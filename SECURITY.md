@@ -79,6 +79,33 @@ Please include as much of the following information as possible:
 4. **Workspace Selection**: Only grant access to necessary folders
 5. **Network Awareness**: Monitor any network permission requests
 
+## Known Security Issues
+
+### Build Dependency: tar (GHSA-8qq5-rm4j-mr97, GHSA-r6q2-hw4h-h46w)
+
+**Status**: Acknowledged, awaiting upstream fix
+
+**Affected packages**: `tar` <=7.5.3 used by `electron-builder` and `@electron/rebuild`
+
+**Impact**: Development/build environment only. These vulnerabilities relate to tarball extraction during the build process. The packaged application does not include or use the vulnerable `tar` package.
+
+**Risk assessment**:
+- **Runtime risk**: None - tar is a devDependency only
+- **Attack vector**: Malicious tarball during `npm install`
+- **Realistic threat**: Low - developers control what packages are installed
+
+**Why it's not fixed**:
+- The patched `tar` v7.5.6+ uses ESM exports incompatible with current `electron-builder`
+- Waiting for `electron-builder` maintainers to update their dependencies
+- Using `npm audit fix --force` breaks the build toolchain
+
+**Mitigation**:
+- Only install dependencies from trusted sources
+- Review package changes before updating
+- Monitor electron-builder releases for updates
+
+---
+
 ## Scope
 
 This security policy applies to:

@@ -1,35 +1,74 @@
 # Dependencies
 node_modules/
+.pnp/
+.pnp.js
+.yarn/
 
 # Build outputs
 dist/
+out/
 release/
 *.app
+*.dmg
+*.exe
+*.deb
+*.rpm
+*.AppImage
+
+# TypeScript
+*.tsbuildinfo
 
 # Database
 *.db
 *.db-journal
+*.sqlite
+*.sqlite3
 
 # Logs
 logs/
 *.log
 npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
 # OS
 .DS_Store
 Thumbs.db
+Desktop.ini
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+*.sublime-*
 
-# Environment
+# Environment - IMPORTANT: Never commit secrets!
 .env
-.env.local
+.env.*
+!.env.example
+
+# Cache
+.cache/
+.eslintcache
+.turbo/
+*.cache
+
+# Test coverage
+coverage/
+
+# Claude Code
+.claude/
 
 # VM artifacts
 vm-bundle/
 *.img
 *.qcow2
+
+# Electron
+*.asar
+
+# Temporary files
+tmp/
+temp/
+*.tmp

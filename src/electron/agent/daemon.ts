@@ -20,7 +20,7 @@ export class AgentDaemon extends EventEmitter {
   private workspaceRepo: WorkspaceRepository;
   private approvalRepo: ApprovalRepository;
   private activeTasks: Map<string, TaskExecutor> = new Map();
-  private pendingApprovals: Map<string, { taskId: string; resolve: Function; reject: Function }> = new Map();
+  private pendingApprovals: Map<string, { taskId: string; resolve: (value: boolean) => void; reject: (reason?: unknown) => void }> = new Map();
 
   constructor(private dbManager: DatabaseManager) {
     super();

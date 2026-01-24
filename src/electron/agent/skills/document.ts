@@ -24,9 +24,10 @@ export class DocumentBuilder {
     return content
       .map(block => {
         switch (block.type) {
-          case 'heading':
+          case 'heading': {
             const level = block.level || 1;
             return `${'#'.repeat(level)} ${block.text}\n`;
+          }
           case 'paragraph':
             return `${block.text}\n`;
           case 'list':

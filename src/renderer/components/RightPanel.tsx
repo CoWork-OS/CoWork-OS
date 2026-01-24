@@ -1,6 +1,45 @@
 import { useState, useMemo, ReactElement } from 'react';
 import { Task, Workspace, TaskEvent, PlanStep } from '../../shared/types';
 
+// Clickable file path component
+function ClickableFilePath({ path, className = '' }: { path: string; className?: string }) {
+  const handleClick = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      const error = await window.electronAPI.openFile(path);
+      if (error) {
+        console.error('Failed to open file:', error);
+      }
+    } catch (err) {
+      console.error('Error opening file:', err);
+    }
+  };
+
+  const handleContextMenu = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      await window.electronAPI.showInFinder(path);
+    } catch (err) {
+      console.error('Error showing in Finder:', err);
+    }
+  };
+
+  const fileName = path.split('/').pop() || path;
+
+  return (
+    <span
+      className={`clickable-file-path ${className}`}
+      onClick={handleClick}
+      onContextMenu={handleContextMenu}
+      title={`${path}\n\nClick to open • Right-click to show in Finder`}
+    >
+      {fileName}
+    </span>
+  );
+}
+
 interface RightPanelProps {
   task: Task | undefined;
   workspace: Workspace | null;
@@ -313,7 +352,7 @@ export function RightPanel({ task, workspace, events }: RightPanelProps) {
                 {files.map((file, index) => (
                   <div key={`${file.path}-${index}`} className={`cli-file-item ${file.action}`}>
                     <span className={`cli-file-action ${file.action}`}>{getFileActionSymbol(file.action)}</span>
-                    <span className="cli-file-name" title={file.path}>{getFileName(file.path)}</span>
+                    <ClickableFilePath path={file.path} className="cli-file-name" />
                   </div>
                 ))}
               </div>
@@ -364,7 +403,7 @@ export function RightPanel({ task, workspace, events }: RightPanelProps) {
                     <div className="cli-context-label"># files_read:</div>
                     {referencedFiles.map((file, index) => (
                       <div key={`${file}-${index}`} className="cli-context-item">
-                        <span className="cli-context-file" title={file}>{getFileName(file)}</span>
+                        <ClickableFilePath path={file} className="cli-context-file" />
                       </div>
                     ))}
                   </div>

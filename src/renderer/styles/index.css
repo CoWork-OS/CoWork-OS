@@ -3609,3 +3609,22 @@ button {
 .send-btn {
   font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
 }
+
+/* Clickable File Paths */
+.clickable-file-path {
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+  transition: color 0.15s ease, text-decoration-color 0.15s ease;
+}
+
+.clickable-file-path:hover {
+  color: var(--color-accent);
+  text-decoration-style: solid;
+  text-decoration-color: var(--color-accent);
+}
+
+.clickable-file-path:active {
+  color: var(--color-accent-hover);
+}

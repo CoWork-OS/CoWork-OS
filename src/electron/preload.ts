@@ -33,6 +33,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Dialog APIs
   selectFolder: () => ipcRenderer.invoke('dialog:selectFolder'),
 
+  // File APIs
+  openFile: (filePath: string) => ipcRenderer.invoke('file:open', filePath),
+  showInFinder: (filePath: string) => ipcRenderer.invoke('file:showInFinder', filePath),
+
   // Task APIs
   createTask: (data: any) => ipcRenderer.invoke(IPC_CHANNELS.TASK_CREATE, data),
   getTask: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_GET, id),
@@ -84,6 +88,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 // Type declarations for TypeScript
 export interface ElectronAPI {
   selectFolder: () => Promise<string | null>;
+  openFile: (filePath: string) => Promise<string>;
+  showInFinder: (filePath: string) => Promise<void>;
   createTask: (data: any) => Promise<any>;
   getTask: (id: string) => Promise<any>;
   listTasks: () => Promise<any[]>;

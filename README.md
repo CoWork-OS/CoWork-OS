@@ -27,7 +27,7 @@ CoWork-OSS is an open-source, local-first agent workbench for running multi-step
 
 ## Why CoWork-OSS?
 
-- **Local-first**: All tasks, artifacts, and data stored locally in SQLite — your data stays on your machine
+- **Local-first state**: Tasks/events/artifacts are stored locally in SQLite; model requests are sent to your configured provider (Anthropic/Bedrock). No telemetry by default.
 - **Folder-scoped security**: Operations are sandboxed to your selected workspace with path traversal protection
 - **Permissioned execution**: Explicit user approval required for destructive operations (delete, bulk rename)
 - **Extensible skills/tools**: Clear developer path to add custom tools and skills
@@ -64,6 +64,11 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
 - **Real-Time Timeline**: Live activity feed showing agent actions and tool calls
 - **Artifact Tracking**: All created/modified files are tracked and viewable
 - **Model Selection**: Choose between Opus, Sonnet, or Haiku models
+
+## Data handling (local-first, BYOK)
+- Stored locally: task metadata, timeline events, artifact index, workspace config (SQLite).
+- Sent to provider: the task prompt and any context you choose to include (e.g., selected file contents/snippets) to generate outputs.
+- Not sent: your API keys (stored locally), unless you explicitly configure external syncing.
 
 ### Architecture
 
@@ -212,6 +217,11 @@ This project requires users to comply with their model provider's terms and poli
 - [AWS Bedrock Third-Party Model Terms](https://aws.amazon.com/legal/bedrock/third-party-models/)
 
 **Note:** Anthropic's Usage Policy requires that consumer-facing applications using AI disclose this to users. CoWork-OSS displays model information in the UI.
+**Note:** For consumer-facing use, Anthropic’s Usage Policy requires disclosing that users are interacting with AI at the beginning of each session. CoWork-OSS shows an explicit “AI system” disclosure when starting a new task/session.
+
+## Trademark notice
+“Cowork” is an Anthropic product name. CoWork-OSS is an independent open-source project and is not affiliated with Anthropic.
+If requested by the rights holder, we will update naming/branding to avoid confusion.
 
 ---
 
@@ -337,6 +347,7 @@ Areas where help is especially needed:
 - Test coverage
 
 ---
+
 
 ## License
 

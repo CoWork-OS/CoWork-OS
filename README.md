@@ -217,11 +217,12 @@ This project requires users to comply with their model provider's terms and poli
 - [AWS Bedrock Third-Party Model Terms](https://aws.amazon.com/legal/bedrock/third-party-models/)
 
 **Note:** Anthropic's Usage Policy requires that consumer-facing applications using AI disclose this to users. CoWork-OSS displays model information in the UI.
-**Note:** For consumer-facing use, Anthropic’s Usage Policy requires disclosing that users are interacting with AI at the beginning of each session. CoWork-OSS shows an explicit “AI system” disclosure when starting a new task/session.
 
 ## Trademark notice
 “Cowork” is an Anthropic product name. CoWork-OSS is an independent open-source project and is not affiliated with Anthropic.
 If requested by the rights holder, we will update naming/branding to avoid confusion.
+
+**Note:** For consumer-facing use, Anthropic’s Usage Policy requires disclosing that users are interacting with AI at the beginning of each session. CoWork-OSS shows an explicit “AI system” disclosure when starting a new task/session.
 
 ---
 

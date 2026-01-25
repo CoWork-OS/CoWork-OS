@@ -59,6 +59,16 @@ export class TelegramAdapter implements ChannelAdapter {
       const me = await this.bot.api.getMe();
       this._botUsername = me.username;
 
+      // Register bot commands for the "/" menu
+      await this.bot.api.setMyCommands([
+        { command: 'start', description: 'Start the bot' },
+        { command: 'help', description: 'Show available commands' },
+        { command: 'workspaces', description: 'List available workspaces' },
+        { command: 'workspace', description: 'Select or show current workspace' },
+        { command: 'status', description: 'Check bot status' },
+        { command: 'cancel', description: 'Cancel current task' },
+      ]);
+
       // Set up message handler
       this.bot.on('message:text', async (ctx) => {
         const message = this.mapContextToMessage(ctx);

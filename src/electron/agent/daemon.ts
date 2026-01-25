@@ -250,12 +250,15 @@ export class AgentDaemon extends EventEmitter {
     // Emit to renderer process via IPC
     const windows = BrowserWindow.getAllWindows();
     windows.forEach(window => {
-      window.webContents.send(IPC_CHANNELS.TASK_EVENT, {
-        taskId,
-        type,
-        payload,
-        timestamp: Date.now(),
-      });
+      // Check if window is still valid before sending
+      if (!window.isDestroyed()) {
+        window.webContents.send(IPC_CHANNELS.TASK_EVENT, {
+          taskId,
+          type,
+          payload,
+          timestamp: Date.now(),
+        });
+      }
     });
   }
 

@@ -67,6 +67,8 @@ export class TelegramAdapter implements ChannelAdapter {
         { command: 'workspace', description: 'Select or show current workspace' },
         { command: 'addworkspace', description: 'Add a new workspace by path' },
         { command: 'newtask', description: 'Start a fresh task/conversation' },
+        { command: 'models', description: 'List available AI models' },
+        { command: 'model', description: 'Change or show current model' },
         { command: 'status', description: 'Check bot status' },
         { command: 'cancel', description: 'Cancel current task' },
       ]);

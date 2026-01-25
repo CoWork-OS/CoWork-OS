@@ -386,11 +386,13 @@ IMPORTANT INSTRUCTIONS:
         }
 
         // Log any text responses from the assistant
-        for (const content of response.content) {
-          if (content.type === 'text' && content.text) {
-            this.daemon.logEvent(this.task.id, 'assistant_message', {
-              message: content.text,
-            });
+        if (response.content) {
+          for (const content of response.content) {
+            if (content.type === 'text' && content.text) {
+              this.daemon.logEvent(this.task.id, 'assistant_message', {
+                message: content.text,
+              });
+            }
           }
         }
 
@@ -413,7 +415,7 @@ IMPORTANT INSTRUCTIONS:
 
         // Handle tool calls
         const toolResults: LLMToolResult[] = [];
-        for (const content of response.content) {
+        for (const content of response.content || []) {
           if (content.type === 'tool_use') {
             this.daemon.logEvent(this.task.id, 'tool_call', {
               tool: content.name,
@@ -544,11 +546,13 @@ IMPORTANT INSTRUCTIONS:
         }
 
         // Log any text responses from the assistant
-        for (const content of response.content) {
-          if (content.type === 'text' && content.text) {
-            this.daemon.logEvent(this.task.id, 'assistant_message', {
-              message: content.text,
-            });
+        if (response.content) {
+          for (const content of response.content) {
+            if (content.type === 'text' && content.text) {
+              this.daemon.logEvent(this.task.id, 'assistant_message', {
+                message: content.text,
+              });
+            }
           }
         }
 
@@ -571,7 +575,7 @@ IMPORTANT INSTRUCTIONS:
 
         // Handle tool calls
         const toolResults: LLMToolResult[] = [];
-        for (const content of response.content) {
+        for (const content of response.content || []) {
           if (content.type === 'tool_use') {
             this.daemon.logEvent(this.task.id, 'tool_call', {
               tool: content.name,

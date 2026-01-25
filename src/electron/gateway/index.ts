@@ -49,6 +49,8 @@ export class ChannelGateway {
   private userRepo: ChannelUserRepository;
   private config: GatewayConfig;
   private initialized = false;
+  private agentDaemon?: AgentDaemon;
+  private daemonListeners: Array<{ event: string; handler: (...args: any[]) => void }> = [];
 
   constructor(db: Database.Database, config: GatewayConfig = {}) {
     this.db = db;
@@ -63,6 +65,7 @@ export class ChannelGateway {
 
     // Listen for agent daemon events to send responses back to channels
     if (config.agentDaemon) {
+      this.agentDaemon = config.agentDaemon;
       this.setupAgentDaemonListeners(config.agentDaemon);
     }
   }
@@ -76,7 +79,7 @@ export class ChannelGateway {
 
     // Listen for assistant messages (streaming responses)
     // Note: daemon emits { taskId, message } not { taskId, content }
-    agentDaemon.on('assistant_message', (data: { taskId: string; message?: string }) => {
+    const onAssistantMessage = (data: { taskId: string; message?: string }) => {
       const message = data.message;
       if (message && message.length > 10) {
         // Save the last message as the result
@@ -84,23 +87,29 @@ export class ChannelGateway {
         // Stream update to channel
         this.router.sendTaskUpdate(data.taskId, message);
       }
-    });
+    };
+    agentDaemon.on('assistant_message', onAssistantMessage);
+    this.daemonListeners.push({ event: 'assistant_message', handler: onAssistantMessage });
 
     // Listen for task completion
-    agentDaemon.on('task_completed', (data: { taskId: string; message?: string }) => {
+    const onTaskCompleted = (data: { taskId: string; message?: string }) => {
       // Use the last assistant message as the result
       const result = lastMessages.get(data.taskId);
       this.router.handleTaskCompletion(data.taskId, result);
       lastMessages.delete(data.taskId);
-    });
+    };
+    agentDaemon.on('task_completed', onTaskCompleted);
+    this.daemonListeners.push({ event: 'task_completed', handler: onTaskCompleted });
 
     // Listen for task errors
     // Note: daemon emits { taskId, error } or { taskId, message }
-    agentDaemon.on('error', (data: { taskId: string; error?: string; message?: string }) => {
+    const onError = (data: { taskId: string; error?: string; message?: string }) => {
       const errorMsg = data.error || data.message || 'Unknown error';
       this.router.handleTaskFailure(data.taskId, errorMsg);
       lastMessages.delete(data.taskId);
-    });
+    };
+    agentDaemon.on('error', onError);
+    this.daemonListeners.push({ event: 'error', handler: onError });
   }
 
   /**
@@ -136,6 +145,14 @@ export class ChannelGateway {
    * Shutdown the gateway
    */
   async shutdown(): Promise<void> {
+    // Clean up daemon event listeners
+    if (this.agentDaemon) {
+      for (const { event, handler } of this.daemonListeners) {
+        this.agentDaemon.off(event, handler);
+      }
+      this.daemonListeners = [];
+    }
+
     await this.router.disconnectAll();
     this.initialized = false;
     console.log('Channel Gateway shutdown');

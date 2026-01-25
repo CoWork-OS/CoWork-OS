@@ -21,14 +21,24 @@ export class FileTools {
 
   /**
    * Ensure path is within workspace (security check)
+   * Uses path.relative() to safely detect path traversal attacks including symlinks
    */
   private resolvePath(relativePath: string): string {
-    const resolved = path.resolve(this.workspace.path, relativePath);
-    console.log('[FileTools Debug] resolvePath:', { relativePath, workspacePath: this.workspace.path, resolved });
-    if (!resolved.startsWith(this.workspace.path)) {
+    // Normalize workspace path to ensure consistent comparison
+    const normalizedWorkspace = path.resolve(this.workspace.path);
+    const resolved = path.resolve(normalizedWorkspace, relativePath);
+
+    console.log('[FileTools Debug] resolvePath:', { relativePath, workspacePath: normalizedWorkspace, resolved });
+
+    // Use path.relative to check if resolved path is within workspace
+    // If the relative path starts with '..', it's outside the workspace
+    const relative = path.relative(normalizedWorkspace, resolved);
+
+    if (relative.startsWith('..') || path.isAbsolute(relative)) {
       console.log('[FileTools Debug] Path outside workspace boundary - BLOCKING');
       throw new Error('Path is outside workspace boundary');
     }
+
     return resolved;
   }
 

@@ -33,6 +33,17 @@ export function setupIpcHandlers(dbManager: DatabaseManager, agentDaemon: AgentD
   // Workspace handlers
   ipcMain.handle(IPC_CHANNELS.WORKSPACE_CREATE, async (_, data) => {
     const { name, path, permissions } = data;
+
+    // Validate path is not empty
+    if (!path || typeof path !== 'string' || path.trim() === '') {
+      throw new Error('Workspace path is required');
+    }
+
+    // Check if workspace with this path already exists
+    if (workspaceRepo.existsByPath(path)) {
+      throw new Error(`A workspace with path "${path}" already exists. Please choose a different folder.`);
+    }
+
     return workspaceRepo.create(name, path, permissions);
   });
 

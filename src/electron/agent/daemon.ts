@@ -10,6 +10,16 @@ import {
 import { Task, IPC_CHANNELS } from '../../shared/types';
 import { TaskExecutor } from './executor';
 
+// Memory management constants
+const MAX_CACHED_EXECUTORS = 10; // Maximum number of completed task executors to keep in memory
+const EXECUTOR_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes - time before completed executors are cleaned up
+
+interface CachedExecutor {
+  executor: TaskExecutor;
+  lastAccessed: number;
+  status: 'active' | 'completed';
+}
+
 /**
  * AgentDaemon is the core orchestrator that manages task execution
  * It coordinates between the database, task executors, and UI
@@ -19,8 +29,9 @@ export class AgentDaemon extends EventEmitter {
   private eventRepo: TaskEventRepository;
   private workspaceRepo: WorkspaceRepository;
   private approvalRepo: ApprovalRepository;
-  private activeTasks: Map<string, TaskExecutor> = new Map();
-  private pendingApprovals: Map<string, { taskId: string; resolve: (value: boolean) => void; reject: (reason?: unknown) => void }> = new Map();
+  private activeTasks: Map<string, CachedExecutor> = new Map();
+  private pendingApprovals: Map<string, { taskId: string; resolve: (value: boolean) => void; reject: (reason?: unknown) => void; resolved: boolean; timeoutHandle: ReturnType<typeof setTimeout> }> = new Map();
+  private cleanupIntervalHandle?: ReturnType<typeof setInterval>;
 
   constructor(private dbManager: DatabaseManager) {
     super();
@@ -29,6 +40,54 @@ export class AgentDaemon extends EventEmitter {
     this.eventRepo = new TaskEventRepository(db);
     this.workspaceRepo = new WorkspaceRepository(db);
     this.approvalRepo = new ApprovalRepository(db);
+
+    // Start periodic cleanup of old executors
+    this.cleanupIntervalHandle = setInterval(() => this.cleanupOldExecutors(), 5 * 60 * 1000); // Run every 5 minutes
+  }
+
+  /**
+   * Clean up old completed task executors to prevent memory leaks
+   */
+  private cleanupOldExecutors(): void {
+    const now = Date.now();
+    const toDelete: string[] = [];
+    let completedCount = 0;
+
+    // Find executors to clean up
+    this.activeTasks.forEach((cached, taskId) => {
+      if (cached.status === 'completed') {
+        completedCount++;
+        // Remove if older than TTL
+        if (now - cached.lastAccessed > EXECUTOR_CACHE_TTL_MS) {
+          toDelete.push(taskId);
+        }
+      }
+    });
+
+    // Also remove oldest completed executors if we have too many
+    if (completedCount > MAX_CACHED_EXECUTORS) {
+      const completedTasks = Array.from(this.activeTasks.entries())
+        .filter(([_, cached]) => cached.status === 'completed')
+        .sort((a, b) => a[1].lastAccessed - b[1].lastAccessed);
+
+      const excessCount = completedCount - MAX_CACHED_EXECUTORS;
+      for (let i = 0; i < excessCount; i++) {
+        const [taskId] = completedTasks[i];
+        if (!toDelete.includes(taskId)) {
+          toDelete.push(taskId);
+        }
+      }
+    }
+
+    // Delete the marked executors
+    for (const taskId of toDelete) {
+      console.log(`[AgentDaemon] Cleaning up cached executor for task ${taskId}`);
+      this.activeTasks.delete(taskId);
+    }
+
+    if (toDelete.length > 0) {
+      console.log(`[AgentDaemon] Cleaned up ${toDelete.length} old executor(s). Active: ${this.activeTasks.size}`);
+    }
   }
 
   /**
@@ -45,7 +104,11 @@ export class AgentDaemon extends EventEmitter {
 
     // Create task executor
     const executor = new TaskExecutor(task, workspace, this);
-    this.activeTasks.set(task.id, executor);
+    this.activeTasks.set(task.id, {
+      executor,
+      lastAccessed: Date.now(),
+      status: 'active',
+    });
 
     // Update task status
     this.taskRepo.update(task.id, { status: 'planning' });
@@ -68,9 +131,9 @@ export class AgentDaemon extends EventEmitter {
    * Cancel a running task
    */
   async cancelTask(taskId: string): Promise<void> {
-    const executor = this.activeTasks.get(taskId);
-    if (executor) {
-      await executor.cancel();
+    const cached = this.activeTasks.get(taskId);
+    if (cached) {
+      await cached.executor.cancel();
       this.activeTasks.delete(taskId);
     }
   }
@@ -79,9 +142,10 @@ export class AgentDaemon extends EventEmitter {
    * Pause a running task
    */
   async pauseTask(taskId: string): Promise<void> {
-    const executor = this.activeTasks.get(taskId);
-    if (executor) {
-      await executor.pause();
+    const cached = this.activeTasks.get(taskId);
+    if (cached) {
+      cached.lastAccessed = Date.now();
+      await cached.executor.pause();
     }
   }
 
@@ -89,9 +153,11 @@ export class AgentDaemon extends EventEmitter {
    * Resume a paused task
    */
   async resumeTask(taskId: string): Promise<void> {
-    const executor = this.activeTasks.get(taskId);
-    if (executor) {
-      await executor.resume();
+    const cached = this.activeTasks.get(taskId);
+    if (cached) {
+      cached.lastAccessed = Date.now();
+      cached.status = 'active';
+      await cached.executor.resume();
     }
   }
 
@@ -123,17 +189,19 @@ export class AgentDaemon extends EventEmitter {
 
     // Wait for user response
     return new Promise((resolve, reject) => {
-      this.pendingApprovals.set(approval.id, { taskId, resolve, reject });
-
       // Timeout after 5 minutes
-      setTimeout(() => {
-        if (this.pendingApprovals.has(approval.id)) {
+      const timeoutHandle = setTimeout(() => {
+        const pending = this.pendingApprovals.get(approval.id);
+        if (pending && !pending.resolved) {
+          pending.resolved = true;
           this.pendingApprovals.delete(approval.id);
           this.approvalRepo.update(approval.id, 'denied');
-          this.logEvent(taskId, 'approval_denied', { approvalId: approval.id });
+          this.logEvent(taskId, 'approval_denied', { approvalId: approval.id, reason: 'timeout' });
           reject(new Error('Approval request timed out'));
         }
       }, 5 * 60 * 1000);
+
+      this.pendingApprovals.set(approval.id, { taskId, resolve, reject, resolved: false, timeoutHandle });
     });
   }
 
@@ -142,7 +210,13 @@ export class AgentDaemon extends EventEmitter {
    */
   async respondToApproval(approvalId: string, approved: boolean): Promise<void> {
     const pending = this.pendingApprovals.get(approvalId);
-    if (pending) {
+    if (pending && !pending.resolved) {
+      // Mark as resolved first to prevent race condition with timeout
+      pending.resolved = true;
+
+      // Clear the timeout
+      clearTimeout(pending.timeoutHandle);
+
       this.pendingApprovals.delete(approvalId);
       this.approvalRepo.update(approvalId, approved ? 'approved' : 'denied');
 
@@ -195,14 +269,19 @@ export class AgentDaemon extends EventEmitter {
 
   /**
    * Mark task as completed
-   * Note: We keep the executor in memory for follow-up messages
+   * Note: We keep the executor in memory for follow-up messages (with TTL-based cleanup)
    */
   completeTask(taskId: string): void {
     this.taskRepo.update(taskId, {
       status: 'completed',
       completedAt: Date.now(),
     });
-    // Don't delete executor - keep it for follow-up messages
+    // Mark executor as completed for TTL-based cleanup
+    const cached = this.activeTasks.get(taskId);
+    if (cached) {
+      cached.status = 'completed';
+      cached.lastAccessed = Date.now();
+    }
     this.emitTaskEvent(taskId, 'task_completed', { message: 'Task completed successfully' });
   }
 
@@ -210,9 +289,10 @@ export class AgentDaemon extends EventEmitter {
    * Send a follow-up message to a task
    */
   async sendMessage(taskId: string, message: string): Promise<void> {
-    let executor = this.activeTasks.get(taskId);
+    let cached = this.activeTasks.get(taskId);
+    let executor: TaskExecutor;
 
-    if (!executor) {
+    if (!cached) {
       // Task executor not in memory - need to recreate it
       const task = this.taskRepo.findById(taskId);
       if (!task) {
@@ -233,7 +313,15 @@ export class AgentDaemon extends EventEmitter {
         executor.rebuildConversationFromEvents(events);
       }
 
-      this.activeTasks.set(taskId, executor);
+      this.activeTasks.set(taskId, {
+        executor,
+        lastAccessed: Date.now(),
+        status: 'active',
+      });
+    } else {
+      executor = cached.executor;
+      cached.lastAccessed = Date.now();
+      cached.status = 'active';
     }
 
     // Send the message
@@ -242,12 +330,39 @@ export class AgentDaemon extends EventEmitter {
 
   /**
    * Shutdown daemon
+   * Properly awaits all task cancellations and clears intervals
    */
-  shutdown(): void {
+  async shutdown(): Promise<void> {
     console.log('Shutting down agent daemon...');
-    this.activeTasks.forEach((executor, taskId) => {
-      executor.cancel().catch(err => console.error(`Error cancelling task ${taskId}:`, err));
+
+    // Clear the cleanup interval
+    if (this.cleanupIntervalHandle) {
+      clearInterval(this.cleanupIntervalHandle);
+      this.cleanupIntervalHandle = undefined;
+    }
+
+    // Clear all pending approval timeouts
+    this.pendingApprovals.forEach((pending) => {
+      clearTimeout(pending.timeoutHandle);
     });
+    this.pendingApprovals.clear();
+
+    // Cancel all active tasks and wait for them to complete
+    const cancelPromises: Promise<void>[] = [];
+    this.activeTasks.forEach((cached, taskId) => {
+      const promise = cached.executor.cancel().catch(err => {
+        console.error(`Error cancelling task ${taskId}:`, err);
+      });
+      cancelPromises.push(promise);
+    });
+
+    // Wait for all cancellations to complete (with timeout)
+    await Promise.race([
+      Promise.all(cancelPromises),
+      new Promise<void>(resolve => setTimeout(resolve, 5000)), // 5 second timeout
+    ]);
+
     this.activeTasks.clear();
+    console.log('Agent daemon shutdown complete');
   }
 }

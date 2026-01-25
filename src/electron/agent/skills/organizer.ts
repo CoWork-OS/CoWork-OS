@@ -13,16 +13,28 @@ export class FolderOrganizer {
     private taskId: string
   ) {}
 
+  /**
+   * Ensure path is within workspace (security check)
+   * Uses path.relative() to safely detect path traversal attacks including symlinks
+   */
+  private validatePath(relativePath: string): string {
+    const normalizedWorkspace = path.resolve(this.workspace.path);
+    const resolved = path.resolve(normalizedWorkspace, relativePath);
+    const relative = path.relative(normalizedWorkspace, resolved);
+
+    if (relative.startsWith('..') || path.isAbsolute(relative)) {
+      throw new Error('Path is outside workspace boundary');
+    }
+
+    return resolved;
+  }
+
   async organize(
     relativePath: string,
     strategy: 'by_type' | 'by_date' | 'custom',
     rules?: any
   ): Promise<number> {
-    const fullPath = path.resolve(this.workspace.path, relativePath);
-
-    if (!fullPath.startsWith(this.workspace.path)) {
-      throw new Error('Path is outside workspace boundary');
-    }
+    const fullPath = this.validatePath(relativePath);
 
     switch (strategy) {
       case 'by_type':

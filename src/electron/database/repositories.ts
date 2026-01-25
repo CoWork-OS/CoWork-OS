@@ -10,6 +10,19 @@ import {
   WorkspacePermissions,
 } from '../../shared/types';
 
+/**
+ * Safely parse JSON with error handling
+ * Returns defaultValue if parsing fails
+ */
+function safeJsonParse<T>(jsonString: string, defaultValue: T, context?: string): T {
+  try {
+    return JSON.parse(jsonString);
+  } catch (error) {
+    console.error(`Failed to parse JSON${context ? ` in ${context}` : ''}:`, error, 'Input:', jsonString?.slice(0, 100));
+    return defaultValue;
+  }
+}
+
 export class WorkspaceRepository {
   constructor(private db: Database.Database) {}
 
@@ -50,13 +63,32 @@ export class WorkspaceRepository {
     return rows.map(row => this.mapRowToWorkspace(row));
   }
 
+  /**
+   * Check if a workspace with the given path already exists
+   */
+  existsByPath(path: string): boolean {
+    const stmt = this.db.prepare('SELECT 1 FROM workspaces WHERE path = ?');
+    const row = stmt.get(path);
+    return !!row;
+  }
+
+  /**
+   * Find a workspace by its path
+   */
+  findByPath(path: string): Workspace | undefined {
+    const stmt = this.db.prepare('SELECT * FROM workspaces WHERE path = ?');
+    const row = stmt.get(path) as any;
+    return row ? this.mapRowToWorkspace(row) : undefined;
+  }
+
   private mapRowToWorkspace(row: any): Workspace {
+    const defaultPermissions: WorkspacePermissions = { read: true, write: false, delete: false, network: false };
     return {
       id: row.id,
       name: row.name,
       path: row.path,
       createdAt: row.created_at,
-      permissions: JSON.parse(row.permissions),
+      permissions: safeJsonParse(row.permissions, defaultPermissions, 'workspace.permissions'),
     };
   }
 }
@@ -194,7 +226,7 @@ export class TaskEventRepository {
       taskId: row.task_id,
       timestamp: row.timestamp,
       type: row.type,
-      payload: JSON.parse(row.payload),
+      payload: safeJsonParse(row.payload, {}, 'taskEvent.payload'),
     };
   }
 }
@@ -297,7 +329,7 @@ export class ApprovalRepository {
       taskId: row.task_id,
       type: row.type,
       description: row.description,
-      details: JSON.parse(row.details),
+      details: safeJsonParse(row.details, {}, 'approval.details'),
       status: row.status,
       requestedAt: row.requested_at,
       resolvedAt: row.resolved_at || undefined,
@@ -352,7 +384,7 @@ export class SkillRepository {
       category: row.category,
       prompt: row.prompt,
       scriptPath: row.script_path || undefined,
-      parameters: row.parameters ? JSON.parse(row.parameters) : undefined,
+      parameters: row.parameters ? safeJsonParse(row.parameters, undefined, 'skill.parameters') : undefined,
     };
   }
 }

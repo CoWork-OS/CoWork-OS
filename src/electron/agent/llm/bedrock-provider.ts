@@ -1,5 +1,6 @@
 import {
   BedrockRuntimeClient,
+  BedrockRuntimeClientConfig,
   ConverseCommand,
   ContentBlock,
   Message,
@@ -8,6 +9,7 @@ import {
   ToolInputSchema,
   StopReason,
 } from '@aws-sdk/client-bedrock-runtime';
+import { fromIni } from '@aws-sdk/credential-provider-ini';
 import {
   LLMProvider,
   LLMProviderConfig,
@@ -27,7 +29,7 @@ export class BedrockProvider implements LLMProvider {
   private client: BedrockRuntimeClient;
 
   constructor(config: LLMProviderConfig) {
-    const clientConfig: any = {
+    const clientConfig: BedrockRuntimeClientConfig = {
       region: config.awsRegion || process.env.AWS_REGION || 'us-east-1',
     };
 
@@ -39,8 +41,9 @@ export class BedrockProvider implements LLMProvider {
         ...(config.awsSessionToken && { sessionToken: config.awsSessionToken }),
       };
     } else if (config.awsProfile) {
-      // AWS SDK will use the profile from shared credentials file
-      process.env.AWS_PROFILE = config.awsProfile;
+      // Use fromIni to load credentials from a specific profile
+      // This avoids mutating process.env which could affect other code
+      clientConfig.credentials = fromIni({ profile: config.awsProfile });
     }
     // Otherwise, let the SDK use default credential chain
     // (environment variables, IAM role, etc.)

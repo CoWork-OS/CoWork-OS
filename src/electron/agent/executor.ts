@@ -354,12 +354,23 @@ IMPORTANT INSTRUCTIONS:
 
       let continueLoop = true;
       let iterationCount = 0;
+      let emptyResponseCount = 0;
       const maxIterations = 10;
+      const maxEmptyResponses = 3;
 
       while (continueLoop && iterationCount < maxIterations) {
         if (this.cancelled) break;
 
         iterationCount++;
+
+        // Check for too many empty responses
+        if (emptyResponseCount >= maxEmptyResponses) {
+          console.warn(`[Executor] Breaking loop due to ${emptyResponseCount} consecutive empty responses`);
+          this.daemon.logEvent(this.task.id, 'log', {
+            message: `Step ended early due to ${emptyResponseCount} empty responses from LLM`,
+          });
+          break;
+        }
 
         // Compact messages if context is getting too large
         messages = this.contextManager.compactMessages(messages, systemPromptTokens);
@@ -401,9 +412,12 @@ IMPORTANT INSTRUCTIONS:
             role: 'assistant',
             content: response.content,
           });
+          // Reset empty response counter on valid response
+          emptyResponseCount = 0;
         } else {
           // Bedrock API requires non-empty content, add placeholder and continue
-          console.warn('[Executor Debug] Empty response from LLM in executeStep - adding placeholder and continuing');
+          emptyResponseCount++;
+          console.warn(`[Executor Debug] Empty response from LLM in executeStep (${emptyResponseCount}/${maxEmptyResponses}) - adding placeholder and continuing`);
           messages.push({
             role: 'assistant',
             content: [{ type: 'text', text: 'I understand. Let me continue.' }],
@@ -460,6 +474,14 @@ IMPORTANT INSTRUCTIONS:
         }
       }
 
+      // Log warning if we hit max iterations
+      if (iterationCount >= maxIterations) {
+        console.warn(`[Executor] Step reached max iterations (${maxIterations})`);
+        this.daemon.logEvent(this.task.id, 'log', {
+          message: `Step completed after reaching maximum iterations (${maxIterations})`,
+        });
+      }
+
       // Save conversation history for follow-up messages
       this.conversationHistory = messages;
 
@@ -509,13 +531,21 @@ IMPORTANT INSTRUCTIONS:
     let messages = this.conversationHistory;
     let continueLoop = true;
     let iterationCount = 0;
+    let emptyResponseCount = 0;
     const maxIterations = 10;
+    const maxEmptyResponses = 3;
 
     try {
       while (continueLoop && iterationCount < maxIterations) {
         if (this.cancelled) break;
 
         iterationCount++;
+
+        // Check for too many empty responses
+        if (emptyResponseCount >= maxEmptyResponses) {
+          console.warn(`[Executor] Breaking sendMessage loop due to ${emptyResponseCount} consecutive empty responses`);
+          break;
+        }
 
         // Compact messages if context is getting too large
         messages = this.contextManager.compactMessages(messages, systemPromptTokens);
@@ -548,9 +578,12 @@ IMPORTANT INSTRUCTIONS:
             role: 'assistant',
             content: response.content,
           });
+          // Reset empty response counter on valid response
+          emptyResponseCount = 0;
         } else {
           // Bedrock API requires non-empty content, add placeholder
-          console.warn('Received empty response content from LLM in sendMessage');
+          emptyResponseCount++;
+          console.warn(`Received empty response content from LLM in sendMessage (${emptyResponseCount}/${maxEmptyResponses})`);
           messages.push({
             role: 'assistant',
             content: [{ type: 'text', text: 'I understand. Let me continue.' }],
@@ -604,6 +637,11 @@ IMPORTANT INSTRUCTIONS:
           });
           continueLoop = true;
         }
+      }
+
+      // Log warning if we hit max iterations
+      if (iterationCount >= maxIterations) {
+        console.warn(`[Executor] sendMessage reached max iterations (${maxIterations})`);
       }
 
       // Save updated conversation history

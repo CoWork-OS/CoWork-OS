@@ -76,15 +76,25 @@ export function truncateToTokens(text: string, maxTokens: number): string {
 }
 
 /**
+ * Safely parse JSON, returning null if parsing fails
+ */
+function safeJsonParse(jsonString: string): any | null {
+  try {
+    return JSON.parse(jsonString);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Truncate tool result content if too large
  */
 export function truncateToolResult(result: string): string {
   if (result.length <= MAX_TOOL_RESULT_CHARS) return result;
 
   // For JSON results, try to preserve structure
-  try {
-    const parsed = JSON.parse(result);
-
+  const parsed = safeJsonParse(result);
+  if (parsed !== null) {
     // If it's an array, limit items
     if (Array.isArray(parsed)) {
       const limited = parsed.slice(0, 50);
@@ -99,8 +109,6 @@ export function truncateToolResult(result: string): string {
       parsed.content = truncateToTokens(parsed.content, MAX_TOOL_RESULT_TOKENS / 2);
       return JSON.stringify(parsed, null, 2);
     }
-  } catch {
-    // Not JSON, just truncate
   }
 
   // Plain text truncation

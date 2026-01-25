@@ -215,7 +215,12 @@ export class TelegramAdapter implements ChannelAdapter {
       throw new Error('Telegram bot is not connected');
     }
 
-    await this.bot.api.editMessageText(chatId, parseInt(messageId, 10), text);
+    const msgId = parseInt(messageId, 10);
+    if (isNaN(msgId)) {
+      throw new Error(`Invalid message ID: ${messageId}`);
+    }
+
+    await this.bot.api.editMessageText(chatId, msgId, text);
   }
 
   /**
@@ -226,7 +231,12 @@ export class TelegramAdapter implements ChannelAdapter {
       throw new Error('Telegram bot is not connected');
     }
 
-    await this.bot.api.deleteMessage(chatId, parseInt(messageId, 10));
+    const msgId = parseInt(messageId, 10);
+    if (isNaN(msgId)) {
+      throw new Error(`Invalid message ID: ${messageId}`);
+    }
+
+    await this.bot.api.deleteMessage(chatId, msgId);
   }
 
   /**

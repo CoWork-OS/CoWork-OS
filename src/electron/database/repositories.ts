@@ -124,15 +124,29 @@ export class TaskRepository {
     return newTask;
   }
 
+  // Whitelist of allowed update fields to prevent SQL injection
+  private static readonly ALLOWED_UPDATE_FIELDS = new Set([
+    'title', 'status', 'error', 'result', 'budgetTokens', 'budgetCost'
+  ]);
+
   update(id: string, updates: Partial<Task>): void {
     const fields: string[] = [];
     const values: any[] = [];
 
     Object.entries(updates).forEach(([key, value]) => {
+      // Validate field name against whitelist
+      if (!TaskRepository.ALLOWED_UPDATE_FIELDS.has(key)) {
+        console.warn(`Ignoring unknown field in task update: ${key}`);
+        return;
+      }
       const snakeKey = key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
       fields.push(`${snakeKey} = ?`);
       values.push(value);
     });
+
+    if (fields.length === 0) {
+      return; // No valid fields to update
+    }
 
     fields.push('updated_at = ?');
     values.push(Date.now());
@@ -159,13 +173,18 @@ export class TaskRepository {
   }
 
   delete(id: string): void {
-    // First delete related task events
-    const deleteEvents = this.db.prepare('DELETE FROM task_events WHERE task_id = ?');
-    deleteEvents.run(id);
+    // Use transaction to ensure atomic deletion
+    const deleteTransaction = this.db.transaction((taskId: string) => {
+      // First delete related task events
+      const deleteEvents = this.db.prepare('DELETE FROM task_events WHERE task_id = ?');
+      deleteEvents.run(taskId);
 
-    // Then delete the task
-    const deleteTask = this.db.prepare('DELETE FROM tasks WHERE id = ?');
-    deleteTask.run(id);
+      // Then delete the task
+      const deleteTask = this.db.prepare('DELETE FROM tasks WHERE id = ?');
+      deleteTask.run(taskId);
+    });
+
+    deleteTransaction(id);
   }
 
   private mapRowToTask(row: any): Task {

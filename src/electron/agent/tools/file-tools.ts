@@ -68,16 +68,19 @@ export class FileTools {
       if (stats.size > MAX_FILE_SIZE) {
         // Read only the first portion of large files
         const fileHandle = await fs.open(fullPath, 'r');
-        const buffer = Buffer.alloc(MAX_FILE_SIZE);
-        await fileHandle.read(buffer, 0, MAX_FILE_SIZE, 0);
-        await fileHandle.close();
+        try {
+          const buffer = Buffer.alloc(MAX_FILE_SIZE);
+          await fileHandle.read(buffer, 0, MAX_FILE_SIZE, 0);
 
-        const content = buffer.toString('utf-8');
-        return {
-          content: content + `\n\n[... File truncated. Showing first ${Math.round(MAX_FILE_SIZE / 1024)}KB of ${Math.round(stats.size / 1024)}KB ...]`,
-          size: stats.size,
-          truncated: true,
-        };
+          const content = buffer.toString('utf-8');
+          return {
+            content: content + `\n\n[... File truncated. Showing first ${Math.round(MAX_FILE_SIZE / 1024)}KB of ${Math.round(stats.size / 1024)}KB ...]`,
+            size: stats.size,
+            truncated: true,
+          };
+        } finally {
+          await fileHandle.close();
+        }
       }
 
       const content = await fs.readFile(fullPath, 'utf-8');

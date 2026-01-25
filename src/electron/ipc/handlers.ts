@@ -97,16 +97,22 @@ export function setupIpcHandlers(
   });
 
   ipcMain.handle(IPC_CHANNELS.TASK_CANCEL, async (_, id: string) => {
-    await agentDaemon.cancelTask(id);
-    taskRepo.update(id, { status: 'cancelled' });
+    try {
+      await agentDaemon.cancelTask(id);
+    } finally {
+      // Always update status even if daemon cancel fails
+      taskRepo.update(id, { status: 'cancelled' });
+    }
   });
 
   ipcMain.handle(IPC_CHANNELS.TASK_PAUSE, async (_, id: string) => {
+    // Pause daemon first - if it fails, exception propagates and status won't be updated
     await agentDaemon.pauseTask(id);
     taskRepo.update(id, { status: 'paused' });
   });
 
   ipcMain.handle(IPC_CHANNELS.TASK_RESUME, async (_, id: string) => {
+    // Resume daemon first - if it fails, exception propagates and status won't be updated
     await agentDaemon.resumeTask(id);
     taskRepo.update(id, { status: 'executing' });
   });

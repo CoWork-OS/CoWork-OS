@@ -29,6 +29,8 @@ import {
 import Database from 'better-sqlite3';
 import { AgentDaemon } from '../agent/daemon';
 import { Task, IPC_CHANNELS } from '../../shared/types';
+import { LLMProviderFactory, LLMSettings } from '../agent/llm/provider-factory';
+import { ModelKey, LLMProviderType } from '../agent/llm/types';
 
 export interface RouterConfig {
   /** Default workspace ID to use for new sessions */
@@ -419,6 +421,14 @@ export class MessageRouter {
         await this.handleAddWorkspaceCommand(adapter, message, sessionId, args);
         break;
 
+      case '/models':
+        await this.handleModelsCommand(adapter, message);
+        break;
+
+      case '/model':
+        await this.handleModelCommand(adapter, message, args);
+        break;
+
       default:
         await adapter.sendMessage({
           chatId: message.chatId,
@@ -650,6 +660,145 @@ export class MessageRouter {
     await adapter.sendMessage({
       chatId: message.chatId,
       text: `✅ Workspace added and selected!\n\n📁 *${workspace.name}*\n\`${workspace.path}\`\n\nYou can now send messages to create tasks in this workspace.`,
+      parseMode: 'markdown',
+    });
+  }
+
+  /**
+   * Handle /models command - list available models and providers
+   */
+  private async handleModelsCommand(
+    adapter: ChannelAdapter,
+    message: IncomingMessage
+  ): Promise<void> {
+    const status = LLMProviderFactory.getConfigStatus();
+
+    let text = '🤖 *AI Models & Providers*\n\n';
+
+    // Current configuration
+    text += '*Current:*\n';
+    const currentProvider = status.providers.find(p => p.type === status.currentProvider);
+    const currentModel = status.models.find(m => m.key === status.currentModel);
+    text += `• Provider: ${currentProvider?.name || status.currentProvider}\n`;
+    text += `• Model: ${currentModel?.displayName || status.currentModel}\n\n`;
+
+    // Available providers
+    text += '*Available Providers:*\n';
+    status.providers.forEach(provider => {
+      const isActive = provider.type === status.currentProvider ? ' ✓' : '';
+      const configStatus = provider.configured ? '🟢' : '⚪';
+      text += `${configStatus} ${provider.name}${isActive}\n`;
+    });
+    text += '\n';
+
+    // Available models (for Anthropic/Bedrock)
+    text += '*Available Models:*\n';
+    status.models.forEach((model, index) => {
+      const isActive = model.key === status.currentModel ? ' ✓' : '';
+      text += `${index + 1}. ${model.displayName}${isActive}\n`;
+    });
+    text += '\n';
+
+    text += '💡 Use `/model <name>` to switch models\n';
+    text += 'Example: `/model sonnet-4` or `/model 2`';
+
+    await adapter.sendMessage({
+      chatId: message.chatId,
+      text,
+      parseMode: 'markdown',
+    });
+  }
+
+  /**
+   * Handle /model command - show or change current model
+   */
+  private async handleModelCommand(
+    adapter: ChannelAdapter,
+    message: IncomingMessage,
+    args: string[]
+  ): Promise<void> {
+    const status = LLMProviderFactory.getConfigStatus();
+
+    // If no args, show current model
+    if (args.length === 0) {
+      const currentProvider = status.providers.find(p => p.type === status.currentProvider);
+      const currentModel = status.models.find(m => m.key === status.currentModel);
+
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: `🤖 *Current Model*\n\n• Provider: ${currentProvider?.name || status.currentProvider}\n• Model: ${currentModel?.displayName || status.currentModel}\n\nUse \`/model <name>\` to change.\nUse \`/models\` to see all options.`,
+        parseMode: 'markdown',
+      });
+      return;
+    }
+
+    const selector = args.join(' ').toLowerCase();
+    let selectedModel: { key: string; displayName: string } | undefined;
+    let selectedProvider: LLMProviderType | undefined;
+
+    // Check if selector is a provider name
+    const providerMatch = status.providers.find(
+      p => p.type === selector || p.name.toLowerCase().includes(selector)
+    );
+
+    if (providerMatch) {
+      // Switching provider
+      selectedProvider = providerMatch.type;
+
+      // Keep current model if compatible, otherwise use default
+      const settings = LLMProviderFactory.loadSettings();
+      const newSettings: LLMSettings = {
+        ...settings,
+        providerType: selectedProvider,
+      };
+
+      LLMProviderFactory.saveSettings(newSettings);
+      LLMProviderFactory.clearCache();
+
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: `✅ Provider changed to: *${providerMatch.name}*\n\nModel: ${settings.modelKey}`,
+        parseMode: 'markdown',
+      });
+      return;
+    }
+
+    // Try to find model by number
+    const num = parseInt(selector, 10);
+    if (!isNaN(num) && num > 0 && num <= status.models.length) {
+      selectedModel = status.models[num - 1];
+    } else {
+      // Try to find by name (partial match)
+      selectedModel = status.models.find(
+        m => m.key.toLowerCase() === selector ||
+             m.key.toLowerCase().includes(selector) ||
+             m.displayName.toLowerCase().includes(selector)
+      );
+    }
+
+    if (!selectedModel) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: `❌ Model not found: "${args.join(' ')}"\n\nUse /models to see available options.`,
+      });
+      return;
+    }
+
+    // Update settings
+    const settings = LLMProviderFactory.loadSettings();
+    const newSettings: LLMSettings = {
+      ...settings,
+      modelKey: selectedModel.key as ModelKey,
+    };
+
+    LLMProviderFactory.saveSettings(newSettings);
+    LLMProviderFactory.clearCache();
+
+    const providerName = status.providers.find(p => p.type === settings.providerType)?.name || settings.providerType;
+
+    await adapter.sendMessage({
+      chatId: message.chatId,
+      text: `✅ Model changed to: *${selectedModel.displayName}*\n\nProvider: ${providerName}`,
       parseMode: 'markdown',
     });
   }
@@ -1018,6 +1167,8 @@ export class MessageRouter {
 /workspace <name> - Select a workspace
 /addworkspace <path> - Add a new workspace
 /newtask - Start a fresh task/conversation
+/models - List available AI models
+/model <name> - Change or show current model
 /cancel - Cancel current task
 
 💬 *How to use*
@@ -1028,6 +1179,7 @@ export class MessageRouter {
 2. Send me a message describing what you want to do
 3. Continue the conversation with follow-up messages
 4. Use \`/newtask\` when you want to start something new
+5. Use \`/models\` to see AI models, \`/model <name>\` to switch
 
 Examples:
 • "What files are in this project?"

@@ -110,6 +110,15 @@ export class ChannelGateway {
     };
     agentDaemon.on('error', onError);
     this.daemonListeners.push({ event: 'error', handler: onError });
+
+    // Listen for tool errors (individual tool execution failures)
+    const onToolError = (data: { taskId: string; tool?: string; error?: string }) => {
+      const toolName = data.tool || 'Unknown tool';
+      const errorMsg = data.error || 'Unknown error';
+      this.router.sendTaskUpdate(data.taskId, `⚠️ Tool error (${toolName}): ${errorMsg}`);
+    };
+    agentDaemon.on('tool_error', onToolError);
+    this.daemonListeners.push({ event: 'tool_error', handler: onToolError });
   }
 
   /**

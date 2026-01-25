@@ -444,6 +444,10 @@ IMPORTANT INSTRUCTIONS:
               });
             } catch (error: any) {
               console.error(`Tool execution failed:`, error);
+              this.daemon.logEvent(this.task.id, 'tool_error', {
+                tool: content.name,
+                error: error.message,
+              });
               toolResults.push({
                 type: 'tool_result',
                 tool_use_id: content.id,
@@ -603,6 +607,10 @@ IMPORTANT INSTRUCTIONS:
               });
             } catch (error: any) {
               console.error(`Tool execution failed:`, error);
+              this.daemon.logEvent(this.task.id, 'tool_error', {
+                tool: content.name,
+                error: error.message,
+              });
               toolResults.push({
                 type: 'tool_result',
                 tool_use_id: content.id,

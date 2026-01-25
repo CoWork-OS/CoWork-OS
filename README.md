@@ -27,16 +27,18 @@ CoWork-OSS is an open-source, local-first agent workbench for running multi-step
 
 <p align="center">
   <img src="screenshots/cowork-oss4.jpeg" alt="CoWork-OSS Interface" width="700">
+  <br>
+  <em>Terminal-inspired UI — because GUIs shouldn't feel like GUIs</em>
 </p>
 
 ---
 
 ## Why CoWork-OSS?
 
-- **Local-first state**: Tasks/events/artifacts are stored locally in SQLite; model requests are sent to your configured provider (Anthropic/Bedrock). CoWork-OSS does not collect telemetry by default.
-- **Folder-scoped security**: File operations are constrained to your selected workspace with path traversal protection.
+- **CLI-style interface**: Terminal-inspired UI with monospace fonts, status indicators `[✓]`, and keyboard-friendly navigation
+- **Local-first state**: Tasks/events/artifacts are stored locally in SQLite; model requests are sent to your configured provider (Anthropic/Bedrock). No telemetry by default
+- **Folder-scoped security**: File operations are constrained to your selected workspace with path traversal protection
 - **Permissioned execution**: Explicit user approval required for destructive operations (delete, bulk rename)
-- **Extensible skills/tools**: Clear developer path to add custom tools and skills
 - **Transparent runtime**: Real-time timeline showing every step, tool call, and decision
 - **BYOK (Bring Your Own Key)**: Use your own API credentials — no proxy, no reselling
 

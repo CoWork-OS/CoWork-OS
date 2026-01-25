@@ -11,12 +11,20 @@ interface ModelOption {
   displayName: string;
 }
 
+interface ProviderInfo {
+  type: string;
+  name: string;
+  configured: boolean;
+  source?: string;
+}
+
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [settings, setSettings] = useState<LLMSettingsData>({
     providerType: 'anthropic',
     modelKey: 'sonnet-3-5',
   });
   const [models, setModels] = useState<ModelOption[]>([]);
+  const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -32,14 +40,21 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
   useEffect(() => {
     if (isOpen) {
-      loadSettings();
-      loadModels();
+      loadConfigStatus();
     }
   }, [isOpen]);
 
-  const loadSettings = async () => {
+  const loadConfigStatus = async () => {
     try {
       setLoading(true);
+      // Load config status which includes settings, providers, and models
+      const configStatus = await window.electronAPI.getLLMConfigStatus();
+
+      // Set providers
+      setProviders(configStatus.providers || []);
+      setModels(configStatus.models || []);
+
+      // Load full settings separately for bedrock config
       const loadedSettings = await window.electronAPI.getLLMSettings();
       setSettings(loadedSettings);
 
@@ -55,15 +70,6 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       console.error('Failed to load settings:', error);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const loadModels = async () => {
-    try {
-      const loadedModels = await window.electronAPI.getLLMModels();
-      setModels(loadedModels);
-    } catch (error) {
-      console.error('Failed to load models:', error);
     }
   };
 
@@ -155,37 +161,53 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 </p>
 
                 <div className="provider-options">
-                  <label className={`provider-option ${settings.providerType === 'anthropic' ? 'selected' : ''}`}>
-                    <input
-                      type="radio"
-                      name="provider"
-                      value="anthropic"
-                      checked={settings.providerType === 'anthropic'}
-                      onChange={() => setSettings({ ...settings, providerType: 'anthropic' })}
-                    />
-                    <div className="provider-option-content">
-                      <div className="provider-option-title">Anthropic API</div>
-                      <div className="provider-option-description">
-                        Direct API access using your Anthropic API key
-                      </div>
-                    </div>
-                  </label>
+                  {providers.map(provider => {
+                    const isAnthropic = provider.type === 'anthropic';
+                    const isBedrock = provider.type === 'bedrock';
+                    const isOAuth = provider.source === 'oauth';
 
-                  <label className={`provider-option ${settings.providerType === 'bedrock' ? 'selected' : ''}`}>
-                    <input
-                      type="radio"
-                      name="provider"
-                      value="bedrock"
-                      checked={settings.providerType === 'bedrock'}
-                      onChange={() => setSettings({ ...settings, providerType: 'bedrock' })}
-                    />
-                    <div className="provider-option-content">
-                      <div className="provider-option-title">AWS Bedrock</div>
-                      <div className="provider-option-description">
-                        Access AI models through AWS Bedrock using your AWS credentials
-                      </div>
-                    </div>
-                  </label>
+                    return (
+                      <label
+                        key={provider.type}
+                        className={`provider-option ${settings.providerType === provider.type ? 'selected' : ''}`}
+                      >
+                        <input
+                          type="radio"
+                          name="provider"
+                          value={provider.type}
+                          checked={settings.providerType === provider.type}
+                          onChange={() => setSettings({ ...settings, providerType: provider.type as 'anthropic' | 'bedrock' })}
+                        />
+                        <div className="provider-option-content">
+                          <div className="provider-option-title">
+                            {provider.name}
+                            {provider.configured && (
+                              <span className="provider-configured" title="Credentials detected">
+                                [Configured]
+                              </span>
+                            )}
+                          </div>
+                          <div className="provider-option-description">
+                            {isAnthropic && isOAuth && (
+                              <>Using Claude subscription via CLAUDE_CODE_OAUTH_TOKEN</>
+                            )}
+                            {isAnthropic && !isOAuth && provider.configured && (
+                              <>Using API key from environment or settings</>
+                            )}
+                            {isAnthropic && !provider.configured && (
+                              <>Set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN in .env</>
+                            )}
+                            {isBedrock && provider.configured && (
+                              <>Using AWS credentials from environment or settings</>
+                            )}
+                            {isBedrock && !provider.configured && (
+                              <>Configure AWS credentials below or in environment</>
+                            )}
+                          </div>
+                        </div>
+                      </label>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -206,17 +228,30 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
               {settings.providerType === 'anthropic' && (
                 <div className="settings-section">
-                  <h3>Anthropic API Key</h3>
-                  <p className="settings-description">
-                    Enter your API key from console.anthropic.com. Leave empty to use ANTHROPIC_API_KEY environment variable.
-                  </p>
-                  <input
-                    type="password"
-                    className="settings-input"
-                    placeholder="sk-ant-..."
-                    value={anthropicApiKey}
-                    onChange={(e) => setAnthropicApiKey(e.target.value)}
-                  />
+                  {providers.find(p => p.type === 'anthropic')?.source === 'oauth' ? (
+                    <>
+                      <h3>Claude Subscription</h3>
+                      <p className="settings-description" style={{ color: 'var(--color-success, #22c55e)' }}>
+                        Using your Claude Pro/Max subscription via CLAUDE_CODE_OAUTH_TOKEN.
+                        No additional configuration needed.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <h3>Anthropic API Key</h3>
+                      <p className="settings-description">
+                        Enter your API key from console.anthropic.com, or leave empty to use environment variable.
+                        You can also use <code>claude setup-token</code> to use your Claude subscription.
+                      </p>
+                      <input
+                        type="password"
+                        className="settings-input"
+                        placeholder="sk-ant-..."
+                        value={anthropicApiKey}
+                        onChange={(e) => setAnthropicApiKey(e.target.value)}
+                      />
+                    </>
+                  )}
                 </div>
               )}
 

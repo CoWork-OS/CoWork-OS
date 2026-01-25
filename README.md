@@ -50,10 +50,38 @@ CoWork-OSS is an open-source, local-first agent workbench for running multi-step
 
 CoWork-OSS is **free and open source**. To run tasks, you must configure your own model credentials.
 
-| Provider | Configuration |
-|----------|---------------|
-| Anthropic API | Set `ANTHROPIC_API_KEY` in `.env` |
-| AWS Bedrock | Configure AWS credentials in Settings |
+| Provider | Configuration | Billing |
+|----------|---------------|---------|
+| Claude Subscription | Use `claude setup-token` (see below) | Uses your Pro/Max quota |
+| Anthropic API | Set `ANTHROPIC_API_KEY` in `.env` | Pay-per-token |
+| AWS Bedrock | Configure AWS credentials in Settings | Pay-per-token via AWS |
+
+### Using Claude Pro/Max Subscription (Recommended for subscribers)
+
+If you have a Claude Pro or Max subscription, you can use your subscription quota instead of paying per-token:
+
+1. **Install Claude Code CLI** (if not already installed):
+   ```bash
+   brew install --cask claude-code
+   ```
+
+2. **Generate a setup token**:
+   ```bash
+   claude setup-token
+   ```
+   This opens a browser for OAuth authorization. After authorizing, you'll receive a token (valid for 1 year).
+
+3. **Set the environment variable**:
+   ```bash
+   export CLAUDE_CODE_OAUTH_TOKEN=sk-ant-...your-token...
+   ```
+
+   Or add to your `.env` file:
+   ```
+   CLAUDE_CODE_OAUTH_TOKEN=sk-ant-...your-token...
+   ```
+
+4. **Launch CoWork-OSS** — it will automatically detect and use your subscription.
 
 **Your usage is billed directly by your provider.** CoWork-OSS does not proxy or resell model access.
 

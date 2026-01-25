@@ -672,15 +672,24 @@ export class MessageRouter {
     message: IncomingMessage
   ): Promise<void> {
     const status = LLMProviderFactory.getConfigStatus();
+    const settings = LLMProviderFactory.loadSettings();
+    const isOllama = status.currentProvider === 'ollama';
 
     let text = '🤖 *AI Models & Providers*\n\n';
 
     // Current configuration
     text += '*Current:*\n';
     const currentProvider = status.providers.find(p => p.type === status.currentProvider);
-    const currentModel = status.models.find(m => m.key === status.currentModel);
-    text += `• Provider: ${currentProvider?.name || status.currentProvider}\n`;
-    text += `• Model: ${currentModel?.displayName || status.currentModel}\n\n`;
+
+    if (isOllama) {
+      const ollamaModel = settings.ollama?.model || 'llama3.2';
+      text += `• Provider: ${currentProvider?.name || 'Ollama'}\n`;
+      text += `• Model: ${ollamaModel}\n\n`;
+    } else {
+      const currentModel = status.models.find(m => m.key === status.currentModel);
+      text += `• Provider: ${currentProvider?.name || status.currentProvider}\n`;
+      text += `• Model: ${currentModel?.displayName || status.currentModel}\n\n`;
+    }
 
     // Available providers
     text += '*Available Providers:*\n';
@@ -691,16 +700,38 @@ export class MessageRouter {
     });
     text += '\n';
 
-    // Available models (for Anthropic/Bedrock)
-    text += '*Available Models:*\n';
-    status.models.forEach((model, index) => {
-      const isActive = model.key === status.currentModel ? ' ✓' : '';
-      text += `${index + 1}. ${model.displayName}${isActive}\n`;
-    });
-    text += '\n';
+    // Available models - show different list based on provider
+    if (isOllama) {
+      text += '*Available Ollama Models:*\n';
+      try {
+        const ollamaModels = await LLMProviderFactory.getOllamaModels();
+        const currentOllamaModel = settings.ollama?.model || 'llama3.2';
 
-    text += '💡 Use `/model <name>` to switch models\n';
-    text += 'Example: `/model sonnet-4` or `/model 2`';
+        if (ollamaModels.length === 0) {
+          text += '⚠️ No models found. Run `ollama pull <model>` to download.\n';
+        } else {
+          ollamaModels.slice(0, 10).forEach((model, index) => {
+            const isActive = model.name === currentOllamaModel ? ' ✓' : '';
+            const sizeGB = (model.size / 1e9).toFixed(1);
+            text += `${index + 1}. ${model.name} (${sizeGB}GB)${isActive}\n`;
+          });
+          if (ollamaModels.length > 10) {
+            text += `   ... and ${ollamaModels.length - 10} more\n`;
+          }
+        }
+      } catch {
+        text += '⚠️ Could not fetch Ollama models. Is Ollama running?\n';
+      }
+      text += '\n💡 Use `/model <name>` to switch (e.g., `/model llama3.2`)';
+    } else {
+      text += '*Available Claude Models:*\n';
+      status.models.forEach((model, index) => {
+        const isActive = model.key === status.currentModel ? ' ✓' : '';
+        text += `${index + 1}. ${model.displayName}${isActive}\n`;
+      });
+      text += '\n💡 Use `/model <name>` to switch\n';
+      text += 'Example: `/model sonnet-4` or `/model 2`';
+    }
 
     await adapter.sendMessage({
       chatId: message.chatId,
@@ -718,23 +749,32 @@ export class MessageRouter {
     args: string[]
   ): Promise<void> {
     const status = LLMProviderFactory.getConfigStatus();
+    const settings = LLMProviderFactory.loadSettings();
+    const isOllama = status.currentProvider === 'ollama';
 
     // If no args, show current model
     if (args.length === 0) {
       const currentProvider = status.providers.find(p => p.type === status.currentProvider);
-      const currentModel = status.models.find(m => m.key === status.currentModel);
 
-      await adapter.sendMessage({
-        chatId: message.chatId,
-        text: `🤖 *Current Model*\n\n• Provider: ${currentProvider?.name || status.currentProvider}\n• Model: ${currentModel?.displayName || status.currentModel}\n\nUse \`/model <name>\` to change.\nUse \`/models\` to see all options.`,
-        parseMode: 'markdown',
-      });
+      if (isOllama) {
+        const ollamaModel = settings.ollama?.model || 'llama3.2';
+        await adapter.sendMessage({
+          chatId: message.chatId,
+          text: `🤖 *Current Model*\n\n• Provider: ${currentProvider?.name || 'Ollama'}\n• Model: ${ollamaModel}\n\nUse \`/model <name>\` to change.\nUse \`/models\` to see all options.`,
+          parseMode: 'markdown',
+        });
+      } else {
+        const currentModel = status.models.find(m => m.key === status.currentModel);
+        await adapter.sendMessage({
+          chatId: message.chatId,
+          text: `🤖 *Current Model*\n\n• Provider: ${currentProvider?.name || status.currentProvider}\n• Model: ${currentModel?.displayName || status.currentModel}\n\nUse \`/model <name>\` to change.\nUse \`/models\` to see all options.`,
+          parseMode: 'markdown',
+        });
+      }
       return;
     }
 
     const selector = args.join(' ').toLowerCase();
-    let selectedModel: { key: string; displayName: string } | undefined;
-    let selectedProvider: LLMProviderType | undefined;
 
     // Check if selector is a provider name
     const providerMatch = status.providers.find(
@@ -743,13 +783,68 @@ export class MessageRouter {
 
     if (providerMatch) {
       // Switching provider
-      selectedProvider = providerMatch.type;
-
-      // Keep current model if compatible, otherwise use default
-      const settings = LLMProviderFactory.loadSettings();
       const newSettings: LLMSettings = {
         ...settings,
-        providerType: selectedProvider,
+        providerType: providerMatch.type,
+      };
+
+      LLMProviderFactory.saveSettings(newSettings);
+      LLMProviderFactory.clearCache();
+
+      // Show appropriate model info based on new provider
+      let modelInfo: string;
+      if (providerMatch.type === 'ollama') {
+        modelInfo = settings.ollama?.model || 'llama3.2';
+      } else {
+        const model = status.models.find(m => m.key === settings.modelKey);
+        modelInfo = model?.displayName || settings.modelKey;
+      }
+
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: `✅ Provider changed to: *${providerMatch.name}*\n\nModel: ${modelInfo}`,
+        parseMode: 'markdown',
+      });
+      return;
+    }
+
+    // Handle model selection based on current provider
+    if (isOllama) {
+      // For Ollama, try to match against available Ollama models
+      let ollamaModels: Array<{ name: string; size: number; modified: string }> = [];
+      try {
+        ollamaModels = await LLMProviderFactory.getOllamaModels();
+      } catch {
+        // If we can't fetch models, just accept the user's input
+      }
+
+      let selectedOllamaModel: string | undefined;
+
+      // Try to find model by number
+      const num = parseInt(selector, 10);
+      if (!isNaN(num) && num > 0 && num <= ollamaModels.length) {
+        selectedOllamaModel = ollamaModels[num - 1].name;
+      } else {
+        // Try to find by name (exact or partial match)
+        const match = ollamaModels.find(
+          m => m.name.toLowerCase() === selector ||
+               m.name.toLowerCase().includes(selector)
+        );
+        if (match) {
+          selectedOllamaModel = match.name;
+        } else {
+          // Accept any input as Ollama model name (user might know a model we don't have listed)
+          selectedOllamaModel = args.join(' ');
+        }
+      }
+
+      // Update settings with new Ollama model
+      const newSettings: LLMSettings = {
+        ...settings,
+        ollama: {
+          ...settings.ollama,
+          model: selectedOllamaModel,
+        },
       };
 
       LLMProviderFactory.saveSettings(newSettings);
@@ -757,11 +852,14 @@ export class MessageRouter {
 
       await adapter.sendMessage({
         chatId: message.chatId,
-        text: `✅ Provider changed to: *${providerMatch.name}*\n\nModel: ${settings.modelKey}`,
+        text: `✅ Ollama model changed to: *${selectedOllamaModel}*`,
         parseMode: 'markdown',
       });
       return;
     }
+
+    // For Anthropic/Bedrock, match against Claude models
+    let selectedModel: { key: string; displayName: string } | undefined;
 
     // Try to find model by number
     const num = parseInt(selector, 10);
@@ -785,7 +883,6 @@ export class MessageRouter {
     }
 
     // Update settings
-    const settings = LLMProviderFactory.loadSettings();
     const newSettings: LLMSettings = {
       ...settings,
       modelKey: selectedModel.key as ModelKey,

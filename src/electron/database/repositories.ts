@@ -802,23 +802,24 @@ export class ChannelSessionRepository {
     const fields: string[] = [];
     const values: unknown[] = [];
 
-    if (updates.taskId !== undefined) {
+    // Use 'in' check to allow setting fields to null/undefined (clearing them)
+    if ('taskId' in updates) {
       fields.push('task_id = ?');
-      values.push(updates.taskId);
+      values.push(updates.taskId ?? null); // Convert undefined to null for SQLite
     }
-    if (updates.workspaceId !== undefined) {
+    if ('workspaceId' in updates) {
       fields.push('workspace_id = ?');
-      values.push(updates.workspaceId);
+      values.push(updates.workspaceId ?? null);
     }
-    if (updates.state !== undefined) {
+    if ('state' in updates) {
       fields.push('state = ?');
       values.push(updates.state);
     }
-    if (updates.context !== undefined) {
+    if ('context' in updates) {
       fields.push('context = ?');
-      values.push(JSON.stringify(updates.context));
+      values.push(updates.context ? JSON.stringify(updates.context) : null);
     }
-    if (updates.lastActivityAt !== undefined) {
+    if ('lastActivityAt' in updates) {
       fields.push('last_activity_at = ?');
       values.push(updates.lastActivityAt);
     }

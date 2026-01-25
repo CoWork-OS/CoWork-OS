@@ -145,6 +145,22 @@ The packaged app will be in the `release/` directory.
 
 ---
 
+## Screenshots
+
+<p align="center">
+  <img src="screenshots/cowork-oss2.jpeg" alt="CoWork-OSS Welcome Screen" width="800">
+  <br>
+  <em>Welcome screen with AI disclosure and quick commands</em>
+</p>
+
+<p align="center">
+  <img src="screenshots/cowork-oss3.jpeg" alt="CoWork-OSS Task Execution" width="800">
+  <br>
+  <em>Real-time task execution with plan steps and tool calls</em>
+</p>
+
+---
+
 ## Usage
 
 ### 1. Select a Workspace
@@ -153,6 +169,12 @@ On first launch, select a folder where CoWork-OSS can work. This folder will be:
 - Mounted for read/write access
 - Protected by permission boundaries
 - Used as the working directory for all tasks
+
+<p align="center">
+  <img src="screenshots/cowork-oss4.jpeg" alt="Workspace Selector" width="600">
+  <br>
+  <em>Workspace selector with recent workspaces</em>
+</p>
 
 ### 2. Create a Task
 
@@ -171,6 +193,12 @@ Watch the task timeline as the agent:
 - Executes steps using available tools
 - Requests approvals for destructive operations
 - Produces artifacts (files)
+
+<p align="center">
+  <img src="screenshots/cowork-oss1.jpeg" alt="Task Completion" width="800">
+  <br>
+  <em>Task completion with verification and file tracking</em>
+</p>
 
 ### 4. Approve Requests
 

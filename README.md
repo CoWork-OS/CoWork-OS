@@ -25,6 +25,10 @@ CoWork-OSS is an open-source, local-first agent workbench for running multi-step
 
 **Status**: macOS desktop app (cross-platform support planned).
 
+<p align="center">
+  <img src="screenshots/cowork-oss4.jpeg" alt="CoWork-OSS Interface" width="700">
+</p>
+
 ---
 
 ## Why CoWork-OSS?
@@ -169,12 +173,6 @@ On first launch, select a folder where CoWork-OSS can work. This folder will be:
 - Mounted for read/write access
 - Protected by permission boundaries
 - Used as the working directory for all tasks
-
-<p align="center">
-  <img src="screenshots/cowork-oss4.jpeg" alt="Workspace Selector" width="600">
-  <br>
-  <em>Workspace selector with recent workspaces</em>
-</p>
 
 ### 2. Create a Task
 

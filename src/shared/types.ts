@@ -176,6 +176,7 @@ export const IPC_CHANNELS = {
   LLM_TEST_PROVIDER: 'llm:testProvider',
   LLM_GET_MODELS: 'llm:getModels',
   LLM_GET_CONFIG_STATUS: 'llm:getConfigStatus',
+  LLM_GET_OLLAMA_MODELS: 'llm:getOllamaModels',
 
   // Gateway / Channels
   GATEWAY_GET_CHANNELS: 'gateway:getChannels',
@@ -198,7 +199,7 @@ export const IPC_CHANNELS = {
 } as const;
 
 // LLM Provider types
-export type LLMProviderType = 'anthropic' | 'bedrock';
+export type LLMProviderType = 'anthropic' | 'bedrock' | 'ollama';
 
 export interface LLMSettingsData {
   providerType: LLMProviderType;
@@ -213,6 +214,11 @@ export interface LLMSettingsData {
     sessionToken?: string;
     profile?: string;
     useDefaultCredentials?: boolean;
+  };
+  ollama?: {
+    baseUrl?: string;
+    model?: string;
+    apiKey?: string; // Optional, for remote Ollama servers
   };
 }
 

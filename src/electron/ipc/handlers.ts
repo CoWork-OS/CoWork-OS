@@ -168,6 +168,7 @@ export function setupIpcHandlers(
       modelKey: settings.modelKey as ModelKey,
       anthropic: settings.anthropic,
       bedrock: settings.bedrock,
+      ollama: settings.ollama,
     });
     // Clear cache so next task uses new settings
     LLMProviderFactory.clearCache();
@@ -177,13 +178,15 @@ export function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.LLM_TEST_PROVIDER, async (_, config: any) => {
     const providerConfig: LLMProviderConfig = {
       type: config.providerType,
-      model: LLMProviderFactory.getModelId(config.modelKey as ModelKey, config.providerType),
+      model: LLMProviderFactory.getModelId(config.modelKey as ModelKey, config.providerType, config.ollama?.model),
       anthropicApiKey: config.anthropic?.apiKey,
       awsRegion: config.bedrock?.region,
       awsAccessKeyId: config.bedrock?.accessKeyId,
       awsSecretAccessKey: config.bedrock?.secretAccessKey,
       awsSessionToken: config.bedrock?.sessionToken,
       awsProfile: config.bedrock?.profile,
+      ollamaBaseUrl: config.ollama?.baseUrl,
+      ollamaApiKey: config.ollama?.apiKey,
     };
     return LLMProviderFactory.testProvider(providerConfig);
   });
@@ -213,6 +216,10 @@ export function setupIpcHandlers(
         description: m.description,
       })),
     };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.LLM_GET_OLLAMA_MODELS, async (_, baseUrl?: string) => {
+    return LLMProviderFactory.getOllamaModels(baseUrl);
   });
 
   // Search Settings handlers

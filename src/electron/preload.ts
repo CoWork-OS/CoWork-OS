@@ -26,6 +26,7 @@ const IPC_CHANNELS = {
   LLM_TEST_PROVIDER: 'llm:testProvider',
   LLM_GET_MODELS: 'llm:getModels',
   LLM_GET_CONFIG_STATUS: 'llm:getConfigStatus',
+  LLM_GET_OLLAMA_MODELS: 'llm:getOllamaModels',
   // Gateway / Channels
   GATEWAY_GET_CHANNELS: 'gateway:getChannels',
   GATEWAY_ADD_CHANNEL: 'gateway:addChannel',
@@ -100,6 +101,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   testLLMProvider: (config: any) => ipcRenderer.invoke(IPC_CHANNELS.LLM_TEST_PROVIDER, config),
   getLLMModels: () => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_MODELS),
   getLLMConfigStatus: () => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_CONFIG_STATUS),
+  getOllamaModels: (baseUrl?: string) => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_OLLAMA_MODELS, baseUrl),
 
   // Gateway / Channel APIs
   getGatewayChannels: () => ipcRenderer.invoke(IPC_CHANNELS.GATEWAY_GET_CHANNELS),
@@ -161,11 +163,12 @@ export interface ElectronAPI {
   testLLMProvider: (config: any) => Promise<{ success: boolean; error?: string }>;
   getLLMModels: () => Promise<Array<{ key: string; displayName: string; description: string }>>;
   getLLMConfigStatus: () => Promise<{
-    currentProvider: 'anthropic' | 'bedrock';
+    currentProvider: 'anthropic' | 'bedrock' | 'ollama';
     currentModel: string;
-    providers: Array<{ type: 'anthropic' | 'bedrock'; name: string; configured: boolean; source?: string }>;
+    providers: Array<{ type: 'anthropic' | 'bedrock' | 'ollama'; name: string; configured: boolean; source?: string }>;
     models: Array<{ key: string; displayName: string; description: string }>;
   }>;
+  getOllamaModels: (baseUrl?: string) => Promise<Array<{ name: string; size: number; modified: string }>>;
   // Gateway / Channel APIs
   getGatewayChannels: () => Promise<any[]>;
   addGatewayChannel: (data: { type: string; name: string; botToken: string; securityMode?: string }) => Promise<any>;

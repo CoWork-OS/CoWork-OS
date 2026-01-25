@@ -21,6 +21,15 @@ interface ProviderInfo {
 
 type SettingsTab = 'llm' | 'search' | 'telegram';
 
+// Helper to format bytes to human-readable size
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('llm');
   const [settings, setSettings] = useState<LLMSettingsData>({
@@ -41,6 +50,13 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [awsSecretAccessKey, setAwsSecretAccessKey] = useState('');
   const [awsProfile, setAwsProfile] = useState('');
   const [useDefaultCredentials, setUseDefaultCredentials] = useState(true);
+
+  // Ollama state
+  const [ollamaBaseUrl, setOllamaBaseUrl] = useState('http://localhost:11434');
+  const [ollamaModel, setOllamaModel] = useState('llama3.2');
+  const [ollamaApiKey, setOllamaApiKey] = useState('');
+  const [ollamaModels, setOllamaModels] = useState<Array<{ name: string; size: number }>>([]);
+  const [loadingOllamaModels, setLoadingOllamaModels] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -70,10 +86,35 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         setAwsProfile(loadedSettings.bedrock.profile);
       }
       setUseDefaultCredentials(loadedSettings.bedrock?.useDefaultCredentials ?? true);
+
+      // Set Ollama form state
+      if (loadedSettings.ollama?.baseUrl) {
+        setOllamaBaseUrl(loadedSettings.ollama.baseUrl);
+      }
+      if (loadedSettings.ollama?.model) {
+        setOllamaModel(loadedSettings.ollama.model);
+      }
     } catch (error) {
       console.error('Failed to load settings:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadOllamaModels = async (baseUrl?: string) => {
+    try {
+      setLoadingOllamaModels(true);
+      const models = await window.electronAPI.getOllamaModels(baseUrl || ollamaBaseUrl);
+      setOllamaModels(models || []);
+      // If we got models and current model isn't in the list, select the first one
+      if (models && models.length > 0 && !models.some(m => m.name === ollamaModel)) {
+        setOllamaModel(models[0].name);
+      }
+    } catch (error) {
+      console.error('Failed to load Ollama models:', error);
+      setOllamaModels([]);
+    } finally {
+      setLoadingOllamaModels(false);
     }
   };
 
@@ -96,6 +137,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             accessKeyId: awsAccessKeyId || undefined,
             secretAccessKey: awsSecretAccessKey || undefined,
           }),
+        } : undefined,
+        ollama: settings.providerType === 'ollama' ? {
+          baseUrl: ollamaBaseUrl || undefined,
+          model: ollamaModel || undefined,
+          apiKey: ollamaApiKey || undefined,
         } : undefined,
       };
 
@@ -127,6 +173,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             accessKeyId: awsAccessKeyId || undefined,
             secretAccessKey: awsSecretAccessKey || undefined,
           }),
+        } : undefined,
+        ollama: settings.providerType === 'ollama' ? {
+          baseUrl: ollamaBaseUrl || undefined,
+          model: ollamaModel || undefined,
+          apiKey: ollamaApiKey || undefined,
         } : undefined,
       };
 
@@ -193,6 +244,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   {providers.map(provider => {
                     const isAnthropic = provider.type === 'anthropic';
                     const isBedrock = provider.type === 'bedrock';
+                    const isOllama = provider.type === 'ollama';
 
                     return (
                       <label
@@ -204,7 +256,13 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           name="provider"
                           value={provider.type}
                           checked={settings.providerType === provider.type}
-                          onChange={() => setSettings({ ...settings, providerType: provider.type as 'anthropic' | 'bedrock' })}
+                          onChange={() => {
+                            setSettings({ ...settings, providerType: provider.type as 'anthropic' | 'bedrock' | 'ollama' });
+                            // Load Ollama models when selecting Ollama
+                            if (provider.type === 'ollama') {
+                              loadOllamaModels();
+                            }
+                          }}
                         />
                         <div className="provider-option-content">
                           <div className="provider-option-title">
@@ -228,6 +286,12 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             {isBedrock && !provider.configured && (
                               <>Configure AWS credentials below or in environment</>
                             )}
+                            {isOllama && provider.configured && (
+                              <>Ollama server detected - configure model below</>
+                            )}
+                            {isOllama && !provider.configured && (
+                              <>Run local LLM models with Ollama</>
+                            )}
                           </div>
                         </div>
                       </label>
@@ -236,20 +300,22 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 </div>
               </div>
 
-              <div className="settings-section">
-                <h3>Model</h3>
-                <select
-                  className="settings-select"
-                  value={settings.modelKey}
-                  onChange={(e) => setSettings({ ...settings, modelKey: e.target.value })}
-                >
-                  {models.map(model => (
-                    <option key={model.key} value={model.key}>
-                      {model.displayName}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {settings.providerType !== 'ollama' && (
+                <div className="settings-section">
+                  <h3>Model</h3>
+                  <select
+                    className="settings-select"
+                    value={settings.modelKey}
+                    onChange={(e) => setSettings({ ...settings, modelKey: e.target.value })}
+                  >
+                    {models.map(model => (
+                      <option key={model.key} value={model.key}>
+                        {model.displayName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               {settings.providerType === 'anthropic' && (
                 <div className="settings-section">
@@ -329,6 +395,78 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         />
                       </div>
                     )}
+                  </div>
+                </>
+              )}
+
+              {settings.providerType === 'ollama' && (
+                <>
+                  <div className="settings-section">
+                    <h3>Ollama Server URL</h3>
+                    <p className="settings-description">
+                      URL of your Ollama server. Default is http://localhost:11434 for local installations.
+                    </p>
+                    <div className="settings-input-group">
+                      <input
+                        type="text"
+                        className="settings-input"
+                        placeholder="http://localhost:11434"
+                        value={ollamaBaseUrl}
+                        onChange={(e) => setOllamaBaseUrl(e.target.value)}
+                      />
+                      <button
+                        className="button-small button-secondary"
+                        onClick={() => loadOllamaModels(ollamaBaseUrl)}
+                        disabled={loadingOllamaModels}
+                      >
+                        {loadingOllamaModels ? 'Loading...' : 'Refresh Models'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="settings-section">
+                    <h3>Model</h3>
+                    <p className="settings-description">
+                      Select from models available on your Ollama server, or enter a custom model name.
+                    </p>
+                    {ollamaModels.length > 0 ? (
+                      <select
+                        className="settings-select"
+                        value={ollamaModel}
+                        onChange={(e) => setOllamaModel(e.target.value)}
+                      >
+                        {ollamaModels.map(model => (
+                          <option key={model.name} value={model.name}>
+                            {model.name} ({formatBytes(model.size)})
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        className="settings-input"
+                        placeholder="llama3.2"
+                        value={ollamaModel}
+                        onChange={(e) => setOllamaModel(e.target.value)}
+                      />
+                    )}
+                    <p className="settings-hint">
+                      Don't have models? Run <code>ollama pull llama3.2</code> to download a model.
+                    </p>
+                  </div>
+
+                  <div className="settings-section">
+                    <h3>API Key (Optional)</h3>
+                    <p className="settings-description">
+                      Only needed if connecting to a remote Ollama server that requires authentication.
+                    </p>
+                    <input
+                      type="password"
+                      className="settings-input"
+                      placeholder="Optional API key for remote servers"
+                      value={ollamaApiKey}
+                      onChange={(e) => setOllamaApiKey(e.target.value)}
+                    />
                   </div>
                 </>
               )}

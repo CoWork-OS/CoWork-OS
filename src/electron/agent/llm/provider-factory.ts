@@ -11,6 +11,7 @@ import {
 } from './types';
 import { AnthropicProvider } from './anthropic-provider';
 import { BedrockProvider } from './bedrock-provider';
+import { OllamaProvider } from './ollama-provider';
 
 const SETTINGS_FILE = 'llm-settings.json';
 const MASKED_VALUE = '***configured***';
@@ -39,6 +40,13 @@ function sanitizeSettings(settings: LLMSettings): LLMSettings {
     };
   }
 
+  if (sanitized.ollama) {
+    sanitized.ollama = {
+      ...sanitized.ollama,
+      apiKey: normalizeSecret(sanitized.ollama.apiKey),
+    };
+  }
+
   return sanitized;
 }
 
@@ -47,7 +55,7 @@ function sanitizeSettings(settings: LLMSettings): LLMSettings {
  */
 export interface LLMSettings {
   providerType: LLMProviderType;
-  modelKey: ModelKey;
+  modelKey: ModelKey | string; // String for custom Ollama model names
   anthropic?: {
     apiKey?: string;
   };
@@ -58,6 +66,11 @@ export interface LLMSettings {
     sessionToken?: string;
     profile?: string;
     useDefaultCredentials?: boolean;
+  };
+  ollama?: {
+    baseUrl?: string;
+    model?: string;
+    apiKey?: string; // Optional, for remote Ollama servers
   };
 }
 
@@ -139,6 +152,13 @@ export class LLMProviderFactory {
   }
 
   /**
+   * Check if Ollama is configured via environment
+   */
+  private static getOllamaBaseUrlFromEnv(): string | undefined {
+    return process.env.OLLAMA_BASE_URL || process.env.OLLAMA_HOST;
+  }
+
+  /**
    * Detect which provider to use based on environment variables
    */
   private static detectProviderFromEnv(): LLMProviderType | null {
@@ -155,6 +175,11 @@ export class LLMProviderFactory {
     // Fall back to Bedrock if AWS credentials exist
     if (hasAwsCredentials) {
       return 'bedrock';
+    }
+
+    // Check for Ollama (local server is always available by default)
+    if (this.getOllamaBaseUrlFromEnv()) {
+      return 'ollama';
     }
 
     // No valid credentials detected
@@ -186,6 +211,14 @@ export class LLMProviderFactory {
         };
       }
 
+      // Same for Ollama API key (for remote servers)
+      if (settingsToSave.ollama?.apiKey) {
+        settingsToSave.ollama = {
+          ...settingsToSave.ollama,
+          apiKey: MASKED_VALUE,
+        };
+      }
+
       fs.writeFileSync(this.settingsPath, JSON.stringify(settingsToSave, null, 2));
       this.cachedSettings = settings;
     } catch (error) {
@@ -206,6 +239,7 @@ export class LLMProviderFactory {
    */
   static createProvider(overrideConfig?: Partial<LLMProviderConfig>): LLMProvider {
     const settings = this.loadSettings();
+    const providerType = overrideConfig?.type || settings.providerType;
 
     const anthropicApiKey =
       normalizeSecret(overrideConfig?.anthropicApiKey) ||
@@ -213,8 +247,8 @@ export class LLMProviderFactory {
       this.getAnthropicKeyFromEnv();
 
     const config: LLMProviderConfig = {
-      type: overrideConfig?.type || settings.providerType,
-      model: this.getModelId(settings.modelKey, overrideConfig?.type || settings.providerType),
+      type: providerType,
+      model: this.getModelId(settings.modelKey, providerType, settings.ollama?.model),
       anthropicApiKey,
       // Bedrock config
       awsRegion: overrideConfig?.awsRegion || settings.bedrock?.region || process.env.AWS_REGION,
@@ -225,6 +259,9 @@ export class LLMProviderFactory {
         process.env.AWS_SECRET_ACCESS_KEY,
       awsSessionToken: overrideConfig?.awsSessionToken || settings.bedrock?.sessionToken || process.env.AWS_SESSION_TOKEN,
       awsProfile: overrideConfig?.awsProfile || settings.bedrock?.profile || process.env.AWS_PROFILE,
+      // Ollama config
+      ollamaBaseUrl: overrideConfig?.ollamaBaseUrl || settings.ollama?.baseUrl || this.getOllamaBaseUrlFromEnv(),
+      ollamaApiKey: normalizeSecret(overrideConfig?.ollamaApiKey) || settings.ollama?.apiKey || process.env.OLLAMA_API_KEY,
     };
 
     return this.createProviderFromConfig(config);
@@ -239,6 +276,8 @@ export class LLMProviderFactory {
         return new AnthropicProvider(config);
       case 'bedrock':
         return new BedrockProvider(config);
+      case 'ollama':
+        return new OllamaProvider(config);
       default:
         throw new Error(`Unknown provider type: ${config.type}`);
     }
@@ -247,12 +286,18 @@ export class LLMProviderFactory {
   /**
    * Get the model ID for a provider
    */
-  static getModelId(modelKey: ModelKey, providerType: LLMProviderType): string {
-    const model = MODELS[modelKey];
+  static getModelId(modelKey: ModelKey | string, providerType: LLMProviderType, ollamaModel?: string): string {
+    // For Ollama, use the specific Ollama model if provided, or default to 'llama3.2'
+    if (providerType === 'ollama') {
+      return ollamaModel || 'llama3.2';
+    }
+
+    // For other providers, look up in MODELS
+    const model = MODELS[modelKey as ModelKey];
     if (!model) {
       throw new Error(`Unknown model: ${modelKey}`);
     }
-    return model[providerType];
+    return model[providerType as 'anthropic' | 'bedrock'];
   }
 
   /**
@@ -290,6 +335,8 @@ export class LLMProviderFactory {
     // Also check saved settings
     const settings = this.loadSettings();
     const hasBedrockInSettings = settings.bedrock?.region || settings.bedrock?.profile;
+    const hasOllamaInSettings = settings.ollama?.baseUrl || settings.ollama?.model;
+    const hasOllamaEnv = !!this.getOllamaBaseUrlFromEnv();
 
     return [
       {
@@ -302,6 +349,11 @@ export class LLMProviderFactory {
         name: 'AWS Bedrock',
         configured: !!(hasAwsCredentials || hasBedrockInSettings),
       },
+      {
+        type: 'ollama' as LLMProviderType,
+        name: 'Ollama (Local)',
+        configured: !!(hasOllamaInSettings || hasOllamaEnv),
+      },
     ];
   }
 
@@ -310,7 +362,7 @@ export class LLMProviderFactory {
    */
   static getConfigStatus(): {
     currentProvider: LLMProviderType;
-    currentModel: ModelKey;
+    currentModel: ModelKey | string;
     providers: Array<{ type: LLMProviderType; name: string; configured: boolean }>;
     models: Array<{ key: ModelKey; displayName: string }>;
   } {
@@ -335,6 +387,27 @@ export class LLMProviderFactory {
         success: false,
         error: error.message || 'Failed to create provider',
       };
+    }
+  }
+
+  /**
+   * Fetch available Ollama models from the server
+   */
+  static async getOllamaModels(baseUrl?: string): Promise<Array<{ name: string; size: number; modified: string }>> {
+    const settings = this.loadSettings();
+    const url = baseUrl || settings.ollama?.baseUrl || this.getOllamaBaseUrlFromEnv() || 'http://localhost:11434';
+
+    try {
+      const provider = new OllamaProvider({
+        type: 'ollama',
+        model: '',
+        ollamaBaseUrl: url,
+        ollamaApiKey: settings.ollama?.apiKey,
+      });
+      return await provider.getAvailableModels();
+    } catch (error: any) {
+      console.error('Failed to fetch Ollama models:', error);
+      return [];
     }
   }
 }

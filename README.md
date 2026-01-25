@@ -18,7 +18,7 @@
 
 CoWork-OSS is an open-source, local-first agent workbench for running multi-step tasks in a folder-scoped workspace, with explicit approvals for destructive actions and built-in skills for generating documents, spreadsheets, and presentations.
 
-**You bring your own model credentials (Anthropic API / AWS Bedrock); usage is billed by your provider.**
+**You bring your own model credentials (Anthropic API / AWS Bedrock) or run locally with Ollama; usage is billed by your provider (or free with Ollama).**
 
 > **Independent project.** CoWork-OSS is not affiliated with, endorsed by, or sponsored by Anthropic.
 > This project implements a local, folder-scoped agent workflow pattern in open source.
@@ -48,14 +48,15 @@ CoWork-OSS is an open-source, local-first agent workbench for running multi-step
 
 ## Providers & Costs (BYOK)
 
-CoWork-OSS is **free and open source**. To run tasks, you must configure your own model credentials.
+CoWork-OSS is **free and open source**. To run tasks, you must configure your own model credentials or use local models.
 
 | Provider | Configuration | Billing |
 |----------|---------------|---------|
 | Anthropic API | Set `ANTHROPIC_API_KEY` in `.env` | Pay-per-token |
 | AWS Bedrock | Configure AWS credentials in Settings | Pay-per-token via AWS |
+| Ollama (Local) | Install Ollama and pull models | **Free** (runs locally) |
 
-**Your usage is billed directly by your provider.** CoWork-OSS does not proxy or resell model access.
+**Your usage is billed directly by your provider.** CoWork-OSS does not proxy or resell model access. With Ollama, everything runs on your machine for free.
 
 ---
 
@@ -105,7 +106,7 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
 │                  Execution Layer                 │
 │  - File Operations                               │
 │  - Skills (Document Creation)                    │
-│  - LLM Providers (Anthropic/Bedrock)             │
+│  - LLM Providers (Anthropic/Bedrock/Ollama)      │
 │  - Search Providers (Tavily/Brave/SerpAPI/Google)│
 └─────────────────────────────────────────────────┘
                       ↕
@@ -123,7 +124,7 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
 
 - Node.js 18+ and npm
 - macOS (for Electron native features)
-- API credentials (Anthropic API key or AWS Bedrock access)
+- One of: Anthropic API key, AWS Bedrock access, or Ollama installed locally
 
 ### Installation
 
@@ -265,12 +266,13 @@ If requested by the rights holder, we will update naming/branding to avoid confu
 - [x] Folder-scoped workspace + path traversal protection
 - [x] Approval gates for destructive operations
 - [x] Task timeline + artifact outputs
-- [x] Multi-provider support (Anthropic API / AWS Bedrock)
-- [x] Model selection (Opus, Sonnet, Haiku)
+- [x] Multi-provider support (Anthropic API / AWS Bedrock / Ollama)
+- [x] Model selection (Opus, Sonnet, Haiku, or any Ollama model)
 - [x] Built-in skills (documents, spreadsheets, presentations)
 - [x] SQLite local persistence
 - [x] Telegram bot integration for remote task execution
 - [x] Web search integration (Tavily, Brave, SerpAPI, Google)
+- [x] Local LLM support via Ollama (free, runs on your machine)
 
 ### Planned
 - [ ] VM sandbox using macOS Virtualization.framework
@@ -278,7 +280,6 @@ If requested by the rights holder, we will update naming/branding to avoid confu
 - [ ] Sub-agent coordination for parallel tasks
 - [ ] Network egress controls with proxy
 - [ ] Browser automation
-- [ ] Additional model provider support
 - [ ] Skill marketplace/loader
 
 ---
@@ -433,6 +434,77 @@ If no provider is explicitly selected, CoWork-OSS auto-detects available provide
 2. Brave (if `BRAVE_API_KEY` is set)
 3. SerpAPI (if `SERPAPI_KEY` is set)
 4. Google (if both `GOOGLE_API_KEY` and `GOOGLE_SEARCH_ENGINE_ID` are set)
+
+---
+
+## Ollama Integration (Local LLMs)
+
+CoWork-OSS supports running local language models via Ollama, allowing you to use the agent completely offline and free of charge.
+
+### Setting Up Ollama
+
+#### 1. Install Ollama
+
+Download and install from [ollama.ai](https://ollama.ai/):
+
+```bash
+# macOS (via Homebrew)
+brew install ollama
+
+# Or download directly from https://ollama.ai/download
+```
+
+#### 2. Pull a Model
+
+```bash
+# Recommended models for agent tasks
+ollama pull llama3.2        # Fast, good for most tasks
+ollama pull qwen2.5:14b     # Better reasoning
+ollama pull deepseek-r1:14b # Strong coding abilities
+```
+
+#### 3. Start Ollama Server
+
+```bash
+ollama serve
+# Server runs at http://localhost:11434
+```
+
+### Configuring in CoWork-OSS
+
+1. Open **Settings** (gear icon)
+2. Select **Ollama (Local)** as your provider
+3. Click **Refresh Models** to load available models
+4. Select your preferred model from the dropdown
+5. Click **Test Connection** to verify
+6. Save settings
+
+### Environment Variables (Optional)
+
+```bash
+# Custom server URL (defaults to localhost:11434)
+OLLAMA_BASE_URL=http://localhost:11434
+
+# API key for remote Ollama servers with authentication
+OLLAMA_API_KEY=your_key_if_needed
+```
+
+### Recommended Models
+
+| Model | Size | Best For |
+|-------|------|----------|
+| `llama3.2` | 3B | Quick tasks, low memory |
+| `llama3.2:70b` | 70B | Complex reasoning (needs ~40GB RAM) |
+| `qwen2.5:14b` | 14B | Balanced performance |
+| `deepseek-r1:14b` | 14B | Coding and technical tasks |
+| `mistral` | 7B | General purpose |
+
+### Notes
+
+- **Performance**: Local models are slower than cloud APIs but completely private
+- **Memory**: Larger models need more RAM (e.g., 14B models need ~16GB RAM)
+- **Tool Calling**: Works best with models that support function calling (llama3.2, qwen2.5)
+- **Offline**: Once models are downloaded, no internet connection is required
 
 ---
 

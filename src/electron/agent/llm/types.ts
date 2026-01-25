@@ -3,7 +3,7 @@
  * Allows switching between Anthropic API and AWS Bedrock
  */
 
-export type LLMProviderType = 'anthropic' | 'bedrock';
+export type LLMProviderType = 'anthropic' | 'bedrock' | 'ollama';
 
 export interface LLMProviderConfig {
   type: LLMProviderType;
@@ -17,6 +17,9 @@ export interface LLMProviderConfig {
   awsSessionToken?: string;
   // Use AWS profile instead of explicit credentials
   awsProfile?: string;
+  // Ollama-specific
+  ollamaBaseUrl?: string;
+  ollamaApiKey?: string; // Optional API key for remote Ollama servers
 }
 
 export interface LLMTool {
@@ -92,6 +95,7 @@ export interface LLMProvider {
 /**
  * Available AI models with their IDs for each provider
  * Note: Bedrock uses inference profile IDs (us. prefix) for newer models
+ * Note: Ollama models are dynamic and fetched from the server
  */
 export const MODELS = {
   'opus-4-5': {
@@ -125,6 +129,25 @@ export const MODELS = {
     displayName: 'Haiku 3.5',
   },
 } as const;
+
+/**
+ * Popular Ollama models with their details
+ * Users can use any model available on their Ollama server
+ */
+export const OLLAMA_MODELS = {
+  'llama3.2': { displayName: 'Llama 3.2', size: '3B' },
+  'llama3.1': { displayName: 'Llama 3.1', size: '8B' },
+  'llama3.1:70b': { displayName: 'Llama 3.1 70B', size: '70B' },
+  'mistral': { displayName: 'Mistral', size: '7B' },
+  'mixtral': { displayName: 'Mixtral', size: '47B' },
+  'codellama': { displayName: 'Code Llama', size: '7B' },
+  'deepseek-coder': { displayName: 'DeepSeek Coder', size: '6.7B' },
+  'qwen2.5': { displayName: 'Qwen 2.5', size: '7B' },
+  'phi3': { displayName: 'Phi-3', size: '3.8B' },
+  'gemma2': { displayName: 'Gemma 2', size: '9B' },
+} as const;
+
+export type OllamaModelKey = keyof typeof OLLAMA_MODELS;
 
 export type ModelKey = keyof typeof MODELS;
 

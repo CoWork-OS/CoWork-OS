@@ -42,7 +42,7 @@ export class TaskExecutor {
 
     // Get the model ID from settings
     const settings = LLMProviderFactory.loadSettings();
-    this.modelId = LLMProviderFactory.getModelId(settings.modelKey, settings.providerType);
+    this.modelId = LLMProviderFactory.getModelId(settings.modelKey, settings.providerType, settings.ollama?.model);
     this.modelKey = settings.modelKey;
 
     // Initialize context manager for handling long conversations

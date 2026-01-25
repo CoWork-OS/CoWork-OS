@@ -845,7 +845,7 @@ export class MessageRouter {
   async sendTaskUpdate(taskId: string, text: string): Promise<void> {
     const pending = this.pendingTaskResponses.get(taskId);
     if (!pending) {
-      console.log('No pending response for task:', taskId);
+      // This is expected for tasks started from the UI (not via Telegram)
       return;
     }
 

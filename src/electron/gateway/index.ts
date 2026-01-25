@@ -14,9 +14,11 @@ import {
   ChannelAdapter,
   ChannelType,
   TelegramConfig,
+  DiscordConfig,
   GatewayEventHandler,
 } from './channels/types';
 import { TelegramAdapter, createTelegramAdapter } from './channels/telegram';
+import { DiscordAdapter, createDiscordAdapter } from './channels/discord';
 import {
   ChannelRepository,
   ChannelUserRepository,
@@ -225,6 +227,40 @@ export class ChannelGateway {
       name,
       enabled: false, // Don't enable until tested
       config: { botToken },
+      securityConfig: {
+        mode: securityMode,
+        pairingCodeTTL: 300, // 5 minutes
+        maxPairingAttempts: 5,
+        rateLimitPerMinute: 30,
+      },
+      status: 'disconnected',
+    });
+
+    return channel;
+  }
+
+  /**
+   * Add a new Discord channel
+   */
+  async addDiscordChannel(
+    name: string,
+    botToken: string,
+    applicationId: string,
+    guildIds?: string[],
+    securityMode: 'open' | 'allowlist' | 'pairing' = 'pairing'
+  ): Promise<Channel> {
+    // Check if Discord channel already exists
+    const existing = this.channelRepo.findByType('discord');
+    if (existing) {
+      throw new Error('Discord channel already configured. Update or remove it first.');
+    }
+
+    // Create channel record
+    const channel = this.channelRepo.create({
+      type: 'discord',
+      name,
+      enabled: false, // Don't enable until tested
+      config: { botToken, applicationId, guildIds },
       securityConfig: {
         mode: securityMode,
         pairingCodeTTL: 300, // 5 minutes
@@ -483,6 +519,14 @@ export class ChannelGateway {
           webhookUrl: channel.config.webhookUrl as string | undefined,
         });
 
+      case 'discord':
+        return createDiscordAdapter({
+          enabled: channel.enabled,
+          botToken: channel.config.botToken as string,
+          applicationId: channel.config.applicationId as string,
+          guildIds: channel.config.guildIds as string[] | undefined,
+        });
+
       default:
         throw new Error(`Unsupported channel type: ${channel.type}`);
     }
@@ -495,3 +539,4 @@ export * from './router';
 export * from './session';
 export * from './security';
 export { TelegramAdapter, createTelegramAdapter } from './channels/telegram';
+export { DiscordAdapter, createDiscordAdapter } from './channels/discord';

@@ -292,6 +292,29 @@ export function setupIpcHandlers(
         createdAt: channel.createdAt,
       };
     }
+
+    if (data.type === 'discord') {
+      if (!data.applicationId) {
+        throw new Error('Discord Application ID is required');
+      }
+      const channel = await gateway.addDiscordChannel(
+        data.name,
+        data.botToken,
+        data.applicationId,
+        data.guildIds,
+        data.securityMode as SecurityMode || 'pairing'
+      );
+      return {
+        id: channel.id,
+        type: channel.type,
+        name: channel.name,
+        enabled: channel.enabled,
+        status: channel.status,
+        securityMode: channel.securityConfig.mode,
+        createdAt: channel.createdAt,
+      };
+    }
+
     throw new Error(`Unsupported channel type: ${data.type}`);
   });
 

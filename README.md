@@ -77,6 +77,7 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
 - **Artifact Tracking**: All created/modified files are tracked and viewable
 - **Model Selection**: Choose between Opus, Sonnet, or Haiku models
 - **Telegram Bot**: Run tasks remotely via Telegram with workspace selection and streaming responses
+- **Discord Bot**: Run tasks via Discord with slash commands and direct messages
 - **Web Search**: Multi-provider web search (Tavily, Brave, SerpAPI, Google) with fallback support
 - **Browser Automation**: Full web browser control with Playwright:
   - Navigate to URLs, take screenshots, save pages as PDF
@@ -278,6 +279,7 @@ If requested by the rights holder, we will update naming/branding to avoid confu
 - [x] **Real Office format support** (Excel .xlsx, Word .docx, PDF, PowerPoint .pptx)
 - [x] SQLite local persistence
 - [x] Telegram bot integration for remote task execution
+- [x] **Discord bot integration** with slash commands and DM support
 - [x] Web search integration (Tavily, Brave, SerpAPI, Google)
 - [x] Local LLM support via Ollama (free, runs on your machine)
 - [x] **Browser automation** with Playwright (navigate, click, fill, screenshot, PDF)
@@ -365,6 +367,110 @@ The bot converts responses to Telegram-compatible formatting:
 - Tables are displayed as code blocks for readability
 - Bold text and code formatting are preserved
 - If formatting fails, plain text is sent as fallback
+
+---
+
+## Discord Bot Integration
+
+CoWork-OSS supports running tasks via a Discord bot. Use slash commands or direct messages to interact with your agent from any Discord server or DM.
+
+### Setting Up the Discord Bot
+
+#### 1. Create a Discord Application
+
+1. Go to the [Discord Developer Portal](https://discord.com/developers/applications)
+2. Click **New Application** and give it a name (e.g., "CoWork Bot")
+3. Go to the **Bot** section and click **Add Bot**
+4. Copy the **Bot Token** (click "Reset Token" if needed)
+5. Enable these **Privileged Gateway Intents**:
+   - Message Content Intent (required for reading messages)
+6. Copy your **Application ID** from the General Information page
+
+#### 2. Invite the Bot to Your Server
+
+1. Go to **OAuth2** → **URL Generator**
+2. Select scopes: `bot`, `applications.commands`
+3. Select bot permissions:
+   - Send Messages
+   - Read Message History
+   - Use Slash Commands
+   - Attach Files
+4. Copy the generated URL and open it to invite the bot
+
+#### 3. Configure in CoWork-OSS
+
+1. Open CoWork-OSS and go to **Settings** (gear icon)
+2. Navigate to the **Channels** tab
+3. Enter your **Bot Token** and **Application ID**
+4. Optionally add **Guild IDs** for faster slash command registration (development)
+5. Click **Add Discord Channel**
+6. Test the connection, then enable the channel
+
+### Bot Commands (Slash Commands)
+
+| Command | Description |
+|---------|-------------|
+| `/start` | Start the bot and get help |
+| `/help` | Show available commands |
+| `/workspaces` | List all available workspaces |
+| `/workspace [path]` | Select or show current workspace |
+| `/addworkspace <path>` | Add a new workspace directory |
+| `/newtask` | Start a fresh task/conversation |
+| `/provider [name]` | Change or show current LLM provider |
+| `/models` | List available AI models |
+| `/model [name]` | Change or show current model |
+| `/status` | Show current session status |
+| `/cancel` | Cancel the running task |
+| `/task <prompt>` | Run a task directly |
+
+### Using the Bot
+
+**Via Slash Commands:**
+```
+/workspaces
+/workspace ~/Documents/project
+/task Create a summary of all markdown files
+```
+
+**Via Direct Messages:**
+Simply DM the bot with your request. Commands can also be typed as `/command` in DMs.
+
+**Via Mentions:**
+In a server channel, mention the bot with your task:
+```
+@CoWorkBot organize my project files by type
+```
+
+### Example Conversation
+
+```
+You: /workspaces
+Bot: Available workspaces:
+     1. ~/Documents/project-a
+     2. ~/Downloads
+
+You: /workspace ~/Documents/project-a
+Bot: Workspace selected: ~/Documents/project-a
+
+You: /task List all JavaScript files and count lines of code
+Bot: Task created... [streaming updates]
+Bot: Found 15 JavaScript files with 2,847 total lines of code.
+```
+
+### Security Modes
+
+| Mode | Description | Best For |
+|------|-------------|----------|
+| **Pairing** (default) | Users must enter a pairing code generated in the app | Personal use |
+| **Allowlist** | Only pre-approved Discord user IDs can interact | Team use |
+| **Open** | Anyone can use the bot | Not recommended |
+
+### Guild IDs (Optional)
+
+For faster slash command registration during development, specify Guild IDs:
+- Global commands take up to 1 hour to propagate
+- Guild-specific commands register instantly
+- Leave empty for production (global commands)
 
 ---
 

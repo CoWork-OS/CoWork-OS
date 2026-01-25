@@ -171,7 +171,7 @@ export interface ElectronAPI {
   getOllamaModels: (baseUrl?: string) => Promise<Array<{ name: string; size: number; modified: string }>>;
   // Gateway / Channel APIs
   getGatewayChannels: () => Promise<any[]>;
-  addGatewayChannel: (data: { type: string; name: string; botToken: string; securityMode?: string }) => Promise<any>;
+  addGatewayChannel: (data: { type: string; name: string; botToken: string; securityMode?: string; applicationId?: string; guildIds?: string[] }) => Promise<any>;
   updateGatewayChannel: (data: { id: string; name?: string; securityMode?: string }) => Promise<void>;
   removeGatewayChannel: (id: string) => Promise<void>;
   enableGatewayChannel: (id: string) => Promise<void>;

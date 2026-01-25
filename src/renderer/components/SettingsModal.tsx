@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { LLMSettingsData } from '../../shared/types';
 import { TelegramSettings } from './TelegramSettings';
+import { DiscordSettings } from './DiscordSettings';
 import { SearchSettings } from './SearchSettings';
 
 interface SettingsModalProps {
@@ -19,7 +20,7 @@ interface ProviderInfo {
   configured: boolean;
 }
 
-type SettingsTab = 'llm' | 'search' | 'telegram';
+type SettingsTab = 'llm' | 'search' | 'telegram' | 'discord';
 
 // Helper to format bytes to human-readable size
 function formatBytes(bytes: number): string {
@@ -224,10 +225,18 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             >
               Telegram
             </button>
+            <button
+              className={`settings-tab ${activeTab === 'discord' ? 'active' : ''}`}
+              onClick={() => setActiveTab('discord')}
+            >
+              Discord
+            </button>
           </div>
 
           {activeTab === 'telegram' ? (
             <TelegramSettings />
+          ) : activeTab === 'discord' ? (
+            <DiscordSettings />
           ) : activeTab === 'search' ? (
             <SearchSettings />
           ) : loading ? (
@@ -522,6 +531,16 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         )}
 
         {activeTab === 'telegram' && (
+          <div className="modal-footer">
+            <div className="modal-footer-right">
+              <button className="button-secondary" onClick={onClose}>
+                Close
+              </button>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'discord' && (
           <div className="modal-footer">
             <div className="modal-footer-right">
               <button className="button-secondary" onClick={onClose}>

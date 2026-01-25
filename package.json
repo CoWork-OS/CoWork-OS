@@ -1,6 +1,6 @@
 {
   "name": "cowork-oss",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "CoWork-OSS - Open source agentic task automation for macOS",
   "main": "dist/electron/electron/main.js",
   "author": "CoWork-OSS Contributors",
@@ -41,6 +41,7 @@
     "@aws-sdk/client-bedrock-runtime": "^3.700.0",
     "better-sqlite3": "^12.6.2",
     "chokidar": "^5.0.0",
+    "discord.js": "^14.25.1",
     "docx": "^9.5.1",
     "dotenv": "^17.2.3",
     "exceljs": "^4.4.0",

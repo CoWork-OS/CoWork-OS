@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.6] - 2025-01-25
+
+### Added
+- **Discord Bot Integration** - Full Discord support with slash commands and DMs
+  - `/start` - Start the bot and get help
+  - `/help` - Show available commands
+  - `/workspaces` - List available workspaces
+  - `/workspace` - Select or show current workspace
+  - `/addworkspace` - Add a new workspace by path
+  - `/newtask` - Start a fresh task/conversation
+  - `/provider` - Change or show current LLM provider
+  - `/models` - List available AI models
+  - `/model` - Change or show current model
+  - `/status` - Check bot status
+  - `/cancel` - Cancel current task
+  - `/task` - Run a task directly
+- Direct message support for conversational interactions
+- Mention-based task creation in server channels
+- Automatic message chunking for Discord's 2000 character limit
+- Guild-specific or global slash command registration
+
+### Changed
+- Channel gateway now supports both Telegram and Discord adapters
+- Added `discord.js` dependency for Discord API integration
+
 ## [0.1.5] - 2025-01-25
 
 ### Added
@@ -127,13 +152,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 0.1.6 | 2025-01-25 | Discord bot integration with slash commands |
 | 0.1.5 | 2025-01-25 | Browser automation with Playwright |
 | 0.1.4 | 2025-01-25 | Real Office format support (Excel, Word, PDF, PowerPoint) |
 | 0.1.3 | 2025-01-25 | Telegram bot, web search, Ollama support |
 | 0.1.0 | 2025-01-24 | First public release with core features |
 | 0.0.1 | 2025-01-20 | Initial development setup |
 
-[Unreleased]: https://github.com/mesutfelat/cowork-oss/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/mesutfelat/cowork-oss/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/mesutfelat/cowork-oss/releases/tag/v0.1.6
 [0.1.5]: https://github.com/mesutfelat/cowork-oss/releases/tag/v0.1.5
 [0.1.4]: https://github.com/mesutfelat/cowork-oss/releases/tag/v0.1.4
 [0.1.3]: https://github.com/mesutfelat/cowork-oss/releases/tag/v0.1.3

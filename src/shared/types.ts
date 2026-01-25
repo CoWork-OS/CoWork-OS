@@ -272,6 +272,9 @@ export interface AddChannelRequest {
   name: string;
   botToken: string;
   securityMode?: SecurityMode;
+  // Discord-specific fields
+  applicationId?: string;
+  guildIds?: string[];
 }
 
 export interface UpdateChannelRequest {

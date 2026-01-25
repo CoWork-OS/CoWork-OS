@@ -127,20 +127,38 @@ export class LLMProviderFactory {
   }
 
   /**
+   * Get the Anthropic API key from environment variables
+   * Supports both ANTHROPIC_API_KEY and CLAUDE_CODE_OAUTH_TOKEN (from claude setup-token)
+   */
+  private static getAnthropicKeyFromEnv(): string | undefined {
+    // Check for Claude Code OAuth token first (from `claude setup-token`)
+    // This allows users with Claude Pro/Max subscriptions to use the app
+    const oauthToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    if (oauthToken && oauthToken.startsWith('sk-ant-')) {
+      return oauthToken;
+    }
+
+    // Fall back to standard API key
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (apiKey && apiKey !== 'your_api_key_here' && apiKey.startsWith('sk-')) {
+      return apiKey;
+    }
+
+    return undefined;
+  }
+
+  /**
    * Detect which provider to use based on environment variables
    */
   private static detectProviderFromEnv(): LLMProviderType | null {
-    const anthropicKey = process.env.ANTHROPIC_API_KEY;
-    const hasValidAnthropicKey = anthropicKey &&
-      anthropicKey !== 'your_api_key_here' &&
-      anthropicKey.startsWith('sk-');
+    const hasValidAnthropicKey = !!this.getAnthropicKeyFromEnv();
 
     const awsAccessKey = process.env.AWS_ACCESS_KEY_ID;
     const awsSecretKey = process.env.AWS_SECRET_ACCESS_KEY;
     const awsProfile = process.env.AWS_PROFILE;
     const hasAwsCredentials = (awsAccessKey && awsSecretKey) || awsProfile;
 
-    // Prefer Anthropic if valid key exists
+    // Prefer Anthropic if valid key exists (API key or OAuth token)
     if (hasValidAnthropicKey) {
       return 'anthropic';
     }
@@ -203,11 +221,11 @@ export class LLMProviderFactory {
     const config: LLMProviderConfig = {
       type: overrideConfig?.type || settings.providerType,
       model: this.getModelId(settings.modelKey, overrideConfig?.type || settings.providerType),
-      // Anthropic config
+      // Anthropic config - supports both API key and Claude Code OAuth token
       anthropicApiKey:
         normalizeSecret(overrideConfig?.anthropicApiKey) ||
         settings.anthropic?.apiKey ||
-        process.env.ANTHROPIC_API_KEY,
+        this.getAnthropicKeyFromEnv(),
       // Bedrock config
       awsRegion: overrideConfig?.awsRegion || settings.bedrock?.region || process.env.AWS_REGION,
       awsAccessKeyId: overrideConfig?.awsAccessKeyId || settings.bedrock?.accessKeyId || process.env.AWS_ACCESS_KEY_ID,
@@ -267,11 +285,10 @@ export class LLMProviderFactory {
   /**
    * Get available providers based on environment configuration
    */
-  static getAvailableProviders(): Array<{ type: LLMProviderType; name: string; configured: boolean }> {
-    const anthropicKey = process.env.ANTHROPIC_API_KEY;
-    const hasValidAnthropicKey = anthropicKey &&
-      anthropicKey !== 'your_api_key_here' &&
-      anthropicKey.startsWith('sk-');
+  static getAvailableProviders(): Array<{ type: LLMProviderType; name: string; configured: boolean; source?: string }> {
+    // Check for Anthropic credentials (API key or Claude Code OAuth token)
+    const hasAnthropicKey = !!this.getAnthropicKeyFromEnv();
+    const hasOAuthToken = !!process.env.CLAUDE_CODE_OAUTH_TOKEN?.startsWith('sk-ant-');
 
     const awsAccessKey = process.env.AWS_ACCESS_KEY_ID;
     const awsSecretKey = process.env.AWS_SECRET_ACCESS_KEY;
@@ -285,8 +302,9 @@ export class LLMProviderFactory {
     return [
       {
         type: 'anthropic' as LLMProviderType,
-        name: 'Anthropic API',
-        configured: !!hasValidAnthropicKey,
+        name: hasOAuthToken ? 'Anthropic (Claude Subscription)' : 'Anthropic API',
+        configured: hasAnthropicKey,
+        source: hasOAuthToken ? 'oauth' : 'api_key',
       },
       {
         type: 'bedrock' as LLMProviderType,

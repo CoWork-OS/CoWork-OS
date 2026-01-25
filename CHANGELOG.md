@@ -7,10 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2025-01-25
+
+### Added
+- **Real Office Format Support** - Documents now create actual Office files instead of text placeholders
+  - Excel (.xlsx) files with `exceljs` - multiple sheets, auto-fit columns, header formatting, filters, frozen rows
+  - Word (.docx) files with `docx` - headings, paragraphs, lists, tables, code blocks with proper styling
+  - PDF files with `pdfkit` - professional document generation with custom fonts and margins
+  - PowerPoint (.pptx) files with `pptxgenjs` - multiple slide layouts (title, content, two-column, image), speaker notes, themes
+- Spreadsheet read capability for existing Excel files
+- Fallback to CSV/Markdown when those extensions are explicitly requested
+
+### Changed
+- SpreadsheetBuilder now creates real Excel workbooks with formatting
+- DocumentBuilder supports Word, PDF, and Markdown output formats
+- PresentationBuilder creates professional PowerPoint presentations with layouts
+
+## [0.1.3] - 2025-01-25
+
 ### Added
 - CLI/ASCII terminal-style UI throughout the application
 - Model selection dropdown (Opus 4.5, Sonnet 4.5, Haiku 4.5)
 - AWS Bedrock support as alternative to Anthropic API
+- Telegram bot integration with full command support
+- Web search integration (Tavily, Brave, SerpAPI, Google)
+- Ollama support for local LLM inference
 
 ### Changed
 - Updated branding to CoWork-OSS
@@ -79,9 +100,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 0.1.4 | 2025-01-25 | Real Office format support (Excel, Word, PDF, PowerPoint) |
+| 0.1.3 | 2025-01-25 | Telegram bot, web search, Ollama support |
 | 0.1.0 | 2025-01-24 | First public release with core features |
 | 0.0.1 | 2025-01-20 | Initial development setup |
 
-[Unreleased]: https://github.com/mesutfelat/cowork-oss/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/mesutfelat/cowork-oss/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/mesutfelat/cowork-oss/releases/tag/v0.1.4
+[0.1.3]: https://github.com/mesutfelat/cowork-oss/releases/tag/v0.1.3
 [0.1.0]: https://github.com/mesutfelat/cowork-oss/releases/tag/v0.1.0
 [0.0.1]: https://github.com/mesutfelat/cowork-oss/releases/tag/v0.0.1

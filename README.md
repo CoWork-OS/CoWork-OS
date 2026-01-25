@@ -68,10 +68,11 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
 - **Workspace Management**: Sandboxed file operations within selected folders
 - **Permission System**: Explicit approval for destructive operations
 - **Skill System**: Built-in skills for creating professional outputs:
-  - Spreadsheet creation (Excel format)
-  - Document creation (Word/PDF)
-  - Presentation creation (PowerPoint)
-  - Folder organization
+  - **Excel spreadsheets** (.xlsx) with multiple sheets, auto-fit columns, formatting, and filters
+  - **Word documents** (.docx) with headings, paragraphs, lists, tables, and code blocks
+  - **PDF documents** with professional formatting and custom fonts
+  - **PowerPoint presentations** (.pptx) with multiple layouts, themes, and speaker notes
+  - **Folder organization** by type, date, or custom rules
 - **Real-Time Timeline**: Live activity feed showing agent actions and tool calls
 - **Artifact Tracking**: All created/modified files are tracked and viewable
 - **Model Selection**: Choose between Opus, Sonnet, or Haiku models
@@ -269,6 +270,7 @@ If requested by the rights holder, we will update naming/branding to avoid confu
 - [x] Multi-provider support (Anthropic API / AWS Bedrock / Ollama)
 - [x] Model selection (Opus, Sonnet, Haiku, or any Ollama model)
 - [x] Built-in skills (documents, spreadsheets, presentations)
+- [x] **Real Office format support** (Excel .xlsx, Word .docx, PDF, PowerPoint .pptx)
 - [x] SQLite local persistence
 - [x] Telegram bot integration for remote task execution
 - [x] Web search integration (Tavily, Brave, SerpAPI, Google)
@@ -604,7 +606,7 @@ Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md)
 Areas where help is especially needed:
 - VM sandbox implementation using Virtualization.framework
 - Additional model provider integrations
-- Enhanced document creation libraries
+- MCP connector support
 - Network security controls
 - Test coverage
 

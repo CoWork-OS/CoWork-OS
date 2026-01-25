@@ -59,7 +59,7 @@ export class TavilyProvider implements SearchProvider {
       throw new Error(`Tavily API error: ${response.status} - ${error}`);
     }
 
-    const data = await response.json();
+    const data = await response.json() as { results?: any[] };
 
     return {
       results: this.mapResults(data.results || []),

@@ -13,6 +13,34 @@ import { AnthropicProvider } from './anthropic-provider';
 import { BedrockProvider } from './bedrock-provider';
 
 const SETTINGS_FILE = 'llm-settings.json';
+const MASKED_VALUE = '***configured***';
+
+function normalizeSecret(value?: string): string | undefined {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === MASKED_VALUE) return undefined;
+  return trimmed;
+}
+
+function sanitizeSettings(settings: LLMSettings): LLMSettings {
+  const sanitized: LLMSettings = { ...settings };
+
+  if (sanitized.anthropic) {
+    sanitized.anthropic = {
+      ...sanitized.anthropic,
+      apiKey: normalizeSecret(sanitized.anthropic.apiKey),
+    };
+  }
+
+  if (sanitized.bedrock) {
+    sanitized.bedrock = {
+      ...sanitized.bedrock,
+      secretAccessKey: normalizeSecret(sanitized.bedrock.secretAccessKey),
+    };
+  }
+
+  return sanitized;
+}
 
 /**
  * Stored settings for LLM provider
@@ -93,8 +121,9 @@ export class LLMProviderFactory {
       }
     }
 
-    this.cachedSettings = settings;
-    return settings;
+    const sanitized = sanitizeSettings(settings);
+    this.cachedSettings = sanitized;
+    return sanitized;
   }
 
   /**
@@ -138,7 +167,7 @@ export class LLMProviderFactory {
       if (settingsToSave.anthropic?.apiKey) {
         settingsToSave.anthropic = {
           ...settingsToSave.anthropic,
-          apiKey: '***configured***', // Marker that key is set
+          apiKey: MASKED_VALUE, // Marker that key is set
         };
       }
 
@@ -146,7 +175,7 @@ export class LLMProviderFactory {
       if (settingsToSave.bedrock?.secretAccessKey) {
         settingsToSave.bedrock = {
           ...settingsToSave.bedrock,
-          secretAccessKey: '***configured***',
+          secretAccessKey: MASKED_VALUE,
         };
       }
 
@@ -175,11 +204,17 @@ export class LLMProviderFactory {
       type: overrideConfig?.type || settings.providerType,
       model: this.getModelId(settings.modelKey, overrideConfig?.type || settings.providerType),
       // Anthropic config
-      anthropicApiKey: overrideConfig?.anthropicApiKey || settings.anthropic?.apiKey || process.env.ANTHROPIC_API_KEY,
+      anthropicApiKey:
+        normalizeSecret(overrideConfig?.anthropicApiKey) ||
+        settings.anthropic?.apiKey ||
+        process.env.ANTHROPIC_API_KEY,
       // Bedrock config
       awsRegion: overrideConfig?.awsRegion || settings.bedrock?.region || process.env.AWS_REGION,
       awsAccessKeyId: overrideConfig?.awsAccessKeyId || settings.bedrock?.accessKeyId || process.env.AWS_ACCESS_KEY_ID,
-      awsSecretAccessKey: overrideConfig?.awsSecretAccessKey || settings.bedrock?.secretAccessKey || process.env.AWS_SECRET_ACCESS_KEY,
+      awsSecretAccessKey:
+        normalizeSecret(overrideConfig?.awsSecretAccessKey) ||
+        settings.bedrock?.secretAccessKey ||
+        process.env.AWS_SECRET_ACCESS_KEY,
       awsSessionToken: overrideConfig?.awsSessionToken || settings.bedrock?.sessionToken || process.env.AWS_SESSION_TOKEN,
       awsProfile: overrideConfig?.awsProfile || settings.bedrock?.profile || process.env.AWS_PROFILE,
     };

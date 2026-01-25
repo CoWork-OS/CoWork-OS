@@ -99,6 +99,16 @@ export const MODELS = {
     bedrock: 'us.anthropic.claude-opus-4-5-20251101-v1:0',
     displayName: 'Opus 4.5',
   },
+  'sonnet-4-5': {
+    anthropic: 'claude-sonnet-4-5-20250514',
+    bedrock: 'us.anthropic.claude-sonnet-4-5-20250514-v1:0',
+    displayName: 'Sonnet 4.5',
+  },
+  'haiku-4-5': {
+    anthropic: 'claude-haiku-4-5-20250514',
+    bedrock: 'us.anthropic.claude-haiku-4-5-20250514-v1:0',
+    displayName: 'Haiku 4.5',
+  },
   'sonnet-4': {
     anthropic: 'claude-sonnet-4-20250514',
     bedrock: 'us.anthropic.claude-sonnet-4-20250514-v1:0',

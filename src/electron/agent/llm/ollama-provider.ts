@@ -196,6 +196,16 @@ export class OllamaProvider implements LLMProvider {
     const content: LLMContent[] = [];
     const message = response.message;
 
+    // Handle missing message
+    if (!message) {
+      console.error('Ollama response missing message:', response);
+      return {
+        content: [{ type: 'text', text: 'Error: Ollama returned an empty response' }],
+        stopReason: 'end_turn',
+        usage: { inputTokens: 0, outputTokens: 0 },
+      };
+    }
+
     // Handle text content
     if (message.content) {
       content.push({
@@ -207,13 +217,20 @@ export class OllamaProvider implements LLMProvider {
     // Handle tool calls
     if (message.tool_calls && message.tool_calls.length > 0) {
       for (const toolCall of message.tool_calls) {
+        let args: Record<string, any>;
+        try {
+          args = typeof toolCall.function.arguments === 'string'
+            ? JSON.parse(toolCall.function.arguments)
+            : toolCall.function.arguments || {};
+        } catch (e) {
+          console.error('Failed to parse tool arguments:', toolCall.function.arguments);
+          args = {};
+        }
         content.push({
           type: 'tool_use',
           id: `tool_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
           name: toolCall.function.name,
-          input: typeof toolCall.function.arguments === 'string'
-            ? JSON.parse(toolCall.function.arguments)
-            : toolCall.function.arguments,
+          input: args,
         } as LLMToolUse);
       }
     }

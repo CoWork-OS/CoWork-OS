@@ -119,6 +119,42 @@ export class ChannelGateway {
     };
     agentDaemon.on('tool_error', onToolError);
     this.daemonListeners.push({ event: 'tool_error', handler: onToolError });
+
+    // Listen for follow-up message completion
+    // Track if any assistant messages were sent during follow-up
+    const followUpMessagesSent = new Map<string, boolean>();
+    const originalOnAssistantMessage = onAssistantMessage;
+    // Override to track follow-up messages
+    agentDaemon.off('assistant_message', onAssistantMessage);
+    const trackingAssistantMessage = (data: { taskId: string; message?: string }) => {
+      followUpMessagesSent.set(data.taskId, true);
+      originalOnAssistantMessage(data);
+    };
+    agentDaemon.on('assistant_message', trackingAssistantMessage);
+    // Update the stored handler
+    const assistantIdx = this.daemonListeners.findIndex(l => l.event === 'assistant_message');
+    if (assistantIdx >= 0) {
+      this.daemonListeners[assistantIdx] = { event: 'assistant_message', handler: trackingAssistantMessage };
+    }
+
+    const onFollowUpCompleted = (data: { taskId: string }) => {
+      // If no assistant messages were sent during the follow-up, send a confirmation
+      if (!followUpMessagesSent.get(data.taskId)) {
+        this.router.sendTaskUpdate(data.taskId, '✅ Done');
+      }
+      followUpMessagesSent.delete(data.taskId);
+    };
+    agentDaemon.on('follow_up_completed', onFollowUpCompleted);
+    this.daemonListeners.push({ event: 'follow_up_completed', handler: onFollowUpCompleted });
+
+    // Listen for follow-up failures
+    const onFollowUpFailed = (data: { taskId: string; error?: string }) => {
+      const errorMsg = data.error || 'Unknown error';
+      this.router.sendTaskUpdate(data.taskId, `❌ Follow-up failed: ${errorMsg}`);
+      followUpMessagesSent.delete(data.taskId);
+    };
+    agentDaemon.on('follow_up_failed', onFollowUpFailed);
+    this.daemonListeners.push({ event: 'follow_up_failed', handler: onFollowUpFailed });
   }
 
   /**

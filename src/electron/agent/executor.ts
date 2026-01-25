@@ -633,12 +633,20 @@ IMPORTANT INSTRUCTIONS:
       // Save updated conversation history
       this.conversationHistory = messages;
       this.daemon.updateTaskStatus(this.task.id, 'completed');
+      // Emit follow_up_completed event to signal the follow-up is done
+      this.daemon.logEvent(this.task.id, 'follow_up_completed', {
+        message: 'Follow-up message processed',
+      });
     } catch (error: any) {
       console.error('sendMessage failed:', error);
       this.daemon.logEvent(this.task.id, 'error', {
         message: error.message,
       });
       this.daemon.updateTaskStatus(this.task.id, 'failed');
+      // Emit follow_up_failed event for the gateway
+      this.daemon.logEvent(this.task.id, 'follow_up_failed', {
+        error: error.message,
+      });
       throw error;
     }
   }

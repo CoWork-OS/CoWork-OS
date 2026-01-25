@@ -1134,6 +1134,13 @@ export class MessageRouter {
                 replyTo: message.messageId,
               });
 
+              // Re-register task for response tracking (may have been removed after initial completion)
+              this.pendingTaskResponses.set(session.taskId, {
+                adapter,
+                chatId: message.chatId,
+                sessionId,
+              });
+
               await this.agentDaemon.sendMessage(session.taskId, message.text);
             } catch (error) {
               console.error('Error sending follow-up message:', error);

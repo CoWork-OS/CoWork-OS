@@ -5,12 +5,12 @@ import { Task, TaskEvent, Workspace, ApprovalRequest, LLMModelInfo } from '../..
 import { ApprovalDialog } from './ApprovalDialog';
 
 // Clickable file path component - opens file on click, shows in Finder on right-click
-function ClickableFilePath({ path, className = '' }: { path: string; className?: string }) {
+function ClickableFilePath({ path, workspacePath, className = '' }: { path: string; workspacePath?: string; className?: string }) {
   const handleClick = async (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     try {
-      const error = await window.electronAPI.openFile(path);
+      const error = await window.electronAPI.openFile(path, workspacePath);
       if (error) {
         console.error('Failed to open file:', error);
       }
@@ -23,7 +23,7 @@ function ClickableFilePath({ path, className = '' }: { path: string; className?:
     e.preventDefault();
     e.stopPropagation();
     try {
-      await window.electronAPI.showInFinder(path);
+      await window.electronAPI.showInFinder(path, workspacePath);
     } catch (err) {
       console.error('Error showing in Finder:', err);
     }
@@ -387,7 +387,7 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
                         {index < events.length - 1 && <div className="event-line" />}
                       </div>
                       <div className="event-content">
-                        <div className="event-title">{renderEventTitle(event)}</div>
+                        <div className="event-title">{renderEventTitle(event, workspace?.path)}</div>
                         <div className="event-time">{formatTime(event.timestamp)}</div>
                         {renderEventDetails(event)}
                       </div>
@@ -488,7 +488,7 @@ function truncateForDisplay(text: string, maxLength: number = 2000): string {
   return text.slice(0, maxLength) + '\n\n... [content truncated for display]';
 }
 
-function renderEventTitle(event: TaskEvent): React.ReactNode {
+function renderEventTitle(event: TaskEvent, workspacePath?: string): React.ReactNode {
   switch (event.type) {
     case 'task_created':
       return 'Task created';
@@ -507,13 +507,13 @@ function renderEventTitle(event: TaskEvent): React.ReactNode {
     case 'file_created':
       return (
         <span>
-          Created: <ClickableFilePath path={event.payload.path} />
+          Created: <ClickableFilePath path={event.payload.path} workspacePath={workspacePath} />
         </span>
       );
     case 'file_modified':
       return (
         <span>
-          Modified: <ClickableFilePath path={event.payload.path || event.payload.from} />
+          Modified: <ClickableFilePath path={event.payload.path || event.payload.from} workspacePath={workspacePath} />
         </span>
       );
     case 'file_deleted':

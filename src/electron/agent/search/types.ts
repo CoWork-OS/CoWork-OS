@@ -52,7 +52,13 @@ export interface SearchResponse {
   query: string;
   searchType: SearchType;
   totalResults?: number;
-  provider: SearchProviderType;
+  provider: SearchProviderType | 'none';
+  // Optional metadata for additional info (e.g., errors, configuration status)
+  metadata?: {
+    error?: string;
+    notConfigured?: boolean;
+    [key: string]: unknown;
+  };
 }
 
 /**

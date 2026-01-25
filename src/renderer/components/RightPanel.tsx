@@ -2,12 +2,12 @@ import { useState, useMemo } from 'react';
 import { Task, Workspace, TaskEvent, PlanStep } from '../../shared/types';
 
 // Clickable file path component
-function ClickableFilePath({ path, className = '' }: { path: string; className?: string }) {
+function ClickableFilePath({ path, workspacePath, className = '' }: { path: string; workspacePath?: string; className?: string }) {
   const handleClick = async (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     try {
-      const error = await window.electronAPI.openFile(path);
+      const error = await window.electronAPI.openFile(path, workspacePath);
       if (error) {
         console.error('Failed to open file:', error);
       }
@@ -20,7 +20,7 @@ function ClickableFilePath({ path, className = '' }: { path: string; className?:
     e.preventDefault();
     e.stopPropagation();
     try {
-      await window.electronAPI.showInFinder(path);
+      await window.electronAPI.showInFinder(path, workspacePath);
     } catch (err) {
       console.error('Error showing in Finder:', err);
     }
@@ -248,7 +248,7 @@ export function RightPanel({ task, workspace, events }: RightPanelProps) {
                 {files.map((file, index) => (
                   <div key={`${file.path}-${index}`} className={`cli-file-item ${file.action}`}>
                     <span className={`cli-file-action ${file.action}`}>{getFileActionSymbol(file.action)}</span>
-                    <ClickableFilePath path={file.path} className="cli-file-name" />
+                    <ClickableFilePath path={file.path} workspacePath={workspace?.path} className="cli-file-name" />
                   </div>
                 ))}
               </div>
@@ -299,7 +299,7 @@ export function RightPanel({ task, workspace, events }: RightPanelProps) {
                     <div className="cli-context-label"># files_read:</div>
                     {referencedFiles.map((file, index) => (
                       <div key={`${file}-${index}`} className="cli-context-item">
-                        <ClickableFilePath path={file} className="cli-context-file" />
+                        <ClickableFilePath path={file} workspacePath={workspace?.path} className="cli-context-file" />
                       </div>
                     ))}
                   </div>

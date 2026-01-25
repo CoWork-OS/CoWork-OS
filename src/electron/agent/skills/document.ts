@@ -50,24 +50,53 @@ export class DocumentBuilder {
   async create(
     outputPath: string,
     format: 'docx' | 'pdf' | 'md',
-    content: ContentBlock[],
+    content: ContentBlock[] | ContentBlock | string | undefined,
     options: DocumentOptions = {}
   ): Promise<void> {
+    // Normalize content to always be an array
+    const normalizedContent = this.normalizeContent(content);
     const ext = path.extname(outputPath).toLowerCase();
 
     // Allow format override via extension
     if (ext === '.md' || format === 'md') {
-      await this.createMarkdown(outputPath, content);
+      await this.createMarkdown(outputPath, normalizedContent);
       return;
     }
 
     if (ext === '.pdf' || format === 'pdf') {
-      await this.createPDF(outputPath, content, options);
+      await this.createPDF(outputPath, normalizedContent, options);
       return;
     }
 
     // Default to Word document
-    await this.createDocx(outputPath, content, options);
+    await this.createDocx(outputPath, normalizedContent, options);
+  }
+
+  /**
+   * Normalizes content input to always be an array of ContentBlocks
+   */
+  private normalizeContent(content: ContentBlock[] | ContentBlock | string | undefined): ContentBlock[] {
+    // Handle undefined/null
+    if (!content) {
+      return [{ type: 'paragraph', text: '' }];
+    }
+
+    // Handle string input - convert to a single paragraph
+    if (typeof content === 'string') {
+      return [{ type: 'paragraph', text: content }];
+    }
+
+    // Handle single object (not an array)
+    if (!Array.isArray(content)) {
+      return [content];
+    }
+
+    // Already an array - ensure it's not empty
+    if (content.length === 0) {
+      return [{ type: 'paragraph', text: '' }];
+    }
+
+    return content;
   }
 
   /**

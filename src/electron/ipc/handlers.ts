@@ -1,4 +1,5 @@
 import { ipcMain, shell } from 'electron';
+import * as path from 'path';
 import { DatabaseManager } from '../database/schema';
 import {
   WorkspaceRepository,
@@ -28,12 +29,22 @@ export function setupIpcHandlers(
   const llmModelRepo = new LLMModelRepository(db);
 
   // File handlers - open files and show in Finder
-  ipcMain.handle('file:open', async (_, filePath: string) => {
-    return shell.openPath(filePath);
+  ipcMain.handle('file:open', async (_, filePath: string, workspacePath?: string) => {
+    // If workspacePath is provided and filePath is relative, resolve it
+    let resolvedPath = filePath;
+    if (workspacePath && !path.isAbsolute(filePath)) {
+      resolvedPath = path.resolve(workspacePath, filePath);
+    }
+    return shell.openPath(resolvedPath);
   });
 
-  ipcMain.handle('file:showInFinder', async (_, filePath: string) => {
-    shell.showItemInFolder(filePath);
+  ipcMain.handle('file:showInFinder', async (_, filePath: string, workspacePath?: string) => {
+    // If workspacePath is provided and filePath is relative, resolve it
+    let resolvedPath = filePath;
+    if (workspacePath && !path.isAbsolute(filePath)) {
+      resolvedPath = path.resolve(workspacePath, filePath);
+    }
+    shell.showItemInFolder(resolvedPath);
   });
 
   // Workspace handlers

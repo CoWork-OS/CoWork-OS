@@ -31,16 +31,45 @@ export class SearchTools {
   }): Promise<SearchResponse> {
     // Check if any provider is configured
     if (!SearchProviderFactory.isAnyProviderConfigured()) {
-      throw new Error(
-        'No search provider configured. Set one of: TAVILY_API_KEY, BRAVE_API_KEY, SERPAPI_KEY, or GOOGLE_API_KEY + GOOGLE_SEARCH_ENGINE_ID'
-      );
+      // Return a helpful response instead of throwing an error
+      // This allows the LLM to inform the user gracefully
+      this.daemon.logEvent(this.taskId, 'log', {
+        message: 'Web search is not available - no search provider configured',
+      });
+      return {
+        query: input.query,
+        searchType: input.searchType || 'web',
+        results: [],
+        provider: 'none',
+        metadata: {
+          error: 'Web search is not configured. To enable web search, please configure a search provider in Settings > Web Search. Supported providers: Tavily, Brave Search, SerpAPI, or Google Custom Search.',
+          notConfigured: true,
+        },
+      };
     }
 
     const settings = SearchProviderFactory.loadSettings();
     if (!settings.primaryProvider && !input.provider) {
-      throw new Error(
-        'No primary search provider selected. Configure one in Settings > Web Search.'
-      );
+      // This shouldn't happen after the loadSettings auto-detection fix,
+      // but keep as a safety net
+      this.daemon.logEvent(this.taskId, 'log', {
+        message: 'Web search provider not selected - auto-selecting...',
+      });
+      // Clear cache and reload to trigger auto-detection
+      SearchProviderFactory.clearCache();
+      const reloadedSettings = SearchProviderFactory.loadSettings();
+      if (!reloadedSettings.primaryProvider) {
+        return {
+          query: input.query,
+          searchType: input.searchType || 'web',
+          results: [],
+          provider: 'none',
+          metadata: {
+            error: 'No search provider is selected. Please configure one in Settings > Web Search.',
+            notConfigured: true,
+          },
+        };
+      }
     }
 
     const searchQuery: SearchQuery = {

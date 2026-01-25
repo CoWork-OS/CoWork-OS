@@ -75,11 +75,9 @@ export class SearchProviderFactory {
     }
 
     let settings: SearchSettings;
-    let settingsFileExists = false;
 
     try {
       if (this.settingsPath && fs.existsSync(this.settingsPath)) {
-        settingsFileExists = true;
         const data = fs.readFileSync(this.settingsPath, 'utf-8');
         const parsed = JSON.parse(data);
         // Handle migration from old format (providerType -> primaryProvider)
@@ -96,21 +94,50 @@ export class SearchProviderFactory {
       settings = { ...DEFAULT_SETTINGS };
     }
 
-    // Auto-detect providers if no settings file exists
-    if (!settingsFileExists) {
-      const configuredProviders = this.getConfiguredProviderTypes();
+    // Auto-detect and select providers if primaryProvider is not set
+    // This works both for new installations and when user hasn't explicitly selected one
+    if (!settings.primaryProvider) {
+      const configuredProviders = this.getConfiguredProvidersFromSettingsAndEnv(settings);
       if (configuredProviders.length > 0) {
         settings.primaryProvider = configuredProviders[0];
-        console.log(`Auto-detected primary Search provider: ${configuredProviders[0]}`);
-        if (configuredProviders.length > 1) {
+        console.log(`Auto-selected primary Search provider: ${configuredProviders[0]}`);
+        if (configuredProviders.length > 1 && !settings.fallbackProvider) {
           settings.fallbackProvider = configuredProviders[1];
-          console.log(`Auto-detected fallback Search provider: ${configuredProviders[1]}`);
+          console.log(`Auto-selected fallback Search provider: ${configuredProviders[1]}`);
         }
       }
     }
 
     this.cachedSettings = settings;
     return settings;
+  }
+
+  /**
+   * Get list of configured provider types from both settings and environment
+   */
+  private static getConfiguredProvidersFromSettingsAndEnv(settings: SearchSettings): SearchProviderType[] {
+    const configured: SearchProviderType[] = [];
+
+    // Check Tavily
+    if (settings.tavily?.apiKey || this.getApiKeyFromEnv('TAVILY_API_KEY')) {
+      configured.push('tavily');
+    }
+    // Check Brave
+    if (settings.brave?.apiKey || this.getApiKeyFromEnv('BRAVE_API_KEY')) {
+      configured.push('brave');
+    }
+    // Check SerpAPI
+    if (settings.serpapi?.apiKey || this.getApiKeyFromEnv('SERPAPI_KEY')) {
+      configured.push('serpapi');
+    }
+    // Check Google
+    const hasGoogleApiKey = settings.google?.apiKey || this.getApiKeyFromEnv('GOOGLE_API_KEY');
+    const hasGoogleSearchEngineId = settings.google?.searchEngineId || process.env.GOOGLE_SEARCH_ENGINE_ID;
+    if (hasGoogleApiKey && hasGoogleSearchEngineId) {
+      configured.push('google');
+    }
+
+    return configured;
   }
 
   /**

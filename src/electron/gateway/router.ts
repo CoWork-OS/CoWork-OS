@@ -815,7 +815,19 @@ export class MessageRouter {
       try {
         ollamaModels = await LLMProviderFactory.getOllamaModels();
       } catch {
-        // If we can't fetch models, just accept the user's input
+        await adapter.sendMessage({
+          chatId: message.chatId,
+          text: `❌ Could not fetch Ollama models. Is Ollama running?\n\nMake sure Ollama is running with \`ollama serve\``,
+        });
+        return;
+      }
+
+      if (ollamaModels.length === 0) {
+        await adapter.sendMessage({
+          chatId: message.chatId,
+          text: `❌ No Ollama models found.\n\nRun \`ollama pull <model>\` to download a model first.`,
+        });
+        return;
       }
 
       let selectedOllamaModel: string | undefined;
@@ -832,10 +844,19 @@ export class MessageRouter {
         );
         if (match) {
           selectedOllamaModel = match.name;
-        } else {
-          // Accept any input as Ollama model name (user might know a model we don't have listed)
-          selectedOllamaModel = args.join(' ');
         }
+      }
+
+      // If no match found, show error with available models
+      if (!selectedOllamaModel) {
+        const modelList = ollamaModels.slice(0, 5).map((m, i) => `${i + 1}. ${m.name}`).join('\n');
+        const moreText = ollamaModels.length > 5 ? `\n   ... and ${ollamaModels.length - 5} more` : '';
+        await adapter.sendMessage({
+          chatId: message.chatId,
+          text: `❌ Model not found: "${args.join(' ')}"\n\n*Available Ollama models:*\n${modelList}${moreText}\n\nUse \`/model <name>\` or \`/model <number>\``,
+          parseMode: 'markdown',
+        });
+        return;
       }
 
       // Update settings with new Ollama model

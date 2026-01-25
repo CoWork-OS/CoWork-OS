@@ -159,11 +159,14 @@ export class TelegramAdapter implements ChannelAdapter {
 
   /**
    * Convert GitHub-flavored markdown to Telegram-compatible format
-   * - Converts tables to code blocks for proper display
-   * - Converts ** bold ** to * bold * (Telegram style)
+   * Telegram legacy Markdown only supports: *bold*, _italic_, `code`, ```code blocks```, [links](url)
    */
   private convertMarkdownForTelegram(text: string): string {
     let result = text;
+
+    // Convert markdown headers (## Header) to bold (*Header*)
+    // Must be done before ** conversion
+    result = result.replace(/^#{1,6}\s+(.+)$/gm, '*$1*');
 
     // Convert markdown tables to code blocks
     // Tables start with | and have a separator line like |---|---|
@@ -192,8 +195,11 @@ export class TelegramAdapter implements ChannelAdapter {
     // Convert **bold** to *bold* (Telegram uses single asterisk)
     result = result.replace(/\*\*([^*]+)\*\*/g, '*$1*');
 
-    // Convert __italic__ to _italic_ (already correct for Telegram)
-    // result = result.replace(/__([^_]+)__/g, '_$1_');
+    // Convert __bold__ to *bold* (alternative bold syntax)
+    result = result.replace(/__([^_]+)__/g, '*$1*');
+
+    // Convert horizontal rules (---, ***) to a line
+    result = result.replace(/^[-*]{3,}$/gm, '─────────────────');
 
     return result;
   }

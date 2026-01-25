@@ -42,12 +42,13 @@
     "better-sqlite3": "^12.6.2",
     "chokidar": "^5.0.0",
     "dotenv": "^17.2.3",
+    "grammy": "^1.39.3",
     "mime-types": "^3.0.2",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
-    "uuid": "^13.0.0",
+    "uuid": "^9.0.1",
     "zod": "^4.3.6"
   },
   "devDependencies": {
@@ -57,7 +58,7 @@
     "@types/node": "^25.0.10",
     "@types/react": "^19.2.9",
     "@types/react-dom": "^19.2.3",
-    "@types/uuid": "^11.0.0",
+    "@types/uuid": "^9.0.8",
     "@typescript-eslint/eslint-plugin": "^8.53.1",
     "@typescript-eslint/parser": "^8.53.1",
     "@vitejs/plugin-react": "^5.1.2",

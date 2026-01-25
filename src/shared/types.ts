@@ -176,6 +176,19 @@ export const IPC_CHANNELS = {
   LLM_TEST_PROVIDER: 'llm:testProvider',
   LLM_GET_MODELS: 'llm:getModels',
   LLM_GET_CONFIG_STATUS: 'llm:getConfigStatus',
+
+  // Gateway / Channels
+  GATEWAY_GET_CHANNELS: 'gateway:getChannels',
+  GATEWAY_ADD_CHANNEL: 'gateway:addChannel',
+  GATEWAY_UPDATE_CHANNEL: 'gateway:updateChannel',
+  GATEWAY_REMOVE_CHANNEL: 'gateway:removeChannel',
+  GATEWAY_ENABLE_CHANNEL: 'gateway:enableChannel',
+  GATEWAY_DISABLE_CHANNEL: 'gateway:disableChannel',
+  GATEWAY_TEST_CHANNEL: 'gateway:testChannel',
+  GATEWAY_GET_USERS: 'gateway:getUsers',
+  GATEWAY_GRANT_ACCESS: 'gateway:grantAccess',
+  GATEWAY_REVOKE_ACCESS: 'gateway:revokeAccess',
+  GATEWAY_GENERATE_PAIRING: 'gateway:generatePairing',
 } as const;
 
 // LLM Provider types
@@ -214,4 +227,49 @@ export interface LLMConfigStatus {
   currentModel: string;
   providers: LLMProviderInfo[];
   models: LLMModelInfo[];
+}
+
+// Gateway / Channel types
+export type ChannelType = 'telegram' | 'discord' | 'slack' | 'whatsapp';
+export type ChannelStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
+export type SecurityMode = 'open' | 'allowlist' | 'pairing';
+
+export interface ChannelData {
+  id: string;
+  type: ChannelType;
+  name: string;
+  enabled: boolean;
+  status: ChannelStatus;
+  botUsername?: string;
+  securityMode: SecurityMode;
+  createdAt: number;
+}
+
+export interface ChannelUserData {
+  id: string;
+  channelId: string;
+  channelUserId: string;
+  displayName: string;
+  username?: string;
+  allowed: boolean;
+  lastSeenAt: number;
+}
+
+export interface AddChannelRequest {
+  type: ChannelType;
+  name: string;
+  botToken: string;
+  securityMode?: SecurityMode;
+}
+
+export interface UpdateChannelRequest {
+  id: string;
+  name?: string;
+  securityMode?: SecurityMode;
+}
+
+export interface TestChannelResult {
+  success: boolean;
+  error?: string;
+  botUsername?: string;
 }

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { LLMSettingsData } from '../../shared/types';
+import { TelegramSettings } from './TelegramSettings';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -15,10 +16,12 @@ interface ProviderInfo {
   type: string;
   name: string;
   configured: boolean;
-  source?: string;
 }
 
+type SettingsTab = 'llm' | 'telegram';
+
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
+  const [activeTab, setActiveTab] = useState<SettingsTab>('llm');
   const [settings, setSettings] = useState<LLMSettingsData>({
     providerType: 'anthropic',
     modelKey: 'sonnet-3-5',
@@ -150,7 +153,24 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         </div>
 
         <div className="modal-body">
-          {loading ? (
+          <div className="settings-tabs">
+            <button
+              className={`settings-tab ${activeTab === 'llm' ? 'active' : ''}`}
+              onClick={() => setActiveTab('llm')}
+            >
+              LLM Provider
+            </button>
+            <button
+              className={`settings-tab ${activeTab === 'telegram' ? 'active' : ''}`}
+              onClick={() => setActiveTab('telegram')}
+            >
+              Telegram
+            </button>
+          </div>
+
+          {activeTab === 'telegram' ? (
+            <TelegramSettings />
+          ) : loading ? (
             <div className="settings-loading">Loading settings...</div>
           ) : (
             <>
@@ -164,7 +184,6 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   {providers.map(provider => {
                     const isAnthropic = provider.type === 'anthropic';
                     const isBedrock = provider.type === 'bedrock';
-                    const isOAuth = provider.source === 'oauth';
 
                     return (
                       <label
@@ -188,14 +207,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             )}
                           </div>
                           <div className="provider-option-description">
-                            {isAnthropic && isOAuth && (
-                              <>Using Claude subscription via CLAUDE_CODE_OAUTH_TOKEN</>
-                            )}
-                            {isAnthropic && !isOAuth && provider.configured && (
+                            {isAnthropic && provider.configured && (
                               <>Using API key from environment or settings</>
                             )}
                             {isAnthropic && !provider.configured && (
-                              <>Set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN in .env</>
+                              <>Set ANTHROPIC_API_KEY in .env or enter below</>
                             )}
                             {isBedrock && provider.configured && (
                               <>Using AWS credentials from environment or settings</>
@@ -228,30 +244,17 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
               {settings.providerType === 'anthropic' && (
                 <div className="settings-section">
-                  {providers.find(p => p.type === 'anthropic')?.source === 'oauth' ? (
-                    <>
-                      <h3>Claude Subscription</h3>
-                      <p className="settings-description" style={{ color: 'var(--color-success, #22c55e)' }}>
-                        Using your Claude Pro/Max subscription via CLAUDE_CODE_OAUTH_TOKEN.
-                        No additional configuration needed.
-                      </p>
-                    </>
-                  ) : (
-                    <>
-                      <h3>Anthropic API Key</h3>
-                      <p className="settings-description">
-                        Enter your API key from console.anthropic.com, or leave empty to use environment variable.
-                        You can also use <code>claude setup-token</code> to use your Claude subscription.
-                      </p>
-                      <input
-                        type="password"
-                        className="settings-input"
-                        placeholder="sk-ant-..."
-                        value={anthropicApiKey}
-                        onChange={(e) => setAnthropicApiKey(e.target.value)}
-                      />
-                    </>
-                  )}
+                  <h3>Anthropic API Key</h3>
+                  <p className="settings-description">
+                    Enter your API key from console.anthropic.com, or leave empty to use environment variable.
+                  </p>
+                  <input
+                    type="password"
+                    className="settings-input"
+                    placeholder="sk-ant-..."
+                    value={anthropicApiKey}
+                    onChange={(e) => setAnthropicApiKey(e.target.value)}
+                  />
                 </div>
               )}
 
@@ -347,27 +350,39 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           )}
         </div>
 
-        <div className="modal-footer">
-          <button
-            className="button-secondary"
-            onClick={handleTestConnection}
-            disabled={loading || testing}
-          >
-            {testing ? 'Testing...' : 'Test Connection'}
-          </button>
-          <div className="modal-footer-right">
-            <button className="button-secondary" onClick={onClose}>
-              Cancel
-            </button>
+        {activeTab === 'llm' && (
+          <div className="modal-footer">
             <button
-              className="button-primary"
-              onClick={handleSave}
-              disabled={loading || saving}
+              className="button-secondary"
+              onClick={handleTestConnection}
+              disabled={loading || testing}
             >
-              {saving ? 'Saving...' : 'Save'}
+              {testing ? 'Testing...' : 'Test Connection'}
             </button>
+            <div className="modal-footer-right">
+              <button className="button-secondary" onClick={onClose}>
+                Cancel
+              </button>
+              <button
+                className="button-primary"
+                onClick={handleSave}
+                disabled={loading || saving}
+              >
+                {saving ? 'Saving...' : 'Save'}
+              </button>
+            </div>
           </div>
-        </div>
+        )}
+
+        {activeTab === 'telegram' && (
+          <div className="modal-footer">
+            <div className="modal-footer-right">
+              <button className="button-secondary" onClick={onClose}>
+                Close
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

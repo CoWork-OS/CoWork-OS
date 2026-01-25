@@ -2922,6 +2922,128 @@ button {
   border: 1px solid rgba(239, 68, 68, 0.2);
 }
 
+/* OAuth Authentication Styles */
+.auth-status-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  background: var(--color-bg-glass);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  gap: 16px;
+}
+
+.auth-status-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.auth-status-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.auth-status-badge.success {
+  color: var(--color-success, #22c55e);
+}
+
+.auth-status-badge svg {
+  flex-shrink: 0;
+}
+
+.auth-email {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.auth-expiry {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.auth-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.oauth-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 20px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.oauth-button svg {
+  flex-shrink: 0;
+}
+
+.button-small {
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+.auth-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-radius: var(--radius-md);
+  color: var(--color-error);
+  font-size: 12px;
+  margin-top: 12px;
+}
+
+.auth-error svg {
+  flex-shrink: 0;
+}
+
+.settings-divider {
+  display: flex;
+  align-items: center;
+  margin: 20px 0;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.settings-divider::before,
+.settings-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--color-border-subtle);
+}
+
+.settings-divider span {
+  padding: 0 12px;
+}
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  display: inline-block;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* Settings button in sidebar footer */
 .settings-btn {
   display: flex;
@@ -2940,6 +3062,191 @@ button {
 .settings-btn:hover {
   background: var(--color-bg-hover);
   color: var(--color-text);
+}
+
+/* Settings Tabs */
+.settings-tabs {
+  display: flex;
+  gap: 4px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--color-border-subtle);
+  margin-bottom: 16px;
+}
+
+.settings-tab {
+  padding: 8px 16px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: var(--radius-md);
+  transition: all 0.15s ease;
+}
+
+.settings-tab:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-secondary);
+}
+
+.settings-tab.active {
+  background: var(--color-accent-subtle);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+/* Telegram Settings */
+.telegram-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.settings-field {
+  margin-bottom: 16px;
+}
+
+.settings-field label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  margin-bottom: 6px;
+}
+
+.settings-hint {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-top: 6px;
+}
+
+.channel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.channel-info h3 {
+  margin: 0 0 4px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bot-username {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--color-text-muted);
+}
+
+.channel-status {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.channel-status.connected {
+  color: var(--color-success);
+}
+
+.channel-status.error {
+  color: var(--color-error);
+}
+
+.channel-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.button-danger {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: var(--color-error);
+}
+
+.button-danger:hover {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.5);
+}
+
+.button-small {
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
+.pairing-form {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.pairing-form .settings-input {
+  flex: 1;
+}
+
+.pairing-code-display {
+  padding: 12px;
+  background: var(--color-bg-glass);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  text-align: center;
+}
+
+.pairing-code {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--color-accent);
+  letter-spacing: 4px;
+}
+
+.users-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.user-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: var(--color-bg-glass);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.user-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.user-name {
+  font-size: 13px;
+  color: var(--color-text);
+}
+
+.user-username {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.user-status {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+}
+
+.user-status.allowed {
+  background: rgba(34, 197, 94, 0.1);
+  color: var(--color-success);
+}
+
+.user-status.pending {
+  background: rgba(234, 179, 8, 0.1);
+  color: var(--color-warning, #eab308);
 }
 
 /* ==========================================

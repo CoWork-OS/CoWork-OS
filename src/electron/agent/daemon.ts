@@ -241,9 +241,13 @@ export class AgentDaemon extends EventEmitter {
   }
 
   /**
-   * Emit event to renderer process
+   * Emit event to renderer process and local listeners
    */
   private emitTaskEvent(taskId: string, type: string, payload: any): void {
+    // Emit to local EventEmitter listeners (for gateway integration)
+    this.emit(type, { taskId, ...payload });
+
+    // Emit to renderer process via IPC
     const windows = BrowserWindow.getAllWindows();
     windows.forEach(window => {
       window.webContents.send(IPC_CHANNELS.TASK_EVENT, {

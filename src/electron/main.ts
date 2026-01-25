@@ -9,10 +9,12 @@ import { DatabaseManager } from './database/schema';
 import { setupIpcHandlers } from './ipc/handlers';
 import { AgentDaemon } from './agent/daemon';
 import { LLMProviderFactory } from './agent/llm';
+import { ChannelGateway } from './gateway';
 
 let mainWindow: BrowserWindow | null = null;
 let dbManager: DatabaseManager;
 let agentDaemon: AgentDaemon;
+let channelGateway: ChannelGateway;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -56,11 +58,22 @@ app.whenReady().then(async () => {
   // Initialize agent daemon
   agentDaemon = new AgentDaemon(dbManager);
 
+  // Initialize channel gateway with agent daemon for task processing
+  channelGateway = new ChannelGateway(dbManager.getDatabase(), {
+    autoConnect: true, // Auto-connect enabled channels on startup
+    agentDaemon,
+  });
+
   // Setup IPC handlers
-  setupIpcHandlers(dbManager, agentDaemon);
+  setupIpcHandlers(dbManager, agentDaemon, channelGateway);
 
   // Create window
   createWindow();
+
+  // Initialize gateway with main window reference
+  if (mainWindow) {
+    await channelGateway.initialize(mainWindow);
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -75,7 +88,10 @@ app.on('window-all-closed', () => {
   }
 });
 
-app.on('before-quit', () => {
+app.on('before-quit', async () => {
+  if (channelGateway) {
+    await channelGateway.shutdown();
+  }
   if (dbManager) {
     dbManager.close();
   }

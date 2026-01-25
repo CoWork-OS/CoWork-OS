@@ -101,6 +101,80 @@ export class DatabaseManager {
       CREATE INDEX IF NOT EXISTS idx_approvals_task ON approvals(task_id);
       CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status);
       CREATE INDEX IF NOT EXISTS idx_llm_models_active ON llm_models(is_active);
+
+      -- Channel Gateway tables
+      CREATE TABLE IF NOT EXISTS channels (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL,
+        name TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 0,
+        config TEXT NOT NULL,
+        security_config TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'disconnected',
+        bot_username TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS channel_users (
+        id TEXT PRIMARY KEY,
+        channel_id TEXT NOT NULL,
+        channel_user_id TEXT NOT NULL,
+        display_name TEXT NOT NULL,
+        username TEXT,
+        allowed INTEGER NOT NULL DEFAULT 0,
+        pairing_code TEXT,
+        pairing_attempts INTEGER NOT NULL DEFAULT 0,
+        pairing_expires_at INTEGER,
+        created_at INTEGER NOT NULL,
+        last_seen_at INTEGER NOT NULL,
+        FOREIGN KEY (channel_id) REFERENCES channels(id),
+        UNIQUE(channel_id, channel_user_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS channel_sessions (
+        id TEXT PRIMARY KEY,
+        channel_id TEXT NOT NULL,
+        chat_id TEXT NOT NULL,
+        user_id TEXT,
+        task_id TEXT,
+        workspace_id TEXT,
+        state TEXT NOT NULL DEFAULT 'idle',
+        context TEXT,
+        created_at INTEGER NOT NULL,
+        last_activity_at INTEGER NOT NULL,
+        FOREIGN KEY (channel_id) REFERENCES channels(id),
+        FOREIGN KEY (user_id) REFERENCES channel_users(id),
+        FOREIGN KEY (task_id) REFERENCES tasks(id),
+        FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS channel_messages (
+        id TEXT PRIMARY KEY,
+        channel_id TEXT NOT NULL,
+        session_id TEXT,
+        channel_message_id TEXT NOT NULL,
+        chat_id TEXT NOT NULL,
+        user_id TEXT,
+        direction TEXT NOT NULL,
+        content TEXT NOT NULL,
+        attachments TEXT,
+        timestamp INTEGER NOT NULL,
+        FOREIGN KEY (channel_id) REFERENCES channels(id),
+        FOREIGN KEY (session_id) REFERENCES channel_sessions(id),
+        FOREIGN KEY (user_id) REFERENCES channel_users(id)
+      );
+
+      -- Channel indexes
+      CREATE INDEX IF NOT EXISTS idx_channels_type ON channels(type);
+      CREATE INDEX IF NOT EXISTS idx_channels_enabled ON channels(enabled);
+      CREATE INDEX IF NOT EXISTS idx_channel_users_channel ON channel_users(channel_id);
+      CREATE INDEX IF NOT EXISTS idx_channel_users_allowed ON channel_users(allowed);
+      CREATE INDEX IF NOT EXISTS idx_channel_sessions_channel ON channel_sessions(channel_id);
+      CREATE INDEX IF NOT EXISTS idx_channel_sessions_task ON channel_sessions(task_id);
+      CREATE INDEX IF NOT EXISTS idx_channel_sessions_state ON channel_sessions(state);
+      CREATE INDEX IF NOT EXISTS idx_channel_messages_session ON channel_messages(session_id);
+      CREATE INDEX IF NOT EXISTS idx_channel_messages_chat ON channel_messages(chat_id);
     `);
 
     // Seed default models if table is empty

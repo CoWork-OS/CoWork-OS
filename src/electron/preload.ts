@@ -26,6 +26,18 @@ const IPC_CHANNELS = {
   LLM_TEST_PROVIDER: 'llm:testProvider',
   LLM_GET_MODELS: 'llm:getModels',
   LLM_GET_CONFIG_STATUS: 'llm:getConfigStatus',
+  // Gateway / Channels
+  GATEWAY_GET_CHANNELS: 'gateway:getChannels',
+  GATEWAY_ADD_CHANNEL: 'gateway:addChannel',
+  GATEWAY_UPDATE_CHANNEL: 'gateway:updateChannel',
+  GATEWAY_REMOVE_CHANNEL: 'gateway:removeChannel',
+  GATEWAY_ENABLE_CHANNEL: 'gateway:enableChannel',
+  GATEWAY_DISABLE_CHANNEL: 'gateway:disableChannel',
+  GATEWAY_TEST_CHANNEL: 'gateway:testChannel',
+  GATEWAY_GET_USERS: 'gateway:getUsers',
+  GATEWAY_GRANT_ACCESS: 'gateway:grantAccess',
+  GATEWAY_REVOKE_ACCESS: 'gateway:revokeAccess',
+  GATEWAY_GENERATE_PAIRING: 'gateway:generatePairing',
 } as const;
 
 // Expose protected methods that allow the renderer process to use ipcRenderer
@@ -83,6 +95,29 @@ contextBridge.exposeInMainWorld('electronAPI', {
   testLLMProvider: (config: any) => ipcRenderer.invoke(IPC_CHANNELS.LLM_TEST_PROVIDER, config),
   getLLMModels: () => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_MODELS),
   getLLMConfigStatus: () => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_CONFIG_STATUS),
+
+  // Gateway / Channel APIs
+  getGatewayChannels: () => ipcRenderer.invoke(IPC_CHANNELS.GATEWAY_GET_CHANNELS),
+  addGatewayChannel: (data: any) => ipcRenderer.invoke(IPC_CHANNELS.GATEWAY_ADD_CHANNEL, data),
+  updateGatewayChannel: (data: any) => ipcRenderer.invoke(IPC_CHANNELS.GATEWAY_UPDATE_CHANNEL, data),
+  removeGatewayChannel: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.GATEWAY_REMOVE_CHANNEL, id),
+  enableGatewayChannel: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.GATEWAY_ENABLE_CHANNEL, id),
+  disableGatewayChannel: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.GATEWAY_DISABLE_CHANNEL, id),
+  testGatewayChannel: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.GATEWAY_TEST_CHANNEL, id),
+  getGatewayUsers: (channelId: string) => ipcRenderer.invoke(IPC_CHANNELS.GATEWAY_GET_USERS, channelId),
+  grantGatewayAccess: (channelId: string, userId: string, displayName?: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.GATEWAY_GRANT_ACCESS, { channelId, userId, displayName }),
+  revokeGatewayAccess: (channelId: string, userId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.GATEWAY_REVOKE_ACCESS, { channelId, userId }),
+  generateGatewayPairing: (channelId: string, userId: string, displayName?: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.GATEWAY_GENERATE_PAIRING, { channelId, userId, displayName }),
+
+  // Gateway event listener
+  onGatewayMessage: (callback: (data: any) => void) => {
+    const subscription = (_: any, data: any) => callback(data);
+    ipcRenderer.on('gateway:message', subscription);
+    return () => ipcRenderer.removeListener('gateway:message', subscription);
+  },
 });
 
 // Type declarations for TypeScript
@@ -117,9 +152,22 @@ export interface ElectronAPI {
   getLLMConfigStatus: () => Promise<{
     currentProvider: 'anthropic' | 'bedrock';
     currentModel: string;
-    providers: Array<{ type: 'anthropic' | 'bedrock'; name: string; configured: boolean }>;
+    providers: Array<{ type: 'anthropic' | 'bedrock'; name: string; configured: boolean; source?: string }>;
     models: Array<{ key: string; displayName: string; description: string }>;
   }>;
+  // Gateway / Channel APIs
+  getGatewayChannels: () => Promise<any[]>;
+  addGatewayChannel: (data: { type: string; name: string; botToken: string; securityMode?: string }) => Promise<any>;
+  updateGatewayChannel: (data: { id: string; name?: string; securityMode?: string }) => Promise<void>;
+  removeGatewayChannel: (id: string) => Promise<void>;
+  enableGatewayChannel: (id: string) => Promise<void>;
+  disableGatewayChannel: (id: string) => Promise<void>;
+  testGatewayChannel: (id: string) => Promise<{ success: boolean; error?: string; botUsername?: string }>;
+  getGatewayUsers: (channelId: string) => Promise<any[]>;
+  grantGatewayAccess: (channelId: string, userId: string, displayName?: string) => Promise<void>;
+  revokeGatewayAccess: (channelId: string, userId: string) => Promise<void>;
+  generateGatewayPairing: (channelId: string, userId: string, displayName?: string) => Promise<string>;
+  onGatewayMessage: (callback: (data: any) => void) => () => void;
 }
 
 declare global {

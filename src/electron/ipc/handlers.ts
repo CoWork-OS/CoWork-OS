@@ -8,11 +8,16 @@ import {
   SkillRepository,
   LLMModelRepository,
 } from '../database/repositories';
-import { IPC_CHANNELS, LLMSettingsData } from '../../shared/types';
+import { IPC_CHANNELS, LLMSettingsData, AddChannelRequest, UpdateChannelRequest, SecurityMode } from '../../shared/types';
 import { AgentDaemon } from '../agent/daemon';
 import { LLMProviderFactory, LLMProviderConfig, ModelKey } from '../agent/llm';
+import { ChannelGateway } from '../gateway';
 
-export function setupIpcHandlers(dbManager: DatabaseManager, agentDaemon: AgentDaemon) {
+export function setupIpcHandlers(
+  dbManager: DatabaseManager,
+  agentDaemon: AgentDaemon,
+  gateway?: ChannelGateway
+) {
   const db = dbManager.getDatabase();
   const workspaceRepo = new WorkspaceRepository(db);
   const taskRepo = new TaskRepository(db);
@@ -207,5 +212,105 @@ export function setupIpcHandlers(dbManager: DatabaseManager, agentDaemon: AgentD
         description: m.description,
       })),
     };
+  });
+
+  // Gateway / Channel handlers
+  ipcMain.handle(IPC_CHANNELS.GATEWAY_GET_CHANNELS, async () => {
+    if (!gateway) return [];
+    return gateway.getChannels().map(ch => ({
+      id: ch.id,
+      type: ch.type,
+      name: ch.name,
+      enabled: ch.enabled,
+      status: ch.status,
+      botUsername: ch.botUsername,
+      securityMode: ch.securityConfig.mode,
+      createdAt: ch.createdAt,
+    }));
+  });
+
+  ipcMain.handle(IPC_CHANNELS.GATEWAY_ADD_CHANNEL, async (_, data: AddChannelRequest) => {
+    if (!gateway) throw new Error('Gateway not initialized');
+
+    if (data.type === 'telegram') {
+      const channel = await gateway.addTelegramChannel(
+        data.name,
+        data.botToken,
+        data.securityMode as SecurityMode || 'pairing'
+      );
+      return {
+        id: channel.id,
+        type: channel.type,
+        name: channel.name,
+        enabled: channel.enabled,
+        status: channel.status,
+        securityMode: channel.securityConfig.mode,
+        createdAt: channel.createdAt,
+      };
+    }
+    throw new Error(`Unsupported channel type: ${data.type}`);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.GATEWAY_UPDATE_CHANNEL, async (_, data: UpdateChannelRequest) => {
+    if (!gateway) throw new Error('Gateway not initialized');
+
+    const channel = gateway.getChannel(data.id);
+    if (!channel) throw new Error('Channel not found');
+
+    const updates: Record<string, unknown> = {};
+    if (data.name !== undefined) updates.name = data.name;
+    if (data.securityMode !== undefined) {
+      updates.securityConfig = { ...channel.securityConfig, mode: data.securityMode };
+    }
+
+    gateway.updateChannel(data.id, updates);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.GATEWAY_REMOVE_CHANNEL, async (_, id: string) => {
+    if (!gateway) throw new Error('Gateway not initialized');
+    await gateway.removeChannel(id);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.GATEWAY_ENABLE_CHANNEL, async (_, id: string) => {
+    if (!gateway) throw new Error('Gateway not initialized');
+    await gateway.enableChannel(id);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.GATEWAY_DISABLE_CHANNEL, async (_, id: string) => {
+    if (!gateway) throw new Error('Gateway not initialized');
+    await gateway.disableChannel(id);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.GATEWAY_TEST_CHANNEL, async (_, id: string) => {
+    if (!gateway) return { success: false, error: 'Gateway not initialized' };
+    return gateway.testChannel(id);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.GATEWAY_GET_USERS, async (_, channelId: string) => {
+    if (!gateway) return [];
+    return gateway.getChannelUsers(channelId).map(u => ({
+      id: u.id,
+      channelId: u.channelId,
+      channelUserId: u.channelUserId,
+      displayName: u.displayName,
+      username: u.username,
+      allowed: u.allowed,
+      lastSeenAt: u.lastSeenAt,
+    }));
+  });
+
+  ipcMain.handle(IPC_CHANNELS.GATEWAY_GRANT_ACCESS, async (_, data: { channelId: string; userId: string; displayName?: string }) => {
+    if (!gateway) throw new Error('Gateway not initialized');
+    gateway.grantUserAccess(data.channelId, data.userId, data.displayName);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.GATEWAY_REVOKE_ACCESS, async (_, data: { channelId: string; userId: string }) => {
+    if (!gateway) throw new Error('Gateway not initialized');
+    gateway.revokeUserAccess(data.channelId, data.userId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.GATEWAY_GENERATE_PAIRING, async (_, data: { channelId: string; userId: string; displayName?: string }) => {
+    if (!gateway) throw new Error('Gateway not initialized');
+    return gateway.generatePairingCode(data.channelId, data.userId, data.displayName);
   });
 }

@@ -442,3 +442,469 @@ export class LLMModelRepository {
     };
   }
 }
+
+// ============================================================
+// Channel Gateway Repositories
+// ============================================================
+
+export interface Channel {
+  id: string;
+  type: string;
+  name: string;
+  enabled: boolean;
+  config: Record<string, unknown>;
+  securityConfig: {
+    mode: 'open' | 'allowlist' | 'pairing';
+    allowedUsers?: string[];
+    pairingCodeTTL?: number;
+    maxPairingAttempts?: number;
+    rateLimitPerMinute?: number;
+  };
+  status: string;
+  botUsername?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ChannelUser {
+  id: string;
+  channelId: string;
+  channelUserId: string;
+  displayName: string;
+  username?: string;
+  allowed: boolean;
+  pairingCode?: string;
+  pairingAttempts: number;
+  pairingExpiresAt?: number;
+  createdAt: number;
+  lastSeenAt: number;
+}
+
+export interface ChannelSession {
+  id: string;
+  channelId: string;
+  chatId: string;
+  userId?: string;
+  taskId?: string;
+  workspaceId?: string;
+  state: 'idle' | 'active' | 'waiting_approval';
+  context?: Record<string, unknown>;
+  createdAt: number;
+  lastActivityAt: number;
+}
+
+export interface ChannelMessage {
+  id: string;
+  channelId: string;
+  sessionId?: string;
+  channelMessageId: string;
+  chatId: string;
+  userId?: string;
+  direction: 'incoming' | 'outgoing';
+  content: string;
+  attachments?: Array<{ type: string; url?: string; fileName?: string }>;
+  timestamp: number;
+}
+
+export class ChannelRepository {
+  constructor(private db: Database.Database) {}
+
+  create(channel: Omit<Channel, 'id' | 'createdAt' | 'updatedAt'>): Channel {
+    const now = Date.now();
+    const newChannel: Channel = {
+      ...channel,
+      id: uuidv4(),
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const stmt = this.db.prepare(`
+      INSERT INTO channels (id, type, name, enabled, config, security_config, status, bot_username, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    stmt.run(
+      newChannel.id,
+      newChannel.type,
+      newChannel.name,
+      newChannel.enabled ? 1 : 0,
+      JSON.stringify(newChannel.config),
+      JSON.stringify(newChannel.securityConfig),
+      newChannel.status,
+      newChannel.botUsername || null,
+      newChannel.createdAt,
+      newChannel.updatedAt
+    );
+
+    return newChannel;
+  }
+
+  update(id: string, updates: Partial<Channel>): void {
+    const fields: string[] = [];
+    const values: unknown[] = [];
+
+    if (updates.name !== undefined) {
+      fields.push('name = ?');
+      values.push(updates.name);
+    }
+    if (updates.enabled !== undefined) {
+      fields.push('enabled = ?');
+      values.push(updates.enabled ? 1 : 0);
+    }
+    if (updates.config !== undefined) {
+      fields.push('config = ?');
+      values.push(JSON.stringify(updates.config));
+    }
+    if (updates.securityConfig !== undefined) {
+      fields.push('security_config = ?');
+      values.push(JSON.stringify(updates.securityConfig));
+    }
+    if (updates.status !== undefined) {
+      fields.push('status = ?');
+      values.push(updates.status);
+    }
+    if (updates.botUsername !== undefined) {
+      fields.push('bot_username = ?');
+      values.push(updates.botUsername);
+    }
+
+    if (fields.length === 0) return;
+
+    fields.push('updated_at = ?');
+    values.push(Date.now());
+    values.push(id);
+
+    const stmt = this.db.prepare(`UPDATE channels SET ${fields.join(', ')} WHERE id = ?`);
+    stmt.run(...values);
+  }
+
+  findById(id: string): Channel | undefined {
+    const stmt = this.db.prepare('SELECT * FROM channels WHERE id = ?');
+    const row = stmt.get(id) as Record<string, unknown> | undefined;
+    return row ? this.mapRowToChannel(row) : undefined;
+  }
+
+  findByType(type: string): Channel | undefined {
+    const stmt = this.db.prepare('SELECT * FROM channels WHERE type = ?');
+    const row = stmt.get(type) as Record<string, unknown> | undefined;
+    return row ? this.mapRowToChannel(row) : undefined;
+  }
+
+  findAll(): Channel[] {
+    const stmt = this.db.prepare('SELECT * FROM channels ORDER BY created_at ASC');
+    const rows = stmt.all() as Record<string, unknown>[];
+    return rows.map(row => this.mapRowToChannel(row));
+  }
+
+  findEnabled(): Channel[] {
+    const stmt = this.db.prepare('SELECT * FROM channels WHERE enabled = 1 ORDER BY created_at ASC');
+    const rows = stmt.all() as Record<string, unknown>[];
+    return rows.map(row => this.mapRowToChannel(row));
+  }
+
+  delete(id: string): void {
+    const stmt = this.db.prepare('DELETE FROM channels WHERE id = ?');
+    stmt.run(id);
+  }
+
+  private mapRowToChannel(row: Record<string, unknown>): Channel {
+    const defaultSecurityConfig = { mode: 'pairing' as const };
+    return {
+      id: row.id as string,
+      type: row.type as string,
+      name: row.name as string,
+      enabled: row.enabled === 1,
+      config: safeJsonParse(row.config as string, {}, 'channel.config'),
+      securityConfig: safeJsonParse(row.security_config as string, defaultSecurityConfig, 'channel.securityConfig'),
+      status: row.status as string,
+      botUsername: (row.bot_username as string) || undefined,
+      createdAt: row.created_at as number,
+      updatedAt: row.updated_at as number,
+    };
+  }
+}
+
+export class ChannelUserRepository {
+  constructor(private db: Database.Database) {}
+
+  create(user: Omit<ChannelUser, 'id' | 'createdAt' | 'lastSeenAt' | 'pairingAttempts'>): ChannelUser {
+    const now = Date.now();
+    const newUser: ChannelUser = {
+      ...user,
+      id: uuidv4(),
+      pairingAttempts: 0,
+      createdAt: now,
+      lastSeenAt: now,
+    };
+
+    const stmt = this.db.prepare(`
+      INSERT INTO channel_users (id, channel_id, channel_user_id, display_name, username, allowed, pairing_code, pairing_attempts, pairing_expires_at, created_at, last_seen_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    stmt.run(
+      newUser.id,
+      newUser.channelId,
+      newUser.channelUserId,
+      newUser.displayName,
+      newUser.username || null,
+      newUser.allowed ? 1 : 0,
+      newUser.pairingCode || null,
+      newUser.pairingAttempts,
+      newUser.pairingExpiresAt || null,
+      newUser.createdAt,
+      newUser.lastSeenAt
+    );
+
+    return newUser;
+  }
+
+  update(id: string, updates: Partial<ChannelUser>): void {
+    const fields: string[] = [];
+    const values: unknown[] = [];
+
+    if (updates.displayName !== undefined) {
+      fields.push('display_name = ?');
+      values.push(updates.displayName);
+    }
+    if (updates.username !== undefined) {
+      fields.push('username = ?');
+      values.push(updates.username);
+    }
+    if (updates.allowed !== undefined) {
+      fields.push('allowed = ?');
+      values.push(updates.allowed ? 1 : 0);
+    }
+    if (updates.pairingCode !== undefined) {
+      fields.push('pairing_code = ?');
+      values.push(updates.pairingCode);
+    }
+    if (updates.pairingAttempts !== undefined) {
+      fields.push('pairing_attempts = ?');
+      values.push(updates.pairingAttempts);
+    }
+    if (updates.pairingExpiresAt !== undefined) {
+      fields.push('pairing_expires_at = ?');
+      values.push(updates.pairingExpiresAt);
+    }
+    if (updates.lastSeenAt !== undefined) {
+      fields.push('last_seen_at = ?');
+      values.push(updates.lastSeenAt);
+    }
+
+    if (fields.length === 0) return;
+
+    values.push(id);
+    const stmt = this.db.prepare(`UPDATE channel_users SET ${fields.join(', ')} WHERE id = ?`);
+    stmt.run(...values);
+  }
+
+  findById(id: string): ChannelUser | undefined {
+    const stmt = this.db.prepare('SELECT * FROM channel_users WHERE id = ?');
+    const row = stmt.get(id) as Record<string, unknown> | undefined;
+    return row ? this.mapRowToUser(row) : undefined;
+  }
+
+  findByChannelUserId(channelId: string, channelUserId: string): ChannelUser | undefined {
+    const stmt = this.db.prepare('SELECT * FROM channel_users WHERE channel_id = ? AND channel_user_id = ?');
+    const row = stmt.get(channelId, channelUserId) as Record<string, unknown> | undefined;
+    return row ? this.mapRowToUser(row) : undefined;
+  }
+
+  findByChannelId(channelId: string): ChannelUser[] {
+    const stmt = this.db.prepare('SELECT * FROM channel_users WHERE channel_id = ? ORDER BY last_seen_at DESC');
+    const rows = stmt.all(channelId) as Record<string, unknown>[];
+    return rows.map(row => this.mapRowToUser(row));
+  }
+
+  findAllowedByChannelId(channelId: string): ChannelUser[] {
+    const stmt = this.db.prepare('SELECT * FROM channel_users WHERE channel_id = ? AND allowed = 1 ORDER BY last_seen_at DESC');
+    const rows = stmt.all(channelId) as Record<string, unknown>[];
+    return rows.map(row => this.mapRowToUser(row));
+  }
+
+  findByPairingCode(channelId: string, pairingCode: string): ChannelUser | undefined {
+    const stmt = this.db.prepare('SELECT * FROM channel_users WHERE channel_id = ? AND UPPER(pairing_code) = UPPER(?)');
+    const row = stmt.get(channelId, pairingCode) as Record<string, unknown> | undefined;
+    return row ? this.mapRowToUser(row) : undefined;
+  }
+
+  private mapRowToUser(row: Record<string, unknown>): ChannelUser {
+    return {
+      id: row.id as string,
+      channelId: row.channel_id as string,
+      channelUserId: row.channel_user_id as string,
+      displayName: row.display_name as string,
+      username: (row.username as string) || undefined,
+      allowed: row.allowed === 1,
+      pairingCode: (row.pairing_code as string) || undefined,
+      pairingAttempts: row.pairing_attempts as number,
+      pairingExpiresAt: (row.pairing_expires_at as number) || undefined,
+      createdAt: row.created_at as number,
+      lastSeenAt: row.last_seen_at as number,
+    };
+  }
+}
+
+export class ChannelSessionRepository {
+  constructor(private db: Database.Database) {}
+
+  create(session: Omit<ChannelSession, 'id' | 'createdAt' | 'lastActivityAt'>): ChannelSession {
+    const now = Date.now();
+    const newSession: ChannelSession = {
+      ...session,
+      id: uuidv4(),
+      createdAt: now,
+      lastActivityAt: now,
+    };
+
+    const stmt = this.db.prepare(`
+      INSERT INTO channel_sessions (id, channel_id, chat_id, user_id, task_id, workspace_id, state, context, created_at, last_activity_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    stmt.run(
+      newSession.id,
+      newSession.channelId,
+      newSession.chatId,
+      newSession.userId || null,
+      newSession.taskId || null,
+      newSession.workspaceId || null,
+      newSession.state,
+      newSession.context ? JSON.stringify(newSession.context) : null,
+      newSession.createdAt,
+      newSession.lastActivityAt
+    );
+
+    return newSession;
+  }
+
+  update(id: string, updates: Partial<ChannelSession>): void {
+    const fields: string[] = [];
+    const values: unknown[] = [];
+
+    if (updates.taskId !== undefined) {
+      fields.push('task_id = ?');
+      values.push(updates.taskId);
+    }
+    if (updates.workspaceId !== undefined) {
+      fields.push('workspace_id = ?');
+      values.push(updates.workspaceId);
+    }
+    if (updates.state !== undefined) {
+      fields.push('state = ?');
+      values.push(updates.state);
+    }
+    if (updates.context !== undefined) {
+      fields.push('context = ?');
+      values.push(JSON.stringify(updates.context));
+    }
+    if (updates.lastActivityAt !== undefined) {
+      fields.push('last_activity_at = ?');
+      values.push(updates.lastActivityAt);
+    }
+
+    if (fields.length === 0) return;
+
+    values.push(id);
+    const stmt = this.db.prepare(`UPDATE channel_sessions SET ${fields.join(', ')} WHERE id = ?`);
+    stmt.run(...values);
+  }
+
+  findById(id: string): ChannelSession | undefined {
+    const stmt = this.db.prepare('SELECT * FROM channel_sessions WHERE id = ?');
+    const row = stmt.get(id) as Record<string, unknown> | undefined;
+    return row ? this.mapRowToSession(row) : undefined;
+  }
+
+  findByChatId(channelId: string, chatId: string): ChannelSession | undefined {
+    const stmt = this.db.prepare('SELECT * FROM channel_sessions WHERE channel_id = ? AND chat_id = ? ORDER BY last_activity_at DESC LIMIT 1');
+    const row = stmt.get(channelId, chatId) as Record<string, unknown> | undefined;
+    return row ? this.mapRowToSession(row) : undefined;
+  }
+
+  findByTaskId(taskId: string): ChannelSession | undefined {
+    const stmt = this.db.prepare('SELECT * FROM channel_sessions WHERE task_id = ?');
+    const row = stmt.get(taskId) as Record<string, unknown> | undefined;
+    return row ? this.mapRowToSession(row) : undefined;
+  }
+
+  findActiveByChannelId(channelId: string): ChannelSession[] {
+    const stmt = this.db.prepare("SELECT * FROM channel_sessions WHERE channel_id = ? AND state != 'idle' ORDER BY last_activity_at DESC");
+    const rows = stmt.all(channelId) as Record<string, unknown>[];
+    return rows.map(row => this.mapRowToSession(row));
+  }
+
+  private mapRowToSession(row: Record<string, unknown>): ChannelSession {
+    return {
+      id: row.id as string,
+      channelId: row.channel_id as string,
+      chatId: row.chat_id as string,
+      userId: (row.user_id as string) || undefined,
+      taskId: (row.task_id as string) || undefined,
+      workspaceId: (row.workspace_id as string) || undefined,
+      state: row.state as 'idle' | 'active' | 'waiting_approval',
+      context: row.context ? safeJsonParse(row.context as string, undefined, 'session.context') : undefined,
+      createdAt: row.created_at as number,
+      lastActivityAt: row.last_activity_at as number,
+    };
+  }
+}
+
+export class ChannelMessageRepository {
+  constructor(private db: Database.Database) {}
+
+  create(message: Omit<ChannelMessage, 'id'>): ChannelMessage {
+    const newMessage: ChannelMessage = {
+      ...message,
+      id: uuidv4(),
+    };
+
+    const stmt = this.db.prepare(`
+      INSERT INTO channel_messages (id, channel_id, session_id, channel_message_id, chat_id, user_id, direction, content, attachments, timestamp)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    stmt.run(
+      newMessage.id,
+      newMessage.channelId,
+      newMessage.sessionId || null,
+      newMessage.channelMessageId,
+      newMessage.chatId,
+      newMessage.userId || null,
+      newMessage.direction,
+      newMessage.content,
+      newMessage.attachments ? JSON.stringify(newMessage.attachments) : null,
+      newMessage.timestamp
+    );
+
+    return newMessage;
+  }
+
+  findBySessionId(sessionId: string, limit = 50): ChannelMessage[] {
+    const stmt = this.db.prepare('SELECT * FROM channel_messages WHERE session_id = ? ORDER BY timestamp DESC LIMIT ?');
+    const rows = stmt.all(sessionId, limit) as Record<string, unknown>[];
+    return rows.map(row => this.mapRowToMessage(row)).reverse();
+  }
+
+  findByChatId(channelId: string, chatId: string, limit = 50): ChannelMessage[] {
+    const stmt = this.db.prepare('SELECT * FROM channel_messages WHERE channel_id = ? AND chat_id = ? ORDER BY timestamp DESC LIMIT ?');
+    const rows = stmt.all(channelId, chatId, limit) as Record<string, unknown>[];
+    return rows.map(row => this.mapRowToMessage(row)).reverse();
+  }
+
+  private mapRowToMessage(row: Record<string, unknown>): ChannelMessage {
+    return {
+      id: row.id as string,
+      channelId: row.channel_id as string,
+      sessionId: (row.session_id as string) || undefined,
+      channelMessageId: row.channel_message_id as string,
+      chatId: row.chat_id as string,
+      userId: (row.user_id as string) || undefined,
+      direction: row.direction as 'incoming' | 'outgoing',
+      content: row.content as string,
+      attachments: row.attachments ? safeJsonParse(row.attachments as string, undefined, 'message.attachments') : undefined,
+      timestamp: row.timestamp as number,
+    };
+  }
+}

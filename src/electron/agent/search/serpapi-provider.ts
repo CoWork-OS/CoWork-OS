@@ -55,7 +55,13 @@ export class SerpApiProvider implements SearchProvider {
       throw new Error(`SerpAPI error: ${response.status} - ${error}`);
     }
 
-    const data = await response.json();
+    const data = await response.json() as {
+      error?: string;
+      search_information?: { total_results?: number };
+      organic_results?: any[];
+      news_results?: any[];
+      images_results?: any[];
+    };
 
     if (data.error) {
       throw new Error(`SerpAPI error: ${data.error}`);

@@ -3411,6 +3411,104 @@ button {
   margin-top: 8px;
 }
 
+/* Provider Config List (with expandable API key input) */
+.provider-config-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 16px 0;
+}
+
+.provider-config-item {
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.provider-config-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--color-bg-glass);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.provider-config-header:hover {
+  background: var(--color-bg-glass-hover);
+}
+
+.provider-config-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.provider-config-info .provider-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.provider-expand-icon {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  transition: transform 0.15s ease;
+}
+
+.provider-config-form {
+  padding: 16px;
+  background: var(--color-bg-secondary);
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.provider-config-form .provider-description {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin: 0 0 8px 0;
+}
+
+.provider-config-form .provider-types {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-style: italic;
+  margin: 0 0 16px 0;
+}
+
+.provider-config-form .settings-field {
+  margin-bottom: 12px;
+}
+
+.provider-config-form .settings-field label {
+  display: block;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.provider-config-form .settings-hint {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-top: 6px;
+}
+
+.provider-config-form .settings-hint a {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+.provider-config-form .settings-hint a:hover {
+  text-decoration: underline;
+}
+
+.provider-config-form .button-small {
+  margin-top: 8px;
+}
+
 /* ==========================================
    CLI Panel Styles (Right Sidebar)
    ========================================== */

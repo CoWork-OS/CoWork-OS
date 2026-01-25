@@ -287,9 +287,9 @@ export class LLMProviderFactory {
    * Get the model ID for a provider
    */
   static getModelId(modelKey: ModelKey | string, providerType: LLMProviderType, ollamaModel?: string): string {
-    // For Ollama, use the specific Ollama model if provided, or default to 'llama3.2'
+    // For Ollama, use the specific Ollama model if provided
     if (providerType === 'ollama') {
-      return ollamaModel || 'llama3.2';
+      return ollamaModel || 'gpt-oss:20b';
     }
 
     // For other providers, look up in MODELS

@@ -140,27 +140,41 @@ export class SearchProviderFactory {
 
   /**
    * Save settings to disk
+   * API keys are stored directly so they can be used
    */
   static saveSettings(settings: SearchSettings): void {
     try {
-      const settingsToSave = { ...settings };
+      // Load existing settings to preserve API keys that weren't changed
+      let existingSettings: SearchSettings = { ...DEFAULT_SETTINGS };
+      try {
+        if (this.settingsPath && fs.existsSync(this.settingsPath)) {
+          const data = fs.readFileSync(this.settingsPath, 'utf-8');
+          existingSettings = JSON.parse(data);
+        }
+      } catch {
+        // Ignore errors reading existing settings
+      }
 
-      // Mask sensitive values
-      if (settingsToSave.tavily?.apiKey) {
-        settingsToSave.tavily = { ...settingsToSave.tavily, apiKey: MASKED_VALUE };
-      }
-      if (settingsToSave.brave?.apiKey) {
-        settingsToSave.brave = { ...settingsToSave.brave, apiKey: MASKED_VALUE };
-      }
-      if (settingsToSave.serpapi?.apiKey) {
-        settingsToSave.serpapi = { ...settingsToSave.serpapi, apiKey: MASKED_VALUE };
-      }
-      if (settingsToSave.google?.apiKey) {
-        settingsToSave.google = { ...settingsToSave.google, apiKey: MASKED_VALUE };
-      }
+      // Merge settings, preserving existing API keys if new ones aren't provided
+      const settingsToSave: SearchSettings = {
+        primaryProvider: settings.primaryProvider,
+        fallbackProvider: settings.fallbackProvider,
+        tavily: settings.tavily?.apiKey
+          ? settings.tavily
+          : existingSettings.tavily,
+        brave: settings.brave?.apiKey
+          ? settings.brave
+          : existingSettings.brave,
+        serpapi: settings.serpapi?.apiKey
+          ? settings.serpapi
+          : existingSettings.serpapi,
+        google: settings.google?.apiKey || settings.google?.searchEngineId
+          ? { ...existingSettings.google, ...settings.google }
+          : existingSettings.google,
+      };
 
       fs.writeFileSync(this.settingsPath, JSON.stringify(settingsToSave, null, 2));
-      this.cachedSettings = settings;
+      this.cachedSettings = settingsToSave;
     } catch (error) {
       console.error('Failed to save Search settings:', error);
       throw error;
@@ -273,7 +287,7 @@ export class SearchProviderFactory {
   }
 
   /**
-   * Get available providers based on environment configuration
+   * Get available providers based on environment and saved configuration
    */
   static getAvailableProviders(): Array<{
     type: SearchProviderType;
@@ -282,26 +296,27 @@ export class SearchProviderFactory {
     configured: boolean;
     supportedTypes: SearchType[];
   }> {
+    const settings = this.loadSettings();
     return [
       {
         type: 'tavily',
         name: SEARCH_PROVIDER_INFO.tavily.displayName,
         description: SEARCH_PROVIDER_INFO.tavily.description,
-        configured: !!this.getApiKeyFromEnv('TAVILY_API_KEY'),
+        configured: !!(settings.tavily?.apiKey || this.getApiKeyFromEnv('TAVILY_API_KEY')),
         supportedTypes: [...SEARCH_PROVIDER_INFO.tavily.supportedTypes],
       },
       {
         type: 'brave',
         name: SEARCH_PROVIDER_INFO.brave.displayName,
         description: SEARCH_PROVIDER_INFO.brave.description,
-        configured: !!this.getApiKeyFromEnv('BRAVE_API_KEY'),
+        configured: !!(settings.brave?.apiKey || this.getApiKeyFromEnv('BRAVE_API_KEY')),
         supportedTypes: [...SEARCH_PROVIDER_INFO.brave.supportedTypes],
       },
       {
         type: 'serpapi',
         name: SEARCH_PROVIDER_INFO.serpapi.displayName,
         description: SEARCH_PROVIDER_INFO.serpapi.description,
-        configured: !!this.getApiKeyFromEnv('SERPAPI_KEY'),
+        configured: !!(settings.serpapi?.apiKey || this.getApiKeyFromEnv('SERPAPI_KEY')),
         supportedTypes: [...SEARCH_PROVIDER_INFO.serpapi.supportedTypes],
       },
       {
@@ -309,8 +324,8 @@ export class SearchProviderFactory {
         name: SEARCH_PROVIDER_INFO.google.displayName,
         description: SEARCH_PROVIDER_INFO.google.description,
         configured: !!(
-          this.getApiKeyFromEnv('GOOGLE_API_KEY') &&
-          process.env.GOOGLE_SEARCH_ENGINE_ID
+          (settings.google?.apiKey || this.getApiKeyFromEnv('GOOGLE_API_KEY')) &&
+          (settings.google?.searchEngineId || process.env.GOOGLE_SEARCH_ENGINE_ID)
         ),
         supportedTypes: [...SEARCH_PROVIDER_INFO.google.supportedTypes],
       },

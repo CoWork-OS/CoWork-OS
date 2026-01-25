@@ -65,13 +65,16 @@ export class GoogleProvider implements SearchProvider {
     const response = await fetch(`${this.baseUrl}?${params}`);
 
     if (!response.ok) {
-      const error = await response.json();
+      const error = await response.json() as { error?: { message?: string } };
       throw new Error(
         `Google CSE error: ${response.status} - ${error.error?.message || 'Unknown error'}`
       );
     }
 
-    const data = await response.json();
+    const data = await response.json() as {
+      items?: any[];
+      searchInformation?: { totalResults?: string };
+    };
 
     return {
       results: this.mapResults(data.items || [], searchType),

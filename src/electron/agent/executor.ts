@@ -365,10 +365,6 @@ IMPORTANT INSTRUCTIONS:
 
         // Check for too many empty responses
         if (emptyResponseCount >= maxEmptyResponses) {
-          console.warn(`[Executor] Breaking loop due to ${emptyResponseCount} consecutive empty responses`);
-          this.daemon.logEvent(this.task.id, 'log', {
-            message: `Step ended early due to ${emptyResponseCount} empty responses from LLM`,
-          });
           break;
         }
 
@@ -381,14 +377,6 @@ IMPORTANT INSTRUCTIONS:
           system: this.systemPrompt,
           tools: this.toolRegistry.getTools(),
           messages,
-        });
-
-        // Debug: Log the full response
-        console.log('[Executor Debug] LLM Response in executeStep:', {
-          stopReason: response.stopReason,
-          contentLength: response.content?.length || 0,
-          contentTypes: response.content?.map(c => c.type) || [],
-          iteration: iterationCount,
         });
 
         // Process response - only stop if we have actual content AND it's end_turn
@@ -417,7 +405,6 @@ IMPORTANT INSTRUCTIONS:
         } else {
           // Bedrock API requires non-empty content, add placeholder and continue
           emptyResponseCount++;
-          console.warn(`[Executor Debug] Empty response from LLM in executeStep (${emptyResponseCount}/${maxEmptyResponses}) - adding placeholder and continuing`);
           messages.push({
             role: 'assistant',
             content: [{ type: 'text', text: 'I understand. Let me continue.' }],
@@ -474,13 +461,7 @@ IMPORTANT INSTRUCTIONS:
         }
       }
 
-      // Log warning if we hit max iterations
-      if (iterationCount >= maxIterations) {
-        console.warn(`[Executor] Step reached max iterations (${maxIterations})`);
-        this.daemon.logEvent(this.task.id, 'log', {
-          message: `Step completed after reaching maximum iterations (${maxIterations})`,
-        });
-      }
+      // Step completed
 
       // Save conversation history for follow-up messages
       this.conversationHistory = messages;
@@ -543,7 +524,6 @@ IMPORTANT INSTRUCTIONS:
 
         // Check for too many empty responses
         if (emptyResponseCount >= maxEmptyResponses) {
-          console.warn(`[Executor] Breaking sendMessage loop due to ${emptyResponseCount} consecutive empty responses`);
           break;
         }
 
@@ -583,7 +563,6 @@ IMPORTANT INSTRUCTIONS:
         } else {
           // Bedrock API requires non-empty content, add placeholder
           emptyResponseCount++;
-          console.warn(`Received empty response content from LLM in sendMessage (${emptyResponseCount}/${maxEmptyResponses})`);
           messages.push({
             role: 'assistant',
             content: [{ type: 'text', text: 'I understand. Let me continue.' }],
@@ -637,11 +616,6 @@ IMPORTANT INSTRUCTIONS:
           });
           continueLoop = true;
         }
-      }
-
-      // Log warning if we hit max iterations
-      if (iterationCount >= maxIterations) {
-        console.warn(`[Executor] sendMessage reached max iterations (${maxIterations})`);
       }
 
       // Save updated conversation history

@@ -155,23 +155,8 @@ export class BedrockProvider implements LLMProvider {
   private convertResponse(response: any): LLMResponse {
     const content: LLMContent[] = [];
 
-    // Debug: Log the raw Bedrock response
-    console.log('[Bedrock Debug] Raw response structure:', {
-      hasOutput: !!response.output,
-      hasMessage: !!response.output?.message,
-      hasContent: !!response.output?.message?.content,
-      contentLength: response.output?.message?.content?.length || 0,
-      stopReason: response.stopReason,
-    });
-
     if (response.output?.message?.content) {
       for (const block of response.output.message.content) {
-        console.log('[Bedrock Debug] Processing content block:', {
-          hasText: !!block.text,
-          hasToolUse: !!block.toolUse,
-          blockKeys: Object.keys(block),
-        });
-
         if (block.text) {
           content.push({
             type: 'text',
@@ -187,8 +172,6 @@ export class BedrockProvider implements LLMProvider {
         }
       }
     }
-
-    console.log('[Bedrock Debug] Converted content length:', content.length);
 
     return {
       content,

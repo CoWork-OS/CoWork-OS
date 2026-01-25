@@ -124,17 +124,6 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
         .filter(Boolean)
     );
 
-    // Log all approval-related events for debugging
-    const approvalEvents = events.filter(e =>
-      e.type === 'approval_requested' ||
-      e.type === 'approval_granted' ||
-      e.type === 'approval_denied'
-    );
-    if (approvalEvents.length > 0) {
-      console.log('[Approval Debug] Approval-related events:', approvalEvents);
-      console.log('[Approval Debug] Resolved approval IDs:', Array.from(resolvedApprovalIds));
-    }
-
     // Find an approval request that hasn't been resolved yet
     const pendingApprovalEvent = events.find(e => {
       if (e.type !== 'approval_requested' || !e.payload?.approval) return false;
@@ -144,7 +133,6 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
     });
 
     if (pendingApprovalEvent) {
-      console.log('[Approval Debug] Setting pending approval:', pendingApprovalEvent.payload.approval);
       setPendingApproval(pendingApprovalEvent.payload.approval);
     } else {
       // No pending approvals - clear the state

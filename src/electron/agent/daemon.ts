@@ -170,8 +170,6 @@ export class AgentDaemon extends EventEmitter {
     description: string,
     details: any
   ): Promise<boolean> {
-    console.log('[Approval Debug] Requesting approval:', { taskId, type, description, details });
-
     const approval = this.approvalRepo.create({
       taskId,
       type: type as any,
@@ -181,11 +179,8 @@ export class AgentDaemon extends EventEmitter {
       requestedAt: Date.now(),
     });
 
-    console.log('[Approval Debug] Created approval record:', approval);
-
     // Emit event to UI
     this.emitTaskEvent(taskId, 'approval_requested', { approval });
-    console.log('[Approval Debug] Emitted approval_requested event');
 
     // Wait for user response
     return new Promise((resolve, reject) => {

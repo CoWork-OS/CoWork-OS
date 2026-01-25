@@ -28,14 +28,11 @@ export class FileTools {
     const normalizedWorkspace = path.resolve(this.workspace.path);
     const resolved = path.resolve(normalizedWorkspace, relativePath);
 
-    console.log('[FileTools Debug] resolvePath:', { relativePath, workspacePath: normalizedWorkspace, resolved });
-
     // Use path.relative to check if resolved path is within workspace
     // If the relative path starts with '..', it's outside the workspace
     const relative = path.relative(normalizedWorkspace, resolved);
 
     if (relative.startsWith('..') || path.isAbsolute(relative)) {
-      console.log('[FileTools Debug] Path outside workspace boundary - BLOCKING');
       throw new Error('Path is outside workspace boundary');
     }
 
@@ -201,15 +198,10 @@ export class FileTools {
    * Uses shell.trashItem() for protected locations like /Applications
    */
   async deleteFile(relativePath: string): Promise<{ success: boolean; movedToTrash?: boolean }> {
-    console.log('[FileTools Debug] deleteFile called with path:', relativePath);
-    console.log('[FileTools Debug] Workspace path:', this.workspace.path);
-
     this.checkPermission('delete');
     const fullPath = this.resolvePath(relativePath);
-    console.log('[FileTools Debug] Resolved full path:', fullPath);
 
     // Request user approval
-    console.log('[FileTools Debug] Requesting user approval...');
     const approved = await this.daemon.requestApproval(
       this.taskId,
       'delete_file',
@@ -224,7 +216,6 @@ export class FileTools {
     try {
       // For .app bundles on macOS, use shell.trashItem directly (safer and expected behavior)
       if (fullPath.endsWith('.app')) {
-        console.log('[FileTools Debug] Detected .app bundle, using shell.trashItem for safer deletion');
         await shell.trashItem(fullPath);
 
         this.daemon.logEvent(this.taskId, 'file_deleted', {
@@ -253,7 +244,6 @@ export class FileTools {
       // If deletion fails, try moving to Trash as fallback
       // This handles EPERM, EACCES, ENOTEMPTY and other filesystem errors
       if (error.code === 'EPERM' || error.code === 'EACCES' || error.code === 'ENOTEMPTY' || error.code === 'EBUSY') {
-        console.log('[FileTools Debug] Direct deletion failed with', error.code, '- trying shell.trashItem');
         try {
           await shell.trashItem(fullPath);
 

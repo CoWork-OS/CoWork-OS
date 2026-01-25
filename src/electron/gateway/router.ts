@@ -410,6 +410,11 @@ export class MessageRouter {
         await this.handleCancelCommand(adapter, message, sessionId);
         break;
 
+      case '/newtask':
+        // Start a new task (unlink current session)
+        await this.handleNewTaskCommand(adapter, message, sessionId);
+        break;
+
       case '/addworkspace':
         await this.handleAddWorkspaceCommand(adapter, message, sessionId, args);
         break;
@@ -713,29 +718,41 @@ export class MessageRouter {
       return;
     }
 
-    // Check if there's already an active task for this session
+    // Check if there's an existing task for this session (active or completed)
     if (session.taskId) {
       const existingTask = this.taskRepo.findById(session.taskId);
-      if (existingTask && ['pending', 'planning', 'executing', 'paused'].includes(existingTask.status)) {
-        // Send follow-up message to existing task
-        if (this.agentDaemon) {
-          try {
-            await adapter.sendMessage({
-              chatId: message.chatId,
-              text: '💬 Sending follow-up to current task...',
-              replyTo: message.messageId,
-            });
+      if (existingTask) {
+        // For active tasks, send follow-up message
+        // For completed tasks, also allow follow-up (continues the conversation)
+        const activeStatuses = ['pending', 'planning', 'executing', 'paused'];
+        const isActive = activeStatuses.includes(existingTask.status);
+        const isCompleted = existingTask.status === 'completed';
 
-            await this.agentDaemon.sendMessage(session.taskId, message.text);
-          } catch (error) {
-            console.error('Error sending follow-up message:', error);
-            await adapter.sendMessage({
-              chatId: message.chatId,
-              text: '❌ Failed to send message to task. Use /cancel to cancel the current task.',
-            });
+        if (isActive || isCompleted) {
+          if (this.agentDaemon) {
+            try {
+              const statusMsg = isActive
+                ? '💬 Sending follow-up message...'
+                : '💬 Continuing conversation...';
+              await adapter.sendMessage({
+                chatId: message.chatId,
+                text: statusMsg,
+                replyTo: message.messageId,
+              });
+
+              await this.agentDaemon.sendMessage(session.taskId, message.text);
+            } catch (error) {
+              console.error('Error sending follow-up message:', error);
+              await adapter.sendMessage({
+                chatId: message.chatId,
+                text: '❌ Failed to send message. Use /newtask to start a new task.',
+              });
+            }
           }
+          return;
         }
-        return;
+        // Task is in failed/cancelled state - unlink and create new task
+        this.sessionManager.unlinkSessionFromTask(sessionId);
       }
     }
 
@@ -845,6 +862,7 @@ export class MessageRouter {
 
   /**
    * Handle task completion
+   * Note: We keep the session linked to the task for follow-up messages
    */
   async handleTaskCompletion(taskId: string, result?: string): Promise<void> {
     const pending = this.pendingTaskResponses.get(taskId);
@@ -852,8 +870,8 @@ export class MessageRouter {
 
     try {
       const message = result
-        ? `✅ Task completed!\n\n${result}`
-        : '✅ Task completed!';
+        ? `✅ Task completed!\n\n${result}\n\n💡 Send a follow-up message to continue, or use /newtask to start fresh.`
+        : '✅ Task completed!\n\n💡 Send a follow-up message to continue, or use /newtask to start fresh.';
 
       // Split long messages (Telegram has 4096 char limit)
       const chunks = this.splitMessage(message, 4000);
@@ -865,8 +883,8 @@ export class MessageRouter {
         });
       }
 
-      // Unlink session from task
-      this.sessionManager.unlinkSessionFromTask(pending.sessionId);
+      // Don't unlink session - keep it linked for follow-up messages
+      // User can use /newtask to explicitly start a new task
     } catch (error) {
       console.error('Error sending task completion:', error);
     } finally {
@@ -966,6 +984,28 @@ export class MessageRouter {
   }
 
   /**
+   * Handle newtask command - start a fresh task session
+   */
+  private async handleNewTaskCommand(
+    adapter: ChannelAdapter,
+    message: IncomingMessage,
+    sessionId: string
+  ): Promise<void> {
+    const session = this.sessionRepo.findById(sessionId);
+
+    if (session?.taskId) {
+      // Unlink current task from session
+      this.sessionManager.unlinkSessionFromTask(sessionId);
+      this.pendingTaskResponses.delete(session.taskId);
+    }
+
+    await adapter.sendMessage({
+      chatId: message.chatId,
+      text: '🆕 Ready for a new task!\n\nSend me a message describing what you want to do.',
+    });
+  }
+
+  /**
    * Get help text
    */
   private getHelpText(): string {
@@ -977,6 +1017,7 @@ export class MessageRouter {
 /workspaces - List available workspaces
 /workspace <name> - Select a workspace
 /addworkspace <path> - Add a new workspace
+/newtask - Start a fresh task/conversation
 /cancel - Cancel current task
 
 💬 *How to use*
@@ -985,7 +1026,8 @@ export class MessageRouter {
    • \`/workspace <name>\` to select one
    • \`/addworkspace ~/path/to/folder\` to add new
 2. Send me a message describing what you want to do
-3. I'll execute the task and send you the results
+3. Continue the conversation with follow-up messages
+4. Use \`/newtask\` when you want to start something new
 
 Examples:
 • "What files are in this project?"

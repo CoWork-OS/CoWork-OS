@@ -6,6 +6,8 @@
  */
 
 import { BrowserWindow } from 'electron';
+import * as fs from 'fs';
+import * as path from 'path';
 import {
   ChannelAdapter,
   IncomingMessage,
@@ -408,6 +410,10 @@ export class MessageRouter {
         await this.handleCancelCommand(adapter, message, sessionId);
         break;
 
+      case '/addworkspace':
+        await this.handleAddWorkspaceCommand(adapter, message, sessionId, args);
+        break;
+
       default:
         await adapter.sendMessage({
           chatId: message.chatId,
@@ -541,6 +547,98 @@ export class MessageRouter {
     await adapter.sendMessage({
       chatId: message.chatId,
       text: `✅ Workspace set to: *${workspace.name}*\n\`${workspace.path}\`\n\nYou can now send messages to create tasks in this workspace.`,
+      parseMode: 'markdown',
+    });
+  }
+
+  /**
+   * Handle /addworkspace command - add a new workspace by path
+   */
+  private async handleAddWorkspaceCommand(
+    adapter: ChannelAdapter,
+    message: IncomingMessage,
+    sessionId: string,
+    args: string[]
+  ): Promise<void> {
+    if (args.length === 0) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: '📁 *Add Workspace*\n\nUsage: `/addworkspace <path>`\n\nExample:\n`/addworkspace /Users/john/projects/myapp`\n`/addworkspace ~/Documents`',
+        parseMode: 'markdown',
+      });
+      return;
+    }
+
+    // Join args to handle paths with spaces
+    let workspacePath = args.join(' ');
+
+    // Expand ~ to home directory
+    if (workspacePath.startsWith('~')) {
+      const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+      workspacePath = workspacePath.replace('~', homeDir);
+    }
+
+    // Resolve to absolute path
+    workspacePath = path.resolve(workspacePath);
+
+    // Check if path exists and is a directory
+    try {
+      const stats = fs.statSync(workspacePath);
+      if (!stats.isDirectory()) {
+        await adapter.sendMessage({
+          chatId: message.chatId,
+          text: `❌ Path is not a directory: \`${workspacePath}\``,
+          parseMode: 'markdown',
+        });
+        return;
+      }
+    } catch {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: `❌ Directory not found: \`${workspacePath}\``,
+        parseMode: 'markdown',
+      });
+      return;
+    }
+
+    // Check if workspace already exists
+    const existingWorkspaces = this.workspaceRepo.findAll();
+    const existing = existingWorkspaces.find(ws => ws.path === workspacePath);
+    if (existing) {
+      // Workspace exists, just select it
+      this.sessionManager.setSessionWorkspace(sessionId, existing.id);
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: `📁 Workspace already exists!\n\n✅ Selected: *${existing.name}*\n\`${existing.path}\``,
+        parseMode: 'markdown',
+      });
+      return;
+    }
+
+    // Create workspace name from path
+    const workspaceName = path.basename(workspacePath);
+
+    // Create new workspace
+    const workspace = this.workspaceRepo.create({
+      name: workspaceName,
+      path: workspacePath,
+    });
+
+    // Set as current workspace
+    this.sessionManager.setSessionWorkspace(sessionId, workspace.id);
+
+    // Notify desktop app
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.webContents.send('workspace:added', {
+        id: workspace.id,
+        name: workspace.name,
+        path: workspace.path,
+      });
+    }
+
+    await adapter.sendMessage({
+      chatId: message.chatId,
+      text: `✅ Workspace added and selected!\n\n📁 *${workspace.name}*\n\`${workspace.path}\`\n\nYou can now send messages to create tasks in this workspace.`,
       parseMode: 'markdown',
     });
   }
@@ -872,11 +970,15 @@ export class MessageRouter {
 /status - Check bot status and current workspace
 /workspaces - List available workspaces
 /workspace <name> - Select a workspace
+/addworkspace <path> - Add a new workspace
 /cancel - Cancel current task
 
 💬 *How to use*
-1. First, select a workspace with \`/workspaces\` and \`/workspace <name>\`
-2. Then send me a message describing what you want to do
+1. Add or select a workspace:
+   • \`/workspaces\` to see existing workspaces
+   • \`/workspace <name>\` to select one
+   • \`/addworkspace ~/path/to/folder\` to add new
+2. Send me a message describing what you want to do
 3. I'll execute the task and send you the results
 
 Examples:

@@ -321,6 +321,7 @@ Choose the appropriate security mode for your use case:
 |---------|-------------|
 | `/workspaces` | List all available workspaces |
 | `/workspace <number>` | Select a workspace by number |
+| `/addworkspace <path>` | Add a new workspace directory |
 | `/status` | Show current session status |
 | `/cancel` | Cancel the running task |
 

@@ -66,9 +66,19 @@ export class BedrockProvider implements LLMProvider {
       ...(toolConfig && { toolConfig }),
     });
 
-    const response = await this.client.send(command);
-
-    return this.convertResponse(response);
+    try {
+      console.log(`[Bedrock] Calling API with model: ${request.model}`);
+      const response = await this.client.send(command);
+      return this.convertResponse(response);
+    } catch (error: any) {
+      console.error(`[Bedrock] API error:`, {
+        name: error.name,
+        message: error.message,
+        code: error.$metadata?.httpStatusCode,
+        requestId: error.$metadata?.requestId,
+      });
+      throw error;
+    }
   }
 
   async testConnection(): Promise<{ success: boolean; error?: string }> {

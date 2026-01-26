@@ -77,6 +77,11 @@ export class OllamaProvider implements LLMProvider {
       return this.convertResponse(data);
     } catch (error: any) {
       clearTimeout(timeoutId);
+      console.error(`[Ollama] API error:`, {
+        name: error.name,
+        message: error.message,
+        code: error.code,
+      });
       if (error.name === 'AbortError') {
         throw new Error('Ollama request timed out after 5 minutes. The model may be too slow or not responding.');
       }

@@ -207,7 +207,8 @@ You are continuing a previous conversation. The context from the previous conver
    * Create execution plan using LLM
    */
   private async createPlan(): Promise<void> {
-    this.daemon.logEvent(this.task.id, 'log', { message: 'Creating execution plan...' });
+    console.log(`[Task ${this.task.id}] Creating plan with model: ${this.modelId}`);
+    this.daemon.logEvent(this.task.id, 'log', { message: `Creating execution plan (model: ${this.modelId})...` });
 
     const systemPrompt = `You are an autonomous task executor. Your job is to:
 1. Analyze the user's request
@@ -230,21 +231,36 @@ Format your plan as a JSON object with this structure:
   ]
 }`;
 
-    const response = await withTimeout(
-      this.provider.createMessage({
-        model: this.modelId,
-        maxTokens: 4096,
-        system: systemPrompt,
-        messages: [
-          {
-            role: 'user',
-            content: `Task: ${this.task.title}\n\nDetails: ${this.task.prompt}\n\nCreate an execution plan.`,
-          },
-        ],
-      }),
-      LLM_TIMEOUT_MS,
-      'Plan creation'
-    );
+    let response;
+    try {
+      const startTime = Date.now();
+      console.log(`[Task ${this.task.id}] Calling LLM API for plan creation...`);
+
+      response = await withTimeout(
+        this.provider.createMessage({
+          model: this.modelId,
+          maxTokens: 4096,
+          system: systemPrompt,
+          messages: [
+            {
+              role: 'user',
+              content: `Task: ${this.task.title}\n\nDetails: ${this.task.prompt}\n\nCreate an execution plan.`,
+            },
+          ],
+        }),
+        LLM_TIMEOUT_MS,
+        'Plan creation'
+      );
+
+      console.log(`[Task ${this.task.id}] LLM response received in ${Date.now() - startTime}ms`);
+    } catch (llmError: any) {
+      console.error(`[Task ${this.task.id}] LLM API call failed:`, llmError);
+      this.daemon.logEvent(this.task.id, 'error', {
+        message: `LLM API error: ${llmError.message}`,
+        details: llmError.status ? `Status: ${llmError.status}` : undefined,
+      });
+      throw llmError;
+    }
 
     // Extract plan from response
     const textContent = response.content.find(c => c.type === 'text');

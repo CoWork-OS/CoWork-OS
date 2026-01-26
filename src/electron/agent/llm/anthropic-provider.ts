@@ -30,15 +30,26 @@ export class AnthropicProvider implements LLMProvider {
     const messages = this.convertMessages(request.messages);
     const tools = request.tools ? this.convertTools(request.tools) : undefined;
 
-    const response = await this.client.messages.create({
-      model: request.model,
-      max_tokens: request.maxTokens,
-      system: request.system,
-      messages,
-      ...(tools && { tools }),
-    });
+    try {
+      console.log(`[Anthropic] Calling API with model: ${request.model}`);
+      const response = await this.client.messages.create({
+        model: request.model,
+        max_tokens: request.maxTokens,
+        system: request.system,
+        messages,
+        ...(tools && { tools }),
+      });
 
-    return this.convertResponse(response);
+      return this.convertResponse(response);
+    } catch (error: any) {
+      console.error(`[Anthropic] API error:`, {
+        status: error.status,
+        message: error.message,
+        type: error.type || error.name,
+        headers: error.headers ? Object.fromEntries(error.headers) : undefined,
+      });
+      throw error;
+    }
   }
 
   async testConnection(): Promise<{ success: boolean; error?: string }> {

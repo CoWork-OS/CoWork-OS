@@ -112,6 +112,24 @@ export class DiscordAdapter implements ChannelAdapter {
       this.client.on(Events.InteractionCreate, async (interaction) => {
         if (!interaction.isChatInputCommand()) return;
 
+        // Defer the reply FIRST to avoid interaction timeout (Discord requires response within 3 seconds)
+        try {
+          await interaction.deferReply();
+        } catch (error) {
+          console.error('Failed to defer reply:', error);
+          return;
+        }
+
+        // Store the interaction so sendMessage can use editReply for the first response
+        if (interaction.channelId) {
+          this.pendingInteractions.set(interaction.channelId, interaction);
+
+          // Auto-clear after 14 minutes (interactions expire after 15 minutes)
+          setTimeout(() => {
+            this.pendingInteractions.delete(interaction.channelId!);
+          }, 14 * 60 * 1000);
+        }
+
         // Convert slash command to message format
         const incomingMessage = this.mapInteractionToIncoming(interaction);
         await this.handleIncomingMessage(incomingMessage);
@@ -538,18 +556,7 @@ export class DiscordAdapter implements ChannelAdapter {
         break;
     }
 
-    // Defer the reply to avoid interaction timeout (Discord requires response within 3 seconds)
-    interaction.deferReply().catch(console.error);
-
-    // Store the interaction so sendMessage can use editReply for the first response
-    if (interaction.channelId) {
-      this.pendingInteractions.set(interaction.channelId, interaction);
-
-      // Auto-clear after 14 minutes (interactions expire after 15 minutes)
-      setTimeout(() => {
-        this.pendingInteractions.delete(interaction.channelId!);
-      }, 14 * 60 * 1000);
-    }
+    // Note: deferReply and pendingInteractions are handled in the event handler before this is called
 
     return {
       messageId: interaction.id,

@@ -44,6 +44,15 @@ const IPC_CHANNELS = {
   SEARCH_SAVE_SETTINGS: 'search:saveSettings',
   SEARCH_GET_CONFIG_STATUS: 'search:getConfigStatus',
   SEARCH_TEST_PROVIDER: 'search:testProvider',
+  // App Updates
+  APP_CHECK_UPDATES: 'app:checkUpdates',
+  APP_DOWNLOAD_UPDATE: 'app:downloadUpdate',
+  APP_INSTALL_UPDATE: 'app:installUpdate',
+  APP_GET_VERSION: 'app:getVersion',
+  APP_UPDATE_AVAILABLE: 'app:updateAvailable',
+  APP_UPDATE_PROGRESS: 'app:updateProgress',
+  APP_UPDATE_DOWNLOADED: 'app:updateDownloaded',
+  APP_UPDATE_ERROR: 'app:updateError',
 } as const;
 
 // Expose protected methods that allow the renderer process to use ipcRenderer
@@ -131,6 +140,29 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveSearchSettings: (settings: any) => ipcRenderer.invoke(IPC_CHANNELS.SEARCH_SAVE_SETTINGS, settings),
   getSearchConfigStatus: () => ipcRenderer.invoke(IPC_CHANNELS.SEARCH_GET_CONFIG_STATUS),
   testSearchProvider: (providerType: string) => ipcRenderer.invoke(IPC_CHANNELS.SEARCH_TEST_PROVIDER, providerType),
+
+  // App Update APIs
+  getAppVersion: () => ipcRenderer.invoke(IPC_CHANNELS.APP_GET_VERSION),
+  checkForUpdates: () => ipcRenderer.invoke(IPC_CHANNELS.APP_CHECK_UPDATES),
+  downloadUpdate: (updateInfo: any) => ipcRenderer.invoke(IPC_CHANNELS.APP_DOWNLOAD_UPDATE, updateInfo),
+  installUpdate: () => ipcRenderer.invoke(IPC_CHANNELS.APP_INSTALL_UPDATE),
+
+  // Update event listeners
+  onUpdateProgress: (callback: (progress: any) => void) => {
+    const subscription = (_: any, data: any) => callback(data);
+    ipcRenderer.on(IPC_CHANNELS.APP_UPDATE_PROGRESS, subscription);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.APP_UPDATE_PROGRESS, subscription);
+  },
+  onUpdateDownloaded: (callback: (info: any) => void) => {
+    const subscription = (_: any, data: any) => callback(data);
+    ipcRenderer.on(IPC_CHANNELS.APP_UPDATE_DOWNLOADED, subscription);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.APP_UPDATE_DOWNLOADED, subscription);
+  },
+  onUpdateError: (callback: (error: any) => void) => {
+    const subscription = (_: any, data: any) => callback(data);
+    ipcRenderer.on(IPC_CHANNELS.APP_UPDATE_ERROR, subscription);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.APP_UPDATE_ERROR, subscription);
+  },
 });
 
 // Type declarations for TypeScript
@@ -201,6 +233,34 @@ export interface ElectronAPI {
     isConfigured: boolean;
   }>;
   testSearchProvider: (providerType: string) => Promise<{ success: boolean; error?: string }>;
+  // App Updates
+  getAppVersion: () => Promise<{
+    version: string;
+    isDev: boolean;
+    isGitRepo: boolean;
+    gitBranch?: string;
+    gitCommit?: string;
+  }>;
+  checkForUpdates: () => Promise<{
+    available: boolean;
+    currentVersion: string;
+    latestVersion: string;
+    releaseNotes?: string;
+    releaseUrl?: string;
+    publishedAt?: string;
+    updateMode: 'git' | 'electron-updater';
+  }>;
+  downloadUpdate: (updateInfo: any) => Promise<{ success: boolean }>;
+  installUpdate: () => Promise<{ success: boolean }>;
+  onUpdateProgress: (callback: (progress: {
+    phase: 'checking' | 'downloading' | 'extracting' | 'installing' | 'complete' | 'error';
+    percent?: number;
+    message: string;
+    bytesDownloaded?: number;
+    bytesTotal?: number;
+  }) => void) => () => void;
+  onUpdateDownloaded: (callback: (info: { requiresRestart: boolean; message: string }) => void) => () => void;
+  onUpdateError: (callback: (error: { error: string }) => void) => () => void;
 }
 
 declare global {

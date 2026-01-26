@@ -4223,3 +4223,242 @@ button {
   color: var(--color-text-muted);
   font-size: 12px;
 }
+
+/* ==================== UPDATE SETTINGS ==================== */
+.update-settings {
+  padding: 16px 0;
+}
+
+.version-info {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.version-number {
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.version-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+}
+
+.version-badge.dev {
+  background: rgba(251, 191, 36, 0.15);
+  color: var(--color-warning);
+}
+
+.git-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  font-family: 'SF Mono', monospace;
+}
+
+.git-branch {
+  background: var(--color-bg-secondary);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.git-commit {
+  color: var(--color-text-muted);
+}
+
+.update-actions {
+  margin-top: 16px;
+}
+
+.update-status {
+  margin-top: 16px;
+  padding: 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+}
+
+.update-status.available {
+  border-color: var(--color-accent);
+  background: rgba(99, 102, 241, 0.05);
+}
+
+.update-status.up-to-date {
+  border-color: var(--color-success);
+  background: rgba(34, 197, 94, 0.05);
+}
+
+.update-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-accent);
+  margin-bottom: 12px;
+}
+
+.update-header.up-to-date {
+  color: var(--color-success);
+  margin-bottom: 0;
+}
+
+.update-header svg {
+  flex-shrink: 0;
+}
+
+.update-versions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.update-versions .current {
+  color: var(--color-text-muted);
+}
+
+.update-versions .arrow {
+  color: var(--color-text-muted);
+}
+
+.update-versions .latest {
+  color: var(--color-accent);
+  font-weight: 500;
+}
+
+.update-date {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin-bottom: 12px;
+}
+
+.release-notes {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+}
+
+.release-notes h4 {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.release-notes-content {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.release-link {
+  display: inline-block;
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+.release-link:hover {
+  text-decoration: underline;
+}
+
+.update-mode {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.update-mode strong {
+  color: var(--color-text-secondary);
+}
+
+.update-progress {
+  margin-top: 16px;
+  padding: 12px;
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+}
+
+.progress-message {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  margin-bottom: 8px;
+}
+
+.progress-bar {
+  height: 6px;
+  background: var(--color-border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--color-accent);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.update-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 12px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  color: var(--color-error);
+}
+
+.update-error svg {
+  flex-shrink: 0;
+}
+
+.update-button {
+  margin-top: 16px;
+  width: 100%;
+}
+
+.update-button.restart {
+  background: var(--color-success);
+}
+
+.update-button.restart:hover {
+  background: #16a34a;
+}
+
+.manual-update-commands {
+  margin-top: 12px;
+  padding: 12px;
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+}
+
+.manual-update-commands code {
+  display: block;
+  font-family: 'SF Mono', monospace;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  white-space: pre;
+  line-height: 1.6;
+}

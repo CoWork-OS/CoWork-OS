@@ -3,6 +3,7 @@ import { LLMSettingsData } from '../../shared/types';
 import { TelegramSettings } from './TelegramSettings';
 import { DiscordSettings } from './DiscordSettings';
 import { SearchSettings } from './SearchSettings';
+import { UpdateSettings } from './UpdateSettings';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -20,7 +21,7 @@ interface ProviderInfo {
   configured: boolean;
 }
 
-type SettingsTab = 'llm' | 'search' | 'telegram' | 'discord';
+type SettingsTab = 'llm' | 'search' | 'telegram' | 'discord' | 'updates';
 
 // Helper to format bytes to human-readable size
 function formatBytes(bytes: number): string {
@@ -231,6 +232,12 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             >
               Discord
             </button>
+            <button
+              className={`settings-tab ${activeTab === 'updates' ? 'active' : ''}`}
+              onClick={() => setActiveTab('updates')}
+            >
+              Updates
+            </button>
           </div>
 
           {activeTab === 'telegram' ? (
@@ -239,6 +246,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             <DiscordSettings />
           ) : activeTab === 'search' ? (
             <SearchSettings />
+          ) : activeTab === 'updates' ? (
+            <UpdateSettings />
           ) : loading ? (
             <div className="settings-loading">Loading settings...</div>
           ) : (
@@ -551,6 +560,16 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         )}
 
         {activeTab === 'search' && (
+          <div className="modal-footer">
+            <div className="modal-footer-right">
+              <button className="button-secondary" onClick={onClose}>
+                Close
+              </button>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'updates' && (
           <div className="modal-footer">
             <div className="modal-footer-right">
               <button className="button-secondary" onClick={onClose}>

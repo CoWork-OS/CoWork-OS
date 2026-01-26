@@ -196,6 +196,16 @@ export const IPC_CHANNELS = {
   SEARCH_SAVE_SETTINGS: 'search:saveSettings',
   SEARCH_GET_CONFIG_STATUS: 'search:getConfigStatus',
   SEARCH_TEST_PROVIDER: 'search:testProvider',
+
+  // App Updates
+  APP_CHECK_UPDATES: 'app:checkUpdates',
+  APP_DOWNLOAD_UPDATE: 'app:downloadUpdate',
+  APP_INSTALL_UPDATE: 'app:installUpdate',
+  APP_GET_VERSION: 'app:getVersion',
+  APP_UPDATE_AVAILABLE: 'app:updateAvailable',
+  APP_UPDATE_PROGRESS: 'app:updateProgress',
+  APP_UPDATE_DOWNLOADED: 'app:updateDownloaded',
+  APP_UPDATE_ERROR: 'app:updateError',
 } as const;
 
 // LLM Provider types
@@ -324,4 +334,33 @@ export interface SearchConfigStatus {
   fallbackProvider: SearchProviderType | null;
   providers: SearchProviderInfo[];
   isConfigured: boolean;
+}
+
+// App Update types
+export type UpdateMode = 'git' | 'electron-updater';
+
+export interface UpdateInfo {
+  available: boolean;
+  currentVersion: string;
+  latestVersion: string;
+  releaseNotes?: string;
+  releaseUrl?: string;
+  publishedAt?: string;
+  updateMode: UpdateMode;
+}
+
+export interface UpdateProgress {
+  phase: 'checking' | 'downloading' | 'extracting' | 'installing' | 'complete' | 'error';
+  percent?: number;
+  message: string;
+  bytesDownloaded?: number;
+  bytesTotal?: number;
+}
+
+export interface AppVersionInfo {
+  version: string;
+  isDev: boolean;
+  isGitRepo: boolean;
+  gitBranch?: string;
+  gitCommit?: string;
 }

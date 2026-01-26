@@ -44,6 +44,7 @@
     "discord.js": "^14.25.1",
     "docx": "^9.5.1",
     "dotenv": "^17.2.3",
+    "electron-updater": "^6.3.9",
     "exceljs": "^4.4.0",
     "grammy": "^1.39.3",
     "mime-types": "^3.0.2",
@@ -100,6 +101,11 @@
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "mesutfelat",
+      "repo": "cowork-oss"
     }
   }
 }

@@ -9,11 +9,12 @@ import {
   SkillRepository,
   LLMModelRepository,
 } from '../database/repositories';
-import { IPC_CHANNELS, LLMSettingsData, AddChannelRequest, UpdateChannelRequest, SecurityMode } from '../../shared/types';
+import { IPC_CHANNELS, LLMSettingsData, AddChannelRequest, UpdateChannelRequest, SecurityMode, UpdateInfo } from '../../shared/types';
 import { AgentDaemon } from '../agent/daemon';
 import { LLMProviderFactory, LLMProviderConfig, ModelKey } from '../agent/llm';
 import { SearchProviderFactory, SearchSettings, SearchProviderType } from '../agent/search';
 import { ChannelGateway } from '../gateway';
+import { updateManager } from '../updater';
 
 export function setupIpcHandlers(
   dbManager: DatabaseManager,
@@ -379,5 +380,24 @@ export function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.GATEWAY_GENERATE_PAIRING, async (_, data: { channelId: string; userId: string; displayName?: string }) => {
     if (!gateway) throw new Error('Gateway not initialized');
     return gateway.generatePairingCode(data.channelId, data.userId, data.displayName);
+  });
+
+  // App Update handlers
+  ipcMain.handle(IPC_CHANNELS.APP_GET_VERSION, async () => {
+    return updateManager.getVersionInfo();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.APP_CHECK_UPDATES, async () => {
+    return updateManager.checkForUpdates();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.APP_DOWNLOAD_UPDATE, async (_, updateInfo: UpdateInfo) => {
+    await updateManager.downloadAndInstallUpdate(updateInfo);
+    return { success: true };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.APP_INSTALL_UPDATE, async () => {
+    await updateManager.installUpdateAndRestart();
+    return { success: true };
   });
 }

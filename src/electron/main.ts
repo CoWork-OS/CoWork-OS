@@ -11,6 +11,7 @@ import { AgentDaemon } from './agent/daemon';
 import { LLMProviderFactory } from './agent/llm';
 import { SearchProviderFactory } from './agent/search';
 import { ChannelGateway } from './gateway';
+import { updateManager } from './updater';
 
 let mainWindow: BrowserWindow | null = null;
 let dbManager: DatabaseManager;
@@ -75,6 +76,8 @@ app.whenReady().then(async () => {
   // Initialize gateway with main window reference
   if (mainWindow) {
     await channelGateway.initialize(mainWindow);
+    // Initialize update manager with main window reference
+    updateManager.setMainWindow(mainWindow);
   }
 
   app.on('activate', () => {

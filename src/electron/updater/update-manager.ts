@@ -280,7 +280,7 @@ export class UpdateManager {
     // This requires electron-updater to be installed and configured
     try {
       // Dynamic import to avoid issues when running in dev mode
-      // @ts-ignore - electron-updater may not be installed in dev
+      // @ts-expect-error - electron-updater may not be installed in dev
       const electronUpdater = await import('electron-updater').catch(() => null);
       if (!electronUpdater) {
         throw new Error('electron-updater not available');

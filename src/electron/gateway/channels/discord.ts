@@ -213,6 +213,13 @@ export class DiscordAdapter implements ChannelAdapter {
           option.setName('prompt')
             .setDescription('Task description')
             .setRequired(true)),
+      new SlashCommandBuilder()
+        .setName('pair')
+        .setDescription('Pair with a pairing code to gain access')
+        .addStringOption(option =>
+          option.setName('code')
+            .setDescription('The pairing code from CoWork-OSS app')
+            .setRequired(true)),
     ];
 
     const rest = new REST().setToken(this.config.botToken);
@@ -553,6 +560,10 @@ export class DiscordAdapter implements ChannelAdapter {
       case 'task':
         const prompt = options.getString('prompt');
         if (prompt) text = prompt; // Task prompt becomes the text directly
+        break;
+      case 'pair':
+        const code = options.getString('code');
+        if (code) text += ` ${code}`;
         break;
     }
 

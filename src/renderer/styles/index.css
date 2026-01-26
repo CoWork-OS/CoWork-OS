@@ -6189,3 +6189,990 @@ button {
   color: var(--color-text-muted);
   line-height: 1.4;
 }
+
+/* ============================================
+   COMPREHENSIVE macOS STYLE OVERRIDES
+   Transform CLI/Terminal elements to Apple-style UI
+   ============================================ */
+
+/* macOS Welcome View - Replace CLI style with clean Apple look */
+.style-macos .welcome-view {
+  padding: 60px 40px;
+}
+
+.style-macos .welcome-content {
+  max-width: 680px;
+}
+
+/* Hide CLI-specific elements in macOS mode */
+.style-macos .welcome-content.cli-style {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', system-ui, sans-serif;
+}
+
+.style-macos .cli-header {
+  margin-bottom: 48px;
+}
+
+/* Hide ASCII art in macOS mode */
+.style-macos .ascii-art {
+  display: none;
+}
+
+/* macOS Welcome Header - Clean modern look */
+.style-macos .cli-header::before {
+  content: '';
+  display: block;
+  width: 80px;
+  height: 80px;
+  margin: 0 auto 24px;
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-dark) 100%);
+  border-radius: 22px;
+  box-shadow: 0 8px 24px var(--color-accent-subtle), inset 0 2px 0 rgba(255, 255, 255, 0.2);
+}
+
+.style-macos .cli-header h1,
+.style-macos .cli-header .app-title {
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--color-text);
+  margin-bottom: 8px;
+}
+
+.style-macos .cli-version {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+  font-size: 14px;
+  color: var(--color-text-secondary);
+  margin-top: 8px;
+}
+
+.style-macos .cli-tag {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* macOS CLI Info Section - Transform to feature cards */
+.style-macos .cli-info {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 20px 24px;
+  margin-bottom: 32px;
+}
+
+.style-macos .cli-line {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+  font-size: 14px;
+  margin-bottom: 12px;
+  gap: 12px;
+}
+
+.style-macos .cli-line:last-child {
+  margin-bottom: 0;
+}
+
+.style-macos .cli-prompt {
+  color: var(--color-accent);
+  font-weight: 600;
+  font-family: inherit;
+}
+
+.style-macos .cli-text {
+  color: var(--color-text-secondary);
+}
+
+/* macOS Commands Grid - Clean card style */
+.style-macos .cli-commands {
+  margin-bottom: 32px;
+}
+
+.style-macos .cli-commands-header {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-transform: none;
+  letter-spacing: normal;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+}
+
+.style-macos .cli-commands-grid {
+  gap: 12px;
+}
+
+.style-macos .cli-command {
+  padding: 16px 20px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  transition: all 0.2s ease;
+}
+
+.style-macos .cli-command:hover {
+  background: var(--color-bg-secondary);
+  border-color: var(--color-accent);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.style-macos .cli-cmd-prefix {
+  display: none;
+}
+
+.style-macos .cli-cmd-text {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.style-macos .cli-command:hover .cli-cmd-text {
+  color: var(--color-accent);
+}
+
+/* macOS Input Container - Clean Apple style */
+.style-macos .cli-input-container {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+.style-macos .cli-input-wrapper {
+  padding: 16px 20px;
+  gap: 12px;
+}
+
+.style-macos .cli-input-prompt {
+  display: none;
+}
+
+.style-macos .cli-input {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif !important;
+  font-size: 15px !important;
+}
+
+.style-macos .cli-cursor {
+  display: none;
+}
+
+.style-macos .cli-input-container .welcome-input-footer {
+  background: transparent;
+  border-top: 1px solid var(--color-border-subtle);
+  padding: 12px 16px;
+}
+
+.style-macos .cli-input-container .folder-selector {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+  padding: 8px 14px;
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-md);
+}
+
+.style-macos .cli-input-container .model-selector {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+  border: none;
+  background: var(--color-bg-tertiary);
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+}
+
+.style-macos .cli-input-container .lets-go-btn {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+  padding: 12px 28px;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm), 0 4px 12px var(--color-accent-subtle);
+}
+
+.style-macos .cli-input-container .lets-go-btn:hover:not(:disabled) {
+  box-shadow: var(--shadow-md), 0 6px 20px var(--color-accent-subtle);
+}
+
+/* macOS Workspace Selector - Clean card layout */
+.style-macos .workspace-selector {
+  padding-top: 60px;
+}
+
+.style-macos .workspace-selector-content {
+  max-width: 480px;
+  padding: 48px;
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
+}
+
+.style-macos .workspace-selector-content::before {
+  display: none;
+}
+
+.style-macos .workspace-selector-header {
+  margin-bottom: 48px;
+}
+
+.style-macos .workspace-selector-header h1 {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.style-macos .workspace-selector-header p {
+  font-size: 15px;
+  color: var(--color-text-secondary);
+}
+
+.style-macos .workspace-list h3 {
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  margin-bottom: 16px;
+}
+
+.style-macos .workspace-list-item {
+  padding: 16px 18px;
+  border-radius: var(--radius-lg);
+  margin-bottom: 10px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+}
+
+.style-macos .workspace-list-item::before {
+  display: none;
+}
+
+.style-macos .workspace-list-item:hover {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-subtle);
+}
+
+.style-macos .workspace-list-item-name {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.style-macos .workspace-list-item-path {
+  font-size: 12px;
+}
+
+/* macOS CLI Workspace Selector - Override to clean style */
+.style-macos .cli-workspace-selector {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif;
+}
+
+.style-macos .cli-workspace-content {
+  max-width: 480px !important;
+  background: var(--color-bg-elevated) !important;
+  border-radius: var(--radius-xl) !important;
+  padding: 0 !important;
+}
+
+.style-macos .cli-terminal-header {
+  display: none;
+}
+
+.style-macos .cli-logo-section {
+  padding: 48px 32px 24px;
+}
+
+.style-macos .cli-logo-section .cli-ascii-logo {
+  display: none;
+}
+
+.style-macos .cli-logo-section::before {
+  content: '';
+  display: block;
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 20px;
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-dark) 100%);
+  border-radius: 20px;
+  box-shadow: 0 6px 20px var(--color-accent-subtle);
+}
+
+.style-macos .cli-logo-section .cli-version {
+  font-family: inherit;
+  font-size: 14px;
+}
+
+.style-macos .cli-init-info {
+  background: var(--color-bg-secondary);
+  border: none;
+  padding: 20px 32px;
+  margin: 0 24px;
+  border-radius: var(--radius-lg);
+}
+
+.style-macos .cli-init-info .cli-line {
+  font-family: inherit;
+}
+
+.style-macos .cli-init-info .cli-prompt {
+  font-family: inherit;
+}
+
+.style-macos .cli-cursor-block {
+  display: none;
+}
+
+.style-macos .cli-workspace-list {
+  padding: 24px 32px;
+}
+
+.style-macos .cli-workspace-list .cli-section-header {
+  margin-bottom: 16px;
+}
+
+.style-macos .cli-workspace-list .cli-section-prompt {
+  display: none;
+}
+
+.style-macos .cli-workspace-list .cli-section-title {
+  font-family: inherit;
+  font-size: 12px;
+  letter-spacing: 0.05em;
+}
+
+.style-macos .cli-workspace-item {
+  padding: 14px 18px;
+  margin-bottom: 10px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-left: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.style-macos .cli-workspace-item:hover {
+  border-color: var(--color-accent);
+  border-left-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-subtle);
+}
+
+.style-macos .cli-item-num {
+  display: none;
+}
+
+.style-macos .cli-item-icon {
+  font-size: 16px;
+}
+
+.style-macos .cli-item-name {
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.style-macos .cli-item-path {
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.style-macos .cli-workspace-actions {
+  padding: 24px 32px;
+}
+
+.style-macos .cli-action-btn {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+  padding: 14px 28px;
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-secondary);
+}
+
+.style-macos .cli-action-btn .cli-btn-bracket {
+  display: none;
+}
+
+.style-macos .cli-action-btn .cli-btn-icon {
+  font-size: 16px;
+}
+
+.style-macos .cli-action-btn .cli-btn-text {
+  font-weight: 500;
+}
+
+.style-macos .cli-workspace-actions .cli-hint {
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.style-macos .cli-init-footer {
+  display: none;
+}
+
+/* macOS Right Panel - Clean sidebar style */
+.style-macos .right-panel {
+  background: var(--color-bg-sidebar);
+  border-left: 1px solid var(--color-border-subtle);
+}
+
+.style-macos .right-panel::before {
+  display: none;
+}
+
+.style-macos .right-panel-header {
+  padding: 16px 20px;
+}
+
+.style-macos .right-panel-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+
+.style-macos .right-panel-content {
+  padding: 0 20px 20px;
+}
+
+/* macOS CLI Panel - Convert to clean sidebar */
+.style-macos .cli-panel {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+  background: var(--color-bg-sidebar) !important;
+}
+
+.style-macos .cli-panel-header {
+  background: transparent;
+  border-bottom: 1px solid var(--color-border-subtle);
+  padding: 16px 20px;
+}
+
+.style-macos .cli-panel-title {
+  font-family: inherit;
+  color: var(--color-text);
+  letter-spacing: 0.05em;
+}
+
+.style-macos .cli-panel-dots {
+  display: none;
+}
+
+/* macOS Main Content Header */
+.style-macos .main-header {
+  padding: 14px 24px;
+  min-height: 56px;
+  background: transparent;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.style-macos .main-header-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* macOS Main Body */
+.style-macos .main-body {
+  padding: 28px 36px;
+}
+
+/* macOS Task Content */
+.style-macos .task-section {
+  margin-bottom: 28px;
+}
+
+.style-macos .task-section-title {
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  margin-bottom: 14px;
+}
+
+.style-macos .task-description {
+  padding: 20px 24px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+}
+
+.style-macos .task-description p {
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+/* macOS Timeline Events */
+.style-macos .timeline-event {
+  padding: 14px 0;
+}
+
+.style-macos .event-dot {
+  width: 10px;
+  height: 10px;
+}
+
+.style-macos .event-line {
+  width: 2px;
+}
+
+.style-macos .event-title {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.style-macos .event-time {
+  font-size: 12px;
+}
+
+.style-macos .event-details {
+  padding: 14px 18px;
+  border-radius: var(--radius-lg);
+  font-size: 13px;
+}
+
+.style-macos .event-details pre {
+  font-family: 'SF Mono', 'Menlo', monospace;
+}
+
+/* macOS Markdown Content */
+.style-macos .markdown-content {
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.style-macos .markdown-content code {
+  font-family: 'SF Mono', 'Menlo', monospace;
+  border-radius: 6px;
+  padding: 3px 8px;
+}
+
+.style-macos .markdown-content pre {
+  border-radius: var(--radius-lg);
+  padding: 16px 20px;
+}
+
+.style-macos .markdown-content pre code {
+  font-size: 13px;
+}
+
+/* macOS Input Footer */
+.style-macos .main-footer {
+  padding: 20px 28px;
+}
+
+.style-macos .input-container {
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-sm);
+}
+
+.style-macos .input-row {
+  padding: 14px 18px;
+}
+
+.style-macos .input-field {
+  font-size: 15px;
+}
+
+.style-macos .send-btn {
+  min-height: 44px;
+  border-radius: var(--radius-lg);
+  padding: 0 20px;
+  font-size: 14px;
+}
+
+.style-macos .send-btn::before {
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+/* macOS Model Dropdown */
+.style-macos .model-dropdown {
+  border-radius: var(--radius-lg);
+  padding: 8px;
+}
+
+.style-macos .model-dropdown-item {
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+}
+
+.style-macos .model-dropdown-item-name {
+  font-size: 15px;
+}
+
+.style-macos .model-dropdown-item-desc {
+  font-size: 13px;
+}
+
+.style-macos .model-dropdown-search {
+  padding: 10px 14px;
+  margin: -8px -8px 8px -8px;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+.style-macos .model-dropdown-search input {
+  font-size: 14px;
+}
+
+/* macOS Sidebar Tabs */
+.style-macos .sidebar-tabs {
+  padding: 14px 14px 0;
+}
+
+.style-macos .sidebar-tab {
+  padding: 10px 16px;
+  font-size: 14px;
+  border-radius: var(--radius-md);
+}
+
+/* macOS Task List */
+.style-macos .task-list {
+  padding: 0 12px;
+}
+
+.style-macos .task-list-header {
+  padding: 14px 10px 10px;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+}
+
+.style-macos .task-item {
+  padding: 12px 14px;
+  margin-bottom: 4px;
+  border-radius: var(--radius-md);
+}
+
+.style-macos .task-item-selected {
+  background: var(--color-accent-subtle);
+  box-shadow: none;
+}
+
+.style-macos .task-item-selected::before {
+  width: 4px;
+  border-radius: 0 3px 3px 0;
+}
+
+.style-macos .task-item-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+}
+
+.style-macos .task-item-title {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.style-macos .task-item-status {
+  font-size: 12px;
+}
+
+/* macOS Task Item Menu */
+.style-macos .task-item-menu {
+  border-radius: var(--radius-lg);
+  padding: 6px;
+  min-width: 160px;
+}
+
+.style-macos .task-item-menu::before {
+  display: none;
+}
+
+.style-macos .task-item-menu-option {
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  font-size: 14px;
+}
+
+/* macOS Sidebar Footer */
+.style-macos .sidebar-footer {
+  padding: 14px 16px;
+}
+
+.style-macos .settings-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+}
+
+/* macOS New Task Button */
+.style-macos .new-task-btn {
+  padding: 12px 16px;
+  font-size: 14px;
+  border-radius: var(--radius-md);
+}
+
+.style-macos .new-task-btn::before {
+  display: none;
+}
+
+/* macOS Settings Page */
+.style-macos .settings-page {
+  padding: 28px;
+}
+
+.style-macos .settings-nav-item {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.style-macos .settings-content {
+  padding: 28px;
+}
+
+.style-macos .settings-section {
+  padding: 24px 28px;
+  margin-bottom: 20px;
+  border-radius: var(--radius-lg);
+}
+
+.style-macos .settings-section h3 {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.style-macos .settings-description {
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+/* macOS Provider Options */
+.style-macos .provider-option {
+  padding: 18px 22px;
+  border-radius: var(--radius-lg);
+}
+
+.style-macos .provider-option::before {
+  display: none;
+}
+
+.style-macos .provider-option-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.style-macos .provider-option-description {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* macOS Settings Inputs */
+.style-macos .settings-input,
+.style-macos .settings-select {
+  padding: 12px 16px;
+  font-size: 15px;
+  border-radius: var(--radius-lg);
+}
+
+.style-macos .settings-checkbox span {
+  font-size: 14px;
+}
+
+/* macOS Settings Toggle */
+.style-macos .settings-toggle {
+  width: 52px;
+  height: 32px;
+}
+
+.style-macos .toggle-slider {
+  border-radius: 32px;
+}
+
+.style-macos .toggle-slider::before {
+  height: 26px;
+  width: 26px;
+  left: 3px;
+  bottom: 3px;
+}
+
+.style-macos .settings-toggle input:checked + .toggle-slider::before {
+  transform: translateX(20px);
+}
+
+/* macOS Modal */
+.style-macos .modal {
+  border-radius: var(--radius-xl);
+}
+
+.style-macos .modal-header {
+  padding: 20px 24px;
+}
+
+.style-macos .modal-header h2 {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.style-macos .modal-body {
+  padding: 24px;
+}
+
+.style-macos .modal-footer {
+  padding: 20px 24px;
+}
+
+/* macOS Modal Content */
+.style-macos .modal-content {
+  border-radius: var(--radius-xl);
+  padding: 0;
+}
+
+.style-macos .modal-content::before {
+  display: none;
+}
+
+/* macOS Approval Dialog */
+.style-macos .approval-dialog {
+  border-radius: var(--radius-xl);
+  padding: 28px;
+}
+
+.style-macos .approval-content h3 {
+  font-size: 18px;
+}
+
+.style-macos .approval-description {
+  font-size: 14px;
+}
+
+.style-macos .approval-details {
+  border-radius: var(--radius-lg);
+  padding: 16px;
+}
+
+/* macOS Empty States */
+.style-macos .empty-state {
+  padding: 60px 32px;
+}
+
+.style-macos .empty-state h2 {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.style-macos .empty-state p {
+  font-size: 14px;
+}
+
+/* macOS Buttons */
+.style-macos .button-primary {
+  padding: 12px 24px;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: var(--radius-lg);
+}
+
+.style-macos .button-primary::before {
+  display: none;
+}
+
+.style-macos .button-secondary {
+  padding: 12px 20px;
+  font-size: 14px;
+  font-weight: 500;
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-secondary);
+}
+
+.style-macos .button-secondary::before {
+  display: none;
+}
+
+/* macOS Form Elements */
+.style-macos .form-input,
+.style-macos .form-textarea {
+  padding: 12px 16px;
+  font-size: 15px;
+  border-radius: var(--radius-lg);
+}
+
+/* macOS Progress Steps */
+.style-macos .progress-step-indicator .step-icon {
+  width: 28px;
+  height: 28px;
+}
+
+.style-macos .progress-step-label {
+  font-size: 14px;
+}
+
+/* macOS File List */
+.style-macos .file-list-item {
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+}
+
+.style-macos .file-list-item .file-name {
+  font-size: 13px;
+}
+
+.style-macos .file-list-item .file-action {
+  font-size: 11px;
+  border-radius: 6px;
+}
+
+/* macOS Context Items */
+.style-macos .context-item {
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+}
+
+.style-macos .context-item-name {
+  font-size: 13px;
+}
+
+/* macOS Searchable Select */
+.style-macos .searchable-select-trigger {
+  padding: 12px 16px;
+  font-size: 15px;
+  border-radius: var(--radius-lg);
+}
+
+.style-macos .searchable-select-dropdown {
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
+
+.style-macos .searchable-select-option {
+  padding: 12px 16px;
+}
+
+.style-macos .searchable-select-option-label {
+  font-size: 14px;
+}
+
+/* macOS Loading Spinner */
+.style-macos .loading-spinner {
+  width: 24px;
+  height: 24px;
+  border-width: 3px;
+}
+
+/* macOS Update Banner */
+.style-macos .update-banner {
+  padding: 10px 20px 10px 88px;
+  font-size: 14px;
+  border-radius: 0;
+}
+
+.style-macos .update-banner-link {
+  padding: 6px 14px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+}
+
+/* Light Theme Specific macOS adjustments */
+.style-macos.theme-light .cli-command {
+  background: var(--color-bg-secondary);
+  border-color: var(--color-border);
+}
+
+.style-macos.theme-light .cli-input-container {
+  background: var(--color-bg-secondary);
+}
+
+.style-macos.theme-light .workspace-list-item {
+  background: var(--color-bg-secondary);
+}
+
+.style-macos.theme-light .cli-workspace-item {
+  background: var(--color-bg-secondary);
+}
+
+.style-macos.theme-light .task-description {
+  background: var(--color-bg-secondary);
+}
+
+.style-macos.theme-light .event-details {
+  background: var(--color-bg-secondary);
+}
+
+.style-macos.theme-light .input-container {
+  background: var(--color-bg-secondary);
+}

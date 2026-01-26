@@ -4,6 +4,161 @@ import remarkGfm from 'remark-gfm';
 import { Task, TaskEvent, Workspace, ApprovalRequest, LLMModelInfo } from '../../shared/types';
 import { ApprovalDialog } from './ApprovalDialog';
 
+// Searchable Model Dropdown Component
+interface ModelDropdownProps {
+  models: LLMModelInfo[];
+  selectedModel: string;
+  onModelChange: (model: string) => void;
+}
+
+function ModelDropdown({ models, selectedModel, onModelChange }: ModelDropdownProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [highlightedIndex, setHighlightedIndex] = useState(0);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  const selectedModelInfo = models.find(m => m.key === selectedModel);
+
+  const filteredModels = models.filter(model =>
+    model.displayName.toLowerCase().includes(search.toLowerCase()) ||
+    model.key.toLowerCase().includes(search.toLowerCase()) ||
+    model.description.toLowerCase().includes(search.toLowerCase())
+  );
+
+  // Reset highlighted index when search changes
+  useEffect(() => {
+    setHighlightedIndex(0);
+  }, [search]);
+
+  // Scroll highlighted option into view
+  useEffect(() => {
+    if (isOpen && listRef.current) {
+      const highlightedEl = listRef.current.querySelector(`[data-index="${highlightedIndex}"]`);
+      if (highlightedEl) {
+        highlightedEl.scrollIntoView({ block: 'nearest' });
+      }
+    }
+  }, [highlightedIndex, isOpen]);
+
+  // Close on click outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+        setSearch('');
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (!isOpen) {
+      if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        setIsOpen(true);
+      }
+      return;
+    }
+
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault();
+        setHighlightedIndex(i => Math.min(i + 1, filteredModels.length - 1));
+        break;
+      case 'ArrowUp':
+        e.preventDefault();
+        setHighlightedIndex(i => Math.max(i - 1, 0));
+        break;
+      case 'Enter':
+        e.preventDefault();
+        if (filteredModels[highlightedIndex]) {
+          onModelChange(filteredModels[highlightedIndex].key);
+          setIsOpen(false);
+          setSearch('');
+        }
+        break;
+      case 'Escape':
+        e.preventDefault();
+        setIsOpen(false);
+        setSearch('');
+        break;
+    }
+  };
+
+  const handleSelect = (modelKey: string) => {
+    onModelChange(modelKey);
+    setIsOpen(false);
+    setSearch('');
+  };
+
+  return (
+    <div className="model-dropdown-container" ref={containerRef}>
+      <button
+        className={`model-selector ${isOpen ? 'open' : ''}`}
+        onClick={() => {
+          setIsOpen(!isOpen);
+          if (!isOpen) {
+            setTimeout(() => inputRef.current?.focus(), 0);
+          }
+        }}
+        onKeyDown={handleKeyDown}
+      >
+        {selectedModelInfo?.displayName || 'Select Model'}
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </button>
+      {isOpen && (
+        <div className="model-dropdown">
+          <div className="model-dropdown-search">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="11" cy="11" r="8" />
+              <path d="M21 21l-4.35-4.35" />
+            </svg>
+            <input
+              ref={inputRef}
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Search models..."
+              autoFocus
+            />
+          </div>
+          <div ref={listRef} className="model-dropdown-list">
+            {filteredModels.length === 0 ? (
+              <div className="model-dropdown-no-results">No models found</div>
+            ) : (
+              filteredModels.map((model, index) => (
+                <button
+                  key={model.key}
+                  data-index={index}
+                  className={`model-dropdown-item ${model.key === selectedModel ? 'selected' : ''} ${index === highlightedIndex ? 'highlighted' : ''}`}
+                  onClick={() => handleSelect(model.key)}
+                  onMouseEnter={() => setHighlightedIndex(index)}
+                >
+                  <div className="model-dropdown-item-content">
+                    <span className="model-dropdown-item-name">{model.displayName}</span>
+                    <span className="model-dropdown-item-desc">{model.description}</span>
+                  </div>
+                  {model.key === selectedModel && (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M20 6L9 17l-5-5" />
+                    </svg>
+                  )}
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Clickable file path component - opens file on click, shows in Finder on right-click
 function ClickableFilePath({ path, workspacePath, className = '' }: { path: string; workspacePath?: string; className?: string }) {
   const handleClick = async (e: React.MouseEvent) => {
@@ -61,8 +216,6 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
   const [inputValue, setInputValue] = useState('');
   const [showSteps, setShowSteps] = useState(true);
   const [autoScroll, setAutoScroll] = useState(true);
-  const [showModelDropdown, setShowModelDropdown] = useState(false);
-  const modelDropdownRef = useRef<HTMLDivElement>(null);
 
   const timelineRef = useRef<HTMLDivElement>(null);
   const mainBodyRef = useRef<HTMLDivElement>(null);
@@ -95,24 +248,6 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
   useEffect(() => {
     setAutoScroll(true);
   }, [task?.id]);
-
-  // Close model dropdown when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (modelDropdownRef.current && !modelDropdownRef.current.contains(event.target as Node)) {
-        setShowModelDropdown(false);
-      }
-    };
-
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  // Get display name for selected model
-  const getModelDisplayName = () => {
-    const model = availableModels.find(m => m.key === selectedModel);
-    return model?.displayName || 'Select Model';
-  };
 
   // Check for approval requests in events
   useEffect(() => {
@@ -286,41 +421,11 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
                   </button>
                 </div>
                 <div className="input-right-actions">
-                  <div className="model-dropdown-container" ref={modelDropdownRef}>
-                    <button
-                      className="model-selector"
-                      onClick={() => setShowModelDropdown(!showModelDropdown)}
-                    >
-                      {getModelDisplayName()}
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M6 9l6 6 6-6" />
-                      </svg>
-                    </button>
-                    {showModelDropdown && (
-                      <div className="model-dropdown">
-                        {availableModels.map((model) => (
-                          <button
-                            key={model.key}
-                            className={`model-dropdown-item ${model.key === selectedModel ? 'selected' : ''}`}
-                            onClick={() => {
-                              onModelChange(model.key);
-                              setShowModelDropdown(false);
-                            }}
-                          >
-                            <div className="model-dropdown-item-content">
-                              <span className="model-dropdown-item-name">{model.displayName}</span>
-                              <span className="model-dropdown-item-desc">{model.description}</span>
-                            </div>
-                            {model.key === selectedModel && (
-                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                <path d="M20 6L9 17l-5-5" />
-                              </svg>
-                            )}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                  <ModelDropdown
+                    models={availableModels}
+                    selectedModel={selectedModel}
+                    onModelChange={onModelChange}
+                  />
                   <button
                     className="lets-go-btn"
                     onClick={handleSend}
@@ -413,41 +518,11 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
               onKeyDown={handleKeyDown}
             />
             <div className="input-actions">
-              <div className="model-dropdown-container" ref={modelDropdownRef}>
-                <button
-                  className="model-selector"
-                  onClick={() => setShowModelDropdown(!showModelDropdown)}
-                >
-                  {getModelDisplayName()}
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M6 9l6 6 6-6" />
-                  </svg>
-                </button>
-                {showModelDropdown && (
-                  <div className="model-dropdown">
-                    {availableModels.map((model) => (
-                      <button
-                        key={model.key}
-                        className={`model-dropdown-item ${model.key === selectedModel ? 'selected' : ''}`}
-                        onClick={() => {
-                          onModelChange(model.key);
-                          setShowModelDropdown(false);
-                        }}
-                      >
-                        <div className="model-dropdown-item-content">
-                          <span className="model-dropdown-item-name">{model.displayName}</span>
-                          <span className="model-dropdown-item-desc">{model.description}</span>
-                        </div>
-                        {model.key === selectedModel && (
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path d="M20 6L9 17l-5-5" />
-                          </svg>
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <ModelDropdown
+                models={availableModels}
+                selectedModel={selectedModel}
+                onModelChange={onModelChange}
+              />
               <button
                 className={`send-btn ${task.status === 'executing' ? 'send-btn-queue' : ''}`}
                 onClick={handleSend}

@@ -3,15 +3,16 @@ import { Sidebar } from './components/Sidebar';
 import { MainContent } from './components/MainContent';
 import { RightPanel } from './components/RightPanel';
 import { WorkspaceSelector } from './components/WorkspaceSelector';
-import { SettingsModal } from './components/SettingsModal';
+import { Settings } from './components/Settings';
 import { Task, Workspace, TaskEvent, LLMModelInfo, LLMProviderInfo } from '../shared/types';
+
+type AppView = 'workspace-selector' | 'main' | 'settings';
 
 export function App() {
   const [currentWorkspace, setCurrentWorkspace] = useState<Workspace | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
-  const [showWorkspaceSelector, setShowWorkspaceSelector] = useState(true);
-  const [showSettings, setShowSettings] = useState(false);
+  const [currentView, setCurrentView] = useState<AppView>('workspace-selector');
   const [events, setEvents] = useState<TaskEvent[]>([]);
 
   // Model selection state
@@ -19,19 +20,21 @@ export function App() {
   const [availableModels, setAvailableModels] = useState<LLMModelInfo[]>([]);
   const [_availableProviders, setAvailableProviders] = useState<LLMProviderInfo[]>([]);
 
-  // Load LLM config status on mount
+  // Load LLM config status
+  const loadLLMConfig = async () => {
+    try {
+      const config = await window.electronAPI.getLLMConfigStatus();
+      setSelectedModel(config.currentModel);
+      setAvailableModels(config.models);
+      setAvailableProviders(config.providers);
+    } catch (error) {
+      console.error('Failed to load LLM config:', error);
+    }
+  };
+
+  // Load LLM config on mount
   useEffect(() => {
-    const loadConfigStatus = async () => {
-      try {
-        const config = await window.electronAPI.getLLMConfigStatus();
-        setSelectedModel(config.currentModel);
-        setAvailableModels(config.models);
-        setAvailableProviders(config.providers);
-      } catch (error) {
-        console.error('Failed to load LLM config:', error);
-      }
-    };
-    loadConfigStatus();
+    loadLLMConfig();
   }, []);
 
   useEffect(() => {
@@ -46,7 +49,7 @@ export function App() {
   useEffect(() => {
     if (currentWorkspace) {
       loadTasks();
-      setShowWorkspaceSelector(false);
+      setCurrentView('main');
     }
   }, [currentWorkspace]);
 
@@ -134,7 +137,7 @@ export function App() {
           `${errorMessage}\n\nWould you like to open Settings to configure your LLM provider?`
         );
         if (openSettings) {
-          setShowSettings(true);
+          setCurrentView('settings');
         }
       } else {
         alert(`Error: ${errorMessage}`);
@@ -168,16 +171,17 @@ export function App() {
   return (
     <div className="app">
       <div className="title-bar" />
-      {showWorkspaceSelector ? (
+      {currentView === 'workspace-selector' && (
         <WorkspaceSelector onWorkspaceSelected={handleWorkspaceSelected} />
-      ) : (
+      )}
+      {currentView === 'main' && (
         <div className="app-layout">
           <Sidebar
             workspace={currentWorkspace}
             tasks={tasks}
             selectedTaskId={selectedTaskId}
             onSelectTask={setSelectedTaskId}
-            onOpenSettings={() => setShowSettings(true)}
+            onOpenSettings={() => setCurrentView('settings')}
             onTasksChanged={loadTasks}
           />
           <MainContent
@@ -186,7 +190,7 @@ export function App() {
             events={events}
             onSendMessage={handleSendMessage}
             onCreateTask={handleCreateTask}
-            onChangeWorkspace={() => setShowWorkspaceSelector(true)}
+            onChangeWorkspace={() => setCurrentView('workspace-selector')}
             selectedModel={selectedModel}
             availableModels={availableModels}
             onModelChange={handleModelChange}
@@ -194,7 +198,9 @@ export function App() {
           <RightPanel task={selectedTask} workspace={currentWorkspace} events={events} />
         </div>
       )}
-      <SettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} />
+      {currentView === 'settings' && (
+        <Settings onBack={() => setCurrentView('main')} onSettingsChanged={loadLLMConfig} />
+      )}
     </div>
   );
 }

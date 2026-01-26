@@ -912,7 +912,7 @@ a,
   position: absolute;
   bottom: calc(100% + 8px);
   right: 0;
-  min-width: 240px;
+  min-width: 280px;
   background: var(--color-bg-elevated);
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
@@ -922,6 +922,7 @@ a,
   padding: 6px;
   z-index: 1000;
   animation: dropdownFadeIn 0.15s ease;
+  overflow: hidden;
 }
 
 @keyframes dropdownFadeIn {
@@ -994,6 +995,65 @@ a,
 .model-dropdown-item-desc {
   font-size: 12px;
   color: var(--color-text-muted);
+}
+
+.model-dropdown-item.highlighted {
+  background: var(--color-bg-hover);
+}
+
+.model-dropdown-item.highlighted .model-dropdown-item-name {
+  color: var(--color-text);
+}
+
+.model-dropdown-item.selected.highlighted {
+  background: var(--color-accent-subtle);
+}
+
+.model-dropdown-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--color-border);
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  margin: -6px -6px 6px -6px;
+}
+
+.model-dropdown-search svg {
+  flex-shrink: 0;
+  opacity: 0.5;
+}
+
+.model-dropdown-search input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--color-text);
+  font-size: 13px;
+}
+
+.model-dropdown-search input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.model-dropdown-list {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.model-dropdown-no-results {
+  padding: 16px 12px;
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.model-selector.open {
+  background: var(--color-bg-glass-hover);
+  border-color: var(--color-accent);
 }
 
 .send-btn {
@@ -2850,6 +2910,151 @@ button {
   border-color: var(--color-accent);
 }
 
+/* Searchable Select Component */
+.searchable-select {
+  position: relative;
+  width: 100%;
+}
+
+.searchable-select-trigger {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  font-size: 13px;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.2s ease;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.searchable-select-trigger:hover {
+  border-color: var(--color-border-light);
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.searchable-select-trigger:focus {
+  border-color: var(--color-accent);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.1), 0 0 0 3px var(--color-accent-subtle);
+}
+
+.searchable-select-trigger.open {
+  border-color: var(--color-accent);
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.searchable-select-value {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.searchable-select-arrow {
+  flex-shrink: 0;
+  opacity: 0.6;
+  transition: transform 0.2s ease;
+}
+
+.searchable-select-trigger.open .searchable-select-arrow {
+  transform: rotate(180deg);
+}
+
+.searchable-select-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-accent);
+  border-top: none;
+  border-bottom-left-radius: var(--radius-md);
+  border-bottom-right-radius: var(--radius-md);
+  z-index: 100;
+  box-shadow: var(--shadow-lg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  overflow: hidden;
+}
+
+.searchable-select-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.searchable-select-search svg {
+  flex-shrink: 0;
+  opacity: 0.5;
+}
+
+.searchable-select-search input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--color-text);
+  font-size: 13px;
+}
+
+.searchable-select-search input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.searchable-select-options {
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.searchable-select-option {
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.searchable-select-option:hover,
+.searchable-select-option.highlighted {
+  background: var(--color-bg-hover);
+}
+
+.searchable-select-option.selected {
+  background: var(--color-accent-subtle);
+}
+
+.searchable-select-option.selected.highlighted {
+  background: var(--color-accent-subtle);
+}
+
+.searchable-select-option-label {
+  font-size: 13px;
+  color: var(--color-text);
+}
+
+.searchable-select-option-desc {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.searchable-select-no-results {
+  padding: 16px 12px;
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
 .settings-input {
   width: 100%;
   padding: 10px 12px;
@@ -4461,4 +4666,174 @@ button {
   color: var(--color-text-secondary);
   white-space: pre;
   line-height: 1.6;
+}
+
+/* ============================================
+   Full-Page Settings View
+   ============================================ */
+
+.settings-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--color-bg-primary);
+}
+
+.settings-page-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 24px 16px 80px; /* Extra left padding for macOS window controls */
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+}
+
+.settings-back-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.settings-back-btn:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-hover);
+}
+
+.settings-back-btn svg {
+  flex-shrink: 0;
+}
+
+.settings-page-header h1 {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.settings-page-layout {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.settings-sidebar {
+  width: 220px;
+  padding: 16px;
+  border-right: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.settings-nav-item:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+.settings-nav-item.active {
+  background: var(--color-accent);
+  color: white;
+}
+
+.settings-nav-item svg {
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+.settings-nav-item.active svg {
+  opacity: 1;
+}
+
+.settings-content {
+  flex: 1;
+  padding: 24px 32px;
+  overflow-y: auto;
+  max-width: 800px;
+}
+
+.settings-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid var(--color-border);
+}
+
+.settings-actions .button-primary,
+.settings-actions .button-secondary {
+  padding: 10px 20px;
+  font-size: 14px;
+}
+
+/* Ensure settings sections look good in full-page view */
+.settings-page .settings-section {
+  margin-bottom: 24px;
+  padding-bottom: 0;
+}
+
+.settings-page .settings-section:last-of-type {
+  margin-bottom: 0;
+}
+
+.settings-page .provider-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-page .provider-option {
+  padding: 14px 16px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .settings-page-layout {
+    flex-direction: column;
+  }
+
+  .settings-sidebar {
+    width: 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
+    border-right: none;
+    border-bottom: 1px solid var(--color-border);
+    padding: 12px;
+  }
+
+  .settings-nav-item {
+    flex: 1;
+    min-width: 120px;
+    justify-content: center;
+    padding: 8px 12px;
+    font-size: 13px;
+  }
+
+  .settings-content {
+    padding: 20px;
+  }
 }

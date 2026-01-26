@@ -81,7 +81,7 @@ export class OpenRouterProvider implements LLMProvider {
           'X-Title': 'CoWork-OSS',
         },
         body: JSON.stringify({
-          model: 'openai/gpt-4o-mini',
+          model: this.defaultModel,
           messages: [{ role: 'user', content: 'Hi' }],
           max_tokens: 10,
         }),

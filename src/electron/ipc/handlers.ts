@@ -11,7 +11,7 @@ import {
 } from '../database/repositories';
 import { IPC_CHANNELS, LLMSettingsData, AddChannelRequest, UpdateChannelRequest, SecurityMode, UpdateInfo } from '../../shared/types';
 import { AgentDaemon } from '../agent/daemon';
-import { LLMProviderFactory, LLMProviderConfig, ModelKey } from '../agent/llm';
+import { LLMProviderFactory, LLMProviderConfig, ModelKey, MODELS, GEMINI_MODELS, OPENROUTER_MODELS, OLLAMA_MODELS } from '../agent/llm';
 import { SearchProviderFactory, SearchSettings, SearchProviderType } from '../agent/search';
 import { ChannelGateway } from '../gateway';
 import { updateManager } from '../updater';
@@ -181,12 +181,21 @@ export function setupIpcHandlers(
   });
 
   ipcMain.handle(IPC_CHANNELS.LLM_SAVE_SETTINGS, async (_, settings: LLMSettingsData) => {
+    // Load existing settings to preserve cached models
+    const existingSettings = LLMProviderFactory.loadSettings();
+
     LLMProviderFactory.saveSettings({
       providerType: settings.providerType,
       modelKey: settings.modelKey as ModelKey,
       anthropic: settings.anthropic,
       bedrock: settings.bedrock,
       ollama: settings.ollama,
+      gemini: settings.gemini,
+      openrouter: settings.openrouter,
+      // Preserve cached models from existing settings
+      cachedGeminiModels: existingSettings.cachedGeminiModels,
+      cachedOpenRouterModels: existingSettings.cachedOpenRouterModels,
+      cachedOllamaModels: existingSettings.cachedOllamaModels,
     });
     // Clear cache so next task uses new settings
     LLMProviderFactory.clearCache();
@@ -196,7 +205,13 @@ export function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.LLM_TEST_PROVIDER, async (_, config: any) => {
     const providerConfig: LLMProviderConfig = {
       type: config.providerType,
-      model: LLMProviderFactory.getModelId(config.modelKey as ModelKey, config.providerType, config.ollama?.model),
+      model: LLMProviderFactory.getModelId(
+        config.modelKey as ModelKey,
+        config.providerType,
+        config.ollama?.model,
+        config.gemini?.model,
+        config.openrouter?.model
+      ),
       anthropicApiKey: config.anthropic?.apiKey,
       awsRegion: config.bedrock?.region,
       awsAccessKeyId: config.bedrock?.accessKeyId,
@@ -205,6 +220,8 @@ export function setupIpcHandlers(
       awsProfile: config.bedrock?.profile,
       ollamaBaseUrl: config.ollama?.baseUrl,
       ollamaApiKey: config.ollama?.apiKey,
+      geminiApiKey: config.gemini?.apiKey,
+      openrouterApiKey: config.openrouter?.apiKey,
     };
     return LLMProviderFactory.testProvider(providerConfig);
   });
@@ -221,23 +238,153 @@ export function setupIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.LLM_GET_CONFIG_STATUS, async () => {
     const settings = LLMProviderFactory.loadSettings();
-    const dbModels = llmModelRepo.findAll();
     const providers = LLMProviderFactory.getAvailableProviders();
+
+    // Get models based on the current provider type
+    let models: Array<{ key: string; displayName: string; description: string }> = [];
+    let currentModel = settings.modelKey;
+
+    switch (settings.providerType) {
+      case 'anthropic':
+      case 'bedrock':
+        // Use Anthropic/Bedrock models from MODELS
+        models = Object.entries(MODELS).map(([key, value]) => ({
+          key,
+          displayName: value.displayName,
+          description: key.includes('opus') ? 'Most capable for complex work' :
+                       key.includes('sonnet') ? 'Balanced performance and speed' :
+                       'Fast and efficient',
+        }));
+        break;
+
+      case 'gemini':
+        // For Gemini, use the specific model from settings (full model ID)
+        currentModel = settings.gemini?.model || 'gemini-2.0-flash';
+        // Use cached models if available, otherwise fall back to static list
+        const cachedGemini = LLMProviderFactory.getCachedModels('gemini');
+        if (cachedGemini && cachedGemini.length > 0) {
+          models = cachedGemini;
+        } else {
+          // Fall back to static models
+          models = Object.values(GEMINI_MODELS).map((value) => ({
+            key: value.id,
+            displayName: value.displayName,
+            description: value.description,
+          }));
+        }
+        // Ensure the currently selected model is in the list
+        if (currentModel && !models.some(m => m.key === currentModel)) {
+          models.unshift({
+            key: currentModel,
+            displayName: currentModel,
+            description: 'Selected model',
+          });
+        }
+        break;
+
+      case 'openrouter':
+        // For OpenRouter, use the specific model from settings (full model ID)
+        currentModel = settings.openrouter?.model || 'anthropic/claude-3.5-sonnet';
+        // Use cached models if available, otherwise fall back to static list
+        const cachedOpenRouter = LLMProviderFactory.getCachedModels('openrouter');
+        if (cachedOpenRouter && cachedOpenRouter.length > 0) {
+          models = cachedOpenRouter;
+        } else {
+          // Fall back to static models
+          models = Object.values(OPENROUTER_MODELS).map((value) => ({
+            key: value.id,
+            displayName: value.displayName,
+            description: value.description,
+          }));
+        }
+        // Ensure the currently selected model is in the list
+        if (currentModel && !models.some(m => m.key === currentModel)) {
+          models.unshift({
+            key: currentModel,
+            displayName: currentModel,
+            description: 'Selected model',
+          });
+        }
+        break;
+
+      case 'ollama':
+        // For Ollama, use the specific model from settings
+        currentModel = settings.ollama?.model || 'llama3.2';
+        // Use cached models if available, otherwise fall back to static list
+        const cachedOllama = LLMProviderFactory.getCachedModels('ollama');
+        if (cachedOllama && cachedOllama.length > 0) {
+          models = cachedOllama;
+        } else {
+          // Fall back to static models
+          models = Object.entries(OLLAMA_MODELS).map(([key, value]) => ({
+            key,
+            displayName: value.displayName,
+            description: `${value.size} parameter model`,
+          }));
+        }
+        // Ensure the currently selected model is in the list
+        if (currentModel && !models.some(m => m.key === currentModel)) {
+          models.unshift({
+            key: currentModel,
+            displayName: currentModel,
+            description: 'Selected model',
+          });
+        }
+        break;
+
+      default:
+        // Fallback to Anthropic models
+        models = Object.entries(MODELS).map(([key, value]) => ({
+          key,
+          displayName: value.displayName,
+          description: 'Claude model',
+        }));
+    }
 
     return {
       currentProvider: settings.providerType,
-      currentModel: settings.modelKey,
+      currentModel,
       providers,
-      models: dbModels.map(m => ({
-        key: m.key,
-        displayName: m.displayName,
-        description: m.description,
-      })),
+      models,
     };
   });
 
   ipcMain.handle(IPC_CHANNELS.LLM_GET_OLLAMA_MODELS, async (_, baseUrl?: string) => {
-    return LLMProviderFactory.getOllamaModels(baseUrl);
+    const models = await LLMProviderFactory.getOllamaModels(baseUrl);
+    // Cache the models for use in config status
+    const cachedModels = models.map(m => ({
+      key: m.name,
+      displayName: m.name,
+      description: `${Math.round(m.size / 1e9)}B parameter model`,
+      size: m.size,
+    }));
+    LLMProviderFactory.saveCachedModels('ollama', cachedModels);
+    return models;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.LLM_GET_GEMINI_MODELS, async (_, apiKey?: string) => {
+    const models = await LLMProviderFactory.getGeminiModels(apiKey);
+    // Cache the models for use in config status
+    const cachedModels = models.map(m => ({
+      key: m.name,
+      displayName: m.displayName,
+      description: m.description,
+    }));
+    LLMProviderFactory.saveCachedModels('gemini', cachedModels);
+    return models;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.LLM_GET_OPENROUTER_MODELS, async (_, apiKey?: string) => {
+    const models = await LLMProviderFactory.getOpenRouterModels(apiKey);
+    // Cache the models for use in config status
+    const cachedModels = models.map(m => ({
+      key: m.id,
+      displayName: m.name,
+      description: `Context: ${Math.round(m.context_length / 1000)}k tokens`,
+      contextLength: m.context_length,
+    }));
+    LLMProviderFactory.saveCachedModels('openrouter', cachedModels);
+    return models;
   });
 
   // Search Settings handlers

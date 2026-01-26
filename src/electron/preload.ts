@@ -27,6 +27,8 @@ const IPC_CHANNELS = {
   LLM_GET_MODELS: 'llm:getModels',
   LLM_GET_CONFIG_STATUS: 'llm:getConfigStatus',
   LLM_GET_OLLAMA_MODELS: 'llm:getOllamaModels',
+  LLM_GET_GEMINI_MODELS: 'llm:getGeminiModels',
+  LLM_GET_OPENROUTER_MODELS: 'llm:getOpenRouterModels',
   // Gateway / Channels
   GATEWAY_GET_CHANNELS: 'gateway:getChannels',
   GATEWAY_ADD_CHANNEL: 'gateway:addChannel',
@@ -111,6 +113,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getLLMModels: () => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_MODELS),
   getLLMConfigStatus: () => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_CONFIG_STATUS),
   getOllamaModels: (baseUrl?: string) => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_OLLAMA_MODELS, baseUrl),
+  getGeminiModels: (apiKey?: string) => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_GEMINI_MODELS, apiKey),
+  getOpenRouterModels: (apiKey?: string) => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_OPENROUTER_MODELS, apiKey),
 
   // Gateway / Channel APIs
   getGatewayChannels: () => ipcRenderer.invoke(IPC_CHANNELS.GATEWAY_GET_CHANNELS),
@@ -201,6 +205,8 @@ export interface ElectronAPI {
     models: Array<{ key: string; displayName: string; description: string }>;
   }>;
   getOllamaModels: (baseUrl?: string) => Promise<Array<{ name: string; size: number; modified: string }>>;
+  getGeminiModels: (apiKey?: string) => Promise<Array<{ name: string; displayName: string; description: string }>>;
+  getOpenRouterModels: (apiKey?: string) => Promise<Array<{ id: string; name: string; context_length: number }>>;
   // Gateway / Channel APIs
   getGatewayChannels: () => Promise<any[]>;
   addGatewayChannel: (data: { type: string; name: string; botToken: string; securityMode?: string; applicationId?: string; guildIds?: string[] }) => Promise<any>;

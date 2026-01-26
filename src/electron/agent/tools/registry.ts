@@ -286,8 +286,16 @@ Shell Commands:
               items: {
                 type: 'object',
                 properties: {
-                  name: { type: 'string' },
-                  data: { type: 'array', description: '2D array of cell values' },
+                  name: { type: 'string', description: 'Sheet name' },
+                  data: {
+                    type: 'array',
+                    description: '2D array of cell values (rows of columns)',
+                    items: {
+                      type: 'array',
+                      description: 'Row of cell values',
+                      items: { type: 'string', description: 'Cell value' },
+                    },
+                  },
                 },
               },
             },

@@ -1,4 +1,4 @@
-import { app } from 'electron';
+import { app, safeStorage } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
 import {
@@ -17,53 +17,113 @@ import { OpenRouterProvider } from './openrouter-provider';
 
 const SETTINGS_FILE = 'llm-settings.json';
 const MASKED_VALUE = '***configured***';
+const ENCRYPTED_PREFIX = 'encrypted:';
+
+/**
+ * Encrypt a secret using OS keychain via safeStorage
+ */
+function encryptSecret(value?: string): string | undefined {
+  if (!value || !value.trim()) return undefined;
+  const trimmed = value.trim();
+  if (trimmed === MASKED_VALUE) return undefined;
+
+  try {
+    if (safeStorage.isEncryptionAvailable()) {
+      const encrypted = safeStorage.encryptString(trimmed);
+      return ENCRYPTED_PREFIX + encrypted.toString('base64');
+    }
+  } catch (error) {
+    console.warn('Failed to encrypt secret, storing masked:', error);
+  }
+  // Fallback to masked value if encryption fails
+  return MASKED_VALUE;
+}
+
+/**
+ * Decrypt a secret that was encrypted with safeStorage
+ */
+function decryptSecret(value?: string): string | undefined {
+  if (!value) return undefined;
+  if (value === MASKED_VALUE) return undefined;
+
+  if (value.startsWith(ENCRYPTED_PREFIX)) {
+    try {
+      if (safeStorage.isEncryptionAvailable()) {
+        const encrypted = Buffer.from(value.slice(ENCRYPTED_PREFIX.length), 'base64');
+        return safeStorage.decryptString(encrypted);
+      }
+    } catch (error) {
+      console.warn('Failed to decrypt secret:', error);
+    }
+  }
+
+  // If not encrypted and not masked, return as-is (for backwards compatibility)
+  if (value !== MASKED_VALUE && !value.startsWith(ENCRYPTED_PREFIX)) {
+    return value.trim() || undefined;
+  }
+
+  return undefined;
+}
 
 function normalizeSecret(value?: string): string | undefined {
   if (!value) return undefined;
   const trimmed = value.trim();
-  if (!trimmed || trimmed === MASKED_VALUE) return undefined;
+  if (!trimmed || trimmed === MASKED_VALUE || trimmed.startsWith(ENCRYPTED_PREFIX)) return undefined;
   return trimmed;
 }
 
 function sanitizeSettings(settings: LLMSettings): LLMSettings {
   const sanitized: LLMSettings = { ...settings };
 
+  // Decrypt secrets when loading from disk
   if (sanitized.anthropic) {
     sanitized.anthropic = {
       ...sanitized.anthropic,
-      apiKey: normalizeSecret(sanitized.anthropic.apiKey),
+      apiKey: decryptSecret(sanitized.anthropic.apiKey),
     };
   }
 
   if (sanitized.bedrock) {
     sanitized.bedrock = {
       ...sanitized.bedrock,
-      secretAccessKey: normalizeSecret(sanitized.bedrock.secretAccessKey),
+      secretAccessKey: decryptSecret(sanitized.bedrock.secretAccessKey),
     };
   }
 
   if (sanitized.ollama) {
     sanitized.ollama = {
       ...sanitized.ollama,
-      apiKey: normalizeSecret(sanitized.ollama.apiKey),
+      apiKey: decryptSecret(sanitized.ollama.apiKey),
     };
   }
 
   if (sanitized.gemini) {
     sanitized.gemini = {
       ...sanitized.gemini,
-      apiKey: normalizeSecret(sanitized.gemini.apiKey),
+      apiKey: decryptSecret(sanitized.gemini.apiKey),
     };
   }
 
   if (sanitized.openrouter) {
     sanitized.openrouter = {
       ...sanitized.openrouter,
-      apiKey: normalizeSecret(sanitized.openrouter.apiKey),
+      apiKey: decryptSecret(sanitized.openrouter.apiKey),
     };
   }
 
   return sanitized;
+}
+
+/**
+ * Cached model info for dynamic providers
+ */
+export interface CachedModelInfo {
+  key: string;
+  displayName: string;
+  description: string;
+  // Additional fields for provider-specific info
+  contextLength?: number;  // For OpenRouter models
+  size?: number;           // For Ollama models (in bytes)
 }
 
 /**
@@ -96,6 +156,10 @@ export interface LLMSettings {
     apiKey?: string;
     model?: string;
   };
+  // Cached models from API (populated when user refreshes)
+  cachedGeminiModels?: CachedModelInfo[];
+  cachedOpenRouterModels?: CachedModelInfo[];
+  cachedOllamaModels?: CachedModelInfo[];
 }
 
 const DEFAULT_SETTINGS: LLMSettings = {
@@ -247,47 +311,42 @@ export class LLMProviderFactory {
    */
   static saveSettings(settings: LLMSettings): void {
     try {
-      // Don't save sensitive data in plain text - mask API keys
+      // Encrypt sensitive data using OS keychain before saving
       const settingsToSave = { ...settings };
 
-      // For Anthropic, we can store a flag that key exists but not the key itself
-      // The actual key should come from environment or keychain
+      // Encrypt API keys using safeStorage (OS keychain)
       if (settingsToSave.anthropic?.apiKey) {
         settingsToSave.anthropic = {
           ...settingsToSave.anthropic,
-          apiKey: MASKED_VALUE, // Marker that key is set
+          apiKey: encryptSecret(settingsToSave.anthropic.apiKey),
         };
       }
 
-      // Same for AWS credentials
       if (settingsToSave.bedrock?.secretAccessKey) {
         settingsToSave.bedrock = {
           ...settingsToSave.bedrock,
-          secretAccessKey: MASKED_VALUE,
+          secretAccessKey: encryptSecret(settingsToSave.bedrock.secretAccessKey),
         };
       }
 
-      // Same for Ollama API key (for remote servers)
       if (settingsToSave.ollama?.apiKey) {
         settingsToSave.ollama = {
           ...settingsToSave.ollama,
-          apiKey: MASKED_VALUE,
+          apiKey: encryptSecret(settingsToSave.ollama.apiKey),
         };
       }
 
-      // Same for Gemini API key
       if (settingsToSave.gemini?.apiKey) {
         settingsToSave.gemini = {
           ...settingsToSave.gemini,
-          apiKey: MASKED_VALUE,
+          apiKey: encryptSecret(settingsToSave.gemini.apiKey),
         };
       }
 
-      // Same for OpenRouter API key
       if (settingsToSave.openrouter?.apiKey) {
         settingsToSave.openrouter = {
           ...settingsToSave.openrouter,
-          apiKey: MASKED_VALUE,
+          apiKey: encryptSecret(settingsToSave.openrouter.apiKey),
         };
       }
 
@@ -421,38 +480,39 @@ export class LLMProviderFactory {
     name: string;
     configured: boolean;
   }> {
-    const hasAnthropicKey = !!this.getAnthropicKeyFromEnv();
+    const hasAnthropicKeyEnv = !!this.getAnthropicKeyFromEnv();
 
     const awsAccessKey = process.env.AWS_ACCESS_KEY_ID;
     const awsSecretKey = process.env.AWS_SECRET_ACCESS_KEY;
     const awsProfile = process.env.AWS_PROFILE;
     const hasAwsCredentials = (awsAccessKey && awsSecretKey) || awsProfile;
 
-    // Also check saved settings
+    // Also check saved settings for API keys
     const settings = this.loadSettings();
+    const hasAnthropicKeyInSettings = !!settings.anthropic?.apiKey;
     const hasBedrockInSettings = settings.bedrock?.region || settings.bedrock?.profile;
     const hasOllamaInSettings = settings.ollama?.baseUrl || settings.ollama?.model;
     const hasOllamaEnv = !!this.getOllamaBaseUrlFromEnv();
-    const hasGeminiKey = !!this.getGeminiKeyFromEnv();
-    const hasGeminiInSettings = !!settings.gemini?.model;
-    const hasOpenRouterKey = !!this.getOpenRouterKeyFromEnv();
-    const hasOpenRouterInSettings = !!settings.openrouter?.model;
+    const hasGeminiKeyEnv = !!this.getGeminiKeyFromEnv();
+    const hasGeminiKeyInSettings = !!settings.gemini?.apiKey;
+    const hasOpenRouterKeyEnv = !!this.getOpenRouterKeyFromEnv();
+    const hasOpenRouterKeyInSettings = !!settings.openrouter?.apiKey;
 
     return [
       {
         type: 'anthropic' as LLMProviderType,
         name: 'Anthropic API',
-        configured: hasAnthropicKey,
+        configured: !!(hasAnthropicKeyEnv || hasAnthropicKeyInSettings),
       },
       {
         type: 'gemini' as LLMProviderType,
         name: 'Google Gemini',
-        configured: !!(hasGeminiKey || hasGeminiInSettings),
+        configured: !!(hasGeminiKeyEnv || hasGeminiKeyInSettings),
       },
       {
         type: 'openrouter' as LLMProviderType,
         name: 'OpenRouter',
-        configured: !!(hasOpenRouterKey || hasOpenRouterInSettings),
+        configured: !!(hasOpenRouterKeyEnv || hasOpenRouterKeyInSettings),
       },
       {
         type: 'bedrock' as LLMProviderType,
@@ -518,6 +578,132 @@ export class LLMProviderFactory {
     } catch (error: any) {
       console.error('Failed to fetch Ollama models:', error);
       return [];
+    }
+  }
+
+  /**
+   * Fetch available Gemini models from the API
+   */
+  static async getGeminiModels(apiKey?: string): Promise<Array<{ name: string; displayName: string; description: string }>> {
+    const settings = this.loadSettings();
+    // Normalize empty strings to undefined
+    const normalizedApiKey = apiKey?.trim() || undefined;
+    const settingsKey = settings.gemini?.apiKey;
+    const envKey = this.getGeminiKeyFromEnv();
+    const key = normalizedApiKey || settingsKey || envKey;
+
+    // Debug logging
+    const maskKey = (k?: string) => k ? `${k.substring(0, 8)}...${k.slice(-4)}` : 'undefined';
+    console.log(`[Gemini] getGeminiModels called:`);
+    console.log(`  - passedApiKey: ${maskKey(normalizedApiKey)}`);
+    console.log(`  - settingsKey: ${maskKey(settingsKey)}`);
+    console.log(`  - envKey: ${maskKey(envKey)}`);
+    console.log(`  - finalKey: ${maskKey(key)}`);
+
+    const defaultModels = [
+      { name: 'gemini-2.5-pro-preview-05-06', displayName: 'Gemini 2.5 Pro', description: 'Most capable model for complex tasks' },
+      { name: 'gemini-2.5-flash-preview-05-20', displayName: 'Gemini 2.5 Flash', description: 'Fast and efficient for most tasks' },
+      { name: 'gemini-2.0-flash', displayName: 'Gemini 2.0 Flash', description: 'Balanced speed and capability' },
+      { name: 'gemini-2.0-flash-lite', displayName: 'Gemini 2.0 Flash Lite', description: 'Fastest and most cost-effective' },
+      { name: 'gemini-1.5-pro', displayName: 'Gemini 1.5 Pro', description: 'Previous generation pro model' },
+      { name: 'gemini-1.5-flash', displayName: 'Gemini 1.5 Flash', description: 'Previous generation flash model' },
+    ];
+
+    if (!key) {
+      // Return default models if no API key
+      return defaultModels;
+    }
+
+    try {
+      const provider = new GeminiProvider({
+        type: 'gemini',
+        model: '',
+        geminiApiKey: key,
+      });
+      return await provider.getAvailableModels();
+    } catch (error: any) {
+      console.error('Failed to fetch Gemini models:', error);
+      // Return default models on error instead of empty array
+      return defaultModels;
+    }
+  }
+
+  /**
+   * Fetch available OpenRouter models from the API
+   */
+  static async getOpenRouterModels(apiKey?: string): Promise<Array<{ id: string; name: string; context_length: number }>> {
+    const settings = this.loadSettings();
+    // Normalize empty strings to undefined
+    const normalizedApiKey = apiKey?.trim() || undefined;
+    const key = normalizedApiKey || settings.openrouter?.apiKey || this.getOpenRouterKeyFromEnv();
+
+    const defaultModels = [
+      { id: 'anthropic/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet', context_length: 200000 },
+      { id: 'anthropic/claude-3-opus', name: 'Claude 3 Opus', context_length: 200000 },
+      { id: 'openai/gpt-4o', name: 'GPT-4o', context_length: 128000 },
+      { id: 'openai/gpt-4o-mini', name: 'GPT-4o Mini', context_length: 128000 },
+      { id: 'google/gemini-pro-1.5', name: 'Gemini Pro 1.5', context_length: 1000000 },
+      { id: 'meta-llama/llama-3.1-405b-instruct', name: 'Llama 3.1 405B', context_length: 131072 },
+    ];
+
+    if (!key) {
+      // Return default models if no API key
+      return defaultModels;
+    }
+
+    try {
+      const provider = new OpenRouterProvider({
+        type: 'openrouter',
+        model: '',
+        openrouterApiKey: key,
+      });
+      return await provider.getAvailableModels();
+    } catch (error: any) {
+      console.error('Failed to fetch OpenRouter models:', error);
+      // Return default models on error instead of empty array
+      return defaultModels;
+    }
+  }
+
+  /**
+   * Save cached models for a provider
+   */
+  static saveCachedModels(
+    providerType: 'gemini' | 'openrouter' | 'ollama',
+    models: CachedModelInfo[]
+  ): void {
+    const settings = this.loadSettings();
+
+    switch (providerType) {
+      case 'gemini':
+        settings.cachedGeminiModels = models;
+        break;
+      case 'openrouter':
+        settings.cachedOpenRouterModels = models;
+        break;
+      case 'ollama':
+        settings.cachedOllamaModels = models;
+        break;
+    }
+
+    this.saveSettings(settings);
+  }
+
+  /**
+   * Get cached models for a provider
+   */
+  static getCachedModels(providerType: 'gemini' | 'openrouter' | 'ollama'): CachedModelInfo[] | undefined {
+    const settings = this.loadSettings();
+
+    switch (providerType) {
+      case 'gemini':
+        return settings.cachedGeminiModels;
+      case 'openrouter':
+        return settings.cachedOpenRouterModels;
+      case 'ollama':
+        return settings.cachedOllamaModels;
+      default:
+        return undefined;
     }
   }
 }

@@ -180,6 +180,8 @@ export const IPC_CHANNELS = {
   LLM_GET_MODELS: 'llm:getModels',
   LLM_GET_CONFIG_STATUS: 'llm:getConfigStatus',
   LLM_GET_OLLAMA_MODELS: 'llm:getOllamaModels',
+  LLM_GET_GEMINI_MODELS: 'llm:getGeminiModels',
+  LLM_GET_OPENROUTER_MODELS: 'llm:getOpenRouterModels',
 
   // Gateway / Channels
   GATEWAY_GET_CHANNELS: 'gateway:getChannels',
@@ -214,6 +216,14 @@ export const IPC_CHANNELS = {
 // LLM Provider types
 export type LLMProviderType = 'anthropic' | 'bedrock' | 'ollama' | 'gemini' | 'openrouter';
 
+export interface CachedModelInfo {
+  key: string;
+  displayName: string;
+  description: string;
+  contextLength?: number;  // For OpenRouter models
+  size?: number;           // For Ollama models (in bytes)
+}
+
 export interface LLMSettingsData {
   providerType: LLMProviderType;
   modelKey: string;
@@ -241,6 +251,10 @@ export interface LLMSettingsData {
     apiKey?: string;
     model?: string;
   };
+  // Cached models from API (populated when user refreshes)
+  cachedGeminiModels?: CachedModelInfo[];
+  cachedOpenRouterModels?: CachedModelInfo[];
+  cachedOllamaModels?: CachedModelInfo[];
 }
 
 export interface LLMProviderInfo {

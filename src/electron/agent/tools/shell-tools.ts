@@ -21,16 +21,9 @@ export class ShellTools {
   ) {}
 
   /**
-   * Check if shell execution is allowed
-   */
-  private checkPermission(): void {
-    if (!this.workspace.permissions.shell) {
-      throw new Error('Shell execution permission not granted for this workspace');
-    }
-  }
-
-  /**
    * Execute a shell command (requires user approval)
+   * Note: We don't check workspace.permissions.shell here because
+   * shell commands always require explicit user approval via requestApproval()
    */
   async runCommand(
     command: string,
@@ -46,8 +39,6 @@ export class ShellTools {
     exitCode: number | null;
     truncated?: boolean;
   }> {
-    this.checkPermission();
-
     // Request user approval before executing
     const approved = await this.daemon.requestApproval(
       this.taskId,

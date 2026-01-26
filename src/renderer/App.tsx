@@ -63,6 +63,7 @@ export function App() {
         'step_started': 'executing',
         'step_completed': 'executing',
         'task_completed': 'completed',
+        'follow_up_completed': 'completed',
         'error': 'failed',
       };
 
@@ -159,6 +160,18 @@ export function App() {
     }
   };
 
+  const handleCancelTask = async () => {
+    if (!selectedTaskId) return;
+
+    try {
+      await window.electronAPI.cancelTask(selectedTaskId);
+    } catch (error: unknown) {
+      console.error('Failed to cancel task:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to cancel task';
+      alert(`Error: ${errorMessage}`);
+    }
+  };
+
   const handleModelChange = (modelKey: string) => {
     setSelectedModel(modelKey);
     // When model changes during a task, clear the current task to start fresh
@@ -191,6 +204,7 @@ export function App() {
             onSendMessage={handleSendMessage}
             onCreateTask={handleCreateTask}
             onChangeWorkspace={() => setCurrentView('workspace-selector')}
+            onStopTask={handleCancelTask}
             selectedModel={selectedModel}
             availableModels={availableModels}
             onModelChange={handleModelChange}

@@ -206,19 +206,22 @@ interface MainContentProps {
   onSendMessage: (message: string) => void;
   onCreateTask?: (title: string, prompt: string) => void;
   onChangeWorkspace?: () => void;
+  onStopTask?: () => void;
   selectedModel: string;
   availableModels: LLMModelInfo[];
   onModelChange: (model: string) => void;
 }
 
-export function MainContent({ task, workspace, events, onSendMessage, onCreateTask, onChangeWorkspace, selectedModel, availableModels, onModelChange }: MainContentProps) {
+export function MainContent({ task, workspace, events, onSendMessage, onCreateTask, onChangeWorkspace, onStopTask, selectedModel, availableModels, onModelChange }: MainContentProps) {
   const [pendingApproval, setPendingApproval] = useState<ApprovalRequest | null>(null);
   const [inputValue, setInputValue] = useState('');
   const [showSteps, setShowSteps] = useState(true);
   const [autoScroll, setAutoScroll] = useState(true);
+  const [queuedMessage, setQueuedMessage] = useState<string | null>(null);
 
   const timelineRef = useRef<HTMLDivElement>(null);
   const mainBodyRef = useRef<HTMLDivElement>(null);
+  const prevTaskStatusRef = useRef<Task['status'] | undefined>(undefined);
 
   // Check if user is near the bottom of the scroll container
   const isNearBottom = useCallback((element: HTMLElement, threshold = 100) => {
@@ -248,6 +251,20 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
   useEffect(() => {
     setAutoScroll(true);
   }, [task?.id]);
+
+  // Send queued message when task finishes executing
+  useEffect(() => {
+    const prevStatus = prevTaskStatusRef.current;
+    const currentStatus = task?.status;
+
+    // If task was executing and now it's not, send the queued message
+    if (prevStatus === 'executing' && currentStatus !== 'executing' && queuedMessage) {
+      onSendMessage(queuedMessage);
+      setQueuedMessage(null);
+    }
+
+    prevTaskStatusRef.current = currentStatus;
+  }, [task?.status, queuedMessage, onSendMessage]);
 
   // Check for approval requests in events
   useEffect(() => {
@@ -299,6 +316,17 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
       }
       setInputValue('');
     }
+  };
+
+  const handleQueue = () => {
+    if (inputValue.trim()) {
+      setQueuedMessage(inputValue.trim());
+      setInputValue('');
+    }
+  };
+
+  const handleClearQueue = () => {
+    setQueuedMessage(null);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -508,11 +536,28 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
       {/* Footer with Input */}
       <div className="main-footer">
         <div className="input-container">
+          {/* Queued message display */}
+          {queuedMessage && (
+            <div className="queued-message-frame">
+              <div className="queued-message-content">
+                <svg className="queued-message-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M12 19V5M5 12l7-7 7 7" />
+                </svg>
+                <span className="queued-message-label">Queue:</span>
+                <span className="queued-message-text">{queuedMessage}</span>
+              </div>
+              <button className="queued-message-clear" onClick={handleClearQueue} title="Remove from queue">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          )}
           <div className="input-row">
             <input
               type="text"
               className="input-field"
-              placeholder="Reply..."
+              placeholder={queuedMessage ? "Message queued..." : "Reply..."}
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={handleKeyDown}
@@ -523,19 +568,35 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
                 selectedModel={selectedModel}
                 onModelChange={onModelChange}
               />
-              <button
-                className={`send-btn ${task.status === 'executing' ? 'send-btn-queue' : ''}`}
-                onClick={handleSend}
-                disabled={!inputValue.trim() && task.status !== 'executing'}
-              >
-                {task.status === 'executing' ? (
+              {task.status === 'executing' && onStopTask && (
+                <button
+                  className="send-btn send-btn-stop"
+                  onClick={onStopTask}
+                  title="Stop task"
+                >
+                  <span>Stop</span>
+                </button>
+              )}
+              {task.status === 'executing' ? (
+                <button
+                  className="send-btn send-btn-queue"
+                  onClick={handleQueue}
+                  disabled={!inputValue.trim() || !!queuedMessage}
+                  title={queuedMessage ? "A message is already queued" : "Add to queue"}
+                >
                   <span>Queue</span>
-                ) : (
+                </button>
+              ) : (
+                <button
+                  className="send-btn"
+                  onClick={handleSend}
+                  disabled={!inputValue.trim()}
+                >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M12 19V5M5 12l7-7 7 7" />
                   </svg>
-                )}
-              </button>
+                </button>
+              )}
             </div>
           </div>
           <div className="input-disclaimer">

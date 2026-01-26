@@ -188,6 +188,7 @@ You are continuing a previous conversation. The context from the previous conver
 
       // Phase 2: Execution
       this.daemon.updateTaskStatus(this.task.id, 'executing');
+      this.daemon.logEvent(this.task.id, 'executing', { message: 'Executing plan' });
       await this.executePlan();
 
       if (this.cancelled) return;
@@ -571,6 +572,7 @@ IMPORTANT INSTRUCTIONS:
    */
   async sendMessage(message: string): Promise<void> {
     this.daemon.updateTaskStatus(this.task.id, 'executing');
+    this.daemon.logEvent(this.task.id, 'executing', { message: 'Processing follow-up message' });
     this.daemon.logEvent(this.task.id, 'log', { message: `User: ${message}` });
 
     // Ensure system prompt is set

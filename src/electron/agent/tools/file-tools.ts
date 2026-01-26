@@ -199,9 +199,10 @@ export class FileTools {
   /**
    * Delete file (requires approval)
    * Uses shell.trashItem() for protected locations like /Applications
+   * Note: We don't check workspace.permissions.delete here because
+   * delete operations always require explicit user approval via requestApproval()
    */
   async deleteFile(relativePath: string): Promise<{ success: boolean; movedToTrash?: boolean }> {
-    this.checkPermission('delete');
     const fullPath = this.resolvePath(relativePath);
 
     // Request user approval

@@ -8,6 +8,7 @@
 import {
   Client,
   GatewayIntentBits,
+  Partials,
   Events,
   Message,
   REST,
@@ -71,13 +72,18 @@ export class DiscordAdapter implements ChannelAdapter {
     this.setStatus('connecting');
 
     try {
-      // Create client instance with required intents
+      // Create client instance with required intents and partials
+      // Partials.Channel is required to receive DM messages
       this.client = new Client({
         intents: [
           GatewayIntentBits.Guilds,
           GatewayIntentBits.GuildMessages,
           GatewayIntentBits.DirectMessages,
           GatewayIntentBits.MessageContent,
+        ],
+        partials: [
+          Partials.Channel, // Required to receive DMs
+          Partials.Message, // Required for uncached message events
         ],
       });
 
@@ -102,8 +108,11 @@ export class DiscordAdapter implements ChannelAdapter {
         const isDM = message.channel.type === DiscordChannelType.DM;
         const isMentioned = message.mentions.has(this.client!.user!);
 
+        console.log(`Discord message received: isDM=${isDM}, isMentioned=${isMentioned}, content="${message.content.slice(0, 50)}"`);
+
         if (isDM || isMentioned) {
           const incomingMessage = this.mapMessageToIncoming(message);
+          console.log(`Processing Discord message from ${message.author.username}: ${incomingMessage.text.slice(0, 50)}`);
           await this.handleIncomingMessage(incomingMessage);
         }
       });

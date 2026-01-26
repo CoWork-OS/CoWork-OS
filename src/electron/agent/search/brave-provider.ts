@@ -19,10 +19,10 @@ export class BraveProvider implements SearchProvider {
   private baseUrl = 'https://api.search.brave.com/res/v1';
 
   constructor(config: SearchProviderConfig) {
-    const apiKey = config.braveApiKey || process.env.BRAVE_API_KEY;
+    const apiKey = config.braveApiKey;
     if (!apiKey) {
       throw new Error(
-        'Brave API key is required. Get one from https://brave.com/search/api/'
+        'Brave API key is required. Configure it in Settings or get one from https://brave.com/search/api/'
       );
     }
     this.apiKey = apiKey;

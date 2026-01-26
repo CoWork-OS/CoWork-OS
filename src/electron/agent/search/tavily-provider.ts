@@ -19,9 +19,9 @@ export class TavilyProvider implements SearchProvider {
   private baseUrl = 'https://api.tavily.com';
 
   constructor(config: SearchProviderConfig) {
-    const apiKey = config.tavilyApiKey || process.env.TAVILY_API_KEY;
+    const apiKey = config.tavilyApiKey;
     if (!apiKey) {
-      throw new Error('Tavily API key is required. Get one from https://tavily.com/');
+      throw new Error('Tavily API key is required. Configure it in Settings or get one from https://tavily.com/');
     }
     this.apiKey = apiKey;
   }

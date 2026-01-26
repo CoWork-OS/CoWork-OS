@@ -27,9 +27,9 @@ export class GeminiProvider implements LLMProvider {
   private defaultModel: string;
 
   constructor(config: LLMProviderConfig) {
-    const apiKey = config.geminiApiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
+    const apiKey = config.geminiApiKey;
     if (!apiKey) {
-      throw new Error('Gemini API key is required. Get one from https://aistudio.google.com/apikey');
+      throw new Error('Gemini API key is required. Configure it in Settings or get one from https://aistudio.google.com/apikey');
     }
 
     this.client = new GoogleGenerativeAI(apiKey);

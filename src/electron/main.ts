@@ -1,10 +1,5 @@
-import { config } from 'dotenv';
 import path from 'path';
-
-// Load environment variables from .env file
-config({ path: path.join(process.cwd(), '.env') });
-
-import { app, BrowserWindow, ipcMain, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, session } from 'electron';
 import { DatabaseManager } from './database/schema';
 import { setupIpcHandlers } from './ipc/handlers';
 import { AgentDaemon } from './agent/daemon';
@@ -12,6 +7,7 @@ import { LLMProviderFactory } from './agent/llm';
 import { SearchProviderFactory } from './agent/search';
 import { ChannelGateway } from './gateway';
 import { updateManager } from './updater';
+import { migrateEnvToSettings } from './utils/env-migration';
 
 let mainWindow: BrowserWindow | null = null;
 let dbManager: DatabaseManager;
@@ -51,9 +47,33 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  // Set up Content Security Policy for production builds
+  if (process.env.NODE_ENV !== 'development') {
+    session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+      callback({
+        responseHeaders: {
+          ...details.responseHeaders,
+          'Content-Security-Policy': [
+            "default-src 'self'; " +
+            "script-src 'self'; " +
+            "style-src 'self' 'unsafe-inline'; " +  // Allow inline styles for React
+            "img-src 'self' data: https:; " +       // Allow images from self, data URIs, and HTTPS
+            "font-src 'self' data:; " +             // Allow fonts from self and data URIs
+            "connect-src 'self' https:; " +         // Allow API calls to HTTPS endpoints
+            "frame-ancestors 'none'; " +            // Prevent embedding in iframes
+            "form-action 'self';"                   // Restrict form submissions
+          ],
+        },
+      });
+    });
+  }
+
   // Initialize provider factories (loads settings from disk)
   LLMProviderFactory.initialize();
   SearchProviderFactory.initialize();
+
+  // Migrate .env configuration to Settings (one-time upgrade path)
+  const migrationResult = await migrateEnvToSettings();
 
   // Initialize database
   dbManager = new DatabaseManager();
@@ -78,6 +98,23 @@ app.whenReady().then(async () => {
     await channelGateway.initialize(mainWindow);
     // Initialize update manager with main window reference
     updateManager.setMainWindow(mainWindow);
+
+    // Show migration notification after window is ready
+    if (migrationResult.migrated && migrationResult.migratedKeys.length > 0) {
+      mainWindow.webContents.once('did-finish-load', () => {
+        dialog.showMessageBox(mainWindow!, {
+          type: 'info',
+          title: 'Configuration Migrated',
+          message: 'Your API credentials have been migrated',
+          detail: `The following credentials were migrated from your .env file to secure Settings storage:\n\n` +
+            `${migrationResult.migratedKeys.map(k => `• ${k}`).join('\n')}\n\n` +
+            `Your .env file has been renamed to .env.migrated. ` +
+            `You can safely delete it after verifying your settings work correctly.\n\n` +
+            `Open Settings (gear icon) to review your configuration.`,
+          buttons: ['OK'],
+        });
+      });
+    }
   }
 
   app.on('activate', () => {

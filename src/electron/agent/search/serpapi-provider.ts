@@ -19,9 +19,9 @@ export class SerpApiProvider implements SearchProvider {
   private baseUrl = 'https://serpapi.com/search.json';
 
   constructor(config: SearchProviderConfig) {
-    const apiKey = config.serpApiKey || process.env.SERPAPI_KEY;
+    const apiKey = config.serpApiKey;
     if (!apiKey) {
-      throw new Error('SerpAPI key is required. Get one from https://serpapi.com/');
+      throw new Error('SerpAPI key is required. Configure it in Settings or get one from https://serpapi.com/');
     }
     this.apiKey = apiKey;
   }

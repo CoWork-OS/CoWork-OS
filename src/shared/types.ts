@@ -182,6 +182,7 @@ export const IPC_CHANNELS = {
   LLM_GET_OLLAMA_MODELS: 'llm:getOllamaModels',
   LLM_GET_GEMINI_MODELS: 'llm:getGeminiModels',
   LLM_GET_OPENROUTER_MODELS: 'llm:getOpenRouterModels',
+  LLM_GET_BEDROCK_MODELS: 'llm:getBedrockModels',
 
   // Gateway / Channels
   GATEWAY_GET_CHANNELS: 'gateway:getChannels',
@@ -237,6 +238,7 @@ export interface LLMSettingsData {
     sessionToken?: string;
     profile?: string;
     useDefaultCredentials?: boolean;
+    model?: string;
   };
   ollama?: {
     baseUrl?: string;
@@ -255,6 +257,7 @@ export interface LLMSettingsData {
   cachedGeminiModels?: CachedModelInfo[];
   cachedOpenRouterModels?: CachedModelInfo[];
   cachedOllamaModels?: CachedModelInfo[];
+  cachedBedrockModels?: CachedModelInfo[];
 }
 
 export interface LLMProviderInfo {

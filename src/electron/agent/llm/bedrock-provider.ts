@@ -30,7 +30,7 @@ export class BedrockProvider implements LLMProvider {
 
   constructor(config: LLMProviderConfig) {
     const clientConfig: BedrockRuntimeClientConfig = {
-      region: config.awsRegion || process.env.AWS_REGION || 'us-east-1',
+      region: config.awsRegion || 'us-east-1',
     };
 
     // Use explicit credentials if provided

@@ -15,6 +15,47 @@ import { LLMProviderFactory, LLMProviderConfig, ModelKey, MODELS, GEMINI_MODELS,
 import { SearchProviderFactory, SearchSettings, SearchProviderType } from '../agent/search';
 import { ChannelGateway } from '../gateway';
 import { updateManager } from '../updater';
+import { rateLimiter, RATE_LIMIT_CONFIGS } from '../utils/rate-limiter';
+import {
+  validateInput,
+  WorkspaceCreateSchema,
+  TaskCreateSchema,
+  TaskRenameSchema,
+  TaskMessageSchema,
+  ApprovalResponseSchema,
+  LLMSettingsSchema,
+  SearchSettingsSchema,
+  AddChannelSchema,
+  UpdateChannelSchema,
+  GrantAccessSchema,
+  RevokeAccessSchema,
+  GeneratePairingSchema,
+  UUIDSchema,
+  StringIdSchema,
+} from '../utils/validation';
+
+// Helper to check rate limit and throw if exceeded
+function checkRateLimit(channel: string, config = RATE_LIMIT_CONFIGS.standard): void {
+  if (!rateLimiter.check(channel)) {
+    const resetMs = rateLimiter.getResetTime(channel);
+    const resetSec = Math.ceil(resetMs / 1000);
+    throw new Error(`Rate limit exceeded. Try again in ${resetSec} seconds.`);
+  }
+}
+
+// Configure rate limits for sensitive channels
+rateLimiter.configure(IPC_CHANNELS.TASK_CREATE, RATE_LIMIT_CONFIGS.expensive);
+rateLimiter.configure(IPC_CHANNELS.TASK_SEND_MESSAGE, RATE_LIMIT_CONFIGS.expensive);
+rateLimiter.configure(IPC_CHANNELS.LLM_SAVE_SETTINGS, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.LLM_TEST_PROVIDER, RATE_LIMIT_CONFIGS.expensive);
+rateLimiter.configure(IPC_CHANNELS.LLM_GET_OLLAMA_MODELS, RATE_LIMIT_CONFIGS.standard);
+rateLimiter.configure(IPC_CHANNELS.LLM_GET_GEMINI_MODELS, RATE_LIMIT_CONFIGS.standard);
+rateLimiter.configure(IPC_CHANNELS.LLM_GET_OPENROUTER_MODELS, RATE_LIMIT_CONFIGS.standard);
+rateLimiter.configure(IPC_CHANNELS.LLM_GET_BEDROCK_MODELS, RATE_LIMIT_CONFIGS.standard);
+rateLimiter.configure(IPC_CHANNELS.SEARCH_SAVE_SETTINGS, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.SEARCH_TEST_PROVIDER, RATE_LIMIT_CONFIGS.expensive);
+rateLimiter.configure(IPC_CHANNELS.GATEWAY_ADD_CHANNEL, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.GATEWAY_TEST_CHANNEL, RATE_LIMIT_CONFIGS.expensive);
 
 export function setupIpcHandlers(
   dbManager: DatabaseManager,
@@ -29,40 +70,74 @@ export function setupIpcHandlers(
   const skillRepo = new SkillRepository(db);
   const llmModelRepo = new LLMModelRepository(db);
 
+  // Helper to validate path is within workspace (prevent path traversal attacks)
+  const isPathWithinWorkspace = (filePath: string, workspacePath: string): boolean => {
+    const normalizedWorkspace = path.resolve(workspacePath);
+    const normalizedFile = path.resolve(normalizedWorkspace, filePath);
+    const relative = path.relative(normalizedWorkspace, normalizedFile);
+    // If relative path starts with '..' or is absolute, it's outside workspace
+    return !relative.startsWith('..') && !path.isAbsolute(relative);
+  };
+
   // File handlers - open files and show in Finder
   ipcMain.handle('file:open', async (_, filePath: string, workspacePath?: string) => {
-    // If workspacePath is provided and filePath is relative, resolve it
-    let resolvedPath = filePath;
-    if (workspacePath && !path.isAbsolute(filePath)) {
-      resolvedPath = path.resolve(workspacePath, filePath);
+    // Security: require workspacePath and validate path is within it
+    if (!workspacePath) {
+      throw new Error('Workspace path is required for file operations');
     }
+
+    // Resolve the path relative to workspace
+    const resolvedPath = path.isAbsolute(filePath)
+      ? filePath
+      : path.resolve(workspacePath, filePath);
+
+    // Validate path is within workspace (prevent path traversal)
+    if (!isPathWithinWorkspace(resolvedPath, workspacePath)) {
+      throw new Error('Access denied: file path is outside the workspace');
+    }
+
     return shell.openPath(resolvedPath);
   });
 
   ipcMain.handle('file:showInFinder', async (_, filePath: string, workspacePath?: string) => {
-    // If workspacePath is provided and filePath is relative, resolve it
-    let resolvedPath = filePath;
-    if (workspacePath && !path.isAbsolute(filePath)) {
-      resolvedPath = path.resolve(workspacePath, filePath);
+    // Security: require workspacePath and validate path is within it
+    if (!workspacePath) {
+      throw new Error('Workspace path is required for file operations');
     }
+
+    // Resolve the path relative to workspace
+    const resolvedPath = path.isAbsolute(filePath)
+      ? filePath
+      : path.resolve(workspacePath, filePath);
+
+    // Validate path is within workspace (prevent path traversal)
+    if (!isPathWithinWorkspace(resolvedPath, workspacePath)) {
+      throw new Error('Access denied: file path is outside the workspace');
+    }
+
     shell.showItemInFolder(resolvedPath);
   });
 
   // Workspace handlers
   ipcMain.handle(IPC_CHANNELS.WORKSPACE_CREATE, async (_, data) => {
-    const { name, path, permissions } = data;
-
-    // Validate path is not empty
-    if (!path || typeof path !== 'string' || path.trim() === '') {
-      throw new Error('Workspace path is required');
-    }
+    const validated = validateInput(WorkspaceCreateSchema, data, 'workspace');
+    const { name, path, permissions } = validated;
 
     // Check if workspace with this path already exists
     if (workspaceRepo.existsByPath(path)) {
       throw new Error(`A workspace with path "${path}" already exists. Please choose a different folder.`);
     }
 
-    return workspaceRepo.create(name, path, permissions);
+    // Provide default permissions if not specified
+    const defaultPermissions = {
+      read: true,
+      write: true,
+      delete: false,
+      network: false,
+      shell: false,
+    };
+
+    return workspaceRepo.create(name, path, permissions ?? defaultPermissions);
   });
 
   ipcMain.handle(IPC_CHANNELS.WORKSPACE_LIST, async () => {
@@ -75,7 +150,9 @@ export function setupIpcHandlers(
 
   // Task handlers
   ipcMain.handle(IPC_CHANNELS.TASK_CREATE, async (_, data) => {
-    const { title, prompt, workspaceId, budgetTokens, budgetCost } = data;
+    checkRateLimit(IPC_CHANNELS.TASK_CREATE);
+    const validated = validateInput(TaskCreateSchema, data, 'task');
+    const { title, prompt, workspaceId, budgetTokens, budgetCost } = validated;
     const task = taskRepo.create({
       title,
       prompt,
@@ -129,8 +206,9 @@ export function setupIpcHandlers(
     taskRepo.update(id, { status: 'executing' });
   });
 
-  ipcMain.handle(IPC_CHANNELS.TASK_RENAME, async (_, data: { id: string; title: string }) => {
-    taskRepo.update(data.id, { title: data.title });
+  ipcMain.handle(IPC_CHANNELS.TASK_RENAME, async (_, data) => {
+    const validated = validateInput(TaskRenameSchema, data, 'task rename');
+    taskRepo.update(validated.id, { title: validated.title });
   });
 
   ipcMain.handle(IPC_CHANNELS.TASK_DELETE, async (_, id: string) => {
@@ -146,14 +224,16 @@ export function setupIpcHandlers(
   });
 
   // Send follow-up message to a task
-  ipcMain.handle(IPC_CHANNELS.TASK_SEND_MESSAGE, async (_, data: { taskId: string; message: string }) => {
-    await agentDaemon.sendMessage(data.taskId, data.message);
+  ipcMain.handle(IPC_CHANNELS.TASK_SEND_MESSAGE, async (_, data) => {
+    checkRateLimit(IPC_CHANNELS.TASK_SEND_MESSAGE);
+    const validated = validateInput(TaskMessageSchema, data, 'task message');
+    await agentDaemon.sendMessage(validated.taskId, validated.message);
   });
 
   // Approval handlers
   ipcMain.handle(IPC_CHANNELS.APPROVAL_RESPOND, async (_, data) => {
-    const { approvalId, approved } = data;
-    await agentDaemon.respondToApproval(approvalId, approved);
+    const validated = validateInput(ApprovalResponseSchema, data, 'approval response');
+    await agentDaemon.respondToApproval(validated.approvalId, validated.approved);
   });
 
   // Artifact handlers
@@ -180,18 +260,21 @@ export function setupIpcHandlers(
     return LLMProviderFactory.loadSettings();
   });
 
-  ipcMain.handle(IPC_CHANNELS.LLM_SAVE_SETTINGS, async (_, settings: LLMSettingsData) => {
+  ipcMain.handle(IPC_CHANNELS.LLM_SAVE_SETTINGS, async (_, settings) => {
+    checkRateLimit(IPC_CHANNELS.LLM_SAVE_SETTINGS);
+    const validated = validateInput(LLMSettingsSchema, settings, 'LLM settings');
+
     // Load existing settings to preserve cached models
     const existingSettings = LLMProviderFactory.loadSettings();
 
     LLMProviderFactory.saveSettings({
-      providerType: settings.providerType,
-      modelKey: settings.modelKey as ModelKey,
-      anthropic: settings.anthropic,
-      bedrock: settings.bedrock,
-      ollama: settings.ollama,
-      gemini: settings.gemini,
-      openrouter: settings.openrouter,
+      providerType: validated.providerType,
+      modelKey: validated.modelKey as ModelKey,
+      anthropic: validated.anthropic,
+      bedrock: validated.bedrock,
+      ollama: validated.ollama,
+      gemini: validated.gemini,
+      openrouter: validated.openrouter,
       // Preserve cached models from existing settings
       cachedGeminiModels: existingSettings.cachedGeminiModels,
       cachedOpenRouterModels: existingSettings.cachedOpenRouterModels,
@@ -203,6 +286,7 @@ export function setupIpcHandlers(
   });
 
   ipcMain.handle(IPC_CHANNELS.LLM_TEST_PROVIDER, async (_, config: any) => {
+    checkRateLimit(IPC_CHANNELS.LLM_TEST_PROVIDER);
     const providerConfig: LLMProviderConfig = {
       type: config.providerType,
       model: LLMProviderFactory.getModelId(
@@ -350,6 +434,7 @@ export function setupIpcHandlers(
   });
 
   ipcMain.handle(IPC_CHANNELS.LLM_GET_OLLAMA_MODELS, async (_, baseUrl?: string) => {
+    checkRateLimit(IPC_CHANNELS.LLM_GET_OLLAMA_MODELS);
     const models = await LLMProviderFactory.getOllamaModels(baseUrl);
     // Cache the models for use in config status
     const cachedModels = models.map(m => ({
@@ -363,6 +448,7 @@ export function setupIpcHandlers(
   });
 
   ipcMain.handle(IPC_CHANNELS.LLM_GET_GEMINI_MODELS, async (_, apiKey?: string) => {
+    checkRateLimit(IPC_CHANNELS.LLM_GET_GEMINI_MODELS);
     const models = await LLMProviderFactory.getGeminiModels(apiKey);
     // Cache the models for use in config status
     const cachedModels = models.map(m => ({
@@ -375,6 +461,7 @@ export function setupIpcHandlers(
   });
 
   ipcMain.handle(IPC_CHANNELS.LLM_GET_OPENROUTER_MODELS, async (_, apiKey?: string) => {
+    checkRateLimit(IPC_CHANNELS.LLM_GET_OPENROUTER_MODELS);
     const models = await LLMProviderFactory.getOpenRouterModels(apiKey);
     // Cache the models for use in config status
     const cachedModels = models.map(m => ({
@@ -387,13 +474,33 @@ export function setupIpcHandlers(
     return models;
   });
 
+  ipcMain.handle(IPC_CHANNELS.LLM_GET_BEDROCK_MODELS, async (_, config?: {
+    region?: string;
+    accessKeyId?: string;
+    secretAccessKey?: string;
+    profile?: string;
+  }) => {
+    checkRateLimit(IPC_CHANNELS.LLM_GET_BEDROCK_MODELS);
+    const models = await LLMProviderFactory.getBedrockModels(config);
+    // Cache the models for use in config status
+    const cachedModels = models.map(m => ({
+      key: m.id,
+      displayName: m.name,
+      description: m.description,
+    }));
+    LLMProviderFactory.saveCachedModels('bedrock', cachedModels);
+    return models;
+  });
+
   // Search Settings handlers
   ipcMain.handle(IPC_CHANNELS.SEARCH_GET_SETTINGS, async () => {
     return SearchProviderFactory.loadSettings();
   });
 
-  ipcMain.handle(IPC_CHANNELS.SEARCH_SAVE_SETTINGS, async (_, settings: SearchSettings) => {
-    SearchProviderFactory.saveSettings(settings);
+  ipcMain.handle(IPC_CHANNELS.SEARCH_SAVE_SETTINGS, async (_, settings) => {
+    checkRateLimit(IPC_CHANNELS.SEARCH_SAVE_SETTINGS);
+    const validated = validateInput(SearchSettingsSchema, settings, 'search settings');
+    SearchProviderFactory.saveSettings(validated as SearchSettings);
     SearchProviderFactory.clearCache();
     return { success: true };
   });
@@ -403,6 +510,7 @@ export function setupIpcHandlers(
   });
 
   ipcMain.handle(IPC_CHANNELS.SEARCH_TEST_PROVIDER, async (_, providerType: SearchProviderType) => {
+    checkRateLimit(IPC_CHANNELS.SEARCH_TEST_PROVIDER);
     return SearchProviderFactory.testProvider(providerType);
   });
 
@@ -421,14 +529,17 @@ export function setupIpcHandlers(
     }));
   });
 
-  ipcMain.handle(IPC_CHANNELS.GATEWAY_ADD_CHANNEL, async (_, data: AddChannelRequest) => {
+  ipcMain.handle(IPC_CHANNELS.GATEWAY_ADD_CHANNEL, async (_, data) => {
+    checkRateLimit(IPC_CHANNELS.GATEWAY_ADD_CHANNEL);
     if (!gateway) throw new Error('Gateway not initialized');
 
-    if (data.type === 'telegram') {
+    const validated = validateInput(AddChannelSchema, data, 'channel');
+
+    if (validated.type === 'telegram') {
       const channel = await gateway.addTelegramChannel(
-        data.name,
-        data.botToken,
-        data.securityMode as SecurityMode || 'pairing'
+        validated.name,
+        validated.botToken,
+        validated.securityMode || 'pairing'
       );
       return {
         id: channel.id,
@@ -441,16 +552,13 @@ export function setupIpcHandlers(
       };
     }
 
-    if (data.type === 'discord') {
-      if (!data.applicationId) {
-        throw new Error('Discord Application ID is required');
-      }
+    if (validated.type === 'discord') {
       const channel = await gateway.addDiscordChannel(
-        data.name,
-        data.botToken,
-        data.applicationId,
-        data.guildIds,
-        data.securityMode as SecurityMode || 'pairing'
+        validated.name,
+        validated.botToken,
+        validated.applicationId,
+        validated.guildIds,
+        validated.securityMode || 'pairing'
       );
       return {
         id: channel.id,
@@ -463,22 +571,24 @@ export function setupIpcHandlers(
       };
     }
 
-    throw new Error(`Unsupported channel type: ${data.type}`);
+    // TypeScript exhaustiveness check - should never reach here due to discriminated union
+    throw new Error(`Unsupported channel type`);
   });
 
-  ipcMain.handle(IPC_CHANNELS.GATEWAY_UPDATE_CHANNEL, async (_, data: UpdateChannelRequest) => {
+  ipcMain.handle(IPC_CHANNELS.GATEWAY_UPDATE_CHANNEL, async (_, data) => {
     if (!gateway) throw new Error('Gateway not initialized');
 
-    const channel = gateway.getChannel(data.id);
+    const validated = validateInput(UpdateChannelSchema, data, 'channel update');
+    const channel = gateway.getChannel(validated.id);
     if (!channel) throw new Error('Channel not found');
 
     const updates: Record<string, unknown> = {};
-    if (data.name !== undefined) updates.name = data.name;
-    if (data.securityMode !== undefined) {
-      updates.securityConfig = { ...channel.securityConfig, mode: data.securityMode };
+    if (validated.name !== undefined) updates.name = validated.name;
+    if (validated.securityMode !== undefined) {
+      updates.securityConfig = { ...channel.securityConfig, mode: validated.securityMode };
     }
 
-    gateway.updateChannel(data.id, updates);
+    gateway.updateChannel(validated.id, updates);
   });
 
   ipcMain.handle(IPC_CHANNELS.GATEWAY_REMOVE_CHANNEL, async (_, id: string) => {
@@ -497,6 +607,7 @@ export function setupIpcHandlers(
   });
 
   ipcMain.handle(IPC_CHANNELS.GATEWAY_TEST_CHANNEL, async (_, id: string) => {
+    checkRateLimit(IPC_CHANNELS.GATEWAY_TEST_CHANNEL);
     if (!gateway) return { success: false, error: 'Gateway not initialized' };
     return gateway.testChannel(id);
   });
@@ -514,19 +625,22 @@ export function setupIpcHandlers(
     }));
   });
 
-  ipcMain.handle(IPC_CHANNELS.GATEWAY_GRANT_ACCESS, async (_, data: { channelId: string; userId: string; displayName?: string }) => {
+  ipcMain.handle(IPC_CHANNELS.GATEWAY_GRANT_ACCESS, async (_, data) => {
     if (!gateway) throw new Error('Gateway not initialized');
-    gateway.grantUserAccess(data.channelId, data.userId, data.displayName);
+    const validated = validateInput(GrantAccessSchema, data, 'grant access');
+    gateway.grantUserAccess(validated.channelId, validated.userId, validated.displayName);
   });
 
-  ipcMain.handle(IPC_CHANNELS.GATEWAY_REVOKE_ACCESS, async (_, data: { channelId: string; userId: string }) => {
+  ipcMain.handle(IPC_CHANNELS.GATEWAY_REVOKE_ACCESS, async (_, data) => {
     if (!gateway) throw new Error('Gateway not initialized');
-    gateway.revokeUserAccess(data.channelId, data.userId);
+    const validated = validateInput(RevokeAccessSchema, data, 'revoke access');
+    gateway.revokeUserAccess(validated.channelId, validated.userId);
   });
 
-  ipcMain.handle(IPC_CHANNELS.GATEWAY_GENERATE_PAIRING, async (_, data: { channelId: string; userId: string; displayName?: string }) => {
+  ipcMain.handle(IPC_CHANNELS.GATEWAY_GENERATE_PAIRING, async (_, data) => {
     if (!gateway) throw new Error('Gateway not initialized');
-    return gateway.generatePairingCode(data.channelId, data.userId, data.displayName);
+    const validated = validateInput(GeneratePairingSchema, data, 'generate pairing');
+    return gateway.generatePairingCode(validated.channelId, validated.userId, validated.displayName);
   });
 
   // App Update handlers

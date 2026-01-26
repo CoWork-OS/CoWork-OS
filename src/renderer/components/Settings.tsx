@@ -234,6 +234,11 @@ export function Settings({ onBack, onSettingsChanged }: SettingsProps) {
   const [openrouterModels, setOpenrouterModels] = useState<Array<{ id: string; name: string; context_length: number }>>([]);
   const [loadingOpenRouterModels, setLoadingOpenRouterModels] = useState(false);
 
+  // Bedrock state
+  const [bedrockModel, setBedrockModel] = useState('');
+  const [bedrockModels, setBedrockModels] = useState<Array<{ id: string; name: string; description: string }>>([]);
+  const [loadingBedrockModels, setLoadingBedrockModels] = useState(false);
+
   useEffect(() => {
     loadConfigStatus();
   }, []);
@@ -293,25 +298,43 @@ export function Settings({ onBack, onSettingsChanged }: SettingsProps) {
         setOpenrouterModel(loadedSettings.openrouter.model);
       }
 
+      // Set Bedrock form state (access key and secret key are set earlier)
+      if (loadedSettings.bedrock?.accessKeyId) {
+        setAwsAccessKeyId(loadedSettings.bedrock.accessKeyId);
+      }
+      if (loadedSettings.bedrock?.secretAccessKey) {
+        setAwsSecretAccessKey(loadedSettings.bedrock.secretAccessKey);
+      }
+      if (loadedSettings.bedrock?.model) {
+        setBedrockModel(loadedSettings.bedrock.model);
+      }
+
       // Populate dropdown arrays from cached models
       if (loadedSettings.cachedGeminiModels && loadedSettings.cachedGeminiModels.length > 0) {
-        setGeminiModels(loadedSettings.cachedGeminiModels.map(m => ({
+        setGeminiModels(loadedSettings.cachedGeminiModels.map((m: any) => ({
           name: m.key,
           displayName: m.displayName,
           description: m.description,
         })));
       }
       if (loadedSettings.cachedOpenRouterModels && loadedSettings.cachedOpenRouterModels.length > 0) {
-        setOpenrouterModels(loadedSettings.cachedOpenRouterModels.map(m => ({
+        setOpenrouterModels(loadedSettings.cachedOpenRouterModels.map((m: any) => ({
           id: m.key,
           name: m.displayName,
           context_length: m.contextLength || 0,
         })));
       }
       if (loadedSettings.cachedOllamaModels && loadedSettings.cachedOllamaModels.length > 0) {
-        setOllamaModels(loadedSettings.cachedOllamaModels.map(m => ({
+        setOllamaModels(loadedSettings.cachedOllamaModels.map((m: any) => ({
           name: m.key,
           size: m.size || 0,
+        })));
+      }
+      if (loadedSettings.cachedBedrockModels && loadedSettings.cachedBedrockModels.length > 0) {
+        setBedrockModels(loadedSettings.cachedBedrockModels.map((m: any) => ({
+          id: m.key,
+          name: m.displayName,
+          description: m.description || '',
         })));
       }
     } catch (error) {
@@ -378,6 +401,28 @@ export function Settings({ onBack, onSettingsChanged }: SettingsProps) {
     }
   };
 
+  const loadBedrockModels = async () => {
+    try {
+      setLoadingBedrockModels(true);
+      const config = useDefaultCredentials
+        ? { region: awsRegion, profile: awsProfile || undefined }
+        : { region: awsRegion, accessKeyId: awsAccessKeyId || undefined, secretAccessKey: awsSecretAccessKey || undefined };
+      const models = await window.electronAPI.getBedrockModels(config);
+      setBedrockModels(models || []);
+      // If we got models and current model isn't in the list, select the first one
+      if (models && models.length > 0 && !models.some((m: any) => m.id === bedrockModel)) {
+        setBedrockModel(models[0].id);
+      }
+      // Notify main page that models were refreshed (they're now cached)
+      onSettingsChanged?.();
+    } catch (error) {
+      console.error('Failed to load Bedrock models:', error);
+      setBedrockModels([]);
+    } finally {
+      setLoadingBedrockModels(false);
+    }
+  };
+
   const handleSave = async () => {
     try {
       setSaving(true);
@@ -395,6 +440,7 @@ export function Settings({ onBack, onSettingsChanged }: SettingsProps) {
         bedrock: {
           region: awsRegion,
           useDefaultCredentials,
+          model: bedrockModel || undefined,
           ...(useDefaultCredentials ? {
             profile: awsProfile || undefined,
           } : {
@@ -597,28 +643,28 @@ export function Settings({ onBack, onSettingsChanged }: SettingsProps) {
                           </div>
                           <div className="provider-option-description">
                             {isAnthropic && provider.configured && (
-                              <>Using API key from environment or settings</>
+                              <>API key configured</>
                             )}
                             {isAnthropic && !provider.configured && (
-                              <>Set ANTHROPIC_API_KEY in .env or enter below</>
+                              <>Enter your Anthropic API key below</>
                             )}
                             {isGemini && provider.configured && (
-                              <>Using API key from environment or settings</>
+                              <>API key configured</>
                             )}
                             {isGemini && !provider.configured && (
-                              <>Set GEMINI_API_KEY in .env or enter below</>
+                              <>Enter your Gemini API key below</>
                             )}
                             {isOpenRouter && provider.configured && (
-                              <>Using API key from environment or settings</>
+                              <>API key configured</>
                             )}
                             {isOpenRouter && !provider.configured && (
-                              <>Set OPENROUTER_API_KEY in .env or enter below</>
+                              <>Enter your OpenRouter API key below</>
                             )}
                             {isBedrock && provider.configured && (
-                              <>Using AWS credentials from environment or settings</>
+                              <>AWS credentials configured</>
                             )}
                             {isBedrock && !provider.configured && (
-                              <>Configure AWS credentials below or in environment</>
+                              <>Configure your AWS credentials below</>
                             )}
                             {isOllama && provider.configured && (
                               <>Ollama server detected - configure model below</>
@@ -634,7 +680,7 @@ export function Settings({ onBack, onSettingsChanged }: SettingsProps) {
                 </div>
               </div>
 
-              {settings.providerType !== 'ollama' && settings.providerType !== 'gemini' && settings.providerType !== 'openrouter' && (
+              {settings.providerType === 'anthropic' && (
                 <div className="settings-section">
                   <h3>Model</h3>
                   <select
@@ -655,7 +701,10 @@ export function Settings({ onBack, onSettingsChanged }: SettingsProps) {
                 <div className="settings-section">
                   <h3>Anthropic API Key</h3>
                   <p className="settings-description">
-                    Enter your API key from console.anthropic.com, or leave empty to use environment variable.
+                    Enter your API key from{' '}
+                    <a href="https://console.anthropic.com/" target="_blank" rel="noopener noreferrer">
+                      console.anthropic.com
+                    </a>
                   </p>
                   <input
                     type="password"
@@ -672,9 +721,9 @@ export function Settings({ onBack, onSettingsChanged }: SettingsProps) {
                   <div className="settings-section">
                     <h3>Gemini API Key</h3>
                     <p className="settings-description">
-                      Enter your API key, or leave empty to use environment variable.{' '}
+                      Enter your API key from{' '}
                       <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">
-                        Get API Key →
+                        Google AI Studio
                       </a>
                     </p>
                     <div className="settings-input-group">
@@ -729,9 +778,9 @@ export function Settings({ onBack, onSettingsChanged }: SettingsProps) {
                   <div className="settings-section">
                     <h3>OpenRouter API Key</h3>
                     <p className="settings-description">
-                      Enter your API key, or leave empty to use environment variable.{' '}
+                      Enter your API key from{' '}
                       <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer">
-                        Get API Key →
+                        OpenRouter
                       </a>
                     </p>
                     <div className="settings-input-group">
@@ -845,6 +894,45 @@ export function Settings({ onBack, onSettingsChanged }: SettingsProps) {
                           onChange={(e) => setAwsSecretAccessKey(e.target.value)}
                         />
                       </div>
+                    )}
+                  </div>
+
+                  <div className="settings-section">
+                    <h3>Model</h3>
+                    <p className="settings-description">
+                      Select a Claude model from AWS Bedrock.{' '}
+                      <button
+                        className="button-small button-secondary"
+                        onClick={loadBedrockModels}
+                        disabled={loadingBedrockModels}
+                        style={{ marginLeft: '8px' }}
+                      >
+                        {loadingBedrockModels ? 'Loading...' : 'Refresh Models'}
+                      </button>
+                    </p>
+                    {bedrockModels.length > 0 ? (
+                      <SearchableSelect
+                        options={bedrockModels.map(model => ({
+                          value: model.id,
+                          label: model.name,
+                          description: model.description,
+                        }))}
+                        value={bedrockModel}
+                        onChange={setBedrockModel}
+                        placeholder="Select a model..."
+                      />
+                    ) : (
+                      <select
+                        className="settings-select"
+                        value={settings.modelKey}
+                        onChange={(e) => setSettings({ ...settings, modelKey: e.target.value })}
+                      >
+                        {models.map(model => (
+                          <option key={model.key} value={model.key}>
+                            {model.displayName}
+                          </option>
+                        ))}
+                      </select>
                     )}
                   </div>
                 </>

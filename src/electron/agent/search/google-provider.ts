@@ -20,18 +20,17 @@ export class GoogleProvider implements SearchProvider {
   private baseUrl = 'https://www.googleapis.com/customsearch/v1';
 
   constructor(config: SearchProviderConfig) {
-    const apiKey = config.googleApiKey || process.env.GOOGLE_API_KEY;
-    const searchEngineId =
-      config.googleSearchEngineId || process.env.GOOGLE_SEARCH_ENGINE_ID;
+    const apiKey = config.googleApiKey;
+    const searchEngineId = config.googleSearchEngineId;
 
     if (!apiKey) {
       throw new Error(
-        'Google API key is required. Get one from https://console.cloud.google.com/'
+        'Google API key is required. Configure it in Settings or get one from https://console.cloud.google.com/'
       );
     }
     if (!searchEngineId) {
       throw new Error(
-        'Google Search Engine ID is required. Create one at https://programmablesearchengine.google.com/'
+        'Google Search Engine ID is required. Configure it in Settings or create one at https://programmablesearchengine.google.com/'
       );
     }
 

@@ -97,7 +97,7 @@ export class SearchProviderFactory {
     // Auto-detect and select providers if primaryProvider is not set
     // This works both for new installations and when user hasn't explicitly selected one
     if (!settings.primaryProvider) {
-      const configuredProviders = this.getConfiguredProvidersFromSettingsAndEnv(settings);
+      const configuredProviders = this.getConfiguredProvidersFromSettings(settings);
       if (configuredProviders.length > 0) {
         settings.primaryProvider = configuredProviders[0];
         console.log(`Auto-selected primary Search provider: ${configuredProviders[0]}`);
@@ -113,56 +113,30 @@ export class SearchProviderFactory {
   }
 
   /**
-   * Get list of configured provider types from both settings and environment
+   * Get list of configured provider types from settings only
+   * Note: Environment variables are no longer used for security reasons.
    */
-  private static getConfiguredProvidersFromSettingsAndEnv(settings: SearchSettings): SearchProviderType[] {
+  private static getConfiguredProvidersFromSettings(settings: SearchSettings): SearchProviderType[] {
     const configured: SearchProviderType[] = [];
 
     // Check Tavily
-    if (settings.tavily?.apiKey || this.getApiKeyFromEnv('TAVILY_API_KEY')) {
+    if (settings.tavily?.apiKey) {
       configured.push('tavily');
     }
     // Check Brave
-    if (settings.brave?.apiKey || this.getApiKeyFromEnv('BRAVE_API_KEY')) {
+    if (settings.brave?.apiKey) {
       configured.push('brave');
     }
     // Check SerpAPI
-    if (settings.serpapi?.apiKey || this.getApiKeyFromEnv('SERPAPI_KEY')) {
+    if (settings.serpapi?.apiKey) {
       configured.push('serpapi');
     }
-    // Check Google
-    const hasGoogleApiKey = settings.google?.apiKey || this.getApiKeyFromEnv('GOOGLE_API_KEY');
-    const hasGoogleSearchEngineId = settings.google?.searchEngineId || process.env.GOOGLE_SEARCH_ENGINE_ID;
-    if (hasGoogleApiKey && hasGoogleSearchEngineId) {
+    // Check Google (requires both API key and Search Engine ID)
+    if (settings.google?.apiKey && settings.google?.searchEngineId) {
       configured.push('google');
     }
 
     return configured;
-  }
-
-  /**
-   * Get list of configured provider types from environment
-   */
-  private static getConfiguredProviderTypes(): SearchProviderType[] {
-    const configured: SearchProviderType[] = [];
-    if (this.getApiKeyFromEnv('TAVILY_API_KEY')) configured.push('tavily');
-    if (this.getApiKeyFromEnv('BRAVE_API_KEY')) configured.push('brave');
-    if (this.getApiKeyFromEnv('SERPAPI_KEY')) configured.push('serpapi');
-    if (this.getApiKeyFromEnv('GOOGLE_API_KEY') && process.env.GOOGLE_SEARCH_ENGINE_ID) {
-      configured.push('google');
-    }
-    return configured;
-  }
-
-  /**
-   * Get API key from environment
-   */
-  private static getApiKeyFromEnv(envVar: string): string | undefined {
-    const value = process.env[envVar];
-    if (value && value !== 'your_api_key_here' && value.length > 5) {
-      return value;
-    }
-    return undefined;
   }
 
   /**
@@ -217,17 +191,17 @@ export class SearchProviderFactory {
 
   /**
    * Get the config for creating a provider
+   * Note: All credentials must be configured via the Settings UI.
    */
   private static getProviderConfig(providerType: SearchProviderType): SearchProviderConfig {
     const settings = this.loadSettings();
     return {
       type: providerType,
-      tavilyApiKey: settings.tavily?.apiKey || this.getApiKeyFromEnv('TAVILY_API_KEY'),
-      braveApiKey: settings.brave?.apiKey || this.getApiKeyFromEnv('BRAVE_API_KEY'),
-      serpApiKey: settings.serpapi?.apiKey || this.getApiKeyFromEnv('SERPAPI_KEY'),
-      googleApiKey: settings.google?.apiKey || this.getApiKeyFromEnv('GOOGLE_API_KEY'),
-      googleSearchEngineId:
-        settings.google?.searchEngineId || process.env.GOOGLE_SEARCH_ENGINE_ID,
+      tavilyApiKey: settings.tavily?.apiKey,
+      braveApiKey: settings.brave?.apiKey,
+      serpApiKey: settings.serpapi?.apiKey,
+      googleApiKey: settings.google?.apiKey,
+      googleSearchEngineId: settings.google?.searchEngineId,
     };
   }
 
@@ -314,7 +288,8 @@ export class SearchProviderFactory {
   }
 
   /**
-   * Get available providers based on environment and saved configuration
+   * Get available providers based on saved configuration
+   * Note: Environment variables are no longer checked for security reasons.
    */
   static getAvailableProviders(): Array<{
     type: SearchProviderType;
@@ -329,31 +304,28 @@ export class SearchProviderFactory {
         type: 'tavily',
         name: SEARCH_PROVIDER_INFO.tavily.displayName,
         description: SEARCH_PROVIDER_INFO.tavily.description,
-        configured: !!(settings.tavily?.apiKey || this.getApiKeyFromEnv('TAVILY_API_KEY')),
+        configured: !!settings.tavily?.apiKey,
         supportedTypes: [...SEARCH_PROVIDER_INFO.tavily.supportedTypes],
       },
       {
         type: 'brave',
         name: SEARCH_PROVIDER_INFO.brave.displayName,
         description: SEARCH_PROVIDER_INFO.brave.description,
-        configured: !!(settings.brave?.apiKey || this.getApiKeyFromEnv('BRAVE_API_KEY')),
+        configured: !!settings.brave?.apiKey,
         supportedTypes: [...SEARCH_PROVIDER_INFO.brave.supportedTypes],
       },
       {
         type: 'serpapi',
         name: SEARCH_PROVIDER_INFO.serpapi.displayName,
         description: SEARCH_PROVIDER_INFO.serpapi.description,
-        configured: !!(settings.serpapi?.apiKey || this.getApiKeyFromEnv('SERPAPI_KEY')),
+        configured: !!settings.serpapi?.apiKey,
         supportedTypes: [...SEARCH_PROVIDER_INFO.serpapi.supportedTypes],
       },
       {
         type: 'google',
         name: SEARCH_PROVIDER_INFO.google.displayName,
         description: SEARCH_PROVIDER_INFO.google.description,
-        configured: !!(
-          (settings.google?.apiKey || this.getApiKeyFromEnv('GOOGLE_API_KEY')) &&
-          (settings.google?.searchEngineId || process.env.GOOGLE_SEARCH_ENGINE_ID)
-        ),
+        configured: !!(settings.google?.apiKey && settings.google?.searchEngineId),
         supportedTypes: [...SEARCH_PROVIDER_INFO.google.supportedTypes],
       },
     ];

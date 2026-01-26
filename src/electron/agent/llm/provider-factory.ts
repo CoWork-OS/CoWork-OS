@@ -142,6 +142,7 @@ export interface LLMSettings {
     sessionToken?: string;
     profile?: string;
     useDefaultCredentials?: boolean;
+    model?: string;
   };
   ollama?: {
     baseUrl?: string;
@@ -160,6 +161,7 @@ export interface LLMSettings {
   cachedGeminiModels?: CachedModelInfo[];
   cachedOpenRouterModels?: CachedModelInfo[];
   cachedOllamaModels?: CachedModelInfo[];
+  cachedBedrockModels?: CachedModelInfo[];
 }
 
 const DEFAULT_SETTINGS: LLMSettings = {
@@ -215,7 +217,7 @@ export class LLMProviderFactory {
 
     // Auto-detect provider if no settings file exists
     if (!settingsFileExists) {
-      const detectedProvider = this.detectProviderFromEnv();
+      const detectedProvider = this.detectProviderFromSettings();
       if (detectedProvider) {
         settings.providerType = detectedProvider;
         console.log(`Auto-detected LLM provider: ${detectedProvider}`);
@@ -228,81 +230,31 @@ export class LLMProviderFactory {
   }
 
   /**
-   * Get the Anthropic API key from environment variables
+   * Detect which provider to use based on saved settings
+   * Note: Environment variables are no longer used for security reasons.
+   * All configuration should be done through the Settings UI.
    */
-  private static getAnthropicKeyFromEnv(): string | undefined {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (apiKey && apiKey !== 'your_api_key_here' && apiKey.startsWith('sk-')) {
-      return apiKey;
-    }
+  private static detectProviderFromSettings(): LLMProviderType | null {
+    const settings = this.loadSettings();
 
-    return undefined;
-  }
-
-  /**
-   * Check if Ollama is configured via environment
-   */
-  private static getOllamaBaseUrlFromEnv(): string | undefined {
-    return process.env.OLLAMA_BASE_URL || process.env.OLLAMA_HOST;
-  }
-
-  /**
-   * Get the Gemini API key from environment variables
-   */
-  private static getGeminiKeyFromEnv(): string | undefined {
-    const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
-    if (apiKey && apiKey !== 'your_api_key_here') {
-      return apiKey;
-    }
-    return undefined;
-  }
-
-  /**
-   * Get the OpenRouter API key from environment variables
-   */
-  private static getOpenRouterKeyFromEnv(): string | undefined {
-    const apiKey = process.env.OPENROUTER_API_KEY;
-    if (apiKey && apiKey !== 'your_api_key_here') {
-      return apiKey;
-    }
-    return undefined;
-  }
-
-  /**
-   * Detect which provider to use based on environment variables
-   */
-  private static detectProviderFromEnv(): LLMProviderType | null {
-    const awsAccessKey = process.env.AWS_ACCESS_KEY_ID;
-    const awsSecretKey = process.env.AWS_SECRET_ACCESS_KEY;
-    const awsProfile = process.env.AWS_PROFILE;
-    const hasAwsCredentials = (awsAccessKey && awsSecretKey) || awsProfile;
-
-    // Prefer Anthropic if API key exists
-    if (this.getAnthropicKeyFromEnv()) {
+    // Check if any provider has credentials configured in settings
+    if (settings.anthropic?.apiKey) {
       return 'anthropic';
     }
-
-    // Check for Gemini API key
-    if (this.getGeminiKeyFromEnv()) {
+    if (settings.gemini?.apiKey) {
       return 'gemini';
     }
-
-    // Check for OpenRouter API key
-    if (this.getOpenRouterKeyFromEnv()) {
+    if (settings.openrouter?.apiKey) {
       return 'openrouter';
     }
-
-    // Fall back to Bedrock if AWS credentials exist
-    if (hasAwsCredentials) {
+    if (settings.bedrock?.accessKeyId || settings.bedrock?.profile) {
       return 'bedrock';
     }
-
-    // Check for Ollama (local server is always available by default)
-    if (this.getOllamaBaseUrlFromEnv()) {
+    if (settings.ollama?.baseUrl || settings.ollama?.model) {
       return 'ollama';
     }
 
-    // No valid credentials detected
+    // No valid credentials detected - user needs to configure via Settings
     return null;
   }
 
@@ -367,42 +319,31 @@ export class LLMProviderFactory {
 
   /**
    * Create a provider based on current settings
+   * Note: All credentials must be configured via the Settings UI.
+   * Environment variables are no longer used for security reasons.
    */
   static createProvider(overrideConfig?: Partial<LLMProviderConfig>): LLMProvider {
     const settings = this.loadSettings();
     const providerType = overrideConfig?.type || settings.providerType;
 
-    const anthropicApiKey =
-      normalizeSecret(overrideConfig?.anthropicApiKey) ||
-      settings.anthropic?.apiKey ||
-      this.getAnthropicKeyFromEnv();
-
     const config: LLMProviderConfig = {
       type: providerType,
       model: this.getModelId(settings.modelKey, providerType, settings.ollama?.model, settings.gemini?.model, settings.openrouter?.model),
-      anthropicApiKey,
-      // Bedrock config
-      awsRegion: overrideConfig?.awsRegion || settings.bedrock?.region || process.env.AWS_REGION,
-      awsAccessKeyId: overrideConfig?.awsAccessKeyId || settings.bedrock?.accessKeyId || process.env.AWS_ACCESS_KEY_ID,
-      awsSecretAccessKey:
-        normalizeSecret(overrideConfig?.awsSecretAccessKey) ||
-        settings.bedrock?.secretAccessKey ||
-        process.env.AWS_SECRET_ACCESS_KEY,
-      awsSessionToken: overrideConfig?.awsSessionToken || settings.bedrock?.sessionToken || process.env.AWS_SESSION_TOKEN,
-      awsProfile: overrideConfig?.awsProfile || settings.bedrock?.profile || process.env.AWS_PROFILE,
-      // Ollama config
-      ollamaBaseUrl: overrideConfig?.ollamaBaseUrl || settings.ollama?.baseUrl || this.getOllamaBaseUrlFromEnv(),
-      ollamaApiKey: normalizeSecret(overrideConfig?.ollamaApiKey) || settings.ollama?.apiKey || process.env.OLLAMA_API_KEY,
-      // Gemini config
-      geminiApiKey:
-        normalizeSecret(overrideConfig?.geminiApiKey) ||
-        settings.gemini?.apiKey ||
-        this.getGeminiKeyFromEnv(),
-      // OpenRouter config
-      openrouterApiKey:
-        normalizeSecret(overrideConfig?.openrouterApiKey) ||
-        settings.openrouter?.apiKey ||
-        this.getOpenRouterKeyFromEnv(),
+      // Anthropic config - from settings only
+      anthropicApiKey: normalizeSecret(overrideConfig?.anthropicApiKey) || settings.anthropic?.apiKey,
+      // Bedrock config - from settings only
+      awsRegion: overrideConfig?.awsRegion || settings.bedrock?.region || 'us-east-1',
+      awsAccessKeyId: overrideConfig?.awsAccessKeyId || settings.bedrock?.accessKeyId,
+      awsSecretAccessKey: normalizeSecret(overrideConfig?.awsSecretAccessKey) || settings.bedrock?.secretAccessKey,
+      awsSessionToken: overrideConfig?.awsSessionToken || settings.bedrock?.sessionToken,
+      awsProfile: overrideConfig?.awsProfile || settings.bedrock?.profile,
+      // Ollama config - from settings only
+      ollamaBaseUrl: overrideConfig?.ollamaBaseUrl || settings.ollama?.baseUrl || 'http://localhost:11434',
+      ollamaApiKey: normalizeSecret(overrideConfig?.ollamaApiKey) || settings.ollama?.apiKey,
+      // Gemini config - from settings only
+      geminiApiKey: normalizeSecret(overrideConfig?.geminiApiKey) || settings.gemini?.apiKey,
+      // OpenRouter config - from settings only
+      openrouterApiKey: normalizeSecret(overrideConfig?.openrouterApiKey) || settings.openrouter?.apiKey,
     };
 
     return this.createProviderFromConfig(config);
@@ -473,56 +414,41 @@ export class LLMProviderFactory {
   }
 
   /**
-   * Get available providers based on environment configuration
+   * Get available providers based on saved settings configuration
+   * Note: Environment variables are no longer checked for security reasons.
    */
   static getAvailableProviders(): Array<{
     type: LLMProviderType;
     name: string;
     configured: boolean;
   }> {
-    const hasAnthropicKeyEnv = !!this.getAnthropicKeyFromEnv();
-
-    const awsAccessKey = process.env.AWS_ACCESS_KEY_ID;
-    const awsSecretKey = process.env.AWS_SECRET_ACCESS_KEY;
-    const awsProfile = process.env.AWS_PROFILE;
-    const hasAwsCredentials = (awsAccessKey && awsSecretKey) || awsProfile;
-
-    // Also check saved settings for API keys
     const settings = this.loadSettings();
-    const hasAnthropicKeyInSettings = !!settings.anthropic?.apiKey;
-    const hasBedrockInSettings = settings.bedrock?.region || settings.bedrock?.profile;
-    const hasOllamaInSettings = settings.ollama?.baseUrl || settings.ollama?.model;
-    const hasOllamaEnv = !!this.getOllamaBaseUrlFromEnv();
-    const hasGeminiKeyEnv = !!this.getGeminiKeyFromEnv();
-    const hasGeminiKeyInSettings = !!settings.gemini?.apiKey;
-    const hasOpenRouterKeyEnv = !!this.getOpenRouterKeyFromEnv();
-    const hasOpenRouterKeyInSettings = !!settings.openrouter?.apiKey;
 
     return [
       {
         type: 'anthropic' as LLMProviderType,
         name: 'Anthropic API',
-        configured: !!(hasAnthropicKeyEnv || hasAnthropicKeyInSettings),
+        configured: !!settings.anthropic?.apiKey,
       },
       {
         type: 'gemini' as LLMProviderType,
         name: 'Google Gemini',
-        configured: !!(hasGeminiKeyEnv || hasGeminiKeyInSettings),
+        configured: !!settings.gemini?.apiKey,
       },
       {
         type: 'openrouter' as LLMProviderType,
         name: 'OpenRouter',
-        configured: !!(hasOpenRouterKeyEnv || hasOpenRouterKeyInSettings),
+        configured: !!settings.openrouter?.apiKey,
       },
       {
         type: 'bedrock' as LLMProviderType,
         name: 'AWS Bedrock',
-        configured: !!(hasAwsCredentials || hasBedrockInSettings),
+        configured: !!(settings.bedrock?.accessKeyId || settings.bedrock?.profile),
       },
       {
         type: 'ollama' as LLMProviderType,
         name: 'Ollama (Local)',
-        configured: !!(hasOllamaInSettings || hasOllamaEnv),
+        configured: !!(settings.ollama?.baseUrl || settings.ollama?.model),
       },
     ];
   }
@@ -561,11 +487,82 @@ export class LLMProviderFactory {
   }
 
   /**
+   * Fetch available Bedrock models from AWS
+   */
+  static async getBedrockModels(config?: {
+    region?: string;
+    accessKeyId?: string;
+    secretAccessKey?: string;
+    profile?: string;
+  }): Promise<Array<{ id: string; name: string; provider: string; description: string }>> {
+    const settings = this.loadSettings();
+    const region = config?.region || settings.bedrock?.region || 'us-east-1';
+    const accessKeyId = config?.accessKeyId || settings.bedrock?.accessKeyId;
+    const secretAccessKey = config?.secretAccessKey || settings.bedrock?.secretAccessKey;
+    const profile = config?.profile || settings.bedrock?.profile;
+
+    // Default Claude models available on Bedrock
+    const defaultModels = Object.entries(MODELS).map(([key, value]) => ({
+      id: value.bedrock,
+      name: value.displayName,
+      provider: 'Anthropic',
+      description: key.includes('opus') ? 'Most capable for complex tasks' :
+                   key.includes('sonnet') ? 'Balanced performance and speed' :
+                   'Fast and efficient',
+    }));
+
+    try {
+      // Import BedrockClient for listing models (different from runtime client)
+      const { BedrockClient, ListFoundationModelsCommand } = await import('@aws-sdk/client-bedrock');
+      const { fromIni } = await import('@aws-sdk/credential-provider-ini');
+
+      const clientConfig: any = { region };
+
+      if (accessKeyId && secretAccessKey) {
+        clientConfig.credentials = {
+          accessKeyId,
+          secretAccessKey,
+        };
+      } else if (profile) {
+        clientConfig.credentials = fromIni({ profile });
+      }
+
+      const client = new BedrockClient(clientConfig);
+      const command = new ListFoundationModelsCommand({
+        byOutputModality: 'TEXT',
+      });
+
+      const response = await client.send(command);
+      const models = response.modelSummaries || [];
+
+      // Filter for Claude models and format the response
+      const claudeModels = models
+        .filter((m: any) => m.providerName === 'Anthropic' && m.modelId?.includes('claude'))
+        .map((m: any) => ({
+          id: m.modelId || '',
+          name: m.modelName || m.modelId || '',
+          provider: m.providerName || 'Anthropic',
+          description: m.modelId?.includes('opus') ? 'Most capable for complex tasks' :
+                       m.modelId?.includes('sonnet') ? 'Balanced performance and speed' :
+                       m.modelId?.includes('haiku') ? 'Fast and efficient' :
+                       'Claude model',
+        }))
+        .filter((m: any) => m.id);
+
+      return claudeModels.length > 0 ? claudeModels : defaultModels;
+    } catch (error: any) {
+      console.error('Failed to fetch Bedrock models:', error);
+      // Return default models on error
+      return defaultModels;
+    }
+  }
+
+  /**
    * Fetch available Ollama models from the server
    */
   static async getOllamaModels(baseUrl?: string): Promise<Array<{ name: string; size: number; modified: string }>> {
     const settings = this.loadSettings();
-    const url = baseUrl || settings.ollama?.baseUrl || this.getOllamaBaseUrlFromEnv() || 'http://localhost:11434';
+    const url = baseUrl || settings.ollama?.baseUrl || 'http://localhost:11434';
 
     try {
       const provider = new OllamaProvider({
@@ -589,16 +586,7 @@ export class LLMProviderFactory {
     // Normalize empty strings to undefined
     const normalizedApiKey = apiKey?.trim() || undefined;
     const settingsKey = settings.gemini?.apiKey;
-    const envKey = this.getGeminiKeyFromEnv();
-    const key = normalizedApiKey || settingsKey || envKey;
-
-    // Debug logging
-    const maskKey = (k?: string) => k ? `${k.substring(0, 8)}...${k.slice(-4)}` : 'undefined';
-    console.log(`[Gemini] getGeminiModels called:`);
-    console.log(`  - passedApiKey: ${maskKey(normalizedApiKey)}`);
-    console.log(`  - settingsKey: ${maskKey(settingsKey)}`);
-    console.log(`  - envKey: ${maskKey(envKey)}`);
-    console.log(`  - finalKey: ${maskKey(key)}`);
+    const key = normalizedApiKey || settingsKey;
 
     const defaultModels = [
       { name: 'gemini-2.5-pro-preview-05-06', displayName: 'Gemini 2.5 Pro', description: 'Most capable model for complex tasks' },
@@ -635,7 +623,7 @@ export class LLMProviderFactory {
     const settings = this.loadSettings();
     // Normalize empty strings to undefined
     const normalizedApiKey = apiKey?.trim() || undefined;
-    const key = normalizedApiKey || settings.openrouter?.apiKey || this.getOpenRouterKeyFromEnv();
+    const key = normalizedApiKey || settings.openrouter?.apiKey;
 
     const defaultModels = [
       { id: 'anthropic/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet', context_length: 200000 },
@@ -669,7 +657,7 @@ export class LLMProviderFactory {
    * Save cached models for a provider
    */
   static saveCachedModels(
-    providerType: 'gemini' | 'openrouter' | 'ollama',
+    providerType: 'gemini' | 'openrouter' | 'ollama' | 'bedrock',
     models: CachedModelInfo[]
   ): void {
     const settings = this.loadSettings();
@@ -684,6 +672,9 @@ export class LLMProviderFactory {
       case 'ollama':
         settings.cachedOllamaModels = models;
         break;
+      case 'bedrock':
+        settings.cachedBedrockModels = models;
+        break;
     }
 
     this.saveSettings(settings);
@@ -692,7 +683,7 @@ export class LLMProviderFactory {
   /**
    * Get cached models for a provider
    */
-  static getCachedModels(providerType: 'gemini' | 'openrouter' | 'ollama'): CachedModelInfo[] | undefined {
+  static getCachedModels(providerType: 'gemini' | 'openrouter' | 'ollama' | 'bedrock'): CachedModelInfo[] | undefined {
     const settings = this.loadSettings();
 
     switch (providerType) {
@@ -702,6 +693,8 @@ export class LLMProviderFactory {
         return settings.cachedOpenRouterModels;
       case 'ollama':
         return settings.cachedOllamaModels;
+      case 'bedrock':
+        return settings.cachedBedrockModels;
       default:
         return undefined;
     }

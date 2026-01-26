@@ -73,15 +73,26 @@ export class ShellTools {
 
     const timeout = Math.min(options?.timeout || DEFAULT_TIMEOUT, MAX_TIMEOUT);
 
+    // Create a minimal, safe environment (don't leak sensitive process.env vars like API keys)
+    const safeEnv: Record<string, string> = {
+      // Essential system variables only
+      PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin',
+      HOME: process.env.HOME || '',
+      USER: process.env.USER || '',
+      SHELL: process.env.SHELL || '/bin/bash',
+      LANG: process.env.LANG || 'en_US.UTF-8',
+      TERM: process.env.TERM || 'xterm-256color',
+      TMPDIR: process.env.TMPDIR || '/tmp',
+      // Add any user-provided env vars (explicitly passed by caller)
+      ...options?.env,
+    };
+
     const execOptions: ExecOptions = {
       cwd: options?.cwd || this.workspace.path,
       timeout,
       maxBuffer: MAX_OUTPUT_SIZE,
       encoding: 'utf-8',
-      env: {
-        ...process.env,
-        ...options?.env,
-      },
+      env: safeEnv,
     };
 
     try {

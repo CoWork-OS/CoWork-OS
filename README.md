@@ -72,9 +72,9 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
 
 | Provider | Configuration | Billing |
 |----------|---------------|---------|
-| Anthropic API | Set `ANTHROPIC_API_KEY` in `.env` | Pay-per-token |
-| Google Gemini | Set `GEMINI_API_KEY` in `.env` | Pay-per-token (free tier available) |
-| OpenRouter | Set `OPENROUTER_API_KEY` in `.env` | Pay-per-token (multi-model access) |
+| Anthropic API | Configure API key in Settings | Pay-per-token |
+| Google Gemini | Configure API key in Settings | Pay-per-token (free tier available) |
+| OpenRouter | Configure API key in Settings | Pay-per-token (multi-model access) |
 | AWS Bedrock | Configure AWS credentials in Settings | Pay-per-token via AWS |
 | Ollama (Local) | Install Ollama and pull models | **Free** (runs locally) |
 
@@ -165,12 +165,10 @@ cd cowork-oss
 # Install dependencies
 npm install
 
-# Configure your API credentials
-cp .env.example .env
-# Edit .env and add your ANTHROPIC_API_KEY
-
 # Run in development mode
 npm run dev
+
+# Configure your API credentials in Settings (gear icon)
 ```
 
 ### Building for Production
@@ -515,36 +513,21 @@ CoWork-OSS includes a multi-provider web search system that allows the agent to 
 
 ### Configuration
 
-Configure at least one provider by adding API keys to your `.env` file:
-
-```bash
-# Tavily (recommended) - https://tavily.com/
-TAVILY_API_KEY=tvly-...
-
-# Brave Search - https://brave.com/search/api/
-BRAVE_API_KEY=BSA...
-
-# SerpAPI - https://serpapi.com/
-SERPAPI_KEY=...
-
-# Google Custom Search - https://developers.google.com/custom-search/
-GOOGLE_API_KEY=AIza...
-GOOGLE_SEARCH_ENGINE_ID=...   # Required with GOOGLE_API_KEY
-```
-
-### Settings UI
-
-Once providers are configured, you can manage them in the app:
+Configure search providers in the Settings UI:
 
 1. Open **Settings** (gear icon)
 2. Navigate to the **Web Search** tab
-3. Select your **Primary Provider** - used for all searches by default
-4. Optionally select a **Fallback Provider** - used automatically if primary fails
+3. Enter your API key(s) for your preferred providers:
+   - **Tavily** (recommended) - Get key from [tavily.com](https://tavily.com/)
+   - **Brave Search** - Get key from [brave.com/search/api](https://brave.com/search/api/)
+   - **SerpAPI** - Get key from [serpapi.com](https://serpapi.com/)
+   - **Google Custom Search** - Get key and Search Engine ID from [Google Cloud Console](https://console.cloud.google.com/)
+4. Select your **Primary Provider** - used for all searches by default
+5. Optionally select a **Fallback Provider** - used automatically if primary fails
+6. Click **Test** to verify connectivity
+7. Save settings
 
-The settings panel shows:
-- Which providers are configured (based on environment variables)
-- Test button for each provider to verify connectivity
-- Provider capabilities (web, news, images support)
+The settings panel shows provider capabilities (web, news, images support) and configuration status.
 
 ### How the Agent Uses Search
 
@@ -568,11 +551,11 @@ When multiple providers are configured:
 
 ### Provider Auto-Detection
 
-If no provider is explicitly selected, CoWork-OSS auto-detects available providers in this priority order:
-1. Tavily (if `TAVILY_API_KEY` is set)
-2. Brave (if `BRAVE_API_KEY` is set)
-3. SerpAPI (if `SERPAPI_KEY` is set)
-4. Google (if both `GOOGLE_API_KEY` and `GOOGLE_SEARCH_ENGINE_ID` are set)
+If no provider is explicitly selected, CoWork-OSS auto-detects available providers based on which ones have API keys configured in Settings, in this priority order:
+1. Tavily
+2. Brave
+3. SerpAPI
+4. Google (requires both API key and Search Engine ID)
 
 ---
 
@@ -613,20 +596,12 @@ ollama serve
 
 1. Open **Settings** (gear icon)
 2. Select **Ollama (Local)** as your provider
-3. Click **Refresh Models** to load available models
-4. Select your preferred model from the dropdown
-5. Click **Test Connection** to verify
-6. Save settings
-
-### Environment Variables (Optional)
-
-```bash
-# Custom server URL (defaults to localhost:11434)
-OLLAMA_BASE_URL=http://localhost:11434
-
-# API key for remote Ollama servers with authentication
-OLLAMA_API_KEY=your_key_if_needed
-```
+3. Optionally change the **Base URL** (defaults to `http://localhost:11434`)
+4. If using a remote Ollama server with authentication, enter the **API Key**
+5. Click **Refresh Models** to load available models
+6. Select your preferred model from the dropdown
+7. Click **Test Connection** to verify
+8. Save settings
 
 ### Recommended Models
 
@@ -662,20 +637,13 @@ CoWork-OSS supports Google's Gemini models via Google AI Studio, offering powerf
 
 #### 2. Configure in CoWork-OSS
 
-**Option A: Environment Variable**
-
-Add to your `.env` file:
-```bash
-GEMINI_API_KEY=AIza...your-api-key-here...
-```
-
-**Option B: Settings UI**
-
 1. Open **Settings** (gear icon)
 2. Select **Google Gemini** as your provider
 3. Enter your API key
-4. Click **Test Connection** to verify
-5. Save settings
+4. Click **Refresh Models** to load available models
+5. Select your preferred model
+6. Click **Test Connection** to verify
+7. Save settings
 
 ### Available Models
 
@@ -693,7 +661,6 @@ GEMINI_API_KEY=AIza...your-api-key-here...
 - **Free Tier**: Google AI Studio offers a generous free tier for experimentation
 - **Tool Calling**: Full support for function calling/tools
 - **Rate Limits**: Free tier has lower rate limits than paid tiers
-- **Alternative Variable**: You can also use `GOOGLE_AI_API_KEY` instead of `GEMINI_API_KEY`
 
 ---
 
@@ -712,20 +679,13 @@ CoWork-OSS supports OpenRouter, a multi-model API gateway that provides access t
 
 #### 2. Configure in CoWork-OSS
 
-**Option A: Environment Variable**
-
-Add to your `.env` file:
-```bash
-OPENROUTER_API_KEY=sk-or-...your-api-key-here...
-```
-
-**Option B: Settings UI**
-
 1. Open **Settings** (gear icon)
 2. Select **OpenRouter** as your provider
 3. Enter your API key
-4. Click **Test Connection** to verify
-5. Save settings
+4. Click **Refresh Models** to load available models
+5. Select your preferred model
+6. Click **Test Connection** to verify
+7. Save settings
 
 ### Available Models
 
@@ -816,13 +776,9 @@ Development mode provides hot reload for both:
 
 ## Troubleshooting
 
-### "ANTHROPIC_API_KEY not found"
+### "No LLM provider configured"
 
-Set the environment variable in your `.env` file or export it:
-```bash
-export ANTHROPIC_API_KEY=your_key_here
-npm run dev
-```
+Open **Settings** (gear icon) and configure at least one LLM provider with your API credentials.
 
 ### Electron won't start
 

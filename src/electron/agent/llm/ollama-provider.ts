@@ -20,8 +20,8 @@ export class OllamaProvider implements LLMProvider {
   private apiKey?: string;
 
   constructor(config: LLMProviderConfig) {
-    this.baseUrl = config.ollamaBaseUrl || process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
-    this.apiKey = config.ollamaApiKey || process.env.OLLAMA_API_KEY;
+    this.baseUrl = config.ollamaBaseUrl || 'http://localhost:11434';
+    this.apiKey = config.ollamaApiKey;
 
     // Remove trailing slash if present
     if (this.baseUrl.endsWith('/')) {

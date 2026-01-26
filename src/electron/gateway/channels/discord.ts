@@ -197,7 +197,7 @@ export class DiscordAdapter implements ChannelAdapter {
         .setDescription('Change or show current LLM provider')
         .addStringOption(option =>
           option.setName('name')
-            .setDescription('Provider name (anthropic, bedrock, ollama)')
+            .setDescription('Provider name (anthropic, gemini, openrouter, bedrock, ollama)')
             .setRequired(false)),
       new SlashCommandBuilder()
         .setName('models')

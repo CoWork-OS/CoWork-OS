@@ -19,9 +19,9 @@ export class OpenRouterProvider implements LLMProvider {
   private defaultModel: string;
 
   constructor(config: LLMProviderConfig) {
-    const apiKey = config.openrouterApiKey || process.env.OPENROUTER_API_KEY;
+    const apiKey = config.openrouterApiKey;
     if (!apiKey) {
-      throw new Error('OpenRouter API key is required. Get one from https://openrouter.ai/keys');
+      throw new Error('OpenRouter API key is required. Configure it in Settings or get one from https://openrouter.ai/keys');
     }
 
     this.apiKey = apiKey;

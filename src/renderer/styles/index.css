@@ -4682,34 +4682,10 @@ button {
 .settings-page-header {
   display: flex;
   align-items: center;
-  gap: 16px;
   padding: 16px 24px 16px 80px; /* Extra left padding for macOS window controls */
   border-bottom: 1px solid var(--color-border);
   background: var(--color-bg-secondary);
-}
-
-.settings-back-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  background: transparent;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  color: var(--color-text-secondary);
-  font-size: 13px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.settings-back-btn:hover {
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-primary);
-  border-color: var(--color-border-hover);
-}
-
-.settings-back-btn svg {
-  flex-shrink: 0;
+  -webkit-app-region: drag;
 }
 
 .settings-page-header h1 {
@@ -4717,6 +4693,48 @@ button {
   font-weight: 600;
   color: var(--color-text-primary);
   margin: 0;
+  -webkit-app-region: no-drag;
+}
+
+/* Back button styled like a nav item */
+.settings-back-btn {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  background: transparent;
+  border: 2px solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.settings-back-btn:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+.settings-back-btn svg {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  opacity: 0.7;
+}
+
+.settings-back-btn:hover svg {
+  opacity: 1;
+}
+
+.settings-nav-divider {
+  height: 1px;
+  background: var(--color-border);
+  margin: 8px 0;
 }
 
 .settings-page-layout {
@@ -4738,13 +4756,16 @@ button {
 .settings-nav-item {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 10px;
+  width: 100%;
   padding: 10px 12px;
   background: transparent;
-  border: none;
+  border: 2px solid transparent;
   border-radius: var(--radius-md);
   color: var(--color-text-secondary);
   font-size: 14px;
+  font-weight: 500;
   text-align: left;
   cursor: pointer;
   transition: all 0.15s ease;
@@ -4756,17 +4777,25 @@ button {
 }
 
 .settings-nav-item.active {
-  background: var(--color-accent);
-  color: white;
+  background: var(--color-bg-tertiary);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
 }
 
 .settings-nav-item svg {
   flex-shrink: 0;
-  opacity: 0.8;
+  width: 18px;
+  height: 18px;
+  opacity: 0.7;
+}
+
+.settings-nav-item:hover svg {
+  opacity: 1;
 }
 
 .settings-nav-item.active svg {
   opacity: 1;
+  color: var(--color-accent);
 }
 
 .settings-content {

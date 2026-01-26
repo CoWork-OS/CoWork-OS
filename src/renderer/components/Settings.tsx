@@ -523,17 +523,18 @@ export function Settings({ onBack, onSettingsChanged }: SettingsProps) {
   return (
     <div className="settings-page">
       <div className="settings-page-header">
-        <button className="settings-back-btn" onClick={onBack}>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M19 12H5M12 19l-7-7 7-7" />
-          </svg>
-          Back
-        </button>
         <h1>Settings</h1>
       </div>
 
       <div className="settings-page-layout">
         <div className="settings-sidebar">
+          <button className="settings-back-btn" onClick={onBack}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M19 12H5M12 19l-7-7 7-7" />
+            </svg>
+            Back
+          </button>
+          <div className="settings-nav-divider" />
           <button
             className={`settings-nav-item ${activeTab === 'llm' ? 'active' : ''}`}
             onClick={() => setActiveTab('llm')}

@@ -18,7 +18,7 @@
 
 CoWork-OSS is an open-source, local-first agent workbench for running multi-step tasks in a folder-scoped workspace, with explicit approvals for destructive actions and built-in skills for generating documents, spreadsheets, and presentations.
 
-**You bring your own model credentials (Anthropic API / Google Gemini / AWS Bedrock) or run locally with Ollama; usage is billed by your provider (or free with Ollama).**
+**You bring your own model credentials (Anthropic API / Google Gemini / OpenRouter / AWS Bedrock) or run locally with Ollama; usage is billed by your provider (or free with Ollama).**
 
 > **Independent project.** CoWork-OSS is not affiliated with, endorsed by, or sponsored by Anthropic.
 > This project implements a local, folder-scoped agent workflow pattern in open source.
@@ -74,6 +74,7 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
 |----------|---------------|---------|
 | Anthropic API | Set `ANTHROPIC_API_KEY` in `.env` | Pay-per-token |
 | Google Gemini | Set `GEMINI_API_KEY` in `.env` | Pay-per-token (free tier available) |
+| OpenRouter | Set `OPENROUTER_API_KEY` in `.env` | Pay-per-token (multi-model access) |
 | AWS Bedrock | Configure AWS credentials in Settings | Pay-per-token via AWS |
 | Ollama (Local) | Install Ollama and pull models | **Free** (runs locally) |
 
@@ -134,7 +135,7 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
 │                  Execution Layer                 │
 │  - File Operations                               │
 │  - Skills (Document Creation)                    │
-│  - LLM Providers (Anthropic/Gemini/Bedrock/Ollama)│
+│  - LLM Providers (Anthropic/Gemini/OpenRouter/Bedrock/Ollama)│
 │  - Search Providers (Tavily/Brave/SerpAPI/Google)│
 └─────────────────────────────────────────────────┘
                       ↕
@@ -152,7 +153,7 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
 
 - Node.js 18+ and npm
 - macOS (for Electron native features)
-- One of: Anthropic API key, Google Gemini API key, AWS Bedrock access, or Ollama installed locally
+- One of: Anthropic API key, Google Gemini API key, OpenRouter API key, AWS Bedrock access, or Ollama installed locally
 
 ### Installation
 
@@ -298,7 +299,7 @@ If requested by the rights holder, we will update naming/branding to avoid confu
 - [x] Folder-scoped workspace + path traversal protection
 - [x] Approval gates for destructive operations
 - [x] Task timeline + artifact outputs
-- [x] Multi-provider support (Anthropic API / Google Gemini / AWS Bedrock / Ollama)
+- [x] Multi-provider support (Anthropic API / Google Gemini / OpenRouter / AWS Bedrock / Ollama)
 - [x] Model selection (Opus, Sonnet, Haiku, or any Ollama model)
 - [x] Built-in skills (documents, spreadsheets, presentations)
 - [x] **Real Office format support** (Excel .xlsx, Word .docx, PDF, PowerPoint .pptx)
@@ -693,6 +694,62 @@ GEMINI_API_KEY=AIza...your-api-key-here...
 - **Tool Calling**: Full support for function calling/tools
 - **Rate Limits**: Free tier has lower rate limits than paid tiers
 - **Alternative Variable**: You can also use `GOOGLE_AI_API_KEY` instead of `GEMINI_API_KEY`
+
+---
+
+## OpenRouter Integration
+
+CoWork-OSS supports OpenRouter, a multi-model API gateway that provides access to various AI models from different providers (Claude, GPT-4, Llama, Mistral, etc.) through a unified API.
+
+### Setting Up OpenRouter
+
+#### 1. Get an API Key
+
+1. Go to [OpenRouter](https://openrouter.ai/keys)
+2. Create an account or sign in
+3. Click **Create Key**
+4. Copy the generated API key (starts with `sk-or-...`)
+
+#### 2. Configure in CoWork-OSS
+
+**Option A: Environment Variable**
+
+Add to your `.env` file:
+```bash
+OPENROUTER_API_KEY=sk-or-...your-api-key-here...
+```
+
+**Option B: Settings UI**
+
+1. Open **Settings** (gear icon)
+2. Select **OpenRouter** as your provider
+3. Enter your API key
+4. Click **Test Connection** to verify
+5. Save settings
+
+### Available Models
+
+OpenRouter provides access to many models, including:
+
+| Model | Provider | Description |
+|-------|----------|-------------|
+| `anthropic/claude-3.5-sonnet` | Anthropic | Default. Balanced model |
+| `anthropic/claude-3-opus` | Anthropic | Most capable Claude model |
+| `openai/gpt-4o` | OpenAI | OpenAI's flagship model |
+| `openai/gpt-4o-mini` | OpenAI | Fast and affordable |
+| `google/gemini-pro-1.5` | Google | Google's advanced model |
+| `meta-llama/llama-3.1-405b-instruct` | Meta | Largest open model |
+| `mistralai/mistral-large` | Mistral | Mistral's flagship |
+| `deepseek/deepseek-chat` | DeepSeek | Conversational model |
+
+See all available models at [openrouter.ai/models](https://openrouter.ai/models)
+
+### Benefits
+
+- **Multi-Model Access**: Switch between models without changing API keys
+- **Pay-As-You-Go**: Pay only for what you use
+- **Model Variety**: Access models from OpenAI, Anthropic, Google, Meta, and more
+- **Unified API**: OpenAI-compatible API format
 
 ---
 

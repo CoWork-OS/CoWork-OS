@@ -13,6 +13,7 @@ import { AnthropicProvider } from './anthropic-provider';
 import { BedrockProvider } from './bedrock-provider';
 import { OllamaProvider } from './ollama-provider';
 import { GeminiProvider } from './gemini-provider';
+import { OpenRouterProvider } from './openrouter-provider';
 
 const SETTINGS_FILE = 'llm-settings.json';
 const MASKED_VALUE = '***configured***';
@@ -55,6 +56,13 @@ function sanitizeSettings(settings: LLMSettings): LLMSettings {
     };
   }
 
+  if (sanitized.openrouter) {
+    sanitized.openrouter = {
+      ...sanitized.openrouter,
+      apiKey: normalizeSecret(sanitized.openrouter.apiKey),
+    };
+  }
+
   return sanitized;
 }
 
@@ -81,6 +89,10 @@ export interface LLMSettings {
     apiKey?: string; // Optional, for remote Ollama servers
   };
   gemini?: {
+    apiKey?: string;
+    model?: string;
+  };
+  openrouter?: {
     apiKey?: string;
     model?: string;
   };
@@ -182,6 +194,17 @@ export class LLMProviderFactory {
   }
 
   /**
+   * Get the OpenRouter API key from environment variables
+   */
+  private static getOpenRouterKeyFromEnv(): string | undefined {
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (apiKey && apiKey !== 'your_api_key_here') {
+      return apiKey;
+    }
+    return undefined;
+  }
+
+  /**
    * Detect which provider to use based on environment variables
    */
   private static detectProviderFromEnv(): LLMProviderType | null {
@@ -198,6 +221,11 @@ export class LLMProviderFactory {
     // Check for Gemini API key
     if (this.getGeminiKeyFromEnv()) {
       return 'gemini';
+    }
+
+    // Check for OpenRouter API key
+    if (this.getOpenRouterKeyFromEnv()) {
+      return 'openrouter';
     }
 
     // Fall back to Bedrock if AWS credentials exist
@@ -255,6 +283,14 @@ export class LLMProviderFactory {
         };
       }
 
+      // Same for OpenRouter API key
+      if (settingsToSave.openrouter?.apiKey) {
+        settingsToSave.openrouter = {
+          ...settingsToSave.openrouter,
+          apiKey: MASKED_VALUE,
+        };
+      }
+
       fs.writeFileSync(this.settingsPath, JSON.stringify(settingsToSave, null, 2));
       this.cachedSettings = settings;
     } catch (error) {
@@ -284,7 +320,7 @@ export class LLMProviderFactory {
 
     const config: LLMProviderConfig = {
       type: providerType,
-      model: this.getModelId(settings.modelKey, providerType, settings.ollama?.model, settings.gemini?.model),
+      model: this.getModelId(settings.modelKey, providerType, settings.ollama?.model, settings.gemini?.model, settings.openrouter?.model),
       anthropicApiKey,
       // Bedrock config
       awsRegion: overrideConfig?.awsRegion || settings.bedrock?.region || process.env.AWS_REGION,
@@ -303,6 +339,11 @@ export class LLMProviderFactory {
         normalizeSecret(overrideConfig?.geminiApiKey) ||
         settings.gemini?.apiKey ||
         this.getGeminiKeyFromEnv(),
+      // OpenRouter config
+      openrouterApiKey:
+        normalizeSecret(overrideConfig?.openrouterApiKey) ||
+        settings.openrouter?.apiKey ||
+        this.getOpenRouterKeyFromEnv(),
     };
 
     return this.createProviderFromConfig(config);
@@ -321,6 +362,8 @@ export class LLMProviderFactory {
         return new OllamaProvider(config);
       case 'gemini':
         return new GeminiProvider(config);
+      case 'openrouter':
+        return new OpenRouterProvider(config);
       default:
         throw new Error(`Unknown provider type: ${config.type}`);
     }
@@ -329,7 +372,7 @@ export class LLMProviderFactory {
   /**
    * Get the model ID for a provider
    */
-  static getModelId(modelKey: ModelKey | string, providerType: LLMProviderType, ollamaModel?: string, geminiModel?: string): string {
+  static getModelId(modelKey: ModelKey | string, providerType: LLMProviderType, ollamaModel?: string, geminiModel?: string, openrouterModel?: string): string {
     // For Ollama, use the specific Ollama model if provided
     if (providerType === 'ollama') {
       return ollamaModel || 'gpt-oss:20b';
@@ -338,6 +381,11 @@ export class LLMProviderFactory {
     // For Gemini, use the specific Gemini model if provided or default
     if (providerType === 'gemini') {
       return geminiModel || 'gemini-2.0-flash';
+    }
+
+    // For OpenRouter, use the specific model if provided or default
+    if (providerType === 'openrouter') {
+      return openrouterModel || 'anthropic/claude-3.5-sonnet';
     }
 
     // For other providers, look up in MODELS
@@ -387,6 +435,8 @@ export class LLMProviderFactory {
     const hasOllamaEnv = !!this.getOllamaBaseUrlFromEnv();
     const hasGeminiKey = !!this.getGeminiKeyFromEnv();
     const hasGeminiInSettings = !!settings.gemini?.model;
+    const hasOpenRouterKey = !!this.getOpenRouterKeyFromEnv();
+    const hasOpenRouterInSettings = !!settings.openrouter?.model;
 
     return [
       {
@@ -398,6 +448,11 @@ export class LLMProviderFactory {
         type: 'gemini' as LLMProviderType,
         name: 'Google Gemini',
         configured: !!(hasGeminiKey || hasGeminiInSettings),
+      },
+      {
+        type: 'openrouter' as LLMProviderType,
+        name: 'OpenRouter',
+        configured: !!(hasOpenRouterKey || hasOpenRouterInSettings),
       },
       {
         type: 'bedrock' as LLMProviderType,

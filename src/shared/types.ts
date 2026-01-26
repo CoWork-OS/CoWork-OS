@@ -30,14 +30,16 @@ export type ToolType =
   | 'delete_file'
   | 'create_directory'
   | 'search_files'
-  | 'run_skill';
+  | 'run_skill'
+  | 'run_command';
 
 export type ApprovalType =
   | 'delete_file'
   | 'delete_multiple'
   | 'bulk_rename'
   | 'network_access'
-  | 'external_service';
+  | 'external_service'
+  | 'run_command';
 
 export interface Task {
   id: string;
@@ -84,6 +86,7 @@ export interface WorkspacePermissions {
   write: boolean;
   delete: boolean;
   network: boolean;
+  shell: boolean;
   allowedDomains?: string[];
 }
 

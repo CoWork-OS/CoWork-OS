@@ -36,6 +36,7 @@ export function WorkspaceSelector({ onWorkspaceSelected }: WorkspaceSelectorProp
           write: true,
           delete: true,
           network: false,
+          shell: false,
         },
       });
 

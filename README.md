@@ -18,7 +18,7 @@
 
 CoWork-OSS is an open-source, local-first agent workbench for running multi-step tasks in a folder-scoped workspace, with explicit approvals for destructive actions and built-in skills for generating documents, spreadsheets, and presentations.
 
-**You bring your own model credentials (Anthropic API / AWS Bedrock) or run locally with Ollama; usage is billed by your provider (or free with Ollama).**
+**You bring your own model credentials (Anthropic API / Google Gemini / AWS Bedrock) or run locally with Ollama; usage is billed by your provider (or free with Ollama).**
 
 > **Independent project.** CoWork-OSS is not affiliated with, endorsed by, or sponsored by Anthropic.
 > This project implements a local, folder-scoped agent workflow pattern in open source.
@@ -73,6 +73,7 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
 | Provider | Configuration | Billing |
 |----------|---------------|---------|
 | Anthropic API | Set `ANTHROPIC_API_KEY` in `.env` | Pay-per-token |
+| Google Gemini | Set `GEMINI_API_KEY` in `.env` | Pay-per-token (free tier available) |
 | AWS Bedrock | Configure AWS credentials in Settings | Pay-per-token via AWS |
 | Ollama (Local) | Install Ollama and pull models | **Free** (runs locally) |
 
@@ -133,7 +134,7 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
 │                  Execution Layer                 │
 │  - File Operations                               │
 │  - Skills (Document Creation)                    │
-│  - LLM Providers (Anthropic/Bedrock/Ollama)      │
+│  - LLM Providers (Anthropic/Gemini/Bedrock/Ollama)│
 │  - Search Providers (Tavily/Brave/SerpAPI/Google)│
 └─────────────────────────────────────────────────┘
                       ↕
@@ -151,7 +152,7 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
 
 - Node.js 18+ and npm
 - macOS (for Electron native features)
-- One of: Anthropic API key, AWS Bedrock access, or Ollama installed locally
+- One of: Anthropic API key, Google Gemini API key, AWS Bedrock access, or Ollama installed locally
 
 ### Installation
 
@@ -297,7 +298,7 @@ If requested by the rights holder, we will update naming/branding to avoid confu
 - [x] Folder-scoped workspace + path traversal protection
 - [x] Approval gates for destructive operations
 - [x] Task timeline + artifact outputs
-- [x] Multi-provider support (Anthropic API / AWS Bedrock / Ollama)
+- [x] Multi-provider support (Anthropic API / Google Gemini / AWS Bedrock / Ollama)
 - [x] Model selection (Opus, Sonnet, Haiku, or any Ollama model)
 - [x] Built-in skills (documents, spreadsheets, presentations)
 - [x] **Real Office format support** (Excel .xlsx, Word .docx, PDF, PowerPoint .pptx)
@@ -642,6 +643,56 @@ OLLAMA_API_KEY=your_key_if_needed
 - **Memory**: Larger models need more RAM (e.g., 14B models need ~16GB RAM)
 - **Tool Calling**: Works best with models that support function calling (llama3.2, qwen2.5)
 - **Offline**: Once models are downloaded, no internet connection is required
+
+---
+
+## Google Gemini Integration
+
+CoWork-OSS supports Google's Gemini models via Google AI Studio, offering powerful AI capabilities with a generous free tier.
+
+### Setting Up Gemini
+
+#### 1. Get an API Key
+
+1. Go to [Google AI Studio](https://aistudio.google.com/apikey)
+2. Sign in with your Google account
+3. Click **Create API Key**
+4. Copy the generated API key (starts with `AIza...`)
+
+#### 2. Configure in CoWork-OSS
+
+**Option A: Environment Variable**
+
+Add to your `.env` file:
+```bash
+GEMINI_API_KEY=AIza...your-api-key-here...
+```
+
+**Option B: Settings UI**
+
+1. Open **Settings** (gear icon)
+2. Select **Google Gemini** as your provider
+3. Enter your API key
+4. Click **Test Connection** to verify
+5. Save settings
+
+### Available Models
+
+| Model | Description |
+|-------|-------------|
+| `gemini-2.0-flash` | Default. Balanced speed and capability |
+| `gemini-2.5-pro` | Most capable for complex tasks |
+| `gemini-2.5-flash` | Fast and efficient |
+| `gemini-2.0-flash-lite` | Fastest and most cost-effective |
+| `gemini-1.5-pro` | Previous generation pro model |
+| `gemini-1.5-flash` | Previous generation flash model |
+
+### Notes
+
+- **Free Tier**: Google AI Studio offers a generous free tier for experimentation
+- **Tool Calling**: Full support for function calling/tools
+- **Rate Limits**: Free tier has lower rate limits than paid tiers
+- **Alternative Variable**: You can also use `GOOGLE_AI_API_KEY` instead of `GEMINI_API_KEY`
 
 ---
 

@@ -212,7 +212,7 @@ export const IPC_CHANNELS = {
 } as const;
 
 // LLM Provider types
-export type LLMProviderType = 'anthropic' | 'bedrock' | 'ollama';
+export type LLMProviderType = 'anthropic' | 'bedrock' | 'ollama' | 'gemini';
 
 export interface LLMSettingsData {
   providerType: LLMProviderType;
@@ -232,6 +232,10 @@ export interface LLMSettingsData {
     baseUrl?: string;
     model?: string;
     apiKey?: string; // Optional, for remote Ollama servers
+  };
+  gemini?: {
+    apiKey?: string;
+    model?: string;
   };
 }
 

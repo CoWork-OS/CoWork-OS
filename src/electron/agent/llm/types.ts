@@ -3,7 +3,7 @@
  * Allows switching between Anthropic API and AWS Bedrock
  */
 
-export type LLMProviderType = 'anthropic' | 'bedrock' | 'ollama';
+export type LLMProviderType = 'anthropic' | 'bedrock' | 'ollama' | 'gemini';
 
 export interface LLMProviderConfig {
   type: LLMProviderType;
@@ -20,6 +20,8 @@ export interface LLMProviderConfig {
   // Ollama-specific
   ollamaBaseUrl?: string;
   ollamaApiKey?: string; // Optional API key for remote Ollama servers
+  // Gemini-specific
+  geminiApiKey?: string;
 }
 
 export interface LLMTool {
@@ -129,6 +131,44 @@ export const MODELS = {
     displayName: 'Haiku 3.5',
   },
 } as const;
+
+/**
+ * Available Gemini models from Google AI Studio
+ */
+export const GEMINI_MODELS = {
+  'gemini-2.5-pro': {
+    id: 'gemini-2.5-pro-preview-05-06',
+    displayName: 'Gemini 2.5 Pro',
+    description: 'Most capable model for complex tasks',
+  },
+  'gemini-2.5-flash': {
+    id: 'gemini-2.5-flash-preview-05-20',
+    displayName: 'Gemini 2.5 Flash',
+    description: 'Fast and efficient for most tasks',
+  },
+  'gemini-2.0-flash': {
+    id: 'gemini-2.0-flash',
+    displayName: 'Gemini 2.0 Flash',
+    description: 'Balanced speed and capability',
+  },
+  'gemini-2.0-flash-lite': {
+    id: 'gemini-2.0-flash-lite',
+    displayName: 'Gemini 2.0 Flash Lite',
+    description: 'Fastest and most cost-effective',
+  },
+  'gemini-1.5-pro': {
+    id: 'gemini-1.5-pro',
+    displayName: 'Gemini 1.5 Pro',
+    description: 'Previous generation pro model',
+  },
+  'gemini-1.5-flash': {
+    id: 'gemini-1.5-flash',
+    displayName: 'Gemini 1.5 Flash',
+    description: 'Previous generation flash model',
+  },
+} as const;
+
+export type GeminiModelKey = keyof typeof GEMINI_MODELS;
 
 /**
  * Popular Ollama models with their details

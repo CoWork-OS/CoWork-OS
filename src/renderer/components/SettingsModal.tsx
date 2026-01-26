@@ -60,6 +60,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [ollamaModels, setOllamaModels] = useState<Array<{ name: string; size: number }>>([]);
   const [loadingOllamaModels, setLoadingOllamaModels] = useState(false);
 
+  // Gemini state
+  const [geminiApiKey, setGeminiApiKey] = useState('');
+
   useEffect(() => {
     if (isOpen) {
       loadConfigStatus();
@@ -145,6 +148,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           model: ollamaModel || undefined,
           apiKey: ollamaApiKey || undefined,
         } : undefined,
+        gemini: settings.providerType === 'gemini' ? {
+          apiKey: geminiApiKey || undefined,
+        } : undefined,
       };
 
       await window.electronAPI.saveLLMSettings(settingsToSave);
@@ -180,6 +186,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           baseUrl: ollamaBaseUrl || undefined,
           model: ollamaModel || undefined,
           apiKey: ollamaApiKey || undefined,
+        } : undefined,
+        gemini: settings.providerType === 'gemini' ? {
+          apiKey: geminiApiKey || undefined,
         } : undefined,
       };
 
@@ -263,6 +272,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     const isAnthropic = provider.type === 'anthropic';
                     const isBedrock = provider.type === 'bedrock';
                     const isOllama = provider.type === 'ollama';
+                    const isGemini = provider.type === 'gemini';
 
                     return (
                       <label
@@ -275,7 +285,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           value={provider.type}
                           checked={settings.providerType === provider.type}
                           onChange={() => {
-                            setSettings({ ...settings, providerType: provider.type as 'anthropic' | 'bedrock' | 'ollama' });
+                            setSettings({ ...settings, providerType: provider.type as 'anthropic' | 'bedrock' | 'ollama' | 'gemini' });
                             // Load Ollama models when selecting Ollama
                             if (provider.type === 'ollama') {
                               loadOllamaModels();
@@ -298,6 +308,12 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             {isAnthropic && !provider.configured && (
                               <>Set ANTHROPIC_API_KEY in .env or enter below</>
                             )}
+                            {isGemini && provider.configured && (
+                              <>Using API key from environment or settings</>
+                            )}
+                            {isGemini && !provider.configured && (
+                              <>Set GEMINI_API_KEY in .env or enter below</>
+                            )}
                             {isBedrock && provider.configured && (
                               <>Using AWS credentials from environment or settings</>
                             )}
@@ -318,7 +334,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 </div>
               </div>
 
-              {settings.providerType !== 'ollama' && (
+              {settings.providerType !== 'ollama' && settings.providerType !== 'gemini' && (
                 <div className="settings-section">
                   <h3>Model</h3>
                   <select
@@ -348,6 +364,25 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     value={anthropicApiKey}
                     onChange={(e) => setAnthropicApiKey(e.target.value)}
                   />
+                </div>
+              )}
+
+              {settings.providerType === 'gemini' && (
+                <div className="settings-section">
+                  <h3>Gemini API Key</h3>
+                  <p className="settings-description">
+                    Enter your API key from aistudio.google.com/apikey, or leave empty to use environment variable.
+                  </p>
+                  <input
+                    type="password"
+                    className="settings-input"
+                    placeholder="AIza..."
+                    value={geminiApiKey}
+                    onChange={(e) => setGeminiApiKey(e.target.value)}
+                  />
+                  <p className="settings-hint">
+                    Default model: Gemini 2.0 Flash. Other models like Gemini 2.5 Pro can be configured via environment.
+                  </p>
                 </div>
               )}
 

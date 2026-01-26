@@ -12,6 +12,7 @@ import {
 import { AnthropicProvider } from './anthropic-provider';
 import { BedrockProvider } from './bedrock-provider';
 import { OllamaProvider } from './ollama-provider';
+import { GeminiProvider } from './gemini-provider';
 
 const SETTINGS_FILE = 'llm-settings.json';
 const MASKED_VALUE = '***configured***';
@@ -47,6 +48,13 @@ function sanitizeSettings(settings: LLMSettings): LLMSettings {
     };
   }
 
+  if (sanitized.gemini) {
+    sanitized.gemini = {
+      ...sanitized.gemini,
+      apiKey: normalizeSecret(sanitized.gemini.apiKey),
+    };
+  }
+
   return sanitized;
 }
 
@@ -71,6 +79,10 @@ export interface LLMSettings {
     baseUrl?: string;
     model?: string;
     apiKey?: string; // Optional, for remote Ollama servers
+  };
+  gemini?: {
+    apiKey?: string;
+    model?: string;
   };
 }
 
@@ -159,6 +171,17 @@ export class LLMProviderFactory {
   }
 
   /**
+   * Get the Gemini API key from environment variables
+   */
+  private static getGeminiKeyFromEnv(): string | undefined {
+    const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
+    if (apiKey && apiKey !== 'your_api_key_here') {
+      return apiKey;
+    }
+    return undefined;
+  }
+
+  /**
    * Detect which provider to use based on environment variables
    */
   private static detectProviderFromEnv(): LLMProviderType | null {
@@ -170,6 +193,11 @@ export class LLMProviderFactory {
     // Prefer Anthropic if API key exists
     if (this.getAnthropicKeyFromEnv()) {
       return 'anthropic';
+    }
+
+    // Check for Gemini API key
+    if (this.getGeminiKeyFromEnv()) {
+      return 'gemini';
     }
 
     // Fall back to Bedrock if AWS credentials exist
@@ -219,6 +247,14 @@ export class LLMProviderFactory {
         };
       }
 
+      // Same for Gemini API key
+      if (settingsToSave.gemini?.apiKey) {
+        settingsToSave.gemini = {
+          ...settingsToSave.gemini,
+          apiKey: MASKED_VALUE,
+        };
+      }
+
       fs.writeFileSync(this.settingsPath, JSON.stringify(settingsToSave, null, 2));
       this.cachedSettings = settings;
     } catch (error) {
@@ -248,7 +284,7 @@ export class LLMProviderFactory {
 
     const config: LLMProviderConfig = {
       type: providerType,
-      model: this.getModelId(settings.modelKey, providerType, settings.ollama?.model),
+      model: this.getModelId(settings.modelKey, providerType, settings.ollama?.model, settings.gemini?.model),
       anthropicApiKey,
       // Bedrock config
       awsRegion: overrideConfig?.awsRegion || settings.bedrock?.region || process.env.AWS_REGION,
@@ -262,6 +298,11 @@ export class LLMProviderFactory {
       // Ollama config
       ollamaBaseUrl: overrideConfig?.ollamaBaseUrl || settings.ollama?.baseUrl || this.getOllamaBaseUrlFromEnv(),
       ollamaApiKey: normalizeSecret(overrideConfig?.ollamaApiKey) || settings.ollama?.apiKey || process.env.OLLAMA_API_KEY,
+      // Gemini config
+      geminiApiKey:
+        normalizeSecret(overrideConfig?.geminiApiKey) ||
+        settings.gemini?.apiKey ||
+        this.getGeminiKeyFromEnv(),
     };
 
     return this.createProviderFromConfig(config);
@@ -278,6 +319,8 @@ export class LLMProviderFactory {
         return new BedrockProvider(config);
       case 'ollama':
         return new OllamaProvider(config);
+      case 'gemini':
+        return new GeminiProvider(config);
       default:
         throw new Error(`Unknown provider type: ${config.type}`);
     }
@@ -286,10 +329,15 @@ export class LLMProviderFactory {
   /**
    * Get the model ID for a provider
    */
-  static getModelId(modelKey: ModelKey | string, providerType: LLMProviderType, ollamaModel?: string): string {
+  static getModelId(modelKey: ModelKey | string, providerType: LLMProviderType, ollamaModel?: string, geminiModel?: string): string {
     // For Ollama, use the specific Ollama model if provided
     if (providerType === 'ollama') {
       return ollamaModel || 'gpt-oss:20b';
+    }
+
+    // For Gemini, use the specific Gemini model if provided or default
+    if (providerType === 'gemini') {
+      return geminiModel || 'gemini-2.0-flash';
     }
 
     // For other providers, look up in MODELS
@@ -337,12 +385,19 @@ export class LLMProviderFactory {
     const hasBedrockInSettings = settings.bedrock?.region || settings.bedrock?.profile;
     const hasOllamaInSettings = settings.ollama?.baseUrl || settings.ollama?.model;
     const hasOllamaEnv = !!this.getOllamaBaseUrlFromEnv();
+    const hasGeminiKey = !!this.getGeminiKeyFromEnv();
+    const hasGeminiInSettings = !!settings.gemini?.model;
 
     return [
       {
         type: 'anthropic' as LLMProviderType,
         name: 'Anthropic API',
         configured: hasAnthropicKey,
+      },
+      {
+        type: 'gemini' as LLMProviderType,
+        name: 'Google Gemini',
+        configured: !!(hasGeminiKey || hasGeminiInSettings),
       },
       {
         type: 'bedrock' as LLMProviderType,

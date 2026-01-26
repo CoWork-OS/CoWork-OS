@@ -71,6 +71,9 @@ export class MessageRouter {
   // Track pending responses for tasks
   private pendingTaskResponses: Map<string, { adapter: ChannelAdapter; chatId: string; sessionId: string }> = new Map();
 
+  // Track pending approval requests for Discord/Telegram
+  private pendingApprovals: Map<string, { taskId: string; approval: any; sessionId: string }> = new Map();
+
   constructor(db: Database.Database, config: RouterConfig = {}, agentDaemon?: AgentDaemon) {
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.agentDaemon = agentDaemon;
@@ -463,6 +466,18 @@ export class MessageRouter {
 
       case '/shell':
         await this.handleShellCommand(adapter, message, sessionId, args);
+        break;
+
+      case '/approve':
+      case '/yes':
+      case '/y':
+        await this.handleApproveCommand(adapter, message, sessionId);
+        break;
+
+      case '/deny':
+      case '/no':
+      case '/n':
+        await this.handleDenyCommand(adapter, message, sessionId);
         break;
 
       default:
@@ -1472,6 +1487,122 @@ export class MessageRouter {
   }
 
   /**
+   * Send approval request to Discord/Telegram
+   */
+  async sendApprovalRequest(taskId: string, approval: any): Promise<void> {
+    const pending = this.pendingTaskResponses.get(taskId);
+    if (!pending) return;
+
+    // Store approval for response handling
+    this.pendingApprovals.set(approval.id, {
+      taskId,
+      approval,
+      sessionId: pending.sessionId,
+    });
+
+    // Format approval message
+    let message = `🔐 *Approval Required*\n\n`;
+    message += `**${approval.description}**\n\n`;
+
+    if (approval.type === 'run_command' && approval.details?.command) {
+      message += `\`\`\`\n${approval.details.command}\n\`\`\`\n\n`;
+    } else if (approval.details) {
+      message += `Details: ${JSON.stringify(approval.details, null, 2)}\n\n`;
+    }
+
+    message += `Reply with:\n`;
+    message += `• \`/approve\` - Allow this action\n`;
+    message += `• \`/deny\` - Reject this action\n\n`;
+    message += `⏳ _Expires in 5 minutes_`;
+
+    try {
+      await pending.adapter.sendMessage({
+        chatId: pending.chatId,
+        text: message,
+        parseMode: 'markdown',
+      });
+    } catch (error) {
+      console.error('Error sending approval request:', error);
+    }
+  }
+
+  /**
+   * Handle /approve command
+   */
+  private async handleApproveCommand(
+    adapter: ChannelAdapter,
+    message: IncomingMessage,
+    sessionId: string
+  ): Promise<void> {
+    // Find pending approval for this session
+    const approvalEntry = Array.from(this.pendingApprovals.entries())
+      .find(([, data]) => data.sessionId === sessionId);
+
+    if (!approvalEntry) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: '❌ No pending approval request.',
+      });
+      return;
+    }
+
+    const [approvalId, data] = approvalEntry;
+    this.pendingApprovals.delete(approvalId);
+
+    try {
+      await this.agentDaemon?.respondToApproval(approvalId, true);
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: '✅ Approved! Executing...',
+      });
+    } catch (error) {
+      console.error('Error responding to approval:', error);
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: '❌ Failed to process approval.',
+      });
+    }
+  }
+
+  /**
+   * Handle /deny command
+   */
+  private async handleDenyCommand(
+    adapter: ChannelAdapter,
+    message: IncomingMessage,
+    sessionId: string
+  ): Promise<void> {
+    // Find pending approval for this session
+    const approvalEntry = Array.from(this.pendingApprovals.entries())
+      .find(([, data]) => data.sessionId === sessionId);
+
+    if (!approvalEntry) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: '❌ No pending approval request.',
+      });
+      return;
+    }
+
+    const [approvalId] = approvalEntry;
+    this.pendingApprovals.delete(approvalId);
+
+    try {
+      await this.agentDaemon?.respondToApproval(approvalId, false);
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: '🛑 Denied. Action cancelled.',
+      });
+    } catch (error) {
+      console.error('Error responding to denial:', error);
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: '❌ Failed to process denial.',
+      });
+    }
+  }
+
+  /**
    * Split a message into chunks for Telegram's character limit
    */
   private splitMessage(text: string, maxLength: number): string[] {
@@ -1579,6 +1710,8 @@ export class MessageRouter {
 /model - Show or change model
 /shell - Enable/disable shell command execution
 /cancel - Cancel current task
+/approve - Approve pending action (or /yes, /y)
+/deny - Reject pending action (or /no, /n)
 
 💬 *How to use*
 1. Add or select a workspace:

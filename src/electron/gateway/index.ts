@@ -163,6 +163,13 @@ export class ChannelGateway {
     };
     agentDaemon.on('follow_up_failed', onFollowUpFailed);
     this.daemonListeners.push({ event: 'follow_up_failed', handler: onFollowUpFailed });
+
+    // Listen for approval requests - forward to Discord/Telegram
+    const onApprovalRequested = (data: { taskId: string; approval: any }) => {
+      this.router.sendApprovalRequest(data.taskId, data.approval);
+    };
+    agentDaemon.on('approval_requested', onApprovalRequested);
+    this.daemonListeners.push({ event: 'approval_requested', handler: onApprovalRequested });
   }
 
   /**

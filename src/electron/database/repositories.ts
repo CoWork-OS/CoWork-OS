@@ -138,7 +138,7 @@ export class TaskRepository {
   // Whitelist of allowed update fields to prevent SQL injection
   private static readonly ALLOWED_UPDATE_FIELDS = new Set([
     'title', 'status', 'error', 'result', 'budgetTokens', 'budgetCost',
-    'successCriteria', 'maxAttempts', 'currentAttempt'
+    'successCriteria', 'maxAttempts', 'currentAttempt', 'completedAt'
   ]);
 
   update(id: string, updates: Partial<Task>): void {

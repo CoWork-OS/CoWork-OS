@@ -218,6 +218,24 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
   const [showSteps, setShowSteps] = useState(true);
   const [autoScroll, setAutoScroll] = useState(true);
   const [queuedMessage, setQueuedMessage] = useState<string | null>(null);
+  const [expandedEvents, setExpandedEvents] = useState<Set<number>>(new Set());
+
+  const toggleEventExpanded = (index: number) => {
+    setExpandedEvents(prev => {
+      const next = new Set(prev);
+      if (next.has(index)) {
+        next.delete(index);
+      } else {
+        next.add(index);
+      }
+      return next;
+    });
+  };
+
+  // Check if an event has details to show
+  const hasEventDetails = (event: TaskEvent): boolean => {
+    return ['plan_created', 'tool_call', 'tool_result', 'assistant_message', 'error'].includes(event.type);
+  };
 
   const timelineRef = useRef<HTMLDivElement>(null);
   const mainBodyRef = useRef<HTMLDivElement>(null);
@@ -513,19 +531,35 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
 
               {showSteps && (
                 <div className="timeline-events" ref={timelineRef}>
-                  {events.map((event, index) => (
-                    <div key={`event-${index}-${event.id || 'no-id'}`} className="timeline-event">
-                      <div className="event-indicator">
-                        <div className={`event-dot ${getEventDotClass(event.type)}`} />
-                        {index < events.length - 1 && <div className="event-line" />}
+                  {events.map((event, index) => {
+                    const isExpandable = hasEventDetails(event);
+                    const isExpanded = expandedEvents.has(index);
+                    return (
+                      <div key={`event-${index}-${event.id || 'no-id'}`} className="timeline-event">
+                        <div className="event-indicator">
+                          <div className={`event-dot ${getEventDotClass(event.type)}`} />
+                          {index < events.length - 1 && <div className="event-line" />}
+                        </div>
+                        <div className="event-content">
+                          <div
+                            className={`event-header ${isExpandable ? 'expandable' : ''} ${isExpanded ? 'expanded' : ''}`}
+                            onClick={isExpandable ? () => toggleEventExpanded(index) : undefined}
+                          >
+                            <div className="event-header-left">
+                              {isExpandable && (
+                                <svg className="event-expand-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <path d="M9 18l6-6-6-6" />
+                                </svg>
+                              )}
+                              <div className="event-title">{renderEventTitle(event, workspace?.path)}</div>
+                            </div>
+                            <div className="event-time">{formatTime(event.timestamp)}</div>
+                          </div>
+                          {isExpanded && renderEventDetails(event)}
+                        </div>
                       </div>
-                      <div className="event-content">
-                        <div className="event-title">{renderEventTitle(event, workspace?.path)}</div>
-                        <div className="event-time">{formatTime(event.timestamp)}</div>
-                        {renderEventDetails(event)}
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>

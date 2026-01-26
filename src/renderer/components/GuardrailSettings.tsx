@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
-import { GuardrailSettings as GuardrailSettingsType, DEFAULT_BLOCKED_COMMAND_PATTERNS } from '../../shared/types';
+import { GuardrailSettings as GuardrailSettingsType, DEFAULT_BLOCKED_COMMAND_PATTERNS, DEFAULT_TRUSTED_COMMAND_PATTERNS } from '../../shared/types';
 
 export function GuardrailSettings() {
   const [settings, setSettings] = useState<GuardrailSettingsType | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [newPattern, setNewPattern] = useState('');
+  const [newTrustedPattern, setNewTrustedPattern] = useState('');
   const [newDomain, setNewDomain] = useState('');
 
   useEffect(() => {
@@ -60,6 +61,24 @@ export function GuardrailSettings() {
     setSettings({
       ...settings,
       customBlockedPatterns: settings.customBlockedPatterns.filter(p => p !== pattern),
+    });
+  };
+
+  const addTrustedPattern = () => {
+    if (!settings || !newTrustedPattern.trim()) return;
+    if (settings.trustedCommandPatterns.includes(newTrustedPattern.trim())) return;
+    setSettings({
+      ...settings,
+      trustedCommandPatterns: [...settings.trustedCommandPatterns, newTrustedPattern.trim()],
+    });
+    setNewTrustedPattern('');
+  };
+
+  const removeTrustedPattern = (pattern: string) => {
+    if (!settings) return;
+    setSettings({
+      ...settings,
+      trustedCommandPatterns: settings.trustedCommandPatterns.filter(p => p !== pattern),
     });
   };
 
@@ -259,6 +278,94 @@ export function GuardrailSettings() {
             <p className="settings-hint">No custom patterns added.</p>
           )}
         </div>
+      </div>
+
+      {/* Auto-Approve Trusted Commands Section */}
+      <div className="settings-section">
+        <div className="settings-section-header">
+          <h3>Auto-Approve Trusted Commands</h3>
+          <label className="settings-toggle">
+            <input
+              type="checkbox"
+              checked={settings.autoApproveTrustedCommands}
+              onChange={(e) => setSettings({ ...settings, autoApproveTrustedCommands: e.target.checked })}
+            />
+            <span className="toggle-slider"></span>
+          </label>
+        </div>
+        <p className="settings-description">
+          Automatically approve shell commands that match trusted patterns without asking for confirmation.
+          This enables more autonomous operation while keeping dangerous commands blocked.
+        </p>
+
+        {settings.autoApproveTrustedCommands && (
+          <>
+            <div className="settings-subsection">
+              <h4>Built-in Trusted Patterns</h4>
+              <p className="settings-description">
+                Common safe commands that are auto-approved by default.
+              </p>
+              <div className="pattern-list">
+                {DEFAULT_TRUSTED_COMMAND_PATTERNS.slice(0, 15).map((pattern, index) => (
+                  <span key={index} className="pattern-tag builtin trusted" title={pattern}>
+                    {pattern}
+                  </span>
+                ))}
+                {DEFAULT_TRUSTED_COMMAND_PATTERNS.length > 15 && (
+                  <span className="pattern-tag builtin trusted">
+                    +{DEFAULT_TRUSTED_COMMAND_PATTERNS.length - 15} more
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="settings-subsection">
+              <h4>Custom Trusted Patterns</h4>
+              <p className="settings-description">
+                Add your own glob patterns for commands to auto-approve. Use * as wildcard.
+              </p>
+              <div className="settings-input-group">
+                <input
+                  type="text"
+                  className="settings-input"
+                  placeholder="e.g., cargo build* or make *"
+                  value={newTrustedPattern}
+                  onChange={(e) => setNewTrustedPattern(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && addTrustedPattern()}
+                />
+                <button
+                  className="button-small button-secondary"
+                  onClick={addTrustedPattern}
+                  disabled={!newTrustedPattern.trim()}
+                >
+                  Add
+                </button>
+              </div>
+              {settings.trustedCommandPatterns.length > 0 ? (
+                <div className="pattern-list">
+                  {settings.trustedCommandPatterns.map((pattern, index) => (
+                    <span key={index} className="pattern-tag custom trusted">
+                      {pattern}
+                      <button
+                        className="pattern-remove"
+                        onClick={() => removeTrustedPattern(pattern)}
+                        title="Remove pattern"
+                      >
+                        x
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="settings-hint">No custom trusted patterns added.</p>
+              )}
+            </div>
+          </>
+        )}
+
+        <p className="settings-hint warning">
+          Blocked patterns always take priority over trusted patterns for safety.
+        </p>
       </div>
 
       {/* File Size Limit Section */}

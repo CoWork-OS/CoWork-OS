@@ -6,6 +6,7 @@ import { SearchTools } from './search-tools';
 import { BrowserTools } from './browser-tools';
 import { ShellTools } from './shell-tools';
 import { ImageTools } from './image-tools';
+import { SystemTools } from './system-tools';
 import { LLMTool } from '../llm/types';
 import { SearchProviderFactory } from '../search';
 
@@ -19,6 +20,7 @@ export class ToolRegistry {
   private browserTools: BrowserTools;
   private shellTools: ShellTools;
   private imageTools: ImageTools;
+  private systemTools: SystemTools;
 
   constructor(
     private workspace: Workspace,
@@ -31,6 +33,7 @@ export class ToolRegistry {
     this.browserTools = new BrowserTools(workspace, daemon, taskId);
     this.shellTools = new ShellTools(workspace, daemon, taskId);
     this.imageTools = new ImageTools(workspace, daemon, taskId);
+    this.systemTools = new SystemTools(workspace, daemon, taskId);
   }
 
   /**
@@ -58,7 +61,25 @@ export class ToolRegistry {
       tools.push(...ImageTools.getToolDefinitions());
     }
 
+    // Always add system tools (they enable broader system interaction)
+    tools.push(...SystemTools.getToolDefinitions());
+
+    // Add meta tools for execution control
+    tools.push(...this.getMetaToolDefinitions());
+
     return tools;
+  }
+
+  /**
+   * Callback for handling plan revisions (set by executor)
+   */
+  private planRevisionHandler?: (newSteps: Array<{ description: string }>, reason: string) => void;
+
+  /**
+   * Set the callback for handling plan revisions
+   */
+  setPlanRevisionHandler(handler: (newSteps: Array<{ description: string }>, reason: string) => void): void {
+    this.planRevisionHandler = handler;
   }
 
   /**
@@ -125,6 +146,24 @@ Image Generation (Nano Banana):
   - nano-banana-pro: High-quality generation for production use`;
     }
 
+    // System tools are always available
+    descriptions += `
+
+System Tools:
+- system_info: Get OS, CPU, memory, and user info
+- read_clipboard: Read system clipboard contents
+- write_clipboard: Write text to system clipboard
+- take_screenshot: Capture screen and save to workspace
+- open_application: Open an app by name
+- open_url: Open URL in default browser
+- open_path: Open file/folder with default application
+- show_in_folder: Reveal file in Finder/Explorer
+- get_env: Read environment variable
+- get_app_paths: Get system paths (home, downloads, etc.)
+
+Plan Control:
+- revise_plan: Modify remaining plan steps when obstacles are encountered or new information discovered`;
+
     return descriptions.trim();
   }
 
@@ -160,6 +199,32 @@ Image Generation (Nano Banana):
 
     // Image tools
     if (name === 'generate_image') return await this.imageTools.generateImage(input);
+
+    // System tools
+    if (name === 'system_info') return await this.systemTools.getSystemInfo();
+    if (name === 'read_clipboard') return await this.systemTools.readClipboard();
+    if (name === 'write_clipboard') return await this.systemTools.writeClipboard(input.text);
+    if (name === 'take_screenshot') return await this.systemTools.takeScreenshot(input);
+    if (name === 'open_application') return await this.systemTools.openApplication(input.appName);
+    if (name === 'open_url') return await this.systemTools.openUrl(input.url);
+    if (name === 'open_path') return await this.systemTools.openPath(input.path);
+    if (name === 'show_in_folder') return await this.systemTools.showInFolder(input.path);
+    if (name === 'get_env') return await this.systemTools.getEnvVariable(input.name);
+    if (name === 'get_app_paths') return this.systemTools.getAppPaths();
+
+    // Meta tools
+    if (name === 'revise_plan') {
+      if (!this.planRevisionHandler) {
+        throw new Error('Plan revision not available at this time');
+      }
+      const newSteps = input.newSteps || [];
+      const reason = input.reason || 'No reason provided';
+      this.planRevisionHandler(newSteps, reason);
+      return {
+        success: true,
+        message: `Plan revised: ${newSteps.length} new steps added. Reason: ${reason}`,
+      };
+    }
 
     throw new Error(`Unknown tool: ${name}`);
   }
@@ -466,6 +531,45 @@ Image Generation (Nano Banana):
             },
           },
           required: ['command'],
+        },
+      },
+    ];
+  }
+
+  /**
+   * Define meta tools for execution control
+   */
+  private getMetaToolDefinitions(): LLMTool[] {
+    return [
+      {
+        name: 'revise_plan',
+        description:
+          'Revise the execution plan by adding new steps. Use this when you encounter unexpected obstacles, ' +
+          'discover that the original plan is insufficient, or find a better approach. ' +
+          'The new steps will be added to the remaining plan and executed after the current step completes.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            reason: {
+              type: 'string',
+              description: 'Brief explanation of why the plan needs to be revised (e.g., "discovered missing dependency", "found better approach")',
+            },
+            newSteps: {
+              type: 'array',
+              description: 'Array of new steps to add to the plan',
+              items: {
+                type: 'object',
+                properties: {
+                  description: {
+                    type: 'string',
+                    description: 'Description of what this step should accomplish',
+                  },
+                },
+                required: ['description'],
+              },
+            },
+          },
+          required: ['reason', 'newSteps'],
         },
       },
     ];

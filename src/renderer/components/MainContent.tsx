@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Task, TaskEvent, Workspace, ApprovalRequest, LLMModelInfo } from '../../shared/types';
+import { Task, TaskEvent, Workspace, ApprovalRequest, LLMModelInfo, SuccessCriteria } from '../../shared/types';
 import { ApprovalDialog } from './ApprovalDialog';
 
 // Searchable Model Dropdown Component
@@ -199,12 +199,17 @@ function ClickableFilePath({ path, workspacePath, className = '' }: { path: stri
   );
 }
 
+interface GoalModeOptions {
+  successCriteria?: SuccessCriteria;
+  maxAttempts?: number;
+}
+
 interface MainContentProps {
   task: Task | undefined;
   workspace: Workspace | null;
   events: TaskEvent[];
   onSendMessage: (message: string) => void;
-  onCreateTask?: (title: string, prompt: string) => void;
+  onCreateTask?: (title: string, prompt: string, options?: GoalModeOptions) => void;
   onChangeWorkspace?: () => void;
   onStopTask?: () => void;
   selectedModel: string;
@@ -215,6 +220,10 @@ interface MainContentProps {
 export function MainContent({ task, workspace, events, onSendMessage, onCreateTask, onChangeWorkspace, onStopTask, selectedModel, availableModels, onModelChange }: MainContentProps) {
   const [pendingApproval, setPendingApproval] = useState<ApprovalRequest | null>(null);
   const [inputValue, setInputValue] = useState('');
+  // Goal Mode state
+  const [goalModeEnabled, setGoalModeEnabled] = useState(false);
+  const [verificationCommand, setVerificationCommand] = useState('');
+  const [maxAttempts, setMaxAttempts] = useState(3);
   const [showSteps, setShowSteps] = useState(true);
   const [autoScroll, setAutoScroll] = useState(true);
   const [queuedMessage, setQueuedMessage] = useState<string | null>(null);
@@ -341,9 +350,19 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
   const handleSend = () => {
     if (inputValue.trim()) {
       if (!task && onCreateTask) {
-        // Create new task
+        // Create new task with optional Goal Mode options
         const title = inputValue.trim().slice(0, 50);
-        onCreateTask(title, inputValue.trim());
+        const options: GoalModeOptions | undefined = goalModeEnabled && verificationCommand
+          ? {
+              successCriteria: { type: 'shell_command' as const, command: verificationCommand },
+              maxAttempts,
+            }
+          : undefined;
+        onCreateTask(title, inputValue.trim(), options);
+        // Reset Goal Mode state
+        setGoalModeEnabled(false);
+        setVerificationCommand('');
+        setMaxAttempts(3);
       } else {
         onSendMessage(inputValue.trim());
       }
@@ -381,9 +400,9 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
   };
 
   const getEventDotClass = (type: TaskEvent['type']) => {
-    if (type === 'error') return 'error';
-    if (type === 'step_completed' || type === 'task_completed') return 'success';
-    if (type === 'step_started' || type === 'executing') return 'active';
+    if (type === 'error' || type === 'verification_failed') return 'error';
+    if (type === 'step_completed' || type === 'task_completed' || type === 'verification_passed') return 'success';
+    if (type === 'step_started' || type === 'executing' || type === 'verification_started' || type === 'retry_started') return 'active';
     return '';
   };
 
@@ -470,6 +489,46 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
                 />
                 <span className="cli-cursor"></span>
               </div>
+
+              {/* Goal Mode Options */}
+              <div className="goal-mode-section">
+                <label className="goal-mode-toggle">
+                  <input
+                    type="checkbox"
+                    checked={goalModeEnabled}
+                    onChange={(e) => setGoalModeEnabled(e.target.checked)}
+                  />
+                  <span className="goal-mode-label">Goal Mode</span>
+                  <span className="goal-mode-hint">Verify & retry until success</span>
+                </label>
+                {goalModeEnabled && (
+                  <div className="goal-mode-options">
+                    <div className="goal-mode-command">
+                      <span className="goal-mode-prompt">$</span>
+                      <input
+                        type="text"
+                        className="goal-mode-input"
+                        placeholder="Verification command (e.g., npm test)"
+                        value={verificationCommand}
+                        onChange={(e) => setVerificationCommand(e.target.value)}
+                      />
+                    </div>
+                    <div className="goal-mode-attempts">
+                      <label>
+                        Max attempts:
+                        <input
+                          type="number"
+                          min="1"
+                          max="10"
+                          value={maxAttempts}
+                          onChange={(e) => setMaxAttempts(Math.min(10, Math.max(1, Number(e.target.value))))}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <div className="welcome-input-footer">
                 <div className="input-left-actions">
                   <button className="folder-selector" onClick={onChangeWorkspace}>
@@ -711,6 +770,15 @@ function renderEventTitle(event: TaskEvent, workspacePath?: string): React.React
       return `Approval needed: ${event.payload.approval?.description}`;
     case 'log':
       return event.payload.message;
+    // Goal Mode verification events
+    case 'verification_started':
+      return 'Running verification...';
+    case 'verification_passed':
+      return `Verification passed (attempt ${event.payload.attempt})`;
+    case 'verification_failed':
+      return `Verification failed (attempt ${event.payload.attempt}/${event.payload.maxAttempts})`;
+    case 'retry_started':
+      return `Retrying (attempt ${event.payload.attempt}/${event.payload.maxAttempts})`;
     default:
       return event.type;
   }

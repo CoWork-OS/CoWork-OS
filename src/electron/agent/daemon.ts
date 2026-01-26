@@ -270,6 +270,13 @@ export class AgentDaemon extends EventEmitter {
   }
 
   /**
+   * Update task fields (for Goal Mode attempt tracking, etc.)
+   */
+  updateTask(taskId: string, updates: Partial<Pick<Task, 'currentAttempt' | 'status' | 'error' | 'completedAt'>>): void {
+    this.taskRepo.update(taskId, updates);
+  }
+
+  /**
    * Mark task as completed
    * Note: We keep the executor in memory for follow-up messages (with TTL-based cleanup)
    */

@@ -177,8 +177,29 @@ export class DatabaseManager {
       CREATE INDEX IF NOT EXISTS idx_channel_messages_chat ON channel_messages(chat_id);
     `);
 
+    // Run migrations for Goal Mode columns (SQLite ALTER TABLE ADD COLUMN is safe if column exists)
+    this.runMigrations();
+
     // Seed default models if table is empty
     this.seedDefaultModels();
+  }
+
+  private runMigrations() {
+    // Migration: Add Goal Mode columns to tasks table
+    // SQLite ALTER TABLE ADD COLUMN fails if column exists, so we catch and ignore
+    const goalModeColumns = [
+      'ALTER TABLE tasks ADD COLUMN success_criteria TEXT',
+      'ALTER TABLE tasks ADD COLUMN max_attempts INTEGER DEFAULT 3',
+      'ALTER TABLE tasks ADD COLUMN current_attempt INTEGER DEFAULT 1',
+    ];
+
+    for (const sql of goalModeColumns) {
+      try {
+        this.db.exec(sql);
+      } catch {
+        // Column already exists, ignore
+      }
+    }
   }
 
   private seedDefaultModels() {

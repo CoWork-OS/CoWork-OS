@@ -21,20 +21,115 @@ export class FileTools {
   ) {}
 
   /**
-   * Ensure path is within workspace (security check)
-   * Uses path.relative() to safely detect path traversal attacks including symlinks
+   * Dangerous paths that should never be written to, even with unrestricted access
    */
-  private resolvePath(relativePath: string): string {
-    // Normalize workspace path to ensure consistent comparison
-    const normalizedWorkspace = path.resolve(this.workspace.path);
-    const resolved = path.resolve(normalizedWorkspace, relativePath);
+  private static readonly PROTECTED_PATHS = [
+    '/System',
+    '/Library',
+    '/usr',
+    '/bin',
+    '/sbin',
+    '/etc',
+    '/var',
+    '/private',
+    'C:\\Windows',
+    'C:\\Program Files',
+    'C:\\Program Files (x86)',
+  ];
 
-    // Use path.relative to check if resolved path is within workspace
-    // If the relative path starts with '..', it's outside the workspace
+  /**
+   * Check if a path is in a protected system location
+   */
+  private isProtectedPath(absolutePath: string): boolean {
+    const normalizedPath = path.normalize(absolutePath).toLowerCase();
+    return FileTools.PROTECTED_PATHS.some(protectedPath =>
+      normalizedPath.startsWith(protectedPath.toLowerCase())
+    );
+  }
+
+  /**
+   * Check if path is allowed based on allowedPaths configuration
+   */
+  private isPathAllowed(absolutePath: string): boolean {
+    const allowedPaths = this.workspace.permissions.allowedPaths;
+    if (!allowedPaths || allowedPaths.length === 0) {
+      return false;
+    }
+
+    const normalizedPath = path.normalize(absolutePath);
+    return allowedPaths.some(allowed => {
+      const normalizedAllowed = path.normalize(allowed);
+      // Check if the path starts with or equals an allowed path
+      return normalizedPath === normalizedAllowed ||
+             normalizedPath.startsWith(normalizedAllowed + path.sep);
+    });
+  }
+
+  /**
+   * Resolve path, supporting both workspace-relative and absolute paths
+   * When unrestrictedFileAccess is enabled, allows absolute paths anywhere (except protected locations)
+   * When allowedPaths is configured, allows specific paths outside workspace
+   */
+  private resolvePath(inputPath: string, operation: 'read' | 'write' | 'delete' = 'read'): string {
+    const normalizedWorkspace = path.resolve(this.workspace.path);
+
+    // Handle absolute paths
+    if (path.isAbsolute(inputPath)) {
+      const absolutePath = path.normalize(inputPath);
+
+      // Check if it's inside workspace (always allowed)
+      const relativeToWorkspace = path.relative(normalizedWorkspace, absolutePath);
+      if (!relativeToWorkspace.startsWith('..') && !path.isAbsolute(relativeToWorkspace)) {
+        return absolutePath;
+      }
+
+      // Outside workspace - check permissions
+      if (this.workspace.permissions.unrestrictedFileAccess) {
+        // With unrestricted access, block protected paths for writes
+        if (operation !== 'read' && this.isProtectedPath(absolutePath)) {
+          throw new Error(`Cannot ${operation} protected system path: ${absolutePath}`);
+        }
+        return absolutePath;
+      }
+
+      // Check if in allowed paths
+      if (this.isPathAllowed(absolutePath)) {
+        if (operation !== 'read' && this.isProtectedPath(absolutePath)) {
+          throw new Error(`Cannot ${operation} protected system path: ${absolutePath}`);
+        }
+        return absolutePath;
+      }
+
+      throw new Error(
+        'Path is outside workspace boundary. Enable "Unrestricted File Access" in workspace settings ' +
+        'or add specific paths to "Allowed Paths" to access files outside the workspace.'
+      );
+    }
+
+    // Handle relative paths (relative to workspace)
+    const resolved = path.resolve(normalizedWorkspace, inputPath);
     const relative = path.relative(normalizedWorkspace, resolved);
 
     if (relative.startsWith('..') || path.isAbsolute(relative)) {
-      throw new Error('Path is outside workspace boundary');
+      // Path escapes workspace via ../ traversal
+      if (this.workspace.permissions.unrestrictedFileAccess) {
+        if (operation !== 'read' && this.isProtectedPath(resolved)) {
+          throw new Error(`Cannot ${operation} protected system path: ${resolved}`);
+        }
+        return resolved;
+      }
+
+      if (this.isPathAllowed(resolved)) {
+        if (operation !== 'read' && this.isProtectedPath(resolved)) {
+          throw new Error(`Cannot ${operation} protected system path: ${resolved}`);
+        }
+        return resolved;
+      }
+
+      throw new Error(
+        'Path traversal outside workspace is not allowed. Enable "Unrestricted File Access" ' +
+        'in workspace settings to access files outside the workspace.'
+      );
     }
 
     return resolved;
@@ -59,8 +154,13 @@ export class FileTools {
    * Read file contents (with size limit to prevent context overflow)
    */
   async readFile(relativePath: string): Promise<{ content: string; size: number; truncated?: boolean }> {
+    // Validate input
+    if (!relativePath || typeof relativePath !== 'string') {
+      throw new Error('Invalid path: path must be a non-empty string');
+    }
+
     this.checkPermission('read');
-    const fullPath = this.resolvePath(relativePath);
+    const fullPath = this.resolvePath(relativePath, 'read');
 
     try {
       const stats = await fs.stat(fullPath);
@@ -98,8 +198,19 @@ export class FileTools {
    * Write file contents
    */
   async writeFile(relativePath: string, content: string): Promise<{ success: boolean; path: string }> {
+    // Validate inputs before proceeding
+    if (!relativePath || typeof relativePath !== 'string') {
+      throw new Error('Invalid path: path must be a non-empty string');
+    }
+    if (content === undefined || content === null) {
+      throw new Error('Invalid content: content parameter is required but was not provided');
+    }
+    if (typeof content !== 'string') {
+      throw new Error(`Invalid content: expected string but received ${typeof content}`);
+    }
+
     this.checkPermission('write');
-    const fullPath = this.resolvePath(relativePath);
+    const fullPath = this.resolvePath(relativePath, 'write');
 
     // Check file size against guardrail limits
     const contentSizeBytes = Buffer.byteLength(content, 'utf-8');
@@ -141,8 +252,11 @@ export class FileTools {
     totalCount: number;
     truncated?: boolean;
   }> {
+    // Validate and normalize input (use default if null/undefined)
+    const pathToUse = (relativePath && typeof relativePath === 'string') ? relativePath : '.';
+
     this.checkPermission('read');
-    const fullPath = this.resolvePath(relativePath);
+    const fullPath = this.resolvePath(pathToUse, 'read');
 
     try {
       const entries = await fs.readdir(fullPath, { withFileTypes: true });
@@ -185,9 +299,17 @@ export class FileTools {
    * Rename or move file
    */
   async renameFile(oldPath: string, newPath: string): Promise<{ success: boolean }> {
+    // Validate inputs
+    if (!oldPath || typeof oldPath !== 'string') {
+      throw new Error('Invalid oldPath: must be a non-empty string');
+    }
+    if (!newPath || typeof newPath !== 'string') {
+      throw new Error('Invalid newPath: must be a non-empty string');
+    }
+
     this.checkPermission('write');
-    const oldFullPath = this.resolvePath(oldPath);
-    const newFullPath = this.resolvePath(newPath);
+    const oldFullPath = this.resolvePath(oldPath, 'write');
+    const newFullPath = this.resolvePath(newPath, 'write');
 
     try {
       // Ensure target directory exists
@@ -214,7 +336,12 @@ export class FileTools {
    * delete operations always require explicit user approval via requestApproval()
    */
   async deleteFile(relativePath: string): Promise<{ success: boolean; movedToTrash?: boolean }> {
-    const fullPath = this.resolvePath(relativePath);
+    // Validate input
+    if (!relativePath || typeof relativePath !== 'string') {
+      throw new Error('Invalid path: path must be a non-empty string');
+    }
+
+    const fullPath = this.resolvePath(relativePath, 'delete');
 
     // Request user approval
     const approved = await this.daemon.requestApproval(
@@ -280,8 +407,13 @@ export class FileTools {
    * Create directory
    */
   async createDirectory(relativePath: string): Promise<{ success: boolean }> {
+    // Validate input
+    if (!relativePath || typeof relativePath !== 'string') {
+      throw new Error('Invalid path: path must be a non-empty string');
+    }
+
     this.checkPermission('write');
-    const fullPath = this.resolvePath(relativePath);
+    const fullPath = this.resolvePath(relativePath, 'write');
 
     try {
       await fs.mkdir(fullPath, { recursive: true });
@@ -308,8 +440,13 @@ export class FileTools {
     totalFound: number;
     truncated?: boolean;
   }> {
+    // Validate input
+    if (!query || typeof query !== 'string') {
+      throw new Error('Invalid query: query must be a non-empty string');
+    }
+
     this.checkPermission('read');
-    const fullPath = this.resolvePath(relativePath);
+    const fullPath = this.resolvePath(relativePath, 'read');
     const matches: Array<{ path: string; type: 'filename' | 'content' }> = [];
     let filesSearched = 0;
     const maxFilesToSearch = 500; // Limit files to search for performance

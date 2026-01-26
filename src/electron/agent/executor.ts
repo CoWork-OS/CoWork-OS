@@ -1,4 +1,6 @@
-import { Task, Workspace, Plan, PlanStep, TaskEvent } from '../../shared/types';
+import { Task, Workspace, Plan, PlanStep, TaskEvent, SuccessCriteria } from '../../shared/types';
+import * as fs from 'fs';
+import * as path from 'path';
 import { AgentDaemon } from './daemon';
 import { ToolRegistry } from './tools/registry';
 import { SandboxRunner } from './sandbox/runner';
@@ -231,6 +233,11 @@ export class TaskExecutor {
     // Initialize tool registry
     this.toolRegistry = new ToolRegistry(workspace, daemon, task.id);
 
+    // Set up plan revision handler
+    this.toolRegistry.setPlanRevisionHandler((newSteps, reason) => {
+      this.handlePlanRevision(newSteps, reason);
+    });
+
     // Initialize sandbox runner
     this.sandboxRunner = new SandboxRunner(workspace);
 
@@ -390,6 +397,117 @@ You are continuing a previous conversation. The context from the previous conver
   }
 
   /**
+   * Verify success criteria for Goal Mode
+   * @returns Object with success status and message
+   */
+  private async verifySuccessCriteria(): Promise<{ success: boolean; message: string }> {
+    const criteria = this.task.successCriteria;
+    if (!criteria) {
+      return { success: true, message: 'No criteria defined' };
+    }
+
+    this.daemon.logEvent(this.task.id, 'verification_started', { criteria });
+
+    if (criteria.type === 'shell_command' && criteria.command) {
+      try {
+        // Execute verification command via tool registry
+        const result = await this.toolRegistry.executeTool('run_command', {
+          command: criteria.command,
+        }) as { success: boolean; exitCode: number | null; stdout: string; stderr: string };
+
+        return {
+          success: result.exitCode === 0,
+          message: result.exitCode === 0
+            ? 'Verification command passed'
+            : `Verification failed (exit code ${result.exitCode}): ${result.stderr || result.stdout || 'Command failed'}`,
+        };
+      } catch (error: any) {
+        return {
+          success: false,
+          message: `Verification command error: ${error.message}`,
+        };
+      }
+    }
+
+    if (criteria.type === 'file_exists' && criteria.filePaths) {
+      const missing = criteria.filePaths.filter(p => {
+        const fullPath = path.resolve(this.workspace.path, p);
+        return !fs.existsSync(fullPath);
+      });
+      return {
+        success: missing.length === 0,
+        message: missing.length === 0
+          ? 'All required files exist'
+          : `Missing files: ${missing.join(', ')}`,
+      };
+    }
+
+    return { success: true, message: 'Unknown criteria type' };
+  }
+
+  /**
+   * Reset state for retry attempt in Goal Mode
+   */
+  private resetForRetry(): void {
+    // Reset plan steps to pending
+    if (this.plan) {
+      for (const step of this.plan.steps) {
+        step.status = 'pending';
+        step.startedAt = undefined;
+        step.completedAt = undefined;
+        step.error = undefined;
+      }
+    }
+
+    // Reset tool failure tracker (tools might work on retry)
+    this.toolFailureTracker = new ToolFailureTracker();
+
+    // Add context for LLM about retry
+    this.conversationHistory.push({
+      role: 'user',
+      content: `The previous attempt did not meet the success criteria. Please try a different approach. This is attempt ${this.task.currentAttempt}.`,
+    });
+  }
+
+  /**
+   * Handle plan revision request from the LLM
+   * Adds new steps to the plan after the current step
+   */
+  private handlePlanRevision(newSteps: Array<{ description: string }>, reason: string): void {
+    if (!this.plan) {
+      console.warn('[TaskExecutor] Cannot revise plan - no plan exists');
+      return;
+    }
+
+    // Create new PlanStep objects for each new step
+    const newPlanSteps: PlanStep[] = newSteps.map((step, index) => ({
+      id: `revised-${Date.now()}-${index}`,
+      description: step.description,
+      status: 'pending' as const,
+    }));
+
+    // Find the current step (in_progress) and insert new steps after it
+    const currentStepIndex = this.plan.steps.findIndex(s => s.status === 'in_progress');
+    if (currentStepIndex === -1) {
+      // No step in progress, append to end
+      this.plan.steps.push(...newPlanSteps);
+    } else {
+      // Insert after current step
+      this.plan.steps.splice(currentStepIndex + 1, 0, ...newPlanSteps);
+    }
+
+    // Log the plan revision
+    this.daemon.logEvent(this.task.id, 'plan_revised', {
+      reason,
+      newStepsCount: newSteps.length,
+      newSteps: newSteps.map(s => s.description),
+      totalSteps: this.plan.steps.length,
+    });
+
+    console.log(`[TaskExecutor] Plan revised: added ${newSteps.length} steps. Reason: ${reason}`);
+  }
+
+  /**
    * Main execution loop
    */
   async execute(): Promise<void> {
@@ -400,10 +518,54 @@ You are continuing a previous conversation. The context from the previous conver
 
       if (this.cancelled) return;
 
-      // Phase 2: Execution
-      this.daemon.updateTaskStatus(this.task.id, 'executing');
-      this.daemon.logEvent(this.task.id, 'executing', { message: 'Executing plan' });
-      await this.executePlan();
+      // Phase 2: Execution with Goal Mode retry loop
+      const maxAttempts = this.task.maxAttempts || 1;
+
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        if (this.cancelled) break;
+
+        // Update attempt tracking
+        this.task.currentAttempt = attempt;
+        this.daemon.updateTask(this.task.id, { currentAttempt: attempt });
+
+        if (attempt > 1) {
+          this.daemon.logEvent(this.task.id, 'retry_started', { attempt, maxAttempts });
+          this.resetForRetry();
+        }
+
+        // Execute plan
+        this.daemon.updateTaskStatus(this.task.id, 'executing');
+        this.daemon.logEvent(this.task.id, 'executing', {
+          message: maxAttempts > 1 ? `Executing plan (attempt ${attempt}/${maxAttempts})` : 'Executing plan',
+        });
+        await this.executePlan();
+
+        if (this.cancelled) break;
+
+        // Verify success criteria if defined (Goal Mode)
+        if (this.task.successCriteria) {
+          const result = await this.verifySuccessCriteria();
+
+          if (result.success) {
+            this.daemon.logEvent(this.task.id, 'verification_passed', {
+              attempt,
+              message: result.message,
+            });
+            break; // Success - exit retry loop
+          } else {
+            this.daemon.logEvent(this.task.id, 'verification_failed', {
+              attempt,
+              maxAttempts,
+              message: result.message,
+              willRetry: attempt < maxAttempts,
+            });
+
+            if (attempt === maxAttempts) {
+              throw new Error(`Failed to meet success criteria after ${maxAttempts} attempts: ${result.message}`);
+            }
+          }
+        }
+      }
 
       if (this.cancelled) return;
 
@@ -627,7 +789,12 @@ IMPORTANT INSTRUCTIONS:
 - The delete_file tool has a built-in approval mechanism that will prompt the user. Just call the tool directly.
 - Do NOT ask "Should I proceed?" or wait for permission in text - the tools handle approvals automatically.
 - Be concise. When reading files, only read what you need.
-- After completing the work, provide a brief summary of what was done.`;
+- After completing the work, provide a brief summary of what was done.
+
+ADAPTIVE PLANNING:
+- If you discover the current plan is insufficient, encounter unexpected obstacles, or find a better approach, use the revise_plan tool to add new steps.
+- Do not silently skip necessary work - if something new is needed, add it to the plan.
+- The revise_plan tool lets you adapt without starting over.`;
 
     const systemPromptTokens = estimateTokens(this.systemPrompt);
 

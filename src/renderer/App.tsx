@@ -4,7 +4,7 @@ import { MainContent } from './components/MainContent';
 import { RightPanel } from './components/RightPanel';
 import { WorkspaceSelector } from './components/WorkspaceSelector';
 import { Settings } from './components/Settings';
-import { Task, Workspace, TaskEvent, LLMModelInfo, LLMProviderInfo } from '../shared/types';
+import { Task, Workspace, TaskEvent, LLMModelInfo, LLMProviderInfo, SuccessCriteria } from '../shared/types';
 
 type AppView = 'workspace-selector' | 'main' | 'settings';
 
@@ -117,7 +117,7 @@ export function App() {
     setCurrentWorkspace(workspace);
   };
 
-  const handleCreateTask = async (title: string, prompt: string) => {
+  const handleCreateTask = async (title: string, prompt: string, options?: { successCriteria?: SuccessCriteria; maxAttempts?: number }) => {
     if (!currentWorkspace) return;
 
     try {
@@ -125,6 +125,8 @@ export function App() {
         title,
         prompt,
         workspaceId: currentWorkspace.id,
+        ...(options?.successCriteria && { successCriteria: options.successCriteria }),
+        ...(options?.maxAttempts && { maxAttempts: options.maxAttempts }),
       });
 
       setTasks(prev => [task, ...prev]);

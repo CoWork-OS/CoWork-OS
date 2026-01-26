@@ -113,8 +113,8 @@ export class TaskRepository {
     };
 
     const stmt = this.db.prepare(`
-      INSERT INTO tasks (id, title, prompt, status, workspace_id, created_at, updated_at, budget_tokens, budget_cost)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO tasks (id, title, prompt, status, workspace_id, created_at, updated_at, budget_tokens, budget_cost, success_criteria, max_attempts, current_attempt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -126,7 +126,10 @@ export class TaskRepository {
       newTask.createdAt,
       newTask.updatedAt,
       newTask.budgetTokens || null,
-      newTask.budgetCost || null
+      newTask.budgetCost || null,
+      newTask.successCriteria ? JSON.stringify(newTask.successCriteria) : null,
+      newTask.maxAttempts || null,
+      newTask.currentAttempt || 1
     );
 
     return newTask;
@@ -134,7 +137,8 @@ export class TaskRepository {
 
   // Whitelist of allowed update fields to prevent SQL injection
   private static readonly ALLOWED_UPDATE_FIELDS = new Set([
-    'title', 'status', 'error', 'result', 'budgetTokens', 'budgetCost'
+    'title', 'status', 'error', 'result', 'budgetTokens', 'budgetCost',
+    'successCriteria', 'maxAttempts', 'currentAttempt'
   ]);
 
   update(id: string, updates: Partial<Task>): void {
@@ -149,7 +153,12 @@ export class TaskRepository {
       }
       const snakeKey = key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
       fields.push(`${snakeKey} = ?`);
-      values.push(value);
+      // JSON serialize object fields
+      if (key === 'successCriteria' && value != null) {
+        values.push(JSON.stringify(value));
+      } else {
+        values.push(value);
+      }
     });
 
     if (fields.length === 0) {
@@ -208,6 +217,10 @@ export class TaskRepository {
       budgetTokens: row.budget_tokens || undefined,
       budgetCost: row.budget_cost || undefined,
       error: row.error || undefined,
+      // Goal Mode fields
+      successCriteria: row.success_criteria ? safeJsonParse(row.success_criteria, undefined, 'task.successCriteria') : undefined,
+      maxAttempts: row.max_attempts || undefined,
+      currentAttempt: row.current_attempt || undefined,
     };
   }
 }

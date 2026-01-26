@@ -8,7 +8,7 @@
 import { app } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
-import { GuardrailSettings, DEFAULT_BLOCKED_COMMAND_PATTERNS } from '../../shared/types';
+import { GuardrailSettings, DEFAULT_BLOCKED_COMMAND_PATTERNS, DEFAULT_TRUSTED_COMMAND_PATTERNS } from '../../shared/types';
 
 const SETTINGS_FILE = 'guardrail-settings.json';
 
@@ -24,6 +24,10 @@ const DEFAULT_SETTINGS: GuardrailSettings = {
   // Dangerous Commands
   blockDangerousCommands: true,
   customBlockedPatterns: [],
+
+  // Auto-Approve Trusted Commands
+  autoApproveTrustedCommands: false,
+  trustedCommandPatterns: [],
 
   // File Size
   maxFileSizeMB: 50,
@@ -136,6 +140,53 @@ export class GuardrailManager {
     }
 
     return { blocked: false };
+  }
+
+  /**
+   * Convert a glob-like pattern to regex
+   * Supports * as wildcard for any characters
+   */
+  private static globToRegex(pattern: string): RegExp {
+    // Escape special regex characters except *
+    const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
+    // Convert * to regex wildcard (.*)
+    const regexStr = '^' + escaped.replace(/\*/g, '.*') + '$';
+    return new RegExp(regexStr, 'i');
+  }
+
+  /**
+   * Check if a command matches any trusted pattern (auto-approve without user confirmation)
+   * @returns Object with trusted status and matched pattern if trusted
+   */
+  static isCommandTrusted(command: string): { trusted: boolean; pattern?: string } {
+    const settings = this.loadSettings();
+
+    if (!settings.autoApproveTrustedCommands) {
+      return { trusted: false };
+    }
+
+    // Combine default patterns with custom patterns
+    const allPatterns = [
+      ...DEFAULT_TRUSTED_COMMAND_PATTERNS,
+      ...settings.trustedCommandPatterns,
+    ];
+
+    for (const pattern of allPatterns) {
+      try {
+        const regex = this.globToRegex(pattern);
+        if (regex.test(command)) {
+          return { trusted: true, pattern };
+        }
+      } catch {
+        // If conversion fails, try simple prefix match
+        const prefix = pattern.replace(/\*/g, '');
+        if (command.toLowerCase().startsWith(prefix.toLowerCase())) {
+          return { trusted: true, pattern };
+        }
+      }
+    }
+
+    return { trusted: false };
   }
 
   /**

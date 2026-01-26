@@ -6,6 +6,7 @@ export type EventType =
   | 'task_created'
   | 'task_completed'
   | 'plan_created'
+  | 'plan_revised'
   | 'step_started'
   | 'step_completed'
   | 'step_failed'
@@ -22,7 +23,11 @@ export type EventType =
   | 'file_deleted'
   | 'image_generated'
   | 'error'
-  | 'log';
+  | 'log'
+  | 'verification_started'
+  | 'verification_passed'
+  | 'verification_failed'
+  | 'retry_started';
 
 export type ToolType =
   | 'read_file'
@@ -35,7 +40,20 @@ export type ToolType =
   | 'search_files'
   | 'run_skill'
   | 'run_command'
-  | 'generate_image';
+  | 'generate_image'
+  // System tools
+  | 'system_info'
+  | 'read_clipboard'
+  | 'write_clipboard'
+  | 'take_screenshot'
+  | 'open_application'
+  | 'open_url'
+  | 'open_path'
+  | 'show_in_folder'
+  | 'get_env'
+  | 'get_app_paths'
+  // Meta tools
+  | 'revise_plan';
 
 export type ApprovalType =
   | 'delete_file'
@@ -44,6 +62,15 @@ export type ApprovalType =
   | 'network_access'
   | 'external_service'
   | 'run_command';
+
+// Success Criteria for Goal Mode
+export type SuccessCriteriaType = 'shell_command' | 'file_exists';
+
+export interface SuccessCriteria {
+  type: SuccessCriteriaType;
+  command?: string;      // For shell_command: command to run (exit 0 = success)
+  filePaths?: string[];  // For file_exists: paths that must exist
+}
 
 export interface Task {
   id: string;
@@ -57,6 +84,10 @@ export interface Task {
   budgetTokens?: number;
   budgetCost?: number;
   error?: string;
+  // Goal Mode fields
+  successCriteria?: SuccessCriteria;
+  maxAttempts?: number;        // Default: 3, max: 10
+  currentAttempt?: number;     // Tracks which attempt we're on
 }
 
 export interface TaskEvent {
@@ -92,6 +123,9 @@ export interface WorkspacePermissions {
   network: boolean;
   shell: boolean;
   allowedDomains?: string[];
+  // Broader filesystem access (like Claude Code)
+  unrestrictedFileAccess?: boolean;  // Allow reading/writing files outside workspace
+  allowedPaths?: string[];           // Specific paths outside workspace to allow (if not fully unrestricted)
 }
 
 export interface PlanStep {
@@ -387,6 +421,10 @@ export interface GuardrailSettings {
   blockDangerousCommands: boolean;
   customBlockedPatterns: string[];
 
+  // Auto-Approve Trusted Commands
+  autoApproveTrustedCommands: boolean;
+  trustedCommandPatterns: string[];
+
   // File Write Size Limit (in MB)
   maxFileSizeMB: number;
   fileSizeLimitEnabled: boolean;
@@ -399,6 +437,49 @@ export interface GuardrailSettings {
   maxIterationsPerTask: number;
   iterationLimitEnabled: boolean;
 }
+
+// Default trusted command patterns (glob-like patterns)
+export const DEFAULT_TRUSTED_COMMAND_PATTERNS = [
+  'npm test*',
+  'npm run *',
+  'npm install*',
+  'npm ci',
+  'yarn test*',
+  'yarn run *',
+  'yarn install*',
+  'yarn add *',
+  'pnpm test*',
+  'pnpm run *',
+  'pnpm install*',
+  'git status*',
+  'git diff*',
+  'git log*',
+  'git branch*',
+  'git show*',
+  'git ls-files*',
+  'ls *',
+  'ls',
+  'pwd',
+  'cat *',
+  'head *',
+  'tail *',
+  'wc *',
+  'grep *',
+  'find *',
+  'echo *',
+  'which *',
+  'type *',
+  'file *',
+  'tree *',
+  'node --version',
+  'npm --version',
+  'python --version',
+  'python3 --version',
+  'tsc --version',
+  'cargo --version',
+  'go version',
+  'rustc --version',
+];
 
 // Default dangerous command patterns (regex)
 export const DEFAULT_BLOCKED_COMMAND_PATTERNS = [

@@ -288,6 +288,8 @@ export interface ElectronAPI {
     costBudgetEnabled: boolean;
     blockDangerousCommands: boolean;
     customBlockedPatterns: string[];
+    autoApproveTrustedCommands: boolean;
+    trustedCommandPatterns: string[];
     maxFileSizeMB: number;
     fileSizeLimitEnabled: boolean;
     enforceAllowedDomains: boolean;
@@ -303,6 +305,8 @@ export interface ElectronAPI {
     costBudgetEnabled: boolean;
     blockDangerousCommands: boolean;
     customBlockedPatterns: string[];
+    autoApproveTrustedCommands: boolean;
+    trustedCommandPatterns: string[];
     maxFileSizeMB: number;
     fileSizeLimitEnabled: boolean;
     enforceAllowedDomains: boolean;

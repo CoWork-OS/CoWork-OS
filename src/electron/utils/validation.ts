@@ -22,10 +22,19 @@ export const WorkspaceCreateSchema = z.object({
     delete: z.boolean().default(false),
     network: z.boolean().default(false),
     shell: z.boolean().default(false),
+    // Broader filesystem access
+    unrestrictedFileAccess: z.boolean().default(false),
+    allowedPaths: z.array(z.string().max(MAX_PATH_LENGTH)).max(50).optional(),
   }).optional(),
 });
 
 // ============ Task Schemas ============
+
+export const SuccessCriteriaSchema = z.object({
+  type: z.enum(['shell_command', 'file_exists']),
+  command: z.string().max(5000).optional(),
+  filePaths: z.array(z.string().max(MAX_PATH_LENGTH)).max(20).optional(),
+});
 
 export const TaskCreateSchema = z.object({
   title: z.string().min(1).max(MAX_TITLE_LENGTH),
@@ -33,6 +42,9 @@ export const TaskCreateSchema = z.object({
   workspaceId: z.string().uuid(),
   budgetTokens: z.number().int().positive().optional(),
   budgetCost: z.number().positive().optional(),
+  // Goal Mode fields
+  successCriteria: SuccessCriteriaSchema.optional(),
+  maxAttempts: z.number().int().min(1).max(10).optional(),
 });
 
 export const TaskRenameSchema = z.object({
@@ -132,6 +144,10 @@ export const GuardrailSettingsSchema = z.object({
   // Dangerous commands
   blockDangerousCommands: z.boolean().default(true),
   customBlockedPatterns: z.array(z.string().max(500)).max(50).default([]),
+
+  // Auto-approve trusted commands
+  autoApproveTrustedCommands: z.boolean().default(false),
+  trustedCommandPatterns: z.array(z.string().max(500)).max(100).default([]),
 
   // File size
   maxFileSizeMB: z.number().int().min(1).max(500).default(50),

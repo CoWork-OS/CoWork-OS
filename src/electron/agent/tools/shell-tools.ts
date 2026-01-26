@@ -40,7 +40,7 @@ export class ShellTools {
     exitCode: number | null;
     truncated?: boolean;
   }> {
-    // Check if command is blocked by guardrails BEFORE asking for approval
+    // Check if command is blocked by guardrails BEFORE anything else
     const blockCheck = GuardrailManager.isCommandBlocked(command);
     if (blockCheck.blocked) {
       throw new Error(
@@ -50,17 +50,30 @@ export class ShellTools {
       );
     }
 
-    // Request user approval before executing
-    const approved = await this.daemon.requestApproval(
-      this.taskId,
-      'run_command',
-      `Run command: ${command}`,
-      {
+    // Check if command is trusted (auto-approve without user confirmation)
+    const trustCheck = GuardrailManager.isCommandTrusted(command);
+    let approved = false;
+
+    if (trustCheck.trusted) {
+      // Auto-approve trusted commands
+      approved = true;
+      this.daemon.logEvent(this.taskId, 'log', {
+        message: `Auto-approved trusted command (matched: ${trustCheck.pattern})`,
         command,
-        cwd: options?.cwd || this.workspace.path,
-        timeout: options?.timeout || DEFAULT_TIMEOUT,
-      }
-    );
+      });
+    } else {
+      // Request user approval before executing
+      approved = await this.daemon.requestApproval(
+        this.taskId,
+        'run_command',
+        `Run command: ${command}`,
+        {
+          command,
+          cwd: options?.cwd || this.workspace.path,
+          timeout: options?.timeout || DEFAULT_TIMEOUT,
+        }
+      );
+    }
 
     if (!approved) {
       throw new Error('User denied command execution');

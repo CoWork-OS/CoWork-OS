@@ -1,6 +1,6 @@
 {
   "name": "cowork-oss",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "description": "CoWork-OSS - Open source agentic task automation for macOS",
   "overrides": {
     "undici": "^7.0.0"

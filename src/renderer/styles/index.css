@@ -879,8 +879,9 @@ a,
 
 .input-row {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   padding: 12px 16px;
+  gap: 12px;
 }
 
 .input-field {
@@ -894,6 +895,34 @@ a,
 
 .input-field::placeholder {
   color: var(--color-text-muted);
+}
+
+/* Auto-expanding textarea styles */
+.input-textarea {
+  resize: none;
+  min-height: 24px;
+  max-height: 200px;
+  overflow-y: auto;
+  line-height: 1.5;
+  padding: 0;
+  font-family: inherit;
+}
+
+.input-textarea::-webkit-scrollbar {
+  width: 6px;
+}
+
+.input-textarea::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.input-textarea::-webkit-scrollbar-thumb {
+  background: var(--color-border-subtle);
+  border-radius: 3px;
+}
+
+.input-textarea::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
 }
 
 .input-actions {

@@ -240,6 +240,21 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
   const timelineRef = useRef<HTMLDivElement>(null);
   const mainBodyRef = useRef<HTMLDivElement>(null);
   const prevTaskStatusRef = useRef<Task['status'] | undefined>(undefined);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-resize textarea as content changes
+  const autoResizeTextarea = useCallback(() => {
+    const textarea = textareaRef.current;
+    if (textarea) {
+      textarea.style.height = 'auto';
+      textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
+    }
+  }, []);
+
+  // Auto-resize when input value changes
+  useEffect(() => {
+    autoResizeTextarea();
+  }, [inputValue, autoResizeTextarea]);
 
   // Check if user is near the bottom of the scroll container
   const isNearBottom = useCallback((element: HTMLElement, threshold = 100) => {
@@ -444,13 +459,14 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
             <div className="welcome-input-container cli-input-container">
               <div className="cli-input-wrapper">
                 <span className="cli-input-prompt">~$</span>
-                <input
-                  type="text"
-                  className="welcome-input cli-input"
+                <textarea
+                  ref={textareaRef}
+                  className="welcome-input cli-input input-textarea"
                   placeholder="Enter your task..."
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
                   onKeyDown={handleKeyDown}
+                  rows={1}
                 />
                 <span className="cli-cursor"></span>
               </div>
@@ -588,13 +604,14 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
             </div>
           )}
           <div className="input-row">
-            <input
-              type="text"
-              className="input-field"
+            <textarea
+              ref={textareaRef}
+              className="input-field input-textarea"
               placeholder={queuedMessage ? "Message queued..." : "Reply..."}
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={handleKeyDown}
+              rows={1}
             />
             <div className="input-actions">
               <ModelDropdown

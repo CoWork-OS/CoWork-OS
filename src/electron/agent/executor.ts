@@ -14,6 +14,30 @@ import {
   estimateTokens,
 } from './context-manager';
 
+// Timeout for LLM API calls (2 minutes)
+const LLM_TIMEOUT_MS = 2 * 60 * 1000;
+
+/**
+ * Wrap a promise with a timeout
+ */
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, operation: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${operation} timed out after ${timeoutMs / 1000}s`));
+    }, timeoutMs);
+
+    promise
+      .then((result) => {
+        clearTimeout(timer);
+        resolve(result);
+      })
+      .catch((error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+  });
+}
+
 /**
  * TaskExecutor handles the execution of a single task
  * It implements the plan-execute-observe agent loop
@@ -206,17 +230,21 @@ Format your plan as a JSON object with this structure:
   ]
 }`;
 
-    const response = await this.provider.createMessage({
-      model: this.modelId,
-      maxTokens: 4096,
-      system: systemPrompt,
-      messages: [
-        {
-          role: 'user',
-          content: `Task: ${this.task.title}\n\nDetails: ${this.task.prompt}\n\nCreate an execution plan.`,
-        },
-      ],
-    });
+    const response = await withTimeout(
+      this.provider.createMessage({
+        model: this.modelId,
+        maxTokens: 4096,
+        system: systemPrompt,
+        messages: [
+          {
+            role: 'user',
+            content: `Task: ${this.task.title}\n\nDetails: ${this.task.prompt}\n\nCreate an execution plan.`,
+          },
+        ],
+      }),
+      LLM_TIMEOUT_MS,
+      'Plan creation'
+    );
 
     // Extract plan from response
     const textContent = response.content.find(c => c.type === 'text');
@@ -396,13 +424,17 @@ IMPORTANT INSTRUCTIONS:
         // Compact messages if context is getting too large
         messages = this.contextManager.compactMessages(messages, systemPromptTokens);
 
-        const response = await this.provider.createMessage({
-          model: this.modelId,
-          maxTokens: 4096,
-          system: this.systemPrompt,
-          tools: this.toolRegistry.getTools(),
-          messages,
-        });
+        const response = await withTimeout(
+          this.provider.createMessage({
+            model: this.modelId,
+            maxTokens: 4096,
+            system: this.systemPrompt,
+            tools: this.toolRegistry.getTools(),
+            messages,
+          }),
+          LLM_TIMEOUT_MS,
+          'LLM execution step'
+        );
 
         // Process response - only stop if we have actual content AND it's end_turn
         // Empty responses should not terminate the loop
@@ -561,13 +593,17 @@ IMPORTANT INSTRUCTIONS:
         // Compact messages if context is getting too large
         messages = this.contextManager.compactMessages(messages, systemPromptTokens);
 
-        const response = await this.provider.createMessage({
-          model: this.modelId,
-          maxTokens: 4096,
-          system: this.systemPrompt,
-          tools: this.toolRegistry.getTools(),
-          messages,
-        });
+        const response = await withTimeout(
+          this.provider.createMessage({
+            model: this.modelId,
+            maxTokens: 4096,
+            system: this.systemPrompt,
+            tools: this.toolRegistry.getTools(),
+            messages,
+          }),
+          LLM_TIMEOUT_MS,
+          'LLM message processing'
+        );
 
         // Process response
         if (response.stopReason === 'end_turn') {

@@ -325,6 +325,193 @@
   border: 1px solid var(--color-border-subtle);
 }
 
+/* macOS Appearance Settings - remove heavy card style for header */
+.style-macos .appearance-settings .settings-section {
+  background: transparent;
+  border: none;
+  padding: 0 0 16px 0;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.style-macos .appearance-settings .settings-section h3 {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.style-macos .appearance-settings .settings-section .settings-description {
+  color: var(--color-text-secondary);
+  margin-top: 4px;
+}
+
+/* macOS Appearance Sections */
+.style-macos .appearance-section {
+  margin-bottom: 32px;
+}
+
+.style-macos .appearance-section h4 {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 14px;
+}
+
+/* macOS Style Selector */
+.style-macos .style-switcher {
+  gap: 16px;
+}
+
+.style-macos .style-option {
+  padding: 18px 20px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+.style-macos .style-option:hover {
+  background: var(--color-bg-secondary);
+  border-color: var(--color-border-light);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+.style-macos .style-option.selected {
+  border-color: var(--color-accent);
+  background: var(--color-bg-secondary);
+  box-shadow: 0 0 0 3px var(--color-accent-subtle);
+}
+
+.style-macos .style-option-preview {
+  width: 56px;
+  height: 40px;
+  border-radius: 8px;
+}
+
+.style-macos .style-option-preview.macos {
+  background: linear-gradient(180deg, #4a4a4c 0%, #3a3a3c 100%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.style-macos .style-option-preview.cli {
+  background: #0a0a0a;
+  border: 1px solid rgba(34, 211, 238, 0.4);
+  box-shadow: 0 0 8px rgba(34, 211, 238, 0.15);
+}
+
+.style-macos .style-option-label {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.style-macos .style-option-description {
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
+/* macOS Theme Switcher */
+.style-macos .theme-switcher {
+  gap: 14px;
+}
+
+.style-macos .theme-option {
+  padding: 20px 16px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  gap: 12px;
+}
+
+.style-macos .theme-option:hover {
+  background: var(--color-bg-secondary);
+  border-color: var(--color-border-light);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+.style-macos .theme-option.selected {
+  border-color: var(--color-accent);
+  background: var(--color-bg-secondary);
+  box-shadow: 0 0 0 3px var(--color-accent-subtle);
+}
+
+.style-macos .theme-option-preview {
+  width: 72px;
+  height: 48px;
+  border-radius: 10px;
+  box-shadow: var(--shadow-sm);
+}
+
+.style-macos .theme-option-preview.dark {
+  background: linear-gradient(180deg, #2d2d30 0%, #1e1e1e 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.style-macos .theme-option-preview.light {
+  background: linear-gradient(180deg, #ffffff 0%, #f0f0f2 100%);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.style-macos .theme-option-preview.system {
+  background: linear-gradient(135deg, #2d2d30 0%, #2d2d30 50%, #ffffff 50%, #f0f0f2 100%);
+  border: 1px solid rgba(128, 128, 128, 0.15);
+}
+
+.style-macos .theme-option-label {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.style-macos .system-badge {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--color-bg-tertiary);
+}
+
+/* macOS Color Grid */
+.style-macos .color-grid {
+  gap: 12px;
+}
+
+.style-macos .color-option {
+  padding: 14px 10px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  gap: 10px;
+}
+
+.style-macos .color-option:hover {
+  background: var(--color-bg-secondary);
+  border-color: var(--color-border-light);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+.style-macos .color-option.selected {
+  border-color: var(--color-accent);
+  background: var(--color-bg-secondary);
+  box-shadow: 0 0 0 3px var(--color-accent-subtle);
+}
+
+.style-macos .color-swatch {
+  width: 36px;
+  height: 36px;
+  box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+.style-macos .color-label {
+  font-size: 12px;
+  font-weight: 500;
+}
+
 .style-macos .settings-nav-item {
   padding: 10px 16px;
   border-radius: var(--radius-md);

@@ -285,6 +285,23 @@ export class TaskExecutor {
   }
 
   /**
+   * Get available tools, filtering out disabled ones
+   * This prevents the LLM from trying to use tools that have been disabled by the circuit breaker
+   */
+  private getAvailableTools() {
+    const allTools = this.toolRegistry.getTools();
+    const disabledTools = this.toolFailureTracker.getDisabledTools();
+
+    if (disabledTools.length === 0) {
+      return allTools;
+    }
+
+    const filtered = allTools.filter(tool => !disabledTools.includes(tool.name));
+    console.log(`[TaskExecutor] Filtered out ${disabledTools.length} disabled tools: ${disabledTools.join(', ')}`);
+    return filtered;
+  }
+
+  /**
    * Rebuild conversation history from saved events
    * This is used when recreating an executor for follow-up messages
    */
@@ -636,6 +653,8 @@ IMPORTANT INSTRUCTIONS:
       let continueLoop = true;
       let iterationCount = 0;
       let emptyResponseCount = 0;
+      let stepFailed = false;  // Track if step failed due to all tools being disabled/erroring
+      let lastFailureReason = '';  // Track the reason for failure
       const maxIterations = 10;
       const maxEmptyResponses = 3;
 
@@ -660,7 +679,7 @@ IMPORTANT INSTRUCTIONS:
             model: this.modelId,
             maxTokens: 4096,
             system: this.systemPrompt,
-            tools: this.toolRegistry.getTools(),
+            tools: this.getAvailableTools(),
             messages,
           }),
           LLM_TIMEOUT_MS,
@@ -816,6 +835,8 @@ IMPORTANT INSTRUCTIONS:
           // This prevents infinite retry loops
           if (hasDisabledToolAttempt && toolResults.every(r => r.is_error)) {
             console.log('[TaskExecutor] All tool calls failed or were disabled, stopping iteration');
+            stepFailed = true;
+            lastFailureReason = 'All required tools are unavailable or failed. Unable to complete this step.';
             continueLoop = false;
           } else {
             continueLoop = true;
@@ -829,14 +850,25 @@ IMPORTANT INSTRUCTIONS:
         }
       }
 
-      // Step completed
+      // Step completed or failed
 
       // Save conversation history for follow-up messages
       this.conversationHistory = messages;
 
-      step.status = 'completed';
-      step.completedAt = Date.now();
-      this.daemon.logEvent(this.task.id, 'step_completed', { step });
+      // Mark step as failed if all tools failed/were disabled
+      if (stepFailed) {
+        step.status = 'failed';
+        step.error = lastFailureReason;
+        step.completedAt = Date.now();
+        this.daemon.logEvent(this.task.id, 'step_failed', {
+          step,
+          reason: lastFailureReason,
+        });
+      } else {
+        step.status = 'completed';
+        step.completedAt = Date.now();
+        this.daemon.logEvent(this.task.id, 'step_completed', { step });
+      }
     } catch (error: any) {
       step.status = 'failed';
       step.error = error.message;
@@ -907,7 +939,7 @@ IMPORTANT INSTRUCTIONS:
             model: this.modelId,
             maxTokens: 4096,
             system: this.systemPrompt,
-            tools: this.toolRegistry.getTools(),
+            tools: this.getAvailableTools(),
             messages,
           }),
           LLM_TIMEOUT_MS,

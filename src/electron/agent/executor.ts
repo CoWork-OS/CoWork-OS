@@ -23,6 +23,7 @@ const LLM_TIMEOUT_MS = 2 * 60 * 1000;
 const MAX_TOOL_FAILURES = 2;
 
 // Patterns that indicate non-retryable errors (quota, rate limits, etc.)
+// These errors should immediately disable the tool
 const NON_RETRYABLE_ERROR_PATTERNS = [
   /quota.*exceeded/i,
   /rate.*limit/i,
@@ -34,11 +35,36 @@ const NON_RETRYABLE_ERROR_PATTERNS = [
   /payment.*required/i,
 ];
 
+// Patterns that indicate input-dependent errors (not tool failures)
+// These are normal operational errors that should NOT count towards circuit breaker
+const INPUT_DEPENDENT_ERROR_PATTERNS = [
+  /ENOENT/i,           // File/directory not found
+  /ENOTDIR/i,          // Not a directory
+  /EISDIR/i,           // Is a directory (when expecting file)
+  /no such file/i,     // File not found
+  /not found/i,        // Generic not found
+  /does not exist/i,   // Resource doesn't exist
+  /invalid path/i,     // Invalid path provided
+  /path.*invalid/i,    // Path is invalid
+  /cannot find/i,      // Cannot find resource
+  /permission denied/i, // Permission on specific file (not API permission)
+  /EACCES/i,           // Access denied to specific file
+];
+
 /**
  * Check if an error is non-retryable (quota/rate limit related)
+ * These errors indicate a systemic problem with the tool/API
  */
 function isNonRetryableError(errorMessage: string): boolean {
   return NON_RETRYABLE_ERROR_PATTERNS.some(pattern => pattern.test(errorMessage));
+}
+
+/**
+ * Check if an error is input-dependent (normal operational error)
+ * These errors are due to bad input, not tool failure, and should not trigger circuit breaker
+ */
+function isInputDependentError(errorMessage: string): boolean {
+  return INPUT_DEPENDENT_ERROR_PATTERNS.some(pattern => pattern.test(errorMessage));
 }
 
 /**
@@ -75,22 +101,30 @@ class ToolFailureTracker {
    * @returns true if the tool should be disabled (circuit broken)
    */
   recordFailure(toolName: string, errorMessage: string): boolean {
-    const existing = this.failures.get(toolName) || { count: 0, lastError: '' };
-    existing.count++;
-    existing.lastError = errorMessage;
-    this.failures.set(toolName, existing);
+    // Input-dependent errors (file not found, etc.) should NOT count towards circuit breaker
+    // These are normal operational errors, not tool failures
+    if (isInputDependentError(errorMessage)) {
+      console.log(`[ToolFailureTracker] Ignoring input-dependent error for ${toolName}: ${errorMessage.substring(0, 80)}`);
+      return false;
+    }
 
-    // If it's a non-retryable error, disable immediately
+    // If it's a non-retryable error (quota, rate limit), disable immediately
     if (isNonRetryableError(errorMessage)) {
       this.disabledTools.add(toolName);
       console.log(`[ToolFailureTracker] Tool ${toolName} disabled due to non-retryable error: ${errorMessage.substring(0, 100)}`);
       return true;
     }
 
-    // If we've hit max failures, disable the tool
+    // Track other failures (systemic issues)
+    const existing = this.failures.get(toolName) || { count: 0, lastError: '' };
+    existing.count++;
+    existing.lastError = errorMessage;
+    this.failures.set(toolName, existing);
+
+    // If we've hit max failures for systemic issues, disable the tool
     if (existing.count >= MAX_TOOL_FAILURES) {
       this.disabledTools.add(toolName);
-      console.log(`[ToolFailureTracker] Tool ${toolName} disabled after ${existing.count} consecutive failures`);
+      console.log(`[ToolFailureTracker] Tool ${toolName} disabled after ${existing.count} consecutive systemic failures`);
       return true;
     }
 

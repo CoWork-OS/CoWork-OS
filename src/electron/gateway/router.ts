@@ -461,6 +461,10 @@ export class MessageRouter {
         }
         break;
 
+      case '/shell':
+        await this.handleShellCommand(adapter, message, sessionId, args);
+        break;
+
       default:
         await adapter.sendMessage({
           chatId: message.chatId,
@@ -674,6 +678,7 @@ export class MessageRouter {
         write: true,
         delete: false, // Requires approval
         network: false,
+        shell: false, // Requires approval
       }
     );
 
@@ -984,6 +989,83 @@ export class MessageRouter {
     await adapter.sendMessage({
       chatId: message.chatId,
       text: `✅ Provider changed to: *${providerInfo?.name || targetProvider}*\n\nCurrent model: ${modelInfo}\n\nUse \`/model\` to see available models for this provider.`,
+      parseMode: 'markdown',
+    });
+  }
+
+  /**
+   * Handle /shell command - enable or disable shell execution permission
+   */
+  private async handleShellCommand(
+    adapter: ChannelAdapter,
+    message: IncomingMessage,
+    sessionId: string,
+    args: string[]
+  ): Promise<void> {
+    const session = this.sessionRepo.findById(sessionId);
+
+    if (!session?.workspaceId) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: '⚠️ No workspace selected. Use `/workspace` to select one first.',
+        parseMode: 'markdown',
+      });
+      return;
+    }
+
+    const workspace = this.workspaceRepo.findById(session.workspaceId);
+    if (!workspace) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: '❌ Workspace not found.',
+      });
+      return;
+    }
+
+    // If no args, show current status
+    if (args.length === 0) {
+      const status = workspace.permissions.shell ? '🟢 Enabled' : '🔴 Disabled';
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: `🖥️ *Shell Commands*\n\nStatus: ${status}\n\nWhen enabled, the AI can execute shell commands like \`npm install\`, \`git\`, etc. Each command requires your approval before running.\n\n*Usage:*\n• \`/shell on\` - Enable shell commands\n• \`/shell off\` - Disable shell commands`,
+        parseMode: 'markdown',
+      });
+      return;
+    }
+
+    const action = args[0].toLowerCase();
+    let newShellPermission: boolean;
+
+    if (action === 'on' || action === 'enable' || action === '1' || action === 'true') {
+      newShellPermission = true;
+    } else if (action === 'off' || action === 'disable' || action === '0' || action === 'false') {
+      newShellPermission = false;
+    } else {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: '❌ Invalid option. Use `/shell on` or `/shell off`',
+        parseMode: 'markdown',
+      });
+      return;
+    }
+
+    // Update workspace permissions
+    const updatedPermissions = {
+      ...workspace.permissions,
+      shell: newShellPermission,
+    };
+
+    // Update in database
+    this.workspaceRepo.updatePermissions(workspace.id, updatedPermissions);
+
+    const statusText = newShellPermission ? '🟢 enabled' : '🔴 disabled';
+    const warning = newShellPermission
+      ? '\n\n⚠️ The AI will now ask for approval before running each command.'
+      : '';
+
+    await adapter.sendMessage({
+      chatId: message.chatId,
+      text: `✅ Shell commands ${statusText} for workspace *${workspace.name}*${warning}`,
       parseMode: 'markdown',
     });
   }
@@ -1495,6 +1577,7 @@ export class MessageRouter {
 /newtask - Start a fresh task/conversation
 /provider - Show or change AI provider
 /model - Show or change model
+/shell - Enable/disable shell command execution
 /cancel - Cancel current task
 
 💬 *How to use*
@@ -1502,15 +1585,16 @@ export class MessageRouter {
    • \`/workspaces\` to see existing workspaces
    • \`/workspace <name>\` to select one
    • \`/addworkspace ~/path/to/folder\` to add new
-2. Send me a message describing what you want to do
-3. Continue the conversation with follow-up messages
-4. Use \`/newtask\` when you want to start something new
-5. Use \`/models\` to see AI models, \`/model <name>\` to switch
+2. Enable shell commands if needed: \`/shell on\`
+3. Send me a message describing what you want to do
+4. Continue the conversation with follow-up messages
+5. Use \`/newtask\` when you want to start something new
+6. Use \`/models\` to see AI models, \`/model <name>\` to switch
 
 Examples:
 • "What files are in this project?"
 • "Create a new React component called Button"
-• "Find all TODO comments in the code"`;
+• "Run npm install to install dependencies"`;
   }
 
   /**

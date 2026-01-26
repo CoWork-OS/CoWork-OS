@@ -4,6 +4,7 @@ import { FileTools } from './file-tools';
 import { SkillTools } from './skill-tools';
 import { SearchTools } from './search-tools';
 import { BrowserTools } from './browser-tools';
+import { ShellTools } from './shell-tools';
 import { LLMTool } from '../llm/types';
 import { SearchProviderFactory } from '../search';
 
@@ -15,6 +16,7 @@ export class ToolRegistry {
   private skillTools: SkillTools;
   private searchTools: SearchTools;
   private browserTools: BrowserTools;
+  private shellTools: ShellTools;
 
   constructor(
     private workspace: Workspace,
@@ -25,6 +27,7 @@ export class ToolRegistry {
     this.skillTools = new SkillTools(workspace, daemon, taskId);
     this.searchTools = new SearchTools(workspace, daemon, taskId);
     this.browserTools = new BrowserTools(workspace, daemon, taskId);
+    this.shellTools = new ShellTools(workspace, daemon, taskId);
   }
 
   /**
@@ -40,6 +43,11 @@ export class ToolRegistry {
     // Only add search tool if a provider is configured
     if (SearchProviderFactory.isAnyProviderConfigured()) {
       tools.push(...this.getSearchToolDefinitions());
+    }
+
+    // Only add shell tool if workspace has shell permission
+    if (this.workspace.permissions.shell) {
+      tools.push(...this.getShellToolDefinitions());
     }
 
     return tools;
@@ -91,6 +99,14 @@ Web Search:
 - web_search: Search the web for information (web, news, images)`;
     }
 
+    // Add shell if permitted
+    if (this.workspace.permissions.shell) {
+      descriptions += `
+
+Shell Commands:
+- run_command: Execute shell commands (requires user approval)`;
+    }
+
     return descriptions.trim();
   }
 
@@ -120,6 +136,9 @@ Web Search:
 
     // Search tools
     if (name === 'web_search') return await this.searchTools.webSearch(input);
+
+    // Shell tools
+    if (name === 'run_command') return await this.shellTools.runCommand(input.command, input);
 
     throw new Error(`Unknown tool: ${name}`);
   }
@@ -387,6 +406,37 @@ Web Search:
             },
           },
           required: ['query'],
+        },
+      },
+    ];
+  }
+
+  /**
+   * Define shell tools
+   */
+  private getShellToolDefinitions(): LLMTool[] {
+    return [
+      {
+        name: 'run_command',
+        description:
+          'Execute a shell command in the workspace directory. IMPORTANT: This tool requires user approval before execution. The user will see the command and can approve or deny it. Use this for installing packages (npm, pip, brew), running build commands, git operations, or any terminal commands.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            command: {
+              type: 'string',
+              description: 'The shell command to execute (e.g., "npm install", "git status", "ls -la")',
+            },
+            cwd: {
+              type: 'string',
+              description: 'Working directory for the command (optional, defaults to workspace root)',
+            },
+            timeout: {
+              type: 'number',
+              description: 'Timeout in milliseconds (optional, default: 60000, max: 300000)',
+            },
+          },
+          required: ['command'],
         },
       },
     ];

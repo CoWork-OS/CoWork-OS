@@ -7,7 +7,7 @@ import { LLMTool } from '../llm/types';
  * ImageTools - Tools for AI image generation using Nano Banana models
  *
  * Provides two image generation models:
- * - Nano Banana: Fast generation using Gemini 2.0 Flash
+ * - Nano Banana: Fast generation using Gemini 2.5 Flash Image
  * - Nano Banana Pro: High-quality generation using Gemini 3 Pro
  */
 export class ImageTools {
@@ -79,7 +79,7 @@ export class ImageTools {
       {
         name: 'generate_image',
         description: `Generate an image from a text description using AI. Two models are available:
-- nano-banana: Fast generation using Gemini 2.0 Flash
+- nano-banana: Fast generation using Gemini 2.5 Flash
 - nano-banana-pro: High-quality generation using Gemini 3 Pro (default)
 
 The generated images are saved to the workspace folder.`,

@@ -61,8 +61,8 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
   // Google Gemini image generation models
   // Note: Image generation is priced per image, not per token
   // These are approximate costs (actual pricing may vary)
-  'gemini-2.0-flash-preview-image-generation': { inputPer1M: 0.00, outputPer1M: 0.00 },  // Nano Banana
-  'gemini-3-pro-image-preview': { inputPer1M: 0.00, outputPer1M: 0.00 },                 // Nano Banana Pro
+  'gemini-2.5-flash-image': { inputPer1M: 0.00, outputPer1M: 0.00 },      // Nano Banana
+  'gemini-3-pro-image-preview': { inputPer1M: 0.00, outputPer1M: 0.00 },  // Nano Banana Pro
 };
 
 /**
@@ -70,10 +70,10 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
  * Separate from token-based pricing for LLMs
  */
 export const IMAGE_GENERATION_PRICING: Record<string, number> = {
-  'gemini-2.0-flash-preview-image-generation': 0.02,  // Nano Banana - ~$0.02 per image
-  'gemini-3-pro-image-preview': 0.04,                 // Nano Banana Pro - ~$0.04 per image
-  'nano-banana': 0.02,                                // Alias
-  'nano-banana-pro': 0.04,                            // Alias
+  'gemini-2.5-flash-image': 0.02,         // Nano Banana - ~$0.02 per image
+  'gemini-3-pro-image-preview': 0.04,     // Nano Banana Pro - ~$0.04 per image
+  'nano-banana': 0.02,                    // Alias
+  'nano-banana-pro': 0.04,                // Alias
 };
 
 /**

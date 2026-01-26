@@ -45,11 +45,11 @@ export interface ImageGenerationResult {
 
 /**
  * Map our model names to Gemini model IDs
- * - nano-banana: gemini-2.0-flash-preview-image-generation (faster, good quality)
+ * - nano-banana: gemini-2.5-flash-image (fast, good quality)
  * - nano-banana-pro: gemini-3-pro-image-preview (best quality)
  */
 const MODEL_MAP: Record<ImageModel, string> = {
-  'nano-banana': 'gemini-2.0-flash-preview-image-generation',
+  'nano-banana': 'gemini-2.5-flash-image',
   'nano-banana-pro': 'gemini-3-pro-image-preview',
 };
 
@@ -57,7 +57,7 @@ const MODEL_MAP: Record<ImageModel, string> = {
  * ImageGenerator - Generates images using Google's Gemini models
  *
  * Supports two models:
- * - Nano Banana: Fast generation using Gemini 2.0 Flash
+ * - Nano Banana: Fast generation using Gemini 2.5 Flash Image
  * - Nano Banana Pro: High-quality generation using Gemini 3 Pro Image Preview
  */
 export class ImageGenerator {
@@ -258,7 +258,7 @@ export class ImageGenerator {
       {
         id: 'nano-banana',
         name: 'Nano Banana',
-        description: 'Fast image generation using Gemini 2.0 Flash',
+        description: 'Fast image generation using Gemini 2.5 Flash',
         modelId: MODEL_MAP['nano-banana'],
       },
       {

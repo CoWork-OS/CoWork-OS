@@ -1,14 +1,14 @@
 import { Workspace } from '../../../shared/types';
 import { AgentDaemon } from '../daemon';
-import { ImageGenerator, ImageModel, AspectRatio, ImageGenerationResult } from '../skills/image-generator';
+import { ImageGenerator, ImageModel, ImageSize, ImageGenerationResult } from '../skills/image-generator';
 import { LLMTool } from '../llm/types';
 
 /**
  * ImageTools - Tools for AI image generation using Nano Banana models
  *
  * Provides two image generation models:
- * - Nano Banana: Fast generation for quick iterations
- * - Nano Banana Pro: High-quality generation for production use
+ * - Nano Banana: Fast generation using Gemini 2.0 Flash
+ * - Nano Banana Pro: High-quality generation using Gemini 3 Pro
  */
 export class ImageTools {
   private imageGenerator: ImageGenerator;
@@ -28,7 +28,7 @@ export class ImageTools {
     prompt: string;
     model?: ImageModel;
     filename?: string;
-    aspectRatio?: AspectRatio;
+    imageSize?: ImageSize;
     numberOfImages?: number;
   }): Promise<ImageGenerationResult> {
     if (!this.workspace.permissions.write) {
@@ -37,9 +37,9 @@ export class ImageTools {
 
     const result = await this.imageGenerator.generate({
       prompt: input.prompt,
-      model: input.model || 'nano-banana',
+      model: input.model || 'nano-banana-pro',
       filename: input.filename,
-      aspectRatio: input.aspectRatio || '1:1',
+      imageSize: input.imageSize || '1K',
       numberOfImages: input.numberOfImages || 1,
     });
 
@@ -79,8 +79,8 @@ export class ImageTools {
       {
         name: 'generate_image',
         description: `Generate an image from a text description using AI. Two models are available:
-- nano-banana: Fast generation for quick iterations and previews
-- nano-banana-pro: High-quality generation for production-ready images
+- nano-banana: Fast generation using Gemini 2.0 Flash
+- nano-banana-pro: High-quality generation using Gemini 3 Pro (default)
 
 The generated images are saved to the workspace folder.`,
         input_schema: {
@@ -93,16 +93,16 @@ The generated images are saved to the workspace folder.`,
             model: {
               type: 'string',
               enum: ['nano-banana', 'nano-banana-pro'],
-              description: 'The model to use. "nano-banana" for fast generation, "nano-banana-pro" for high quality (default: nano-banana)',
+              description: 'The model to use. "nano-banana" for fast generation, "nano-banana-pro" for high quality (default: nano-banana-pro)',
             },
             filename: {
               type: 'string',
               description: 'Output filename without extension (optional, defaults to generated_<timestamp>)',
             },
-            aspectRatio: {
+            imageSize: {
               type: 'string',
-              enum: ['1:1', '16:9', '9:16', '4:3', '3:4'],
-              description: 'Aspect ratio of the generated image (default: 1:1)',
+              enum: ['1K', '2K'],
+              description: 'Size of the generated image. "1K" for 1024px, "2K" for 2048px (default: 1K)',
             },
             numberOfImages: {
               type: 'number',

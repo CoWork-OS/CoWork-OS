@@ -58,12 +58,11 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
   // Ollama (local) - free
   // Ollama models are free since they run locally
 
-  // Google Imagen models (image generation)
+  // Google Gemini image generation models
   // Note: Image generation is priced per image, not per token
-  // These are approximate costs converted to "per 1M tokens" equivalent
-  // Actual cost: ~$0.03 per image for fast, ~$0.04 per image for standard
-  'imagen-3.0-fast-generate-001': { inputPer1M: 0.00, outputPer1M: 0.00 },  // Nano Banana
-  'imagen-3.0-generate-002': { inputPer1M: 0.00, outputPer1M: 0.00 },       // Nano Banana Pro
+  // These are approximate costs (actual pricing may vary)
+  'gemini-2.0-flash-preview-image-generation': { inputPer1M: 0.00, outputPer1M: 0.00 },  // Nano Banana
+  'gemini-3-pro-image-preview': { inputPer1M: 0.00, outputPer1M: 0.00 },                 // Nano Banana Pro
 };
 
 /**
@@ -71,10 +70,10 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
  * Separate from token-based pricing for LLMs
  */
 export const IMAGE_GENERATION_PRICING: Record<string, number> = {
-  'imagen-3.0-fast-generate-001': 0.03,  // Nano Banana - ~$0.03 per image
-  'imagen-3.0-generate-002': 0.04,       // Nano Banana Pro - ~$0.04 per image
-  'nano-banana': 0.03,                   // Alias
-  'nano-banana-pro': 0.04,               // Alias
+  'gemini-2.0-flash-preview-image-generation': 0.02,  // Nano Banana - ~$0.02 per image
+  'gemini-3-pro-image-preview': 0.04,                 // Nano Banana Pro - ~$0.04 per image
+  'nano-banana': 0.02,                                // Alias
+  'nano-banana-pro': 0.04,                            // Alias
 };
 
 /**

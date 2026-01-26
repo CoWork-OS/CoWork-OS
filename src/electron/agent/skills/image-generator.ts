@@ -1,19 +1,20 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import * as mimetypes from 'mime-types';
 import { Workspace } from '../../../shared/types';
 import { LLMProviderFactory } from '../llm/provider-factory';
 
 /**
  * Image generation model types
- * - nano-banana: Fast, efficient image generation (Imagen 3.0 Fast)
- * - nano-banana-pro: High-quality image generation (Imagen 3.0)
+ * - nano-banana: Standard image generation using Gemini 2.0 Flash
+ * - nano-banana-pro: High-quality image generation using Gemini 3 Pro Image Preview
  */
 export type ImageModel = 'nano-banana' | 'nano-banana-pro';
 
 /**
- * Image aspect ratio options
+ * Image size options
  */
-export type AspectRatio = '1:1' | '16:9' | '9:16' | '4:3' | '3:4';
+export type ImageSize = '1K' | '2K';
 
 /**
  * Image generation request
@@ -22,7 +23,7 @@ export interface ImageGenerationRequest {
   prompt: string;
   model?: ImageModel;
   filename?: string;
-  aspectRatio?: AspectRatio;
+  imageSize?: ImageSize;
   numberOfImages?: number;
 }
 
@@ -38,36 +39,39 @@ export interface ImageGenerationResult {
     size: number;
   }>;
   model: string;
+  textResponse?: string;
   error?: string;
 }
 
 /**
- * Map our model names to Gemini Imagen model IDs
+ * Map our model names to Gemini model IDs
+ * - nano-banana: gemini-2.0-flash-preview-image-generation (faster, good quality)
+ * - nano-banana-pro: gemini-3-pro-image-preview (best quality)
  */
 const MODEL_MAP: Record<ImageModel, string> = {
-  'nano-banana': 'imagen-3.0-fast-generate-001',
-  'nano-banana-pro': 'imagen-3.0-generate-002',
+  'nano-banana': 'gemini-2.0-flash-preview-image-generation',
+  'nano-banana-pro': 'gemini-3-pro-image-preview',
 };
 
 /**
- * ImageGenerator - Generates images using Google's Imagen models via Gemini API
+ * ImageGenerator - Generates images using Google's Gemini models
  *
  * Supports two models:
- * - Nano Banana: Fast generation for quick iterations (imagen-3.0-fast-generate-001)
- * - Nano Banana Pro: High-quality generation for production use (imagen-3.0-generate-002)
+ * - Nano Banana: Fast generation using Gemini 2.0 Flash
+ * - Nano Banana Pro: High-quality generation using Gemini 3 Pro Image Preview
  */
 export class ImageGenerator {
   constructor(private workspace: Workspace) {}
 
   /**
-   * Generate images from a text prompt
+   * Generate images from a text prompt using Gemini's generateContent API
    */
   async generate(request: ImageGenerationRequest): Promise<ImageGenerationResult> {
     const {
       prompt,
-      model = 'nano-banana',
+      model = 'nano-banana-pro',
       filename,
-      aspectRatio = '1:1',
+      imageSize = '1K',
       numberOfImages = 1,
     } = request;
 
@@ -85,108 +89,142 @@ export class ImageGenerator {
     }
 
     const modelId = MODEL_MAP[model];
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:predict`;
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent`;
 
     try {
-      console.log(`[ImageGenerator] Generating ${numberOfImages} image(s) with ${model} (${modelId})`);
-      console.log(`[ImageGenerator] Prompt: "${prompt.substring(0, 100)}..."`);
+      console.log(`[ImageGenerator] Generating image with ${model} (${modelId})`);
+      console.log(`[ImageGenerator] Prompt: "${prompt.substring(0, 100)}${prompt.length > 100 ? '...' : ''}"`);
 
-      const response = await fetch(`${endpoint}?key=${apiKey}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          instances: [
-            {
-              prompt: prompt,
-            },
-          ],
-          parameters: {
-            sampleCount: Math.min(numberOfImages, 4), // Max 4 images per request
-            aspectRatio: aspectRatio,
-            personGeneration: 'allow_adult', // Allow generating people
-            safetyFilterLevel: 'block_some', // Moderate safety filter
-          },
-        }),
-      });
-
-      if (!response.ok) {
-        const errorBody = await response.text();
-        console.error(`[ImageGenerator] API error: ${response.status} ${response.statusText}`);
-        console.error(`[ImageGenerator] Error body:`, errorBody);
-
-        // Parse error for better message
-        let errorMessage = `Image generation failed: ${response.status}`;
-        try {
-          const errorJson = JSON.parse(errorBody);
-          if (errorJson.error?.message) {
-            errorMessage = errorJson.error.message;
-          }
-        } catch {
-          // Use default message
-        }
-
-        return {
-          success: false,
-          images: [],
-          model: modelId,
-          error: errorMessage,
-        };
-      }
-
-      const data = await response.json() as { predictions?: Array<{ bytesBase64Encoded?: string }> };
-      const predictions = data.predictions || [];
-
-      if (predictions.length === 0) {
-        return {
-          success: false,
-          images: [],
-          model: modelId,
-          error: 'No images were generated. The prompt may have been blocked by safety filters.',
-        };
-      }
-
-      // Save generated images
       const images: ImageGenerationResult['images'] = [];
       const baseFilename = filename || `generated_${Date.now()}`;
       const outputDir = this.workspace.path;
+      let textResponse: string | undefined;
 
-      for (let i = 0; i < predictions.length; i++) {
-        const prediction = predictions[i];
-        const imageBytes = prediction.bytesBase64Encoded;
-
-        if (!imageBytes) {
-          console.warn(`[ImageGenerator] Prediction ${i} has no image data`);
-          continue;
-        }
-
-        // Determine filename
-        const imageName = predictions.length > 1
-          ? `${baseFilename}_${i + 1}.png`
-          : `${baseFilename}.png`;
-        const outputPath = path.join(outputDir, imageName);
-
-        // Decode and save image
-        const imageBuffer = Buffer.from(imageBytes, 'base64');
-        await fs.promises.writeFile(outputPath, imageBuffer);
-
-        const stats = await fs.promises.stat(outputPath);
-
-        images.push({
-          path: outputPath,
-          filename: imageName,
-          mimeType: 'image/png',
-          size: stats.size,
+      // Generate requested number of images (one API call per image for streaming support)
+      for (let imageIndex = 0; imageIndex < Math.min(numberOfImages, 4); imageIndex++) {
+        const response = await fetch(`${endpoint}?key=${apiKey}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            contents: [
+              {
+                role: 'user',
+                parts: [
+                  {
+                    text: prompt,
+                  },
+                ],
+              },
+            ],
+            generationConfig: {
+              responseModalities: ['IMAGE', 'TEXT'],
+              imageConfig: {
+                imageSize: imageSize,
+              },
+            },
+          }),
         });
 
-        console.log(`[ImageGenerator] Saved image: ${imageName} (${stats.size} bytes)`);
+        if (!response.ok) {
+          const errorBody = await response.text();
+          console.error(`[ImageGenerator] API error: ${response.status} ${response.statusText}`);
+          console.error(`[ImageGenerator] Error body:`, errorBody);
+
+          // Parse error for better message
+          let errorMessage = `Image generation failed: ${response.status}`;
+          try {
+            const errorJson = JSON.parse(errorBody);
+            if (errorJson.error?.message) {
+              errorMessage = errorJson.error.message;
+            }
+          } catch {
+            // Use default message
+          }
+
+          // If first image fails, return error
+          if (imageIndex === 0) {
+            return {
+              success: false,
+              images: [],
+              model: modelId,
+              error: errorMessage,
+            };
+          }
+          // Otherwise continue with what we have
+          break;
+        }
+
+        const data = await response.json() as {
+          candidates?: Array<{
+            content?: {
+              parts?: Array<{
+                text?: string;
+                inlineData?: {
+                  mimeType: string;
+                  data: string;
+                };
+              }>;
+            };
+          }>;
+        };
+
+        const candidate = data.candidates?.[0];
+        const parts = candidate?.content?.parts || [];
+
+        for (const part of parts) {
+          // Handle text response
+          if (part.text) {
+            textResponse = part.text;
+            console.log(`[ImageGenerator] Text response: ${part.text.substring(0, 100)}...`);
+          }
+
+          // Handle image data
+          if (part.inlineData?.data) {
+            const inlineData = part.inlineData;
+            const mimeType = inlineData.mimeType || 'image/png';
+            const extension = mimetypes.extension(mimeType) || 'png';
+
+            // Determine filename
+            const imageName = numberOfImages > 1
+              ? `${baseFilename}_${imageIndex + 1}.${extension}`
+              : `${baseFilename}.${extension}`;
+            const outputPath = path.join(outputDir, imageName);
+
+            // Decode and save image
+            const imageBuffer = Buffer.from(inlineData.data, 'base64');
+            await fs.promises.writeFile(outputPath, imageBuffer);
+
+            const stats = await fs.promises.stat(outputPath);
+
+            images.push({
+              path: outputPath,
+              filename: imageName,
+              mimeType: mimeType,
+              size: stats.size,
+            });
+
+            console.log(`[ImageGenerator] Saved image: ${imageName} (${stats.size} bytes)`);
+          }
+        }
+      }
+
+      if (images.length === 0) {
+        return {
+          success: false,
+          images: [],
+          model: modelId,
+          textResponse,
+          error: textResponse || 'No images were generated. The prompt may have been blocked by safety filters.',
+        };
       }
 
       return {
         success: true,
         images,
         model: modelId,
+        textResponse,
       };
     } catch (error: any) {
       console.error(`[ImageGenerator] Error:`, error);
@@ -220,13 +258,13 @@ export class ImageGenerator {
       {
         id: 'nano-banana',
         name: 'Nano Banana',
-        description: 'Fast image generation - great for quick iterations and previews',
+        description: 'Fast image generation using Gemini 2.0 Flash',
         modelId: MODEL_MAP['nano-banana'],
       },
       {
         id: 'nano-banana-pro',
         name: 'Nano Banana Pro',
-        description: 'High-quality image generation - best for final outputs',
+        description: 'High-quality image generation using Gemini 3 Pro',
         modelId: MODEL_MAP['nano-banana-pro'],
       },
     ];

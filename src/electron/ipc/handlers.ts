@@ -341,7 +341,7 @@ export function setupIpcHandlers(
         }));
         break;
 
-      case 'gemini':
+      case 'gemini': {
         // For Gemini, use the specific model from settings (full model ID)
         currentModel = settings.gemini?.model || 'gemini-2.0-flash';
         // Use cached models if available, otherwise fall back to static list
@@ -365,8 +365,9 @@ export function setupIpcHandlers(
           });
         }
         break;
+      }
 
-      case 'openrouter':
+      case 'openrouter': {
         // For OpenRouter, use the specific model from settings (full model ID)
         currentModel = settings.openrouter?.model || 'anthropic/claude-3.5-sonnet';
         // Use cached models if available, otherwise fall back to static list
@@ -390,8 +391,9 @@ export function setupIpcHandlers(
           });
         }
         break;
+      }
 
-      case 'ollama':
+      case 'ollama': {
         // For Ollama, use the specific model from settings
         currentModel = settings.ollama?.model || 'llama3.2';
         // Use cached models if available, otherwise fall back to static list
@@ -415,6 +417,7 @@ export function setupIpcHandlers(
           });
         }
         break;
+      }
 
       default:
         // Fallback to Anthropic models

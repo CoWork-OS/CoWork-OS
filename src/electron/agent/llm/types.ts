@@ -3,7 +3,7 @@
  * Allows switching between Anthropic API and AWS Bedrock
  */
 
-export type LLMProviderType = 'anthropic' | 'bedrock' | 'ollama' | 'gemini';
+export type LLMProviderType = 'anthropic' | 'bedrock' | 'ollama' | 'gemini' | 'openrouter';
 
 export interface LLMProviderConfig {
   type: LLMProviderType;
@@ -22,6 +22,8 @@ export interface LLMProviderConfig {
   ollamaApiKey?: string; // Optional API key for remote Ollama servers
   // Gemini-specific
   geminiApiKey?: string;
+  // OpenRouter-specific
+  openrouterApiKey?: string;
 }
 
 export interface LLMTool {
@@ -169,6 +171,55 @@ export const GEMINI_MODELS = {
 } as const;
 
 export type GeminiModelKey = keyof typeof GEMINI_MODELS;
+
+/**
+ * Popular OpenRouter models
+ * OpenRouter provides access to many models from different providers
+ */
+export const OPENROUTER_MODELS = {
+  'anthropic/claude-3.5-sonnet': {
+    id: 'anthropic/claude-3.5-sonnet',
+    displayName: 'Claude 3.5 Sonnet',
+    description: 'Anthropic\'s balanced model',
+  },
+  'anthropic/claude-3-opus': {
+    id: 'anthropic/claude-3-opus',
+    displayName: 'Claude 3 Opus',
+    description: 'Anthropic\'s most capable model',
+  },
+  'openai/gpt-4o': {
+    id: 'openai/gpt-4o',
+    displayName: 'GPT-4o',
+    description: 'OpenAI\'s flagship model',
+  },
+  'openai/gpt-4o-mini': {
+    id: 'openai/gpt-4o-mini',
+    displayName: 'GPT-4o Mini',
+    description: 'OpenAI\'s fast and affordable model',
+  },
+  'google/gemini-pro-1.5': {
+    id: 'google/gemini-pro-1.5',
+    displayName: 'Gemini Pro 1.5',
+    description: 'Google\'s advanced model',
+  },
+  'meta-llama/llama-3.1-405b-instruct': {
+    id: 'meta-llama/llama-3.1-405b-instruct',
+    displayName: 'Llama 3.1 405B',
+    description: 'Meta\'s largest open model',
+  },
+  'mistralai/mistral-large': {
+    id: 'mistralai/mistral-large',
+    displayName: 'Mistral Large',
+    description: 'Mistral\'s flagship model',
+  },
+  'deepseek/deepseek-chat': {
+    id: 'deepseek/deepseek-chat',
+    displayName: 'DeepSeek Chat',
+    description: 'DeepSeek\'s conversational model',
+  },
+} as const;
+
+export type OpenRouterModelKey = keyof typeof OPENROUTER_MODELS;
 
 /**
  * Popular Ollama models with their details

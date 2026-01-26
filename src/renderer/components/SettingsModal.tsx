@@ -63,6 +63,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   // Gemini state
   const [geminiApiKey, setGeminiApiKey] = useState('');
 
+  // OpenRouter state
+  const [openrouterApiKey, setOpenrouterApiKey] = useState('');
+
   useEffect(() => {
     if (isOpen) {
       loadConfigStatus();
@@ -151,6 +154,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         gemini: settings.providerType === 'gemini' ? {
           apiKey: geminiApiKey || undefined,
         } : undefined,
+        openrouter: settings.providerType === 'openrouter' ? {
+          apiKey: openrouterApiKey || undefined,
+        } : undefined,
       };
 
       await window.electronAPI.saveLLMSettings(settingsToSave);
@@ -189,6 +195,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         } : undefined,
         gemini: settings.providerType === 'gemini' ? {
           apiKey: geminiApiKey || undefined,
+        } : undefined,
+        openrouter: settings.providerType === 'openrouter' ? {
+          apiKey: openrouterApiKey || undefined,
         } : undefined,
       };
 
@@ -273,6 +282,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     const isBedrock = provider.type === 'bedrock';
                     const isOllama = provider.type === 'ollama';
                     const isGemini = provider.type === 'gemini';
+                    const isOpenRouter = provider.type === 'openrouter';
 
                     return (
                       <label
@@ -285,7 +295,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           value={provider.type}
                           checked={settings.providerType === provider.type}
                           onChange={() => {
-                            setSettings({ ...settings, providerType: provider.type as 'anthropic' | 'bedrock' | 'ollama' | 'gemini' });
+                            setSettings({ ...settings, providerType: provider.type as 'anthropic' | 'bedrock' | 'ollama' | 'gemini' | 'openrouter' });
                             // Load Ollama models when selecting Ollama
                             if (provider.type === 'ollama') {
                               loadOllamaModels();
@@ -314,6 +324,12 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             {isGemini && !provider.configured && (
                               <>Set GEMINI_API_KEY in .env or enter below</>
                             )}
+                            {isOpenRouter && provider.configured && (
+                              <>Using API key from environment or settings</>
+                            )}
+                            {isOpenRouter && !provider.configured && (
+                              <>Set OPENROUTER_API_KEY in .env or enter below</>
+                            )}
                             {isBedrock && provider.configured && (
                               <>Using AWS credentials from environment or settings</>
                             )}
@@ -334,7 +350,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 </div>
               </div>
 
-              {settings.providerType !== 'ollama' && settings.providerType !== 'gemini' && (
+              {settings.providerType !== 'ollama' && settings.providerType !== 'gemini' && settings.providerType !== 'openrouter' && (
                 <div className="settings-section">
                   <h3>Model</h3>
                   <select
@@ -382,6 +398,26 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   />
                   <p className="settings-hint">
                     Default model: Gemini 2.0 Flash. Other models like Gemini 2.5 Pro can be configured via environment.
+                  </p>
+                </div>
+              )}
+
+              {settings.providerType === 'openrouter' && (
+                <div className="settings-section">
+                  <h3>OpenRouter API Key</h3>
+                  <p className="settings-description">
+                    Enter your API key from openrouter.ai/keys, or leave empty to use environment variable.
+                  </p>
+                  <input
+                    type="password"
+                    className="settings-input"
+                    placeholder="sk-or-..."
+                    value={openrouterApiKey}
+                    onChange={(e) => setOpenrouterApiKey(e.target.value)}
+                  />
+                  <p className="settings-hint">
+                    OpenRouter provides access to many models from different providers (Claude, GPT-4, Llama, etc.) through a unified API.
+                    Default model: Claude 3.5 Sonnet.
                   </p>
                 </div>
               )}

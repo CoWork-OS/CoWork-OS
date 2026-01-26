@@ -50,10 +50,18 @@ function decryptSecret(value?: string): string | undefined {
     try {
       if (safeStorage.isEncryptionAvailable()) {
         const encrypted = Buffer.from(value.slice(ENCRYPTED_PREFIX.length), 'base64');
-        return safeStorage.decryptString(encrypted);
+        const decrypted = safeStorage.decryptString(encrypted);
+        return decrypted;
+      } else {
+        console.error('[LLM Settings] safeStorage encryption not available - cannot decrypt secrets');
+        console.error('[LLM Settings] You may need to re-enter your API credentials in Settings');
       }
-    } catch (error) {
-      console.warn('Failed to decrypt secret:', error);
+    } catch (error: any) {
+      // This can happen after app updates when the code signature changes
+      // The macOS Keychain ties encryption to the app's signature
+      console.error('[LLM Settings] Failed to decrypt secret - this can happen after app updates');
+      console.error('[LLM Settings] Error:', error.message || error);
+      console.error('[LLM Settings] Please re-enter your API credentials in Settings');
     }
   }
 

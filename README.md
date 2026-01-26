@@ -87,8 +87,11 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
 ### Core Capabilities
 
 - **Task-Based Workflow**: Multi-step task execution with plan-execute-observe loops
-- **Workspace Management**: Sandboxed file operations within selected folders
+- **Goal Mode**: Define success criteria (shell commands or file checks) and let the agent auto-retry up to N attempts until verification passes
+- **Dynamic Re-Planning**: Agent can revise its plan mid-execution based on new information or obstacles
+- **Workspace Management**: Sandboxed file operations within selected folders (with optional broader filesystem access)
 - **Permission System**: Explicit approval for destructive operations
+- **Auto-Approve Trusted Commands**: Configure patterns for safe shell commands that auto-approve without prompts
 - **Skill System**: Built-in skills for creating professional outputs:
   - **Excel spreadsheets** (.xlsx) with multiple sheets, auto-fit columns, formatting, and filters
   - **Word documents** (.docx) with headings, paragraphs, lists, tables, and code blocks
@@ -106,6 +109,13 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
   - Click, fill forms, type text, press keys
   - Extract page content, links, and form data
   - Scroll pages, wait for elements, execute JavaScript
+- **System Tools**: Access to system-level capabilities:
+  - Take screenshots (full screen or specific windows)
+  - Read/write clipboard content
+  - Open applications, URLs, and file paths
+  - Show files in Finder
+  - Get system information and environment variables
+- **Update Notifications**: Automatic check for new releases with in-app notification banner
 
 ## Data handling (local-first, BYOK)
 - Stored locally: task metadata, timeline events, artifact index, workspace config (SQLite).
@@ -289,6 +299,7 @@ CoWork-OSS includes configurable safety guardrails that you can customize in **S
 | **Cost Budget** | Limits estimated cost (USD) per task | $1.00 (disabled) | $0.01 - $100 |
 | **Iteration Limit** | Limits LLM calls per task to prevent infinite loops | 50 | 5 - 500 |
 | **Dangerous Command Blocking** | Blocks shell commands matching dangerous patterns | Enabled | On/Off + custom patterns |
+| **Auto-Approve Trusted Commands** | Skip approval for safe commands (npm test, git status, etc.) | Disabled | On/Off + patterns |
 | **File Size Limit** | Limits the size of files the agent can write | 50 MB | 1 - 500 MB |
 | **Domain Allowlist** | Restricts browser automation to approved domains | Disabled | On/Off + domain list |
 
@@ -314,6 +325,18 @@ Built-in patterns block potentially destructive shell commands **before** they r
 - `curl|bash` - Piped execution from internet
 
 You can add custom patterns (regex supported) to block additional commands specific to your environment.
+
+### Auto-Approve Trusted Commands
+
+For productivity, you can configure patterns for commands that auto-approve without prompts:
+
+**Default trusted patterns** (when enabled):
+- `npm test*`, `npm run *`, `npm install*` - Package manager commands
+- `git status*`, `git diff*`, `git log*` - Read-only git commands
+- `ls`, `pwd`, `cat *`, `head *`, `tail *` - File inspection commands
+- Version checks (`node --version`, `python --version`, etc.)
+
+You can add custom patterns using glob-style syntax (e.g., `cargo build*`, `make test*`).
 
 ### Domain Allowlist
 
@@ -371,6 +394,12 @@ If requested by the rights holder, we will update naming/branding to avoid confu
 - [x] Local LLM support via Ollama (free, runs on your machine)
 - [x] **Browser automation** with Playwright (navigate, click, fill, screenshot, PDF)
 - [x] **Configurable guardrails** (token/cost budgets, iteration limits, command blocking, file size limits, domain allowlist)
+- [x] **Goal Mode** - Define success criteria and auto-retry until verification passes
+- [x] **Dynamic re-planning** - Agent can revise plan mid-execution with `revise_plan` tool
+- [x] **System tools** - Screenshots, clipboard, open apps/URLs/paths, system info
+- [x] **Auto-approve trusted commands** - Skip approval for safe shell commands matching patterns
+- [x] **Broader filesystem access** - Optional access to files outside workspace boundaries
+- [x] **Update notifications** - In-app banner when new releases are available
 
 ### Planned
 - [ ] VM sandbox using macOS Virtualization.framework

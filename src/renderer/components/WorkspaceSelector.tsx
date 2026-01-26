@@ -7,10 +7,21 @@ interface WorkspaceSelectorProps {
 
 export function WorkspaceSelector({ onWorkspaceSelected }: WorkspaceSelectorProps) {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [appVersion, setAppVersion] = useState<string>('');
 
   useEffect(() => {
     loadWorkspaces();
+    loadVersion();
   }, []);
+
+  const loadVersion = async () => {
+    try {
+      const versionInfo = await window.electronAPI.getAppVersion();
+      setAppVersion(versionInfo.version);
+    } catch (error) {
+      console.error('Failed to load version:', error);
+    }
+  };
 
   const loadWorkspaces = async () => {
     try {
@@ -68,7 +79,7 @@ export function WorkspaceSelector({ onWorkspaceSelected }: WorkspaceSelectorProp
  ██║     ██║   ██║██║███╗██║██║   ██║██╔══██╗██╔═██╗ ╚════╝██║   ██║╚════██║╚════██║
  ╚██████╗╚██████╔╝╚███╔███╔╝╚██████╔╝██║  ██║██║  ██╗      ╚██████╔╝███████║███████║
   ╚═════╝ ╚═════╝  ╚══╝╚══╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝       ╚═════╝ ╚══════╝╚══════╝`}</pre>
-          <div className="cli-version">v0.1.0</div>
+          <div className="cli-version">{appVersion ? `v${appVersion}` : ''}</div>
         </div>
 
         {/* Terminal Info */}

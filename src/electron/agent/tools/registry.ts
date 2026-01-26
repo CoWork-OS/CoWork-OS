@@ -88,8 +88,9 @@ export class ToolRegistry {
   getToolDescriptions(): string {
     let descriptions = `
 File Operations:
-- read_file: Read contents of a file
+- read_file: Read contents of a file (supports plain text, DOCX, and PDF)
 - write_file: Write content to a file (creates or overwrites)
+- copy_file: Copy a file (supports binary files like DOCX, PDF, images)
 - list_directory: List files and folders in a directory
 - rename_file: Rename or move a file
 - delete_file: Delete a file (requires approval)
@@ -174,6 +175,7 @@ Plan Control:
     // File tools
     if (name === 'read_file') return await this.fileTools.readFile(input.path);
     if (name === 'write_file') return await this.fileTools.writeFile(input.path, input.content);
+    if (name === 'copy_file') return await this.fileTools.copyFile(input.sourcePath, input.destPath);
     if (name === 'list_directory') return await this.fileTools.listDirectory(input.path);
     if (name === 'rename_file') return await this.fileTools.renameFile(input.oldPath, input.newPath);
     if (name === 'delete_file') return await this.fileTools.deleteFile(input.path);
@@ -243,7 +245,7 @@ Plan Control:
     return [
       {
         name: 'read_file',
-        description: 'Read the contents of a file in the workspace',
+        description: 'Read the contents of a file in the workspace. Supports plain text files, DOCX (Word documents), and PDF files. For DOCX and PDF, extracts and returns the text content.',
         input_schema: {
           type: 'object',
           properties: {
@@ -271,6 +273,24 @@ Plan Control:
             },
           },
           required: ['path', 'content'],
+        },
+      },
+      {
+        name: 'copy_file',
+        description: 'Copy a file to a new location. Supports binary files (DOCX, PDF, images, etc.) and preserves exact file content.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            sourcePath: {
+              type: 'string',
+              description: 'Path to the source file to copy',
+            },
+            destPath: {
+              type: 'string',
+              description: 'Path for the destination file (the copy)',
+            },
+          },
+          required: ['sourcePath', 'destPath'],
         },
       },
       {

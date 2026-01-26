@@ -51,6 +51,12 @@ const INPUT_DEPENDENT_ERROR_PATTERNS = [
   /cannot find/i,      // Cannot find resource
   /permission denied/i, // Permission on specific file (not API permission)
   /EACCES/i,           // Access denied to specific file
+  // Missing/invalid parameter errors (LLM didn't provide required params)
+  /parameter.*required/i,      // "parameter is required"
+  /required.*not provided/i,   // "required but was not provided"
+  /invalid.*parameter/i,       // "Invalid content" type errors
+  /must be.*string/i,          // Type validation: "must be a non-empty string"
+  /expected.*but received/i,   // Type validation: "expected string but received undefined"
 ];
 
 /**

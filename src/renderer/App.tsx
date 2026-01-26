@@ -4,7 +4,7 @@ import { MainContent } from './components/MainContent';
 import { RightPanel } from './components/RightPanel';
 import { WorkspaceSelector } from './components/WorkspaceSelector';
 import { Settings } from './components/Settings';
-import { Task, Workspace, TaskEvent, LLMModelInfo, LLMProviderInfo, SuccessCriteria } from '../shared/types';
+import { Task, Workspace, TaskEvent, LLMModelInfo, LLMProviderInfo, SuccessCriteria, UpdateInfo } from '../shared/types';
 
 type AppView = 'workspace-selector' | 'main' | 'settings';
 
@@ -19,6 +19,10 @@ export function App() {
   const [selectedModel, setSelectedModel] = useState<string>('opus-4-5');
   const [availableModels, setAvailableModels] = useState<LLMModelInfo[]>([]);
   const [_availableProviders, setAvailableProviders] = useState<LLMProviderInfo[]>([]);
+
+  // Update notification state
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [updateDismissed, setUpdateDismissed] = useState(false);
 
   // Load LLM config status
   const loadLLMConfig = async () => {
@@ -35,6 +39,24 @@ export function App() {
   // Load LLM config on mount
   useEffect(() => {
     loadLLMConfig();
+  }, []);
+
+  // Check for updates on mount
+  useEffect(() => {
+    const checkUpdates = async () => {
+      try {
+        const info = await window.electronAPI.checkForUpdates();
+        if (info.available) {
+          setUpdateInfo(info);
+        }
+      } catch (error) {
+        // Silently ignore update check failures
+        console.log('Update check skipped:', error);
+      }
+    };
+    // Delay check to not block app startup
+    const timeoutId = setTimeout(checkUpdates, 3000);
+    return () => clearTimeout(timeoutId);
   }, []);
 
   useEffect(() => {
@@ -186,6 +208,45 @@ export function App() {
   return (
     <div className="app">
       <div className="title-bar" />
+      {/* Update notification banner */}
+      {updateInfo?.available && !updateDismissed && (
+        <div className="update-banner">
+          <div className="update-banner-content">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" />
+            </svg>
+            <span>
+              New version <strong>v{updateInfo.latestVersion}</strong> is available!
+            </span>
+            {updateInfo.releaseUrl ? (
+              <a
+                href={updateInfo.releaseUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="update-banner-link"
+              >
+                View Release
+              </a>
+            ) : (
+              <button
+                className="update-banner-link"
+                onClick={() => setCurrentView('settings')}
+              >
+                Update
+              </button>
+            )}
+          </div>
+          <button
+            className="update-banner-dismiss"
+            onClick={() => setUpdateDismissed(true)}
+            aria-label="Dismiss update notification"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
       {currentView === 'workspace-selector' && (
         <WorkspaceSelector onWorkspaceSelected={handleWorkspaceSelected} />
       )}

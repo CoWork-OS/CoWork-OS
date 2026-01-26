@@ -228,6 +228,14 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
   const [autoScroll, setAutoScroll] = useState(true);
   const [queuedMessage, setQueuedMessage] = useState<string | null>(null);
   const [expandedEvents, setExpandedEvents] = useState<Set<number>>(new Set());
+  const [appVersion, setAppVersion] = useState<string>('');
+
+  // Load app version
+  useEffect(() => {
+    window.electronAPI.getAppVersion()
+      .then(info => setAppVersion(info.version))
+      .catch(err => console.error('Failed to load version:', err));
+  }, []);
 
   const toggleEventExpanded = (index: number) => {
     setExpandedEvents(prev => {
@@ -244,6 +252,22 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
   // Check if an event has details to show
   const hasEventDetails = (event: TaskEvent): boolean => {
     return ['plan_created', 'tool_call', 'tool_result', 'assistant_message', 'error'].includes(event.type);
+  };
+
+  // Determine if an event should be expanded by default
+  // Important events (plan, assistant responses, errors) should be expanded
+  // Verbose events (tool calls/results) should be collapsed
+  const shouldDefaultExpand = (event: TaskEvent): boolean => {
+    return ['plan_created', 'assistant_message', 'error'].includes(event.type);
+  };
+
+  // Check if an event is currently expanded
+  // If the event should default expand, clicking toggles it to collapsed (and vice versa)
+  const isEventExpanded = (event: TaskEvent, index: number): boolean => {
+    const defaultExpanded = shouldDefaultExpand(event);
+    const isToggled = expandedEvents.has(index);
+    // XOR: if toggled, invert the default state
+    return defaultExpanded ? !isToggled : isToggled;
   };
 
   const timelineRef = useRef<HTMLDivElement>(null);
@@ -421,7 +445,7 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
  ██║     ██║   ██║██║███╗██║██║   ██║██╔══██╗██╔═██╗ ╚════╝██║   ██║╚════██║╚════██║
  ╚██████╗╚██████╔╝╚███╔███╔╝╚██████╔╝██║  ██║██║  ██╗      ╚██████╔╝███████║███████║
   ╚═════╝ ╚═════╝  ╚══╝╚══╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝       ╚═════╝ ╚══════╝╚══════╝`}</pre>
-              <div className="cli-version">v0.1.0</div>
+              <div className="cli-version">{appVersion ? `v${appVersion}` : ''}</div>
             </div>
 
             {/* Terminal Info */}
@@ -608,7 +632,7 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
                 <div className="timeline-events" ref={timelineRef}>
                   {events.map((event, index) => {
                     const isExpandable = hasEventDetails(event);
-                    const isExpanded = expandedEvents.has(index);
+                    const isExpanded = isEventExpanded(event, index);
                     return (
                       <div key={`event-${index}-${event.id || 'no-id'}`} className="timeline-event">
                         <div className="event-indicator">
@@ -748,8 +772,35 @@ function renderEventTitle(event: TaskEvent, workspacePath?: string): React.React
       return `✓ ${event.payload.step?.description || event.payload.message || 'Step done'}`;
     case 'tool_call':
       return `Tool: ${event.payload.tool}`;
-    case 'tool_result':
-      return `Result: ${event.payload.tool}`;
+    case 'tool_result': {
+      const result = event.payload.result;
+      const success = result?.success !== false && !result?.error;
+      const status = success ? 'succeeded' : 'failed';
+
+      // Extract useful info from result to show inline
+      let detail = '';
+      if (result) {
+        if (!success && result.error) {
+          // Show error message for failed tools
+          const errorMsg = typeof result.error === 'string' ? result.error : 'Unknown error';
+          detail = `: ${errorMsg.slice(0, 60)}${errorMsg.length > 60 ? '...' : ''}`;
+        } else if (result.path) {
+          detail = ` → ${result.path}`;
+        } else if (result.content && typeof result.content === 'string') {
+          const lines = result.content.split('\n').length;
+          detail = ` → ${lines} lines`;
+        } else if (result.size !== undefined) {
+          detail = ` → ${result.size} bytes`;
+        } else if (result.files) {
+          detail = ` → ${result.files.length} items`;
+        } else if (result.matches) {
+          detail = ` → ${result.matches.length} matches`;
+        } else if (result.exitCode !== undefined) {
+          detail = result.exitCode === 0 ? '' : ` → exit ${result.exitCode}`;
+        }
+      }
+      return `${event.payload.tool} ${status}${detail}`;
+    }
     case 'assistant_message':
       return 'Assistant';
     case 'file_created':

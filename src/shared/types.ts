@@ -32,6 +32,7 @@ export type EventType =
 export type ToolType =
   | 'read_file'
   | 'write_file'
+  | 'copy_file'
   | 'list_directory'
   | 'rename_file'
   | 'move_file'

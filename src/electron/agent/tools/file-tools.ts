@@ -4,6 +4,13 @@ import { shell } from 'electron';
 import { Workspace } from '../../../shared/types';
 import { AgentDaemon } from '../daemon';
 import { GuardrailManager } from '../../guardrails/guardrail-manager';
+import mammoth from 'mammoth';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const pdfParse = require('pdf-parse') as (dataBuffer: Buffer) => Promise<{
+  numpages: number;
+  info: { Title?: string; Author?: string };
+  text: string;
+}>;
 
 // Limits to prevent context overflow
 const MAX_FILE_SIZE = 100 * 1024; // 100KB max for file reads
@@ -152,8 +159,9 @@ export class FileTools {
 
   /**
    * Read file contents (with size limit to prevent context overflow)
+   * Supports plain text, DOCX, and PDF files
    */
-  async readFile(relativePath: string): Promise<{ content: string; size: number; truncated?: boolean }> {
+  async readFile(relativePath: string): Promise<{ content: string; size: number; truncated?: boolean; format?: string }> {
     // Validate input
     if (!relativePath || typeof relativePath !== 'string') {
       throw new Error('Invalid path: path must be a non-empty string');
@@ -161,10 +169,22 @@ export class FileTools {
 
     this.checkPermission('read');
     const fullPath = this.resolvePath(relativePath, 'read');
+    const ext = path.extname(fullPath).toLowerCase();
 
     try {
       const stats = await fs.stat(fullPath);
 
+      // Handle DOCX files
+      if (ext === '.docx') {
+        return await this.readDocxFile(fullPath, stats.size);
+      }
+
+      // Handle PDF files
+      if (ext === '.pdf') {
+        return await this.readPdfFile(fullPath, stats.size);
+      }
+
+      // Handle plain text files
       // Check file size before reading
       if (stats.size > MAX_FILE_SIZE) {
         // Read only the first portion of large files
@@ -191,6 +211,76 @@ export class FileTools {
       };
     } catch (error: any) {
       throw new Error(`Failed to read file: ${error.message}`);
+    }
+  }
+
+  /**
+   * Read DOCX file and extract text content
+   */
+  private async readDocxFile(fullPath: string, size: number): Promise<{ content: string; size: number; truncated?: boolean; format: string }> {
+    try {
+      const result = await mammoth.extractRawText({ path: fullPath });
+      let content = result.value;
+
+      // Check if extracted text exceeds limit
+      const truncated = content.length > MAX_FILE_SIZE;
+      if (truncated) {
+        content = content.slice(0, MAX_FILE_SIZE) +
+          `\n\n[... Content truncated. Showing first ${Math.round(MAX_FILE_SIZE / 1024)}KB of extracted text ...]`;
+      }
+
+      // Add any warnings from mammoth
+      if (result.messages && result.messages.length > 0) {
+        const warnings = result.messages.map(m => m.message).join('\n');
+        content = `[Document warnings: ${warnings}]\n\n${content}`;
+      }
+
+      return {
+        content,
+        size,
+        truncated,
+        format: 'docx',
+      };
+    } catch (error: any) {
+      throw new Error(`Failed to read DOCX file: ${error.message}`);
+    }
+  }
+
+  /**
+   * Read PDF file and extract text content
+   */
+  private async readPdfFile(fullPath: string, size: number): Promise<{ content: string; size: number; truncated?: boolean; format: string }> {
+    try {
+      const dataBuffer = await fs.readFile(fullPath);
+      const data = await pdfParse(dataBuffer);
+
+      let content = data.text;
+
+      // Add metadata header
+      const metadata: string[] = [];
+      if (data.numpages) metadata.push(`Pages: ${data.numpages}`);
+      if (data.info?.Title) metadata.push(`Title: ${data.info.Title}`);
+      if (data.info?.Author) metadata.push(`Author: ${data.info.Author}`);
+
+      if (metadata.length > 0) {
+        content = `[PDF Metadata: ${metadata.join(' | ')}]\n\n${content}`;
+      }
+
+      // Check if extracted text exceeds limit
+      const truncated = content.length > MAX_FILE_SIZE;
+      if (truncated) {
+        content = content.slice(0, MAX_FILE_SIZE) +
+          `\n\n[... Content truncated. Showing first ${Math.round(MAX_FILE_SIZE / 1024)}KB of extracted text ...]`;
+      }
+
+      return {
+        content,
+        size,
+        truncated,
+        format: 'pdf',
+      };
+    } catch (error: any) {
+      throw new Error(`Failed to read PDF file: ${error.message}`);
     }
   }
 
@@ -326,6 +416,44 @@ export class FileTools {
       return { success: true };
     } catch (error: any) {
       throw new Error(`Failed to rename file: ${error.message}`);
+    }
+  }
+
+  /**
+   * Copy file (supports binary files like DOCX, PDF, images, etc.)
+   */
+  async copyFile(sourcePath: string, destPath: string): Promise<{ success: boolean; path: string }> {
+    // Validate inputs
+    if (!sourcePath || typeof sourcePath !== 'string') {
+      throw new Error('Invalid sourcePath: must be a non-empty string');
+    }
+    if (!destPath || typeof destPath !== 'string') {
+      throw new Error('Invalid destPath: must be a non-empty string');
+    }
+
+    this.checkPermission('read');
+    this.checkPermission('write');
+    const sourceFullPath = this.resolvePath(sourcePath, 'read');
+    const destFullPath = this.resolvePath(destPath, 'write');
+
+    try {
+      // Ensure target directory exists
+      await fs.mkdir(path.dirname(destFullPath), { recursive: true });
+
+      // Copy file using binary buffer (preserves exact content)
+      await fs.copyFile(sourceFullPath, destFullPath);
+
+      this.daemon.logEvent(this.taskId, 'file_created', {
+        path: destPath,
+        copiedFrom: sourcePath,
+      });
+
+      return {
+        success: true,
+        path: destPath,
+      };
+    } catch (error: any) {
+      throw new Error(`Failed to copy file: ${error.message}`);
     }
   }
 

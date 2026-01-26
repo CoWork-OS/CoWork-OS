@@ -96,6 +96,76 @@ body {
   z-index: 1000;
 }
 
+/* ============================================
+   Update Notification Banner
+   ============================================ */
+
+.update-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px 8px 80px; /* Left padding for macOS window controls */
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  color: white;
+  font-size: 13px;
+  position: relative;
+  z-index: 999;
+  -webkit-app-region: drag;
+}
+
+.update-banner-content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  -webkit-app-region: no-drag;
+}
+
+.update-banner-content svg {
+  flex-shrink: 0;
+  opacity: 0.9;
+}
+
+.update-banner-content strong {
+  font-weight: 600;
+}
+
+.update-banner-link {
+  margin-left: 4px;
+  padding: 4px 10px;
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  border-radius: var(--radius-sm);
+  color: white;
+  font-size: 12px;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.update-banner-link:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.update-banner-dismiss {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  -webkit-app-region: no-drag;
+}
+
+.update-banner-dismiss:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+}
+
 /* Make sure interactive elements are not draggable */
 button,
 input,

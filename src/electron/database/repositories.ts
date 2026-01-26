@@ -81,8 +81,16 @@ export class WorkspaceRepository {
     return row ? this.mapRowToWorkspace(row) : undefined;
   }
 
+  /**
+   * Update workspace permissions
+   */
+  updatePermissions(id: string, permissions: WorkspacePermissions): void {
+    const stmt = this.db.prepare('UPDATE workspaces SET permissions = ? WHERE id = ?');
+    stmt.run(JSON.stringify(permissions), id);
+  }
+
   private mapRowToWorkspace(row: any): Workspace {
-    const defaultPermissions: WorkspacePermissions = { read: true, write: false, delete: false, network: false };
+    const defaultPermissions: WorkspacePermissions = { read: true, write: false, delete: false, network: false, shell: false };
     return {
       id: row.id,
       name: row.name,

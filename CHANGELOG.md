@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.7] - 2025-01-26
+
+### Added
+- **Shell Command Execution** - AI can now execute shell commands with user approval
+  - `run_command` tool for running terminal commands (npm, git, brew, etc.)
+  - Each command requires explicit user approval before execution
+  - Configurable timeout (default 60s, max 5 minutes)
+  - Output truncation for large command outputs (100KB max)
+  - New `shell` permission in workspace settings (disabled by default)
+- `/shell` command for Discord/Telegram to enable/disable shell execution
+  - `/shell` - Show current status
+  - `/shell on` - Enable shell commands for workspace
+  - `/shell off` - Disable shell commands
+- **Safety & Data Loss Warning** in README
+  - Prominent warning section at top of documentation
+  - Guidelines for safe usage (separate environment, non-critical folders, backups)
+  - Clear disclaimer of maintainer responsibility
+
+### Changed
+- Workspace permissions now include `shell: boolean` field
+- Updated help text in Discord/Telegram bots to include shell command info
+- Permission model documentation updated in README
+
 ## [0.1.6] - 2025-01-25
 
 ### Added

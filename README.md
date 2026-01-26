@@ -25,6 +25,26 @@ CoWork-OSS is an open-source, local-first agent workbench for running multi-step
 
 **Status**: macOS desktop app (cross-platform support planned).
 
+---
+
+## ⚠️ Safety & Data Loss Warning
+
+**CoWork-OSS can modify, move, overwrite, or delete files** as part of normal operation — or due to bugs, misuse, or unexpected AI behavior. Before using this software, please understand and follow these guidelines:
+
+1. **Use a separate environment when possible.** Run CoWork-OSS on a dedicated Mac, a separate user account, or a virtual machine to isolate it from your primary data.
+
+2. **Work only in non-critical folders.** If you cannot use a separate environment, select only folders you can afford to lose. **Never point CoWork-OSS at important personal files, system folders, or production data.**
+
+3. **Enable and verify backups before use.** Ensure Time Machine or another backup solution is running and has recent, verified backups. Test that you can restore files before relying on them.
+
+4. **Review all approval requests carefully.** The agent will ask for permission before destructive operations, but approvals are your responsibility. Read what the agent wants to do before clicking "Approve."
+
+5. **Expect the unexpected.** AI systems can behave unpredictably. Files may be modified or deleted even when you don't expect it. Treat every workspace as potentially at risk.
+
+> **Disclaimer:** The maintainers and contributors of CoWork-OSS are **not responsible** for any data loss, file corruption, or other damage resulting from the use of this software. You use CoWork-OSS entirely at your own risk.
+
+---
+
 <p align="center">
   <img src="screenshots/cowork-oss4.jpeg" alt="CoWork-OSS Interface" width="700">
   <br>
@@ -219,6 +239,8 @@ When the agent needs to perform destructive actions, you'll see an approval dial
 
 ## Security & Safety
 
+> **See also:** [⚠️ Safety & Data Loss Warning](#%EF%B8%8F-safety--data-loss-warning) at the top of this document for critical safety guidelines.
+
 ### Important Warnings
 
 - **Don't point this at sensitive folders** — select only folders you're comfortable giving the agent access to
@@ -238,6 +260,7 @@ interface WorkspacePermissions {
   write: boolean;     // Create/modify files
   delete: boolean;    // Delete files (requires approval)
   network: boolean;   // Network access (future)
+  shell: boolean;     // Execute shell commands (requires approval)
 }
 ```
 
@@ -245,6 +268,7 @@ interface WorkspacePermissions {
 
 The following operations always require user approval:
 - File deletion
+- Shell command execution (when enabled)
 - Bulk rename (>10 files)
 - Network access beyond allowlist
 - External service calls

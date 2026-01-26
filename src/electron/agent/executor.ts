@@ -19,6 +19,113 @@ import { calculateCost, formatCost } from './llm/pricing';
 // Timeout for LLM API calls (2 minutes)
 const LLM_TIMEOUT_MS = 2 * 60 * 1000;
 
+// Maximum consecutive failures for the same tool before giving up
+const MAX_TOOL_FAILURES = 2;
+
+// Patterns that indicate non-retryable errors (quota, rate limits, etc.)
+const NON_RETRYABLE_ERROR_PATTERNS = [
+  /quota.*exceeded/i,
+  /rate.*limit/i,
+  /exceeded.*quota/i,
+  /too many requests/i,
+  /429/i,
+  /resource.*exhausted/i,
+  /billing/i,
+  /payment.*required/i,
+];
+
+/**
+ * Check if an error is non-retryable (quota/rate limit related)
+ */
+function isNonRetryableError(errorMessage: string): boolean {
+  return NON_RETRYABLE_ERROR_PATTERNS.some(pattern => pattern.test(errorMessage));
+}
+
+/**
+ * Check if the assistant's response is asking a question and waiting for user input
+ */
+function isAskingQuestion(text: string): boolean {
+  const questionPatterns = [
+    /would you like me to/i,
+    /would you prefer/i,
+    /should I/i,
+    /do you want me to/i,
+    /please (let me know|confirm|specify|choose)/i,
+    /which (option|approach|method)/i,
+    /options.*:/i,
+    /\?\s*$/,  // Ends with question mark
+  ];
+
+  // Check if text contains question patterns AND doesn't also contain tool calls
+  const hasQuestion = questionPatterns.some(pattern => pattern.test(text));
+  const isShort = text.length < 1000; // Questions are usually concise
+
+  return hasQuestion && isShort;
+}
+
+/**
+ * Tracks tool failures to implement circuit breaker pattern
+ */
+class ToolFailureTracker {
+  private failures: Map<string, { count: number; lastError: string }> = new Map();
+  private disabledTools: Set<string> = new Set();
+
+  /**
+   * Record a tool failure
+   * @returns true if the tool should be disabled (circuit broken)
+   */
+  recordFailure(toolName: string, errorMessage: string): boolean {
+    const existing = this.failures.get(toolName) || { count: 0, lastError: '' };
+    existing.count++;
+    existing.lastError = errorMessage;
+    this.failures.set(toolName, existing);
+
+    // If it's a non-retryable error, disable immediately
+    if (isNonRetryableError(errorMessage)) {
+      this.disabledTools.add(toolName);
+      console.log(`[ToolFailureTracker] Tool ${toolName} disabled due to non-retryable error: ${errorMessage.substring(0, 100)}`);
+      return true;
+    }
+
+    // If we've hit max failures, disable the tool
+    if (existing.count >= MAX_TOOL_FAILURES) {
+      this.disabledTools.add(toolName);
+      console.log(`[ToolFailureTracker] Tool ${toolName} disabled after ${existing.count} consecutive failures`);
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Record a successful tool call (resets failure count)
+   */
+  recordSuccess(toolName: string): void {
+    this.failures.delete(toolName);
+  }
+
+  /**
+   * Check if a tool is disabled
+   */
+  isDisabled(toolName: string): boolean {
+    return this.disabledTools.has(toolName);
+  }
+
+  /**
+   * Get the last error for a tool
+   */
+  getLastError(toolName: string): string | undefined {
+    return this.failures.get(toolName)?.lastError;
+  }
+
+  /**
+   * Get list of disabled tools
+   */
+  getDisabledTools(): string[] {
+    return Array.from(this.disabledTools);
+  }
+}
+
 /**
  * Wrap a promise with a timeout
  */
@@ -50,6 +157,7 @@ export class TaskExecutor {
   private toolRegistry: ToolRegistry;
   private sandboxRunner: SandboxRunner;
   private contextManager: ContextManager;
+  private toolFailureTracker: ToolFailureTracker;
   private cancelled = false;
   private paused = false;
   private plan?: Plan;
@@ -91,6 +199,9 @@ export class TaskExecutor {
 
     // Initialize sandbox runner
     this.sandboxRunner = new SandboxRunner(workspace);
+
+    // Initialize tool failure tracker for circuit breaker pattern
+    this.toolFailureTracker = new ToolFailureTracker();
 
     console.log(`TaskExecutor initialized with ${settings.providerType} provider, model: ${this.modelId}`);
   }
@@ -533,13 +644,19 @@ IMPORTANT INSTRUCTIONS:
           continueLoop = false;
         }
 
-        // Log any text responses from the assistant
+        // Log any text responses from the assistant and check if asking a question
+        let assistantAskedQuestion = false;
         if (response.content) {
           for (const content of response.content) {
             if (content.type === 'text' && content.text) {
               this.daemon.logEvent(this.task.id, 'assistant_message', {
                 message: content.text,
               });
+
+              // Check if the assistant is asking a question (waiting for user input)
+              if (isAskingQuestion(content.text)) {
+                assistantAskedQuestion = true;
+              }
             }
           }
         }
@@ -563,8 +680,32 @@ IMPORTANT INSTRUCTIONS:
 
         // Handle tool calls
         const toolResults: LLMToolResult[] = [];
+        let hasDisabledToolAttempt = false;
+
         for (const content of response.content || []) {
           if (content.type === 'tool_use') {
+            // Check if this tool is disabled (circuit breaker tripped)
+            if (this.toolFailureTracker.isDisabled(content.name)) {
+              const lastError = this.toolFailureTracker.getLastError(content.name);
+              console.log(`[TaskExecutor] Skipping disabled tool: ${content.name}`);
+              this.daemon.logEvent(this.task.id, 'tool_error', {
+                tool: content.name,
+                error: `Tool disabled due to repeated failures: ${lastError}`,
+                skipped: true,
+              });
+              toolResults.push({
+                type: 'tool_result',
+                tool_use_id: content.id,
+                content: JSON.stringify({
+                  error: `Tool "${content.name}" is temporarily unavailable due to: ${lastError}. Please try a different approach or wait and try again later.`,
+                  disabled: true,
+                }),
+                is_error: true,
+              });
+              hasDisabledToolAttempt = true;
+              continue;
+            }
+
             this.daemon.logEvent(this.task.id, 'tool_call', {
               tool: content.name,
               input: content.input,
@@ -576,8 +717,24 @@ IMPORTANT INSTRUCTIONS:
                 content.input as any
               );
 
-              // Truncate large tool results to avoid context overflow
+              // Tool succeeded - reset failure counter
+              this.toolFailureTracker.recordSuccess(content.name);
+
+              // Check if the result indicates an error (some tools return error in result)
               const resultStr = JSON.stringify(result);
+              if (result && result.success === false && result.error) {
+                // Check if this is a non-retryable error
+                const shouldDisable = this.toolFailureTracker.recordFailure(content.name, result.error);
+                if (shouldDisable) {
+                  this.daemon.logEvent(this.task.id, 'tool_error', {
+                    tool: content.name,
+                    error: result.error,
+                    disabled: true,
+                  });
+                }
+              }
+
+              // Truncate large tool results to avoid context overflow
               const truncatedResult = truncateToolResult(resultStr);
 
               this.daemon.logEvent(this.task.id, 'tool_result', {
@@ -592,14 +749,23 @@ IMPORTANT INSTRUCTIONS:
               });
             } catch (error: any) {
               console.error(`Tool execution failed:`, error);
+
+              // Track the failure
+              const shouldDisable = this.toolFailureTracker.recordFailure(content.name, error.message);
+
               this.daemon.logEvent(this.task.id, 'tool_error', {
                 tool: content.name,
                 error: error.message,
+                disabled: shouldDisable,
               });
+
               toolResults.push({
                 type: 'tool_result',
                 tool_use_id: content.id,
-                content: JSON.stringify({ error: error.message }),
+                content: JSON.stringify({
+                  error: error.message,
+                  ...(shouldDisable ? { disabled: true, message: 'Tool has been disabled due to repeated failures.' } : {}),
+                }),
                 is_error: true,
               });
             }
@@ -611,7 +777,21 @@ IMPORTANT INSTRUCTIONS:
             role: 'user',
             content: toolResults,
           });
-          continueLoop = true;
+
+          // If all tool attempts were for disabled tools, don't continue looping
+          // This prevents infinite retry loops
+          if (hasDisabledToolAttempt && toolResults.every(r => r.is_error)) {
+            console.log('[TaskExecutor] All tool calls failed or were disabled, stopping iteration');
+            continueLoop = false;
+          } else {
+            continueLoop = true;
+          }
+        }
+
+        // If assistant asked a question and there are no tool calls, stop and wait for user
+        if (assistantAskedQuestion && toolResults.length === 0) {
+          console.log('[TaskExecutor] Assistant asked a question, pausing for user input');
+          continueLoop = false;
         }
       }
 
@@ -710,13 +890,19 @@ IMPORTANT INSTRUCTIONS:
           continueLoop = false;
         }
 
-        // Log any text responses from the assistant
+        // Log any text responses from the assistant and check if asking a question
+        let assistantAskedQuestion = false;
         if (response.content) {
           for (const content of response.content) {
             if (content.type === 'text' && content.text) {
               this.daemon.logEvent(this.task.id, 'assistant_message', {
                 message: content.text,
               });
+
+              // Check if the assistant is asking a question (waiting for user input)
+              if (isAskingQuestion(content.text)) {
+                assistantAskedQuestion = true;
+              }
             }
           }
         }
@@ -740,8 +926,32 @@ IMPORTANT INSTRUCTIONS:
 
         // Handle tool calls
         const toolResults: LLMToolResult[] = [];
+        let hasDisabledToolAttempt = false;
+
         for (const content of response.content || []) {
           if (content.type === 'tool_use') {
+            // Check if this tool is disabled (circuit breaker tripped)
+            if (this.toolFailureTracker.isDisabled(content.name)) {
+              const lastError = this.toolFailureTracker.getLastError(content.name);
+              console.log(`[TaskExecutor] Skipping disabled tool: ${content.name}`);
+              this.daemon.logEvent(this.task.id, 'tool_error', {
+                tool: content.name,
+                error: `Tool disabled due to repeated failures: ${lastError}`,
+                skipped: true,
+              });
+              toolResults.push({
+                type: 'tool_result',
+                tool_use_id: content.id,
+                content: JSON.stringify({
+                  error: `Tool "${content.name}" is temporarily unavailable due to: ${lastError}. Please try a different approach or wait and try again later.`,
+                  disabled: true,
+                }),
+                is_error: true,
+              });
+              hasDisabledToolAttempt = true;
+              continue;
+            }
+
             this.daemon.logEvent(this.task.id, 'tool_call', {
               tool: content.name,
               input: content.input,
@@ -753,7 +963,23 @@ IMPORTANT INSTRUCTIONS:
                 content.input as any
               );
 
+              // Tool succeeded - reset failure counter
+              this.toolFailureTracker.recordSuccess(content.name);
+
+              // Check if the result indicates an error (some tools return error in result)
               const resultStr = JSON.stringify(result);
+              if (result && result.success === false && result.error) {
+                // Check if this is a non-retryable error
+                const shouldDisable = this.toolFailureTracker.recordFailure(content.name, result.error);
+                if (shouldDisable) {
+                  this.daemon.logEvent(this.task.id, 'tool_error', {
+                    tool: content.name,
+                    error: result.error,
+                    disabled: true,
+                  });
+                }
+              }
+
               const truncatedResult = truncateToolResult(resultStr);
 
               this.daemon.logEvent(this.task.id, 'tool_result', {
@@ -768,14 +994,23 @@ IMPORTANT INSTRUCTIONS:
               });
             } catch (error: any) {
               console.error(`Tool execution failed:`, error);
+
+              // Track the failure
+              const shouldDisable = this.toolFailureTracker.recordFailure(content.name, error.message);
+
               this.daemon.logEvent(this.task.id, 'tool_error', {
                 tool: content.name,
                 error: error.message,
+                disabled: shouldDisable,
               });
+
               toolResults.push({
                 type: 'tool_result',
                 tool_use_id: content.id,
-                content: JSON.stringify({ error: error.message }),
+                content: JSON.stringify({
+                  error: error.message,
+                  ...(shouldDisable ? { disabled: true, message: 'Tool has been disabled due to repeated failures.' } : {}),
+                }),
                 is_error: true,
               });
             }
@@ -787,7 +1022,20 @@ IMPORTANT INSTRUCTIONS:
             role: 'user',
             content: toolResults,
           });
-          continueLoop = true;
+
+          // If all tool attempts were for disabled tools, don't continue looping
+          if (hasDisabledToolAttempt && toolResults.every(r => r.is_error)) {
+            console.log('[TaskExecutor] All tool calls failed or were disabled, stopping iteration');
+            continueLoop = false;
+          } else {
+            continueLoop = true;
+          }
+        }
+
+        // If assistant asked a question and there are no tool calls, stop and wait for user
+        if (assistantAskedQuestion && toolResults.length === 0) {
+          console.log('[TaskExecutor] Assistant asked a question, pausing for user input');
+          continueLoop = false;
         }
       }
 

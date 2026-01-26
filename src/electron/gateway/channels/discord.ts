@@ -550,30 +550,36 @@ export class DiscordAdapter implements ChannelAdapter {
 
     // Handle specific commands with their options
     switch (commandName) {
-      case 'workspace':
+      case 'workspace': {
         const wsPath = options.getString('path');
         if (wsPath) text += ` ${wsPath}`;
         break;
-      case 'addworkspace':
+      }
+      case 'addworkspace': {
         const addPath = options.getString('path');
         if (addPath) text += ` ${addPath}`;
         break;
-      case 'provider':
+      }
+      case 'provider': {
         const provider = options.getString('name');
         if (provider) text += ` ${provider}`;
         break;
-      case 'model':
+      }
+      case 'model': {
         const model = options.getString('name');
         if (model) text += ` ${model}`;
         break;
-      case 'task':
+      }
+      case 'task': {
         const prompt = options.getString('prompt');
         if (prompt) text = prompt; // Task prompt becomes the text directly
         break;
-      case 'pair':
+      }
+      case 'pair': {
         const code = options.getString('code');
         if (code) text += ` ${code}`;
         break;
+      }
     }
 
     // Note: deferReply and pendingInteractions are handled in the event handler before this is called

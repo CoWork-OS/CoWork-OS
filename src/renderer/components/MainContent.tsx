@@ -714,6 +714,20 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
             </div>
           </div>
         </div>
+
+        {/* Modal for skills with parameters - Welcome View */}
+        {selectedSkillForParams && (
+          <>
+            {console.log('[JSX-Welcome] Rendering modal for:', selectedSkillForParams.name)}
+            <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div style={{ background: 'white', padding: '20px', borderRadius: '8px', color: 'black' }}>
+                <h2>Skill: {selectedSkillForParams.name}</h2>
+                <p>Parameters: {selectedSkillForParams.parameters?.length}</p>
+                <button onClick={handleSkillParamCancel} style={{ marginTop: '10px', padding: '8px 16px' }}>Close</button>
+              </div>
+            </div>
+          </>
+        )}
       </div>
     );
   }

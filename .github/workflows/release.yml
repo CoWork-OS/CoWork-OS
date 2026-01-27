@@ -36,14 +36,5 @@ jobs:
         run: npm run package
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload Release Assets
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            release/*.dmg
-            release/*.zip
-          draft: true
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # electron-builder handles publishing to GitHub releases
+          # No need for separate upload step - it's handled by electron-builder's publish config

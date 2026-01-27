@@ -18,7 +18,7 @@ import {
 interface PendingRequest {
   resolve: (result: any) => void;
   reject: (error: Error) => void;
-  timeout: NodeJS.Timeout;
+  timeout: ReturnType<typeof setTimeout>;
 }
 
 export class StdioTransport extends EventEmitter implements MCPTransport {

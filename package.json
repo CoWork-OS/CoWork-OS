@@ -50,6 +50,7 @@
     "discord.js": "^14.25.1",
     "docx": "^9.5.1",
     "electron-updater": "^6.3.9",
+    "eventsource": "^4.1.0",
     "exceljs": "^4.4.0",
     "grammy": "^1.39.3",
     "jszip": "^3.10.1",
@@ -69,6 +70,7 @@
   "devDependencies": {
     "@electron/rebuild": "^4.0.2",
     "@types/better-sqlite3": "^7.6.8",
+    "@types/eventsource": "^1.1.15",
     "@types/mime-types": "^3.0.1",
     "@types/node": "^25.0.10",
     "@types/pdf-parse": "^1.1.5",

@@ -19,7 +19,7 @@ import {
 interface PendingRequest {
   resolve: (result: any) => void;
   reject: (error: Error) => void;
-  timeout: NodeJS.Timeout;
+  timeout: ReturnType<typeof setTimeout>;
 }
 
 export class WebSocketTransport extends EventEmitter implements MCPTransport {
@@ -31,8 +31,8 @@ export class WebSocketTransport extends EventEmitter implements MCPTransport {
   private pendingRequests: Map<string | number, PendingRequest> = new Map();
   private connected = false;
   private requestId = 0;
-  private pingInterval: NodeJS.Timeout | null = null;
-  private pongTimeout: NodeJS.Timeout | null = null;
+  private pingInterval: ReturnType<typeof setTimeout> | null = null;
+  private pongTimeout: ReturnType<typeof setTimeout> | null = null;
 
   // Ping/pong settings
   private readonly PING_INTERVAL = 30000; // 30 seconds

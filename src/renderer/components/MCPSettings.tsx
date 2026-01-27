@@ -40,7 +40,7 @@ interface MCPServerStatus {
   lastPing?: number;
 }
 
-interface MCPSettings {
+interface MCPSettingsData {
   servers: MCPServerConfig[];
   autoConnect: boolean;
   toolNamePrefix: string;
@@ -59,7 +59,7 @@ interface MCPUpdateInfo {
 }
 
 export function MCPSettings() {
-  const [settings, setSettings] = useState<MCPSettings | null>(null);
+  const [settings, setSettings] = useState<MCPSettingsData | null>(null);
   const [serverStatuses, setServerStatuses] = useState<MCPServerStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);

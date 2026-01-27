@@ -7,6 +7,7 @@
  */
 
 import { EventEmitter } from 'events';
+import EventSource from 'eventsource';
 import {
   MCPTransport,
   MCPServerConfig,
@@ -18,7 +19,7 @@ import {
 interface PendingRequest {
   resolve: (result: any) => void;
   reject: (error: Error) => void;
-  timeout: NodeJS.Timeout;
+  timeout: ReturnType<typeof setTimeout>;
 }
 
 export class SSETransport extends EventEmitter implements MCPTransport {
@@ -245,7 +246,8 @@ export class SSETransport extends EventEmitter implements MCPTransport {
    * Check if transport is connected
    */
   isConnected(): boolean {
-    return this.connected && this.eventSource?.readyState === EventSource.OPEN;
+    // EventSource readyState: 0=CONNECTING, 1=OPEN, 2=CLOSED
+    return this.connected && this.eventSource?.readyState === 1;
   }
 
   /**

@@ -175,6 +175,19 @@ class ToolCallDeduplicator {
       return `${toolName}:copy:${baseName}`;
     }
 
+    // For web searches, normalize the query to detect similar searches
+    if (toolName === 'web_search') {
+      const query = (input.query || input.search || '').toLowerCase();
+      // Remove platform-specific modifiers to get the core search term
+      const normalizedQuery = query
+        .replace(/site:(twitter\.com|x\.com|reddit\.com|github\.com)/gi, '')
+        .replace(/\b(reddit|twitter|x\.com|github)\b/gi, '')
+        .replace(/["']/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      return `${toolName}:search:${normalizedQuery}`;
+    }
+
     // For read operations, just use tool name (reading same file repeatedly is OK)
     if (toolName === 'read_file' || toolName === 'list_directory') {
       return `${toolName}:${input.path || ''}`;
@@ -266,7 +279,7 @@ class ToolCallDeduplicator {
     }
 
     // 3. Check semantic duplicate (for tools prone to retry loops)
-    const semanticTools = ['create_document', 'write_file', 'copy_file', 'create_spreadsheet', 'create_presentation'];
+    const semanticTools = ['create_document', 'write_file', 'copy_file', 'create_spreadsheet', 'create_presentation', 'web_search'];
     if (semanticTools.includes(toolName)) {
       const semanticCheck = this.checkSemanticDuplicate(toolName, input);
       if (semanticCheck.isDuplicate) {
@@ -899,7 +912,8 @@ export class TaskExecutor {
 
     // Initialize tool call deduplicator to prevent repetitive calls
     // Max 2 identical calls within 60 seconds before blocking
-    this.toolCallDeduplicator = new ToolCallDeduplicator(2, 60000);
+    // Max 2 semantically similar calls (e.g., similar web searches) within the window
+    this.toolCallDeduplicator = new ToolCallDeduplicator(2, 60000, 2);
 
     // Initialize file operation tracker to detect redundant reads and duplicate creations
     this.fileOperationTracker = new FileOperationTracker();

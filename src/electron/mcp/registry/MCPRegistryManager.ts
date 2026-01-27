@@ -303,8 +303,13 @@ export class MCPRegistryManager {
       console.log(`[MCPRegistryManager] Fetched ${registry.servers.length} servers from registry`);
       return registry;
     } catch (error: any) {
-      console.warn('[MCPRegistryManager] Failed to fetch registry, using built-in:', error.message);
-      // Return built-in registry as fallback
+      // Only log on first failure or after cache expires
+      if (!this.registryCache) {
+        console.warn('[MCPRegistryManager] Failed to fetch registry, using built-in:', error.message);
+      }
+      // Cache the built-in registry to prevent repeated fetch attempts
+      this.registryCache = BUILTIN_REGISTRY;
+      this.cacheTimestamp = Date.now();
       return BUILTIN_REGISTRY;
     }
   }

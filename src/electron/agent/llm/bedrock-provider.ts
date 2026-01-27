@@ -72,9 +72,19 @@ export class BedrockProvider implements LLMProvider {
 
     try {
       console.log(`[Bedrock] Calling API with model: ${request.model}`);
-      const response = await this.client.send(command);
+      const response = await this.client.send(
+        command,
+        // Pass abort signal to allow cancellation
+        request.signal ? { abortSignal: request.signal } : undefined
+      );
       return this.convertResponse(response);
     } catch (error: any) {
+      // Handle abort errors gracefully
+      if (error.name === 'AbortError' || error.message?.includes('aborted')) {
+        console.log(`[Bedrock] Request aborted`);
+        throw new Error('Request cancelled');
+      }
+
       console.error(`[Bedrock] API error:`, {
         name: error.name,
         message: error.message,

@@ -47,7 +47,8 @@ export type EventType =
   | 'verification_started'
   | 'verification_passed'
   | 'verification_failed'
-  | 'retry_started';
+  | 'retry_started'
+  | 'task_cancelled';
 
 export type ToolType =
   | 'read_file'

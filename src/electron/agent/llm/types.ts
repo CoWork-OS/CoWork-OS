@@ -68,6 +68,8 @@ export interface LLMRequest {
   system: string;
   messages: LLMMessage[];
   tools?: LLMTool[];
+  /** Optional abort signal to cancel the request */
+  signal?: AbortSignal;
 }
 
 export interface LLMResponse {

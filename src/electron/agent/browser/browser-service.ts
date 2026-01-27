@@ -14,6 +14,8 @@ export interface NavigateResult {
   url: string;
   title: string;
   status: number | null;
+  /** True if status code indicates an error (4xx or 5xx) */
+  isError?: boolean;
 }
 
 export interface ScreenshotResult {
@@ -76,21 +78,41 @@ export class BrowserService {
 
   /**
    * Initialize the browser
+   * Uses try-finally to ensure cleanup on errors
    */
   async init(): Promise<void> {
     if (this.browser) return;
 
-    this.browser = await chromium.launch({
-      headless: this.options.headless
-    });
+    let browser: Browser | null = null;
+    let context: BrowserContext | null = null;
 
-    this.context = await this.browser.newContext({
-      viewport: this.options.viewport,
-      userAgent: 'CoWork-OSS Browser Automation'
-    });
+    try {
+      browser = await chromium.launch({
+        headless: this.options.headless
+      });
 
-    this.page = await this.context.newPage();
-    this.page.setDefaultTimeout(this.options.timeout!);
+      context = await browser.newContext({
+        viewport: this.options.viewport,
+        userAgent: 'CoWork-OSS Browser Automation'
+      });
+
+      const page = await context.newPage();
+      page.setDefaultTimeout(this.options.timeout!);
+
+      // Only assign to instance variables after all operations succeed
+      this.browser = browser;
+      this.context = context;
+      this.page = page;
+    } catch (error) {
+      // Cleanup partial initialization on error
+      if (context) {
+        await context.close().catch(() => {});
+      }
+      if (browser) {
+        await browser.close().catch(() => {});
+      }
+      throw error;
+    }
   }
 
   /**
@@ -113,11 +135,22 @@ export class BrowserService {
     await this.ensurePage();
 
     const response = await this.page!.goto(url, { waitUntil });
+    const status = response?.status() ?? null;
+
+    // Validate HTTP status code - warn on client/server errors
+    if (status && status >= 400) {
+      const statusMessage = status >= 500
+        ? `Server error (${status})`
+        : `Client error (${status})`;
+      console.warn(`[BrowserService] Navigation to ${url} returned ${statusMessage}`);
+    }
 
     return {
       url: this.page!.url(),
       title: await this.page!.title(),
-      status: response?.status() ?? null
+      status,
+      // Include error flag for status codes >= 400
+      isError: status !== null && status >= 400
     };
   }
 

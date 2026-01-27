@@ -136,6 +136,10 @@ export class AgentDaemon extends EventEmitter {
       await cached.executor.cancel();
       this.activeTasks.delete(taskId);
     }
+    // Always emit cancelled event so UI updates (even if task wasn't in cache)
+    this.emitTaskEvent(taskId, 'task_cancelled', {
+      message: 'Task was stopped by user',
+    });
   }
 
   /**
@@ -245,19 +249,28 @@ export class AgentDaemon extends EventEmitter {
    */
   private emitTaskEvent(taskId: string, type: string, payload: any): void {
     // Emit to local EventEmitter listeners (for gateway integration)
-    this.emit(type, { taskId, ...payload });
+    try {
+      this.emit(type, { taskId, ...payload });
+    } catch (error) {
+      console.error(`[AgentDaemon] Error emitting event ${type}:`, error);
+    }
 
     // Emit to renderer process via IPC
     const windows = BrowserWindow.getAllWindows();
     windows.forEach(window => {
       // Check if window is still valid before sending
-      if (!window.isDestroyed()) {
-        window.webContents.send(IPC_CHANNELS.TASK_EVENT, {
-          taskId,
-          type,
-          payload,
-          timestamp: Date.now(),
-        });
+      try {
+        if (!window.isDestroyed() && window.webContents && !window.webContents.isDestroyed()) {
+          window.webContents.send(IPC_CHANNELS.TASK_EVENT, {
+            taskId,
+            type,
+            payload,
+            timestamp: Date.now(),
+          });
+        }
+      } catch (error) {
+        // Window might have been destroyed between check and send
+        console.error(`[AgentDaemon] Error sending IPC to window:`, error);
       }
     });
   }
@@ -353,9 +366,13 @@ export class AgentDaemon extends EventEmitter {
       this.cleanupIntervalHandle = undefined;
     }
 
-    // Clear all pending approval timeouts
-    this.pendingApprovals.forEach((pending) => {
+    // Clear all pending approval timeouts and reject pending promises
+    this.pendingApprovals.forEach((pending, approvalId) => {
       clearTimeout(pending.timeoutHandle);
+      if (!pending.resolved) {
+        pending.resolved = true;
+        pending.reject(new Error('Daemon shutting down'));
+      }
     });
     this.pendingApprovals.clear();
 
@@ -375,6 +392,10 @@ export class AgentDaemon extends EventEmitter {
     ]);
 
     this.activeTasks.clear();
+
+    // Remove all EventEmitter listeners to prevent memory leaks
+    this.removeAllListeners();
+
     console.log('Agent daemon shutdown complete');
   }
 }

@@ -42,8 +42,24 @@ export class OllamaProvider implements LLMProvider {
     }
 
     // Use AbortController for timeout (5 minutes for large models)
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000);
+    const timeoutController = new AbortController();
+    const timeoutId = setTimeout(() => timeoutController.abort(), 5 * 60 * 1000);
+
+    // Track if abort came from external signal (cancellation) vs timeout
+    let abortedByExternalSignal = false;
+
+    // If external signal provided, abort our controller when it fires
+    if (request.signal) {
+      request.signal.addEventListener('abort', () => {
+        abortedByExternalSignal = true;
+        timeoutController.abort();
+      });
+      // Check if already aborted
+      if (request.signal.aborted) {
+        abortedByExternalSignal = true;
+        timeoutController.abort();
+      }
+    }
 
     try {
       console.log(`[Ollama] Sending request to model: ${request.model}`);
@@ -52,7 +68,7 @@ export class OllamaProvider implements LLMProvider {
       const response = await fetch(`${this.baseUrl}/api/chat`, {
         method: 'POST',
         headers,
-        signal: controller.signal,
+        signal: timeoutController.signal,
         body: JSON.stringify({
           model: request.model,
           messages,
@@ -83,6 +99,10 @@ export class OllamaProvider implements LLMProvider {
         code: error.code,
       });
       if (error.name === 'AbortError') {
+        if (abortedByExternalSignal) {
+          console.log(`[Ollama] Request aborted by user`);
+          throw new Error('Request cancelled');
+        }
         throw new Error('Ollama request timed out after 5 minutes. The model may be too slow or not responding.');
       }
       throw error;

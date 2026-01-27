@@ -208,7 +208,7 @@ export class SSETransport extends EventEmitter implements MCPTransport {
       const contentType = response.headers.get('content-type');
       if (contentType?.includes('application/json')) {
         const responseData = await response.json();
-        if (responseData && 'id' in responseData) {
+        if (responseData && typeof responseData === 'object' && 'id' in responseData) {
           this.handleJsonRpcResponse(responseData);
         }
       }

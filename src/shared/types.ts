@@ -655,6 +655,7 @@ export interface CustomSkill {
   category?: string;  // For grouping skills
   enabled?: boolean;
   filePath?: string;  // Path to the skill file (for editing)
+  priority?: number;  // Lower numbers appear first in dropdown (default: 100)
 }
 
 export interface SkillsConfig {

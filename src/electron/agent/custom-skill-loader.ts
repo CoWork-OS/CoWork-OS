@@ -814,10 +814,17 @@ Be careful not to rename unrelated code that happens to have the same name.`,
    */
   listSkills(): CustomSkill[] {
     return Array.from(this.skills.values()).sort((a, b) => {
-      // Sort by category first, then by name
+      // Sort by priority first (lower = higher priority, default 100)
+      const priorityA = a.priority ?? 100;
+      const priorityB = b.priority ?? 100;
+      if (priorityA !== priorityB) {
+        return priorityA - priorityB;
+      }
+      // Then by category
       if (a.category && b.category && a.category !== b.category) {
         return a.category.localeCompare(b.category);
       }
+      // Finally by name
       return a.name.localeCompare(b.name);
     });
   }

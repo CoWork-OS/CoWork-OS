@@ -8,6 +8,7 @@ interface SkillParameterModalProps {
 }
 
 export function SkillParameterModal({ skill, onSubmit, onCancel }: SkillParameterModalProps) {
+  console.log('[SkillParameterModal] RENDERING modal for skill:', skill.name);
   const [values, setValues] = useState<Record<string, string | number | boolean>>({});
   const firstInputRef = useRef<HTMLInputElement | HTMLSelectElement>(null);
 

@@ -652,13 +652,12 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
                         {customSkills.length > 0 ? (
                           <div className="skills-dropdown-list">
                             {customSkills.map(skill => (
-                              <button
+                              <div
                                 key={skill.id}
-                                type="button"
                                 className="skills-dropdown-item"
-                                onMouseDown={(e) => e.stopPropagation()}
-                                onClick={(e) => {
-                                  e.stopPropagation();
+                                style={{ cursor: 'pointer' }}
+                                onClick={() => {
+                                  console.log('[CLICK] Skill clicked:', skill.name);
                                   handleSkillSelect(skill);
                                 }}
                               >
@@ -667,7 +666,7 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
                                   <span className="skills-dropdown-name">{skill.name}</span>
                                   <span className="skills-dropdown-desc">{skill.description}</span>
                                 </div>
-                              </button>
+                              </div>
                             ))}
                           </div>
                         ) : (

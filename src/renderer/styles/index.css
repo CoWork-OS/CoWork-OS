@@ -777,6 +777,18 @@ a,
   padding: 10px 0;
 }
 
+/* Muted events - for summaries like blocked tool calls */
+.timeline-event.timeline-event-muted {
+  opacity: 0.6;
+  padding: 6px 0;
+}
+
+.timeline-event-muted .event-title {
+  font-size: 11px;
+  font-style: italic;
+  color: var(--text-secondary);
+}
+
 /* User message events - chat bubble on the right */
 .timeline-event.user-message-event {
   display: flex;

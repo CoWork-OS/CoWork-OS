@@ -27,8 +27,8 @@ Fixes #
 ## Testing
 <!-- Describe how you tested your changes -->
 - [ ] Tested locally on macOS
-- [ ] Tested with Anthropic API
-- [ ] Tested with AWS Bedrock
+- [ ] Tested with at least one LLM provider (Anthropic/Bedrock/Gemini/OpenRouter/Ollama)
+- [ ] Tested MCP functionality (if applicable)
 - [ ] Verified no console errors
 
 ## Checklist

@@ -1135,6 +1135,13 @@ Areas where help is especially needed:
 
 ---
 
+## Contact
+
+- **X/Twitter**: [@MesutGenAI](https://x.com/MesutGenAI)
+- **GitHub Issues**: [Report bugs or request features](https://github.com/mesutfelat/cowork-oss/issues)
+- **Discussions**: [Ask questions or share ideas](https://github.com/mesutfelat/cowork-oss/discussions)
+
+---
 
 ## License
 

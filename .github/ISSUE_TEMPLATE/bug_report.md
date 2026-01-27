@@ -26,9 +26,10 @@ If applicable, add screenshots to help explain your problem.
 
 ## Environment
 - **OS**: macOS [version, e.g., 14.2]
-- **CoWork-OSS Version**: [e.g., 0.1.0]
+- **CoWork-OSS Version**: [e.g., 0.3.0]
 - **Node.js Version**: [e.g., 20.10.0]
-- **LLM Provider**: [Anthropic API / AWS Bedrock]
+- **LLM Provider**: [Anthropic API / AWS Bedrock / Gemini / OpenRouter / Ollama]
+- **MCP Servers**: [List any connected MCP servers, if applicable]
 
 ## Logs
 <details>

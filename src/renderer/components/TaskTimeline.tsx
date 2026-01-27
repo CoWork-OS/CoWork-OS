@@ -5,6 +5,11 @@ interface TaskTimelineProps {
 }
 
 export function TaskTimeline({ events }: TaskTimelineProps) {
+  // Filter out tool_blocked events - they're internal implementation details
+  // that don't provide value to end users (e.g., deduplication blocks)
+  const blockedEvents = events.filter(e => e.type === 'tool_blocked');
+  const visibleEvents = events.filter(e => e.type !== 'tool_blocked');
+
   const formatTime = (timestamp: number) => {
     return new Date(timestamp).toLocaleTimeString(undefined, {
       hour: '2-digit',
@@ -120,7 +125,7 @@ export function TaskTimeline({ events }: TaskTimelineProps) {
     }
   };
 
-  if (events.length === 0) {
+  if (visibleEvents.length === 0 && blockedEvents.length === 0) {
     return (
       <div className="timeline-empty">
         <p>No activity yet</p>
@@ -132,7 +137,7 @@ export function TaskTimeline({ events }: TaskTimelineProps) {
     <div className="timeline">
       <h3>Activity Timeline</h3>
       <div className="timeline-events">
-        {events.map(event => (
+        {visibleEvents.map(event => (
           <div key={event.id} className="timeline-event">
             <div className="event-icon">{getEventIcon(event.type)}</div>
             <div className="event-content">
@@ -144,6 +149,19 @@ export function TaskTimeline({ events }: TaskTimelineProps) {
             </div>
           </div>
         ))}
+        {/* Show summary of blocked events if any - collapsed for cleaner UI */}
+        {blockedEvents.length > 0 && (
+          <div className="timeline-event timeline-event-muted">
+            <div className="event-icon">🛡️</div>
+            <div className="event-content">
+              <div className="event-header">
+                <div className="event-title">
+                  {blockedEvents.length} duplicate tool call{blockedEvents.length > 1 ? 's' : ''} prevented
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -86,7 +86,7 @@ Feature suggestions are welcome! Please:
 
 Areas where help is especially needed:
 - VM sandbox implementation using macOS Virtualization.framework
-- MCP protocol integration
+- Additional MCP server integrations and transport types (SSE, WebSocket)
 - Enhanced document creation (proper Excel/Word/PowerPoint libraries)
 - Network security controls
 - Sub-agent coordination
@@ -146,7 +146,15 @@ Areas where help is especially needed:
 src/
 ├── electron/          # Main process code
 │   ├── agent/         # Agent orchestration
+│   │   ├── llm/       # LLM provider abstraction
+│   │   ├── search/    # Web search providers
+│   │   ├── tools/     # Tool implementations
+│   │   └── skills/    # Document creation skills
 │   ├── database/      # SQLite operations
+│   ├── mcp/           # Model Context Protocol
+│   │   ├── client/    # MCP client (connect to servers)
+│   │   ├── host/      # MCP host (expose tools)
+│   │   └── registry/  # MCP server registry
 │   └── ipc/           # IPC handlers
 ├── renderer/          # React UI
 │   ├── components/    # React components
@@ -196,7 +204,7 @@ docs(readme): update installation instructions for M1 Macs
 
 Feel free to:
 - Open a [Discussion](https://github.com/mesutfelat/cowork-oss/discussions) for questions
-- Join our community channels (if available)
+- Reach out on X/Twitter: [@MesutGenAI](https://x.com/MesutGenAI)
 - Tag maintainers in issues for guidance
 
 Thank you for contributing to CoWork-OSS!

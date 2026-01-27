@@ -28,6 +28,7 @@ export function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [currentView, setCurrentView] = useState<AppView>('workspace-selector');
+  const [settingsTab, setSettingsTab] = useState<'appearance' | 'llm' | 'search' | 'telegram' | 'discord' | 'updates' | 'guardrails' | 'queue' | 'skills'>('appearance');
   const [events, setEvents] = useState<TaskEvent[]>([]);
 
   // Model selection state
@@ -410,7 +411,10 @@ export function App() {
               onSendMessage={handleSendMessage}
               onCreateTask={handleCreateTask}
               onChangeWorkspace={() => setCurrentView('workspace-selector')}
-              onOpenSettings={() => setCurrentView('settings')}
+              onOpenSettings={(tab) => {
+                setSettingsTab(tab || 'appearance');
+                setCurrentView('settings');
+              }}
               onStopTask={handleCancelTask}
               selectedModel={selectedModel}
               availableModels={availableModels}
@@ -450,6 +454,7 @@ export function App() {
           accentColor={accentColor}
           onThemeChange={handleThemeChange}
           onAccentChange={handleAccentChange}
+          initialTab={settingsTab}
         />
       )}
     </div>

@@ -633,6 +633,20 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
                   {events.map((event, index) => {
                     const isExpandable = hasEventDetails(event);
                     const isExpanded = isEventExpanded(event, index);
+                    const isUserMessage = event.type === 'user_message';
+
+                    // Render user messages as chat bubbles on the right
+                    if (isUserMessage) {
+                      return (
+                        <div key={`event-${index}-${event.id || 'no-id'}`} className="timeline-event user-message-event">
+                          <div className="user-message-bubble">
+                            <div className="user-message-content">{event.payload?.message || 'User message'}</div>
+                            <div className="user-message-time">{formatTime(event.timestamp)}</div>
+                          </div>
+                        </div>
+                      );
+                    }
+
                     return (
                       <div key={`event-${index}-${event.id || 'no-id'}`} className="timeline-event">
                         <div className="event-indicator">

@@ -766,6 +766,35 @@ a,
   padding: 10px 0;
 }
 
+/* User message events - chat bubble on the right */
+.timeline-event.user-message-event {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 0;
+}
+
+.user-message-bubble {
+  max-width: 70%;
+  background: var(--color-accent);
+  color: #fff;
+  border-radius: 16px 16px 4px 16px;
+  padding: 10px 14px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.user-message-content {
+  font-size: 13px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.user-message-time {
+  font-size: 10px;
+  opacity: 0.7;
+  text-align: right;
+  margin-top: 4px;
+}
+
 .event-indicator {
   display: flex;
   flex-direction: column;

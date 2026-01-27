@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Task, TaskEvent, Workspace, ApprovalRequest, LLMModelInfo, SuccessCriteria, CustomSkill } from '../../shared/types';
 import { ApprovalDialog } from './ApprovalDialog';
+import { SkillParameterModal } from './SkillParameterModal';
 
 // Searchable Model Dropdown Component
 interface ModelDropdownProps {
@@ -234,6 +235,7 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
   const [appVersion, setAppVersion] = useState<string>('');
   const [customSkills, setCustomSkills] = useState<CustomSkill[]>([]);
   const [showSkillsMenu, setShowSkillsMenu] = useState(false);
+  const [selectedSkillForParams, setSelectedSkillForParams] = useState<CustomSkill | null>(null);
   const skillsMenuRef = useRef<HTMLDivElement>(null);
 
   // Load app version
@@ -264,8 +266,27 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
   }, [showSkillsMenu]);
 
   const handleSkillSelect = (skill: CustomSkill) => {
-    setInputValue(skill.prompt);
     setShowSkillsMenu(false);
+    // If skill has parameters, show the parameter modal
+    if (skill.parameters && skill.parameters.length > 0) {
+      setSelectedSkillForParams(skill);
+    } else {
+      // No parameters, just set the prompt directly
+      setInputValue(skill.prompt);
+    }
+  };
+
+  const handleSkillParamSubmit = (expandedPrompt: string) => {
+    setSelectedSkillForParams(null);
+    // Create task directly with the expanded prompt
+    if (onCreateTask) {
+      const title = expandedPrompt.trim().slice(0, 50);
+      onCreateTask(title, expandedPrompt);
+    }
+  };
+
+  const handleSkillParamCancel = () => {
+    setSelectedSkillForParams(null);
   };
 
   const toggleEventExpanded = (index: number) => {
@@ -852,6 +873,14 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
           approval={pendingApproval}
           onApprove={() => handleApprovalResponse(true)}
           onDeny={() => handleApprovalResponse(false)}
+        />
+      )}
+
+      {selectedSkillForParams && (
+        <SkillParameterModal
+          skill={selectedSkillForParams}
+          onSubmit={handleSkillParamSubmit}
+          onCancel={handleSkillParamCancel}
         />
       )}
     </div>

@@ -1057,7 +1057,7 @@ function renderEventDetails(event: TaskEvent) {
       return (
         <div className="event-details assistant-message event-details-scrollable markdown-content">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>
-            {truncateForDisplay(event.payload.message)}
+            {event.payload.message}
           </ReactMarkdown>
         </div>
       );

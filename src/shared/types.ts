@@ -3,12 +3,10 @@
 // Theme and Appearance types
 export type ThemeMode = 'light' | 'dark' | 'system';
 export type AccentColor = 'cyan' | 'blue' | 'purple' | 'pink' | 'rose' | 'orange' | 'green' | 'teal';
-export type VisualStyle = 'macos' | 'cli';
 
 export interface AppearanceSettings {
   themeMode: ThemeMode;
   accentColor: AccentColor;
-  visualStyle: VisualStyle;
 }
 
 export const ACCENT_COLORS: { id: AccentColor; label: string }[] = [
@@ -20,11 +18,6 @@ export const ACCENT_COLORS: { id: AccentColor; label: string }[] = [
   { id: 'orange', label: 'Orange' },
   { id: 'green', label: 'Green' },
   { id: 'teal', label: 'Teal' },
-];
-
-export const VISUAL_STYLES: { id: VisualStyle; label: string; description: string }[] = [
-  { id: 'macos', label: 'macOS', description: 'Clean, modern Apple-style interface' },
-  { id: 'cli', label: 'Terminal', description: 'Compact CLI/hacker aesthetic' },
 ];
 
 export type TaskStatus = 'pending' | 'planning' | 'executing' | 'paused' | 'completed' | 'failed' | 'cancelled';

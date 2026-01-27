@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="screenshots/cowork-oss-logo.png" alt="CoWork-OSS Logo" width="120">
+</p>
+
 # CoWork-OSS
 
 [![CI](https://github.com/mesutfelat/cowork-oss/actions/workflows/ci.yml/badge.svg)](https://github.com/mesutfelat/cowork-oss/actions/workflows/ci.yml)

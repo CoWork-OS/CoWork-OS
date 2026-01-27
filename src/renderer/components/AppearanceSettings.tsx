@@ -1,21 +1,17 @@
-import { ThemeMode, AccentColor, VisualStyle, ACCENT_COLORS, VISUAL_STYLES } from '../../shared/types';
+import { ThemeMode, AccentColor, ACCENT_COLORS } from '../../shared/types';
 
 interface AppearanceSettingsProps {
   themeMode: ThemeMode;
   accentColor: AccentColor;
-  visualStyle: VisualStyle;
   onThemeChange: (theme: ThemeMode) => void;
   onAccentChange: (accent: AccentColor) => void;
-  onStyleChange: (style: VisualStyle) => void;
 }
 
 export function AppearanceSettings({
   themeMode,
   accentColor,
-  visualStyle,
   onThemeChange,
   onAccentChange,
-  onStyleChange,
 }: AppearanceSettingsProps) {
   return (
     <div className="appearance-settings">
@@ -24,28 +20,6 @@ export function AppearanceSettings({
         <p className="settings-description">
           Customize the look and feel of the application
         </p>
-      </div>
-
-      {/* Visual Style */}
-      <div className="appearance-section">
-        <h4>Visual Style</h4>
-        <div className="style-switcher">
-          {VISUAL_STYLES.map((style) => (
-            <button
-              key={style.id}
-              className={`style-option ${visualStyle === style.id ? 'selected' : ''}`}
-              onClick={() => onStyleChange(style.id)}
-            >
-              <div className="style-option-header">
-                <div className={`style-option-preview ${style.id}`} />
-                <div className="style-option-info">
-                  <div className="style-option-label">{style.label}</div>
-                  <div className="style-option-description">{style.description}</div>
-                </div>
-              </div>
-            </button>
-          ))}
-        </div>
       </div>
 
       {/* Theme Mode */}

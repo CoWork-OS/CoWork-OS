@@ -30,6 +30,9 @@ const TOOL_TIMEOUT_MS = 30 * 1000;
 // Maximum consecutive failures for the same tool before giving up
 const MAX_TOOL_FAILURES = 2;
 
+// Maximum total steps in a plan (including revisions) to prevent runaway execution
+const MAX_TOTAL_STEPS = 20;
+
 // Exponential backoff configuration
 const INITIAL_BACKOFF_MS = 1000; // Start with 1 second
 const MAX_BACKOFF_MS = 30000;    // Cap at 30 seconds
@@ -434,11 +437,44 @@ class ToolFailureTracker {
   }
 
   /**
-   * Get the last error for a tool
+   * Get the last error for a tool with guidance for alternative approaches
    */
   getLastError(toolName: string): string | undefined {
     const disabled = this.disabledTools.get(toolName);
-    return disabled?.reason || this.failures.get(toolName)?.lastError;
+    const baseError = disabled?.reason || this.failures.get(toolName)?.lastError;
+
+    if (!baseError) return undefined;
+
+    // Add guidance for specific tool failures
+    const guidance = this.getAlternativeApproachGuidance(toolName, baseError);
+    return guidance ? `${baseError}. ${guidance}` : baseError;
+  }
+
+  /**
+   * Provide guidance for alternative approaches when a tool fails
+   */
+  private getAlternativeApproachGuidance(toolName: string, error: string): string | undefined {
+    // Document editing failures - suggest manual steps or different tool
+    if (toolName === 'edit_document' && (error.includes('images') || error.includes('binary') || error.includes('size'))) {
+      return 'SUGGESTION: The edit_document tool cannot preserve images in DOCX files. Consider: (1) Create a separate document with the new content only, (2) Provide instructions for the user to manually merge the content, or (3) Use a different output format';
+    }
+
+    // File copy/edit loop detection
+    if ((toolName === 'copy_file' || toolName === 'edit_document') && error.includes('failed')) {
+      return 'SUGGESTION: If copy+edit approach is not working, try creating new content in a separate file instead';
+    }
+
+    // Missing parameter errors
+    if (error.includes('parameter') && error.includes('required')) {
+      return 'SUGGESTION: Ensure all required parameters are provided. Check the tool documentation for the exact parameter format';
+    }
+
+    // Content validation errors
+    if (error.includes('content') && (error.includes('empty') || error.includes('required'))) {
+      return 'SUGGESTION: The content parameter must be a non-empty array of content blocks. Example: [{ type: "paragraph", text: "Your text here" }]';
+    }
+
+    return undefined;
   }
 
   /**
@@ -535,6 +571,13 @@ export class TaskExecutor {
   private modelKey: string;
   private conversationHistory: LLMMessage[] = [];
   private systemPrompt: string = '';
+
+  // Plan revision tracking to prevent infinite revision loops
+  private planRevisionCount: number = 0;
+  private readonly maxPlanRevisions: number = 5;
+
+  // Failed approach tracking to prevent retrying the same failed strategies
+  private failedApproaches: Set<string> = new Set();
 
   // Abort controller for cancelling LLM requests
   private abortController: AbortController = new AbortController();
@@ -894,11 +937,67 @@ You are continuing a previous conversation. The context from the previous conver
   /**
    * Handle plan revision request from the LLM
    * Adds new steps to the plan after the current step
+   * Enforces a maximum revision limit to prevent infinite loops
    */
   private handlePlanRevision(newSteps: Array<{ description: string }>, reason: string): void {
     if (!this.plan) {
       console.warn('[TaskExecutor] Cannot revise plan - no plan exists');
       return;
+    }
+
+    // Check plan revision limit to prevent infinite loops
+    this.planRevisionCount++;
+    if (this.planRevisionCount > this.maxPlanRevisions) {
+      console.warn(`[TaskExecutor] Plan revision limit reached (${this.maxPlanRevisions}). Ignoring revision request.`);
+      this.daemon.logEvent(this.task.id, 'plan_revision_blocked', {
+        reason: `Maximum plan revisions (${this.maxPlanRevisions}) reached. The current approach may not be working - consider completing with available results or trying a fundamentally different strategy.`,
+        attemptedRevision: reason,
+        revisionCount: this.planRevisionCount,
+      });
+      return;
+    }
+
+    // Check for similar steps that have already failed (prevent retrying same approach)
+    const newStepDescriptions = newSteps.map(s => s.description.toLowerCase());
+    const existingFailedSteps = this.plan.steps.filter(s => s.status === 'failed');
+    const duplicateApproach = existingFailedSteps.some(failedStep => {
+      const failedDesc = failedStep.description.toLowerCase();
+      return newStepDescriptions.some(newDesc =>
+        // Check if new step is similar to a failed step
+        newDesc.includes(failedDesc.substring(0, 30)) ||
+        failedDesc.includes(newDesc.substring(0, 30)) ||
+        // Check for common patterns like "copy file", "edit document", "verify"
+        (failedDesc.includes('copy') && newDesc.includes('copy')) ||
+        (failedDesc.includes('edit') && newDesc.includes('edit')) ||
+        (failedDesc.includes('verify') && newDesc.includes('verify'))
+      );
+    });
+
+    if (duplicateApproach) {
+      console.warn('[TaskExecutor] Blocking plan revision - similar approach already failed');
+      this.daemon.logEvent(this.task.id, 'plan_revision_blocked', {
+        reason: 'Similar steps have already failed. The current approach is not working - try a fundamentally different strategy.',
+        attemptedRevision: reason,
+        failedSteps: existingFailedSteps.map(s => s.description),
+      });
+      return;
+    }
+
+    // Check if adding new steps would exceed the maximum total steps limit
+    if (this.plan.steps.length + newSteps.length > MAX_TOTAL_STEPS) {
+      const allowedNewSteps = MAX_TOTAL_STEPS - this.plan.steps.length;
+      if (allowedNewSteps <= 0) {
+        console.warn(`[TaskExecutor] Maximum total steps limit (${MAX_TOTAL_STEPS}) reached. Cannot add more steps.`);
+        this.daemon.logEvent(this.task.id, 'plan_revision_blocked', {
+          reason: `Maximum total steps (${MAX_TOTAL_STEPS}) reached. Complete the task with current progress or simplify the approach.`,
+          attemptedSteps: newSteps.length,
+          currentSteps: this.plan.steps.length,
+        });
+        return;
+      }
+      // Truncate to allowed number
+      console.warn(`[TaskExecutor] Truncating revision from ${newSteps.length} to ${allowedNewSteps} steps due to limit`);
+      newSteps = newSteps.slice(0, allowedNewSteps);
     }
 
     // Create new PlanStep objects for each new step
@@ -924,9 +1023,11 @@ You are continuing a previous conversation. The context from the previous conver
       newStepsCount: newSteps.length,
       newSteps: newSteps.map(s => s.description),
       totalSteps: this.plan.steps.length,
+      revisionNumber: this.planRevisionCount,
+      revisionsRemaining: this.maxPlanRevisions - this.planRevisionCount,
     });
 
-    console.log(`[TaskExecutor] Plan revised: added ${newSteps.length} steps. Reason: ${reason}`);
+    console.log(`[TaskExecutor] Plan revised (${this.planRevisionCount}/${this.maxPlanRevisions}): added ${newSteps.length} steps. Reason: ${reason}`);
   }
 
   /**
@@ -995,6 +1096,18 @@ You are continuing a previous conversation. The context from the previous conver
       this.taskCompleted = true;  // Mark task as completed to prevent any further processing
       this.daemon.completeTask(this.task.id);
     } catch (error: any) {
+      // Don't log cancellation as an error - it's intentional
+      const isCancellation = this.cancelled ||
+        error.message === 'Request cancelled' ||
+        error.name === 'AbortError' ||
+        error.message?.includes('aborted');
+
+      if (isCancellation) {
+        console.log(`[TaskExecutor] Task cancelled - not logging as error`);
+        // Status will be updated by the daemon's cancelTask method
+        return;
+      }
+
       console.error(`Task execution failed:`, error);
       this.daemon.updateTaskStatus(this.task.id, 'failed');
       this.daemon.logEvent(this.task.id, 'error', {
@@ -1905,6 +2018,17 @@ IMPORTANT INSTRUCTIONS:
         message: 'Follow-up message processed',
       });
     } catch (error: any) {
+      // Don't log cancellation as an error - it's intentional
+      const isCancellation = this.cancelled ||
+        error.message === 'Request cancelled' ||
+        error.name === 'AbortError' ||
+        error.message?.includes('aborted');
+
+      if (isCancellation) {
+        console.log(`[TaskExecutor] sendMessage cancelled - not logging as error`);
+        return;
+      }
+
       console.error('sendMessage failed:', error);
       this.daemon.logEvent(this.task.id, 'error', {
         message: error.message,

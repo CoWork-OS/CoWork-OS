@@ -48,7 +48,14 @@ export type EventType =
   | 'verification_passed'
   | 'verification_failed'
   | 'retry_started'
-  | 'task_cancelled';
+  | 'task_cancelled'
+  | 'plan_revision_blocked'
+  | 'step_timeout'
+  | 'tool_blocked'
+  | 'progress_update'
+  | 'llm_retry'
+  | 'follow_up_completed'
+  | 'follow_up_failed';
 
 export type ToolType =
   | 'read_file'

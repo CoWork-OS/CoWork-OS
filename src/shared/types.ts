@@ -304,6 +304,34 @@ export const IPC_CHANNELS = {
   QUEUE_GET_SETTINGS: 'queue:getSettings',
   QUEUE_SAVE_SETTINGS: 'queue:saveSettings',
   QUEUE_UPDATE: 'queue:update',
+
+  // MCP (Model Context Protocol)
+  MCP_GET_SETTINGS: 'mcp:getSettings',
+  MCP_SAVE_SETTINGS: 'mcp:saveSettings',
+  MCP_GET_SERVERS: 'mcp:getServers',
+  MCP_ADD_SERVER: 'mcp:addServer',
+  MCP_UPDATE_SERVER: 'mcp:updateServer',
+  MCP_REMOVE_SERVER: 'mcp:removeServer',
+  MCP_CONNECT_SERVER: 'mcp:connectServer',
+  MCP_DISCONNECT_SERVER: 'mcp:disconnectServer',
+  MCP_GET_STATUS: 'mcp:getStatus',
+  MCP_GET_SERVER_TOOLS: 'mcp:getServerTools',
+  MCP_TEST_SERVER: 'mcp:testServer',
+
+  // MCP Registry
+  MCP_REGISTRY_FETCH: 'mcp:registryFetch',
+  MCP_REGISTRY_SEARCH: 'mcp:registrySearch',
+  MCP_REGISTRY_INSTALL: 'mcp:registryInstall',
+  MCP_REGISTRY_UNINSTALL: 'mcp:registryUninstall',
+  MCP_REGISTRY_CHECK_UPDATES: 'mcp:registryCheckUpdates',
+
+  // MCP Host
+  MCP_HOST_START: 'mcp:hostStart',
+  MCP_HOST_STOP: 'mcp:hostStop',
+  MCP_HOST_GET_STATUS: 'mcp:hostGetStatus',
+
+  // MCP Events
+  MCP_SERVER_STATUS_CHANGE: 'mcp:serverStatusChange',
 } as const;
 
 // LLM Provider types

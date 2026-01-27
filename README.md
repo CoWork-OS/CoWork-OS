@@ -123,6 +123,14 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
   - Show files in Finder
   - Get system information and environment variables
 - **Update Notifications**: Automatic check for new releases with in-app notification banner
+- **Custom Skills**: Create and manage your own skills with custom prompts and tool configurations
+  - Define reusable workflows as custom skills
+  - Configure which tools each skill can use
+  - Skills stored locally in your user directory
+- **MCP (Model Context Protocol)**: Full MCP support for extensibility:
+  - **MCP Client**: Connect to external MCP servers (filesystem, databases, APIs)
+  - **MCP Host**: Expose CoWork's tools as an MCP server for external clients
+  - **MCP Registry**: Browse and install MCP servers from a catalog with one-click installation
 
 ## Data handling (local-first, BYOK)
 - Stored locally: task metadata, timeline events, artifact index, workspace config (SQLite).
@@ -138,14 +146,16 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
 │  - Task Timeline                                 │
 │  - Approval Dialogs                              │
 │  - Workspace Selector                            │
+│  - MCP Settings & Registry Browser               │
 └─────────────────────────────────────────────────┘
                       ↕ IPC
 ┌─────────────────────────────────────────────────┐
 │            Agent Daemon (Main Process)           │
 │  - Task Queue Manager (Parallel Execution)       │
 │  - Agent Executor (Plan-Execute Loop)            │
-│  - Tool Registry                                 │
+│  - Tool Registry (Built-in + MCP Tools)          │
 │  - Permission Manager                            │
+│  - Custom Skill Loader                           │
 └─────────────────────────────────────────────────┘
                       ↕
 ┌─────────────────────────────────────────────────┐
@@ -154,11 +164,18 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
 │  - Skills (Document Creation)                    │
 │  - LLM Providers (Anthropic/Gemini/OpenRouter/Bedrock/Ollama)│
 │  - Search Providers (Tavily/Brave/SerpAPI/Google)│
+│  - MCP Client (External Tool Servers)            │
 └─────────────────────────────────────────────────┘
                       ↕
 ┌─────────────────────────────────────────────────┐
 │              SQLite Local Database               │
 │  - Tasks, Events, Artifacts, Workspaces          │
+└─────────────────────────────────────────────────┘
+                      ↕
+┌─────────────────────────────────────────────────┐
+│              MCP Host Server (Optional)          │
+│  - Expose CoWork tools to external clients       │
+│  - JSON-RPC over stdio                           │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -460,10 +477,13 @@ If requested by the rights holder, we will update naming/branding to avoid confu
 - [x] **Parallel task queue** - Run multiple tasks concurrently with configurable limits and queue management
 - [x] **Quick Task FAB** - Floating action button for rapid task creation
 - [x] **Toast notifications** - Real-time notifications for task completion and failures
+- [x] **Custom Skills** - Create and manage user-defined skills with custom prompts and tool configurations
+- [x] **MCP Client** - Connect to external MCP servers and use their tools
+- [x] **MCP Host** - Expose CoWork's tools as an MCP server for external clients
+- [x] **MCP Registry** - Browse and install MCP servers from a catalog with one-click installation
 
 ### Planned
 - [ ] VM sandbox using macOS Virtualization.framework
-- [ ] MCP connector host and registry
 - [ ] Network egress controls with proxy
 - [ ] Skill marketplace/loader
 
@@ -865,6 +885,150 @@ See all available models at [openrouter.ai/models](https://openrouter.ai/models)
 
 ---
 
+## Custom Skills
+
+CoWork-OSS allows you to create and manage custom skills - reusable workflows with specific prompts and tool configurations.
+
+### Creating Custom Skills
+
+1. Open **Settings** (gear icon)
+2. Navigate to the **Custom Skills** tab
+3. Click **Create New Skill**
+4. Configure your skill:
+   - **Name**: A unique identifier for your skill
+   - **Description**: What the skill does
+   - **Prompt**: The system prompt that defines the skill's behavior
+   - **Allowed Tools**: Select which tools the skill can use
+
+### Skill Structure
+
+Custom skills are stored as YAML files in your user directory:
+```
+~/Library/Application Support/cowork-oss/skills/
+├── my-skill.yaml
+├── code-reviewer.yaml
+└── report-generator.yaml
+```
+
+### Example Skill
+
+```yaml
+name: code-reviewer
+description: Reviews code for best practices and potential issues
+prompt: |
+  You are a code review assistant. Analyze the provided code for:
+  - Code quality and readability
+  - Potential bugs or issues
+  - Performance improvements
+  - Security vulnerabilities
+  Provide constructive feedback with specific suggestions.
+allowedTools:
+  - read_file
+  - list_directory
+  - search_files
+```
+
+### Using Custom Skills
+
+Once created, custom skills appear in the skills list and can be:
+- Triggered by the agent when appropriate
+- Manually invoked during task execution
+- Shared by copying the YAML files
+
+---
+
+## MCP (Model Context Protocol)
+
+CoWork-OSS includes full support for the Model Context Protocol (MCP), allowing you to extend the agent's capabilities with external tool servers and expose CoWork's tools to external clients.
+
+### What is MCP?
+
+MCP is an open protocol for connecting AI models to external tools and data sources. It enables:
+- **Extensibility**: Add new tools without modifying CoWork-OSS
+- **Interoperability**: Use tools from any MCP-compatible server
+- **Aggregation**: Combine tools from multiple sources
+
+### MCP Client (Connect to External Servers)
+
+Connect to external MCP servers to use their tools within CoWork-OSS.
+
+#### Configuration
+
+1. Open **Settings** (gear icon)
+2. Navigate to the **MCP Servers** tab
+3. Click **Add Server** to manually configure, or browse the **Registry**
+
+#### Manual Server Configuration
+
+- **Name**: Display name for the server
+- **Command**: The command to launch the server (e.g., `npx`)
+- **Arguments**: Command arguments (e.g., `-y @modelcontextprotocol/server-filesystem /path`)
+- **Environment Variables**: Any required environment variables
+
+#### Example: Filesystem Server
+
+```
+Command: npx
+Arguments: -y @modelcontextprotocol/server-filesystem /Users/me/Documents
+```
+
+This exposes file operations on the specified directory as MCP tools.
+
+### MCP Registry (One-Click Installation)
+
+Browse and install MCP servers from the built-in registry:
+
+1. Go to **Settings > MCP Servers > Browse Registry**
+2. Search or filter by category
+3. Click **Install** on any server
+4. The server is automatically configured and ready to use
+
+#### Available Servers
+
+| Server | Description |
+|--------|-------------|
+| **Filesystem** | Read/write files in specified directories |
+| **GitHub** | Interact with GitHub repos, issues, PRs |
+| **Brave Search** | Web search via Brave |
+| **Puppeteer** | Browser automation |
+| **Memory** | Persistent key-value storage |
+| **SQLite** | Query SQLite databases |
+| **PostgreSQL** | Query PostgreSQL databases |
+| **Fetch** | HTTP requests to external APIs |
+
+### MCP Host (Expose CoWork's Tools)
+
+Enable MCP Host mode to expose CoWork's tools as an MCP server for external clients like Claude Code.
+
+#### Enabling Host Mode
+
+1. Go to **Settings > MCP Servers > Settings**
+2. Enable **MCP Host Mode**
+3. The server listens on stdio for incoming connections
+
+#### Connecting from Claude Code
+
+Add CoWork-OSS as an MCP server in your Claude Code configuration:
+
+```json
+{
+  "mcpServers": {
+    "cowork": {
+      "command": "/Applications/CoWork-OSS.app/Contents/MacOS/CoWork-OSS",
+      "args": ["--mcp-host"]
+    }
+  }
+}
+```
+
+### Tool Namespacing
+
+MCP tools are prefixed with `mcp_` by default to avoid conflicts with built-in tools. You can customize this prefix in Settings.
+
+Example: If an MCP server provides a `read_file` tool, it appears as `mcp_read_file` in CoWork-OSS.
+
+---
+
 ## Technology Stack
 
 - **Frontend**: React 19 + TypeScript + Vite
@@ -887,10 +1051,17 @@ cowork-oss/
 │   │   │   ├── daemon.ts      # Task coordinator
 │   │   │   ├── executor.ts    # Agent execution loop
 │   │   │   ├── queue-manager.ts # Parallel task queue
+│   │   │   ├── custom-skill-loader.ts # Custom skill management
 │   │   │   ├── llm/           # Provider abstraction
 │   │   │   ├── search/        # Web search providers
 │   │   │   ├── tools/         # Tool implementations
 │   │   │   └── skills/        # Document creation skills
+│   │   ├── mcp/               # Model Context Protocol
+│   │   │   ├── client/        # MCP client (connect to servers)
+│   │   │   ├── host/          # MCP host (expose tools)
+│   │   │   ├── registry/      # MCP server registry
+│   │   │   ├── types.ts       # MCP type definitions
+│   │   │   └── settings.ts    # MCP settings management
 │   │   └── ipc/               # IPC handlers
 │   ├── renderer/              # React UI
 │   │   ├── App.tsx            # Main app component
@@ -958,8 +1129,8 @@ Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md)
 Areas where help is especially needed:
 - VM sandbox implementation using Virtualization.framework
 - Additional model provider integrations
-- MCP connector support
 - Network security controls
+- Additional MCP server integrations
 - Test coverage
 
 ---

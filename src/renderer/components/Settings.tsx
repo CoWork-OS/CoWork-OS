@@ -8,8 +8,9 @@ import { GuardrailSettings } from './GuardrailSettings';
 import { AppearanceSettings } from './AppearanceSettings';
 import { QueueSettings } from './QueueSettings';
 import { SkillsSettings } from './SkillsSettings';
+import { MCPSettings } from './MCPSettings';
 
-type SettingsTab = 'appearance' | 'llm' | 'search' | 'telegram' | 'discord' | 'updates' | 'guardrails' | 'queue' | 'skills';
+type SettingsTab = 'appearance' | 'llm' | 'search' | 'telegram' | 'discord' | 'updates' | 'guardrails' | 'queue' | 'skills' | 'mcp';
 
 interface SettingsProps {
   onBack: () => void;
@@ -630,6 +631,19 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
             </svg>
             Custom Skills
           </button>
+          <button
+            className={`settings-nav-item ${activeTab === 'mcp' ? 'active' : ''}`}
+            onClick={() => setActiveTab('mcp')}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="2" y="3" width="20" height="14" rx="2" />
+              <path d="M8 21h8" />
+              <path d="M12 17v4" />
+              <path d="M7 8h2M15 8h2" />
+              <path d="M9 12h6" />
+            </svg>
+            MCP Servers
+          </button>
         </div>
 
         <div className="settings-content">
@@ -654,6 +668,8 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
             <QueueSettings />
           ) : activeTab === 'skills' ? (
             <SkillsSettings />
+          ) : activeTab === 'mcp' ? (
+            <MCPSettings />
           ) : loading ? (
             <div className="settings-loading">Loading settings...</div>
           ) : (

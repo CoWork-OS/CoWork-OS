@@ -37,6 +37,16 @@ import {
 import { GuardrailManager } from '../guardrails/guardrail-manager';
 import { getCustomSkillLoader } from '../agent/custom-skill-loader';
 import { CustomSkill } from '../../shared/types';
+import { MCPSettingsManager } from '../mcp/settings';
+import { MCPClientManager } from '../mcp/client/MCPClientManager';
+import { MCPRegistryManager } from '../mcp/registry/MCPRegistryManager';
+import { MCPHostServer } from '../mcp/host/MCPHostServer';
+import {
+  MCPServerConfigSchema,
+  MCPServerUpdateSchema,
+  MCPSettingsSchema,
+  MCPRegistrySearchSchema,
+} from '../utils/validation';
 
 // Helper to check rate limit and throw if exceeded
 function checkRateLimit(channel: string, config = RATE_LIMIT_CONFIGS.standard): void {
@@ -750,5 +760,178 @@ export function setupIpcHandlers(
     checkRateLimit(IPC_CHANNELS.QUEUE_SAVE_SETTINGS);
     agentDaemon.saveQueueSettings(settings);
     return { success: true };
+  });
+
+  // MCP handlers
+  setupMCPHandlers();
+}
+
+/**
+ * Set up MCP (Model Context Protocol) IPC handlers
+ */
+function setupMCPHandlers(): void {
+  // Configure rate limits for MCP channels
+  rateLimiter.configure(IPC_CHANNELS.MCP_SAVE_SETTINGS, RATE_LIMIT_CONFIGS.limited);
+  rateLimiter.configure(IPC_CHANNELS.MCP_CONNECT_SERVER, RATE_LIMIT_CONFIGS.expensive);
+  rateLimiter.configure(IPC_CHANNELS.MCP_TEST_SERVER, RATE_LIMIT_CONFIGS.expensive);
+  rateLimiter.configure(IPC_CHANNELS.MCP_REGISTRY_INSTALL, RATE_LIMIT_CONFIGS.expensive);
+
+  // Initialize MCP settings manager
+  MCPSettingsManager.initialize();
+
+  // Get settings
+  ipcMain.handle(IPC_CHANNELS.MCP_GET_SETTINGS, async () => {
+    return MCPSettingsManager.getSettingsForDisplay();
+  });
+
+  // Save settings
+  ipcMain.handle(IPC_CHANNELS.MCP_SAVE_SETTINGS, async (_, settings) => {
+    checkRateLimit(IPC_CHANNELS.MCP_SAVE_SETTINGS);
+    const validated = validateInput(MCPSettingsSchema, settings, 'MCP settings');
+    MCPSettingsManager.saveSettings(validated);
+    MCPSettingsManager.clearCache();
+    return { success: true };
+  });
+
+  // Get all servers
+  ipcMain.handle(IPC_CHANNELS.MCP_GET_SERVERS, async () => {
+    const settings = MCPSettingsManager.loadSettings();
+    return settings.servers;
+  });
+
+  // Add a server
+  ipcMain.handle(IPC_CHANNELS.MCP_ADD_SERVER, async (_, serverConfig) => {
+    checkRateLimit(IPC_CHANNELS.MCP_ADD_SERVER);
+    const validated = validateInput(MCPServerConfigSchema, serverConfig, 'MCP server config');
+    const { id, ...configWithoutId } = validated;
+    return MCPSettingsManager.addServer(configWithoutId);
+  });
+
+  // Update a server
+  ipcMain.handle(IPC_CHANNELS.MCP_UPDATE_SERVER, async (_, serverId: string, updates) => {
+    const validatedId = validateInput(UUIDSchema, serverId, 'server ID');
+    const validatedUpdates = validateInput(MCPServerUpdateSchema, updates, 'server updates');
+    return MCPSettingsManager.updateServer(validatedId, validatedUpdates);
+  });
+
+  // Remove a server
+  ipcMain.handle(IPC_CHANNELS.MCP_REMOVE_SERVER, async (_, serverId: string) => {
+    const validatedId = validateInput(UUIDSchema, serverId, 'server ID');
+
+    // Disconnect if connected
+    try {
+      await MCPClientManager.getInstance().disconnectServer(validatedId);
+    } catch {
+      // Ignore errors
+    }
+
+    return MCPSettingsManager.removeServer(validatedId);
+  });
+
+  // Connect to a server
+  ipcMain.handle(IPC_CHANNELS.MCP_CONNECT_SERVER, async (_, serverId: string) => {
+    checkRateLimit(IPC_CHANNELS.MCP_CONNECT_SERVER);
+    const validatedId = validateInput(UUIDSchema, serverId, 'server ID');
+    await MCPClientManager.getInstance().connectServer(validatedId);
+    return { success: true };
+  });
+
+  // Disconnect from a server
+  ipcMain.handle(IPC_CHANNELS.MCP_DISCONNECT_SERVER, async (_, serverId: string) => {
+    const validatedId = validateInput(UUIDSchema, serverId, 'server ID');
+    await MCPClientManager.getInstance().disconnectServer(validatedId);
+    return { success: true };
+  });
+
+  // Get status of all servers
+  ipcMain.handle(IPC_CHANNELS.MCP_GET_STATUS, async () => {
+    return MCPClientManager.getInstance().getStatus();
+  });
+
+  // Get tools from a specific server
+  ipcMain.handle(IPC_CHANNELS.MCP_GET_SERVER_TOOLS, async (_, serverId: string) => {
+    const validatedId = validateInput(UUIDSchema, serverId, 'server ID');
+    return MCPClientManager.getInstance().getServerTools(validatedId);
+  });
+
+  // Test server connection
+  ipcMain.handle(IPC_CHANNELS.MCP_TEST_SERVER, async (_, serverId: string) => {
+    checkRateLimit(IPC_CHANNELS.MCP_TEST_SERVER);
+    const validatedId = validateInput(UUIDSchema, serverId, 'server ID');
+    return MCPClientManager.getInstance().testServer(validatedId);
+  });
+
+  // MCP Registry handlers
+  ipcMain.handle(IPC_CHANNELS.MCP_REGISTRY_FETCH, async () => {
+    const registry = await MCPRegistryManager.fetchRegistry();
+    const categories = await MCPRegistryManager.getCategories();
+    const featured = registry.servers.filter(s => s.featured);
+    return { ...registry, categories, featured };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MCP_REGISTRY_SEARCH, async (_, options) => {
+    const validatedOptions = validateInput(MCPRegistrySearchSchema, options, 'registry search options');
+    return MCPRegistryManager.searchServers(validatedOptions);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MCP_REGISTRY_INSTALL, async (_, entryId: string) => {
+    checkRateLimit(IPC_CHANNELS.MCP_REGISTRY_INSTALL);
+    const validatedId = validateInput(StringIdSchema, entryId, 'registry entry ID');
+    return MCPRegistryManager.installServer(validatedId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MCP_REGISTRY_UNINSTALL, async (_, serverId: string) => {
+    const validatedId = validateInput(UUIDSchema, serverId, 'server ID');
+
+    // Disconnect if connected
+    try {
+      await MCPClientManager.getInstance().disconnectServer(validatedId);
+    } catch {
+      // Ignore errors
+    }
+
+    await MCPRegistryManager.uninstallServer(validatedId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MCP_REGISTRY_CHECK_UPDATES, async () => {
+    return MCPRegistryManager.checkForUpdates();
+  });
+
+  // MCP Host handlers
+  ipcMain.handle(IPC_CHANNELS.MCP_HOST_START, async () => {
+    const hostServer = MCPHostServer.getInstance();
+
+    // If no tool provider is set, create a minimal one that exposes MCP tools
+    // from connected servers (useful for tool aggregation/forwarding)
+    if (!hostServer.hasToolProvider()) {
+      const mcpClientManager = MCPClientManager.getInstance();
+
+      // Create a minimal tool provider that exposes MCP tools
+      hostServer.setToolProvider({
+        getTools() {
+          return mcpClientManager.getAllTools();
+        },
+        async executeTool(name: string, args: Record<string, any>) {
+          return mcpClientManager.callTool(name, args);
+        },
+      });
+    }
+
+    await hostServer.startStdio();
+    return { success: true };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MCP_HOST_STOP, async () => {
+    const hostServer = MCPHostServer.getInstance();
+    await hostServer.stop();
+    return { success: true };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MCP_HOST_GET_STATUS, async () => {
+    const hostServer = MCPHostServer.getInstance();
+    return {
+      running: hostServer.isRunning(),
+      toolCount: hostServer.hasToolProvider() ? MCPClientManager.getInstance().getAllTools().length : 0,
+    };
   });
 }

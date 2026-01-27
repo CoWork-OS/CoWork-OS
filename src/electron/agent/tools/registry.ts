@@ -9,6 +9,8 @@ import { ImageTools } from './image-tools';
 import { SystemTools } from './system-tools';
 import { LLMTool } from '../llm/types';
 import { SearchProviderFactory } from '../search';
+import { MCPClientManager } from '../mcp/client/MCPClientManager';
+import { MCPSettingsManager } from '../mcp/settings';
 
 /**
  * ToolRegistry manages all available tools and their execution
@@ -67,7 +69,31 @@ export class ToolRegistry {
     // Add meta tools for execution control
     tools.push(...this.getMetaToolDefinitions());
 
+    // Add MCP tools from connected servers
+    tools.push(...this.getMCPToolDefinitions());
+
     return tools;
+  }
+
+  /**
+   * Get MCP tools from connected servers
+   */
+  private getMCPToolDefinitions(): LLMTool[] {
+    try {
+      const mcpManager = MCPClientManager.getInstance();
+      const mcpTools = mcpManager.getAllTools();
+      const settings = MCPSettingsManager.loadSettings();
+      const prefix = settings.toolNamePrefix || 'mcp_';
+
+      return mcpTools.map((tool) => ({
+        name: `${prefix}${tool.name}`,
+        description: tool.description || `MCP tool: ${tool.name}`,
+        input_schema: tool.inputSchema,
+      }));
+    } catch (error) {
+      // MCP not initialized yet, return empty array
+      return [];
+    }
   }
 
   /**
@@ -230,7 +256,72 @@ Plan Control:
       };
     }
 
+    // MCP tools (prefixed with mcp_ by default)
+    const mcpToolResult = await this.tryExecuteMCPTool(name, input);
+    if (mcpToolResult !== null) {
+      return mcpToolResult;
+    }
+
     throw new Error(`Unknown tool: ${name}`);
+  }
+
+  /**
+   * Try to execute an MCP tool if the name matches
+   */
+  private async tryExecuteMCPTool(name: string, input: any): Promise<any | null> {
+    try {
+      const settings = MCPSettingsManager.loadSettings();
+      const prefix = settings.toolNamePrefix || 'mcp_';
+
+      if (!name.startsWith(prefix)) {
+        return null;
+      }
+
+      const mcpToolName = name.slice(prefix.length);
+      const mcpManager = MCPClientManager.getInstance();
+
+      if (!mcpManager.hasTool(mcpToolName)) {
+        return null;
+      }
+
+      console.log(`[ToolRegistry] Executing MCP tool: ${mcpToolName}`);
+      const result = await mcpManager.callTool(mcpToolName, input);
+
+      // Format MCP result for consumption by the agent
+      return this.formatMCPResult(result);
+    } catch (error) {
+      // Not an MCP tool or MCP not initialized
+      return null;
+    }
+  }
+
+  /**
+   * Format MCP call result for agent consumption
+   */
+  private formatMCPResult(result: any): any {
+    if (!result) return { success: true };
+
+    // Check if it's an MCP CallResult format
+    if (result.content && Array.isArray(result.content)) {
+      if (result.isError) {
+        throw new Error(result.content.map((c: any) => c.text || '').join('\n') || 'MCP tool execution failed');
+      }
+
+      // Combine text content
+      const textParts = result.content
+        .filter((c: any) => c.type === 'text')
+        .map((c: any) => c.text);
+
+      if (textParts.length > 0) {
+        return textParts.join('\n');
+      }
+
+      // Return raw result if no text content
+      return result;
+    }
+
+    // Return as-is if not in MCP format
+    return result;
   }
 
   /**

@@ -222,6 +222,73 @@ export const FilePathSchema = z.object({
 export const UUIDSchema = z.string().uuid();
 export const StringIdSchema = z.string().min(1).max(100);
 
+// ============ MCP (Model Context Protocol) Schemas ============
+
+export const MCPTransportTypeSchema = z.enum(['stdio', 'sse', 'websocket']);
+
+export const MCPAuthConfigSchema = z.object({
+  type: z.enum(['none', 'bearer', 'api-key', 'basic']),
+  token: z.string().max(2000).optional(),
+  apiKey: z.string().max(2000).optional(),
+  username: z.string().max(500).optional(),
+  password: z.string().max(500).optional(),
+  headerName: z.string().max(100).optional(),
+}).optional();
+
+export const MCPServerConfigSchema = z.object({
+  id: z.string().uuid().optional(), // Optional for create (will be generated)
+  name: z.string().min(1).max(200),
+  description: z.string().max(1000).optional(),
+  enabled: z.boolean().default(true),
+  transport: MCPTransportTypeSchema,
+
+  // stdio transport config
+  command: z.string().max(1000).optional(),
+  args: z.array(z.string().max(500)).max(50).optional(),
+  env: z.record(z.string().max(500)).optional(),
+  cwd: z.string().max(MAX_PATH_LENGTH).optional(),
+
+  // HTTP-based transport config
+  url: z.string().url().max(500).optional(),
+  headers: z.record(z.string().max(1000)).optional(),
+
+  // Authentication
+  auth: MCPAuthConfigSchema,
+
+  // Timeouts
+  connectionTimeout: z.number().int().min(1000).max(120000).optional(),
+  requestTimeout: z.number().int().min(1000).max(300000).optional(),
+
+  // Metadata
+  version: z.string().max(100).optional(),
+  author: z.string().max(200).optional(),
+  homepage: z.string().url().max(500).optional(),
+  repository: z.string().url().max(500).optional(),
+  license: z.string().max(100).optional(),
+});
+
+export const MCPServerUpdateSchema = MCPServerConfigSchema.partial().omit({ id: true });
+
+export const MCPSettingsSchema = z.object({
+  servers: z.array(MCPServerConfigSchema).max(50),
+  autoConnect: z.boolean().default(true),
+  toolNamePrefix: z.string().min(0).max(50).default('mcp_'),
+  maxReconnectAttempts: z.number().int().min(0).max(20).default(5),
+  reconnectDelayMs: z.number().int().min(100).max(60000).default(1000),
+  registryEnabled: z.boolean().default(true),
+  registryUrl: z.string().url().max(500).optional(),
+  hostEnabled: z.boolean().default(false),
+  hostPort: z.number().int().min(1024).max(65535).optional(),
+});
+
+// MCP Registry schemas
+export const MCPRegistrySearchSchema = z.object({
+  query: z.string().max(200).optional(),
+  tags: z.array(z.string().max(50)).max(20).optional(),
+  limit: z.number().int().min(1).max(100).default(50),
+  offset: z.number().int().min(0).default(0),
+});
+
 // ============ Validation Helper ============
 
 /**

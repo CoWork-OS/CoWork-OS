@@ -73,6 +73,29 @@ const IPC_CHANNELS = {
   CUSTOM_SKILL_DELETE: 'customSkill:delete',
   CUSTOM_SKILL_RELOAD: 'customSkill:reload',
   CUSTOM_SKILL_OPEN_FOLDER: 'customSkill:openFolder',
+  // MCP (Model Context Protocol)
+  MCP_GET_SETTINGS: 'mcp:getSettings',
+  MCP_SAVE_SETTINGS: 'mcp:saveSettings',
+  MCP_ADD_SERVER: 'mcp:addServer',
+  MCP_UPDATE_SERVER: 'mcp:updateServer',
+  MCP_REMOVE_SERVER: 'mcp:removeServer',
+  MCP_CONNECT_SERVER: 'mcp:connectServer',
+  MCP_DISCONNECT_SERVER: 'mcp:disconnectServer',
+  MCP_GET_STATUS: 'mcp:getStatus',
+  MCP_GET_SERVER_STATUS: 'mcp:getServerStatus',
+  MCP_GET_ALL_TOOLS: 'mcp:getAllTools',
+  MCP_GET_SERVER_TOOLS: 'mcp:getServerTools',
+  MCP_TEST_SERVER: 'mcp:testServer',
+  MCP_SERVER_STATUS_CHANGE: 'mcp:serverStatusChange',
+  // MCP Registry
+  MCP_REGISTRY_FETCH: 'mcp:registryFetch',
+  MCP_REGISTRY_SEARCH: 'mcp:registrySearch',
+  MCP_REGISTRY_INSTALL: 'mcp:registryInstall',
+  MCP_REGISTRY_UNINSTALL: 'mcp:registryUninstall',
+  // MCP Host
+  MCP_HOST_START: 'mcp:hostStart',
+  MCP_HOST_STOP: 'mcp:hostStop',
+  MCP_HOST_GET_STATUS: 'mcp:hostGetStatus',
 } as const;
 
 // Custom Skill types (inlined for sandboxed preload)
@@ -95,6 +118,78 @@ interface CustomSkill {
   category?: string;
   enabled?: boolean;
   filePath?: string;
+}
+
+// MCP types (inlined for sandboxed preload)
+type MCPTransportType = 'stdio' | 'sse' | 'websocket';
+type MCPConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'error';
+
+interface MCPServerConfig {
+  id: string;
+  name: string;
+  description?: string;
+  enabled: boolean;
+  transport: MCPTransportType;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  cwd?: string;
+  url?: string;
+  headers?: Record<string, string>;
+  connectionTimeout?: number;
+  requestTimeout?: number;
+}
+
+interface MCPTool {
+  name: string;
+  description?: string;
+  inputSchema: {
+    type: 'object';
+    properties?: Record<string, any>;
+    required?: string[];
+  };
+}
+
+interface MCPServerStatus {
+  id: string;
+  name: string;
+  status: MCPConnectionStatus;
+  error?: string;
+  tools: MCPTool[];
+  lastPing?: number;
+}
+
+interface MCPSettings {
+  servers: MCPServerConfig[];
+  autoConnect: boolean;
+  toolNamePrefix: string;
+  maxReconnectAttempts: number;
+  reconnectDelayMs: number;
+  registryEnabled: boolean;
+  registryUrl?: string;
+  hostEnabled: boolean;
+  hostPort?: number;
+}
+
+interface MCPRegistryEntry {
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  author: string;
+  installMethod: 'npm' | 'pip' | 'binary' | 'docker';
+  installCommand?: string;
+  transport: MCPTransportType;
+  defaultCommand?: string;
+  tools: Array<{ name: string; description: string }>;
+  tags: string[];
+  verified: boolean;
+}
+
+interface MCPRegistry {
+  version: string;
+  lastUpdated: string;
+  servers: MCPRegistryEntry[];
 }
 
 // Expose protected methods that allow the renderer process to use ipcRenderer
@@ -236,6 +331,39 @@ contextBridge.exposeInMainWorld('electronAPI', {
   deleteCustomSkill: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.CUSTOM_SKILL_DELETE, id),
   reloadCustomSkills: () => ipcRenderer.invoke(IPC_CHANNELS.CUSTOM_SKILL_RELOAD),
   openCustomSkillsFolder: () => ipcRenderer.invoke(IPC_CHANNELS.CUSTOM_SKILL_OPEN_FOLDER),
+
+  // MCP (Model Context Protocol) APIs
+  getMCPSettings: () => ipcRenderer.invoke(IPC_CHANNELS.MCP_GET_SETTINGS),
+  saveMCPSettings: (settings: any) => ipcRenderer.invoke(IPC_CHANNELS.MCP_SAVE_SETTINGS, settings),
+  addMCPServer: (config: any) => ipcRenderer.invoke(IPC_CHANNELS.MCP_ADD_SERVER, config),
+  updateMCPServer: (id: string, updates: any) => ipcRenderer.invoke(IPC_CHANNELS.MCP_UPDATE_SERVER, id, updates),
+  removeMCPServer: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.MCP_REMOVE_SERVER, id),
+  connectMCPServer: (serverId: string) => ipcRenderer.invoke(IPC_CHANNELS.MCP_CONNECT_SERVER, serverId),
+  disconnectMCPServer: (serverId: string) => ipcRenderer.invoke(IPC_CHANNELS.MCP_DISCONNECT_SERVER, serverId),
+  getMCPStatus: () => ipcRenderer.invoke(IPC_CHANNELS.MCP_GET_STATUS),
+  getMCPServerStatus: (serverId: string) => ipcRenderer.invoke(IPC_CHANNELS.MCP_GET_SERVER_STATUS, serverId),
+  getMCPAllTools: () => ipcRenderer.invoke(IPC_CHANNELS.MCP_GET_ALL_TOOLS),
+  getMCPServerTools: (serverId: string) => ipcRenderer.invoke(IPC_CHANNELS.MCP_GET_SERVER_TOOLS, serverId),
+  testMCPServer: (serverId: string) => ipcRenderer.invoke(IPC_CHANNELS.MCP_TEST_SERVER, serverId),
+
+  // MCP Status change event listener
+  onMCPStatusChange: (callback: (status: any[]) => void) => {
+    const subscription = (_: any, data: any) => callback(data);
+    ipcRenderer.on(IPC_CHANNELS.MCP_SERVER_STATUS_CHANGE, subscription);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.MCP_SERVER_STATUS_CHANGE, subscription);
+  },
+
+  // MCP Registry APIs
+  fetchMCPRegistry: () => ipcRenderer.invoke(IPC_CHANNELS.MCP_REGISTRY_FETCH),
+  searchMCPRegistry: (query: string, tags?: string[]) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MCP_REGISTRY_SEARCH, { query, tags }),
+  installMCPServer: (entryId: string) => ipcRenderer.invoke(IPC_CHANNELS.MCP_REGISTRY_INSTALL, entryId),
+  uninstallMCPServer: (serverId: string) => ipcRenderer.invoke(IPC_CHANNELS.MCP_REGISTRY_UNINSTALL, serverId),
+
+  // MCP Host APIs
+  startMCPHost: (port?: number) => ipcRenderer.invoke(IPC_CHANNELS.MCP_HOST_START, port),
+  stopMCPHost: () => ipcRenderer.invoke(IPC_CHANNELS.MCP_HOST_STOP),
+  getMCPHostStatus: () => ipcRenderer.invoke(IPC_CHANNELS.MCP_HOST_GET_STATUS),
 });
 
 // Type declarations for TypeScript
@@ -399,6 +527,29 @@ export interface ElectronAPI {
   deleteCustomSkill: (id: string) => Promise<boolean>;
   reloadCustomSkills: () => Promise<CustomSkill[]>;
   openCustomSkillsFolder: () => Promise<void>;
+  // MCP (Model Context Protocol)
+  getMCPSettings: () => Promise<MCPSettings>;
+  saveMCPSettings: (settings: MCPSettings) => Promise<{ success: boolean }>;
+  addMCPServer: (config: Omit<MCPServerConfig, 'id'>) => Promise<MCPServerConfig>;
+  updateMCPServer: (id: string, updates: Partial<MCPServerConfig>) => Promise<MCPServerConfig>;
+  removeMCPServer: (id: string) => Promise<void>;
+  connectMCPServer: (serverId: string) => Promise<void>;
+  disconnectMCPServer: (serverId: string) => Promise<void>;
+  getMCPStatus: () => Promise<MCPServerStatus[]>;
+  getMCPServerStatus: (serverId: string) => Promise<MCPServerStatus | null>;
+  getMCPAllTools: () => Promise<MCPTool[]>;
+  getMCPServerTools: (serverId: string) => Promise<MCPTool[]>;
+  testMCPServer: (serverId: string) => Promise<{ success: boolean; error?: string; tools?: number }>;
+  onMCPStatusChange: (callback: (status: MCPServerStatus[]) => void) => () => void;
+  // MCP Registry
+  fetchMCPRegistry: () => Promise<MCPRegistry>;
+  searchMCPRegistry: (query: string, tags?: string[]) => Promise<MCPRegistryEntry[]>;
+  installMCPServer: (entryId: string) => Promise<MCPServerConfig>;
+  uninstallMCPServer: (serverId: string) => Promise<void>;
+  // MCP Host
+  startMCPHost: (port?: number) => Promise<{ success: boolean; port?: number }>;
+  stopMCPHost: () => Promise<void>;
+  getMCPHostStatus: () => Promise<{ running: boolean; port?: number }>;
 }
 
 declare global {

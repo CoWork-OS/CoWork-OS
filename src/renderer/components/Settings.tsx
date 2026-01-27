@@ -9,6 +9,8 @@ import { AppearanceSettings } from './AppearanceSettings';
 import { QueueSettings } from './QueueSettings';
 import { SkillsSettings } from './SkillsSettings';
 
+type SettingsTab = 'appearance' | 'llm' | 'search' | 'telegram' | 'discord' | 'updates' | 'guardrails' | 'queue' | 'skills';
+
 interface SettingsProps {
   onBack: () => void;
   onSettingsChanged?: () => void;
@@ -16,6 +18,7 @@ interface SettingsProps {
   accentColor: AccentColor;
   onThemeChange: (theme: ThemeMode) => void;
   onAccentChange: (accent: AccentColor) => void;
+  initialTab?: SettingsTab;
 }
 
 interface ModelOption {
@@ -28,8 +31,6 @@ interface ProviderInfo {
   name: string;
   configured: boolean;
 }
-
-type SettingsTab = 'appearance' | 'llm' | 'search' | 'telegram' | 'discord' | 'updates' | 'guardrails' | 'queue' | 'skills';
 
 // Helper to format bytes to human-readable size
 function formatBytes(bytes: number): string {
@@ -202,8 +203,8 @@ function SearchableSelect({ options, value, onChange, placeholder = 'Select...',
   );
 }
 
-export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, onThemeChange, onAccentChange }: SettingsProps) {
-  const [activeTab, setActiveTab] = useState<SettingsTab>('appearance');
+export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, onThemeChange, onAccentChange, initialTab = 'appearance' }: SettingsProps) {
+  const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
   const [settings, setSettings] = useState<LLMSettingsData>({
     providerType: 'anthropic',
     modelKey: 'sonnet-3-5',

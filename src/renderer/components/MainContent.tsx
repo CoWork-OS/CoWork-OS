@@ -204,6 +204,8 @@ interface GoalModeOptions {
   maxAttempts?: number;
 }
 
+type SettingsTab = 'appearance' | 'llm' | 'search' | 'telegram' | 'discord' | 'updates' | 'guardrails' | 'queue' | 'skills';
+
 interface MainContentProps {
   task: Task | undefined;
   workspace: Workspace | null;
@@ -211,7 +213,7 @@ interface MainContentProps {
   onSendMessage: (message: string) => void;
   onCreateTask?: (title: string, prompt: string, options?: GoalModeOptions) => void;
   onChangeWorkspace?: () => void;
-  onOpenSettings?: () => void;
+  onOpenSettings?: (tab?: SettingsTab) => void;
   onStopTask?: () => void;
   selectedModel: string;
   availableModels: LLMModelInfo[];
@@ -649,7 +651,7 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
                             className="skills-dropdown-create"
                             onClick={() => {
                               setShowSkillsMenu(false);
-                              onOpenSettings?.();
+                              onOpenSettings?.('skills');
                             }}
                           >
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

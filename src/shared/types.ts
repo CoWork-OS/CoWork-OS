@@ -55,7 +55,9 @@ export type EventType =
   | 'progress_update'
   | 'llm_retry'
   | 'follow_up_completed'
-  | 'follow_up_failed';
+  | 'follow_up_failed'
+  | 'tool_warning'
+  | 'user_message';
 
 export type ToolType =
   | 'read_file'

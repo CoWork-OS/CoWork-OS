@@ -498,6 +498,274 @@ class ToolFailureTracker {
 }
 
 /**
+ * Tracks file operations to detect redundant reads and duplicate file creations
+ * Helps prevent the agent from reading the same file multiple times or
+ * creating multiple versions of the same document
+ */
+class FileOperationTracker {
+  // Track files that have been read (path -> { count, lastReadTime, contentSummary })
+  private readFiles: Map<string, { count: number; lastReadTime: number; contentLength: number }> = new Map();
+  // Track files that have been created (normalized name -> full path)
+  private createdFiles: Map<string, string> = new Map();
+  // Track file operation counts per type
+  private operationCounts: Map<string, number> = new Map();
+  // Track directory listings (path -> { files, lastListTime, count })
+  private directoryListings: Map<string, { files: string[]; lastListTime: number; count: number }> = new Map();
+
+  private readonly maxReadsPerFile: number = 2;
+  private readonly readCooldownMs: number = 30000; // 30 seconds between reads of same file
+  private readonly maxListingsPerDir: number = 2;
+  private readonly listingCooldownMs: number = 60000; // 60 seconds between listings of same directory
+
+  /**
+   * Check if a file read should be blocked (redundant read)
+   * @returns Object with blocked flag and reason if blocked
+   */
+  checkFileRead(filePath: string): { blocked: boolean; reason?: string; suggestion?: string } {
+    const normalized = this.normalizePath(filePath);
+    const existing = this.readFiles.get(normalized);
+    const now = Date.now();
+
+    if (existing) {
+      const timeSinceLastRead = now - existing.lastReadTime;
+
+      // If file was read recently (within cooldown), block
+      if (timeSinceLastRead < this.readCooldownMs && existing.count >= this.maxReadsPerFile) {
+        return {
+          blocked: true,
+          reason: `File "${filePath}" was already read ${existing.count} times in the last ${this.readCooldownMs / 1000}s`,
+          suggestion: 'Use the content from the previous read instead of reading the file again. If you need specific parts, describe what you need.',
+        };
+      }
+    }
+
+    return { blocked: false };
+  }
+
+  /**
+   * Record a file read operation
+   */
+  recordFileRead(filePath: string, contentLength: number): void {
+    const normalized = this.normalizePath(filePath);
+    const existing = this.readFiles.get(normalized);
+    const now = Date.now();
+
+    if (existing) {
+      existing.count++;
+      existing.lastReadTime = now;
+      existing.contentLength = contentLength;
+    } else {
+      this.readFiles.set(normalized, { count: 1, lastReadTime: now, contentLength });
+    }
+
+    this.incrementOperation('read_file');
+  }
+
+  /**
+   * Check if a directory listing should be blocked (redundant listing)
+   * @returns Object with blocked flag, reason, and cached files if available
+   */
+  checkDirectoryListing(dirPath: string): { blocked: boolean; reason?: string; cachedFiles?: string[]; suggestion?: string } {
+    const normalized = this.normalizePath(dirPath);
+    const existing = this.directoryListings.get(normalized);
+    const now = Date.now();
+
+    if (existing) {
+      const timeSinceLastList = now - existing.lastListTime;
+
+      // If directory was listed recently (within cooldown), return cached result
+      if (timeSinceLastList < this.listingCooldownMs && existing.count >= this.maxListingsPerDir) {
+        return {
+          blocked: true,
+          reason: `Directory "${dirPath}" was already listed ${existing.count} times in the last ${this.listingCooldownMs / 1000}s`,
+          cachedFiles: existing.files,
+          suggestion: 'Use the cached directory listing instead of listing again. The directory contents are unlikely to have changed.',
+        };
+      }
+    }
+
+    return { blocked: false };
+  }
+
+  /**
+   * Record a directory listing operation
+   */
+  recordDirectoryListing(dirPath: string, files: string[]): void {
+    const normalized = this.normalizePath(dirPath);
+    const existing = this.directoryListings.get(normalized);
+    const now = Date.now();
+
+    if (existing) {
+      existing.count++;
+      existing.lastListTime = now;
+      existing.files = files;
+    } else {
+      this.directoryListings.set(normalized, { count: 1, lastListTime: now, files });
+    }
+
+    this.incrementOperation('list_directory');
+  }
+
+  /**
+   * Get cached directory listing if available
+   */
+  getCachedDirectoryListing(dirPath: string): string[] | undefined {
+    const normalized = this.normalizePath(dirPath);
+    return this.directoryListings.get(normalized)?.files;
+  }
+
+  /**
+   * Check if creating a file would be a duplicate
+   * @returns Object with isDuplicate flag and existing file path if duplicate
+   */
+  checkFileCreation(filename: string): { isDuplicate: boolean; existingPath?: string; suggestion?: string } {
+    const normalized = this.normalizeFilename(filename);
+
+    // Check for exact match
+    const existingPath = this.createdFiles.get(normalized);
+    if (existingPath) {
+      return {
+        isDuplicate: true,
+        existingPath,
+        suggestion: `A similar file "${existingPath}" was already created. Consider editing that file instead of creating a new version.`,
+      };
+    }
+
+    // Check for version variants (e.g., v2.4 vs v2.5, _Updated vs _Final)
+    for (const [key, path] of this.createdFiles.entries()) {
+      if (this.areSimilarFilenames(normalized, key)) {
+        return {
+          isDuplicate: true,
+          existingPath: path,
+          suggestion: `A similar file "${path}" was already created. Avoid creating multiple versions - edit the existing file instead.`,
+        };
+      }
+    }
+
+    return { isDuplicate: false };
+  }
+
+  /**
+   * Record a file creation
+   */
+  recordFileCreation(filePath: string): void {
+    const filename = filePath.split('/').pop() || filePath;
+    const normalized = this.normalizeFilename(filename);
+    this.createdFiles.set(normalized, filePath);
+    this.incrementOperation('create_file');
+  }
+
+  /**
+   * Get operation statistics
+   */
+  getStats(): { totalReads: number; totalCreates: number; totalListings: number; uniqueFilesRead: number; filesCreated: number; dirsListed: number } {
+    return {
+      totalReads: this.operationCounts.get('read_file') || 0,
+      totalCreates: this.operationCounts.get('create_file') || 0,
+      totalListings: this.operationCounts.get('list_directory') || 0,
+      uniqueFilesRead: this.readFiles.size,
+      filesCreated: this.createdFiles.size,
+      dirsListed: this.directoryListings.size,
+    };
+  }
+
+  private incrementOperation(operation: string): void {
+    const current = this.operationCounts.get(operation) || 0;
+    this.operationCounts.set(operation, current + 1);
+  }
+
+  private normalizePath(filePath: string): string {
+    // Normalize path for comparison
+    return filePath.toLowerCase().replace(/\\/g, '/');
+  }
+
+  private normalizeFilename(filename: string): string {
+    // Remove path, extension, version numbers, and common suffixes
+    const name = filename.split('/').pop() || filename;
+    return name
+      .toLowerCase()
+      .replace(/\.[^.]+$/, '') // Remove extension
+      .replace(/[_-]v?\d+(\.\d+)?/g, '') // Remove version numbers
+      .replace(/[_-](updated|final|new|copy|backup|draft|section)/g, '') // Remove common suffixes
+      .replace(/[_-]+/g, '_') // Normalize separators
+      .trim();
+  }
+
+  private areSimilarFilenames(name1: string, name2: string): boolean {
+    // Check if two normalized filenames are similar enough to be duplicates
+    if (name1 === name2) return true;
+
+    // Check if one contains the other (for cases like "en400" and "en400_us_gdpr")
+    const shorter = name1.length < name2.length ? name1 : name2;
+    const longer = name1.length < name2.length ? name2 : name1;
+
+    // If the shorter name is at least 10 chars and is contained in the longer, they're similar
+    if (shorter.length >= 10 && longer.includes(shorter)) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Reset tracker (e.g., for a new task)
+   */
+  reset(): void {
+    this.readFiles.clear();
+    this.createdFiles.clear();
+    this.operationCounts.clear();
+    this.directoryListings.clear();
+  }
+
+  /**
+   * Get the most recently created document file (for parameter inference)
+   */
+  getLastCreatedDocument(): string | undefined {
+    // Find the most recent .docx file that was created
+    for (const [_, path] of this.createdFiles.entries()) {
+      if (path.endsWith('.docx') || path.endsWith('.pdf')) {
+        return path;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Get all created file paths
+   */
+  getCreatedFiles(): string[] {
+    return Array.from(this.createdFiles.values());
+  }
+
+  /**
+   * Get a summary of discovered information to share across steps
+   */
+  getKnowledgeSummary(): string {
+    const parts: string[] = [];
+
+    // List files that have been read
+    if (this.readFiles.size > 0) {
+      const files = Array.from(this.readFiles.keys()).slice(0, 10); // Limit to 10 most recent
+      parts.push(`Files already read: ${files.join(', ')}`);
+    }
+
+    // List files that have been created
+    if (this.createdFiles.size > 0) {
+      const created = Array.from(this.createdFiles.values()).slice(0, 10);
+      parts.push(`Files created: ${created.join(', ')}`);
+    }
+
+    // List directories that have been explored
+    if (this.directoryListings.size > 0) {
+      const dirs = Array.from(this.directoryListings.keys()).slice(0, 5);
+      parts.push(`Directories explored: ${dirs.join(', ')}`);
+    }
+
+    return parts.join('\n');
+  }
+}
+
+/**
  * Wrap a promise with a timeout
  */
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, operation: string): Promise<T> {
@@ -563,6 +831,7 @@ export class TaskExecutor {
   private contextManager: ContextManager;
   private toolFailureTracker: ToolFailureTracker;
   private toolCallDeduplicator: ToolCallDeduplicator;
+  private fileOperationTracker: FileOperationTracker;
   private cancelled = false;
   private paused = false;
   private taskCompleted = false;  // Prevents any further processing after task completes
@@ -631,6 +900,9 @@ export class TaskExecutor {
     // Initialize tool call deduplicator to prevent repetitive calls
     // Max 2 identical calls within 60 seconds before blocking
     this.toolCallDeduplicator = new ToolCallDeduplicator(2, 60000);
+
+    // Initialize file operation tracker to detect redundant reads and duplicate creations
+    this.fileOperationTracker = new FileOperationTracker();
 
     console.log(`TaskExecutor initialized with ${settings.providerType} provider, model: ${this.modelId}`);
   }
@@ -754,6 +1026,137 @@ export class TaskExecutor {
     this.totalCost += calculateCost(this.modelId, inputTokens, outputTokens);
     this.iterationCount++;
     this.globalTurnCount++; // Track global turns across all steps
+  }
+
+  /**
+   * Check if a file operation should be blocked (redundant read or duplicate creation)
+   * @returns Object with blocked flag, reason, and suggestion if blocked, plus optional cached result
+   */
+  private checkFileOperation(toolName: string, input: any): { blocked: boolean; reason?: string; suggestion?: string; cachedResult?: string } {
+    // Check for redundant file reads
+    if (toolName === 'read_file' && input?.path) {
+      const check = this.fileOperationTracker.checkFileRead(input.path);
+      if (check.blocked) {
+        console.log(`[TaskExecutor] Blocking redundant file read: ${input.path}`);
+        return check;
+      }
+    }
+
+    // Check for redundant directory listings
+    if (toolName === 'list_directory' && input?.path) {
+      const check = this.fileOperationTracker.checkDirectoryListing(input.path);
+      if (check.blocked && check.cachedFiles) {
+        console.log(`[TaskExecutor] Returning cached directory listing for: ${input.path}`);
+        return {
+          blocked: true,
+          reason: check.reason,
+          suggestion: check.suggestion,
+          cachedResult: `Directory contents (cached): ${check.cachedFiles.join(', ')}`,
+        };
+      }
+    }
+
+    // Check for duplicate file creations
+    const fileCreationTools = ['create_document', 'write_file', 'copy_file'];
+    if (fileCreationTools.includes(toolName)) {
+      const filename = input?.filename || input?.path || input?.destPath || input?.destination;
+      if (filename) {
+        const check = this.fileOperationTracker.checkFileCreation(filename);
+        if (check.isDuplicate) {
+          console.log(`[TaskExecutor] Warning: Duplicate file creation detected: ${filename}`);
+          // Don't block, but log warning - the LLM might have a good reason
+          this.daemon.logEvent(this.task.id, 'tool_warning', {
+            tool: toolName,
+            warning: check.suggestion,
+            existingFile: check.existingPath,
+          });
+        }
+      }
+    }
+
+    return { blocked: false };
+  }
+
+  /**
+   * Record a file operation after successful execution
+   */
+  private recordFileOperation(toolName: string, input: any, result: any): void {
+    // Record file reads
+    if (toolName === 'read_file' && input?.path) {
+      const contentLength = typeof result === 'string' ? result.length : JSON.stringify(result).length;
+      this.fileOperationTracker.recordFileRead(input.path, contentLength);
+    }
+
+    // Record directory listings
+    if (toolName === 'list_directory' && input?.path) {
+      // Extract file names from the result
+      let files: string[] = [];
+      if (Array.isArray(result)) {
+        files = result.map(f => typeof f === 'string' ? f : f.name || f.path || String(f));
+      } else if (typeof result === 'string') {
+        // Parse string result (e.g., "file1, file2, file3" or "file1\nfile2\nfile3")
+        files = result.split(/[,\n]/).map(f => f.trim()).filter(f => f);
+      } else if (result?.files) {
+        files = result.files;
+      }
+      this.fileOperationTracker.recordDirectoryListing(input.path, files);
+    }
+
+    // Record file creations
+    const fileCreationTools = ['create_document', 'write_file', 'copy_file'];
+    if (fileCreationTools.includes(toolName)) {
+      const filename = result?.path || result?.filename || input?.filename || input?.path || input?.destPath;
+      if (filename) {
+        this.fileOperationTracker.recordFileCreation(filename);
+      }
+    }
+  }
+
+  /**
+   * Infer missing parameters for tool calls (helps weaker models)
+   * This auto-fills parameters when the LLM fails to provide them but context is available
+   */
+  private inferMissingParameters(toolName: string, input: any): { input: any; modified: boolean; inference?: string } {
+    // Handle edit_document - infer sourcePath from recently created documents
+    if (toolName === 'edit_document') {
+      let modified = false;
+      let inference = '';
+
+      // Infer sourcePath if missing
+      if (!input?.sourcePath) {
+        const lastDoc = this.fileOperationTracker.getLastCreatedDocument();
+        if (lastDoc) {
+          input = input || {};
+          input.sourcePath = lastDoc;
+          modified = true;
+          inference = `Inferred sourcePath="${lastDoc}" from recently created document`;
+          console.log(`[TaskExecutor] Parameter inference: ${inference}`);
+        }
+      }
+
+      // Provide helpful example for newContent if missing
+      if (!input?.newContent || !Array.isArray(input.newContent) || input.newContent.length === 0) {
+        // Can't infer content, but log helpful message
+        console.log(`[TaskExecutor] edit_document called without newContent - LLM needs to provide content blocks`);
+      }
+
+      return { input, modified, inference: modified ? inference : undefined };
+    }
+
+    // Handle copy_file - normalize path parameters
+    if (toolName === 'copy_file') {
+      // Some LLMs use 'source'/'destination' instead of 'sourcePath'/'destPath'
+      if (!input?.sourcePath && input?.source) {
+        input.sourcePath = input.source;
+        return { input, modified: true, inference: 'Normalized source -> sourcePath' };
+      }
+      if (!input?.destPath && input?.destination) {
+        input.destPath = input.destination;
+        return { input, modified: true, inference: 'Normalized destination -> destPath' };
+      }
+    }
+
+    return { input, modified: false };
   }
 
   /**
@@ -1031,10 +1434,94 @@ You are continuing a previous conversation. The context from the previous conver
   }
 
   /**
+   * Pre-task Analysis Phase (inspired by Cowork's AskUserQuestion pattern)
+   * Analyzes the task to understand what's involved and gather helpful context
+   * This helps the LLM create better plans by understanding the workspace context first
+   */
+  private async analyzeTask(): Promise<{ additionalContext?: string; taskType: string }> {
+    this.daemon.logEvent(this.task.id, 'log', { message: 'Analyzing task requirements...' });
+
+    const prompt = this.task.prompt.toLowerCase();
+
+    // Detect task types and gather relevant context
+    const isDocumentModification = prompt.includes('modify') || prompt.includes('edit') || prompt.includes('update') ||
+      prompt.includes('change') || prompt.includes('add to') || prompt.includes('append') ||
+      prompt.includes('duplicate') || prompt.includes('copy') || prompt.includes('version');
+
+    const isDocumentCreation = prompt.includes('create') || prompt.includes('make') || prompt.includes('generate') ||
+      prompt.includes('write a document') || prompt.includes('write a report');
+
+    const mentionsSpecificFile = /\.(docx|pdf|xlsx|pptx|txt|md)/.test(prompt);
+
+    let additionalContext = '';
+    let taskType = 'general';
+
+    try {
+      // If the task mentions modifying documents or specific files, list workspace contents
+      if (isDocumentModification || mentionsSpecificFile) {
+        taskType = 'document_modification';
+
+        // List workspace to find relevant files
+        const files = await this.toolRegistry.executeTool('list_directory', { path: '.' });
+        const fileList = Array.isArray(files) ? files : [];
+
+        // Filter for relevant document files
+        const documentFiles = fileList.filter((f: string) =>
+          /\.(docx|pdf|xlsx|pptx|txt|md)$/i.test(f)
+        );
+
+        if (documentFiles.length > 0) {
+          additionalContext += `WORKSPACE FILES FOUND:\n${documentFiles.join('\n')}\n\n`;
+
+          // Record this listing to prevent duplicate list_directory calls
+          this.fileOperationTracker.recordDirectoryListing('.', fileList);
+        }
+
+        // Add document modification best practices
+        additionalContext += `DOCUMENT MODIFICATION BEST PRACTICES:
+1. ALWAYS read the source document first to understand its structure
+2. Use copy_file to create a new version (e.g., v2.4) before editing
+3. Use edit_document with 'sourcePath' pointing to the copied file
+4. edit_document REQUIRES: sourcePath (string) and newContent (array of {type, text} blocks)
+5. DO NOT create new documents from scratch when modifying existing ones`;
+      } else if (isDocumentCreation) {
+        taskType = 'document_creation';
+
+        additionalContext += `DOCUMENT CREATION BEST PRACTICES:
+1. Use create_document for new Word/PDF files
+2. Required parameters: filename, format ('docx' or 'pdf'), content (array of blocks)
+3. Content blocks: { type: 'heading'|'paragraph'|'list', text: '...', level?: 1-6 }`;
+      }
+
+      // Log the analysis result
+      this.daemon.logEvent(this.task.id, 'task_analysis', {
+        taskType,
+        hasAdditionalContext: !!additionalContext,
+      });
+
+    } catch (error: any) {
+      console.warn(`[TaskExecutor] Task analysis error (non-fatal): ${error.message}`);
+    }
+
+    return { additionalContext: additionalContext || undefined, taskType };
+  }
+
+  /**
    * Main execution loop
    */
   async execute(): Promise<void> {
     try {
+      // Phase 0: Pre-task Analysis (like Cowork's AskUserQuestion)
+      // Analyze task complexity and check if clarification is needed
+      const taskAnalysis = await this.analyzeTask();
+
+      if (this.cancelled) return;
+
+      // If task needs clarification, add context to the task prompt
+      if (taskAnalysis.additionalContext) {
+        this.task.prompt = `${this.task.prompt}\n\nADDITIONAL CONTEXT:\n${taskAnalysis.additionalContext}`;
+      }
+
       // Phase 1: Planning
       this.daemon.updateTaskStatus(this.task.id, 'planning');
       await this.createPlan();
@@ -1130,8 +1617,8 @@ You are continuing a previous conversation. The context from the previous conver
     this.daemon.logEvent(this.task.id, 'log', { message: `Creating execution plan (model: ${this.modelId})...` });
 
     const systemPrompt = `You are an autonomous task executor. Your job is to:
-1. Analyze the user's request
-2. Create a detailed, step-by-step plan
+1. Analyze the user's request thoroughly - understand what files are involved and what changes are needed
+2. Create a detailed, step-by-step plan with specific actions
 3. Execute each step using the available tools
 4. Produce high-quality outputs
 
@@ -1141,12 +1628,46 @@ Workspace permissions: ${JSON.stringify(this.workspace.permissions)}
 Available tools:
 ${this.toolRegistry.getToolDescriptions()}
 
-Create a clear, actionable plan with 3-7 steps. Each step should be specific and measurable.
+PLANNING RULES:
+- Create a plan with 3-7 SPECIFIC steps. Each step must describe a concrete action.
+- Each step should accomplish ONE clear objective with specific file names when known.
+- DO NOT include redundant "verify" or "review" steps for each action.
+- DO NOT plan to create multiple versions of files - pick ONE target file.
+- DO NOT plan to read the same file multiple times in different steps.
+
+COMMON WORKFLOWS (follow these patterns):
+
+1. MODIFY EXISTING DOCUMENT (CRITICAL):
+   Step 1: Read the original document to understand its structure
+   Step 2: Copy the document to a new version (e.g., v2.4)
+   Step 3: Edit the copied document with edit_document tool, adding new content sections
+   IMPORTANT: edit_document requires 'sourcePath' (the file to edit) and 'newContent' (array of content blocks)
+
+2. CREATE NEW DOCUMENT:
+   Step 1: Gather/research the required information
+   Step 2: Create the document with create_document tool
+
+3. FILE ORGANIZATION:
+   Step 1: List directory contents to see current structure
+   Step 2: Create necessary directories
+   Step 3: Move/rename files as needed
+
+TOOL PARAMETER REMINDERS:
+- edit_document: REQUIRES sourcePath (path to existing doc) and newContent (array of {type, text} blocks)
+- copy_file: REQUIRES sourcePath and destPath
+- read_file: REQUIRES path
+
+VERIFICATION STEP (REQUIRED):
+- For non-trivial tasks, include a FINAL verification step
+- Verification can include: reading the output file to confirm changes, checking file exists, summarizing what was done
+- Example: "Verify: Read the modified document and confirm new sections were added correctly"
+
 Format your plan as a JSON object with this structure:
 {
   "description": "Overall plan description",
   "steps": [
-    {"id": "1", "description": "Step description", "status": "pending"}
+    {"id": "1", "description": "Specific action with file names when applicable", "status": "pending"},
+    {"id": "N", "description": "Verify: [describe what to check]", "status": "pending"}
   ]
 }`;
 
@@ -1377,7 +1898,32 @@ Format your plan as a JSON object with this structure:
       });
     }
 
-    // Emit completion progress
+    // Check if any steps failed
+    const failedSteps = this.plan.steps.filter(s => s.status === 'failed');
+    const successfulSteps = this.plan.steps.filter(s => s.status === 'completed');
+
+    if (failedSteps.length > 0) {
+      // Log warning about failed steps
+      const failedDescriptions = failedSteps.map(s => s.description).join(', ');
+      console.log(`[TaskExecutor] ${failedSteps.length} step(s) failed: ${failedDescriptions}`);
+
+      // If critical steps failed (not just verification), this should be marked
+      const criticalFailures = failedSteps.filter(s => !s.description.toLowerCase().includes('verify'));
+      if (criticalFailures.length > 0) {
+        this.daemon.logEvent(this.task.id, 'progress_update', {
+          phase: 'execution',
+          completedSteps: successfulSteps.length,
+          totalSteps,
+          progress: Math.round((successfulSteps.length / totalSteps) * 100),
+          message: `Completed with ${criticalFailures.length} failed step(s)`,
+          hasFailures: true,
+        });
+        // Throw error to mark task as failed
+        throw new Error(`Task partially completed: ${criticalFailures.length} step(s) failed - ${criticalFailures.map(s => s.description).join('; ')}`);
+      }
+    }
+
+    // Emit completion progress (only if no critical failures)
     this.daemon.logEvent(this.task.id, 'progress_update', {
       phase: 'execution',
       completedSteps,
@@ -1404,13 +1950,26 @@ IMPORTANT INSTRUCTIONS:
 - Always use tools to accomplish tasks. Do not just describe what you would do - actually call the tools.
 - The delete_file tool has a built-in approval mechanism that will prompt the user. Just call the tool directly.
 - Do NOT ask "Should I proceed?" or wait for permission in text - the tools handle approvals automatically.
-- Be concise. When reading files, only read what you need.
 - After completing the work, provide a brief summary of what was done.
 
+CRITICAL TOOL PARAMETER REQUIREMENTS:
+- edit_document: MUST provide 'sourcePath' (path to existing DOCX file) and 'newContent' (array of content blocks)
+  Example: edit_document({ sourcePath: "document.docx", newContent: [{ type: "heading", text: "New Section", level: 2 }, { type: "paragraph", text: "Content here" }] })
+- copy_file: MUST provide 'sourcePath' and 'destPath'
+- read_file: MUST provide 'path'
+- create_document: MUST provide 'filename', 'format', and 'content'
+
+EFFICIENCY RULES (CRITICAL):
+- DO NOT read the same file multiple times. If you've already read a file, use the content from memory.
+- DO NOT create multiple versions of the same file (e.g., v2.4, v2.5, _Updated, _Final). Pick ONE target file and work with it.
+- DO NOT repeatedly verify/check the same thing. Trust your previous actions.
+- If a tool fails, try a DIFFERENT approach - don't retry the same approach multiple times.
+- Minimize file operations: read once, modify once, verify once.
+
 ADAPTIVE PLANNING:
-- If you discover the current plan is insufficient, encounter unexpected obstacles, or find a better approach, use the revise_plan tool to add new steps.
+- If you discover the current plan is insufficient, use the revise_plan tool to add new steps.
 - Do not silently skip necessary work - if something new is needed, add it to the plan.
-- The revise_plan tool lets you adapt without starting over.`;
+- If an approach keeps failing, revise the plan with a fundamentally different strategy.`;
 
     const systemPromptTokens = estimateTokens(this.systemPrompt);
 
@@ -1423,6 +1982,12 @@ ADAPTIVE PLANNING:
       if (completedSteps.length > 0) {
         stepContext += `\n\nPrevious steps already completed:\n${completedSteps.map(s => `- ${s.description}`).join('\n')}`;
         stepContext += `\n\nDo NOT repeat work from previous steps. Focus only on: ${step.description}`;
+      }
+
+      // Add accumulated knowledge from previous steps (discovered files, directories, etc.)
+      const knowledgeSummary = this.fileOperationTracker.getKnowledgeSummary();
+      if (knowledgeSummary) {
+        stepContext += `\n\nKNOWLEDGE FROM PREVIOUS STEPS (use this instead of re-reading/re-listing):\n${knowledgeSummary}`;
       }
 
       // Start fresh messages for this step
@@ -1438,7 +2003,7 @@ ADAPTIVE PLANNING:
       let emptyResponseCount = 0;
       let stepFailed = false;  // Track if step failed due to all tools being disabled/erroring
       let lastFailureReason = '';  // Track the reason for failure
-      const maxIterations = 10;
+      const maxIterations = 5;  // Reduced from 10 to prevent excessive iterations per step
       const maxEmptyResponses = 3;
 
       while (continueLoop && iterationCount < maxIterations) {
@@ -1592,6 +2157,49 @@ ADAPTIVE PLANNING:
               break;
             }
 
+            // Check for redundant file operations
+            const fileOpCheck = this.checkFileOperation(content.name, content.input);
+            if (fileOpCheck.blocked) {
+              console.log(`[TaskExecutor] Blocking redundant file operation: ${content.name}`);
+              this.daemon.logEvent(this.task.id, 'tool_blocked', {
+                tool: content.name,
+                reason: 'redundant_file_operation',
+                message: fileOpCheck.reason,
+              });
+
+              // If we have a cached result (e.g., for directory listings), return it instead of an error
+              if (fileOpCheck.cachedResult) {
+                toolResults.push({
+                  type: 'tool_result',
+                  tool_use_id: content.id,
+                  content: fileOpCheck.cachedResult,
+                  is_error: false,
+                });
+              } else {
+                toolResults.push({
+                  type: 'tool_result',
+                  tool_use_id: content.id,
+                  content: JSON.stringify({
+                    error: fileOpCheck.reason,
+                    suggestion: fileOpCheck.suggestion,
+                    blocked: true,
+                  }),
+                  is_error: true,
+                });
+              }
+              continue;
+            }
+
+            // Infer missing parameters for weaker models
+            const inference = this.inferMissingParameters(content.name, content.input);
+            if (inference.modified) {
+              content.input = inference.input;
+              this.daemon.logEvent(this.task.id, 'parameter_inference', {
+                tool: content.name,
+                inference: inference.inference,
+              });
+            }
+
             this.daemon.logEvent(this.task.id, 'tool_call', {
               tool: content.name,
               input: content.input,
@@ -1614,6 +2222,9 @@ ADAPTIVE PLANNING:
               // Record this call for deduplication
               const resultStr = JSON.stringify(result);
               this.toolCallDeduplicator.recordCall(content.name, content.input, resultStr);
+
+              // Record file operation for tracking
+              this.recordFileOperation(content.name, content.input, result);
 
               // Check if the result indicates an error (some tools return error in result)
               if (result && result.success === false && result.error) {
@@ -1735,7 +2346,7 @@ ADAPTIVE PLANNING:
   async sendMessage(message: string): Promise<void> {
     this.daemon.updateTaskStatus(this.task.id, 'executing');
     this.daemon.logEvent(this.task.id, 'executing', { message: 'Processing follow-up message' });
-    this.daemon.logEvent(this.task.id, 'log', { message: `User: ${message}` });
+    this.daemon.logEvent(this.task.id, 'user_message', { message });
 
     // Ensure system prompt is set
     if (!this.systemPrompt) {
@@ -1746,8 +2357,12 @@ IMPORTANT INSTRUCTIONS:
 - Always use tools to accomplish tasks. Do not just describe what you would do - actually call the tools.
 - The delete_file tool has a built-in approval mechanism that will prompt the user. Just call the tool directly.
 - Do NOT ask "Should I proceed?" or wait for permission in text - the tools handle approvals automatically.
-- Be concise. When reading files, only read what you need.
-- After completing the work, provide a brief summary of what was done.`;
+- After completing the work, provide a brief summary of what was done.
+
+EFFICIENCY RULES (CRITICAL):
+- DO NOT read the same file multiple times. If you've already read a file, use the content from memory.
+- DO NOT create multiple versions of the same file. Pick ONE target file and work with it.
+- If a tool fails, try a DIFFERENT approach - don't retry the same approach multiple times.`;
     }
 
     const systemPromptTokens = estimateTokens(this.systemPrompt);
@@ -1762,14 +2377,21 @@ IMPORTANT INSTRUCTIONS:
     let continueLoop = true;
     let iterationCount = 0;
     let emptyResponseCount = 0;
-    const maxIterations = 10;
+    const maxIterations = 5;  // Reduced from 10 to prevent excessive iterations
     const maxEmptyResponses = 3;
 
     try {
+      // For follow-up messages, reset taskCompleted flag to allow processing
+      // The user explicitly sent a message, so we should handle it
+      if (this.taskCompleted) {
+        console.log(`[TaskExecutor] Processing follow-up message after task completion`);
+        this.taskCompleted = false;  // Allow this follow-up to be processed
+      }
+
       while (continueLoop && iterationCount < maxIterations) {
-        // Check if task is cancelled or completed
-        if (this.cancelled || this.taskCompleted) {
-          console.log(`[TaskExecutor] sendMessage loop terminated: cancelled=${this.cancelled}, completed=${this.taskCompleted}`);
+        // Only check cancelled - taskCompleted should not block follow-ups
+        if (this.cancelled) {
+          console.log(`[TaskExecutor] sendMessage loop terminated: cancelled=${this.cancelled}`);
           break;
         }
 
@@ -1914,6 +2536,49 @@ IMPORTANT INSTRUCTIONS:
               break;
             }
 
+            // Check for redundant file operations
+            const fileOpCheck = this.checkFileOperation(content.name, content.input);
+            if (fileOpCheck.blocked) {
+              console.log(`[TaskExecutor] Blocking redundant file operation: ${content.name}`);
+              this.daemon.logEvent(this.task.id, 'tool_blocked', {
+                tool: content.name,
+                reason: 'redundant_file_operation',
+                message: fileOpCheck.reason,
+              });
+
+              // If we have a cached result (e.g., for directory listings), return it instead of an error
+              if (fileOpCheck.cachedResult) {
+                toolResults.push({
+                  type: 'tool_result',
+                  tool_use_id: content.id,
+                  content: fileOpCheck.cachedResult,
+                  is_error: false,
+                });
+              } else {
+                toolResults.push({
+                  type: 'tool_result',
+                  tool_use_id: content.id,
+                  content: JSON.stringify({
+                    error: fileOpCheck.reason,
+                    suggestion: fileOpCheck.suggestion,
+                    blocked: true,
+                  }),
+                  is_error: true,
+                });
+              }
+              continue;
+            }
+
+            // Infer missing parameters for weaker models
+            const inference = this.inferMissingParameters(content.name, content.input);
+            if (inference.modified) {
+              content.input = inference.input;
+              this.daemon.logEvent(this.task.id, 'parameter_inference', {
+                tool: content.name,
+                inference: inference.inference,
+              });
+            }
+
             this.daemon.logEvent(this.task.id, 'tool_call', {
               tool: content.name,
               input: content.input,
@@ -1936,6 +2601,9 @@ IMPORTANT INSTRUCTIONS:
               // Record this call for deduplication
               const resultStr = JSON.stringify(result);
               this.toolCallDeduplicator.recordCall(content.name, content.input, resultStr);
+
+              // Record file operation for tracking
+              this.recordFileOperation(content.name, content.input, result);
 
               // Check if the result indicates an error (some tools return error in result)
               if (result && result.success === false && result.error) {

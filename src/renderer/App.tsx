@@ -371,14 +371,12 @@ export function App() {
               New version <strong>v{updateInfo.latestVersion}</strong> is available!
             </span>
             {updateInfo.releaseUrl ? (
-              <a
-                href={updateInfo.releaseUrl}
-                target="_blank"
-                rel="noopener noreferrer"
+              <button
                 className="update-banner-link"
+                onClick={() => window.electronAPI?.openExternal(updateInfo.releaseUrl!)}
               >
                 View Release
-              </a>
+              </button>
             ) : (
               <button
                 className="update-banner-link"

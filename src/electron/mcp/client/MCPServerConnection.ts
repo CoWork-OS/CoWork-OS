@@ -52,6 +52,7 @@ export class MCPServerConnection extends EventEmitter {
   private reconnectDelayMs: number;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private connectedAt: number | null = null;
+  private intentionalDisconnect = false;
 
   constructor(
     config: MCPServerConfig,
@@ -99,6 +100,8 @@ export class MCPServerConnection extends EventEmitter {
       return;
     }
 
+    // Reset intentional disconnect flag for new connection
+    this.intentionalDisconnect = false;
     this.setStatus('connecting');
 
     try {
@@ -136,6 +139,8 @@ export class MCPServerConnection extends EventEmitter {
    * Disconnect from the MCP server
    */
   async disconnect(): Promise<void> {
+    // Mark as intentional to prevent reconnection attempts
+    this.intentionalDisconnect = true;
     this.cancelReconnect();
 
     if (this.transport) {
@@ -226,7 +231,8 @@ export class MCPServerConnection extends EventEmitter {
 
     this.transport.onClose((error) => {
       console.log(`[MCPServerConnection] Transport closed for ${this.config.name}`, error);
-      if (this.status === 'connected') {
+      // Only trigger reconnection for unexpected disconnections
+      if (this.status === 'connected' && !this.intentionalDisconnect) {
         this.handleDisconnection(error);
       }
     });

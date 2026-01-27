@@ -239,6 +239,513 @@ Explain at a {{level}} level.`,
         ],
         enabled: true,
       },
+      // Development Skills
+      {
+        id: 'git-commit',
+        name: 'Git Commit',
+        description: 'Create a well-formatted commit message from staged changes',
+        icon: '📝',
+        category: 'Development',
+        prompt: `Please analyze the staged git changes and create a well-formatted commit message.
+
+Steps:
+1. Run \`git diff --staged\` to see the changes
+2. Analyze what was changed and why
+3. Create a commit message following conventional commits format:
+   - type(scope): description
+   - Types: feat, fix, docs, style, refactor, test, chore
+4. Include a brief body if the changes are complex
+5. Run \`git commit -m "message"\` with the generated message
+
+Make the commit message clear, concise, and descriptive.`,
+        parameters: [],
+        enabled: true,
+      },
+      {
+        id: 'debug-error',
+        name: 'Debug Error',
+        description: 'Analyze an error message and suggest fixes',
+        icon: '🐛',
+        category: 'Development',
+        prompt: `Please help me debug this error:
+
+{{error}}
+
+Steps:
+1. Analyze the error message and stack trace
+2. Identify the root cause
+3. Search for the relevant code in the project
+4. Suggest specific fixes with code examples
+5. Explain why the error occurred and how to prevent it
+
+If you need more context, ask me to provide relevant files.`,
+        parameters: [
+          {
+            name: 'error',
+            type: 'string',
+            description: 'The error message or stack trace',
+            required: true,
+          },
+        ],
+        enabled: true,
+      },
+      {
+        id: 'security-audit',
+        name: 'Security Audit',
+        description: 'Check code for common security vulnerabilities',
+        icon: '🔒',
+        category: 'Development',
+        prompt: `Please perform a security audit on {{path}}.
+
+Check for:
+- SQL injection vulnerabilities
+- XSS (Cross-Site Scripting) risks
+- Command injection possibilities
+- Insecure data handling
+- Hardcoded secrets or credentials
+- Insecure dependencies
+- Authentication/authorization issues
+- Input validation problems
+- Sensitive data exposure
+
+For each issue found:
+1. Describe the vulnerability
+2. Explain the potential impact
+3. Provide a fix with code example
+4. Rate severity (Critical/High/Medium/Low)`,
+        parameters: [
+          {
+            name: 'path',
+            type: 'string',
+            description: 'Path to file or folder to audit',
+            required: true,
+            default: '.',
+          },
+        ],
+        enabled: true,
+      },
+      {
+        id: 'add-documentation',
+        name: 'Add Documentation',
+        description: 'Generate JSDoc/docstrings for functions',
+        icon: '📚',
+        category: 'Development',
+        prompt: `Please add documentation to all functions in {{path}}.
+
+Requirements:
+- Use {{style}} documentation style
+- Document all parameters with types
+- Document return values
+- Add brief description of what each function does
+- Include @example where helpful
+- Note any side effects or exceptions
+
+Preserve existing documentation if it's accurate, enhance if needed.`,
+        parameters: [
+          {
+            name: 'path',
+            type: 'string',
+            description: 'Path to the file to document',
+            required: true,
+          },
+          {
+            name: 'style',
+            type: 'select',
+            description: 'Documentation style',
+            required: true,
+            default: 'JSDoc',
+            options: ['JSDoc', 'TSDoc', 'Python docstring', 'Javadoc', 'XML comments'],
+          },
+        ],
+        enabled: true,
+      },
+      {
+        id: 'convert-code',
+        name: 'Convert Code',
+        description: 'Convert code from one language to another',
+        icon: '🔄',
+        category: 'Development',
+        prompt: `Please convert the code in {{path}} from its current language to {{targetLanguage}}.
+
+Requirements:
+- Maintain the same functionality
+- Use idiomatic patterns for the target language
+- Preserve comments (translated if needed)
+- Handle language-specific differences appropriately
+- Add type annotations if the target language supports them
+
+Save the converted code to a new file with the appropriate extension.`,
+        parameters: [
+          {
+            name: 'path',
+            type: 'string',
+            description: 'Path to the source file',
+            required: true,
+          },
+          {
+            name: 'targetLanguage',
+            type: 'select',
+            description: 'Target programming language',
+            required: true,
+            default: 'TypeScript',
+            options: ['TypeScript', 'JavaScript', 'Python', 'Go', 'Rust', 'Java', 'C#', 'Ruby'],
+          },
+        ],
+        enabled: true,
+      },
+      // Project Skills
+      {
+        id: 'generate-readme',
+        name: 'Generate README',
+        description: 'Create a README.md for a project',
+        icon: '📄',
+        category: 'Project',
+        prompt: `Please analyze this project and generate a comprehensive README.md.
+
+Include:
+- Project title and description
+- Features list
+- Installation instructions
+- Usage examples
+- Configuration options
+- API documentation (if applicable)
+- Contributing guidelines
+- License information
+
+Analyze the codebase to understand:
+- What the project does
+- How to install dependencies
+- How to run/build the project
+- Key configuration files
+
+Save the README.md in the project root.`,
+        parameters: [],
+        enabled: true,
+      },
+      {
+        id: 'create-changelog',
+        name: 'Create Changelog',
+        description: 'Generate changelog from git commits',
+        icon: '📰',
+        category: 'Project',
+        prompt: `Please generate a CHANGELOG.md from the git history.
+
+Steps:
+1. Run \`git log --oneline\` to get recent commits
+2. Group commits by type (Features, Bug Fixes, etc.)
+3. Format according to Keep a Changelog standard
+4. Include version numbers if tags exist
+5. Add dates for each version
+
+Format:
+## [Version] - YYYY-MM-DD
+### Added
+### Changed
+### Fixed
+### Removed
+
+Generate for the last {{commits}} commits.`,
+        parameters: [
+          {
+            name: 'commits',
+            type: 'select',
+            description: 'Number of commits to include',
+            required: true,
+            default: '50',
+            options: ['20', '50', '100', 'all'],
+          },
+        ],
+        enabled: true,
+      },
+      {
+        id: 'dependency-check',
+        name: 'Dependency Check',
+        description: 'Audit dependencies for updates and vulnerabilities',
+        icon: '📦',
+        category: 'Project',
+        prompt: `Please audit the project dependencies.
+
+Steps:
+1. Identify the package manager (npm, yarn, pip, etc.)
+2. List all dependencies with current versions
+3. Check for available updates
+4. Run security audit if available (npm audit, pip-audit, etc.)
+5. Identify deprecated packages
+
+Report:
+- Outdated packages with latest versions
+- Security vulnerabilities with severity
+- Deprecated packages that need replacement
+- Recommendations for updates
+
+Be careful about breaking changes in major version updates.`,
+        parameters: [],
+        enabled: true,
+      },
+      {
+        id: 'project-structure',
+        name: 'Project Structure',
+        description: 'Analyze and explain project architecture',
+        icon: '🏗️',
+        category: 'Project',
+        prompt: `Please analyze this project's structure and architecture.
+
+Provide:
+1. **Directory Structure**: Visual tree of important directories
+2. **Architecture Overview**: How the project is organized
+3. **Key Files**: Entry points, configs, main modules
+4. **Data Flow**: How data moves through the system
+5. **Dependencies**: External libraries and their purposes
+6. **Design Patterns**: Patterns used in the codebase
+7. **Tech Stack**: Languages, frameworks, tools used
+
+Format as a clear, well-organized document that would help a new developer understand the project.`,
+        parameters: [],
+        enabled: true,
+      },
+      // Data & Documents Skills
+      {
+        id: 'analyze-csv',
+        name: 'Analyze CSV',
+        description: 'Load a CSV and provide insights',
+        icon: '📊',
+        category: 'Data',
+        prompt: `Please analyze the CSV file at {{path}}.
+
+Provide:
+1. **Overview**: Number of rows, columns, file size
+2. **Columns**: List each column with data type and sample values
+3. **Statistics**: For numeric columns - min, max, mean, median
+4. **Missing Data**: Identify columns with null/empty values
+5. **Patterns**: Any notable patterns or anomalies
+6. **Insights**: Key findings and observations
+
+If the file is large, analyze a representative sample.
+Create visualizations or summary tables if helpful.`,
+        parameters: [
+          {
+            name: 'path',
+            type: 'string',
+            description: 'Path to the CSV file',
+            required: true,
+          },
+        ],
+        enabled: true,
+      },
+      {
+        id: 'compare-files',
+        name: 'Compare Files',
+        description: 'Compare two files and show differences',
+        icon: '⚖️',
+        category: 'Data',
+        prompt: `Please compare these two files and show the differences:
+
+File 1: {{file1}}
+File 2: {{file2}}
+
+Provide:
+1. **Summary**: High-level overview of differences
+2. **Added**: Lines/sections only in File 2
+3. **Removed**: Lines/sections only in File 1
+4. **Modified**: Lines that changed between files
+5. **Statistics**: Number of additions, deletions, modifications
+
+For code files, highlight semantic differences (not just whitespace).
+For data files, compare structure and content.`,
+        parameters: [
+          {
+            name: 'file1',
+            type: 'string',
+            description: 'Path to the first file',
+            required: true,
+          },
+          {
+            name: 'file2',
+            type: 'string',
+            description: 'Path to the second file',
+            required: true,
+          },
+        ],
+        enabled: true,
+      },
+      {
+        id: 'proofread',
+        name: 'Proofread',
+        description: 'Check document for grammar and clarity',
+        icon: '✏️',
+        category: 'Writing',
+        prompt: `Please proofread the document at {{path}}.
+
+Check for:
+- Spelling errors
+- Grammar mistakes
+- Punctuation issues
+- Awkward phrasing
+- Unclear sentences
+- Consistency (terminology, formatting)
+- Tone appropriateness
+
+For each issue:
+1. Quote the original text
+2. Explain the problem
+3. Suggest a correction
+
+At the end, provide:
+- Overall quality score (1-10)
+- Summary of common issues
+- General improvement suggestions`,
+        parameters: [
+          {
+            name: 'path',
+            type: 'string',
+            description: 'Path to the document',
+            required: true,
+          },
+        ],
+        enabled: true,
+      },
+      {
+        id: 'translate',
+        name: 'Translate',
+        description: 'Translate content to another language',
+        icon: '🌐',
+        category: 'Writing',
+        prompt: `Please translate the content in {{path}} to {{language}}.
+
+Requirements:
+- Maintain the original meaning and tone
+- Preserve formatting (markdown, code blocks, etc.)
+- Keep technical terms consistent
+- Adapt idioms appropriately for the target language
+- Preserve any code snippets unchanged
+
+Save the translated content to a new file with the language code suffix (e.g., README_es.md).`,
+        parameters: [
+          {
+            name: 'path',
+            type: 'string',
+            description: 'Path to the file to translate',
+            required: true,
+          },
+          {
+            name: 'language',
+            type: 'select',
+            description: 'Target language',
+            required: true,
+            default: 'Spanish',
+            options: ['Spanish', 'French', 'German', 'Chinese', 'Japanese', 'Korean', 'Portuguese', 'Italian', 'Russian', 'Arabic'],
+          },
+        ],
+        enabled: true,
+      },
+      // Utility Skills
+      {
+        id: 'extract-todos',
+        name: 'Extract TODOs',
+        description: 'Find all TODO/FIXME comments in codebase',
+        icon: '📌',
+        category: 'Utilities',
+        prompt: `Please find all TODO, FIXME, HACK, and XXX comments in the codebase.
+
+Search in {{path}} and provide:
+1. **Summary**: Total count by type
+2. **By File**: Group findings by file
+3. **By Priority**: If priority markers exist (e.g., TODO(high))
+4. **Old TODOs**: Identify TODOs that might be stale
+
+For each TODO:
+- File path and line number
+- The full comment text
+- Surrounding context if helpful
+
+Suggest which TODOs should be prioritized based on:
+- Security implications
+- Bug-related issues
+- Technical debt impact`,
+        parameters: [
+          {
+            name: 'path',
+            type: 'string',
+            description: 'Path to search',
+            required: true,
+            default: '.',
+          },
+        ],
+        enabled: true,
+      },
+      {
+        id: 'clean-imports',
+        name: 'Clean Imports',
+        description: 'Remove unused imports from files',
+        icon: '🧹',
+        category: 'Utilities',
+        prompt: `Please clean up imports in {{path}}.
+
+Tasks:
+1. Remove unused imports
+2. Sort imports alphabetically
+3. Group imports by type:
+   - Built-in/standard library
+   - External packages
+   - Internal/local imports
+4. Remove duplicate imports
+5. Fix import paths if needed
+
+Apply changes and report:
+- Number of imports removed
+- Files modified
+- Any potential issues found`,
+        parameters: [
+          {
+            name: 'path',
+            type: 'string',
+            description: 'Path to file or folder',
+            required: true,
+            default: '.',
+          },
+        ],
+        enabled: true,
+      },
+      {
+        id: 'rename-symbol',
+        name: 'Rename Symbol',
+        description: 'Rename a variable/function across files',
+        icon: '🏷️',
+        category: 'Utilities',
+        prompt: `Please rename "{{oldName}}" to "{{newName}}" across the project.
+
+Steps:
+1. Find all occurrences of the symbol
+2. Distinguish between:
+   - The actual symbol (function, variable, class)
+   - String literals containing the name
+   - Comments mentioning the name
+3. Rename only the actual symbol references
+4. Update imports/exports as needed
+5. Check for naming conflicts
+
+Report:
+- Files modified
+- Number of replacements
+- Any manual review needed (strings, comments)
+
+Be careful not to rename unrelated code that happens to have the same name.`,
+        parameters: [
+          {
+            name: 'oldName',
+            type: 'string',
+            description: 'Current name of the symbol',
+            required: true,
+          },
+          {
+            name: 'newName',
+            type: 'string',
+            description: 'New name for the symbol',
+            required: true,
+          },
+        ],
+        enabled: true,
+      },
     ];
 
     for (const skill of sampleSkills) {

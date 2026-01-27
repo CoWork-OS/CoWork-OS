@@ -211,13 +211,14 @@ interface MainContentProps {
   onSendMessage: (message: string) => void;
   onCreateTask?: (title: string, prompt: string, options?: GoalModeOptions) => void;
   onChangeWorkspace?: () => void;
+  onOpenSettings?: () => void;
   onStopTask?: () => void;
   selectedModel: string;
   availableModels: LLMModelInfo[];
   onModelChange: (model: string) => void;
 }
 
-export function MainContent({ task, workspace, events, onSendMessage, onCreateTask, onChangeWorkspace, onStopTask, selectedModel, availableModels, onModelChange }: MainContentProps) {
+export function MainContent({ task, workspace, events, onSendMessage, onCreateTask, onChangeWorkspace, onOpenSettings, onStopTask, selectedModel, availableModels, onModelChange }: MainContentProps) {
   const [pendingApproval, setPendingApproval] = useState<ApprovalRequest | null>(null);
   const [inputValue, setInputValue] = useState('');
   // Goal Mode state
@@ -619,31 +620,44 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
                     >
                       <span>/</span>
                     </button>
-                    {showSkillsMenu && customSkills.length > 0 && (
+                    {showSkillsMenu && (
                       <div className="skills-dropdown">
                         <div className="skills-dropdown-header">Custom Skills</div>
-                        <div className="skills-dropdown-list">
-                          {customSkills.map(skill => (
-                            <button
-                              key={skill.id}
-                              className="skills-dropdown-item"
-                              onClick={() => handleSkillSelect(skill)}
-                            >
-                              <span className="skills-dropdown-icon">{skill.icon}</span>
-                              <div className="skills-dropdown-info">
-                                <span className="skills-dropdown-name">{skill.name}</span>
-                                <span className="skills-dropdown-desc">{skill.description}</span>
-                              </div>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    {showSkillsMenu && customSkills.length === 0 && (
-                      <div className="skills-dropdown">
-                        <div className="skills-dropdown-empty">
-                          No custom skills found.<br />
-                          Create skills in Settings.
+                        {customSkills.length > 0 ? (
+                          <div className="skills-dropdown-list">
+                            {customSkills.map(skill => (
+                              <button
+                                key={skill.id}
+                                className="skills-dropdown-item"
+                                onClick={() => handleSkillSelect(skill)}
+                              >
+                                <span className="skills-dropdown-icon">{skill.icon}</span>
+                                <div className="skills-dropdown-info">
+                                  <span className="skills-dropdown-name">{skill.name}</span>
+                                  <span className="skills-dropdown-desc">{skill.description}</span>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="skills-dropdown-empty">
+                            No custom skills yet.
+                          </div>
+                        )}
+                        <div className="skills-dropdown-footer">
+                          <button
+                            className="skills-dropdown-create"
+                            onClick={() => {
+                              setShowSkillsMenu(false);
+                              onOpenSettings?.();
+                            }}
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <line x1="12" y1="5" x2="12" y2="19" />
+                              <line x1="5" y1="12" x2="19" y2="12" />
+                            </svg>
+                            <span>Create New Skill</span>
+                          </button>
                         </div>
                       </div>
                     )}

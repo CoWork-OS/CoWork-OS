@@ -410,6 +410,7 @@ export function App() {
               onSendMessage={handleSendMessage}
               onCreateTask={handleCreateTask}
               onChangeWorkspace={() => setCurrentView('workspace-selector')}
+              onOpenSettings={() => setCurrentView('settings')}
               onStopTask={handleCancelTask}
               selectedModel={selectedModel}
               availableModels={availableModels}

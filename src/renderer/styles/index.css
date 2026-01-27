@@ -3044,11 +3044,56 @@ button {
 }
 
 .skills-dropdown-empty {
-  padding: 24px 16px;
+  padding: 16px;
   text-align: center;
   font-size: 12px;
   color: var(--color-text-muted);
   line-height: 1.5;
+}
+
+.skills-dropdown-footer {
+  padding: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.theme-light .skills-dropdown-footer {
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.skills-dropdown-create {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px dashed rgba(255, 255, 255, 0.15);
+  border-radius: var(--radius-md);
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.skills-dropdown-create:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.theme-light .skills-dropdown-create {
+  background: rgba(0, 0, 0, 0.02);
+  border: 1px dashed rgba(0, 0, 0, 0.15);
+}
+
+.theme-light .skills-dropdown-create:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.skills-dropdown-create svg {
+  flex-shrink: 0;
 }
 
 /* ==================== RIGHT PANEL UPDATES ==================== */

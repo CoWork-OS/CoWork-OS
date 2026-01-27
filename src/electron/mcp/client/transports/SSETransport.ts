@@ -7,7 +7,7 @@
  */
 
 import { EventEmitter } from 'events';
-import EventSource from 'eventsource';
+import { EventSource } from 'eventsource';
 import {
   MCPTransport,
   MCPServerConfig,

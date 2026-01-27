@@ -52,7 +52,7 @@ export class MCPServerConnection extends EventEmitter {
   private reconnectAttempts = 0;
   private maxReconnectAttempts: number;
   private reconnectDelayMs: number;
-  private reconnectTimer: NodeJS.Timeout | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private connectedAt: number | null = null;
   private intentionalDisconnect = false;
 

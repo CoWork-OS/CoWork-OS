@@ -238,6 +238,14 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
   const [selectedSkillForParams, setSelectedSkillForParams] = useState<CustomSkill | null>(null);
   const skillsMenuRef = useRef<HTMLDivElement>(null);
 
+  // Debug: Log whenever selectedSkillForParams changes
+  useEffect(() => {
+    console.log('[MainContent] selectedSkillForParams changed to:', selectedSkillForParams?.name ?? 'null');
+  }, [selectedSkillForParams]);
+
+  // Debug: Log on every render
+  console.log('[MainContent] RENDER - selectedSkillForParams:', selectedSkillForParams?.name ?? 'null');
+
   // Load app version
   useEffect(() => {
     window.electronAPI.getAppVersion()

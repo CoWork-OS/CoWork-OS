@@ -32,16 +32,26 @@ export class AnthropicProvider implements LLMProvider {
 
     try {
       console.log(`[Anthropic] Calling API with model: ${request.model}`);
-      const response = await this.client.messages.create({
-        model: request.model,
-        max_tokens: request.maxTokens,
-        system: request.system,
-        messages,
-        ...(tools && { tools }),
-      });
+      const response = await this.client.messages.create(
+        {
+          model: request.model,
+          max_tokens: request.maxTokens,
+          system: request.system,
+          messages,
+          ...(tools && { tools }),
+        },
+        // Pass abort signal to allow cancellation
+        request.signal ? { signal: request.signal } : undefined
+      );
 
       return this.convertResponse(response);
     } catch (error: any) {
+      // Handle abort errors gracefully
+      if (error.name === 'AbortError' || error.message?.includes('aborted')) {
+        console.log(`[Anthropic] Request aborted`);
+        throw new Error('Request cancelled');
+      }
+
       console.error(`[Anthropic] API error:`, {
         status: error.status,
         message: error.message,

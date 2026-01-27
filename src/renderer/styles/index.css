@@ -38,6 +38,7 @@
   --color-purple: #a78bfa;
   --sidebar-width: 240px;
   --right-panel-width: 280px;
+  --header-height: 56px;
   --radius-sm: 8px;
   --radius-md: 10px;
   --radius-lg: 14px;
@@ -319,23 +320,16 @@ a,
   position: relative;
 }
 
-.sidebar::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: var(--gradient-glossy);
-  pointer-events: none;
-}
+/* Removed: double-border effect - using single border only */
 
 .sidebar-tabs {
   display: flex;
-  padding: 12px 12px 0;
+  padding: 0 12px;
   gap: 4px;
   -webkit-app-region: drag;
-  padding-top: 40px;
+  height: var(--header-height);
+  align-items: center;
+  border-bottom: 1px solid var(--color-border-subtle);
 }
 
 .sidebar-tab {
@@ -664,25 +658,16 @@ a,
   position: relative;
 }
 
-.main-content::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: rgba(255, 255, 255, 0.05);
-  pointer-events: none;
-}
+/* Removed: double-border effect - using single border only */
 
 .main-header {
-  padding: 12px 20px;
+  padding: 0 20px;
   border-bottom: 1px solid var(--color-border-subtle);
   display: flex;
   align-items: center;
   gap: 12px;
   -webkit-app-region: drag;
-  min-height: 52px;
+  height: var(--header-height);
   background: rgba(0, 0, 0, 0.1);
 }
 
@@ -710,6 +695,7 @@ a,
 
 .task-content {
   max-width: 800px;
+  margin: 0 auto;
 }
 
 .task-section {
@@ -774,9 +760,10 @@ a,
 }
 
 .timeline-event {
-  display: flex;
+  display: grid;
+  grid-template-columns: 20px 1fr;
   gap: 12px;
-  padding: 12px 0;
+  padding: 10px 0;
 }
 
 .event-indicator {
@@ -803,6 +790,16 @@ a,
 
 .event-dot.error {
   background: var(--color-error);
+}
+
+.event-dot.cancelled {
+  background: var(--color-warning, #f59e0b);
+}
+
+.event-details.cancelled {
+  color: var(--color-warning, #f59e0b);
+  background: rgba(245, 158, 11, 0.1);
+  border-color: rgba(245, 158, 11, 0.3);
 }
 
 .event-line {
@@ -858,9 +855,12 @@ a,
 }
 
 .event-time {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--color-text-muted);
   flex-shrink: 0;
+  opacity: 0.6;
+  min-width: 65px;
+  text-align: right;
 }
 
 .event-details {
@@ -1058,6 +1058,7 @@ a,
 
 .input-container {
   max-width: 800px;
+  margin: 0 auto;
   background: var(--color-bg-input);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
@@ -1065,8 +1066,8 @@ a,
 
 .input-row {
   display: flex;
-  align-items: flex-end;
-  padding: 12px 16px;
+  align-items: center;
+  padding: 10px 16px;
   gap: 12px;
 }
 
@@ -1090,8 +1091,9 @@ a,
   max-height: 200px;
   overflow-y: auto;
   line-height: 1.5;
-  padding: 0;
+  padding: 8px 0;
   font-family: inherit;
+  align-self: center;
 }
 
 .input-textarea::-webkit-scrollbar {
@@ -1140,7 +1142,8 @@ a,
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 6px 10px;
+  padding: 0 10px;
+  height: 36px;
   background: transparent;
   border: none;
   color: var(--color-text-secondary);
@@ -1414,8 +1417,8 @@ a,
 }
 
 .stop-btn-spinner .stop-icon {
-  width: 18px;
-  height: 18px;
+  width: 26px;
+  height: 26px;
   color: #dc3545;
   z-index: 1;
 }
@@ -1499,11 +1502,15 @@ a,
   color: var(--color-text-primary);
 }
 
+/* Disclaimer moved outside input container */
 .input-disclaimer {
   text-align: center;
-  padding: 8px 16px;
-  font-size: 11px;
+  padding: 10px 16px 0;
+  font-size: 10px;
   color: var(--color-text-muted);
+  opacity: 0.7;
+  max-width: 800px;
+  margin: 0 auto;
 }
 
 /* ==================== RIGHT PANEL ==================== */
@@ -1520,16 +1527,7 @@ a,
   position: relative;
 }
 
-.right-panel::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  bottom: 0;
-  width: 1px;
-  background: rgba(255, 255, 255, 0.03);
-  pointer-events: none;
-}
+/* Removed: double-border effect - using single border only */
 
 .right-panel-section {
   border-bottom: 1px solid var(--color-border-subtle);
@@ -1539,7 +1537,8 @@ a,
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 16px;
+  padding: 0 16px;
+  height: var(--header-height);
   cursor: pointer;
 }
 
@@ -1566,10 +1565,11 @@ a,
 
 /* Progress Items */
 .progress-item {
-  display: flex;
-  align-items: flex-start;
+  display: grid;
+  grid-template-columns: 20px 1fr;
   gap: 10px;
   padding: 8px 0;
+  align-items: start;
 }
 
 .progress-check {
@@ -1609,6 +1609,15 @@ a,
 .progress-text.completed {
   text-decoration: line-through;
   color: var(--color-text-muted);
+}
+
+/* Active progress item highlight */
+.progress-item.active {
+  position: relative;
+  background: var(--color-bg-hover);
+  margin: 0 -16px;
+  padding: 8px 16px 8px 14px;
+  border-left: 2px solid var(--color-accent);
 }
 
 /* Working Folder */
@@ -2406,9 +2415,10 @@ button {
 }
 
 /* ==================== SCROLLBAR ==================== */
+/* Subtle scrollbars - only visible on hover */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 4px;
+  height: 4px;
 }
 
 ::-webkit-scrollbar-track {
@@ -2416,12 +2426,18 @@ button {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--color-border);
-  border-radius: 3px;
+  background: transparent;
+  border-radius: 2px;
+  transition: background 0.2s ease;
+}
+
+*:hover > ::-webkit-scrollbar-thumb,
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.08);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-text-muted);
+  background: rgba(255, 255, 255, 0.15);
 }
 
 /* ==================== LOADING SPINNER ==================== */
@@ -4800,19 +4816,19 @@ button {
   font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
 }
 
-/* Clickable File Paths */
+/* Clickable File Paths - underline on hover only */
 .clickable-file-path {
   cursor: pointer;
-  text-decoration: underline;
-  text-decoration-style: dotted;
-  text-underline-offset: 2px;
+  text-decoration: none;
   transition: color 0.15s ease, text-decoration-color 0.15s ease;
 }
 
 .clickable-file-path:hover {
   color: var(--color-accent);
+  text-decoration: underline;
   text-decoration-style: solid;
   text-decoration-color: var(--color-accent);
+  text-underline-offset: 2px;
 }
 
 .clickable-file-path:active {

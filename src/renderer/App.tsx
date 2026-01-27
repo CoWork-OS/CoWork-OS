@@ -146,6 +146,7 @@ export function App() {
         'task_completed': 'completed',
         'follow_up_completed': 'completed',
         'error': 'failed',
+        'task_cancelled': 'cancelled',
       };
 
       const newStatus = statusMap[event.type];

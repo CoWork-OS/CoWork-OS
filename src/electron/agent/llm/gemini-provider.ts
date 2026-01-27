@@ -48,24 +48,34 @@ export class GeminiProvider implements LLMProvider {
     try {
       console.log(`[Gemini] Calling API with model: ${request.model || this.defaultModel}`);
 
-      const result = await model.generateContent({
-        contents,
-        generationConfig: {
-          maxOutputTokens: request.maxTokens,
-        },
-        ...(tools && {
-          tools,
-          toolConfig: {
-            functionCallingConfig: {
-              mode: FunctionCallingMode.AUTO,
-            },
+      const result = await model.generateContent(
+        {
+          contents,
+          generationConfig: {
+            maxOutputTokens: request.maxTokens,
           },
-        }),
-      });
+          ...(tools && {
+            tools,
+            toolConfig: {
+              functionCallingConfig: {
+                mode: FunctionCallingMode.AUTO,
+              },
+            },
+          }),
+        },
+        // Pass abort signal to allow cancellation
+        request.signal ? { signal: request.signal } : undefined
+      );
 
       const response = result.response;
       return this.convertResponse(response);
     } catch (error: any) {
+      // Handle abort errors gracefully
+      if (error.name === 'AbortError' || error.message?.includes('aborted')) {
+        console.log(`[Gemini] Request aborted`);
+        throw new Error('Request cancelled');
+      }
+
       console.error(`[Gemini] API error:`, {
         message: error.message,
         status: error.status,

@@ -34,6 +34,8 @@ export function TaskTimeline({ events }: TaskTimelineProps) {
         return '🗑️';
       case 'error':
         return '❌';
+      case 'task_cancelled':
+        return '🛑';
       case 'approval_requested':
         return '⚠️';
       default:
@@ -63,6 +65,8 @@ export function TaskTimeline({ events }: TaskTimelineProps) {
         return `Deleted: ${event.payload.path}`;
       case 'error':
         return 'Error occurred';
+      case 'task_cancelled':
+        return 'Task stopped by user';
       case 'approval_requested':
         return `Approval needed: ${event.payload.approval?.description}`;
       case 'log':
@@ -103,6 +107,12 @@ export function TaskTimeline({ events }: TaskTimelineProps) {
         return (
           <div className="event-details error">
             {event.payload.error || event.payload.message}
+          </div>
+        );
+      case 'task_cancelled':
+        return (
+          <div className="event-details cancelled">
+            {event.payload.message || 'Execution was stopped'}
           </div>
         );
       default:

@@ -21,8 +21,19 @@ import { calculateCost, formatCost } from './llm/pricing';
 // Timeout for LLM API calls (2 minutes)
 const LLM_TIMEOUT_MS = 2 * 60 * 1000;
 
+// Per-step timeout (5 minutes max per step)
+const STEP_TIMEOUT_MS = 5 * 60 * 1000;
+
+// Per-tool execution timeout (30 seconds)
+const TOOL_TIMEOUT_MS = 30 * 1000;
+
 // Maximum consecutive failures for the same tool before giving up
 const MAX_TOOL_FAILURES = 2;
+
+// Exponential backoff configuration
+const INITIAL_BACKOFF_MS = 1000; // Start with 1 second
+const MAX_BACKOFF_MS = 30000;    // Cap at 30 seconds
+const BACKOFF_MULTIPLIER = 2;   // Double each time
 
 // Patterns that indicate non-retryable errors (quota, rate limits, etc.)
 // These errors should immediately disable the tool
@@ -98,29 +109,283 @@ function isAskingQuestion(text: string): boolean {
 }
 
 /**
+ * Tracks recent tool calls to detect and prevent duplicate/repetitive calls
+ * This prevents the agent from getting stuck in loops calling the same tool
+ *
+ * Features:
+ * - Exact duplicate detection (same tool + same params)
+ * - Semantic duplicate detection (same tool + similar params, e.g., filename variants)
+ * - Rate limiting per tool
+ */
+class ToolCallDeduplicator {
+  private recentCalls: Map<string, { count: number; lastCallTime: number; lastResult?: string }> = new Map();
+  // Track semantic patterns (tool name -> list of recent inputs for pattern detection)
+  private semanticPatterns: Map<string, Array<{ input: any; time: number }>> = new Map();
+  // Rate limiting: track calls per tool per minute
+  private rateLimitCounters: Map<string, { count: number; windowStart: number }> = new Map();
+
+  private readonly maxDuplicates: number;
+  private readonly windowMs: number;
+  private readonly maxSemanticSimilar: number;
+  private readonly rateLimit: number; // Max calls per tool per minute
+
+  constructor(maxDuplicates = 2, windowMs = 60000, maxSemanticSimilar = 4, rateLimit = 20) {
+    this.maxDuplicates = maxDuplicates;
+    this.windowMs = windowMs;
+    this.maxSemanticSimilar = maxSemanticSimilar;
+    this.rateLimit = rateLimit;
+  }
+
+  /**
+   * Generate a hash key for a tool call based on name and input
+   */
+  private getCallKey(toolName: string, input: any): string {
+    // Normalize input by sorting keys for consistent hashing
+    const normalizedInput = JSON.stringify(input, Object.keys(input || {}).sort());
+    return `${toolName}:${normalizedInput}`;
+  }
+
+  /**
+   * Extract semantic signature from input for pattern matching
+   * This normalizes filenames, paths, etc. to detect "same operation, different target"
+   */
+  private getSemanticSignature(toolName: string, input: any): string {
+    if (!input) return toolName;
+
+    // For file operations, normalize the filename to detect variants
+    if (toolName === 'create_document' || toolName === 'write_file') {
+      const filename = input.filename || input.path || '';
+      // Extract base name without version suffixes like _v2.4, _COMPLETE, _Final, etc.
+      const baseName = filename
+        .replace(/[_-]v?\d+(\.\d+)?/gi, '') // Remove version numbers
+        .replace(/[_-](complete|final|updated|new|copy|backup|draft)/gi, '') // Remove common suffixes
+        .replace(/\.[^.]+$/, ''); // Remove extension
+      return `${toolName}:file:${baseName}`;
+    }
+
+    if (toolName === 'copy_file') {
+      const destPath = input.destPath || input.destination || '';
+      const baseName = destPath
+        .replace(/[_-]v?\d+(\.\d+)?/gi, '')
+        .replace(/[_-](complete|final|updated|new|copy|backup|draft)/gi, '')
+        .replace(/\.[^.]+$/, '');
+      return `${toolName}:copy:${baseName}`;
+    }
+
+    // For read operations, just use tool name (reading same file repeatedly is OK)
+    if (toolName === 'read_file' || toolName === 'list_directory') {
+      return `${toolName}:${input.path || ''}`;
+    }
+
+    // Default: use tool name only for semantic grouping
+    return toolName;
+  }
+
+  /**
+   * Check rate limit for a tool
+   */
+  private checkRateLimit(toolName: string): { exceeded: boolean; reason?: string } {
+    const now = Date.now();
+    const counter = this.rateLimitCounters.get(toolName);
+
+    if (!counter || now - counter.windowStart > 60000) {
+      // New window or first call
+      return { exceeded: false };
+    }
+
+    if (counter.count >= this.rateLimit) {
+      return {
+        exceeded: true,
+        reason: `Rate limit exceeded: "${toolName}" called ${counter.count} times in the last minute. Max allowed: ${this.rateLimit}/min.`,
+      };
+    }
+
+    return { exceeded: false };
+  }
+
+  /**
+   * Check for semantic duplicates (similar operations with slight variations)
+   */
+  private checkSemanticDuplicate(toolName: string, input: any): { isDuplicate: boolean; reason?: string } {
+    const now = Date.now();
+    const signature = this.getSemanticSignature(toolName, input);
+
+    // Get recent calls with this semantic signature
+    const patterns = this.semanticPatterns.get(signature) || [];
+
+    // Clean up old entries
+    const recentPatterns = patterns.filter(p => now - p.time <= this.windowMs);
+    this.semanticPatterns.set(signature, recentPatterns);
+
+    // Check if we have too many semantically similar calls
+    if (recentPatterns.length >= this.maxSemanticSimilar) {
+      return {
+        isDuplicate: true,
+        reason: `Detected ${recentPatterns.length + 1} semantically similar "${toolName}" calls within ${this.windowMs / 1000}s. ` +
+          `This appears to be a retry loop with slight parameter variations. ` +
+          `Please try a different approach or check if the previous operation actually succeeded.`,
+      };
+    }
+
+    return { isDuplicate: false };
+  }
+
+  /**
+   * Check if a tool call is a duplicate and should be blocked
+   * @returns Object with isDuplicate flag and optional cached result
+   */
+  checkDuplicate(toolName: string, input: any): { isDuplicate: boolean; reason?: string; cachedResult?: string } {
+    const now = Date.now();
+
+    // 1. Check rate limit first
+    const rateLimitCheck = this.checkRateLimit(toolName);
+    if (rateLimitCheck.exceeded) {
+      return { isDuplicate: true, reason: rateLimitCheck.reason };
+    }
+
+    // 2. Check exact duplicate
+    const callKey = this.getCallKey(toolName, input);
+
+    // Clean up old entries outside the time window
+    for (const [key, value] of this.recentCalls.entries()) {
+      if (now - value.lastCallTime > this.windowMs) {
+        this.recentCalls.delete(key);
+      }
+    }
+
+    const existing = this.recentCalls.get(callKey);
+    if (existing && now - existing.lastCallTime <= this.windowMs && existing.count >= this.maxDuplicates) {
+      return {
+        isDuplicate: true,
+        reason: `Tool "${toolName}" called ${existing.count + 1} times with identical parameters within ${this.windowMs / 1000}s. This appears to be a duplicate call.`,
+        cachedResult: existing.lastResult,
+      };
+    }
+
+    // 3. Check semantic duplicate (for tools prone to retry loops)
+    const semanticTools = ['create_document', 'write_file', 'copy_file', 'create_spreadsheet', 'create_presentation'];
+    if (semanticTools.includes(toolName)) {
+      const semanticCheck = this.checkSemanticDuplicate(toolName, input);
+      if (semanticCheck.isDuplicate) {
+        return semanticCheck;
+      }
+    }
+
+    return { isDuplicate: false };
+  }
+
+  /**
+   * Record a tool call (call this after checking for duplicates)
+   */
+  recordCall(toolName: string, input: any, result?: string): void {
+    const now = Date.now();
+
+    // Record exact call
+    const callKey = this.getCallKey(toolName, input);
+    const existing = this.recentCalls.get(callKey);
+
+    if (existing && now - existing.lastCallTime <= this.windowMs) {
+      existing.count++;
+      existing.lastCallTime = now;
+      if (result) {
+        existing.lastResult = result;
+      }
+    } else {
+      this.recentCalls.set(callKey, {
+        count: 1,
+        lastCallTime: now,
+        lastResult: result,
+      });
+    }
+
+    // Record semantic pattern
+    const signature = this.getSemanticSignature(toolName, input);
+    const patterns = this.semanticPatterns.get(signature) || [];
+    patterns.push({ input, time: now });
+    this.semanticPatterns.set(signature, patterns);
+
+    // Update rate limit counter
+    const counter = this.rateLimitCounters.get(toolName);
+    if (!counter || now - counter.windowStart > 60000) {
+      this.rateLimitCounters.set(toolName, { count: 1, windowStart: now });
+    } else {
+      counter.count++;
+    }
+  }
+
+  /**
+   * Reset the deduplicator (e.g., when starting a new step)
+   */
+  reset(): void {
+    this.recentCalls.clear();
+    this.semanticPatterns.clear();
+    // Don't reset rate limit counters - they should persist across steps
+  }
+
+  /**
+   * Check if a tool is idempotent (safe to cache/skip duplicates)
+   */
+  static isIdempotentTool(toolName: string): boolean {
+    const idempotentTools = [
+      'read_file',
+      'list_directory',
+      'search_files',
+      'search_code',
+      'get_file_info',
+      'web_search',
+    ];
+    return idempotentTools.includes(toolName);
+  }
+}
+
+/**
  * Tracks tool failures to implement circuit breaker pattern
+ * Tools are automatically re-enabled after a cooldown period
+ *
+ * IMPORTANT: This now tracks ALL consecutive failures, including input-dependent ones.
+ * If the LLM consistently fails to provide correct parameters, it's a sign it's stuck
+ * in a loop and we should disable the tool to force a different approach.
  */
 class ToolFailureTracker {
   private failures: Map<string, { count: number; lastError: string }> = new Map();
-  private disabledTools: Set<string> = new Set();
+  // Separate tracker for input-dependent errors (higher threshold before disabling)
+  private inputDependentFailures: Map<string, { count: number; lastError: string }> = new Map();
+  private disabledTools: Map<string, { disabledAt: number; reason: string }> = new Map();
+  private readonly cooldownMs: number = 5 * 60 * 1000; // 5 minutes cooldown
+  // Higher threshold for input-dependent errors since LLM might eventually get it right
+  private readonly maxInputDependentFailures: number = 4;
 
   /**
    * Record a tool failure
    * @returns true if the tool should be disabled (circuit broken)
    */
   recordFailure(toolName: string, errorMessage: string): boolean {
-    // Input-dependent errors (file not found, etc.) should NOT count towards circuit breaker
-    // These are normal operational errors, not tool failures
-    if (isInputDependentError(errorMessage)) {
-      console.log(`[ToolFailureTracker] Ignoring input-dependent error for ${toolName}: ${errorMessage.substring(0, 80)}`);
-      return false;
-    }
-
     // If it's a non-retryable error (quota, rate limit), disable immediately
     if (isNonRetryableError(errorMessage)) {
-      this.disabledTools.add(toolName);
+      this.disabledTools.set(toolName, { disabledAt: Date.now(), reason: errorMessage });
       console.log(`[ToolFailureTracker] Tool ${toolName} disabled due to non-retryable error: ${errorMessage.substring(0, 100)}`);
       return true;
+    }
+
+    // Input-dependent errors (missing params, file not found, etc.)
+    // These are tracked separately with a higher threshold
+    if (isInputDependentError(errorMessage)) {
+      const existing = this.inputDependentFailures.get(toolName) || { count: 0, lastError: '' };
+      existing.count++;
+      existing.lastError = errorMessage;
+      this.inputDependentFailures.set(toolName, existing);
+
+      console.log(`[ToolFailureTracker] Input-dependent error for ${toolName} (${existing.count}/${this.maxInputDependentFailures}): ${errorMessage.substring(0, 80)}`);
+
+      // If LLM keeps making the same mistake, disable the tool
+      if (existing.count >= this.maxInputDependentFailures) {
+        const reason = `LLM failed to provide correct parameters ${existing.count} times: ${errorMessage}`;
+        this.disabledTools.set(toolName, { disabledAt: Date.now(), reason });
+        console.log(`[ToolFailureTracker] Tool ${toolName} disabled after ${existing.count} consecutive input-dependent failures`);
+        return true;
+      }
+
+      return false;
     }
 
     // Track other failures (systemic issues)
@@ -131,7 +396,7 @@ class ToolFailureTracker {
 
     // If we've hit max failures for systemic issues, disable the tool
     if (existing.count >= MAX_TOOL_FAILURES) {
-      this.disabledTools.add(toolName);
+      this.disabledTools.set(toolName, { disabledAt: Date.now(), reason: errorMessage });
       console.log(`[ToolFailureTracker] Tool ${toolName} disabled after ${existing.count} consecutive systemic failures`);
       return true;
     }
@@ -140,31 +405,59 @@ class ToolFailureTracker {
   }
 
   /**
-   * Record a successful tool call (resets failure count)
+   * Record a successful tool call (resets failure count for both types)
    */
   recordSuccess(toolName: string): void {
     this.failures.delete(toolName);
+    this.inputDependentFailures.delete(toolName);
   }
 
   /**
-   * Check if a tool is disabled
+   * Check if a tool is disabled (with automatic re-enablement after cooldown)
    */
   isDisabled(toolName: string): boolean {
-    return this.disabledTools.has(toolName);
+    const disabled = this.disabledTools.get(toolName);
+    if (!disabled) {
+      return false;
+    }
+
+    // Check if cooldown has passed - re-enable the tool
+    const elapsed = Date.now() - disabled.disabledAt;
+    if (elapsed >= this.cooldownMs) {
+      console.log(`[ToolFailureTracker] Tool ${toolName} re-enabled after ${this.cooldownMs / 1000}s cooldown`);
+      this.disabledTools.delete(toolName);
+      this.failures.delete(toolName); // Also reset failure counter
+      return false;
+    }
+
+    return true;
   }
 
   /**
    * Get the last error for a tool
    */
   getLastError(toolName: string): string | undefined {
-    return this.failures.get(toolName)?.lastError;
+    const disabled = this.disabledTools.get(toolName);
+    return disabled?.reason || this.failures.get(toolName)?.lastError;
   }
 
   /**
-   * Get list of disabled tools
+   * Get list of disabled tools (excluding those past cooldown)
    */
   getDisabledTools(): string[] {
-    return Array.from(this.disabledTools);
+    const now = Date.now();
+    const activelyDisabled: string[] = [];
+
+    for (const [toolName, info] of this.disabledTools.entries()) {
+      if (now - info.disabledAt < this.cooldownMs) {
+        activelyDisabled.push(toolName);
+      } else {
+        // Cleanup expired entries
+        this.disabledTools.delete(toolName);
+      }
+    }
+
+    return activelyDisabled;
   }
 }
 
@@ -190,6 +483,39 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, operation: strin
 }
 
 /**
+ * Calculate exponential backoff delay with jitter
+ * @param attempt - The attempt number (0-indexed)
+ * @param initialDelay - Initial delay in milliseconds
+ * @param maxDelay - Maximum delay cap in milliseconds
+ * @param multiplier - Multiplier for each subsequent attempt
+ * @returns Delay in milliseconds with random jitter
+ */
+function calculateBackoffDelay(
+  attempt: number,
+  initialDelay = INITIAL_BACKOFF_MS,
+  maxDelay = MAX_BACKOFF_MS,
+  multiplier = BACKOFF_MULTIPLIER
+): number {
+  // Calculate base delay: initialDelay * multiplier^attempt
+  const baseDelay = initialDelay * Math.pow(multiplier, attempt);
+
+  // Cap at max delay
+  const cappedDelay = Math.min(baseDelay, maxDelay);
+
+  // Add random jitter (±25%) to prevent thundering herd
+  const jitter = cappedDelay * 0.25 * (Math.random() * 2 - 1);
+
+  return Math.round(cappedDelay + jitter);
+}
+
+/**
+ * Sleep for a specified duration
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
  * TaskExecutor handles the execution of a single task
  * It implements the plan-execute-observe agent loop
  * Supports both Anthropic API and AWS Bedrock
@@ -200,19 +526,28 @@ export class TaskExecutor {
   private sandboxRunner: SandboxRunner;
   private contextManager: ContextManager;
   private toolFailureTracker: ToolFailureTracker;
+  private toolCallDeduplicator: ToolCallDeduplicator;
   private cancelled = false;
   private paused = false;
+  private taskCompleted = false;  // Prevents any further processing after task completes
   private plan?: Plan;
   private modelId: string;
   private modelKey: string;
   private conversationHistory: LLMMessage[] = [];
   private systemPrompt: string = '';
 
+  // Abort controller for cancelling LLM requests
+  private abortController: AbortController = new AbortController();
+
   // Guardrail tracking
   private totalInputTokens: number = 0;
   private totalOutputTokens: number = 0;
   private totalCost: number = 0;
   private iterationCount: number = 0;
+
+  // Global turn tracking (across all steps) - similar to Claude Agent SDK's maxTurns
+  private globalTurnCount: number = 0;
+  private readonly maxGlobalTurns: number = 100; // Configurable global limit
 
   constructor(
     private task: Task,
@@ -250,7 +585,79 @@ export class TaskExecutor {
     // Initialize tool failure tracker for circuit breaker pattern
     this.toolFailureTracker = new ToolFailureTracker();
 
+    // Initialize tool call deduplicator to prevent repetitive calls
+    // Max 2 identical calls within 60 seconds before blocking
+    this.toolCallDeduplicator = new ToolCallDeduplicator(2, 60000);
+
     console.log(`TaskExecutor initialized with ${settings.providerType} provider, model: ${this.modelId}`);
+  }
+
+  /**
+   * Make an LLM API call with exponential backoff retry
+   * @param requestFn - Function that returns the LLM request promise
+   * @param operation - Description of the operation for logging
+   * @param maxRetries - Maximum number of retry attempts (default: 3)
+   */
+  private async callLLMWithRetry(
+    requestFn: () => Promise<any>,
+    operation: string,
+    maxRetries = 3
+  ): Promise<any> {
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        if (attempt > 0) {
+          const delay = calculateBackoffDelay(attempt - 1);
+          console.log(`[TaskExecutor] Retry attempt ${attempt}/${maxRetries} for ${operation} after ${delay}ms`);
+          this.daemon.logEvent(this.task.id, 'llm_retry', {
+            operation,
+            attempt,
+            maxRetries,
+            delayMs: delay,
+          });
+          await sleep(delay);
+        }
+
+        // Check for cancellation before retry
+        if (this.cancelled) {
+          throw new Error('Request cancelled');
+        }
+
+        return await requestFn();
+      } catch (error: any) {
+        lastError = error;
+
+        // Don't retry on cancellation or non-retryable errors
+        if (
+          error.message === 'Request cancelled' ||
+          error.name === 'AbortError' ||
+          isNonRetryableError(error.message)
+        ) {
+          throw error;
+        }
+
+        // Check if it's a retryable error (rate limit, timeout, network error)
+        const isRetryable =
+          error.message?.includes('timeout') ||
+          error.message?.includes('429') ||
+          error.message?.includes('rate limit') ||
+          error.message?.includes('ECONNRESET') ||
+          error.message?.includes('ETIMEDOUT') ||
+          error.message?.includes('network') ||
+          error.status === 429 ||
+          error.status === 503 ||
+          error.status === 502;
+
+        if (!isRetryable || attempt === maxRetries) {
+          throw error;
+        }
+
+        console.log(`[TaskExecutor] ${operation} failed (attempt ${attempt + 1}/${maxRetries + 1}): ${error.message}`);
+      }
+    }
+
+    throw lastError || new Error(`${operation} failed after ${maxRetries + 1} attempts`);
   }
 
   /**
@@ -258,6 +665,14 @@ export class TaskExecutor {
    * @throws Error if any budget is exceeded
    */
   private checkBudgets(): void {
+    // Check global turn limit (similar to Claude Agent SDK's maxTurns)
+    if (this.globalTurnCount >= this.maxGlobalTurns) {
+      throw new Error(
+        `Global turn limit exceeded: ${this.globalTurnCount}/${this.maxGlobalTurns} turns. ` +
+        `Task stopped to prevent infinite loops. Consider breaking this task into smaller parts.`
+      );
+    }
+
     // Check iteration limit
     const iterationCheck = GuardrailManager.isIterationLimitExceeded(this.iterationCount);
     if (iterationCheck.exceeded) {
@@ -295,6 +710,7 @@ export class TaskExecutor {
     this.totalOutputTokens += outputTokens;
     this.totalCost += calculateCost(this.modelId, inputTokens, outputTokens);
     this.iterationCount++;
+    this.globalTurnCount++; // Track global turns across all steps
   }
 
   /**
@@ -576,6 +992,7 @@ You are continuing a previous conversation. The context from the previous conver
       if (this.cancelled) return;
 
       // Phase 3: Completion
+      this.taskCompleted = true;  // Mark task as completed to prevent any further processing
       this.daemon.completeTask(this.task.id);
     } catch (error: any) {
       console.error(`Task execution failed:`, error);
@@ -628,19 +1045,24 @@ Format your plan as a JSON object with this structure:
       const startTime = Date.now();
       console.log(`[Task ${this.task.id}] Calling LLM API for plan creation...`);
 
-      response = await withTimeout(
-        this.provider.createMessage({
-          model: this.modelId,
-          maxTokens: 4096,
-          system: systemPrompt,
-          messages: [
-            {
-              role: 'user',
-              content: `Task: ${this.task.title}\n\nDetails: ${this.task.prompt}\n\nCreate an execution plan.`,
-            },
-          ],
-        }),
-        LLM_TIMEOUT_MS,
+      // Use retry wrapper for resilient API calls
+      response = await this.callLLMWithRetry(
+        () => withTimeout(
+          this.provider.createMessage({
+            model: this.modelId,
+            maxTokens: 4096,
+            system: systemPrompt,
+            messages: [
+              {
+                role: 'user',
+                content: `Task: ${this.task.title}\n\nDetails: ${this.task.prompt}\n\nCreate an execution plan.`,
+              },
+            ],
+            signal: this.abortController.signal,
+          }),
+          LLM_TIMEOUT_MS,
+          'Plan creation'
+        ),
         'Plan creation'
       );
 
@@ -660,7 +1082,7 @@ Format your plan as a JSON object with this structure:
     }
 
     // Extract plan from response
-    const textContent = response.content.find(c => c.type === 'text');
+    const textContent = response.content.find((c: { type: string }) => c.type === 'text');
     if (textContent && textContent.type === 'text') {
       try {
         // Try to extract and parse JSON from the response
@@ -765,6 +1187,18 @@ Format your plan as a JSON object with this structure:
       throw new Error('No plan available');
     }
 
+    const totalSteps = this.plan.steps.length;
+    let completedSteps = 0;
+
+    // Emit initial progress event
+    this.daemon.logEvent(this.task.id, 'progress_update', {
+      phase: 'execution',
+      completedSteps,
+      totalSteps,
+      progress: 0,
+      message: `Starting execution of ${totalSteps} steps`,
+    });
+
     for (const step of this.plan.steps) {
       if (this.cancelled) break;
 
@@ -773,8 +1207,71 @@ Format your plan as a JSON object with this structure:
         await new Promise(resolve => setTimeout(resolve, 100));
       }
 
-      await this.executeStep(step);
+      // Emit step starting progress
+      this.daemon.logEvent(this.task.id, 'progress_update', {
+        phase: 'execution',
+        currentStep: step.id,
+        currentStepDescription: step.description,
+        completedSteps,
+        totalSteps,
+        progress: Math.round((completedSteps / totalSteps) * 100),
+        message: `Executing step ${completedSteps + 1}/${totalSteps}: ${step.description}`,
+      });
+
+      // Execute step with timeout enforcement
+      // Create a step-specific timeout that will abort ongoing LLM requests
+      const stepTimeoutId = setTimeout(() => {
+        console.log(`[TaskExecutor] Step "${step.description}" timed out after ${STEP_TIMEOUT_MS / 1000}s - aborting`);
+        // Abort any in-flight LLM requests for this step
+        this.abortController.abort();
+        // Create new controller for next step
+        this.abortController = new AbortController();
+      }, STEP_TIMEOUT_MS);
+
+      try {
+        await this.executeStep(step);
+        clearTimeout(stepTimeoutId);
+      } catch (error: any) {
+        clearTimeout(stepTimeoutId);
+
+        // If step was aborted due to timeout or cancellation
+        if (error.name === 'AbortError' || error.message.includes('aborted') || error.message.includes('timed out')) {
+          step.status = 'failed';
+          step.error = `Step timed out after ${STEP_TIMEOUT_MS / 1000}s`;
+          step.completedAt = Date.now();
+          this.daemon.logEvent(this.task.id, 'step_timeout', {
+            step,
+            timeout: STEP_TIMEOUT_MS,
+            message: `Step timed out after ${STEP_TIMEOUT_MS / 1000}s`,
+          });
+          // Continue with next step instead of failing entire task
+          completedSteps++;
+          continue;
+        }
+        throw error;
+      }
+
+      completedSteps++;
+
+      // Emit step completed progress
+      this.daemon.logEvent(this.task.id, 'progress_update', {
+        phase: 'execution',
+        currentStep: step.id,
+        completedSteps,
+        totalSteps,
+        progress: Math.round((completedSteps / totalSteps) * 100),
+        message: `Completed step ${completedSteps}/${totalSteps}`,
+      });
     }
+
+    // Emit completion progress
+    this.daemon.logEvent(this.task.id, 'progress_update', {
+      phase: 'execution',
+      completedSteps,
+      totalSteps,
+      progress: 100,
+      message: 'All steps completed',
+    });
   }
 
   /**
@@ -832,7 +1329,11 @@ ADAPTIVE PLANNING:
       const maxEmptyResponses = 3;
 
       while (continueLoop && iterationCount < maxIterations) {
-        if (this.cancelled) break;
+        // Check if task is cancelled or already completed
+        if (this.cancelled || this.taskCompleted) {
+          console.log(`[TaskExecutor] Step loop terminated: cancelled=${this.cancelled}, completed=${this.taskCompleted}`);
+          break;
+        }
 
         iterationCount++;
 
@@ -847,16 +1348,21 @@ ADAPTIVE PLANNING:
         // Compact messages if context is getting too large
         messages = this.contextManager.compactMessages(messages, systemPromptTokens);
 
-        const response = await withTimeout(
-          this.provider.createMessage({
-            model: this.modelId,
-            maxTokens: 4096,
-            system: this.systemPrompt,
-            tools: this.getAvailableTools(),
-            messages,
-          }),
-          LLM_TIMEOUT_MS,
-          'LLM execution step'
+        // Use retry wrapper for resilient API calls
+        const response = await this.callLLMWithRetry(
+          () => withTimeout(
+            this.provider.createMessage({
+              model: this.modelId,
+              maxTokens: 4096,
+              system: this.systemPrompt,
+              tools: this.getAvailableTools(),
+              messages,
+              signal: this.abortController.signal,
+            }),
+            LLM_TIMEOUT_MS,
+            'LLM execution step'
+          ),
+          `Step execution (iteration ${iterationCount})`
         );
 
         // Update tracking after response
@@ -907,6 +1413,7 @@ ADAPTIVE PLANNING:
         // Handle tool calls
         const toolResults: LLMToolResult[] = [];
         let hasDisabledToolAttempt = false;
+        let hasDuplicateToolAttempt = false;
 
         for (const content of response.content || []) {
           if (content.type === 'tool_use') {
@@ -932,22 +1439,70 @@ ADAPTIVE PLANNING:
               continue;
             }
 
+            // Check for duplicate tool calls (prevents stuck loops)
+            const duplicateCheck = this.toolCallDeduplicator.checkDuplicate(content.name, content.input);
+            if (duplicateCheck.isDuplicate) {
+              console.log(`[TaskExecutor] Blocking duplicate tool call: ${content.name}`);
+              this.daemon.logEvent(this.task.id, 'tool_blocked', {
+                tool: content.name,
+                reason: 'duplicate_call',
+                message: duplicateCheck.reason,
+              });
+
+              // If we have a cached result for idempotent tools, return it
+              if (duplicateCheck.cachedResult && ToolCallDeduplicator.isIdempotentTool(content.name)) {
+                toolResults.push({
+                  type: 'tool_result',
+                  tool_use_id: content.id,
+                  content: duplicateCheck.cachedResult,
+                });
+              } else {
+                // For non-idempotent tools, return an error explaining the duplicate
+                toolResults.push({
+                  type: 'tool_result',
+                  tool_use_id: content.id,
+                  content: JSON.stringify({
+                    error: duplicateCheck.reason,
+                    suggestion: 'This tool was already called with these exact parameters. The previous call succeeded. Please proceed to the next step or try a different approach.',
+                    duplicate: true,
+                  }),
+                  is_error: true,
+                });
+                hasDuplicateToolAttempt = true;
+              }
+              continue;
+            }
+
+            // Check for cancellation or completion before executing tool
+            if (this.cancelled || this.taskCompleted) {
+              console.log(`[TaskExecutor] Stopping tool execution: cancelled=${this.cancelled}, completed=${this.taskCompleted}`);
+              break;
+            }
+
             this.daemon.logEvent(this.task.id, 'tool_call', {
               tool: content.name,
               input: content.input,
             });
 
             try {
-              const result = await this.toolRegistry.executeTool(
-                content.name,
-                content.input as any
+              // Execute tool with timeout to prevent hanging
+              const result = await withTimeout(
+                this.toolRegistry.executeTool(
+                  content.name,
+                  content.input as any
+                ),
+                TOOL_TIMEOUT_MS,
+                `Tool ${content.name}`
               );
 
               // Tool succeeded - reset failure counter
               this.toolFailureTracker.recordSuccess(content.name);
 
-              // Check if the result indicates an error (some tools return error in result)
+              // Record this call for deduplication
               const resultStr = JSON.stringify(result);
+              this.toolCallDeduplicator.recordCall(content.name, content.input, resultStr);
+
+              // Check if the result indicates an error (some tools return error in result)
               if (result && result.success === false && result.error) {
                 // Check if this is a non-retryable error
                 const shouldDisable = this.toolFailureTracker.recordFailure(content.name, result.error);
@@ -1004,12 +1559,19 @@ ADAPTIVE PLANNING:
             content: toolResults,
           });
 
-          // If all tool attempts were for disabled tools, don't continue looping
+          // If all tool attempts were for disabled or duplicate tools, don't continue looping
           // This prevents infinite retry loops
-          if (hasDisabledToolAttempt && toolResults.every(r => r.is_error)) {
-            console.log('[TaskExecutor] All tool calls failed or were disabled, stopping iteration');
-            stepFailed = true;
-            lastFailureReason = 'All required tools are unavailable or failed. Unable to complete this step.';
+          const allToolsFailed = toolResults.every(r => r.is_error);
+          if ((hasDisabledToolAttempt || hasDuplicateToolAttempt) && allToolsFailed) {
+            console.log('[TaskExecutor] All tool calls failed, were disabled, or duplicates - stopping iteration');
+            if (hasDuplicateToolAttempt) {
+              // Duplicate detection triggered - step is likely complete
+              stepFailed = false;
+              lastFailureReason = '';
+            } else {
+              stepFailed = true;
+              lastFailureReason = 'All required tools are unavailable or failed. Unable to complete this step.';
+            }
             continueLoop = false;
           } else {
             continueLoop = true;
@@ -1092,7 +1654,11 @@ IMPORTANT INSTRUCTIONS:
 
     try {
       while (continueLoop && iterationCount < maxIterations) {
-        if (this.cancelled) break;
+        // Check if task is cancelled or completed
+        if (this.cancelled || this.taskCompleted) {
+          console.log(`[TaskExecutor] sendMessage loop terminated: cancelled=${this.cancelled}, completed=${this.taskCompleted}`);
+          break;
+        }
 
         iterationCount++;
 
@@ -1107,16 +1673,21 @@ IMPORTANT INSTRUCTIONS:
         // Compact messages if context is getting too large
         messages = this.contextManager.compactMessages(messages, systemPromptTokens);
 
-        const response = await withTimeout(
-          this.provider.createMessage({
-            model: this.modelId,
-            maxTokens: 4096,
-            system: this.systemPrompt,
-            tools: this.getAvailableTools(),
-            messages,
-          }),
-          LLM_TIMEOUT_MS,
-          'LLM message processing'
+        // Use retry wrapper for resilient API calls
+        const response = await this.callLLMWithRetry(
+          () => withTimeout(
+            this.provider.createMessage({
+              model: this.modelId,
+              maxTokens: 4096,
+              system: this.systemPrompt,
+              tools: this.getAvailableTools(),
+              messages,
+              signal: this.abortController.signal,
+            }),
+            LLM_TIMEOUT_MS,
+            'LLM message processing'
+          ),
+          `Message processing (iteration ${iterationCount})`
         );
 
         // Update tracking after response
@@ -1166,6 +1737,7 @@ IMPORTANT INSTRUCTIONS:
         // Handle tool calls
         const toolResults: LLMToolResult[] = [];
         let hasDisabledToolAttempt = false;
+        let hasDuplicateToolAttempt = false;
 
         for (const content of response.content || []) {
           if (content.type === 'tool_use') {
@@ -1191,22 +1763,68 @@ IMPORTANT INSTRUCTIONS:
               continue;
             }
 
+            // Check for duplicate tool calls (prevents stuck loops)
+            const duplicateCheck = this.toolCallDeduplicator.checkDuplicate(content.name, content.input);
+            if (duplicateCheck.isDuplicate) {
+              console.log(`[TaskExecutor] Blocking duplicate tool call: ${content.name}`);
+              this.daemon.logEvent(this.task.id, 'tool_blocked', {
+                tool: content.name,
+                reason: 'duplicate_call',
+                message: duplicateCheck.reason,
+              });
+
+              if (duplicateCheck.cachedResult && ToolCallDeduplicator.isIdempotentTool(content.name)) {
+                toolResults.push({
+                  type: 'tool_result',
+                  tool_use_id: content.id,
+                  content: duplicateCheck.cachedResult,
+                });
+              } else {
+                toolResults.push({
+                  type: 'tool_result',
+                  tool_use_id: content.id,
+                  content: JSON.stringify({
+                    error: duplicateCheck.reason,
+                    suggestion: 'This tool was already called with these exact parameters. Please proceed or try a different approach.',
+                    duplicate: true,
+                  }),
+                  is_error: true,
+                });
+                hasDuplicateToolAttempt = true;
+              }
+              continue;
+            }
+
+            // Check for cancellation or completion before executing tool
+            if (this.cancelled || this.taskCompleted) {
+              console.log(`[TaskExecutor] Stopping tool execution: cancelled=${this.cancelled}, completed=${this.taskCompleted}`);
+              break;
+            }
+
             this.daemon.logEvent(this.task.id, 'tool_call', {
               tool: content.name,
               input: content.input,
             });
 
             try {
-              const result = await this.toolRegistry.executeTool(
-                content.name,
-                content.input as any
+              // Execute tool with timeout to prevent hanging
+              const result = await withTimeout(
+                this.toolRegistry.executeTool(
+                  content.name,
+                  content.input as any
+                ),
+                TOOL_TIMEOUT_MS,
+                `Tool ${content.name}`
               );
 
               // Tool succeeded - reset failure counter
               this.toolFailureTracker.recordSuccess(content.name);
 
-              // Check if the result indicates an error (some tools return error in result)
+              // Record this call for deduplication
               const resultStr = JSON.stringify(result);
+              this.toolCallDeduplicator.recordCall(content.name, content.input, resultStr);
+
+              // Check if the result indicates an error (some tools return error in result)
               if (result && result.success === false && result.error) {
                 // Check if this is a non-retryable error
                 const shouldDisable = this.toolFailureTracker.recordFailure(content.name, result.error);
@@ -1262,9 +1880,10 @@ IMPORTANT INSTRUCTIONS:
             content: toolResults,
           });
 
-          // If all tool attempts were for disabled tools, don't continue looping
-          if (hasDisabledToolAttempt && toolResults.every(r => r.is_error)) {
-            console.log('[TaskExecutor] All tool calls failed or were disabled, stopping iteration');
+          // If all tool attempts were for disabled or duplicate tools, don't continue looping
+          const allToolsFailed = toolResults.every(r => r.is_error);
+          if ((hasDisabledToolAttempt || hasDuplicateToolAttempt) && allToolsFailed) {
+            console.log('[TaskExecutor] All tool calls failed, were disabled, or duplicates - stopping iteration');
             continueLoop = false;
           } else {
             continueLoop = true;
@@ -1304,6 +1923,14 @@ IMPORTANT INSTRUCTIONS:
    */
   async cancel(): Promise<void> {
     this.cancelled = true;
+    this.taskCompleted = true;  // Also mark as completed to prevent any further processing
+
+    // Abort any in-flight LLM requests immediately
+    this.abortController.abort();
+
+    // Create a new controller for any future requests (in case of resume)
+    this.abortController = new AbortController();
+
     this.sandboxRunner.cleanup();
   }
 

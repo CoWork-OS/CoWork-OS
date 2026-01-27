@@ -49,6 +49,8 @@ export class OpenRouterProvider implements LLMProvider {
           max_tokens: request.maxTokens,
           ...(tools && { tools, tool_choice: 'auto' }),
         }),
+        // Pass abort signal to allow cancellation
+        signal: request.signal,
       });
 
       if (!response.ok) {
@@ -62,6 +64,12 @@ export class OpenRouterProvider implements LLMProvider {
       const data = await response.json() as any;
       return this.convertResponse(data);
     } catch (error: any) {
+      // Handle abort errors gracefully
+      if (error.name === 'AbortError' || error.message?.includes('aborted')) {
+        console.log(`[OpenRouter] Request aborted`);
+        throw new Error('Request cancelled');
+      }
+
       console.error(`[OpenRouter] API error:`, {
         message: error.message,
         status: error.status,

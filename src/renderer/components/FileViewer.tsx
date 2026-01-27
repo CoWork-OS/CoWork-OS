@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { FileViewerResult } from '../../electron/preload';
@@ -148,7 +149,8 @@ export function FileViewer({ filePath, workspacePath, onClose }: FileViewerProps
     }
   };
 
-  return (
+  // Use portal to render at document body level (escapes parent container constraints)
+  return createPortal(
     <div className="file-viewer-overlay" onClick={onClose}>
       <div className="file-viewer-modal" onClick={(e) => e.stopPropagation()}>
         <div className="file-viewer-header">
@@ -203,6 +205,7 @@ export function FileViewer({ filePath, workspacePath, onClose }: FileViewerProps
           {!loading && !error && renderContent()}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

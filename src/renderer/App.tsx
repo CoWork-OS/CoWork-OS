@@ -370,21 +370,12 @@ export function App() {
             <span>
               New version <strong>v{updateInfo.latestVersion}</strong> is available!
             </span>
-            {updateInfo.releaseUrl ? (
-              <button
-                className="update-banner-link"
-                onClick={() => window.electronAPI?.openExternal(updateInfo.releaseUrl!)}
-              >
-                View Release
-              </button>
-            ) : (
-              <button
-                className="update-banner-link"
-                onClick={() => setCurrentView('settings')}
-              >
-                Update
-              </button>
-            )}
+            <button
+              className="update-banner-link"
+              onClick={() => setCurrentView('settings')}
+            >
+              View Release
+            </button>
           </div>
           <button
             className="update-banner-dismiss"

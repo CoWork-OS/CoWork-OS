@@ -266,12 +266,15 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
   }, [showSkillsMenu]);
 
   const handleSkillSelect = (skill: CustomSkill) => {
+    console.log('[handleSkillSelect] Selected skill:', skill.name, 'Parameters:', skill.parameters);
     setShowSkillsMenu(false);
     // If skill has parameters, show the parameter modal
     if (skill.parameters && skill.parameters.length > 0) {
+      console.log('[handleSkillSelect] Showing parameter modal for skill with', skill.parameters.length, 'parameters');
       setSelectedSkillForParams(skill);
     } else {
       // No parameters, just set the prompt directly
+      console.log('[handleSkillSelect] No parameters, setting input value directly');
       setInputValue(skill.prompt);
     }
   };

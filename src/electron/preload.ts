@@ -92,6 +92,8 @@ const IPC_CHANNELS = {
   MCP_REGISTRY_SEARCH: 'mcp:registrySearch',
   MCP_REGISTRY_INSTALL: 'mcp:registryInstall',
   MCP_REGISTRY_UNINSTALL: 'mcp:registryUninstall',
+  MCP_REGISTRY_CHECK_UPDATES: 'mcp:registryCheckUpdates',
+  MCP_REGISTRY_UPDATE_SERVER: 'mcp:registryUpdateServer',
   // MCP Host
   MCP_HOST_START: 'mcp:hostStart',
   MCP_HOST_STOP: 'mcp:hostStop',
@@ -190,6 +192,13 @@ interface MCPRegistry {
   version: string;
   lastUpdated: string;
   servers: MCPRegistryEntry[];
+}
+
+interface MCPUpdateInfo {
+  serverId: string;
+  currentVersion: string;
+  latestVersion: string;
+  registryEntry: MCPRegistryEntry;
 }
 
 // Expose protected methods that allow the renderer process to use ipcRenderer
@@ -359,6 +368,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke(IPC_CHANNELS.MCP_REGISTRY_SEARCH, { query, tags }),
   installMCPServer: (entryId: string) => ipcRenderer.invoke(IPC_CHANNELS.MCP_REGISTRY_INSTALL, entryId),
   uninstallMCPServer: (serverId: string) => ipcRenderer.invoke(IPC_CHANNELS.MCP_REGISTRY_UNINSTALL, serverId),
+  checkMCPUpdates: () => ipcRenderer.invoke(IPC_CHANNELS.MCP_REGISTRY_CHECK_UPDATES),
+  updateMCPServerFromRegistry: (serverId: string) => ipcRenderer.invoke(IPC_CHANNELS.MCP_REGISTRY_UPDATE_SERVER, serverId),
 
   // MCP Host APIs
   startMCPHost: (port?: number) => ipcRenderer.invoke(IPC_CHANNELS.MCP_HOST_START, port),
@@ -546,6 +557,8 @@ export interface ElectronAPI {
   searchMCPRegistry: (query: string, tags?: string[]) => Promise<MCPRegistryEntry[]>;
   installMCPServer: (entryId: string) => Promise<MCPServerConfig>;
   uninstallMCPServer: (serverId: string) => Promise<void>;
+  checkMCPUpdates: () => Promise<MCPUpdateInfo[]>;
+  updateMCPServerFromRegistry: (serverId: string) => Promise<MCPServerConfig>;
   // MCP Host
   startMCPHost: (port?: number) => Promise<{ success: boolean; port?: number }>;
   stopMCPHost: () => Promise<void>;

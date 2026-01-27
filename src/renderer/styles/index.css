@@ -7141,6 +7141,43 @@ button {
   color: var(--color-error);
 }
 
+/* MCP Header Actions */
+.mcp-header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* MCP Update Badge */
+.mcp-update-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: white;
+  background: var(--color-accent);
+  border-radius: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+/* Success Button */
+.button-success {
+  background: var(--color-success);
+  color: white;
+  border: none;
+}
+
+.button-success:hover {
+  background: #16a34a;
+}
+
+.button-success:disabled {
+  background: var(--color-text-tertiary);
+  cursor: not-allowed;
+}
+
 /* MCP Modal */
 .mcp-modal-overlay {
   position: fixed;

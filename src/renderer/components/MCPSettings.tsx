@@ -52,6 +52,12 @@ interface MCPSettings {
   hostPort?: number;
 }
 
+interface MCPUpdateInfo {
+  serverId: string;
+  currentVersion: string;
+  latestVersion: string;
+}
+
 export function MCPSettings() {
   const [settings, setSettings] = useState<MCPSettings | null>(null);
   const [serverStatuses, setServerStatuses] = useState<MCPServerStatus[]>([]);
@@ -76,6 +82,11 @@ export function MCPSettings() {
 
   // Connecting/disconnecting state
   const [connectingServer, setConnectingServer] = useState<string | null>(null);
+
+  // Update state
+  const [availableUpdates, setAvailableUpdates] = useState<MCPUpdateInfo[]>([]);
+  const [checkingUpdates, setCheckingUpdates] = useState(false);
+  const [updatingServer, setUpdatingServer] = useState<string | null>(null);
 
   useEffect(() => {
     loadData();
@@ -229,6 +240,43 @@ export function MCPSettings() {
     }
   };
 
+  const handleCheckUpdates = async () => {
+    try {
+      setCheckingUpdates(true);
+      const updates = await window.electronAPI.checkMCPUpdates();
+      setAvailableUpdates(updates);
+      if (updates.length === 0) {
+        alert('All MCP servers are up to date!');
+      }
+    } catch (error: any) {
+      console.error('Failed to check for updates:', error);
+      alert(`Failed to check for updates: ${error.message}`);
+    } finally {
+      setCheckingUpdates(false);
+    }
+  };
+
+  const handleUpdateServer = async (serverId: string) => {
+    try {
+      setUpdatingServer(serverId);
+      await window.electronAPI.updateMCPServerFromRegistry(serverId);
+      // Remove from available updates
+      setAvailableUpdates(prev => prev.filter(u => u.serverId !== serverId));
+      // Reload data
+      await loadData();
+      alert('Server updated successfully!');
+    } catch (error: any) {
+      console.error('Failed to update server:', error);
+      alert(`Failed to update server: ${error.message}`);
+    } finally {
+      setUpdatingServer(null);
+    }
+  };
+
+  const getUpdateInfo = (serverId: string): MCPUpdateInfo | undefined => {
+    return availableUpdates.find(u => u.serverId === serverId);
+  };
+
   const getStatusColor = (status: MCPConnectionStatus): string => {
     switch (status) {
       case 'connected': return 'var(--color-success)';
@@ -282,12 +330,21 @@ export function MCPSettings() {
           <div className="settings-section">
             <div className="settings-section-header">
               <h3>MCP Servers</h3>
-              <button
-                className="button-small button-primary"
-                onClick={() => setShowAddForm(!showAddForm)}
-              >
-                {showAddForm ? 'Cancel' : '+ Add Server'}
-              </button>
+              <div className="mcp-header-actions">
+                <button
+                  className="button-small button-secondary"
+                  onClick={handleCheckUpdates}
+                  disabled={checkingUpdates}
+                >
+                  {checkingUpdates ? 'Checking...' : 'Check for Updates'}
+                </button>
+                <button
+                  className="button-small button-primary"
+                  onClick={() => setShowAddForm(!showAddForm)}
+                >
+                  {showAddForm ? 'Cancel' : '+ Add Server'}
+                </button>
+              </div>
             </div>
             <p className="settings-description">
               Connect to MCP servers to extend CoWork with additional tools.
@@ -365,6 +422,8 @@ export function MCPSettings() {
                   const config = settings?.servers.find(s => s.id === serverStatus.id);
                   const isConnecting = connectingServer === serverStatus.id;
                   const isTesting = testingServer === serverStatus.id;
+                  const updateInfo = getUpdateInfo(serverStatus.id);
+                  const isUpdating = updatingServer === serverStatus.id;
 
                   return (
                     <div key={serverStatus.id} className="mcp-server-card">
@@ -372,6 +431,11 @@ export function MCPSettings() {
                         <div className="mcp-server-info">
                           <div className="mcp-server-name-row">
                             <span className="mcp-server-name">{serverStatus.name}</span>
+                            {updateInfo && (
+                              <span className="mcp-update-badge" title={`Update available: ${updateInfo.currentVersion} → ${updateInfo.latestVersion}`}>
+                                Update
+                              </span>
+                            )}
                             <span
                               className="mcp-server-status"
                               style={{ color: getStatusColor(serverStatus.status) }}
@@ -442,6 +506,17 @@ export function MCPSettings() {
                         >
                           {isTesting ? 'Testing...' : 'Test'}
                         </button>
+
+                        {updateInfo && (
+                          <button
+                            className="button-small button-success"
+                            onClick={() => handleUpdateServer(serverStatus.id)}
+                            disabled={isUpdating}
+                            title={`Update from ${updateInfo.currentVersion} to ${updateInfo.latestVersion}`}
+                          >
+                            {isUpdating ? 'Updating...' : `Update to ${updateInfo.latestVersion}`}
+                          </button>
+                        )}
 
                         <button
                           className="button-small button-danger"

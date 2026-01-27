@@ -897,6 +897,11 @@ function setupMCPHandlers(): void {
     return MCPRegistryManager.checkForUpdates();
   });
 
+  ipcMain.handle(IPC_CHANNELS.MCP_REGISTRY_UPDATE_SERVER, async (_, serverId: string) => {
+    const validatedId = validateInput(UUIDSchema, serverId, 'server ID');
+    return MCPRegistryManager.updateServer(validatedId);
+  });
+
   // MCP Host handlers
   ipcMain.handle(IPC_CHANNELS.MCP_HOST_START, async () => {
     const hostServer = MCPHostServer.getInstance();

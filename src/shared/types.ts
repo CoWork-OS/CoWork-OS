@@ -324,6 +324,7 @@ export const IPC_CHANNELS = {
   MCP_REGISTRY_INSTALL: 'mcp:registryInstall',
   MCP_REGISTRY_UNINSTALL: 'mcp:registryUninstall',
   MCP_REGISTRY_CHECK_UPDATES: 'mcp:registryCheckUpdates',
+  MCP_REGISTRY_UPDATE_SERVER: 'mcp:registryUpdateServer',
 
   // MCP Host
   MCP_HOST_START: 'mcp:hostStart',

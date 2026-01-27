@@ -1787,7 +1787,7 @@ a,
 
 .cli-workspace-content {
   max-width: 600px;
-  max-height: min(700px, calc(100vh - 120px));
+  max-height: min(820px, calc(100vh - 120px));
   background: rgba(0, 0, 0, 0.6) !important;
   border: 1px solid var(--color-border-subtle) !important;
   border-radius: 8px !important;

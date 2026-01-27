@@ -35,6 +35,8 @@ import {
   StringIdSchema,
 } from '../utils/validation';
 import { GuardrailManager } from '../guardrails/guardrail-manager';
+import { getCustomSkillLoader } from '../agent/custom-skill-loader';
+import { CustomSkill } from '../../shared/types';
 
 // Helper to check rate limit and throw if exceeded
 function checkRateLimit(channel: string, config = RATE_LIMIT_CONFIGS.standard): void {
@@ -270,6 +272,42 @@ export function setupIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.SKILL_GET, async (_, id: string) => {
     return skillRepo.findById(id);
+  });
+
+  // Custom User Skills handlers
+  const customSkillLoader = getCustomSkillLoader();
+
+  // Initialize custom skill loader
+  customSkillLoader.initialize().catch(error => {
+    console.error('[IPC] Failed to initialize custom skill loader:', error);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.CUSTOM_SKILL_LIST, async () => {
+    return customSkillLoader.listSkills();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.CUSTOM_SKILL_GET, async (_, id: string) => {
+    return customSkillLoader.getSkill(id);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.CUSTOM_SKILL_CREATE, async (_, skillData: Omit<CustomSkill, 'filePath'>) => {
+    return customSkillLoader.createSkill(skillData);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.CUSTOM_SKILL_UPDATE, async (_, id: string, updates: Partial<CustomSkill>) => {
+    return customSkillLoader.updateSkill(id, updates);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.CUSTOM_SKILL_DELETE, async (_, id: string) => {
+    return customSkillLoader.deleteSkill(id);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.CUSTOM_SKILL_RELOAD, async () => {
+    return customSkillLoader.reloadSkills();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.CUSTOM_SKILL_OPEN_FOLDER, async () => {
+    return customSkillLoader.openSkillsFolder();
   });
 
   // LLM Settings handlers

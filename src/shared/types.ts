@@ -245,6 +245,15 @@ export const IPC_CHANNELS = {
   SKILL_LIST: 'skill:list',
   SKILL_GET: 'skill:get',
 
+  // Custom User Skills
+  CUSTOM_SKILL_LIST: 'customSkill:list',
+  CUSTOM_SKILL_GET: 'customSkill:get',
+  CUSTOM_SKILL_CREATE: 'customSkill:create',
+  CUSTOM_SKILL_UPDATE: 'customSkill:update',
+  CUSTOM_SKILL_DELETE: 'customSkill:delete',
+  CUSTOM_SKILL_RELOAD: 'customSkill:reload',
+  CUSTOM_SKILL_OPEN_FOLDER: 'customSkill:openFolder',
+
   // LLM Settings
   LLM_GET_SETTINGS: 'llm:getSettings',
   LLM_SAVE_SETTINGS: 'llm:saveSettings',
@@ -595,4 +604,31 @@ export interface ToastNotification {
   title: string;
   message?: string;
   taskId?: string;
+}
+
+// Custom User Skills
+export interface SkillParameter {
+  name: string;
+  type: 'string' | 'number' | 'boolean' | 'select';
+  description: string;
+  required?: boolean;
+  default?: string | number | boolean;
+  options?: string[];  // For 'select' type
+}
+
+export interface CustomSkill {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;  // Emoji or icon name
+  prompt: string;  // Prompt template with {{parameter}} placeholders
+  parameters?: SkillParameter[];
+  category?: string;  // For grouping skills
+  enabled?: boolean;
+  filePath?: string;  // Path to the skill file (for editing)
+}
+
+export interface SkillsConfig {
+  skillsDirectory: string;  // Default: ~/.cowork/skills/
+  enabledSkillIds: string[];
 }

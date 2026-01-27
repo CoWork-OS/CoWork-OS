@@ -65,7 +65,37 @@ const IPC_CHANNELS = {
   QUEUE_GET_SETTINGS: 'queue:getSettings',
   QUEUE_SAVE_SETTINGS: 'queue:saveSettings',
   QUEUE_UPDATE: 'queue:update',
+  // Custom User Skills
+  CUSTOM_SKILL_LIST: 'customSkill:list',
+  CUSTOM_SKILL_GET: 'customSkill:get',
+  CUSTOM_SKILL_CREATE: 'customSkill:create',
+  CUSTOM_SKILL_UPDATE: 'customSkill:update',
+  CUSTOM_SKILL_DELETE: 'customSkill:delete',
+  CUSTOM_SKILL_RELOAD: 'customSkill:reload',
+  CUSTOM_SKILL_OPEN_FOLDER: 'customSkill:openFolder',
 } as const;
+
+// Custom Skill types (inlined for sandboxed preload)
+interface SkillParameter {
+  name: string;
+  type: 'string' | 'number' | 'boolean' | 'select';
+  description: string;
+  required?: boolean;
+  default?: string | number | boolean;
+  options?: string[];
+}
+
+interface CustomSkill {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  prompt: string;
+  parameters?: SkillParameter[];
+  category?: string;
+  enabled?: boolean;
+  filePath?: string;
+}
 
 // Expose protected methods that allow the renderer process to use ipcRenderer
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -197,6 +227,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on(IPC_CHANNELS.QUEUE_UPDATE, subscription);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.QUEUE_UPDATE, subscription);
   },
+
+  // Custom Skills APIs
+  listCustomSkills: () => ipcRenderer.invoke(IPC_CHANNELS.CUSTOM_SKILL_LIST),
+  getCustomSkill: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.CUSTOM_SKILL_GET, id),
+  createCustomSkill: (skill: any) => ipcRenderer.invoke(IPC_CHANNELS.CUSTOM_SKILL_CREATE, skill),
+  updateCustomSkill: (id: string, updates: any) => ipcRenderer.invoke(IPC_CHANNELS.CUSTOM_SKILL_UPDATE, id, updates),
+  deleteCustomSkill: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.CUSTOM_SKILL_DELETE, id),
+  reloadCustomSkills: () => ipcRenderer.invoke(IPC_CHANNELS.CUSTOM_SKILL_RELOAD),
+  openCustomSkillsFolder: () => ipcRenderer.invoke(IPC_CHANNELS.CUSTOM_SKILL_OPEN_FOLDER),
 });
 
 // Type declarations for TypeScript
@@ -352,6 +391,14 @@ export interface ElectronAPI {
     queuedTaskIds: string[];
     maxConcurrent: number;
   }) => void) => () => void;
+  // Custom Skills APIs
+  listCustomSkills: () => Promise<CustomSkill[]>;
+  getCustomSkill: (id: string) => Promise<CustomSkill | undefined>;
+  createCustomSkill: (skill: Omit<CustomSkill, 'filePath'>) => Promise<CustomSkill>;
+  updateCustomSkill: (id: string, updates: Partial<CustomSkill>) => Promise<CustomSkill>;
+  deleteCustomSkill: (id: string) => Promise<boolean>;
+  reloadCustomSkills: () => Promise<CustomSkill[]>;
+  openCustomSkillsFolder: () => Promise<void>;
 }
 
 declare global {

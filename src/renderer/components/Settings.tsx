@@ -7,6 +7,7 @@ import { UpdateSettings } from './UpdateSettings';
 import { GuardrailSettings } from './GuardrailSettings';
 import { AppearanceSettings } from './AppearanceSettings';
 import { QueueSettings } from './QueueSettings';
+import { SkillsSettings } from './SkillsSettings';
 
 interface SettingsProps {
   onBack: () => void;
@@ -28,7 +29,7 @@ interface ProviderInfo {
   configured: boolean;
 }
 
-type SettingsTab = 'appearance' | 'llm' | 'search' | 'telegram' | 'discord' | 'updates' | 'guardrails' | 'queue';
+type SettingsTab = 'appearance' | 'llm' | 'search' | 'telegram' | 'discord' | 'updates' | 'guardrails' | 'queue' | 'skills';
 
 // Helper to format bytes to human-readable size
 function formatBytes(bytes: number): string {
@@ -619,6 +620,15 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
             </svg>
             Task Queue
           </button>
+          <button
+            className={`settings-nav-item ${activeTab === 'skills' ? 'active' : ''}`}
+            onClick={() => setActiveTab('skills')}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+            </svg>
+            Custom Skills
+          </button>
         </div>
 
         <div className="settings-content">
@@ -641,6 +651,8 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
             <GuardrailSettings />
           ) : activeTab === 'queue' ? (
             <QueueSettings />
+          ) : activeTab === 'skills' ? (
+            <SkillsSettings />
           ) : loading ? (
             <div className="settings-loading">Loading settings...</div>
           ) : (

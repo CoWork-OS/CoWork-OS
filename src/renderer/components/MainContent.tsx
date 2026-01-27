@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Task, TaskEvent, Workspace, ApprovalRequest, LLMModelInfo, SuccessCriteria } from '../../shared/types';
+import { Task, TaskEvent, Workspace, ApprovalRequest, LLMModelInfo, SuccessCriteria, CustomSkill } from '../../shared/types';
 import { ApprovalDialog } from './ApprovalDialog';
 
 // Searchable Model Dropdown Component
@@ -229,12 +229,20 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
   const [queuedMessage, setQueuedMessage] = useState<string | null>(null);
   const [expandedEvents, setExpandedEvents] = useState<Set<number>>(new Set());
   const [appVersion, setAppVersion] = useState<string>('');
+  const [customSkills, setCustomSkills] = useState<CustomSkill[]>([]);
 
   // Load app version
   useEffect(() => {
     window.electronAPI.getAppVersion()
       .then(info => setAppVersion(info.version))
       .catch(err => console.error('Failed to load version:', err));
+  }, []);
+
+  // Load custom skills
+  useEffect(() => {
+    window.electronAPI.listCustomSkills()
+      .then(skills => setCustomSkills(skills.filter(s => s.enabled !== false)))
+      .catch(err => console.error('Failed to load custom skills:', err));
   }, []);
 
   const toggleEventExpanded = (index: number) => {
@@ -508,6 +516,29 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
                 </button>
               </div>
             </div>
+
+            {/* Custom Skills */}
+            {customSkills.length > 0 && (
+              <div className="cli-commands">
+                <div className="cli-commands-header">
+                  <span className="cli-prompt">&gt;</span>
+                  <span>CUSTOM SKILLS</span>
+                </div>
+                <div className="quick-start-grid">
+                  {customSkills.slice(0, 6).map(skill => (
+                    <button
+                      key={skill.id}
+                      className="quick-start-card"
+                      onClick={() => handleQuickAction(skill.prompt)}
+                    >
+                      <span className="quick-start-icon">{skill.icon}</span>
+                      <span className="quick-start-title">{skill.name}</span>
+                      <span className="quick-start-desc">{skill.description}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Input Area */}
             <div className="welcome-input-container cli-input-container">

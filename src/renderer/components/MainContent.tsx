@@ -238,14 +238,6 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
   const [selectedSkillForParams, setSelectedSkillForParams] = useState<CustomSkill | null>(null);
   const skillsMenuRef = useRef<HTMLDivElement>(null);
 
-  // Debug: Log whenever selectedSkillForParams changes
-  useEffect(() => {
-    console.log('[MainContent] selectedSkillForParams changed to:', selectedSkillForParams?.name ?? 'null');
-  }, [selectedSkillForParams]);
-
-  // Debug: Log on every render
-  console.log('[MainContent] RENDER - selectedSkillForParams:', selectedSkillForParams?.name ?? 'null');
-
   // Load app version
   useEffect(() => {
     window.electronAPI.getAppVersion()
@@ -274,15 +266,12 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
   }, [showSkillsMenu]);
 
   const handleSkillSelect = (skill: CustomSkill) => {
-    console.log('[handleSkillSelect] Selected skill:', skill.name, 'Parameters:', skill.parameters);
     setShowSkillsMenu(false);
     // If skill has parameters, show the parameter modal
     if (skill.parameters && skill.parameters.length > 0) {
-      console.log('[handleSkillSelect] Showing parameter modal for skill with', skill.parameters.length, 'parameters');
       setSelectedSkillForParams(skill);
     } else {
       // No parameters, just set the prompt directly
-      console.log('[handleSkillSelect] No parameters, setting input value directly');
       setInputValue(skill.prompt);
     }
   };
@@ -664,10 +653,7 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
                                 key={skill.id}
                                 className="skills-dropdown-item"
                                 style={{ cursor: 'pointer' }}
-                                onClick={() => {
-                                  console.log('[CLICK] Skill clicked:', skill.name);
-                                  handleSkillSelect(skill);
-                                }}
+                                onClick={() => handleSkillSelect(skill)}
                               >
                                 <span className="skills-dropdown-icon">{skill.icon}</span>
                                 <div className="skills-dropdown-info">
@@ -717,16 +703,11 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
 
         {/* Modal for skills with parameters - Welcome View */}
         {selectedSkillForParams && (
-          <>
-            {console.log('[JSX-Welcome] Rendering modal for:', selectedSkillForParams.name)}
-            <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <div style={{ background: 'white', padding: '20px', borderRadius: '8px', color: 'black' }}>
-                <h2>Skill: {selectedSkillForParams.name}</h2>
-                <p>Parameters: {selectedSkillForParams.parameters?.length}</p>
-                <button onClick={handleSkillParamCancel} style={{ marginTop: '10px', padding: '8px 16px' }}>Close</button>
-              </div>
-            </div>
-          </>
+          <SkillParameterModal
+            skill={selectedSkillForParams}
+            onSubmit={handleSkillParamSubmit}
+            onCancel={handleSkillParamCancel}
+          />
         )}
       </div>
     );
@@ -906,15 +887,11 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
       )}
 
       {selectedSkillForParams && (
-        <>
-          {console.log('[JSX] About to render SkillParameterModal')}
-          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'red', zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <div style={{ background: 'white', padding: '20px', borderRadius: '8px' }}>
-              <h2>DEBUG: Modal should appear here for {selectedSkillForParams.name}</h2>
-              <button onClick={handleSkillParamCancel}>Close</button>
-            </div>
-          </div>
-        </>
+        <SkillParameterModal
+          skill={selectedSkillForParams}
+          onSubmit={handleSkillParamSubmit}
+          onCancel={handleSkillParamCancel}
+        />
       )}
     </div>
   );

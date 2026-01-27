@@ -121,6 +121,20 @@ export function setupIpcHandlers(
     shell.showItemInFolder(resolvedPath);
   });
 
+  // Open external URL in system browser
+  ipcMain.handle('shell:openExternal', async (_, url: string) => {
+    // Validate URL to prevent security issues
+    try {
+      const parsedUrl = new URL(url);
+      if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+        throw new Error('Only http and https URLs are allowed');
+      }
+      await shell.openExternal(url);
+    } catch (error: any) {
+      throw new Error(`Failed to open URL: ${error.message}`);
+    }
+  });
+
   // Workspace handlers
   ipcMain.handle(IPC_CHANNELS.WORKSPACE_CREATE, async (_, data) => {
     const validated = validateInput(WorkspaceCreateSchema, data, 'workspace');

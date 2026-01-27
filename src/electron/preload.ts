@@ -76,6 +76,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openFile: (filePath: string, workspacePath?: string) => ipcRenderer.invoke('file:open', filePath, workspacePath),
   showInFinder: (filePath: string, workspacePath?: string) => ipcRenderer.invoke('file:showInFinder', filePath, workspacePath),
 
+  // Shell APIs
+  openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url),
+
   // Task APIs
   createTask: (data: any) => ipcRenderer.invoke(IPC_CHANNELS.TASK_CREATE, data),
   getTask: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_GET, id),
@@ -201,6 +204,7 @@ export interface ElectronAPI {
   selectFolder: () => Promise<string | null>;
   openFile: (filePath: string, workspacePath?: string) => Promise<string>;
   showInFinder: (filePath: string, workspacePath?: string) => Promise<void>;
+  openExternal: (url: string) => Promise<void>;
   createTask: (data: any) => Promise<any>;
   getTask: (id: string) => Promise<any>;
   listTasks: () => Promise<any[]>;

@@ -654,8 +654,13 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
                             {customSkills.map(skill => (
                               <button
                                 key={skill.id}
+                                type="button"
                                 className="skills-dropdown-item"
-                                onClick={() => handleSkillSelect(skill)}
+                                onMouseDown={(e) => e.stopPropagation()}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleSkillSelect(skill);
+                                }}
                               >
                                 <span className="skills-dropdown-icon">{skill.icon}</span>
                                 <div className="skills-dropdown-info">

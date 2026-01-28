@@ -749,8 +749,8 @@ Be careful not to rename unrelated code that happens to have the same name.`,
       // Guideline Skills - injected into system prompt when enabled
       {
         id: 'karpathy-guidelines',
-        name: 'Karpathy Coding Guidelines',
-        description: 'Best practices for LLM coding behavior based on Andrej Karpathy\'s observations',
+        name: 'Coding Guidelines',
+        description: 'Best practices for LLM coding behavior',
         icon: '🧠',
         category: 'Guidelines',
         type: 'guideline',

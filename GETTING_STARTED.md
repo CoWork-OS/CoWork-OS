@@ -28,6 +28,7 @@ This will:
    - **Anthropic** - Claude models (requires API key from [console.anthropic.com](https://console.anthropic.com))
    - **Google Gemini** - Gemini models (requires API key from [aistudio.google.com](https://aistudio.google.com/apikey))
    - **OpenRouter** - Multiple models (requires API key from [openrouter.ai](https://openrouter.ai/keys))
+   - **OpenAI** - GPT-4o, o1 models (requires API key from [platform.openai.com](https://platform.openai.com/api-keys))
    - **AWS Bedrock** - Enterprise AWS (requires AWS credentials)
    - **Ollama** - Local models (free, requires [Ollama](https://ollama.ai) installed)
 3. Enter your API key
@@ -146,6 +147,8 @@ Open **Settings** > **Provider** tab:
 | Anthropic | Enter API key from [console.anthropic.com](https://console.anthropic.com) |
 | Google Gemini | Enter API key from [aistudio.google.com](https://aistudio.google.com/apikey) |
 | OpenRouter | Enter API key from [openrouter.ai](https://openrouter.ai/keys) |
+| OpenAI (API Key) | Enter API key from [platform.openai.com](https://platform.openai.com/api-keys) |
+| OpenAI (ChatGPT) | Click "Sign in with ChatGPT" to use your subscription |
 | AWS Bedrock | Enter AWS Access Key, Secret Key, and Region |
 | Ollama | Install Ollama, pull a model, select it |
 

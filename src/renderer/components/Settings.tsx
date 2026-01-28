@@ -245,6 +245,15 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
   const [openrouterModels, setOpenrouterModels] = useState<Array<{ id: string; name: string; context_length: number }>>([]);
   const [loadingOpenRouterModels, setLoadingOpenRouterModels] = useState(false);
 
+  // OpenAI state
+  const [openaiApiKey, setOpenaiApiKey] = useState('');
+  const [openaiModel, setOpenaiModel] = useState('gpt-4o-mini');
+  const [openaiModels, setOpenaiModels] = useState<Array<{ id: string; name: string; description: string }>>([]);
+  const [loadingOpenAIModels, setLoadingOpenAIModels] = useState(false);
+  const [openaiAuthMethod, setOpenaiAuthMethod] = useState<'api_key' | 'oauth'>('api_key');
+  const [openaiOAuthConnected, setOpenaiOAuthConnected] = useState(false);
+  const [openaiOAuthLoading, setOpenaiOAuthLoading] = useState(false);
+
   // Bedrock state
   const [bedrockModel, setBedrockModel] = useState('');
   const [bedrockModels, setBedrockModels] = useState<Array<{ id: string; name: string; description: string }>>([]);
@@ -309,6 +318,34 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
         setOpenrouterModel(loadedSettings.openrouter.model);
       }
 
+      // Set OpenAI form state
+      if (loadedSettings.openai?.apiKey) {
+        setOpenaiApiKey(loadedSettings.openai.apiKey);
+      }
+      if (loadedSettings.openai?.model) {
+        setOpenaiModel(loadedSettings.openai.model);
+      }
+      // Set OpenAI auth method and OAuth status
+      if (loadedSettings.openai?.authMethod) {
+        setOpenaiAuthMethod(loadedSettings.openai.authMethod);
+        // If authMethod is 'oauth', check if tokens are available
+        if (loadedSettings.openai.authMethod === 'oauth') {
+          if (loadedSettings.openai.accessToken || loadedSettings.openai.refreshToken) {
+            // Tokens available - fully connected
+            setOpenaiOAuthConnected(true);
+          } else {
+            // Auth method is OAuth but tokens missing (decryption failed or expired)
+            // Keep authMethod as oauth so user knows they configured it, but not connected
+            setOpenaiOAuthConnected(false);
+            console.log('[Settings] OpenAI OAuth configured but tokens unavailable - re-authentication required');
+          }
+        }
+      } else if (loadedSettings.openai?.accessToken) {
+        // Legacy: accessToken present but no authMethod set
+        setOpenaiOAuthConnected(true);
+        setOpenaiAuthMethod('oauth');
+      }
+
       // Set Bedrock form state (access key and secret key are set earlier)
       if (loadedSettings.bedrock?.accessKeyId) {
         setAwsAccessKeyId(loadedSettings.bedrock.accessKeyId);
@@ -333,6 +370,13 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
           id: m.key,
           name: m.displayName,
           context_length: m.contextLength || 0,
+        })));
+      }
+      if (loadedSettings.cachedOpenAIModels && loadedSettings.cachedOpenAIModels.length > 0) {
+        setOpenaiModels(loadedSettings.cachedOpenAIModels.map((m: any) => ({
+          id: m.key,
+          name: m.displayName,
+          description: m.description || '',
         })));
       }
       if (loadedSettings.cachedOllamaModels && loadedSettings.cachedOllamaModels.length > 0) {
@@ -412,6 +456,62 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
     }
   };
 
+  const loadOpenAIModels = async (apiKey?: string) => {
+    try {
+      setLoadingOpenAIModels(true);
+      const models = await window.electronAPI.getOpenAIModels(apiKey || openaiApiKey);
+      setOpenaiModels(models || []);
+      // If we got models and current model isn't in the list, select the first one
+      if (models && models.length > 0 && !models.some(m => m.id === openaiModel)) {
+        setOpenaiModel(models[0].id);
+      }
+      // Notify main page that models were refreshed (they're now cached)
+      onSettingsChanged?.();
+    } catch (error) {
+      console.error('Failed to load OpenAI models:', error);
+      setOpenaiModels([]);
+    } finally {
+      setLoadingOpenAIModels(false);
+    }
+  };
+
+  const handleOpenAIOAuthLogin = async () => {
+    try {
+      setOpenaiOAuthLoading(true);
+      setTestResult(null);
+      const result = await window.electronAPI.openaiOAuthStart();
+      if (result.success) {
+        setOpenaiOAuthConnected(true);
+        setOpenaiAuthMethod('oauth');
+        setOpenaiApiKey(''); // Clear API key when using OAuth
+        onSettingsChanged?.();
+        // Load models after OAuth success
+        loadOpenAIModels();
+      } else {
+        setTestResult({ success: false, error: result.error || 'OAuth failed' });
+      }
+    } catch (error: any) {
+      console.error('OpenAI OAuth error:', error);
+      setTestResult({ success: false, error: error.message || 'OAuth failed' });
+    } finally {
+      setOpenaiOAuthLoading(false);
+    }
+  };
+
+  const handleOpenAIOAuthLogout = async () => {
+    try {
+      setOpenaiOAuthLoading(true);
+      await window.electronAPI.openaiOAuthLogout();
+      setOpenaiOAuthConnected(false);
+      setOpenaiAuthMethod('api_key');
+      onSettingsChanged?.();
+    } catch (error: any) {
+      console.error('OpenAI OAuth logout error:', error);
+    } finally {
+      setOpenaiOAuthLoading(false);
+    }
+  };
+
   const loadBedrockModels = async () => {
     try {
       setLoadingBedrockModels(true);
@@ -475,6 +575,12 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
           apiKey: openrouterApiKey || undefined,
           model: openrouterModel || undefined,
         },
+        // Always include openai settings
+        openai: {
+          apiKey: openaiAuthMethod === 'api_key' ? (openaiApiKey || undefined) : undefined,
+          model: openaiModel || undefined,
+          authMethod: openaiAuthMethod,
+        },
       };
 
       await window.electronAPI.saveLLMSettings(settingsToSave);
@@ -519,6 +625,12 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
         openrouter: settings.providerType === 'openrouter' ? {
           apiKey: openrouterApiKey || undefined,
           model: openrouterModel || undefined,
+        } : undefined,
+        openai: settings.providerType === 'openai' ? {
+          apiKey: openaiAuthMethod === 'api_key' ? (openaiApiKey || undefined) : undefined,
+          model: openaiModel || undefined,
+          authMethod: openaiAuthMethod,
+          // OAuth tokens are handled by the backend from stored settings
         } : undefined,
       };
 
@@ -706,6 +818,7 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
                     const isOllama = provider.type === 'ollama';
                     const isGemini = provider.type === 'gemini';
                     const isOpenRouter = provider.type === 'openrouter';
+                    const isOpenAI = provider.type === 'openai';
 
                     return (
                       <label
@@ -718,7 +831,7 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
                           value={provider.type}
                           checked={settings.providerType === provider.type}
                           onChange={() => {
-                            setSettings({ ...settings, providerType: provider.type as 'anthropic' | 'bedrock' | 'ollama' | 'gemini' | 'openrouter' });
+                            setSettings({ ...settings, providerType: provider.type as 'anthropic' | 'bedrock' | 'ollama' | 'gemini' | 'openrouter' | 'openai' });
                             // Load models when selecting provider
                             if (provider.type === 'ollama') {
                               loadOllamaModels();
@@ -726,6 +839,8 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
                               loadGeminiModels();
                             } else if (provider.type === 'openrouter') {
                               loadOpenRouterModels();
+                            } else if (provider.type === 'openai') {
+                              loadOpenAIModels();
                             }
                           }}
                         />
@@ -756,6 +871,15 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
                             )}
                             {isOpenRouter && !provider.configured && (
                               <>Enter your OpenRouter API key below</>
+                            )}
+                            {isOpenAI && provider.configured && openaiOAuthConnected && (
+                              <>Connected via ChatGPT account</>
+                            )}
+                            {isOpenAI && provider.configured && !openaiOAuthConnected && (
+                              <>API key configured</>
+                            )}
+                            {isOpenAI && !provider.configured && (
+                              <>Sign in with ChatGPT or enter API key</>
                             )}
                             {isBedrock && provider.configured && (
                               <>AWS credentials configured</>
@@ -926,6 +1050,161 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
                     <p className="settings-hint">
                       OpenRouter provides access to many models from different providers (Claude, GPT-4, Llama, etc.) through a unified API.
                     </p>
+                  </div>
+                </>
+              )}
+
+              {settings.providerType === 'openai' && (
+                <>
+                  <div className="settings-section">
+                    <h3>Authentication Method</h3>
+                    <p className="settings-description">
+                      Choose how to authenticate with OpenAI
+                    </p>
+                    <div className="auth-method-tabs">
+                      <button
+                        className={`auth-method-tab ${openaiAuthMethod === 'oauth' ? 'active' : ''}`}
+                        onClick={() => setOpenaiAuthMethod('oauth')}
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                          <circle cx="12" cy="7" r="4" />
+                        </svg>
+                        Sign in with ChatGPT
+                      </button>
+                      <button
+                        className={`auth-method-tab ${openaiAuthMethod === 'api_key' ? 'active' : ''}`}
+                        onClick={() => setOpenaiAuthMethod('api_key')}
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4" />
+                        </svg>
+                        API Key
+                      </button>
+                    </div>
+                  </div>
+
+                  {openaiAuthMethod === 'oauth' && (
+                    <div className="settings-section">
+                      <h3>ChatGPT Account</h3>
+                      {openaiOAuthConnected ? (
+                        <div className="oauth-connected">
+                          <div className="oauth-status">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M22 11.08V12a10 10 0 11-5.93-9.14" />
+                              <path d="M22 4L12 14.01l-3-3" />
+                            </svg>
+                            <span>Connected to ChatGPT</span>
+                          </div>
+                          <p className="settings-description">
+                            Your ChatGPT account is connected. You can use GPT-4o and other models with your subscription.
+                          </p>
+                          <button
+                            className="button-small button-secondary"
+                            onClick={handleOpenAIOAuthLogout}
+                            disabled={openaiOAuthLoading}
+                          >
+                            {openaiOAuthLoading ? 'Disconnecting...' : 'Disconnect Account'}
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="oauth-login">
+                          <p className="settings-description">
+                            Sign in with your ChatGPT account to use GPT-4o, o1, and other models with your subscription.
+                          </p>
+                          <button
+                            className="button-primary oauth-login-btn"
+                            onClick={handleOpenAIOAuthLogin}
+                            disabled={openaiOAuthLoading}
+                          >
+                            {openaiOAuthLoading ? (
+                              <>
+                                <svg className="spinner" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <path d="M21 12a9 9 0 11-6.219-8.56" />
+                                </svg>
+                                Connecting...
+                              </>
+                            ) : (
+                              <>
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+                                  <polyline points="10 17 15 12 10 7" />
+                                  <line x1="15" y1="12" x2="3" y2="12" />
+                                </svg>
+                                Sign in with ChatGPT
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {openaiAuthMethod === 'api_key' && (
+                    <div className="settings-section">
+                      <h3>OpenAI API Key</h3>
+                      <p className="settings-description">
+                        Enter your API key from{' '}
+                        <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">
+                          OpenAI Platform
+                        </a>
+                      </p>
+                      <div className="settings-input-group">
+                        <input
+                          type="password"
+                          className="settings-input"
+                          placeholder="sk-..."
+                          value={openaiApiKey}
+                          onChange={(e) => setOpenaiApiKey(e.target.value)}
+                        />
+                        <button
+                          className="button-small button-secondary"
+                          onClick={() => loadOpenAIModels(openaiApiKey)}
+                          disabled={loadingOpenAIModels}
+                        >
+                          {loadingOpenAIModels ? 'Loading...' : 'Refresh Models'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="settings-section">
+                    <h3>Model</h3>
+                    <p className="settings-description">
+                      {openaiAuthMethod === 'oauth' && openaiOAuthConnected
+                        ? 'Select a GPT model to use with your ChatGPT subscription.'
+                        : 'Select a GPT model. Enter your API key and click "Refresh Models" to load available models.'}
+                    </p>
+                    {openaiModels.length > 0 ? (
+                      <SearchableSelect
+                        options={openaiModels.map(model => ({
+                          value: model.id,
+                          label: model.name,
+                          description: model.description,
+                        }))}
+                        value={openaiModel}
+                        onChange={setOpenaiModel}
+                        placeholder="Select a model..."
+                      />
+                    ) : (
+                      <input
+                        type="text"
+                        className="settings-input"
+                        placeholder="gpt-4o-mini"
+                        value={openaiModel}
+                        onChange={(e) => setOpenaiModel(e.target.value)}
+                      />
+                    )}
+                    {openaiAuthMethod === 'oauth' && openaiOAuthConnected && (
+                      <button
+                        className="button-small button-secondary"
+                        onClick={() => loadOpenAIModels()}
+                        disabled={loadingOpenAIModels}
+                        style={{ marginTop: '8px' }}
+                      >
+                        {loadingOpenAIModels ? 'Loading...' : 'Refresh Models'}
+                      </button>
+                    )}
                   </div>
                 </>
               )}

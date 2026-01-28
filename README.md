@@ -22,7 +22,7 @@
 
 CoWork-OSS is an open-source, local-first agent workbench for running multi-step tasks in a folder-scoped workspace, with explicit approvals for destructive actions and built-in skills for generating documents, spreadsheets, and presentations.
 
-**You bring your own model credentials (Anthropic API / Google Gemini / OpenRouter / AWS Bedrock) or run locally with Ollama; usage is billed by your provider (or free with Ollama).**
+**You bring your own model credentials (Anthropic API / Google Gemini / OpenRouter / OpenAI / AWS Bedrock) or run locally with Ollama; usage is billed by your provider (or free with Ollama).**
 
 > **Independent project.** CoWork-OSS is not affiliated with, endorsed by, or sponsored by Anthropic.
 > This project implements a local, folder-scoped agent workflow pattern in open source.
@@ -79,6 +79,8 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
 | Anthropic API | Configure API key in Settings | Pay-per-token |
 | Google Gemini | Configure API key in Settings | Pay-per-token (free tier available) |
 | OpenRouter | Configure API key in Settings | Pay-per-token (multi-model access) |
+| OpenAI (API Key) | Configure API key in Settings | Pay-per-token |
+| OpenAI (ChatGPT OAuth) | Sign in with your ChatGPT account | Uses your ChatGPT subscription |
 | AWS Bedrock | Configure AWS credentials in Settings | Pay-per-token via AWS |
 | Ollama (Local) | Install Ollama and pull models | **Free** (runs locally) |
 
@@ -163,7 +165,7 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
 │                  Execution Layer                 │
 │  - File Operations                               │
 │  - Skills (Document Creation)                    │
-│  - LLM Providers (Anthropic/Gemini/OpenRouter/Bedrock/Ollama)│
+│  - LLM Providers (Anthropic/Gemini/OpenRouter/OpenAI/Bedrock/Ollama)│
 │  - Search Providers (Tavily/Brave/SerpAPI/Google)│
 │  - MCP Client (External Tool Servers)            │
 └─────────────────────────────────────────────────┘
@@ -188,7 +190,7 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
 
 - Node.js 18+ and npm
 - macOS (for Electron native features)
-- One of: Anthropic API key, Google Gemini API key, OpenRouter API key, AWS Bedrock access, or Ollama installed locally
+- One of: Anthropic API key, Google Gemini API key, OpenRouter API key, OpenAI API key, AWS Bedrock access, or Ollama installed locally
 
 ### Installation
 
@@ -458,7 +460,7 @@ If requested by the rights holder, we will update naming/branding to avoid confu
 - [x] Folder-scoped workspace + path traversal protection
 - [x] Approval gates for destructive operations
 - [x] Task timeline + artifact outputs
-- [x] Multi-provider support (Anthropic API / Google Gemini / OpenRouter / AWS Bedrock / Ollama)
+- [x] Multi-provider support (Anthropic API / Google Gemini / OpenRouter / OpenAI / AWS Bedrock / Ollama)
 - [x] Model selection (Opus, Sonnet, Haiku, or any Ollama model)
 - [x] Built-in skills (documents, spreadsheets, presentations)
 - [x] **Real Office format support** (Excel .xlsx, Word .docx, PDF, PowerPoint .pptx)
@@ -1003,6 +1005,65 @@ See all available models at [openrouter.ai/models](https://openrouter.ai/models)
 - **Pay-As-You-Go**: Pay only for what you use
 - **Model Variety**: Access models from OpenAI, Anthropic, Google, Meta, and more
 - **Unified API**: OpenAI-compatible API format
+
+---
+
+## OpenAI / ChatGPT Integration
+
+CoWork-OSS supports OpenAI models through two authentication methods: API Key or ChatGPT OAuth.
+
+### Option 1: API Key (Pay-per-token)
+
+Use your OpenAI API key to access GPT models with pay-per-token billing.
+
+#### Setup
+
+1. Go to [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+2. Create an API key
+3. In CoWork-OSS: **Settings** > **LLM Provider** > **OpenAI**
+4. Select **API Key** tab
+5. Enter your API key
+6. Click **Refresh Models** to load available models
+7. Select your preferred model
+8. Click **Test Connection** to verify
+9. Save settings
+
+### Option 2: ChatGPT OAuth (Use Your Subscription)
+
+If you have a ChatGPT Plus, Pro, or Team subscription, you can sign in with your ChatGPT account to use your subscription's models without additional API costs.
+
+#### Setup
+
+1. In CoWork-OSS: **Settings** > **LLM Provider** > **OpenAI**
+2. Select **Sign in with ChatGPT** tab
+3. Click **Sign in with ChatGPT**
+4. A browser window opens - log in to your ChatGPT account
+5. Authorize the connection
+6. Once connected, your available models are loaded automatically
+7. Select your preferred model
+8. Save settings
+
+### Available Models
+
+| Model | Description |
+|-------|-------------|
+| `gpt-5.2-codex` | Most advanced reasoning (ChatGPT OAuth) |
+| `gpt-5.2` | Advanced reasoning (ChatGPT OAuth) |
+| `gpt-5.1-codex-max` | Maximum capability (ChatGPT OAuth) |
+| `gpt-5.1-codex-mini` | Fast and efficient (ChatGPT OAuth) |
+| `gpt-5.1` | Balanced performance (ChatGPT OAuth) |
+| `gpt-4o` | Most capable (API Key) |
+| `gpt-4o-mini` | Fast and affordable (API Key) |
+| `o1` | Advanced reasoning (API Key) |
+| `o1-mini` | Fast reasoning (API Key) |
+
+**Note:** ChatGPT OAuth provides access to internal ChatGPT models (gpt-5.x series), while API Key provides access to public OpenAI API models (gpt-4o, o1, etc.).
+
+### Benefits
+
+- **ChatGPT OAuth**: Use your existing ChatGPT subscription without additional API costs
+- **API Key**: Pay-per-token access to the latest OpenAI models
+- **Full Tool Support**: Both authentication methods support function calling for all CoWork tools
 
 ---
 

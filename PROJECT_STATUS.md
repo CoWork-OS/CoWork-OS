@@ -26,6 +26,8 @@ CoWork-OSS has reached **production status** with comprehensive features for age
 - [x] Anthropic (Claude models)
 - [x] Google Gemini
 - [x] OpenRouter (multi-model access)
+- [x] OpenAI (API Key: GPT-4o, o1 models)
+- [x] OpenAI (ChatGPT OAuth: Use your ChatGPT subscription)
 - [x] AWS Bedrock
 - [x] Ollama (local/free)
 - [x] Provider Factory with dynamic selection
@@ -296,7 +298,7 @@ Operations Requiring Approval:
 
 ### You Can:
 1. Select workspaces and create tasks
-2. Use any of 5 LLM providers (including free local Ollama)
+2. Use any of 6 LLM providers (including free local Ollama)
 3. Execute multi-step file operations
 4. Create real Office documents (.xlsx, .docx, .pdf, .pptx)
 5. Search the web with multiple providers
@@ -386,7 +388,7 @@ Expected behavior:
 **This is a production-ready application** for agentic task automation:
 - All core systems implemented
 - UI is fully functional
-- Multi-provider LLM support (5 providers)
+- Multi-provider LLM support (6 providers)
 - Real Office document creation
 - Web search and browser automation
 - Remote access via Telegram, Discord, and Slack

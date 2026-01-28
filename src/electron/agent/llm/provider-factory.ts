@@ -1,6 +1,7 @@
 import { app, safeStorage } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
+import { getModels as getPiAiModels } from '@mariozechner/pi-ai';
 import {
   LLMProvider,
   LLMProviderConfig,
@@ -14,6 +15,7 @@ import { BedrockProvider } from './bedrock-provider';
 import { OllamaProvider } from './ollama-provider';
 import { GeminiProvider } from './gemini-provider';
 import { OpenRouterProvider } from './openrouter-provider';
+import { OpenAIProvider } from './openai-provider';
 
 const SETTINGS_FILE = 'llm-settings.json';
 const MASKED_VALUE = '***configured***';
@@ -48,7 +50,8 @@ function decryptSecret(value?: string): string | undefined {
 
   if (value.startsWith(ENCRYPTED_PREFIX)) {
     try {
-      if (safeStorage.isEncryptionAvailable()) {
+      const isAvailable = safeStorage.isEncryptionAvailable();
+      if (isAvailable) {
         const encrypted = Buffer.from(value.slice(ENCRYPTED_PREFIX.length), 'base64');
         const decrypted = safeStorage.decryptString(encrypted);
         return decrypted;
@@ -119,6 +122,28 @@ function sanitizeSettings(settings: LLMSettings): LLMSettings {
     };
   }
 
+  if (sanitized.openai) {
+    const decryptedAccessToken = decryptSecret(sanitized.openai.accessToken);
+    const decryptedRefreshToken = decryptSecret(sanitized.openai.refreshToken);
+
+    // Log OAuth token status for debugging
+    if (sanitized.openai.authMethod === 'oauth') {
+      console.log('[LLM Settings] Loading OpenAI OAuth settings:');
+      console.log('[LLM Settings]   authMethod:', sanitized.openai.authMethod);
+      console.log('[LLM Settings]   hasAccessToken:', !!sanitized.openai.accessToken);
+      console.log('[LLM Settings]   decryptedAccessToken:', !!decryptedAccessToken);
+      console.log('[LLM Settings]   hasRefreshToken:', !!sanitized.openai.refreshToken);
+      console.log('[LLM Settings]   decryptedRefreshToken:', !!decryptedRefreshToken);
+    }
+
+    sanitized.openai = {
+      ...sanitized.openai,
+      apiKey: decryptSecret(sanitized.openai.apiKey),
+      accessToken: decryptedAccessToken,
+      refreshToken: decryptedRefreshToken,
+    };
+  }
+
   return sanitized;
 }
 
@@ -165,11 +190,21 @@ export interface LLMSettings {
     apiKey?: string;
     model?: string;
   };
+  openai?: {
+    apiKey?: string;
+    model?: string;
+    // OAuth tokens (alternative to API key)
+    accessToken?: string;
+    refreshToken?: string;
+    tokenExpiresAt?: number;
+    authMethod?: 'api_key' | 'oauth';
+  };
   // Cached models from API (populated when user refreshes)
   cachedGeminiModels?: CachedModelInfo[];
   cachedOpenRouterModels?: CachedModelInfo[];
   cachedOllamaModels?: CachedModelInfo[];
   cachedBedrockModels?: CachedModelInfo[];
+  cachedOpenAIModels?: CachedModelInfo[];
 }
 
 const DEFAULT_SETTINGS: LLMSettings = {
@@ -255,6 +290,9 @@ export class LLMProviderFactory {
     if (settings.openrouter?.apiKey) {
       return 'openrouter';
     }
+    if (settings.openai?.apiKey || settings.openai?.accessToken) {
+      return 'openai';
+    }
     if (settings.bedrock?.accessKeyId || settings.bedrock?.profile) {
       return 'bedrock';
     }
@@ -310,6 +348,15 @@ export class LLMProviderFactory {
         };
       }
 
+      if (settingsToSave.openai) {
+        settingsToSave.openai = {
+          ...settingsToSave.openai,
+          apiKey: settingsToSave.openai.apiKey ? encryptSecret(settingsToSave.openai.apiKey) : undefined,
+          accessToken: settingsToSave.openai.accessToken ? encryptSecret(settingsToSave.openai.accessToken) : undefined,
+          refreshToken: settingsToSave.openai.refreshToken ? encryptSecret(settingsToSave.openai.refreshToken) : undefined,
+        };
+      }
+
       fs.writeFileSync(this.settingsPath, JSON.stringify(settingsToSave, null, 2));
       this.cachedSettings = settings;
     } catch (error) {
@@ -336,7 +383,7 @@ export class LLMProviderFactory {
 
     const config: LLMProviderConfig = {
       type: providerType,
-      model: this.getModelId(settings.modelKey, providerType, settings.ollama?.model, settings.gemini?.model, settings.openrouter?.model),
+      model: this.getModelId(settings.modelKey, providerType, settings.ollama?.model, settings.gemini?.model, settings.openrouter?.model, settings.openai?.model),
       // Anthropic config - from settings only
       anthropicApiKey: normalizeSecret(overrideConfig?.anthropicApiKey) || settings.anthropic?.apiKey,
       // Bedrock config - from settings only
@@ -352,6 +399,10 @@ export class LLMProviderFactory {
       geminiApiKey: normalizeSecret(overrideConfig?.geminiApiKey) || settings.gemini?.apiKey,
       // OpenRouter config - from settings only
       openrouterApiKey: normalizeSecret(overrideConfig?.openrouterApiKey) || settings.openrouter?.apiKey,
+      // OpenAI config - from settings only
+      openaiApiKey: normalizeSecret(overrideConfig?.openaiApiKey) || settings.openai?.apiKey,
+      openaiAccessToken: normalizeSecret(overrideConfig?.openaiAccessToken) || settings.openai?.accessToken,
+      openaiRefreshToken: settings.openai?.refreshToken,
     };
 
     return this.createProviderFromConfig(config);
@@ -372,6 +423,8 @@ export class LLMProviderFactory {
         return new GeminiProvider(config);
       case 'openrouter':
         return new OpenRouterProvider(config);
+      case 'openai':
+        return new OpenAIProvider(config);
       default:
         throw new Error(`Unknown provider type: ${config.type}`);
     }
@@ -380,7 +433,7 @@ export class LLMProviderFactory {
   /**
    * Get the model ID for a provider
    */
-  static getModelId(modelKey: ModelKey | string, providerType: LLMProviderType, ollamaModel?: string, geminiModel?: string, openrouterModel?: string): string {
+  static getModelId(modelKey: ModelKey | string, providerType: LLMProviderType, ollamaModel?: string, geminiModel?: string, openrouterModel?: string, openaiModel?: string): string {
     // For Ollama, use the specific Ollama model if provided
     if (providerType === 'ollama') {
       return ollamaModel || 'gpt-oss:20b';
@@ -394,6 +447,11 @@ export class LLMProviderFactory {
     // For OpenRouter, use the specific model if provided or default
     if (providerType === 'openrouter') {
       return openrouterModel || 'anthropic/claude-3.5-sonnet';
+    }
+
+    // For OpenAI, use the specific model if provided or default
+    if (providerType === 'openai') {
+      return openaiModel || 'gpt-4o-mini';
     }
 
     // For other providers, look up in MODELS
@@ -447,6 +505,11 @@ export class LLMProviderFactory {
         type: 'openrouter' as LLMProviderType,
         name: 'OpenRouter',
         configured: !!settings.openrouter?.apiKey,
+      },
+      {
+        type: 'openai' as LLMProviderType,
+        name: 'OpenAI',
+        configured: !!(settings.openai?.apiKey || settings.openai?.accessToken),
       },
       {
         type: 'bedrock' as LLMProviderType,
@@ -662,10 +725,138 @@ export class LLMProviderFactory {
   }
 
   /**
+   * Fetch available OpenAI models
+   * For API key auth: uses the models.list API via OpenAI SDK
+   * For OAuth auth: uses pi-ai SDK's model list for openai-codex provider
+   */
+  static async getOpenAIModels(apiKey?: string): Promise<Array<{ id: string; name: string; description: string }>> {
+    const settings = this.loadSettings();
+    // Normalize empty strings to undefined
+    const normalizedApiKey = apiKey?.trim() || undefined;
+    const key = normalizedApiKey || settings.openai?.apiKey;
+    // Check for OAuth access token if no API key
+    const accessToken = settings.openai?.accessToken;
+    const refreshToken = settings.openai?.refreshToken;
+
+    const defaultModels = [
+      { id: 'gpt-4o', name: 'GPT-4o', description: 'Most capable model for complex tasks' },
+      { id: 'gpt-4o-mini', name: 'GPT-4o Mini', description: 'Fast and affordable for most tasks' },
+      { id: 'gpt-4-turbo', name: 'GPT-4 Turbo', description: 'Previous generation flagship' },
+      { id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo', description: 'Fast and cost-effective' },
+      { id: 'o1', name: 'o1', description: 'Advanced reasoning model' },
+      { id: 'o1-mini', name: 'o1 Mini', description: 'Fast reasoning model' },
+    ];
+
+    // For OAuth users, use pi-ai SDK's model list directly
+    if (accessToken && refreshToken && !key) {
+      console.log('[OpenAI] Using OAuth - fetching models from pi-ai SDK...');
+      try {
+        const piAiModels = getPiAiModels('openai-codex');
+        const models = piAiModels.map((m) => ({
+          id: m.id,
+          name: m.name || this.formatOpenAIModelName(m.id),
+          description: this.getOpenAIModelDescription(m.id),
+        }));
+
+        // Sort by priority (ChatGPT internal models)
+        models.sort((a, b) => {
+          const priority = (id: string) => {
+            if (id.includes('5.1-codex-mini')) return 0;
+            if (id.includes('5.1-codex-max')) return 1;
+            if (id === 'gpt-5.1') return 2;
+            if (id.includes('5.2-codex')) return 3;
+            if (id === 'gpt-5.2') return 4;
+            return 5;
+          };
+          return priority(a.id) - priority(b.id);
+        });
+
+        console.log(`[OpenAI] Found ${models.length} models via pi-ai SDK`);
+        return models;
+      } catch (error) {
+        console.error('[OpenAI] Failed to get models from pi-ai SDK:', error);
+        // Return ChatGPT-specific defaults for OAuth users
+        return [
+          { id: 'gpt-5.1-codex-mini', name: 'GPT-5.1 Codex Mini', description: 'Fast and efficient for most tasks' },
+          { id: 'gpt-5.1-codex-max', name: 'GPT-5.1 Codex Max', description: 'Maximum capability for complex tasks' },
+          { id: 'gpt-5.1', name: 'GPT-5.1', description: 'Balanced performance and capability' },
+          { id: 'gpt-5.2-codex', name: 'GPT-5.2 Codex', description: 'Advanced reasoning model' },
+          { id: 'gpt-5.2', name: 'GPT-5.2', description: 'Most advanced reasoning' },
+        ];
+      }
+    }
+
+    if (!key) {
+      // Return default models if no authentication
+      return defaultModels;
+    }
+
+    try {
+      // For API key, use the OpenAI provider
+      const provider = new OpenAIProvider({
+        type: 'openai',
+        model: '',
+        openaiApiKey: key,
+      });
+      return await provider.getAvailableModels();
+    } catch (error: any) {
+      console.error('Failed to fetch OpenAI models:', error);
+      // Return default models on error instead of empty array
+      return defaultModels;
+    }
+  }
+
+  /**
+   * Format OpenAI model ID to display name
+   */
+  private static formatOpenAIModelName(modelId: string): string {
+    // Public API models
+    if (modelId === 'gpt-4o') return 'GPT-4o';
+    if (modelId === 'gpt-4o-mini') return 'GPT-4o Mini';
+    if (modelId.includes('gpt-4o-')) return `GPT-4o (${modelId.replace('gpt-4o-', '')})`;
+    if (modelId === 'gpt-4-turbo') return 'GPT-4 Turbo';
+    if (modelId === 'gpt-4') return 'GPT-4';
+    if (modelId === 'gpt-3.5-turbo') return 'GPT-3.5 Turbo';
+    if (modelId === 'o1') return 'o1';
+    if (modelId === 'o1-mini') return 'o1 Mini';
+    if (modelId === 'o1-preview') return 'o1 Preview';
+    if (modelId === 'o3-mini') return 'o3 Mini';
+    // ChatGPT internal models
+    if (modelId === 'gpt-5.1') return 'GPT-5.1';
+    if (modelId === 'gpt-5.1-codex-mini') return 'GPT-5.1 Codex Mini';
+    if (modelId === 'gpt-5.1-codex-max') return 'GPT-5.1 Codex Max';
+    if (modelId === 'gpt-5.2') return 'GPT-5.2';
+    if (modelId === 'gpt-5.2-codex') return 'GPT-5.2 Codex';
+    return modelId;
+  }
+
+  /**
+   * Get OpenAI model description
+   */
+  private static getOpenAIModelDescription(modelId: string): string {
+    // Public API models
+    if (modelId.includes('gpt-4o') && !modelId.includes('mini')) return 'Most capable model for complex tasks';
+    if (modelId.includes('gpt-4o-mini')) return 'Fast and affordable for most tasks';
+    if (modelId.includes('gpt-4-turbo')) return 'Previous generation flagship';
+    if (modelId.includes('gpt-4')) return 'High capability model';
+    if (modelId.includes('gpt-3.5')) return 'Fast and cost-effective';
+    if (modelId === 'o1' || modelId === 'o1-preview') return 'Advanced reasoning model';
+    if (modelId === 'o1-mini') return 'Fast reasoning model';
+    if (modelId.includes('o3')) return 'Next generation reasoning';
+    // ChatGPT internal models
+    if (modelId === 'gpt-5.1') return 'Balanced performance and capability';
+    if (modelId === 'gpt-5.1-codex-mini') return 'Fast and efficient for most tasks';
+    if (modelId === 'gpt-5.1-codex-max') return 'Maximum capability for complex tasks';
+    if (modelId === 'gpt-5.2') return 'Most advanced reasoning';
+    if (modelId === 'gpt-5.2-codex') return 'Advanced reasoning model';
+    return 'OpenAI model';
+  }
+
+  /**
    * Save cached models for a provider
    */
   static saveCachedModels(
-    providerType: 'gemini' | 'openrouter' | 'ollama' | 'bedrock',
+    providerType: 'gemini' | 'openrouter' | 'ollama' | 'bedrock' | 'openai',
     models: CachedModelInfo[]
   ): void {
     const settings = this.loadSettings();
@@ -683,6 +874,9 @@ export class LLMProviderFactory {
       case 'bedrock':
         settings.cachedBedrockModels = models;
         break;
+      case 'openai':
+        settings.cachedOpenAIModels = models;
+        break;
     }
 
     this.saveSettings(settings);
@@ -691,7 +885,7 @@ export class LLMProviderFactory {
   /**
    * Get cached models for a provider
    */
-  static getCachedModels(providerType: 'gemini' | 'openrouter' | 'ollama' | 'bedrock'): CachedModelInfo[] | undefined {
+  static getCachedModels(providerType: 'gemini' | 'openrouter' | 'ollama' | 'bedrock' | 'openai'): CachedModelInfo[] | undefined {
     const settings = this.loadSettings();
 
     switch (providerType) {
@@ -703,6 +897,8 @@ export class LLMProviderFactory {
         return settings.cachedOllamaModels;
       case 'bedrock':
         return settings.cachedBedrockModels;
+      case 'openai':
+        return settings.cachedOpenAIModels;
       default:
         return undefined;
     }

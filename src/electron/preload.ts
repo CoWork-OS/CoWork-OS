@@ -29,6 +29,9 @@ const IPC_CHANNELS = {
   LLM_GET_OLLAMA_MODELS: 'llm:getOllamaModels',
   LLM_GET_GEMINI_MODELS: 'llm:getGeminiModels',
   LLM_GET_OPENROUTER_MODELS: 'llm:getOpenRouterModels',
+  LLM_GET_OPENAI_MODELS: 'llm:getOpenAIModels',
+  LLM_OPENAI_OAUTH_START: 'llm:openaiOAuthStart',
+  LLM_OPENAI_OAUTH_LOGOUT: 'llm:openaiOAuthLogout',
   LLM_GET_BEDROCK_MODELS: 'llm:getBedrockModels',
   // Gateway / Channels
   GATEWAY_GET_CHANNELS: 'gateway:getChannels',
@@ -263,6 +266,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getOllamaModels: (baseUrl?: string) => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_OLLAMA_MODELS, baseUrl),
   getGeminiModels: (apiKey?: string) => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_GEMINI_MODELS, apiKey),
   getOpenRouterModels: (apiKey?: string) => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_OPENROUTER_MODELS, apiKey),
+  getOpenAIModels: (apiKey?: string) => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_OPENAI_MODELS, apiKey),
+  openaiOAuthStart: () => ipcRenderer.invoke(IPC_CHANNELS.LLM_OPENAI_OAUTH_START),
+  openaiOAuthLogout: () => ipcRenderer.invoke(IPC_CHANNELS.LLM_OPENAI_OAUTH_LOGOUT),
   getBedrockModels: (config?: { region?: string; accessKeyId?: string; secretAccessKey?: string; profile?: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_BEDROCK_MODELS, config),
 
@@ -431,6 +437,9 @@ export interface ElectronAPI {
   getOllamaModels: (baseUrl?: string) => Promise<Array<{ name: string; size: number; modified: string }>>;
   getGeminiModels: (apiKey?: string) => Promise<Array<{ name: string; displayName: string; description: string }>>;
   getOpenRouterModels: (apiKey?: string) => Promise<Array<{ id: string; name: string; context_length: number }>>;
+  getOpenAIModels: (apiKey?: string) => Promise<Array<{ id: string; name: string; description: string }>>;
+  openaiOAuthStart: () => Promise<{ success: boolean; error?: string }>;
+  openaiOAuthLogout: () => Promise<{ success: boolean }>;
   getBedrockModels: (config?: { region?: string; accessKeyId?: string; secretAccessKey?: string; profile?: string }) => Promise<Array<{ id: string; name: string; provider: string; description: string }>>;
   // Gateway / Channel APIs
   getGatewayChannels: () => Promise<any[]>;

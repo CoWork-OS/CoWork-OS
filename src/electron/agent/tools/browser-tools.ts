@@ -15,7 +15,7 @@ export class BrowserTools {
   ) {
     this.browserService = new BrowserService(workspace, {
       headless: true,
-      timeout: 30000
+      timeout: 60000  // 60 seconds - enough time for browser launch + navigation
     });
   }
 

@@ -25,8 +25,8 @@ const LLM_TIMEOUT_MS = 2 * 60 * 1000;
 // Per-step timeout (5 minutes max per step)
 const STEP_TIMEOUT_MS = 5 * 60 * 1000;
 
-// Per-tool execution timeout (30 seconds)
-const TOOL_TIMEOUT_MS = 30 * 1000;
+// Per-tool execution timeout (60 seconds - increased for browser tools which need time to launch)
+const TOOL_TIMEOUT_MS = 60 * 1000;
 
 // Maximum consecutive failures for the same tool before giving up
 const MAX_TOOL_FAILURES = 2;

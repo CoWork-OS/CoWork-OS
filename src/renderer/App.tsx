@@ -4,14 +4,16 @@ import { MainContent } from './components/MainContent';
 import { RightPanel } from './components/RightPanel';
 import { WorkspaceSelector } from './components/WorkspaceSelector';
 import { Settings } from './components/Settings';
+import { DisclaimerModal } from './components/DisclaimerModal';
 // TaskQueuePanel moved to RightPanel
 import { ToastContainer } from './components/Toast';
 import { QuickTaskFAB } from './components/QuickTaskFAB';
 import { Task, Workspace, TaskEvent, LLMModelInfo, LLMProviderInfo, SuccessCriteria, UpdateInfo, ThemeMode, AccentColor, QueueStatus, ToastNotification } from '../shared/types';
 
-// Theme storage keys
+// Storage keys
 const THEME_STORAGE_KEY = 'cowork-theme-mode';
 const ACCENT_STORAGE_KEY = 'cowork-accent-color';
+const DISCLAIMER_ACCEPTED_KEY = 'cowork-disclaimer-accepted';
 
 // Helper to get effective theme based on system preference
 function getEffectiveTheme(themeMode: ThemeMode): 'light' | 'dark' {
@@ -53,6 +55,16 @@ export function App() {
   // Queue state
   const [queueStatus, setQueueStatus] = useState<QueueStatus | null>(null);
   const [toasts, setToasts] = useState<ToastNotification[]>([]);
+
+  // Disclaimer state
+  const [disclaimerAccepted, setDisclaimerAccepted] = useState(() => {
+    return localStorage.getItem(DISCLAIMER_ACCEPTED_KEY) === 'true';
+  });
+
+  const handleDisclaimerAccept = () => {
+    localStorage.setItem(DISCLAIMER_ACCEPTED_KEY, 'true');
+    setDisclaimerAccepted(true);
+  };
 
   // Load LLM config status
   const loadLLMConfig = async () => {
@@ -358,6 +370,16 @@ export function App() {
     setAccentColor(accent);
     localStorage.setItem(ACCENT_STORAGE_KEY, accent);
   };
+
+  // Show disclaimer modal on first launch
+  if (!disclaimerAccepted) {
+    return (
+      <div className="app">
+        <div className="title-bar" />
+        <DisclaimerModal onAccept={handleDisclaimerAccept} />
+      </div>
+    );
+  }
 
   return (
     <div className="app">

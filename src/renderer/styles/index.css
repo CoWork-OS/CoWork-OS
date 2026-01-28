@@ -8250,3 +8250,202 @@ button {
 .file-viewer-open-btn:hover {
   opacity: 0.9;
 }
+
+/* ============================================
+   Disclaimer Modal (First Launch)
+   ============================================ */
+
+.disclaimer-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  padding: 20px;
+}
+
+.disclaimer-modal {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  max-width: 600px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: var(--shadow-lg), 0 0 60px rgba(0, 0, 0, 0.5);
+}
+
+.disclaimer-header {
+  padding: 32px 32px 24px;
+  text-align: center;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.disclaimer-icon {
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 16px;
+  background: var(--color-warning);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #1a1a1a;
+}
+
+.disclaimer-icon svg {
+  width: 40px;
+  height: 40px;
+}
+
+.disclaimer-header h1 {
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.disclaimer-content {
+  padding: 24px 32px;
+}
+
+.disclaimer-box {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  padding: 20px;
+  margin-bottom: 24px;
+}
+
+.disclaimer-box h3 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin-bottom: 16px;
+  text-align: center;
+}
+
+.disclaimer-section {
+  margin-bottom: 16px;
+}
+
+.disclaimer-section:last-child {
+  margin-bottom: 0;
+}
+
+.disclaimer-section h4 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.disclaimer-section ul {
+  list-style: none;
+  padding-left: 0;
+  margin: 0;
+}
+
+.disclaimer-section li {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  padding: 4px 0 4px 20px;
+  position: relative;
+}
+
+.disclaimer-section li::before {
+  content: "•";
+  position: absolute;
+  left: 6px;
+  color: var(--color-text-muted);
+}
+
+.disclaimer-checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  cursor: pointer;
+  padding: 16px;
+  background: var(--color-bg-glass);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  transition: border-color 0.15s ease;
+}
+
+.disclaimer-checkbox:hover {
+  border-color: var(--color-border-light);
+}
+
+.disclaimer-checkbox input[type="checkbox"] {
+  display: none;
+}
+
+.disclaimer-checkbox .checkbox-custom {
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  border: 2px solid var(--color-border-light);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  margin-top: 1px;
+}
+
+.disclaimer-checkbox input[type="checkbox"]:checked + .checkbox-custom {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.disclaimer-checkbox input[type="checkbox"]:checked + .checkbox-custom::after {
+  content: "✓";
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.disclaimer-checkbox .checkbox-label {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.disclaimer-footer {
+  padding: 20px 32px 32px;
+  display: flex;
+  justify-content: center;
+}
+
+.disclaimer-button {
+  padding: 14px 32px;
+  font-size: 15px;
+  font-weight: 600;
+  background: var(--color-accent);
+  border: none;
+  border-radius: var(--radius-md);
+  color: white;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.disclaimer-button:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.disclaimer-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

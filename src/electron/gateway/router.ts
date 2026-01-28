@@ -725,39 +725,117 @@ export class MessageRouter {
   ): Promise<void> {
     const status = LLMProviderFactory.getConfigStatus();
     const settings = LLMProviderFactory.loadSettings();
-    const isOllama = status.currentProvider === 'ollama';
+    const providerType = status.currentProvider;
 
     let text = '🤖 *AI Models & Providers*\n\n';
 
+    // Get provider-specific models and current model
+    let models: Array<{ key: string; displayName: string }> = [];
+    let currentModel = settings.modelKey;
+
+    // Provider display names
+    const providerModelNames: Record<string, string> = {
+      'anthropic': 'Claude',
+      'bedrock': 'Claude',
+      'openai': 'OpenAI',
+      'gemini': 'Gemini',
+      'openrouter': 'OpenRouter',
+      'ollama': 'Ollama',
+    };
+
+    // Get models based on current provider
+    switch (providerType) {
+      case 'anthropic':
+      case 'bedrock':
+        models = status.models;
+        break;
+
+      case 'openai': {
+        currentModel = settings.openai?.model || 'gpt-4o-mini';
+        const cachedOpenAI = LLMProviderFactory.getCachedModels('openai');
+        if (cachedOpenAI && cachedOpenAI.length > 0) {
+          models = cachedOpenAI;
+        } else {
+          // Default OpenAI models
+          models = [
+            { key: 'gpt-4o', displayName: 'GPT-4o' },
+            { key: 'gpt-4o-mini', displayName: 'GPT-4o Mini' },
+            { key: 'gpt-4-turbo', displayName: 'GPT-4 Turbo' },
+            { key: 'gpt-3.5-turbo', displayName: 'GPT-3.5 Turbo' },
+            { key: 'o1', displayName: 'o1' },
+            { key: 'o1-mini', displayName: 'o1 Mini' },
+          ];
+        }
+        break;
+      }
+
+      case 'gemini': {
+        currentModel = settings.gemini?.model || 'gemini-2.0-flash';
+        const cachedGemini = LLMProviderFactory.getCachedModels('gemini');
+        if (cachedGemini && cachedGemini.length > 0) {
+          models = cachedGemini;
+        } else {
+          models = [
+            { key: 'gemini-2.0-flash', displayName: 'Gemini 2.0 Flash' },
+            { key: 'gemini-1.5-pro', displayName: 'Gemini 1.5 Pro' },
+            { key: 'gemini-1.5-flash', displayName: 'Gemini 1.5 Flash' },
+          ];
+        }
+        break;
+      }
+
+      case 'openrouter': {
+        currentModel = settings.openrouter?.model || 'anthropic/claude-3.5-sonnet';
+        const cachedOpenRouter = LLMProviderFactory.getCachedModels('openrouter');
+        if (cachedOpenRouter && cachedOpenRouter.length > 0) {
+          models = cachedOpenRouter.slice(0, 10); // Limit to 10 for readability
+        } else {
+          models = [
+            { key: 'anthropic/claude-3.5-sonnet', displayName: 'Claude 3.5 Sonnet' },
+            { key: 'openai/gpt-4o', displayName: 'GPT-4o' },
+            { key: 'google/gemini-pro', displayName: 'Gemini Pro' },
+          ];
+        }
+        break;
+      }
+
+      case 'ollama': {
+        // Ollama handled separately below
+        break;
+      }
+
+      default:
+        models = status.models;
+    }
+
     // Current configuration
     text += '*Current:*\n';
-    const currentProvider = status.providers.find(p => p.type === status.currentProvider);
+    const currentProvider = status.providers.find(p => p.type === providerType);
+    text += `• Provider: ${currentProvider?.name || providerType}\n`;
 
-    if (isOllama) {
-      const ollamaModel = settings.ollama?.model || 'gpt-oss:20b';
-      text += `• Provider: ${currentProvider?.name || 'Ollama'}\n`;
+    if (providerType === 'ollama') {
+      const ollamaModel = settings.ollama?.model || 'llama3.2';
       text += `• Model: ${ollamaModel}\n\n`;
     } else {
-      const currentModel = status.models.find(m => m.key === status.currentModel);
-      text += `• Provider: ${currentProvider?.name || status.currentProvider}\n`;
-      text += `• Model: ${currentModel?.displayName || status.currentModel}\n\n`;
+      const modelInfo = models.find(m => m.key === currentModel);
+      text += `• Model: ${modelInfo?.displayName || currentModel}\n\n`;
     }
 
     // Available providers
     text += '*Available Providers:*\n';
     status.providers.forEach(provider => {
-      const isActive = provider.type === status.currentProvider ? ' ✓' : '';
+      const isActive = provider.type === providerType ? ' ✓' : '';
       const configStatus = provider.configured ? '🟢' : '⚪';
       text += `${configStatus} ${provider.name}${isActive}\n`;
     });
     text += '\n';
 
     // Available models - show different list based on provider
-    if (isOllama) {
+    if (providerType === 'ollama') {
       text += '*Available Ollama Models:*\n';
       try {
         const ollamaModels = await LLMProviderFactory.getOllamaModels();
-        const currentOllamaModel = settings.ollama?.model || 'gpt-oss:20b';
+        const currentOllamaModel = settings.ollama?.model || 'llama3.2';
 
         if (ollamaModels.length === 0) {
           text += '⚠️ No models found. Run `ollama pull <model>` to download.\n';
@@ -774,20 +852,12 @@ export class MessageRouter {
       } catch {
         text += '⚠️ Could not fetch Ollama models. Is Ollama running?\n';
       }
-      text += '\n💡 Use `/model <name>` to switch (e.g., `/model gpt-oss:20b`)';
+      text += '\n💡 Use `/model <name>` to switch (e.g., `/model llama3.2`)';
     } else {
-      // Dynamic heading based on provider
-      const providerModelNames: Record<string, string> = {
-        'anthropic': 'Claude',
-        'bedrock': 'Claude',
-        'openai': 'OpenAI',
-        'gemini': 'Gemini',
-        'openrouter': 'OpenRouter',
-      };
-      const modelBrand = providerModelNames[status.currentProvider] || 'Available';
+      const modelBrand = providerModelNames[providerType] || 'Available';
       text += `*Available ${modelBrand} Models:*\n`;
-      status.models.forEach((model, index) => {
-        const isActive = model.key === status.currentModel ? ' ✓' : '';
+      models.forEach((model, index) => {
+        const isActive = model.key === currentModel ? ' ✓' : '';
         text += `${index + 1}. ${model.displayName}${isActive}\n`;
       });
       text += '\n💡 Use `/model <name>` to switch\n';

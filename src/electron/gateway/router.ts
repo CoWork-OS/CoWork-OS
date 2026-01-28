@@ -942,10 +942,11 @@ export class MessageRouter {
 
       text += '*Available Providers:*\n';
       text += '1. anthropic - Anthropic API (direct)\n';
-      text += '2. gemini - Google Gemini\n';
-      text += '3. openrouter - OpenRouter\n';
-      text += '4. bedrock - AWS Bedrock\n';
-      text += '5. ollama - Ollama (local)\n\n';
+      text += '2. openai - OpenAI/ChatGPT\n';
+      text += '3. gemini - Google Gemini\n';
+      text += '4. openrouter - OpenRouter\n';
+      text += '5. bedrock - AWS Bedrock\n';
+      text += '6. ollama - Ollama (local)\n\n';
 
       text += '💡 Use `/provider <name>` to switch\n';
       text += 'Example: `/provider bedrock` or `/provider 2`';
@@ -965,16 +966,19 @@ export class MessageRouter {
       '1': 'anthropic',
       'anthropic': 'anthropic',
       'api': 'anthropic',
-      '2': 'gemini',
+      '2': 'openai',
+      'openai': 'openai',
+      'chatgpt': 'openai',
+      '3': 'gemini',
       'gemini': 'gemini',
       'google': 'gemini',
-      '3': 'openrouter',
+      '4': 'openrouter',
       'openrouter': 'openrouter',
       'or': 'openrouter',
-      '4': 'bedrock',
+      '5': 'bedrock',
       'bedrock': 'bedrock',
       'aws': 'bedrock',
-      '5': 'ollama',
+      '6': 'ollama',
       'ollama': 'ollama',
       'local': 'ollama',
     };
@@ -983,7 +987,7 @@ export class MessageRouter {
     if (!targetProvider) {
       await adapter.sendMessage({
         chatId: message.chatId,
-        text: `❌ Unknown provider: "${args[0]}"\n\n*Available providers:*\n1. anthropic\n2. gemini\n3. openrouter\n4. bedrock\n5. ollama\n\nUse \`/provider <name>\` or \`/provider <number>\``,
+        text: `❌ Unknown provider: "${args[0]}"\n\n*Available providers:*\n1. anthropic\n2. openai\n3. gemini\n4. openrouter\n5. bedrock\n6. ollama\n\nUse \`/provider <name>\` or \`/provider <number>\``,
         parseMode: 'markdown',
       });
       return;

@@ -182,8 +182,9 @@ export class BuiltinToolsSettingsManager {
     }
 
     // Deep clone to prevent mutation of DEFAULT_SETTINGS
-    this.cachedSettings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
-    return this.cachedSettings;
+    const defaults: BuiltinToolsSettings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+    this.cachedSettings = defaults;
+    return defaults;
   }
 
   /**

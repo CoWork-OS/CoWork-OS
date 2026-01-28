@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { MainContent } from './components/MainContent';
 import { RightPanel } from './components/RightPanel';
@@ -55,6 +55,9 @@ export function App() {
   // Queue state
   const [queueStatus, setQueueStatus] = useState<QueueStatus | null>(null);
   const [toasts, setToasts] = useState<ToastNotification[]>([]);
+
+  // Ref to track current tasks for use in event handlers (avoids stale closure)
+  const tasksRef = useRef<Task[]>([]);
 
   // Disclaimer state
   const [disclaimerAccepted, setDisclaimerAccepted] = useState(() => {
@@ -188,6 +191,11 @@ export function App() {
     setToasts(prev => prev.filter(t => t.id !== id));
   };
 
+  // Keep tasksRef in sync with tasks state
+  useEffect(() => {
+    tasksRef.current = tasks;
+  }, [tasks]);
+
   // Subscribe to all task events to update task status
   useEffect(() => {
     const unsubscribe = window.electronAPI.onTaskEvent((event: TaskEvent) => {
@@ -214,26 +222,20 @@ export function App() {
 
       // Show toast notifications for task completion/failure
       if (event.type === 'task_completed') {
-        setTasks(prev => {
-          const task = prev.find(t => t.id === event.taskId);
-          addToast({
-            type: 'success',
-            title: 'Task Completed',
-            message: task?.title || 'Task finished successfully',
-            taskId: event.taskId,
-          });
-          return prev;
+        const task = tasksRef.current.find(t => t.id === event.taskId);
+        addToast({
+          type: 'success',
+          title: 'Task Completed',
+          message: task?.title || 'Task finished successfully',
+          taskId: event.taskId,
         });
       } else if (event.type === 'error') {
-        setTasks(prev => {
-          const task = prev.find(t => t.id === event.taskId);
-          addToast({
-            type: 'error',
-            title: 'Task Failed',
-            message: task?.title || 'Task encountered an error',
-            taskId: event.taskId,
-          });
-          return prev;
+        const task = tasksRef.current.find(t => t.id === event.taskId);
+        addToast({
+          type: 'error',
+          title: 'Task Failed',
+          message: task?.title || 'Task encountered an error',
+          taskId: event.taskId,
         });
       }
 

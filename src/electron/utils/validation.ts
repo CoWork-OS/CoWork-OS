@@ -227,7 +227,7 @@ export const RevokeAccessSchema = z.object({
 
 export const GeneratePairingSchema = z.object({
   channelId: z.string().uuid(),
-  userId: z.string().min(1).max(100),
+  userId: z.string().max(100).optional(),
   displayName: z.string().max(MAX_TITLE_LENGTH).optional(),
 });
 

@@ -723,16 +723,6 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
             Slack
           </button>
           <button
-            className={`settings-nav-item ${activeTab === 'updates' ? 'active' : ''}`}
-            onClick={() => setActiveTab('updates')}
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M21 12a9 9 0 11-6.219-8.56" />
-              <polyline points="21 3 21 9 15 9" />
-            </svg>
-            Updates
-          </button>
-          <button
             className={`settings-nav-item ${activeTab === 'guardrails' ? 'active' : ''}`}
             onClick={() => setActiveTab('guardrails')}
           >
@@ -782,6 +772,17 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
               <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
             </svg>
             Built-in Tools
+          </button>
+          {/* NOTE: Updates tab should ALWAYS stay at the bottom as the last tab */}
+          <button
+            className={`settings-nav-item ${activeTab === 'updates' ? 'active' : ''}`}
+            onClick={() => setActiveTab('updates')}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M21 12a9 9 0 11-6.219-8.56" />
+              <polyline points="21 3 21 9 15 9" />
+            </svg>
+            Updates
           </button>
         </div>
 

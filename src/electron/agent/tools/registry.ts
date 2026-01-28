@@ -1,4 +1,4 @@
-import { Workspace } from '../../../shared/types';
+import { Workspace, GatewayContextType } from '../../../shared/types';
 import { AgentDaemon } from '../daemon';
 import { FileTools } from './file-tools';
 import { SkillTools } from './skill-tools';
@@ -11,9 +11,11 @@ import { LLMTool } from '../llm/types';
 import { SearchProviderFactory } from '../search';
 import { MCPClientManager } from '../../mcp/client/MCPClientManager';
 import { MCPSettingsManager } from '../../mcp/settings';
+import { isToolAllowedQuick } from '../../security/policy-manager';
 
 /**
  * ToolRegistry manages all available tools and their execution
+ * Integrates with SecurityPolicyManager for context-aware tool filtering
  */
 export class ToolRegistry {
   private fileTools: FileTools;
@@ -23,11 +25,13 @@ export class ToolRegistry {
   private shellTools: ShellTools;
   private imageTools: ImageTools;
   private systemTools: SystemTools;
+  private gatewayContext?: GatewayContextType;
 
   constructor(
     private workspace: Workspace,
     private daemon: AgentDaemon,
-    private taskId: string
+    private taskId: string,
+    gatewayContext?: GatewayContextType
   ) {
     this.fileTools = new FileTools(workspace, daemon, taskId);
     this.skillTools = new SkillTools(workspace, daemon, taskId);
@@ -36,13 +40,30 @@ export class ToolRegistry {
     this.shellTools = new ShellTools(workspace, daemon, taskId);
     this.imageTools = new ImageTools(workspace, daemon, taskId);
     this.systemTools = new SystemTools(workspace, daemon, taskId);
+    this.gatewayContext = gatewayContext;
+  }
+
+  /**
+   * Set the gateway context for tool filtering
+   * Used when task originates from Telegram/Discord/etc.
+   */
+  setGatewayContext(context: GatewayContextType | undefined): void {
+    this.gatewayContext = context;
+  }
+
+  /**
+   * Check if a tool is allowed based on security policy
+   */
+  isToolAllowed(toolName: string): boolean {
+    return isToolAllowedQuick(toolName, this.workspace, this.gatewayContext);
   }
 
   /**
    * Get all available tools in provider-agnostic format
+   * Filters tools based on workspace permissions and gateway context
    */
   getTools(): LLMTool[] {
-    const tools = [
+    const allTools: LLMTool[] = [
       ...this.getFileToolDefinitions(),
       ...this.getSkillToolDefinitions(),
       ...BrowserTools.getToolDefinitions(),
@@ -50,29 +71,39 @@ export class ToolRegistry {
 
     // Only add search tool if a provider is configured
     if (SearchProviderFactory.isAnyProviderConfigured()) {
-      tools.push(...this.getSearchToolDefinitions());
+      allTools.push(...this.getSearchToolDefinitions());
     }
 
     // Only add shell tool if workspace has shell permission
     if (this.workspace.permissions.shell) {
-      tools.push(...this.getShellToolDefinitions());
+      allTools.push(...this.getShellToolDefinitions());
     }
 
     // Only add image tools if Gemini API is configured
     if (ImageTools.isAvailable()) {
-      tools.push(...ImageTools.getToolDefinitions());
+      allTools.push(...ImageTools.getToolDefinitions());
     }
 
     // Always add system tools (they enable broader system interaction)
-    tools.push(...SystemTools.getToolDefinitions());
+    allTools.push(...SystemTools.getToolDefinitions());
 
     // Add meta tools for execution control
-    tools.push(...this.getMetaToolDefinitions());
+    allTools.push(...this.getMetaToolDefinitions());
 
     // Add MCP tools from connected servers
-    tools.push(...this.getMCPToolDefinitions());
+    allTools.push(...this.getMCPToolDefinitions());
 
-    return tools;
+    // Filter tools based on security policy (workspace + gateway context)
+    const filteredTools = allTools.filter(tool => this.isToolAllowed(tool.name));
+
+    // Log filtered tools for debugging
+    const blockedTools = allTools.filter(tool => !this.isToolAllowed(tool.name));
+    if (blockedTools.length > 0 && this.gatewayContext) {
+      console.log(`[ToolRegistry] Blocked ${blockedTools.length} tools for ${this.gatewayContext} context:`,
+        blockedTools.map(t => t.name).join(', '));
+    }
+
+    return filteredTools;
   }
 
   /**

@@ -10,6 +10,7 @@ import {
 import { Task, TaskStatus, IPC_CHANNELS, QueueSettings, QueueStatus } from '../../shared/types';
 import { TaskExecutor } from './executor';
 import { TaskQueueManager } from './queue-manager';
+import { approvalIdempotency, taskIdempotency, IdempotencyManager } from '../security/concurrency';
 
 // Memory management constants
 const MAX_CACHED_EXECUTORS = 10; // Maximum number of completed task executors to keep in memory
@@ -131,8 +132,23 @@ export class AgentDaemon extends EventEmitter {
       throw new Error(`Workspace ${task.workspaceId} not found`);
     }
 
-    // Create task executor
-    const executor = new TaskExecutor(task, workspace, this);
+    // Create task executor - wrapped in try-catch to handle provider initialization errors
+    let executor: TaskExecutor;
+    try {
+      executor = new TaskExecutor(task, workspace, this);
+    } catch (error: any) {
+      console.error(`Task ${task.id} failed to initialize:`, error);
+      this.taskRepo.update(task.id, {
+        status: 'failed',
+        error: error.message || 'Failed to initialize task executor',
+        completedAt: Date.now(),
+      });
+      this.emitTaskEvent(task.id, 'error', { error: error.message });
+      // Notify queue manager so it can start next task
+      this.queueManager.onTaskFinished(task.id);
+      return;
+    }
+
     this.activeTasks.set(task.id, {
       executor,
       lastAccessed: Date.now(),
@@ -249,28 +265,57 @@ export class AgentDaemon extends EventEmitter {
 
   /**
    * Respond to an approval request
+   * Uses idempotency to prevent double-approval race conditions
+   * Implements C6: Approval Gate Enforcement
    */
   async respondToApproval(approvalId: string, approved: boolean): Promise<void> {
-    const pending = this.pendingApprovals.get(approvalId);
-    if (pending && !pending.resolved) {
-      // Mark as resolved first to prevent race condition with timeout
-      pending.resolved = true;
+    // Generate idempotency key for this approval response
+    const idempotencyKey = IdempotencyManager.generateKey(
+      'approval:respond',
+      approvalId,
+      approved ? 'approve' : 'deny'
+    );
 
-      // Clear the timeout
-      clearTimeout(pending.timeoutHandle);
+    // Check if this exact response was already processed
+    const existing = approvalIdempotency.check(idempotencyKey);
+    if (existing.exists) {
+      console.log(`[AgentDaemon] Duplicate approval response ignored: ${approvalId}`);
+      return; // Silently ignore duplicate
+    }
 
-      this.pendingApprovals.delete(approvalId);
-      this.approvalRepo.update(approvalId, approved ? 'approved' : 'denied');
+    // Start tracking this operation
+    if (!approvalIdempotency.start(idempotencyKey)) {
+      console.log(`[AgentDaemon] Concurrent approval response in progress: ${approvalId}`);
+      return; // Another response is being processed
+    }
 
-      // Emit event so UI knows the approval has been handled
-      const eventType = approved ? 'approval_granted' : 'approval_denied';
-      this.logEvent(pending.taskId, eventType, { approvalId });
+    try {
+      const pending = this.pendingApprovals.get(approvalId);
+      if (pending && !pending.resolved) {
+        // Mark as resolved first to prevent race condition with timeout
+        pending.resolved = true;
 
-      if (approved) {
-        pending.resolve(true);
-      } else {
-        pending.reject(new Error('User denied approval'));
+        // Clear the timeout
+        clearTimeout(pending.timeoutHandle);
+
+        this.pendingApprovals.delete(approvalId);
+        this.approvalRepo.update(approvalId, approved ? 'approved' : 'denied');
+
+        // Emit event so UI knows the approval has been handled
+        const eventType = approved ? 'approval_granted' : 'approval_denied';
+        this.logEvent(pending.taskId, eventType, { approvalId });
+
+        if (approved) {
+          pending.resolve(true);
+        } else {
+          pending.reject(new Error('User denied approval'));
+        }
       }
+
+      approvalIdempotency.complete(idempotencyKey, { success: true });
+    } catch (error) {
+      approvalIdempotency.fail(idempotencyKey, error);
+      throw error;
     }
   }
 

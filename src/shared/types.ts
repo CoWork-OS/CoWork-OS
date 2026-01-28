@@ -97,6 +97,162 @@ export type ApprovalType =
   | 'external_service'
   | 'run_command';
 
+// ============ Security Tool Groups & Risk Levels ============
+
+/**
+ * Tool risk levels for security policy enforcement
+ * Higher levels require more permissions/approval
+ */
+export type ToolRiskLevel = 'read' | 'write' | 'destructive' | 'system' | 'network';
+
+/**
+ * Tool groups for policy-based access control
+ * Inspired by Clawdbot's formal security model
+ */
+export const TOOL_GROUPS = {
+  // Read-only operations - lowest risk
+  'group:read': [
+    'read_file',
+    'list_directory',
+    'search_files',
+    'system_info',
+    'get_env',
+    'get_app_paths',
+  ],
+  // Write operations - medium risk
+  'group:write': [
+    'write_file',
+    'copy_file',
+    'rename_file',
+    'create_directory',
+    'create_spreadsheet',
+    'create_document',
+    'edit_document',
+    'create_presentation',
+    'organize_folder',
+  ],
+  // Destructive operations - high risk, requires approval
+  'group:destructive': [
+    'delete_file',
+    'run_command',
+  ],
+  // System operations - requires explicit permission
+  'group:system': [
+    'read_clipboard',
+    'write_clipboard',
+    'take_screenshot',
+    'open_application',
+    'open_url',
+    'open_path',
+    'show_in_folder',
+  ],
+  // Network operations - requires network permission
+  'group:network': [
+    'web_search',
+    'browser_navigate',
+    'browser_screenshot',
+    'browser_get_content',
+    'browser_click',
+    'browser_fill',
+    'browser_type',
+    'browser_press',
+    'browser_wait',
+    'browser_scroll',
+    'browser_select',
+    'browser_get_text',
+    'browser_evaluate',
+    'browser_back',
+    'browser_forward',
+    'browser_reload',
+    'browser_save_pdf',
+    'browser_close',
+  ],
+  // Memory/sensitive tools - restricted in shared contexts
+  'group:memory': [
+    'read_clipboard',
+    'write_clipboard',
+  ],
+  // Image generation - requires API access
+  'group:image': [
+    'generate_image',
+  ],
+  // Meta/control tools
+  'group:meta': [
+    'revise_plan',
+  ],
+} as const;
+
+export type ToolGroupName = keyof typeof TOOL_GROUPS;
+
+/**
+ * Maps each tool to its risk level
+ */
+export const TOOL_RISK_LEVELS: Record<ToolType, ToolRiskLevel> = {
+  // Read operations
+  read_file: 'read',
+  list_directory: 'read',
+  search_files: 'read',
+  system_info: 'read',
+  get_env: 'read',
+  get_app_paths: 'read',
+  // Write operations
+  write_file: 'write',
+  copy_file: 'write',
+  rename_file: 'write',
+  move_file: 'write',
+  create_directory: 'write',
+  run_skill: 'write',
+  // Destructive operations
+  delete_file: 'destructive',
+  run_command: 'destructive',
+  // System operations
+  read_clipboard: 'system',
+  write_clipboard: 'system',
+  take_screenshot: 'system',
+  open_application: 'system',
+  open_url: 'system',
+  open_path: 'system',
+  show_in_folder: 'system',
+  // Network operations
+  generate_image: 'network',
+  // Meta
+  revise_plan: 'read',
+};
+
+/**
+ * Gateway context types for context-aware tool restrictions
+ */
+export type GatewayContextType = 'private' | 'group' | 'public';
+
+/**
+ * Tool restrictions based on gateway context
+ * Implements C1: Memory Tool Isolation in Shared Contexts
+ */
+export const CONTEXT_TOOL_RESTRICTIONS: Record<GatewayContextType, {
+  deniedGroups: ToolGroupName[];
+  deniedTools: string[];
+  requireApprovalFor: string[];
+}> = {
+  private: {
+    deniedGroups: [],
+    deniedTools: [],
+    requireApprovalFor: ['run_command', 'delete_file'],
+  },
+  group: {
+    deniedGroups: ['group:memory', 'group:destructive'],
+    deniedTools: ['read_clipboard', 'write_clipboard', 'delete_file'],
+    requireApprovalFor: ['run_command', 'write_file'],
+  },
+  public: {
+    deniedGroups: ['group:memory', 'group:destructive', 'group:system'],
+    deniedTools: [
+      'read_clipboard', 'write_clipboard', 'delete_file', 'run_command',
+      'take_screenshot', 'open_application',
+    ],
+    requireApprovalFor: ['write_file', 'create_directory'],
+  },
+};
+
 // Success Criteria for Goal Mode
 export type SuccessCriteriaType = 'shell_command' | 'file_exists';
 

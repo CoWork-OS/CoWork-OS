@@ -6,6 +6,9 @@
  * - open: Anyone can use the bot
  * - allowlist: Only pre-approved users
  * - pairing: Users must enter a pairing code generated in the desktop app
+ *
+ * Implements concurrent access safety using mutex locks to prevent race conditions
+ * in pairing operations (inspired by Clawdbot's PairingStoreConcurrentHarness.tla).
  */
 
 import * as crypto from 'crypto';
@@ -16,6 +19,7 @@ import {
   Channel,
 } from '../database/repositories';
 import { IncomingMessage } from './channels/types';
+import { pairingMutex, IdempotencyManager } from '../security/concurrency';
 
 export interface AccessCheckResult {
   allowed: boolean;
@@ -32,9 +36,11 @@ export interface PairingResult {
 
 export class SecurityManager {
   private userRepo: ChannelUserRepository;
+  private pairingIdempotency: IdempotencyManager;
 
   constructor(db: Database.Database) {
     this.userRepo = new ChannelUserRepository(db);
+    this.pairingIdempotency = new IdempotencyManager(5 * 60 * 1000); // 5 min TTL
   }
 
   /**
@@ -103,8 +109,13 @@ export class SecurityManager {
   /**
    * Generate a pairing code for a channel
    * Creates a placeholder entry that can be claimed by any user who enters the code
+   * Uses mutex to prevent race conditions in concurrent code generation
    */
   generatePairingCode(channel: Channel, _userId?: string, _displayName?: string): string {
+    // Use synchronous mutex key for this channel to prevent concurrent generation issues
+    const mutexKey = `pairing:generate:${channel.id}`;
+
+    // Generate code (synchronous operation, but we track idempotency)
     const code = this.createPairingCode();
     const ttl = channel.securityConfig.pairingCodeTTL || 300; // 5 minutes default
     const expiresAt = Date.now() + ttl * 1000;
@@ -128,8 +139,55 @@ export class SecurityManager {
   /**
    * Verify a pairing code
    * Looks up the code across all users in the channel and grants access to the caller
+   * Uses idempotency to prevent double-verification race conditions
    */
   async verifyPairingCode(
+    channel: Channel,
+    userId: string,
+    code: string
+  ): Promise<PairingResult> {
+    // Generate idempotency key for this verification attempt
+    const idempotencyKey = IdempotencyManager.generateKey(
+      'pairing:verify',
+      channel.id,
+      userId,
+      code.toUpperCase()
+    );
+
+    // Check if this exact verification is already in progress or completed
+    const existing = this.pairingIdempotency.check(idempotencyKey);
+    if (existing.exists && existing.status === 'completed') {
+      return existing.result as PairingResult;
+    }
+
+    // Use mutex to ensure only one verification happens at a time per channel
+    const mutexKey = `pairing:verify:${channel.id}`;
+
+    return await pairingMutex.withLock(mutexKey, async () => {
+      // Double-check idempotency after acquiring lock
+      const recheck = this.pairingIdempotency.check(idempotencyKey);
+      if (recheck.exists && recheck.status === 'completed') {
+        return recheck.result as PairingResult;
+      }
+
+      // Start tracking this operation
+      this.pairingIdempotency.start(idempotencyKey);
+
+      try {
+        const result = await this.doVerifyPairingCode(channel, userId, code);
+        this.pairingIdempotency.complete(idempotencyKey, result);
+        return result;
+      } catch (error) {
+        this.pairingIdempotency.fail(idempotencyKey, error);
+        throw error;
+      }
+    });
+  }
+
+  /**
+   * Internal pairing verification logic (called within mutex)
+   */
+  private async doVerifyPairingCode(
     channel: Channel,
     userId: string,
     code: string

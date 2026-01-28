@@ -28,6 +28,7 @@ export interface LLMProviderConfig {
   openaiApiKey?: string;
   openaiAccessToken?: string; // OAuth access token
   openaiRefreshToken?: string; // OAuth refresh token
+  openaiTokenExpiresAt?: number; // OAuth token expiry timestamp
 }
 
 export interface LLMTool {

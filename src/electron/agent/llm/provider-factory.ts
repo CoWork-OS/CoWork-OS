@@ -403,6 +403,7 @@ export class LLMProviderFactory {
       openaiApiKey: normalizeSecret(overrideConfig?.openaiApiKey) || settings.openai?.apiKey,
       openaiAccessToken: normalizeSecret(overrideConfig?.openaiAccessToken) || settings.openai?.accessToken,
       openaiRefreshToken: settings.openai?.refreshToken,
+      openaiTokenExpiresAt: settings.openai?.tokenExpiresAt,
     };
 
     return this.createProviderFromConfig(config);

@@ -40,6 +40,7 @@ export class OpenAIProvider implements LLMProvider {
     const apiKey = config.openaiApiKey;
     const accessToken = config.openaiAccessToken;
     const refreshToken = config.openaiRefreshToken;
+    const tokenExpiresAt = config.openaiTokenExpiresAt;
     this.model = config.model;
 
     if (accessToken && refreshToken) {
@@ -47,10 +48,10 @@ export class OpenAIProvider implements LLMProvider {
       this.oauthTokens = {
         access_token: accessToken,
         refresh_token: refreshToken,
-        expires_at: 0, // Will be refreshed as needed
+        expires_at: tokenExpiresAt || 0, // Use stored expiry or 0 if not available
       };
       this.authMethod = 'oauth';
-      console.log('[OpenAI] Using OAuth authentication with pi-ai SDK');
+      console.log(`[OpenAI] Using OAuth authentication with pi-ai SDK (token expires: ${tokenExpiresAt ? new Date(tokenExpiresAt).toISOString() : 'unknown'})`);
     } else if (apiKey) {
       // Use API key - standard OpenAI SDK
       this.client = new OpenAI({ apiKey });

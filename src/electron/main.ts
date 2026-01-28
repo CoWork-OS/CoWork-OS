@@ -1,5 +1,5 @@
 import path from 'path';
-import { app, BrowserWindow, ipcMain, dialog, session } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, session, shell } from 'electron';
 import { DatabaseManager } from './database/schema';
 import { setupIpcHandlers } from './ipc/handlers';
 import { AgentDaemon } from './agent/daemon';
@@ -45,6 +45,25 @@ function createWindow() {
 
   mainWindow.on('closed', () => {
     mainWindow = null;
+  });
+
+  // Open external links in the system browser instead of inside the app
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    // Open all new window requests in external browser
+    shell.openExternal(url);
+    return { action: 'deny' };
+  });
+
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    // Allow navigation to the app itself (dev server or file://), block external URLs
+    const appUrl = process.env.NODE_ENV === 'development'
+      ? 'http://localhost:5173'
+      : `file://${path.join(__dirname, '../../renderer')}`;
+
+    if (!url.startsWith(appUrl)) {
+      event.preventDefault();
+      shell.openExternal(url);
+    }
   });
 }
 

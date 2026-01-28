@@ -471,6 +471,14 @@ export class AgentDaemon extends EventEmitter {
   }
 
   /**
+   * Clear stuck tasks from the queue
+   * Used to recover from stuck state when tasks fail to clean up
+   */
+  clearStuckTasks(): { clearedRunning: number; clearedQueued: number } {
+    return this.queueManager.clearStuckTasks();
+  }
+
+  /**
    * Emit queue update event to all windows
    */
   private emitQueueUpdate(status: QueueStatus): void {

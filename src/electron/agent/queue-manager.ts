@@ -131,6 +131,29 @@ export class TaskQueueManager {
   }
 
   /**
+   * Clear all stuck tasks from the running set
+   * This should be used to recover from stuck state when tasks fail to clean up
+   * Returns the number of tasks cleared
+   */
+  clearStuckTasks(): { clearedRunning: number; clearedQueued: number } {
+    const clearedRunning = this.runningTaskIds.size;
+    const clearedQueued = this.queuedTaskIds.length;
+
+    console.log(`[TaskQueueManager] Clearing ${clearedRunning} running tasks and ${clearedQueued} queued tasks`);
+
+    // Clear running tasks
+    this.runningTaskIds.clear();
+
+    // Clear queued tasks
+    this.queuedTaskIds = [];
+
+    // Emit update
+    this.emitQueueUpdate();
+
+    return { clearedRunning, clearedQueued };
+  }
+
+  /**
    * Get current queue status for UI
    */
   getStatus(): QueueStatus {

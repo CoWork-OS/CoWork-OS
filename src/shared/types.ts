@@ -86,6 +86,25 @@ export type ToolType =
   | 'show_in_folder'
   | 'get_env'
   | 'get_app_paths'
+  // Network/Browser tools
+  | 'web_search'
+  | 'browser_navigate'
+  | 'browser_screenshot'
+  | 'browser_get_content'
+  | 'browser_click'
+  | 'browser_fill'
+  | 'browser_type'
+  | 'browser_press'
+  | 'browser_wait'
+  | 'browser_scroll'
+  | 'browser_select'
+  | 'browser_get_text'
+  | 'browser_evaluate'
+  | 'browser_back'
+  | 'browser_forward'
+  | 'browser_reload'
+  | 'browser_save_pdf'
+  | 'browser_close'
   // Meta tools
   | 'revise_plan';
 
@@ -215,6 +234,24 @@ export const TOOL_RISK_LEVELS: Record<ToolType, ToolRiskLevel> = {
   show_in_folder: 'system',
   // Network operations
   generate_image: 'network',
+  web_search: 'network',
+  browser_navigate: 'network',
+  browser_screenshot: 'network',
+  browser_get_content: 'network',
+  browser_click: 'network',
+  browser_fill: 'network',
+  browser_type: 'network',
+  browser_press: 'network',
+  browser_wait: 'network',
+  browser_scroll: 'network',
+  browser_select: 'network',
+  browser_get_text: 'network',
+  browser_evaluate: 'network',
+  browser_back: 'network',
+  browser_forward: 'network',
+  browser_reload: 'network',
+  browser_save_pdf: 'network',
+  browser_close: 'network',
   // Meta
   revise_plan: 'read',
 };

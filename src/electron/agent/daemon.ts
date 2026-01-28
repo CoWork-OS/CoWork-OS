@@ -473,8 +473,31 @@ export class AgentDaemon extends EventEmitter {
   /**
    * Clear stuck tasks from the queue
    * Used to recover from stuck state when tasks fail to clean up
+   * Also properly cancels running tasks to clean up resources (browser sessions, etc.)
    */
-  clearStuckTasks(): { clearedRunning: number; clearedQueued: number } {
+  async clearStuckTasks(): Promise<{ clearedRunning: number; clearedQueued: number }> {
+    // Get running task IDs before clearing
+    const status = this.queueManager.getStatus();
+    const runningTaskIds = [...status.runningTaskIds];
+    const queuedTaskIds = [...status.queuedTaskIds];
+
+    console.log(`[AgentDaemon] Clearing ${runningTaskIds.length} running tasks and ${queuedTaskIds.length} queued tasks`);
+
+    // Cancel all running tasks properly (this cleans up browser sessions, etc.)
+    for (const taskId of runningTaskIds) {
+      const cached = this.activeTasks.get(taskId);
+      if (cached) {
+        try {
+          console.log(`[AgentDaemon] Cancelling running task: ${taskId}`);
+          await cached.executor.cancel();
+          this.activeTasks.delete(taskId);
+        } catch (error) {
+          console.error(`[AgentDaemon] Error cancelling task ${taskId}:`, error);
+        }
+      }
+    }
+
+    // Now clear the queue state
     return this.queueManager.clearStuckTasks();
   }
 

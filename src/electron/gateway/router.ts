@@ -1807,11 +1807,11 @@ export class MessageRouter {
     const subcommand = args[0]?.toLowerCase();
 
     if (subcommand === 'clear' || subcommand === 'reset') {
-      // Clear stuck tasks
-      const result = this.agentDaemon.clearStuckTasks();
+      // Clear stuck tasks (also properly cancels running tasks to clean up browser sessions)
+      const result = await this.agentDaemon.clearStuckTasks();
       await adapter.sendMessage({
         chatId: message.chatId,
-        text: `✅ Queue cleared!\n\n• Running tasks cleared: ${result.clearedRunning}\n• Queued tasks cleared: ${result.clearedQueued}\n\nYou can now start new tasks.`,
+        text: `✅ Queue cleared!\n\n• Running tasks cancelled: ${result.clearedRunning}\n• Queued tasks removed: ${result.clearedQueued}\n\nBrowser sessions and other resources have been cleaned up. You can now start new tasks.`,
       });
     } else {
       // Show queue status

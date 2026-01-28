@@ -1281,7 +1281,7 @@ Workspace: ${this.workspace.path}
 Always ask for approval before deleting files or making destructive changes.
 Be concise in your responses. When reading files, only read what you need.
 
-WEB ACCESS: To access the internet, use browser_navigate to visit URLs directly. This is the most reliable method for fetching web content.
+WEB ACCESS: Prefer browser_navigate for web access. If browser tools are unavailable, use web_search as an alternative. If any tool category is disabled, try alternative tools that can accomplish the same goal.
 
 You are continuing a previous conversation. The context from the previous conversation has been provided.`;
   }
@@ -1673,10 +1673,12 @@ PLANNING RULES:
 - DO NOT plan to create multiple versions of files - pick ONE target file.
 - DO NOT plan to read the same file multiple times in different steps.
 
-WEB ACCESS (IMPORTANT):
-- To access the internet, use browser_navigate to visit URLs directly. This is the primary method for web content.
-- If web_search tool is available, use it for searching. Otherwise, use browser_navigate to go to search engines or specific sites.
-- NEVER use run_command with curl, wget, or other network commands for web access. Always use browser tools.
+WEB ACCESS & TOOL ALTERNATIVES (IMPORTANT):
+- For web access, prefer browser_navigate to visit URLs directly.
+- If browser tools are unavailable, use web_search as an alternative to find information online.
+- NEVER use run_command with curl, wget, or other network commands for web access.
+- If a tool category is disabled or unavailable, automatically plan to use alternative tools that can accomplish the same goal.
+- NEVER create a plan that says "cannot be done" if alternative tools are available. Always adapt your approach.
 
 COMMON WORKFLOWS (follow these patterns):
 
@@ -1691,9 +1693,9 @@ COMMON WORKFLOWS (follow these patterns):
    Step 2: Create the document with create_document tool
 
 3. WEB RESEARCH (when needing current information):
-   Step 1: Use browser_navigate to visit relevant websites or search engines
-   Step 2: Use browser_get_content to extract information from the page
-   Step 3: Provide the answer - OUTPUT THE FINDINGS AS TEXT (no tool needed, just respond with the answer)
+   Option A (browser tools available): Use browser_navigate + browser_get_content to visit and extract info
+   Option B (browser tools unavailable): Use web_search to search the internet directly
+   Final Step: OUTPUT THE FINDINGS AS TEXT (no tool needed, just respond with the answer)
 
 4. FILE ORGANIZATION:
    Step 1: List directory contents to see current structure
@@ -2011,9 +2013,12 @@ CRITICAL - FINAL ANSWER REQUIREMENT:
 - If you couldn't find the information, SAY SO explicitly (e.g., "I couldn't find lap times for today's testing").
 - After 2-3 tool calls, you MUST provide a text answer summarizing what you found or didn't find.
 
-WEB ACCESS:
-- To access the internet, use browser_navigate to visit URLs directly.
-- NEVER use run_command with curl, wget, or other network commands. Always use browser tools.
+WEB ACCESS & TOOL ALTERNATIVES:
+- To access the internet, prefer browser_navigate to visit URLs directly.
+- If browser tools are unavailable, use web_search as an alternative to find information online.
+- NEVER use run_command with curl, wget, or other network commands.
+- If a tool category is disabled or unavailable, automatically try alternative tools that can accomplish the same goal.
+- NEVER say "I can't do this because X tool is unavailable" if alternative tools exist. Try the alternatives first.
 
 CRITICAL TOOL PARAMETER REQUIREMENTS:
 - edit_document: MUST provide 'sourcePath' (path to existing DOCX file) and 'newContent' (array of content blocks)
@@ -2433,9 +2438,12 @@ CRITICAL - FINAL ANSWER REQUIREMENT:
 - If you couldn't find the information, SAY SO explicitly (e.g., "I couldn't find lap times for today's testing").
 - After 2-3 tool calls, you MUST provide a text answer summarizing what you found or didn't find.
 
-WEB ACCESS:
-- To access the internet, use browser_navigate to visit URLs directly.
-- NEVER use run_command with curl, wget, or other network commands. Always use browser tools.
+WEB ACCESS & TOOL ALTERNATIVES:
+- To access the internet, prefer browser_navigate to visit URLs directly.
+- If browser tools are unavailable, use web_search as an alternative to find information online.
+- NEVER use run_command with curl, wget, or other network commands.
+- If a tool category is disabled or unavailable, automatically try alternative tools that can accomplish the same goal.
+- NEVER say "I can't do this because X tool is unavailable" if alternative tools exist. Try the alternatives first.
 
 EFFICIENCY RULES (CRITICAL):
 - DO NOT read the same file multiple times. If you've already read a file, use the content from memory.

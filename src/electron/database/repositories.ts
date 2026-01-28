@@ -90,7 +90,8 @@ export class WorkspaceRepository {
   }
 
   private mapRowToWorkspace(row: any): Workspace {
-    const defaultPermissions: WorkspacePermissions = { read: true, write: false, delete: false, network: false, shell: false };
+    // Note: network is true by default for browser tools (web access)
+    const defaultPermissions: WorkspacePermissions = { read: true, write: false, delete: false, network: true, shell: false };
     return {
       id: row.id,
       name: row.name,

@@ -298,11 +298,12 @@ export function setupIpcHandlers(
     }
 
     // Provide default permissions if not specified
+    // Note: network is enabled by default for browser tools (web access)
     const defaultPermissions = {
       read: true,
       write: true,
       delete: false,
-      network: false,
+      network: true,
       shell: false,
     };
 

@@ -689,6 +689,7 @@ export class MessageRouter {
     const workspaceName = path.basename(workspacePath);
 
     // Create new workspace with default permissions
+    // Note: network is enabled by default for browser tools (web access)
     const workspace = this.workspaceRepo.create(
       workspaceName,
       workspacePath,
@@ -696,7 +697,7 @@ export class MessageRouter {
         read: true,
         write: true,
         delete: false, // Requires approval
-        network: false,
+        network: true,
         shell: false, // Requires approval
       }
     );

@@ -265,9 +265,9 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
       .catch(err => console.error('Failed to load version:', err));
   }, []);
 
-  // Load custom skills
+  // Load custom skills (task skills only, excludes guidelines)
   useEffect(() => {
-    window.electronAPI.listCustomSkills()
+    window.electronAPI.listTaskSkills()
       .then(skills => setCustomSkills(skills.filter(s => s.enabled !== false)))
       .catch(err => console.error('Failed to load custom skills:', err));
   }, []);

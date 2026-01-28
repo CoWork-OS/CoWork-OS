@@ -70,6 +70,8 @@ const IPC_CHANNELS = {
   QUEUE_UPDATE: 'queue:update',
   // Custom User Skills
   CUSTOM_SKILL_LIST: 'customSkill:list',
+  CUSTOM_SKILL_LIST_TASKS: 'customSkill:listTasks',
+  CUSTOM_SKILL_LIST_GUIDELINES: 'customSkill:listGuidelines',
   CUSTOM_SKILL_GET: 'customSkill:get',
   CUSTOM_SKILL_CREATE: 'customSkill:create',
   CUSTOM_SKILL_UPDATE: 'customSkill:update',
@@ -341,6 +343,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Custom Skills APIs
   listCustomSkills: () => ipcRenderer.invoke(IPC_CHANNELS.CUSTOM_SKILL_LIST),
+  listTaskSkills: () => ipcRenderer.invoke(IPC_CHANNELS.CUSTOM_SKILL_LIST_TASKS),
+  listGuidelineSkills: () => ipcRenderer.invoke(IPC_CHANNELS.CUSTOM_SKILL_LIST_GUIDELINES),
   getCustomSkill: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.CUSTOM_SKILL_GET, id),
   createCustomSkill: (skill: any) => ipcRenderer.invoke(IPC_CHANNELS.CUSTOM_SKILL_CREATE, skill),
   updateCustomSkill: (id: string, updates: any) => ipcRenderer.invoke(IPC_CHANNELS.CUSTOM_SKILL_UPDATE, id, updates),
@@ -556,6 +560,8 @@ export interface ElectronAPI {
   }) => void) => () => void;
   // Custom Skills APIs
   listCustomSkills: () => Promise<CustomSkill[]>;
+  listTaskSkills: () => Promise<CustomSkill[]>;
+  listGuidelineSkills: () => Promise<CustomSkill[]>;
   getCustomSkill: (id: string) => Promise<CustomSkill | undefined>;
   createCustomSkill: (skill: Omit<CustomSkill, 'filePath'>) => Promise<CustomSkill>;
   updateCustomSkill: (id: string, updates: Partial<CustomSkill>) => Promise<CustomSkill>;

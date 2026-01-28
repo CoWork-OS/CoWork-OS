@@ -746,6 +746,44 @@ Be careful not to rename unrelated code that happens to have the same name.`,
         ],
         enabled: true,
       },
+      // Guideline Skills - injected into system prompt when enabled
+      {
+        id: 'karpathy-guidelines',
+        name: 'Karpathy Coding Guidelines',
+        description: 'Best practices for LLM coding behavior based on Andrej Karpathy\'s observations',
+        icon: '🧠',
+        category: 'Guidelines',
+        type: 'guideline',
+        priority: 1,
+        prompt: `## Coding Guidelines
+
+**1. Think Before Coding**
+- State assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them - don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
+
+**2. Simplicity First**
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+**3. Surgical Changes**
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it - don't delete it.
+- Every changed line should trace directly to the user's request.
+
+**4. Goal-Driven Execution**
+- Transform tasks into verifiable goals.
+- For multi-step tasks, state a brief plan with verification steps.
+- Loop until success criteria are met.`,
+        parameters: [],
+        enabled: true,
+      },
     ];
 
     for (const skill of sampleSkills) {
@@ -827,6 +865,33 @@ Be careful not to rename unrelated code that happens to have the same name.`,
       // Finally by name
       return a.name.localeCompare(b.name);
     });
+  }
+
+  /**
+   * List only task skills (excludes guideline skills)
+   * Used for the skill dropdown in UI
+   */
+  listTaskSkills(): CustomSkill[] {
+    return this.listSkills().filter(skill => skill.type !== 'guideline');
+  }
+
+  /**
+   * List only guideline skills
+   */
+  listGuidelineSkills(): CustomSkill[] {
+    return this.listSkills().filter(skill => skill.type === 'guideline');
+  }
+
+  /**
+   * Get enabled guideline skills for system prompt injection
+   * Returns the combined prompt content of all enabled guideline skills
+   */
+  getEnabledGuidelinesPrompt(): string {
+    const enabledGuidelines = this.listGuidelineSkills().filter(skill => skill.enabled !== false);
+    if (enabledGuidelines.length === 0) {
+      return '';
+    }
+    return enabledGuidelines.map(skill => skill.prompt).join('\n\n');
   }
 
   /**

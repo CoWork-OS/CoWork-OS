@@ -436,6 +436,14 @@ export function setupIpcHandlers(
     return customSkillLoader.listSkills();
   });
 
+  ipcMain.handle(IPC_CHANNELS.CUSTOM_SKILL_LIST_TASKS, async () => {
+    return customSkillLoader.listTaskSkills();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.CUSTOM_SKILL_LIST_GUIDELINES, async () => {
+    return customSkillLoader.listGuidelineSkills();
+  });
+
   ipcMain.handle(IPC_CHANNELS.CUSTOM_SKILL_GET, async (_, id: string) => {
     return customSkillLoader.getSkill(id);
   });

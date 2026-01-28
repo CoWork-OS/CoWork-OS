@@ -247,6 +247,8 @@ export const IPC_CHANNELS = {
 
   // Custom User Skills
   CUSTOM_SKILL_LIST: 'customSkill:list',
+  CUSTOM_SKILL_LIST_TASKS: 'customSkill:listTasks',  // List only task skills (for dropdown)
+  CUSTOM_SKILL_LIST_GUIDELINES: 'customSkill:listGuidelines',  // List only guideline skills (for settings)
   CUSTOM_SKILL_GET: 'customSkill:get',
   CUSTOM_SKILL_CREATE: 'customSkill:create',
   CUSTOM_SKILL_UPDATE: 'customSkill:update',
@@ -658,17 +660,20 @@ export interface SkillParameter {
   options?: string[];  // For 'select' type
 }
 
+export type SkillType = 'task' | 'guideline';
+
 export interface CustomSkill {
   id: string;
   name: string;
   description: string;
   icon: string;  // Emoji or icon name
-  prompt: string;  // Prompt template with {{parameter}} placeholders
+  prompt: string;  // Prompt template with {{parameter}} placeholders (for tasks) or guidelines content (for guidelines)
   parameters?: SkillParameter[];
   category?: string;  // For grouping skills
   enabled?: boolean;
   filePath?: string;  // Path to the skill file (for editing)
   priority?: number;  // Lower numbers appear first in dropdown (default: 100)
+  type?: SkillType;  // 'task' (default) = executable skill, 'guideline' = injected into system prompt
 }
 
 export interface SkillsConfig {

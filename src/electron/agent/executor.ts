@@ -17,6 +17,7 @@ import {
 } from './context-manager';
 import { GuardrailManager } from '../guardrails/guardrail-manager';
 import { calculateCost, formatCost } from './llm/pricing';
+import { getCustomSkillLoader } from './custom-skill-loader';
 
 // Timeout for LLM API calls (2 minutes)
 const LLM_TIMEOUT_MS = 2 * 60 * 1000;
@@ -1631,6 +1632,10 @@ You are continuing a previous conversation. The context from the previous conver
     console.log(`[Task ${this.task.id}] Creating plan with model: ${this.modelId}`);
     this.daemon.logEvent(this.task.id, 'log', { message: `Creating execution plan (model: ${this.modelId})...` });
 
+    // Get enabled guidelines from custom skills
+    const skillLoader = getCustomSkillLoader();
+    const guidelinesPrompt = skillLoader.getEnabledGuidelinesPrompt();
+
     const systemPrompt = `You are an autonomous task executor. Your job is to:
 1. Analyze the user's request thoroughly - understand what files are involved and what changes are needed
 2. Create a detailed, step-by-step plan with specific actions
@@ -1684,7 +1689,7 @@ Format your plan as a JSON object with this structure:
     {"id": "1", "description": "Specific action with file names when applicable", "status": "pending"},
     {"id": "N", "description": "Verify: [describe what to check]", "status": "pending"}
   ]
-}`;
+}${guidelinesPrompt ? `\n\n${guidelinesPrompt}` : ''}`;
 
     let response;
     try {
@@ -1957,6 +1962,10 @@ Format your plan as a JSON object with this structure:
     step.status = 'in_progress';
     step.startedAt = Date.now();
 
+    // Get enabled guidelines from custom skills
+    const skillLoader = getCustomSkillLoader();
+    const guidelinesPrompt = skillLoader.getEnabledGuidelinesPrompt();
+
     // Define system prompt once so we can track its token usage
     this.systemPrompt = `You are an autonomous task executor. Use the available tools to complete each step.
 Workspace: ${this.workspace.path}
@@ -1984,7 +1993,7 @@ EFFICIENCY RULES (CRITICAL):
 ADAPTIVE PLANNING:
 - If you discover the current plan is insufficient, use the revise_plan tool to add new steps.
 - Do not silently skip necessary work - if something new is needed, add it to the plan.
-- If an approach keeps failing, revise the plan with a fundamentally different strategy.`;
+- If an approach keeps failing, revise the plan with a fundamentally different strategy.${guidelinesPrompt ? `\n\n${guidelinesPrompt}` : ''}`;
 
     const systemPromptTokens = estimateTokens(this.systemPrompt);
 
@@ -2363,6 +2372,10 @@ ADAPTIVE PLANNING:
     this.daemon.logEvent(this.task.id, 'executing', { message: 'Processing follow-up message' });
     this.daemon.logEvent(this.task.id, 'user_message', { message });
 
+    // Get enabled guidelines from custom skills
+    const skillLoader = getCustomSkillLoader();
+    const guidelinesPrompt = skillLoader.getEnabledGuidelinesPrompt();
+
     // Ensure system prompt is set
     if (!this.systemPrompt) {
       this.systemPrompt = `You are an autonomous task executor. Use the available tools to complete each step.
@@ -2377,7 +2390,7 @@ IMPORTANT INSTRUCTIONS:
 EFFICIENCY RULES (CRITICAL):
 - DO NOT read the same file multiple times. If you've already read a file, use the content from memory.
 - DO NOT create multiple versions of the same file. Pick ONE target file and work with it.
-- If a tool fails, try a DIFFERENT approach - don't retry the same approach multiple times.`;
+- If a tool fails, try a DIFFERENT approach - don't retry the same approach multiple times.${guidelinesPrompt ? `\n\n${guidelinesPrompt}` : ''}`;
     }
 
     const systemPromptTokens = estimateTokens(this.systemPrompt);

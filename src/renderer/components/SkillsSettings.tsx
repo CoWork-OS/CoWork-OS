@@ -175,16 +175,38 @@ export function SkillsSettings({ onSkillSelect }: SkillsSettingsProps) {
               <h4 className="skills-category-title">{category}</h4>
               <div className="skills-grid">
                 {categorySkills.map(skill => (
-                  <div key={skill.id} className="skill-card">
+                  <div key={skill.id} className={`skill-card ${skill.type === 'guideline' ? 'skill-card-guideline' : ''}`}>
                     <div className="skill-card-header">
                       <span className="skill-icon">{skill.icon}</span>
                       <div className="skill-info">
-                        <span className="skill-name">{skill.name}</span>
+                        <span className="skill-name">
+                          {skill.name}
+                          {skill.type === 'guideline' && (
+                            <span className="skill-type-badge">Behavior</span>
+                          )}
+                        </span>
                         <span className="skill-description">{skill.description}</span>
                       </div>
+                      {skill.type === 'guideline' && (
+                        <label className="skill-toggle">
+                          <input
+                            type="checkbox"
+                            checked={skill.enabled !== false}
+                            onChange={async (e) => {
+                              try {
+                                const updated = await window.electronAPI.updateCustomSkill(skill.id, { enabled: e.target.checked });
+                                setSkills(prev => prev.map(s => s.id === updated.id ? updated : s));
+                              } catch (err) {
+                                console.error('Failed to toggle skill:', err);
+                              }
+                            }}
+                          />
+                          <span className="skill-toggle-slider"></span>
+                        </label>
+                      )}
                     </div>
                     <div className="skill-card-actions">
-                      {onSkillSelect && (
+                      {onSkillSelect && skill.type !== 'guideline' && (
                         <button
                           className="btn-primary btn-xs"
                           onClick={() => onSkillSelect(skill)}

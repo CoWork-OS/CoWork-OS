@@ -110,6 +110,7 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
 - **Toast Notifications**: Real-time notifications for task completion and failures
 - **Telegram Bot**: Run tasks remotely via Telegram with workspace selection and streaming responses
 - **Discord Bot**: Run tasks via Discord with slash commands and direct messages
+- **Slack Bot**: Run tasks via Slack with Socket Mode, direct messages, and channel mentions
 - **Web Search**: Multi-provider web search (Tavily, Brave, SerpAPI, Google) with fallback support
 - **Browser Automation**: Full web browser control with Playwright:
   - Navigate to URLs, take screenshots, save pages as PDF
@@ -464,6 +465,7 @@ If requested by the rights holder, we will update naming/branding to avoid confu
 - [x] SQLite local persistence
 - [x] Telegram bot integration for remote task execution
 - [x] **Discord bot integration** with slash commands and DM support
+- [x] **Slack bot integration** with Socket Mode and channel mentions
 - [x] Web search integration (Tavily, Brave, SerpAPI, Google)
 - [x] Local LLM support via Ollama (free, runs on your machine)
 - [x] **Browser automation** with Playwright (navigate, click, fill, screenshot, PDF)
@@ -669,6 +671,123 @@ For faster slash command registration during development, specify Guild IDs:
 - Global commands take up to 1 hour to propagate
 - Guild-specific commands register instantly
 - Leave empty for production (global commands)
+
+---
+
+## Slack Bot Integration
+
+CoWork-OSS supports running tasks via a Slack bot using Socket Mode for real-time WebSocket connections without exposing webhooks.
+
+### Setting Up the Slack Bot
+
+#### 1. Create a Slack App
+
+1. Go to the [Slack API Apps](https://api.slack.com/apps) page
+2. Click **Create New App** and choose **From scratch**
+3. Give your app a name (e.g., "CoWork Bot") and select your workspace
+
+#### 2. Enable Socket Mode
+
+1. Go to **Socket Mode** in the sidebar
+2. Toggle **Enable Socket Mode** on
+3. Click **Generate** to create an App-Level Token
+4. Give it a name (e.g., "cowork-socket") and add the `connections:write` scope
+5. Copy the **App-Level Token** (starts with `xapp-...`)
+
+#### 3. Configure OAuth & Permissions
+
+1. Go to **OAuth & Permissions** in the sidebar
+2. Under **Bot Token Scopes**, add these scopes:
+   - `app_mentions:read` - Receive mention events
+   - `chat:write` - Send messages
+   - `im:history` - Read DM history
+   - `im:read` - View DM info
+   - `im:write` - Start DMs
+   - `users:read` - Get user info
+   - `files:write` - Upload files
+3. Click **Install to Workspace** (or reinstall if already installed)
+4. Copy the **Bot User OAuth Token** (starts with `xoxb-...`)
+
+#### 4. Configure Event Subscriptions
+
+1. Go to **Event Subscriptions** in the sidebar
+2. Toggle **Enable Events** on
+3. Under **Subscribe to bot events**, add:
+   - `app_mention` - When someone mentions @YourBot
+   - `message.im` - Direct messages to the bot
+
+#### 5. Configure in CoWork-OSS
+
+1. Open CoWork-OSS and go to **Settings** (gear icon)
+2. Navigate to the **Channels** tab and select **Slack**
+3. Enter your credentials:
+   - **Bot Token**: The `xoxb-...` token from OAuth & Permissions
+   - **App-Level Token**: The `xapp-...` token from Socket Mode
+   - **Signing Secret** (optional): Found in Basic Information
+4. Click **Add Slack Bot**
+5. Test the connection, then enable the channel
+
+### Bot Commands
+
+| Command | Description |
+|---------|-------------|
+| `/start` | Start the bot and get help |
+| `/help` | Show available commands |
+| `/workspaces` | List all available workspaces |
+| `/workspace` | Select or show current workspace |
+| `/newtask` | Start a fresh task/conversation |
+| `/status` | Check bot status |
+| `/cancel` | Cancel the running task |
+| `/pair` | Pair with a pairing code |
+
+### Using the Bot
+
+**Via Direct Messages:**
+Simply DM the bot with your request. The bot will process your message and respond with results.
+
+**Via Channel Mentions:**
+In any channel where the bot is a member, mention it with your task:
+```
+@CoWorkBot organize these files by date
+```
+
+### Example Conversation
+
+```
+You: /workspaces
+Bot: Available workspaces:
+     1. ~/Documents/project-a
+     2. ~/Downloads
+
+You: /workspace 1
+Bot: Workspace selected: ~/Documents/project-a
+
+You: Create a summary of all markdown files in this project
+Bot: Task created... [streaming updates]
+Bot: Found 8 markdown files. Here's a summary...
+```
+
+### Security Modes
+
+| Mode | Description | Best For |
+|------|-------------|----------|
+| **Pairing** (default) | Users must enter a pairing code generated in the app | Personal use |
+| **Allowlist** | Only pre-approved Slack user IDs can interact | Team use |
+| **Open** | Anyone can use the bot | Not recommended |
+
+### Pairing Your Slack Account
+
+1. In CoWork-OSS Settings → Channels → Slack, click **Generate Code**
+2. In Slack, DM the bot with `/pair <code>` using the generated code
+3. Once paired, you can start using the bot
+
+### Markdown Support
+
+The bot converts responses to Slack mrkdwn format:
+- Headers become bold text
+- Code blocks are preserved
+- Links use Slack's `<url|text>` format
+- Long messages are automatically chunked (Slack's 4000 char limit)
 
 ---
 

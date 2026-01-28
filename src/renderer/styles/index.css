@@ -1468,13 +1468,13 @@ a,
   color: #c82333;
 }
 
-/* Stop button in header */
-.stop-btn-header {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  border: 2px solid rgba(220, 53, 69, 0.6);
+/* Simple stop button in input area */
+.stop-btn-simple {
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(220, 53, 69, 0.4);
   background: rgba(220, 53, 69, 0.1);
+  color: #dc3545;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -1482,24 +1482,17 @@ a,
   transition: all 0.2s ease;
 }
 
-.stop-btn-header:hover {
+.stop-btn-simple:hover {
   background: rgba(220, 53, 69, 0.2);
-  border-color: rgba(220, 53, 69, 0.8);
-  transform: scale(1.05);
+  border-color: rgba(220, 53, 69, 0.6);
 }
 
-.stop-btn-header:active {
+.stop-btn-simple:active {
   transform: scale(0.95);
 }
 
-.stop-btn-header .stop-icon {
-  width: 16px;
-  height: 16px;
-  color: #dc3545;
-}
-
-.stop-btn-header:hover .stop-icon {
-  color: #c82333;
+.stop-btn-simple svg {
+  stroke: #dc3545;
 }
 
 /* Queued message frame */

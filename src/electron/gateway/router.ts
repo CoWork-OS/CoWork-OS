@@ -881,19 +881,85 @@ export class MessageRouter {
   ): Promise<void> {
     const status = LLMProviderFactory.getConfigStatus();
     const settings = LLMProviderFactory.loadSettings();
-    const isOllama = status.currentProvider === 'ollama';
-    const currentProvider = status.providers.find(p => p.type === status.currentProvider);
+    const providerType = status.currentProvider;
+    const currentProviderInfo = status.providers.find(p => p.type === providerType);
+
+    // Get provider-specific models and current model
+    let models: Array<{ key: string; displayName: string }> = [];
+    let currentModel = settings.modelKey;
+
+    // Get models based on current provider
+    switch (providerType) {
+      case 'anthropic':
+      case 'bedrock':
+        models = status.models;
+        break;
+
+      case 'openai': {
+        currentModel = settings.openai?.model || 'gpt-4o-mini';
+        const cachedOpenAI = LLMProviderFactory.getCachedModels('openai');
+        if (cachedOpenAI && cachedOpenAI.length > 0) {
+          models = cachedOpenAI;
+        } else {
+          models = [
+            { key: 'gpt-4o', displayName: 'GPT-4o' },
+            { key: 'gpt-4o-mini', displayName: 'GPT-4o Mini' },
+            { key: 'gpt-4-turbo', displayName: 'GPT-4 Turbo' },
+            { key: 'gpt-3.5-turbo', displayName: 'GPT-3.5 Turbo' },
+            { key: 'o1', displayName: 'o1' },
+            { key: 'o1-mini', displayName: 'o1 Mini' },
+          ];
+        }
+        break;
+      }
+
+      case 'gemini': {
+        currentModel = settings.gemini?.model || 'gemini-2.0-flash';
+        const cachedGemini = LLMProviderFactory.getCachedModels('gemini');
+        if (cachedGemini && cachedGemini.length > 0) {
+          models = cachedGemini;
+        } else {
+          models = [
+            { key: 'gemini-2.0-flash', displayName: 'Gemini 2.0 Flash' },
+            { key: 'gemini-1.5-pro', displayName: 'Gemini 1.5 Pro' },
+            { key: 'gemini-1.5-flash', displayName: 'Gemini 1.5 Flash' },
+          ];
+        }
+        break;
+      }
+
+      case 'openrouter': {
+        currentModel = settings.openrouter?.model || 'anthropic/claude-3.5-sonnet';
+        const cachedOpenRouter = LLMProviderFactory.getCachedModels('openrouter');
+        if (cachedOpenRouter && cachedOpenRouter.length > 0) {
+          models = cachedOpenRouter.slice(0, 10);
+        } else {
+          models = [
+            { key: 'anthropic/claude-3.5-sonnet', displayName: 'Claude 3.5 Sonnet' },
+            { key: 'openai/gpt-4o', displayName: 'GPT-4o' },
+            { key: 'google/gemini-pro', displayName: 'Gemini Pro' },
+          ];
+        }
+        break;
+      }
+
+      case 'ollama':
+        // Handled separately
+        break;
+
+      default:
+        models = status.models;
+    }
 
     // If no args, show current model and available models
     if (args.length === 0) {
       let text = '🤖 *Current Model*\n\n';
+      text += `• Provider: ${currentProviderInfo?.name || providerType}\n`;
 
-      if (isOllama) {
-        const ollamaModel = settings.ollama?.model || 'gpt-oss:20b';
-        text += `• Provider: ${currentProvider?.name || 'Ollama'}\n`;
+      if (providerType === 'ollama') {
+        const ollamaModel = settings.ollama?.model || 'llama3.2';
         text += `• Model: ${ollamaModel}\n\n`;
 
-        // Show available Ollama models
         text += '*Available Models:*\n';
         try {
           const ollamaModels = await LLMProviderFactory.getOllamaModels();
@@ -914,14 +980,12 @@ export class MessageRouter {
         }
         text += '\n💡 Use `/model <name>` or `/model <number>` to switch';
       } else {
-        const currentModel = status.models.find(m => m.key === status.currentModel);
-        text += `• Provider: ${currentProvider?.name || status.currentProvider}\n`;
-        text += `• Model: ${currentModel?.displayName || status.currentModel}\n\n`;
+        const modelInfo = models.find(m => m.key === currentModel);
+        text += `• Model: ${modelInfo?.displayName || currentModel}\n\n`;
 
-        // Show available Claude models
         text += '*Available Models:*\n';
-        status.models.forEach((model, index) => {
-          const isActive = model.key === status.currentModel ? ' ✓' : '';
+        models.forEach((model, index) => {
+          const isActive = model.key === currentModel ? ' ✓' : '';
           text += `${index + 1}. ${model.displayName}${isActive}\n`;
         });
         text += '\n💡 Use `/model <name>` or `/model <number>` to switch';
@@ -938,7 +1002,7 @@ export class MessageRouter {
     // Change model within current provider
     const selector = args.join(' ').toLowerCase();
 
-    if (isOllama) {
+    if (providerType === 'ollama') {
       const result = await this.selectOllamaModel(selector, args);
       if (!result.success) {
         await adapter.sendMessage({
@@ -968,8 +1032,8 @@ export class MessageRouter {
       return;
     }
 
-    // For Anthropic/Bedrock, match against Claude models
-    const result = this.selectClaudeModel(selector, status.models);
+    // For all other providers, use the provider-specific model list
+    const result = this.selectClaudeModel(selector, models);
     if (!result.success) {
       await adapter.sendMessage({
         chatId: message.chatId,
@@ -978,10 +1042,37 @@ export class MessageRouter {
       return;
     }
 
-    const newSettings: LLMSettings = {
-      ...settings,
-      modelKey: result.model!.key as ModelKey,
-    };
+    // Save to the appropriate provider-specific setting
+    let newSettings: LLMSettings = { ...settings };
+
+    switch (providerType) {
+      case 'openai':
+        newSettings.openai = {
+          ...settings.openai,
+          model: result.model!.key,
+        };
+        break;
+
+      case 'gemini':
+        newSettings.gemini = {
+          ...settings.gemini,
+          model: result.model!.key,
+        };
+        break;
+
+      case 'openrouter':
+        newSettings.openrouter = {
+          ...settings.openrouter,
+          model: result.model!.key,
+        };
+        break;
+
+      case 'anthropic':
+      case 'bedrock':
+      default:
+        newSettings.modelKey = result.model!.key as ModelKey;
+        break;
+    }
 
     LLMProviderFactory.saveSettings(newSettings);
     LLMProviderFactory.clearCache();

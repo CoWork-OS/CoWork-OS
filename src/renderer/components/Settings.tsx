@@ -404,6 +404,7 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
     try {
       setLoadingOllamaModels(true);
       const models = await window.electronAPI.getOllamaModels(baseUrl || ollamaBaseUrl);
+      console.log(`[Settings] Loaded ${models?.length || 0} Ollama models`, models);
       setOllamaModels(models || []);
       // If we got models and current model isn't in the list, select the first one
       if (models && models.length > 0 && !models.some(m => m.name === ollamaModel)) {

@@ -1468,23 +1468,49 @@ a,
   color: #c82333;
 }
 
-/* Simple stop button in input area */
+/* Simple stop button in input area with spinner */
 .stop-btn-simple {
+  position: relative;
   padding: 6px 8px;
-  border-radius: 8px;
-  border: 1px solid rgba(220, 53, 69, 0.4);
+  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  border: 2px solid transparent;
   background: rgba(220, 53, 69, 0.1);
   color: #dc3545;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s ease;
+  transition: background 0.2s ease;
+}
+
+.stop-btn-simple::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  border: 2px solid rgba(220, 53, 69, 0.2);
+}
+
+.stop-btn-simple::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: #dc3545;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .stop-btn-simple:hover {
   background: rgba(220, 53, 69, 0.2);
-  border-color: rgba(220, 53, 69, 0.6);
 }
 
 .stop-btn-simple:active {
@@ -1493,6 +1519,7 @@ a,
 
 .stop-btn-simple svg {
   stroke: #dc3545;
+  z-index: 1;
 }
 
 /* Queued message frame */

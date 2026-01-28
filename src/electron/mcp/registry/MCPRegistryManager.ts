@@ -9,6 +9,8 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 import {
   MCPRegistry,
   MCPRegistryEntry,
@@ -18,20 +20,23 @@ import {
 } from '../types';
 import { MCPSettingsManager } from '../settings';
 
+const execAsync = promisify(exec);
+
 // Cache duration in milliseconds (15 minutes)
 const REGISTRY_CACHE_DURATION = 15 * 60 * 1000;
 
 // Built-in registry of common MCP servers
 // This is used as a fallback when the remote registry is unavailable
+// Package versions verified against npm registry as of 2026-01
 const BUILTIN_REGISTRY: MCPRegistry = {
-  version: '1.0.0',
+  version: '1.1.0',
   lastUpdated: new Date().toISOString(),
   servers: [
     {
       id: 'filesystem',
       name: 'Filesystem',
       description: 'Provides secure file system access with configurable root directories',
-      version: '0.6.0',
+      version: '2026.1.14',
       author: 'Anthropic',
       homepage: 'https://modelcontextprotocol.io',
       repository: 'https://github.com/modelcontextprotocol/servers',
@@ -62,8 +67,8 @@ const BUILTIN_REGISTRY: MCPRegistry = {
     {
       id: 'github',
       name: 'GitHub',
-      description: 'Provides GitHub API integration for repository management',
-      version: '0.6.0',
+      description: 'Provides GitHub API integration for repository management. Requires GITHUB_PERSONAL_ACCESS_TOKEN.',
+      version: '2025.4.8',
       author: 'Anthropic',
       homepage: 'https://modelcontextprotocol.io',
       repository: 'https://github.com/modelcontextprotocol/servers',
@@ -94,37 +99,10 @@ const BUILTIN_REGISTRY: MCPRegistry = {
       featured: true,
     },
     {
-      id: 'brave-search',
-      name: 'Brave Search',
-      description: 'Web and local search using Brave Search API',
-      version: '0.6.0',
-      author: 'Anthropic',
-      homepage: 'https://modelcontextprotocol.io',
-      repository: 'https://github.com/modelcontextprotocol/servers',
-      license: 'MIT',
-      installMethod: 'npm',
-      installCommand: 'npx',
-      packageName: '@modelcontextprotocol/server-brave-search',
-      transport: 'stdio',
-      defaultCommand: 'npx',
-      defaultArgs: ['-y', '@modelcontextprotocol/server-brave-search'],
-      defaultEnv: {
-        BRAVE_API_KEY: '',
-      },
-      tools: [
-        { name: 'brave_web_search', description: 'Search the web using Brave Search' },
-        { name: 'brave_local_search', description: 'Search for local businesses and places' },
-      ],
-      tags: ['search', 'web', 'official'],
-      category: 'search',
-      verified: true,
-      featured: true,
-    },
-    {
       id: 'puppeteer',
       name: 'Puppeteer',
       description: 'Browser automation and web scraping using Puppeteer',
-      version: '0.6.0',
+      version: '2025.5.12',
       author: 'Anthropic',
       homepage: 'https://modelcontextprotocol.io',
       repository: 'https://github.com/modelcontextprotocol/servers',
@@ -149,32 +127,10 @@ const BUILTIN_REGISTRY: MCPRegistry = {
       verified: true,
     },
     {
-      id: 'fetch',
-      name: 'Fetch',
-      description: 'HTTP request capabilities for fetching web content',
-      version: '0.6.0',
-      author: 'Anthropic',
-      homepage: 'https://modelcontextprotocol.io',
-      repository: 'https://github.com/modelcontextprotocol/servers',
-      license: 'MIT',
-      installMethod: 'npm',
-      installCommand: 'npx',
-      packageName: '@modelcontextprotocol/server-fetch',
-      transport: 'stdio',
-      defaultCommand: 'npx',
-      defaultArgs: ['-y', '@modelcontextprotocol/server-fetch'],
-      tools: [
-        { name: 'fetch', description: 'Fetch a URL and return the content' },
-      ],
-      tags: ['http', 'web', 'api', 'official'],
-      category: 'web',
-      verified: true,
-    },
-    {
       id: 'memory',
       name: 'Memory',
       description: 'Knowledge graph-based persistent memory system',
-      version: '0.6.0',
+      version: '2026.1.26',
       author: 'Anthropic',
       homepage: 'https://modelcontextprotocol.io',
       repository: 'https://github.com/modelcontextprotocol/servers',
@@ -201,37 +157,10 @@ const BUILTIN_REGISTRY: MCPRegistry = {
       verified: true,
     },
     {
-      id: 'sqlite',
-      name: 'SQLite',
-      description: 'SQLite database operations and queries',
-      version: '0.6.0',
-      author: 'Anthropic',
-      homepage: 'https://modelcontextprotocol.io',
-      repository: 'https://github.com/modelcontextprotocol/servers',
-      license: 'MIT',
-      installMethod: 'npm',
-      installCommand: 'npx',
-      packageName: '@modelcontextprotocol/server-sqlite',
-      transport: 'stdio',
-      defaultCommand: 'npx',
-      defaultArgs: ['-y', '@modelcontextprotocol/server-sqlite'],
-      tools: [
-        { name: 'read_query', description: 'Execute a SELECT query' },
-        { name: 'write_query', description: 'Execute an INSERT, UPDATE, or DELETE query' },
-        { name: 'create_table', description: 'Create a new table' },
-        { name: 'list_tables', description: 'List all tables in the database' },
-        { name: 'describe_table', description: 'Get table schema information' },
-        { name: 'append_insight', description: 'Store analysis insights' },
-      ],
-      tags: ['database', 'sqlite', 'sql', 'official'],
-      category: 'database',
-      verified: true,
-    },
-    {
       id: 'postgres',
       name: 'PostgreSQL',
-      description: 'PostgreSQL database read-only queries',
-      version: '0.6.0',
+      description: 'PostgreSQL database read-only queries. Requires POSTGRES_CONNECTION_STRING.',
+      version: '0.6.2',
       author: 'Anthropic',
       homepage: 'https://modelcontextprotocol.io',
       repository: 'https://github.com/modelcontextprotocol/servers',
@@ -250,6 +179,54 @@ const BUILTIN_REGISTRY: MCPRegistry = {
       ],
       tags: ['database', 'postgres', 'sql', 'official'],
       category: 'database',
+      verified: true,
+    },
+    {
+      id: 'sequential-thinking',
+      name: 'Sequential Thinking',
+      description: 'MCP server for sequential thinking and problem solving',
+      version: '2025.12.18',
+      author: 'Anthropic',
+      homepage: 'https://modelcontextprotocol.io',
+      repository: 'https://github.com/modelcontextprotocol/servers',
+      license: 'MIT',
+      installMethod: 'npm',
+      installCommand: 'npx',
+      packageName: '@modelcontextprotocol/server-sequential-thinking',
+      transport: 'stdio',
+      defaultCommand: 'npx',
+      defaultArgs: ['-y', '@modelcontextprotocol/server-sequential-thinking'],
+      tools: [
+        { name: 'sequentialthinking', description: 'Sequential thinking and problem solving' },
+      ],
+      tags: ['thinking', 'reasoning', 'official'],
+      category: 'reasoning',
+      verified: true,
+    },
+    {
+      id: 'everything',
+      name: 'Everything (Demo)',
+      description: 'MCP server that exercises all features of the MCP protocol. Useful for testing.',
+      version: '2026.1.26',
+      author: 'Anthropic',
+      homepage: 'https://modelcontextprotocol.io',
+      repository: 'https://github.com/modelcontextprotocol/servers',
+      license: 'MIT',
+      installMethod: 'npm',
+      installCommand: 'npx',
+      packageName: '@modelcontextprotocol/server-everything',
+      transport: 'stdio',
+      defaultCommand: 'npx',
+      defaultArgs: ['-y', '@modelcontextprotocol/server-everything'],
+      tools: [
+        { name: 'echo', description: 'Echo back the input' },
+        { name: 'add', description: 'Add two numbers' },
+        { name: 'longRunningOperation', description: 'Test long-running operations' },
+        { name: 'sampleLLM', description: 'Sample from an LLM' },
+        { name: 'getTinyImage', description: 'Get a tiny test image' },
+      ],
+      tags: ['demo', 'testing', 'official'],
+      category: 'testing',
       verified: true,
     },
   ],
@@ -370,6 +347,30 @@ export class MCPRegistryManager {
   }
 
   /**
+   * Verify that an npm package exists on the registry
+   */
+  static async verifyNpmPackage(packageName: string): Promise<{ exists: boolean; version?: string; error?: string }> {
+    try {
+      console.log(`[MCPRegistryManager] Verifying npm package: ${packageName}`);
+      const { stdout } = await execAsync(`npm view ${packageName} version`, {
+        timeout: 15000, // 15 second timeout
+      });
+      const version = stdout.trim();
+      console.log(`[MCPRegistryManager] Package ${packageName} exists, version: ${version}`);
+      return { exists: true, version };
+    } catch (error: any) {
+      // Check if it's a 404 (package not found)
+      if (error.message?.includes('404') || error.message?.includes('not found') || error.stderr?.includes('404')) {
+        console.warn(`[MCPRegistryManager] Package ${packageName} not found on npm`);
+        return { exists: false, error: `Package "${packageName}" not found on npm registry` };
+      }
+      // Other errors (network, timeout, etc.)
+      console.warn(`[MCPRegistryManager] Error verifying package ${packageName}:`, error.message);
+      return { exists: false, error: `Failed to verify package: ${error.message}` };
+    }
+  }
+
+  /**
    * Install a server from the registry
    */
   static async installServer(entryId: string, extraArgs?: string[]): Promise<MCPServerConfig> {
@@ -388,6 +389,18 @@ export class MCPRegistryManager {
 
     if (existingIndex !== -1) {
       throw new Error(`Server ${entry.name} is already installed`);
+    }
+
+    // Verify the npm package exists before installing
+    if (entry.packageName && entry.installMethod === 'npm') {
+      const verification = await this.verifyNpmPackage(entry.packageName);
+      if (!verification.exists) {
+        throw new Error(verification.error || `Package "${entry.packageName}" is not available`);
+      }
+      // Update version to the actual npm version if available
+      if (verification.version) {
+        entry.version = verification.version;
+      }
     }
 
     // Create server config from registry entry

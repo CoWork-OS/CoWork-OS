@@ -83,6 +83,9 @@ export function MCPSettings() {
   // Connecting/disconnecting state
   const [connectingServer, setConnectingServer] = useState<string | null>(null);
 
+  // Connection error state (shows errors inline instead of alerts)
+  const [connectionErrors, setConnectionErrors] = useState<Record<string, string>>({});
+
   // Update state
   const [availableUpdates, setAvailableUpdates] = useState<MCPUpdateInfo[]>([]);
   const [checkingUpdates, setCheckingUpdates] = useState(false);
@@ -173,10 +176,19 @@ export function MCPSettings() {
   const handleConnectServer = async (serverId: string) => {
     try {
       setConnectingServer(serverId);
+      // Clear any previous error for this server
+      setConnectionErrors(prev => {
+        const { [serverId]: _, ...rest } = prev;
+        return rest;
+      });
       await window.electronAPI.connectMCPServer(serverId);
     } catch (error: any) {
       console.error('Failed to connect server:', error);
-      alert(`Failed to connect: ${error.message}`);
+      // Store error in state for inline display
+      setConnectionErrors(prev => ({
+        ...prev,
+        [serverId]: error.message || 'Connection failed'
+      }));
     } finally {
       setConnectingServer(null);
     }
@@ -185,10 +197,18 @@ export function MCPSettings() {
   const handleDisconnectServer = async (serverId: string) => {
     try {
       setConnectingServer(serverId);
+      // Clear any previous error for this server
+      setConnectionErrors(prev => {
+        const { [serverId]: _, ...rest } = prev;
+        return rest;
+      });
       await window.electronAPI.disconnectMCPServer(serverId);
     } catch (error: any) {
       console.error('Failed to disconnect server:', error);
-      alert(`Failed to disconnect: ${error.message}`);
+      setConnectionErrors(prev => ({
+        ...prev,
+        [serverId]: error.message || 'Disconnect failed'
+      }));
     } finally {
       setConnectingServer(null);
     }
@@ -462,9 +482,22 @@ export function MCPSettings() {
                         </div>
                       </div>
 
-                      {serverStatus.error && (
+                      {(serverStatus.error || connectionErrors[serverStatus.id]) && (
                         <div className="mcp-server-error">
-                          {serverStatus.error}
+                          <span className="mcp-error-icon">⚠</span>
+                          {connectionErrors[serverStatus.id] || serverStatus.error}
+                          {connectionErrors[serverStatus.id] && (
+                            <button
+                              className="mcp-error-dismiss"
+                              onClick={() => setConnectionErrors(prev => {
+                                const { [serverStatus.id]: _, ...rest } = prev;
+                                return rest;
+                              })}
+                              title="Dismiss"
+                            >
+                              ×
+                            </button>
+                          )}
                         </div>
                       )}
 

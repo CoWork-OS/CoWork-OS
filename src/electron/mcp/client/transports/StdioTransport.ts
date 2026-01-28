@@ -29,6 +29,7 @@ export class StdioTransport extends EventEmitter implements MCPTransport {
   private errorHandler: ((error: Error) => void) | null = null;
   private pendingRequests: Map<string | number, PendingRequest> = new Map();
   private buffer = '';
+  private stderrBuffer = ''; // Capture stderr for better error messages
   private connected = false;
   private requestId = 0;
 
@@ -82,6 +83,11 @@ export class StdioTransport extends EventEmitter implements MCPTransport {
         this.process.stderr?.on('data', (data: Buffer) => {
           const text = data.toString();
           console.log(`[MCP StdioTransport] Server stderr: ${text}`);
+          // Capture stderr for better error messages (limit to last 1000 chars)
+          this.stderrBuffer += text;
+          if (this.stderrBuffer.length > 1000) {
+            this.stderrBuffer = this.stderrBuffer.slice(-1000);
+          }
         });
 
         // Handle process errors
@@ -98,7 +104,16 @@ export class StdioTransport extends EventEmitter implements MCPTransport {
         // Handle process exit
         this.process.on('exit', (code, signal) => {
           clearTimeout(timeout);
-          const message = `Process exited with code ${code}, signal ${signal}`;
+          // Build error message including stderr output for better diagnostics
+          let message = `Process exited with code ${code}`;
+          if (signal) {
+            message += `, signal ${signal}`;
+          }
+          // Include stderr in error message if there was an error exit
+          if (code !== 0 && this.stderrBuffer.trim()) {
+            const stderrSnippet = this.stderrBuffer.trim().slice(-500); // Last 500 chars
+            message += `: ${stderrSnippet}`;
+          }
           console.log(`[MCP StdioTransport] ${message}`);
 
           if (!this.connected) {
@@ -112,7 +127,12 @@ export class StdioTransport extends EventEmitter implements MCPTransport {
         // Handle process close
         this.process.on('close', (code) => {
           if (this.connected) {
-            this.closeHandler?.(code !== 0 ? new Error(`Process closed with code ${code}`) : undefined);
+            let message = `Process closed with code ${code}`;
+            if (code !== 0 && this.stderrBuffer.trim()) {
+              const stderrSnippet = this.stderrBuffer.trim().slice(-500);
+              message += `: ${stderrSnippet}`;
+            }
+            this.closeHandler?.(code !== 0 ? new Error(message) : undefined);
           }
           this.cleanup();
         });
@@ -317,6 +337,7 @@ export class StdioTransport extends EventEmitter implements MCPTransport {
   private cleanup(): void {
     this.connected = false;
     this.buffer = '';
+    this.stderrBuffer = '';
 
     // Clear all pending requests
     for (const [, pending] of this.pendingRequests) {

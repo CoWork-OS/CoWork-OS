@@ -7517,6 +7517,49 @@ button {
   overflow-y: auto;
 }
 
+.mcp-modal-wide {
+  max-width: 500px;
+}
+
+.mcp-modal-content .settings-field {
+  margin-bottom: 16px;
+}
+
+.mcp-modal-content .settings-field:last-of-type {
+  margin-bottom: 0;
+}
+
+.mcp-env-textarea {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  resize: vertical;
+  min-height: 100px;
+}
+
+.mcp-env-textarea:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.mcp-env-textarea::placeholder {
+  color: var(--color-text-muted);
+}
+
+.mcp-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-border);
+}
+
 .mcp-no-tools {
   color: var(--color-text-secondary);
   text-align: center;

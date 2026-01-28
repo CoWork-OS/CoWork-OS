@@ -91,6 +91,11 @@ export function MCPSettings() {
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [updatingServer, setUpdatingServer] = useState<string | null>(null);
 
+  // Edit server modal state
+  const [editingServer, setEditingServer] = useState<string | null>(null);
+  const [editServerArgs, setEditServerArgs] = useState('');
+  const [editServerEnv, setEditServerEnv] = useState('');
+
   useEffect(() => {
     loadData();
 
@@ -243,6 +248,58 @@ export function MCPSettings() {
       await loadData();
     } catch (error: any) {
       console.error('Failed to update server:', error);
+    }
+  };
+
+  const handleOpenEditServer = (serverId: string) => {
+    const config = settings?.servers.find(s => s.id === serverId);
+    if (!config) return;
+
+    // Convert args array to space-separated string
+    setEditServerArgs(config.args?.join(' ') || '');
+
+    // Convert env object to KEY=VALUE format
+    const envString = config.env
+      ? Object.entries(config.env).map(([k, v]) => `${k}=${v}`).join('\n')
+      : '';
+    setEditServerEnv(envString);
+
+    setEditingServer(serverId);
+  };
+
+  const handleSaveEditServer = async () => {
+    if (!editingServer) return;
+
+    try {
+      // Parse args from space-separated string
+      const args = editServerArgs ? editServerArgs.split(' ').filter(a => a.trim()) : [];
+
+      // Parse env from KEY=VALUE format
+      const env: Record<string, string> = {};
+      if (editServerEnv) {
+        editServerEnv.split('\n').forEach(line => {
+          const trimmed = line.trim();
+          if (trimmed) {
+            const idx = trimmed.indexOf('=');
+            if (idx > 0) {
+              const key = trimmed.substring(0, idx).trim();
+              const value = trimmed.substring(idx + 1).trim();
+              env[key] = value;
+            }
+          }
+        });
+      }
+
+      await window.electronAPI.updateMCPServer(editingServer, {
+        args: args.length > 0 ? args : undefined,
+        env: Object.keys(env).length > 0 ? env : undefined,
+      });
+
+      setEditingServer(null);
+      await loadData();
+    } catch (error: any) {
+      console.error('Failed to update server:', error);
+      alert(`Failed to update server: ${error.message}`);
     }
   };
 
@@ -534,6 +591,14 @@ export function MCPSettings() {
 
                         <button
                           className="button-small button-secondary"
+                          onClick={() => handleOpenEditServer(serverStatus.id)}
+                          title="Configure arguments and environment variables"
+                        >
+                          Configure
+                        </button>
+
+                        <button
+                          className="button-small button-secondary"
                           onClick={() => handleTestServer(serverStatus.id)}
                           disabled={isTesting}
                         >
@@ -697,6 +762,67 @@ export function MCPSettings() {
                   ))}
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Server Modal */}
+      {editingServer && (
+        <div className="mcp-modal-overlay" onClick={() => setEditingServer(null)}>
+          <div className="mcp-modal mcp-modal-wide" onClick={(e) => e.stopPropagation()}>
+            <div className="mcp-modal-header">
+              <h3>Configure Server</h3>
+              <button className="mcp-modal-close" onClick={() => setEditingServer(null)}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="mcp-modal-content">
+              <div className="settings-field">
+                <label>Command Arguments</label>
+                <input
+                  type="text"
+                  value={editServerArgs}
+                  onChange={(e) => setEditServerArgs(e.target.value)}
+                  placeholder="e.g., postgresql://user:pass@localhost/db"
+                />
+                <p className="settings-description">
+                  Space-separated arguments passed to the server command.
+                  For PostgreSQL, enter the database URL here.
+                </p>
+              </div>
+
+              <div className="settings-field">
+                <label>Environment Variables</label>
+                <textarea
+                  value={editServerEnv}
+                  onChange={(e) => setEditServerEnv(e.target.value)}
+                  placeholder="KEY=value&#10;ANOTHER_KEY=another_value"
+                  rows={5}
+                  className="mcp-env-textarea"
+                />
+                <p className="settings-description">
+                  One variable per line in KEY=value format.
+                  Examples: BRAVE_API_KEY, GITHUB_PERSONAL_ACCESS_TOKEN
+                </p>
+              </div>
+
+              <div className="mcp-modal-actions">
+                <button
+                  className="button-secondary"
+                  onClick={() => setEditingServer(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="button-primary"
+                  onClick={handleSaveEditServer}
+                >
+                  Save Configuration
+                </button>
+              </div>
             </div>
           </div>
         </div>

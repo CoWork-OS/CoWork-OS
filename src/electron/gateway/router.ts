@@ -480,6 +480,10 @@ export class MessageRouter {
         await this.handleDenyCommand(adapter, message, sessionId);
         break;
 
+      case '/queue':
+        await this.handleQueueCommand(adapter, message, args);
+        break;
+
       default:
         await adapter.sendMessage({
           chatId: message.chatId,
@@ -1785,6 +1789,54 @@ export class MessageRouter {
   }
 
   /**
+   * Handle /queue command - view or clear task queue
+   */
+  private async handleQueueCommand(
+    adapter: ChannelAdapter,
+    message: IncomingMessage,
+    args: string[]
+  ): Promise<void> {
+    if (!this.agentDaemon) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: '❌ Agent daemon not available.',
+      });
+      return;
+    }
+
+    const subcommand = args[0]?.toLowerCase();
+
+    if (subcommand === 'clear' || subcommand === 'reset') {
+      // Clear stuck tasks
+      const result = this.agentDaemon.clearStuckTasks();
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: `✅ Queue cleared!\n\n• Running tasks cleared: ${result.clearedRunning}\n• Queued tasks cleared: ${result.clearedQueued}\n\nYou can now start new tasks.`,
+      });
+    } else {
+      // Show queue status
+      const status = this.agentDaemon.getQueueStatus();
+      const statusText = `📊 *Queue Status*
+
+• Running: ${status.runningCount}/${status.maxConcurrent}
+• Queued: ${status.queuedCount}
+
+${status.runningCount > 0 ? `Running task IDs: ${status.runningTaskIds.join(', ')}` : ''}
+${status.queuedCount > 0 ? `Queued task IDs: ${status.queuedTaskIds.join(', ')}` : ''}
+
+*Commands:*
+• \`/queue\` - Show this status
+• \`/queue clear\` - Clear stuck tasks`;
+
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: statusText,
+        parseMode: 'markdown',
+      });
+    }
+  }
+
+  /**
    * Split a message into chunks for Telegram's character limit
    */
   private splitMessage(text: string, maxLength: number): string[] {
@@ -1894,6 +1946,8 @@ export class MessageRouter {
 /cancel - Cancel current task
 /approve - Approve pending action (or /yes, /y)
 /deny - Reject pending action (or /no, /n)
+/queue - View task queue status
+/queue clear - Clear stuck tasks from queue
 
 💬 *How to use*
 1. Add or select a workspace:

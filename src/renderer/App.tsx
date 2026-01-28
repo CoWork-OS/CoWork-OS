@@ -398,7 +398,10 @@ export function App() {
             </span>
             <button
               className="update-banner-link"
-              onClick={() => setCurrentView('settings')}
+              onClick={() => {
+                setSettingsTab('updates');
+                setCurrentView('settings');
+              }}
             >
               View Release
             </button>

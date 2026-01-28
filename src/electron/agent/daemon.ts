@@ -61,11 +61,25 @@ export class AgentDaemon extends EventEmitter {
    * Initialize the daemon - call after construction to set up queue
    */
   async initialize(): Promise<void> {
-    // Find queued and running tasks from database for queue recovery
+    // Find queued tasks from database for queue recovery
     const queuedTasks = this.taskRepo.findByStatus('queued');
-    const runningTasks = this.taskRepo.findByStatus(['planning', 'executing']);
 
-    await this.queueManager.initialize(queuedTasks, runningTasks);
+    // Find "running" tasks from previous session - these are orphaned since we lost their executors
+    const orphanedTasks = this.taskRepo.findByStatus(['planning', 'executing']);
+
+    // Mark orphaned tasks as failed - they can't be resumed since we lost their state
+    if (orphanedTasks.length > 0) {
+      console.log(`[AgentDaemon] Found ${orphanedTasks.length} orphaned tasks from previous session, marking as failed`);
+      for (const task of orphanedTasks) {
+        this.taskRepo.update(task.id, {
+          status: 'failed',
+          error: 'Task interrupted - application was restarted while task was running',
+        });
+      }
+    }
+
+    // Only initialize queue with queued tasks (not orphaned "running" tasks)
+    await this.queueManager.initialize(queuedTasks, []);
   }
 
   /**
@@ -197,10 +211,13 @@ export class AgentDaemon extends EventEmitter {
     if (cached) {
       await cached.executor.cancel();
       this.activeTasks.delete(taskId);
-      // Notify queue manager so it can start next task
-      this.queueManager.onTaskFinished(taskId);
     }
-    // Always emit cancelled event so UI updates (even if task wasn't in cache)
+
+    // Always notify queue manager to remove from running set
+    // (handles orphaned tasks that are in runningTaskIds but have no executor)
+    this.queueManager.onTaskFinished(taskId);
+
+    // Always emit cancelled event so UI updates
     this.emitTaskEvent(taskId, 'task_cancelled', {
       message: 'Task was stopped by user',
     });

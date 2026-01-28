@@ -253,8 +253,13 @@ SQLite with 6 tables:
 | DiscordSettings | `DiscordSettings.tsx` | Discord bot config |
 | SlackSettings | `SlackSettings.tsx` | Slack bot config |
 | UpdateSettings | `UpdateSettings.tsx` | Auto-update config |
+| GuardrailSettings | `GuardrailSettings.tsx` | Safety limits config |
+| QueueSettings | `QueueSettings.tsx` | Parallel queue config |
+| SkillsSettings | `SkillsSettings.tsx` | Custom skills management |
+| MCPSettings | `MCPSettings.tsx` | MCP server config |
 | WorkspaceSelector | `WorkspaceSelector.tsx` | Folder picker |
 | ApprovalDialog | `ApprovalDialog.tsx` | Permission requests |
+| FileViewer | `FileViewer.tsx` | In-app artifact viewer |
 
 ### 8. Auto-Update System
 
@@ -264,6 +269,65 @@ SQLite with 6 tables:
 - Download progress tracking
 - User notification
 - One-click install
+
+### 9. MCP (Model Context Protocol)
+
+**Location**: `src/electron/mcp/`
+
+Full MCP support for extensibility:
+
+- **MCP Client** (`client/`): Connect to external MCP servers
+- **MCP Host** (`host/`): Expose CoWork's tools as an MCP server
+- **MCP Registry** (`registry/`): Browse and install servers with one click
+- **Transports**: stdio, SSE, and WebSocket support
+
+### 10. Custom Skills System
+
+**Location**: `src/electron/agent/custom-skill-loader.ts`
+
+User-defined reusable workflows:
+
+- Skills stored as YAML in `~/Library/Application Support/cowork-oss/skills/`
+- Custom prompts and tool configurations
+- Priority-based sorting
+- Parameter input modal for skills with variables
+
+### 11. System Tools
+
+**Location**: `src/electron/agent/tools/system-tools.ts`
+
+System-level capabilities:
+
+- `take_screenshot` - Full screen or specific windows
+- `clipboard_read` / `clipboard_write` - Clipboard access
+- `open_application` / `open_url` / `open_path` - Launch apps and URLs
+- `show_in_finder` - Reveal files in Finder
+- `get_system_info` - System information and environment
+
+### 12. Configurable Guardrails
+
+**Location**: `src/electron/agent/guardrails/`
+
+Safety limits configurable in Settings:
+
+- Token budget per task (1K - 10M)
+- Cost budget per task ($0.01 - $100)
+- Iteration limit (5 - 500)
+- Dangerous command blocking with custom patterns
+- Auto-approve trusted command patterns
+- File size limits (1 - 500 MB)
+- Domain allowlist for browser automation
+
+### 13. Parallel Task Queue
+
+**Location**: `src/electron/agent/queue-manager.ts`
+
+Run multiple tasks concurrently:
+
+- Configurable concurrency (1-10 tasks)
+- FIFO queue for pending tasks
+- Auto-start next task on completion
+- Persistence across app restarts
 
 ## File Structure
 
@@ -433,13 +497,26 @@ npm run type-check       # Check TypeScript types
 | In-app Settings | Production | Secure storage |
 | Auto-updates | Production | GitHub releases |
 | Approval system | Production | User confirmation for destructive ops |
+| Goal Mode | Production | Success criteria with auto-retry |
+| Dynamic re-planning | Production | Agent revises plan mid-execution |
+| Configurable guardrails | Production | Token/cost budgets, blocked commands |
+| System tools | Production | Screenshots, clipboard, open apps |
+| Auto-approve commands | Production | Skip approval for trusted patterns |
+| Parallel task queue | Production | Run 1-10 tasks concurrently |
+| Quick Task FAB | Production | Floating action button |
+| Toast notifications | Production | Task completion alerts |
+| Custom Skills | Production | User-defined reusable workflows |
+| MCP Client | Production | Connect to external MCP servers |
+| MCP Host | Production | Expose tools as MCP server |
+| MCP Registry | Production | One-click server installation |
+| MCP SSE/WebSocket | Production | Web-based MCP transports |
+| In-app file viewer | Production | View artifacts without leaving app |
 
 ### Planned
 
 | Feature | Status | Complexity |
 |---------|--------|------------|
 | VM sandbox | Not started | High |
-| MCP connectors | Not started | Medium |
 | Sub-agent coordination | Not started | High |
 | Network egress controls | Not started | Medium |
 
@@ -506,11 +583,17 @@ npm run type-check       # Check TypeScript types
 | Browser automation | Yes | Yes | Complete |
 | Multi-provider LLM | Yes | Yes | Complete |
 | Remote channels | Yes | Yes (Telegram, Discord, Slack) | Complete |
+| Goal Mode | Yes | Yes | Complete |
+| Dynamic re-planning | Yes | Yes | Complete |
+| System tools | Yes | Yes | Complete |
+| Configurable guardrails | Yes | Yes | Complete |
+| Custom Skills | Yes | Yes | Complete |
+| MCP connectors | Yes | Yes (Client, Host, Registry) | Complete |
+| Parallel task queue | Yes | Yes | Complete |
 | VM sandbox | Yes | No | Planned |
-| MCP connectors | Yes | No | Planned |
 | Sub-agents | Yes | No | Planned |
 
-**Overall Implementation**: ~85%
+**Overall Implementation**: ~95%
 
 ## Summary
 
@@ -521,6 +604,12 @@ CoWork-OSS is a production-ready agentic task automation app with:
 - **12 browser automation tools**
 - **4 document skills** with real Office output
 - **3 channel integrations** (Telegram, Discord, Slack)
+- **Full MCP support** (Client, Host, Registry with SSE/WebSocket)
+- **Custom Skills** (user-defined reusable workflows)
+- **Goal Mode** (success criteria with auto-retry)
+- **Configurable guardrails** (token/cost budgets, blocked commands)
+- **Parallel task queue** (1-10 concurrent tasks)
+- **System tools** (screenshots, clipboard, open apps)
 - **Full in-app configuration** (no .env required)
 - **Auto-update support**
 - **Comprehensive security** (path isolation, approvals, audit logging)

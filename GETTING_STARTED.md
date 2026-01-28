@@ -305,6 +305,11 @@ Don't use system folders like `/System` or `/Applications`.
 2. **Browser Automation**: Have the agent navigate websites and extract data
 3. **Remote Access**: Set up Telegram, Discord, or Slack bot for mobile/remote access
 4. **Document Creation**: Create professional Excel, Word, PDF, or PowerPoint files
+5. **Goal Mode**: Define success criteria and let the agent auto-retry until verification passes
+6. **Custom Skills**: Create reusable workflows with custom prompts in Settings > Custom Skills
+7. **MCP Servers**: Connect to external tools via MCP in Settings > MCP Servers
+8. **Parallel Tasks**: Run multiple tasks concurrently (configure in Settings > Task Queue)
+9. **Guardrails**: Set token/cost budgets and blocked commands in Settings > Guardrails
 
 ### Learn More
 

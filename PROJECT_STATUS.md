@@ -92,6 +92,27 @@ CoWork-OSS has reached **production status** with comprehensive features for age
 #### Shell Tools
 - [x] execute_command - Shell command execution (requires approval)
 
+#### System Tools
+- [x] take_screenshot - Full screen or specific windows
+- [x] clipboard_read / clipboard_write - Clipboard access
+- [x] open_application / open_url / open_path - Launch apps and URLs
+- [x] show_in_finder - Reveal files in Finder
+- [x] get_system_info - System information and environment
+
+#### Custom Skills
+- [x] User-defined reusable workflows
+- [x] YAML-based skill definitions
+- [x] Priority-based sorting
+- [x] Parameter input modal for skill variables
+- [x] Located: `~/Library/Application Support/cowork-oss/skills/`
+
+#### MCP (Model Context Protocol)
+- [x] MCP Client - Connect to external MCP servers
+- [x] MCP Host - Expose CoWork's tools as MCP server
+- [x] MCP Registry - One-click server installation
+- [x] SSE and WebSocket transports
+- [x] Located: `src/electron/mcp/`
+
 ### 3. User Interface
 
 #### Main Components
@@ -100,6 +121,10 @@ CoWork-OSS has reached **production status** with comprehensive features for age
 - [x] Task detail view with timeline
 - [x] Approval dialog system
 - [x] Real-time event streaming
+- [x] Quick Task FAB (floating action button)
+- [x] Toast notifications for task completion
+- [x] In-app file viewer for artifacts
+- [x] Parallel task queue panel
 
 #### Settings UI
 - [x] LLM provider configuration
@@ -109,6 +134,10 @@ CoWork-OSS has reached **production status** with comprehensive features for age
 - [x] Discord bot settings
 - [x] Slack bot settings
 - [x] Update settings
+- [x] Guardrail settings (budgets, limits)
+- [x] Queue settings (concurrency)
+- [x] Custom Skills management
+- [x] MCP server configuration
 
 ### 4. Infrastructure
 
@@ -118,6 +147,27 @@ CoWork-OSS has reached **production status** with comprehensive features for age
 - [x] Content Security Policy
 - [x] Input validation
 - [x] Approval flow for destructive operations
+
+#### Configurable Guardrails
+- [x] Token budget per task (1K - 10M)
+- [x] Cost budget per task ($0.01 - $100)
+- [x] Iteration limit (5 - 500)
+- [x] Dangerous command blocking
+- [x] Auto-approve trusted commands
+- [x] File size limits
+- [x] Domain allowlist for browser
+
+#### Goal Mode & Re-planning
+- [x] Success criteria (shell commands or file checks)
+- [x] Auto-retry up to N attempts
+- [x] Dynamic re-planning mid-execution
+- [x] `revise_plan` tool for agent adaptation
+
+#### Parallel Task Queue
+- [x] Configurable concurrency (1-10)
+- [x] FIFO queue management
+- [x] Auto-start next task
+- [x] Queue persistence across restarts
 
 #### Auto-Update System
 - [x] Update checking
@@ -145,19 +195,26 @@ cowork-oss/
 │   │   ├── agent/
 │   │   │   ├── daemon.ts
 │   │   │   ├── executor.ts
+│   │   │   ├── queue-manager.ts    # Parallel task queue
 │   │   │   ├── context-manager.ts
+│   │   │   ├── custom-skill-loader.ts
 │   │   │   ├── llm/           # 5 providers
 │   │   │   ├── search/        # 4 providers
 │   │   │   ├── browser/       # Playwright service
 │   │   │   ├── tools/         # All tool implementations
-│   │   │   └── skills/        # Document skills
+│   │   │   ├── skills/        # Document skills
+│   │   │   └── guardrails/    # Safety limits
 │   │   ├── gateway/           # Telegram, Discord & Slack
+│   │   ├── mcp/               # Model Context Protocol
+│   │   │   ├── client/        # Connect to servers
+│   │   │   ├── host/          # Expose tools
+│   │   │   └── registry/      # Server catalog
 │   │   ├── updater/           # Auto-update
 │   │   ├── ipc/
 │   │   └── utils/
 │   ├── renderer/
 │   │   ├── App.tsx
-│   │   ├── components/        # 12 components
+│   │   ├── components/        # 20+ components
 │   │   └── styles/
 │   └── shared/
 │       └── types.ts
@@ -227,14 +284,6 @@ Operations Requiring Approval:
   - Workspace mount
   - Network egress controls
 
-### MCP Connectors
-- **Status**: Not started
-- **What's needed**:
-  - MCP protocol client
-  - Server registry
-  - Connection management
-  - Per-tool permissions
-
 ### Sub-Agents
 - **Status**: Not started
 - **What's needed**:
@@ -256,12 +305,18 @@ Operations Requiring Approval:
 8. Track all agent activity in real-time
 9. Approve/deny destructive operations
 10. Receive automatic updates
+11. Use Goal Mode with success criteria and auto-retry
+12. Create custom skills with reusable workflows
+13. Connect to MCP servers for extended tool access
+14. Run multiple tasks in parallel (1-10 concurrent)
+15. Configure safety guardrails (budgets, blocked commands)
+16. Use system tools (screenshots, clipboard, open apps)
+17. View artifacts with the in-app file viewer
 
 ### You Cannot (Yet):
-1. Execute arbitrary code in VM
-2. Connect to external services via MCP (Notion, Jira, etc.)
-3. Run tasks in parallel with sub-agents
-4. Apply network egress controls
+1. Execute arbitrary code in a VM sandbox
+2. Run tasks with coordinated sub-agents
+3. Apply network egress controls
 
 ## Dependencies
 
@@ -331,16 +386,21 @@ Expected behavior:
 **This is a production-ready application** for agentic task automation:
 - All core systems implemented
 - UI is fully functional
-- Multi-provider LLM support
+- Multi-provider LLM support (5 providers)
 - Real Office document creation
 - Web search and browser automation
 - Remote access via Telegram, Discord, and Slack
+- Full MCP support (Client, Host, Registry)
+- Custom Skills system
+- Goal Mode with auto-retry
+- Configurable guardrails
+- Parallel task queue
+- System tools (screenshots, clipboard, etc.)
 - Comprehensive security model
 
-**~85% feature parity** with the original Cowork concept, with main gaps being:
+**~95% feature parity** with the original Cowork concept, with main gaps being:
 - VM sandbox (planned)
-- MCP connectors (planned)
-- Parallel sub-agents (planned)
+- Coordinated sub-agents (planned)
 
 The architecture is extensible. All future features can be added without refactoring core systems.
 

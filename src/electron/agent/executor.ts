@@ -889,7 +889,8 @@ export class TaskExecutor {
       settings.providerType,
       settings.ollama?.model,
       settings.gemini?.model,
-      settings.openrouter?.model
+      settings.openrouter?.model,
+      settings.openai?.model
     );
     this.modelKey = settings.modelKey;
 

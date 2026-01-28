@@ -3,7 +3,7 @@
  * Allows switching between Anthropic API and AWS Bedrock
  */
 
-export type LLMProviderType = 'anthropic' | 'bedrock' | 'ollama' | 'gemini' | 'openrouter';
+export type LLMProviderType = 'anthropic' | 'bedrock' | 'ollama' | 'gemini' | 'openrouter' | 'openai';
 
 export interface LLMProviderConfig {
   type: LLMProviderType;
@@ -24,6 +24,10 @@ export interface LLMProviderConfig {
   geminiApiKey?: string;
   // OpenRouter-specific
   openrouterApiKey?: string;
+  // OpenAI-specific
+  openaiApiKey?: string;
+  openaiAccessToken?: string; // OAuth access token
+  openaiRefreshToken?: string; // OAuth refresh token
 }
 
 export interface LLMTool {
@@ -222,6 +226,45 @@ export const OPENROUTER_MODELS = {
 } as const;
 
 export type OpenRouterModelKey = keyof typeof OPENROUTER_MODELS;
+
+/**
+ * Available OpenAI models
+ * Users with ChatGPT Plus/Team/Enterprise subscriptions can use these models
+ */
+export const OPENAI_MODELS = {
+  'gpt-4o': {
+    id: 'gpt-4o',
+    displayName: 'GPT-4o',
+    description: 'Most capable model for complex tasks',
+  },
+  'gpt-4o-mini': {
+    id: 'gpt-4o-mini',
+    displayName: 'GPT-4o Mini',
+    description: 'Fast and affordable for most tasks',
+  },
+  'gpt-4-turbo': {
+    id: 'gpt-4-turbo',
+    displayName: 'GPT-4 Turbo',
+    description: 'Previous generation flagship',
+  },
+  'gpt-3.5-turbo': {
+    id: 'gpt-3.5-turbo',
+    displayName: 'GPT-3.5 Turbo',
+    description: 'Fast and cost-effective',
+  },
+  'o1': {
+    id: 'o1',
+    displayName: 'o1',
+    description: 'Advanced reasoning model',
+  },
+  'o1-mini': {
+    id: 'o1-mini',
+    displayName: 'o1 Mini',
+    description: 'Fast reasoning model',
+  },
+} as const;
+
+export type OpenAIModelKey = keyof typeof OPENAI_MODELS;
 
 /**
  * Popular Ollama models with their details

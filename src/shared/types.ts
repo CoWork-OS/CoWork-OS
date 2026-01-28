@@ -263,6 +263,9 @@ export const IPC_CHANNELS = {
   LLM_GET_OLLAMA_MODELS: 'llm:getOllamaModels',
   LLM_GET_GEMINI_MODELS: 'llm:getGeminiModels',
   LLM_GET_OPENROUTER_MODELS: 'llm:getOpenRouterModels',
+  LLM_GET_OPENAI_MODELS: 'llm:getOpenAIModels',
+  LLM_OPENAI_OAUTH_START: 'llm:openaiOAuthStart',
+  LLM_OPENAI_OAUTH_LOGOUT: 'llm:openaiOAuthLogout',
   LLM_GET_BEDROCK_MODELS: 'llm:getBedrockModels',
 
   // Gateway / Channels
@@ -336,7 +339,7 @@ export const IPC_CHANNELS = {
 } as const;
 
 // LLM Provider types
-export type LLMProviderType = 'anthropic' | 'bedrock' | 'ollama' | 'gemini' | 'openrouter';
+export type LLMProviderType = 'anthropic' | 'bedrock' | 'ollama' | 'gemini' | 'openrouter' | 'openai';
 
 export interface CachedModelInfo {
   key: string;
@@ -374,11 +377,21 @@ export interface LLMSettingsData {
     apiKey?: string;
     model?: string;
   };
+  openai?: {
+    apiKey?: string;
+    model?: string;
+    // OAuth tokens (alternative to API key)
+    accessToken?: string;
+    refreshToken?: string;
+    tokenExpiresAt?: number;
+    authMethod?: 'api_key' | 'oauth';
+  };
   // Cached models from API (populated when user refreshes)
   cachedGeminiModels?: CachedModelInfo[];
   cachedOpenRouterModels?: CachedModelInfo[];
   cachedOllamaModels?: CachedModelInfo[];
   cachedBedrockModels?: CachedModelInfo[];
+  cachedOpenAIModels?: CachedModelInfo[];
 }
 
 export interface LLMProviderInfo {

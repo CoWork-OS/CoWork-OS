@@ -4,4 +4,6 @@ export { BedrockProvider } from './bedrock-provider';
 export { OllamaProvider } from './ollama-provider';
 export { GeminiProvider } from './gemini-provider';
 export { OpenRouterProvider } from './openrouter-provider';
+export { OpenAIProvider } from './openai-provider';
+export { OpenAIOAuth, OpenAIOAuthTokens } from './openai-oauth';
 export { LLMProviderFactory, LLMSettings, CachedModelInfo } from './provider-factory';

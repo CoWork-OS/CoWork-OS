@@ -45,6 +45,16 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
   'gemini-1.5-pro': { inputPer1M: 1.25, outputPer1M: 5.00 },
   'gemini-1.5-flash': { inputPer1M: 0.075, outputPer1M: 0.30 },
 
+  // OpenAI models (direct API)
+  'gpt-4o': { inputPer1M: 2.50, outputPer1M: 10.00 },
+  'gpt-4o-mini': { inputPer1M: 0.15, outputPer1M: 0.60 },
+  'gpt-4-turbo': { inputPer1M: 10.00, outputPer1M: 30.00 },
+  'gpt-4': { inputPer1M: 30.00, outputPer1M: 60.00 },
+  'gpt-3.5-turbo': { inputPer1M: 0.50, outputPer1M: 1.50 },
+  'o1': { inputPer1M: 15.00, outputPer1M: 60.00 },
+  'o1-mini': { inputPer1M: 3.00, outputPer1M: 12.00 },
+  'o1-preview': { inputPer1M: 15.00, outputPer1M: 60.00 },
+
   // OpenRouter passes through various model pricing
   // These are common models accessed through OpenRouter
   'anthropic/claude-3.5-sonnet': { inputPer1M: 3.00, outputPer1M: 15.00 },

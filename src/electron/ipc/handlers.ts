@@ -21,7 +21,7 @@ import {
 } from '../database/repositories';
 import { IPC_CHANNELS, LLMSettingsData, AddChannelRequest, UpdateChannelRequest, SecurityMode, UpdateInfo } from '../../shared/types';
 import { AgentDaemon } from '../agent/daemon';
-import { LLMProviderFactory, LLMProviderConfig, ModelKey, MODELS, GEMINI_MODELS, OPENROUTER_MODELS, OLLAMA_MODELS } from '../agent/llm';
+import { LLMProviderFactory, LLMProviderConfig, ModelKey, MODELS, GEMINI_MODELS, OPENROUTER_MODELS, OLLAMA_MODELS, OpenAIOAuth } from '../agent/llm';
 import { SearchProviderFactory, SearchSettings, SearchProviderType } from '../agent/search';
 import { ChannelGateway } from '../gateway';
 import { updateManager } from '../updater';
@@ -469,8 +469,21 @@ export function setupIpcHandlers(
     checkRateLimit(IPC_CHANNELS.LLM_SAVE_SETTINGS);
     const validated = validateInput(LLMSettingsSchema, settings, 'LLM settings');
 
-    // Load existing settings to preserve cached models
+    // Load existing settings to preserve cached models and OAuth tokens
     const existingSettings = LLMProviderFactory.loadSettings();
+
+    // Build OpenAI settings, preserving OAuth tokens from existing settings
+    let openaiSettings = validated.openai;
+    if (existingSettings.openai?.authMethod === 'oauth') {
+      // Preserve OAuth tokens when saving settings
+      openaiSettings = {
+        ...validated.openai,
+        accessToken: existingSettings.openai.accessToken,
+        refreshToken: existingSettings.openai.refreshToken,
+        tokenExpiresAt: existingSettings.openai.tokenExpiresAt,
+        authMethod: existingSettings.openai.authMethod,
+      };
+    }
 
     LLMProviderFactory.saveSettings({
       providerType: validated.providerType,
@@ -480,10 +493,13 @@ export function setupIpcHandlers(
       ollama: validated.ollama,
       gemini: validated.gemini,
       openrouter: validated.openrouter,
+      openai: openaiSettings,
       // Preserve cached models from existing settings
       cachedGeminiModels: existingSettings.cachedGeminiModels,
       cachedOpenRouterModels: existingSettings.cachedOpenRouterModels,
       cachedOllamaModels: existingSettings.cachedOllamaModels,
+      cachedBedrockModels: existingSettings.cachedBedrockModels,
+      cachedOpenAIModels: existingSettings.cachedOpenAIModels,
     });
     // Clear cache so next task uses new settings
     LLMProviderFactory.clearCache();
@@ -492,6 +508,14 @@ export function setupIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.LLM_TEST_PROVIDER, async (_, config: any) => {
     checkRateLimit(IPC_CHANNELS.LLM_TEST_PROVIDER);
+    // For OpenAI OAuth, get tokens from stored settings if authMethod is 'oauth'
+    let openaiAccessToken: string | undefined;
+    let openaiRefreshToken: string | undefined;
+    if (config.providerType === 'openai' && config.openai?.authMethod === 'oauth') {
+      const settings = LLMProviderFactory.loadSettings();
+      openaiAccessToken = settings.openai?.accessToken;
+      openaiRefreshToken = settings.openai?.refreshToken;
+    }
     const providerConfig: LLMProviderConfig = {
       type: config.providerType,
       model: LLMProviderFactory.getModelId(
@@ -499,7 +523,8 @@ export function setupIpcHandlers(
         config.providerType,
         config.ollama?.model,
         config.gemini?.model,
-        config.openrouter?.model
+        config.openrouter?.model,
+        config.openai?.model
       ),
       anthropicApiKey: config.anthropic?.apiKey,
       awsRegion: config.bedrock?.region,
@@ -511,6 +536,9 @@ export function setupIpcHandlers(
       ollamaApiKey: config.ollama?.apiKey,
       geminiApiKey: config.gemini?.apiKey,
       openrouterApiKey: config.openrouter?.apiKey,
+      openaiApiKey: config.openai?.apiKey,
+      openaiAccessToken: openaiAccessToken,
+      openaiRefreshToken: openaiRefreshToken,
     };
     return LLMProviderFactory.testProvider(providerConfig);
   });
@@ -624,6 +652,35 @@ export function setupIpcHandlers(
         break;
       }
 
+      case 'openai': {
+        // For OpenAI, use the specific model from settings
+        currentModel = settings.openai?.model || 'gpt-4o-mini';
+        // Use cached models if available, otherwise fall back to static list
+        const cachedOpenAI = LLMProviderFactory.getCachedModels('openai');
+        if (cachedOpenAI && cachedOpenAI.length > 0) {
+          models = cachedOpenAI;
+        } else {
+          // Fall back to static models
+          models = [
+            { key: 'gpt-4o', displayName: 'GPT-4o', description: 'Most capable model for complex tasks' },
+            { key: 'gpt-4o-mini', displayName: 'GPT-4o Mini', description: 'Fast and affordable for most tasks' },
+            { key: 'gpt-4-turbo', displayName: 'GPT-4 Turbo', description: 'Previous generation flagship' },
+            { key: 'gpt-3.5-turbo', displayName: 'GPT-3.5 Turbo', description: 'Fast and cost-effective' },
+            { key: 'o1', displayName: 'o1', description: 'Advanced reasoning model' },
+            { key: 'o1-mini', displayName: 'o1 Mini', description: 'Fast reasoning model' },
+          ];
+        }
+        // Ensure the currently selected model is in the list
+        if (currentModel && !models.some(m => m.key === currentModel)) {
+          models.unshift({
+            key: currentModel,
+            displayName: currentModel,
+            description: 'Selected model',
+          });
+        }
+        break;
+      }
+
       default:
         // Fallback to Anthropic models
         models = Object.entries(MODELS).map(([key, value]) => ({
@@ -680,6 +737,74 @@ export function setupIpcHandlers(
     }));
     LLMProviderFactory.saveCachedModels('openrouter', cachedModels);
     return models;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.LLM_GET_OPENAI_MODELS, async (_, apiKey?: string) => {
+    checkRateLimit(IPC_CHANNELS.LLM_GET_OPENAI_MODELS);
+    const models = await LLMProviderFactory.getOpenAIModels(apiKey);
+    // Cache the models for use in config status
+    const cachedModels = models.map(m => ({
+      key: m.id,
+      displayName: m.name,
+      description: m.description,
+    }));
+    LLMProviderFactory.saveCachedModels('openai', cachedModels);
+    return models;
+  });
+
+  // OpenAI OAuth handlers
+  ipcMain.handle(IPC_CHANNELS.LLM_OPENAI_OAUTH_START, async () => {
+    checkRateLimit(IPC_CHANNELS.LLM_OPENAI_OAUTH_START);
+    console.log('[IPC] Starting OpenAI OAuth flow with pi-ai SDK...');
+
+    try {
+      const oauth = new OpenAIOAuth();
+      const tokens = await oauth.authenticate();
+
+      // Save tokens to settings
+      const settings = LLMProviderFactory.loadSettings();
+      settings.openai = {
+        ...settings.openai,
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token,
+        tokenExpiresAt: tokens.expires_at,
+        authMethod: 'oauth',
+        // Clear API key when using OAuth
+        apiKey: undefined,
+      };
+      LLMProviderFactory.saveSettings(settings);
+      LLMProviderFactory.clearCache();
+
+      console.log('[IPC] OpenAI OAuth successful!');
+      if (tokens.email) {
+        console.log('[IPC] Logged in as:', tokens.email);
+      }
+
+      return { success: true, email: tokens.email };
+    } catch (error: any) {
+      console.error('[IPC] OpenAI OAuth failed:', error.message);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.LLM_OPENAI_OAUTH_LOGOUT, async () => {
+    checkRateLimit(IPC_CHANNELS.LLM_OPENAI_OAUTH_LOGOUT);
+    console.log('[IPC] Logging out of OpenAI OAuth...');
+
+    // Clear OAuth tokens from settings
+    const settings = LLMProviderFactory.loadSettings();
+    if (settings.openai) {
+      settings.openai = {
+        ...settings.openai,
+        accessToken: undefined,
+        refreshToken: undefined,
+        tokenExpiresAt: undefined,
+        authMethod: undefined,
+      };
+      LLMProviderFactory.saveSettings(settings);
+    }
+
+    return { success: true };
   });
 
   ipcMain.handle(IPC_CHANNELS.LLM_GET_BEDROCK_MODELS, async (_, config?: {

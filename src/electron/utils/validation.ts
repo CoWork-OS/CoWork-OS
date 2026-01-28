@@ -66,7 +66,7 @@ export const ApprovalResponseSchema = z.object({
 
 // ============ LLM Settings Schemas ============
 
-export const LLMProviderTypeSchema = z.enum(['anthropic', 'bedrock', 'ollama', 'gemini', 'openrouter']);
+export const LLMProviderTypeSchema = z.enum(['anthropic', 'bedrock', 'ollama', 'gemini', 'openrouter', 'openai']);
 
 export const AnthropicSettingsSchema = z.object({
   apiKey: z.string().max(500).optional(),
@@ -98,6 +98,16 @@ export const OpenRouterSettingsSchema = z.object({
   model: z.string().max(200).optional(),
 }).optional();
 
+export const OpenAISettingsSchema = z.object({
+  apiKey: z.string().max(500).optional(),
+  model: z.string().max(200).optional(),
+  // OAuth tokens (alternative to API key)
+  accessToken: z.string().max(2000).optional(),
+  refreshToken: z.string().max(2000).optional(),
+  tokenExpiresAt: z.number().optional(),
+  authMethod: z.enum(['api_key', 'oauth']).optional(),
+}).optional();
+
 export const LLMSettingsSchema = z.object({
   providerType: LLMProviderTypeSchema,
   modelKey: z.string().max(200),
@@ -106,6 +116,7 @@ export const LLMSettingsSchema = z.object({
   ollama: OllamaSettingsSchema,
   gemini: GeminiSettingsSchema,
   openrouter: OpenRouterSettingsSchema,
+  openai: OpenAISettingsSchema,
 });
 
 // ============ Search Settings Schemas ============

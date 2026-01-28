@@ -6,6 +6,7 @@ import {
   TaskEventRepository,
   WorkspaceRepository,
   ApprovalRepository,
+  ArtifactRepository,
 } from '../database/repositories';
 import { Task, TaskStatus, IPC_CHANNELS, QueueSettings, QueueStatus } from '../../shared/types';
 import { TaskExecutor } from './executor';
@@ -31,6 +32,7 @@ export class AgentDaemon extends EventEmitter {
   private eventRepo: TaskEventRepository;
   private workspaceRepo: WorkspaceRepository;
   private approvalRepo: ApprovalRepository;
+  private artifactRepo: ArtifactRepository;
   private activeTasks: Map<string, CachedExecutor> = new Map();
   private pendingApprovals: Map<string, { taskId: string; resolve: (value: boolean) => void; reject: (reason?: unknown) => void; resolved: boolean; timeoutHandle: ReturnType<typeof setTimeout> }> = new Map();
   private cleanupIntervalHandle?: ReturnType<typeof setInterval>;
@@ -43,6 +45,7 @@ export class AgentDaemon extends EventEmitter {
     this.eventRepo = new TaskEventRepository(db);
     this.workspaceRepo = new WorkspaceRepository(db);
     this.approvalRepo = new ApprovalRepository(db);
+    this.artifactRepo = new ArtifactRepository(db);
 
     // Initialize queue manager with callbacks
     this.queueManager = new TaskQueueManager({
@@ -352,6 +355,39 @@ export class AgentDaemon extends EventEmitter {
       payload,
     });
     this.emitTaskEvent(taskId, type, payload);
+  }
+
+  /**
+   * Register an artifact (file created during task execution)
+   * This allows files like screenshots to be sent back to the user
+   */
+  registerArtifact(taskId: string, filePath: string, mimeType: string): void {
+    const fs = require('fs');
+    const crypto = require('crypto');
+
+    try {
+      if (!fs.existsSync(filePath)) {
+        console.error(`[AgentDaemon] Artifact file not found: ${filePath}`);
+        return;
+      }
+
+      const stats = fs.statSync(filePath);
+      const fileBuffer = fs.readFileSync(filePath);
+      const sha256 = crypto.createHash('sha256').update(fileBuffer).digest('hex');
+
+      this.artifactRepo.create({
+        taskId,
+        path: filePath,
+        mimeType,
+        sha256,
+        size: stats.size,
+        createdAt: Date.now(),
+      });
+
+      console.log(`[AgentDaemon] Registered artifact: ${filePath}`);
+    } catch (error) {
+      console.error(`[AgentDaemon] Failed to register artifact:`, error);
+    }
   }
 
   /**

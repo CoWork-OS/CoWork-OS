@@ -175,6 +175,15 @@ export interface ChannelAdapter {
   sendDocument?(chatId: string, filePath: string, caption?: string): Promise<string>;
 
   /**
+   * Send a photo/image to a chat
+   * @param chatId Chat ID
+   * @param filePath Path to the image file to send
+   * @param caption Optional caption for the image
+   * @returns The sent message ID
+   */
+  sendPhoto?(chatId: string, filePath: string, caption?: string): Promise<string>;
+
+  /**
    * Register a message handler
    * @param handler Function to call when a message is received
    */

@@ -18,6 +18,7 @@ import {
   StatusHandler,
   ChannelInfo,
   TelegramConfig,
+  MessageAttachment,
 } from './types';
 
 export class TelegramAdapter implements ChannelAdapter {
@@ -124,43 +125,65 @@ export class TelegramAdapter implements ChannelAdapter {
       throw new Error('Telegram bot is not connected');
     }
 
-    // Process text for Telegram compatibility
-    let processedText = message.text;
-    if (message.parseMode === 'markdown') {
-      processedText = this.convertMarkdownForTelegram(message.text);
-    }
-
-    const options: Record<string, unknown> = {};
-
-    // Set parse mode
-    // Use legacy Markdown (not MarkdownV2) to avoid escaping issues with special characters
-    if (message.parseMode === 'markdown') {
-      options.parse_mode = 'Markdown';
-    } else if (message.parseMode === 'html') {
-      options.parse_mode = 'HTML';
-    }
-
-    // Reply to message if specified
-    if (message.replyTo) {
-      options.reply_to_message_id = parseInt(message.replyTo, 10);
-    }
-
-    try {
-      const sent = await this.bot.api.sendMessage(message.chatId, processedText, options);
-      return sent.message_id.toString();
-    } catch (error: any) {
-      // If markdown parsing fails, retry without parse_mode
-      if (error?.error_code === 400 && error?.description?.includes("can't parse entities")) {
-        console.log('Markdown parsing failed, retrying without parse_mode');
-        const plainOptions: Record<string, unknown> = {};
-        if (message.replyTo) {
-          plainOptions.reply_to_message_id = parseInt(message.replyTo, 10);
+    // Handle image attachments first (send images before text)
+    let lastMessageId: string | undefined;
+    if (message.attachments && message.attachments.length > 0) {
+      for (const attachment of message.attachments) {
+        if (attachment.type === 'image' && attachment.url) {
+          try {
+            // attachment.url is the file path for local images
+            const msgId = await this.sendPhoto(message.chatId, attachment.url);
+            lastMessageId = msgId;
+          } catch (err) {
+            console.error('Failed to send image attachment:', err);
+          }
         }
-        const sent = await this.bot.api.sendMessage(message.chatId, message.text, plainOptions);
-        return sent.message_id.toString();
       }
-      throw error;
     }
+
+    // If we have text to send, send it
+    if (message.text && message.text.trim()) {
+      // Process text for Telegram compatibility
+      let processedText = message.text;
+      if (message.parseMode === 'markdown') {
+        processedText = this.convertMarkdownForTelegram(message.text);
+      }
+
+      const options: Record<string, unknown> = {};
+
+      // Set parse mode
+      // Use legacy Markdown (not MarkdownV2) to avoid escaping issues with special characters
+      if (message.parseMode === 'markdown') {
+        options.parse_mode = 'Markdown';
+      } else if (message.parseMode === 'html') {
+        options.parse_mode = 'HTML';
+      }
+
+      // Reply to message if specified
+      if (message.replyTo) {
+        options.reply_to_message_id = parseInt(message.replyTo, 10);
+      }
+
+      try {
+        const sent = await this.bot.api.sendMessage(message.chatId, processedText, options);
+        return sent.message_id.toString();
+      } catch (error: any) {
+        // If markdown parsing fails, retry without parse_mode
+        if (error?.error_code === 400 && error?.description?.includes("can't parse entities")) {
+          console.log('Markdown parsing failed, retrying without parse_mode');
+          const plainOptions: Record<string, unknown> = {};
+          if (message.replyTo) {
+            plainOptions.reply_to_message_id = parseInt(message.replyTo, 10);
+          }
+          const sent = await this.bot.api.sendMessage(message.chatId, message.text, plainOptions);
+          return sent.message_id.toString();
+        }
+        throw error;
+      }
+    }
+
+    // If no text but had attachments, return the last attachment message ID
+    return lastMessageId || '';
   }
 
   /**
@@ -259,6 +282,31 @@ export class TelegramAdapter implements ChannelAdapter {
     const fileBuffer = fs.readFileSync(filePath);
 
     const sent = await this.bot.api.sendDocument(
+      chatId,
+      new InputFile(fileBuffer, fileName),
+      { caption }
+    );
+
+    return sent.message_id.toString();
+  }
+
+  /**
+   * Send a photo/image to a chat
+   */
+  async sendPhoto(chatId: string, filePath: string, caption?: string): Promise<string> {
+    if (!this.bot || this._status !== 'connected') {
+      throw new Error('Telegram bot is not connected');
+    }
+
+    // Check if file exists
+    if (!fs.existsSync(filePath)) {
+      throw new Error(`File not found: ${filePath}`);
+    }
+
+    const fileName = path.basename(filePath);
+    const fileBuffer = fs.readFileSync(filePath);
+
+    const sent = await this.bot.api.sendPhoto(
       chatId,
       new InputFile(fileBuffer, fileName),
       { caption }

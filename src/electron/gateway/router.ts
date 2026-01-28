@@ -1606,7 +1606,7 @@ export class MessageRouter {
   }
 
   /**
-   * Send task artifacts as documents to the channel
+   * Send task artifacts as documents/images to the channel
    */
   private async sendTaskArtifacts(
     taskId: string,
@@ -1617,31 +1617,40 @@ export class MessageRouter {
       const artifacts = this.artifactRepo.findByTaskId(taskId);
       if (artifacts.length === 0) return;
 
-      // Filter for sendable file types (documents, spreadsheets, etc.)
-      const sendableExtensions = [
+      // Image extensions
+      const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp'];
+
+      // Document extensions
+      const documentExtensions = [
         '.docx', '.xlsx', '.pptx', '.pdf', '.doc', '.xls', '.ppt',
         '.txt', '.csv', '.json', '.md', '.html', '.xml'
       ];
 
+      // Filter for sendable file types
       const sendableArtifacts = artifacts.filter(artifact => {
         const ext = path.extname(artifact.path).toLowerCase();
-        return sendableExtensions.includes(ext) && fs.existsSync(artifact.path);
+        return (imageExtensions.includes(ext) || documentExtensions.includes(ext)) && fs.existsSync(artifact.path);
       });
 
       if (sendableArtifacts.length === 0) return;
 
-      // Check if adapter supports sendDocument
-      if (!adapter.sendDocument) {
-        console.log('Adapter does not support sendDocument, skipping artifact delivery');
-        return;
-      }
-
       // Send each artifact
       for (const artifact of sendableArtifacts) {
         try {
+          const ext = path.extname(artifact.path).toLowerCase();
           const fileName = path.basename(artifact.path);
-          await adapter.sendDocument(chatId, artifact.path, `📎 ${fileName}`);
-          console.log(`Sent artifact: ${fileName}`);
+
+          if (imageExtensions.includes(ext) && adapter.sendPhoto) {
+            // Send as photo for better display
+            await adapter.sendPhoto(chatId, artifact.path, `📷 ${fileName}`);
+            console.log(`Sent image: ${fileName}`);
+          } else if (adapter.sendDocument) {
+            // Send as document
+            await adapter.sendDocument(chatId, artifact.path, `📎 ${fileName}`);
+            console.log(`Sent document: ${fileName}`);
+          } else {
+            console.log(`Adapter does not support sending ${ext} files, skipping: ${fileName}`);
+          }
         } catch (err) {
           console.error(`Failed to send artifact ${artifact.path}:`, err);
         }

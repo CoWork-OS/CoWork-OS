@@ -2045,6 +2045,17 @@ AUTONOMOUS OPERATION (CRITICAL):
 - If you need information from a page, USE your tools to extract it - don't ask the user to find it for you.
 - Your job is to DO the work, not to tell the user what they need to do.
 
+IMAGE SHARING (when user asks for images/photos/screenshots):
+- Use browser_screenshot to capture images from web pages
+- Navigate to pages with images (social media, news sites, image galleries) and screenshot them
+- For specific image requests (e.g., "show me images of X from today"):
+  1. Navigate to relevant sites (Twitter/X, news sites, official accounts)
+  2. Use browser_screenshot to capture the page showing the images
+  3. The screenshots will be automatically sent to the user as images
+- browser_screenshot creates PNG files in the workspace that will be delivered to the user
+- If asked for multiple images, take multiple screenshots from different sources/pages
+- Always describe what the screenshot shows in your text response
+
 CRITICAL - FINAL ANSWER REQUIREMENT:
 - You MUST ALWAYS output a text response at the end. NEVER finish silently with just tool calls.
 - After using tools, IMMEDIATELY provide your findings as TEXT. Don't keep calling tools indefinitely.
@@ -2498,6 +2509,17 @@ AUTONOMOUS OPERATION (CRITICAL):
 - If you navigated to a website, USE browser_get_content to read it - don't ask the user what's on the page.
 - If you need information from a page, USE your tools to extract it - don't ask the user to find it for you.
 - Your job is to DO the work, not to tell the user what they need to do.
+
+IMAGE SHARING (when user asks for images/photos/screenshots):
+- Use browser_screenshot to capture images from web pages
+- Navigate to pages with images (social media, news sites, image galleries) and screenshot them
+- For specific image requests (e.g., "show me images of X from today"):
+  1. Navigate to relevant sites (Twitter/X, news sites, official accounts)
+  2. Use browser_screenshot to capture the page showing the images
+  3. The screenshots will be automatically sent to the user as images
+- browser_screenshot creates PNG files in the workspace that will be delivered to the user
+- If asked for multiple images, take multiple screenshots from different sources/pages
+- Always describe what the screenshot shows in your text response
 
 FOLLOW-UP MESSAGE HANDLING (CRITICAL):
 - This is a FOLLOW-UP message. The user is continuing an existing conversation.

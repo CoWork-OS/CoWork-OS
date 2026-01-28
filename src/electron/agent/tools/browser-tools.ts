@@ -290,10 +290,18 @@ export class BrowserTools {
           input.filename,
           input.full_page || false
         );
+        // Construct full path for the screenshot
+        const path = require('path');
+        const fullPath = path.join(this.workspace.path, result.path);
+
         this.daemon.logEvent(this.taskId, 'file_created', {
           path: result.path,
           type: 'screenshot'
         });
+
+        // Register as artifact so it can be sent back to the user
+        this.daemon.registerArtifact(this.taskId, fullPath, 'image/png');
+
         return result;
       }
 

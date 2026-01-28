@@ -175,6 +175,16 @@ Open **Settings** > **Web Search** tab:
 4. Invite bot to server
 5. Enable and test
 
+#### Slack Bot
+1. Create app at [Slack API Apps](https://api.slack.com/apps)
+2. Enable Socket Mode and create App-Level Token (xapp-...)
+3. Add OAuth scopes: `app_mentions:read`, `chat:write`, `im:history`, `im:read`, `im:write`, `users:read`, `files:write`
+4. Subscribe to events: `app_mention`, `message.im`
+5. Install to workspace and copy Bot Token (xoxb-...)
+6. Open **Settings** > **Channels** > **Slack**
+7. Enter Bot Token and App-Level Token
+8. Enable and test
+
 ## Development Workflow
 
 ### Making Changes
@@ -197,7 +207,7 @@ src/
 │   │   ├── browser/  # Playwright
 │   │   ├── tools/    # Tool implementations
 │   │   └── skills/   # Document skills
-│   ├── gateway/      # Telegram & Discord
+│   ├── gateway/      # Telegram, Discord & Slack
 │   └── database/     # SQLite storage
 ├── renderer/         # Frontend (React)
 │   ├── App.tsx       # Main component
@@ -293,7 +303,7 @@ Don't use system folders like `/System` or `/Applications`.
 
 1. **Web Search**: Configure a search provider and ask research questions
 2. **Browser Automation**: Have the agent navigate websites and extract data
-3. **Remote Access**: Set up Telegram or Discord bot for mobile access
+3. **Remote Access**: Set up Telegram, Discord, or Slack bot for mobile/remote access
 4. **Document Creation**: Create professional Excel, Word, PDF, or PowerPoint files
 
 ### Learn More

@@ -50,6 +50,7 @@ CoWork-OSS has reached **production status** with comprehensive features for age
 #### Channel Integrations
 - [x] Telegram bot with commands
 - [x] Discord bot with slash commands
+- [x] Slack bot with Socket Mode
 - [x] Session management
 - [x] Security modes (pairing, allowlist, open)
 - [x] Located: `src/electron/gateway/`
@@ -106,6 +107,7 @@ CoWork-OSS has reached **production status** with comprehensive features for age
 - [x] Search provider configuration
 - [x] Telegram bot settings
 - [x] Discord bot settings
+- [x] Slack bot settings
 - [x] Update settings
 
 ### 4. Infrastructure
@@ -149,7 +151,7 @@ cowork-oss/
 │   │   │   ├── browser/       # Playwright service
 │   │   │   ├── tools/         # All tool implementations
 │   │   │   └── skills/        # Document skills
-│   │   ├── gateway/           # Telegram & Discord
+│   │   ├── gateway/           # Telegram, Discord & Slack
 │   │   ├── updater/           # Auto-update
 │   │   ├── ipc/
 │   │   └── utils/
@@ -250,7 +252,7 @@ Operations Requiring Approval:
 4. Create real Office documents (.xlsx, .docx, .pdf, .pptx)
 5. Search the web with multiple providers
 6. Automate browser interactions
-7. Run tasks remotely via Telegram or Discord
+7. Run tasks remotely via Telegram, Discord, or Slack
 8. Track all agent activity in real-time
 9. Approve/deny destructive operations
 10. Receive automatic updates
@@ -272,6 +274,7 @@ Operations Requiring Approval:
 - `playwright` - Browser automation
 - `discord.js` - Discord bot
 - `grammy` - Telegram bot
+- `@slack/bolt` - Slack bot
 - `exceljs` - Excel creation
 - `docx` - Word document creation
 - `pdfkit` - PDF creation
@@ -331,7 +334,7 @@ Expected behavior:
 - Multi-provider LLM support
 - Real Office document creation
 - Web search and browser automation
-- Remote access via Telegram/Discord
+- Remote access via Telegram, Discord, and Slack
 - Comprehensive security model
 
 **~85% feature parity** with the original Cowork concept, with main gaps being:

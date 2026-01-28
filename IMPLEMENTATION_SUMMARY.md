@@ -8,7 +8,7 @@ A **fully functional macOS desktop application** for agentic task automation wit
 - **Real Office document creation**: Excel (.xlsx), Word (.docx), PDF, PowerPoint (.pptx)
 - **Web search integration**: Tavily, Brave, SerpAPI, Google Custom Search
 - **Browser automation**: Full Playwright integration for web interactions
-- **Channel integrations**: Telegram and Discord bots for remote task execution
+- **Channel integrations**: Telegram, Discord, and Slack bots for remote task execution
 - **In-app Settings**: Secure credential storage with no .env files required
 - **Auto-updates**: Built-in update manager for seamless upgrades
 
@@ -72,6 +72,7 @@ A **fully functional macOS desktop application** for agentic task automation wit
 |  |  |    Channel Gateway                                     | | |
 |  |  |  - Telegram Bot                                        | | |
 |  |  |  - Discord Bot                                         | | |
+|  |  |  - Slack Bot (Socket Mode)                             | | |
 |  |  +-------------------------------------------------------+ | |
 |  |                                                             | |
 |  |  +-------------------------------------------------------+ | |
@@ -151,6 +152,13 @@ Remote task execution via messaging platforms:
 - Slash commands with auto-registration
 - DM and server channel support
 - Multi-user session management
+
+#### Slack (`channels/slack.ts`)
+- Socket Mode for real-time WebSocket connections
+- Direct messages and channel mentions
+- Markdown to Slack mrkdwn conversion
+- File upload support
+- Security modes: Pairing, Allowlist, Open
 
 **Gateway Features**:
 - Session management (`session.ts`)
@@ -243,6 +251,7 @@ SQLite with 6 tables:
 | SearchSettings | `SearchSettings.tsx` | Search provider config |
 | TelegramSettings | `TelegramSettings.tsx` | Telegram bot config |
 | DiscordSettings | `DiscordSettings.tsx` | Discord bot config |
+| SlackSettings | `SlackSettings.tsx` | Slack bot config |
 | UpdateSettings | `UpdateSettings.tsx` | Auto-update config |
 | WorkspaceSelector | `WorkspaceSelector.tsx` | Folder picker |
 | ApprovalDialog | `ApprovalDialog.tsx` | Permission requests |
@@ -304,7 +313,8 @@ cowork-oss/
     │   │       ├── index.ts
     │   │       ├── types.ts
     │   │       ├── telegram.ts
-    │   │       └── discord.ts
+    │   │       ├── discord.ts
+    │   │       └── slack.ts
     │   │
     │   ├── utils/
     │   │   ├── rate-limiter.ts
@@ -370,6 +380,7 @@ cowork-oss/
         │   ├── SearchSettings.tsx
         │   ├── TelegramSettings.tsx
         │   ├── DiscordSettings.tsx
+        │   ├── SlackSettings.tsx
         │   ├── UpdateSettings.tsx
         │   ├── WorkspaceSelector.tsx
         │   └── ApprovalDialog.tsx
@@ -418,6 +429,7 @@ npm run type-check       # Check TypeScript types
 | Browser automation | Production | 12 Playwright tools |
 | Telegram bot | Production | Full integration |
 | Discord bot | Production | Slash commands + DMs |
+| Slack bot | Production | Socket Mode + DMs + mentions |
 | In-app Settings | Production | Secure storage |
 | Auto-updates | Production | GitHub releases |
 | Approval system | Production | User confirmation for destructive ops |
@@ -458,6 +470,7 @@ npm run type-check       # Check TypeScript types
 - Playwright (browser)
 - discord.js (Discord)
 - grammy (Telegram)
+- @slack/bolt (Slack)
 
 ## Security Model
 
@@ -492,7 +505,7 @@ npm run type-check       # Check TypeScript types
 | Web search | Yes | Yes | Complete |
 | Browser automation | Yes | Yes | Complete |
 | Multi-provider LLM | Yes | Yes | Complete |
-| Remote channels | Yes | Yes (Telegram, Discord) | Complete |
+| Remote channels | Yes | Yes (Telegram, Discord, Slack) | Complete |
 | VM sandbox | Yes | No | Planned |
 | MCP connectors | Yes | No | Planned |
 | Sub-agents | Yes | No | Planned |
@@ -507,7 +520,7 @@ CoWork-OSS is a production-ready agentic task automation app with:
 - **4 search providers** with fallback
 - **12 browser automation tools**
 - **4 document skills** with real Office output
-- **2 channel integrations** (Telegram, Discord)
+- **3 channel integrations** (Telegram, Discord, Slack)
 - **Full in-app configuration** (no .env required)
 - **Auto-update support**
 - **Comprehensive security** (path isolation, approvals, audit logging)

@@ -711,6 +711,7 @@ export function setupIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.LLM_GET_OLLAMA_MODELS, async (_, baseUrl?: string) => {
     checkRateLimit(IPC_CHANNELS.LLM_GET_OLLAMA_MODELS);
+    console.log('[IPC] Handling LLM_GET_OLLAMA_MODELS request');
     const models = await LLMProviderFactory.getOllamaModels(baseUrl);
     // Cache the models for use in config status
     const cachedModels = models.map(m => ({

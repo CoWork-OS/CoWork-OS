@@ -4310,7 +4310,7 @@ button {
   border-top: none;
   border-bottom-left-radius: var(--radius-md);
   border-bottom-right-radius: var(--radius-md);
-  z-index: 100;
+  z-index: 1000;
   box-shadow: var(--shadow-lg);
   backdrop-filter: blur(var(--glass-blur));
   -webkit-backdrop-filter: blur(var(--glass-blur));

@@ -260,7 +260,7 @@ export class LLMProviderFactory {
 
     // Auto-detect provider if no settings file exists
     if (!settingsFileExists) {
-      const detectedProvider = this.detectProviderFromSettings();
+      const detectedProvider = this.detectProviderFromSettings(settings);
       if (detectedProvider) {
         settings.providerType = detectedProvider;
         console.log(`Auto-detected LLM provider: ${detectedProvider}`);
@@ -277,9 +277,7 @@ export class LLMProviderFactory {
    * Note: Environment variables are no longer used for security reasons.
    * All configuration should be done through the Settings UI.
    */
-  private static detectProviderFromSettings(): LLMProviderType | null {
-    const settings = this.loadSettings();
-
+  private static detectProviderFromSettings(settings: LLMSettings): LLMProviderType | null {
     // Check if any provider has credentials configured in settings
     if (settings.anthropic?.apiKey) {
       return 'anthropic';
@@ -637,13 +635,16 @@ export class LLMProviderFactory {
     const url = baseUrl || settings.ollama?.baseUrl || 'http://localhost:11434';
 
     try {
+      console.log(`[ProviderFactory] Fetching Ollama models from ${url}...`);
       const provider = new OllamaProvider({
         type: 'ollama',
         model: '',
         ollamaBaseUrl: url,
         ollamaApiKey: settings.ollama?.apiKey,
       });
-      return await provider.getAvailableModels();
+      const models = await provider.getAvailableModels();
+      console.log(`[ProviderFactory] Fetched ${models.length} models from Ollama`);
+      return models;
     } catch (error: any) {
       console.error('Failed to fetch Ollama models:', error);
       return [];

@@ -320,6 +320,16 @@ export function setupIpcHandlers(
     return workspaceRepo.findById(id);
   });
 
+  ipcMain.handle(IPC_CHANNELS.WORKSPACE_UPDATE_PERMISSIONS, async (_, id: string, permissions: { shell?: boolean; network?: boolean; read?: boolean; write?: boolean; delete?: boolean }) => {
+    const workspace = workspaceRepo.findById(id);
+    if (!workspace) {
+      throw new Error(`Workspace not found: ${id}`);
+    }
+    const updatedPermissions = { ...workspace.permissions, ...permissions };
+    workspaceRepo.updatePermissions(id, updatedPermissions);
+    return workspaceRepo.findById(id);
+  });
+
   // Task handlers
   ipcMain.handle(IPC_CHANNELS.TASK_CREATE, async (_, data) => {
     checkRateLimit(IPC_CHANNELS.TASK_CREATE);

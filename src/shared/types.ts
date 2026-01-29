@@ -424,6 +424,7 @@ export const IPC_CHANNELS = {
   WORKSPACE_SELECT: 'workspace:select',
   WORKSPACE_LIST: 'workspace:list',
   WORKSPACE_CREATE: 'workspace:create',
+  WORKSPACE_UPDATE_PERMISSIONS: 'workspace:updatePermissions',
 
   // Approval operations
   APPROVAL_RESPOND: 'approval:respond',

@@ -37,6 +37,79 @@ import { ApprovalDialog } from './ApprovalDialog';
 import { SkillParameterModal } from './SkillParameterModal';
 import { FileViewer } from './FileViewer';
 
+// Code block component with copy button
+interface CodeBlockProps {
+  children?: React.ReactNode;
+  className?: string;
+  node?: unknown;
+}
+
+function CodeBlock({ children, className, ...props }: CodeBlockProps) {
+  const [copied, setCopied] = useState(false);
+
+  // Check if this is a code block (has language class) vs inline code
+  const isCodeBlock = className?.startsWith('language-');
+  const language = className?.replace('language-', '') || '';
+
+  // Get the text content for copying
+  const getTextContent = (node: React.ReactNode): string => {
+    if (typeof node === 'string') return node;
+    if (Array.isArray(node)) return node.map(getTextContent).join('');
+    if (node && typeof node === 'object' && 'props' in node) {
+      return getTextContent((node as { props: { children?: React.ReactNode } }).props.children);
+    }
+    return '';
+  };
+
+  const handleCopy = async () => {
+    const text = getTextContent(children);
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  };
+
+  // For inline code, just render normally
+  if (!isCodeBlock) {
+    return <code className={className} {...props}>{children}</code>;
+  }
+
+  // For code blocks, wrap with copy button
+  return (
+    <div className="code-block-wrapper">
+      <div className="code-block-header">
+        {language && <span className="code-block-language">{language}</span>}
+        <button
+          className={`code-block-copy ${copied ? 'copied' : ''}`}
+          onClick={handleCopy}
+          title={copied ? 'Copied!' : 'Copy code'}
+        >
+          {copied ? (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M20 6L9 17l-5-5" />
+            </svg>
+          ) : (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+              <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+            </svg>
+          )}
+          <span>{copied ? 'Copied!' : 'Copy'}</span>
+        </button>
+      </div>
+      <code className={className} {...props}>{children}</code>
+    </div>
+  );
+}
+
+// Custom components for ReactMarkdown
+const markdownComponents = {
+  code: CodeBlock,
+};
+
 // Searchable Model Dropdown Component
 interface ModelDropdownProps {
   models: LLMModelInfo[];
@@ -274,6 +347,8 @@ interface MainContentProps {
 export function MainContent({ task, workspace, events, onSendMessage, onCreateTask, onChangeWorkspace, onOpenSettings, onStopTask, selectedModel, availableModels, onModelChange }: MainContentProps) {
   const [pendingApproval, setPendingApproval] = useState<ApprovalRequest | null>(null);
   const [inputValue, setInputValue] = useState('');
+  // Shell permission state - tracks current workspace's shell permission
+  const [shellEnabled, setShellEnabled] = useState(workspace?.permissions?.shell ?? false);
   // Goal Mode state
   const [goalModeEnabled, setGoalModeEnabled] = useState(false);
   const [verificationCommand, setVerificationCommand] = useState('');
@@ -325,6 +400,24 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
       .then(skills => setCustomSkills(skills.filter(s => s.enabled !== false)))
       .catch(err => console.error('Failed to load custom skills:', err));
   }, []);
+
+  // Sync shell permission state when workspace changes
+  useEffect(() => {
+    setShellEnabled(workspace?.permissions?.shell ?? false);
+  }, [workspace?.id, workspace?.permissions?.shell]);
+
+  // Toggle shell permission for current workspace
+  const handleShellToggle = async () => {
+    if (!workspace) return;
+    const newValue = !shellEnabled;
+    setShellEnabled(newValue);
+    try {
+      await window.electronAPI.updateWorkspacePermissions(workspace.id, { shell: newValue });
+    } catch (err) {
+      console.error('Failed to update shell permission:', err);
+      setShellEnabled(!newValue); // Revert on error
+    }
+  };
 
   // Close skills menu on click outside
   useEffect(() => {
@@ -701,6 +794,16 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
                       <path d="M6 9l6 6 6-6" />
                     </svg>
                   </button>
+                  <button
+                    className={`shell-toggle ${shellEnabled ? 'enabled' : ''}`}
+                    onClick={handleShellToggle}
+                    title={shellEnabled ? 'Shell commands enabled - click to disable' : 'Shell commands disabled - click to enable'}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M4 17l6-6-6-6M12 19h8" />
+                    </svg>
+                    <span>Shell {shellEnabled ? 'ON' : 'OFF'}</span>
+                  </button>
                 </div>
                 <div className="input-right-actions">
                   <ModelDropdown
@@ -896,7 +999,7 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
                   {task.status === 'executing' && <span className="chat-status executing">⏳ Working...</span>}
                 </div>
                 <div className="chat-bubble-content markdown-content">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
                     {lastAssistantMessage.payload.message}
                   </ReactMarkdown>
                 </div>
@@ -1110,7 +1213,7 @@ function renderEventDetails(event: TaskEvent) {
     case 'assistant_message':
       return (
         <div className="event-details assistant-message event-details-scrollable markdown-content">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
             {event.payload.message}
           </ReactMarkdown>
         </div>

@@ -643,7 +643,7 @@ body {
   color: white;
   font-size: 13px;
   position: relative;
-  z-index: 999;
+  z-index: 1001;
   -webkit-app-region: drag;
 }
 
@@ -676,9 +676,6 @@ body {
   cursor: pointer;
   transition: background 0.15s ease;
   -webkit-app-region: no-drag;
-  pointer-events: auto;
-  position: relative;
-  z-index: 1000;
 }
 
 .update-banner-link:hover {
@@ -1557,6 +1554,70 @@ a,
   background: none;
   padding: 0;
   color: var(--color-text-secondary);
+}
+
+/* Code block with copy button */
+.code-block-wrapper {
+  position: relative;
+  margin: 8px 0;
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.code-block-wrapper code {
+  display: block;
+  padding: 12px;
+  overflow-x: auto;
+  background: none;
+  color: var(--color-text-secondary);
+}
+
+.code-block-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 12px;
+  background: var(--color-bg-tertiary);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.code-block-language {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.code-block-copy {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.code-block-copy:hover {
+  color: var(--color-text);
+  background: var(--color-bg-hover);
+  border-color: var(--color-border);
+}
+
+.code-block-copy.copied {
+  color: var(--color-success);
+  border-color: var(--color-success);
+}
+
+.code-block-copy svg {
+  flex-shrink: 0;
 }
 
 .markdown-content blockquote {
@@ -3453,6 +3514,46 @@ button {
 .folder-selector:hover {
   background: var(--color-bg-hover);
   color: var(--color-text);
+}
+
+/* Shell toggle button */
+.shell-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.shell-toggle:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-secondary);
+  border-color: var(--color-border);
+}
+
+.shell-toggle.enabled {
+  background: rgba(34, 197, 94, 0.1);
+  border-color: rgba(34, 197, 94, 0.3);
+  color: var(--color-success);
+}
+
+.shell-toggle.enabled:hover {
+  background: rgba(34, 197, 94, 0.15);
+  border-color: rgba(34, 197, 94, 0.4);
+}
+
+.shell-toggle svg {
+  opacity: 0.7;
+}
+
+.shell-toggle.enabled svg {
+  opacity: 1;
 }
 
 .lets-go-btn {

@@ -16,6 +16,7 @@ const IPC_CHANNELS = {
   WORKSPACE_SELECT: 'workspace:select',
   WORKSPACE_LIST: 'workspace:list',
   WORKSPACE_CREATE: 'workspace:create',
+  WORKSPACE_UPDATE_PERMISSIONS: 'workspace:updatePermissions',
   APPROVAL_RESPOND: 'approval:respond',
   ARTIFACT_LIST: 'artifact:list',
   ARTIFACT_PREVIEW: 'artifact:preview',
@@ -276,6 +277,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   createWorkspace: (data: any) => ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_CREATE, data),
   listWorkspaces: () => ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_LIST),
   selectWorkspace: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_SELECT, id),
+  updateWorkspacePermissions: (id: string, permissions: { shell?: boolean; network?: boolean }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_UPDATE_PERMISSIONS, id, permissions),
 
   // Approval APIs
   respondToApproval: (data: any) => ipcRenderer.invoke(IPC_CHANNELS.APPROVAL_RESPOND, data),
@@ -461,6 +464,7 @@ export interface ElectronAPI {
   createWorkspace: (data: any) => Promise<any>;
   listWorkspaces: () => Promise<any[]>;
   selectWorkspace: (id: string) => Promise<any>;
+  updateWorkspacePermissions: (id: string, permissions: { shell?: boolean; network?: boolean }) => Promise<any>;
   respondToApproval: (data: any) => Promise<void>;
   listArtifacts: (taskId: string) => Promise<any[]>;
   previewArtifact: (id: string) => Promise<any>;

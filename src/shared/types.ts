@@ -7,6 +7,7 @@ export type AccentColor = 'cyan' | 'blue' | 'purple' | 'pink' | 'rose' | 'orange
 export interface AppearanceSettings {
   themeMode: ThemeMode;
   accentColor: AccentColor;
+  disclaimerAccepted?: boolean;
 }
 
 export const ACCENT_COLORS: { id: AccentColor; label: string }[] = [

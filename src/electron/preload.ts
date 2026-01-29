@@ -582,10 +582,12 @@ export interface ElectronAPI {
   getAppearanceSettings: () => Promise<{
     themeMode: 'light' | 'dark' | 'system';
     accentColor: 'cyan' | 'blue' | 'purple' | 'pink' | 'rose' | 'orange' | 'green' | 'teal';
+    disclaimerAccepted?: boolean;
   }>;
   saveAppearanceSettings: (settings: {
-    themeMode: 'light' | 'dark' | 'system';
-    accentColor: 'cyan' | 'blue' | 'purple' | 'pink' | 'rose' | 'orange' | 'green' | 'teal';
+    themeMode?: 'light' | 'dark' | 'system';
+    accentColor?: 'cyan' | 'blue' | 'purple' | 'pink' | 'rose' | 'orange' | 'green' | 'teal';
+    disclaimerAccepted?: boolean;
   }) => Promise<{ success: boolean }>;
   // Queue APIs
   getQueueStatus: () => Promise<{

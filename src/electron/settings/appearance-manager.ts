@@ -15,6 +15,7 @@ const SETTINGS_FILE = 'appearance-settings.json';
 const DEFAULT_SETTINGS: AppearanceSettings = {
   themeMode: 'dark',
   accentColor: 'cyan',
+  disclaimerAccepted: false,
 };
 
 export class AppearanceManager {
@@ -68,10 +69,14 @@ export class AppearanceManager {
    */
   static saveSettings(settings: AppearanceSettings): void {
     try {
-      // Validate before saving
+      // Load existing settings to preserve fields not being updated
+      const existingSettings = this.loadSettings();
+
+      // Validate and merge with existing settings
       const validatedSettings: AppearanceSettings = {
-        themeMode: isValidThemeMode(settings.themeMode) ? settings.themeMode : DEFAULT_SETTINGS.themeMode,
-        accentColor: isValidAccentColor(settings.accentColor) ? settings.accentColor : DEFAULT_SETTINGS.accentColor,
+        themeMode: isValidThemeMode(settings.themeMode) ? settings.themeMode : existingSettings.themeMode,
+        accentColor: isValidAccentColor(settings.accentColor) ? settings.accentColor : existingSettings.accentColor,
+        disclaimerAccepted: settings.disclaimerAccepted ?? existingSettings.disclaimerAccepted,
       };
 
       fs.writeFileSync(this.settingsPath, JSON.stringify(validatedSettings, null, 2));

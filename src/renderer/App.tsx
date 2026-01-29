@@ -10,8 +10,6 @@ import { ToastContainer } from './components/Toast';
 import { QuickTaskFAB } from './components/QuickTaskFAB';
 import { Task, Workspace, TaskEvent, LLMModelInfo, LLMProviderInfo, SuccessCriteria, UpdateInfo, ThemeMode, AccentColor, QueueStatus, ToastNotification } from '../shared/types';
 
-// Storage key for disclaimer (UI-only, doesn't need persistence via main process)
-const DISCLAIMER_ACCEPTED_KEY = 'cowork-disclaimer-accepted';
 
 // Helper to get effective theme based on system preference
 function getEffectiveTheme(themeMode: ThemeMode): 'light' | 'dark' {
@@ -51,15 +49,12 @@ export function App() {
   // Ref to track current tasks for use in event handlers (avoids stale closure)
   const tasksRef = useRef<Task[]>([]);
 
-  // Disclaimer state
-  const [disclaimerAccepted, setDisclaimerAccepted] = useState(() => {
-    return localStorage.getItem(DISCLAIMER_ACCEPTED_KEY) === 'true';
-  });
+  // Disclaimer state (null = loading)
+  const [disclaimerAccepted, setDisclaimerAccepted] = useState<boolean | null>(null);
 
   const handleDisclaimerAccept = (dontShowAgain: boolean) => {
-    if (dontShowAgain) {
-      localStorage.setItem(DISCLAIMER_ACCEPTED_KEY, 'true');
-    }
+    // Save to main process for persistence
+    window.electronAPI.saveAppearanceSettings({ disclaimerAccepted: dontShowAgain });
     setDisclaimerAccepted(true);
   };
 
@@ -87,8 +82,10 @@ export function App() {
         const settings = await window.electronAPI.getAppearanceSettings();
         setThemeMode(settings.themeMode);
         setAccentColor(settings.accentColor);
+        setDisclaimerAccepted(settings.disclaimerAccepted ?? false);
       } catch (error) {
         console.error('Failed to load appearance settings:', error);
+        setDisclaimerAccepted(false);
       }
     };
     loadAppearanceSettings();
@@ -382,6 +379,15 @@ export function App() {
     // Persist to main process
     window.electronAPI.saveAppearanceSettings({ themeMode, accentColor: accent });
   };
+
+  // Show loading state while checking disclaimer status
+  if (disclaimerAccepted === null) {
+    return (
+      <div className="app">
+        <div className="title-bar" />
+      </div>
+    );
+  }
 
   // Show disclaimer modal on first launch
   if (!disclaimerAccepted) {

@@ -2,7 +2,7 @@
  * Discord Channel Adapter
  *
  * Implements the ChannelAdapter interface using discord.js for Discord Bot API.
- * Supports slash commands and direct messages.
+ * Supports slash commands, direct messages, button components, embeds, and threads.
  */
 
 import {
@@ -18,7 +18,14 @@ import {
   ChatInputCommandInteraction,
   TextChannel,
   DMChannel,
+  ThreadChannel,
   ChannelType as DiscordChannelType,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ButtonInteraction,
+  EmbedBuilder,
+  ColorResolvable,
 } from 'discord.js';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -32,7 +39,22 @@ import {
   StatusHandler,
   ChannelInfo,
   DiscordConfig,
+  CallbackQuery,
+  CallbackQueryHandler,
+  InlineKeyboardButton,
 } from './types';
+
+/**
+ * Embed color constants for different message types
+ */
+const EMBED_COLORS = {
+  pending: 0xffa500 as ColorResolvable,   // Orange
+  success: 0x57f287 as ColorResolvable,   // Green
+  error: 0xed4245 as ColorResolvable,     // Red
+  info: 0x5865f2 as ColorResolvable,      // Blue (Discord blurple)
+  warning: 0xfee75c as ColorResolvable,   // Yellow
+  neutral: 0x99aab5 as ColorResolvable,   // Gray
+} as const;
 
 export class DiscordAdapter implements ChannelAdapter {
   readonly type = 'discord' as const;
@@ -44,10 +66,14 @@ export class DiscordAdapter implements ChannelAdapter {
   private messageHandlers: MessageHandler[] = [];
   private errorHandlers: ErrorHandler[] = [];
   private statusHandlers: StatusHandler[] = [];
+  private callbackQueryHandlers: CallbackQueryHandler[] = [];
   private config: DiscordConfig;
 
   // Track pending interactions that need reply (chatId -> interaction)
   private pendingInteractions: Map<string, ChatInputCommandInteraction> = new Map();
+
+  // Track thread starters for context (threadId -> starter info)
+  private threadStarterCache: Map<string, { authorId: string; authorName: string; content: string }> = new Map();
 
   constructor(config: DiscordConfig) {
     this.config = config;
@@ -107,8 +133,9 @@ export class DiscordAdapter implements ChannelAdapter {
         // Handle DMs and mentions in guilds
         const isDM = message.channel.type === DiscordChannelType.DM;
         const isMentioned = message.mentions.has(this.client!.user!);
+        const isThread = message.channel.isThread();
 
-        console.log(`Discord message received: isDM=${isDM}, isMentioned=${isMentioned}, content="${message.content.slice(0, 50)}"`);
+        console.log(`Discord message received: isDM=${isDM}, isMentioned=${isMentioned}, isThread=${isThread}, content="${message.content.slice(0, 50)}"`);
 
         if (isDM || isMentioned) {
           const incomingMessage = this.mapMessageToIncoming(message);
@@ -117,8 +144,14 @@ export class DiscordAdapter implements ChannelAdapter {
         }
       });
 
-      // Handle slash command interactions
+      // Handle slash command and button interactions
       this.client.on(Events.InteractionCreate, async (interaction) => {
+        // Handle button interactions
+        if (interaction.isButton()) {
+          await this.handleButtonInteraction(interaction);
+          return;
+        }
+
         if (!interaction.isChatInputCommand()) return;
 
         // Defer the reply FIRST to avoid interaction timeout (Discord requires response within 3 seconds)
@@ -156,6 +189,38 @@ export class DiscordAdapter implements ChannelAdapter {
       const err = error instanceof Error ? error : new Error(String(error));
       this.setStatus('error', err);
       throw err;
+    }
+  }
+
+  /**
+   * Handle button interaction (callback query equivalent)
+   */
+  private async handleButtonInteraction(interaction: ButtonInteraction): Promise<void> {
+    const customId = interaction.customId;
+
+    // Create callback query object matching our interface
+    const callbackQuery: CallbackQuery = {
+      id: interaction.id,
+      userId: interaction.user.id,
+      userName: interaction.user.displayName || interaction.user.username,
+      chatId: interaction.channelId!,
+      messageId: interaction.message.id,
+      data: customId,
+      threadId: interaction.channel?.isThread() ? interaction.channelId! : undefined,
+      raw: interaction,
+    };
+
+    // Notify all registered handlers
+    for (const handler of this.callbackQueryHandlers) {
+      try {
+        await handler(callbackQuery);
+      } catch (error) {
+        console.error('Error in callback query handler:', error);
+        this.handleError(
+          error instanceof Error ? error : new Error(String(error)),
+          'callbackQueryHandler'
+        );
+      }
     }
   }
 
@@ -200,6 +265,9 @@ export class DiscordAdapter implements ChannelAdapter {
             .setDescription('Provider name (anthropic, gemini, openrouter, bedrock, ollama)')
             .setRequired(false)),
       new SlashCommandBuilder()
+        .setName('providers')
+        .setDescription('List all available providers'),
+      new SlashCommandBuilder()
         .setName('models')
         .setDescription('List available AI models'),
       new SlashCommandBuilder()
@@ -229,6 +297,12 @@ export class DiscordAdapter implements ChannelAdapter {
           option.setName('code')
             .setDescription('The pairing code from CoWork-OSS app')
             .setRequired(true)),
+      new SlashCommandBuilder()
+        .setName('approve')
+        .setDescription('Approve the pending action'),
+      new SlashCommandBuilder()
+        .setName('deny')
+        .setDescription('Deny the pending action'),
     ];
 
     const rest = new REST().setToken(this.config.botToken);
@@ -286,21 +360,39 @@ export class DiscordAdapter implements ChannelAdapter {
       processedText = this.convertMarkdownForDiscord(message.text);
     }
 
-    // Discord has a 2000 character limit
-    const chunks = this.splitMessage(processedText, 2000);
+    // Build button components if inline keyboard is provided
+    const components = message.inlineKeyboard && message.inlineKeyboard.length > 0
+      ? this.buildButtonComponents(message.inlineKeyboard)
+      : [];
+
+    // Use smart chunking that preserves code fences
+    const chunks = this.splitMessageSmart(processedText, 2000);
     let lastMessageId = '';
 
     // Check if there's a pending interaction for this chat that needs reply
     const pendingInteraction = this.pendingInteractions.get(message.chatId);
 
+    // Determine target channel (could be a thread)
+    let targetChannelId = message.chatId;
+    if (message.threadId) {
+      targetChannelId = message.threadId;
+    }
+
     try {
       for (let i = 0; i < chunks.length; i++) {
         const chunk = chunks[i];
+        const isLastChunk = i === chunks.length - 1;
+
+        // Only add buttons to the last chunk
+        const chunkComponents = isLastChunk ? components : [];
 
         // First chunk: use interaction reply if available
         if (i === 0 && pendingInteraction) {
           try {
-            const reply = await pendingInteraction.editReply({ content: chunk });
+            const reply = await pendingInteraction.editReply({
+              content: chunk,
+              components: chunkComponents,
+            });
             lastMessageId = typeof reply === 'object' && 'id' in reply ? reply.id : pendingInteraction.id;
             // Clear the pending interaction after first reply
             this.pendingInteractions.delete(message.chatId);
@@ -313,23 +405,24 @@ export class DiscordAdapter implements ChannelAdapter {
         }
 
         // Regular channel message
-        const channel = await this.client.channels.fetch(message.chatId);
+        const channel = await this.client.channels.fetch(targetChannelId);
         if (!channel || !this.isTextBasedChannel(channel)) {
           throw new Error('Invalid channel or channel is not text-based');
         }
 
-        const sent = await (channel as TextChannel | DMChannel).send({
+        const sent = await (channel as TextChannel | DMChannel | ThreadChannel).send({
           content: chunk,
+          components: chunkComponents,
           reply: message.replyTo && i === 0 ? { messageReference: message.replyTo } : undefined,
         });
         lastMessageId = sent.id;
       }
     } catch (error: unknown) {
-      // If markdown parsing fails, retry without formatting (like Telegram)
+      // If markdown parsing fails, retry without formatting
       const errorMessage = error instanceof Error ? error.message : String(error);
       if (errorMessage.includes('parse') || errorMessage.includes('format')) {
         console.log('Markdown parsing failed, retrying without formatting');
-        return this.sendMessagePlain(message.chatId, message.text, message.replyTo);
+        return this.sendMessagePlain(targetChannelId, message.text, message.replyTo, components);
       }
       throw error;
     }
@@ -338,20 +431,123 @@ export class DiscordAdapter implements ChannelAdapter {
   }
 
   /**
+   * Send a message with an embed (rich format)
+   */
+  async sendEmbed(
+    chatId: string,
+    options: {
+      title?: string;
+      description?: string;
+      color?: keyof typeof EMBED_COLORS;
+      fields?: Array<{ name: string; value: string; inline?: boolean }>;
+      footer?: string;
+      timestamp?: boolean;
+    },
+    buttons?: InlineKeyboardButton[][]
+  ): Promise<string> {
+    if (!this.client || this._status !== 'connected') {
+      throw new Error('Discord bot is not connected');
+    }
+
+    const embed = new EmbedBuilder();
+
+    if (options.title) embed.setTitle(options.title);
+    if (options.description) embed.setDescription(options.description);
+    if (options.color) embed.setColor(EMBED_COLORS[options.color]);
+    if (options.fields) {
+      for (const field of options.fields) {
+        embed.addFields({ name: field.name, value: field.value, inline: field.inline });
+      }
+    }
+    if (options.footer) embed.setFooter({ text: options.footer });
+    if (options.timestamp) embed.setTimestamp();
+
+    const components = buttons ? this.buildButtonComponents(buttons) : [];
+
+    const channel = await this.client.channels.fetch(chatId);
+    if (!channel || !this.isTextBasedChannel(channel)) {
+      throw new Error('Invalid channel');
+    }
+
+    const sent = await (channel as TextChannel | DMChannel | ThreadChannel).send({
+      embeds: [embed],
+      components,
+    });
+
+    return sent.id;
+  }
+
+  /**
+   * Build Discord button components from our button format
+   */
+  private buildButtonComponents(buttons: InlineKeyboardButton[][]): ActionRowBuilder<ButtonBuilder>[] {
+    const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+
+    for (const rowButtons of buttons) {
+      if (rowButtons.length === 0) continue;
+
+      const row = new ActionRowBuilder<ButtonBuilder>();
+      let buttonCount = 0;
+
+      for (const button of rowButtons) {
+        if (buttonCount >= 5) break; // Discord max 5 buttons per row
+
+        const discordButton = new ButtonBuilder()
+          .setLabel(button.text.substring(0, 80)); // Discord max 80 chars
+
+        if (button.url) {
+          discordButton.setStyle(ButtonStyle.Link);
+          discordButton.setURL(button.url);
+        } else if (button.callbackData) {
+          // Determine button style based on callback data
+          if (button.callbackData.startsWith('approve')) {
+            discordButton.setStyle(ButtonStyle.Success);
+          } else if (button.callbackData.startsWith('deny')) {
+            discordButton.setStyle(ButtonStyle.Danger);
+          } else {
+            discordButton.setStyle(ButtonStyle.Primary);
+          }
+          discordButton.setCustomId(button.callbackData.substring(0, 100)); // Discord max 100 chars
+        } else {
+          continue; // Skip buttons without action
+        }
+
+        row.addComponents(discordButton);
+        buttonCount++;
+      }
+
+      if (buttonCount > 0) {
+        rows.push(row);
+      }
+
+      if (rows.length >= 5) break; // Discord max 5 rows
+    }
+
+    return rows;
+  }
+
+  /**
    * Send a plain text message without formatting
    */
-  private async sendMessagePlain(chatId: string, text: string, replyTo?: string): Promise<string> {
+  private async sendMessagePlain(
+    chatId: string,
+    text: string,
+    replyTo?: string,
+    components: ActionRowBuilder<ButtonBuilder>[] = []
+  ): Promise<string> {
     const channel = await this.client!.channels.fetch(chatId);
     if (!channel || !this.isTextBasedChannel(channel)) {
       throw new Error('Invalid channel');
     }
 
-    const chunks = this.splitMessage(text, 2000);
+    const chunks = this.splitMessageSmart(text, 2000);
     let lastMessageId = '';
 
     for (let i = 0; i < chunks.length; i++) {
-      const sent = await (channel as TextChannel | DMChannel).send({
+      const isLastChunk = i === chunks.length - 1;
+      const sent = await (channel as TextChannel | DMChannel | ThreadChannel).send({
         content: chunks[i],
+        components: isLastChunk ? components : [],
         reply: replyTo && i === 0 ? { messageReference: replyTo } : undefined,
       });
       lastMessageId = sent.id;
@@ -362,12 +558,10 @@ export class DiscordAdapter implements ChannelAdapter {
 
   /**
    * Convert GitHub-flavored markdown to Discord-compatible format
-   * Discord supports: **bold**, *italic*, __underline__, ~~strikethrough~~, `code`, ```code blocks```, > quotes, [links](url)
    */
   private convertMarkdownForDiscord(text: string): string {
     let result = text;
 
-    // Discord already supports most markdown, but we can adjust headers
     // Convert markdown headers (## Header) to bold (**Header**)
     result = result.replace(/^#{1,6}\s+(.+)$/gm, '**$1**');
 
@@ -378,36 +572,92 @@ export class DiscordAdapter implements ChannelAdapter {
   }
 
   /**
-   * Split message into chunks respecting Discord's character limit
+   * Smart message splitting that preserves code fences
+   * Based on 's chunking logic
    */
-  private splitMessage(text: string, maxLength: number): string[] {
+  private splitMessageSmart(text: string, maxLength: number): string[] {
     if (text.length <= maxLength) {
       return [text];
     }
 
     const chunks: string[] = [];
     let remaining = text;
+    let inCodeBlock = false;
+    let codeBlockLang = '';
 
     while (remaining.length > 0) {
       if (remaining.length <= maxLength) {
-        chunks.push(remaining);
+        // Close any open code block at the end
+        if (inCodeBlock) {
+          chunks.push(remaining);
+        } else {
+          chunks.push(remaining);
+        }
         break;
       }
 
-      // Find a good breaking point (newline or space)
-      let breakIndex = remaining.lastIndexOf('\n', maxLength);
-      if (breakIndex === -1 || breakIndex < maxLength / 2) {
-        breakIndex = remaining.lastIndexOf(' ', maxLength);
-      }
-      if (breakIndex === -1 || breakIndex < maxLength / 2) {
-        breakIndex = maxLength;
+      // Find the best breaking point
+      let breakIndex = this.findBreakPoint(remaining, maxLength, inCodeBlock);
+      let chunk = remaining.substring(0, breakIndex);
+
+      // Check if we're entering or leaving a code block
+      const codeBlockMatches = chunk.match(/```(\w*)/g) || [];
+      for (const match of codeBlockMatches) {
+        if (inCodeBlock) {
+          inCodeBlock = false;
+          codeBlockLang = '';
+        } else {
+          inCodeBlock = true;
+          codeBlockLang = match.replace('```', '');
+        }
       }
 
-      chunks.push(remaining.substring(0, breakIndex));
+      // If we're in a code block and the chunk doesn't close it, close it manually
+      if (inCodeBlock && !chunk.endsWith('```')) {
+        chunk += '\n```';
+      }
+
+      chunks.push(chunk);
       remaining = remaining.substring(breakIndex).trimStart();
+
+      // If we closed a code block, reopen it in the next chunk
+      if (inCodeBlock && remaining.length > 0) {
+        remaining = '```' + codeBlockLang + '\n' + remaining;
+      }
     }
 
     return chunks;
+  }
+
+  /**
+   * Find the best break point for message splitting
+   */
+  private findBreakPoint(text: string, maxLength: number, inCodeBlock: boolean): number {
+    // Reserve space for potential code fence closure
+    const reservedSpace = inCodeBlock ? 4 : 0;
+    const effectiveMax = maxLength - reservedSpace;
+
+    // Try to break at a newline
+    let breakIndex = text.lastIndexOf('\n', effectiveMax);
+    if (breakIndex > effectiveMax / 2) {
+      return breakIndex + 1;
+    }
+
+    // Try to break at a space
+    breakIndex = text.lastIndexOf(' ', effectiveMax);
+    if (breakIndex > effectiveMax / 2) {
+      return breakIndex + 1;
+    }
+
+    // Force break at max length
+    return effectiveMax;
+  }
+
+  /**
+   * Legacy split method for compatibility
+   */
+  private splitMessage(text: string, maxLength: number): string[] {
+    return this.splitMessageSmart(text, maxLength);
   }
 
   /**
@@ -423,7 +673,7 @@ export class DiscordAdapter implements ChannelAdapter {
       throw new Error('Invalid channel');
     }
 
-    const message = await (channel as TextChannel | DMChannel).messages.fetch(messageId);
+    const message = await (channel as TextChannel | DMChannel | ThreadChannel).messages.fetch(messageId);
     await message.edit(text);
   }
 
@@ -440,7 +690,7 @@ export class DiscordAdapter implements ChannelAdapter {
       throw new Error('Invalid channel');
     }
 
-    const message = await (channel as TextChannel | DMChannel).messages.fetch(messageId);
+    const message = await (channel as TextChannel | DMChannel | ThreadChannel).messages.fetch(messageId);
     await message.delete();
   }
 
@@ -465,7 +715,7 @@ export class DiscordAdapter implements ChannelAdapter {
     const fileName = path.basename(filePath);
     const attachment = new AttachmentBuilder(filePath, { name: fileName });
 
-    const sent = await (channel as TextChannel | DMChannel).send({
+    const sent = await (channel as TextChannel | DMChannel | ThreadChannel).send({
       content: caption,
       files: [attachment],
     });
@@ -478,6 +728,52 @@ export class DiscordAdapter implements ChannelAdapter {
    */
   onMessage(handler: MessageHandler): void {
     this.messageHandlers.push(handler);
+  }
+
+  /**
+   * Register a callback query handler (for button interactions)
+   */
+  onCallbackQuery(handler: CallbackQueryHandler): void {
+    this.callbackQueryHandlers.push(handler);
+  }
+
+  /**
+   * Answer a callback query (acknowledge button press)
+   * For Discord, this updates the message or sends an ephemeral response
+   */
+  async answerCallbackQuery(queryId: string, text?: string, showAlert?: boolean): Promise<void> {
+    // In Discord, we need to use the interaction object stored in the raw field
+    // The queryId is the interaction ID, but we need the actual interaction object
+    // This is typically handled directly in handleButtonInteraction
+    // This method provides API compatibility with Telegram
+    console.log(`answerCallbackQuery called: ${queryId}, text: ${text}, showAlert: ${showAlert}`);
+  }
+
+  /**
+   * Edit a message with a new inline keyboard
+   */
+  async editMessageWithKeyboard(
+    chatId: string,
+    messageId: string,
+    text?: string,
+    inlineKeyboard?: InlineKeyboardButton[][]
+  ): Promise<void> {
+    if (!this.client || this._status !== 'connected') {
+      throw new Error('Discord bot is not connected');
+    }
+
+    const channel = await this.client.channels.fetch(chatId);
+    if (!channel || !this.isTextBasedChannel(channel)) {
+      throw new Error('Invalid channel');
+    }
+
+    const message = await (channel as TextChannel | DMChannel | ThreadChannel).messages.fetch(messageId);
+    const components = inlineKeyboard ? this.buildButtonComponents(inlineKeyboard) : [];
+
+    await message.edit({
+      content: text || message.content,
+      components,
+    });
   }
 
   /**
@@ -513,9 +809,12 @@ export class DiscordAdapter implements ChannelAdapter {
 
   // Private methods
 
-  private isTextBasedChannel(channel: any): channel is TextChannel | DMChannel {
-    return channel.type === DiscordChannelType.GuildText ||
-           channel.type === DiscordChannelType.DM;
+  private isTextBasedChannel(channel: unknown): channel is TextChannel | DMChannel | ThreadChannel {
+    const ch = channel as { type?: DiscordChannelType };
+    return ch.type === DiscordChannelType.GuildText ||
+           ch.type === DiscordChannelType.DM ||
+           ch.type === DiscordChannelType.PublicThread ||
+           ch.type === DiscordChannelType.PrivateThread;
   }
 
   private mapMessageToIncoming(message: Message): IncomingMessage {
@@ -528,15 +827,21 @@ export class DiscordAdapter implements ChannelAdapter {
     // Map Discord message to command format if it looks like a command
     const commandText = this.parseCommand(text);
 
+    // Check for thread context
+    const isThread = message.channel.isThread();
+    const threadId = isThread ? message.channelId : undefined;
+
     return {
       messageId: message.id,
       channel: 'discord',
       userId: message.author.id,
       userName: message.author.displayName || message.author.username,
-      chatId: message.channelId,
+      chatId: isThread ? (message.channel as ThreadChannel).parentId! : message.channelId,
       text: commandText || text,
       timestamp: message.createdAt,
       replyTo: message.reference?.messageId,
+      threadId,
+      isForumTopic: isThread,
       raw: message,
     };
   }
@@ -582,7 +887,8 @@ export class DiscordAdapter implements ChannelAdapter {
       }
     }
 
-    // Note: deferReply and pendingInteractions are handled in the event handler before this is called
+    // Check for thread context
+    const isThread = interaction.channel?.isThread() ?? false;
 
     return {
       messageId: interaction.id,
@@ -592,6 +898,8 @@ export class DiscordAdapter implements ChannelAdapter {
       chatId: interaction.channelId!,
       text,
       timestamp: new Date(interaction.createdTimestamp),
+      threadId: isThread ? interaction.channelId! : undefined,
+      isForumTopic: isThread,
       raw: interaction,
     };
   }

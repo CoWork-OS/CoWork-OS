@@ -162,8 +162,15 @@ export class UpdateManager {
   }
 
   private isNewerVersion(latest: string, current: string): boolean {
-    const latestParts = latest.split('.').map(n => parseInt(n, 10));
-    const currentParts = current.split('.').map(n => parseInt(n, 10));
+    // Normalize versions: convert "0.3.9-1" to "0.3.9.1" for comparison
+    const normalizeVersion = (v: string): number[] => {
+      // Replace hyphens with dots for consistent parsing
+      const normalized = v.replace(/-/g, '.');
+      return normalized.split('.').map(n => parseInt(n, 10) || 0);
+    };
+
+    const latestParts = normalizeVersion(latest);
+    const currentParts = normalizeVersion(current);
 
     for (let i = 0; i < Math.max(latestParts.length, currentParts.length); i++) {
       const l = latestParts[i] || 0;

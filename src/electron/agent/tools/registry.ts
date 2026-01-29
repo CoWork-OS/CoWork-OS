@@ -95,8 +95,29 @@ export class ToolRegistry {
     // Add meta tools for execution control
     allTools.push(...this.getMetaToolDefinitions());
 
-    // Add MCP tools from connected servers
-    allTools.push(...this.getMCPToolDefinitions());
+    // Collect built-in tool names before adding MCP tools
+    const builtinToolNames = new Set(allTools.map(t => t.name));
+
+    // Add MCP tools from connected servers, filtering out those that shadow built-in tools
+    const settings = MCPSettingsManager.loadSettings();
+    const prefix = settings.toolNamePrefix || 'mcp_';
+    const mcpTools = this.getMCPToolDefinitions();
+    const shadowedTools: string[] = [];
+
+    for (const mcpTool of mcpTools) {
+      const baseName = mcpTool.name.slice(prefix.length);
+      if (builtinToolNames.has(baseName)) {
+        // Skip MCP tools that shadow built-in tools - prefer built-in versions
+        shadowedTools.push(mcpTool.name);
+      } else {
+        allTools.push(mcpTool);
+      }
+    }
+
+    if (shadowedTools.length > 0) {
+      console.log(`[ToolRegistry] Skipped ${shadowedTools.length} MCP tools that shadow built-in tools:`,
+        shadowedTools.join(', '));
+    }
 
     // Filter tools based on security policy (workspace + gateway context)
     let filteredTools = allTools.filter(tool => this.isToolAllowed(tool.name));
@@ -105,8 +126,6 @@ export class ToolRegistry {
     const disabledBySettings: string[] = [];
     filteredTools = filteredTools.filter(tool => {
       // MCP tools are not affected by built-in settings
-      const settings = MCPSettingsManager.loadSettings();
-      const prefix = settings.toolNamePrefix || 'mcp_';
       if (tool.name.startsWith(prefix)) {
         return true;
       }
@@ -137,8 +156,6 @@ export class ToolRegistry {
     // This helps influence which tools the LLM is more likely to choose
     const priorityOrder = { high: 0, normal: 1, low: 2 };
     filteredTools.sort((a, b) => {
-      const settings = MCPSettingsManager.loadSettings();
-      const prefix = settings.toolNamePrefix || 'mcp_';
       // MCP tools always come after built-in tools at the same priority
       const aIsMcp = a.name.startsWith(prefix);
       const bIsMcp = b.name.startsWith(prefix);
@@ -355,29 +372,40 @@ Plan Control:
    * Try to execute an MCP tool if the name matches
    */
   private async tryExecuteMCPTool(name: string, input: any): Promise<any | null> {
+    const settings = MCPSettingsManager.loadSettings();
+    const prefix = settings.toolNamePrefix || 'mcp_';
+
+    // Not an MCP tool if it doesn't have the prefix
+    if (!name.startsWith(prefix)) {
+      return null;
+    }
+
+    const mcpToolName = name.slice(prefix.length);
+
+    // Try to get the MCP manager - if not initialized, this is not an MCP tool call
+    let mcpManager: MCPClientManager;
     try {
-      const settings = MCPSettingsManager.loadSettings();
-      const prefix = settings.toolNamePrefix || 'mcp_';
+      mcpManager = MCPClientManager.getInstance();
+    } catch (error) {
+      // MCP not initialized
+      return null;
+    }
 
-      if (!name.startsWith(prefix)) {
-        return null;
-      }
+    // Check if the tool is registered
+    if (!mcpManager.hasTool(mcpToolName)) {
+      return null;
+    }
 
-      const mcpToolName = name.slice(prefix.length);
-      const mcpManager = MCPClientManager.getInstance();
+    // At this point, we know it's a valid MCP tool - any errors should be propagated
+    console.log(`[ToolRegistry] Executing MCP tool: ${mcpToolName}`);
 
-      if (!mcpManager.hasTool(mcpToolName)) {
-        return null;
-      }
-
-      console.log(`[ToolRegistry] Executing MCP tool: ${mcpToolName}`);
+    try {
       const result = await mcpManager.callTool(mcpToolName, input);
-
       // Format MCP result and process any generated files
       return await this.formatMCPResult(result, mcpToolName, input);
-    } catch (error) {
-      // Not an MCP tool or MCP not initialized
-      return null;
+    } catch (error: any) {
+      // Tool was registered but execution failed - propagate the error with context
+      throw new Error(`MCP tool '${mcpToolName}' failed: ${error.message}`);
     }
   }
 

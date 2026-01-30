@@ -8,7 +8,7 @@
 /**
  * Supported channel types
  */
-export type ChannelType = 'telegram' | 'discord' | 'slack' | 'whatsapp';
+export type ChannelType = 'telegram' | 'discord' | 'slack' | 'whatsapp' | 'imessage';
 
 /**
  * Channel connection status
@@ -192,6 +192,33 @@ export interface WhatsAppConfig extends ChannelConfig {
    * Prefix to add to bot responses (e.g., "[CoWork]" or "🤖")
    * Only used when selfChatMode is true. Default: "🤖"
    */
+  responsePrefix?: string;
+}
+
+/**
+ * iMessage-specific configuration
+ * Uses imsg CLI (brew install steipete/tap/imsg) for communication
+ */
+export interface ImessageConfig extends ChannelConfig {
+  /** Path to imsg CLI (default: "imsg") */
+  cliPath?: string;
+  /** Path to Messages database (default: ~/Library/Messages/chat.db) */
+  dbPath?: string;
+  /** DM access policy (default: "pairing") */
+  dmPolicy?: 'open' | 'allowlist' | 'pairing' | 'disabled';
+  /** Group access policy (default: "allowlist") */
+  groupPolicy?: 'open' | 'allowlist' | 'disabled';
+  /** Allowed contacts (phone numbers, emails, or chat_id:*) */
+  allowedContacts?: string[];
+  /** Include attachments in context (default: false) */
+  includeAttachments?: boolean;
+  /** Max media size in MB (default: 16) */
+  mediaMaxMb?: number;
+  /** iMessage service preference */
+  service?: 'imessage' | 'sms' | 'auto';
+  /** Enable message deduplication (default: true) */
+  deduplicationEnabled?: boolean;
+  /** Response prefix for bot messages */
   responsePrefix?: string;
 }
 

@@ -115,6 +115,7 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
 - **Discord Bot**: Run tasks via Discord with slash commands and direct messages
 - **Slack Bot**: Run tasks via Slack with Socket Mode, direct messages, and channel mentions
 - **iMessage Bot** (macOS): Run tasks via iMessage using the imsg CLI with pairing support
+- **Menu Bar App** (macOS): Native menu bar companion with quick access to workspaces and tasks
 - **Web Search**: Multi-provider web search (Tavily, Brave, SerpAPI, Google) with fallback support
 - **Browser Automation**: Full web browser control with Playwright:
   - Navigate to URLs, take screenshots, save pages as PDF
@@ -473,6 +474,7 @@ If requested by the rights holder, we will update naming/branding to avoid confu
 - [x] **Discord bot integration** with slash commands and DM support
 - [x] **Slack bot integration** with Socket Mode and channel mentions
 - [x] **iMessage bot integration** (macOS) with imsg CLI and pairing support
+- [x] **Menu bar app** (macOS) - native companion with quick access to workspaces and tasks
 - [x] Web search integration (Tavily, Brave, SerpAPI, Google)
 - [x] Local LLM support via Ollama (free, runs on your machine)
 - [x] **Browser automation** with Playwright (navigate, click, fill, screenshot, PDF)
@@ -1059,6 +1061,52 @@ Bot: ✅ Done!
 - Check the CoWork-OSS logs for errors
 - Ensure a workspace is selected
 - Verify the user is paired/authorized
+
+---
+
+## Menu Bar App (macOS)
+
+CoWork-OSS includes a native macOS menu bar companion that provides quick access to your workspaces and tasks without having the main window open.
+
+### Features
+
+- **Quick Access**: Click the menu bar icon to show/hide the main window
+- **Status Display**: See connected channel status at a glance
+- **Workspace Selection**: Switch between workspaces from the menu
+- **New Task**: Create a new task directly from the menu bar
+- **Settings Access**: Quick link to settings
+
+### Configuration
+
+Navigate to **Settings → Menu Bar** to configure:
+
+| Setting | Description |
+|---------|-------------|
+| **Enable Menu Bar Icon** | Show/hide the menu bar icon |
+| **Show Dock Icon** | Show/hide the app in the macOS Dock |
+| **Start Minimized** | Start with the main window hidden |
+| **Close to Menu Bar** | Closing the window minimizes to menu bar instead of quitting |
+| **Show Notifications** | Enable system notifications for task completions |
+
+### How It Works
+
+1. **Left-click** the menu bar icon to toggle the main window
+2. **Right-click** (or click) to show the quick menu with:
+   - Channel connection status
+   - Workspace list for quick switching
+   - New task shortcut
+   - Settings and quit options
+
+### Menu Bar Only Mode
+
+For a minimal footprint, you can run CoWork-OSS entirely from the menu bar:
+
+1. Go to **Settings → Menu Bar**
+2. Enable **Start Minimized**
+3. Disable **Show Dock Icon**
+4. Enable **Close to Menu Bar**
+
+The app will now run silently in the menu bar, accessible with a single click.
 
 ---
 

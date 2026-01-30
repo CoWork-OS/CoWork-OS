@@ -116,6 +116,7 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
 - **Slack Bot**: Run tasks via Slack with Socket Mode, direct messages, and channel mentions
 - **iMessage Bot** (macOS): Run tasks via iMessage using the imsg CLI with pairing support
 - **Menu Bar App** (macOS): Native menu bar companion with quick access to workspaces and tasks
+- **Quick Input Window** (macOS): Global shortcut (⌘⇧Space) for instant task input from anywhere
 - **Web Search**: Multi-provider web search (Tavily, Brave, SerpAPI, Google) with fallback support
 - **Browser Automation**: Full web browser control with Playwright:
   - Navigate to URLs, take screenshots, save pages as PDF
@@ -475,6 +476,7 @@ If requested by the rights holder, we will update naming/branding to avoid confu
 - [x] **Slack bot integration** with Socket Mode and channel mentions
 - [x] **iMessage bot integration** (macOS) with imsg CLI and pairing support
 - [x] **Menu bar app** (macOS) - native companion with quick access to workspaces and tasks
+- [x] **Quick Input window** (macOS) - global shortcut (⌘⇧Space) for instant task input from anywhere
 - [x] Web search integration (Tavily, Brave, SerpAPI, Google)
 - [x] Local LLM support via Ollama (free, runs on your machine)
 - [x] **Browser automation** with Playwright (navigate, click, fill, screenshot, PDF)
@@ -1107,6 +1109,38 @@ For a minimal footprint, you can run CoWork-OSS entirely from the menu bar:
 4. Enable **Close to Menu Bar**
 
 The app will now run silently in the menu bar, accessible with a single click.
+
+### Quick Input Window
+
+The Quick Input window is a floating, always-on-top input that lets you create tasks instantly from anywhere on your Mac using a global keyboard shortcut.
+
+#### Keyboard Shortcut
+
+Press **⌘⇧Space** (Command + Shift + Space) from anywhere to open the Quick Input window.
+
+#### Features
+
+- **Global Shortcut**: Works from any app, even when CoWork-OSS is minimized
+- **Floating Design**: Apple-like transparent design with backdrop blur
+- **Inline Responses**: See the agent's response directly in the floating window
+- **Copy to Clipboard**: One-click copy of the response text
+- **Persistent Results**: Window stays visible after task completion (doesn't auto-hide)
+- **Draggable**: Drag the window to any position on screen
+
+#### How It Works
+
+1. Press **⌘⇧Space** to open the Quick Input window
+2. Type your task or question
+3. Press **Enter** or click the submit button
+4. Watch the response stream in real-time
+5. Click the copy button to copy the response
+6. Press **Escape** or click "New Task" to start fresh
+
+#### Tips
+
+- The window follows you across macOS Spaces and full-screen apps
+- Hover over the expanded window to reveal action buttons (copy, new task, close)
+- The input field auto-focuses when the window appears
 
 ---
 

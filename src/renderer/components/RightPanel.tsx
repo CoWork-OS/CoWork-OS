@@ -225,15 +225,6 @@ export function RightPanel({ task, workspace, events, tasks = [], queueStatus, o
 
   return (
     <div className="right-panel cli-panel">
-      {/* Terminal Header */}
-      <div className="cli-panel-header">
-        <span className="cli-panel-title">SYSTEM MONITOR</span>
-        <div className="cli-panel-dots">
-          <span className="cli-dot"></span>
-          <span className="cli-dot"></span>
-          <span className="cli-dot active"></span>
-        </div>
-      </div>
 
       {/* Progress Section */}
       <div className="right-panel-section cli-section">

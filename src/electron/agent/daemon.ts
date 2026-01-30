@@ -199,6 +199,32 @@ export class AgentDaemon extends EventEmitter {
   }
 
   /**
+   * Create a new task in the database and start it
+   * This is a convenience method used by the cron service
+   */
+  async createTask(params: {
+    title: string;
+    prompt: string;
+    workspaceId: string;
+    budgetTokens?: number;
+    budgetCost?: number;
+  }): Promise<Task> {
+    const task = this.taskRepo.create({
+      title: params.title,
+      prompt: params.prompt,
+      status: 'pending',
+      workspaceId: params.workspaceId,
+      budgetTokens: params.budgetTokens,
+      budgetCost: params.budgetCost,
+    });
+
+    // Start the task (will be queued if necessary)
+    await this.startTask(task);
+
+    return task;
+  }
+
+  /**
    * Cancel a running or queued task
    */
   async cancelTask(taskId: string): Promise<void> {

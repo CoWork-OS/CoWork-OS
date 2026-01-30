@@ -105,6 +105,30 @@ function getCurrentDateString(): string {
 }
 
 /**
+ * Get current date/time with timezone for system prompts
+ * Used for scheduling features to help the agent understand current time context
+ */
+function getCurrentDateTimeContext(): string {
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('en-US', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  });
+  const timeStr = now.toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true
+  });
+  // Get timezone name
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const timezoneOffset = now.toLocaleTimeString('en-US', { timeZoneName: 'short' }).split(' ').pop();
+
+  return `${dateStr} at ${timeStr} (${timezone}, ${timezoneOffset})`;
+}
+
+/**
  * Check if the assistant's response is asking a question and waiting for user input
  */
 function isAskingQuestion(text: string): boolean {
@@ -1289,12 +1313,14 @@ export class TaskExecutor {
 
     // Set system prompt
     this.systemPrompt = `You are an AI assistant helping with tasks. Use the available tools to complete the work.
-Today's date: ${getCurrentDateString()}
+Current time: ${getCurrentDateTimeContext()}
 Workspace: ${this.workspace.path}
 Always ask for approval before deleting files or making destructive changes.
 Be concise in your responses. When reading files, only read what you need.
 
 WEB ACCESS: Prefer browser_navigate for web access. If browser tools are unavailable, use web_search as an alternative. If any tool category is disabled, try alternative tools that can accomplish the same goal.
+
+SCHEDULING: Use the schedule_task tool for reminders and scheduled tasks. Convert relative times to ISO timestamps using the current time above.
 
 You are continuing a previous conversation. The context from the previous conversation has been provided.`;
   }
@@ -1672,7 +1698,7 @@ You are continuing a previous conversation. The context from the previous conver
 3. Execute each step using the available tools
 4. Produce high-quality outputs
 
-Today's date: ${getCurrentDateString()}
+Current time: ${getCurrentDateTimeContext()}
 You have access to a workspace folder at: ${this.workspace.path}
 Workspace permissions: ${JSON.stringify(this.workspace.permissions)}
 
@@ -1737,6 +1763,12 @@ VERIFICATION STEP (REQUIRED):
 - For non-trivial tasks, include a FINAL verification step
 - Verification can include: reading the output file to confirm changes, checking file exists, summarizing what was done
 - Example: "Verify: Read the modified document and confirm new sections were added correctly"
+
+5. SCHEDULING & REMINDERS:
+   - Use schedule_task tool for "remind me", "schedule", or recurring task requests
+   - Convert relative times ("tomorrow at 3pm", "in 2 hours") to ISO timestamps
+   - Schedule types: "once" (one-time), "interval" (recurring), "cron" (cron expressions)
+   - Make reminder prompts self-explanatory for when they fire later
 
 Format your plan as a JSON object with this structure:
 {
@@ -2024,7 +2056,7 @@ Format your plan as a JSON object with this structure:
 
     // Define system prompt once so we can track its token usage
     this.systemPrompt = `You are an autonomous task executor. Use the available tools to complete each step.
-Today's date: ${getCurrentDateString()}
+Current time: ${getCurrentDateTimeContext()}
 Workspace: ${this.workspace.path}
 
 IMPORTANT INSTRUCTIONS:
@@ -2103,7 +2135,18 @@ EFFICIENCY RULES (CRITICAL):
 ADAPTIVE PLANNING:
 - If you discover the current plan is insufficient, use the revise_plan tool to add new steps.
 - Do not silently skip necessary work - if something new is needed, add it to the plan.
-- If an approach keeps failing, revise the plan with a fundamentally different strategy.${guidelinesPrompt ? `\n\n${guidelinesPrompt}` : ''}`;
+- If an approach keeps failing, revise the plan with a fundamentally different strategy.
+
+SCHEDULING & REMINDERS:
+- Use the schedule_task tool to create reminders and scheduled tasks when users ask.
+- For "remind me" requests, create a scheduled task with the reminder as the prompt.
+- Convert relative times ("tomorrow at 3pm", "in 2 hours") to absolute ISO timestamps.
+- Use the current time shown above to calculate future timestamps accurately.
+- Schedule types:
+  - "once": One-time task at a specific time (for reminders, single events)
+  - "interval": Recurring at fixed intervals ("every 5m", "every 1h", "every 1d")
+  - "cron": Standard cron expressions for complex schedules ("0 9 * * 1-5" for weekdays at 9am)
+- When creating reminders, make the prompt text descriptive so the reminder is self-explanatory when it fires.${guidelinesPrompt ? `\n\n${guidelinesPrompt}` : ''}`;
 
     const systemPromptTokens = estimateTokens(this.systemPrompt);
 
@@ -2489,7 +2532,7 @@ ADAPTIVE PLANNING:
     // Ensure system prompt is set
     if (!this.systemPrompt) {
       this.systemPrompt = `You are an autonomous task executor. Use the available tools to complete each step.
-Today's date: ${getCurrentDateString()}
+Current time: ${getCurrentDateTimeContext()}
 Workspace: ${this.workspace.path}
 
 IMPORTANT INSTRUCTIONS:
@@ -2569,7 +2612,18 @@ ANTI-PATTERNS (NEVER DO THESE):
 EFFICIENCY RULES (CRITICAL):
 - DO NOT read the same file multiple times. If you've already read a file, use the content from memory.
 - DO NOT create multiple versions of the same file. Pick ONE target file and work with it.
-- If a tool fails, try a DIFFERENT approach - don't retry the same approach multiple times.${guidelinesPrompt ? `\n\n${guidelinesPrompt}` : ''}`;
+- If a tool fails, try a DIFFERENT approach - don't retry the same approach multiple times.
+
+SCHEDULING & REMINDERS:
+- Use the schedule_task tool to create reminders and scheduled tasks when users ask.
+- For "remind me" requests, create a scheduled task with the reminder as the prompt.
+- Convert relative times ("tomorrow at 3pm", "in 2 hours") to absolute ISO timestamps.
+- Use the current time shown above to calculate future timestamps accurately.
+- Schedule types:
+  - "once": One-time task at a specific time (for reminders, single events)
+  - "interval": Recurring at fixed intervals ("every 5m", "every 1h", "every 1d")
+  - "cron": Standard cron expressions for complex schedules ("0 9 * * 1-5" for weekdays at 9am)
+- When creating reminders, make the prompt text descriptive so the reminder is self-explanatory when it fires.${guidelinesPrompt ? `\n\n${guidelinesPrompt}` : ''}`;
     }
 
     const systemPromptTokens = estimateTokens(this.systemPrompt);

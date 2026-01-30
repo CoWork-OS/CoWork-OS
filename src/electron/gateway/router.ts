@@ -32,7 +32,8 @@ import {
 } from '../database/repositories';
 import Database from 'better-sqlite3';
 import { AgentDaemon } from '../agent/daemon';
-import { Task, IPC_CHANNELS } from '../../shared/types';
+import { Task, IPC_CHANNELS, TEMP_WORKSPACE_ID, TEMP_WORKSPACE_NAME, Workspace } from '../../shared/types';
+import * as os from 'os';
 import { LLMProviderFactory, LLMSettings } from '../agent/llm/provider-factory';
 import { ModelKey, LLMProviderType } from '../agent/llm/types';
 import { getCustomSkillLoader } from '../agent/custom-skill-loader';
@@ -63,6 +64,7 @@ export class MessageRouter {
   private eventHandlers: GatewayEventHandler[] = [];
   private mainWindow: BrowserWindow | null = null;
   private agentDaemon?: AgentDaemon;
+  private db: Database.Database;
 
   // Repositories
   private channelRepo: ChannelRepository;
@@ -85,6 +87,7 @@ export class MessageRouter {
   private pendingApprovals: Map<string, { taskId: string; approval: any; sessionId: string }> = new Map();
 
   constructor(db: Database.Database, config: RouterConfig = {}, agentDaemon?: AgentDaemon) {
+    this.db = db;
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.agentDaemon = agentDaemon;
 
@@ -127,6 +130,58 @@ export class MessageRouter {
    */
   getMainWindow(): BrowserWindow | null {
     return this.mainWindow;
+  }
+
+  /**
+   * Get or create the temp workspace for sessions without a workspace
+   */
+  private getOrCreateTempWorkspace(): Workspace {
+    // Check if temp workspace exists
+    const existing = this.workspaceRepo.findById(TEMP_WORKSPACE_ID);
+    if (existing) {
+      // Verify directory exists
+      if (fs.existsSync(existing.path)) {
+        return { ...existing, isTemp: true };
+      }
+      // Directory was deleted, recreate it
+      const tempDir = path.join(os.tmpdir(), 'cowork-oss-temp');
+      fs.mkdirSync(tempDir, { recursive: true });
+      return { ...existing, isTemp: true };
+    }
+
+    // Create temp directory
+    const tempDir = path.join(os.tmpdir(), 'cowork-oss-temp');
+    fs.mkdirSync(tempDir, { recursive: true });
+
+    // Create workspace record
+    const tempWorkspace: Workspace = {
+      id: TEMP_WORKSPACE_ID,
+      name: TEMP_WORKSPACE_NAME,
+      path: tempDir,
+      createdAt: Date.now(),
+      permissions: {
+        read: true,
+        write: true,
+        delete: true,
+        network: true,
+        shell: false,
+      },
+      isTemp: true,
+    };
+
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO workspaces (id, name, path, created_at, permissions)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    stmt.run(
+      tempWorkspace.id,
+      tempWorkspace.name,
+      tempWorkspace.path,
+      tempWorkspace.createdAt,
+      JSON.stringify(tempWorkspace.permissions)
+    );
+
+    return tempWorkspace;
   }
 
   /**
@@ -441,6 +496,10 @@ export class MessageRouter {
           return;
         }
       }
+
+      // No workspace match found - auto-assign temp workspace so tasks can proceed
+      const tempWorkspace = this.getOrCreateTempWorkspace();
+      this.sessionManager.setSessionWorkspace(sessionId, tempWorkspace.id);
     }
 
     // Regular message - send to desktop app for task processing
@@ -689,13 +748,23 @@ export class MessageRouter {
   ): Promise<void> {
     if (args.length === 0) {
       // Show current workspace
-      const session = this.sessionRepo.findById(sessionId);
+      let session = this.sessionRepo.findById(sessionId);
+
+      // Auto-assign temp workspace if none selected
+      if (!session?.workspaceId) {
+        const tempWorkspace = this.getOrCreateTempWorkspace();
+        this.sessionRepo.update(sessionId, { workspaceId: tempWorkspace.id });
+        session = this.sessionRepo.findById(sessionId);
+      }
+
       if (session?.workspaceId) {
         const workspace = this.workspaceRepo.findById(session.workspaceId);
         if (workspace) {
+          const isTempWorkspace = workspace.id === TEMP_WORKSPACE_ID;
+          const displayName = isTempWorkspace ? 'Temporary Workspace (select a folder for persistence)' : workspace.name;
           await adapter.sendMessage({
             chatId: message.chatId,
-            text: `📁 Current workspace: *${workspace.name}*\n\`${workspace.path}\``,
+            text: `📁 Current workspace: *${displayName}*\n\`${workspace.path}\`\n\nUse \`/workspaces\` to see available workspaces.`,
             parseMode: 'markdown',
           });
           return;
@@ -1325,18 +1394,16 @@ export class MessageRouter {
     sessionId: string,
     args: string[]
   ): Promise<void> {
-    const session = this.sessionRepo.findById(sessionId);
+    let session = this.sessionRepo.findById(sessionId);
 
+    // Auto-assign temp workspace if none selected
     if (!session?.workspaceId) {
-      await adapter.sendMessage({
-        chatId: message.chatId,
-        text: '⚠️ No workspace selected. Use `/workspace` to select one first.',
-        parseMode: 'markdown',
-      });
-      return;
+      const tempWorkspace = this.getOrCreateTempWorkspace();
+      this.sessionRepo.update(sessionId, { workspaceId: tempWorkspace.id });
+      session = this.sessionRepo.findById(sessionId);
     }
 
-    const workspace = this.workspaceRepo.findById(session.workspaceId);
+    const workspace = this.workspaceRepo.findById(session!.workspaceId!);
     if (!workspace) {
       await adapter.sendMessage({
         chatId: message.chatId,
@@ -1529,22 +1596,18 @@ export class MessageRouter {
     message: IncomingMessage,
     sessionId: string
   ): Promise<void> {
-    const session = this.sessionRepo.findById(sessionId);
+    let session = this.sessionRepo.findById(sessionId);
 
-    // Check if workspace is selected
+    // Auto-assign temp workspace if none selected
     if (!session?.workspaceId) {
-      await adapter.sendMessage({
-        chatId: message.chatId,
-        text: '⚠️ Please select a workspace first.\n\nUse `/workspaces` to see available workspaces, then `/workspace <name>` to select one.',
-        parseMode: 'markdown',
-        replyTo: message.messageId,
-      });
-      return;
+      const tempWorkspace = this.getOrCreateTempWorkspace();
+      this.sessionManager.setSessionWorkspace(sessionId, tempWorkspace.id);
+      session = this.sessionRepo.findById(sessionId);
     }
 
     // Check if there's an existing task for this session (active or completed)
-    if (session.taskId) {
-      const existingTask = this.taskRepo.findById(session.taskId);
+    if (session!.taskId) {
+      const existingTask = this.taskRepo.findById(session!.taskId);
       if (existingTask) {
         // For active tasks, send follow-up message
         // For completed tasks, also allow follow-up (continues the conversation)
@@ -1565,13 +1628,13 @@ export class MessageRouter {
               });
 
               // Re-register task for response tracking (may have been removed after initial completion)
-              this.pendingTaskResponses.set(session.taskId, {
+              this.pendingTaskResponses.set(session!.taskId!, {
                 adapter,
                 chatId: message.chatId,
                 sessionId,
               });
 
-              await this.agentDaemon.sendMessage(session.taskId, message.text);
+              await this.agentDaemon.sendMessage(session!.taskId!, message.text);
             } catch (error) {
               console.error('Error sending follow-up message:', error);
               await adapter.sendMessage({
@@ -1598,7 +1661,7 @@ export class MessageRouter {
     }
 
     // Get workspace
-    const workspace = this.workspaceRepo.findById(session.workspaceId);
+    const workspace = this.workspaceRepo.findById(session!.workspaceId!);
     if (!workspace) {
       await adapter.sendMessage({
         chatId: message.chatId,
@@ -2207,18 +2270,17 @@ ${status.queuedCount > 0 ? `Queued task IDs: ${status.queuedTaskIds.join(', ')}`
     message: IncomingMessage,
     sessionId: string
   ): Promise<void> {
-    const session = this.sessionRepo.findById(sessionId);
+    let session = this.sessionRepo.findById(sessionId);
 
+    // Auto-assign temp workspace if none selected
     if (!session?.workspaceId) {
-      await adapter.sendMessage({
-        chatId: message.chatId,
-        text: '❌ No workspace selected. Use /workspace to select one first.',
-      });
-      return;
+      const tempWorkspace = this.getOrCreateTempWorkspace();
+      this.sessionRepo.update(sessionId, { workspaceId: tempWorkspace.id });
+      session = this.sessionRepo.findById(sessionId);
     }
 
     // Find the last task for this session's workspace that failed or was cancelled
-    const tasks = this.taskRepo.findByWorkspace(session.workspaceId);
+    const tasks = this.taskRepo.findByWorkspace(session!.workspaceId!);
     const lastFailedTask = tasks
       .filter((t: Task) => t.status === 'failed' || t.status === 'cancelled')
       .sort((a: Task, b: Task) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
@@ -2255,17 +2317,16 @@ ${status.queuedCount > 0 ? `Queued task IDs: ${status.queuedTaskIds.join(', ')}`
     message: IncomingMessage,
     sessionId: string
   ): Promise<void> {
-    const session = this.sessionRepo.findById(sessionId);
+    let session = this.sessionRepo.findById(sessionId);
 
+    // Auto-assign temp workspace if none selected
     if (!session?.workspaceId) {
-      await adapter.sendMessage({
-        chatId: message.chatId,
-        text: '❌ No workspace selected. Use /workspace to select one first.',
-      });
-      return;
+      const tempWorkspace = this.getOrCreateTempWorkspace();
+      this.sessionRepo.update(sessionId, { workspaceId: tempWorkspace.id });
+      session = this.sessionRepo.findById(sessionId);
     }
 
-    const tasks = this.taskRepo.findByWorkspace(session.workspaceId);
+    const tasks = this.taskRepo.findByWorkspace(session!.workspaceId!);
     const recentTasks = tasks
       .sort((a: Task, b: Task) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
       .slice(0, 10);

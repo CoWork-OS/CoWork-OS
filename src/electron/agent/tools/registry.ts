@@ -10,6 +10,7 @@ import { BrowserTools } from './browser-tools';
 import { ShellTools } from './shell-tools';
 import { ImageTools } from './image-tools';
 import { SystemTools } from './system-tools';
+import { CronTools } from './cron-tools';
 import { LLMTool } from '../llm/types';
 import { SearchProviderFactory } from '../search';
 import { MCPClientManager } from '../../mcp/client/MCPClientManager';
@@ -29,7 +30,9 @@ export class ToolRegistry {
   private shellTools: ShellTools;
   private imageTools: ImageTools;
   private systemTools: SystemTools;
+  private cronTools: CronTools;
   private gatewayContext?: GatewayContextType;
+  private shadowedToolsLogged = false;
 
   constructor(
     private workspace: Workspace,
@@ -44,6 +47,7 @@ export class ToolRegistry {
     this.shellTools = new ShellTools(workspace, daemon, taskId);
     this.imageTools = new ImageTools(workspace, daemon, taskId);
     this.systemTools = new SystemTools(workspace, daemon, taskId);
+    this.cronTools = new CronTools(workspace, daemon, taskId);
     this.gatewayContext = gatewayContext;
   }
 
@@ -92,6 +96,9 @@ export class ToolRegistry {
     // Always add system tools (they enable broader system interaction)
     allTools.push(...SystemTools.getToolDefinitions());
 
+    // Always add cron/scheduling tools (enables task scheduling)
+    allTools.push(...CronTools.getToolDefinitions());
+
     // Add meta tools for execution control
     allTools.push(...this.getMetaToolDefinitions());
 
@@ -114,9 +121,10 @@ export class ToolRegistry {
       }
     }
 
-    if (shadowedTools.length > 0) {
+    if (shadowedTools.length > 0 && !this.shadowedToolsLogged) {
       console.log(`[ToolRegistry] Skipped ${shadowedTools.length} MCP tools that shadow built-in tools:`,
         shadowedTools.join(', '));
+      this.shadowedToolsLogged = true;
     }
 
     // Filter tools based on security policy (workspace + gateway context)
@@ -291,6 +299,13 @@ System Tools:
 - get_app_paths: Get system paths (home, downloads, etc.)
 - run_applescript: Execute AppleScript on macOS (control apps, automate tasks)
 
+Scheduling:
+- schedule_task: Schedule tasks to run at specific times or intervals
+  - Create reminders: "remind me to X at Y"
+  - Recurring tasks: "every day at 9am, do X"
+  - One-time tasks: "at 3pm tomorrow, do X"
+  - Cron schedules: standard cron expressions supported
+
 Plan Control:
 - revise_plan: Modify remaining plan steps when obstacles are encountered or new information discovered`;
 
@@ -344,6 +359,9 @@ Plan Control:
     if (name === 'get_env') return await this.systemTools.getEnvVariable(input.name);
     if (name === 'get_app_paths') return this.systemTools.getAppPaths();
     if (name === 'run_applescript') return await this.systemTools.runAppleScript(input.script);
+
+    // Cron/scheduling tools
+    if (name === 'schedule_task') return await this.cronTools.executeAction(input);
 
     // Meta tools
     if (name === 'revise_plan') {

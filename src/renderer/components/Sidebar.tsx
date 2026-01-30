@@ -120,9 +120,6 @@ export function Sidebar({
 
   return (
     <div className="sidebar cli-sidebar">
-      {/* Sidebar Header - matches main header height */}
-      <div className="cli-sidebar-header"></div>
-
       {/* New Task Button */}
       <div className="sidebar-header">
         <button className="new-task-btn cli-new-task-btn" onClick={handleNewTask}>

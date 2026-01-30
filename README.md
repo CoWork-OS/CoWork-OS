@@ -110,6 +110,8 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
 - **Parallel Task Queue**: Run multiple tasks concurrently with configurable limits (1-10, default 3)
 - **Quick Task FAB**: Floating action button for rapid task creation
 - **Toast Notifications**: Real-time notifications for task completion and failures
+- **Scheduled Tasks**: Schedule recurring tasks with cron expressions, channel delivery, and run history
+- **In-App Notification Center**: Bell icon notification panel with mark as read, delete, and click-to-navigate
 - **WhatsApp Bot**: Run tasks via WhatsApp with QR code pairing, self-chat mode, and markdown support
 - **Telegram Bot**: Run tasks remotely via Telegram with workspace selection and streaming responses
 - **Discord Bot**: Run tasks via Discord with slash commands and direct messages
@@ -154,6 +156,7 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
 │  - Task Timeline                                 │
 │  - Approval Dialogs                              │
 │  - Workspace Selector                            │
+│  - Notification Panel                            │
 │  - MCP Settings & Registry Browser               │
 └─────────────────────────────────────────────────┘
                       ↕ IPC
@@ -164,6 +167,8 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
 │  - Tool Registry (Built-in + MCP Tools)          │
 │  - Permission Manager                            │
 │  - Custom Skill Loader                           │
+│  - Cron Service (Scheduled Tasks)                │
+│  - Notification Service                          │
 └─────────────────────────────────────────────────┘
                       ↕
 ┌─────────────────────────────────────────────────┐
@@ -443,6 +448,133 @@ Click a toast to jump to that task's details.
 
 ---
 
+## Scheduled Tasks (Cron Jobs)
+
+CoWork-OSS supports scheduling recurring tasks using cron expressions. This allows you to automate repetitive tasks to run at specific times or intervals, with optional delivery of results to messaging channels.
+
+### Features
+
+- **Cron Expressions**: Schedule tasks using standard cron syntax (minute, hour, day, month, weekday)
+- **Workspace Binding**: Each scheduled task runs in a specific workspace
+- **Channel Delivery**: Optionally send task results to Telegram, Discord, Slack, WhatsApp, or iMessage
+- **Run History**: View execution history with status, duration, and error details
+- **Enable/Disable**: Toggle jobs on or off without deleting them
+- **Manual Trigger**: Run any scheduled task on-demand
+
+### Setting Up Scheduled Tasks
+
+1. Open **Settings** (gear icon)
+2. Navigate to the **Schedule** tab
+3. Click **Add Scheduled Task**
+4. Configure your task:
+   - **Name**: A descriptive name for the job
+   - **Schedule**: Cron expression or use the visual schedule builder
+   - **Workspace**: Select the workspace where the task will run
+   - **Task Prompt**: What the agent should do when triggered
+   - **Channel Delivery** (optional): Select a connected channel to receive results
+
+### Cron Expression Examples
+
+| Schedule | Cron Expression | Description |
+|----------|-----------------|-------------|
+| Every hour | `0 * * * *` | Runs at the start of every hour |
+| Daily at 9am | `0 9 * * *` | Runs every day at 9:00 AM |
+| Every weekday at 6pm | `0 18 * * 1-5` | Runs Monday-Friday at 6:00 PM |
+| Weekly on Sunday | `0 0 * * 0` | Runs every Sunday at midnight |
+| Every 30 minutes | `*/30 * * * *` | Runs every 30 minutes |
+| First of month | `0 0 1 * *` | Runs on the 1st of every month at midnight |
+
+### Visual Schedule Builder
+
+If you're not familiar with cron syntax, use the visual schedule builder:
+- Select frequency: **Hourly**, **Daily**, **Weekly**, **Monthly**
+- Choose specific times and days
+- The cron expression is generated automatically
+
+### Channel Delivery
+
+When channel delivery is enabled, task results are sent to your configured messaging channels:
+
+1. **Task Completion**: Receive a summary when the task finishes successfully
+2. **Task Failure**: Get notified immediately if a task fails
+3. **Summary Mode**: Option to send only a brief summary vs. full results
+
+Supported channels:
+- Telegram
+- Discord
+- Slack
+- WhatsApp
+- iMessage
+
+### Run History
+
+View the execution history for each scheduled task:
+- **Status**: Success ✅, Failed ❌, or Timed Out ⏱️
+- **Duration**: How long the task took to execute
+- **Started At**: When the task began
+- **Error Details**: Error message if the task failed
+- **Task ID**: Link to the full task details
+
+### Example Use Cases
+
+- **Daily Backup Report**: "Every day at 6 PM, check my project folders for uncommitted changes and send a summary to Telegram"
+- **Weekly Code Review**: "Every Monday at 9 AM, analyze the codebase for TODO comments and create a report"
+- **Hourly Monitoring**: "Every hour, check if the build passes and notify me on Discord if it fails"
+- **Monthly Cleanup**: "On the first of each month, organize my Downloads folder by file type"
+
+---
+
+## In-App Notification Center
+
+CoWork-OSS includes a notification center accessible from the title bar, providing a centralized place to view and manage notifications for scheduled tasks and other events.
+
+### Features
+
+- **Bell Icon**: Notification bell in the top-right corner with unread badge count
+- **Notification Panel**: Click the bell to open a dropdown panel with all notifications
+- **Click to Navigate**: Click any notification to jump to the related task
+- **Mark as Read**: Individual or bulk "mark all as read" actions
+- **Delete Notifications**: Remove individual notifications or clear all
+- **Real-Time Updates**: New notifications appear instantly without refresh
+- **macOS Native Notifications**: Desktop notifications for scheduled task completions
+
+### Notification Types
+
+| Type | Icon | Description |
+|------|------|-------------|
+| Task Completed | ✅ | A task or scheduled task finished successfully |
+| Task Failed | ❌ | A task encountered an error |
+| Scheduled Task | ⏰ | A scheduled task event notification |
+| Info | ℹ️ | Informational notification |
+| Warning | ⚠️ | Warning notification |
+| Error | 🚨 | Error notification |
+
+### Using the Notification Center
+
+1. **View Notifications**: Click the bell icon in the top-right corner
+2. **Unread Badge**: The red badge shows the count of unread notifications
+3. **Click Notification**: Opens the related task in the main view
+4. **Mark as Read**: Clicking a notification automatically marks it as read
+5. **Mark All Read**: Click "Mark all read" to clear the unread badge
+6. **Delete**: Hover over a notification and click the X to delete it
+7. **Clear All**: Click "Clear all" to remove all notifications
+
+### Desktop Notifications
+
+When a scheduled task completes, you'll receive:
+1. **macOS Native Notification**: Shows task status and allows clicking to focus the app
+2. **In-App Notification**: Stored in the notification center for later reference
+
+### Notification Persistence
+
+Notifications are stored locally and persist across app restarts. They include:
+- Notification title and message
+- Timestamp
+- Read/unread status
+- Links to related tasks or scheduled jobs
+
+---
+
 ## Compliance
 
 This project requires users to comply with their model provider's terms and policies:
@@ -490,6 +622,8 @@ If requested by the rights holder, we will update naming/branding to avoid confu
 - [x] **Parallel task queue** - Run multiple tasks concurrently with configurable limits and queue management
 - [x] **Quick Task FAB** - Floating action button for rapid task creation
 - [x] **Toast notifications** - Real-time notifications for task completion and failures
+- [x] **Scheduled Tasks** - Cron-based task scheduling with channel delivery and run history
+- [x] **In-App Notification Center** - Bell icon notification panel with mark as read, delete, and click-to-navigate
 - [x] **Custom Skills** - Create and manage user-defined skills with custom prompts and tool configurations
 - [x] **MCP Client** - Connect to external MCP servers and use their tools
 - [x] **MCP Host** - Expose CoWork's tools as an MCP server for external clients
@@ -1612,10 +1746,18 @@ cowork-oss/
 │   │   │   ├── registry/      # MCP server registry
 │   │   │   ├── types.ts       # MCP type definitions
 │   │   │   └── settings.ts    # MCP settings management
+│   │   ├── cron/              # Scheduled task execution
+│   │   │   ├── service.ts     # Cron service with job management
+│   │   │   └── index.ts       # Cron exports
+│   │   ├── notifications/     # In-app notification system
+│   │   │   ├── service.ts     # Notification service
+│   │   │   └── store.ts       # Persistent notification storage
 │   │   └── ipc/               # IPC handlers
 │   ├── renderer/              # React UI
 │   │   ├── App.tsx            # Main app component
 │   │   ├── components/        # UI components
+│   │   │   ├── NotificationPanel.tsx  # Bell icon notification center
+│   │   │   └── ...            # Other UI components
 │   │   └── styles/            # CSS styles
 │   └── shared/                # Shared types
 ├── package.json

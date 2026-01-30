@@ -19,7 +19,8 @@ import {
   SkillRepository,
   LLMModelRepository,
 } from '../database/repositories';
-import { IPC_CHANNELS, LLMSettingsData, AddChannelRequest, UpdateChannelRequest, SecurityMode, UpdateInfo } from '../../shared/types';
+import { IPC_CHANNELS, LLMSettingsData, AddChannelRequest, UpdateChannelRequest, SecurityMode, UpdateInfo, TEMP_WORKSPACE_ID, TEMP_WORKSPACE_NAME, Workspace } from '../../shared/types';
+import * as os from 'os';
 import { AgentDaemon } from '../agent/daemon';
 import { LLMProviderFactory, LLMProviderConfig, ModelKey, MODELS, GEMINI_MODELS, OPENROUTER_MODELS, OLLAMA_MODELS, OpenAIOAuth } from '../agent/llm';
 import { SearchProviderFactory, SearchSettings, SearchProviderType } from '../agent/search';
@@ -59,6 +60,18 @@ import {
   MCPSettingsSchema,
   MCPRegistrySearchSchema,
 } from '../utils/validation';
+import { NotificationService } from '../notifications';
+import type { NotificationType } from '../../shared/types';
+
+// Global notification service instance
+let notificationService: NotificationService | null = null;
+
+/**
+ * Get the notification service instance
+ */
+export function getNotificationService(): NotificationService | null {
+  return notificationService;
+}
 
 // Helper to check rate limit and throw if exceeded
 function checkRateLimit(channel: string, config = RATE_LIMIT_CONFIGS.standard): void {
@@ -104,6 +117,59 @@ export function setupIpcHandlers(
     const relative = path.relative(normalizedWorkspace, normalizedFile);
     // If relative path starts with '..' or is absolute, it's outside workspace
     return !relative.startsWith('..') && !path.isAbsolute(relative);
+  };
+
+  // Temp workspace management
+  // The temp workspace is created on-demand and stored in the database with a special ID
+  // It uses the system's temp directory and is filtered from the workspace list shown to users
+  const getOrCreateTempWorkspace = async (): Promise<Workspace> => {
+    // Check if temp workspace already exists in database
+    const existing = workspaceRepo.findById(TEMP_WORKSPACE_ID);
+    if (existing) {
+      // Verify the temp directory still exists, recreate if not
+      try {
+        await fs.access(existing.path);
+        return { ...existing, isTemp: true };
+      } catch {
+        // Directory was deleted, delete the workspace record and recreate
+        workspaceRepo.delete(TEMP_WORKSPACE_ID);
+      }
+    }
+
+    // Create temp directory
+    const tempDir = path.join(os.tmpdir(), 'cowork-oss-temp');
+    await fs.mkdir(tempDir, { recursive: true });
+
+    // Create the temp workspace with a known ID
+    const tempWorkspace: Workspace = {
+      id: TEMP_WORKSPACE_ID,
+      name: TEMP_WORKSPACE_NAME,
+      path: tempDir,
+      createdAt: Date.now(),
+      permissions: {
+        read: true,
+        write: true,
+        delete: true,
+        network: true,
+        shell: false,
+      },
+      isTemp: true,
+    };
+
+    // Insert directly using raw SQL to use our specific ID
+    const stmt = db.prepare(`
+      INSERT OR REPLACE INTO workspaces (id, name, path, created_at, permissions)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    stmt.run(
+      tempWorkspace.id,
+      tempWorkspace.name,
+      tempWorkspace.path,
+      tempWorkspace.createdAt,
+      JSON.stringify(tempWorkspace.permissions)
+    );
+
+    return tempWorkspace;
   };
 
   // File handlers - open files and show in Finder
@@ -313,7 +379,14 @@ export function setupIpcHandlers(
   });
 
   ipcMain.handle(IPC_CHANNELS.WORKSPACE_LIST, async () => {
-    return workspaceRepo.findAll();
+    // Filter out the temp workspace from the list - users shouldn't see it in their workspaces
+    const allWorkspaces = workspaceRepo.findAll();
+    return allWorkspaces.filter(w => w.id !== TEMP_WORKSPACE_ID);
+  });
+
+  // Get or create the temp workspace (used when no workspace is selected)
+  ipcMain.handle(IPC_CHANNELS.WORKSPACE_GET_TEMP, async () => {
+    return getOrCreateTempWorkspace();
   });
 
   ipcMain.handle(IPC_CHANNELS.WORKSPACE_SELECT, async (_, id: string) => {
@@ -1156,6 +1229,9 @@ export function setupIpcHandlers(
 
   // MCP handlers
   setupMCPHandlers();
+
+  // Notification handlers
+  setupNotificationHandlers();
 }
 
 /**
@@ -1364,5 +1440,175 @@ function setupMCPHandlers(): void {
     const { trayManager } = await import('../tray');
     trayManager.saveSettings(settings);
     return { success: true };
+  });
+
+  // =====================
+  // Cron (Scheduled Tasks) Handlers
+  // =====================
+  setupCronHandlers();
+}
+
+/**
+ * Set up Cron (Scheduled Tasks) IPC handlers
+ */
+function setupCronHandlers(): void {
+  const { getCronService } = require('../cron');
+
+  // Get service status
+  ipcMain.handle(IPC_CHANNELS.CRON_GET_STATUS, async () => {
+    const service = getCronService();
+    if (!service) {
+      return {
+        enabled: false,
+        storePath: '',
+        jobCount: 0,
+        enabledJobCount: 0,
+        nextWakeAtMs: null,
+      };
+    }
+    return service.status();
+  });
+
+  // List all jobs
+  ipcMain.handle(IPC_CHANNELS.CRON_LIST_JOBS, async (_, opts?: { includeDisabled?: boolean }) => {
+    const service = getCronService();
+    if (!service) return [];
+    return service.list(opts);
+  });
+
+  // Get a single job
+  ipcMain.handle(IPC_CHANNELS.CRON_GET_JOB, async (_, id: string) => {
+    const service = getCronService();
+    if (!service) return null;
+    return service.get(id);
+  });
+
+  // Add a new job
+  ipcMain.handle(IPC_CHANNELS.CRON_ADD_JOB, async (_, jobData) => {
+    const service = getCronService();
+    if (!service) {
+      return { ok: false, error: 'Cron service not initialized' };
+    }
+    return service.add(jobData);
+  });
+
+  // Update an existing job
+  ipcMain.handle(IPC_CHANNELS.CRON_UPDATE_JOB, async (_, id: string, patch) => {
+    const service = getCronService();
+    if (!service) {
+      return { ok: false, error: 'Cron service not initialized' };
+    }
+    return service.update(id, patch);
+  });
+
+  // Remove a job
+  ipcMain.handle(IPC_CHANNELS.CRON_REMOVE_JOB, async (_, id: string) => {
+    const service = getCronService();
+    if (!service) {
+      return { ok: false, removed: false, error: 'Cron service not initialized' };
+    }
+    return service.remove(id);
+  });
+
+  // Run a job immediately
+  ipcMain.handle(IPC_CHANNELS.CRON_RUN_JOB, async (_, id: string, mode?: 'due' | 'force') => {
+    const service = getCronService();
+    if (!service) {
+      return { ok: false, error: 'Cron service not initialized' };
+    }
+    return service.run(id, mode);
+  });
+
+  // Get run history for a job
+  ipcMain.handle('cron:getRunHistory', async (_, id: string) => {
+    const service = getCronService();
+    if (!service) return null;
+    return service.getRunHistory(id);
+  });
+
+  // Clear run history for a job
+  ipcMain.handle('cron:clearRunHistory', async (_, id: string) => {
+    const service = getCronService();
+    if (!service) return false;
+    return service.clearRunHistory(id);
+  });
+
+  // Get webhook status
+  ipcMain.handle('cron:getWebhookStatus', async () => {
+    const service = getCronService();
+    if (!service) return { enabled: false };
+    const status = await service.status();
+    return status.webhook ?? { enabled: false };
+  });
+}
+
+/**
+ * Set up Notification IPC handlers
+ */
+function setupNotificationHandlers(): void {
+  // Initialize notification service with event forwarding to main window
+  notificationService = new NotificationService({
+    onEvent: (event) => {
+      // Forward notification events to renderer
+      // We need to import BrowserWindow from electron to send to all windows
+      const { BrowserWindow } = require('electron');
+      const windows = BrowserWindow.getAllWindows();
+      for (const win of windows) {
+        if (win.webContents) {
+          win.webContents.send(IPC_CHANNELS.NOTIFICATION_EVENT, event);
+        }
+      }
+    },
+  });
+
+  console.log('[Notifications] Service initialized');
+
+  // List all notifications
+  ipcMain.handle(IPC_CHANNELS.NOTIFICATION_LIST, async () => {
+    if (!notificationService) return [];
+    return notificationService.list();
+  });
+
+  // Get unread count
+  ipcMain.handle('notification:unreadCount', async () => {
+    if (!notificationService) return 0;
+    return notificationService.getUnreadCount();
+  });
+
+  // Mark notification as read
+  ipcMain.handle(IPC_CHANNELS.NOTIFICATION_MARK_READ, async (_, id: string) => {
+    if (!notificationService) return null;
+    return notificationService.markRead(id);
+  });
+
+  // Mark all notifications as read
+  ipcMain.handle(IPC_CHANNELS.NOTIFICATION_MARK_ALL_READ, async () => {
+    if (!notificationService) return;
+    await notificationService.markAllRead();
+  });
+
+  // Delete a notification
+  ipcMain.handle(IPC_CHANNELS.NOTIFICATION_DELETE, async (_, id: string) => {
+    if (!notificationService) return false;
+    return notificationService.delete(id);
+  });
+
+  // Delete all notifications
+  ipcMain.handle(IPC_CHANNELS.NOTIFICATION_DELETE_ALL, async () => {
+    if (!notificationService) return;
+    await notificationService.deleteAll();
+  });
+
+  // Add a notification (internal use, for programmatic notifications)
+  ipcMain.handle(IPC_CHANNELS.NOTIFICATION_ADD, async (_, data: {
+    type: NotificationType;
+    title: string;
+    message: string;
+    taskId?: string;
+    cronJobId?: string;
+    workspaceId?: string;
+  }) => {
+    if (!notificationService) return null;
+    return notificationService.add(data);
   });
 }

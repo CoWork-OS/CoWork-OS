@@ -1,7 +1,7 @@
 import path from 'path';
-import { app, BrowserWindow, ipcMain, dialog, session, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, session, shell, Notification } from 'electron';
 import { DatabaseManager } from './database/schema';
-import { setupIpcHandlers } from './ipc/handlers';
+import { setupIpcHandlers, getNotificationService } from './ipc/handlers';
 import { AgentDaemon } from './agent/daemon';
 import { LLMProviderFactory } from './agent/llm';
 import { SearchProviderFactory } from './agent/search';
@@ -12,11 +12,13 @@ import { GuardrailManager } from './guardrails/guardrail-manager';
 import { AppearanceManager } from './settings/appearance-manager';
 import { MCPClientManager } from './mcp/client/MCPClientManager';
 import { trayManager } from './tray';
+import { CronService, setCronService, DEFAULT_CRON_STORE_PATH } from './cron';
 
 let mainWindow: BrowserWindow | null = null;
 let dbManager: DatabaseManager;
 let agentDaemon: AgentDaemon;
 let channelGateway: ChannelGateway;
+let cronService: CronService | null = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -117,6 +119,145 @@ app.whenReady().then(async () => {
     // Don't fail app startup if MCP init fails
   }
 
+  // Initialize Cron Service for scheduled task execution
+  try {
+    cronService = new CronService({
+      cronEnabled: true,
+      storePath: DEFAULT_CRON_STORE_PATH,
+      maxConcurrentRuns: 3, // Allow up to 3 concurrent jobs
+      // Webhook configuration (disabled by default, can be enabled in settings)
+      webhook: {
+        enabled: false, // Set to true to enable webhook triggers
+        port: 9876,
+        host: '127.0.0.1',
+        // secret: 'your-secret-here', // Uncomment and set for secure webhooks
+      },
+      createTask: async (params) => {
+        const task = await agentDaemon.createTask({
+          title: params.title,
+          prompt: params.prompt,
+          workspaceId: params.workspaceId,
+        });
+        return { id: task.id };
+      },
+      // Channel delivery handler - sends job results to messaging platforms
+      deliverToChannel: async (params) => {
+        if (!channelGateway) {
+          console.warn('[Cron] Cannot deliver to channel - gateway not initialized');
+          return;
+        }
+
+        // Build the message
+        const statusEmoji = params.status === 'ok' ? '✅' : params.status === 'error' ? '❌' : '⏱️';
+        let message = `${statusEmoji} **Scheduled Task: ${params.jobName}**\n\n`;
+
+        if (params.status === 'ok') {
+          message += `Task completed successfully.\n`;
+        } else if (params.status === 'error') {
+          message += `Task failed.\n`;
+        } else {
+          message += `Task timed out.\n`;
+        }
+
+        if (params.error) {
+          message += `\n**Error:** ${params.error}\n`;
+        }
+
+        if (params.taskId && !params.summaryOnly) {
+          message += `\n_Task ID: ${params.taskId}_`;
+        }
+
+        // Find the channel to verify it exists
+        const channels = channelGateway.getChannels();
+        const channel = channels.find(
+          (ch) => ch.type === params.channelType && ch.id === params.channelId
+        );
+
+        if (!channel) {
+          console.warn(`[Cron] Channel not found: ${params.channelType}:${params.channelId}`);
+          return;
+        }
+
+        try {
+          // Send the message via the gateway
+          await channelGateway.sendMessage(
+            params.channelType as any,
+            params.channelId,
+            message,
+            { parseMode: 'markdown' }
+          );
+          console.log(`[Cron] Delivered to ${params.channelType}:${params.channelId}`);
+        } catch (err) {
+          console.error(`[Cron] Failed to deliver to ${params.channelType}:${params.channelId}:`, err);
+        }
+      },
+      onEvent: async (evt) => {
+        // Forward cron events to renderer
+        if (mainWindow?.webContents) {
+          mainWindow.webContents.send('cron:event', evt);
+        }
+        console.log('[Cron] Event:', evt.action, evt.jobId);
+
+        // Show desktop notification when scheduled task finishes
+        if (evt.action === 'finished') {
+          const statusEmoji = evt.status === 'ok' ? '✅' : evt.status === 'error' ? '❌' : '⏱️';
+          const statusText = evt.status === 'ok' ? 'completed' : evt.status === 'error' ? 'failed' : 'timed out';
+
+          // Add in-app notification
+          const notificationService = getNotificationService();
+          if (notificationService) {
+            try {
+              // Get job name for the notification
+              const job = cronService ? await cronService.get(evt.jobId) : null;
+              const jobName = job?.name || 'Scheduled Task';
+              await notificationService.add({
+                type: evt.status === 'ok' ? 'task_completed' : 'task_failed',
+                title: `${statusEmoji} ${jobName} ${statusText}`,
+                message: evt.error || (evt.status === 'ok' ? 'Task completed successfully.' : 'Task did not complete.'),
+                taskId: evt.taskId,
+                cronJobId: evt.jobId,
+                workspaceId: job?.workspaceId,
+              });
+            } catch (err) {
+              console.error('[Cron] Failed to add in-app notification:', err);
+            }
+          }
+
+          // Show macOS notification
+          if (Notification.isSupported()) {
+            const notification = new Notification({
+              title: `${statusEmoji} Scheduled Task ${statusText}`,
+              body: evt.error ? `Error: ${evt.error}` : 'Click to view results in the app.',
+              silent: false,
+            });
+
+            notification.on('click', () => {
+              // Bring the main window to focus
+              if (mainWindow) {
+                if (mainWindow.isMinimized()) mainWindow.restore();
+                mainWindow.focus();
+              }
+            });
+
+            notification.show();
+          }
+        }
+      },
+      log: {
+        debug: (msg, data) => console.log(`[Cron] ${msg}`, data ?? ''),
+        info: (msg, data) => console.log(`[Cron] ${msg}`, data ?? ''),
+        warn: (msg, data) => console.warn(`[Cron] ${msg}`, data ?? ''),
+        error: (msg, data) => console.error(`[Cron] ${msg}`, data ?? ''),
+      },
+    });
+    setCronService(cronService);
+    await cronService.start();
+    console.log('[Main] Cron Service initialized');
+  } catch (error) {
+    console.error('[Main] Failed to initialize Cron Service:', error);
+    // Don't fail app startup if cron init fails
+  }
+
   // Initialize channel gateway with agent daemon for task processing
   channelGateway = new ChannelGateway(dbManager.getDatabase(), {
     autoConnect: true, // Auto-connect enabled channels on startup
@@ -137,7 +278,7 @@ app.whenReady().then(async () => {
 
     // Initialize menu bar tray (macOS native companion)
     if (process.platform === 'darwin') {
-      await trayManager.initialize(mainWindow, channelGateway, dbManager);
+      await trayManager.initialize(mainWindow, channelGateway, dbManager, agentDaemon);
     }
 
     // Show migration notification after window is ready
@@ -174,6 +315,12 @@ app.on('window-all-closed', () => {
 app.on('before-quit', async () => {
   // Destroy tray
   trayManager.destroy();
+
+  // Stop cron service (async to properly shutdown webhook server)
+  if (cronService) {
+    await cronService.stop();
+    setCronService(null);
+  }
 
   if (channelGateway) {
     await channelGateway.shutdown();

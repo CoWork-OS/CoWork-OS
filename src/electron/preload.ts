@@ -17,6 +17,7 @@ const IPC_CHANNELS = {
   WORKSPACE_LIST: 'workspace:list',
   WORKSPACE_CREATE: 'workspace:create',
   WORKSPACE_UPDATE_PERMISSIONS: 'workspace:updatePermissions',
+  WORKSPACE_GET_TEMP: 'workspace:getTemp',
   APPROVAL_RESPOND: 'approval:respond',
   ARTIFACT_LIST: 'artifact:list',
   ARTIFACT_PREVIEW: 'artifact:preview',
@@ -120,6 +121,27 @@ const IPC_CHANNELS = {
   TRAY_OPEN_SETTINGS: 'tray:openSettings',
   TRAY_OPEN_ABOUT: 'tray:openAbout',
   TRAY_CHECK_UPDATES: 'tray:checkUpdates',
+  TRAY_QUICK_TASK: 'tray:quick-task',
+  // Quick Input
+  QUICK_INPUT_SUBMIT: 'quick-input:submit',
+  QUICK_INPUT_CLOSE: 'quick-input:close',
+  // Cron (Scheduled Tasks)
+  CRON_GET_STATUS: 'cron:getStatus',
+  CRON_LIST_JOBS: 'cron:listJobs',
+  CRON_GET_JOB: 'cron:getJob',
+  CRON_ADD_JOB: 'cron:addJob',
+  CRON_UPDATE_JOB: 'cron:updateJob',
+  CRON_REMOVE_JOB: 'cron:removeJob',
+  CRON_RUN_JOB: 'cron:runJob',
+  CRON_EVENT: 'cron:event',
+  // Notifications
+  NOTIFICATION_LIST: 'notification:list',
+  NOTIFICATION_ADD: 'notification:add',
+  NOTIFICATION_MARK_READ: 'notification:markRead',
+  NOTIFICATION_MARK_ALL_READ: 'notification:markAllRead',
+  NOTIFICATION_DELETE: 'notification:delete',
+  NOTIFICATION_DELETE_ALL: 'notification:deleteAll',
+  NOTIFICATION_EVENT: 'notification:event',
 } as const;
 
 // Custom Skill types (inlined for sandboxed preload)
@@ -241,6 +263,7 @@ interface BuiltinToolsSettings {
     image: ToolCategoryConfig;
   };
   toolOverrides: Record<string, { enabled: boolean; priority?: 'high' | 'normal' | 'low' }>;
+  version: string;
 }
 
 // Tray (Menu Bar) Settings (inlined for sandboxed preload)
@@ -250,6 +273,152 @@ interface TraySettings {
   startMinimized: boolean;
   closeToTray: boolean;
   showNotifications: boolean;
+}
+
+// Cron (Scheduled Tasks) Types (inlined for sandboxed preload)
+type CronSchedule =
+  | { kind: 'at'; atMs: number }
+  | { kind: 'every'; everyMs: number; anchorMs?: number }
+  | { kind: 'cron'; expr: string; tz?: string };
+
+type CronJobStatus = 'ok' | 'error' | 'skipped';
+
+interface CronRunHistoryEntry {
+  runAtMs: number;
+  durationMs: number;
+  status: CronJobStatus;
+  error?: string;
+  taskId?: string;
+}
+
+interface CronJobState {
+  nextRunAtMs?: number;
+  runningAtMs?: number;
+  lastRunAtMs?: number;
+  lastStatus?: CronJobStatus;
+  lastError?: string;
+  lastDurationMs?: number;
+  lastTaskId?: string;
+  runHistory?: CronRunHistoryEntry[];
+  totalRuns?: number;
+  successfulRuns?: number;
+  failedRuns?: number;
+}
+
+interface CronDeliveryConfig {
+  enabled: boolean;
+  channelType?: 'telegram' | 'discord' | 'slack' | 'whatsapp';
+  channelId?: string;
+  deliverOnSuccess?: boolean;
+  deliverOnError?: boolean;
+  summaryOnly?: boolean;
+}
+
+interface CronJob {
+  id: string;
+  name: string;
+  description?: string;
+  enabled: boolean;
+  deleteAfterRun?: boolean;
+  createdAtMs: number;
+  updatedAtMs: number;
+  schedule: CronSchedule;
+  workspaceId: string;
+  taskPrompt: string;
+  taskTitle?: string;
+  timeoutMs?: number;
+  modelKey?: string;
+  maxHistoryEntries?: number;
+  delivery?: CronDeliveryConfig;
+  state: CronJobState;
+}
+
+interface CronJobCreate {
+  name: string;
+  description?: string;
+  enabled: boolean;
+  deleteAfterRun?: boolean;
+  schedule: CronSchedule;
+  workspaceId: string;
+  taskPrompt: string;
+  taskTitle?: string;
+  timeoutMs?: number;
+  modelKey?: string;
+  maxHistoryEntries?: number;
+  delivery?: CronDeliveryConfig;
+}
+
+interface CronJobPatch {
+  name?: string;
+  description?: string;
+  enabled?: boolean;
+  deleteAfterRun?: boolean;
+  schedule?: CronSchedule;
+  workspaceId?: string;
+  taskPrompt?: string;
+  taskTitle?: string;
+  timeoutMs?: number;
+  modelKey?: string;
+  maxHistoryEntries?: number;
+  delivery?: CronDeliveryConfig;
+}
+
+interface CronRunHistoryResult {
+  jobId: string;
+  jobName: string;
+  entries: CronRunHistoryEntry[];
+  totalRuns: number;
+  successfulRuns: number;
+  failedRuns: number;
+}
+
+interface CronWebhookStatus {
+  enabled: boolean;
+  host?: string;
+  port?: number;
+}
+
+interface CronStatusSummary {
+  enabled: boolean;
+  storePath: string;
+  jobCount: number;
+  enabledJobCount: number;
+  runningJobCount: number;
+  maxConcurrentRuns: number;
+  nextWakeAtMs: number | null;
+  webhook?: CronWebhookStatus;
+}
+
+interface CronEvent {
+  jobId: string;
+  action: 'added' | 'updated' | 'removed' | 'started' | 'finished';
+  runAtMs?: number;
+  durationMs?: number;
+  status?: CronJobStatus;
+  error?: string;
+  taskId?: string;
+  nextRunAtMs?: number;
+}
+
+// Notification Types (inlined for sandboxed preload)
+type NotificationType = 'task_completed' | 'task_failed' | 'scheduled_task' | 'info' | 'warning' | 'error';
+
+interface AppNotification {
+  id: string;
+  type: NotificationType;
+  title: string;
+  message: string;
+  read: boolean;
+  createdAt: number;
+  taskId?: string;
+  cronJobId?: string;
+  workspaceId?: string;
+}
+
+interface NotificationEvent {
+  type: 'added' | 'updated' | 'removed' | 'cleared';
+  notification?: AppNotification;
+  notifications?: AppNotification[];
 }
 
 // Expose protected methods that allow the renderer process to use ipcRenderer
@@ -293,6 +462,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   createWorkspace: (data: any) => ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_CREATE, data),
   listWorkspaces: () => ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_LIST),
   selectWorkspace: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_SELECT, id),
+  getTempWorkspace: () => ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_GET_TEMP),
   updateWorkspacePermissions: (id: string, permissions: { shell?: boolean; network?: boolean }) =>
     ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_UPDATE_PERMISSIONS, id, permissions),
 
@@ -485,6 +655,48 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on(IPC_CHANNELS.TRAY_CHECK_UPDATES, callback);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.TRAY_CHECK_UPDATES, callback);
   },
+  onTrayQuickTask: (callback: (event: any, data: { task: string; workspaceId?: string }) => void) => {
+    ipcRenderer.on(IPC_CHANNELS.TRAY_QUICK_TASK, callback);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.TRAY_QUICK_TASK, callback);
+  },
+
+  // Quick Input APIs (for the floating quick input window)
+  quickInputSubmit: (task: string, workspaceId?: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.QUICK_INPUT_SUBMIT, task, workspaceId),
+  quickInputClose: () => ipcRenderer.invoke(IPC_CHANNELS.QUICK_INPUT_CLOSE),
+
+  // Cron (Scheduled Tasks) APIs
+  getCronStatus: () => ipcRenderer.invoke(IPC_CHANNELS.CRON_GET_STATUS),
+  listCronJobs: (opts?: { includeDisabled?: boolean }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CRON_LIST_JOBS, opts),
+  getCronJob: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.CRON_GET_JOB, id),
+  addCronJob: (job: CronJobCreate) => ipcRenderer.invoke(IPC_CHANNELS.CRON_ADD_JOB, job),
+  updateCronJob: (id: string, patch: CronJobPatch) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CRON_UPDATE_JOB, id, patch),
+  removeCronJob: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.CRON_REMOVE_JOB, id),
+  runCronJob: (id: string, mode?: 'due' | 'force') =>
+    ipcRenderer.invoke(IPC_CHANNELS.CRON_RUN_JOB, id, mode),
+  onCronEvent: (callback: (event: CronEvent) => void) => {
+    const subscription = (_: any, data: CronEvent) => callback(data);
+    ipcRenderer.on(IPC_CHANNELS.CRON_EVENT, subscription);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.CRON_EVENT, subscription);
+  },
+  getCronRunHistory: (id: string) => ipcRenderer.invoke('cron:getRunHistory', id),
+  clearCronRunHistory: (id: string) => ipcRenderer.invoke('cron:clearRunHistory', id),
+  getCronWebhookStatus: () => ipcRenderer.invoke('cron:getWebhookStatus'),
+
+  // Notification APIs
+  listNotifications: () => ipcRenderer.invoke(IPC_CHANNELS.NOTIFICATION_LIST),
+  getUnreadNotificationCount: () => ipcRenderer.invoke('notification:unreadCount'),
+  markNotificationRead: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.NOTIFICATION_MARK_READ, id),
+  markAllNotificationsRead: () => ipcRenderer.invoke(IPC_CHANNELS.NOTIFICATION_MARK_ALL_READ),
+  deleteNotification: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.NOTIFICATION_DELETE, id),
+  deleteAllNotifications: () => ipcRenderer.invoke(IPC_CHANNELS.NOTIFICATION_DELETE_ALL),
+  onNotificationEvent: (callback: (event: NotificationEvent) => void) => {
+    const subscription = (_: any, data: NotificationEvent) => callback(data);
+    ipcRenderer.on(IPC_CHANNELS.NOTIFICATION_EVENT, subscription);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.NOTIFICATION_EVENT, subscription);
+  },
 });
 
 // Type declarations for TypeScript
@@ -523,6 +735,7 @@ export interface ElectronAPI {
   createWorkspace: (data: any) => Promise<any>;
   listWorkspaces: () => Promise<any[]>;
   selectWorkspace: (id: string) => Promise<any>;
+  getTempWorkspace: () => Promise<any>;
   updateWorkspacePermissions: (id: string, permissions: { shell?: boolean; network?: boolean }) => Promise<any>;
   respondToApproval: (data: any) => Promise<void>;
   listArtifacts: (taskId: string) => Promise<any[]>;
@@ -726,6 +939,30 @@ export interface ElectronAPI {
   onTrayOpenSettings: (callback: () => void) => () => void;
   onTrayOpenAbout: (callback: () => void) => () => void;
   onTrayCheckUpdates: (callback: () => void) => () => void;
+  // Cron (Scheduled Tasks)
+  getCronStatus: () => Promise<CronStatusSummary>;
+  listCronJobs: (opts?: { includeDisabled?: boolean }) => Promise<CronJob[]>;
+  getCronJob: (id: string) => Promise<CronJob | null>;
+  addCronJob: (job: CronJobCreate) => Promise<{ ok: true; job: CronJob } | { ok: false; error: string }>;
+  updateCronJob: (id: string, patch: CronJobPatch) => Promise<{ ok: true; job: CronJob } | { ok: false; error: string }>;
+  removeCronJob: (id: string) => Promise<{ ok: true; removed: boolean } | { ok: false; removed: false; error: string }>;
+  runCronJob: (id: string, mode?: 'due' | 'force') => Promise<
+    | { ok: true; ran: true; taskId: string }
+    | { ok: true; ran: false; reason: 'not-due' | 'disabled' | 'not-found' }
+    | { ok: false; error: string }
+  >;
+  onCronEvent: (callback: (event: CronEvent) => void) => () => void;
+  getCronRunHistory: (id: string) => Promise<CronRunHistoryResult | null>;
+  clearCronRunHistory: (id: string) => Promise<boolean>;
+  getCronWebhookStatus: () => Promise<CronWebhookStatus>;
+  // Notifications
+  listNotifications: () => Promise<AppNotification[]>;
+  getUnreadNotificationCount: () => Promise<number>;
+  markNotificationRead: (id: string) => Promise<AppNotification | null>;
+  markAllNotificationsRead: () => Promise<void>;
+  deleteNotification: (id: string) => Promise<boolean>;
+  deleteAllNotifications: () => Promise<void>;
+  onNotificationEvent: (callback: (event: NotificationEvent) => void) => () => void;
 }
 
 declare global {

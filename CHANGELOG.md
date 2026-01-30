@@ -8,6 +8,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Scheduled Tasks (Cron Jobs)** - Automate recurring tasks with cron expressions
+  - Schedule tasks using standard cron syntax (minute, hour, day, month, weekday)
+  - Visual schedule builder for users unfamiliar with cron syntax
+  - Workspace binding - each scheduled task runs in a specific workspace
+  - Channel delivery - optionally send task results to Telegram, Discord, Slack, WhatsApp, or iMessage
+  - Run history - view execution history with status, duration, and error details
+  - Enable/disable jobs without deleting them
+  - Manual trigger to run any scheduled task on-demand
+  - Configurable concurrent run limits (default: 3)
+  - Desktop notifications when scheduled tasks complete or fail
+- **In-App Notification Center** - Centralized notification management
+  - Bell icon in the top-right corner with unread badge count
+  - Dropdown notification panel accessible from the title bar
+  - Click-to-navigate - click any notification to jump to the related task
+  - Mark as read - individual or bulk "mark all as read" actions
+  - Delete notifications - remove individual or clear all
+  - Real-time updates - new notifications appear instantly without refresh
+  - macOS native desktop notifications for scheduled task completions
+  - Notification types: task_completed, task_failed, scheduled_task, info, warning, error
+  - Persistent storage - notifications survive app restarts
 - **WhatsApp Bot Integration** - Run tasks via WhatsApp with the Baileys library
   - QR code pairing for WhatsApp Web connection
   - Self-Chat Mode for users using their personal WhatsApp number

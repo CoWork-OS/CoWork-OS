@@ -348,7 +348,12 @@ export interface Workspace {
   path: string;
   createdAt: number;
   permissions: WorkspacePermissions;
+  isTemp?: boolean;  // True for the auto-created temp workspace
 }
+
+// Temp workspace constants
+export const TEMP_WORKSPACE_ID = '__temp_workspace__';
+export const TEMP_WORKSPACE_NAME = 'Temporary Workspace';
 
 export interface WorkspacePermissions {
   read: boolean;
@@ -434,6 +439,7 @@ export const IPC_CHANNELS = {
   WORKSPACE_LIST: 'workspace:list',
   WORKSPACE_CREATE: 'workspace:create',
   WORKSPACE_UPDATE_PERMISSIONS: 'workspace:updatePermissions',
+  WORKSPACE_GET_TEMP: 'workspace:getTemp',  // Get or create temp workspace
 
   // Approval operations
   APPROVAL_RESPOND: 'approval:respond',
@@ -558,6 +564,25 @@ export const IPC_CHANNELS = {
   TRAY_OPEN_SETTINGS: 'tray:openSettings',
   TRAY_OPEN_ABOUT: 'tray:openAbout',
   TRAY_CHECK_UPDATES: 'tray:checkUpdates',
+
+  // Cron (Scheduled Tasks)
+  CRON_GET_STATUS: 'cron:getStatus',
+  CRON_LIST_JOBS: 'cron:listJobs',
+  CRON_GET_JOB: 'cron:getJob',
+  CRON_ADD_JOB: 'cron:addJob',
+  CRON_UPDATE_JOB: 'cron:updateJob',
+  CRON_REMOVE_JOB: 'cron:removeJob',
+  CRON_RUN_JOB: 'cron:runJob',
+  CRON_EVENT: 'cron:event',
+
+  // Notifications
+  NOTIFICATION_LIST: 'notification:list',
+  NOTIFICATION_ADD: 'notification:add',
+  NOTIFICATION_MARK_READ: 'notification:markRead',
+  NOTIFICATION_MARK_ALL_READ: 'notification:markAllRead',
+  NOTIFICATION_DELETE: 'notification:delete',
+  NOTIFICATION_DELETE_ALL: 'notification:deleteAll',
+  NOTIFICATION_EVENT: 'notification:event',
 } as const;
 
 // LLM Provider types
@@ -929,4 +954,28 @@ export interface CustomSkill {
 export interface SkillsConfig {
   skillsDirectory: string;  // Default: ~/.cowork/skills/
   enabledSkillIds: string[];
+}
+
+// ============ Notification Types ============
+
+export type NotificationType = 'task_completed' | 'task_failed' | 'scheduled_task' | 'info' | 'warning' | 'error';
+
+export interface AppNotification {
+  id: string;
+  type: NotificationType;
+  title: string;
+  message: string;
+  read: boolean;
+  createdAt: number;
+  // Optional: link to a task
+  taskId?: string;
+  // Optional: link to a cron job
+  cronJobId?: string;
+  // Optional: workspace context
+  workspaceId?: string;
+}
+
+export interface NotificationStoreFile {
+  version: 1;
+  notifications: AppNotification[];
 }

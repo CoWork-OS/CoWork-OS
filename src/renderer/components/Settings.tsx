@@ -14,8 +14,9 @@ import { SkillsSettings } from './SkillsSettings';
 import { MCPSettings } from './MCPSettings';
 import { BuiltinToolsSettings } from './BuiltinToolsSettings';
 import { TraySettings } from './TraySettings';
+import { ScheduledTasksSettings } from './ScheduledTasksSettings';
 
-type SettingsTab = 'appearance' | 'tray' | 'llm' | 'search' | 'telegram' | 'discord' | 'slack' | 'whatsapp' | 'imessage' | 'updates' | 'guardrails' | 'queue' | 'skills' | 'mcp' | 'tools';
+type SettingsTab = 'appearance' | 'tray' | 'llm' | 'search' | 'telegram' | 'discord' | 'slack' | 'whatsapp' | 'imessage' | 'updates' | 'guardrails' | 'queue' | 'skills' | 'mcp' | 'tools' | 'scheduled';
 
 interface SettingsProps {
   onBack: () => void;
@@ -789,6 +790,16 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
             Custom Skills
           </button>
           <button
+            className={`settings-nav-item ${activeTab === 'scheduled' ? 'active' : ''}`}
+            onClick={() => setActiveTab('scheduled')}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="10" />
+              <polyline points="12 6 12 12 16 14" />
+            </svg>
+            Scheduled Tasks
+          </button>
+          <button
             className={`settings-nav-item ${activeTab === 'mcp' ? 'active' : ''}`}
             onClick={() => setActiveTab('mcp')}
           >
@@ -853,6 +864,8 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
             <QueueSettings />
           ) : activeTab === 'skills' ? (
             <SkillsSettings />
+          ) : activeTab === 'scheduled' ? (
+            <ScheduledTasksSettings />
           ) : activeTab === 'mcp' ? (
             <MCPSettings />
           ) : activeTab === 'tools' ? (

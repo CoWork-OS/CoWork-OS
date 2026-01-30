@@ -2,12 +2,12 @@ import { useState, useEffect, useRef } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { MainContent } from './components/MainContent';
 import { RightPanel } from './components/RightPanel';
-import { WorkspaceSelector } from './components/WorkspaceSelector';
 import { Settings } from './components/Settings';
 import { DisclaimerModal } from './components/DisclaimerModal';
 // TaskQueuePanel moved to RightPanel
 import { ToastContainer } from './components/Toast';
 import { QuickTaskFAB } from './components/QuickTaskFAB';
+import { NotificationPanel } from './components/NotificationPanel';
 import { Task, Workspace, TaskEvent, LLMModelInfo, LLMProviderInfo, SuccessCriteria, UpdateInfo, ThemeMode, AccentColor, QueueStatus, ToastNotification } from '../shared/types';
 
 
@@ -19,13 +19,13 @@ function getEffectiveTheme(themeMode: ThemeMode): 'light' | 'dark' {
   return themeMode;
 }
 
-type AppView = 'workspace-selector' | 'main' | 'settings';
+type AppView = 'main' | 'settings';
 
 export function App() {
   const [currentWorkspace, setCurrentWorkspace] = useState<Workspace | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
-  const [currentView, setCurrentView] = useState<AppView>('workspace-selector');
+  const [currentView, setCurrentView] = useState<AppView>('main');
   const [settingsTab, setSettingsTab] = useState<'appearance' | 'llm' | 'search' | 'telegram' | 'discord' | 'updates' | 'guardrails' | 'queue' | 'skills'>('appearance');
   const [events, setEvents] = useState<TaskEvent[]>([]);
 
@@ -45,6 +45,10 @@ export function App() {
   // Queue state
   const [queueStatus, setQueueStatus] = useState<QueueStatus | null>(null);
   const [toasts, setToasts] = useState<ToastNotification[]>([]);
+
+  // Sidebar collapse state
+  const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(false);
+  const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(false);
 
   // Ref to track current tasks for use in event handlers (avoids stale closure)
   const tasksRef = useRef<Task[]>([]);
@@ -174,12 +178,25 @@ export function App() {
     }
   }, []);
 
-  // Load tasks when workspace is selected
+  // Auto-load temp workspace on mount if no workspace is selected
+  useEffect(() => {
+    const initWorkspace = async () => {
+      if (!currentWorkspace) {
+        try {
+          const tempWorkspace = await window.electronAPI.getTempWorkspace();
+          setCurrentWorkspace(tempWorkspace);
+        } catch (error) {
+          console.error('Failed to initialize temp workspace:', error);
+        }
+      }
+    };
+    initWorkspace();
+  }, []);
+
+  // Load tasks when workspace is set
   useEffect(() => {
     if (currentWorkspace) {
-      loadTasks().then(() => {
-        setCurrentView('main');
-      });
+      loadTasks();
     }
   }, [currentWorkspace]);
 
@@ -283,8 +300,41 @@ export function App() {
     }
   };
 
-  const handleWorkspaceSelected = (workspace: Workspace) => {
-    setCurrentWorkspace(workspace);
+  // Handle workspace change - opens folder selection dialog directly
+  const handleChangeWorkspace = async () => {
+    try {
+      // Get list of existing workspaces for reference
+      const existingWorkspaces = await window.electronAPI.listWorkspaces();
+
+      // Open folder selection dialog
+      const folderPath = await window.electronAPI.selectFolder();
+      if (!folderPath) return; // User cancelled
+
+      // Check if this folder is already a workspace
+      const existingWorkspace = existingWorkspaces.find((w: Workspace) => w.path === folderPath);
+      if (existingWorkspace) {
+        setCurrentWorkspace(existingWorkspace);
+        return;
+      }
+
+      // Create a new workspace for this folder
+      const folderName = folderPath.split('/').pop() || 'Workspace';
+      const workspace = await window.electronAPI.createWorkspace({
+        name: folderName,
+        path: folderPath,
+        permissions: {
+          read: true,
+          write: true,
+          delete: true,
+          network: true,
+          shell: false,
+        },
+      });
+
+      setCurrentWorkspace(workspace);
+    } catch (error) {
+      console.error('Failed to change workspace:', error);
+    }
   };
 
   const handleCreateTask = async (title: string, prompt: string, options?: { successCriteria?: SuccessCriteria; maxAttempts?: number }) => {
@@ -401,7 +451,99 @@ export function App() {
 
   return (
     <div className="app">
-      <div className="title-bar" />
+      <div className="title-bar">
+        <div className="title-bar-left">
+          <button
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '32px',
+              height: '32px',
+              borderRadius: '6px',
+              backgroundColor: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+            }}
+            onClick={() => setLeftSidebarCollapsed(!leftSidebarCollapsed)}
+            title={leftSidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+              <line x1="9" y1="3" x2="9" y2="21" />
+            </svg>
+          </button>
+        </div>
+        <div className="title-bar-actions">
+          <button
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '32px',
+              height: '32px',
+              borderRadius: '6px',
+              backgroundColor: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+            }}
+            onClick={() => {
+              const effectiveTheme = getEffectiveTheme(themeMode);
+              handleThemeChange(effectiveTheme === 'dark' ? 'light' : 'dark');
+            }}
+            title={`Switch to ${getEffectiveTheme(themeMode) === 'dark' ? 'light' : 'dark'} mode`}
+          >
+            {getEffectiveTheme(themeMode) === 'dark' ? (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+                <circle cx="12" cy="12" r="5" />
+                <line x1="12" y1="1" x2="12" y2="3" />
+                <line x1="12" y1="21" x2="12" y2="23" />
+                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+                <line x1="1" y1="12" x2="3" y2="12" />
+                <line x1="21" y1="12" x2="23" y2="12" />
+                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
+                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+              </svg>
+            ) : (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+              </svg>
+            )}
+          </button>
+          <NotificationPanel
+            onNotificationClick={(notification) => {
+              if (notification.taskId) {
+                const task = tasks.find(t => t.id === notification.taskId);
+                if (task) {
+                  setSelectedTaskId(task.id);
+                  setCurrentView('main');
+                }
+              }
+            }}
+          />
+          <button
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '32px',
+              height: '32px',
+              borderRadius: '6px',
+              backgroundColor: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+            }}
+            onClick={() => setRightSidebarCollapsed(!rightSidebarCollapsed)}
+            title={rightSidebarCollapsed ? 'Show panel' : 'Hide panel'}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+              <line x1="15" y1="3" x2="15" y2="21" />
+            </svg>
+          </button>
+        </div>
+      </div>
       {/* Update notification banner */}
       {updateInfo?.available && !updateDismissed && (
         <div className="update-banner">
@@ -433,27 +575,26 @@ export function App() {
           </button>
         </div>
       )}
-      {currentView === 'workspace-selector' && (
-        <WorkspaceSelector onWorkspaceSelected={handleWorkspaceSelected} />
-      )}
       {currentView === 'main' && (
         <>
-          <div className="app-layout">
-            <Sidebar
-              workspace={currentWorkspace}
-              tasks={tasks}
-              selectedTaskId={selectedTaskId}
-              onSelectTask={setSelectedTaskId}
-              onOpenSettings={() => setCurrentView('settings')}
-              onTasksChanged={loadTasks}
-            />
+          <div className={`app-layout ${leftSidebarCollapsed ? 'left-collapsed' : ''} ${rightSidebarCollapsed ? 'right-collapsed' : ''}`}>
+            {!leftSidebarCollapsed && (
+              <Sidebar
+                workspace={currentWorkspace}
+                tasks={tasks}
+                selectedTaskId={selectedTaskId}
+                onSelectTask={setSelectedTaskId}
+                onOpenSettings={() => setCurrentView('settings')}
+                onTasksChanged={loadTasks}
+              />
+            )}
             <MainContent
               task={selectedTask}
               workspace={currentWorkspace}
               events={events}
               onSendMessage={handleSendMessage}
               onCreateTask={handleCreateTask}
-              onChangeWorkspace={() => setCurrentView('workspace-selector')}
+              onChangeWorkspace={handleChangeWorkspace}
               onOpenSettings={(tab) => {
                 setSettingsTab(tab || 'appearance');
                 setCurrentView('settings');
@@ -463,15 +604,17 @@ export function App() {
               availableModels={availableModels}
               onModelChange={handleModelChange}
             />
-            <RightPanel
-              task={selectedTask}
-              workspace={currentWorkspace}
-              events={events}
-              tasks={tasks}
-              queueStatus={queueStatus}
-              onSelectTask={setSelectedTaskId}
-              onCancelTask={handleCancelTaskById}
-            />
+            {!rightSidebarCollapsed && (
+              <RightPanel
+                task={selectedTask}
+                workspace={currentWorkspace}
+                events={events}
+                tasks={tasks}
+                queueStatus={queueStatus}
+                onSelectTask={setSelectedTaskId}
+                onCancelTask={handleCancelTaskById}
+              />
+            )}
           </div>
 
           {/* Quick Task FAB */}

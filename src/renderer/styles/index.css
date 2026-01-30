@@ -679,6 +679,27 @@ body {
   top: 0;
   left: 0;
   z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-left: 80px;
+  padding-right: 12px;
+}
+
+/* Left side of title bar (sidebar toggle) */
+.title-bar-left {
+  -webkit-app-region: no-drag;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Actions in the title bar (notifications, etc.) */
+.title-bar-actions {
+  -webkit-app-region: no-drag;
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 /* ============================================
@@ -777,6 +798,15 @@ a,
   overflow: hidden;
 }
 
+/* Collapsed sidebar states */
+.app-layout.left-collapsed .main-content {
+  margin-left: 0;
+}
+
+.app-layout.right-collapsed .main-content {
+  margin-right: 0;
+}
+
 /* ==================== LEFT SIDEBAR ==================== */
 .sidebar {
   width: var(--sidebar-width);
@@ -790,6 +820,7 @@ a,
   flex-direction: column;
   overflow: hidden;
   position: relative;
+  padding-top: 38px;
 }
 
 /* Removed: double-border effect - using single border only */
@@ -2276,6 +2307,7 @@ a,
   flex-direction: column;
   overflow: hidden;
   position: relative;
+  padding-top: 38px;
 }
 
 /* Removed: double-border effect - using single border only */

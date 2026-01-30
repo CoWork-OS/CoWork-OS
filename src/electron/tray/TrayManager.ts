@@ -8,7 +8,7 @@
  * - Gateway status monitoring
  */
 
-import { app, Tray, Menu, nativeImage, BrowserWindow, shell } from 'electron';
+import { app, Tray, Menu, nativeImage, BrowserWindow, shell, NativeImage } from 'electron';
 import * as path from 'path';
 import { ChannelGateway } from '../gateway';
 import { DatabaseManager } from '../database/schema';
@@ -138,7 +138,7 @@ export class TrayManager {
   /**
    * Get or create tray icon
    */
-  private getTrayIcon(state: 'idle' | 'active' | 'error'): nativeImage {
+  private getTrayIcon(state: 'idle' | 'active' | 'error'): NativeImage {
     // Try to load from file first
     const iconPath = this.getIconPath(state === 'active' ? 'trayActiveTemplate' : 'trayTemplate');
     const fs = require('fs');
@@ -159,7 +159,7 @@ export class TrayManager {
    * Create a programmatic tray icon
    * This creates a simple "C" icon for CoWork-OSS
    */
-  private createProgrammaticIcon(state: 'idle' | 'active' | 'error'): nativeImage {
+  private createProgrammaticIcon(state: 'idle' | 'active' | 'error'): NativeImage {
     // Create a 32x32 icon (will be scaled for retina)
     const size = 32;
 
@@ -341,7 +341,7 @@ export class TrayManager {
   /**
    * Get status icon for the menu
    */
-  private getStatusIcon(): nativeImage | undefined {
+  private getStatusIcon(): NativeImage | undefined {
     // Return undefined for now - icons in menu items can be complex
     return undefined;
   }

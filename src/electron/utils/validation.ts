@@ -36,10 +36,16 @@ export const SuccessCriteriaSchema = z.object({
   filePaths: z.array(z.string().max(MAX_PATH_LENGTH)).max(20).optional(),
 });
 
+// TEMP_WORKSPACE_ID constant for validation
+const TEMP_WORKSPACE_ID = '__temp_workspace__';
+
 export const TaskCreateSchema = z.object({
   title: z.string().min(1).max(MAX_TITLE_LENGTH),
   prompt: z.string().min(1).max(MAX_PROMPT_LENGTH),
-  workspaceId: z.string().uuid(),
+  workspaceId: z.string().refine(
+    (val) => val === TEMP_WORKSPACE_ID || z.string().uuid().safeParse(val).success,
+    { message: 'Must be a valid UUID or temp workspace ID' }
+  ),
   budgetTokens: z.number().int().positive().optional(),
   budgetCost: z.number().positive().optional(),
   // Goal Mode fields

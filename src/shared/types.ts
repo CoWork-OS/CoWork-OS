@@ -634,6 +634,14 @@ export const IPC_CHANNELS = {
   REMOTE_GATEWAY_TEST_CONNECTION: 'remoteGateway:testConnection',
   REMOTE_GATEWAY_EVENT: 'remoteGateway:event',
 
+  // SSH Tunnel (for Remote Gateway connection)
+  SSH_TUNNEL_CONNECT: 'sshTunnel:connect',
+  SSH_TUNNEL_DISCONNECT: 'sshTunnel:disconnect',
+  SSH_TUNNEL_GET_STATUS: 'sshTunnel:getStatus',
+  SSH_TUNNEL_SAVE_CONFIG: 'sshTunnel:saveConfig',
+  SSH_TUNNEL_TEST_CONNECTION: 'sshTunnel:testConnection',
+  SSH_TUNNEL_EVENT: 'sshTunnel:event',
+
   // Live Canvas (Agent-driven visual workspace)
   CANVAS_CREATE: 'canvas:create',
   CANVAS_GET_SESSION: 'canvas:getSession',
@@ -1333,6 +1341,68 @@ export interface ControlPlaneEvent {
   details?: unknown;
 }
 
+// ============ SSH Tunnel Types ============
+
+/**
+ * SSH tunnel connection state
+ */
+export type SSHTunnelState =
+  | 'disconnected'
+  | 'connecting'
+  | 'connected'
+  | 'reconnecting'
+  | 'error';
+
+/**
+ * SSH tunnel configuration for remote gateway access
+ */
+export interface SSHTunnelConfig {
+  /** Enable SSH tunnel creation */
+  enabled: boolean;
+  /** Remote SSH host (IP or hostname) */
+  host: string;
+  /** SSH port (default: 22) */
+  sshPort: number;
+  /** SSH username */
+  username: string;
+  /** Path to SSH private key (optional, uses default if not specified) */
+  keyPath?: string;
+  /** Local port for the tunnel (default: 18789) */
+  localPort: number;
+  /** Remote port to forward to (default: 18789) */
+  remotePort: number;
+  /** Remote bind address (default: 127.0.0.1) */
+  remoteBindAddress?: string;
+  /** Auto-reconnect on connection loss */
+  autoReconnect?: boolean;
+  /** Reconnect delay in milliseconds */
+  reconnectDelayMs?: number;
+  /** Maximum reconnect attempts (0 = unlimited) */
+  maxReconnectAttempts?: number;
+  /** Connection timeout in milliseconds */
+  connectionTimeoutMs?: number;
+}
+
+/**
+ * SSH tunnel status information
+ */
+export interface SSHTunnelStatus {
+  /** Current tunnel state */
+  state: SSHTunnelState;
+  /** Tunnel configuration */
+  config?: Partial<SSHTunnelConfig>;
+  /** Time when tunnel was established */
+  connectedAt?: number;
+  /** Error message if state is 'error' */
+  error?: string;
+  /** Number of reconnect attempts */
+  reconnectAttempts?: number;
+  /** Process ID of the SSH process */
+  pid?: number;
+  /** Local tunnel endpoint (e.g., ws://127.0.0.1:18789) */
+  localEndpoint?: string;
+}
+
 // ============ Remote Gateway Connection Types ============
 
 /**
@@ -1398,68 +1468,6 @@ export interface RemoteGatewayStatus {
   lastActivityAt?: number;
   /** SSH tunnel status (if using SSH tunnel) */
   sshTunnel?: SSHTunnelStatus;
-}
-
-// ============ SSH Tunnel Types ============
-
-/**
- * SSH tunnel connection state
- */
-export type SSHTunnelState =
-  | 'disconnected'
-  | 'connecting'
-  | 'connected'
-  | 'reconnecting'
-  | 'error';
-
-/**
- * SSH tunnel configuration for remote gateway access
- */
-export interface SSHTunnelConfig {
-  /** Enable SSH tunnel creation */
-  enabled: boolean;
-  /** Remote SSH host (IP or hostname) */
-  host: string;
-  /** SSH port (default: 22) */
-  sshPort: number;
-  /** SSH username */
-  username: string;
-  /** Path to SSH private key (optional, uses default if not specified) */
-  keyPath?: string;
-  /** Local port for the tunnel (default: 18789) */
-  localPort: number;
-  /** Remote port to forward to (default: 18789) */
-  remotePort: number;
-  /** Remote bind address (default: 127.0.0.1) */
-  remoteBindAddress?: string;
-  /** Auto-reconnect on connection loss */
-  autoReconnect?: boolean;
-  /** Reconnect delay in milliseconds */
-  reconnectDelayMs?: number;
-  /** Maximum reconnect attempts (0 = unlimited) */
-  maxReconnectAttempts?: number;
-  /** Connection timeout in milliseconds */
-  connectionTimeoutMs?: number;
-}
-
-/**
- * SSH tunnel status information
- */
-export interface SSHTunnelStatus {
-  /** Current tunnel state */
-  state: SSHTunnelState;
-  /** Tunnel configuration */
-  config?: Partial<SSHTunnelConfig>;
-  /** Time when tunnel was established */
-  connectedAt?: number;
-  /** Error message if state is 'error' */
-  error?: string;
-  /** Number of reconnect attempts */
-  reconnectAttempts?: number;
-  /** Process ID of the SSH process */
-  pid?: number;
-  /** Local tunnel endpoint (e.g., ws://127.0.0.1:18789) */
-  localEndpoint?: string;
 }
 
 // ============ Live Canvas Types ============

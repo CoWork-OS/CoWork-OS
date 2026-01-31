@@ -188,6 +188,13 @@ const IPC_CHANNELS = {
   REMOTE_GATEWAY_SAVE_CONFIG: 'remoteGateway:saveConfig',
   REMOTE_GATEWAY_TEST_CONNECTION: 'remoteGateway:testConnection',
   REMOTE_GATEWAY_EVENT: 'remoteGateway:event',
+  // SSH Tunnel (for Remote Gateway connection)
+  SSH_TUNNEL_CONNECT: 'sshTunnel:connect',
+  SSH_TUNNEL_DISCONNECT: 'sshTunnel:disconnect',
+  SSH_TUNNEL_GET_STATUS: 'sshTunnel:getStatus',
+  SSH_TUNNEL_SAVE_CONFIG: 'sshTunnel:saveConfig',
+  SSH_TUNNEL_TEST_CONNECTION: 'sshTunnel:testConnection',
+  SSH_TUNNEL_EVENT: 'sshTunnel:event',
   // Live Canvas (Agent-driven visual workspace)
   CANVAS_CREATE: 'canvas:create',
   CANVAS_GET_SESSION: 'canvas:getSession',
@@ -753,6 +760,7 @@ interface RemoteGatewayConfig {
   autoReconnect?: boolean;
   reconnectIntervalMs?: number;
   maxReconnectAttempts?: number;
+  sshTunnel?: SSHTunnelConfig;
 }
 
 type RemoteGatewayConnectionState =
@@ -779,6 +787,46 @@ interface RemoteGatewayEvent {
   state?: RemoteGatewayConnectionState;
   event?: string;
   payload?: unknown;
+  error?: string;
+}
+
+// SSH Tunnel types
+type SSHTunnelState =
+  | 'disconnected'
+  | 'connecting'
+  | 'connected'
+  | 'reconnecting'
+  | 'error';
+
+interface SSHTunnelConfig {
+  enabled: boolean;
+  host: string;
+  sshPort: number;
+  username: string;
+  keyPath?: string;
+  localPort: number;
+  remotePort: number;
+  remoteBindAddress?: string;
+  autoReconnect?: boolean;
+  reconnectDelayMs?: number;
+  maxReconnectAttempts?: number;
+  connectionTimeoutMs?: number;
+}
+
+interface SSHTunnelStatus {
+  state: SSHTunnelState;
+  config?: Partial<SSHTunnelConfig>;
+  connectedAt?: number;
+  error?: string;
+  reconnectAttempts?: number;
+  pid?: number;
+  localEndpoint?: string;
+}
+
+interface SSHTunnelEvent {
+  type: 'stateChange' | 'connected' | 'disconnected' | 'error';
+  state?: SSHTunnelState;
+  reason?: string;
   error?: string;
 }
 
@@ -1128,6 +1176,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener(IPC_CHANNELS.REMOTE_GATEWAY_EVENT, subscription);
   },
 
+  // SSH Tunnel
+  connectSSHTunnel: (config: SSHTunnelConfig) => ipcRenderer.invoke(IPC_CHANNELS.SSH_TUNNEL_CONNECT, config),
+  disconnectSSHTunnel: () => ipcRenderer.invoke(IPC_CHANNELS.SSH_TUNNEL_DISCONNECT),
+  getSSHTunnelStatus: () => ipcRenderer.invoke(IPC_CHANNELS.SSH_TUNNEL_GET_STATUS),
+  saveSSHTunnelConfig: (config: SSHTunnelConfig) => ipcRenderer.invoke(IPC_CHANNELS.SSH_TUNNEL_SAVE_CONFIG, config),
+  testSSHTunnelConnection: (config: SSHTunnelConfig) => ipcRenderer.invoke(IPC_CHANNELS.SSH_TUNNEL_TEST_CONNECTION, config),
+  onSSHTunnelEvent: (callback: (event: SSHTunnelEvent) => void) => {
+    const subscription = (_: Electron.IpcRendererEvent, data: SSHTunnelEvent) => callback(data);
+    ipcRenderer.on(IPC_CHANNELS.SSH_TUNNEL_EVENT, subscription);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.SSH_TUNNEL_EVENT, subscription);
+  },
+
   // Live Canvas APIs
   canvasCreate: (data: { taskId: string; workspaceId: string; title?: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.CANVAS_CREATE, data),
@@ -1472,6 +1532,14 @@ export interface ElectronAPI {
   saveRemoteGatewayConfig: (config: RemoteGatewayConfig) => Promise<{ ok: boolean; error?: string }>;
   testRemoteGatewayConnection: (config: RemoteGatewayConfig) => Promise<{ ok: boolean; latencyMs?: number; error?: string }>;
   onRemoteGatewayEvent: (callback: (event: RemoteGatewayEvent) => void) => () => void;
+
+  // SSH Tunnel
+  connectSSHTunnel: (config: SSHTunnelConfig) => Promise<{ ok: boolean; error?: string }>;
+  disconnectSSHTunnel: () => Promise<{ ok: boolean; error?: string }>;
+  getSSHTunnelStatus: () => Promise<SSHTunnelStatus>;
+  saveSSHTunnelConfig: (config: SSHTunnelConfig) => Promise<{ ok: boolean; error?: string }>;
+  testSSHTunnelConnection: (config: SSHTunnelConfig) => Promise<{ ok: boolean; latencyMs?: number; error?: string }>;
+  onSSHTunnelEvent: (callback: (event: SSHTunnelEvent) => void) => () => void;
 
   // Live Canvas APIs
   canvasCreate: (data: { taskId: string; workspaceId: string; title?: string }) => Promise<CanvasSession>;

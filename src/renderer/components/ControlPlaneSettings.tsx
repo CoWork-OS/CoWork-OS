@@ -5,6 +5,8 @@ import type {
   TailscaleAvailability,
   RemoteGatewayStatus,
   ControlPlaneConnectionMode,
+  SSHTunnelStatus,
+  SSHTunnelConfig,
 } from '../../shared/types';
 
 export function ControlPlaneSettings() {
@@ -25,19 +27,47 @@ export function ControlPlaneSettings() {
   const [remoteToken, setRemoteToken] = useState('');
   const [remoteDeviceName, setRemoteDeviceName] = useState('CoWork Remote Client');
 
+  // SSH Tunnel state
+  const [sshTunnelStatus, setSshTunnelStatus] = useState<SSHTunnelStatus | null>(null);
+  const [sshTunnelEnabled, setSshTunnelEnabled] = useState(false);
+  const [sshHost, setSshHost] = useState('');
+  const [sshUsername, setSshUsername] = useState('');
+  const [sshPort, setSshPort] = useState(22);
+  const [sshKeyPath, setSshKeyPath] = useState('');
+  const [sshLocalPort, setSshLocalPort] = useState(18789);
+  const [sshRemotePort, setSshRemotePort] = useState(18789);
+  const [testingSshTunnel, setTestingSshTunnel] = useState(false);
+  const [sshTestResult, setSshTestResult] = useState<{ success: boolean; message: string; latencyMs?: number } | null>(null);
+
+  // Helper to build SSH tunnel config
+  const getSshTunnelConfig = useCallback((): SSHTunnelConfig => ({
+    enabled: sshTunnelEnabled,
+    host: sshHost,
+    username: sshUsername,
+    sshPort: sshPort,
+    keyPath: sshKeyPath || undefined,
+    localPort: sshLocalPort,
+    remotePort: sshRemotePort,
+    autoReconnect: true,
+    reconnectDelayMs: 5000,
+    maxReconnectAttempts: 10,
+  }), [sshTunnelEnabled, sshHost, sshUsername, sshPort, sshKeyPath, sshLocalPort, sshRemotePort]);
+
   const loadData = useCallback(async () => {
     try {
-      const [settingsData, statusData, tailscale, remoteStatusData] = await Promise.all([
+      const [settingsData, statusData, tailscale, remoteStatusData, sshStatus] = await Promise.all([
         window.electronAPI?.getControlPlaneSettings?.() || null,
         window.electronAPI?.getControlPlaneStatus?.() || null,
         window.electronAPI?.checkTailscaleAvailability?.() || null,
         window.electronAPI?.getRemoteGatewayStatus?.() || null,
+        window.electronAPI?.getSSHTunnelStatus?.() || null,
       ]);
 
       setSettings(settingsData);
       setStatus(statusData);
       setTailscaleAvailability(tailscale);
       setRemoteStatus(remoteStatusData);
+      setSshTunnelStatus(sshStatus);
 
       // Set connection mode from settings
       if (settingsData?.connectionMode) {
@@ -49,6 +79,19 @@ export function ControlPlaneSettings() {
         setRemoteUrl(settingsData.remote.url || 'ws://127.0.0.1:18789');
         setRemoteToken(settingsData.remote.token || '');
         setRemoteDeviceName(settingsData.remote.deviceName || 'CoWork Remote Client');
+
+        // Set SSH tunnel config from settings
+        const remoteSshTunnel = (settingsData.remote as { sshTunnel?: SSHTunnelConfig }).sshTunnel;
+        if (remoteSshTunnel) {
+          const tunnel = remoteSshTunnel;
+          setSshTunnelEnabled(tunnel.enabled || false);
+          setSshHost(tunnel.host || '');
+          setSshUsername(tunnel.username || '');
+          setSshPort(tunnel.sshPort || 22);
+          setSshKeyPath(tunnel.keyPath || '');
+          setSshLocalPort(tunnel.localPort || 18789);
+          setSshRemotePort(tunnel.remotePort || 18789);
+        }
       }
     } catch (error) {
       console.error('Failed to load control plane data:', error);
@@ -218,6 +261,78 @@ export function ControlPlaneSettings() {
       await loadData();
     } catch (error) {
       console.error('Failed to disconnect:', error);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // SSH Tunnel Handlers
+  const handleTestSshTunnel = async () => {
+    setTestingSshTunnel(true);
+    setSshTestResult(null);
+    try {
+      const result = await window.electronAPI?.testSSHTunnelConnection?.(getSshTunnelConfig());
+      if (result?.ok) {
+        setSshTestResult({
+          success: true,
+          message: 'SSH connection successful',
+          latencyMs: result.latencyMs,
+        });
+      } else {
+        setSshTestResult({
+          success: false,
+          message: result?.error || 'SSH connection failed',
+        });
+      }
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'SSH connection failed';
+      setSshTestResult({
+        success: false,
+        message: errorMessage,
+      });
+    } finally {
+      setTestingSshTunnel(false);
+    }
+  };
+
+  const handleConnectSshTunnel = async () => {
+    setSaving(true);
+    setSshTestResult(null);
+    try {
+      const config = getSshTunnelConfig();
+      config.enabled = true;
+
+      const result = await window.electronAPI?.connectSSHTunnel?.(config);
+      if (!result?.ok) {
+        setSshTestResult({
+          success: false,
+          message: result?.error || 'Failed to create SSH tunnel',
+        });
+      } else {
+        // Update the remote URL to use the local tunnel endpoint
+        setRemoteUrl(`ws://127.0.0.1:${sshLocalPort}`);
+        setSshTunnelEnabled(true);
+      }
+      await loadData();
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to create SSH tunnel';
+      setSshTestResult({
+        success: false,
+        message: errorMessage,
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDisconnectSshTunnel = async () => {
+    setSaving(true);
+    try {
+      await window.electronAPI?.disconnectSSHTunnel?.();
+      setSshTunnelEnabled(false);
+      await loadData();
+    } catch (error) {
+      console.error('Failed to disconnect SSH tunnel:', error);
     } finally {
       setSaving(false);
     }
@@ -566,24 +681,157 @@ export function ControlPlaneSettings() {
             </div>
           </div>
 
-          {/* SSH Tunnel Help */}
+          {/* SSH Tunnel Configuration */}
           <div className="settings-subsection">
-            <h3>Setting Up SSH Tunnel</h3>
+            <h3>SSH Tunnel</h3>
             <p className="hint">
-              First, create an SSH tunnel to the remote machine:
+              Automatically create an SSH tunnel to connect to the remote gateway securely.
             </p>
-            <div className="code-block">
-              <code>ssh -N -L 18789:127.0.0.1:18789 user@remote-host</code>
-              <button
-                className="copy-btn"
-                onClick={() => copyToClipboard('ssh -N -L 18789:127.0.0.1:18789 user@remote-host')}
-              >
-                Copy
-              </button>
+
+            {/* SSH Tunnel Status */}
+            {sshTunnelStatus && sshTunnelStatus.state !== 'disconnected' && (
+              <div className="status-card">
+                <div className="status-indicator">
+                  <span className={`status-dot ${sshTunnelStatus.state === 'connected' ? 'running' : sshTunnelStatus.state === 'connecting' || sshTunnelStatus.state === 'reconnecting' ? 'connecting' : 'stopped'}`} />
+                  <span className="status-text">
+                    {sshTunnelStatus.state === 'connected' && 'Tunnel Connected'}
+                    {sshTunnelStatus.state === 'connecting' && 'Creating Tunnel...'}
+                    {sshTunnelStatus.state === 'reconnecting' && `Reconnecting (attempt ${sshTunnelStatus.reconnectAttempts})...`}
+                    {sshTunnelStatus.state === 'error' && `Error: ${sshTunnelStatus.error}`}
+                  </span>
+                </div>
+                {sshTunnelStatus.state === 'connected' && sshTunnelStatus.localEndpoint && (
+                  <div className="status-details">
+                    <div className="detail-row">
+                      <span className="label">Local Endpoint:</span>
+                      <code>{sshTunnelStatus.localEndpoint}</code>
+                    </div>
+                    {sshTunnelStatus.pid && (
+                      <div className="detail-row">
+                        <span className="label">Process ID:</span>
+                        <span>{sshTunnelStatus.pid}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="settings-row">
+              <label>SSH Host:</label>
+              <input
+                type="text"
+                value={sshHost}
+                onChange={(e) => setSshHost(e.target.value)}
+                placeholder="remote-server.com"
+                className="settings-input"
+                disabled={sshTunnelStatus?.state === 'connected'}
+              />
             </div>
-            <p className="hint">
-              Then use <code>ws://127.0.0.1:18789</code> as the Gateway URL above.
-            </p>
+
+            <div className="settings-row-group">
+              <div className="settings-row half">
+                <label>Username:</label>
+                <input
+                  type="text"
+                  value={sshUsername}
+                  onChange={(e) => setSshUsername(e.target.value)}
+                  placeholder="username"
+                  className="settings-input"
+                  disabled={sshTunnelStatus?.state === 'connected'}
+                />
+              </div>
+              <div className="settings-row half">
+                <label>SSH Port:</label>
+                <input
+                  type="number"
+                  value={sshPort}
+                  onChange={(e) => setSshPort(parseInt(e.target.value) || 22)}
+                  className="settings-input"
+                  disabled={sshTunnelStatus?.state === 'connected'}
+                />
+              </div>
+            </div>
+
+            <div className="settings-row">
+              <label>SSH Key Path (optional):</label>
+              <input
+                type="text"
+                value={sshKeyPath}
+                onChange={(e) => setSshKeyPath(e.target.value)}
+                placeholder="~/.ssh/id_rsa"
+                className="settings-input"
+                disabled={sshTunnelStatus?.state === 'connected'}
+              />
+            </div>
+
+            <div className="settings-row-group">
+              <div className="settings-row half">
+                <label>Local Port:</label>
+                <input
+                  type="number"
+                  value={sshLocalPort}
+                  onChange={(e) => setSshLocalPort(parseInt(e.target.value) || 18789)}
+                  className="settings-input"
+                  disabled={sshTunnelStatus?.state === 'connected'}
+                />
+              </div>
+              <div className="settings-row half">
+                <label>Remote Port:</label>
+                <input
+                  type="number"
+                  value={sshRemotePort}
+                  onChange={(e) => setSshRemotePort(parseInt(e.target.value) || 18789)}
+                  className="settings-input"
+                  disabled={sshTunnelStatus?.state === 'connected'}
+                />
+              </div>
+            </div>
+
+            {sshTestResult && (
+              <div className={`test-result ${sshTestResult.success ? 'success' : 'error'}`}>
+                {sshTestResult.success ? (
+                  <>SSH connection successful{sshTestResult.latencyMs && ` (${sshTestResult.latencyMs}ms)`}</>
+                ) : (
+                  sshTestResult.message
+                )}
+              </div>
+            )}
+
+            <div className="button-row">
+              {sshTunnelStatus?.state === 'connected' ? (
+                <button
+                  onClick={handleDisconnectSshTunnel}
+                  disabled={saving}
+                  className="btn-secondary"
+                >
+                  Disconnect Tunnel
+                </button>
+              ) : (
+                <>
+                  <button
+                    onClick={handleTestSshTunnel}
+                    disabled={testingSshTunnel || !sshHost || !sshUsername}
+                    className="btn-secondary"
+                  >
+                    {testingSshTunnel ? 'Testing...' : 'Test SSH'}
+                  </button>
+                  <button
+                    onClick={handleConnectSshTunnel}
+                    disabled={saving || !sshHost || !sshUsername}
+                    className="btn-primary"
+                  >
+                    {saving ? 'Creating Tunnel...' : 'Create Tunnel'}
+                  </button>
+                </>
+              )}
+            </div>
+
+            {sshTunnelStatus?.state !== 'connected' && (
+              <p className="hint" style={{ marginTop: '0.75rem' }}>
+                <strong>Manual alternative:</strong> Run <code>ssh -N -L {sshLocalPort}:127.0.0.1:{sshRemotePort} {sshUsername || 'user'}@{sshHost || 'remote-host'}</code>
+              </p>
+            )}
           </div>
         </>
       )}
@@ -812,6 +1060,21 @@ export function ControlPlaneSettings() {
           border-radius: 4px;
           background: var(--bg-primary);
           color: var(--text-primary);
+        }
+
+        .settings-input:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
+        }
+
+        .settings-row-group {
+          display: flex;
+          gap: 1rem;
+          margin-bottom: 0.75rem;
+        }
+
+        .settings-row.half {
+          flex: 1;
         }
       `}</style>
     </div>

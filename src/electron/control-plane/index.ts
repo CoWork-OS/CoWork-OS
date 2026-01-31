@@ -36,3 +36,10 @@ export {
   shutdownRemoteGatewayClient,
   type RemoteGatewayClientOptions,
 } from './remote-client';
+export {
+  SSHTunnelManager,
+  getSSHTunnelManager,
+  initSSHTunnelManager,
+  shutdownSSHTunnelManager,
+  DEFAULT_SSH_TUNNEL_CONFIG,
+} from './ssh-tunnel';

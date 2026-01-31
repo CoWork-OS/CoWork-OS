@@ -13,6 +13,8 @@ import type {
   TailscaleMode,
   RemoteGatewayConfig,
   RemoteGatewayStatus,
+  SSHTunnelConfig,
+  SSHTunnelStatus,
 } from '../../shared/types';
 import { ControlPlaneServer, ControlPlaneSettingsManager } from './index';
 import { checkTailscaleAvailability, getExposureStatus } from '../tailscale';
@@ -23,6 +25,12 @@ import {
   getRemoteGatewayClient,
   shutdownRemoteGatewayClient,
 } from './remote-client';
+import {
+  SSHTunnelManager,
+  initSSHTunnelManager,
+  getSSHTunnelManager,
+  shutdownSSHTunnelManager,
+} from './ssh-tunnel';
 
 // Server instance
 let controlPlaneServer: ControlPlaneServer | null = null;
@@ -390,10 +398,20 @@ export function setupControlPlaneHandlers(mainWindow: BrowserWindow): void {
     IPC_CHANNELS.REMOTE_GATEWAY_GET_STATUS,
     async (): Promise<RemoteGatewayStatus> => {
       const client = getRemoteGatewayClient();
+      const tunnel = getSSHTunnelManager();
+
       if (!client) {
-        return { state: 'disconnected' };
+        return {
+          state: 'disconnected',
+          sshTunnel: tunnel?.getStatus(),
+        };
       }
-      return client.getStatus();
+
+      const status = client.getStatus();
+      return {
+        ...status,
+        sshTunnel: tunnel?.getStatus(),
+      };
     }
   );
 
@@ -434,14 +452,164 @@ export function setupControlPlaneHandlers(mainWindow: BrowserWindow): void {
     }
   );
 
+  // ===== SSH Tunnel Handlers =====
+
+  // Connect SSH tunnel
+  ipcMain.handle(
+    IPC_CHANNELS.SSH_TUNNEL_CONNECT,
+    async (_, config?: SSHTunnelConfig): Promise<{ ok: boolean; error?: string }> => {
+      try {
+        // Get config from settings if not provided
+        const settings = ControlPlaneSettingsManager.loadSettings();
+        const tunnelConfig = config || settings.remote?.sshTunnel;
+
+        if (!tunnelConfig?.host || !tunnelConfig?.username) {
+          return { ok: false, error: 'SSH host and username are required' };
+        }
+
+        // Initialize and connect SSH tunnel
+        const tunnel = initSSHTunnelManager({
+          ...tunnelConfig,
+          enabled: true,
+        });
+
+        // Setup event forwarding to renderer
+        tunnel.on('stateChange', (state: string, error?: string) => {
+          if (mainWindowRef && !mainWindowRef.isDestroyed()) {
+            mainWindowRef.webContents.send(IPC_CHANNELS.SSH_TUNNEL_EVENT, {
+              type: 'stateChange',
+              state,
+              error,
+            });
+          }
+        });
+
+        tunnel.on('connected', () => {
+          if (mainWindowRef && !mainWindowRef.isDestroyed()) {
+            mainWindowRef.webContents.send(IPC_CHANNELS.SSH_TUNNEL_EVENT, {
+              type: 'connected',
+            });
+          }
+        });
+
+        tunnel.on('disconnected', (reason: string) => {
+          if (mainWindowRef && !mainWindowRef.isDestroyed()) {
+            mainWindowRef.webContents.send(IPC_CHANNELS.SSH_TUNNEL_EVENT, {
+              type: 'disconnected',
+              reason,
+            });
+          }
+        });
+
+        tunnel.on('error', (error: Error) => {
+          if (mainWindowRef && !mainWindowRef.isDestroyed()) {
+            mainWindowRef.webContents.send(IPC_CHANNELS.SSH_TUNNEL_EVENT, {
+              type: 'error',
+              error: error.message,
+            });
+          }
+        });
+
+        await tunnel.connect();
+
+        // Save SSH tunnel config to settings
+        if (config) {
+          ControlPlaneSettingsManager.updateSettings({
+            remote: {
+              ...settings.remote,
+              url: tunnel.getLocalUrl(),
+              token: settings.remote?.token || '',
+              sshTunnel: config,
+            } as any,
+          });
+        }
+
+        return { ok: true };
+      } catch (error: any) {
+        return { ok: false, error: error.message || String(error) };
+      }
+    }
+  );
+
+  // Disconnect SSH tunnel
+  ipcMain.handle(
+    IPC_CHANNELS.SSH_TUNNEL_DISCONNECT,
+    async (): Promise<{ ok: boolean; error?: string }> => {
+      try {
+        shutdownSSHTunnelManager();
+        return { ok: true };
+      } catch (error: any) {
+        return { ok: false, error: error.message || String(error) };
+      }
+    }
+  );
+
+  // Get SSH tunnel status
+  ipcMain.handle(
+    IPC_CHANNELS.SSH_TUNNEL_GET_STATUS,
+    async (): Promise<SSHTunnelStatus> => {
+      const tunnel = getSSHTunnelManager();
+      if (!tunnel) {
+        return { state: 'disconnected' };
+      }
+      return tunnel.getStatus();
+    }
+  );
+
+  // Save SSH tunnel config
+  ipcMain.handle(
+    IPC_CHANNELS.SSH_TUNNEL_SAVE_CONFIG,
+    async (_, config: SSHTunnelConfig): Promise<{ ok: boolean; error?: string }> => {
+      try {
+        const settings = ControlPlaneSettingsManager.loadSettings();
+        ControlPlaneSettingsManager.updateSettings({
+          remote: {
+            ...settings.remote,
+            url: settings.remote?.url || '',
+            token: settings.remote?.token || '',
+            sshTunnel: config,
+          } as any,
+        });
+        return { ok: true };
+      } catch (error: any) {
+        return { ok: false, error: error.message || String(error) };
+      }
+    }
+  );
+
+  // Test SSH tunnel connection
+  ipcMain.handle(
+    IPC_CHANNELS.SSH_TUNNEL_TEST_CONNECTION,
+    async (_, config: SSHTunnelConfig): Promise<{
+      ok: boolean;
+      latencyMs?: number;
+      error?: string;
+    }> => {
+      try {
+        const tunnel = new SSHTunnelManager(config);
+        const result = await tunnel.testConnection();
+        return {
+          ok: result.success,
+          latencyMs: result.latencyMs,
+          error: result.error,
+        };
+      } catch (error: any) {
+        return { ok: false, error: error.message || String(error) };
+      }
+    }
+  );
+
   console.log('[ControlPlane] IPC handlers initialized');
 }
 
 /**
- * Shutdown the control plane server and remote client
+ * Shutdown the control plane server, remote client, and SSH tunnel
  * Call this during app quit
  */
 export async function shutdownControlPlane(): Promise<void> {
+  // Shutdown SSH tunnel
+  shutdownSSHTunnelManager();
+
   // Shutdown remote client
   shutdownRemoteGatewayClient();
 

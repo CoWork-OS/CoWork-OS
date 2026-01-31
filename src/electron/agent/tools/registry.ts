@@ -6,6 +6,7 @@ import { AgentDaemon } from '../daemon';
 import { FileTools } from './file-tools';
 import { SkillTools } from './skill-tools';
 import { SearchTools } from './search-tools';
+import { WebFetchTools } from './web-fetch-tools';
 import { BrowserTools } from './browser-tools';
 import { ShellTools } from './shell-tools';
 import { ImageTools } from './image-tools';
@@ -26,6 +27,7 @@ export class ToolRegistry {
   private fileTools: FileTools;
   private skillTools: SkillTools;
   private searchTools: SearchTools;
+  private webFetchTools: WebFetchTools;
   private browserTools: BrowserTools;
   private shellTools: ShellTools;
   private imageTools: ImageTools;
@@ -43,6 +45,7 @@ export class ToolRegistry {
     this.fileTools = new FileTools(workspace, daemon, taskId);
     this.skillTools = new SkillTools(workspace, daemon, taskId);
     this.searchTools = new SearchTools(workspace, daemon, taskId);
+    this.webFetchTools = new WebFetchTools(workspace, daemon, taskId);
     this.browserTools = new BrowserTools(workspace, daemon, taskId);
     this.shellTools = new ShellTools(workspace, daemon, taskId);
     this.imageTools = new ImageTools(workspace, daemon, taskId);
@@ -75,6 +78,7 @@ export class ToolRegistry {
     const allTools: LLMTool[] = [
       ...this.getFileToolDefinitions(),
       ...this.getSkillToolDefinitions(),
+      ...WebFetchTools.getToolDefinitions(),
       ...BrowserTools.getToolDefinitions(),
     ];
 
@@ -239,10 +243,14 @@ Skills:
 - create_presentation: Create PowerPoint presentations
 - organize_folder: Organize and structure files in folders
 
-Browser Automation:
-- browser_navigate: Navigate to a URL
+Web Fetch (PREFERRED for reading web content):
+- web_fetch: Fetch and read content from a URL as markdown (fast, lightweight, no browser needed)
+  Use this FIRST when you need to read any web page, documentation, GitHub repo, or article.
+
+Browser Automation (use only when interaction is needed):
+- browser_navigate: Navigate to a URL (use only for pages requiring JS or when you need to interact)
 - browser_screenshot: Take a screenshot of the page
-- browser_get_content: Get page text, links, and forms
+- browser_get_content: Get page text, links, and forms (use after navigate, for inspecting interactive elements)
 - browser_click: Click on an element
 - browser_fill: Fill a form field
 - browser_type: Type text character by character
@@ -261,8 +269,9 @@ Browser Automation:
     if (SearchProviderFactory.isAnyProviderConfigured()) {
       descriptions += `
 
-Web Search:
-- web_search: Search the web for information (web, news, images)`;
+Web Search (for finding URLs, not reading them):
+- web_search: Search the web for information (web, news, images)
+  Use to FIND relevant pages. To READ a specific URL, use web_fetch instead.`;
     }
 
     // Add shell if permitted
@@ -332,6 +341,9 @@ Plan Control:
     if (name === 'edit_document') return await this.skillTools.editDocument(input);
     if (name === 'create_presentation') return await this.skillTools.createPresentation(input);
     if (name === 'organize_folder') return await this.skillTools.organizeFolder(input);
+
+    // Web fetch tool (preferred for reading web content)
+    if (name === 'web_fetch') return await this.webFetchTools.webFetch(input);
 
     // Browser tools
     if (BrowserTools.isBrowserTool(name)) {
@@ -867,7 +879,10 @@ Plan Control:
     return [
       {
         name: 'web_search',
-        description: `Search the web for information. Configured providers: ${configuredProviders.map((p) => p.name).join(', ')}`,
+        description:
+          `Search the web for information using search engines. Use this to FIND relevant URLs/pages on a topic. ` +
+          `NOTE: If you already have a specific URL to read, use web_fetch instead - it directly fetches the content. ` +
+          `Configured providers: ${configuredProviders.map((p) => p.name).join(', ')}`,
         input_schema: {
           type: 'object',
           properties: {

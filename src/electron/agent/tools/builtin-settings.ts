@@ -30,6 +30,7 @@ export interface ToolOverride {
 export interface BuiltinToolsSettings {
   // Category-level settings
   categories: {
+    webfetch: ToolCategoryConfig;
     browser: ToolCategoryConfig;
     search: ToolCategoryConfig;
     system: ToolCategoryConfig;
@@ -49,6 +50,11 @@ export interface BuiltinToolsSettings {
  */
 const DEFAULT_SETTINGS: BuiltinToolsSettings = {
   categories: {
+    webfetch: {
+      enabled: true,
+      priority: 'high',
+      description: 'Lightweight web fetching (preferred for reading web content)',
+    },
     browser: {
       enabled: true,
       priority: 'normal',
@@ -93,6 +99,8 @@ const DEFAULT_SETTINGS: BuiltinToolsSettings = {
  * Tool category mapping
  */
 const TOOL_CATEGORIES: Record<string, keyof BuiltinToolsSettings['categories']> = {
+  // Web fetch tools (high priority)
+  web_fetch: 'webfetch',
   // Browser tools
   browser_navigate: 'browser',
   browser_screenshot: 'browser',

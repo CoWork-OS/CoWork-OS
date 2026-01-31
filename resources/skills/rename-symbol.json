@@ -1,0 +1,24 @@
+{
+  "id": "rename-symbol",
+  "name": "Rename Symbol",
+  "description": "Rename a variable/function across files",
+  "icon": "🏷️",
+  "category": "Utilities",
+  "prompt": "Please rename \"{{oldName}}\" to \"{{newName}}\" across the project.\n\nSteps:\n1. Find all occurrences of the symbol\n2. Distinguish between:\n   - The actual symbol (function, variable, class)\n   - String literals containing the name\n   - Comments mentioning the name\n3. Rename only the actual symbol references\n4. Update imports/exports as needed\n5. Check for naming conflicts\n\nReport:\n- Files modified\n- Number of replacements\n- Any manual review needed (strings, comments)\n\nBe careful not to rename unrelated code that happens to have the same name.",
+  "parameters": [
+    {
+      "name": "oldName",
+      "type": "string",
+      "description": "Current name of the symbol",
+      "required": true
+    },
+    {
+      "name": "newName",
+      "type": "string",
+      "description": "New name for the symbol",
+      "required": true
+    }
+  ],
+  "enabled": true,
+  "filePath": "/Users/mesut/Library/Application Support/cowork-oss/skills/rename-symbol.json"
+}

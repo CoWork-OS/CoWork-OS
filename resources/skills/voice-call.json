@@ -1,0 +1,10 @@
+{
+  "id": "voice-call",
+  "name": "Voice-call",
+  "description": "Start voice calls via the CoWork-OSS voice-call plugin.",
+  "icon": "📞",
+  "category": "Tools",
+  "prompt": "# Voice Call\n\nUse the voice-call plugin to start or inspect calls (Twilio, Telnyx, Plivo, or mock).\n\n## CLI\n\n```bash\nCoWork-OSS voicecall call --to \"+15555550123\" --message \"Hello from CoWork-OSS\"\nCoWork-OSS voicecall status --call-id <id>\n```\n\n## Tool\n\nUse `voice_call` for agent-initiated calls.\n\nActions:\n\n- `initiate_call` (message, to?, mode?)\n- `continue_call` (callId, message)\n- `speak_to_user` (callId, message)\n- `end_call` (callId)\n- `get_status` (callId)\n\nNotes:\n\n- Requires the voice-call plugin to be enabled.\n- Plugin config lives under `plugins.entries.voice-call.config`.\n- Twilio config: `provider: \"twilio\"` + `twilio.accountSid/authToken` + `fromNumber`.\n- Telnyx config: `provider: \"telnyx\"` + `telnyx.apiKey/connectionId` + `fromNumber`.\n- Plivo config: `provider: \"plivo\"` + `plivo.authId/authToken` + `fromNumber`.\n- Dev fallback: `provider: \"mock\"` (no network).",
+  "parameters": [],
+  "enabled": true
+}

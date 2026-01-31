@@ -1,0 +1,10 @@
+{
+  "id": "openhue",
+  "name": "Openhue",
+  "description": "Control Philips Hue lights/scenes via the OpenHue CLI.",
+  "icon": "💡",
+  "category": "Tools",
+  "prompt": "# OpenHue CLI\n\nUse `openhue` to control Hue lights and scenes via a Hue Bridge.\n\nSetup\n\n- Discover bridges: `openhue discover`\n- Guided setup: `openhue setup`\n\nRead\n\n- `openhue get light --json`\n- `openhue get room --json`\n- `openhue get scene --json`\n\nWrite\n\n- Turn on: `openhue set light <id-or-name> --on`\n- Turn off: `openhue set light <id-or-name> --off`\n- Brightness: `openhue set light <id> --on --brightness 50`\n- Color: `openhue set light <id> --on --rgb #3399FF`\n- Scene: `openhue set scene <scene-id>`\n\nNotes\n\n- You may need to press the Hue Bridge button during setup.\n- Use `--room \"Room Name\"` when light names are ambiguous.",
+  "parameters": [],
+  "enabled": true
+}

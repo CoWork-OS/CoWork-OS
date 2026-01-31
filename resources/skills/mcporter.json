@@ -1,0 +1,10 @@
+{
+  "id": "mcporter",
+  "name": "Mcporter",
+  "description": "Use the mcporter CLI to list, configure, auth, and call MCP servers/tools directly (HTTP or stdio), including ad-hoc servers, config edits, and CLI/type generation.",
+  "icon": "📦",
+  "category": "Tools",
+  "prompt": "# mcporter\n\nUse `mcporter` to work with MCP servers directly.\n\nQuick start\n\n- `mcporter list`\n- `mcporter list <server> --schema`\n- `mcporter call <server.tool> key=value`\n\nCall tools\n\n- Selector: `mcporter call linear.list_issues team=ENG limit:5`\n- Function syntax: `mcporter call \"linear.create_issue(title: \\\"Bug\\\")\"`\n- Full URL: `mcporter call https://api.example.com/mcp.fetch url:https://example.com`\n- Stdio: `mcporter call --stdio \"bun run ./server.ts\" scrape url=https://example.com`\n- JSON payload: `mcporter call <server.tool> --args '{\"limit\":5}'`\n\nAuth + config\n\n- OAuth: `mcporter auth <server | url> [--reset]`\n- Config: `mcporter config list|get|add|remove|import|login|logout`\n\nDaemon\n\n- `mcporter daemon start|status|stop|restart`\n\nCodegen\n\n- CLI: `mcporter generate-cli --server <name>` or `--command <url>`\n- Inspect: `mcporter inspect-cli <path> [--json]`\n- TS: `mcporter emit-ts <server> --mode client|types`\n\nNotes\n\n- Config default: `./config/mcporter.json` (override with `--config`).\n- Prefer `--output json` for machine-readable results.",
+  "parameters": [],
+  "enabled": true
+}

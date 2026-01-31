@@ -1,0 +1,37 @@
+{
+  "id": "translate",
+  "name": "Translate",
+  "description": "Translate content to another language",
+  "icon": "🌐",
+  "category": "Writing",
+  "prompt": "Please translate the content in {{path}} to {{language}}.\n\nRequirements:\n- Maintain the original meaning and tone\n- Preserve formatting (markdown, code blocks, etc.)\n- Keep technical terms consistent\n- Adapt idioms appropriately for the target language\n- Preserve any code snippets unchanged\n\nSave the translated content to a new file with the language code suffix (e.g., README_es.md).",
+  "parameters": [
+    {
+      "name": "path",
+      "type": "string",
+      "description": "Path to the file to translate",
+      "required": true
+    },
+    {
+      "name": "language",
+      "type": "select",
+      "description": "Target language",
+      "required": true,
+      "default": "Spanish",
+      "options": [
+        "Spanish",
+        "French",
+        "German",
+        "Chinese",
+        "Japanese",
+        "Korean",
+        "Portuguese",
+        "Italian",
+        "Russian",
+        "Arabic"
+      ]
+    }
+  ],
+  "enabled": true,
+  "filePath": "/Users/mesut/Library/Application Support/cowork-oss/skills/translate.json"
+}

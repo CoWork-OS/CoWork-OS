@@ -1,0 +1,10 @@
+{
+  "id": "eightctl",
+  "name": "Eightctl",
+  "description": "Control Eight Sleep pods (status, temperature, alarms, schedules).",
+  "icon": "🎛️",
+  "category": "Tools",
+  "prompt": "# eightctl\n\nUse `eightctl` for Eight Sleep pod control. Requires auth.\n\nAuth\n\n- Config: `~/.config/eightctl/config.yaml`\n- Env: `EIGHTCTL_EMAIL`, `EIGHTCTL_PASSWORD`\n\nQuick start\n\n- `eightctl status`\n- `eightctl on|off`\n- `eightctl temp 20`\n\nCommon tasks\n\n- Alarms: `eightctl alarm list|create|dismiss`\n- Schedules: `eightctl schedule list|create|update`\n- Audio: `eightctl audio state|play|pause`\n- Base: `eightctl base info|angle`\n\nNotes\n\n- API is unofficial and rate-limited; avoid repeated logins.\n- Confirm before changing temperature or alarms.",
+  "parameters": [],
+  "enabled": true
+}

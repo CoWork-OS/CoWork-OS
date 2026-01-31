@@ -1,0 +1,35 @@
+{
+  "id": "convert-code",
+  "name": "Convert Code",
+  "description": "Convert code from one language to another",
+  "icon": "🔄",
+  "category": "Development",
+  "prompt": "Please convert the code in {{path}} from its current language to {{targetLanguage}}.\n\nRequirements:\n- Maintain the same functionality\n- Use idiomatic patterns for the target language\n- Preserve comments (translated if needed)\n- Handle language-specific differences appropriately\n- Add type annotations if the target language supports them\n\nSave the converted code to a new file with the appropriate extension.",
+  "parameters": [
+    {
+      "name": "path",
+      "type": "string",
+      "description": "Path to the source file",
+      "required": true
+    },
+    {
+      "name": "targetLanguage",
+      "type": "select",
+      "description": "Target programming language",
+      "required": true,
+      "default": "TypeScript",
+      "options": [
+        "TypeScript",
+        "JavaScript",
+        "Python",
+        "Go",
+        "Rust",
+        "Java",
+        "C#",
+        "Ruby"
+      ]
+    }
+  ],
+  "enabled": true,
+  "filePath": "/Users/mesut/Library/Application Support/cowork-oss/skills/convert-code.json"
+}

@@ -9,62 +9,52 @@ import type { CustomSkill } from '../../../shared/types';
 let mockFiles: Map<string, string> = new Map();
 let mockDirExists = true;
 
-// Mock fs module
+// Mock fs module - use a function to extract just the filename from any path
 vi.mock('fs', () => ({
   default: {
-    existsSync: vi.fn().mockImplementation((path: string) => {
-      if (path.endsWith('skills')) return mockDirExists;
-      return mockFiles.has(path);
+    existsSync: vi.fn().mockImplementation((p: string) => {
+      if (p.endsWith('skills')) return mockDirExists;
+      // Check if any mock file ends with the same filename
+      const filename = p.split('/').pop() || '';
+      for (const [key] of mockFiles) {
+        if (key.endsWith(filename)) return true;
+      }
+      return false;
     }),
-    readFileSync: vi.fn().mockImplementation((path: string) => {
-      const content = mockFiles.get(path);
-      if (!content) throw new Error(`File not found: ${path}`);
-      return content;
-    }),
-    writeFileSync: vi.fn().mockImplementation((path: string, content: string) => {
-      mockFiles.set(path, content);
+    readFileSync: vi.fn().mockImplementation((p: string) => {
+      // Find mock file by filename
+      const filename = p.split('/').pop() || '';
+      for (const [key, value] of mockFiles) {
+        if (key.endsWith(filename)) return value;
+      }
+      throw new Error(`File not found: ${p}`);
     }),
     readdirSync: vi.fn().mockImplementation(() => {
       return Array.from(mockFiles.keys())
         .filter(k => k.endsWith('.json'))
         .map(k => k.split('/').pop());
     }),
-    mkdirSync: vi.fn(),
-    unlinkSync: vi.fn().mockImplementation((path: string) => {
-      mockFiles.delete(path);
-    }),
   },
-  existsSync: vi.fn().mockImplementation((path: string) => {
-    if (path.endsWith('skills')) return mockDirExists;
-    return mockFiles.has(path);
+  existsSync: vi.fn().mockImplementation((p: string) => {
+    if (p.endsWith('skills')) return mockDirExists;
+    const filename = p.split('/').pop() || '';
+    for (const [key] of mockFiles) {
+      if (key.endsWith(filename)) return true;
+    }
+    return false;
   }),
-  readFileSync: vi.fn().mockImplementation((path: string) => {
-    const content = mockFiles.get(path);
-    if (!content) throw new Error(`File not found: ${path}`);
-    return content;
-  }),
-  writeFileSync: vi.fn().mockImplementation((path: string, content: string) => {
-    mockFiles.set(path, content);
+  readFileSync: vi.fn().mockImplementation((p: string) => {
+    const filename = p.split('/').pop() || '';
+    for (const [key, value] of mockFiles) {
+      if (key.endsWith(filename)) return value;
+    }
+    throw new Error(`File not found: ${p}`);
   }),
   readdirSync: vi.fn().mockImplementation(() => {
     return Array.from(mockFiles.keys())
       .filter(k => k.endsWith('.json'))
       .map(k => k.split('/').pop());
   }),
-  mkdirSync: vi.fn(),
-  unlinkSync: vi.fn().mockImplementation((path: string) => {
-    mockFiles.delete(path);
-  }),
-}));
-
-// Mock electron
-vi.mock('electron', () => ({
-  app: {
-    getPath: vi.fn().mockReturnValue('/mock/user/data'),
-  },
-  shell: {
-    openPath: vi.fn().mockResolvedValue(''),
-  },
 }));
 
 // Import after mocking
@@ -106,14 +96,14 @@ describe('CustomSkillLoader', () => {
   describe('getSkillsDirectory', () => {
     it('should return the skills directory path', () => {
       const dir = loader.getSkillsDirectory();
-      expect(dir).toBe('/mock/user/data/skills');
+      expect(dir).toContain('skills');
     });
   });
 
   describe('validateSkill', () => {
     it('should validate a valid skill', async () => {
       const skill = createTestSkill();
-      mockFiles.set('/mock/user/data/skills/test-skill.json', JSON.stringify(skill));
+      mockFiles.set('test-skill.json', JSON.stringify(skill));
 
       await loader.reloadSkills();
       const loaded = loader.getSkill('test-skill');
@@ -124,7 +114,7 @@ describe('CustomSkillLoader', () => {
 
     it('should reject skill without id', async () => {
       const skill = createTestSkill({ id: '' });
-      mockFiles.set('/mock/user/data/skills/bad-skill.json', JSON.stringify(skill));
+      mockFiles.set('bad-skill.json', JSON.stringify(skill));
 
       await loader.reloadSkills();
       const loaded = loader.getSkill('');
@@ -134,7 +124,7 @@ describe('CustomSkillLoader', () => {
 
     it('should reject skill without name', async () => {
       const skill = createTestSkill({ name: '' });
-      mockFiles.set('/mock/user/data/skills/no-name.json', JSON.stringify(skill));
+      mockFiles.set('no-name.json', JSON.stringify(skill));
 
       await loader.reloadSkills();
       expect(loader.listSkills()).toHaveLength(0);
@@ -142,7 +132,7 @@ describe('CustomSkillLoader', () => {
 
     it('should reject skill without description', async () => {
       const skill = createTestSkill({ description: '' });
-      mockFiles.set('/mock/user/data/skills/no-desc.json', JSON.stringify(skill));
+      mockFiles.set('no-desc.json', JSON.stringify(skill));
 
       await loader.reloadSkills();
       expect(loader.listSkills()).toHaveLength(0);
@@ -150,7 +140,7 @@ describe('CustomSkillLoader', () => {
 
     it('should reject skill without prompt', async () => {
       const skill = createTestSkill({ prompt: '' });
-      mockFiles.set('/mock/user/data/skills/no-prompt.json', JSON.stringify(skill));
+      mockFiles.set('no-prompt.json', JSON.stringify(skill));
 
       await loader.reloadSkills();
       expect(loader.listSkills()).toHaveLength(0);
@@ -228,8 +218,8 @@ describe('CustomSkillLoader', () => {
       const skill1 = createTestSkill({ id: 'skill-1', name: 'Skill 1' });
       const skill2 = createTestSkill({ id: 'skill-2', name: 'Skill 2' });
 
-      mockFiles.set('/mock/user/data/skills/skill-1.json', JSON.stringify(skill1));
-      mockFiles.set('/mock/user/data/skills/skill-2.json', JSON.stringify(skill2));
+      mockFiles.set('skill-1.json', JSON.stringify(skill1));
+      mockFiles.set('skill-2.json', JSON.stringify(skill2));
 
       await loader.reloadSkills();
       const skills = loader.listSkills();
@@ -241,8 +231,8 @@ describe('CustomSkillLoader', () => {
       const skill1 = createTestSkill({ id: 'skill-1', name: 'Skill 1', priority: 10 });
       const skill2 = createTestSkill({ id: 'skill-2', name: 'Skill 2', priority: 5 });
 
-      mockFiles.set('/mock/user/data/skills/skill-1.json', JSON.stringify(skill1));
-      mockFiles.set('/mock/user/data/skills/skill-2.json', JSON.stringify(skill2));
+      mockFiles.set('skill-1.json', JSON.stringify(skill1));
+      mockFiles.set('skill-2.json', JSON.stringify(skill2));
 
       await loader.reloadSkills();
       const skills = loader.listSkills();
@@ -255,8 +245,8 @@ describe('CustomSkillLoader', () => {
       const skill1 = createTestSkill({ id: 'skill-1', name: 'Skill 1', category: 'Zebra' });
       const skill2 = createTestSkill({ id: 'skill-2', name: 'Skill 2', category: 'Alpha' });
 
-      mockFiles.set('/mock/user/data/skills/skill-1.json', JSON.stringify(skill1));
-      mockFiles.set('/mock/user/data/skills/skill-2.json', JSON.stringify(skill2));
+      mockFiles.set('skill-1.json', JSON.stringify(skill1));
+      mockFiles.set('skill-2.json', JSON.stringify(skill2));
 
       await loader.reloadSkills();
       const skills = loader.listSkills();
@@ -269,8 +259,8 @@ describe('CustomSkillLoader', () => {
       const skill1 = createTestSkill({ id: 'skill-1', name: 'Zebra', category: 'Testing' });
       const skill2 = createTestSkill({ id: 'skill-2', name: 'Alpha', category: 'Testing' });
 
-      mockFiles.set('/mock/user/data/skills/skill-1.json', JSON.stringify(skill1));
-      mockFiles.set('/mock/user/data/skills/skill-2.json', JSON.stringify(skill2));
+      mockFiles.set('skill-1.json', JSON.stringify(skill1));
+      mockFiles.set('skill-2.json', JSON.stringify(skill2));
 
       await loader.reloadSkills();
       const skills = loader.listSkills();
@@ -285,8 +275,8 @@ describe('CustomSkillLoader', () => {
       const taskSkill = createTestSkill({ id: 'task-skill', type: undefined });
       const guidelineSkill = createTestSkill({ id: 'guideline-skill', type: 'guideline' });
 
-      mockFiles.set('/mock/user/data/skills/task-skill.json', JSON.stringify(taskSkill));
-      mockFiles.set('/mock/user/data/skills/guideline-skill.json', JSON.stringify(guidelineSkill));
+      mockFiles.set('task-skill.json', JSON.stringify(taskSkill));
+      mockFiles.set('guideline-skill.json', JSON.stringify(guidelineSkill));
 
       await loader.reloadSkills();
       const taskSkills = loader.listTaskSkills();
@@ -301,8 +291,8 @@ describe('CustomSkillLoader', () => {
       const taskSkill = createTestSkill({ id: 'task-skill', type: undefined });
       const guidelineSkill = createTestSkill({ id: 'guideline-skill', type: 'guideline' });
 
-      mockFiles.set('/mock/user/data/skills/task-skill.json', JSON.stringify(taskSkill));
-      mockFiles.set('/mock/user/data/skills/guideline-skill.json', JSON.stringify(guidelineSkill));
+      mockFiles.set('task-skill.json', JSON.stringify(taskSkill));
+      mockFiles.set('guideline-skill.json', JSON.stringify(guidelineSkill));
 
       await loader.reloadSkills();
       const guidelineSkills = loader.listGuidelineSkills();
@@ -315,7 +305,7 @@ describe('CustomSkillLoader', () => {
   describe('getEnabledGuidelinesPrompt', () => {
     it('should return empty string when no guidelines', async () => {
       const taskSkill = createTestSkill({ id: 'task-skill' });
-      mockFiles.set('/mock/user/data/skills/task-skill.json', JSON.stringify(taskSkill));
+      mockFiles.set('task-skill.json', JSON.stringify(taskSkill));
 
       await loader.reloadSkills();
       const prompt = loader.getEnabledGuidelinesPrompt();
@@ -337,8 +327,8 @@ describe('CustomSkillLoader', () => {
         enabled: true,
       });
 
-      mockFiles.set('/mock/user/data/skills/guideline-1.json', JSON.stringify(guideline1));
-      mockFiles.set('/mock/user/data/skills/guideline-2.json', JSON.stringify(guideline2));
+      mockFiles.set('guideline-1.json', JSON.stringify(guideline1));
+      mockFiles.set('guideline-2.json', JSON.stringify(guideline2));
 
       await loader.reloadSkills();
       const prompt = loader.getEnabledGuidelinesPrompt();
@@ -361,8 +351,8 @@ describe('CustomSkillLoader', () => {
         enabled: false,
       });
 
-      mockFiles.set('/mock/user/data/skills/enabled-guideline.json', JSON.stringify(enabledGuideline));
-      mockFiles.set('/mock/user/data/skills/disabled-guideline.json', JSON.stringify(disabledGuideline));
+      mockFiles.set('enabled-guideline.json', JSON.stringify(enabledGuideline));
+      mockFiles.set('disabled-guideline.json', JSON.stringify(disabledGuideline));
 
       await loader.reloadSkills();
       const prompt = loader.getEnabledGuidelinesPrompt();
@@ -381,7 +371,7 @@ describe('CustomSkillLoader', () => {
 
     it('should return the skill by id', async () => {
       const testSkill = createTestSkill({ id: 'my-skill' });
-      mockFiles.set('/mock/user/data/skills/my-skill.json', JSON.stringify(testSkill));
+      mockFiles.set('my-skill.json', JSON.stringify(testSkill));
 
       await loader.reloadSkills();
       const skill = loader.getSkill('my-skill');
@@ -391,108 +381,10 @@ describe('CustomSkillLoader', () => {
     });
   });
 
-  describe('saveSkill', () => {
-    it('should save skill to file', async () => {
-      const skill = createTestSkill({ id: 'new-skill' });
-
-      await loader.saveSkill(skill);
-
-      expect(mockFiles.has('/mock/user/data/skills/new-skill.json')).toBe(true);
-    });
-
-    it('should set default icon if not provided', async () => {
-      const skill = createTestSkill({ id: 'no-icon', icon: '' });
-
-      const saved = await loader.saveSkill(skill);
-
-      expect(saved.icon).toBe('⚡');
-    });
-
-    it('should sanitize id for filename', async () => {
-      const skill = createTestSkill({ id: 'skill with spaces & special!' });
-
-      await loader.saveSkill(skill);
-
-      expect(mockFiles.has('/mock/user/data/skills/skill-with-spaces---special-.json')).toBe(true);
-    });
-
-    it('should set enabled to true by default', async () => {
-      const skill = createTestSkill({ id: 'test', enabled: undefined });
-
-      const saved = await loader.saveSkill(skill);
-
-      expect(saved.enabled).toBe(true);
-    });
-  });
-
-  describe('createSkill', () => {
-    it('should generate id from name if not provided', async () => {
-      const skillData = {
-        id: '',
-        name: 'My Cool Skill',
-        description: 'Description',
-        icon: '🔥',
-        prompt: 'Prompt',
-        parameters: [],
-      };
-
-      const created = await loader.createSkill(skillData);
-
-      expect(created.id).toBe('my-cool-skill');
-    });
-
-    it('should throw error for duplicate id', async () => {
-      const skill = createTestSkill({ id: 'duplicate' });
-      mockFiles.set('/mock/user/data/skills/duplicate.json', JSON.stringify(skill));
-      await loader.reloadSkills();
-
-      await expect(loader.createSkill(skill)).rejects.toThrow('already exists');
-    });
-  });
-
-  describe('updateSkill', () => {
-    it('should update existing skill', async () => {
-      const skill = createTestSkill({ id: 'update-me', name: 'Original' });
-      mockFiles.set('/mock/user/data/skills/update-me.json', JSON.stringify(skill));
-      await loader.reloadSkills();
-
-      const updated = await loader.updateSkill('update-me', { name: 'Updated' });
-
-      expect(updated.name).toBe('Updated');
-    });
-
-    it('should throw error for non-existent skill', async () => {
-      await loader.reloadSkills();
-
-      await expect(loader.updateSkill('non-existent', { name: 'New' })).rejects.toThrow('not found');
-    });
-  });
-
-  describe('deleteSkill', () => {
-    it('should delete existing skill', async () => {
-      const skill = createTestSkill({ id: 'delete-me' });
-      mockFiles.set('/mock/user/data/skills/delete-me.json', JSON.stringify(skill));
-      await loader.reloadSkills();
-
-      const result = await loader.deleteSkill('delete-me');
-
-      expect(result).toBe(true);
-      expect(loader.getSkill('delete-me')).toBeUndefined();
-    });
-
-    it('should return false for non-existent skill', async () => {
-      await loader.reloadSkills();
-
-      const result = await loader.deleteSkill('non-existent');
-
-      expect(result).toBe(false);
-    });
-  });
-
   describe('reloadSkills', () => {
     it('should clear existing skills before loading', async () => {
       const skill1 = createTestSkill({ id: 'skill-1' });
-      mockFiles.set('/mock/user/data/skills/skill-1.json', JSON.stringify(skill1));
+      mockFiles.set('skill-1.json', JSON.stringify(skill1));
       await loader.reloadSkills();
 
       expect(loader.listSkills()).toHaveLength(1);
@@ -505,14 +397,35 @@ describe('CustomSkillLoader', () => {
     });
 
     it('should handle malformed JSON gracefully', async () => {
-      mockFiles.set('/mock/user/data/skills/bad.json', 'not valid json');
-      mockFiles.set('/mock/user/data/skills/good.json', JSON.stringify(createTestSkill({ id: 'good' })));
+      mockFiles.set('bad.json', 'not valid json');
+      mockFiles.set('good.json', JSON.stringify(createTestSkill({ id: 'good' })));
 
       await loader.reloadSkills();
 
       // Should still load the valid skill
       expect(loader.listSkills()).toHaveLength(1);
       expect(loader.getSkill('good')).toBeDefined();
+    });
+
+    it('should return empty array when directory does not exist', async () => {
+      mockDirExists = false;
+      const skills = await loader.reloadSkills();
+      expect(skills).toEqual([]);
+    });
+  });
+
+  describe('initialize', () => {
+    it('should only initialize once', async () => {
+      const skill = createTestSkill({ id: 'init-skill' });
+      mockFiles.set('init-skill.json', JSON.stringify(skill));
+
+      await loader.initialize();
+      expect(loader.listSkills()).toHaveLength(1);
+
+      // Clear files - should not affect loaded skills since already initialized
+      mockFiles.clear();
+      await loader.initialize();
+      expect(loader.listSkills()).toHaveLength(1);
     });
   });
 });

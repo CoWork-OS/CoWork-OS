@@ -1,0 +1,19 @@
+{
+  "id": "summarize-folder",
+  "name": "Summarize Folder",
+  "description": "Create a summary of all files in a folder",
+  "icon": "📋",
+  "category": "Documentation",
+  "prompt": "Please analyze all the files in {{path}} and create a comprehensive summary.\n\nInclude:\n- Overview of the folder structure\n- Purpose of each file/module\n- Key functions and classes\n- Dependencies and relationships between files\n- Any notable patterns or conventions\n\nFormat the output as a clear, well-organized document.",
+  "parameters": [
+    {
+      "name": "path",
+      "type": "string",
+      "description": "Folder path to summarize",
+      "required": true,
+      "default": "."
+    }
+  ],
+  "enabled": true,
+  "filePath": "/Users/mesut/Library/Application Support/cowork-oss/skills/summarize-folder.json"
+}

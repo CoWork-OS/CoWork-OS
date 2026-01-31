@@ -1,0 +1,24 @@
+{
+  "id": "compare-files",
+  "name": "Compare Files",
+  "description": "Compare two files and show differences",
+  "icon": "⚖️",
+  "category": "Data",
+  "prompt": "Please compare these two files and show the differences:\n\nFile 1: {{file1}}\nFile 2: {{file2}}\n\nProvide:\n1. **Summary**: High-level overview of differences\n2. **Added**: Lines/sections only in File 2\n3. **Removed**: Lines/sections only in File 1\n4. **Modified**: Lines that changed between files\n5. **Statistics**: Number of additions, deletions, modifications\n\nFor code files, highlight semantic differences (not just whitespace).\nFor data files, compare structure and content.",
+  "parameters": [
+    {
+      "name": "file1",
+      "type": "string",
+      "description": "Path to the first file",
+      "required": true
+    },
+    {
+      "name": "file2",
+      "type": "string",
+      "description": "Path to the second file",
+      "required": true
+    }
+  ],
+  "enabled": true,
+  "filePath": "/Users/mesut/Library/Application Support/cowork-oss/skills/compare-files.json"
+}

@@ -1,0 +1,19 @@
+{
+  "id": "code-review",
+  "name": "Code Review",
+  "description": "Review code for best practices and potential issues",
+  "icon": "🔍",
+  "category": "Development",
+  "prompt": "Please review the code in {{path}} and provide feedback on:\n- Code quality and best practices\n- Potential bugs or issues\n- Performance considerations\n- Security concerns\n- Suggestions for improvement\n\nBe constructive and specific in your feedback.",
+  "parameters": [
+    {
+      "name": "path",
+      "type": "string",
+      "description": "Path to the file or folder to review",
+      "required": true,
+      "default": "."
+    }
+  ],
+  "enabled": true,
+  "filePath": "/Users/mesut/Library/Application Support/cowork-oss/skills/code-review.json"
+}

@@ -1,0 +1,32 @@
+{
+  "id": "write-tests",
+  "name": "Write Tests",
+  "description": "Generate unit tests for existing code",
+  "icon": "🧪",
+  "category": "Development",
+  "prompt": "Please analyze the code in {{path}} and write comprehensive unit tests for it.\n\nRequirements:\n- Use {{framework}} testing framework\n- Cover edge cases and error handling\n- Include both positive and negative test cases\n- Add clear test descriptions\n\nSave the tests in a file with appropriate naming convention.",
+  "parameters": [
+    {
+      "name": "path",
+      "type": "string",
+      "description": "Path to the file to test",
+      "required": true
+    },
+    {
+      "name": "framework",
+      "type": "select",
+      "description": "Testing framework to use",
+      "required": true,
+      "default": "jest",
+      "options": [
+        "jest",
+        "mocha",
+        "vitest",
+        "pytest",
+        "unittest"
+      ]
+    }
+  ],
+  "enabled": true,
+  "filePath": "/Users/mesut/Library/Application Support/cowork-oss/skills/write-tests.json"
+}

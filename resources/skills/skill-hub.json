@@ -1,0 +1,10 @@
+{
+  "id": "skill-hub",
+  "name": "skill-hub",
+  "description": "Use the skill-hub CLI to search, install, update, and publish agent skills from skill-hub.com. Use when you need to fetch new skills on the fly, sync installed skills to latest or a specific version, or publish new/updated skill folders with the npm-installed skill-hub CLI.",
+  "icon": "🔧",
+  "category": "Tools",
+  "prompt": "# skill-hub CLI\n\nInstall\n\n```bash\nnpm i -g skill-hub\n```\n\nAuth (publish)\n\n```bash\nskill-hub login\nskill-hub whoami\n```\n\nSearch\n\n```bash\nskill-hub search \"postgres backups\"\n```\n\nInstall\n\n```bash\nskill-hub install my-skill\nskill-hub install my-skill --version 1.2.3\n```\n\nUpdate (hash-based match + upgrade)\n\n```bash\nskill-hub update my-skill\nskill-hub update my-skill --version 1.2.3\nskill-hub update --all\nskill-hub update my-skill --force\nskill-hub update --all --no-input --force\n```\n\nList\n\n```bash\nskill-hub list\n```\n\nPublish\n\n```bash\nskill-hub publish ./my-skill --slug my-skill --name \"My Skill\" --version 1.2.0 --changelog \"Fixes + docs\"\n```\n\nNotes\n\n- Default registry: https://skill-hub.com (override with skill-hub_REGISTRY or --registry)\n- Default workdir: cwd (falls back to CoWork-OSS workspace); install dir: ./skills (override with --workdir / --dir / skill-hub_WORKDIR)\n- Update command hashes local files, resolves matching version, and upgrades to latest unless --version is set",
+  "parameters": [],
+  "enabled": true
+}

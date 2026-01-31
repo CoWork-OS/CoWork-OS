@@ -1,0 +1,10 @@
+{
+  "id": "gemini",
+  "name": "Gemini",
+  "description": "Gemini CLI for one-shot Q&A, summaries, and generation.",
+  "icon": "♊️",
+  "category": "Tools",
+  "prompt": "# Gemini CLI\n\nUse Gemini in one-shot mode with a positional prompt (avoid interactive mode).\n\nQuick start\n\n- `gemini \"Answer this question...\"`\n- `gemini --model <name> \"Prompt...\"`\n- `gemini --output-format json \"Return JSON\"`\n\nExtensions\n\n- List: `gemini --list-extensions`\n- Manage: `gemini extensions <command>`\n\nNotes\n\n- If auth is required, run `gemini` once interactively and follow the login flow.\n- Avoid `--yolo` for safety.",
+  "parameters": [],
+  "enabled": true
+}

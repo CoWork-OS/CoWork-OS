@@ -1,0 +1,10 @@
+{
+  "id": "nano-banana-pro",
+  "name": "Nano-banana-pro",
+  "description": "Generate or edit images via Gemini 3 Pro Image (Nano Banana Pro).",
+  "icon": "🍌",
+  "category": "Tools",
+  "prompt": "# Nano Banana Pro (Gemini 3 Pro Image)\n\nUse the bundled script to generate or edit images.\n\nGenerate\n\n```bash\nuv run {baseDir}/scripts/generate_image.py --prompt \"your image description\" --filename \"output.png\" --resolution 1K\n```\n\nEdit (single image)\n\n```bash\nuv run {baseDir}/scripts/generate_image.py --prompt \"edit instructions\" --filename \"output.png\" -i \"/path/in.png\" --resolution 2K\n```\n\nMulti-image composition (up to 14 images)\n\n```bash\nuv run {baseDir}/scripts/generate_image.py --prompt \"combine these into one scene\" --filename \"output.png\" -i img1.png -i img2.png -i img3.png\n```\n\nAPI key\n\n- `GEMINI_API_KEY` env var\n- Or set `skills.\"nano-banana-pro\".apiKey` / `skills.\"nano-banana-pro\".env.GEMINI_API_KEY` in `~/.CoWork-OSS/CoWork-OSS.json`\n\nNotes\n\n- Resolutions: `1K` (default), `2K`, `4K`.\n- Use timestamps in filenames: `yyyy-mm-dd-hh-mm-ss-name.png`.\n- The script prints a `MEDIA:` line for CoWork-OSS to auto-attach on supported chat providers.\n- Do not read the image back; report the saved path only.",
+  "parameters": [],
+  "enabled": true
+}

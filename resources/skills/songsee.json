@@ -1,0 +1,10 @@
+{
+  "id": "songsee",
+  "name": "Songsee",
+  "description": "Generate spectrograms and feature-panel visualizations from audio with the songsee CLI.",
+  "icon": "🌊",
+  "category": "Tools",
+  "prompt": "# songsee\n\nGenerate spectrograms + feature panels from audio.\n\nQuick start\n\n- Spectrogram: `songsee track.mp3`\n- Multi-panel: `songsee track.mp3 --viz spectrogram,mel,chroma,hpss,selfsim,loudness,tempogram,mfcc,flux`\n- Time slice: `songsee track.mp3 --start 12.5 --duration 8 -o slice.jpg`\n- Stdin: `cat track.mp3 | songsee - --format png -o out.png`\n\nCommon flags\n\n- `--viz` list (repeatable or comma-separated)\n- `--style` palette (classic, magma, inferno, viridis, gray)\n- `--width` / `--height` output size\n- `--window` / `--hop` FFT settings\n- `--min-freq` / `--max-freq` frequency range\n- `--start` / `--duration` time slice\n- `--format` jpg|png\n\nNotes\n\n- WAV/MP3 decode native; other formats use ffmpeg if available.\n- Multiple `--viz` renders a grid.",
+  "parameters": [],
+  "enabled": true
+}

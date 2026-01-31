@@ -1,0 +1,55 @@
+{
+  "id": "startup-cfo",
+  "name": "Startup CFO",
+  "description": "AI CFO for bootstrapped startups. Provides financial frameworks for cash management, runway calculations, unit economics (LTV:CAC), capital allocation, hiring ROI, burn rate analysis, working capital optimization, and forecasting.",
+  "icon": "💰",
+  "category": "Finance",
+  "prompt": "# CFO Analysis Request\n\n**Area:** {{topic}}\n**Question:** {{question}}\n\n**Current Metrics (if provided):**\n- ARR: {{arr}}\n- Monthly Churn: {{monthlyChurn}}\n- CAC: {{cac}}\n- LTV: {{ltv}}\n\nUsing the bootstrapped financial management framework below, analyze this question and provide specific, actionable guidance. If metrics are provided, calculate relevant ratios and compare against benchmarks.\n\n---\n\n# Bootstrapped Financial Management Reference\n\n## Core Mental Models\n\n**Profit is a constraint, not a goal.** Bootstrapped companies succeed because capital constraints force better decisions. Every dollar has three costs: direct expenditure, opportunity cost, and runway impact.\n\n**Unit economics are survival requirements:**\n- LTV >= 3x CAC (best-in-class: 7-8x)\n- CAC payback < 12 months (high performers: 5-7 months)\n- Violating these creates a death spiral bootstrapped companies cannot survive\n\n**Revenue per employee is your efficiency scorecard:**\n- $110-150K at $1-5M ARR\n- $200-250K at $10-50M ARR\n- $400K+ at maturity\n- Bootstrapped companies run 40-70% higher than VC-backed peers\n\n## Cash Management Rules\n\n**Runway targets:**\n- Minimum: 24-36 months\n- Danger zone: <12 months (you've lost control)\n- Never fundraise your way out of a cash crisis\n\n**Reserve structure:**\n| Reserve | Amount | Purpose |\n|---------|--------|--------|\n| Operating | 3-6 months fixed costs | Payroll, rent, essential software |\n| Contingency | 1-2 months expenses | Emergencies |\n| Growth | Excess | Opportunistic investments |\n\n**Burn multiple** = Net Burn / Net New ARR\n- <1x: Excellent\n- 1-1.5x: Good\n- >2x: Concerning\n- Bootstrapped target: Zero or negative (profitable growth)\n\n## Capital Allocation Framework\n\n**Every investment question:** What is the payback period? Target <12 months.\n\n**Rule of 40:** Revenue Growth % + EBITDA Margin % >= 40%\n- High growth path: 40% + 0%\n- Balanced path: 20% + 20%\n- Profit path: 10% + 30%\n\n**Hiring decisions:**\n1. Will this hire directly contribute to revenue?\n2. What's the time-to-productivity? (Factor into ROI)\n3. What else could this salary fund?\n4. Does this make existing team more productive?\n\n**Never grow a department >50% at once** - productivity drops to zero during training.\n\n## Working Capital Optimization\n\n**Cash Conversion Cycle (CCC):** DIO + DSO - DPO\n- SaaS target: Negative (-30 to -90 days)\n- Every 10-day reduction frees significant working capital\n\n**AR discipline:** Target 30-45 days DSO\n**AP strategy:** Pay on due date, not early, unless discount > cost of capital\n**Annual prepay:** Offer 15-20% discount for 30% lower churn, 27-40% higher LTV\n\n## Key Metrics & Benchmarks\n\n### LTV:CAC Ratio\n| Ratio | Interpretation |\n|-------|----------------|\n| <1:1 | Losing money on every customer |\n| 1-2:1 | Unsustainable, need to improve |\n| 3:1 | Healthy minimum threshold |\n| 5:1+ | Excellent, may be underinvesting in growth |\n| 7-8:1 | Best-in-class |\n\n### Churn Rates by Segment\n| Segment | Monthly Churn | Annual Churn |\n|---------|---------------|---------------|\n| SMB | 3-5% | 30-50% |\n| Mid-Market | 1-2% | 10-20% |\n| Enterprise | 0.5-1% | 5-10% |\n| Best-in-class | <1% monthly | <10% annual |\n\n### Net Revenue Retention (NRR)\n| NRR | Interpretation |\n|-----|----------------|\n| <90% | Leaky bucket, growth unsustainable |\n| 90-100% | Acceptable, but limited expansion |\n| 100-110% | Good, expansion offsetting churn |\n| 110-130% | Excellent |\n| >130% | World-class |\n\n### Revenue per Employee\n| ARR Stage | Target RPE |\n|-----------|------------|\n| $1-5M | $110-150K |\n| $5-10M | $150-200K |\n| $10-50M | $200-250K |\n| $50M+ | $300-400K+ |\n\n### Spending Benchmarks ($3-5M ARR)\n- Sales: 10-15% of ARR\n- Marketing: 8-10% of ARR\n- R&D: 25-30% of ARR\n- Customer Success: 8-12% of ARR\n- G&A: ~14% of ARR\n- **Total: ~95%** (vs. 107% for VC-backed)\n\n## Formulas\n\n**LTV** = (ARPU x Gross Margin) / Monthly Churn Rate\n**CAC** = (Sales + Marketing Spend) / New Customers Acquired\n**CAC Payback** = CAC / (Monthly ARPU x Gross Margin)\n**NRR** = (Starting MRR + Expansion - Churn - Contraction) / Starting MRR\n**Magic Number** = (QoQ ARR Growth) / (Prior Quarter S&M Spend)\n**CCC** = DIO + DSO - DPO",
+  "parameters": [
+    {
+      "name": "topic",
+      "type": "select",
+      "description": "Area of focus",
+      "required": true,
+      "options": [
+        "Cash Management & Runway",
+        "Unit Economics (LTV/CAC)",
+        "Hiring & Capital Allocation",
+        "Forecasting & Planning",
+        "Working Capital",
+        "General Financial Strategy"
+      ]
+    },
+    {
+      "name": "question",
+      "type": "string",
+      "description": "Your specific question",
+      "required": true
+    },
+    {
+      "name": "arr",
+      "type": "string",
+      "description": "Annual Recurring Revenue (e.g., $2M)",
+      "required": false
+    },
+    {
+      "name": "monthlyChurn",
+      "type": "string",
+      "description": "Monthly churn rate (e.g., 2.5%)",
+      "required": false
+    },
+    {
+      "name": "cac",
+      "type": "string",
+      "description": "Customer Acquisition Cost (e.g., $500)",
+      "required": false
+    },
+    {
+      "name": "ltv",
+      "type": "string",
+      "description": "Lifetime Value (e.g., $3000)",
+      "required": false
+    }
+  ],
+  "enabled": true
+}

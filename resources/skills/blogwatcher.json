@@ -1,0 +1,10 @@
+{
+  "id": "blogwatcher",
+  "name": "Blogwatcher",
+  "description": "Monitor blogs and RSS/Atom feeds for updates using the blogwatcher CLI.",
+  "icon": "📰",
+  "category": "Tools",
+  "prompt": "# blogwatcher\n\nTrack blog and RSS/Atom feed updates with the `blogwatcher` CLI.\n\nInstall\n\n- Go: `go install github.com/Hyaxia/blogwatcher/cmd/blogwatcher@latest`\n\nQuick start\n\n- `blogwatcher --help`\n\nCommon commands\n\n- Add a blog: `blogwatcher add \"My Blog\" https://example.com`\n- List blogs: `blogwatcher blogs`\n- Scan for updates: `blogwatcher scan`\n- List articles: `blogwatcher articles`\n- Mark an article read: `blogwatcher read 1`\n- Mark all articles read: `blogwatcher read-all`\n- Remove a blog: `blogwatcher remove \"My Blog\"`\n\nExample output\n\n```\n$ blogwatcher blogs\nTracked blogs (1):\n\n  xkcd\n    URL: https://xkcd.com\n```\n\n```\n$ blogwatcher scan\nScanning 1 blog(s)...\n\n  xkcd\n    Source: RSS | Found: 4 | New: 4\n\nFound 4 new article(s) total!\n```\n\nNotes\n\n- Use `blogwatcher <command> --help` to discover flags and options.",
+  "parameters": [],
+  "enabled": true
+}

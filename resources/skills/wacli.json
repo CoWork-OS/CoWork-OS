@@ -1,0 +1,10 @@
+{
+  "id": "wacli",
+  "name": "Wacli",
+  "description": "Send WhatsApp messages to other people or search/sync WhatsApp history via the wacli CLI (not for normal user chats).",
+  "icon": "📱",
+  "category": "Tools",
+  "prompt": "# wacli\n\nUse `wacli` only when the user explicitly asks you to message someone else on WhatsApp or when they ask to sync/search WhatsApp history.\nDo NOT use `wacli` for normal user chats; CoWork-OSS routes WhatsApp conversations automatically.\nIf the user is chatting with you on WhatsApp, you should not reach for this tool unless they ask you to contact a third party.\n\nSafety\n\n- Require explicit recipient + message text.\n- Confirm recipient + message before sending.\n- If anything is ambiguous, ask a clarifying question.\n\nAuth + sync\n\n- `wacli auth` (QR login + initial sync)\n- `wacli sync --follow` (continuous sync)\n- `wacli doctor`\n\nFind chats + messages\n\n- `wacli chats list --limit 20 --query \"name or number\"`\n- `wacli messages search \"query\" --limit 20 --chat <jid>`\n- `wacli messages search \"invoice\" --after 2025-01-01 --before 2025-12-31`\n\nHistory backfill\n\n- `wacli history backfill --chat <jid> --requests 2 --count 50`\n\nSend\n\n- Text: `wacli send text --to \"+14155551212\" --message \"Hello! Are you free at 3pm?\"`\n- Group: `wacli send text --to \"1234567890-123456789@g.us\" --message \"Running 5 min late.\"`\n- File: `wacli send file --to \"+14155551212\" --file /path/agenda.pdf --caption \"Agenda\"`\n\nNotes\n\n- Store dir: `~/.wacli` (override with `--store`).\n- Use `--json` for machine-readable output when parsing.\n- Backfill requires your phone online; results are best-effort.\n- WhatsApp CLI is not needed for routine user chats; it’s for messaging other people.\n- JIDs: direct chats look like `<number>@s.whatsapp.net`; groups look like `<id>@g.us` (use `wacli chats list` to find).",
+  "parameters": [],
+  "enabled": true
+}

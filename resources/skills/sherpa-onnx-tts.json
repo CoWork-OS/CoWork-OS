@@ -1,0 +1,10 @@
+{
+  "id": "sherpa-onnx-tts",
+  "name": "Sherpa-onnx-tts",
+  "description": "Local text-to-speech via sherpa-onnx (offline, no cloud)",
+  "icon": "🗣️",
+  "category": "Tools",
+  "prompt": "# sherpa-onnx-tts\n\nLocal TTS using the sherpa-onnx offline CLI.\n\n## Install\n\n1. Download the runtime for your OS (extracts into `~/.CoWork-OSS/tools/sherpa-onnx-tts/runtime`)\n2. Download a voice model (extracts into `~/.CoWork-OSS/tools/sherpa-onnx-tts/models`)\n\nUpdate `~/.CoWork-OSS/CoWork-OSS.json`:\n\n```json5\n{\n  skills: {\n    entries: {\n      \"sherpa-onnx-tts\": {\n        env: {\n          SHERPA_ONNX_RUNTIME_DIR: \"~/.CoWork-OSS/tools/sherpa-onnx-tts/runtime\",\n          SHERPA_ONNX_MODEL_DIR: \"~/.CoWork-OSS/tools/sherpa-onnx-tts/models/vits-piper-en_US-lessac-high\",\n        },\n      },\n    },\n  },\n}\n```\n\nThe wrapper lives in this skill folder. Run it directly, or add the wrapper to PATH:\n\n```bash\nexport PATH=\"{baseDir}/bin:$PATH\"\n```\n\n## Usage\n\n```bash\n{baseDir}/bin/sherpa-onnx-tts -o ./tts.wav \"Hello from local TTS.\"\n```\n\nNotes:\n\n- Pick a different model from the sherpa-onnx `tts-models` release if you want another voice.\n- If the model dir has multiple `.onnx` files, set `SHERPA_ONNX_MODEL_FILE` or pass `--model-file`.\n- You can also pass `--tokens-file` or `--data-dir` to override the defaults.\n- Windows: run `node {baseDir}\\\\bin\\\\sherpa-onnx-tts -o tts.wav \"Hello from local TTS.\"`",
+  "parameters": [],
+  "enabled": true
+}

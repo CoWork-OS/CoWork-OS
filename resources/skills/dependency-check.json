@@ -1,0 +1,11 @@
+{
+  "id": "dependency-check",
+  "name": "Dependency Check",
+  "description": "Audit dependencies for updates and vulnerabilities",
+  "icon": "📦",
+  "category": "Project",
+  "prompt": "Please audit the project dependencies.\n\nSteps:\n1. Identify the package manager (npm, yarn, pip, etc.)\n2. List all dependencies with current versions\n3. Check for available updates\n4. Run security audit if available (npm audit, pip-audit, etc.)\n5. Identify deprecated packages\n\nReport:\n- Outdated packages with latest versions\n- Security vulnerabilities with severity\n- Deprecated packages that need replacement\n- Recommendations for updates\n\nBe careful about breaking changes in major version updates.",
+  "parameters": [],
+  "enabled": true,
+  "filePath": "/Users/mesut/Library/Application Support/cowork-oss/skills/dependency-check.json"
+}

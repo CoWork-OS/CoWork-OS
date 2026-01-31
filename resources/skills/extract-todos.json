@@ -1,0 +1,19 @@
+{
+  "id": "extract-todos",
+  "name": "Extract TODOs",
+  "description": "Find all TODO/FIXME comments in codebase",
+  "icon": "📌",
+  "category": "Utilities",
+  "prompt": "Please find all TODO, FIXME, HACK, and XXX comments in the codebase.\n\nSearch in {{path}} and provide:\n1. **Summary**: Total count by type\n2. **By File**: Group findings by file\n3. **By Priority**: If priority markers exist (e.g., TODO(high))\n4. **Old TODOs**: Identify TODOs that might be stale\n\nFor each TODO:\n- File path and line number\n- The full comment text\n- Surrounding context if helpful\n\nSuggest which TODOs should be prioritized based on:\n- Security implications\n- Bug-related issues\n- Technical debt impact",
+  "parameters": [
+    {
+      "name": "path",
+      "type": "string",
+      "description": "Path to search",
+      "required": true,
+      "default": "."
+    }
+  ],
+  "enabled": true,
+  "filePath": "/Users/mesut/Library/Application Support/cowork-oss/skills/extract-todos.json"
+}

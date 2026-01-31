@@ -1,0 +1,10 @@
+{
+  "id": "video-frames",
+  "name": "Video-frames",
+  "description": "Extract frames or short clips from videos using ffmpeg.",
+  "icon": "🎞️",
+  "category": "Tools",
+  "prompt": "# Video Frames (ffmpeg)\n\nExtract a single frame from a video, or create quick thumbnails for inspection.\n\n## Quick start\n\nFirst frame:\n\n```bash\n{baseDir}/scripts/frame.sh /path/to/video.mp4 --out /tmp/frame.jpg\n```\n\nAt a timestamp:\n\n```bash\n{baseDir}/scripts/frame.sh /path/to/video.mp4 --time 00:00:10 --out /tmp/frame-10s.jpg\n```\n\n## Notes\n\n- Prefer `--time` for “what is happening around here?”.\n- Use a `.jpg` for quick share; use `.png` for crisp UI frames.",
+  "parameters": [],
+  "enabled": true
+}

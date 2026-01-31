@@ -1,0 +1,10 @@
+{
+  "id": "sonoscli",
+  "name": "Sonoscli",
+  "description": "Control Sonos speakers (discover/status/play/volume/group).",
+  "icon": "🔊",
+  "category": "Tools",
+  "prompt": "# Sonos CLI\n\nUse `sonos` to control Sonos speakers on the local network.\n\nQuick start\n\n- `sonos discover`\n- `sonos status --name \"Kitchen\"`\n- `sonos play|pause|stop --name \"Kitchen\"`\n- `sonos volume set 15 --name \"Kitchen\"`\n\nCommon tasks\n\n- Grouping: `sonos group status|join|unjoin|party|solo`\n- Favorites: `sonos favorites list|open`\n- Queue: `sonos queue list|play|clear`\n- Spotify search (via SMAPI): `sonos smapi search --service \"Spotify\" --category tracks \"query\"`\n\nNotes\n\n- If SSDP fails, specify `--ip <speaker-ip>`.\n- Spotify Web API search is optional and requires `SPOTIFY_CLIENT_ID/SECRET`.",
+  "parameters": [],
+  "enabled": true
+}

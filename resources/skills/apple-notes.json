@@ -1,0 +1,10 @@
+{
+  "id": "apple-notes",
+  "name": "Apple-notes",
+  "description": "Manage Apple Notes via the `memo` CLI on macOS (create, view, edit, delete, search, move, and export notes). Use when a user asks CoWork-OSS to add a note, list notes, search notes, or manage note folders.",
+  "icon": "📝",
+  "category": "Tools",
+  "prompt": "# Apple Notes CLI\n\nUse `memo notes` to manage Apple Notes directly from the terminal. Create, view, edit, delete, search, move notes between folders, and export to HTML/Markdown.\n\nSetup\n\n- Install (Homebrew): `brew tap antoniorodr/memo && brew install antoniorodr/memo/memo`\n- Manual (pip): `pip install .` (after cloning the repo)\n- macOS-only; if prompted, grant Automation access to Notes.app.\n\nView Notes\n\n- List all notes: `memo notes`\n- Filter by folder: `memo notes -f \"Folder Name\"`\n- Search notes (fuzzy): `memo notes -s \"query\"`\n\nCreate Notes\n\n- Add a new note: `memo notes -a`\n  - Opens an interactive editor to compose the note.\n- Quick add with title: `memo notes -a \"Note Title\"`\n\nEdit Notes\n\n- Edit existing note: `memo notes -e`\n  - Interactive selection of note to edit.\n\nDelete Notes\n\n- Delete a note: `memo notes -d`\n  - Interactive selection of note to delete.\n\nMove Notes\n\n- Move note to folder: `memo notes -m`\n  - Interactive selection of note and destination folder.\n\nExport Notes\n\n- Export to HTML/Markdown: `memo notes -ex`\n  - Exports selected note; uses Mistune for markdown processing.\n\nLimitations\n\n- Cannot edit notes containing images or attachments.\n- Interactive prompts may require terminal access.\n\nNotes\n\n- macOS-only.\n- Requires Apple Notes.app to be accessible.\n- For automation, grant permissions in System Settings > Privacy & Security > Automation.",
+  "parameters": [],
+  "enabled": true
+}

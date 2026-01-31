@@ -1,0 +1,32 @@
+{
+  "id": "refactor-code",
+  "name": "Refactor Code",
+  "description": "Improve code structure and readability",
+  "icon": "🔧",
+  "category": "Development",
+  "prompt": "Please refactor the code in {{path}} to improve its quality.\n\nFocus on:\n- {{focus}}\n- Maintaining the same functionality\n- Adding comments where helpful\n- Following best practices for the language\n\nExplain the changes you make and why.",
+  "parameters": [
+    {
+      "name": "path",
+      "type": "string",
+      "description": "Path to the file to refactor",
+      "required": true
+    },
+    {
+      "name": "focus",
+      "type": "select",
+      "description": "What to focus on",
+      "required": true,
+      "default": "readability",
+      "options": [
+        "readability",
+        "performance",
+        "modularity",
+        "error handling",
+        "all of the above"
+      ]
+    }
+  ],
+  "enabled": true,
+  "filePath": "/Users/mesut/Library/Application Support/cowork-oss/skills/refactor-code.json"
+}

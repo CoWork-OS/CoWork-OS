@@ -1,0 +1,10 @@
+{
+  "id": "goplaces",
+  "name": "Goplaces",
+  "description": "Query Google Places API (New) via the goplaces CLI for text search, place details, resolve, and reviews. Use for human-friendly place lookup or JSON output for scripts.",
+  "icon": "📍",
+  "category": "Tools",
+  "prompt": "# goplaces\n\nModern Google Places API (New) CLI. Human output by default, `--json` for scripts.\n\nInstall\n\n- Homebrew: `brew install steipete/tap/goplaces`\n\nConfig\n\n- `GOOGLE_PLACES_API_KEY` required.\n- Optional: `GOOGLE_PLACES_BASE_URL` for testing/proxying.\n\nCommon commands\n\n- Search: `goplaces search \"coffee\" --open-now --min-rating 4 --limit 5`\n- Bias: `goplaces search \"pizza\" --lat 40.8 --lng -73.9 --radius-m 3000`\n- Pagination: `goplaces search \"pizza\" --page-token \"NEXT_PAGE_TOKEN\"`\n- Resolve: `goplaces resolve \"Soho, London\" --limit 5`\n- Details: `goplaces details <place_id> --reviews`\n- JSON: `goplaces search \"sushi\" --json`\n\nNotes\n\n- `--no-color` or `NO_COLOR` disables ANSI color.\n- Price levels: 0..4 (free → very expensive).\n- Type filter sends only the first `--type` value (API accepts one).",
+  "parameters": [],
+  "enabled": true
+}

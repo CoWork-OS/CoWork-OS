@@ -1,0 +1,19 @@
+{
+  "id": "security-audit",
+  "name": "Security Audit",
+  "description": "Check code for common security vulnerabilities",
+  "icon": "🔒",
+  "category": "Development",
+  "prompt": "Please perform a security audit on {{path}}.\n\nCheck for:\n- SQL injection vulnerabilities\n- XSS (Cross-Site Scripting) risks\n- Command injection possibilities\n- Insecure data handling\n- Hardcoded secrets or credentials\n- Insecure dependencies\n- Authentication/authorization issues\n- Input validation problems\n- Sensitive data exposure\n\nFor each issue found:\n1. Describe the vulnerability\n2. Explain the potential impact\n3. Provide a fix with code example\n4. Rate severity (Critical/High/Medium/Low)",
+  "parameters": [
+    {
+      "name": "path",
+      "type": "string",
+      "description": "Path to file or folder to audit",
+      "required": true,
+      "default": "."
+    }
+  ],
+  "enabled": true,
+  "filePath": "/Users/mesut/Library/Application Support/cowork-oss/skills/security-audit.json"
+}

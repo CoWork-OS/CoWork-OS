@@ -1,0 +1,10 @@
+{
+  "id": "blucli",
+  "name": "Blucli",
+  "description": "BluOS CLI (blu) for discovery, playback, grouping, and volume.",
+  "icon": "🫐",
+  "category": "Tools",
+  "prompt": "# blucli (blu)\n\nUse `blu` to control Bluesound/NAD players.\n\nQuick start\n\n- `blu devices` (pick target)\n- `blu --device <id> status`\n- `blu play|pause|stop`\n- `blu volume set 15`\n\nTarget selection (in priority order)\n\n- `--device <id|name|alias>`\n- `BLU_DEVICE`\n- config default (if set)\n\nCommon tasks\n\n- Grouping: `blu group status|add|remove`\n- TuneIn search/play: `blu tunein search \"query\"`, `blu tunein play \"query\"`\n\nPrefer `--json` for scripts. Confirm the target device before changing playback.",
+  "parameters": [],
+  "enabled": true
+}

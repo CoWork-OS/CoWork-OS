@@ -1,0 +1,10 @@
+{
+  "id": "spotify-player",
+  "name": "Spotify-player",
+  "description": "Terminal Spotify playback/search via spogo (preferred) or spotify_player.",
+  "icon": "🎵",
+  "category": "Tools",
+  "prompt": "# spogo / spotify_player\n\nUse `spogo` **(preferred)** for Spotify playback/search. Fall back to `spotify_player` if needed.\n\nRequirements\n\n- Spotify Premium account.\n- Either `spogo` or `spotify_player` installed.\n\nspogo setup\n\n- Import cookies: `spogo auth import --browser chrome`\n\nCommon CLI commands\n\n- Search: `spogo search track \"query\"`\n- Playback: `spogo play|pause|next|prev`\n- Devices: `spogo device list`, `spogo device set \"<name|id>\"`\n- Status: `spogo status`\n\nspotify_player commands (fallback)\n\n- Search: `spotify_player search \"query\"`\n- Playback: `spotify_player playback play|pause|next|previous`\n- Connect device: `spotify_player connect`\n- Like track: `spotify_player like`\n\nNotes\n\n- Config folder: `~/.config/spotify-player` (e.g., `app.toml`).\n- For Spotify Connect integration, set a user `client_id` in config.\n- TUI shortcuts are available via `?` in the app.",
+  "parameters": [],
+  "enabled": true
+}

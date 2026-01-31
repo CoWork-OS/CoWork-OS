@@ -1,0 +1,18 @@
+{
+  "id": "proofread",
+  "name": "Proofread",
+  "description": "Check document for grammar and clarity",
+  "icon": "✏️",
+  "category": "Writing",
+  "prompt": "Please proofread the document at {{path}}.\n\nCheck for:\n- Spelling errors\n- Grammar mistakes\n- Punctuation issues\n- Awkward phrasing\n- Unclear sentences\n- Consistency (terminology, formatting)\n- Tone appropriateness\n\nFor each issue:\n1. Quote the original text\n2. Explain the problem\n3. Suggest a correction\n\nAt the end, provide:\n- Overall quality score (1-10)\n- Summary of common issues\n- General improvement suggestions",
+  "parameters": [
+    {
+      "name": "path",
+      "type": "string",
+      "description": "Path to the document",
+      "required": true
+    }
+  ],
+  "enabled": true,
+  "filePath": "/Users/mesut/Library/Application Support/cowork-oss/skills/proofread.json"
+}

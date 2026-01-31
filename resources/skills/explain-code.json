@@ -1,0 +1,30 @@
+{
+  "id": "explain-code",
+  "name": "Explain Code",
+  "description": "Get a detailed explanation of how code works",
+  "icon": "📖",
+  "category": "Learning",
+  "prompt": "Please explain the code in {{path}} in detail.\n\nInclude:\n- What the code does at a high level\n- How it works step by step\n- Key concepts and patterns used\n- Any complex or tricky parts\n- How it fits into the larger system (if applicable)\n\nExplain at a {{level}} level.",
+  "parameters": [
+    {
+      "name": "path",
+      "type": "string",
+      "description": "Path to the file to explain",
+      "required": true
+    },
+    {
+      "name": "level",
+      "type": "select",
+      "description": "Explanation depth",
+      "required": true,
+      "default": "intermediate",
+      "options": [
+        "beginner",
+        "intermediate",
+        "advanced"
+      ]
+    }
+  ],
+  "enabled": true,
+  "filePath": "/Users/mesut/Library/Application Support/cowork-oss/skills/explain-code.json"
+}

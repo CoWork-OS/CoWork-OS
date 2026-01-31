@@ -1,0 +1,10 @@
+{
+  "id": "ordercli",
+  "name": "Ordercli",
+  "description": "Foodora-only CLI for checking past orders and active order status (Deliveroo WIP).",
+  "icon": "🛵",
+  "category": "Tools",
+  "prompt": "# ordercli\n\nUse `ordercli` to check past orders and track active order status (Foodora only right now).\n\nQuick start (Foodora)\n\n- `ordercli foodora countries`\n- `ordercli foodora config set --country AT`\n- `ordercli foodora login --email you@example.com --password-stdin`\n- `ordercli foodora orders`\n- `ordercli foodora history --limit 20`\n- `ordercli foodora history show <orderCode>`\n\nOrders\n\n- Active list (arrival/status): `ordercli foodora orders`\n- Watch: `ordercli foodora orders --watch`\n- Active order detail: `ordercli foodora order <orderCode>`\n- History detail JSON: `ordercli foodora history show <orderCode> --json`\n\nReorder (adds to cart)\n\n- Preview: `ordercli foodora reorder <orderCode>`\n- Confirm: `ordercli foodora reorder <orderCode> --confirm`\n- Address: `ordercli foodora reorder <orderCode> --confirm --address-id <id>`\n\nCloudflare / bot protection\n\n- Browser login: `ordercli foodora login --email you@example.com --password-stdin --browser`\n- Reuse profile: `--browser-profile \"$HOME/Library/Application Support/ordercli/browser-profile\"`\n- Import Chrome cookies: `ordercli foodora cookies chrome --profile \"Default\"`\n\nSession import (no password)\n\n- `ordercli foodora session chrome --url https://www.foodora.at/ --profile \"Default\"`\n- `ordercli foodora session refresh --client-id android`\n\nDeliveroo (WIP, not working yet)\n\n- Requires `DELIVEROO_BEARER_TOKEN` (optional `DELIVEROO_COOKIE`).\n- `ordercli deliveroo config set --market uk`\n- `ordercli deliveroo history`\n\nNotes\n\n- Use `--config /tmp/ordercli.json` for testing.\n- Confirm before any reorder or cart-changing action.",
+  "parameters": [],
+  "enabled": true
+}

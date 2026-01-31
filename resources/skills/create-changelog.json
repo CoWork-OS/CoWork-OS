@@ -1,0 +1,25 @@
+{
+  "id": "create-changelog",
+  "name": "Create Changelog",
+  "description": "Generate changelog from git commits",
+  "icon": "📰",
+  "category": "Project",
+  "prompt": "Please generate a CHANGELOG.md from the git history.\n\nSteps:\n1. Run `git log --oneline` to get recent commits\n2. Group commits by type (Features, Bug Fixes, etc.)\n3. Format according to Keep a Changelog standard\n4. Include version numbers if tags exist\n5. Add dates for each version\n\nFormat:\n## [Version] - YYYY-MM-DD\n### Added\n### Changed\n### Fixed\n### Removed\n\nGenerate for the last {{commits}} commits.",
+  "parameters": [
+    {
+      "name": "commits",
+      "type": "select",
+      "description": "Number of commits to include",
+      "required": true,
+      "default": "50",
+      "options": [
+        "20",
+        "50",
+        "100",
+        "all"
+      ]
+    }
+  ],
+  "enabled": true,
+  "filePath": "/Users/mesut/Library/Application Support/cowork-oss/skills/create-changelog.json"
+}

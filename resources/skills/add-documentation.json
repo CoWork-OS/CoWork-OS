@@ -1,0 +1,32 @@
+{
+  "id": "add-documentation",
+  "name": "Add Documentation",
+  "description": "Generate JSDoc/docstrings for functions",
+  "icon": "📚",
+  "category": "Development",
+  "prompt": "Please add documentation to all functions in {{path}}.\n\nRequirements:\n- Use {{style}} documentation style\n- Document all parameters with types\n- Document return values\n- Add brief description of what each function does\n- Include @example where helpful\n- Note any side effects or exceptions\n\nPreserve existing documentation if it's accurate, enhance if needed.",
+  "parameters": [
+    {
+      "name": "path",
+      "type": "string",
+      "description": "Path to the file to document",
+      "required": true
+    },
+    {
+      "name": "style",
+      "type": "select",
+      "description": "Documentation style",
+      "required": true,
+      "default": "JSDoc",
+      "options": [
+        "JSDoc",
+        "TSDoc",
+        "Python docstring",
+        "Javadoc",
+        "XML comments"
+      ]
+    }
+  ],
+  "enabled": true,
+  "filePath": "/Users/mesut/Library/Application Support/cowork-oss/skills/add-documentation.json"
+}

@@ -1,0 +1,11 @@
+{
+  "id": "git-commit",
+  "name": "Git Commit",
+  "description": "Create a well-formatted commit message from staged changes",
+  "icon": "📝",
+  "category": "Development",
+  "prompt": "Please analyze the staged git changes and create a well-formatted commit message.\n\nSteps:\n1. Run `git diff --staged` to see the changes\n2. Analyze what was changed and why\n3. Create a commit message following conventional commits format:\n   - type(scope): description\n   - Types: feat, fix, docs, style, refactor, test, chore\n4. Include a brief body if the changes are complex\n5. Run `git commit -m \"message\"` with the generated message\n\nMake the commit message clear, concise, and descriptive.",
+  "parameters": [],
+  "enabled": true,
+  "filePath": "/Users/mesut/Library/Application Support/cowork-oss/skills/git-commit.json"
+}

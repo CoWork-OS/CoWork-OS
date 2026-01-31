@@ -1,0 +1,26 @@
+{
+  "id": "last30days",
+  "name": "Last 30 Days",
+  "description": "Research topics across Reddit and X from the past month to generate working prompts",
+  "icon": "🔬",
+  "category": "Research",
+  "priority": 1,
+  "prompt": "Research \"{{topic}}\" across Reddit and X from the past 30 days.\n\nIMPORTANT: Use the EXACT search term \"{{topic}}\" as provided. Do NOT interpret, correct, or modify the search term in any way.\n\nGoal: Find real community discussions, patterns, and best practices to generate copy-paste-ready prompts that actually work.\n\nSteps:\n1. Search Reddit and X for discussions about \"{{topic}}\" (use this exact term) from the last 30 days\n2. Analyze engagement metrics (upvotes, likes, retweets) to identify what resonates\n3. Extract patterns and techniques that users report as effective\n4. Synthesize findings into actionable, domain-specific prompts\n\nTarget tool: {{tool}}\n\nOutput:\n- Summary of key findings from community discussions\n- 3-5 ready-to-use prompts based on what's working\n- Tips and techniques discovered from real users\n- Links to notable discussions for reference",
+  "parameters": [
+    {
+      "name": "topic",
+      "type": "string",
+      "description": "The topic to research (e.g., 'prompting techniques', 'iOS app mockups', 'animation effects')",
+      "required": true
+    },
+    {
+      "name": "tool",
+      "type": "select",
+      "description": "Target AI tool for the prompts",
+      "required": false,
+      "default": "Any",
+      "options": ["Any", "ChatGPT", "Claude", "Midjourney", "DALL-E", "Stable Diffusion", "Cursor", "Claude Code"]
+    }
+  ],
+  "enabled": true
+}

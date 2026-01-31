@@ -1,0 +1,10 @@
+{
+  "id": "openai-whisper-api",
+  "name": "Openai-whisper-api",
+  "description": "Transcribe audio via OpenAI Audio Transcriptions API (Whisper).",
+  "icon": "☁️",
+  "category": "Tools",
+  "prompt": "# OpenAI Whisper API (curl)\n\nTranscribe an audio file via OpenAI’s `/v1/audio/transcriptions` endpoint.\n\n## Quick start\n\n```bash\n{baseDir}/scripts/transcribe.sh /path/to/audio.m4a\n```\n\nDefaults:\n\n- Model: `whisper-1`\n- Output: `<input>.txt`\n\n## Useful flags\n\n```bash\n{baseDir}/scripts/transcribe.sh /path/to/audio.ogg --model whisper-1 --out /tmp/transcript.txt\n{baseDir}/scripts/transcribe.sh /path/to/audio.m4a --language en\n{baseDir}/scripts/transcribe.sh /path/to/audio.m4a --prompt \"Speaker names: Peter, Daniel\"\n{baseDir}/scripts/transcribe.sh /path/to/audio.m4a --json --out /tmp/transcript.json\n```\n\n## API key\n\nSet `OPENAI_API_KEY`, or configure it in `~/.CoWork-OSS/CoWork-OSS.json`:\n\n```json5\n{\n  skills: {\n    \"openai-whisper-api\": {\n      apiKey: \"OPENAI_KEY_HERE\",\n    },\n  },\n}\n```",
+  "parameters": [],
+  "enabled": true
+}

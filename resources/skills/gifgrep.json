@@ -1,0 +1,10 @@
+{
+  "id": "gifgrep",
+  "name": "Gifgrep",
+  "description": "Search GIF providers with CLI/TUI, download results, and extract stills/sheets.",
+  "icon": "🧲",
+  "category": "Tools",
+  "prompt": "# gifgrep\n\nUse `gifgrep` to search GIF providers (Tenor/Giphy), browse in a TUI, download results, and extract stills or sheets.\n\nGIF-Grab (gifgrep workflow)\n\n- Search → preview → download → extract (still/sheet) for fast review and sharing.\n\nQuick start\n\n- `gifgrep cats --max 5`\n- `gifgrep cats --format url | head -n 5`\n- `gifgrep search --json cats | jq '.[0].url'`\n- `gifgrep tui \"office handshake\"`\n- `gifgrep cats --download --max 1 --format url`\n\nTUI + previews\n\n- TUI: `gifgrep tui \"query\"`\n- CLI still previews: `--thumbs` (Kitty/Ghostty only; still frame)\n\nDownload + reveal\n\n- `--download` saves to `~/Downloads`\n- `--reveal` shows the last download in Finder\n\nStills + sheets\n\n- `gifgrep still ./clip.gif --at 1.5s -o still.png`\n- `gifgrep sheet ./clip.gif --frames 9 --cols 3 -o sheet.png`\n- Sheets = single PNG grid of sampled frames (great for quick review, docs, PRs, chat).\n- Tune: `--frames` (count), `--cols` (grid width), `--padding` (spacing).\n\nProviders\n\n- `--source auto|tenor|giphy`\n- `GIPHY_API_KEY` required for `--source giphy`\n- `TENOR_API_KEY` optional (Tenor demo key used if unset)\n\nOutput\n\n- `--json` prints an array of results (`id`, `title`, `url`, `preview_url`, `tags`, `width`, `height`)\n- `--format` for pipe-friendly fields (e.g., `url`)\n\nEnvironment tweaks\n\n- `GIFGREP_SOFTWARE_ANIM=1` to force software animation\n- `GIFGREP_CELL_ASPECT=0.5` to tweak preview geometry",
+  "parameters": [],
+  "enabled": true
+}

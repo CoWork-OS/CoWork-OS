@@ -1,0 +1,10 @@
+{
+  "id": "github",
+  "name": "Github",
+  "description": "Interact with GitHub using the `gh` CLI. Use `gh issue`, `gh pr`, `gh run`, and `gh api` for issues, PRs, CI runs, and advanced queries.",
+  "icon": "🐙",
+  "category": "Tools",
+  "prompt": "# GitHub Skill\n\nUse the `gh` CLI to interact with GitHub. Always specify `--repo owner/repo` when not in a git directory, or use URLs directly.\n\n## Pull Requests\n\nCheck CI status on a PR:\n\n```bash\ngh pr checks 55 --repo owner/repo\n```\n\nList recent workflow runs:\n\n```bash\ngh run list --repo owner/repo --limit 10\n```\n\nView a run and see which steps failed:\n\n```bash\ngh run view <run-id> --repo owner/repo\n```\n\nView logs for failed steps only:\n\n```bash\ngh run view <run-id> --repo owner/repo --log-failed\n```\n\n## API for Advanced Queries\n\nThe `gh api` command is useful for accessing data not available through other subcommands.\n\nGet PR with specific fields:\n\n```bash\ngh api repos/owner/repo/pulls/55 --jq '.title, .state, .user.login'\n```\n\n## JSON Output\n\nMost commands support `--json` for structured output. You can use `--jq` to filter:\n\n```bash\ngh issue list --repo owner/repo --json number,title --jq '.[] | \"\\(.number): \\(.title)\"'\n```",
+  "parameters": [],
+  "enabled": true
+}

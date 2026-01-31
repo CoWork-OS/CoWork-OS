@@ -1,0 +1,18 @@
+{
+  "id": "analyze-csv",
+  "name": "Analyze CSV",
+  "description": "Load a CSV and provide insights",
+  "icon": "📊",
+  "category": "Data",
+  "prompt": "Please analyze the CSV file at {{path}}.\n\nProvide:\n1. **Overview**: Number of rows, columns, file size\n2. **Columns**: List each column with data type and sample values\n3. **Statistics**: For numeric columns - min, max, mean, median\n4. **Missing Data**: Identify columns with null/empty values\n5. **Patterns**: Any notable patterns or anomalies\n6. **Insights**: Key findings and observations\n\nIf the file is large, analyze a representative sample.\nCreate visualizations or summary tables if helpful.",
+  "parameters": [
+    {
+      "name": "path",
+      "type": "string",
+      "description": "Path to the CSV file",
+      "required": true
+    }
+  ],
+  "enabled": true,
+  "filePath": "/Users/mesut/Library/Application Support/cowork-oss/skills/analyze-csv.json"
+}

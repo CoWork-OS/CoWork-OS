@@ -1,0 +1,19 @@
+{
+  "id": "clean-imports",
+  "name": "Clean Imports",
+  "description": "Remove unused imports from files",
+  "icon": "🧹",
+  "category": "Utilities",
+  "prompt": "Please clean up imports in {{path}}.\n\nTasks:\n1. Remove unused imports\n2. Sort imports alphabetically\n3. Group imports by type:\n   - Built-in/standard library\n   - External packages\n   - Internal/local imports\n4. Remove duplicate imports\n5. Fix import paths if needed\n\nApply changes and report:\n- Number of imports removed\n- Files modified\n- Any potential issues found",
+  "parameters": [
+    {
+      "name": "path",
+      "type": "string",
+      "description": "Path to file or folder",
+      "required": true,
+      "default": "."
+    }
+  ],
+  "enabled": true,
+  "filePath": "/Users/mesut/Library/Application Support/cowork-oss/skills/clean-imports.json"
+}

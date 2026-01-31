@@ -142,6 +142,20 @@ const IPC_CHANNELS = {
   NOTIFICATION_DELETE: 'notification:delete',
   NOTIFICATION_DELETE_ALL: 'notification:deleteAll',
   NOTIFICATION_EVENT: 'notification:event',
+  // Hooks (Webhooks & Gmail Pub/Sub)
+  HOOKS_GET_SETTINGS: 'hooks:getSettings',
+  HOOKS_SAVE_SETTINGS: 'hooks:saveSettings',
+  HOOKS_ENABLE: 'hooks:enable',
+  HOOKS_DISABLE: 'hooks:disable',
+  HOOKS_REGENERATE_TOKEN: 'hooks:regenerateToken',
+  HOOKS_GET_STATUS: 'hooks:getStatus',
+  HOOKS_ADD_MAPPING: 'hooks:addMapping',
+  HOOKS_REMOVE_MAPPING: 'hooks:removeMapping',
+  HOOKS_CONFIGURE_GMAIL: 'hooks:configureGmail',
+  HOOKS_GET_GMAIL_STATUS: 'hooks:getGmailStatus',
+  HOOKS_START_GMAIL_WATCHER: 'hooks:startGmailWatcher',
+  HOOKS_STOP_GMAIL_WATCHER: 'hooks:stopGmailWatcher',
+  HOOKS_EVENT: 'hooks:event',
 } as const;
 
 // Custom Skill types (inlined for sandboxed preload)
@@ -421,6 +435,89 @@ interface NotificationEvent {
   notifications?: AppNotification[];
 }
 
+// Hooks types (inlined for sandboxed preload)
+interface HooksSettings {
+  enabled: boolean;
+  token: string;
+  path: string;
+  maxBodyBytes: number;
+  port: number;
+  host: string;
+  presets: string[];
+  mappings: HookMapping[];
+  gmail?: GmailHooksConfig;
+}
+
+interface HookMapping {
+  id?: string;
+  match?: {
+    path?: string;
+    source?: string;
+  };
+  action?: 'wake' | 'agent';
+  wakeMode?: 'now' | 'next-heartbeat';
+  name?: string;
+  sessionKey?: string;
+  messageTemplate?: string;
+  textTemplate?: string;
+  deliver?: boolean;
+  channel?: 'telegram' | 'discord' | 'slack' | 'whatsapp' | 'imessage' | 'last';
+  to?: string;
+  model?: string;
+  thinking?: string;
+  timeoutSeconds?: number;
+}
+
+interface GmailHooksConfig {
+  account?: string;
+  label?: string;
+  topic?: string;
+  subscription?: string;
+  pushToken?: string;
+  hookUrl?: string;
+  includeBody?: boolean;
+  maxBytes?: number;
+  renewEveryMinutes?: number;
+  model?: string;
+  thinking?: string;
+  serve?: {
+    bind?: string;
+    port?: number;
+    path?: string;
+  };
+  tailscale?: {
+    mode?: 'off' | 'serve' | 'funnel';
+    path?: string;
+    target?: string;
+  };
+}
+
+interface HooksStatus {
+  enabled: boolean;
+  serverRunning: boolean;
+  serverAddress?: { host: string; port: number };
+  gmailWatcherRunning: boolean;
+  gmailAccount?: string;
+  gogAvailable: boolean;
+}
+
+interface GmailHooksStatus {
+  configured: boolean;
+  running: boolean;
+  account?: string;
+  topic?: string;
+  gogAvailable: boolean;
+}
+
+interface HooksEvent {
+  action: 'started' | 'stopped' | 'request' | 'error';
+  timestamp: number;
+  path?: string;
+  method?: string;
+  statusCode?: number;
+  error?: string;
+}
+
 // Expose protected methods that allow the renderer process to use ipcRenderer
 contextBridge.exposeInMainWorld('electronAPI', {
   // Dialog APIs
@@ -697,6 +794,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on(IPC_CHANNELS.NOTIFICATION_EVENT, subscription);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.NOTIFICATION_EVENT, subscription);
   },
+
+  // Hooks (Webhooks & Gmail Pub/Sub) APIs
+  getHooksSettings: () => ipcRenderer.invoke(IPC_CHANNELS.HOOKS_GET_SETTINGS),
+  saveHooksSettings: (settings: Partial<HooksSettings>) => ipcRenderer.invoke(IPC_CHANNELS.HOOKS_SAVE_SETTINGS, settings),
+  enableHooks: () => ipcRenderer.invoke(IPC_CHANNELS.HOOKS_ENABLE),
+  disableHooks: () => ipcRenderer.invoke(IPC_CHANNELS.HOOKS_DISABLE),
+  regenerateHookToken: () => ipcRenderer.invoke(IPC_CHANNELS.HOOKS_REGENERATE_TOKEN),
+  getHooksStatus: () => ipcRenderer.invoke(IPC_CHANNELS.HOOKS_GET_STATUS),
+  addHookMapping: (mapping: HookMapping) => ipcRenderer.invoke(IPC_CHANNELS.HOOKS_ADD_MAPPING, mapping),
+  removeHookMapping: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.HOOKS_REMOVE_MAPPING, id),
+  configureGmailHooks: (config: GmailHooksConfig) => ipcRenderer.invoke(IPC_CHANNELS.HOOKS_CONFIGURE_GMAIL, config),
+  getGmailHooksStatus: () => ipcRenderer.invoke(IPC_CHANNELS.HOOKS_GET_GMAIL_STATUS),
+  startGmailWatcher: () => ipcRenderer.invoke(IPC_CHANNELS.HOOKS_START_GMAIL_WATCHER),
+  stopGmailWatcher: () => ipcRenderer.invoke(IPC_CHANNELS.HOOKS_STOP_GMAIL_WATCHER),
+  onHooksEvent: (callback: (event: HooksEvent) => void) => {
+    const subscription = (_: Electron.IpcRendererEvent, data: HooksEvent) => callback(data);
+    ipcRenderer.on(IPC_CHANNELS.HOOKS_EVENT, subscription);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.HOOKS_EVENT, subscription);
+  },
 });
 
 // Type declarations for TypeScript
@@ -963,6 +1079,20 @@ export interface ElectronAPI {
   deleteNotification: (id: string) => Promise<boolean>;
   deleteAllNotifications: () => Promise<void>;
   onNotificationEvent: (callback: (event: NotificationEvent) => void) => () => void;
+  // Hooks (Webhooks & Gmail Pub/Sub)
+  getHooksSettings: () => Promise<HooksSettings>;
+  saveHooksSettings: (settings: Partial<HooksSettings>) => Promise<HooksSettings>;
+  enableHooks: () => Promise<{ enabled: boolean; gmailWatcherError?: string }>;
+  disableHooks: () => Promise<{ enabled: boolean }>;
+  regenerateHookToken: () => Promise<{ token: string }>;
+  getHooksStatus: () => Promise<HooksStatus>;
+  addHookMapping: (mapping: HookMapping) => Promise<{ ok: boolean }>;
+  removeHookMapping: (id: string) => Promise<{ ok: boolean }>;
+  configureGmailHooks: (config: GmailHooksConfig) => Promise<{ ok: boolean; gmail?: GmailHooksConfig }>;
+  getGmailHooksStatus: () => Promise<GmailHooksStatus>;
+  startGmailWatcher: () => Promise<{ ok: boolean; error?: string }>;
+  stopGmailWatcher: () => Promise<{ ok: boolean }>;
+  onHooksEvent: (callback: (event: HooksEvent) => void) => () => void;
 }
 
 declare global {

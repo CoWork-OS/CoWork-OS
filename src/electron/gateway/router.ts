@@ -761,7 +761,7 @@ export class MessageRouter {
         const workspace = this.workspaceRepo.findById(session.workspaceId);
         if (workspace) {
           const isTempWorkspace = workspace.id === TEMP_WORKSPACE_ID;
-          const displayName = isTempWorkspace ? 'Temporary Workspace (select a folder for persistence)' : workspace.name;
+          const displayName = isTempWorkspace ? 'Temporary Workspace (work in a folder for persistence)' : workspace.name;
           await adapter.sendMessage({
             chatId: message.chatId,
             text: `📁 Current workspace: *${displayName}*\n\`${workspace.path}\`\n\nUse \`/workspaces\` to see available workspaces.`,

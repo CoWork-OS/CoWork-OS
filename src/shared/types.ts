@@ -583,6 +583,21 @@ export const IPC_CHANNELS = {
   NOTIFICATION_DELETE: 'notification:delete',
   NOTIFICATION_DELETE_ALL: 'notification:deleteAll',
   NOTIFICATION_EVENT: 'notification:event',
+
+  // Hooks (Webhooks & Gmail Pub/Sub)
+  HOOKS_GET_SETTINGS: 'hooks:getSettings',
+  HOOKS_SAVE_SETTINGS: 'hooks:saveSettings',
+  HOOKS_ENABLE: 'hooks:enable',
+  HOOKS_DISABLE: 'hooks:disable',
+  HOOKS_REGENERATE_TOKEN: 'hooks:regenerateToken',
+  HOOKS_GET_STATUS: 'hooks:getStatus',
+  HOOKS_ADD_MAPPING: 'hooks:addMapping',
+  HOOKS_REMOVE_MAPPING: 'hooks:removeMapping',
+  HOOKS_CONFIGURE_GMAIL: 'hooks:configureGmail',
+  HOOKS_GET_GMAIL_STATUS: 'hooks:getGmailStatus',
+  HOOKS_START_GMAIL_WATCHER: 'hooks:startGmailWatcher',
+  HOOKS_STOP_GMAIL_WATCHER: 'hooks:stopGmailWatcher',
+  HOOKS_EVENT: 'hooks:event',
 } as const;
 
 // LLM Provider types
@@ -978,4 +993,71 @@ export interface AppNotification {
 export interface NotificationStoreFile {
   version: 1;
   notifications: AppNotification[];
+}
+
+// ============ Hooks (Webhooks & Gmail Pub/Sub) Types ============
+
+export interface HooksSettingsData {
+  enabled: boolean;
+  token: string;
+  path: string;
+  maxBodyBytes: number;
+  port: number;
+  host: string;
+  presets: string[];
+  mappings: HookMappingData[];
+  gmail?: GmailHooksSettingsData;
+}
+
+export interface HookMappingData {
+  id?: string;
+  match?: {
+    path?: string;
+    source?: string;
+  };
+  action?: 'wake' | 'agent';
+  wakeMode?: 'now' | 'next-heartbeat';
+  name?: string;
+  sessionKey?: string;
+  messageTemplate?: string;
+  textTemplate?: string;
+  deliver?: boolean;
+  channel?: ChannelType | 'last';
+  to?: string;
+  model?: string;
+  thinking?: string;
+  timeoutSeconds?: number;
+}
+
+export interface GmailHooksSettingsData {
+  account?: string;
+  label?: string;
+  topic?: string;
+  subscription?: string;
+  pushToken?: string;
+  hookUrl?: string;
+  includeBody?: boolean;
+  maxBytes?: number;
+  renewEveryMinutes?: number;
+  model?: string;
+  thinking?: string;
+  serve?: {
+    bind?: string;
+    port?: number;
+    path?: string;
+  };
+  tailscale?: {
+    mode?: 'off' | 'serve' | 'funnel';
+    path?: string;
+    target?: string;
+  };
+}
+
+export interface HooksStatus {
+  enabled: boolean;
+  serverRunning: boolean;
+  serverAddress?: { host: string; port: number };
+  gmailWatcherRunning: boolean;
+  gmailAccount?: string;
+  gogAvailable: boolean;
 }

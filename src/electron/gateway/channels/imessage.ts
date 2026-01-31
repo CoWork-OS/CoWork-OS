@@ -2,7 +2,6 @@
  * iMessage Channel Adapter
  *
  * Implements the ChannelAdapter interface using the imsg CLI tool.
- * Based on 's implementation pattern.
  *
  * Features:
  * - JSON-RPC communication with imsg subprocess

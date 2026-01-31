@@ -2,7 +2,6 @@
  * iMessage RPC Client
  *
  * JSON-RPC client for communicating with the imsg CLI tool.
- * Based on 's implementation pattern.
  *
  * The imsg CLI (brew install steipete/tap/imsg) provides a JSON-RPC
  * interface over stdio for sending and receiving iMessages.

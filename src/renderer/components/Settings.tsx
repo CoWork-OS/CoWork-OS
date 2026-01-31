@@ -15,8 +15,9 @@ import { MCPSettings } from './MCPSettings';
 import { BuiltinToolsSettings } from './BuiltinToolsSettings';
 import { TraySettings } from './TraySettings';
 import { ScheduledTasksSettings } from './ScheduledTasksSettings';
+import { HooksSettings } from './HooksSettings';
 
-type SettingsTab = 'appearance' | 'tray' | 'llm' | 'search' | 'telegram' | 'discord' | 'slack' | 'whatsapp' | 'imessage' | 'updates' | 'guardrails' | 'queue' | 'skills' | 'mcp' | 'tools' | 'scheduled';
+type SettingsTab = 'appearance' | 'tray' | 'llm' | 'search' | 'telegram' | 'discord' | 'slack' | 'whatsapp' | 'imessage' | 'updates' | 'guardrails' | 'queue' | 'skills' | 'mcp' | 'tools' | 'scheduled' | 'hooks';
 
 interface SettingsProps {
   onBack: () => void;
@@ -821,6 +822,16 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
             </svg>
             Built-in Tools
           </button>
+          <button
+            className={`settings-nav-item ${activeTab === 'hooks' ? 'active' : ''}`}
+            onClick={() => setActiveTab('hooks')}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+            </svg>
+            Webhooks
+          </button>
           {/* NOTE: Updates tab should ALWAYS stay at the bottom as the last tab */}
           <button
             className={`settings-nav-item ${activeTab === 'updates' ? 'active' : ''}`}
@@ -870,6 +881,8 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
             <MCPSettings />
           ) : activeTab === 'tools' ? (
             <BuiltinToolsSettings />
+          ) : activeTab === 'hooks' ? (
+            <HooksSettings />
           ) : loading ? (
             <div className="settings-loading">Loading settings...</div>
           ) : (

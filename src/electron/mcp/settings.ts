@@ -131,6 +131,8 @@ export class MCPSettingsManager {
   private static settingsPath: string;
   private static cachedSettings: MCPSettings | null = null;
   private static initialized = false;
+  private static batchMode = false; // When true, defer saves until batch mode ends
+  private static pendingSave = false;
 
   /**
    * Initialize the settings manager (must be called after app is ready)
@@ -189,15 +191,50 @@ export class MCPSettingsManager {
   static saveSettings(settings: MCPSettings): void {
     this.ensureInitialized();
 
+    // Update cache immediately
+    this.cachedSettings = settings;
+
+    // If in batch mode, mark as pending and defer the actual save
+    if (this.batchMode) {
+      this.pendingSave = true;
+      return;
+    }
+
+    this.saveSettingsImmediate(settings);
+  }
+
+  /**
+   * Immediately save settings to disk (bypasses batch mode)
+   */
+  private static saveSettingsImmediate(settings: MCPSettings): void {
     try {
       // Encrypt credentials before saving
       const encrypted = encryptSettings(settings);
       fs.writeFileSync(this.settingsPath, JSON.stringify(encrypted, null, 2));
-      this.cachedSettings = settings;
       console.log(`[MCP Settings] Saved ${settings.servers.length} server(s)`);
     } catch (error) {
       console.error('[MCP Settings] Failed to save settings:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Enter batch mode - defers all saves until endBatch is called
+   * Use this during initialization to avoid redundant disk writes
+   */
+  static beginBatch(): void {
+    this.batchMode = true;
+    this.pendingSave = false;
+  }
+
+  /**
+   * Exit batch mode and save if there were any pending changes
+   */
+  static endBatch(): void {
+    this.batchMode = false;
+    if (this.pendingSave && this.cachedSettings) {
+      this.saveSettingsImmediate(this.cachedSettings);
+      this.pendingSave = false;
     }
   }
 

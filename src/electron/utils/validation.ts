@@ -342,6 +342,30 @@ export const MCPRegistrySearchSchema = z.object({
   offset: z.number().int().min(0).default(0),
 });
 
+// ============ Hooks (Webhooks) Schemas ============
+
+export const HookMappingChannelSchema = z.enum(['telegram', 'discord', 'slack', 'whatsapp', 'imessage', 'last']);
+
+export const HookMappingSchema = z.object({
+  id: z.string().max(100).optional(),
+  match: z.object({
+    path: z.string().max(500).optional(),
+    source: z.string().max(100).optional(),
+  }).optional(),
+  action: z.enum(['wake', 'agent']).optional(),
+  wakeMode: z.enum(['now', 'next-heartbeat']).optional(),
+  name: z.string().max(200).optional(),
+  sessionKey: z.string().max(100).optional(),
+  messageTemplate: z.string().max(10000).optional(),
+  textTemplate: z.string().max(10000).optional(),
+  deliver: z.boolean().optional(),
+  channel: HookMappingChannelSchema.optional(),
+  to: z.string().max(100).optional(),
+  model: z.string().max(100).optional(),
+  thinking: z.string().max(50).optional(),
+  timeoutSeconds: z.number().int().min(1).max(3600).optional(),
+});
+
 // ============ Validation Helper ============
 
 /**

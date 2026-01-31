@@ -1,4 +1,4 @@
-import { ipcMain, shell } from 'electron';
+import { ipcMain, shell, BrowserWindow } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import mammoth from 'mammoth';
@@ -59,9 +59,20 @@ import {
   MCPServerUpdateSchema,
   MCPSettingsSchema,
   MCPRegistrySearchSchema,
+  HookMappingSchema,
 } from '../utils/validation';
 import { NotificationService } from '../notifications';
-import type { NotificationType } from '../../shared/types';
+import type { NotificationType, HooksSettingsData, HookMappingData, GmailHooksSettingsData, HooksStatus } from '../../shared/types';
+import {
+  HooksSettingsManager,
+  HooksServer,
+  startGmailWatcher,
+  stopGmailWatcher,
+  isGmailWatcherRunning,
+  isGogAvailable,
+  generateHookToken,
+  DEFAULT_HOOKS_PORT,
+} from '../hooks';
 
 // Global notification service instance
 let notificationService: NotificationService | null = null;
@@ -74,7 +85,7 @@ export function getNotificationService(): NotificationService | null {
 }
 
 // Helper to check rate limit and throw if exceeded
-function checkRateLimit(channel: string, config = RATE_LIMIT_CONFIGS.standard): void {
+function checkRateLimit(channel: string, config: { maxRequests: number; windowMs: number } = RATE_LIMIT_CONFIGS.standard): void {
   if (!rateLimiter.check(channel)) {
     const resetMs = rateLimiter.getResetTime(channel);
     const resetSec = Math.ceil(resetMs / 1000);
@@ -1232,6 +1243,9 @@ export function setupIpcHandlers(
 
   // Notification handlers
   setupNotificationHandlers();
+
+  // Hooks (Webhooks & Gmail Pub/Sub) handlers
+  setupHooksHandlers(agentDaemon);
 }
 
 /**
@@ -1611,4 +1625,303 @@ function setupNotificationHandlers(): void {
     if (!notificationService) return null;
     return notificationService.add(data);
   });
+}
+
+// Global hooks server instance
+let hooksServer: HooksServer | null = null;
+let hooksServerStarting = false; // Lock to prevent concurrent server creation
+
+/**
+ * Get the hooks server instance
+ */
+export function getHooksServer(): HooksServer | null {
+  return hooksServer;
+}
+
+/**
+ * Set up Hooks (Webhooks & Gmail Pub/Sub) IPC handlers
+ */
+function setupHooksHandlers(agentDaemon: AgentDaemon): void {
+  // Initialize settings manager
+  HooksSettingsManager.initialize();
+
+  // Get hooks settings
+  ipcMain.handle(IPC_CHANNELS.HOOKS_GET_SETTINGS, async (): Promise<HooksSettingsData> => {
+    const settings = HooksSettingsManager.getSettingsForDisplay();
+    return {
+      enabled: settings.enabled,
+      token: settings.token,
+      path: settings.path,
+      maxBodyBytes: settings.maxBodyBytes,
+      port: DEFAULT_HOOKS_PORT,
+      host: '127.0.0.1',
+      presets: settings.presets,
+      mappings: settings.mappings as HookMappingData[],
+      gmail: settings.gmail as GmailHooksSettingsData | undefined,
+    };
+  });
+
+  // Save hooks settings
+  ipcMain.handle(IPC_CHANNELS.HOOKS_SAVE_SETTINGS, async (_, data: Partial<HooksSettingsData>) => {
+    checkRateLimit(IPC_CHANNELS.HOOKS_SAVE_SETTINGS, RATE_LIMIT_CONFIGS.limited);
+
+    const currentSettings = HooksSettingsManager.loadSettings();
+    const updated = HooksSettingsManager.updateConfig({
+      ...currentSettings,
+      enabled: data.enabled ?? currentSettings.enabled,
+      token: data.token ?? currentSettings.token,
+      path: data.path ?? currentSettings.path,
+      maxBodyBytes: data.maxBodyBytes ?? currentSettings.maxBodyBytes,
+      presets: data.presets ?? currentSettings.presets,
+      mappings: data.mappings ?? currentSettings.mappings,
+      gmail: data.gmail ?? currentSettings.gmail,
+    });
+
+    // Restart hooks server if needed
+    if (hooksServer && updated.enabled) {
+      hooksServer.setHooksConfig(updated);
+    }
+
+    return {
+      enabled: updated.enabled,
+      token: updated.token ? '***configured***' : '',
+      path: updated.path,
+      maxBodyBytes: updated.maxBodyBytes,
+      port: DEFAULT_HOOKS_PORT,
+      host: '127.0.0.1',
+      presets: updated.presets,
+      mappings: updated.mappings as HookMappingData[],
+      gmail: updated.gmail as GmailHooksSettingsData | undefined,
+    };
+  });
+
+  // Enable hooks
+  ipcMain.handle(IPC_CHANNELS.HOOKS_ENABLE, async () => {
+    checkRateLimit(IPC_CHANNELS.HOOKS_ENABLE, RATE_LIMIT_CONFIGS.limited);
+
+    // Prevent concurrent enable attempts
+    if (hooksServerStarting) {
+      throw new Error('Hooks server is already starting. Please wait.');
+    }
+
+    const settings = HooksSettingsManager.enableHooks();
+
+    // Start the hooks server if not running
+    if (!hooksServer) {
+      hooksServerStarting = true;
+
+      const server = new HooksServer({
+        port: DEFAULT_HOOKS_PORT,
+        host: '127.0.0.1',
+        enabled: true,
+      });
+
+      server.setHooksConfig(settings);
+
+      // Set up handlers for hook actions
+      server.setHandlers({
+        onWake: async (action) => {
+          console.log('[Hooks] Wake action:', action);
+          // For now, just log. In the future, this could trigger a heartbeat
+        },
+        onAgent: async (action) => {
+          console.log('[Hooks] Agent action:', action.message.substring(0, 100));
+
+          // Create a task for the agent action
+          const task = await agentDaemon.createTask({
+            title: action.name || 'Webhook Task',
+            prompt: action.message,
+            workspaceId: action.workspaceId || TEMP_WORKSPACE_ID,
+          });
+
+          return { taskId: task.id };
+        },
+        onEvent: (event) => {
+          console.log('[Hooks] Server event:', event.action);
+          // Forward events to renderer (with error handling for destroyed windows)
+          const windows = BrowserWindow.getAllWindows();
+          for (const win of windows) {
+            try {
+              if (win.webContents && !win.isDestroyed()) {
+                win.webContents.send(IPC_CHANNELS.HOOKS_EVENT, event);
+              }
+            } catch (err) {
+              // Window may have been destroyed between check and send
+              console.warn('[Hooks] Failed to send event to window:', err);
+            }
+          }
+        },
+      });
+
+      try {
+        await server.start();
+        hooksServer = server;
+      } catch (err) {
+        console.error('[Hooks] Failed to start hooks server:', err);
+        throw new Error(`Failed to start hooks server: ${err instanceof Error ? err.message : String(err)}`);
+      } finally {
+        hooksServerStarting = false;
+      }
+    }
+
+    // Start Gmail watcher if configured (capture result for response)
+    let gmailWatcherError: string | undefined;
+    if (settings.gmail?.account) {
+      try {
+        const result = await startGmailWatcher(settings);
+        if (!result.started) {
+          gmailWatcherError = result.reason;
+          console.warn('[Hooks] Gmail watcher not started:', result.reason);
+        }
+      } catch (err) {
+        gmailWatcherError = err instanceof Error ? err.message : String(err);
+        console.error('[Hooks] Failed to start Gmail watcher:', err);
+      }
+    }
+
+    return { enabled: true, gmailWatcherError };
+  });
+
+  // Disable hooks
+  ipcMain.handle(IPC_CHANNELS.HOOKS_DISABLE, async () => {
+    checkRateLimit(IPC_CHANNELS.HOOKS_DISABLE, RATE_LIMIT_CONFIGS.limited);
+
+    HooksSettingsManager.disableHooks();
+
+    // Stop the hooks server
+    if (hooksServer) {
+      await hooksServer.stop();
+      hooksServer = null;
+    }
+
+    // Stop Gmail watcher
+    await stopGmailWatcher();
+
+    return { enabled: false };
+  });
+
+  // Regenerate hook token
+  ipcMain.handle(IPC_CHANNELS.HOOKS_REGENERATE_TOKEN, async () => {
+    checkRateLimit(IPC_CHANNELS.HOOKS_REGENERATE_TOKEN, RATE_LIMIT_CONFIGS.limited);
+    const newToken = HooksSettingsManager.regenerateToken();
+
+    // Update the running server with new token
+    if (hooksServer) {
+      const settings = HooksSettingsManager.loadSettings();
+      hooksServer.setHooksConfig(settings);
+    }
+
+    return { token: newToken };
+  });
+
+  // Get hooks status
+  ipcMain.handle(IPC_CHANNELS.HOOKS_GET_STATUS, async (): Promise<HooksStatus> => {
+    const settings = HooksSettingsManager.loadSettings();
+    const gogAvailable = await isGogAvailable();
+
+    return {
+      enabled: settings.enabled,
+      serverRunning: hooksServer?.isRunning() ?? false,
+      serverAddress: hooksServer?.getAddress() ?? undefined,
+      gmailWatcherRunning: isGmailWatcherRunning(),
+      gmailAccount: settings.gmail?.account,
+      gogAvailable,
+    };
+  });
+
+  // Add a hook mapping
+  ipcMain.handle(IPC_CHANNELS.HOOKS_ADD_MAPPING, async (_, mapping: HookMappingData) => {
+    checkRateLimit(IPC_CHANNELS.HOOKS_ADD_MAPPING, RATE_LIMIT_CONFIGS.limited);
+
+    // Validate the mapping input
+    const validated = validateInput(HookMappingSchema, mapping, 'hook mapping');
+
+    const settings = HooksSettingsManager.addMapping(validated);
+
+    // Update the server config if running
+    if (hooksServer) {
+      hooksServer.setHooksConfig(settings);
+    }
+
+    return { ok: true };
+  });
+
+  // Remove a hook mapping
+  ipcMain.handle(IPC_CHANNELS.HOOKS_REMOVE_MAPPING, async (_, id: string) => {
+    checkRateLimit(IPC_CHANNELS.HOOKS_REMOVE_MAPPING, RATE_LIMIT_CONFIGS.limited);
+
+    // Validate the mapping ID
+    const validatedId = validateInput(StringIdSchema, id, 'mapping ID');
+
+    const settings = HooksSettingsManager.removeMapping(validatedId);
+
+    // Update the server config if running
+    if (hooksServer) {
+      hooksServer.setHooksConfig(settings);
+    }
+
+    return { ok: true };
+  });
+
+  // Configure Gmail hooks
+  ipcMain.handle(IPC_CHANNELS.HOOKS_CONFIGURE_GMAIL, async (_, config: GmailHooksSettingsData) => {
+    checkRateLimit(IPC_CHANNELS.HOOKS_CONFIGURE_GMAIL, RATE_LIMIT_CONFIGS.limited);
+
+    // Generate push token if not provided
+    if (!config.pushToken) {
+      config.pushToken = generateHookToken();
+    }
+
+    const settings = HooksSettingsManager.configureGmail(config);
+
+    // Update the server config if running
+    if (hooksServer) {
+      hooksServer.setHooksConfig(settings);
+    }
+
+    return {
+      ok: true,
+      gmail: HooksSettingsManager.getGmailConfig(),
+    };
+  });
+
+  // Get Gmail watcher status
+  ipcMain.handle(IPC_CHANNELS.HOOKS_GET_GMAIL_STATUS, async () => {
+    const settings = HooksSettingsManager.loadSettings();
+    const gogAvailable = await isGogAvailable();
+
+    return {
+      configured: HooksSettingsManager.isGmailConfigured(),
+      running: isGmailWatcherRunning(),
+      account: settings.gmail?.account,
+      topic: settings.gmail?.topic,
+      gogAvailable,
+    };
+  });
+
+  // Start Gmail watcher manually
+  ipcMain.handle(IPC_CHANNELS.HOOKS_START_GMAIL_WATCHER, async () => {
+    checkRateLimit(IPC_CHANNELS.HOOKS_START_GMAIL_WATCHER, RATE_LIMIT_CONFIGS.expensive);
+
+    const settings = HooksSettingsManager.loadSettings();
+    if (!settings.enabled) {
+      return { ok: false, error: 'Hooks must be enabled first' };
+    }
+
+    if (!HooksSettingsManager.isGmailConfigured()) {
+      return { ok: false, error: 'Gmail hooks not configured' };
+    }
+
+    const result = await startGmailWatcher(settings);
+    return { ok: result.started, error: result.reason };
+  });
+
+  // Stop Gmail watcher manually
+  ipcMain.handle(IPC_CHANNELS.HOOKS_STOP_GMAIL_WATCHER, async () => {
+    checkRateLimit(IPC_CHANNELS.HOOKS_STOP_GMAIL_WATCHER, RATE_LIMIT_CONFIGS.limited);
+    await stopGmailWatcher();
+    return { ok: true };
+  });
+
+  console.log('[Hooks] IPC handlers initialized');
 }

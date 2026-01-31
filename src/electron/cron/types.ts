@@ -1,6 +1,5 @@
 /**
  * Cron/Scheduled Task Types for CoWork-OSS
- * Inspired by 's cron implementation
  */
 
 /**

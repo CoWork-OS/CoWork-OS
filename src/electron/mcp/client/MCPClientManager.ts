@@ -25,6 +25,8 @@ export class MCPClientManager extends EventEmitter {
   private connections: Map<string, MCPServerConnection> = new Map();
   private toolServerMap: Map<string, string> = new Map(); // tool name -> server id
   private initialized = false;
+  private isInitializing = false; // Flag to batch operations during startup
+  private rebuildToolMapDebounceTimer: NodeJS.Timeout | null = null;
 
   private constructor() {
     super();
@@ -49,28 +51,41 @@ export class MCPClientManager extends EventEmitter {
     }
 
     console.log('[MCPClientManager] Initializing...');
+    this.isInitializing = true;
 
     // Initialize settings manager
     MCPSettingsManager.initialize();
 
+    // Enter batch mode to defer all settings saves until initialization completes
+    MCPSettingsManager.beginBatch();
+
     // Load settings
     const settings = MCPSettingsManager.loadSettings();
 
-    // Auto-connect if enabled
+    // Auto-connect if enabled - connect in PARALLEL for faster startup
     if (settings.autoConnect) {
       const enabledServers = settings.servers.filter((s) => s.enabled);
-      console.log(`[MCPClientManager] Auto-connecting to ${enabledServers.length} enabled servers`);
+      console.log(`[MCPClientManager] Auto-connecting to ${enabledServers.length} enabled servers in parallel`);
 
-      for (const server of enabledServers) {
-        try {
-          await this.connectServer(server.id);
-        } catch (error) {
+      const connectionPromises = enabledServers.map((server) =>
+        this.connectServer(server.id).catch((error) => {
           console.error(`[MCPClientManager] Failed to auto-connect to ${server.name}:`, error);
-        }
-      }
+          return null; // Don't throw, allow other connections to continue
+        })
+      );
+
+      await Promise.allSettled(connectionPromises);
     }
 
+    this.isInitializing = false;
     this.initialized = true;
+
+    // Rebuild tool map once after all connections are established
+    this.rebuildToolMapImmediate();
+
+    // End batch mode - this will save settings once if any changes were made
+    MCPSettingsManager.endBatch();
+
     console.log('[MCPClientManager] Initialized');
   }
 
@@ -79,6 +94,12 @@ export class MCPClientManager extends EventEmitter {
    */
   async shutdown(): Promise<void> {
     console.log('[MCPClientManager] Shutting down...');
+
+    // Clear debounce timer to prevent memory leaks
+    if (this.rebuildToolMapDebounceTimer) {
+      clearTimeout(this.rebuildToolMapDebounceTimer);
+      this.rebuildToolMapDebounceTimer = null;
+    }
 
     const disconnectPromises = Array.from(this.connections.keys()).map((id) =>
       this.disconnectServer(id).catch((error) =>
@@ -133,7 +154,7 @@ export class MCPClientManager extends EventEmitter {
     // Connect
     await connection.connect();
 
-    // Rebuild tool map
+    // Rebuild tool map (debounced during initialization)
     this.rebuildToolMap();
   }
 
@@ -327,9 +348,29 @@ export class MCPClientManager extends EventEmitter {
   }
 
   /**
-   * Rebuild the tool -> server mapping
+   * Rebuild the tool -> server mapping (debounced to avoid redundant rebuilds)
    */
   private rebuildToolMap(): void {
+    // During initialization, skip individual rebuilds - we'll do one at the end
+    if (this.isInitializing) {
+      return;
+    }
+
+    // Debounce rebuilds to batch rapid changes
+    if (this.rebuildToolMapDebounceTimer) {
+      clearTimeout(this.rebuildToolMapDebounceTimer);
+    }
+
+    this.rebuildToolMapDebounceTimer = setTimeout(() => {
+      this.rebuildToolMapImmediate();
+      this.rebuildToolMapDebounceTimer = null;
+    }, 100);
+  }
+
+  /**
+   * Immediately rebuild the tool -> server mapping (no debounce)
+   */
+  private rebuildToolMapImmediate(): void {
     this.toolServerMap.clear();
 
     for (const [serverId, connection] of this.connections) {

@@ -98,12 +98,13 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
 - **Workspace Management**: Sandboxed file operations within selected folders (with optional broader filesystem access)
 - **Permission System**: Explicit approval for destructive operations
 - **Auto-Approve Trusted Commands**: Configure patterns for safe shell commands that auto-approve without prompts
-- **Skill System**: Built-in skills for creating professional outputs:
-  - **Excel spreadsheets** (.xlsx) with multiple sheets, auto-fit columns, formatting, and filters
-  - **Word documents** (.docx) with headings, paragraphs, lists, tables, and code blocks
-  - **PDF documents** with professional formatting and custom fonts
-  - **PowerPoint presentations** (.pptx) with multiple layouts, themes, and speaker notes
-  - **Folder organization** by type, date, or custom rules
+- **75+ Built-in Skills**: Ready-to-use integrations with popular services:
+  - **Developer Tools**: GitHub, GitLab, Linear, Jira, Sentry
+  - **Communication**: Slack, Discord, Telegram, Email
+  - **Productivity**: Notion, Obsidian, Todoist, Apple Notes/Reminders
+  - **Media**: Spotify, YouTube, SoundCloud
+  - **Document Creation**: Excel, Word, PDF, PowerPoint with professional formatting
+  - **And many more**: Smart home, cloud storage, AI services, utilities
 - **Real-Time Timeline**: Live activity feed showing agent actions and tool calls
 - **Artifact Tracking**: All created/modified files are tracked and viewable
 - **Model Selection**: Choose between Opus, Sonnet, or Haiku models
@@ -125,6 +126,13 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
   - Click, fill forms, type text, press keys
   - Extract page content, links, and form data
   - Scroll pages, wait for elements, execute JavaScript
+- **Code Tools**: Claude Code-style tools for code navigation and editing:
+  - **glob** - Fast pattern-based file search (e.g., `**/*.ts`, `src/**/*.tsx`)
+  - **grep** - Regex content search across files with context lines
+  - **edit_file** - Surgical file editing with find-and-replace
+- **Web Fetch Tools**: Lightweight HTTP tools for fetching web content:
+  - **web_fetch** - Fetch and parse web pages with optional CSS selectors
+  - **http_request** - Full HTTP client with custom methods, headers, and body (curl-like)
 - **System Tools**: Access to system-level capabilities:
   - Take screenshots (full screen or specific windows)
   - Read/write clipboard content
@@ -133,14 +141,24 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
   - Get system information and environment variables
   - **Run AppleScript** - Execute AppleScript to automate macOS apps and system tasks
 - **Update Notifications**: Automatic check for new releases with in-app notification banner
-- **Custom Skills**: Create and manage your own skills with custom prompts and tool configurations
-  - Define reusable workflows as custom skills
-  - Configure which tools each skill can use
-  - Skills stored locally in your user directory
+- **Bundled Skills Library**: 75+ pre-configured skills for common workflows
+  - GitHub, Slack, Notion, Spotify, and many more integrations
+  - Apple ecosystem support via AppleScript (Notes, Reminders, Calendar)
+  - Context-aware prompts that guide the agent for each service
 - **MCP (Model Context Protocol)**: Full MCP support for extensibility:
   - **MCP Client**: Connect to external MCP servers (filesystem, databases, APIs)
   - **MCP Host**: Expose CoWork's tools as an MCP server for external clients
   - **MCP Registry**: Browse and install MCP servers from a catalog with one-click installation
+- **WebSocket Control Plane**: Programmatic API for external automation:
+  - Challenge-response token authentication
+  - Request/response/event protocol over WebSocket
+  - Rate limiting for authentication attempts
+  - Full task management API (create, list, cancel, send messages)
+- **Tailscale Integration**: Secure remote access without port forwarding:
+  - **Serve mode**: Expose locally to your Tailscale network (tailnet)
+  - **Funnel mode**: Expose publicly via Tailscale's global edge network
+  - Automatic HTTPS with valid certificates
+  - No firewall or router configuration required
 
 ## Data handling (local-first, BYOK)
 - Stored locally: task metadata, timeline events, artifact index, workspace config (SQLite).
@@ -189,6 +207,21 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
 │              MCP Host Server (Optional)          │
 │  - Expose CoWork tools to external clients       │
 │  - JSON-RPC over stdio                           │
+└─────────────────────────────────────────────────┘
+                      ↕
+┌─────────────────────────────────────────────────┐
+│           WebSocket Control Plane (Optional)     │
+│  - REST/WebSocket API for external automation    │
+│  - Token-based authentication                    │
+│  - Task management (create, cancel, monitor)     │
+│  - Real-time event streaming                     │
+└─────────────────────────────────────────────────┘
+                      ↕
+┌─────────────────────────────────────────────────┐
+│           Tailscale Exposure (Optional)          │
+│  - Serve: Local tailnet access                   │
+│  - Funnel: Public HTTPS endpoint                 │
+│  - Auto TLS certificates                         │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -624,7 +657,7 @@ If requested by the rights holder, we will update naming/branding to avoid confu
 - [x] **Toast notifications** - Real-time notifications for task completion and failures
 - [x] **Scheduled Tasks** - Cron-based task scheduling with channel delivery and run history
 - [x] **In-App Notification Center** - Bell icon notification panel with mark as read, delete, and click-to-navigate
-- [x] **Custom Skills** - Create and manage user-defined skills with custom prompts and tool configurations
+- [x] **75+ Bundled Skills** - Pre-configured integrations for GitHub, Slack, Notion, Spotify, Apple Notes/Reminders, and many more
 - [x] **MCP Client** - Connect to external MCP servers and use their tools
 - [x] **MCP Host** - Expose CoWork's tools as an MCP server for external clients
 - [x] **MCP Registry** - Browse and install MCP servers from a catalog with one-click installation
@@ -638,11 +671,22 @@ If requested by the rights holder, we will update naming/branding to avoid confu
   - **macOS Sandbox Profiles** - Shell command sandboxing with filesystem/network restrictions
   - **Brute-Force Protection** - Pairing code lockout after 5 failed attempts (15 min cooldown)
   - **132 Security Unit Tests** - Comprehensive test suite for security components
+- [x] **WebSocket Control Plane** - Programmatic API for external automation:
+  - **Challenge-Response Auth** - Secure token-based authentication with nonce
+  - **Typed Protocol** - Request/response/event frames with JSON serialization
+  - **Rate Limiting** - IP-based auth attempt limiting with configurable ban duration
+  - **Full Task API** - Create, list, get, cancel tasks; send messages to running tasks
+  - **Real-Time Events** - Subscribe to task updates and system events
+  - **259 Unit Tests** - Comprehensive test coverage for protocol and server
+- [x] **Tailscale Integration** - Secure remote access without port forwarding:
+  - **Serve Mode** - Expose Control Plane to your private tailnet
+  - **Funnel Mode** - Expose publicly via Tailscale's global edge network
+  - **Auto TLS** - Automatic HTTPS with valid certificates
+  - **CLI Detection** - Automatic Tailscale CLI detection and status checking
 
 ### Planned
 - [ ] VM sandbox using macOS Virtualization.framework
 - [ ] Network egress controls with proxy
-- [ ] Skill marketplace/loader
 
 ---
 
@@ -1552,55 +1596,71 @@ If you have a ChatGPT Plus, Pro, or Team subscription, you can sign in with your
 
 ---
 
-## Custom Skills
+## Built-in Skills (75+)
 
-CoWork-OSS allows you to create and manage custom skills - reusable workflows with specific prompts and tool configurations.
+CoWork-OSS comes bundled with **75+ ready-to-use skills** that enable the agent to interact with popular services, automate workflows, and perform specialized tasks.
 
-### Creating Custom Skills
+### Skill Categories
 
-1. Open **Settings** (gear icon)
-2. Navigate to the **Custom Skills** tab
-3. Click **Create New Skill**
-4. Configure your skill:
-   - **Name**: A unique identifier for your skill
-   - **Description**: What the skill does
-   - **Prompt**: The system prompt that defines the skill's behavior
-   - **Allowed Tools**: Select which tools the skill can use
+| Category | Skills | Description |
+|----------|--------|-------------|
+| **Developer Tools** | GitHub, GitLab, Linear, Jira, Sentry | Issue tracking, PR management, error monitoring |
+| **Communication** | Slack, Discord, Telegram, Email | Send messages, manage channels, notifications |
+| **Productivity** | Notion, Obsidian, Todoist, Things, Reminders | Note-taking, task management, knowledge bases |
+| **Apple Ecosystem** | Apple Notes, Apple Reminders, Calendar, Contacts | Native macOS app integration via AppleScript |
+| **Cloud Storage** | Google Drive, Dropbox, iCloud | File management and sync |
+| **Media & Music** | Spotify, YouTube, SoundCloud | Playback control, playlist management |
+| **Smart Home** | HomeKit, Philips Hue | Device control and automation |
+| **Finance** | Banking, Invoicing | Financial data and document generation |
+| **AI Services** | DALL-E, Stable Diffusion, ElevenLabs | Image generation, text-to-speech |
+| **Utilities** | Archive, QR Code, Screenshot | File compression, code generation, screen capture |
 
-### Skill Structure
+### Featured Skills
 
-Custom skills are stored as YAML files in your user directory:
-```
-~/Library/Application Support/cowork-oss/skills/
-├── my-skill.yaml
-├── code-reviewer.yaml
-└── report-generator.yaml
-```
+#### GitHub Integration
+- Create and manage issues, pull requests, and releases
+- Search repositories and code
+- Review and merge pull requests
+- Manage labels, milestones, and projects
 
-### Example Skill
+#### Slack Integration
+- Send messages to channels and DMs
+- Create and manage channels
+- Search message history
+- Upload files and share content
 
-```yaml
-name: code-reviewer
-description: Reviews code for best practices and potential issues
-prompt: |
-  You are a code review assistant. Analyze the provided code for:
-  - Code quality and readability
-  - Potential bugs or issues
-  - Performance improvements
-  - Security vulnerabilities
-  Provide constructive feedback with specific suggestions.
-allowedTools:
-  - read_file
-  - list_directory
-  - search_files
-```
+#### Notion Integration
+- Create and update pages and databases
+- Search across your workspace
+- Manage properties and relations
+- Export content in various formats
 
-### Using Custom Skills
+#### Apple Notes & Reminders
+- Create and organize notes with folders
+- Set reminders with due dates and priorities
+- Sync across your Apple devices
+- Use natural language for scheduling
 
-Once created, custom skills appear in the skills list and can be:
-- Triggered by the agent when appropriate
-- Manually invoked during task execution
-- Shared by copying the YAML files
+#### Spotify Integration
+- Control playback (play, pause, skip)
+- Search for tracks, albums, and artists
+- Manage playlists
+- Get currently playing information
+
+### How Skills Work
+
+Skills are context-aware prompts that guide the agent on how to interact with specific services. When you mention a service or task related to a skill, the agent automatically uses the appropriate skill's knowledge to complete the task.
+
+**Example tasks using skills:**
+- "Create a GitHub issue for the login bug we discussed"
+- "Send a Slack message to #engineering about the deployment"
+- "Add a reminder to call the dentist tomorrow at 10am"
+- "Play my Discover Weekly playlist on Spotify"
+- "Create a Notion page summarizing today's meeting"
+
+### Skill Guidelines
+
+Some skills include **guidelines** - always-active context that helps the agent make better decisions. For example, coding guidelines ensure consistent code style across your projects.
 
 ---
 
@@ -1752,6 +1812,16 @@ cowork-oss/
 │   │   ├── notifications/     # In-app notification system
 │   │   │   ├── service.ts     # Notification service
 │   │   │   └── store.ts       # Persistent notification storage
+│   │   ├── control-plane/     # WebSocket Control Plane API
+│   │   │   ├── server.ts      # WebSocket server with auth
+│   │   │   ├── client.ts      # Client registry and management
+│   │   │   ├── protocol.ts    # Frame types and serialization
+│   │   │   ├── handlers.ts    # Method handlers (task operations)
+│   │   │   └── settings.ts    # Settings persistence
+│   │   ├── tailscale/         # Tailscale integration
+│   │   │   ├── tailscale.ts   # CLI wrapper and status
+│   │   │   ├── exposure.ts    # Serve/Funnel mode manager
+│   │   │   └── settings.ts    # Tailscale settings
 │   │   └── ipc/               # IPC handlers
 │   ├── renderer/              # React UI
 │   │   ├── App.tsx            # Main app component

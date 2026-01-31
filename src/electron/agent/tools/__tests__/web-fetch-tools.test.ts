@@ -161,7 +161,7 @@ describe('WebFetchTools', () => {
         mockFetch.mockResolvedValueOnce({
           ok: true,
           headers: new Map([['content-type', 'application/json']]),
-          json: async () => jsonData,
+          text: async () => JSON.stringify(jsonData),
         });
 
         const result = await webFetchTools.webFetch({ url: 'https://api.example.com/data' });
@@ -170,6 +170,21 @@ describe('WebFetchTools', () => {
         expect(result.title).toBe('JSON Response');
         expect(result.content).toContain('"name": "test"');
         expect(result.content).toContain('"value": 123');
+      });
+
+      it('should fallback to raw text when JSON parsing fails in webFetch', async () => {
+        const invalidJson = 'not valid json {{{';
+        mockFetch.mockResolvedValueOnce({
+          ok: true,
+          headers: new Map([['content-type', 'application/json']]),
+          text: async () => invalidJson,
+        });
+
+        const result = await webFetchTools.webFetch({ url: 'https://api.example.com/data' });
+
+        expect(result.success).toBe(true);
+        expect(result.title).toBe('JSON Response');
+        expect(result.content).toBe(invalidJson);
       });
 
       it('should handle plain text responses', async () => {
@@ -602,7 +617,7 @@ describe('WebFetchTools', () => {
           status: 201,
           statusText: 'Created',
           headers: new Map([['content-type', 'application/json']]),
-          json: async () => ({ id: 1 }),
+          text: async () => JSON.stringify({ id: 1 }),
         });
 
         const result = await webFetchTools.httpRequest({
@@ -785,7 +800,7 @@ describe('WebFetchTools', () => {
             ['content-type', 'application/json'],
             ['x-request-id', '12345'],
           ]),
-          json: async () => ({ data: 'test' }),
+          text: async () => JSON.stringify({ data: 'test' }),
         });
 
         const result = await webFetchTools.httpRequest({ url: 'https://api.example.com' });
@@ -804,7 +819,7 @@ describe('WebFetchTools', () => {
           status: 200,
           statusText: 'OK',
           headers: new Map([['content-type', 'application/json']]),
-          json: async () => jsonData,
+          text: async () => JSON.stringify(jsonData),
         });
 
         const result = await webFetchTools.httpRequest({ url: 'https://api.example.com/users' });
@@ -812,6 +827,38 @@ describe('WebFetchTools', () => {
         expect(result.success).toBe(true);
         expect(result.body).toContain('"users"');
         expect(result.body).toContain('"name": "John"');
+      });
+
+      it('should handle JSON responses with charset in content-type', async () => {
+        const jsonData = { message: 'hello' };
+        mockFetch.mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          statusText: 'OK',
+          headers: new Map([['content-type', 'application/json; charset=utf-8']]),
+          text: async () => JSON.stringify(jsonData),
+        });
+
+        const result = await webFetchTools.httpRequest({ url: 'https://api.example.com' });
+
+        expect(result.success).toBe(true);
+        expect(result.body).toContain('"message": "hello"');
+      });
+
+      it('should fallback to raw text when JSON parsing fails', async () => {
+        const invalidJson = 'not valid json {{{';
+        mockFetch.mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          statusText: 'OK',
+          headers: new Map([['content-type', 'application/json']]),
+          text: async () => invalidJson,
+        });
+
+        const result = await webFetchTools.httpRequest({ url: 'https://api.example.com' });
+
+        expect(result.success).toBe(true);
+        expect(result.body).toBe(invalidJson);
       });
 
       it('should handle plain text responses', async () => {

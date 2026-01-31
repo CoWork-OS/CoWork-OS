@@ -2,10 +2,6 @@
  * Concurrency Safety Module
  *
  * Provides mutex locks and idempotency guarantees for critical operations.
- * Inspired by bot's formal verification of concurrent access safety:
- * - PairingStoreConcurrentHarness.tla
- * - PairingStoreRefreshRaceHarness.tla
- * - IngressEventIdempotencyHarness.tla
  */
 
 /**

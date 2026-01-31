@@ -7,8 +7,6 @@
  * - Resource limits (CPU, memory, file descriptors)
  * - Network access control
  * - Filesystem access restrictions
- *
- * Security model inspired by bot's formal verification approach.
  */
 
 import { spawn, ChildProcess, SpawnOptions } from 'child_process';

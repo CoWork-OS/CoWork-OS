@@ -136,7 +136,6 @@ export type ToolRiskLevel = 'read' | 'write' | 'destructive' | 'system' | 'netwo
 
 /**
  * Tool groups for policy-based access control
- * Inspired by bot's formal security model
  */
 export const TOOL_GROUPS = {
   // Read-only operations - lowest risk

@@ -3,10 +3,6 @@
  *
  * Tests the mutex and idempotency mechanisms that prevent
  * race conditions in critical operations.
- *
- * Inspired by bot's formal verification:
- * - PairingStoreConcurrentHarness.tla
- * - IngressEventIdempotencyHarness.tla
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';

@@ -8,7 +8,7 @@
  * - pairing: Users must enter a pairing code generated in the desktop app
  *
  * Implements concurrent access safety using mutex locks to prevent race conditions
- * in pairing operations (inspired by bot's PairingStoreConcurrentHarness.tla).
+ * in pairing operations.
  */
 
 import * as crypto from 'crypto';

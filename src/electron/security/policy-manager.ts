@@ -2,7 +2,6 @@
  * Security Policy Manager
  *
  * Implements monotonic policy precedence (deny-wins) for tool access control.
- * Inspired by bot's formal verification model (C3: Monotonic Policy Precedence).
  *
  * Policy layers (evaluated in order):
  * 1. Global Guardrails (blocked commands, patterns)

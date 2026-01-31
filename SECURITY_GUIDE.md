@@ -325,6 +325,8 @@ git diff HEAD..origin/main
 | API key leakage | Encrypted storage, minimal env |
 | XSS attacks | Content Security Policy |
 | Unauthorized bot access | Multiple auth modes |
+| Malicious skill IDs | Input validation and sanitization |
+| Binary name injection | Shell metacharacter filtering |
 
 ### What Requires User Vigilance
 
@@ -459,6 +461,32 @@ On macOS, shell commands execute within a `sandbox-exec` profile that:
 
 **Implementation**: `src/electron/agent/sandbox/runner.ts`
 
+### Skill Security
+
+SkillHub includes multiple security measures to prevent attacks via malicious skills:
+
+| Protection | Description |
+|------------|-------------|
+| **Skill ID Validation** | IDs must match `^[a-z0-9_-]+$` pattern (lowercase alphanumeric, hyphens, underscores) |
+| **Path Traversal Prevention** | IDs containing `..`, `/`, or `\` are rejected |
+| **Binary Name Sanitization** | Binary names in `requires.bins` must match `^[a-zA-Z0-9._-]+$` |
+| **Command Injection Prevention** | Shell metacharacters in binary names are blocked before `which` execution |
+| **Debounced Reloading** | Rapid skill reloads are debounced (100ms) to prevent race conditions |
+
+**Rejected inputs (skill IDs)**:
+- `../../../etc/passwd` - Path traversal
+- `foo/bar` - Contains path separator
+- `skill;rm -rf /` - Special characters
+
+**Rejected inputs (binary names)**:
+- `node; rm -rf /` - Shell metacharacters
+- `$(whoami)` - Command substitution
+- `` `whoami` `` - Backtick execution
+
+**Implementation**:
+- `src/electron/agent/skill-registry.ts` (skill ID validation)
+- `src/electron/agent/skill-eligibility.ts` (binary name sanitization)
+
 ### Running Security Tests
 
 ```bash
@@ -491,6 +519,7 @@ CoWork-OSS is designed with security in mind:
 | Policy system | Monotonic deny-wins precedence |
 | Gateway security | Context-aware tool isolation |
 | Concurrency | Mutex locks + idempotency guarantees |
+| Skill security | Input validation, path traversal protection, binary sanitization |
 
 **The security model is transparent and consent-based.** You remain in control of what the AI can do on your machine.
 

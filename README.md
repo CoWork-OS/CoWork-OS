@@ -1756,6 +1756,247 @@ Example: If an MCP server provides a `read_file` tool, it appears as `mcp_read_f
 
 ---
 
+## WebSocket Control Plane
+
+CoWork-OSS includes a WebSocket-based Control Plane API that allows external applications to programmatically control tasks, monitor progress, and receive real-time events.
+
+### Overview
+
+The Control Plane provides:
+- **REST-style API over WebSocket** for task management
+- **Token-based authentication** with challenge-response handshake
+- **Real-time event streaming** for task updates
+- **Rate limiting** to prevent brute-force attacks
+
+### Enabling the Control Plane
+
+1. Open **Settings** (gear icon)
+2. Navigate to the **Control Plane** tab
+3. Toggle **Enable Control Plane**
+4. A secure token is automatically generated (or click **Regenerate Token**)
+5. Note the port (default: `18789`) and token for client connections
+6. Click **Save Settings**
+
+### Authentication Flow
+
+1. Client connects to `ws://127.0.0.1:18789`
+2. Server sends a `connect.challenge` event with a nonce
+3. Client sends a `connect` request with the token
+4. Server validates token and sends `connect.success` event
+5. Client can now send requests and receive events
+
+### Protocol
+
+The Control Plane uses a JSON-based frame protocol:
+
+**Request Frame:**
+```json
+{
+  "type": "req",
+  "id": "unique-request-id",
+  "method": "task.create",
+  "params": { "prompt": "Organize my files", "workspaceId": "ws-123" }
+}
+```
+
+**Response Frame:**
+```json
+{
+  "type": "res",
+  "id": "unique-request-id",
+  "ok": true,
+  "payload": { "taskId": "task-456" }
+}
+```
+
+**Event Frame:**
+```json
+{
+  "type": "event",
+  "event": "task.updated",
+  "payload": { "taskId": "task-456", "status": "running" },
+  "seq": 42
+}
+```
+
+### Available Methods
+
+| Method | Description | Parameters |
+|--------|-------------|------------|
+| `connect` | Authenticate with the server | `token`, `deviceName?`, `nonce?` |
+| `ping` | Health check | - |
+| `health` | Get server health status | - |
+| `task.create` | Create a new task | `prompt`, `workspaceId`, `model?` |
+| `task.get` | Get task details | `taskId` |
+| `task.list` | List all tasks | `limit?`, `offset?`, `status?` |
+| `task.cancel` | Cancel a running task | `taskId` |
+| `task.sendMessage` | Send a message to a task | `taskId`, `message` |
+| `status` | Get server status | - |
+| `workspace.list` | List workspaces | - |
+| `workspace.get` | Get workspace details | `workspaceId` |
+
+### Events
+
+| Event | Description |
+|-------|-------------|
+| `connect.challenge` | Authentication challenge with nonce |
+| `connect.success` | Authentication successful |
+| `task.created` | New task created |
+| `task.updated` | Task status changed |
+| `task.completed` | Task finished successfully |
+| `task.failed` | Task encountered an error |
+| `task.event` | Task timeline event |
+| `heartbeat` | Server heartbeat |
+
+### Example Client (TypeScript)
+
+```typescript
+import WebSocket from 'ws';
+
+const ws = new WebSocket('ws://127.0.0.1:18789');
+const token = 'your-control-plane-token';
+
+ws.on('message', (data) => {
+  const frame = JSON.parse(data.toString());
+
+  if (frame.type === 'event' && frame.event === 'connect.challenge') {
+    // Respond to challenge with token
+    ws.send(JSON.stringify({
+      type: 'req',
+      id: crypto.randomUUID(),
+      method: 'connect',
+      params: { token, deviceName: 'My Client' }
+    }));
+  }
+
+  if (frame.type === 'event' && frame.event === 'connect.success') {
+    // Authenticated! Create a task
+    ws.send(JSON.stringify({
+      type: 'req',
+      id: crypto.randomUUID(),
+      method: 'task.create',
+      params: {
+        prompt: 'List all files in the workspace',
+        workspaceId: 'your-workspace-id'
+      }
+    }));
+  }
+
+  if (frame.type === 'event' && frame.event === 'task.completed') {
+    console.log('Task completed:', frame.payload);
+  }
+});
+```
+
+### Rate Limiting
+
+The Control Plane includes built-in protection against brute-force attacks:
+- **Max attempts**: 5 failed auth attempts before ban (configurable)
+- **Ban duration**: 5 minutes (configurable)
+- **IP-based**: Tracks attempts by remote IP address
+
+### Security Considerations
+
+- The Control Plane binds to `127.0.0.1` by default (localhost only)
+- Use Tailscale Serve/Funnel for secure remote access
+- Regenerate the token if compromised
+- Monitor the server events for unauthorized access attempts
+
+---
+
+## Tailscale Integration
+
+CoWork-OSS integrates with [Tailscale](https://tailscale.com/) to securely expose the Control Plane to your private network (tailnet) or the public internet without complex firewall or router configuration.
+
+### Prerequisites
+
+- Tailscale installed and running on your Mac
+- Logged in to your Tailscale account
+- Tailscale CLI available (`/Applications/Tailscale.app/Contents/MacOS/Tailscale`)
+
+### Exposure Modes
+
+| Mode | Description | Access |
+|------|-------------|--------|
+| **Off** | Control Plane only accessible locally | `ws://127.0.0.1:18789` |
+| **Serve** | Exposed to your private tailnet | `https://your-machine.your-tailnet.ts.net:18789` |
+| **Funnel** | Exposed publicly via Tailscale edge | `https://your-machine.your-tailnet.ts.net` (port 443) |
+
+### Setting Up Tailscale Exposure
+
+1. Open **Settings** (gear icon)
+2. Navigate to the **Control Plane** tab
+3. Enable **Control Plane** if not already enabled
+4. Under **Tailscale Exposure**, select a mode:
+   - **Off**: Local access only
+   - **Serve**: Private tailnet access
+   - **Funnel**: Public internet access
+5. Click **Save Settings**
+
+### Serve Mode
+
+Serve mode exposes the Control Plane to devices on your Tailscale network:
+
+- **Access URL**: `https://your-machine.your-tailnet.ts.net:18789`
+- **TLS**: Automatic HTTPS with valid Tailscale certificates
+- **Auth**: Still requires Control Plane token
+- **Who can access**: Only devices on your tailnet
+
+**Use cases:**
+- Access CoWork-OSS from your phone or tablet
+- Control tasks from another computer on your tailnet
+- Build integrations that run on other machines
+
+### Funnel Mode
+
+Funnel mode exposes the Control Plane to the public internet:
+
+- **Access URL**: `https://your-machine.your-tailnet.ts.net` (port 443)
+- **TLS**: Automatic HTTPS via Tailscale's edge network
+- **Auth**: Still requires Control Plane token
+- **Who can access**: Anyone on the internet (with token)
+
+**Use cases:**
+- Webhook integrations from external services
+- Mobile apps when not on tailnet
+- CI/CD pipelines triggering tasks
+
+### Checking Tailscale Status
+
+The Settings UI shows Tailscale status:
+- **Available**: Tailscale is installed and the CLI is accessible
+- **Running**: Tailscale daemon is active
+- **Logged In**: You're authenticated with Tailscale
+- **Machine Name**: Your device's Tailscale hostname
+
+### Troubleshooting
+
+**"Tailscale not available"**
+- Ensure Tailscale is installed: `brew install tailscale` or download from tailscale.com
+- Check if the CLI exists: `ls /Applications/Tailscale.app/Contents/MacOS/Tailscale`
+
+**"Tailscale not running"**
+- Open the Tailscale app from Applications
+- Or run: `sudo tailscaled`
+
+**"Not logged in to Tailscale"**
+- Run: `tailscale login`
+- Or click "Log in" in the Tailscale menu bar app
+
+**"Serve/Funnel not working"**
+- Ensure Tailscale version supports serve/funnel (v1.34+)
+- Check if funnel is enabled for your tailnet (admin console)
+- View logs: `tailscale serve status`
+
+### Security Notes
+
+- **Token required**: Even with Tailscale exposure, clients must authenticate with the Control Plane token
+- **Funnel risks**: Funnel exposes your Control Plane to the internet; ensure your token is strong and secret
+- **Audit access**: Monitor `task.event` and server events for unauthorized attempts
+- **Disable when not needed**: Set mode to "Off" when remote access isn't required
+
+---
+
 ## Technology Stack
 
 - **Frontend**: React 19 + TypeScript + Vite

@@ -82,7 +82,7 @@
   "devDependencies": {
     "@electron/rebuild": "^4.0.2",
     "@types/better-sqlite3": "^7.6.8",
-    "@types/eventsource": "^1.1.15",
+    "@types/eventsource": "^3.0.0",
     "@types/mime-types": "^3.0.1",
     "@types/node": "^25.0.10",
     "@types/pdf-parse": "^1.1.5",

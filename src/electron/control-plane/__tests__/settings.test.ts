@@ -42,6 +42,7 @@ import {
   ControlPlaneSettingsManager,
   generateControlPlaneToken,
   DEFAULT_CONTROL_PLANE_SETTINGS,
+  DEFAULT_REMOTE_GATEWAY_CONFIG,
 } from '../settings';
 
 describe('generateControlPlaneToken', () => {
@@ -83,6 +84,11 @@ describe('DEFAULT_CONTROL_PLANE_SETTINGS', () => {
   it('should have expected Tailscale defaults', () => {
     expect(DEFAULT_CONTROL_PLANE_SETTINGS.tailscale.mode).toBe('off');
     expect(DEFAULT_CONTROL_PLANE_SETTINGS.tailscale.resetOnExit).toBe(true);
+  });
+
+  it('should have expected connection mode defaults', () => {
+    expect(DEFAULT_CONTROL_PLANE_SETTINGS.connectionMode).toBe('local');
+    expect(DEFAULT_CONTROL_PLANE_SETTINGS.remote).toBeUndefined();
   });
 });
 
@@ -328,6 +334,7 @@ describe('ControlPlaneSettingsManager', () => {
       expect(defaults.port).toBe(18789);
       expect(defaults.host).toBe('127.0.0.1');
       expect(defaults.tailscale.mode).toBe('off');
+      expect(defaults.connectionMode).toBe('local');
     });
 
     it('should return a copy, not the original', () => {
@@ -337,5 +344,148 @@ describe('ControlPlaneSettingsManager', () => {
 
       expect(defaults2.enabled).toBe(false);
     });
+  });
+
+  describe('connectionMode', () => {
+    it('should default to local mode', () => {
+      const settings = ControlPlaneSettingsManager.loadSettings();
+      expect(settings.connectionMode).toBe('local');
+    });
+
+    it('should update connection mode', () => {
+      ControlPlaneSettingsManager.updateSettings({ connectionMode: 'remote' });
+
+      const settings = ControlPlaneSettingsManager.loadSettings();
+      expect(settings.connectionMode).toBe('remote');
+    });
+
+    it('should preserve connection mode when loading existing settings', () => {
+      mockSettings = {
+        connectionMode: 'remote',
+      };
+      ControlPlaneSettingsManager.clearCache();
+
+      const settings = ControlPlaneSettingsManager.loadSettings();
+      expect(settings.connectionMode).toBe('remote');
+    });
+  });
+
+  describe('remote gateway config', () => {
+    it('should have no remote config by default', () => {
+      const settings = ControlPlaneSettingsManager.loadSettings();
+      expect(settings.remote).toBeUndefined();
+    });
+
+    it('should save remote config', () => {
+      const remoteConfig = {
+        url: 'ws://remote-host:18789',
+        token: 'remote-token',
+        deviceName: 'Test Client',
+      };
+
+      ControlPlaneSettingsManager.updateSettings({ remote: remoteConfig });
+
+      expect(mockSettings.remote).toBeDefined();
+      expect((mockSettings.remote as any).url).toBe('ws://remote-host:18789');
+      expect((mockSettings.remote as any).deviceName).toBe('Test Client');
+    });
+
+    it('should load remote config', () => {
+      mockSettings = {
+        remote: {
+          url: 'ws://saved-host:18789',
+          token: 'saved-token',
+          deviceName: 'Saved Client',
+        },
+      };
+      ControlPlaneSettingsManager.clearCache();
+
+      const settings = ControlPlaneSettingsManager.loadSettings();
+
+      expect(settings.remote).toBeDefined();
+      expect(settings.remote!.url).toBe('ws://saved-host:18789');
+      expect(settings.remote!.token).toBe('saved-token');
+      expect(settings.remote!.deviceName).toBe('Saved Client');
+    });
+
+    it('should merge remote config with defaults', () => {
+      mockSettings = {
+        remote: {
+          url: 'ws://host:8080',
+          token: 'token',
+        },
+      };
+      ControlPlaneSettingsManager.clearCache();
+
+      const settings = ControlPlaneSettingsManager.loadSettings();
+
+      expect(settings.remote!.url).toBe('ws://host:8080');
+      expect(settings.remote!.token).toBe('token');
+      // Should have defaults for missing fields
+      expect(settings.remote!.autoReconnect).toBe(true);
+      expect(settings.remote!.reconnectIntervalMs).toBe(5000);
+      expect(settings.remote!.maxReconnectAttempts).toBe(10);
+    });
+
+    it('should mask remote token in display settings', () => {
+      mockSettings = {
+        remote: {
+          url: 'ws://host:18789',
+          token: 'secret-remote-token',
+          deviceName: 'My Device',
+        },
+      };
+      ControlPlaneSettingsManager.clearCache();
+
+      const display = ControlPlaneSettingsManager.getSettingsForDisplay();
+
+      expect(display.remote).toBeDefined();
+      expect(display.remote!.token).toBe('***configured***');
+      expect(display.remote!.url).toBe('ws://host:18789');
+      expect(display.remote!.deviceName).toBe('My Device');
+    });
+
+    it('should show empty string for missing remote token in display', () => {
+      mockSettings = {
+        remote: {
+          url: 'ws://host:18789',
+          token: '',
+        },
+      };
+      ControlPlaneSettingsManager.clearCache();
+
+      const display = ControlPlaneSettingsManager.getSettingsForDisplay();
+
+      expect(display.remote!.token).toBe('');
+    });
+
+    it('should update nested remote config fields', () => {
+      mockSettings = {
+        remote: {
+          url: 'ws://old-host:18789',
+          token: 'old-token',
+          deviceName: 'Old Name',
+        },
+      };
+      ControlPlaneSettingsManager.clearCache();
+
+      ControlPlaneSettingsManager.updateSettings({
+        remote: { url: 'ws://new-host:18789', token: 'new-token', deviceName: 'New Name' },
+      });
+
+      expect((mockSettings.remote as any).url).toBe('ws://new-host:18789');
+      expect((mockSettings.remote as any).deviceName).toBe('New Name');
+    });
+  });
+});
+
+describe('DEFAULT_REMOTE_GATEWAY_CONFIG', () => {
+  it('should have expected default values', () => {
+    expect(DEFAULT_REMOTE_GATEWAY_CONFIG.url).toBe('ws://127.0.0.1:18789');
+    expect(DEFAULT_REMOTE_GATEWAY_CONFIG.token).toBe('');
+    expect(DEFAULT_REMOTE_GATEWAY_CONFIG.deviceName).toBe('CoWork Remote Client');
+    expect(DEFAULT_REMOTE_GATEWAY_CONFIG.autoReconnect).toBe(true);
+    expect(DEFAULT_REMOTE_GATEWAY_CONFIG.reconnectIntervalMs).toBe(5000);
+    expect(DEFAULT_REMOTE_GATEWAY_CONFIG.maxReconnectAttempts).toBe(10);
   });
 });

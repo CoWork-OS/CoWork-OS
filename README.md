@@ -159,6 +159,12 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
   - **Funnel mode**: Expose publicly via Tailscale's global edge network
   - Automatic HTTPS with valid certificates
   - No firewall or router configuration required
+- **SSH Tunnel Support**: Secure remote access via standard SSH:
+  - Connect to remote CoWork instances through SSH port forwarding
+  - No additional software required (uses standard SSH)
+  - Encrypted transport with OS keychain token storage
+  - Auto-reconnection with exponential backoff
+  - Connection testing before committing
 
 ## Data handling (local-first, BYOK)
 - Stored locally: task metadata, timeline events, artifact index, workspace config (SQLite).
@@ -218,9 +224,10 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
 └─────────────────────────────────────────────────┘
                       ↕
 ┌─────────────────────────────────────────────────┐
-│           Tailscale Exposure (Optional)          │
-│  - Serve: Local tailnet access                   │
-│  - Funnel: Public HTTPS endpoint                 │
+│           Remote Access (Optional)               │
+│  - Tailscale Serve: Local tailnet access         │
+│  - Tailscale Funnel: Public HTTPS endpoint       │
+│  - SSH Tunnel: Standard SSH port forwarding      │
 │  - Auto TLS certificates                         │
 └─────────────────────────────────────────────────┘
 ```
@@ -683,6 +690,12 @@ If requested by the rights holder, we will update naming/branding to avoid confu
   - **Funnel Mode** - Expose publicly via Tailscale's global edge network
   - **Auto TLS** - Automatic HTTPS with valid certificates
   - **CLI Detection** - Automatic Tailscale CLI detection and status checking
+- [x] **SSH Tunnel Support** - Secure remote access via standard SSH:
+  - **Remote Client Mode** - Connect to a Control Plane on another machine
+  - **SSH Port Forwarding** - Use standard `ssh -L` for encrypted transport
+  - **Auto-Reconnection** - Exponential backoff with configurable retries
+  - **Connection Testing** - Verify connectivity before saving configuration
+  - **Secure Token Storage** - Remote tokens encrypted via OS keychain
 
 ### Planned
 - [ ] VM sandbox using macOS Virtualization.framework
@@ -1815,6 +1828,63 @@ Skills are context-aware prompts that guide the agent on how to interact with sp
 
 Some skills include **guidelines** - always-active context that helps the agent make better decisions. For example, coding guidelines ensure consistent code style across your projects.
 
+### SkillHub (Skill Registry)
+
+SkillHub is CoWork-OSS's built-in skill registry for discovering, installing, and managing skills.
+
+#### Accessing SkillHub
+
+1. Open **Settings** (gear icon)
+2. Navigate to the **SkillHub** tab
+3. Browse installed skills or search the registry
+
+#### SkillHub Features
+
+| Tab | Description |
+|-----|-------------|
+| **Installed** | View and manage skills installed from the registry |
+| **Browse Registry** | Search and install new skills from skill-hub.com |
+| **Status** | Dashboard showing all skills with eligibility status |
+
+#### Skill Sources (Precedence)
+
+Skills are loaded from three locations. Higher precedence sources override lower ones:
+
+| Source | Location | Precedence |
+|--------|----------|------------|
+| **Workspace** | `workspace/skills/` | Highest |
+| **Managed** | `~/Library/Application Support/cowork-oss/skills/` | Medium |
+| **Bundled** | `resources/skills/` (in app) | Lowest |
+
+#### Skill Requirements
+
+Skills can specify requirements that must be met to be eligible:
+
+```json
+{
+  "requires": {
+    "bins": ["git", "node"],
+    "anyBins": ["npm", "pnpm", "yarn"],
+    "env": ["GITHUB_TOKEN"],
+    "os": ["darwin", "linux"]
+  }
+}
+```
+
+- **bins**: All these binaries must exist in PATH
+- **anyBins**: At least one of these must exist
+- **env**: All these environment variables must be set
+- **os**: Must match current OS (darwin/linux/win32)
+
+#### Skill Eligibility Status
+
+| Status | Meaning |
+|--------|---------|
+| **Ready** | All requirements met, skill is active |
+| **Disabled** | Manually disabled by user |
+| **Blocked** | Blocked by allowlist/denylist |
+| **Missing Requirements** | Binary, env var, or OS requirement not met |
+
 ---
 
 ## MCP (Model Context Protocol)
@@ -2150,6 +2220,120 @@ The Settings UI shows Tailscale status:
 
 ---
 
+## SSH Tunnel Support
+
+For environments where Tailscale isn't available or preferred, CoWork-OSS supports remote access via SSH port forwarding. This provides secure, encrypted access to your Control Plane through any SSH-accessible server.
+
+### How It Works
+
+The Control Plane server binds to localhost (`127.0.0.1:18789`) by default. SSH tunneling forwards this local port to a remote machine, allowing clients on other networks to connect securely through the encrypted SSH connection.
+
+```
+┌─────────────────┐        SSH Tunnel        ┌─────────────────┐
+│  Remote Client  │ ──────────────────────── │   Your Mac      │
+│                 │   Encrypted Connection   │                 │
+│ ws://localhost  │◄────────────────────────►│ Control Plane   │
+│    :18789       │                          │ 127.0.0.1:18789 │
+└─────────────────┘                          └─────────────────┘
+```
+
+### Setting Up an SSH Tunnel
+
+**On the client machine** (where you want to access CoWork-OSS from):
+
+```bash
+# Create SSH tunnel - forwards local port 18789 to remote CoWork machine
+ssh -N -L 18789:127.0.0.1:18789 user@your-mac-hostname
+
+# Options explained:
+#   -N    Don't execute remote commands (tunnel only)
+#   -L    Local port forwarding: local:host:remote
+```
+
+**Keep the tunnel running** in a terminal window, or run in background:
+
+```bash
+ssh -f -N -L 18789:127.0.0.1:18789 user@your-mac-hostname
+```
+
+### Connecting as Remote Client
+
+Once the SSH tunnel is established, you can either:
+
+1. **Use the Settings UI**:
+   - Open **Settings** → **Control Plane** tab
+   - Select **Remote** connection mode
+   - Enter `ws://127.0.0.1:18789` as the gateway URL
+   - Enter your Control Plane token
+   - Click **Connect**
+
+2. **Use a WebSocket client programmatically**:
+   ```javascript
+   const ws = new WebSocket('ws://127.0.0.1:18789');
+
+   ws.on('open', () => {
+     // Send authentication
+     ws.send(JSON.stringify({
+       type: 'request',
+       id: '1',
+       method: 'connect',
+       params: { token: 'your-control-plane-token' }
+     }));
+   });
+   ```
+
+### Connection Modes
+
+The Control Plane supports two connection modes:
+
+| Mode | Description |
+|------|-------------|
+| **Local** | Host the Control Plane server (default) |
+| **Remote** | Connect to an external Control Plane as a client |
+
+Switch modes in **Settings** → **Control Plane** → **Connection Mode**.
+
+### Remote Gateway Configuration
+
+When using Remote mode, configure:
+
+- **Gateway URL**: WebSocket URL (e.g., `ws://127.0.0.1:18789` or `wss://host:port`)
+- **Auth Token**: Control Plane token from the host machine
+- **Device Name**: Identifier for this client connection
+- **Auto Reconnect**: Automatically reconnect on disconnection
+
+### Security Considerations
+
+- **SSH Key Authentication**: Use SSH keys instead of passwords for tunnel setup
+- **Token Protection**: Keep your Control Plane token secret; it grants full access
+- **Firewall Rules**: The Control Plane only binds to localhost; no direct external exposure
+- **Connection Auditing**: Monitor server events for unauthorized connection attempts
+
+### Troubleshooting
+
+**"Connection refused" on client**
+- Verify SSH tunnel is running: `ps aux | grep ssh`
+- Check local port is forwarded: `lsof -i :18789`
+- Ensure Control Plane is running on the host machine
+
+**"Authentication failed"**
+- Verify the token matches the one on the host machine
+- Check that the token hasn't been regenerated since you copied it
+
+**SSH tunnel drops frequently**
+- Add keepalive to SSH config:
+  ```
+  Host your-mac
+    ServerAliveInterval 60
+    ServerAliveCountMax 3
+  ```
+- Consider using `autossh` for persistent tunnels:
+  ```bash
+  autossh -M 0 -f -N -L 18789:127.0.0.1:18789 user@your-mac
+  ```
+
+---
+
 ## Technology Stack
 
 - **Frontend**: React 19 + TypeScript + Vite
@@ -2211,7 +2395,8 @@ cowork-oss/
 │   │   │   ├── client.ts      # Client registry and management
 │   │   │   ├── protocol.ts    # Frame types and serialization
 │   │   │   ├── handlers.ts    # Method handlers (task operations)
-│   │   │   └── settings.ts    # Settings persistence
+│   │   │   ├── settings.ts    # Settings persistence
+│   │   │   └── remote-client.ts # Remote gateway client (SSH tunnel)
 │   │   ├── tailscale/         # Tailscale integration
 │   │   │   ├── tailscale.ts   # CLI wrapper and status
 │   │   │   ├── exposure.ts    # Serve/Funnel mode manager
@@ -2248,9 +2433,66 @@ Development mode provides hot reload for both:
 
 ### Adding New Skills
 
-1. Create skill implementation in `skills/` directory
-2. Add skill tool definition in `tools/skill-tools.ts`
-3. Implement the skill method in SkillTools class
+Skills are JSON files stored in one of three locations (see [SkillHub](#skillhub-skill-registry)).
+
+#### Skill JSON Format
+
+```json
+{
+  "id": "my-skill",
+  "name": "My Skill",
+  "description": "What this skill does and when to use it",
+  "icon": "🔧",
+  "category": "Tools",
+  "prompt": "Instructions injected into context when skill is triggered",
+  "parameters": [],
+  "enabled": true,
+  "type": "task",
+  "requires": {
+    "bins": ["required-binary"],
+    "env": ["API_KEY"]
+  },
+  "metadata": {
+    "version": "1.0.0",
+    "author": "Author Name",
+    "tags": ["tag1", "tag2"]
+  }
+}
+```
+
+#### Required Fields
+
+| Field | Description |
+|-------|-------------|
+| `id` | Unique identifier (lowercase, hyphens allowed) |
+| `name` | Display name |
+| `description` | What the skill does (used for triggering) |
+| `icon` | Emoji or icon |
+| `prompt` | Instructions/content injected into context |
+
+#### Optional Fields
+
+| Field | Description |
+|-------|-------------|
+| `category` | For grouping in UI |
+| `parameters` | Array of input parameters |
+| `enabled` | Whether skill is active (default: true) |
+| `type` | `"task"` (default) or `"guideline"` |
+| `requires` | Requirements for eligibility |
+| `install` | Installation specs for dependencies |
+| `metadata` | Extended information (version, author, etc.) |
+
+#### Skill Types
+
+- **task**: Executable skill selected for specific tasks
+- **guideline**: Always injected into system prompt when enabled
+
+#### Creating a Skill
+
+1. Create a `.json` file in `~/Library/Application Support/cowork-oss/skills/`
+2. Add the required fields (id, name, description, icon, prompt)
+3. Optionally add requirements and metadata
+4. The skill will be loaded automatically on next restart (or use SkillHub > Reload)
 
 ---
 

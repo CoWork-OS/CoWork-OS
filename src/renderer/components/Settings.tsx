@@ -11,13 +11,15 @@ import { GuardrailSettings } from './GuardrailSettings';
 import { AppearanceSettings } from './AppearanceSettings';
 import { QueueSettings } from './QueueSettings';
 import { SkillsSettings } from './SkillsSettings';
+import { SkillHubBrowser } from './SkillHubBrowser';
 import { MCPSettings } from './MCPSettings';
 import { BuiltinToolsSettings } from './BuiltinToolsSettings';
 import { TraySettings } from './TraySettings';
 import { ScheduledTasksSettings } from './ScheduledTasksSettings';
 import { HooksSettings } from './HooksSettings';
+import { ControlPlaneSettings } from './ControlPlaneSettings';
 
-type SettingsTab = 'appearance' | 'tray' | 'llm' | 'search' | 'telegram' | 'discord' | 'slack' | 'whatsapp' | 'imessage' | 'updates' | 'guardrails' | 'queue' | 'skills' | 'mcp' | 'tools' | 'scheduled' | 'hooks';
+type SettingsTab = 'appearance' | 'tray' | 'llm' | 'search' | 'telegram' | 'discord' | 'slack' | 'whatsapp' | 'imessage' | 'updates' | 'guardrails' | 'queue' | 'skills' | 'skillhub' | 'mcp' | 'tools' | 'scheduled' | 'hooks' | 'controlplane';
 
 interface SettingsProps {
   onBack: () => void;
@@ -791,6 +793,18 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
             Custom Skills
           </button>
           <button
+            className={`settings-nav-item ${activeTab === 'skillhub' ? 'active' : ''}`}
+            onClick={() => setActiveTab('skillhub')}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M12 16v-4" />
+              <path d="M12 8h.01" />
+              <path d="M8 12h8" />
+            </svg>
+            SkillHub
+          </button>
+          <button
             className={`settings-nav-item ${activeTab === 'scheduled' ? 'active' : ''}`}
             onClick={() => setActiveTab('scheduled')}
           >
@@ -831,6 +845,17 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
               <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
             </svg>
             Webhooks
+          </button>
+          <button
+            className={`settings-nav-item ${activeTab === 'controlplane' ? 'active' : ''}`}
+            onClick={() => setActiveTab('controlplane')}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+              <line x1="8" y1="21" x2="16" y2="21" />
+              <line x1="12" y1="17" x2="12" y2="21" />
+            </svg>
+            Control Plane
           </button>
           {/* NOTE: Updates tab should ALWAYS stay at the bottom as the last tab */}
           <button
@@ -875,6 +900,8 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
             <QueueSettings />
           ) : activeTab === 'skills' ? (
             <SkillsSettings />
+          ) : activeTab === 'skillhub' ? (
+            <SkillHubBrowser />
           ) : activeTab === 'scheduled' ? (
             <ScheduledTasksSettings />
           ) : activeTab === 'mcp' ? (
@@ -883,6 +910,8 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
             <BuiltinToolsSettings />
           ) : activeTab === 'hooks' ? (
             <HooksSettings />
+          ) : activeTab === 'controlplane' ? (
+            <ControlPlaneSettings />
           ) : loading ? (
             <div className="settings-loading">Loading settings...</div>
           ) : (

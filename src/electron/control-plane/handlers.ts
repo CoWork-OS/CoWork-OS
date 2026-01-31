@@ -11,10 +11,18 @@ import type {
   ControlPlaneStatus,
   TailscaleAvailability,
   TailscaleMode,
+  RemoteGatewayConfig,
+  RemoteGatewayStatus,
 } from '../../shared/types';
 import { ControlPlaneServer, ControlPlaneSettingsManager } from './index';
 import { checkTailscaleAvailability, getExposureStatus } from '../tailscale';
 import { TailscaleSettingsManager } from '../tailscale/settings';
+import {
+  RemoteGatewayClient,
+  initRemoteGatewayClient,
+  getRemoteGatewayClient,
+  shutdownRemoteGatewayClient,
+} from './remote-client';
 
 // Server instance
 let controlPlaneServer: ControlPlaneServer | null = null;
@@ -302,14 +310,142 @@ export function setupControlPlaneHandlers(mainWindow: BrowserWindow): void {
     }
   );
 
+  // ===== Remote Gateway Handlers =====
+
+  // Connect to remote gateway
+  ipcMain.handle(
+    IPC_CHANNELS.REMOTE_GATEWAY_CONNECT,
+    async (_, config?: RemoteGatewayConfig): Promise<{ ok: boolean; error?: string }> => {
+      try {
+        // Get config from settings if not provided
+        const settings = ControlPlaneSettingsManager.loadSettings();
+        const remoteConfig = config || settings.remote;
+
+        if (!remoteConfig?.url || !remoteConfig?.token) {
+          return { ok: false, error: 'Remote gateway URL and token are required' };
+        }
+
+        // Stop local server if running
+        if (controlPlaneServer?.isRunning) {
+          await controlPlaneServer.stop();
+          controlPlaneServer = null;
+        }
+
+        // Initialize and connect remote client
+        const client = initRemoteGatewayClient({
+          ...remoteConfig,
+          onStateChange: (state, error) => {
+            if (mainWindowRef && !mainWindowRef.isDestroyed()) {
+              mainWindowRef.webContents.send(IPC_CHANNELS.REMOTE_GATEWAY_EVENT, {
+                type: 'stateChange',
+                state,
+                error,
+              });
+            }
+          },
+          onEvent: (event, payload) => {
+            if (mainWindowRef && !mainWindowRef.isDestroyed()) {
+              mainWindowRef.webContents.send(IPC_CHANNELS.REMOTE_GATEWAY_EVENT, {
+                type: 'event',
+                event,
+                payload,
+              });
+            }
+          },
+        });
+
+        await client.connect();
+
+        // Update settings with connection mode
+        ControlPlaneSettingsManager.updateSettings({
+          connectionMode: 'remote',
+          remote: remoteConfig,
+        });
+
+        return { ok: true };
+      } catch (error: any) {
+        return { ok: false, error: error.message || String(error) };
+      }
+    }
+  );
+
+  // Disconnect from remote gateway
+  ipcMain.handle(
+    IPC_CHANNELS.REMOTE_GATEWAY_DISCONNECT,
+    async (): Promise<{ ok: boolean; error?: string }> => {
+      try {
+        shutdownRemoteGatewayClient();
+        ControlPlaneSettingsManager.updateSettings({
+          connectionMode: 'local',
+        });
+        return { ok: true };
+      } catch (error: any) {
+        return { ok: false, error: error.message || String(error) };
+      }
+    }
+  );
+
+  // Get remote gateway status
+  ipcMain.handle(
+    IPC_CHANNELS.REMOTE_GATEWAY_GET_STATUS,
+    async (): Promise<RemoteGatewayStatus> => {
+      const client = getRemoteGatewayClient();
+      if (!client) {
+        return { state: 'disconnected' };
+      }
+      return client.getStatus();
+    }
+  );
+
+  // Save remote gateway config
+  ipcMain.handle(
+    IPC_CHANNELS.REMOTE_GATEWAY_SAVE_CONFIG,
+    async (_, config: RemoteGatewayConfig): Promise<{ ok: boolean; error?: string }> => {
+      try {
+        ControlPlaneSettingsManager.updateSettings({
+          remote: config,
+        });
+        return { ok: true };
+      } catch (error: any) {
+        return { ok: false, error: error.message || String(error) };
+      }
+    }
+  );
+
+  // Test remote gateway connection
+  ipcMain.handle(
+    IPC_CHANNELS.REMOTE_GATEWAY_TEST_CONNECTION,
+    async (_, config: RemoteGatewayConfig): Promise<{
+      ok: boolean;
+      latencyMs?: number;
+      error?: string;
+    }> => {
+      try {
+        const client = new RemoteGatewayClient(config);
+        const result = await client.testConnection();
+        return {
+          ok: result.success,
+          latencyMs: result.latencyMs,
+          error: result.error,
+        };
+      } catch (error: any) {
+        return { ok: false, error: error.message || String(error) };
+      }
+    }
+  );
+
   console.log('[ControlPlane] IPC handlers initialized');
 }
 
 /**
- * Shutdown the control plane server
+ * Shutdown the control plane server and remote client
  * Call this during app quit
  */
 export async function shutdownControlPlane(): Promise<void> {
+  // Shutdown remote client
+  shutdownRemoteGatewayClient();
+
+  // Shutdown local server
   if (controlPlaneServer) {
     console.log('[ControlPlane] Shutting down server...');
     await controlPlaneServer.stop();

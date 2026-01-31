@@ -84,6 +84,17 @@ const IPC_CHANNELS = {
   CUSTOM_SKILL_DELETE: 'customSkill:delete',
   CUSTOM_SKILL_RELOAD: 'customSkill:reload',
   CUSTOM_SKILL_OPEN_FOLDER: 'customSkill:openFolder',
+  // Skill Registry (SkillHub)
+  SKILL_REGISTRY_SEARCH: 'skillRegistry:search',
+  SKILL_REGISTRY_GET_DETAILS: 'skillRegistry:getDetails',
+  SKILL_REGISTRY_INSTALL: 'skillRegistry:install',
+  SKILL_REGISTRY_UPDATE: 'skillRegistry:update',
+  SKILL_REGISTRY_UPDATE_ALL: 'skillRegistry:updateAll',
+  SKILL_REGISTRY_UNINSTALL: 'skillRegistry:uninstall',
+  SKILL_REGISTRY_LIST_MANAGED: 'skillRegistry:listManaged',
+  SKILL_REGISTRY_CHECK_UPDATES: 'skillRegistry:checkUpdates',
+  SKILL_REGISTRY_GET_STATUS: 'skillRegistry:getStatus',
+  SKILL_REGISTRY_GET_ELIGIBLE: 'skillRegistry:getEligible',
   // MCP (Model Context Protocol)
   MCP_GET_SETTINGS: 'mcp:getSettings',
   MCP_SAVE_SETTINGS: 'mcp:saveSettings',
@@ -170,6 +181,25 @@ const IPC_CHANNELS = {
   TAILSCALE_GET_STATUS: 'tailscale:getStatus',
   TAILSCALE_CHECK_AVAILABILITY: 'tailscale:checkAvailability',
   TAILSCALE_SET_MODE: 'tailscale:setMode',
+  // Remote Gateway (connecting to external Control Plane)
+  REMOTE_GATEWAY_CONNECT: 'remoteGateway:connect',
+  REMOTE_GATEWAY_DISCONNECT: 'remoteGateway:disconnect',
+  REMOTE_GATEWAY_GET_STATUS: 'remoteGateway:getStatus',
+  REMOTE_GATEWAY_SAVE_CONFIG: 'remoteGateway:saveConfig',
+  REMOTE_GATEWAY_TEST_CONNECTION: 'remoteGateway:testConnection',
+  REMOTE_GATEWAY_EVENT: 'remoteGateway:event',
+  // Live Canvas (Agent-driven visual workspace)
+  CANVAS_CREATE: 'canvas:create',
+  CANVAS_GET_SESSION: 'canvas:getSession',
+  CANVAS_LIST_SESSIONS: 'canvas:listSessions',
+  CANVAS_SHOW: 'canvas:show',
+  CANVAS_HIDE: 'canvas:hide',
+  CANVAS_CLOSE: 'canvas:close',
+  CANVAS_PUSH: 'canvas:push',
+  CANVAS_EVAL: 'canvas:eval',
+  CANVAS_SNAPSHOT: 'canvas:snapshot',
+  CANVAS_A2UI_ACTION: 'canvas:a2uiAction',
+  CANVAS_EVENT: 'canvas:event',
 } as const;
 
 // Custom Skill types (inlined for sandboxed preload)
@@ -182,6 +212,26 @@ interface SkillParameter {
   options?: string[];
 }
 
+type SkillSource = 'bundled' | 'managed' | 'workspace';
+
+interface SkillRequirements {
+  bins?: string[];
+  anyBins?: string[];
+  env?: string[];
+  config?: string[];
+  os?: ('darwin' | 'linux' | 'win32')[];
+}
+
+interface SkillMetadata {
+  version?: string;
+  author?: string;
+  homepage?: string;
+  repository?: string;
+  license?: string;
+  tags?: string[];
+  primaryEnv?: string;
+}
+
 interface CustomSkill {
   id: string;
   name: string;
@@ -192,6 +242,66 @@ interface CustomSkill {
   category?: string;
   enabled?: boolean;
   filePath?: string;
+  source?: SkillSource;
+  requires?: SkillRequirements;
+  metadata?: SkillMetadata;
+}
+
+// Skill Registry types (inlined for sandboxed preload)
+interface SkillRegistryEntry {
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  author?: string;
+  downloads?: number;
+  rating?: number;
+  tags?: string[];
+  icon?: string;
+  category?: string;
+  updatedAt?: string;
+  homepage?: string;
+}
+
+interface SkillSearchResult {
+  query: string;
+  total: number;
+  page: number;
+  pageSize: number;
+  results: SkillRegistryEntry[];
+}
+
+interface SkillStatusEntry extends CustomSkill {
+  eligible: boolean;
+  disabled: boolean;
+  blockedByAllowlist: boolean;
+  requirements: {
+    bins: string[];
+    anyBins: string[];
+    env: string[];
+    config: string[];
+    os: string[];
+  };
+  missing: {
+    bins: string[];
+    anyBins: string[];
+    env: string[];
+    config: string[];
+    os: string[];
+  };
+}
+
+interface SkillStatusReport {
+  workspaceDir: string;
+  managedSkillsDir: string;
+  bundledSkillsDir: string;
+  skills: SkillStatusEntry[];
+  summary: {
+    total: number;
+    eligible: number;
+    disabled: number;
+    missingRequirements: number;
+  };
 }
 
 // MCP types (inlined for sandboxed preload)
@@ -271,6 +381,37 @@ interface MCPUpdateInfo {
   currentVersion: string;
   latestVersion: string;
   registryEntry: MCPRegistryEntry;
+}
+
+// Canvas types (inlined for sandboxed preload)
+type CanvasSessionStatus = 'active' | 'paused' | 'closed';
+
+interface CanvasSession {
+  id: string;
+  taskId: string;
+  workspaceId: string;
+  sessionDir: string;
+  status: CanvasSessionStatus;
+  title?: string;
+  createdAt: number;
+  lastUpdatedAt: number;
+}
+
+interface CanvasA2UIAction {
+  actionName: string;
+  sessionId: string;
+  componentId?: string;
+  context?: Record<string, unknown>;
+  timestamp: number;
+}
+
+interface CanvasEvent {
+  type: 'session_created' | 'session_updated' | 'session_closed' | 'content_pushed' | 'a2ui_action';
+  sessionId: string;
+  taskId: string;
+  session?: CanvasSession;
+  action?: CanvasA2UIAction;
+  timestamp: number;
 }
 
 // Built-in Tools Settings types (inlined for sandboxed preload)
@@ -537,6 +678,7 @@ interface HooksEvent {
 // the preload script runs in a sandboxed context and cannot import from other modules.
 // When updating these types, ensure shared/types.ts is also updated to stay in sync.
 type TailscaleMode = 'off' | 'serve' | 'funnel';
+type ControlPlaneConnectionMode = 'local' | 'remote';
 
 interface ControlPlaneSettingsData {
   enabled: boolean;
@@ -550,6 +692,8 @@ interface ControlPlaneSettingsData {
     mode: TailscaleMode;
     resetOnExit: boolean;
   };
+  connectionMode?: ControlPlaneConnectionMode;
+  remote?: RemoteGatewayConfig;
 }
 
 interface ControlPlaneClientInfo {
@@ -598,6 +742,44 @@ interface TailscaleAvailability {
   installed: boolean;
   funnelAvailable: boolean;
   hostname: string | null;
+}
+
+// Remote Gateway types
+interface RemoteGatewayConfig {
+  url: string;
+  token: string;
+  tlsFingerprint?: string;
+  deviceName?: string;
+  autoReconnect?: boolean;
+  reconnectIntervalMs?: number;
+  maxReconnectAttempts?: number;
+}
+
+type RemoteGatewayConnectionState =
+  | 'disconnected'
+  | 'connecting'
+  | 'authenticating'
+  | 'connected'
+  | 'reconnecting'
+  | 'error';
+
+interface RemoteGatewayStatus {
+  state: RemoteGatewayConnectionState;
+  url?: string;
+  connectedAt?: number;
+  clientId?: string;
+  scopes?: string[];
+  error?: string;
+  reconnectAttempts?: number;
+  lastActivityAt?: number;
+}
+
+interface RemoteGatewayEvent {
+  type: 'stateChange' | 'event';
+  state?: RemoteGatewayConnectionState;
+  event?: string;
+  payload?: unknown;
+  error?: string;
 }
 
 // Expose protected methods that allow the renderer process to use ipcRenderer
@@ -769,6 +951,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
   reloadCustomSkills: () => ipcRenderer.invoke(IPC_CHANNELS.CUSTOM_SKILL_RELOAD),
   openCustomSkillsFolder: () => ipcRenderer.invoke(IPC_CHANNELS.CUSTOM_SKILL_OPEN_FOLDER),
 
+  // Skill Registry (SkillHub) APIs
+  searchSkillRegistry: (query: string, options?: { page?: number; pageSize?: number }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SKILL_REGISTRY_SEARCH, query, options),
+  getSkillDetails: (skillId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SKILL_REGISTRY_GET_DETAILS, skillId),
+  installSkillFromRegistry: (skillId: string, version?: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SKILL_REGISTRY_INSTALL, skillId, version),
+  updateSkillFromRegistry: (skillId: string, version?: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SKILL_REGISTRY_UPDATE, skillId, version),
+  updateAllSkills: () => ipcRenderer.invoke(IPC_CHANNELS.SKILL_REGISTRY_UPDATE_ALL),
+  uninstallSkill: (skillId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SKILL_REGISTRY_UNINSTALL, skillId),
+  listManagedSkills: () => ipcRenderer.invoke(IPC_CHANNELS.SKILL_REGISTRY_LIST_MANAGED),
+  checkSkillUpdates: (skillId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SKILL_REGISTRY_CHECK_UPDATES, skillId),
+  getSkillStatus: () => ipcRenderer.invoke(IPC_CHANNELS.SKILL_REGISTRY_GET_STATUS),
+  getEligibleSkills: () => ipcRenderer.invoke(IPC_CHANNELS.SKILL_REGISTRY_GET_ELIGIBLE),
+
   // MCP (Model Context Protocol) APIs
   getMCPSettings: () => ipcRenderer.invoke(IPC_CHANNELS.MCP_GET_SETTINGS),
   saveMCPSettings: (settings: any) => ipcRenderer.invoke(IPC_CHANNELS.MCP_SAVE_SETTINGS, settings),
@@ -915,6 +1115,43 @@ contextBridge.exposeInMainWorld('electronAPI', {
   checkTailscaleAvailability: () => ipcRenderer.invoke(IPC_CHANNELS.TAILSCALE_CHECK_AVAILABILITY),
   getTailscaleStatus: () => ipcRenderer.invoke(IPC_CHANNELS.TAILSCALE_GET_STATUS),
   setTailscaleMode: (mode: TailscaleMode) => ipcRenderer.invoke(IPC_CHANNELS.TAILSCALE_SET_MODE, mode),
+
+  // Remote Gateway
+  connectRemoteGateway: (config?: RemoteGatewayConfig) => ipcRenderer.invoke(IPC_CHANNELS.REMOTE_GATEWAY_CONNECT, config),
+  disconnectRemoteGateway: () => ipcRenderer.invoke(IPC_CHANNELS.REMOTE_GATEWAY_DISCONNECT),
+  getRemoteGatewayStatus: () => ipcRenderer.invoke(IPC_CHANNELS.REMOTE_GATEWAY_GET_STATUS),
+  saveRemoteGatewayConfig: (config: RemoteGatewayConfig) => ipcRenderer.invoke(IPC_CHANNELS.REMOTE_GATEWAY_SAVE_CONFIG, config),
+  testRemoteGatewayConnection: (config: RemoteGatewayConfig) => ipcRenderer.invoke(IPC_CHANNELS.REMOTE_GATEWAY_TEST_CONNECTION, config),
+  onRemoteGatewayEvent: (callback: (event: RemoteGatewayEvent) => void) => {
+    const subscription = (_: Electron.IpcRendererEvent, data: RemoteGatewayEvent) => callback(data);
+    ipcRenderer.on(IPC_CHANNELS.REMOTE_GATEWAY_EVENT, subscription);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.REMOTE_GATEWAY_EVENT, subscription);
+  },
+
+  // Live Canvas APIs
+  canvasCreate: (data: { taskId: string; workspaceId: string; title?: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CANVAS_CREATE, data),
+  canvasGetSession: (sessionId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CANVAS_GET_SESSION, sessionId),
+  canvasListSessions: (taskId?: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CANVAS_LIST_SESSIONS, taskId),
+  canvasShow: (sessionId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CANVAS_SHOW, sessionId),
+  canvasHide: (sessionId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CANVAS_HIDE, sessionId),
+  canvasClose: (sessionId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CANVAS_CLOSE, sessionId),
+  canvasPush: (data: { sessionId: string; content: string; filename?: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CANVAS_PUSH, data),
+  canvasEval: (data: { sessionId: string; script: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CANVAS_EVAL, data),
+  canvasSnapshot: (sessionId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CANVAS_SNAPSHOT, sessionId),
+  onCanvasEvent: (callback: (event: CanvasEvent) => void) => {
+    const subscription = (_: Electron.IpcRendererEvent, data: CanvasEvent) => callback(data);
+    ipcRenderer.on(IPC_CHANNELS.CANVAS_EVENT, subscription);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.CANVAS_EVENT, subscription);
+  },
 });
 
 // Type declarations for TypeScript
@@ -1120,6 +1357,17 @@ export interface ElectronAPI {
   deleteCustomSkill: (id: string) => Promise<boolean>;
   reloadCustomSkills: () => Promise<CustomSkill[]>;
   openCustomSkillsFolder: () => Promise<void>;
+  // Skill Registry (SkillHub) APIs
+  searchSkillRegistry: (query: string, options?: { page?: number; pageSize?: number }) => Promise<SkillSearchResult>;
+  getSkillDetails: (skillId: string) => Promise<SkillRegistryEntry | null>;
+  installSkillFromRegistry: (skillId: string, version?: string) => Promise<{ success: boolean; skill?: CustomSkill; error?: string }>;
+  updateSkillFromRegistry: (skillId: string, version?: string) => Promise<{ success: boolean; skill?: CustomSkill; error?: string }>;
+  updateAllSkills: () => Promise<{ updated: string[]; failed: string[] }>;
+  uninstallSkill: (skillId: string) => Promise<{ success: boolean; error?: string }>;
+  listManagedSkills: () => Promise<CustomSkill[]>;
+  checkSkillUpdates: (skillId: string) => Promise<{ hasUpdate: boolean; currentVersion: string | null; latestVersion: string | null }>;
+  getSkillStatus: () => Promise<SkillStatusReport>;
+  getEligibleSkills: () => Promise<CustomSkill[]>;
   // MCP (Model Context Protocol)
   getMCPSettings: () => Promise<MCPSettings>;
   saveMCPSettings: (settings: MCPSettings) => Promise<{ success: boolean }>;
@@ -1216,6 +1464,26 @@ export interface ElectronAPI {
   checkTailscaleAvailability: () => Promise<TailscaleAvailability>;
   getTailscaleStatus: () => Promise<{ settings: any; exposure: any }>;
   setTailscaleMode: (mode: TailscaleMode) => Promise<{ ok: boolean; error?: string }>;
+
+  // Remote Gateway
+  connectRemoteGateway: (config?: RemoteGatewayConfig) => Promise<{ ok: boolean; error?: string }>;
+  disconnectRemoteGateway: () => Promise<{ ok: boolean; error?: string }>;
+  getRemoteGatewayStatus: () => Promise<RemoteGatewayStatus>;
+  saveRemoteGatewayConfig: (config: RemoteGatewayConfig) => Promise<{ ok: boolean; error?: string }>;
+  testRemoteGatewayConnection: (config: RemoteGatewayConfig) => Promise<{ ok: boolean; latencyMs?: number; error?: string }>;
+  onRemoteGatewayEvent: (callback: (event: RemoteGatewayEvent) => void) => () => void;
+
+  // Live Canvas APIs
+  canvasCreate: (data: { taskId: string; workspaceId: string; title?: string }) => Promise<CanvasSession>;
+  canvasGetSession: (sessionId: string) => Promise<CanvasSession | null>;
+  canvasListSessions: (taskId?: string) => Promise<CanvasSession[]>;
+  canvasShow: (sessionId: string) => Promise<{ success: boolean }>;
+  canvasHide: (sessionId: string) => Promise<{ success: boolean }>;
+  canvasClose: (sessionId: string) => Promise<{ success: boolean }>;
+  canvasPush: (data: { sessionId: string; content: string; filename?: string }) => Promise<{ success: boolean }>;
+  canvasEval: (data: { sessionId: string; script: string }) => Promise<{ result: unknown }>;
+  canvasSnapshot: (sessionId: string) => Promise<{ imageBase64: string; width: number; height: number }>;
+  onCanvasEvent: (callback: (event: CanvasEvent) => void) => () => void;
 }
 
 declare global {

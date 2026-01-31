@@ -1,82 +1,157 @@
 /**
  * Custom Skill Loader
  *
- * Loads and provides access to bundled skills.
- * Skills are stored as JSON files in resources/skills/ directory.
+ * Loads skills from multiple sources with precedence:
+ * - Bundled skills (resources/skills/) - lowest precedence
+ * - Managed skills (~/Library/Application Support/cowork-oss/skills/) - medium precedence
+ * - Workspace skills (workspace/skills/) - highest precedence
+ *
+ * Skills with the same ID from higher precedence sources override lower ones.
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { CustomSkill } from '../../shared/types';
+import { app } from 'electron';
+import {
+  CustomSkill,
+  SkillSource,
+  SkillStatusEntry,
+  SkillStatusReport,
+  SkillsConfig,
+} from '../../shared/types';
+import { SkillEligibilityChecker, getSkillEligibilityChecker } from './skill-eligibility';
+import { getSkillRegistry } from './skill-registry';
 
 const SKILLS_FOLDER_NAME = 'skills';
 const SKILL_FILE_EXTENSION = '.json';
+const RELOAD_DEBOUNCE_MS = 100; // Debounce rapid reload calls
+
+export interface SkillLoaderConfig {
+  bundledSkillsDir?: string;
+  managedSkillsDir?: string;
+  workspaceSkillsDir?: string;
+  skillsConfig?: SkillsConfig;
+}
 
 export class CustomSkillLoader {
-  private skillsDirectory: string;
+  private bundledSkillsDir: string;
+  private managedSkillsDir: string;
+  private workspaceSkillsDir: string | null = null;
   private skills: Map<string, CustomSkill> = new Map();
   private initialized: boolean = false;
+  private skillsConfig?: SkillsConfig;
+  private eligibilityChecker: SkillEligibilityChecker;
 
-  constructor() {
-    // Skills are bundled in the resources/skills directory
-    // In development: resources/skills
-    // In production: process.resourcesPath/skills (inside the app bundle)
+  // Debounce state for reloadSkills
+  private reloadDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private reloadPromise: Promise<CustomSkill[]> | null = null;
+  private isReloading: boolean = false;
+
+  constructor(config?: SkillLoaderConfig) {
+    // Bundled skills directory
     const isDev = process.env.NODE_ENV === 'development';
-    if (isDev) {
-      this.skillsDirectory = path.join(process.cwd(), 'resources', SKILLS_FOLDER_NAME);
+    if (config?.bundledSkillsDir) {
+      this.bundledSkillsDir = config.bundledSkillsDir;
+    } else if (isDev) {
+      this.bundledSkillsDir = path.join(process.cwd(), 'resources', SKILLS_FOLDER_NAME);
     } else {
-      // In production, resources are in the app bundle
-      this.skillsDirectory = path.join(process.resourcesPath || '', SKILLS_FOLDER_NAME);
+      this.bundledSkillsDir = path.join(process.resourcesPath || '', SKILLS_FOLDER_NAME);
     }
+
+    // Managed skills directory (from registry)
+    this.managedSkillsDir =
+      config?.managedSkillsDir ||
+      path.join(app.getPath('userData'), SKILLS_FOLDER_NAME);
+
+    // Workspace skills directory (set later when workspace is loaded)
+    this.workspaceSkillsDir = config?.workspaceSkillsDir || null;
+
+    // Skills config
+    this.skillsConfig = config?.skillsConfig;
+
+    // Initialize eligibility checker
+    this.eligibilityChecker = getSkillEligibilityChecker(this.skillsConfig);
   }
 
   /**
-   * Initialize the skill loader - loads all bundled skills
+   * Initialize the skill loader - loads all skills from all sources
    */
   async initialize(): Promise<void> {
     if (this.initialized) return;
+
+    // Ensure managed skills directory exists
+    if (!fs.existsSync(this.managedSkillsDir)) {
+      fs.mkdirSync(this.managedSkillsDir, { recursive: true });
+    }
 
     // Load all skills
     await this.reloadSkills();
 
     this.initialized = true;
-    console.log(`[CustomSkillLoader] Initialized with ${this.skills.size} skills from ${this.skillsDirectory}`);
+    console.log(`[CustomSkillLoader] Initialized with ${this.skills.size} skills`);
+    console.log(`[CustomSkillLoader] Bundled: ${this.bundledSkillsDir}`);
+    console.log(`[CustomSkillLoader] Managed: ${this.managedSkillsDir}`);
+    if (this.workspaceSkillsDir) {
+      console.log(`[CustomSkillLoader] Workspace: ${this.workspaceSkillsDir}`);
+    }
   }
 
   /**
-   * Get the skills directory path
+   * Set the workspace skills directory
+   */
+  setWorkspaceSkillsDir(workspacePath: string): void {
+    this.workspaceSkillsDir = path.join(workspacePath, SKILLS_FOLDER_NAME);
+  }
+
+  /**
+   * Get directory paths
+   */
+  getBundledSkillsDir(): string {
+    return this.bundledSkillsDir;
+  }
+
+  getManagedSkillsDir(): string {
+    return this.managedSkillsDir;
+  }
+
+  getWorkspaceSkillsDir(): string | null {
+    return this.workspaceSkillsDir;
+  }
+
+  /**
+   * Get the skills directory path (for backward compatibility)
    */
   getSkillsDirectory(): string {
-    return this.skillsDirectory;
+    return this.bundledSkillsDir;
   }
 
   /**
-   * Reload all skills from disk
+   * Load skills from a directory
    */
-  async reloadSkills(): Promise<CustomSkill[]> {
-    this.skills.clear();
+  private loadSkillsFromDir(dir: string, source: SkillSource): CustomSkill[] {
+    const skills: CustomSkill[] = [];
+
+    if (!fs.existsSync(dir)) {
+      return skills;
+    }
 
     try {
-      if (!fs.existsSync(this.skillsDirectory)) {
-        console.warn(`[CustomSkillLoader] Skills directory not found: ${this.skillsDirectory}`);
-        return [];
-      }
-
-      const files = fs.readdirSync(this.skillsDirectory);
-      const skillFiles = files.filter(f => f.endsWith(SKILL_FILE_EXTENSION));
+      const files = fs.readdirSync(dir);
+      const skillFiles = files.filter((f) => f.endsWith(SKILL_FILE_EXTENSION));
 
       for (const file of skillFiles) {
         try {
-          const filePath = path.join(this.skillsDirectory, file);
+          const filePath = path.join(dir, file);
           const content = fs.readFileSync(filePath, 'utf-8');
           const skill = JSON.parse(content) as CustomSkill;
 
-          // Add file path to skill for reference
+          // Add metadata
           skill.filePath = filePath;
+          skill.source = source;
 
           // Validate skill has required fields
           if (this.validateSkill(skill)) {
-            this.skills.set(skill.id, skill);
+            skills.push(skill);
           } else {
             console.warn(`[CustomSkillLoader] Invalid skill file: ${file}`);
           }
@@ -84,13 +159,85 @@ export class CustomSkillLoader {
           console.error(`[CustomSkillLoader] Failed to load skill file ${file}:`, error);
         }
       }
-
-      console.log(`[CustomSkillLoader] Loaded ${this.skills.size} skills`);
-      return this.listSkills();
     } catch (error) {
-      console.error('[CustomSkillLoader] Failed to reload skills:', error);
-      return [];
+      console.error(`[CustomSkillLoader] Failed to read directory ${dir}:`, error);
     }
+
+    return skills;
+  }
+
+  /**
+   * Reload all skills from all sources
+   * Precedence: workspace > managed > bundled
+   * Uses debouncing to prevent rapid consecutive calls
+   */
+  async reloadSkills(): Promise<CustomSkill[]> {
+    // If already reloading, return the existing promise
+    if (this.isReloading && this.reloadPromise) {
+      return this.reloadPromise;
+    }
+
+    // Clear any pending debounce timer
+    if (this.reloadDebounceTimer) {
+      clearTimeout(this.reloadDebounceTimer);
+      this.reloadDebounceTimer = null;
+    }
+
+    // Create a debounced reload promise
+    this.reloadPromise = new Promise((resolve) => {
+      this.reloadDebounceTimer = setTimeout(async () => {
+        this.isReloading = true;
+        try {
+          const result = await this.doReloadSkills();
+          resolve(result);
+        } finally {
+          this.isReloading = false;
+          this.reloadPromise = null;
+          this.reloadDebounceTimer = null;
+        }
+      }, RELOAD_DEBOUNCE_MS);
+    });
+
+    return this.reloadPromise;
+  }
+
+  /**
+   * Internal method to actually reload skills
+   */
+  private async doReloadSkills(): Promise<CustomSkill[]> {
+    this.skills.clear();
+
+    // Load from all sources
+    const bundledSkills = this.loadSkillsFromDir(this.bundledSkillsDir, 'bundled');
+    const managedSkills = this.loadSkillsFromDir(this.managedSkillsDir, 'managed');
+    const workspaceSkills = this.workspaceSkillsDir
+      ? this.loadSkillsFromDir(this.workspaceSkillsDir, 'workspace')
+      : [];
+
+    // Merge with precedence: bundled < managed < workspace
+    for (const skill of bundledSkills) {
+      this.skills.set(skill.id, skill);
+    }
+    for (const skill of managedSkills) {
+      this.skills.set(skill.id, skill);
+    }
+    for (const skill of workspaceSkills) {
+      this.skills.set(skill.id, skill);
+    }
+
+    const counts = {
+      bundled: bundledSkills.length,
+      managed: managedSkills.length,
+      workspace: workspaceSkills.length,
+      total: this.skills.size,
+    };
+
+    console.log(
+      `[CustomSkillLoader] Loaded ${counts.total} skills ` +
+        `(bundled: ${counts.bundled}, managed: ${counts.managed}, workspace: ${counts.workspace})`
+    );
+
+    return this.listSkills();
   }
 
   /**
@@ -130,18 +277,25 @@ export class CustomSkillLoader {
   }
 
   /**
+   * List skills by source
+   */
+  listSkillsBySource(source: SkillSource): CustomSkill[] {
+    return this.listSkills().filter((skill) => skill.source === source);
+  }
+
+  /**
    * List only task skills (excludes guideline skills)
    * Used for the skill dropdown in UI
    */
   listTaskSkills(): CustomSkill[] {
-    return this.listSkills().filter(skill => skill.type !== 'guideline');
+    return this.listSkills().filter((skill) => skill.type !== 'guideline');
   }
 
   /**
    * List only guideline skills
    */
   listGuidelineSkills(): CustomSkill[] {
-    return this.listSkills().filter(skill => skill.type === 'guideline');
+    return this.listSkills().filter((skill) => skill.type === 'guideline');
   }
 
   /**
@@ -149,11 +303,13 @@ export class CustomSkillLoader {
    * Returns the combined prompt content of all enabled guideline skills
    */
   getEnabledGuidelinesPrompt(): string {
-    const enabledGuidelines = this.listGuidelineSkills().filter(skill => skill.enabled !== false);
+    const enabledGuidelines = this.listGuidelineSkills().filter(
+      (skill) => skill.enabled !== false
+    );
     if (enabledGuidelines.length === 0) {
       return '';
     }
-    return enabledGuidelines.map(skill => skill.prompt).join('\n\n');
+    return enabledGuidelines.map((skill) => skill.prompt).join('\n\n');
   }
 
   /**
@@ -166,7 +322,10 @@ export class CustomSkillLoader {
   /**
    * Expand a skill's prompt template with parameter values
    */
-  expandPrompt(skill: CustomSkill, parameterValues: Record<string, string | number | boolean>): string {
+  expandPrompt(
+    skill: CustomSkill,
+    parameterValues: Record<string, string | number | boolean>
+  ): string {
     let prompt = skill.prompt;
 
     // Replace {{param}} placeholders with values
@@ -183,14 +342,229 @@ export class CustomSkillLoader {
 
     return prompt.trim();
   }
+
+  /**
+   * Get eligible skills (those that meet all requirements)
+   */
+  async getEligibleSkills(): Promise<CustomSkill[]> {
+    const statusEntries = await this.getSkillStatus();
+    return statusEntries.skills
+      .filter((entry) => entry.eligible)
+      .map((entry) => this.getSkill(entry.id)!)
+      .filter(Boolean);
+  }
+
+  /**
+   * Get skill status with eligibility information
+   */
+  async getSkillStatus(): Promise<SkillStatusReport> {
+    const skills = this.listSkills();
+    const statusEntries = await this.eligibilityChecker.buildStatusEntries(skills);
+
+    const summary = {
+      total: statusEntries.length,
+      eligible: statusEntries.filter((s) => s.eligible).length,
+      disabled: statusEntries.filter((s) => s.disabled).length,
+      missingRequirements: statusEntries.filter(
+        (s) => !s.eligible && !s.disabled && !s.blockedByAllowlist
+      ).length,
+    };
+
+    return {
+      workspaceDir: this.workspaceSkillsDir || '',
+      managedSkillsDir: this.managedSkillsDir,
+      bundledSkillsDir: this.bundledSkillsDir,
+      skills: statusEntries,
+      summary,
+    };
+  }
+
+  /**
+   * Get status for a single skill
+   */
+  async getSkillStatusEntry(skillId: string): Promise<SkillStatusEntry | null> {
+    const skill = this.getSkill(skillId);
+    if (!skill) return null;
+
+    return this.eligibilityChecker.buildStatusEntry(skill);
+  }
+
+  /**
+   * Update skills config
+   */
+  updateConfig(config: SkillsConfig): void {
+    this.skillsConfig = config;
+    this.eligibilityChecker.updateConfig(config);
+  }
+
+  /**
+   * Clear eligibility cache (useful after installing dependencies)
+   */
+  clearEligibilityCache(): void {
+    this.eligibilityChecker.clearCache();
+  }
+
+  /**
+   * Create a skill in the workspace directory
+   */
+  async createWorkspaceSkill(skill: Omit<CustomSkill, 'filePath' | 'source'>): Promise<CustomSkill> {
+    if (!this.workspaceSkillsDir) {
+      throw new Error('Workspace skills directory not set');
+    }
+
+    // Ensure workspace skills directory exists
+    if (!fs.existsSync(this.workspaceSkillsDir)) {
+      fs.mkdirSync(this.workspaceSkillsDir, { recursive: true });
+    }
+
+    const filePath = path.join(this.workspaceSkillsDir, `${skill.id}.json`);
+    const fullSkill: CustomSkill = {
+      ...skill,
+      source: 'workspace',
+      filePath,
+    };
+
+    fs.writeFileSync(filePath, JSON.stringify(fullSkill, null, 2), 'utf-8');
+
+    // Reload skills to pick up the new one
+    await this.reloadSkills();
+
+    return fullSkill;
+  }
+
+  /**
+   * Update a skill
+   */
+  async updateSkill(
+    skillId: string,
+    updates: Partial<Omit<CustomSkill, 'id' | 'filePath' | 'source'>>
+  ): Promise<CustomSkill | null> {
+    const skill = this.getSkill(skillId);
+    if (!skill || !skill.filePath) {
+      return null;
+    }
+
+    // Only allow updating workspace and managed skills
+    if (skill.source === 'bundled') {
+      throw new Error('Cannot update bundled skills');
+    }
+
+    const updatedSkill: CustomSkill = {
+      ...skill,
+      ...updates,
+    };
+
+    fs.writeFileSync(skill.filePath, JSON.stringify(updatedSkill, null, 2), 'utf-8');
+
+    // Reload skills to pick up the update
+    await this.reloadSkills();
+
+    return updatedSkill;
+  }
+
+  /**
+   * Delete a workspace skill
+   */
+  async deleteWorkspaceSkill(skillId: string): Promise<boolean> {
+    const skill = this.getSkill(skillId);
+    if (!skill || !skill.filePath || skill.source !== 'workspace') {
+      return false;
+    }
+
+    try {
+      fs.unlinkSync(skill.filePath);
+      await this.reloadSkills();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Delete a managed skill (from registry)
+   */
+  async deleteManagedSkill(skillId: string): Promise<boolean> {
+    const skill = this.getSkill(skillId);
+    if (!skill || !skill.filePath || skill.source !== 'managed') {
+      return false;
+    }
+
+    try {
+      fs.unlinkSync(skill.filePath);
+      await this.reloadSkills();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Open the managed skills folder in the system file browser
+   */
+  async openSkillsFolder(): Promise<void> {
+    const { shell } = await import('electron');
+
+    // Ensure directory exists
+    if (!fs.existsSync(this.managedSkillsDir)) {
+      fs.mkdirSync(this.managedSkillsDir, { recursive: true });
+    }
+
+    await shell.openPath(this.managedSkillsDir);
+  }
+
+  // === Backward compatibility aliases ===
+
+  /**
+   * Create a skill (alias for createWorkspaceSkill)
+   * @deprecated Use createWorkspaceSkill instead
+   */
+  async createSkill(skill: Omit<CustomSkill, 'filePath' | 'source'>): Promise<CustomSkill> {
+    // For backward compatibility, if no workspace is set, create in managed dir
+    if (!this.workspaceSkillsDir) {
+      const filePath = path.join(this.managedSkillsDir, `${skill.id}.json`);
+      const fullSkill: CustomSkill = {
+        ...skill,
+        source: 'managed',
+        filePath,
+      };
+      fs.writeFileSync(filePath, JSON.stringify(fullSkill, null, 2), 'utf-8');
+      await this.reloadSkills();
+      return fullSkill;
+    }
+    return this.createWorkspaceSkill(skill);
+  }
+
+  /**
+   * Delete a skill (checks both workspace and managed)
+   * @deprecated Use deleteWorkspaceSkill or deleteManagedSkill instead
+   */
+  async deleteSkill(skillId: string): Promise<boolean> {
+    const skill = this.getSkill(skillId);
+    if (!skill) return false;
+
+    if (skill.source === 'workspace') {
+      return this.deleteWorkspaceSkill(skillId);
+    }
+    if (skill.source === 'managed') {
+      return this.deleteManagedSkill(skillId);
+    }
+    return false;
+  }
 }
 
 // Singleton instance
 let instance: CustomSkillLoader | null = null;
 
-export function getCustomSkillLoader(): CustomSkillLoader {
+export function getCustomSkillLoader(config?: SkillLoaderConfig): CustomSkillLoader {
   if (!instance) {
-    instance = new CustomSkillLoader();
+    instance = new CustomSkillLoader(config);
   }
   return instance;
+}
+
+/**
+ * Reset the singleton instance (useful for testing)
+ */
+export function resetCustomSkillLoader(): void {
+  instance = null;
 }

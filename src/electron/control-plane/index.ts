@@ -19,9 +19,20 @@ export {
   createResponseFrame,
   createEventFrame,
 } from './protocol';
-export { ControlPlaneSettingsManager, type ControlPlaneSettings } from './settings';
+export {
+  ControlPlaneSettingsManager,
+  type ControlPlaneSettings,
+  DEFAULT_REMOTE_GATEWAY_CONFIG,
+} from './settings';
 export {
   setupControlPlaneHandlers,
   shutdownControlPlane,
   getControlPlaneServer,
 } from './handlers';
+export {
+  RemoteGatewayClient,
+  getRemoteGatewayClient,
+  initRemoteGatewayClient,
+  shutdownRemoteGatewayClient,
+  type RemoteGatewayClientOptions,
+} from './remote-client';

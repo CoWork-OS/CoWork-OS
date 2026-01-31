@@ -14,12 +14,17 @@ import { MCPClientManager } from './mcp/client/MCPClientManager';
 import { trayManager } from './tray';
 import { CronService, setCronService, DEFAULT_CRON_STORE_PATH } from './cron';
 import { setupControlPlaneHandlers, shutdownControlPlane } from './control-plane';
+import { registerCanvasScheme, registerCanvasProtocol, CanvasManager } from './canvas';
+import { setupCanvasHandlers, cleanupCanvasHandlers } from './ipc/canvas-handlers';
 
 let mainWindow: BrowserWindow | null = null;
 let dbManager: DatabaseManager;
 let agentDaemon: AgentDaemon;
 let channelGateway: ChannelGateway;
 let cronService: CronService | null = null;
+
+// Register canvas:// protocol scheme (must be called before app.ready)
+registerCanvasScheme();
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -268,6 +273,9 @@ app.whenReady().then(async () => {
   // Setup IPC handlers
   setupIpcHandlers(dbManager, agentDaemon, channelGateway);
 
+  // Register canvas:// protocol handler (must be after app.ready)
+  registerCanvasProtocol();
+
   // Create window
   createWindow();
 
@@ -276,6 +284,15 @@ app.whenReady().then(async () => {
     await channelGateway.initialize(mainWindow);
     // Initialize update manager with main window reference
     updateManager.setMainWindow(mainWindow);
+
+    // Initialize Live Canvas handlers and set main window reference
+    setupCanvasHandlers(mainWindow, agentDaemon);
+    CanvasManager.getInstance().setMainWindow(mainWindow);
+
+    // Clean up old canvas sessions (older than 7 days)
+    CanvasManager.getInstance().cleanupOldSessions().catch((err) => {
+      console.error('[Main] Failed to cleanup old canvas sessions:', err);
+    });
 
     // Initialize control plane (WebSocket gateway)
     setupControlPlaneHandlers(mainWindow);
@@ -325,6 +342,9 @@ app.on('before-quit', async () => {
     await cronService.stop();
     setCronService(null);
   }
+
+  // Cleanup canvas manager (close all windows and watchers)
+  await cleanupCanvasHandlers();
 
   // Shutdown control plane (WebSocket gateway and Tailscale)
   await shutdownControlPlane();

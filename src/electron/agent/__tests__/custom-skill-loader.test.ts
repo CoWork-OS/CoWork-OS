@@ -9,6 +9,13 @@ import type { CustomSkill } from '../../../shared/types';
 let mockFiles: Map<string, string> = new Map();
 let mockDirExists = true;
 
+// Mock electron app
+vi.mock('electron', () => ({
+  app: {
+    getPath: vi.fn().mockReturnValue('/mock/user/data'),
+  },
+}));
+
 // Mock fs module - use a function to extract just the filename from any path
 vi.mock('fs', () => ({
   default: {

@@ -9,6 +9,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 import crypto from 'crypto';
 import type { TailscaleMode } from '../tailscale/settings';
+import type {
+  ControlPlaneConnectionMode,
+  RemoteGatewayConfig,
+} from '../../shared/types';
 
 const SETTINGS_FILE = 'control-plane-settings.json';
 const MASKED_VALUE = '***configured***';
@@ -37,6 +41,10 @@ export interface ControlPlaneSettings {
     mode: TailscaleMode;
     resetOnExit: boolean;
   };
+  /** Connection mode: 'local' to host server, 'remote' to connect to external gateway */
+  connectionMode: ControlPlaneConnectionMode;
+  /** Remote gateway configuration (used when connectionMode is 'remote') */
+  remote?: RemoteGatewayConfig;
 }
 
 /**
@@ -54,6 +62,20 @@ export const DEFAULT_CONTROL_PLANE_SETTINGS: ControlPlaneSettings = {
     mode: 'off',
     resetOnExit: true,
   },
+  connectionMode: 'local',
+  remote: undefined,
+};
+
+/**
+ * Default remote gateway configuration
+ */
+export const DEFAULT_REMOTE_GATEWAY_CONFIG: RemoteGatewayConfig = {
+  url: 'ws://127.0.0.1:18789',
+  token: '',
+  deviceName: 'CoWork Remote Client',
+  autoReconnect: true,
+  reconnectIntervalMs: 5000,
+  maxReconnectAttempts: 10,
 };
 
 /**
@@ -163,8 +185,17 @@ export class ControlPlaneSettingsManager {
           },
         };
 
-        // Decrypt token
+        // Decrypt local token
         merged.token = decryptSecret(merged.token) || '';
+
+        // Handle remote config with encrypted token
+        if (parsed.remote) {
+          merged.remote = {
+            ...DEFAULT_REMOTE_GATEWAY_CONFIG,
+            ...parsed.remote,
+            token: decryptSecret(parsed.remote.token) || '',
+          };
+        }
 
         this.cachedSettings = merged;
         console.log('[ControlPlane Settings] Loaded settings');
@@ -187,11 +218,19 @@ export class ControlPlaneSettingsManager {
     this.ensureInitialized();
 
     try {
-      // Encrypt token before saving
-      const toSave = {
+      // Encrypt tokens before saving
+      const toSave: any = {
         ...settings,
         token: encryptSecret(settings.token) || '',
       };
+
+      // Encrypt remote token if present
+      if (settings.remote) {
+        toSave.remote = {
+          ...settings.remote,
+          token: encryptSecret(settings.remote.token) || '',
+        };
+      }
 
       fs.writeFileSync(this.settingsPath, JSON.stringify(toSave, null, 2));
       this.cachedSettings = settings;
@@ -213,7 +252,12 @@ export class ControlPlaneSettingsManager {
       ? { ...settings.tailscale, ...updates.tailscale }
       : settings.tailscale;
 
-    const updated = { ...settings, ...updates, tailscale };
+    // Handle nested remote config updates
+    const remote = updates.remote
+      ? { ...DEFAULT_REMOTE_GATEWAY_CONFIG, ...settings.remote, ...updates.remote }
+      : settings.remote;
+
+    const updated = { ...settings, ...updates, tailscale, remote };
     this.saveSettings(updated);
     return updated;
   }
@@ -256,10 +300,20 @@ export class ControlPlaneSettingsManager {
    */
   static getSettingsForDisplay(): ControlPlaneSettings {
     const settings = this.loadSettings();
-    return {
+    const displaySettings: ControlPlaneSettings = {
       ...settings,
       token: settings.token ? MASKED_VALUE : '',
     };
+
+    // Mask remote token if present
+    if (settings.remote) {
+      displaySettings.remote = {
+        ...settings.remote,
+        token: settings.remote.token ? MASKED_VALUE : '',
+      };
+    }
+
+    return displaySettings;
   }
 
   /**

@@ -565,6 +565,69 @@ export function setupIpcHandlers(
     return customSkillLoader.openSkillsFolder();
   });
 
+  // Skill Registry (SkillHub) handlers
+  const { getSkillRegistry } = await import('../agent/skill-registry');
+  const skillRegistry = getSkillRegistry();
+
+  ipcMain.handle(IPC_CHANNELS.SKILL_REGISTRY_SEARCH, async (_, query: string, options?: { page?: number; pageSize?: number }) => {
+    return skillRegistry.search(query, options);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SKILL_REGISTRY_GET_DETAILS, async (_, skillId: string) => {
+    return skillRegistry.getSkillDetails(skillId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SKILL_REGISTRY_INSTALL, async (_, skillId: string, version?: string) => {
+    const result = await skillRegistry.install(skillId, version);
+    if (result.success) {
+      // Reload skills to pick up the new one
+      await customSkillLoader.reloadSkills();
+      // Clear eligibility cache in case new dependencies were installed
+      customSkillLoader.clearEligibilityCache();
+    }
+    return result;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SKILL_REGISTRY_UPDATE, async (_, skillId: string, version?: string) => {
+    const result = await skillRegistry.update(skillId, version);
+    if (result.success) {
+      await customSkillLoader.reloadSkills();
+      customSkillLoader.clearEligibilityCache();
+    }
+    return result;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SKILL_REGISTRY_UPDATE_ALL, async () => {
+    const result = await skillRegistry.updateAll();
+    await customSkillLoader.reloadSkills();
+    customSkillLoader.clearEligibilityCache();
+    return result;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SKILL_REGISTRY_UNINSTALL, async (_, skillId: string) => {
+    const result = skillRegistry.uninstall(skillId);
+    if (result.success) {
+      await customSkillLoader.reloadSkills();
+    }
+    return result;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SKILL_REGISTRY_LIST_MANAGED, async () => {
+    return skillRegistry.listManagedSkills();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SKILL_REGISTRY_CHECK_UPDATES, async (_, skillId: string) => {
+    return skillRegistry.checkForUpdates(skillId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SKILL_REGISTRY_GET_STATUS, async () => {
+    return customSkillLoader.getSkillStatus();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SKILL_REGISTRY_GET_ELIGIBLE, async () => {
+    return customSkillLoader.getEligibleSkills();
+  });
+
   // LLM Settings handlers
   ipcMain.handle(IPC_CHANNELS.LLM_GET_SETTINGS, async () => {
     return LLMProviderFactory.loadSettings();

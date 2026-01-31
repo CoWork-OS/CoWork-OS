@@ -462,6 +462,18 @@ export const IPC_CHANNELS = {
   CUSTOM_SKILL_RELOAD: 'customSkill:reload',
   CUSTOM_SKILL_OPEN_FOLDER: 'customSkill:openFolder',
 
+  // Skill Registry (SkillHub)
+  SKILL_REGISTRY_SEARCH: 'skillRegistry:search',
+  SKILL_REGISTRY_GET_DETAILS: 'skillRegistry:getDetails',
+  SKILL_REGISTRY_INSTALL: 'skillRegistry:install',
+  SKILL_REGISTRY_UPDATE: 'skillRegistry:update',
+  SKILL_REGISTRY_UPDATE_ALL: 'skillRegistry:updateAll',
+  SKILL_REGISTRY_UNINSTALL: 'skillRegistry:uninstall',
+  SKILL_REGISTRY_LIST_MANAGED: 'skillRegistry:listManaged',
+  SKILL_REGISTRY_CHECK_UPDATES: 'skillRegistry:checkUpdates',
+  SKILL_REGISTRY_GET_STATUS: 'skillRegistry:getStatus',
+  SKILL_REGISTRY_GET_ELIGIBLE: 'skillRegistry:getEligible',
+
   // LLM Settings
   LLM_GET_SETTINGS: 'llm:getSettings',
   LLM_SAVE_SETTINGS: 'llm:saveSettings',
@@ -613,6 +625,27 @@ export const IPC_CHANNELS = {
   TAILSCALE_GET_STATUS: 'tailscale:getStatus',
   TAILSCALE_CHECK_AVAILABILITY: 'tailscale:checkAvailability',
   TAILSCALE_SET_MODE: 'tailscale:setMode',
+
+  // Remote Gateway (connecting to external Control Plane)
+  REMOTE_GATEWAY_CONNECT: 'remoteGateway:connect',
+  REMOTE_GATEWAY_DISCONNECT: 'remoteGateway:disconnect',
+  REMOTE_GATEWAY_GET_STATUS: 'remoteGateway:getStatus',
+  REMOTE_GATEWAY_SAVE_CONFIG: 'remoteGateway:saveConfig',
+  REMOTE_GATEWAY_TEST_CONNECTION: 'remoteGateway:testConnection',
+  REMOTE_GATEWAY_EVENT: 'remoteGateway:event',
+
+  // Live Canvas (Agent-driven visual workspace)
+  CANVAS_CREATE: 'canvas:create',
+  CANVAS_GET_SESSION: 'canvas:getSession',
+  CANVAS_LIST_SESSIONS: 'canvas:listSessions',
+  CANVAS_SHOW: 'canvas:show',
+  CANVAS_HIDE: 'canvas:hide',
+  CANVAS_CLOSE: 'canvas:close',
+  CANVAS_PUSH: 'canvas:push',
+  CANVAS_EVAL: 'canvas:eval',
+  CANVAS_SNAPSHOT: 'canvas:snapshot',
+  CANVAS_A2UI_ACTION: 'canvas:a2uiAction',
+  CANVAS_EVENT: 'canvas:event',
 } as const;
 
 // LLM Provider types
@@ -967,6 +1000,48 @@ export interface SkillParameter {
 
 export type SkillType = 'task' | 'guideline';
 
+// Skill source indicates where a skill was loaded from (precedence: workspace > managed > bundled)
+export type SkillSource = 'bundled' | 'managed' | 'workspace';
+
+// Requirements that must be met for a skill to be eligible
+export interface SkillRequirements {
+  bins?: string[];      // All these binaries must exist
+  anyBins?: string[];   // At least one of these binaries must exist
+  env?: string[];       // All these environment variables must be set
+  config?: string[];    // All these config paths must be truthy
+  os?: ('darwin' | 'linux' | 'win32')[];  // Must be one of these platforms
+}
+
+// Installation specification for a skill dependency
+export interface SkillInstallSpec {
+  id: string;
+  kind: 'brew' | 'npm' | 'go' | 'download';
+  label: string;
+  formula?: string;     // For brew installations
+  package?: string;     // For npm/go installations
+  module?: string;      // For go installations
+  url?: string;         // For download installations
+  bins?: string[];      // Binaries provided by this installation
+  os?: string[];        // OS restrictions for this install option
+}
+
+// Controls how users and the model can invoke a skill
+export interface SkillInvocationPolicy {
+  userInvocable?: boolean;           // Can be called via /command (default: true)
+  disableModelInvocation?: boolean;  // Prevent model from auto-using (default: false)
+}
+
+// Skill metadata for registry and extended features
+export interface SkillMetadata {
+  version?: string;
+  author?: string;
+  homepage?: string;
+  repository?: string;
+  license?: string;
+  tags?: string[];
+  primaryEnv?: string;  // Main environment variable for API key etc.
+}
+
 export interface CustomSkill {
   id: string;
   name: string;
@@ -979,11 +1054,104 @@ export interface CustomSkill {
   filePath?: string;  // Path to the skill file (for editing)
   priority?: number;  // Lower numbers appear first in dropdown (default: 100)
   type?: SkillType;  // 'task' (default) = executable skill, 'guideline' = injected into system prompt
+  // New fields for skill registry support
+  source?: SkillSource;  // Where the skill was loaded from
+  requires?: SkillRequirements;  // Requirements for eligibility
+  install?: SkillInstallSpec[];  // Installation options for dependencies
+  invocation?: SkillInvocationPolicy;  // How the skill can be invoked
+  metadata?: SkillMetadata;  // Extended metadata
+}
+
+// Skill eligibility status after checking requirements
+export interface SkillEligibility {
+  eligible: boolean;
+  disabled: boolean;
+  blockedByAllowlist: boolean;
+  missing: {
+    bins: string[];
+    anyBins: string[];
+    env: string[];
+    config: string[];
+    os: string[];
+  };
+}
+
+// Full skill status for UI display
+export interface SkillStatusEntry extends CustomSkill {
+  eligible: boolean;
+  disabled: boolean;
+  blockedByAllowlist: boolean;
+  requirements: {
+    bins: string[];
+    anyBins: string[];
+    env: string[];
+    config: string[];
+    os: string[];
+  };
+  missing: {
+    bins: string[];
+    anyBins: string[];
+    env: string[];
+    config: string[];
+    os: string[];
+  };
+}
+
+// Status report for all skills
+export interface SkillStatusReport {
+  workspaceDir: string;
+  managedSkillsDir: string;
+  bundledSkillsDir: string;
+  skills: SkillStatusEntry[];
+  summary: {
+    total: number;
+    eligible: number;
+    disabled: number;
+    missingRequirements: number;
+  };
+}
+
+// Registry search result
+export interface SkillRegistryEntry {
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  author?: string;
+  downloads?: number;
+  rating?: number;
+  tags?: string[];
+  icon?: string;
+  category?: string;
+  updatedAt?: string;
+  homepage?: string;
+}
+
+// Registry search response
+export interface SkillSearchResult {
+  query: string;
+  total: number;
+  page: number;
+  pageSize: number;
+  results: SkillRegistryEntry[];
+}
+
+// Install progress event
+export interface SkillInstallProgress {
+  skillId: string;
+  status: 'downloading' | 'extracting' | 'installing' | 'completed' | 'failed';
+  progress?: number;  // 0-100
+  message?: string;
+  error?: string;
 }
 
 export interface SkillsConfig {
-  skillsDirectory: string;  // Default: ~/.cowork/skills/
+  skillsDirectory: string;  // Default: ~/Library/Application Support/cowork-oss/skills/
   enabledSkillIds: string[];
+  registryUrl?: string;  // Default: https://skill-hub.com
+  autoUpdate?: boolean;  // Auto-update managed skills
+  allowlist?: string[];  // Only allow these skill IDs (if set)
+  denylist?: string[];   // Block these skill IDs
 }
 
 // ============ Notification Types ============
@@ -1099,6 +1267,10 @@ export interface ControlPlaneSettingsData {
     mode: TailscaleMode;
     resetOnExit: boolean;
   };
+  /** Connection mode: 'local' to host server, 'remote' to connect to external gateway */
+  connectionMode?: ControlPlaneConnectionMode;
+  /** Remote gateway configuration (used when connectionMode is 'remote') */
+  remote?: RemoteGatewayConfig;
 }
 
 /**
@@ -1159,4 +1331,167 @@ export interface ControlPlaneEvent {
   method?: string;
   error?: string;
   details?: unknown;
+}
+
+// ============ Remote Gateway Connection Types ============
+
+/**
+ * Connection mode for Control Plane
+ * - 'local': This instance hosts the Control Plane server
+ * - 'remote': Connect to a Control Plane on another machine (via SSH tunnel, Tailscale, etc.)
+ */
+export type ControlPlaneConnectionMode = 'local' | 'remote';
+
+/**
+ * Remote gateway connection configuration
+ * Used when connecting to a Control Plane hosted on another machine
+ */
+export interface RemoteGatewayConfig {
+  /** Remote gateway WebSocket URL (e.g., ws://127.0.0.1:18789 via SSH tunnel) */
+  url: string;
+  /** Authentication token for the remote gateway */
+  token: string;
+  /** Optional TLS certificate fingerprint for certificate pinning (wss:// only) */
+  tlsFingerprint?: string;
+  /** Device name to identify this client */
+  deviceName?: string;
+  /** Auto-reconnect on connection loss (default: true) */
+  autoReconnect?: boolean;
+  /** Reconnect interval in milliseconds (default: 5000) */
+  reconnectIntervalMs?: number;
+  /** Maximum reconnect attempts (default: 10, 0 = unlimited) */
+  maxReconnectAttempts?: number;
+}
+
+/**
+ * Remote gateway connection state
+ */
+export type RemoteGatewayConnectionState =
+  | 'disconnected'
+  | 'connecting'
+  | 'authenticating'
+  | 'connected'
+  | 'reconnecting'
+  | 'error';
+
+/**
+ * Remote gateway connection status
+ */
+export interface RemoteGatewayStatus {
+  /** Current connection state */
+  state: RemoteGatewayConnectionState;
+  /** Configured remote URL */
+  url?: string;
+  /** Time when connected (if connected) */
+  connectedAt?: number;
+  /** Client ID assigned by remote gateway */
+  clientId?: string;
+  /** Scopes granted by remote gateway */
+  scopes?: string[];
+  /** Last error message (if state is 'error') */
+  error?: string;
+  /** Number of reconnect attempts */
+  reconnectAttempts?: number;
+  /** Last activity timestamp */
+  lastActivityAt?: number;
+}
+
+// ============ Live Canvas Types ============
+
+/**
+ * Canvas session status
+ */
+export type CanvasSessionStatus = 'active' | 'paused' | 'closed';
+
+/**
+ * Canvas session represents a visual workspace that the agent can render content to
+ */
+export interface CanvasSession {
+  /** Unique session identifier */
+  id: string;
+  /** Associated task ID */
+  taskId: string;
+  /** Associated workspace ID */
+  workspaceId: string;
+  /** Directory where canvas files are stored */
+  sessionDir: string;
+  /** Current status of the canvas session */
+  status: CanvasSessionStatus;
+  /** Optional title for the canvas window */
+  title?: string;
+  /** Timestamp when the session was created */
+  createdAt: number;
+  /** Timestamp of last update */
+  lastUpdatedAt: number;
+}
+
+/**
+ * A2UI (Agent-to-UI) action sent from canvas to agent
+ * Represents user interactions within the canvas that should trigger agent responses
+ */
+export interface CanvasA2UIAction {
+  /** Name of the action being triggered */
+  actionName: string;
+  /** Session ID where the action originated */
+  sessionId: string;
+  /** Optional component ID that triggered the action */
+  componentId?: string;
+  /** Optional context data passed with the action */
+  context?: Record<string, unknown>;
+  /** Timestamp when the action was triggered */
+  timestamp: number;
+}
+
+/**
+ * Canvas event emitted to renderer for UI updates
+ */
+export interface CanvasEvent {
+  /** Event type */
+  type: 'session_created' | 'session_updated' | 'session_closed' | 'content_pushed' | 'a2ui_action';
+  /** Session ID */
+  sessionId: string;
+  /** Associated task ID */
+  taskId: string;
+  /** Session data (for session events) */
+  session?: CanvasSession;
+  /** A2UI action data (for a2ui_action events) */
+  action?: CanvasA2UIAction;
+  /** Timestamp */
+  timestamp: number;
+}
+
+/**
+ * Canvas content push request
+ */
+export interface CanvasPushContent {
+  /** Session ID */
+  sessionId: string;
+  /** Content to push (HTML, CSS, JS, etc.) */
+  content: string;
+  /** Filename to save (default: index.html) */
+  filename?: string;
+}
+
+/**
+ * Canvas eval script request
+ */
+export interface CanvasEvalScript {
+  /** Session ID */
+  sessionId: string;
+  /** JavaScript code to execute in the canvas context */
+  script: string;
+}
+
+/**
+ * Canvas snapshot result
+ */
+export interface CanvasSnapshot {
+  /** Session ID */
+  sessionId: string;
+  /** Base64 encoded PNG image */
+  imageBase64: string;
+  /** Image width */
+  width: number;
+  /** Image height */
+  height: number;
 }

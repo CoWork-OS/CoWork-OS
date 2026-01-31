@@ -15,6 +15,7 @@ import { ShellTools } from './shell-tools';
 import { ImageTools } from './image-tools';
 import { SystemTools } from './system-tools';
 import { CronTools } from './cron-tools';
+import { CanvasTools } from './canvas-tools';
 import { LLMTool } from '../llm/types';
 import { SearchProviderFactory } from '../search';
 import { MCPClientManager } from '../../mcp/client/MCPClientManager';
@@ -39,6 +40,7 @@ export class ToolRegistry {
   private imageTools: ImageTools;
   private systemTools: SystemTools;
   private cronTools: CronTools;
+  private canvasTools: CanvasTools;
   private gatewayContext?: GatewayContextType;
   private shadowedToolsLogged = false;
 
@@ -60,6 +62,7 @@ export class ToolRegistry {
     this.imageTools = new ImageTools(workspace, daemon, taskId);
     this.systemTools = new SystemTools(workspace, daemon, taskId);
     this.cronTools = new CronTools(workspace, daemon, taskId);
+    this.canvasTools = new CanvasTools(workspace, daemon, taskId);
     this.gatewayContext = gatewayContext;
   }
 
@@ -114,6 +117,9 @@ export class ToolRegistry {
 
     // Always add cron/scheduling tools (enables task scheduling)
     allTools.push(...CronTools.getToolDefinitions());
+
+    // Always add canvas tools (enables visual workspace)
+    allTools.push(...CanvasTools.getToolDefinitions());
 
     // Add meta tools for execution control
     allTools.push(...this.getMetaToolDefinitions());
@@ -338,6 +344,16 @@ Scheduling:
   - One-time tasks: "at 3pm tomorrow, do X"
   - Cron schedules: standard cron expressions supported
 
+Live Canvas (Visual Workspace):
+- canvas_create: Create a new canvas session for displaying interactive content
+- canvas_push: Push HTML/CSS/JS content to the canvas
+- canvas_show: Show and focus the canvas window
+- canvas_hide: Hide the canvas window
+- canvas_close: Close a canvas session
+- canvas_eval: Execute JavaScript in the canvas context
+- canvas_snapshot: Take a screenshot of the canvas
+- canvas_list: List all active canvas sessions
+
 Plan Control:
 - revise_plan: Modify remaining plan steps when obstacles are encountered or new information discovered`;
 
@@ -403,6 +419,16 @@ Plan Control:
 
     // Cron/scheduling tools
     if (name === 'schedule_task') return await this.cronTools.executeAction(input);
+
+    // Canvas tools
+    if (name === 'canvas_create') return await this.canvasTools.createCanvas(input.title);
+    if (name === 'canvas_push') return await this.canvasTools.pushContent(input.session_id, input.content, input.filename);
+    if (name === 'canvas_show') return await this.canvasTools.showCanvas(input.session_id);
+    if (name === 'canvas_hide') return this.canvasTools.hideCanvas(input.session_id);
+    if (name === 'canvas_close') return await this.canvasTools.closeCanvas(input.session_id);
+    if (name === 'canvas_eval') return await this.canvasTools.evalScript(input.session_id, input.script);
+    if (name === 'canvas_snapshot') return await this.canvasTools.takeSnapshot(input.session_id);
+    if (name === 'canvas_list') return this.canvasTools.listSessions();
 
     // Meta tools
     if (name === 'revise_plan') {

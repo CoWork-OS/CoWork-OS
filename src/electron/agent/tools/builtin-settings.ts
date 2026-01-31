@@ -30,6 +30,7 @@ export interface ToolOverride {
 export interface BuiltinToolsSettings {
   // Category-level settings
   categories: {
+    code: ToolCategoryConfig;
     webfetch: ToolCategoryConfig;
     browser: ToolCategoryConfig;
     search: ToolCategoryConfig;
@@ -50,6 +51,11 @@ export interface BuiltinToolsSettings {
  */
 const DEFAULT_SETTINGS: BuiltinToolsSettings = {
   categories: {
+    code: {
+      enabled: true,
+      priority: 'high',
+      description: 'Code tools (glob, grep, edit) - preferred for code navigation and editing',
+    },
     webfetch: {
       enabled: true,
       priority: 'high',
@@ -99,6 +105,10 @@ const DEFAULT_SETTINGS: BuiltinToolsSettings = {
  * Tool category mapping
  */
 const TOOL_CATEGORIES: Record<string, keyof BuiltinToolsSettings['categories']> = {
+  // Code tools (high priority)
+  glob: 'code',
+  grep: 'code',
+  edit_file: 'code',
   // Web fetch tools (high priority)
   web_fetch: 'webfetch',
   // Browser tools

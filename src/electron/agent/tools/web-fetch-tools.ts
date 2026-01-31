@@ -152,9 +152,15 @@ export class WebFetchTools {
       let title: string | undefined;
 
       if (contentType.includes('application/json')) {
-        // JSON response - format nicely
-        const json = await response.json();
-        content = JSON.stringify(json, null, 2);
+        // JSON response - format nicely, with fallback to raw text
+        const rawText = await response.text();
+        try {
+          const json = JSON.parse(rawText);
+          content = JSON.stringify(json, null, 2);
+        } catch {
+          // Invalid JSON - return raw text
+          content = rawText;
+        }
         title = 'JSON Response';
       } else if (contentType.includes('text/plain')) {
         // Plain text
@@ -285,8 +291,15 @@ export class WebFetchTools {
       if (method === 'HEAD') {
         responseBody = ''; // HEAD requests don't have a body
       } else if (contentType.includes('application/json')) {
-        const json = await response.json();
-        responseBody = JSON.stringify(json, null, 2);
+        // Try to parse as JSON, fallback to raw text if parsing fails
+        const rawText = await response.text();
+        try {
+          const json = JSON.parse(rawText);
+          responseBody = JSON.stringify(json, null, 2);
+        } catch {
+          // Invalid JSON - return raw text
+          responseBody = rawText;
+        }
       } else {
         responseBody = await response.text();
       }

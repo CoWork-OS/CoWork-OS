@@ -3599,6 +3599,149 @@ button {
   color: var(--color-text);
 }
 
+.folder-selector .chevron-up {
+  transform: rotate(180deg);
+}
+
+/* Workspace dropdown container */
+.workspace-dropdown-container {
+  position: relative;
+}
+
+.workspace-dropdown {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  min-width: 280px;
+  max-width: 360px;
+  background: #1a1d23;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  z-index: 100;
+  overflow: hidden;
+}
+
+.theme-light .workspace-dropdown {
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(0, 0, 0, 0.05);
+}
+
+.workspace-dropdown-header {
+  padding: 10px 14px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted);
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.theme-light .workspace-dropdown-header {
+  background: rgba(0, 0, 0, 0.03);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.workspace-dropdown-list {
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.workspace-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 14px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s ease;
+  color: var(--color-text-secondary);
+}
+
+.workspace-dropdown-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.theme-light .workspace-dropdown-item:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.workspace-dropdown-item.active {
+  background: rgba(var(--accent-rgb), 0.1);
+}
+
+.workspace-dropdown-item.active:hover {
+  background: rgba(var(--accent-rgb), 0.15);
+}
+
+.workspace-dropdown-item svg {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+
+.workspace-dropdown-item.active svg {
+  color: var(--color-accent);
+}
+
+.workspace-dropdown-item .check-icon {
+  margin-left: auto;
+  color: var(--color-accent);
+}
+
+.workspace-item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.workspace-item-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.workspace-item-path {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.workspace-dropdown-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
+  margin: 4px 0;
+}
+
+.theme-light .workspace-dropdown-divider {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.workspace-dropdown-item.new-folder {
+  color: var(--color-accent);
+  padding: 12px 14px;
+}
+
+.workspace-dropdown-item.new-folder svg {
+  color: var(--color-accent);
+}
+
+.workspace-dropdown-item.new-folder:hover {
+  background: rgba(var(--accent-rgb), 0.1);
+}
+
 /* Shell toggle button */
 .shell-toggle {
   display: flex;

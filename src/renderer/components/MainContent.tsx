@@ -337,6 +337,7 @@ interface MainContentProps {
   onSendMessage: (message: string) => void;
   onCreateTask?: (title: string, prompt: string, options?: GoalModeOptions) => void;
   onChangeWorkspace?: () => void;
+  onSelectWorkspace?: (workspace: Workspace) => void;
   onOpenSettings?: (tab?: SettingsTab) => void;
   onStopTask?: () => void;
   selectedModel: string;
@@ -344,7 +345,7 @@ interface MainContentProps {
   onModelChange: (model: string) => void;
 }
 
-export function MainContent({ task, workspace, events, onSendMessage, onCreateTask, onChangeWorkspace, onOpenSettings, onStopTask, selectedModel, availableModels, onModelChange }: MainContentProps) {
+export function MainContent({ task, workspace, events, onSendMessage, onCreateTask, onChangeWorkspace, onSelectWorkspace, onOpenSettings, onStopTask, selectedModel, availableModels, onModelChange }: MainContentProps) {
   const [pendingApproval, setPendingApproval] = useState<ApprovalRequest | null>(null);
   const [inputValue, setInputValue] = useState('');
   // Shell permission state - tracks current workspace's shell permission
@@ -364,12 +365,16 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
   const [skillsSearchQuery, setSkillsSearchQuery] = useState('');
   const [selectedSkillForParams, setSelectedSkillForParams] = useState<CustomSkill | null>(null);
   const [viewerFilePath, setViewerFilePath] = useState<string | null>(null);
+  // Workspace dropdown state
+  const [showWorkspaceDropdown, setShowWorkspaceDropdown] = useState(false);
+  const [workspacesList, setWorkspacesList] = useState<Workspace[]>([]);
   // Verbose mode - when false, only show important steps
   const [verboseSteps, setVerboseSteps] = useState(() => {
     const saved = localStorage.getItem(VERBOSE_STEPS_KEY);
     return saved === 'true';
   });
   const skillsMenuRef = useRef<HTMLDivElement>(null);
+  const workspaceDropdownRef = useRef<HTMLDivElement>(null);
 
   // Filter events based on verbose mode
   const filteredEvents = useMemo(() => {
@@ -444,6 +449,48 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
     }
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showSkillsMenu]);
+
+  // Close workspace dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (workspaceDropdownRef.current && !workspaceDropdownRef.current.contains(e.target as Node)) {
+        setShowWorkspaceDropdown(false);
+      }
+    };
+    if (showWorkspaceDropdown) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showWorkspaceDropdown]);
+
+  // Handle workspace dropdown toggle - load workspaces when opening
+  const handleWorkspaceDropdownToggle = async () => {
+    if (!showWorkspaceDropdown) {
+      try {
+        const workspaces = await window.electronAPI.listWorkspaces();
+        // Filter out temp workspace and sort by most recently created
+        const filteredWorkspaces = workspaces
+          .filter((w: Workspace) => w.id !== TEMP_WORKSPACE_ID)
+          .sort((a: Workspace, b: Workspace) => b.createdAt - a.createdAt);
+        setWorkspacesList(filteredWorkspaces);
+      } catch (error) {
+        console.error('Failed to load workspaces:', error);
+      }
+    }
+    setShowWorkspaceDropdown(!showWorkspaceDropdown);
+  };
+
+  // Handle selecting an existing workspace from dropdown
+  const handleWorkspaceSelect = (selectedWorkspace: Workspace) => {
+    setShowWorkspaceDropdown(false);
+    onSelectWorkspace?.(selectedWorkspace);
+  };
+
+  // Handle selecting a new folder via Finder
+  const handleSelectNewFolder = () => {
+    setShowWorkspaceDropdown(false);
+    onChangeWorkspace?.();
+  };
 
   const handleSkillSelect = (skill: CustomSkill) => {
     setShowSkillsMenu(false);
@@ -799,15 +846,55 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
 
               <div className="welcome-input-footer">
                 <div className="input-left-actions">
-                  <button className="folder-selector" onClick={onChangeWorkspace}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
-                    </svg>
-                    <span>{workspace?.id === TEMP_WORKSPACE_ID ? 'Select folder' : (workspace?.name || 'Select folder')}</span>
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M6 9l6 6 6-6" />
-                    </svg>
-                  </button>
+                  <div className="workspace-dropdown-container" ref={workspaceDropdownRef}>
+                    <button className="folder-selector" onClick={handleWorkspaceDropdownToggle}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+                      </svg>
+                      <span>{workspace?.id === TEMP_WORKSPACE_ID ? 'Work in a folder' : (workspace?.name || 'Work in a folder')}</span>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={showWorkspaceDropdown ? 'chevron-up' : ''}>
+                        <path d="M6 9l6 6 6-6" />
+                      </svg>
+                    </button>
+                    {showWorkspaceDropdown && (
+                      <div className="workspace-dropdown">
+                        {workspacesList.length > 0 && (
+                          <>
+                            <div className="workspace-dropdown-header">Recent Folders</div>
+                            <div className="workspace-dropdown-list">
+                              {workspacesList.slice(0, 5).map((w) => (
+                                <button
+                                  key={w.id}
+                                  className={`workspace-dropdown-item ${workspace?.id === w.id ? 'active' : ''}`}
+                                  onClick={() => handleWorkspaceSelect(w)}
+                                >
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+                                  </svg>
+                                  <div className="workspace-item-info">
+                                    <span className="workspace-item-name">{w.name}</span>
+                                    <span className="workspace-item-path">{w.path}</span>
+                                  </div>
+                                  {workspace?.id === w.id && (
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="check-icon">
+                                      <path d="M20 6L9 17l-5-5" />
+                                    </svg>
+                                  )}
+                                </button>
+                              ))}
+                            </div>
+                            <div className="workspace-dropdown-divider" />
+                          </>
+                        )}
+                        <button className="workspace-dropdown-item new-folder" onClick={handleSelectNewFolder}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M12 5v14M5 12h14" />
+                          </svg>
+                          <span>Work in another folder...</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
                   <button
                     className={`shell-toggle ${shellEnabled ? 'enabled' : ''}`}
                     onClick={handleShellToggle}

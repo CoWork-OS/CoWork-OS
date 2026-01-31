@@ -595,6 +595,7 @@ export function App() {
               onSendMessage={handleSendMessage}
               onCreateTask={handleCreateTask}
               onChangeWorkspace={handleChangeWorkspace}
+              onSelectWorkspace={(workspace) => setCurrentWorkspace(workspace)}
               onOpenSettings={(tab) => {
                 setSettingsTab(tab || 'appearance');
                 setCurrentView('settings');

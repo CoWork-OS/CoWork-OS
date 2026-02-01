@@ -954,8 +954,8 @@ export class TaskExecutor {
     this.toolRegistry = new ToolRegistry(workspace, daemon, task.id);
 
     // Set up plan revision handler
-    this.toolRegistry.setPlanRevisionHandler((newSteps, reason) => {
-      this.handlePlanRevision(newSteps, reason);
+    this.toolRegistry.setPlanRevisionHandler((newSteps, reason, clearRemaining) => {
+      this.handlePlanRevision(newSteps, reason, clearRemaining);
     });
 
     // Set up workspace switch handler
@@ -1383,8 +1383,8 @@ You are continuing a previous conversation. The context from the previous conver
     this.toolRegistry = new ToolRegistry(workspace, this.daemon, this.task.id);
 
     // Re-register handlers after recreating tool registry
-    this.toolRegistry.setPlanRevisionHandler((newSteps, reason) => {
-      this.handlePlanRevision(newSteps, reason);
+    this.toolRegistry.setPlanRevisionHandler((newSteps, reason, clearRemaining) => {
+      this.handlePlanRevision(newSteps, reason, clearRemaining);
     });
     this.toolRegistry.setWorkspaceSwitchHandler(async (newWorkspace) => {
       await this.handleWorkspaceSwitch(newWorkspace);
@@ -1468,10 +1468,10 @@ You are continuing a previous conversation. The context from the previous conver
 
   /**
    * Handle plan revision request from the LLM
-   * Adds new steps to the plan after the current step
+   * Can add new steps, clear remaining steps, or both
    * Enforces a maximum revision limit to prevent infinite loops
    */
-  private handlePlanRevision(newSteps: Array<{ description: string }>, reason: string): void {
+  private handlePlanRevision(newSteps: Array<{ description: string }>, reason: string, clearRemaining: boolean = false): void {
     if (!this.plan) {
       console.warn('[TaskExecutor] Cannot revise plan - no plan exists');
       return;
@@ -1486,6 +1486,39 @@ You are continuing a previous conversation. The context from the previous conver
         attemptedRevision: reason,
         revisionCount: this.planRevisionCount,
       });
+      return;
+    }
+
+    // If clearRemaining is true, remove all pending steps
+    let clearedCount = 0;
+    if (clearRemaining) {
+      const currentStepIndex = this.plan.steps.findIndex(s => s.status === 'in_progress');
+      if (currentStepIndex !== -1) {
+        // Remove all steps after the current step that are still pending
+        const stepsToRemove = this.plan.steps.slice(currentStepIndex + 1).filter(s => s.status === 'pending');
+        clearedCount = stepsToRemove.length;
+        this.plan.steps = this.plan.steps.filter((s, idx) =>
+          idx <= currentStepIndex || s.status !== 'pending'
+        );
+      } else {
+        // No step in progress, remove all pending steps
+        clearedCount = this.plan.steps.filter(s => s.status === 'pending').length;
+        this.plan.steps = this.plan.steps.filter(s => s.status !== 'pending');
+      }
+      console.log(`[TaskExecutor] Cleared ${clearedCount} pending steps from plan`);
+    }
+
+    // If no new steps and we just cleared, we're done
+    if (newSteps.length === 0) {
+      this.daemon.logEvent(this.task.id, 'plan_revised', {
+        reason,
+        clearedSteps: clearedCount,
+        clearRemaining: true,
+        totalSteps: this.plan.steps.length,
+        revisionNumber: this.planRevisionCount,
+        revisionsRemaining: this.maxPlanRevisions - this.planRevisionCount,
+      });
+      console.log(`[TaskExecutor] Plan revised (${this.planRevisionCount}/${this.maxPlanRevisions}): cleared ${clearedCount} steps. Reason: ${reason}`);
       return;
     }
 
@@ -1552,6 +1585,7 @@ You are continuing a previous conversation. The context from the previous conver
     // Log the plan revision
     this.daemon.logEvent(this.task.id, 'plan_revised', {
       reason,
+      clearedSteps: clearedCount,
       newStepsCount: newSteps.length,
       newSteps: newSteps.map(s => s.description),
       totalSteps: this.plan.steps.length,
@@ -1559,7 +1593,7 @@ You are continuing a previous conversation. The context from the previous conver
       revisionsRemaining: this.maxPlanRevisions - this.planRevisionCount,
     });
 
-    console.log(`[TaskExecutor] Plan revised (${this.planRevisionCount}/${this.maxPlanRevisions}): added ${newSteps.length} steps. Reason: ${reason}`);
+    console.log(`[TaskExecutor] Plan revised (${this.planRevisionCount}/${this.maxPlanRevisions}): ${clearRemaining ? `cleared ${clearedCount} steps, ` : ''}added ${newSteps.length} steps. Reason: ${reason}`);
   }
 
   /**
@@ -1825,6 +1859,14 @@ PATH DISCOVERY (CRITICAL):
   - In an allowed path outside the workspace
 - ALWAYS search before concluding something doesn't exist.
 - Example: If user says "audit the src/components folder" and workspace is /tmp/tasks, search for "**/src/components/**" first.
+- CRITICAL - REQUIRED PATH NOT FOUND BEHAVIOR:
+  - If a task REQUIRES a specific folder/path (like "audit the electron/agent folder") and it's NOT found after searching:
+    1. IMMEDIATELY call revise_plan with { clearRemaining: true, reason: "Required path not found - need user input", newSteps: [] }
+       This will REMOVE all remaining pending steps from the plan.
+    2. Then ask the user: "The path '[X]' wasn't found in the workspace. Please provide the full path or switch to the correct workspace."
+    3. DO NOT proceed with placeholder work - NO fake reports, NO generic checklists, NO "framework" documents
+    4. STOP and WAIT for user response - the task cannot be completed without the correct path
+  - This is a HARD STOP - the revise_plan with clearRemaining:true will cancel all pending steps.
 
 SKILL USAGE (IMPORTANT):
 - Check if a custom skill matches the task before planning manually.
@@ -2200,6 +2242,13 @@ PATH DISCOVERY (CRITICAL):
   - search_files to find files with relevant names
 - The intended path may be in a subdirectory, a parent directory, or an allowed external path.
 - ALWAYS search comprehensively before saying something doesn't exist.
+- CRITICAL - REQUIRED PATH NOT FOUND:
+  - If a task REQUIRES a specific folder/path and it's NOT found after searching:
+    1. IMMEDIATELY call revise_plan({ clearRemaining: true, reason: "Required path not found", newSteps: [] })
+    2. Ask: "The path '[X]' wasn't found. Please provide the full path or switch to the correct workspace."
+    3. DO NOT create placeholder reports, generic checklists, or "framework" documents
+    4. STOP execution - the clearRemaining:true removes all pending steps
+  - This is a HARD STOP - revise_plan with clearRemaining cancels all remaining work.
 
 TOOL CALL STYLE:
 - Default: do NOT narrate routine, low-risk tool calls. Just call the tool silently.
@@ -2695,6 +2744,13 @@ PATH DISCOVERY (CRITICAL):
   - search_files to find files with relevant names
 - The intended path may be in a subdirectory, a parent directory, or an allowed external path.
 - ALWAYS search comprehensively before saying something doesn't exist.
+- CRITICAL - REQUIRED PATH NOT FOUND:
+  - If a task REQUIRES a specific folder/path and it's NOT found after searching:
+    1. IMMEDIATELY call revise_plan({ clearRemaining: true, reason: "Required path not found", newSteps: [] })
+    2. Ask: "The path '[X]' wasn't found. Please provide the full path or switch to the correct workspace."
+    3. DO NOT create placeholder reports, generic checklists, or "framework" documents
+    4. STOP execution - the clearRemaining:true removes all pending steps
+  - This is a HARD STOP - revise_plan with clearRemaining cancels all remaining work.
 
 TOOL CALL STYLE:
 - Default: do NOT narrate routine, low-risk tool calls. Just call the tool silently.

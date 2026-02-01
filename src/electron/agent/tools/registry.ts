@@ -283,12 +283,12 @@ export class ToolRegistry {
   /**
    * Callback for handling plan revisions (set by executor)
    */
-  private planRevisionHandler?: (newSteps: Array<{ description: string }>, reason: string) => void;
+  private planRevisionHandler?: (newSteps: Array<{ description: string }>, reason: string, clearRemaining: boolean) => void;
 
   /**
    * Set the callback for handling plan revisions
    */
-  setPlanRevisionHandler(handler: (newSteps: Array<{ description: string }>, reason: string) => void): void {
+  setPlanRevisionHandler(handler: (newSteps: Array<{ description: string }>, reason: string, clearRemaining: boolean) => void): void {
     this.planRevisionHandler = handler;
   }
 
@@ -619,10 +619,22 @@ ${skillDescriptions}`;
       }
       const newSteps = input.newSteps || [];
       const reason = input.reason || 'No reason provided';
-      this.planRevisionHandler(newSteps, reason);
+      const clearRemaining = input.clearRemaining || false;
+      this.planRevisionHandler(newSteps, reason, clearRemaining);
+
+      let message = '';
+      if (clearRemaining) {
+        message = `Plan revised: Cleared remaining steps. `;
+      }
+      if (newSteps.length > 0) {
+        message += `${newSteps.length} new steps added. `;
+      }
+      message += `Reason: ${reason}`;
+
       return {
         success: true,
-        message: `Plan revised: ${newSteps.length} new steps added. Reason: ${reason}`,
+        message: message.trim(),
+        clearedRemaining: clearRemaining,
       };
     }
 
@@ -1369,19 +1381,23 @@ ${skillDescriptions}`;
       {
         name: 'revise_plan',
         description:
-          'Revise the execution plan by adding new steps. Use this when you encounter unexpected obstacles, ' +
-          'discover that the original plan is insufficient, or find a better approach. ' +
-          'The new steps will be added to the remaining plan and executed after the current step completes.',
+          'Revise the execution plan. Use this when you encounter unexpected obstacles, ' +
+          'discover that the original plan is insufficient, need to stop execution, or find a better approach. ' +
+          'Can add new steps, clear remaining steps, or both.',
         input_schema: {
           type: 'object',
           properties: {
             reason: {
               type: 'string',
-              description: 'Brief explanation of why the plan needs to be revised (e.g., "discovered missing dependency", "found better approach")',
+              description: 'Brief explanation of why the plan needs to be revised (e.g., "discovered missing dependency", "required path not found - need user input")',
+            },
+            clearRemaining: {
+              type: 'boolean',
+              description: 'Set to true to CLEAR/REMOVE all remaining pending steps. Use when the task cannot proceed (e.g., required files not found). Default is false.',
             },
             newSteps: {
               type: 'array',
-              description: 'Array of new steps to add to the plan',
+              description: 'Array of new steps to add to the plan. Can be empty [] when clearing remaining steps.',
               items: {
                 type: 'object',
                 properties: {
@@ -1394,7 +1410,7 @@ ${skillDescriptions}`;
               },
             },
           },
-          required: ['reason', 'newSteps'],
+          required: ['reason'],
         },
       },
       {

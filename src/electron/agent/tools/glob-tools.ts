@@ -235,14 +235,14 @@ export class GlobTools {
     // Convert each pattern to regex
     const regexParts = expandedPatterns.map((p) => {
       let regex = p
-        // Escape special regex characters (except glob chars)
+        // Escape special regex characters (except glob chars * and ?)
         .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-        // ** matches any path (including /)
-        .replace(/\\\*\\\*/g, '.*')
+        // ** matches any path (including /) - must be before single * replacement
+        .replace(/\*\*/g, '.*')
         // * matches anything except /
-        .replace(/\\\*/g, '[^/]*')
+        .replace(/\*/g, '[^/]*')
         // ? matches single character except /
-        .replace(/\\\?/g, '[^/]');
+        .replace(/\?/g, '[^/]');
 
       return regex;
     });

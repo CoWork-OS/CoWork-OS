@@ -176,7 +176,7 @@
 
 /* Headers with dark overlays */
 .theme-light .main-header {
-  background: rgba(255, 255, 255, 0.5);
+  background: transparent;
 }
 
 /* Event items and overlays */
@@ -424,7 +424,7 @@
 }
 
 .theme-light .main-header {
-  background: rgba(255, 255, 255, 0.7) !important;
+  background: transparent !important;
 }
 
 .theme-light .main-body {
@@ -444,8 +444,7 @@
 }
 
 .theme-light .cli-info {
-  background: rgba(255, 255, 255, 0.7);
-  border-color: rgba(0, 0, 0, 0.1);
+  background: transparent;
 }
 
 .theme-light .cli-line-disclosure {
@@ -1213,31 +1212,35 @@ a,
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   min-width: 0;
   position: relative;
-  padding-top: 38px; /* Space for title bar - matches sidebar and right-panel */
+  padding-top: 32px; /* Space for title bar */
 }
 
 /* Removed: double-border effect - using single border only */
 
 .main-header {
   padding: 0 20px;
-  border-bottom: 1px solid var(--color-border-subtle);
+  border-bottom: none;
   display: flex;
   align-items: center;
   gap: 12px;
   -webkit-app-region: drag;
-  height: var(--header-height);
-  background: rgba(0, 0, 0, 0.1);
+  height: 28px;
+  background: transparent;
   position: relative;
   z-index: 10;
+  overflow: hidden;
 }
 
 .main-header-title {
   flex: 1;
+  width: 0;
   font-size: 14px;
   color: var(--color-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  -webkit-app-region: no-drag;
+  cursor: default;
 }
 
 .main-header-actions {
@@ -3413,7 +3416,7 @@ button {
 
 .cli-header {
   text-align: center;
-  margin-bottom: 32px;
+  margin-bottom: 20px;
 }
 
 .ascii-art {
@@ -3443,11 +3446,8 @@ button {
 }
 
 .cli-info {
-  margin-bottom: 28px;
-  padding: 16px;
-  background: rgba(0, 0, 0, 0.3);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--color-border-subtle);
+  margin-bottom: 16px;
+  padding: 0 16px;
 }
 
 .cli-line {
@@ -3469,6 +3469,9 @@ button {
 
 .cli-text {
   color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .cli-commands {
@@ -3583,12 +3586,21 @@ button {
   font-size: 14px;
   font-weight: 600;
   color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
 }
 
 .quick-start-desc {
   font-size: 12px;
   color: var(--color-text-muted);
   line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 /* CLI Input Styles */
@@ -6446,14 +6458,22 @@ button {
 
 .main-header {
   font-family: 'SF Mono', 'Fira Code', 'Consolas', 'Monaco', monospace;
-  background: rgba(0, 0, 0, 0.3);
-  border-bottom: 1px solid var(--color-border-subtle);
+  background: transparent;
+  border-bottom: none;
+  overflow: hidden;
 }
 
 .main-header-title {
+  flex: 1;
   font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
   font-size: 13px;
   letter-spacing: 0.3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 0;
+  min-width: 0;
+  -webkit-app-region: no-drag;
 }
 
 /* CLI Style for Task View */
@@ -7764,6 +7784,27 @@ button {
 .toast-dismiss:hover {
   background: var(--color-bg-hover);
   color: var(--color-text-primary);
+}
+
+.toast-with-action {
+  flex-wrap: wrap;
+}
+
+.toast-action-btn {
+  margin-top: 8px;
+  padding: 6px 12px;
+  background: var(--color-accent);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.toast-action-btn:hover {
+  background: var(--color-accent-hover);
 }
 
 /* ===== Quick Task FAB ===== */

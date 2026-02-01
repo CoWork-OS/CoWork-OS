@@ -76,7 +76,9 @@ export type EventType =
   | 'agent_spawned'        // Parent spawned a child agent
   | 'agent_completed'      // Child agent completed successfully
   | 'agent_failed'         // Child agent failed
-  | 'sub_agent_result';    // Result summary from child agent
+  | 'sub_agent_result'     // Result summary from child agent
+  // Conversation persistence
+  | 'conversation_snapshot'; // Full conversation history for restoration
 
 export type ToolType =
   | 'read_file'
@@ -760,6 +762,27 @@ export const IPC_CHANNELS = {
   MEMORY_GET_STATS: 'memory:getStats',
   MEMORY_CLEAR: 'memory:clear',
   MEMORY_EVENT: 'memory:event',
+
+  // Migration Status (for showing one-time notifications after app rename)
+  MIGRATION_GET_STATUS: 'migration:getStatus',
+  MIGRATION_DISMISS_NOTIFICATION: 'migration:dismissNotification',
+
+  // Extensions / Plugins
+  EXTENSIONS_LIST: 'extensions:list',
+  EXTENSIONS_GET: 'extensions:get',
+  EXTENSIONS_ENABLE: 'extensions:enable',
+  EXTENSIONS_DISABLE: 'extensions:disable',
+  EXTENSIONS_RELOAD: 'extensions:reload',
+  EXTENSIONS_GET_CONFIG: 'extensions:getConfig',
+  EXTENSIONS_SET_CONFIG: 'extensions:setConfig',
+  EXTENSIONS_DISCOVER: 'extensions:discover',
+
+  // Webhook Tunnel
+  TUNNEL_GET_STATUS: 'tunnel:getStatus',
+  TUNNEL_START: 'tunnel:start',
+  TUNNEL_STOP: 'tunnel:stop',
+  TUNNEL_GET_CONFIG: 'tunnel:getConfig',
+  TUNNEL_SET_CONFIG: 'tunnel:setConfig',
 } as const;
 
 // LLM Provider types
@@ -838,7 +861,7 @@ export interface LLMConfigStatus {
 }
 
 // Gateway / Channel types
-export type ChannelType = 'telegram' | 'discord' | 'slack' | 'whatsapp' | 'imessage';
+export type ChannelType = 'telegram' | 'discord' | 'slack' | 'whatsapp' | 'imessage' | 'signal';
 export type ChannelStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 export type SecurityMode = 'open' | 'allowlist' | 'pairing';
 
@@ -889,6 +912,13 @@ export interface AddChannelRequest {
   dmPolicy?: 'open' | 'allowlist' | 'pairing' | 'disabled';
   groupPolicy?: 'open' | 'allowlist' | 'disabled';
   allowedContacts?: string[];
+  // Signal-specific fields
+  phoneNumber?: string;
+  dataDir?: string;
+  mode?: 'native' | 'json-rpc' | 'dbus';
+  trustMode?: 'always' | 'on-first-use' | 'never';
+  sendReadReceipts?: boolean;
+  sendTypingIndicators?: boolean;
 }
 
 export interface UpdateChannelRequest {
@@ -906,6 +936,65 @@ export interface TestChannelResult {
   success: boolean;
   error?: string;
   botUsername?: string;
+}
+
+// Extension / Plugin types
+export type ExtensionType = 'channel' | 'tool' | 'provider' | 'integration';
+export type ExtensionState = 'loading' | 'loaded' | 'registered' | 'active' | 'error' | 'disabled';
+
+export interface ExtensionCapabilities {
+  sendMessage?: boolean;
+  receiveMessage?: boolean;
+  attachments?: boolean;
+  reactions?: boolean;
+  inlineKeyboards?: boolean;
+  groups?: boolean;
+  threads?: boolean;
+  webhooks?: boolean;
+  e2eEncryption?: boolean;
+}
+
+export interface ExtensionData {
+  name: string;
+  displayName: string;
+  version: string;
+  description: string;
+  author?: string;
+  type: ExtensionType;
+  state: ExtensionState;
+  path: string;
+  loadedAt: number;
+  error?: string;
+  capabilities?: ExtensionCapabilities;
+  configSchema?: Record<string, unknown>;
+}
+
+export interface ExtensionConfig {
+  [key: string]: unknown;
+}
+
+// Webhook Tunnel types
+export type TunnelProvider = 'ngrok' | 'tailscale' | 'cloudflare' | 'localtunnel';
+export type TunnelStatus = 'stopped' | 'starting' | 'running' | 'error';
+
+export interface TunnelConfig {
+  provider: TunnelProvider;
+  port: number;
+  host?: string;
+  ngrokAuthToken?: string;
+  ngrokRegion?: 'us' | 'eu' | 'ap' | 'au' | 'sa' | 'jp' | 'in';
+  ngrokSubdomain?: string;
+  tailscaleHostname?: string;
+  cloudflareTunnelName?: string;
+  autoStart?: boolean;
+}
+
+export interface TunnelStatusData {
+  status: TunnelStatus;
+  provider?: TunnelProvider;
+  url?: string;
+  error?: string;
+  startedAt?: number;
 }
 
 // Search Provider types
@@ -1075,6 +1164,13 @@ export interface AppVersionInfo {
   gitCommit?: string;
 }
 
+// Migration status (for showing one-time notifications after app rename)
+export interface MigrationStatus {
+  migrated: boolean;
+  notificationDismissed: boolean;
+  timestamp?: string;
+}
+
 // Task Queue types
 export interface QueueSettings {
   maxConcurrentTasks: number;  // Default: 5, min: 1, max: 10
@@ -1101,6 +1197,10 @@ export interface ToastNotification {
   title: string;
   message?: string;
   taskId?: string;
+  action?: {
+    label: string;
+    callback: () => void;
+  };
 }
 
 // Custom User Skills

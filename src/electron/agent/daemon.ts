@@ -849,4 +849,16 @@ export class AgentDaemon extends EventEmitter {
 
     console.log('Agent daemon shutdown complete');
   }
+
+  /**
+   * Prune old conversation snapshots for a task, keeping only the most recent one.
+   * This prevents database bloat from accumulating snapshots.
+   */
+  pruneOldSnapshots(taskId: string): void {
+    try {
+      this.eventRepo.pruneOldSnapshots(taskId);
+    } catch (error) {
+      console.debug('[AgentDaemon] Failed to prune old snapshots:', error);
+    }
+  }
 }

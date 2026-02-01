@@ -33,7 +33,7 @@ export function ToastContainer({
       {toasts.map(toast => (
         <div
           key={toast.id}
-          className={`toast toast-${toast.type}`}
+          className={`toast toast-${toast.type} ${toast.action ? 'toast-with-action' : ''}`}
           onClick={() => toast.taskId && onTaskClick?.(toast.taskId)}
           style={{ cursor: toast.taskId ? 'pointer' : 'default' }}
         >
@@ -44,6 +44,18 @@ export function ToastContainer({
             <div className="toast-title">{toast.title}</div>
             {toast.message && (
               <div className="toast-message">{toast.message}</div>
+            )}
+            {toast.action && (
+              <button
+                className="toast-action-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toast.action?.callback();
+                  onDismiss(toast.id);
+                }}
+              >
+                {toast.action.label}
+              </button>
             )}
           </div>
           <button

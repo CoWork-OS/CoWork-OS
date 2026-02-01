@@ -830,6 +830,54 @@ class FileOperationTracker {
 
     return parts.join('\n');
   }
+
+  /**
+   * Serialize the tracker state for persistence in snapshots.
+   * Only includes essential data, not timing info which is session-specific.
+   */
+  serialize(): {
+    readFiles: string[];
+    createdFiles: string[];
+    directories: string[];
+  } {
+    return {
+      readFiles: Array.from(this.readFiles.keys()).slice(0, 50), // Limit to prevent huge snapshots
+      createdFiles: Array.from(this.createdFiles.values()).slice(0, 50),
+      directories: Array.from(this.directoryListings.keys()).slice(0, 20),
+    };
+  }
+
+  /**
+   * Restore tracker state from a serialized snapshot.
+   * Recreates minimal tracking info for files/directories that were previously accessed.
+   */
+  restore(state: { readFiles?: string[]; createdFiles?: string[]; directories?: string[] }): void {
+    const now = Date.now();
+
+    // Restore read files (minimal info - we know they were read but not full details)
+    if (state.readFiles) {
+      for (const filePath of state.readFiles) {
+        this.readFiles.set(filePath, { count: 1, lastReadTime: now, contentLength: 0 });
+      }
+    }
+
+    // Restore created files
+    if (state.createdFiles) {
+      for (const filePath of state.createdFiles) {
+        const normalized = this.normalizeFilename(filePath.split('/').pop() || filePath);
+        this.createdFiles.set(normalized, filePath);
+      }
+    }
+
+    // Restore directory listings (minimal info)
+    if (state.directories) {
+      for (const dir of state.directories) {
+        this.directoryListings.set(dir, { files: [], lastListTime: now, count: 1 });
+      }
+    }
+
+    console.log(`[FileOperationTracker] Restored state: ${state.readFiles?.length || 0} files, ${state.createdFiles?.length || 0} created, ${state.directories?.length || 0} dirs`);
+  }
 }
 
 /**
@@ -1307,7 +1355,16 @@ export class TaskExecutor {
    * This is used when recreating an executor for follow-up messages
    */
   rebuildConversationFromEvents(events: TaskEvent[]): void {
-    // Build a summary of the previous conversation
+    // First, try to restore from a saved conversation snapshot
+    // This provides full conversation context including tool results, web content, etc.
+    if (this.restoreFromSnapshot(events)) {
+      console.log('[TaskExecutor] Successfully restored conversation from snapshot');
+      return;
+    }
+
+    // Fallback: Build a summary of the previous conversation from events
+    // This is used for backward compatibility with tasks that don't have snapshots
+    console.log('[TaskExecutor] No snapshot found, falling back to event-based summary');
     const conversationParts: string[] = [];
 
     // Add the original task as context
@@ -1318,6 +1375,12 @@ export class TaskExecutor {
 
     for (const event of events) {
       switch (event.type) {
+        case 'user_message':
+          // User follow-up messages
+          if (event.payload?.message) {
+            conversationParts.push(`User: ${event.payload.message}`);
+          }
+          break;
         case 'log':
           if (event.payload?.message) {
             // User messages are logged as "User: message"
@@ -1340,6 +1403,17 @@ export class TaskExecutor {
         case 'tool_call':
           if (event.payload?.tool) {
             conversationParts.push(`[Used tool: ${event.payload.tool}]`);
+          }
+          break;
+        case 'tool_result':
+          // Include tool results for better context
+          if (event.payload?.tool && event.payload?.result) {
+            const result = typeof event.payload.result === 'string'
+              ? event.payload.result
+              : JSON.stringify(event.payload.result);
+            // Truncate very long results
+            const truncated = result.length > 1000 ? result.slice(0, 1000) + '...' : result;
+            conversationParts.push(`[Tool result from ${event.payload.tool}: ${truncated}]`);
           }
           break;
         case 'plan_created':
@@ -1367,7 +1441,7 @@ export class TaskExecutor {
           content: [{ type: 'text', text: 'I understand the context from our previous conversation. How can I help you now?' }],
         },
       ];
-      console.log('Rebuilt conversation history from', events.length, 'events');
+      console.log('Rebuilt conversation history from', events.length, 'events (legacy fallback)');
     }
 
     // Set system prompt
@@ -1382,6 +1456,226 @@ WEB ACCESS: Prefer browser_navigate for web access. If browser tools are unavail
 SCHEDULING: Use the schedule_task tool for reminders and scheduled tasks. Convert relative times to ISO timestamps using the current time above.
 
 You are continuing a previous conversation. The context from the previous conversation has been provided.`;
+  }
+
+  /**
+   * Save the current conversation history as a snapshot to the database.
+   * This allows restoring the full conversation context after failures, migrations, or upgrades.
+   * Called after each LLM response and on task completion.
+   *
+   * NOTE: Only the most recent snapshot is kept to prevent database bloat.
+   * Old snapshots are automatically pruned.
+   */
+  saveConversationSnapshot(): void {
+    try {
+      // Only save if there's meaningful conversation history
+      if (this.conversationHistory.length === 0) {
+        return;
+      }
+
+      // Serialize the conversation history with size limits
+      const serializedHistory = this.serializeConversationWithSizeLimit(this.conversationHistory);
+
+      // Serialize file operation tracker state (files read, created, directories explored)
+      const trackerState = this.fileOperationTracker.serialize();
+
+      // Get completed plan steps summary for context
+      const planSummary = this.plan ? {
+        description: this.plan.description,
+        completedSteps: this.plan.steps
+          .filter(s => s.status === 'completed')
+          .map(s => s.description)
+          .slice(0, 20), // Limit to 20 steps
+        failedSteps: this.plan.steps
+          .filter(s => s.status === 'failed')
+          .map(s => ({ description: s.description, error: s.error }))
+          .slice(0, 10),
+      } : undefined;
+
+      // Estimate size for logging
+      const payload = {
+        conversationHistory: serializedHistory,
+        trackerState,
+        planSummary,
+        timestamp: Date.now(),
+        messageCount: serializedHistory.length,
+        // Include metadata for debugging
+        modelId: this.modelId,
+        modelKey: this.modelKey,
+      };
+      const estimatedSize = JSON.stringify(payload).length;
+      const sizeMB = (estimatedSize / 1024 / 1024).toFixed(2);
+
+      // Warn if snapshot is getting large
+      if (estimatedSize > 5 * 1024 * 1024) { // > 5MB
+        console.warn(`[TaskExecutor] Large snapshot (${sizeMB}MB) - consider conversation compaction`);
+      }
+
+      this.daemon.logEvent(this.task.id, 'conversation_snapshot', {
+        ...payload,
+        estimatedSizeBytes: estimatedSize,
+      });
+
+      console.log(`[TaskExecutor] Saved conversation snapshot with ${serializedHistory.length} messages (~${sizeMB}MB) for task ${this.task.id}`);
+
+      // Prune old snapshots to prevent database bloat (keep only the most recent)
+      this.pruneOldSnapshots();
+    } catch (error) {
+      // Don't fail the task if snapshot saving fails
+      console.error('[TaskExecutor] Failed to save conversation snapshot:', error);
+    }
+  }
+
+  /**
+   * Serialize conversation history with size limits to prevent huge snapshots.
+   * Truncates large tool results and content blocks while preserving structure.
+   */
+  private serializeConversationWithSizeLimit(history: LLMMessage[]): any[] {
+    const MAX_CONTENT_LENGTH = 50000; // 50KB per content block
+    const MAX_TOOL_RESULT_LENGTH = 10000; // 10KB per tool result
+
+    return history.map(msg => {
+      // Handle string content
+      if (typeof msg.content === 'string') {
+        return {
+          role: msg.role,
+          content: msg.content.length > MAX_CONTENT_LENGTH
+            ? msg.content.slice(0, MAX_CONTENT_LENGTH) + '\n[... content truncated for snapshot ...]'
+            : msg.content,
+        };
+      }
+
+      // Handle array content (tool calls, tool results, etc.)
+      if (Array.isArray(msg.content)) {
+        const truncatedContent = msg.content.map((block: any) => {
+          // Truncate tool_result content
+          if (block.type === 'tool_result' && block.content) {
+            const content = typeof block.content === 'string' ? block.content : JSON.stringify(block.content);
+            return {
+              ...block,
+              content: content.length > MAX_TOOL_RESULT_LENGTH
+                ? content.slice(0, MAX_TOOL_RESULT_LENGTH) + '\n[... truncated ...]'
+                : block.content,
+            };
+          }
+          // Truncate long text blocks
+          if (block.type === 'text' && block.text && block.text.length > MAX_CONTENT_LENGTH) {
+            return {
+              ...block,
+              text: block.text.slice(0, MAX_CONTENT_LENGTH) + '\n[... truncated ...]',
+            };
+          }
+          return block;
+        });
+        return { role: msg.role, content: truncatedContent };
+      }
+
+      return { role: msg.role, content: msg.content };
+    });
+  }
+
+  /**
+   * Remove old conversation snapshots, keeping only the most recent one.
+   * This prevents database bloat from accumulating snapshots.
+   */
+  private pruneOldSnapshots(): void {
+    try {
+      // This is handled by deleting old snapshot events from the database
+      // We call the daemon to handle this
+      this.daemon.pruneOldSnapshots?.(this.task.id);
+    } catch (error) {
+      // Non-critical - don't fail if pruning fails
+      console.debug('[TaskExecutor] Failed to prune old snapshots:', error);
+    }
+  }
+
+  /**
+   * Restore conversation history from the most recent snapshot in the database.
+   * Returns true if a snapshot was found and restored, false otherwise.
+   */
+  private restoreFromSnapshot(events: TaskEvent[]): boolean {
+    // Find the most recent conversation_snapshot event
+    const snapshotEvents = events.filter(e => e.type === 'conversation_snapshot');
+    if (snapshotEvents.length === 0) {
+      return false;
+    }
+
+    // Get the most recent snapshot (events are sorted by timestamp ascending)
+    const latestSnapshot = snapshotEvents[snapshotEvents.length - 1];
+    const payload = latestSnapshot.payload;
+
+    if (!payload?.conversationHistory || !Array.isArray(payload.conversationHistory)) {
+      console.warn('[TaskExecutor] Snapshot found but conversationHistory is invalid');
+      return false;
+    }
+
+    try {
+      // Restore the conversation history
+      this.conversationHistory = payload.conversationHistory.map((msg: any) => ({
+        role: msg.role as 'user' | 'assistant',
+        content: msg.content,
+      }));
+
+      // Restore file operation tracker state (files read, created, directories explored)
+      if (payload.trackerState) {
+        this.fileOperationTracker.restore(payload.trackerState);
+      }
+
+      // If we have plan summary from initial execution, prepend context to first user message
+      // This ensures follow-up messages have context about what was accomplished
+      if (payload.planSummary && this.conversationHistory.length > 0) {
+        const planContext = this.buildPlanContextSummary(payload.planSummary);
+        if (planContext && this.conversationHistory[0].role === 'user') {
+          const firstMsg = this.conversationHistory[0];
+          const originalContent = typeof firstMsg.content === 'string'
+            ? firstMsg.content
+            : JSON.stringify(firstMsg.content);
+
+          // Only prepend if not already present
+          if (!originalContent.includes('PREVIOUS TASK CONTEXT')) {
+            this.conversationHistory[0] = {
+              role: 'user',
+              content: `${planContext}\n\n${originalContent}`,
+            };
+          }
+        }
+      }
+
+      // NOTE: We intentionally do NOT restore systemPrompt from snapshot
+      // The system prompt contains time-sensitive data (e.g., "Current time: ...")
+      // that would be stale. Let sendMessage() generate a fresh system prompt.
+
+      console.log(`[TaskExecutor] Restored conversation from snapshot with ${this.conversationHistory.length} messages (saved at ${new Date(payload.timestamp).toISOString()})`);
+      return true;
+    } catch (error) {
+      console.error('[TaskExecutor] Failed to restore from snapshot:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Build a summary of the initial task execution plan for context.
+   */
+  private buildPlanContextSummary(planSummary: {
+    description?: string;
+    completedSteps?: string[];
+    failedSteps?: { description: string; error?: string }[];
+  }): string {
+    const parts: string[] = ['PREVIOUS TASK CONTEXT:'];
+
+    if (planSummary.description) {
+      parts.push(`Task plan: ${planSummary.description}`);
+    }
+
+    if (planSummary.completedSteps && planSummary.completedSteps.length > 0) {
+      parts.push(`Completed steps:\n${planSummary.completedSteps.map(s => `  - ${s}`).join('\n')}`);
+    }
+
+    if (planSummary.failedSteps && planSummary.failedSteps.length > 0) {
+      parts.push(`Failed steps:\n${planSummary.failedSteps.map(s => `  - ${s.description}${s.error ? ` (${s.error})` : ''}`).join('\n')}`);
+    }
+
+    return parts.length > 1 ? parts.join('\n') : '';
   }
 
   /**
@@ -1797,6 +2091,8 @@ You are continuing a previous conversation. The context from the previous conver
       if (this.cancelled) return;
 
       // Phase 3: Completion
+      // Save conversation snapshot before completing task for future follow-ups
+      this.saveConversationSnapshot();
       this.taskCompleted = true;  // Mark task as completed to prevent any further processing
       this.daemon.completeTask(this.task.id);
     } catch (error: any) {
@@ -1813,6 +2109,8 @@ You are continuing a previous conversation. The context from the previous conver
       }
 
       console.error(`Task execution failed:`, error);
+      // Save conversation snapshot even on failure for potential recovery
+      this.saveConversationSnapshot();
       this.daemon.updateTaskStatus(this.task.id, 'failed');
       this.daemon.logEvent(this.task.id, 'error', {
         message: error.message,
@@ -3197,6 +3495,8 @@ SCHEDULING & REMINDERS:
 
       // Save updated conversation history
       this.conversationHistory = messages;
+      // Save conversation snapshot for future follow-ups and persistence
+      this.saveConversationSnapshot();
       this.daemon.updateTaskStatus(this.task.id, 'completed');
       // Log visible task_completed event for UI
       this.daemon.logEvent(this.task.id, 'task_completed', {
@@ -3219,6 +3519,8 @@ SCHEDULING & REMINDERS:
       }
 
       console.error('sendMessage failed:', error);
+      // Save conversation snapshot even on failure for potential recovery
+      this.saveConversationSnapshot();
       this.daemon.logEvent(this.task.id, 'error', {
         message: error.message,
       });

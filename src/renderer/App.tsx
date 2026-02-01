@@ -95,6 +95,52 @@ export function App() {
     loadAppearanceSettings();
   }, []);
 
+  // Check for migration status and show one-time notification if needed
+  // This handles the case where the app was renamed from cowork-oss to cowork-os
+  // and encrypted credentials (API keys) need to be re-entered
+  const migrationCheckDone = useRef(false);
+  useEffect(() => {
+    // Prevent double execution in React StrictMode
+    if (migrationCheckDone.current) return;
+    migrationCheckDone.current = true;
+
+    const checkMigrationStatus = async () => {
+      try {
+        const status = await window.electronAPI.getMigrationStatus();
+
+        // If migration happened but notification hasn't been dismissed, show info toast
+        if (status.migrated && !status.notificationDismissed) {
+          const id = `migration-notice-${Date.now()}`;
+          const toast: ToastNotification = {
+            id,
+            type: 'info',
+            title: 'Welcome to CoWork OS',
+            message: 'Your data was migrated successfully. Due to macOS security, API keys need to be re-entered.',
+            action: {
+              label: 'Open Settings',
+              callback: () => {
+                setCurrentView('settings');
+                setSettingsTab('llm');
+              },
+            },
+          };
+          setToasts(prev => [...prev, toast]);
+
+          // Longer auto-dismiss for this important notification (30 seconds)
+          setTimeout(() => {
+            setToasts(prev => prev.filter(t => t.id !== id));
+          }, 30000);
+
+          // Mark notification as dismissed so it only shows once
+          await window.electronAPI.dismissMigrationNotification();
+        }
+      } catch (error) {
+        console.error('Failed to check migration status:', error);
+      }
+    };
+    checkMigrationStatus();
+  }, []);
+
   // Load queue status and subscribe to updates
   useEffect(() => {
     const loadQueueStatus = async () => {

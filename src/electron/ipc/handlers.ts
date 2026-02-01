@@ -1,6 +1,7 @@
-import { ipcMain, shell, BrowserWindow } from 'electron';
+import { ipcMain, shell, BrowserWindow, app } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs/promises';
+import * as fsSync from 'fs';
 import mammoth from 'mammoth';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -2212,4 +2213,244 @@ function setupMemoryHandlers(): void {
   });
 
   console.log('[Memory] Handlers initialized');
+
+  // === Migration Status Handlers ===
+  // These handlers help show one-time notifications after app migration (cowork-oss → cowork-os)
+
+  const userDataPath = app.getPath('userData');
+  const migrationMarkerPath = path.join(userDataPath, '.migrated-from-cowork-oss');
+  const notificationDismissedPath = path.join(userDataPath, '.migration-notification-dismissed');
+
+  // Get migration status
+  ipcMain.handle(IPC_CHANNELS.MIGRATION_GET_STATUS, async () => {
+    try {
+      const migrated = fsSync.existsSync(migrationMarkerPath);
+      const notificationDismissed = fsSync.existsSync(notificationDismissedPath);
+
+      let timestamp: string | undefined;
+      if (migrated) {
+        try {
+          const markerContent = fsSync.readFileSync(migrationMarkerPath, 'utf-8');
+          const markerData = JSON.parse(markerContent);
+          timestamp = markerData.timestamp;
+        } catch {
+          // Old format marker or read error
+        }
+      }
+
+      return {
+        migrated,
+        notificationDismissed,
+        timestamp,
+      };
+    } catch (error) {
+      console.error('[Migration] Failed to get status:', error);
+      return { migrated: false, notificationDismissed: true }; // Default to no notification on error
+    }
+  });
+
+  // Dismiss migration notification (user has acknowledged it)
+  ipcMain.handle(IPC_CHANNELS.MIGRATION_DISMISS_NOTIFICATION, async () => {
+    try {
+      fsSync.writeFileSync(notificationDismissedPath, JSON.stringify({
+        dismissedAt: new Date().toISOString(),
+      }));
+      console.log('[Migration] Notification dismissed');
+      return { success: true };
+    } catch (error) {
+      console.error('[Migration] Failed to dismiss notification:', error);
+      throw error;
+    }
+  });
+
+  console.log('[Migration] Handlers initialized');
+
+  // === Extension / Plugin Handlers ===
+  const { getPluginRegistry } = await import('../extensions/registry');
+
+  // List all extensions
+  ipcMain.handle(IPC_CHANNELS.EXTENSIONS_LIST, async () => {
+    try {
+      const registry = getPluginRegistry();
+      const plugins = registry.getPlugins();
+      return plugins.map(p => ({
+        name: p.manifest.name,
+        displayName: p.manifest.displayName,
+        version: p.manifest.version,
+        description: p.manifest.description,
+        author: p.manifest.author,
+        type: p.manifest.type,
+        state: p.state,
+        path: p.path,
+        loadedAt: p.loadedAt.getTime(),
+        error: p.error?.message,
+        capabilities: p.manifest.capabilities,
+        configSchema: p.manifest.configSchema,
+      }));
+    } catch (error) {
+      console.error('[Extensions] Failed to list:', error);
+      return [];
+    }
+  });
+
+  // Get single extension
+  ipcMain.handle(IPC_CHANNELS.EXTENSIONS_GET, async (_, name: string) => {
+    try {
+      const registry = getPluginRegistry();
+      const plugin = registry.getPlugin(name);
+      if (!plugin) return null;
+      return {
+        name: plugin.manifest.name,
+        displayName: plugin.manifest.displayName,
+        version: plugin.manifest.version,
+        description: plugin.manifest.description,
+        author: plugin.manifest.author,
+        type: plugin.manifest.type,
+        state: plugin.state,
+        path: plugin.path,
+        loadedAt: plugin.loadedAt.getTime(),
+        error: plugin.error?.message,
+        capabilities: plugin.manifest.capabilities,
+        configSchema: plugin.manifest.configSchema,
+      };
+    } catch (error) {
+      console.error('[Extensions] Failed to get:', error);
+      return null;
+    }
+  });
+
+  // Enable extension
+  ipcMain.handle(IPC_CHANNELS.EXTENSIONS_ENABLE, async (_, name: string) => {
+    try {
+      const registry = getPluginRegistry();
+      await registry.enablePlugin(name);
+      return { success: true };
+    } catch (error: any) {
+      console.error('[Extensions] Failed to enable:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Disable extension
+  ipcMain.handle(IPC_CHANNELS.EXTENSIONS_DISABLE, async (_, name: string) => {
+    try {
+      const registry = getPluginRegistry();
+      await registry.disablePlugin(name);
+      return { success: true };
+    } catch (error: any) {
+      console.error('[Extensions] Failed to disable:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Reload extension
+  ipcMain.handle(IPC_CHANNELS.EXTENSIONS_RELOAD, async (_, name: string) => {
+    try {
+      const registry = getPluginRegistry();
+      await registry.reloadPlugin(name);
+      return { success: true };
+    } catch (error: any) {
+      console.error('[Extensions] Failed to reload:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Get extension config
+  ipcMain.handle(IPC_CHANNELS.EXTENSIONS_GET_CONFIG, async (_, name: string) => {
+    try {
+      const registry = getPluginRegistry();
+      return registry.getPluginConfig(name) || {};
+    } catch (error) {
+      console.error('[Extensions] Failed to get config:', error);
+      return {};
+    }
+  });
+
+  // Set extension config
+  ipcMain.handle(IPC_CHANNELS.EXTENSIONS_SET_CONFIG, async (_, data: { name: string; config: Record<string, unknown> }) => {
+    try {
+      const registry = getPluginRegistry();
+      await registry.setPluginConfig(data.name, data.config);
+      return { success: true };
+    } catch (error: any) {
+      console.error('[Extensions] Failed to set config:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Discover extensions (re-scan directories)
+  ipcMain.handle(IPC_CHANNELS.EXTENSIONS_DISCOVER, async () => {
+    try {
+      const registry = getPluginRegistry();
+      await registry.initialize();
+      const plugins = registry.getPlugins();
+      return plugins.map(p => ({
+        name: p.manifest.name,
+        displayName: p.manifest.displayName,
+        version: p.manifest.version,
+        description: p.manifest.description,
+        type: p.manifest.type,
+        state: p.state,
+      }));
+    } catch (error) {
+      console.error('[Extensions] Failed to discover:', error);
+      return [];
+    }
+  });
+
+  console.log('[Extensions] Handlers initialized');
+
+  // === Webhook Tunnel Handlers ===
+  let tunnelManager: any = null;
+
+  // Get tunnel status
+  ipcMain.handle(IPC_CHANNELS.TUNNEL_GET_STATUS, async () => {
+    try {
+      if (!tunnelManager) {
+        return { status: 'stopped' };
+      }
+      return {
+        status: tunnelManager.status,
+        provider: tunnelManager.config?.provider,
+        url: tunnelManager.url,
+        error: tunnelManager.error?.message,
+        startedAt: tunnelManager.startedAt?.getTime(),
+      };
+    } catch (error) {
+      console.error('[Tunnel] Failed to get status:', error);
+      return { status: 'stopped' };
+    }
+  });
+
+  // Start tunnel
+  ipcMain.handle(IPC_CHANNELS.TUNNEL_START, async (_, config: any) => {
+    try {
+      const { TunnelManager } = await import('../gateway/tunnel');
+      if (tunnelManager) {
+        await tunnelManager.stop();
+      }
+      tunnelManager = new TunnelManager(config);
+      const url = await tunnelManager.start();
+      return { success: true, url };
+    } catch (error: any) {
+      console.error('[Tunnel] Failed to start:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Stop tunnel
+  ipcMain.handle(IPC_CHANNELS.TUNNEL_STOP, async () => {
+    try {
+      if (tunnelManager) {
+        await tunnelManager.stop();
+        tunnelManager = null;
+      }
+      return { success: true };
+    } catch (error: any) {
+      console.error('[Tunnel] Failed to stop:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  console.log('[Tunnel] Handlers initialized');
 }

@@ -238,6 +238,25 @@ const IPC_CHANNELS = {
   MEMORY_GET_STATS: 'memory:getStats',
   MEMORY_CLEAR: 'memory:clear',
   MEMORY_EVENT: 'memory:event',
+
+  // Migration Status (for showing one-time notifications after app rename)
+  MIGRATION_GET_STATUS: 'migration:getStatus',
+  MIGRATION_DISMISS_NOTIFICATION: 'migration:dismissNotification',
+
+  // Extensions / Plugins
+  EXTENSIONS_LIST: 'extensions:list',
+  EXTENSIONS_GET: 'extensions:get',
+  EXTENSIONS_ENABLE: 'extensions:enable',
+  EXTENSIONS_DISABLE: 'extensions:disable',
+  EXTENSIONS_RELOAD: 'extensions:reload',
+  EXTENSIONS_GET_CONFIG: 'extensions:getConfig',
+  EXTENSIONS_SET_CONFIG: 'extensions:setConfig',
+  EXTENSIONS_DISCOVER: 'extensions:discover',
+
+  // Webhook Tunnel
+  TUNNEL_GET_STATUS: 'tunnel:getStatus',
+  TUNNEL_START: 'tunnel:start',
+  TUNNEL_STOP: 'tunnel:stop',
 } as const;
 
 // Mobile Companion Node types (inlined for sandboxed preload)
@@ -1381,6 +1400,27 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on(IPC_CHANNELS.MEMORY_EVENT, subscription);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.MEMORY_EVENT, subscription);
   },
+
+  // Migration Status APIs
+  getMigrationStatus: () => ipcRenderer.invoke(IPC_CHANNELS.MIGRATION_GET_STATUS),
+  dismissMigrationNotification: () => ipcRenderer.invoke(IPC_CHANNELS.MIGRATION_DISMISS_NOTIFICATION),
+
+  // Extensions / Plugin APIs
+  getExtensions: () => ipcRenderer.invoke(IPC_CHANNELS.EXTENSIONS_LIST),
+  getExtension: (name: string) => ipcRenderer.invoke(IPC_CHANNELS.EXTENSIONS_GET, name),
+  enableExtension: (name: string) => ipcRenderer.invoke(IPC_CHANNELS.EXTENSIONS_ENABLE, name),
+  disableExtension: (name: string) => ipcRenderer.invoke(IPC_CHANNELS.EXTENSIONS_DISABLE, name),
+  reloadExtension: (name: string) => ipcRenderer.invoke(IPC_CHANNELS.EXTENSIONS_RELOAD, name),
+  getExtensionConfig: (name: string) => ipcRenderer.invoke(IPC_CHANNELS.EXTENSIONS_GET_CONFIG, name),
+  setExtensionConfig: (name: string, config: Record<string, unknown>) =>
+    ipcRenderer.invoke(IPC_CHANNELS.EXTENSIONS_SET_CONFIG, { name, config }),
+  discoverExtensions: () => ipcRenderer.invoke(IPC_CHANNELS.EXTENSIONS_DISCOVER),
+
+  // Webhook Tunnel APIs
+  getTunnelStatus: () => ipcRenderer.invoke(IPC_CHANNELS.TUNNEL_GET_STATUS),
+  startTunnel: (config: { provider: string; port: number; ngrokAuthToken?: string; ngrokRegion?: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TUNNEL_START, config),
+  stopTunnel: () => ipcRenderer.invoke(IPC_CHANNELS.TUNNEL_STOP),
 });
 
 // Type declarations for TypeScript
@@ -1448,7 +1488,7 @@ export interface ElectronAPI {
   getBedrockModels: (config?: { region?: string; accessKeyId?: string; secretAccessKey?: string; profile?: string }) => Promise<Array<{ id: string; name: string; provider: string; description: string }>>;
   // Gateway / Channel APIs
   getGatewayChannels: () => Promise<any[]>;
-  addGatewayChannel: (data: { type: string; name: string; botToken?: string; securityMode?: string; applicationId?: string; guildIds?: string[]; appToken?: string; signingSecret?: string; allowedNumbers?: string[]; selfChatMode?: boolean; responsePrefix?: string; cliPath?: string; dbPath?: string; allowedContacts?: string[]; dmPolicy?: string; groupPolicy?: string }) => Promise<any>;
+  addGatewayChannel: (data: { type: string; name: string; botToken?: string; securityMode?: string; applicationId?: string; guildIds?: string[]; appToken?: string; signingSecret?: string; allowedNumbers?: string[]; selfChatMode?: boolean; responsePrefix?: string; cliPath?: string; dbPath?: string; allowedContacts?: string[]; dmPolicy?: string; groupPolicy?: string; phoneNumber?: string; dataDir?: string; mode?: string; trustMode?: string; sendReadReceipts?: boolean; sendTypingIndicators?: boolean }) => Promise<any>;
   updateGatewayChannel: (data: { id: string; name?: string; securityMode?: string; config?: { selfChatMode?: boolean; responsePrefix?: string; [key: string]: unknown } }) => Promise<void>;
   removeGatewayChannel: (id: string) => Promise<void>;
   enableGatewayChannel: (id: string) => Promise<void>;
@@ -1825,6 +1865,63 @@ export interface ElectronAPI {
   getMemoryStats: (workspaceId: string) => Promise<MemoryStats>;
   clearMemory: (workspaceId: string) => Promise<{ success: boolean }>;
   onMemoryEvent: (callback: (event: { type: string; workspaceId: string }) => void) => () => void;
+
+  // Migration Status
+  getMigrationStatus: () => Promise<MigrationStatus>;
+  dismissMigrationNotification: () => Promise<{ success: boolean }>;
+
+  // Extensions / Plugins
+  getExtensions: () => Promise<ExtensionData[]>;
+  getExtension: (name: string) => Promise<ExtensionData | null>;
+  enableExtension: (name: string) => Promise<{ success: boolean; error?: string }>;
+  disableExtension: (name: string) => Promise<{ success: boolean; error?: string }>;
+  reloadExtension: (name: string) => Promise<{ success: boolean; error?: string }>;
+  getExtensionConfig: (name: string) => Promise<Record<string, unknown>>;
+  setExtensionConfig: (name: string, config: Record<string, unknown>) => Promise<{ success: boolean; error?: string }>;
+  discoverExtensions: () => Promise<ExtensionData[]>;
+
+  // Webhook Tunnel
+  getTunnelStatus: () => Promise<TunnelStatusData>;
+  startTunnel: (config: { provider: string; port: number; ngrokAuthToken?: string; ngrokRegion?: string }) => Promise<{ success: boolean; url?: string; error?: string }>;
+  stopTunnel: () => Promise<{ success: boolean; error?: string }>;
+}
+
+// Migration status type (for showing one-time notifications after app rename)
+export interface MigrationStatus {
+  migrated: boolean;
+  notificationDismissed: boolean;
+  timestamp?: string;
+}
+
+// Extension / Plugin types (duplicated from shared/types since preload is sandboxed)
+export type ExtensionType = 'channel' | 'tool' | 'provider' | 'integration';
+export type ExtensionState = 'loading' | 'loaded' | 'registered' | 'active' | 'error' | 'disabled';
+
+export interface ExtensionData {
+  name: string;
+  displayName: string;
+  version: string;
+  description: string;
+  author?: string;
+  type: ExtensionType;
+  state: ExtensionState;
+  path: string;
+  loadedAt: number;
+  error?: string;
+  capabilities?: Record<string, boolean>;
+  configSchema?: Record<string, unknown>;
+}
+
+// Webhook Tunnel types
+export type TunnelProvider = 'ngrok' | 'tailscale' | 'cloudflare' | 'localtunnel';
+export type TunnelStatus = 'stopped' | 'starting' | 'running' | 'error';
+
+export interface TunnelStatusData {
+  status: TunnelStatus;
+  provider?: TunnelProvider;
+  url?: string;
+  error?: string;
+  startedAt?: number;
 }
 
 declare global {

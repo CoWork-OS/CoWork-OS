@@ -356,6 +356,34 @@ export class TaskEventRepository {
       payload: safeJsonParse(row.payload, {}, 'taskEvent.payload'),
     };
   }
+
+  /**
+   * Prune old conversation snapshots for a task, keeping only the most recent one.
+   * This prevents database bloat from accumulating snapshots over time.
+   */
+  pruneOldSnapshots(taskId: string): void {
+    // Find all conversation_snapshot events for this task, ordered by timestamp descending
+    const findStmt = this.db.prepare(`
+      SELECT id, timestamp FROM task_events
+      WHERE task_id = ? AND type = 'conversation_snapshot'
+      ORDER BY timestamp DESC
+    `);
+    const snapshots = findStmt.all(taskId) as { id: string; timestamp: number }[];
+
+    // Keep only the most recent one, delete the rest
+    if (snapshots.length > 1) {
+      const idsToDelete = snapshots.slice(1).map(s => s.id);
+      const deleteStmt = this.db.prepare(`
+        DELETE FROM task_events WHERE id = ?
+      `);
+
+      for (const id of idsToDelete) {
+        deleteStmt.run(id);
+      }
+
+      console.log(`[TaskEventRepository] Pruned ${idsToDelete.length} old snapshot(s) for task ${taskId}`);
+    }
+  }
 }
 
 export class ArtifactRepository {

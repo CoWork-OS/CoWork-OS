@@ -48,7 +48,7 @@ Your AI needs a secure home. CoWork OS provides the runtime, security layers, an
 ---
 
 <p align="center">
-  <img src="screenshots/cowork-oss4.jpeg" alt="CoWork OS Interface" width="700">
+  <img src="screenshots/cowork-os-main.png" alt="CoWork OS Interface" width="700">
   <br>
   <em>Terminal-inspired UI with real-time task timeline</em>
 </p>

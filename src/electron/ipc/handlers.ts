@@ -22,6 +22,7 @@ import {
   SkillRepository,
   LLMModelRepository,
 } from '../database/repositories';
+import { AgentRoleRepository } from '../agents/AgentRoleRepository';
 import { IPC_CHANNELS, LLMSettingsData, AddChannelRequest, UpdateChannelRequest, SecurityMode, UpdateInfo, TEMP_WORKSPACE_ID, TEMP_WORKSPACE_NAME, Workspace } from '../../shared/types';
 import * as os from 'os';
 import { AgentDaemon } from '../agent/daemon';
@@ -126,6 +127,10 @@ export async function setupIpcHandlers(
   const artifactRepo = new ArtifactRepository(db);
   const skillRepo = new SkillRepository(db);
   const llmModelRepo = new LLMModelRepository(db);
+  const agentRoleRepo = new AgentRoleRepository(db);
+
+  // Seed default agent roles if none exist
+  agentRoleRepo.seedDefaults();
 
   // Helper to validate path is within workspace (prevent path traversal attacks)
   const isPathWithinWorkspace = (filePath: string, workspacePath: string): boolean => {
@@ -1300,6 +1305,89 @@ export async function setupIpcHandlers(
       };
     }
 
+    if (validated.type === 'line') {
+      const channel = await gateway.addLineChannel(
+        validated.name,
+        validated.lineChannelAccessToken!,
+        validated.lineChannelSecret!,
+        validated.lineWebhookPort ?? 3100,
+        validated.securityMode || 'pairing'
+      );
+
+      // Automatically enable and connect LINE
+      gateway.enableChannel(channel.id).catch((err) => {
+        console.error('Failed to enable LINE channel:', err);
+      });
+
+      return {
+        id: channel.id,
+        type: channel.type,
+        name: channel.name,
+        enabled: channel.enabled,
+        status: 'connecting',
+        securityMode: channel.securityConfig.mode,
+        createdAt: channel.createdAt,
+        config: channel.config,
+      };
+    }
+
+    if (validated.type === 'bluebubbles') {
+      const channel = await gateway.addBlueBubblesChannel(
+        validated.name,
+        validated.blueBubblesServerUrl!,
+        validated.blueBubblesPassword!,
+        validated.blueBubblesWebhookPort ?? 3101,
+        validated.blueBubblesAllowedContacts,
+        validated.securityMode || 'pairing'
+      );
+
+      // Automatically enable and connect BlueBubbles
+      gateway.enableChannel(channel.id).catch((err) => {
+        console.error('Failed to enable BlueBubbles channel:', err);
+      });
+
+      return {
+        id: channel.id,
+        type: channel.type,
+        name: channel.name,
+        enabled: channel.enabled,
+        status: 'connecting',
+        securityMode: channel.securityConfig.mode,
+        createdAt: channel.createdAt,
+        config: channel.config,
+      };
+    }
+
+    if (validated.type === 'email') {
+      const channel = await gateway.addEmailChannel(
+        validated.name,
+        validated.emailAddress!,
+        validated.emailPassword!,
+        validated.emailImapHost!,
+        validated.emailSmtpHost!,
+        validated.emailDisplayName,
+        validated.emailAllowedSenders,
+        validated.emailSubjectFilter,
+        validated.securityMode || 'pairing'
+      );
+
+      // Automatically enable and connect Email
+      gateway.enableChannel(channel.id).catch((err) => {
+        console.error('Failed to enable Email channel:', err);
+      });
+
+      return {
+        id: channel.id,
+        type: channel.type,
+        name: channel.name,
+        enabled: channel.enabled,
+        status: 'connecting',
+        securityMode: channel.securityConfig.mode,
+        createdAt: channel.createdAt,
+        config: channel.config,
+      };
+    }
+
     // TypeScript exhaustiveness check - should never reach here due to discriminated union
     throw new Error(`Unsupported channel type`);
   });
@@ -1478,6 +1566,73 @@ export async function setupIpcHandlers(
     PersonalityManager.resetToDefaults(preserveRelationship);
     // Event emission is handled by PersonalityManager.resetToDefaults()
     return { success: true };
+  });
+
+  // Agent Role / Squad handlers
+  ipcMain.handle(IPC_CHANNELS.AGENT_ROLE_LIST, async (_, includeInactive?: boolean) => {
+    return agentRoleRepo.findAll(includeInactive ?? false);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.AGENT_ROLE_GET, async (_, id: string) => {
+    const validated = validateInput(UUIDSchema, id, 'agent role ID');
+    return agentRoleRepo.findById(validated);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.AGENT_ROLE_CREATE, async (_, request) => {
+    checkRateLimit(IPC_CHANNELS.AGENT_ROLE_CREATE);
+    // Validate name format (lowercase, alphanumeric, hyphens)
+    if (!/^[a-z0-9-]+$/.test(request.name)) {
+      throw new Error('Agent role name must be lowercase alphanumeric with hyphens only');
+    }
+    // Check for duplicate name
+    if (agentRoleRepo.findByName(request.name)) {
+      throw new Error(`Agent role with name "${request.name}" already exists`);
+    }
+    return agentRoleRepo.create(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.AGENT_ROLE_UPDATE, async (_, request) => {
+    checkRateLimit(IPC_CHANNELS.AGENT_ROLE_UPDATE);
+    const validated = validateInput(UUIDSchema, request.id, 'agent role ID');
+    const result = agentRoleRepo.update({ ...request, id: validated });
+    if (!result) {
+      throw new Error('Agent role not found');
+    }
+    return result;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.AGENT_ROLE_DELETE, async (_, id: string) => {
+    checkRateLimit(IPC_CHANNELS.AGENT_ROLE_DELETE);
+    const validated = validateInput(UUIDSchema, id, 'agent role ID');
+    const success = agentRoleRepo.delete(validated);
+    if (!success) {
+      throw new Error('Agent role not found or cannot be deleted');
+    }
+    return { success: true };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.AGENT_ROLE_ASSIGN_TO_TASK, async (_, taskId: string, agentRoleId: string | null) => {
+    checkRateLimit(IPC_CHANNELS.AGENT_ROLE_ASSIGN_TO_TASK);
+    const validatedTaskId = validateInput(UUIDSchema, taskId, 'task ID');
+    if (agentRoleId !== null) {
+      const validatedRoleId = validateInput(UUIDSchema, agentRoleId, 'agent role ID');
+      const role = agentRoleRepo.findById(validatedRoleId);
+      if (!role) {
+        throw new Error('Agent role not found');
+      }
+    }
+    taskRepo.update(validatedTaskId, { assignedAgentRoleId: agentRoleId ?? undefined } as any);
+    return { success: true };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.AGENT_ROLE_GET_DEFAULTS, async () => {
+    const { DEFAULT_AGENT_ROLES } = await import('../../shared/types');
+    return DEFAULT_AGENT_ROLES;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.AGENT_ROLE_SEED_DEFAULTS, async () => {
+    checkRateLimit(IPC_CHANNELS.AGENT_ROLE_SEED_DEFAULTS);
+    return agentRoleRepo.seedDefaults();
   });
 
   // Queue handlers

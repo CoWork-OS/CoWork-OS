@@ -278,6 +278,40 @@ export const AddTwitchChannelSchema = z.object({
   securityMode: SecurityModeSchema.optional(),
 });
 
+export const AddLineChannelSchema = z.object({
+  type: z.literal('line'),
+  name: z.string().min(1).max(MAX_TITLE_LENGTH),
+  lineChannelAccessToken: z.string().min(1).max(500),
+  lineChannelSecret: z.string().min(1).max(200),
+  lineWebhookPort: z.number().int().min(1024).max(65535).optional(),
+  securityMode: SecurityModeSchema.optional(),
+});
+
+export const AddBlueBubblesChannelSchema = z.object({
+  type: z.literal('bluebubbles'),
+  name: z.string().min(1).max(MAX_TITLE_LENGTH),
+  blueBubblesServerUrl: z.string().url().min(1).max(500),
+  blueBubblesPassword: z.string().min(1).max(500),
+  blueBubblesWebhookPort: z.number().int().min(1024).max(65535).optional(),
+  blueBubblesAllowedContacts: z.array(z.string().max(100)).max(100).optional(),
+  securityMode: SecurityModeSchema.optional(),
+});
+
+export const AddEmailChannelSchema = z.object({
+  type: z.literal('email'),
+  name: z.string().min(1).max(MAX_TITLE_LENGTH),
+  emailAddress: z.string().email().min(1).max(200),
+  emailPassword: z.string().min(1).max(500),
+  emailImapHost: z.string().min(1).max(200),
+  emailImapPort: z.number().int().min(1).max(65535).optional(),
+  emailSmtpHost: z.string().min(1).max(200),
+  emailSmtpPort: z.number().int().min(1).max(65535).optional(),
+  emailDisplayName: z.string().max(100).optional(),
+  emailAllowedSenders: z.array(z.string().max(200)).max(100).optional(),
+  emailSubjectFilter: z.string().max(200).optional(),
+  securityMode: SecurityModeSchema.optional(),
+});
+
 export const AddChannelSchema = z.discriminatedUnion('type', [
   AddTelegramChannelSchema,
   AddDiscordChannelSchema,
@@ -288,6 +322,9 @@ export const AddChannelSchema = z.discriminatedUnion('type', [
   AddMattermostChannelSchema,
   AddMatrixChannelSchema,
   AddTwitchChannelSchema,
+  AddLineChannelSchema,
+  AddBlueBubblesChannelSchema,
+  AddEmailChannelSchema,
 ]);
 
 export const ChannelConfigSchema = z.object({
@@ -400,7 +437,7 @@ export const MCPRegistrySearchSchema = z.object({
 
 // ============ Hooks (Webhooks) Schemas ============
 
-export const HookMappingChannelSchema = z.enum(['telegram', 'discord', 'slack', 'whatsapp', 'imessage', 'signal', 'mattermost', 'matrix', 'twitch', 'last']);
+export const HookMappingChannelSchema = z.enum(['telegram', 'discord', 'slack', 'whatsapp', 'imessage', 'signal', 'mattermost', 'matrix', 'twitch', 'line', 'bluebubbles', 'email', 'last']);
 
 export const HookMappingSchema = z.object({
   id: z.string().max(100).optional(),

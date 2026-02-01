@@ -8,7 +8,7 @@
 /**
  * Supported channel types
  */
-export type ChannelType = 'telegram' | 'discord' | 'slack' | 'whatsapp' | 'imessage' | 'signal' | 'mattermost' | 'matrix' | 'twitch';
+export type ChannelType = 'telegram' | 'discord' | 'slack' | 'whatsapp' | 'imessage' | 'signal' | 'mattermost' | 'matrix' | 'twitch' | 'line' | 'bluebubbles' | 'email';
 
 /**
  * Channel connection status
@@ -315,6 +315,91 @@ export interface TwitchConfig extends ChannelConfig {
   deduplicationEnabled?: boolean;
   /** Whether to respond to whispers (DMs) - default: false */
   allowWhispers?: boolean;
+}
+
+/**
+ * LINE-specific configuration
+ * Uses LINE Messaging API for communication
+ */
+export interface LineConfig extends ChannelConfig {
+  /** LINE Channel Access Token (long-lived) */
+  channelAccessToken: string;
+  /** LINE Channel Secret (for webhook signature verification) */
+  channelSecret: string;
+  /** Webhook port to listen on (default: 3100) */
+  webhookPort?: number;
+  /** Webhook path (default: /line/webhook) */
+  webhookPath?: string;
+  /** Response prefix for bot messages */
+  responsePrefix?: string;
+  /** Enable message deduplication (default: true) */
+  deduplicationEnabled?: boolean;
+  /** Whether to use reply tokens (faster) or push messages */
+  useReplyTokens?: boolean;
+}
+
+/**
+ * BlueBubbles-specific configuration
+ * Uses BlueBubbles REST API for iMessage integration
+ */
+export interface BlueBubblesConfig extends ChannelConfig {
+  /** BlueBubbles server URL (e.g., http://192.168.1.100:1234) */
+  serverUrl: string;
+  /** BlueBubbles server password */
+  password: string;
+  /** Enable webhook notifications (default: true) */
+  enableWebhook?: boolean;
+  /** Webhook port to listen on (default: 3101) */
+  webhookPort?: number;
+  /** Webhook path (default: /bluebubbles/webhook) */
+  webhookPath?: string;
+  /** Poll interval in ms if webhooks not available (default: 5000) */
+  pollInterval?: number;
+  /** Response prefix for bot messages */
+  responsePrefix?: string;
+  /** Enable message deduplication (default: true) */
+  deduplicationEnabled?: boolean;
+  /** Allowed contacts (phone numbers or emails) */
+  allowedContacts?: string[];
+}
+
+/**
+ * Email-specific configuration
+ * Uses IMAP for receiving and SMTP for sending
+ */
+export interface EmailConfig extends ChannelConfig {
+  /** IMAP server host */
+  imapHost: string;
+  /** IMAP server port (default: 993) */
+  imapPort?: number;
+  /** IMAP use SSL/TLS (default: true) */
+  imapSecure?: boolean;
+  /** SMTP server host */
+  smtpHost: string;
+  /** SMTP server port (default: 587) */
+  smtpPort?: number;
+  /** SMTP use SSL/TLS (default: false for STARTTLS) */
+  smtpSecure?: boolean;
+  /** Email address (used for both IMAP and SMTP) */
+  email: string;
+  /** Password or app password */
+  password: string;
+  /** Display name for outgoing emails */
+  displayName?: string;
+  /** IMAP mailbox to monitor (default: INBOX) */
+  mailbox?: string;
+  /** Poll interval in ms for IMAP IDLE fallback (default: 30000) */
+  pollInterval?: number;
+  /** Mark emails as read after processing (default: true) */
+  markAsRead?: boolean;
+  /** Response prefix for bot replies */
+  responsePrefix?: string;
+  /** Enable message deduplication (default: true) */
+  deduplicationEnabled?: boolean;
+  /** Allowed sender addresses (empty = allow all) */
+  allowedSenders?: string[];
+  /** Subject prefix filter (only process emails with this prefix) */
+  subjectFilter?: string;
 }
 
 /**

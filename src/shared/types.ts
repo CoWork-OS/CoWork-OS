@@ -364,6 +364,10 @@ export interface Task {
   agentConfig?: AgentConfig;   // Per-task agent configuration (model, personality, etc.)
   depth?: number;              // Nesting depth (0 = root, 1 = first child, etc.)
   resultSummary?: string;      // Summary of results for parent agent to consume
+  // Agent Squad fields
+  assignedAgentRoleId?: string; // ID of the agent role assigned to this task
+  boardColumn?: BoardColumn;    // Kanban column for task organization
+  priority?: number;            // Task priority (higher = more important)
 }
 
 export interface TaskEvent {
@@ -486,6 +490,157 @@ export interface Skill {
   parameters?: Record<string, any>;
 }
 
+// ============ Agent Squad / Role Types ============
+
+/**
+ * Capability types that define what an agent role can do
+ */
+export type AgentCapability = 'code' | 'review' | 'research' | 'test' | 'document' | 'plan' | 'design' | 'analyze';
+
+/**
+ * Tool restriction configuration for an agent role
+ */
+export interface AgentToolRestrictions {
+  allowedTools?: string[];
+  deniedTools?: string[];
+}
+
+/**
+ * Agent role defines a specialized agent with specific capabilities and configuration
+ */
+export interface AgentRole {
+  id: string;
+  name: string;                          // Unique identifier (e.g., 'code-reviewer')
+  displayName: string;                   // Human-readable name (e.g., 'Code Reviewer')
+  description?: string;                  // What this agent does
+  icon: string;                          // Emoji or icon
+  color: string;                         // Hex color for UI
+  personalityId?: PersonalityId;         // Override personality
+  modelKey?: string;                     // Override model (e.g., 'opus-4-5')
+  providerType?: LLMProviderType;        // Override provider
+  systemPrompt?: string;                 // Additional system prompt
+  capabilities: AgentCapability[];       // What this agent can do
+  toolRestrictions?: AgentToolRestrictions; // Tool access control
+  isSystem: boolean;                     // Built-in vs custom
+  isActive: boolean;                     // Enabled/disabled
+  sortOrder: number;                     // Display order
+  createdAt: number;
+  updatedAt: number;
+}
+
+/**
+ * Request to create a new agent role
+ */
+export interface CreateAgentRoleRequest {
+  name: string;
+  displayName: string;
+  description?: string;
+  icon?: string;
+  color?: string;
+  personalityId?: PersonalityId;
+  modelKey?: string;
+  providerType?: LLMProviderType;
+  systemPrompt?: string;
+  capabilities: AgentCapability[];
+  toolRestrictions?: AgentToolRestrictions;
+}
+
+/**
+ * Request to update an agent role
+ */
+export interface UpdateAgentRoleRequest {
+  id: string;
+  displayName?: string;
+  description?: string;
+  icon?: string;
+  color?: string;
+  personalityId?: PersonalityId;
+  modelKey?: string;
+  providerType?: LLMProviderType;
+  systemPrompt?: string;
+  capabilities?: AgentCapability[];
+  toolRestrictions?: AgentToolRestrictions;
+  isActive?: boolean;
+  sortOrder?: number;
+}
+
+/**
+ * Default agent roles that come pre-configured
+ */
+export const DEFAULT_AGENT_ROLES: Omit<AgentRole, 'id' | 'createdAt' | 'updatedAt'>[] = [
+  {
+    name: 'coder',
+    displayName: 'Coder',
+    description: 'Writes clean, efficient code and implements features',
+    icon: '💻',
+    color: '#3b82f6',
+    capabilities: ['code', 'document'],
+    isSystem: true,
+    isActive: true,
+    sortOrder: 1,
+  },
+  {
+    name: 'reviewer',
+    displayName: 'Code Reviewer',
+    description: 'Reviews code for bugs, security issues, and best practices',
+    icon: '🔍',
+    color: '#8b5cf6',
+    capabilities: ['review', 'analyze'],
+    isSystem: true,
+    isActive: true,
+    sortOrder: 2,
+  },
+  {
+    name: 'researcher',
+    displayName: 'Researcher',
+    description: 'Investigates solutions, analyzes options, and gathers information',
+    icon: '🔬',
+    color: '#10b981',
+    capabilities: ['research', 'analyze', 'document'],
+    isSystem: true,
+    isActive: true,
+    sortOrder: 3,
+  },
+  {
+    name: 'tester',
+    displayName: 'Tester',
+    description: 'Writes and runs tests, finds edge cases and bugs',
+    icon: '🧪',
+    color: '#f59e0b',
+    capabilities: ['test', 'review'],
+    isSystem: true,
+    isActive: true,
+    sortOrder: 4,
+  },
+  {
+    name: 'architect',
+    displayName: 'Architect',
+    description: 'Designs system architecture and plans implementation',
+    icon: '🏗️',
+    color: '#ec4899',
+    capabilities: ['plan', 'design', 'analyze'],
+    isSystem: true,
+    isActive: true,
+    sortOrder: 5,
+  },
+];
+
+/**
+ * Board column for task organization (Kanban)
+ */
+export type BoardColumn = 'backlog' | 'todo' | 'in_progress' | 'review' | 'done';
+
+/**
+ * Board column definitions for UI
+ */
+export const BOARD_COLUMNS: { id: BoardColumn; label: string; color: string }[] = [
+  { id: 'backlog', label: 'Backlog', color: '#6b7280' },
+  { id: 'todo', label: 'To Do', color: '#3b82f6' },
+  { id: 'in_progress', label: 'In Progress', color: '#f59e0b' },
+  { id: 'review', label: 'Review', color: '#8b5cf6' },
+  { id: 'done', label: 'Done', color: '#10b981' },
+];
+
 // IPC Channel names
 export const IPC_CHANNELS = {
   // Task operations
@@ -501,6 +656,16 @@ export const IPC_CHANNELS = {
   // Sub-Agent / Parallel Agent operations
   AGENT_GET_CHILDREN: 'agent:getChildren',    // Get child tasks for a parent
   AGENT_GET_STATUS: 'agent:getStatus',        // Get status of spawned agents
+
+  // Agent Role / Squad operations
+  AGENT_ROLE_LIST: 'agentRole:list',
+  AGENT_ROLE_GET: 'agentRole:get',
+  AGENT_ROLE_CREATE: 'agentRole:create',
+  AGENT_ROLE_UPDATE: 'agentRole:update',
+  AGENT_ROLE_DELETE: 'agentRole:delete',
+  AGENT_ROLE_ASSIGN_TO_TASK: 'agentRole:assignToTask',
+  AGENT_ROLE_GET_DEFAULTS: 'agentRole:getDefaults',
+  AGENT_ROLE_SEED_DEFAULTS: 'agentRole:seedDefaults',
 
   // Task events (streaming and history)
   TASK_EVENT: 'task:event',
@@ -861,7 +1026,7 @@ export interface LLMConfigStatus {
 }
 
 // Gateway / Channel types
-export type ChannelType = 'telegram' | 'discord' | 'slack' | 'whatsapp' | 'imessage' | 'signal' | 'mattermost' | 'matrix' | 'twitch';
+export type ChannelType = 'telegram' | 'discord' | 'slack' | 'whatsapp' | 'imessage' | 'signal' | 'mattermost' | 'matrix' | 'twitch' | 'line' | 'bluebubbles' | 'email';
 export type ChannelStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 export type SecurityMode = 'open' | 'allowlist' | 'pairing';
 
@@ -934,6 +1099,26 @@ export interface AddChannelRequest {
   twitchOauthToken?: string;
   twitchChannels?: string[];
   twitchAllowWhispers?: boolean;
+  // LINE-specific fields
+  lineChannelAccessToken?: string;
+  lineChannelSecret?: string;
+  lineWebhookPort?: number;
+  lineWebhookPath?: string;
+  // BlueBubbles-specific fields
+  blueBubblesServerUrl?: string;
+  blueBubblesPassword?: string;
+  blueBubblesWebhookPort?: number;
+  blueBubblesAllowedContacts?: string[];
+  // Email-specific fields
+  emailAddress?: string;
+  emailPassword?: string;
+  emailImapHost?: string;
+  emailImapPort?: number;
+  emailSmtpHost?: string;
+  emailSmtpPort?: number;
+  emailDisplayName?: string;
+  emailAllowedSenders?: string[];
+  emailSubjectFilter?: string;
 }
 
 export interface UpdateChannelRequest {

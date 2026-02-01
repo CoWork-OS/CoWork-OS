@@ -22,8 +22,9 @@ import { ControlPlaneSettings } from './ControlPlaneSettings';
 import { PersonalitySettings } from './PersonalitySettings';
 import { NodesSettings } from './NodesSettings';
 import { ExtensionsSettings } from './ExtensionsSettings';
+import { AgentSquadSettings } from './AgentSquadSettings';
 
-type SettingsTab = 'appearance' | 'personality' | 'tray' | 'llm' | 'search' | 'telegram' | 'discord' | 'slack' | 'whatsapp' | 'imessage' | 'signal' | 'updates' | 'guardrails' | 'queue' | 'skills' | 'skillhub' | 'mcp' | 'tools' | 'scheduled' | 'hooks' | 'controlplane' | 'nodes' | 'extensions';
+type SettingsTab = 'appearance' | 'personality' | 'squad' | 'tray' | 'llm' | 'search' | 'telegram' | 'discord' | 'slack' | 'whatsapp' | 'imessage' | 'signal' | 'updates' | 'guardrails' | 'queue' | 'skills' | 'skillhub' | 'mcp' | 'tools' | 'scheduled' | 'hooks' | 'controlplane' | 'nodes' | 'extensions';
 
 interface SettingsProps {
   onBack: () => void;
@@ -691,6 +692,17 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
             </svg>
             Personality
           </button>
+          <button
+            className={`settings-nav-item ${activeTab === 'squad' ? 'active' : ''}`}
+            onClick={() => setActiveTab('squad')}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="9" cy="7" r="4" />
+              <path d="M17 7a4 4 0 0 1 0 8" />
+              <path d="M9 15a7 7 0 0 0-7 7h14a7 7 0 0 0-7-7z" />
+            </svg>
+            Agent Squad
+          </button>
           {navigator.platform.toLowerCase().includes('mac') && (
             <button
               className={`settings-nav-item ${activeTab === 'tray' ? 'active' : ''}`}
@@ -923,6 +935,8 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
             />
           ) : activeTab === 'personality' ? (
             <PersonalitySettings onSettingsChanged={onSettingsChanged} />
+          ) : activeTab === 'squad' ? (
+            <AgentSquadSettings onSettingsChanged={onSettingsChanged} />
           ) : activeTab === 'tray' ? (
             <TraySettings />
           ) : activeTab === 'telegram' ? (

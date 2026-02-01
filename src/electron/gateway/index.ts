@@ -22,6 +22,9 @@ import {
   MattermostConfig,
   MatrixConfig,
   TwitchConfig,
+  LineConfig,
+  BlueBubblesConfig,
+  EmailConfig,
   GatewayEventHandler,
 } from './channels/types';
 import { TelegramAdapter, createTelegramAdapter } from './channels/telegram';
@@ -33,6 +36,9 @@ import { SignalAdapter, createSignalAdapter } from './channels/signal';
 import { MattermostAdapter, createMattermostAdapter } from './channels/mattermost';
 import { MatrixAdapter, createMatrixAdapter } from './channels/matrix';
 import { TwitchAdapter, createTwitchAdapter } from './channels/twitch';
+import { LineAdapter, createLineAdapter } from './channels/line';
+import { BlueBubblesAdapter, createBlueBubblesAdapter } from './channels/bluebubbles';
+import { EmailAdapter, createEmailAdapter } from './channels/email';
 import {
   ChannelRepository,
   ChannelUserRepository,
@@ -603,6 +609,133 @@ export class ChannelGateway {
   }
 
   /**
+   * Add a new LINE channel
+   */
+  async addLineChannel(
+    name: string,
+    channelAccessToken: string,
+    channelSecret: string,
+    webhookPort: number = 3100,
+    securityMode: 'open' | 'allowlist' | 'pairing' = 'pairing'
+  ): Promise<Channel> {
+    // Check if LINE channel already exists
+    const existing = this.channelRepo.findByType('line');
+    if (existing) {
+      throw new Error('LINE channel already configured. Update or remove it first.');
+    }
+
+    // Create channel record
+    const channel = this.channelRepo.create({
+      type: 'line',
+      name,
+      enabled: false, // Don't enable until connected
+      config: {
+        channelAccessToken,
+        channelSecret,
+        webhookPort,
+      },
+      securityConfig: {
+        mode: securityMode,
+        allowedUsers: [],
+        pairingCodeTTL: 300,
+        maxPairingAttempts: 5,
+        rateLimitPerMinute: 30,
+      },
+      status: 'disconnected',
+    });
+
+    return channel;
+  }
+
+  /**
+   * Add a new BlueBubbles channel
+   */
+  async addBlueBubblesChannel(
+    name: string,
+    serverUrl: string,
+    password: string,
+    webhookPort: number = 3101,
+    allowedContacts?: string[],
+    securityMode: 'open' | 'allowlist' | 'pairing' = 'pairing'
+  ): Promise<Channel> {
+    // Check if BlueBubbles channel already exists
+    const existing = this.channelRepo.findByType('bluebubbles');
+    if (existing) {
+      throw new Error('BlueBubbles channel already configured. Update or remove it first.');
+    }
+
+    // Create channel record
+    const channel = this.channelRepo.create({
+      type: 'bluebubbles',
+      name,
+      enabled: false, // Don't enable until connected
+      config: {
+        serverUrl,
+        password,
+        webhookPort,
+        allowedContacts,
+      },
+      securityConfig: {
+        mode: securityMode,
+        allowedUsers: allowedContacts || [],
+        pairingCodeTTL: 300,
+        maxPairingAttempts: 5,
+        rateLimitPerMinute: 30,
+      },
+      status: 'disconnected',
+    });
+
+    return channel;
+  }
+
+  /**
+   * Add a new Email channel
+   */
+  async addEmailChannel(
+    name: string,
+    email: string,
+    password: string,
+    imapHost: string,
+    smtpHost: string,
+    displayName?: string,
+    allowedSenders?: string[],
+    subjectFilter?: string,
+    securityMode: 'open' | 'allowlist' | 'pairing' = 'pairing'
+  ): Promise<Channel> {
+    // Check if Email channel already exists
+    const existing = this.channelRepo.findByType('email');
+    if (existing) {
+      throw new Error('Email channel already configured. Update or remove it first.');
+    }
+
+    // Create channel record
+    const channel = this.channelRepo.create({
+      type: 'email',
+      name,
+      enabled: false, // Don't enable until connected
+      config: {
+        email,
+        password,
+        imapHost,
+        smtpHost,
+        displayName,
+        allowedSenders,
+        subjectFilter,
+      },
+      securityConfig: {
+        mode: securityMode,
+        allowedUsers: allowedSenders || [],
+        pairingCodeTTL: 300,
+        maxPairingAttempts: 5,
+        rateLimitPerMinute: 30,
+      },
+      status: 'disconnected',
+    });
+
+    return channel;
+  }
+
+  /**
    * Update a channel configuration
    */
   updateChannel(channelId: string, updates: Partial<Channel>): void {
@@ -1033,6 +1166,48 @@ export class ChannelGateway {
           responsePrefix: channel.config.responsePrefix as string | undefined,
         });
 
+      case 'line':
+        return createLineAdapter({
+          enabled: channel.enabled,
+          channelAccessToken: channel.config.channelAccessToken as string,
+          channelSecret: channel.config.channelSecret as string,
+          webhookPort: channel.config.webhookPort as number | undefined,
+          webhookPath: channel.config.webhookPath as string | undefined,
+          responsePrefix: channel.config.responsePrefix as string | undefined,
+        });
+
+      case 'bluebubbles':
+        return createBlueBubblesAdapter({
+          enabled: channel.enabled,
+          serverUrl: channel.config.serverUrl as string,
+          password: channel.config.password as string,
+          webhookPort: channel.config.webhookPort as number | undefined,
+          webhookPath: channel.config.webhookPath as string | undefined,
+          pollInterval: channel.config.pollInterval as number | undefined,
+          allowedContacts: channel.config.allowedContacts as string[] | undefined,
+          responsePrefix: channel.config.responsePrefix as string | undefined,
+        });
+
+      case 'email':
+        return createEmailAdapter({
+          enabled: channel.enabled,
+          imapHost: channel.config.imapHost as string,
+          imapPort: channel.config.imapPort as number | undefined,
+          imapSecure: channel.config.imapSecure as boolean | undefined,
+          smtpHost: channel.config.smtpHost as string,
+          smtpPort: channel.config.smtpPort as number | undefined,
+          smtpSecure: channel.config.smtpSecure as boolean | undefined,
+          email: channel.config.email as string,
+          password: channel.config.password as string,
+          displayName: channel.config.displayName as string | undefined,
+          mailbox: channel.config.mailbox as string | undefined,
+          pollInterval: channel.config.pollInterval as number | undefined,
+          markAsRead: channel.config.markAsRead as boolean | undefined,
+          allowedSenders: channel.config.allowedSenders as string[] | undefined,
+          subjectFilter: channel.config.subjectFilter as string | undefined,
+          responsePrefix: channel.config.responsePrefix as string | undefined,
+        });
+
       default:
         throw new Error(`Unsupported channel type: ${channel.type}`);
     }
@@ -1058,5 +1233,11 @@ export { MatrixAdapter, createMatrixAdapter } from './channels/matrix';
 export { MatrixClient } from './channels/matrix-client';
 export { TwitchAdapter, createTwitchAdapter } from './channels/twitch';
 export { TwitchClient } from './channels/twitch-client';
+export { LineAdapter, createLineAdapter } from './channels/line';
+export { LineClient } from './channels/line-client';
+export { BlueBubblesAdapter, createBlueBubblesAdapter } from './channels/bluebubbles';
+export { BlueBubblesClient } from './channels/bluebubbles-client';
+export { EmailAdapter, createEmailAdapter } from './channels/email';
+export { EmailClient } from './channels/email-client';
 export { TunnelManager, getAvailableTunnelProviders, createAutoTunnel } from './tunnel';
 export type { TunnelProvider, TunnelStatus, TunnelConfig, TunnelInfo } from './tunnel';

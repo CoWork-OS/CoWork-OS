@@ -22,13 +22,13 @@
 
 **The operating system for personal AI assistants**
 
-Your AI needs a secure home. CoWork OS provides the runtime, security layers, and I/O channels to run AI agents across WhatsApp, Telegram, Discord, Slack, iMessage, Signal, Mattermost, Matrix, and Twitch — with the control you expect from an operating system.
+Your AI needs a secure home. CoWork OS provides the runtime, security layers, and I/O channels to run AI agents across WhatsApp, Telegram, Discord, Slack, iMessage, Signal, Mattermost, Matrix, Twitch, LINE, BlueBubbles, and Email — with the control you expect from an operating system.
 
 | | |
 |---|---|
 | **6 AI Providers** | Claude, GPT-4, Gemini, Bedrock, OpenRouter, Ollama (free/local) |
-| **9 Messaging Channels** | WhatsApp, Telegram, Discord, Slack, iMessage, Signal, Mattermost, Matrix, Twitch |
-| **Security-First** | 390+ unit tests, configurable guardrails, approval workflows |
+| **12 Messaging Channels** | WhatsApp, Telegram, Discord, Slack, iMessage, Signal, Mattermost, Matrix, Twitch, LINE, BlueBubbles, Email |
+| **Security-First** | 1800+ unit tests, configurable guardrails, approval workflows |
 | **Local-First** | Your data stays on your machine. BYOK (Bring Your Own Key) |
 
 > **Status**: macOS desktop app (cross-platform support planned)
@@ -51,7 +51,7 @@ Your AI needs a secure home. CoWork OS provides the runtime, security layers, an
 - **Dangerous command blocking**: Built-in patterns + custom regex rules
 - **Approval workflows**: User consent required for destructive operations
 - **Pairing & allowlists**: Control who can access your AI via messaging channels
-- **390+ security tests**: Comprehensive test coverage for access control and policies
+- **1800+ tests**: Comprehensive test coverage for access control and policies
 
 ### Your Data, Your Control
 
@@ -62,7 +62,7 @@ Your AI needs a secure home. CoWork OS provides the runtime, security layers, an
 
 ### Connect from Anywhere
 
-- Message your AI from WhatsApp, Telegram, Discord, Slack, iMessage, Signal, Mattermost, Matrix, or Twitch
+- Message your AI from WhatsApp, Telegram, Discord, Slack, iMessage, Signal, Mattermost, Matrix, Twitch, LINE, BlueBubbles, or Email
 - Schedule recurring tasks with cron expressions
 - Secure remote access via Tailscale or SSH tunnels
 - WebSocket API for custom integrations
@@ -131,6 +131,9 @@ CoWork OS is **free and open source**. To run tasks, configure your own model cr
 - **Mattermost**: WebSocket real-time, REST API, team/channel support
 - **Matrix**: Federated messaging, room-based, end-to-end encryption ready
 - **Twitch**: IRC chat integration, multi-channel, whisper support
+- **LINE**: Messaging API webhooks, reply tokens, 200M+ users in Asia
+- **BlueBubbles**: iMessage via Mac server, SMS support, attachments
+- **Email**: IMAP/SMTP, any email provider, subject filtering, threading
 
 All channels support:
 - Security modes (pairing, allowlist, open)
@@ -418,7 +421,7 @@ Schedule recurring tasks with cron expressions and optional channel delivery.
 
 - **Cron Expressions**: Standard cron syntax (minute, hour, day, month, weekday)
 - **Workspace Binding**: Each job runs in a specific workspace
-- **Channel Delivery**: Send results to Telegram, Discord, Slack, WhatsApp, iMessage, Signal, Mattermost, Matrix, or Twitch
+- **Channel Delivery**: Send results to Telegram, Discord, Slack, WhatsApp, iMessage, Signal, Mattermost, Matrix, Twitch, LINE, BlueBubbles, or Email
 - **Run History**: View execution history with status and duration
 - **Enable/Disable**: Toggle jobs without deleting them
 
@@ -780,6 +783,193 @@ Run tasks via Twitch chat using IRC over WebSocket.
 
 ---
 
+## LINE Bot Integration
+
+Run tasks via LINE Messaging API with webhooks and push/reply messages.
+
+### Prerequisites
+
+- LINE Developers account ([developers.line.biz](https://developers.line.biz/))
+- Messaging API channel with Channel Access Token and Channel Secret
+- Public webhook URL (use ngrok or cloudflare tunnel for development)
+
+### Setting Up LINE
+
+1. **Create a LINE Messaging API Channel**:
+   - Go to [LINE Developers Console](https://developers.line.biz/console/)
+   - Create a new provider or select existing
+   - Create a new Messaging API channel
+   - Copy the Channel Access Token (long-lived)
+   - Copy the Channel Secret
+
+2. **Configure in CoWork OS**:
+   - Open **Settings** > **LINE** tab
+   - Enter your Channel Access Token
+   - Enter your Channel Secret
+   - Configure webhook port (default: 3100)
+   - Click **Connect LINE**
+
+3. **Configure Webhook in LINE Console**:
+   - Set webhook URL to your public endpoint (e.g., `https://your-domain.com/line/webhook`)
+   - Enable "Use webhook"
+   - Disable "Auto-reply messages" and "Greeting messages"
+
+### Security Modes
+
+| Mode | Description |
+|------|-------------|
+| **Pairing** (default) | Users must enter a pairing code to interact |
+| **Allowlist** | Only pre-approved LINE user IDs can message |
+| **Open** | Anyone can message (not recommended) |
+
+### Bot Commands
+
+| Command | Description |
+|---------|-------------|
+| `/workspaces` | List available workspaces |
+| `/workspace <n>` | Select workspace by number |
+| `/newtask` | Start fresh conversation |
+| `/status` | Check bot status |
+| `/cancel` | Cancel running task |
+| `/pair <code>` | Pair with code |
+
+### Message Types
+
+- **Reply Messages**: Free, use reply tokens (valid 1 minute)
+- **Push Messages**: Uses monthly quota, for proactive messaging
+
+### Important Notes
+
+- **Reply tokens are ephemeral** - valid only for ~1 minute after receiving a message
+- **Push messages count against quota** - free plan has limited monthly messages
+- **Media messages** require hosting URLs (image/video sending not fully implemented)
+
+---
+
+## BlueBubbles Bot Integration
+
+Run tasks via iMessage using BlueBubbles server running on a Mac.
+
+### Prerequisites
+
+- Mac computer running 24/7 with Messages app signed in
+- BlueBubbles server installed ([bluebubbles.app](https://bluebubbles.app/))
+- Network access to the BlueBubbles server
+
+### Setting Up BlueBubbles
+
+1. **Install BlueBubbles Server on Mac**:
+   - Download from [bluebubbles.app](https://bluebubbles.app/)
+   - Follow setup wizard to configure
+   - Note the server URL and password
+
+2. **Configure in CoWork OS**:
+   - Open **Settings** > **BlueBubbles** tab
+   - Enter your server URL (e.g., `http://192.168.1.100:1234`)
+   - Enter your server password
+   - Optionally configure contact allowlist
+   - Click **Connect BlueBubbles**
+
+### Security Modes
+
+| Mode | Description |
+|------|-------------|
+| **Pairing** (default) | Users must enter a pairing code to interact |
+| **Allowlist** | Only pre-approved phone numbers/emails can message |
+| **Open** | Anyone can message (not recommended) |
+
+### Bot Commands
+
+| Command | Description |
+|---------|-------------|
+| `/workspaces` | List available workspaces |
+| `/workspace <n>` | Select workspace by number |
+| `/newtask` | Start fresh conversation |
+| `/status` | Check bot status |
+| `/cancel` | Cancel running task |
+| `/pair <code>` | Pair with code |
+
+### Features
+
+- **iMessage and SMS**: Send to both iMessage and SMS contacts
+- **Group Chats**: Support for group conversations
+- **Webhooks or Polling**: Real-time via webhooks or fallback polling
+
+### Important Notes
+
+- **Requires Mac running 24/7** - BlueBubbles server must stay online
+- **iMessage limitations** - No message editing or deletion (iMessage doesn't support it)
+- **Network access** - CoWork OS must be able to reach the BlueBubbles server
+
+---
+
+## Email Bot Integration
+
+Run tasks via email using IMAP/SMTP. Universal channel that works with any email provider.
+
+### Prerequisites
+
+- Email account with IMAP and SMTP access
+- App password (for Gmail, Outlook, Yahoo with 2FA enabled)
+
+### Setting Up Email
+
+1. **Configure in CoWork OS**:
+   - Open **Settings** > **Email** tab
+   - Use quick setup for Gmail, Outlook, or Yahoo (fills server details)
+   - Enter your email address
+   - Enter your password or app password
+   - Configure IMAP and SMTP settings if using other provider
+   - Click **Connect Email**
+
+### Email Provider Settings
+
+| Provider | IMAP Host | IMAP Port | SMTP Host | SMTP Port |
+|----------|-----------|-----------|-----------|-----------|
+| **Gmail** | imap.gmail.com | 993 | smtp.gmail.com | 587 |
+| **Outlook** | outlook.office365.com | 993 | smtp.office365.com | 587 |
+| **Yahoo** | imap.mail.yahoo.com | 993 | smtp.mail.yahoo.com | 465 |
+
+### Security Modes
+
+| Mode | Description |
+|------|-------------|
+| **Pairing** (default) | Users must enter a pairing code to interact |
+| **Allowlist** | Only pre-approved email addresses can message |
+| **Open** | Anyone can message (not recommended) |
+
+### Bot Commands
+
+| Command | Description |
+|---------|-------------|
+| `/workspaces` | List available workspaces |
+| `/workspace <n>` | Select workspace by number |
+| `/newtask` | Start fresh conversation |
+| `/status` | Check bot status |
+| `/cancel` | Cancel running task |
+| `/pair <code>` | Pair with code |
+
+### Filtering Options
+
+- **Allowed Senders**: Comma-separated email addresses to accept (leave empty for all)
+- **Subject Filter**: Only process emails containing this text in subject (e.g., `[CoWork]`)
+
+### Features
+
+- **Reply Threading**: Maintains conversation threads via In-Reply-To headers
+- **Subject Filtering**: Only process emails with specific subject patterns
+- **Sender Allowlist**: Restrict to specific email addresses
+- **Universal**: Works with any email provider supporting IMAP/SMTP
+
+### Important Notes
+
+- **App Passwords**: Gmail/Outlook with 2FA require app passwords, not regular passwords
+- **No editing/deletion**: Email doesn't support modifying sent messages
+- **Attachments**: Not yet implemented
+- **Polling**: Uses IMAP polling (default 30 seconds) - not instant delivery
+
+---
+
 ## Menu Bar App (macOS)
 
 Native menu bar companion for quick access without the main window.
@@ -1026,7 +1216,7 @@ Users must comply with their model provider's terms:
 ### Completed
 
 - [x] Multi-provider LLM support (6 providers)
-- [x] Multi-channel messaging (9 channels)
+- [x] Multi-channel messaging (12 channels)
 - [x] Configurable guardrails and security
 - [x] Browser automation with Playwright
 - [x] Code tools (glob, grep, edit_file)
@@ -1036,7 +1226,7 @@ Users must comply with their model provider's terms:
 - [x] Tailscale and SSH remote access
 - [x] Personality system
 - [x] 75+ bundled skills
-- [x] 390+ unit tests
+- [x] 1800+ unit tests
 
 ### Planned
 

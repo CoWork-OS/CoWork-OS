@@ -257,6 +257,15 @@ const IPC_CHANNELS = {
   TUNNEL_GET_STATUS: 'tunnel:getStatus',
   TUNNEL_START: 'tunnel:start',
   TUNNEL_STOP: 'tunnel:stop',
+  // Agent Roles (Agent Squad)
+  AGENT_ROLE_LIST: 'agentRole:list',
+  AGENT_ROLE_GET: 'agentRole:get',
+  AGENT_ROLE_CREATE: 'agentRole:create',
+  AGENT_ROLE_UPDATE: 'agentRole:update',
+  AGENT_ROLE_DELETE: 'agentRole:delete',
+  AGENT_ROLE_ASSIGN_TO_TASK: 'agentRole:assignToTask',
+  AGENT_ROLE_GET_DEFAULTS: 'agentRole:getDefaults',
+  AGENT_ROLE_SEED_DEFAULTS: 'agentRole:seedDefaults',
 } as const;
 
 // Mobile Companion Node types (inlined for sandboxed preload)
@@ -959,6 +968,64 @@ interface SSHTunnelEvent {
   error?: string;
 }
 
+// Agent Role (Agent Squad) types (inlined for sandboxed preload)
+type AgentCapability = 'code' | 'review' | 'research' | 'test' | 'document' | 'plan' | 'design' | 'analyze';
+
+interface AgentToolRestrictions {
+  allowedTools?: string[];
+  deniedTools?: string[];
+}
+
+interface AgentRoleData {
+  id: string;
+  name: string;
+  displayName: string;
+  description?: string;
+  icon: string;
+  color: string;
+  personalityId?: string;
+  modelKey?: string;
+  providerType?: string;
+  systemPrompt?: string;
+  capabilities: AgentCapability[];
+  toolRestrictions?: AgentToolRestrictions;
+  isSystem: boolean;
+  isActive: boolean;
+  sortOrder: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+interface CreateAgentRoleRequest {
+  name: string;
+  displayName: string;
+  description?: string;
+  icon?: string;
+  color?: string;
+  personalityId?: string;
+  modelKey?: string;
+  providerType?: string;
+  systemPrompt?: string;
+  capabilities: AgentCapability[];
+  toolRestrictions?: AgentToolRestrictions;
+}
+
+interface UpdateAgentRoleRequest {
+  id: string;
+  displayName?: string;
+  description?: string;
+  icon?: string;
+  color?: string;
+  personalityId?: string;
+  modelKey?: string;
+  providerType?: string;
+  systemPrompt?: string;
+  capabilities?: AgentCapability[];
+  toolRestrictions?: AgentToolRestrictions;
+  isActive?: boolean;
+  sortOrder?: number;
+}
+
 // Expose protected methods that allow the renderer process to use ipcRenderer
 contextBridge.exposeInMainWorld('electronAPI', {
   // Dialog APIs
@@ -1421,6 +1488,48 @@ contextBridge.exposeInMainWorld('electronAPI', {
   startTunnel: (config: { provider: string; port: number; ngrokAuthToken?: string; ngrokRegion?: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.TUNNEL_START, config),
   stopTunnel: () => ipcRenderer.invoke(IPC_CHANNELS.TUNNEL_STOP),
+
+  // Agent Role (Agent Squad) APIs
+  getAgentRoles: (includeInactive?: boolean) =>
+    ipcRenderer.invoke(IPC_CHANNELS.AGENT_ROLE_LIST, includeInactive),
+  getAgentRole: (id: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.AGENT_ROLE_GET, id),
+  createAgentRole: (request: {
+    name: string;
+    displayName: string;
+    description?: string;
+    icon?: string;
+    color?: string;
+    personalityId?: string;
+    modelKey?: string;
+    providerType?: string;
+    systemPrompt?: string;
+    capabilities: string[];
+    toolRestrictions?: { allowedTools?: string[]; deniedTools?: string[] };
+  }) => ipcRenderer.invoke(IPC_CHANNELS.AGENT_ROLE_CREATE, request),
+  updateAgentRole: (request: {
+    id: string;
+    displayName?: string;
+    description?: string;
+    icon?: string;
+    color?: string;
+    personalityId?: string;
+    modelKey?: string;
+    providerType?: string;
+    systemPrompt?: string;
+    capabilities?: string[];
+    toolRestrictions?: { allowedTools?: string[]; deniedTools?: string[] };
+    isActive?: boolean;
+    sortOrder?: number;
+  }) => ipcRenderer.invoke(IPC_CHANNELS.AGENT_ROLE_UPDATE, request),
+  deleteAgentRole: (id: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.AGENT_ROLE_DELETE, id),
+  assignAgentRoleToTask: (taskId: string, agentRoleId: string | null) =>
+    ipcRenderer.invoke(IPC_CHANNELS.AGENT_ROLE_ASSIGN_TO_TASK, taskId, agentRoleId),
+  getDefaultAgentRoles: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.AGENT_ROLE_GET_DEFAULTS),
+  seedDefaultAgentRoles: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.AGENT_ROLE_SEED_DEFAULTS),
 });
 
 // Type declarations for TypeScript
@@ -1438,6 +1547,15 @@ export interface FileViewerResult {
 }
 
 export type { TraySettings };
+
+// Export Agent Role types
+export type {
+  AgentCapability,
+  AgentToolRestrictions,
+  AgentRoleData,
+  CreateAgentRoleRequest,
+  UpdateAgentRoleRequest,
+};
 
 export interface ElectronAPI {
   selectFolder: () => Promise<string | null>;
@@ -1488,7 +1606,7 @@ export interface ElectronAPI {
   getBedrockModels: (config?: { region?: string; accessKeyId?: string; secretAccessKey?: string; profile?: string }) => Promise<Array<{ id: string; name: string; provider: string; description: string }>>;
   // Gateway / Channel APIs
   getGatewayChannels: () => Promise<any[]>;
-  addGatewayChannel: (data: { type: string; name: string; botToken?: string; securityMode?: string; applicationId?: string; guildIds?: string[]; appToken?: string; signingSecret?: string; allowedNumbers?: string[]; selfChatMode?: boolean; responsePrefix?: string; cliPath?: string; dbPath?: string; allowedContacts?: string[]; dmPolicy?: string; groupPolicy?: string; phoneNumber?: string; dataDir?: string; mode?: string; trustMode?: string; sendReadReceipts?: boolean; sendTypingIndicators?: boolean; mattermostServerUrl?: string; mattermostToken?: string; mattermostTeamId?: string; matrixHomeserver?: string; matrixUserId?: string; matrixAccessToken?: string; matrixDeviceId?: string; matrixRoomIds?: string[]; twitchUsername?: string; twitchOauthToken?: string; twitchChannels?: string[]; twitchAllowWhispers?: boolean }) => Promise<any>;
+  addGatewayChannel: (data: { type: string; name: string; botToken?: string; securityMode?: string; applicationId?: string; guildIds?: string[]; appToken?: string; signingSecret?: string; allowedNumbers?: string[]; selfChatMode?: boolean; responsePrefix?: string; cliPath?: string; dbPath?: string; allowedContacts?: string[]; dmPolicy?: string; groupPolicy?: string; phoneNumber?: string; dataDir?: string; mode?: string; trustMode?: string; sendReadReceipts?: boolean; sendTypingIndicators?: boolean; mattermostServerUrl?: string; mattermostToken?: string; mattermostTeamId?: string; matrixHomeserver?: string; matrixUserId?: string; matrixAccessToken?: string; matrixDeviceId?: string; matrixRoomIds?: string[]; twitchUsername?: string; twitchOauthToken?: string; twitchChannels?: string[]; twitchAllowWhispers?: boolean; lineChannelAccessToken?: string; lineChannelSecret?: string; lineWebhookPort?: number; lineWebhookPath?: string; blueBubblesServerUrl?: string; blueBubblesPassword?: string; blueBubblesWebhookPort?: number; blueBubblesAllowedContacts?: string[]; emailAddress?: string; emailPassword?: string; emailImapHost?: string; emailImapPort?: number; emailSmtpHost?: string; emailSmtpPort?: number; emailDisplayName?: string; emailAllowedSenders?: string[]; emailSubjectFilter?: string }) => Promise<any>;
   updateGatewayChannel: (data: { id: string; name?: string; securityMode?: string; config?: { selfChatMode?: boolean; responsePrefix?: string; [key: string]: unknown } }) => Promise<void>;
   removeGatewayChannel: (id: string) => Promise<void>;
   enableGatewayChannel: (id: string) => Promise<void>;
@@ -1884,6 +2002,16 @@ export interface ElectronAPI {
   getTunnelStatus: () => Promise<TunnelStatusData>;
   startTunnel: (config: { provider: string; port: number; ngrokAuthToken?: string; ngrokRegion?: string }) => Promise<{ success: boolean; url?: string; error?: string }>;
   stopTunnel: () => Promise<{ success: boolean; error?: string }>;
+
+  // Agent Role (Agent Squad)
+  getAgentRoles: (includeInactive?: boolean) => Promise<AgentRoleData[]>;
+  getAgentRole: (id: string) => Promise<AgentRoleData | undefined>;
+  createAgentRole: (request: CreateAgentRoleRequest) => Promise<AgentRoleData>;
+  updateAgentRole: (request: UpdateAgentRoleRequest) => Promise<AgentRoleData | undefined>;
+  deleteAgentRole: (id: string) => Promise<boolean>;
+  assignAgentRoleToTask: (taskId: string, agentRoleId: string | null) => Promise<boolean>;
+  getDefaultAgentRoles: () => Promise<Omit<AgentRoleData, 'id' | 'createdAt' | 'updatedAt'>[]>;
+  seedDefaultAgentRoles: () => Promise<AgentRoleData[]>;
 }
 
 // Migration status type (for showing one-time notifications after app rename)

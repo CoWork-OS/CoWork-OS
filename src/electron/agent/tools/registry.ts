@@ -1013,7 +1013,7 @@ ${skillDescriptions}`;
         enabled: skill.enabled,
         type: skill.type,
         invocation: skill.invocation,
-        requirements: skill.requirements,
+        requires: skill.requires,
         source: skill.source,
         filePath: skill.filePath,
       },
@@ -1032,10 +1032,10 @@ ${skillDescriptions}`;
     category?: string;
     parameters?: Array<{
       name: string;
-      type: string;
+      type: 'string' | 'number' | 'boolean' | 'select';
       description: string;
       required?: boolean;
-      default?: string;
+      default?: string | number | boolean;
       options?: string[];
     }>;
     enabled?: boolean;
@@ -1072,7 +1072,7 @@ ${skillDescriptions}`;
         name: input.name,
         description: input.description,
         prompt: input.prompt,
-        icon: input.icon,
+        icon: input.icon || '',
         category: input.category || 'Custom',
         parameters: input.parameters,
         enabled: input.enabled !== false,

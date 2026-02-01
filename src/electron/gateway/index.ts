@@ -18,6 +18,7 @@ import {
   SlackConfig,
   WhatsAppConfig,
   ImessageConfig,
+  SignalConfig,
   GatewayEventHandler,
 } from './channels/types';
 import { TelegramAdapter, createTelegramAdapter } from './channels/telegram';
@@ -25,6 +26,7 @@ import { DiscordAdapter, createDiscordAdapter } from './channels/discord';
 import { SlackAdapter, createSlackAdapter } from './channels/slack';
 import { WhatsAppAdapter, createWhatsAppAdapter } from './channels/whatsapp';
 import { ImessageAdapter, createImessageAdapter } from './channels/imessage';
+import { SignalAdapter, createSignalAdapter } from './channels/signal';
 import {
   ChannelRepository,
   ChannelUserRepository,
@@ -804,6 +806,23 @@ export class ChannelGateway {
           responsePrefix: channel.config.responsePrefix as string | undefined,
         });
 
+      case 'signal':
+        return createSignalAdapter({
+          enabled: channel.enabled,
+          phoneNumber: channel.config.phoneNumber as string,
+          cliPath: channel.config.cliPath as string | undefined,
+          dataDir: channel.config.dataDir as string | undefined,
+          mode: channel.config.mode as 'native' | 'json-rpc' | 'dbus' | undefined,
+          socketPath: channel.config.socketPath as string | undefined,
+          trustMode: channel.config.trustMode as 'always' | 'on-first-use' | 'never' | undefined,
+          dmPolicy: channel.config.dmPolicy as 'open' | 'allowlist' | 'pairing' | 'disabled' | undefined,
+          groupPolicy: channel.config.groupPolicy as 'open' | 'allowlist' | 'disabled' | undefined,
+          allowedNumbers: channel.config.allowedNumbers as string[] | undefined,
+          sendReadReceipts: channel.config.sendReadReceipts as boolean | undefined,
+          sendTypingIndicators: channel.config.sendTypingIndicators as boolean | undefined,
+          responsePrefix: channel.config.responsePrefix as string | undefined,
+        });
+
       default:
         throw new Error(`Unsupported channel type: ${channel.type}`);
     }
@@ -815,8 +834,13 @@ export * from './channels/types';
 export * from './router';
 export * from './session';
 export * from './security';
+export * from './channel-registry';
 export { TelegramAdapter, createTelegramAdapter } from './channels/telegram';
 export { DiscordAdapter, createDiscordAdapter } from './channels/discord';
 export { SlackAdapter, createSlackAdapter } from './channels/slack';
 export { WhatsAppAdapter, createWhatsAppAdapter } from './channels/whatsapp';
 export { ImessageAdapter, createImessageAdapter } from './channels/imessage';
+export { SignalAdapter, createSignalAdapter } from './channels/signal';
+export { SignalClient } from './channels/signal-client';
+export { TunnelManager, getAvailableTunnelProviders, createAutoTunnel } from './tunnel';
+export type { TunnelProvider, TunnelStatus, TunnelConfig, TunnelInfo } from './tunnel';

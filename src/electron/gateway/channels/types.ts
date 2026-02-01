@@ -8,7 +8,7 @@
 /**
  * Supported channel types
  */
-export type ChannelType = 'telegram' | 'discord' | 'slack' | 'whatsapp' | 'imessage';
+export type ChannelType = 'telegram' | 'discord' | 'slack' | 'whatsapp' | 'imessage' | 'signal';
 
 /**
  * Channel connection status
@@ -220,6 +220,43 @@ export interface ImessageConfig extends ChannelConfig {
   deduplicationEnabled?: boolean;
   /** Response prefix for bot messages */
   responsePrefix?: string;
+}
+
+/**
+ * Signal-specific configuration
+ * Uses signal-cli for communication (https://github.com/AsamK/signal-cli)
+ */
+export interface SignalConfig extends ChannelConfig {
+  /** Phone number to use (E.164 format, e.g., +14155551234) */
+  phoneNumber: string;
+  /** Path to signal-cli (default: "signal-cli") */
+  cliPath?: string;
+  /** signal-cli data directory (default: ~/.local/share/signal-cli) */
+  dataDir?: string;
+  /** Configuration mode */
+  mode?: 'native' | 'json-rpc' | 'dbus';
+  /** JSON-RPC socket path (for json-rpc mode) */
+  socketPath?: string;
+  /** Trust mode for new contacts */
+  trustMode?: 'always' | 'on-first-use' | 'never';
+  /** DM access policy (default: "pairing") */
+  dmPolicy?: 'open' | 'allowlist' | 'pairing' | 'disabled';
+  /** Group access policy (default: "allowlist") */
+  groupPolicy?: 'open' | 'allowlist' | 'disabled';
+  /** Allowed phone numbers (E.164 format) */
+  allowedNumbers?: string[];
+  /** Enable read receipts (default: true) */
+  sendReadReceipts?: boolean;
+  /** Enable typing indicators (default: true) */
+  sendTypingIndicators?: boolean;
+  /** Max attachment size in MB (default: 100) */
+  maxAttachmentMb?: number;
+  /** Enable message deduplication (default: true) */
+  deduplicationEnabled?: boolean;
+  /** Response prefix for bot messages */
+  responsePrefix?: string;
+  /** Poll interval for receiving messages in ms (default: 1000) */
+  pollInterval?: number;
 }
 
 /**

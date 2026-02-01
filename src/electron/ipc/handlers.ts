@@ -493,6 +493,32 @@ export async function setupIpcHandlers(
     taskRepo.delete(id);
   });
 
+  // ============ Sub-Agent / Parallel Agent Handlers ============
+
+  // Get child tasks for a parent task
+  ipcMain.handle(IPC_CHANNELS.AGENT_GET_CHILDREN, async (_, parentTaskId: string) => {
+    return agentDaemon.getChildTasks(parentTaskId);
+  });
+
+  // Get status of specific agents
+  ipcMain.handle(IPC_CHANNELS.AGENT_GET_STATUS, async (_, taskIds: string[]) => {
+    const tasks = [];
+    for (const id of taskIds) {
+      const task = await agentDaemon.getTaskById(id);
+      if (task) {
+        tasks.push({
+          taskId: id,
+          status: task.status,
+          title: task.title,
+          agentType: task.agentType,
+          resultSummary: task.resultSummary,
+          error: task.error,
+        });
+      }
+    }
+    return tasks;
+  });
+
   // Task events handler - get historical events from database
   ipcMain.handle(IPC_CHANNELS.TASK_EVENTS, async (_, taskId: string) => {
     return taskEventRepo.findByTaskId(taskId);
@@ -1290,12 +1316,19 @@ export async function setupIpcHandlers(
   });
 
   // Personality Settings handlers
+  // Subscribe to PersonalityManager events to broadcast changes to UI
+  // This handles both IPC changes and tool-based changes
+  PersonalityManager.onSettingsChanged((settings) => {
+    broadcastPersonalitySettingsChanged(settings);
+  });
+
   ipcMain.handle(IPC_CHANNELS.PERSONALITY_GET_SETTINGS, async () => {
     return PersonalityManager.loadSettings();
   });
 
   ipcMain.handle(IPC_CHANNELS.PERSONALITY_SAVE_SETTINGS, async (_, settings) => {
     PersonalityManager.saveSettings(settings);
+    // Event emission is handled by PersonalityManager.saveSettings()
     return { success: true };
   });
 
@@ -1313,11 +1346,20 @@ export async function setupIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.PERSONALITY_SET_ACTIVE, async (_, personalityId) => {
     PersonalityManager.setActivePersonality(personalityId);
+    // Event emission is handled by PersonalityManager.saveSettings()
     return { success: true };
   });
 
   ipcMain.handle(IPC_CHANNELS.PERSONALITY_SET_PERSONA, async (_, personaId) => {
     PersonalityManager.setActivePersona(personaId);
+    // Event emission is handled by PersonalityManager.saveSettings()
+    return { success: true };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.PERSONALITY_RESET, async (_, preserveRelationship?: boolean) => {
+    checkRateLimit(IPC_CHANNELS.PERSONALITY_RESET);
+    PersonalityManager.resetToDefaults(preserveRelationship);
+    // Event emission is handled by PersonalityManager.resetToDefaults()
     return { success: true };
   });
 
@@ -2028,4 +2070,26 @@ function setupHooksHandlers(agentDaemon: AgentDaemon): void {
   });
 
   console.log('[Hooks] IPC handlers initialized');
+}
+
+/**
+ * Broadcast personality settings changed event to all renderer windows.
+ * This allows the UI to stay in sync when settings are changed via tools.
+ */
+function broadcastPersonalitySettingsChanged(settings: any): void {
+  try {
+    const windows = BrowserWindow.getAllWindows();
+    for (const win of windows) {
+      try {
+        if (win.webContents && !win.isDestroyed()) {
+          win.webContents.send(IPC_CHANNELS.PERSONALITY_SETTINGS_CHANGED, settings);
+        }
+      } catch (err) {
+        // Window may have been destroyed between check and send
+        console.warn('[Personality] Failed to send settings changed event to window:', err);
+      }
+    }
+  } catch (err) {
+    console.error('[Personality] Failed to broadcast settings changed:', err);
+  }
 }

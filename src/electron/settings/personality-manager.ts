@@ -14,6 +14,7 @@
 import { app } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
+import { EventEmitter } from 'events';
 import {
   PersonalitySettings,
   PersonalityId,
@@ -51,28 +52,102 @@ const DEFAULT_SETTINGS: PersonalitySettings = {
 // Milestone thresholds for celebrations
 const MILESTONES = [1, 10, 25, 50, 100, 250, 500, 1000];
 
+// Event emitter for personality settings changes
+const personalityEvents = new EventEmitter();
+
 export class PersonalityManager {
   private static settingsPath: string;
   private static cachedSettings: PersonalitySettings | null = null;
+  private static initialized = false;
+
+  /**
+   * Subscribe to settings changed events.
+   * The callback receives the updated settings.
+   */
+  static onSettingsChanged(callback: (settings: PersonalitySettings) => void): () => void {
+    personalityEvents.on('settingsChanged', callback);
+    return () => personalityEvents.off('settingsChanged', callback);
+  }
+
+  /**
+   * Remove all event listeners (useful for testing)
+   */
+  static removeAllListeners(): void {
+    personalityEvents.removeAllListeners();
+  }
+
+  /**
+   * Emit a settings changed event
+   */
+  private static emitSettingsChanged(): void {
+    if (this.cachedSettings) {
+      personalityEvents.emit('settingsChanged', this.cachedSettings);
+    }
+  }
 
   /**
    * Initialize the PersonalityManager with the settings path
    */
   static initialize(): void {
+    if (this.initialized) {
+      return; // Already initialized
+    }
     const userDataPath = app.getPath('userData');
     this.settingsPath = path.join(userDataPath, SETTINGS_FILE);
+    this.initialized = true;
     console.log('[PersonalityManager] Initialized with path:', this.settingsPath);
+  }
+
+  /**
+   * Ensure the manager is initialized before use
+   */
+  private static ensureInitialized(): void {
+    if (!this.initialized) {
+      throw new Error('[PersonalityManager] Not initialized. Call PersonalityManager.initialize() first.');
+    }
+  }
+
+  /**
+   * Atomically write settings to disk using a temp file + rename pattern
+   * This prevents file corruption if the app crashes mid-write
+   */
+  private static atomicWriteFile(filePath: string, data: string): void {
+    const tempPath = `${filePath}.tmp.${Date.now()}`;
+    try {
+      // Write to temp file first
+      fs.writeFileSync(tempPath, data, { encoding: 'utf-8', mode: 0o644 });
+      // Rename temp file to target (atomic on POSIX systems)
+      fs.renameSync(tempPath, filePath);
+    } catch (error) {
+      // Clean up temp file if it exists
+      try {
+        if (fs.existsSync(tempPath)) {
+          fs.unlinkSync(tempPath);
+        }
+      } catch {
+        // Ignore cleanup errors
+      }
+      throw error;
+    }
   }
 
   /**
    * Load settings from disk (with caching)
    */
   static loadSettings(): PersonalitySettings {
+    this.ensureInitialized();
+
     if (this.cachedSettings) {
       return this.cachedSettings;
     }
 
-    let settings: PersonalitySettings = { ...DEFAULT_SETTINGS };
+    // Deep copy DEFAULT_SETTINGS to avoid mutating the original constants
+    let settings: PersonalitySettings = {
+      ...DEFAULT_SETTINGS,
+      responseStyle: { ...DEFAULT_RESPONSE_STYLE },
+      quirks: { ...DEFAULT_QUIRKS },
+      relationship: { ...DEFAULT_RELATIONSHIP },
+    };
 
     try {
       if (fs.existsSync(this.settingsPath)) {
@@ -96,7 +171,13 @@ export class PersonalityManager {
       }
     } catch (error) {
       console.error('[PersonalityManager] Failed to load settings:', error);
-      settings = { ...DEFAULT_SETTINGS };
+      // Deep copy DEFAULT_SETTINGS to avoid mutating the original constants
+      settings = {
+        ...DEFAULT_SETTINGS,
+        responseStyle: { ...DEFAULT_RESPONSE_STYLE },
+        quirks: { ...DEFAULT_QUIRKS },
+        relationship: { ...DEFAULT_RELATIONSHIP },
+      };
     }
 
     this.cachedSettings = settings;
@@ -133,9 +214,10 @@ export class PersonalityManager {
           : existingSettings.relationship,
       };
 
-      fs.writeFileSync(this.settingsPath, JSON.stringify(validatedSettings, null, 2));
+      this.atomicWriteFile(this.settingsPath, JSON.stringify(validatedSettings, null, 2));
       this.cachedSettings = validatedSettings;
       console.log('[PersonalityManager] Settings saved:', validatedSettings.activePersonality);
+      this.emitSettingsChanged();
     } catch (error) {
       console.error('[PersonalityManager] Failed to save settings:', error);
       throw error;
@@ -195,6 +277,27 @@ export class PersonalityManager {
   static getActivePersona(): PersonaDefinition | undefined {
     const settings = this.loadSettings();
     return getPersonaById(settings.activePersona || 'none');
+  }
+
+  /**
+   * Get the personality prompt for a specific personality ID.
+   * Used by sub-agents to get their configured personality prompt.
+   */
+  static getPersonalityPromptById(personalityId: string): string {
+    // Validate and get the personality definition
+    if (!isValidPersonalityId(personalityId)) {
+      console.warn(`[PersonalityManager] Invalid personality ID: ${personalityId}, using default`);
+      return this.getPersonalityPrompt();
+    }
+
+    const personality = getPersonalityById(personalityId as PersonalityId);
+    if (!personality?.promptTemplate) {
+      return this.getPersonalityPrompt();
+    }
+
+    // Return just the base personality prompt for sub-agents
+    // (no persona overlay, no quirks - keep it focused)
+    return personality.promptTemplate;
   }
 
   /**
@@ -568,6 +671,43 @@ You are ${agentName}, an AI assistant built into CoWork-OSS.
    */
   static getDefaults(): PersonalitySettings {
     return { ...DEFAULT_SETTINGS };
+  }
+
+  /**
+   * Reset all settings to defaults
+   * This clears everything except relationship data (to preserve task history)
+   */
+  static resetToDefaults(preserveRelationship = true): void {
+    this.ensureInitialized();
+
+    // Deep copy DEFAULT_SETTINGS to avoid mutating the original constants
+    let newSettings: PersonalitySettings = {
+      ...DEFAULT_SETTINGS,
+      responseStyle: { ...DEFAULT_RESPONSE_STYLE },
+      quirks: { ...DEFAULT_QUIRKS },
+      relationship: { ...DEFAULT_RELATIONSHIP },
+    };
+
+    if (preserveRelationship) {
+      // Load current settings to get relationship data (even if cache is cleared)
+      const currentSettings = this.loadSettings();
+      if (currentSettings.relationship) {
+        // Preserve the relationship data (task count, user name, etc.)
+        newSettings.relationship = { ...currentSettings.relationship };
+      }
+    }
+
+    this.atomicWriteFile(this.settingsPath, JSON.stringify(newSettings, null, 2));
+    this.cachedSettings = newSettings;
+    console.log('[PersonalityManager] Settings reset to defaults', preserveRelationship ? '(preserved relationship)' : '');
+    this.emitSettingsChanged();
+  }
+
+  /**
+   * Check if the manager has been initialized
+   */
+  static isInitialized(): boolean {
+    return this.initialized;
   }
 }
 

@@ -71,7 +71,12 @@ export type EventType =
   | 'follow_up_failed'
   | 'tool_warning'
   | 'user_message'
-  | 'command_output';
+  | 'command_output'
+  // Sub-Agent / Parallel Agent events
+  | 'agent_spawned'        // Parent spawned a child agent
+  | 'agent_completed'      // Child agent completed successfully
+  | 'agent_failed'         // Child agent failed
+  | 'sub_agent_result';    // Result summary from child agent
 
 export type ToolType =
   | 'read_file'
@@ -306,6 +311,35 @@ export interface SuccessCriteria {
   filePaths?: string[];  // For file_exists: paths that must exist
 }
 
+// ============ Sub-Agent / Parallel Agent Types ============
+
+/**
+ * Agent type determines the behavior and lifecycle of a task
+ * - 'main': Primary user-created task (default)
+ * - 'sub': Disposable agent spawned for batch work (no memory retention)
+ * - 'parallel': Independent agent that can run alongside main agents
+ */
+export type AgentType = 'main' | 'sub' | 'parallel';
+
+/**
+ * Per-task agent configuration for customizing LLM and personality
+ * Allows spawning agents with different models/personalities than the global settings
+ */
+export interface AgentConfig {
+  /** Override the LLM provider type (e.g., 'anthropic', 'gemini') */
+  providerType?: LLMProviderType;
+  /** Override the model key (e.g., 'opus-4-5', 'sonnet-4-5', 'haiku-4-5') */
+  modelKey?: string;
+  /** Override the personality for this agent */
+  personalityId?: PersonalityId;
+  /** Maximum number of LLM turns before forcing completion (for sub-agents) */
+  maxTurns?: number;
+  /** Maximum tokens budget for this agent */
+  maxTokens?: number;
+  /** Whether to retain memory/context after completion (default: false for sub-agents) */
+  retainMemory?: boolean;
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -322,6 +356,12 @@ export interface Task {
   successCriteria?: SuccessCriteria;
   maxAttempts?: number;        // Default: 3, max: 10
   currentAttempt?: number;     // Tracks which attempt we're on
+  // Sub-Agent / Parallel Agent fields
+  parentTaskId?: string;       // ID of the parent task that spawned this one
+  agentType?: AgentType;       // Type of agent: 'main', 'sub', or 'parallel'
+  agentConfig?: AgentConfig;   // Per-task agent configuration (model, personality, etc.)
+  depth?: number;              // Nesting depth (0 = root, 1 = first child, etc.)
+  resultSummary?: string;      // Summary of results for parent agent to consume
 }
 
 export interface TaskEvent {
@@ -428,6 +468,10 @@ export const IPC_CHANNELS = {
   TASK_RESUME: 'task:resume',
   TASK_RENAME: 'task:rename',
   TASK_DELETE: 'task:delete',
+
+  // Sub-Agent / Parallel Agent operations
+  AGENT_GET_CHILDREN: 'agent:getChildren',    // Get child tasks for a parent
+  AGENT_GET_STATUS: 'agent:getStatus',        // Get status of spawned agents
 
   // Task events (streaming and history)
   TASK_EVENT: 'task:event',
@@ -537,6 +581,8 @@ export const IPC_CHANNELS = {
   PERSONALITY_GET_RELATIONSHIP_STATS: 'personality:getRelationshipStats',
   PERSONALITY_SET_ACTIVE: 'personality:setActive',
   PERSONALITY_SET_PERSONA: 'personality:setPersona',
+  PERSONALITY_RESET: 'personality:reset',
+  PERSONALITY_SETTINGS_CHANGED: 'personality:settingsChanged', // Event sent to UI when settings change
 
   // Task Queue
   QUEUE_GET_STATUS: 'queue:getStatus',

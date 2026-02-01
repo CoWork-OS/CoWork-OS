@@ -6,23 +6,56 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 let mockSettings: Record<string, unknown> = {};
 let writeCount = 0;
+let tempFileContent: string = '';
 
 // Mock fs module
 vi.mock('fs', () => ({
   default: {
-    existsSync: vi.fn().mockImplementation(() => Object.keys(mockSettings).length > 0),
+    existsSync: vi.fn().mockImplementation((path: string) => {
+      if (path.includes('.tmp.')) return tempFileContent !== '';
+      return Object.keys(mockSettings).length > 0;
+    }),
     readFileSync: vi.fn().mockImplementation(() => JSON.stringify(mockSettings)),
-    writeFileSync: vi.fn().mockImplementation((_path: string, data: string) => {
+    writeFileSync: vi.fn().mockImplementation((path: string, data: string) => {
+      if (path.includes('.tmp.')) {
+        tempFileContent = data;
+      } else {
+        mockSettings = JSON.parse(data);
+        writeCount++;
+      }
+    }),
+    renameSync: vi.fn().mockImplementation((_src: string, _dest: string) => {
+      // Atomic rename: move temp content to actual settings
+      if (tempFileContent) {
+        mockSettings = JSON.parse(tempFileContent);
+        tempFileContent = '';
+        writeCount++;
+      }
+    }),
+    unlinkSync: vi.fn(),
+  },
+  existsSync: vi.fn().mockImplementation((path: string) => {
+    if (path.includes('.tmp.')) return tempFileContent !== '';
+    return Object.keys(mockSettings).length > 0;
+  }),
+  readFileSync: vi.fn().mockImplementation(() => JSON.stringify(mockSettings)),
+  writeFileSync: vi.fn().mockImplementation((path: string, data: string) => {
+    if (path.includes('.tmp.')) {
+      tempFileContent = data;
+    } else {
       mockSettings = JSON.parse(data);
       writeCount++;
-    }),
-  },
-  existsSync: vi.fn().mockImplementation(() => Object.keys(mockSettings).length > 0),
-  readFileSync: vi.fn().mockImplementation(() => JSON.stringify(mockSettings)),
-  writeFileSync: vi.fn().mockImplementation((_path: string, data: string) => {
-    mockSettings = JSON.parse(data);
-    writeCount++;
+    }
   }),
+  renameSync: vi.fn().mockImplementation((_src: string, _dest: string) => {
+    // Atomic rename: move temp content to actual settings
+    if (tempFileContent) {
+      mockSettings = JSON.parse(tempFileContent);
+      tempFileContent = '';
+      writeCount++;
+    }
+  }),
+  unlinkSync: vi.fn(),
 }));
 
 // Mock electron
@@ -40,6 +73,8 @@ describe('PersonalityManager', () => {
     vi.clearAllMocks();
     mockSettings = {};
     writeCount = 0;
+    tempFileContent = '';
+    PersonalityManager.removeAllListeners();
     PersonalityManager.clearCache();
     PersonalityManager.initialize();
   });
@@ -1126,5 +1161,223 @@ describe('PersonalityManager - load settings with new fields', () => {
     const settings = PersonalityManager.loadSettings();
 
     expect(settings.activePersona).toBe('none');
+  });
+});
+
+describe('PersonalityManager - resetToDefaults', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockSettings = {};
+    writeCount = 0;
+    tempFileContent = '';
+    PersonalityManager.removeAllListeners();
+    PersonalityManager.clearCache();
+    PersonalityManager.initialize();
+  });
+
+  it('should reset all settings to defaults', () => {
+    // Set up custom settings
+    mockSettings = {
+      activePersonality: 'creative',
+      agentName: 'Jarvis',
+      activePersona: 'jarvis',
+      quirks: { catchphrase: 'At your service.', signOff: 'Will there be anything else?' },
+      responseStyle: { emojiUsage: 'expressive' },
+    };
+    PersonalityManager.clearCache();
+
+    PersonalityManager.resetToDefaults(false);
+
+    expect(mockSettings.activePersonality).toBe('professional');
+    expect(mockSettings.agentName).toBe('CoWork');
+    expect(mockSettings.activePersona).toBe('none');
+  });
+
+  it('should preserve relationship data when preserveRelationship is true', () => {
+    mockSettings = {
+      activePersonality: 'creative',
+      agentName: 'Jarvis',
+      relationship: {
+        userName: 'Alice',
+        tasksCompleted: 100,
+        projectsWorkedOn: ['project-a', 'project-b'],
+      },
+    };
+    PersonalityManager.clearCache();
+
+    PersonalityManager.resetToDefaults(true);
+
+    expect(mockSettings.activePersonality).toBe('professional');
+    expect((mockSettings.relationship as any)?.userName).toBe('Alice');
+    expect((mockSettings.relationship as any)?.tasksCompleted).toBe(100);
+  });
+
+  it('should not preserve relationship data when preserveRelationship is false', () => {
+    mockSettings = {
+      relationship: {
+        userName: 'Alice',
+        tasksCompleted: 100,
+      },
+    };
+    PersonalityManager.clearCache();
+
+    PersonalityManager.resetToDefaults(false);
+
+    expect((mockSettings.relationship as any)?.userName).toBeFalsy();
+    expect((mockSettings.relationship as any)?.tasksCompleted).toBe(0);
+  });
+
+  it('should default to preserving relationship', () => {
+    mockSettings = {
+      relationship: {
+        userName: 'Bob',
+        tasksCompleted: 50,
+      },
+    };
+    PersonalityManager.clearCache();
+
+    PersonalityManager.resetToDefaults();
+
+    expect((mockSettings.relationship as any)?.userName).toBe('Bob');
+    expect((mockSettings.relationship as any)?.tasksCompleted).toBe(50);
+  });
+
+  it('should increment write count', () => {
+    PersonalityManager.resetToDefaults();
+
+    expect(writeCount).toBe(1);
+  });
+});
+
+describe('PersonalityManager - event emission', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockSettings = {};
+    writeCount = 0;
+    tempFileContent = '';
+    PersonalityManager.removeAllListeners();
+    PersonalityManager.clearCache();
+    PersonalityManager.initialize();
+  });
+
+  it('should emit event when settings are saved', () => {
+    const callback = vi.fn();
+    const unsubscribe = PersonalityManager.onSettingsChanged(callback);
+
+    const settings = PersonalityManager.loadSettings();
+    settings.activePersonality = 'creative';
+    PersonalityManager.saveSettings(settings);
+
+    expect(callback).toHaveBeenCalledTimes(1);
+    expect(callback).toHaveBeenCalledWith(expect.objectContaining({
+      activePersonality: 'creative',
+    }));
+
+    unsubscribe();
+  });
+
+  it('should emit event when personality is changed', () => {
+    const callback = vi.fn();
+    const unsubscribe = PersonalityManager.onSettingsChanged(callback);
+
+    PersonalityManager.setActivePersonality('technical');
+
+    expect(callback).toHaveBeenCalled();
+    expect(callback).toHaveBeenCalledWith(expect.objectContaining({
+      activePersonality: 'technical',
+    }));
+
+    unsubscribe();
+  });
+
+  it('should emit event when persona is changed', () => {
+    const callback = vi.fn();
+    const unsubscribe = PersonalityManager.onSettingsChanged(callback);
+
+    PersonalityManager.setActivePersona('jarvis');
+
+    expect(callback).toHaveBeenCalled();
+    expect(callback).toHaveBeenCalledWith(expect.objectContaining({
+      activePersona: 'jarvis',
+    }));
+
+    unsubscribe();
+  });
+
+  it('should emit event when reset to defaults', () => {
+    const callback = vi.fn();
+    const unsubscribe = PersonalityManager.onSettingsChanged(callback);
+
+    PersonalityManager.resetToDefaults();
+
+    expect(callback).toHaveBeenCalled();
+
+    unsubscribe();
+  });
+
+  it('should stop receiving events after unsubscribe', () => {
+    const callback = vi.fn();
+    const unsubscribe = PersonalityManager.onSettingsChanged(callback);
+
+    PersonalityManager.setActivePersonality('friendly');
+    expect(callback).toHaveBeenCalledTimes(1);
+
+    unsubscribe();
+
+    PersonalityManager.setActivePersonality('creative');
+    expect(callback).toHaveBeenCalledTimes(1); // Still 1, not called again
+  });
+});
+
+describe('PersonalityManager - initialization guard', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockSettings = {};
+    writeCount = 0;
+    tempFileContent = '';
+    PersonalityManager.removeAllListeners();
+    PersonalityManager.clearCache();
+    PersonalityManager.initialize();
+  });
+
+  it('should return true for isInitialized after initialize', () => {
+    expect(PersonalityManager.isInitialized()).toBe(true);
+  });
+
+  it('should allow multiple initialize calls without error', () => {
+    expect(() => {
+      PersonalityManager.initialize();
+      PersonalityManager.initialize();
+      PersonalityManager.initialize();
+    }).not.toThrow();
+  });
+});
+
+describe('PersonalityManager - atomic writes', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockSettings = {};
+    writeCount = 0;
+    tempFileContent = '';
+    PersonalityManager.removeAllListeners();
+    PersonalityManager.clearCache();
+    PersonalityManager.initialize();
+  });
+
+  it('should use atomic write pattern (temp file + rename)', async () => {
+    const fs = await import('fs');
+
+    const settings = PersonalityManager.loadSettings();
+    settings.activePersonality = 'creative';
+    PersonalityManager.saveSettings(settings);
+
+    // Verify writeFileSync was called with a temp path
+    expect(fs.writeFileSync).toHaveBeenCalled();
+    const writeCalls = (fs.writeFileSync as any).mock.calls;
+    const tempWriteCall = writeCalls.find((call: any[]) => call[0].includes('.tmp.'));
+    expect(tempWriteCall).toBeDefined();
+
+    // Verify renameSync was called
+    expect(fs.renameSync).toHaveBeenCalled();
   });
 });

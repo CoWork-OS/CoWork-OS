@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as fsPromises from 'fs/promises';
 import * as path from 'path';
-import { Workspace, GatewayContextType } from '../../../shared/types';
+import { Workspace, GatewayContextType, AgentConfig, AgentType, Task } from '../../../shared/types';
 import { AgentDaemon } from '../daemon';
 import { FileTools } from './file-tools';
 import { SkillTools } from './skill-tools';
@@ -213,7 +213,7 @@ export class ToolRegistry {
         return true;
       }
       // Meta tools are always enabled
-      if (['revise_plan', 'set_personality', 'set_persona', 'set_agent_name', 'set_user_name', 'set_response_style', 'set_quirks'].includes(tool.name)) {
+      if (['revise_plan', 'set_personality', 'set_persona', 'set_agent_name', 'set_user_name', 'set_response_style', 'set_quirks', 'spawn_agent', 'wait_for_agent', 'get_agent_status', 'list_agents'].includes(tool.name)) {
         return true;
       }
       // Check built-in tool settings
@@ -685,6 +685,20 @@ ${skillDescriptions}`;
 
     if (name === 'set_quirks') {
       return this.setQuirks(input);
+    }
+
+    // Sub-Agent / Parallel Agent tools
+    if (name === 'spawn_agent') {
+      return await this.spawnAgent(input);
+    }
+    if (name === 'wait_for_agent') {
+      return await this.waitForAgent(input);
+    }
+    if (name === 'get_agent_status') {
+      return await this.getAgentStatus(input);
+    }
+    if (name === 'list_agents') {
+      return await this.listAgents(input);
     }
 
     // MCP tools (prefixed with mcp_ by default)
@@ -2113,6 +2127,37 @@ ${skillDescriptions}`;
   }
 
   /**
+   * Sanitize user input to prevent prompt injection
+   * Removes control characters and limits potentially harmful patterns
+   */
+  private sanitizeQuirkInput(input: string): string {
+    if (!input) return '';
+
+    // Remove control characters and null bytes
+    let sanitized = input.replace(/[\x00-\x1F\x7F]/g, '');
+
+    // Remove patterns that could be used for prompt injection
+    // These patterns try to override system instructions
+    const dangerousPatterns = [
+      /ignore\s+(all\s+)?(previous|above|prior)\s+(instructions?|prompts?)/gi,
+      /disregard\s+(all\s+)?(previous|above|prior)\s+(instructions?|prompts?)/gi,
+      /forget\s+(all\s+)?(previous|above|prior)\s+(instructions?|prompts?)/gi,
+      /new\s+instructions?:/gi,
+      /system\s*:/gi,
+      /\[INST\]/gi,
+      /<<SYS>>/gi,
+      /<\|im_start\|>/gi,
+      /###\s*(instruction|system|human|assistant)/gi,
+    ];
+
+    for (const pattern of dangerousPatterns) {
+      sanitized = sanitized.replace(pattern, '[filtered]');
+    }
+
+    return sanitized.trim();
+  }
+
+  /**
    * Set personality quirks
    */
   private setQuirks(input: {
@@ -2127,21 +2172,33 @@ ${skillDescriptions}`;
     const changes: string[] = [];
     const quirks: any = {};
 
-    // Apply catchphrase
+    // Maximum lengths for quirk fields
+    const MAX_CATCHPHRASE_LENGTH = 100;
+    const MAX_SIGNOFF_LENGTH = 150;
+
+    // Apply catchphrase with validation
     if (input.catchphrase !== undefined) {
-      quirks.catchphrase = input.catchphrase || '';
-      if (input.catchphrase) {
-        changes.push(`catchphrase: "${input.catchphrase}"`);
+      if (input.catchphrase && input.catchphrase.length > MAX_CATCHPHRASE_LENGTH) {
+        throw new Error(`Catchphrase too long (max ${MAX_CATCHPHRASE_LENGTH} characters, got ${input.catchphrase.length})`);
+      }
+      const sanitized = this.sanitizeQuirkInput(input.catchphrase || '');
+      quirks.catchphrase = sanitized;
+      if (sanitized) {
+        changes.push(`catchphrase: "${sanitized}"`);
       } else {
         changes.push('catchphrase cleared');
       }
     }
 
-    // Apply sign-off
+    // Apply sign-off with validation
     if (input.sign_off !== undefined) {
-      quirks.signOff = input.sign_off || '';
-      if (input.sign_off) {
-        changes.push(`sign-off: "${input.sign_off}"`);
+      if (input.sign_off && input.sign_off.length > MAX_SIGNOFF_LENGTH) {
+        throw new Error(`Sign-off too long (max ${MAX_SIGNOFF_LENGTH} characters, got ${input.sign_off.length})`);
+      }
+      const sanitized = this.sanitizeQuirkInput(input.sign_off || '');
+      quirks.signOff = sanitized;
+      if (sanitized) {
+        changes.push(`sign-off: "${sanitized}"`);
       } else {
         changes.push('sign-off cleared');
       }
@@ -2172,6 +2229,389 @@ ${skillDescriptions}`;
       success: true,
       changes,
       message: `Personality quirks updated: ${changes.join(', ')}. Changes will apply to future responses.`,
+    };
+  }
+
+  // ============ Sub-Agent / Parallel Agent Methods ============
+
+  /**
+   * Get the current task's depth (nesting level)
+   */
+  private async getCurrentTaskDepth(): Promise<number> {
+    const currentTask = await this.daemon.getTaskById(this.taskId);
+    return currentTask?.depth ?? 0;
+  }
+
+  /**
+   * Resolve model preference to a specific model key
+   */
+  private resolveModelPreference(preference: string | undefined): string {
+    switch (preference) {
+      case 'same':
+        // Use the current global settings - daemon will handle this
+        return '';
+      case 'cheaper':
+      case 'haiku':
+        return 'haiku-4-5';
+      case 'smarter':
+      case 'opus':
+        return 'opus-4-5';
+      case 'sonnet':
+        return 'sonnet-4-5';
+      default:
+        // Default to cheaper model for sub-agents
+        return 'haiku-4-5';
+    }
+  }
+
+  /**
+   * Resolve personality preference
+   */
+  private resolvePersonality(preference: string | undefined): PersonalityId | undefined {
+    if (!preference || preference === 'same') {
+      return undefined; // Inherit from parent
+    }
+    const validPersonalities: PersonalityId[] = ['professional', 'friendly', 'concise', 'creative', 'technical', 'casual'];
+    if (validPersonalities.includes(preference as PersonalityId)) {
+      return preference as PersonalityId;
+    }
+    return 'concise'; // Default for sub-agents
+  }
+
+  /**
+   * Spawn a child agent to work on a subtask
+   */
+  private async spawnAgent(input: {
+    prompt: string;
+    title?: string;
+    model_preference?: string;
+    personality?: string;
+    wait?: boolean;
+    max_turns?: number;
+  }): Promise<{
+    success: boolean;
+    task_id?: string;
+    title?: string;
+    message: string;
+    result?: any;
+    error?: string;
+  }> {
+    const { prompt, title, model_preference, personality, wait = false, max_turns = 20 } = input;
+
+    // Validate prompt
+    if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
+      throw new Error('spawn_agent requires a non-empty prompt');
+    }
+
+    // Check depth limit to prevent runaway spawning
+    const currentDepth = await this.getCurrentTaskDepth();
+    const maxDepth = 3;
+    if (currentDepth >= maxDepth) {
+      return {
+        success: false,
+        message: `Cannot spawn agent: maximum nesting depth (${maxDepth}) reached. Consider breaking the task into smaller parts or completing this task first.`,
+        error: 'MAX_DEPTH_REACHED',
+      };
+    }
+
+    // Resolve model and personality
+    const modelKey = this.resolveModelPreference(model_preference);
+    const personalityId = this.resolvePersonality(personality);
+
+    // Build agent config
+    const agentConfig: AgentConfig = {
+      maxTurns: max_turns,
+      retainMemory: false, // Sub-agents don't retain memory
+    };
+
+    if (modelKey) {
+      agentConfig.modelKey = modelKey;
+    }
+    if (personalityId) {
+      agentConfig.personalityId = personalityId;
+    }
+
+    // Generate title if not provided
+    const taskTitle = title || `Sub-task: ${prompt.substring(0, 50)}${prompt.length > 50 ? '...' : ''}`;
+
+    // Log spawn attempt
+    this.daemon.logEvent(this.taskId, 'agent_spawned', {
+      childTaskTitle: taskTitle,
+      modelPreference: model_preference,
+      personality: personality,
+      maxTurns: max_turns,
+      parentDepth: currentDepth,
+    });
+
+    try {
+      // Create the child task via daemon
+      const childTask = await this.daemon.createChildTask({
+        title: taskTitle,
+        prompt: prompt,
+        workspaceId: this.workspace.id,
+        parentTaskId: this.taskId,
+        agentType: 'sub',
+        agentConfig,
+        depth: currentDepth + 1,
+      });
+
+      console.log(`[ToolRegistry] Spawned child agent: ${childTask.id} (depth: ${currentDepth + 1})`);
+
+      // If wait=true, wait for completion
+      if (wait) {
+        const result = await this.waitForAgentInternal(childTask.id, 300);
+        return {
+          success: result.success,
+          task_id: childTask.id,
+          title: taskTitle,
+          message: result.message,
+          result: result.resultSummary,
+          error: result.error,
+        };
+      }
+
+      return {
+        success: true,
+        task_id: childTask.id,
+        title: taskTitle,
+        message: `Sub-agent spawned successfully. Task ID: ${childTask.id}. Use wait_for_agent or get_agent_status to check progress.`,
+      };
+    } catch (error: any) {
+      console.error(`[ToolRegistry] Failed to spawn agent:`, error);
+      this.daemon.logEvent(this.taskId, 'error', {
+        tool: 'spawn_agent',
+        error: error.message,
+      });
+      return {
+        success: false,
+        message: `Failed to spawn agent: ${error.message}`,
+        error: error.message,
+      };
+    }
+  }
+
+  /**
+   * Internal method to wait for an agent to complete
+   */
+  private async waitForAgentInternal(taskId: string, timeoutSeconds: number): Promise<{
+    success: boolean;
+    status: string;
+    message: string;
+    resultSummary?: string;
+    error?: string;
+  }> {
+    const timeoutMs = timeoutSeconds * 1000;
+    const startTime = Date.now();
+    const pollInterval = 1000; // Check every second
+
+    while (Date.now() - startTime < timeoutMs) {
+      const task = await this.daemon.getTaskById(taskId);
+
+      if (!task) {
+        return {
+          success: false,
+          status: 'not_found',
+          message: `Task ${taskId} not found`,
+          error: 'TASK_NOT_FOUND',
+        };
+      }
+
+      // Check if task is complete
+      if (['completed', 'failed', 'cancelled'].includes(task.status)) {
+        const isSuccess = task.status === 'completed';
+
+        // Log result event to parent
+        this.daemon.logEvent(this.taskId, isSuccess ? 'agent_completed' : 'agent_failed', {
+          childTaskId: taskId,
+          childStatus: task.status,
+          resultSummary: task.resultSummary,
+          error: task.error,
+        });
+
+        return {
+          success: isSuccess,
+          status: task.status,
+          message: isSuccess
+            ? `Agent completed successfully`
+            : `Agent ${task.status}: ${task.error || 'Unknown error'}`,
+          resultSummary: task.resultSummary,
+          error: task.error,
+        };
+      }
+
+      // Wait before polling again
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
+    }
+
+    // Timeout reached
+    return {
+      success: false,
+      status: 'timeout',
+      message: `Timeout waiting for agent ${taskId} (${timeoutSeconds}s)`,
+      error: 'TIMEOUT',
+    };
+  }
+
+  /**
+   * Wait for a spawned agent to complete
+   */
+  private async waitForAgent(input: {
+    task_id: string;
+    timeout_seconds?: number;
+  }): Promise<{
+    success: boolean;
+    status: string;
+    task_id: string;
+    message: string;
+    result_summary?: string;
+    error?: string;
+  }> {
+    const { task_id, timeout_seconds = 300 } = input;
+
+    if (!task_id) {
+      throw new Error('wait_for_agent requires a task_id');
+    }
+
+    const result = await this.waitForAgentInternal(task_id, timeout_seconds);
+
+    return {
+      success: result.success,
+      status: result.status,
+      task_id: task_id,
+      message: result.message,
+      result_summary: result.resultSummary,
+      error: result.error,
+    };
+  }
+
+  /**
+   * Get status of spawned agents
+   */
+  private async getAgentStatus(input: {
+    task_ids?: string[];
+  }): Promise<{
+    agents: Array<{
+      task_id: string;
+      title: string;
+      status: string;
+      agent_type: string;
+      model_key?: string;
+      result_summary?: string;
+      error?: string;
+      created_at: number;
+      completed_at?: number;
+    }>;
+    message: string;
+  }> {
+    const { task_ids } = input;
+
+    let tasks: Task[];
+
+    if (task_ids && task_ids.length > 0) {
+      // Get specific tasks
+      tasks = [];
+      for (const id of task_ids) {
+        const task = await this.daemon.getTaskById(id);
+        if (task) {
+          tasks.push(task);
+        }
+      }
+    } else {
+      // Get all child tasks of current task
+      tasks = await this.daemon.getChildTasks(this.taskId);
+    }
+
+    const agents = tasks.map(task => ({
+      task_id: task.id,
+      title: task.title,
+      status: task.status,
+      agent_type: task.agentType || 'main',
+      model_key: task.agentConfig?.modelKey,
+      result_summary: task.resultSummary,
+      error: task.error,
+      created_at: task.createdAt,
+      completed_at: task.completedAt,
+    }));
+
+    return {
+      agents,
+      message: `Found ${agents.length} agent(s)`,
+    };
+  }
+
+  /**
+   * List all spawned child agents for the current task
+   */
+  private async listAgents(input: {
+    status_filter?: 'all' | 'running' | 'completed' | 'failed';
+  }): Promise<{
+    agents: Array<{
+      task_id: string;
+      title: string;
+      status: string;
+      agent_type: string;
+      model_key?: string;
+      depth: number;
+      created_at: number;
+    }>;
+    summary: {
+      total: number;
+      running: number;
+      completed: number;
+      failed: number;
+    };
+    message: string;
+  }> {
+    const { status_filter = 'all' } = input;
+
+    // Get all child tasks
+    let tasks = await this.daemon.getChildTasks(this.taskId);
+
+    // Apply filter
+    if (status_filter !== 'all') {
+      const runningStatuses = ['pending', 'queued', 'planning', 'executing', 'paused'];
+      const completedStatuses = ['completed'];
+      const failedStatuses = ['failed', 'cancelled'];
+
+      tasks = tasks.filter(task => {
+        switch (status_filter) {
+          case 'running':
+            return runningStatuses.includes(task.status);
+          case 'completed':
+            return completedStatuses.includes(task.status);
+          case 'failed':
+            return failedStatuses.includes(task.status);
+          default:
+            return true;
+        }
+      });
+    }
+
+    // Calculate summary from all child tasks (not filtered)
+    const allTasks = await this.daemon.getChildTasks(this.taskId);
+    const summary = {
+      total: allTasks.length,
+      running: allTasks.filter(t => ['pending', 'queued', 'planning', 'executing', 'paused'].includes(t.status)).length,
+      completed: allTasks.filter(t => t.status === 'completed').length,
+      failed: allTasks.filter(t => ['failed', 'cancelled'].includes(t.status)).length,
+    };
+
+    const agents = tasks.map(task => ({
+      task_id: task.id,
+      title: task.title,
+      status: task.status,
+      agent_type: task.agentType || 'main',
+      model_key: task.agentConfig?.modelKey,
+      depth: task.depth ?? 0,
+      created_at: task.createdAt,
+    }));
+
+    return {
+      agents,
+      summary,
+      message: status_filter === 'all'
+        ? `Found ${agents.length} child agent(s)`
+        : `Found ${agents.length} ${status_filter} agent(s) (${summary.total} total)`,
     };
   }
 
@@ -2360,6 +2800,99 @@ ${skillDescriptions}`;
               type: 'string',
               enum: ['none', 'cooking', 'sports', 'space', 'music', 'nature', 'gaming', 'movies', 'construction'],
               description: 'Theme for analogies and examples: none (no preference), or a specific domain',
+            },
+          },
+        },
+      },
+      // Sub-Agent / Parallel Agent tools
+      {
+        name: 'spawn_agent',
+        description:
+          'Spawn a new agent (sub-task) to work on a specific task independently. Use this to delegate work, ' +
+          'perform parallel operations, or use a cheaper/faster model for batch work. Sub-agents do not retain ' +
+          'memory after completion. Returns immediately with the spawned task ID - use wait_for_agent or ' +
+          'get_agent_status to check progress. Maximum nesting depth is 3 levels.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            prompt: {
+              type: 'string',
+              description: 'The task/instruction for the spawned agent. Be specific and include all context needed.',
+            },
+            title: {
+              type: 'string',
+              description: 'A short title for the subtask (optional, derived from prompt if not provided)',
+            },
+            model_preference: {
+              type: 'string',
+              enum: ['same', 'cheaper', 'smarter'],
+              description: 'Model selection: "same" uses parent model, "cheaper" selects Haiku (fast/cheap), "smarter" selects Opus (most capable). Default: "cheaper" for cost optimization.',
+            },
+            personality: {
+              type: 'string',
+              enum: ['same', 'professional', 'technical', 'concise', 'creative', 'friendly'],
+              description: 'Personality for the spawned agent. "same" inherits from parent. Default: "concise"',
+            },
+            wait: {
+              type: 'boolean',
+              description: 'If true, wait for the agent to complete before returning (blocking). Default: false (async)',
+            },
+            max_turns: {
+              type: 'number',
+              description: 'Maximum number of LLM turns for the sub-agent. Default: 20',
+            },
+          },
+          required: ['prompt'],
+        },
+      },
+      {
+        name: 'wait_for_agent',
+        description:
+          'Wait for a spawned agent to complete and retrieve its results. Returns the agent\'s final status, ' +
+          'result summary, and any error information. Use this to synchronize with sub-agents when you need ' +
+          'their results before proceeding.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            task_id: {
+              type: 'string',
+              description: 'The task ID of the spawned agent (returned by spawn_agent)',
+            },
+            timeout_seconds: {
+              type: 'number',
+              description: 'Maximum time to wait in seconds. Default: 300 (5 minutes)',
+            },
+          },
+          required: ['task_id'],
+        },
+      },
+      {
+        name: 'get_agent_status',
+        description:
+          'Check the status of spawned agents. Returns current status, progress, and any results. ' +
+          'Use this for non-blocking status checks.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            task_ids: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Array of task IDs to check. If empty or omitted, returns status of all child agents.',
+            },
+          },
+        },
+      },
+      {
+        name: 'list_agents',
+        description:
+          'List all spawned child agents for the current task. Shows their status, model, title, and progress.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            status_filter: {
+              type: 'string',
+              enum: ['all', 'running', 'completed', 'failed'],
+              description: 'Filter agents by status. Default: "all"',
             },
           },
         },

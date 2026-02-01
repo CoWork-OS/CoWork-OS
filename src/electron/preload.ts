@@ -78,6 +78,8 @@ const IPC_CHANNELS = {
   PERSONALITY_GET_RELATIONSHIP_STATS: 'personality:getRelationshipStats',
   PERSONALITY_SET_ACTIVE: 'personality:setActive',
   PERSONALITY_SET_PERSONA: 'personality:setPersona',
+  PERSONALITY_RESET: 'personality:reset',
+  PERSONALITY_SETTINGS_CHANGED: 'personality:settingsChanged',
   // Task Queue
   QUEUE_GET_STATUS: 'queue:getStatus',
   QUEUE_GET_SETTINGS: 'queue:getSettings',
@@ -1001,6 +1003,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getRelationshipStats: () => ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_GET_RELATIONSHIP_STATS),
   setActivePersonality: (personalityId: string) => ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_SET_ACTIVE, personalityId),
   setActivePersona: (personaId: string) => ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_SET_PERSONA, personaId),
+  resetPersonalitySettings: (preserveRelationship?: boolean) => ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_RESET, preserveRelationship),
+  onPersonalitySettingsChanged: (callback: (settings: any) => void) => {
+    const subscription = (_: any, data: any) => callback(data);
+    ipcRenderer.on(IPC_CHANNELS.PERSONALITY_SETTINGS_CHANGED, subscription);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.PERSONALITY_SETTINGS_CHANGED, subscription);
+  },
 
   // Queue APIs
   getQueueStatus: () => ipcRenderer.invoke(IPC_CHANNELS.QUEUE_GET_STATUS),
@@ -1498,6 +1506,8 @@ export interface ElectronAPI {
   }>;
   setActivePersonality: (personalityId: string) => Promise<{ success: boolean }>;
   setActivePersona: (personaId: string) => Promise<{ success: boolean }>;
+  resetPersonalitySettings: (preserveRelationship?: boolean) => Promise<{ success: boolean }>;
+  onPersonalitySettingsChanged: (callback: (settings: any) => void) => () => void;
   // Queue APIs
   getQueueStatus: () => Promise<{
     runningCount: number;

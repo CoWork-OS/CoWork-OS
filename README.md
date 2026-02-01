@@ -180,6 +180,30 @@ All channels support:
 - **Dynamic Re-Planning**: Agent can revise its plan mid-execution
 - **75+ Built-in Skills**: GitHub, Slack, Notion, Spotify, Apple Notes, and more
 - **Document Creation**: Excel, Word, PDF, PowerPoint with professional formatting
+- **Persistent Memory**: Cross-session context with privacy-aware observation capture
+
+### Persistent Memory System
+
+Capture and recall observations across sessions for improved context continuity.
+
+| Feature | Description |
+|---------|-------------|
+| **Auto-Capture** | Observations, decisions, and errors captured during task execution |
+| **Privacy Protection** | Auto-detects sensitive patterns (API keys, passwords, tokens) |
+| **FTS5 Search** | Full-text search with relevance ranking |
+| **LLM Compression** | Summarizes observations for ~10x token efficiency |
+| **Progressive Retrieval** | 3-layer approach: snippets → timeline → full details |
+| **Per-Workspace Settings** | Enable/disable, privacy modes, retention policies |
+
+**Privacy Modes:**
+
+| Mode | Description |
+|------|-------------|
+| **Normal** | Auto-detect and mark sensitive data as private |
+| **Strict** | Mark all memories as private (local only) |
+| **Disabled** | No memory capture |
+
+Configure in **Settings** > **Memory** for each workspace.
 
 ### Configurable Guardrails
 
@@ -246,9 +270,9 @@ Customize agent behavior via Settings or conversation:
 
 ## Data Handling
 
-- **Stored locally**: Task metadata, timeline events, artifact index, workspace config (SQLite)
+- **Stored locally**: Task metadata, timeline events, artifact index, workspace config, memories (SQLite)
 - **Sent to provider**: Task prompt and context you choose to include
-- **Not sent**: Your API keys (stored locally via OS keychain)
+- **Not sent**: Your API keys (stored locally via OS keychain), private memories (marked sensitive)
 
 ---
 
@@ -273,7 +297,7 @@ Customize agent behavior via Settings or conversation:
 ┌─────────────────────────────────────────────────────────────────┐
 │                 Agent Daemon (Main Process)                      │
 │  Task Queue Manager | Agent Executor | Tool Registry             │
-│  Permission Manager | Cron Service | Canvas Manager              │
+│  Permission Manager | Cron Service | Memory Service              │
 └─────────────────────────────────────────────────────────────────┘
                               ↕
 ┌─────────────────────────────────────────────────────────────────┐
@@ -1320,6 +1344,7 @@ Users must comply with their model provider's terms:
 - [x] Docker-based sandboxing (cross-platform)
 - [x] Per-context security policies (DM vs group)
 - [x] Enhanced pairing code UI with countdown
+- [x] Persistent memory system with privacy protection
 
 ### Planned
 

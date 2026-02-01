@@ -22,12 +22,12 @@
 
 **The operating system for personal AI assistants**
 
-Your AI needs a secure home. CoWork OS provides the runtime, security layers, and I/O channels to run AI agents across WhatsApp, Telegram, Discord, Slack, iMessage, Signal, Mattermost, Matrix, Twitch, LINE, BlueBubbles, and Email — with the control you expect from an operating system.
+Your AI needs a secure home. CoWork OS provides the runtime, security layers, and I/O channels to run AI agents across WhatsApp, Telegram, Discord, Slack, Microsoft Teams, iMessage, Signal, Mattermost, Matrix, Twitch, LINE, BlueBubbles, and Email — with the control you expect from an operating system.
 
 | | |
 |---|---|
 | **6 AI Providers** | Claude, GPT-4, Gemini, Bedrock, OpenRouter, Ollama (free/local) |
-| **12 Messaging Channels** | WhatsApp, Telegram, Discord, Slack, iMessage, Signal, Mattermost, Matrix, Twitch, LINE, BlueBubbles, Email |
+| **13 Messaging Channels** | WhatsApp, Telegram, Discord, Slack, Teams, iMessage, Signal, Mattermost, Matrix, Twitch, LINE, BlueBubbles, Email |
 | **Security-First** | 1800+ unit tests, configurable guardrails, approval workflows |
 | **Local-First** | Your data stays on your machine. BYOK (Bring Your Own Key) |
 
@@ -62,7 +62,7 @@ Your AI needs a secure home. CoWork OS provides the runtime, security layers, an
 
 ### Connect from Anywhere
 
-- Message your AI from WhatsApp, Telegram, Discord, Slack, iMessage, Signal, Mattermost, Matrix, Twitch, LINE, BlueBubbles, or Email
+- Message your AI from WhatsApp, Telegram, Discord, Slack, Microsoft Teams, iMessage, Signal, Mattermost, Matrix, Twitch, LINE, BlueBubbles, or Email
 - Schedule recurring tasks with cron expressions
 - Secure remote access via Tailscale or SSH tunnels
 - WebSocket API for custom integrations
@@ -157,6 +157,7 @@ CoWork OS is **free and open source**. To run tasks, configure your own model cr
 - **Telegram**: Bot commands, streaming responses, workspace selection
 - **Discord**: Slash commands, DM support, guild integration
 - **Slack**: Socket Mode, channel mentions, file uploads
+- **Microsoft Teams**: Incoming webhooks, channel/chat messages, card formatting
 - **iMessage**: macOS native integration, pairing codes
 - **Signal**: End-to-end encrypted messaging via signal-cli
 - **Mattermost**: WebSocket real-time, REST API, team/channel support
@@ -452,7 +453,7 @@ Schedule recurring tasks with cron expressions and optional channel delivery.
 
 - **Cron Expressions**: Standard cron syntax (minute, hour, day, month, weekday)
 - **Workspace Binding**: Each job runs in a specific workspace
-- **Channel Delivery**: Send results to Telegram, Discord, Slack, WhatsApp, iMessage, Signal, Mattermost, Matrix, Twitch, LINE, BlueBubbles, or Email
+- **Channel Delivery**: Send results to Telegram, Discord, Slack, Teams, WhatsApp, iMessage, Signal, Mattermost, Matrix, Twitch, LINE, BlueBubbles, or Email
 - **Run History**: View execution history with status and duration
 - **Enable/Disable**: Toggle jobs without deleting them
 
@@ -565,6 +566,64 @@ Run tasks via Slack using Socket Mode.
 4. Subscribe to events: `app_mention`, `message.im`
 5. Install to workspace and copy Bot Token (`xoxb-...`)
 6. Configure in **Settings** > **Channels** > **Slack**
+
+---
+
+## Microsoft Teams Bot Integration
+
+Run tasks via Microsoft Teams using Incoming Webhooks.
+
+### Prerequisites
+
+- Microsoft Teams workspace with webhook permissions
+- Incoming Webhook connector configured in a channel
+
+### Setting Up Teams
+
+1. **Create an Incoming Webhook**:
+   - Open Microsoft Teams and go to the channel where you want the bot
+   - Click the **...** menu > **Connectors** (or **Workflows** in new Teams)
+   - Search for **Incoming Webhook** and click **Configure**
+   - Give your webhook a name (e.g., "CoWork OS Bot")
+   - Optionally upload a custom icon
+   - Click **Create** and copy the webhook URL
+
+2. **Configure in CoWork OS**:
+   - Open **Settings** > **Teams** tab
+   - Enter your Webhook URL
+   - Optionally set a channel name for display
+   - Click **Connect Teams**
+
+### Security Modes
+
+| Mode | Description |
+|------|-------------|
+| **Pairing** (default) | Users must enter a pairing code to interact |
+| **Allowlist** | Only pre-approved users can message |
+| **Open** | Anyone can message (not recommended) |
+
+### Bot Commands
+
+| Command | Description |
+|---------|-------------|
+| `/workspaces` | List available workspaces |
+| `/workspace <n>` | Select workspace by number |
+| `/newtask` | Start fresh conversation |
+| `/status` | Check bot status |
+| `/cancel` | Cancel running task |
+| `/pair <code>` | Pair with code |
+
+### Message Features
+
+- **Adaptive Cards**: Rich card formatting for responses
+- **Markdown Support**: Basic markdown in messages
+- **Action Buttons**: Interactive buttons in cards (coming soon)
+
+### Important Notes
+
+- **Webhook-Only**: Current implementation uses Incoming Webhooks for sending messages
+- **No Incoming Messages**: Webhooks are outbound-only; use scheduled tasks or other channels for triggers
+- **Rate Limits**: Teams has rate limits on webhook messages (4 messages/second)
 
 ---
 
@@ -1247,7 +1306,7 @@ Users must comply with their model provider's terms:
 ### Completed
 
 - [x] Multi-provider LLM support (6 providers)
-- [x] Multi-channel messaging (12 channels)
+- [x] Multi-channel messaging (13 channels)
 - [x] Configurable guardrails and security
 - [x] Browser automation with Playwright
 - [x] Code tools (glob, grep, edit_file)

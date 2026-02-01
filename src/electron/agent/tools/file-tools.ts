@@ -6,7 +6,9 @@ import { AgentDaemon } from '../daemon';
 import { GuardrailManager } from '../../guardrails/guardrail-manager';
 import mammoth from 'mammoth';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const pdfParse = require('pdf-parse') as (dataBuffer: Buffer) => Promise<{
+const pdfParseModule = require('pdf-parse');
+// Handle both ESM default export and CommonJS module.exports
+const pdfParse = (typeof pdfParseModule === 'function' ? pdfParseModule : pdfParseModule.default) as (dataBuffer: Buffer) => Promise<{
   numpages: number;
   info: { Title?: string; Author?: string };
   text: string;

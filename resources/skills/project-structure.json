@@ -7,5 +7,4 @@
   "prompt": "Please analyze this project's structure and architecture.\n\nProvide:\n1. **Directory Structure**: Visual tree of important directories\n2. **Architecture Overview**: How the project is organized\n3. **Key Files**: Entry points, configs, main modules\n4. **Data Flow**: How data moves through the system\n5. **Dependencies**: External libraries and their purposes\n6. **Design Patterns**: Patterns used in the codebase\n7. **Tech Stack**: Languages, frameworks, tools used\n\nFormat as a clear, well-organized document that would help a new developer understand the project.",
   "parameters": [],
   "enabled": true,
-  "filePath": "/Users/user/Library/Application Support/cowork-oss/skills/project-structure.json"
 }

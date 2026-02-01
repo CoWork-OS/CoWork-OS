@@ -7,5 +7,4 @@
   "prompt": "Please analyze this project and generate a comprehensive README.md.\n\nInclude:\n- Project title and description\n- Features list\n- Installation instructions\n- Usage examples\n- Configuration options\n- API documentation (if applicable)\n- Contributing guidelines\n- License information\n\nAnalyze the codebase to understand:\n- What the project does\n- How to install dependencies\n- How to run/build the project\n- Key configuration files\n\nSave the README.md in the project root.",
   "parameters": [],
   "enabled": true,
-  "filePath": "/Users/user/Library/Application Support/cowork-oss/skills/generate-readme.json"
 }

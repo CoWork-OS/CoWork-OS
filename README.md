@@ -631,6 +631,155 @@ Run tasks via Signal with end-to-end encryption using `signal-cli`.
 
 ---
 
+## Mattermost Bot Integration
+
+Run tasks via Mattermost using the REST API and WebSocket for real-time messaging.
+
+### Prerequisites
+
+- Mattermost server (self-hosted or cloud)
+- Personal Access Token with appropriate permissions
+
+### Setting Up Mattermost
+
+1. **Generate a Personal Access Token**:
+   - Go to **Account Settings** > **Security** > **Personal Access Tokens**
+   - Click **Create Token** and copy the token
+
+2. **Configure in CoWork OS**:
+   - Open **Settings** > **Mattermost** tab
+   - Enter your server URL (e.g., `https://your-team.mattermost.com`)
+   - Enter your Personal Access Token
+   - Optionally specify a Team ID
+   - Click **Connect Mattermost**
+
+### Security Modes
+
+| Mode | Description |
+|------|-------------|
+| **Pairing** (default) | Users must enter a pairing code to interact |
+| **Allowlist** | Only pre-approved users can message |
+| **Open** | Anyone can message (not recommended) |
+
+### Bot Commands
+
+| Command | Description |
+|---------|-------------|
+| `/workspaces` | List available workspaces |
+| `/workspace <n>` | Select workspace by number |
+| `/newtask` | Start fresh conversation |
+| `/status` | Check bot status |
+| `/cancel` | Cancel running task |
+| `/pair <code>` | Pair with code |
+
+---
+
+## Matrix Bot Integration
+
+Run tasks via Matrix protocol with support for federated messaging and rooms.
+
+### Prerequisites
+
+- Matrix homeserver (Matrix.org, Element, Synapse, or self-hosted)
+- Access token for your Matrix account
+
+### Setting Up Matrix
+
+1. **Get your Access Token**:
+   - Log into your Matrix client (Element, etc.)
+   - Go to **Settings** > **Help & About** > **Advanced**
+   - Copy your Access Token
+   - Or use the Matrix API to generate one
+
+2. **Configure in CoWork OS**:
+   - Open **Settings** > **Matrix** tab
+   - Enter your homeserver URL (e.g., `https://matrix.org`)
+   - Enter your User ID (e.g., `@yourbot:matrix.org`)
+   - Enter your Access Token
+   - Optionally specify Room IDs to monitor
+   - Click **Connect Matrix**
+
+### Security Modes
+
+| Mode | Description |
+|------|-------------|
+| **Pairing** (default) | Users must enter a pairing code to interact |
+| **Allowlist** | Only pre-approved Matrix users can message |
+| **Open** | Anyone can message (not recommended) |
+
+### Bot Commands
+
+| Command | Description |
+|---------|-------------|
+| `/workspaces` | List available workspaces |
+| `/workspace <n>` | Select workspace by number |
+| `/newtask` | Start fresh conversation |
+| `/status` | Check bot status |
+| `/cancel` | Cancel running task |
+| `/pair <code>` | Pair with code |
+
+### Important Notes
+
+- **Room-Based**: Matrix operates on rooms. Configure specific room IDs or let the bot respond in any room it's invited to.
+- **Federation**: Matrix is federated, allowing communication across different homeservers.
+- **E2EE**: End-to-end encryption support depends on room settings.
+
+---
+
+## Twitch Bot Integration
+
+Run tasks via Twitch chat using IRC over WebSocket.
+
+### Prerequisites
+
+- Twitch account for the bot
+- OAuth token with chat permissions
+
+### Getting an OAuth Token
+
+1. Visit [twitchtokengenerator.com](https://twitchtokengenerator.com/)
+2. Select **Chat Bot** token type
+3. Authorize with your Twitch account
+4. Copy the OAuth token (starts with `oauth:`)
+
+### Setting Up Twitch
+
+1. **Configure in CoWork OS**:
+   - Open **Settings** > **Twitch** tab
+   - Enter your Twitch username
+   - Enter your OAuth token
+   - Enter channel names to join (comma-separated, without #)
+   - Optionally enable whispers (DMs)
+   - Click **Connect Twitch**
+
+### Security Modes
+
+| Mode | Description |
+|------|-------------|
+| **Pairing** (default) | Users must enter a pairing code to interact |
+| **Allowlist** | Only pre-approved Twitch users can message |
+| **Open** | Anyone can message (not recommended) |
+
+### Bot Commands
+
+| Command | Description |
+|---------|-------------|
+| `/workspaces` | List available workspaces |
+| `/workspace <n>` | Select workspace by number |
+| `/newtask` | Start fresh conversation |
+| `/status` | Check bot status |
+| `/cancel` | Cancel running task |
+| `/pair <code>` | Pair with code |
+
+### Limitations
+
+- **No File Attachments**: Twitch chat is text-only
+- **Rate Limited**: 20 messages per 30 seconds
+- **Message Length**: 500 characters max per message (auto-split for longer responses)
+- **Whispers**: May require verified account status
+
+---
+
 ## Menu Bar App (macOS)
 
 Native menu bar companion for quick access without the main window.
@@ -877,7 +1026,7 @@ Users must comply with their model provider's terms:
 ### Completed
 
 - [x] Multi-provider LLM support (6 providers)
-- [x] Multi-channel messaging (6 channels)
+- [x] Multi-channel messaging (9 channels)
 - [x] Configurable guardrails and security
 - [x] Browser automation with Playwright
 - [x] Code tools (glob, grep, edit_file)

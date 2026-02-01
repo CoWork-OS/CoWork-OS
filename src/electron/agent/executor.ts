@@ -19,6 +19,7 @@ import { GuardrailManager } from '../guardrails/guardrail-manager';
 import { PersonalityManager } from '../settings/personality-manager';
 import { calculateCost, formatCost } from './llm/pricing';
 import { getCustomSkillLoader } from './custom-skill-loader';
+import { MemoryService } from '../memory/MemoryService';
 
 // Timeout for LLM API calls (2 minutes)
 const LLM_TIMEOUT_MS = 2 * 60 * 1000;
@@ -2231,9 +2232,17 @@ Format your plan as a JSON object with this structure:
     const personalityPrompt = PersonalityManager.getPersonalityPrompt();
     const identityPrompt = PersonalityManager.getIdentityPrompt();
 
+    // Get memory context for injection (from previous sessions)
+    let memoryContext = '';
+    try {
+      memoryContext = MemoryService.getContextForInjection(this.workspace.id, this.task.prompt);
+    } catch {
+      // Memory service may not be initialized, continue without context
+    }
+
     // Define system prompt once so we can track its token usage
     this.systemPrompt = `${identityPrompt}
-
+${memoryContext ? `\n${memoryContext}\n` : ''}
 You are an autonomous task executor. Use the available tools to complete each step.
 Current time: ${getCurrentDateTimeContext()}
 Workspace: ${this.workspace.path}

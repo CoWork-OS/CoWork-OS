@@ -9,11 +9,13 @@ import {
   WorkspaceRepository,
   ApprovalRepository,
   ArtifactRepository,
+  MemoryType,
 } from '../database/repositories';
 import { Task, TaskStatus, IPC_CHANNELS, QueueSettings, QueueStatus, Workspace, WorkspacePermissions, AgentConfig, AgentType } from '../../shared/types';
 import { TaskExecutor } from './executor';
 import { TaskQueueManager } from './queue-manager';
 import { approvalIdempotency, taskIdempotency, IdempotencyManager } from '../security/concurrency';
+import { MemoryService } from '../memory/MemoryService';
 
 // Memory management constants
 const MAX_CACHED_EXECUTORS = 10; // Maximum number of completed task executors to keep in memory
@@ -454,6 +456,76 @@ export class AgentDaemon extends EventEmitter {
       payload,
     });
     this.emitTaskEvent(taskId, type, payload);
+
+    // Capture to memory system (async, don't block)
+    this.captureToMemory(taskId, type, payload).catch((error) => {
+      // Silently log - memory capture is optional enhancement
+      console.debug('[AgentDaemon] Memory capture failed:', error);
+    });
+  }
+
+  /**
+   * Capture task event to memory system for cross-session context
+   */
+  private async captureToMemory(taskId: string, type: string, payload: any): Promise<void> {
+    // Map event types to memory types
+    const memoryTypeMap: Record<string, MemoryType> = {
+      tool_call: 'observation',
+      tool_result: 'observation',
+      tool_error: 'error',
+      step_started: 'observation',
+      step_completed: 'observation',
+      step_failed: 'error',
+      assistant_message: 'observation',
+      plan_created: 'decision',
+      plan_revised: 'decision',
+      error: 'error',
+      verification_passed: 'insight',
+      verification_failed: 'error',
+      file_created: 'observation',
+      file_modified: 'observation',
+    };
+
+    const memoryType = memoryTypeMap[type];
+    if (!memoryType) return;
+
+    const task = this.taskRepo.findById(taskId);
+    if (!task) return;
+
+    // Build content string based on event type
+    let content = '';
+    if (type === 'tool_call') {
+      content = `Tool called: ${payload.tool || payload.name}\nInput: ${JSON.stringify(payload.input, null, 2)}`;
+    } else if (type === 'tool_result') {
+      const result =
+        typeof payload.result === 'string' ? payload.result : JSON.stringify(payload.result);
+      content = `Tool result for ${payload.tool || payload.name}:\n${result}`;
+    } else if (type === 'tool_error') {
+      content = `Tool error for ${payload.tool || payload.name}: ${payload.error}`;
+    } else if (type === 'assistant_message') {
+      content = payload.content || payload.message || JSON.stringify(payload);
+    } else if (type === 'plan_created' || type === 'plan_revised') {
+      content = `Plan ${type === 'plan_revised' ? 'revised' : 'created'}:\n${JSON.stringify(payload.plan || payload, null, 2)}`;
+    } else if (type === 'step_completed') {
+      content = `Step completed: ${payload.step?.description || JSON.stringify(payload)}`;
+    } else if (type === 'step_failed') {
+      content = `Step failed: ${payload.step?.description || ''}\nError: ${payload.error || 'Unknown error'}`;
+    } else if (type === 'file_created' || type === 'file_modified') {
+      content = `File ${type === 'file_created' ? 'created' : 'modified'}: ${payload.path}`;
+    } else if (type === 'verification_passed') {
+      content = `Verification passed: ${payload.message || 'Task completed successfully'}`;
+    } else if (type === 'verification_failed') {
+      content = `Verification failed: ${payload.message || payload.error || 'Unknown failure'}`;
+    } else {
+      content = JSON.stringify(payload);
+    }
+
+    // Truncate very long content
+    if (content.length > 5000) {
+      content = content.slice(0, 5000) + '\n[... truncated]';
+    }
+
+    await MemoryService.capture(task.workspaceId, taskId, memoryType, content);
   }
 
   /**

@@ -256,13 +256,109 @@ export class DatabaseManager {
       CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp ON audit_log(timestamp);
       CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log(action);
       CREATE INDEX IF NOT EXISTS idx_audit_log_user ON audit_log(user_id);
+
+      -- Memory System Tables
+
+      -- Core memories table for persistent context
+      CREATE TABLE IF NOT EXISTS memories (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        task_id TEXT,
+        type TEXT NOT NULL,
+        content TEXT NOT NULL,
+        summary TEXT,
+        tokens INTEGER NOT NULL DEFAULT 0,
+        is_compressed INTEGER NOT NULL DEFAULT 0,
+        is_private INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
+        FOREIGN KEY (task_id) REFERENCES tasks(id)
+      );
+
+      -- Aggregated semantic summaries
+      CREATE TABLE IF NOT EXISTS memory_summaries (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        time_period TEXT NOT NULL,
+        period_start INTEGER NOT NULL,
+        period_end INTEGER NOT NULL,
+        summary TEXT NOT NULL,
+        memory_ids TEXT NOT NULL,
+        tokens INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
+      );
+
+      -- Per-workspace memory settings
+      CREATE TABLE IF NOT EXISTS memory_settings (
+        workspace_id TEXT PRIMARY KEY,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        auto_capture INTEGER NOT NULL DEFAULT 1,
+        compression_enabled INTEGER NOT NULL DEFAULT 1,
+        retention_days INTEGER NOT NULL DEFAULT 90,
+        max_storage_mb INTEGER NOT NULL DEFAULT 100,
+        privacy_mode TEXT NOT NULL DEFAULT 'normal',
+        excluded_patterns TEXT,
+        FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
+      );
+
+      -- Memory System Indexes
+      CREATE INDEX IF NOT EXISTS idx_memories_workspace ON memories(workspace_id);
+      CREATE INDEX IF NOT EXISTS idx_memories_task ON memories(task_id);
+      CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(type);
+      CREATE INDEX IF NOT EXISTS idx_memories_created ON memories(created_at);
+      CREATE INDEX IF NOT EXISTS idx_memories_compressed ON memories(is_compressed);
+      CREATE INDEX IF NOT EXISTS idx_memory_summaries_workspace ON memory_summaries(workspace_id);
+      CREATE INDEX IF NOT EXISTS idx_memory_summaries_period ON memory_summaries(time_period, period_start);
     `);
+
+    // Initialize FTS5 for memory search (separate exec to handle if not supported)
+    this.initializeMemoryFTS();
 
     // Run migrations for Goal Mode columns (SQLite ALTER TABLE ADD COLUMN is safe if column exists)
     this.runMigrations();
 
     // Seed default models if table is empty
     this.seedDefaultModels();
+  }
+
+  private initializeMemoryFTS() {
+    // Create FTS5 virtual table for full-text search on memories
+    // Using external content table pattern for efficiency
+    try {
+      this.db.exec(`
+        CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
+          content,
+          summary,
+          content='memories',
+          content_rowid='rowid'
+        );
+
+        -- Trigger to keep FTS in sync on INSERT
+        CREATE TRIGGER IF NOT EXISTS memories_fts_insert AFTER INSERT ON memories BEGIN
+          INSERT INTO memories_fts(rowid, content, summary)
+          VALUES (NEW.rowid, NEW.content, NEW.summary);
+        END;
+
+        -- Trigger to keep FTS in sync on DELETE
+        CREATE TRIGGER IF NOT EXISTS memories_fts_delete AFTER DELETE ON memories BEGIN
+          INSERT INTO memories_fts(memories_fts, rowid, content, summary)
+          VALUES('delete', OLD.rowid, OLD.content, OLD.summary);
+        END;
+
+        -- Trigger to keep FTS in sync on UPDATE
+        CREATE TRIGGER IF NOT EXISTS memories_fts_update AFTER UPDATE ON memories BEGIN
+          INSERT INTO memories_fts(memories_fts, rowid, content, summary)
+          VALUES('delete', OLD.rowid, OLD.content, OLD.summary);
+          INSERT INTO memories_fts(rowid, content, summary)
+          VALUES (NEW.rowid, NEW.content, NEW.summary);
+        END;
+      `);
+    } catch (error) {
+      // FTS5 might not be available in all SQLite builds
+      console.warn('[DatabaseManager] FTS5 initialization failed, full-text search will be disabled:', error);
+    }
   }
 
   private runMigrations() {

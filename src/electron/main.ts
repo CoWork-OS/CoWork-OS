@@ -14,6 +14,7 @@ import { PersonalityManager } from './settings/personality-manager';
 import { MCPClientManager } from './mcp/client/MCPClientManager';
 import { trayManager } from './tray';
 import { CronService, setCronService, getCronStorePath } from './cron';
+import { MemoryService } from './memory/MemoryService';
 import { setupControlPlaneHandlers, shutdownControlPlane } from './control-plane';
 // Live Canvas feature
 import { registerCanvasScheme, registerCanvasProtocol, CanvasManager } from './canvas';
@@ -124,6 +125,15 @@ app.whenReady().then(async () => {
   // Initialize agent daemon
   agentDaemon = new AgentDaemon(dbManager);
   await agentDaemon.initialize();
+
+  // Initialize Memory Service for cross-session context
+  try {
+    MemoryService.initialize(dbManager);
+    console.log('[Main] Memory Service initialized');
+  } catch (error) {
+    console.error('[Main] Failed to initialize Memory Service:', error);
+    // Don't fail app startup if memory init fails
+  }
 
   // Initialize MCP Client Manager - auto-connects enabled servers on startup
   try {
@@ -367,6 +377,13 @@ app.on('before-quit', async () => {
   } catch (error) {
     console.error('[Main] Failed to shutdown MCP servers:', error);
   }
+  // Shutdown Memory Service
+  try {
+    MemoryService.shutdown();
+  } catch (error) {
+    console.error('[Main] Failed to shutdown Memory Service:', error);
+  }
+
   if (dbManager) {
     dbManager.close();
   }

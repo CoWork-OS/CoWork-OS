@@ -228,6 +228,16 @@ const IPC_CHANNELS = {
   NODE_GET: 'node:get',
   NODE_INVOKE: 'node:invoke',
   NODE_EVENT: 'node:event',
+  // Memory System
+  MEMORY_GET_SETTINGS: 'memory:getSettings',
+  MEMORY_SAVE_SETTINGS: 'memory:saveSettings',
+  MEMORY_SEARCH: 'memory:search',
+  MEMORY_GET_TIMELINE: 'memory:getTimeline',
+  MEMORY_GET_DETAILS: 'memory:getDetails',
+  MEMORY_GET_RECENT: 'memory:getRecent',
+  MEMORY_GET_STATS: 'memory:getStats',
+  MEMORY_CLEAR: 'memory:clear',
+  MEMORY_EVENT: 'memory:event',
 } as const;
 
 // Mobile Companion Node types (inlined for sandboxed preload)
@@ -642,6 +652,59 @@ interface NotificationEvent {
   type: 'added' | 'updated' | 'removed' | 'cleared';
   notification?: AppNotification;
   notifications?: AppNotification[];
+}
+
+// Memory System Types (inlined for sandboxed preload)
+type MemoryType = 'observation' | 'decision' | 'error' | 'insight' | 'summary';
+type PrivacyMode = 'normal' | 'strict' | 'disabled';
+
+interface MemorySettings {
+  workspaceId: string;
+  enabled: boolean;
+  autoCapture: boolean;
+  compressionEnabled: boolean;
+  retentionDays: number;
+  maxStorageMb: number;
+  privacyMode: PrivacyMode;
+  excludedPatterns?: string[];
+}
+
+interface Memory {
+  id: string;
+  workspaceId: string;
+  taskId?: string;
+  type: MemoryType;
+  content: string;
+  summary?: string;
+  tokens: number;
+  isCompressed: boolean;
+  isPrivate: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+interface MemorySearchResult {
+  id: string;
+  snippet: string;
+  type: MemoryType;
+  relevanceScore: number;
+  createdAt: number;
+  taskId?: string;
+}
+
+interface MemoryTimelineEntry {
+  id: string;
+  content: string;
+  type: MemoryType;
+  createdAt: number;
+  taskId?: string;
+}
+
+interface MemoryStats {
+  count: number;
+  totalTokens: number;
+  compressedCount: number;
+  compressionRatio: number;
 }
 
 // Hooks types (inlined for sandboxed preload)
@@ -1295,6 +1358,29 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on(IPC_CHANNELS.NODE_EVENT, subscription);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.NODE_EVENT, subscription);
   },
+
+  // Memory System APIs
+  getMemorySettings: (workspaceId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_GET_SETTINGS, workspaceId),
+  saveMemorySettings: (data: { workspaceId: string; settings: Partial<MemorySettings> }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_SAVE_SETTINGS, data),
+  searchMemories: (data: { workspaceId: string; query: string; limit?: number }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_SEARCH, data),
+  getMemoryTimeline: (data: { memoryId: string; windowSize?: number }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_GET_TIMELINE, data),
+  getMemoryDetails: (ids: string[]) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_GET_DETAILS, ids),
+  getRecentMemories: (data: { workspaceId: string; limit?: number }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_GET_RECENT, data),
+  getMemoryStats: (workspaceId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_GET_STATS, workspaceId),
+  clearMemory: (workspaceId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_CLEAR, workspaceId),
+  onMemoryEvent: (callback: (event: { type: string; workspaceId: string }) => void) => {
+    const subscription = (_: Electron.IpcRendererEvent, data: any) => callback(data);
+    ipcRenderer.on(IPC_CHANNELS.MEMORY_EVENT, subscription);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.MEMORY_EVENT, subscription);
+  },
 });
 
 // Type declarations for TypeScript
@@ -1728,6 +1814,17 @@ export interface ElectronAPI {
   nodeInvoke: (params: { nodeId: string; command: string; params?: Record<string, unknown>; timeoutMs?: number }) =>
     Promise<{ ok: boolean; payload?: unknown; error?: { code: string; message: string } }>;
   onNodeEvent: (callback: (event: NodeEvent) => void) => () => void;
+
+  // Memory System
+  getMemorySettings: (workspaceId: string) => Promise<MemorySettings>;
+  saveMemorySettings: (data: { workspaceId: string; settings: Partial<MemorySettings> }) => Promise<{ success: boolean }>;
+  searchMemories: (data: { workspaceId: string; query: string; limit?: number }) => Promise<MemorySearchResult[]>;
+  getMemoryTimeline: (data: { memoryId: string; windowSize?: number }) => Promise<MemoryTimelineEntry[]>;
+  getMemoryDetails: (ids: string[]) => Promise<Memory[]>;
+  getRecentMemories: (data: { workspaceId: string; limit?: number }) => Promise<Memory[]>;
+  getMemoryStats: (workspaceId: string) => Promise<MemoryStats>;
+  clearMemory: (workspaceId: string) => Promise<{ success: boolean }>;
+  onMemoryEvent: (callback: (event: { type: string; workspaceId: string }) => void) => () => void;
 }
 
 declare global {

@@ -1684,3 +1684,533 @@ export class AuditLogRepository {
     };
   }
 }
+
+// ============================================================
+// Memory System Repositories
+// ============================================================
+
+export type MemoryType = 'observation' | 'decision' | 'error' | 'insight' | 'summary';
+export type PrivacyMode = 'normal' | 'strict' | 'disabled';
+export type TimePeriod = 'hourly' | 'daily' | 'weekly';
+
+export interface Memory {
+  id: string;
+  workspaceId: string;
+  taskId?: string;
+  type: MemoryType;
+  content: string;
+  summary?: string;
+  tokens: number;
+  isCompressed: boolean;
+  isPrivate: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface MemorySummary {
+  id: string;
+  workspaceId: string;
+  timePeriod: TimePeriod;
+  periodStart: number;
+  periodEnd: number;
+  summary: string;
+  memoryIds: string[];
+  tokens: number;
+  createdAt: number;
+}
+
+export interface MemorySettings {
+  workspaceId: string;
+  enabled: boolean;
+  autoCapture: boolean;
+  compressionEnabled: boolean;
+  retentionDays: number;
+  maxStorageMb: number;
+  privacyMode: PrivacyMode;
+  excludedPatterns?: string[];
+}
+
+export interface MemorySearchResult {
+  id: string;
+  snippet: string;
+  type: MemoryType;
+  relevanceScore: number;
+  createdAt: number;
+  taskId?: string;
+}
+
+export interface MemoryTimelineEntry {
+  id: string;
+  content: string;
+  type: MemoryType;
+  createdAt: number;
+  taskId?: string;
+}
+
+export interface MemoryStats {
+  count: number;
+  totalTokens: number;
+  compressedCount: number;
+  compressionRatio: number;
+}
+
+export class MemoryRepository {
+  constructor(private db: Database.Database) {}
+
+  create(memory: Omit<Memory, 'id' | 'createdAt' | 'updatedAt'>): Memory {
+    const now = Date.now();
+    const newMemory: Memory = {
+      ...memory,
+      id: uuidv4(),
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const stmt = this.db.prepare(`
+      INSERT INTO memories (id, workspace_id, task_id, type, content, summary, tokens, is_compressed, is_private, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    stmt.run(
+      newMemory.id,
+      newMemory.workspaceId,
+      newMemory.taskId || null,
+      newMemory.type,
+      newMemory.content,
+      newMemory.summary || null,
+      newMemory.tokens,
+      newMemory.isCompressed ? 1 : 0,
+      newMemory.isPrivate ? 1 : 0,
+      newMemory.createdAt,
+      newMemory.updatedAt
+    );
+
+    return newMemory;
+  }
+
+  update(id: string, updates: Partial<Pick<Memory, 'summary' | 'tokens' | 'isCompressed'>>): void {
+    const fields: string[] = [];
+    const values: unknown[] = [];
+
+    if (updates.summary !== undefined) {
+      fields.push('summary = ?');
+      values.push(updates.summary);
+    }
+    if (updates.tokens !== undefined) {
+      fields.push('tokens = ?');
+      values.push(updates.tokens);
+    }
+    if (updates.isCompressed !== undefined) {
+      fields.push('is_compressed = ?');
+      values.push(updates.isCompressed ? 1 : 0);
+    }
+
+    if (fields.length === 0) return;
+
+    fields.push('updated_at = ?');
+    values.push(Date.now());
+    values.push(id);
+
+    const stmt = this.db.prepare(`UPDATE memories SET ${fields.join(', ')} WHERE id = ?`);
+    stmt.run(...values);
+  }
+
+  findById(id: string): Memory | undefined {
+    const stmt = this.db.prepare('SELECT * FROM memories WHERE id = ?');
+    const row = stmt.get(id) as Record<string, unknown> | undefined;
+    return row ? this.mapRowToMemory(row) : undefined;
+  }
+
+  findByIds(ids: string[]): Memory[] {
+    if (ids.length === 0) return [];
+    const placeholders = ids.map(() => '?').join(', ');
+    const stmt = this.db.prepare(`SELECT * FROM memories WHERE id IN (${placeholders})`);
+    const rows = stmt.all(...ids) as Record<string, unknown>[];
+    return rows.map(row => this.mapRowToMemory(row));
+  }
+
+  /**
+   * Layer 1: Search returns IDs + brief snippets (~50 tokens each)
+   * Uses FTS5 for full-text search with relevance ranking
+   */
+  search(workspaceId: string, query: string, limit = 20): MemorySearchResult[] {
+    try {
+      // Try FTS5 search first
+      const stmt = this.db.prepare(`
+        SELECT m.id, m.summary, m.content, m.type, m.created_at, m.task_id,
+               bm25(memories_fts) as score
+        FROM memories_fts f
+        JOIN memories m ON f.rowid = m.rowid
+        WHERE memories_fts MATCH ? AND m.workspace_id = ? AND m.is_private = 0
+        ORDER BY score
+        LIMIT ?
+      `);
+
+      const rows = stmt.all(query, workspaceId, limit) as Record<string, unknown>[];
+      return rows.map(row => ({
+        id: row.id as string,
+        snippet: (row.summary as string) || this.truncateToSnippet(row.content as string, 200),
+        type: row.type as MemoryType,
+        relevanceScore: Math.abs(row.score as number),
+        createdAt: row.created_at as number,
+        taskId: (row.task_id as string) || undefined,
+      }));
+    } catch {
+      // Fall back to LIKE search if FTS5 is not available
+      const stmt = this.db.prepare(`
+        SELECT id, summary, content, type, created_at, task_id
+        FROM memories
+        WHERE workspace_id = ? AND is_private = 0
+          AND (content LIKE ? OR summary LIKE ?)
+        ORDER BY created_at DESC
+        LIMIT ?
+      `);
+
+      const likeQuery = `%${query}%`;
+      const rows = stmt.all(workspaceId, likeQuery, likeQuery, limit) as Record<string, unknown>[];
+      return rows.map(row => ({
+        id: row.id as string,
+        snippet: (row.summary as string) || this.truncateToSnippet(row.content as string, 200),
+        type: row.type as MemoryType,
+        relevanceScore: 1,
+        createdAt: row.created_at as number,
+        taskId: (row.task_id as string) || undefined,
+      }));
+    }
+  }
+
+  /**
+   * Layer 2: Get timeline context around a specific memory
+   * Returns surrounding memories within a time window
+   */
+  getTimelineContext(memoryId: string, windowSize = 5): MemoryTimelineEntry[] {
+    const memory = this.findById(memoryId);
+    if (!memory) return [];
+
+    const stmt = this.db.prepare(`
+      SELECT id, content, type, created_at, task_id
+      FROM memories
+      WHERE workspace_id = ? AND is_private = 0
+        AND created_at BETWEEN ? AND ?
+      ORDER BY created_at ASC
+      LIMIT ?
+    `);
+
+    const timeWindow = 30 * 60 * 1000; // 30 minutes
+    const rows = stmt.all(
+      memory.workspaceId,
+      memory.createdAt - timeWindow,
+      memory.createdAt + timeWindow,
+      windowSize * 2 + 1
+    ) as Record<string, unknown>[];
+
+    return rows.map(row => ({
+      id: row.id as string,
+      content: row.content as string,
+      type: row.type as MemoryType,
+      createdAt: row.created_at as number,
+      taskId: (row.task_id as string) || undefined,
+    }));
+  }
+
+  /**
+   * Layer 3: Get full details for selected IDs
+   * Only called for specific memories when full content is needed
+   */
+  getFullDetails(ids: string[]): Memory[] {
+    return this.findByIds(ids);
+  }
+
+  /**
+   * Get recent memories for context injection
+   */
+  getRecentForWorkspace(workspaceId: string, limit = 10): Memory[] {
+    const stmt = this.db.prepare(`
+      SELECT * FROM memories
+      WHERE workspace_id = ? AND is_private = 0
+      ORDER BY created_at DESC
+      LIMIT ?
+    `);
+    const rows = stmt.all(workspaceId, limit) as Record<string, unknown>[];
+    return rows.map(row => this.mapRowToMemory(row));
+  }
+
+  /**
+   * Get uncompressed memories for batch compression
+   */
+  getUncompressed(limit = 50): Memory[] {
+    const stmt = this.db.prepare(`
+      SELECT * FROM memories
+      WHERE is_compressed = 0 AND summary IS NULL
+      ORDER BY created_at ASC
+      LIMIT ?
+    `);
+    const rows = stmt.all(limit) as Record<string, unknown>[];
+    return rows.map(row => this.mapRowToMemory(row));
+  }
+
+  /**
+   * Find memories by workspace
+   */
+  findByWorkspace(workspaceId: string, limit = 100, offset = 0): Memory[] {
+    const stmt = this.db.prepare(`
+      SELECT * FROM memories
+      WHERE workspace_id = ?
+      ORDER BY created_at DESC
+      LIMIT ? OFFSET ?
+    `);
+    const rows = stmt.all(workspaceId, limit, offset) as Record<string, unknown>[];
+    return rows.map(row => this.mapRowToMemory(row));
+  }
+
+  /**
+   * Find memories by task
+   */
+  findByTask(taskId: string): Memory[] {
+    const stmt = this.db.prepare(`
+      SELECT * FROM memories
+      WHERE task_id = ?
+      ORDER BY created_at ASC
+    `);
+    const rows = stmt.all(taskId) as Record<string, unknown>[];
+    return rows.map(row => this.mapRowToMemory(row));
+  }
+
+  /**
+   * Cleanup old memories based on retention policy
+   */
+  deleteOlderThan(workspaceId: string, cutoffTimestamp: number): number {
+    const stmt = this.db.prepare(`
+      DELETE FROM memories
+      WHERE workspace_id = ? AND created_at < ?
+    `);
+    const result = stmt.run(workspaceId, cutoffTimestamp);
+    return result.changes;
+  }
+
+  /**
+   * Delete all memories for a workspace
+   */
+  deleteByWorkspace(workspaceId: string): number {
+    const stmt = this.db.prepare('DELETE FROM memories WHERE workspace_id = ?');
+    const result = stmt.run(workspaceId);
+    return result.changes;
+  }
+
+  /**
+   * Get storage statistics for a workspace
+   */
+  getStats(workspaceId: string): MemoryStats {
+    const stmt = this.db.prepare(`
+      SELECT COUNT(*) as count,
+             COALESCE(SUM(tokens), 0) as total_tokens,
+             SUM(CASE WHEN is_compressed = 1 THEN 1 ELSE 0 END) as compressed_count
+      FROM memories
+      WHERE workspace_id = ?
+    `);
+    const row = stmt.get(workspaceId) as Record<string, unknown>;
+    const count = row.count as number;
+    const compressedCount = row.compressed_count as number;
+    return {
+      count,
+      totalTokens: row.total_tokens as number,
+      compressedCount,
+      compressionRatio: count > 0 ? compressedCount / count : 0,
+    };
+  }
+
+  private truncateToSnippet(content: string, maxChars: number): string {
+    if (content.length <= maxChars) return content;
+    return content.slice(0, maxChars - 3) + '...';
+  }
+
+  private mapRowToMemory(row: Record<string, unknown>): Memory {
+    return {
+      id: row.id as string,
+      workspaceId: row.workspace_id as string,
+      taskId: (row.task_id as string) || undefined,
+      type: row.type as MemoryType,
+      content: row.content as string,
+      summary: (row.summary as string) || undefined,
+      tokens: row.tokens as number,
+      isCompressed: row.is_compressed === 1,
+      isPrivate: row.is_private === 1,
+      createdAt: row.created_at as number,
+      updatedAt: row.updated_at as number,
+    };
+  }
+}
+
+export class MemorySummaryRepository {
+  constructor(private db: Database.Database) {}
+
+  create(summary: Omit<MemorySummary, 'id' | 'createdAt'>): MemorySummary {
+    const newSummary: MemorySummary = {
+      ...summary,
+      id: uuidv4(),
+      createdAt: Date.now(),
+    };
+
+    const stmt = this.db.prepare(`
+      INSERT INTO memory_summaries (id, workspace_id, time_period, period_start, period_end, summary, memory_ids, tokens, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    stmt.run(
+      newSummary.id,
+      newSummary.workspaceId,
+      newSummary.timePeriod,
+      newSummary.periodStart,
+      newSummary.periodEnd,
+      newSummary.summary,
+      JSON.stringify(newSummary.memoryIds),
+      newSummary.tokens,
+      newSummary.createdAt
+    );
+
+    return newSummary;
+  }
+
+  findByWorkspaceAndPeriod(workspaceId: string, timePeriod: TimePeriod, limit = 10): MemorySummary[] {
+    const stmt = this.db.prepare(`
+      SELECT * FROM memory_summaries
+      WHERE workspace_id = ? AND time_period = ?
+      ORDER BY period_start DESC
+      LIMIT ?
+    `);
+    const rows = stmt.all(workspaceId, timePeriod, limit) as Record<string, unknown>[];
+    return rows.map(row => this.mapRowToSummary(row));
+  }
+
+  findByWorkspace(workspaceId: string, limit = 50): MemorySummary[] {
+    const stmt = this.db.prepare(`
+      SELECT * FROM memory_summaries
+      WHERE workspace_id = ?
+      ORDER BY period_start DESC
+      LIMIT ?
+    `);
+    const rows = stmt.all(workspaceId, limit) as Record<string, unknown>[];
+    return rows.map(row => this.mapRowToSummary(row));
+  }
+
+  deleteByWorkspace(workspaceId: string): number {
+    const stmt = this.db.prepare('DELETE FROM memory_summaries WHERE workspace_id = ?');
+    const result = stmt.run(workspaceId);
+    return result.changes;
+  }
+
+  private mapRowToSummary(row: Record<string, unknown>): MemorySummary {
+    return {
+      id: row.id as string,
+      workspaceId: row.workspace_id as string,
+      timePeriod: row.time_period as TimePeriod,
+      periodStart: row.period_start as number,
+      periodEnd: row.period_end as number,
+      summary: row.summary as string,
+      memoryIds: safeJsonParse(row.memory_ids as string, [] as string[], 'memorySummary.memoryIds'),
+      tokens: row.tokens as number,
+      createdAt: row.created_at as number,
+    };
+  }
+}
+
+export class MemorySettingsRepository {
+  constructor(private db: Database.Database) {}
+
+  getOrCreate(workspaceId: string): MemorySettings {
+    const stmt = this.db.prepare('SELECT * FROM memory_settings WHERE workspace_id = ?');
+    const row = stmt.get(workspaceId) as Record<string, unknown> | undefined;
+
+    if (row) {
+      return this.mapRowToSettings(row);
+    }
+
+    // Create default settings
+    const defaults: MemorySettings = {
+      workspaceId,
+      enabled: true,
+      autoCapture: true,
+      compressionEnabled: true,
+      retentionDays: 90,
+      maxStorageMb: 100,
+      privacyMode: 'normal',
+      excludedPatterns: [],
+    };
+
+    const insertStmt = this.db.prepare(`
+      INSERT INTO memory_settings (workspace_id, enabled, auto_capture, compression_enabled, retention_days, max_storage_mb, privacy_mode, excluded_patterns)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    insertStmt.run(
+      defaults.workspaceId,
+      defaults.enabled ? 1 : 0,
+      defaults.autoCapture ? 1 : 0,
+      defaults.compressionEnabled ? 1 : 0,
+      defaults.retentionDays,
+      defaults.maxStorageMb,
+      defaults.privacyMode,
+      JSON.stringify(defaults.excludedPatterns)
+    );
+
+    return defaults;
+  }
+
+  update(workspaceId: string, updates: Partial<Omit<MemorySettings, 'workspaceId'>>): void {
+    const fields: string[] = [];
+    const values: unknown[] = [];
+
+    if (updates.enabled !== undefined) {
+      fields.push('enabled = ?');
+      values.push(updates.enabled ? 1 : 0);
+    }
+    if (updates.autoCapture !== undefined) {
+      fields.push('auto_capture = ?');
+      values.push(updates.autoCapture ? 1 : 0);
+    }
+    if (updates.compressionEnabled !== undefined) {
+      fields.push('compression_enabled = ?');
+      values.push(updates.compressionEnabled ? 1 : 0);
+    }
+    if (updates.retentionDays !== undefined) {
+      fields.push('retention_days = ?');
+      values.push(updates.retentionDays);
+    }
+    if (updates.maxStorageMb !== undefined) {
+      fields.push('max_storage_mb = ?');
+      values.push(updates.maxStorageMb);
+    }
+    if (updates.privacyMode !== undefined) {
+      fields.push('privacy_mode = ?');
+      values.push(updates.privacyMode);
+    }
+    if (updates.excludedPatterns !== undefined) {
+      fields.push('excluded_patterns = ?');
+      values.push(JSON.stringify(updates.excludedPatterns));
+    }
+
+    if (fields.length === 0) return;
+
+    values.push(workspaceId);
+    const stmt = this.db.prepare(`UPDATE memory_settings SET ${fields.join(', ')} WHERE workspace_id = ?`);
+    stmt.run(...values);
+  }
+
+  delete(workspaceId: string): void {
+    const stmt = this.db.prepare('DELETE FROM memory_settings WHERE workspace_id = ?');
+    stmt.run(workspaceId);
+  }
+
+  private mapRowToSettings(row: Record<string, unknown>): MemorySettings {
+    return {
+      workspaceId: row.workspace_id as string,
+      enabled: row.enabled === 1,
+      autoCapture: row.auto_capture === 1,
+      compressionEnabled: row.compression_enabled === 1,
+      retentionDays: row.retention_days as number,
+      maxStorageMb: row.max_storage_mb as number,
+      privacyMode: row.privacy_mode as PrivacyMode,
+      excludedPatterns: safeJsonParse(row.excluded_patterns as string, [] as string[], 'memorySettings.excludedPatterns'),
+    };
+  }
+}

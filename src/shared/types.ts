@@ -749,6 +749,17 @@ export const IPC_CHANNELS = {
   NODE_GET: 'node:get',
   NODE_INVOKE: 'node:invoke',
   NODE_EVENT: 'node:event',
+
+  // Memory System (Cross-Session Context)
+  MEMORY_GET_SETTINGS: 'memory:getSettings',
+  MEMORY_SAVE_SETTINGS: 'memory:saveSettings',
+  MEMORY_SEARCH: 'memory:search',
+  MEMORY_GET_TIMELINE: 'memory:getTimeline',
+  MEMORY_GET_DETAILS: 'memory:getDetails',
+  MEMORY_GET_RECENT: 'memory:getRecent',
+  MEMORY_GET_STATS: 'memory:getStats',
+  MEMORY_CLEAR: 'memory:clear',
+  MEMORY_EVENT: 'memory:event',
 } as const;
 
 // LLM Provider types

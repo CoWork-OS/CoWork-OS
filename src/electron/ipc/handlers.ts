@@ -76,6 +76,8 @@ import {
   generateHookToken,
   DEFAULT_HOOKS_PORT,
 } from '../hooks';
+import { MemoryService } from '../memory/MemoryService';
+import type { MemorySettings } from '../database/repositories';
 
 // Global notification service instance
 let notificationService: NotificationService | null = null;
@@ -1394,6 +1396,9 @@ export async function setupIpcHandlers(
 
   // Hooks (Webhooks & Gmail Pub/Sub) handlers
   setupHooksHandlers(agentDaemon);
+
+  // Memory system handlers
+  setupMemoryHandlers();
 }
 
 /**
@@ -2094,4 +2099,117 @@ function broadcastPersonalitySettingsChanged(settings: any): void {
   } catch (err) {
     console.error('[Personality] Failed to broadcast settings changed:', err);
   }
+}
+
+/**
+ * Set up Memory System IPC handlers
+ */
+function setupMemoryHandlers(): void {
+  // Get memory settings for a workspace
+  ipcMain.handle(IPC_CHANNELS.MEMORY_GET_SETTINGS, async (_, workspaceId: string) => {
+    try {
+      return MemoryService.getSettings(workspaceId);
+    } catch (error) {
+      console.error('[Memory] Failed to get settings:', error);
+      // Return default settings if service not initialized
+      return {
+        workspaceId,
+        enabled: true,
+        autoCapture: true,
+        compressionEnabled: true,
+        retentionDays: 90,
+        maxStorageMb: 100,
+        privacyMode: 'normal',
+        excludedPatterns: [],
+      };
+    }
+  });
+
+  // Save memory settings for a workspace
+  ipcMain.handle(
+    IPC_CHANNELS.MEMORY_SAVE_SETTINGS,
+    async (_, data: { workspaceId: string; settings: Partial<MemorySettings> }) => {
+      checkRateLimit(IPC_CHANNELS.MEMORY_SAVE_SETTINGS, RATE_LIMIT_CONFIGS.limited);
+      try {
+        MemoryService.updateSettings(data.workspaceId, data.settings);
+        return { success: true };
+      } catch (error) {
+        console.error('[Memory] Failed to save settings:', error);
+        throw error;
+      }
+    }
+  );
+
+  // Search memories
+  ipcMain.handle(
+    IPC_CHANNELS.MEMORY_SEARCH,
+    async (_, data: { workspaceId: string; query: string; limit?: number }) => {
+      try {
+        return MemoryService.search(data.workspaceId, data.query, data.limit);
+      } catch (error) {
+        console.error('[Memory] Failed to search:', error);
+        return [];
+      }
+    }
+  );
+
+  // Get timeline context (Layer 2)
+  ipcMain.handle(
+    IPC_CHANNELS.MEMORY_GET_TIMELINE,
+    async (_, data: { memoryId: string; windowSize?: number }) => {
+      try {
+        return MemoryService.getTimelineContext(data.memoryId, data.windowSize);
+      } catch (error) {
+        console.error('[Memory] Failed to get timeline:', error);
+        return [];
+      }
+    }
+  );
+
+  // Get full details (Layer 3)
+  ipcMain.handle(IPC_CHANNELS.MEMORY_GET_DETAILS, async (_, ids: string[]) => {
+    try {
+      return MemoryService.getFullDetails(ids);
+    } catch (error) {
+      console.error('[Memory] Failed to get details:', error);
+      return [];
+    }
+  });
+
+  // Get recent memories
+  ipcMain.handle(
+    IPC_CHANNELS.MEMORY_GET_RECENT,
+    async (_, data: { workspaceId: string; limit?: number }) => {
+      try {
+        return MemoryService.getRecent(data.workspaceId, data.limit);
+      } catch (error) {
+        console.error('[Memory] Failed to get recent:', error);
+        return [];
+      }
+    }
+  );
+
+  // Get memory statistics
+  ipcMain.handle(IPC_CHANNELS.MEMORY_GET_STATS, async (_, workspaceId: string) => {
+    try {
+      return MemoryService.getStats(workspaceId);
+    } catch (error) {
+      console.error('[Memory] Failed to get stats:', error);
+      return { count: 0, totalTokens: 0, compressedCount: 0, compressionRatio: 0 };
+    }
+  });
+
+  // Clear all memories for a workspace
+  ipcMain.handle(IPC_CHANNELS.MEMORY_CLEAR, async (_, workspaceId: string) => {
+    checkRateLimit(IPC_CHANNELS.MEMORY_CLEAR, RATE_LIMIT_CONFIGS.limited);
+    try {
+      MemoryService.clearWorkspace(workspaceId);
+      return { success: true };
+    } catch (error) {
+      console.error('[Memory] Failed to clear:', error);
+      throw error;
+    }
+  });
+
+  console.log('[Memory] Handlers initialized');
 }

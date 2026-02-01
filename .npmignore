@@ -3,6 +3,14 @@
 .github/
 .vscode/
 .idea/
+.claude/
+
+# iOS companion project (contains Xcode user data)
+cowork-oss/
+
+# Misc files not needed
+*.docx
+*.pdf
 
 # Screenshots and images (large files)
 screenshots/

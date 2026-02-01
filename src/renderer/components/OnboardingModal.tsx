@@ -54,7 +54,7 @@ const PROVIDER_OPTIONS: ProviderOption[] = [
   {
     type: 'openai',
     name: 'OpenAI',
-    description: 'GPT-4o and other models',
+    description: 'GPT-5.2 and other models',
     icon: (
       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
         <circle cx="12" cy="12" r="10" />

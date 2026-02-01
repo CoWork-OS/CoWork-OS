@@ -9,3 +9,4 @@ export * from './telegram';
 export * from './discord';
 export * from './slack';
 export * from './whatsapp';
+export * from './teams';

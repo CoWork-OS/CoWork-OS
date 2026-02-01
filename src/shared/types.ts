@@ -1323,7 +1323,7 @@ export interface LLMConfigStatus {
 }
 
 // Gateway / Channel types
-export type ChannelType = 'telegram' | 'discord' | 'slack' | 'whatsapp' | 'imessage' | 'signal' | 'mattermost' | 'matrix' | 'twitch' | 'line' | 'bluebubbles' | 'email';
+export type ChannelType = 'telegram' | 'discord' | 'slack' | 'whatsapp' | 'imessage' | 'signal' | 'mattermost' | 'matrix' | 'twitch' | 'line' | 'bluebubbles' | 'email' | 'teams';
 export type ChannelStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 export type SecurityMode = 'open' | 'allowlist' | 'pairing';
 

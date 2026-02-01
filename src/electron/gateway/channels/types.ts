@@ -8,7 +8,7 @@
 /**
  * Supported channel types
  */
-export type ChannelType = 'telegram' | 'discord' | 'slack' | 'whatsapp' | 'imessage' | 'signal' | 'mattermost' | 'matrix' | 'twitch' | 'line' | 'bluebubbles' | 'email';
+export type ChannelType = 'telegram' | 'discord' | 'slack' | 'whatsapp' | 'imessage' | 'signal' | 'mattermost' | 'matrix' | 'twitch' | 'line' | 'bluebubbles' | 'email' | 'teams';
 
 /**
  * Channel connection status
@@ -400,6 +400,30 @@ export interface EmailConfig extends ChannelConfig {
   allowedSenders?: string[];
   /** Subject prefix filter (only process emails with this prefix) */
   subjectFilter?: string;
+}
+
+/**
+ * Microsoft Teams-specific configuration
+ */
+export interface TeamsConfig extends ChannelConfig {
+  /** Microsoft App ID from Azure Bot registration */
+  appId: string;
+  /** Microsoft App Password (Client Secret) from Azure Bot registration */
+  appPassword: string;
+  /** Tenant ID for single-tenant apps (optional, uses multi-tenant if not set) */
+  tenantId?: string;
+  /** Bot display name */
+  displayName?: string;
+  /** Webhook endpoint port (default: 3978) */
+  webhookPort?: number;
+  /** Response prefix for bot replies */
+  responsePrefix?: string;
+  /** Enable message deduplication (default: true) */
+  deduplicationEnabled?: boolean;
+  /** Auto-reconnect on connection failure (default: true) */
+  autoReconnect?: boolean;
+  /** Maximum reconnection attempts (default: 5) */
+  maxReconnectAttempts?: number;
 }
 
 /**

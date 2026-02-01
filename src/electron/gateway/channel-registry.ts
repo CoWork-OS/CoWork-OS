@@ -22,6 +22,7 @@ import {
   WhatsAppConfig,
   ImessageConfig,
   SignalConfig,
+  TeamsConfig,
 } from './channels/types';
 import { createTelegramAdapter } from './channels/telegram';
 import { createDiscordAdapter } from './channels/discord';
@@ -29,6 +30,7 @@ import { createSlackAdapter } from './channels/slack';
 import { createWhatsAppAdapter } from './channels/whatsapp';
 import { createImessageAdapter } from './channels/imessage';
 import { createSignalAdapter } from './channels/signal';
+import { createTeamsAdapter } from './channels/teams';
 
 /**
  * Channel metadata for registration
@@ -505,6 +507,68 @@ export class ChannelRegistry extends EventEmitter {
         },
       },
       factory: (config) => createSignalAdapter(config as SignalConfig),
+    });
+
+    // Microsoft Teams
+    this.register({
+      metadata: {
+        type: 'teams',
+        displayName: 'Microsoft Teams',
+        description: 'Microsoft Teams Bot integration using Bot Framework SDK',
+        icon: '🟦',
+        builtin: true,
+        capabilities: {
+          sendMessage: true,
+          receiveMessage: true,
+          attachments: true,
+          reactions: true,
+          inlineKeyboards: true,
+          replyKeyboards: false,
+          polls: false,
+          voice: false,
+          video: false,
+          location: false,
+          editMessage: true,
+          deleteMessage: true,
+          typing: true,
+          readReceipts: false,
+          groups: true,
+          threads: true,
+          webhooks: true,
+          e2eEncryption: false,
+        },
+        configSchema: {
+          type: 'object',
+          properties: {
+            appId: {
+              type: 'string',
+              description: 'Microsoft App ID from Azure Bot registration',
+              required: true,
+            },
+            appPassword: {
+              type: 'string',
+              description: 'Microsoft App Password (Client Secret)',
+              required: true,
+              secret: true,
+            },
+            tenantId: {
+              type: 'string',
+              description: 'Tenant ID for single-tenant apps (optional)',
+            },
+            displayName: {
+              type: 'string',
+              description: 'Bot display name',
+            },
+            webhookPort: {
+              type: 'number',
+              description: 'Webhook endpoint port (default: 3978)',
+              default: 3978,
+            },
+          },
+          required: ['appId', 'appPassword'],
+        },
+      },
+      factory: (config) => createTeamsAdapter(config as TeamsConfig),
     });
   }
 

@@ -1,6 +1,6 @@
 {
   "name": "cowork-oss",
-  "version": "0.3.11",
+  "version": "0.3.12",
   "description": "Security-first personal AI assistant platform with multi-channel support",
   "overrides": {
     "undici": "^7.0.0"

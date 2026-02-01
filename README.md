@@ -35,6 +35,18 @@ Your AI needs a secure home. CoWork OS provides the runtime, security layers, an
 
 ---
 
+### Security Verified by ZeroLeaks
+
+<p align="center">
+  <img src="screenshots/ZeroLeaks-result-010226.png" alt="ZeroLeaks Security Assessment Result" width="600">
+  <br>
+  <em>CoWork OS achieves one of the highest security scores on <a href="https://zeroleaks.ai/">ZeroLeaks</a> — outperforming solutions like OpenClaw in prompt injection resistance</em>
+  <br>
+  <a href="ZeroLeaks-Report-jn70f56art03m4rj7fp4b5k9p180aqfd.pdf">View Full Security Assessment Report</a>
+</p>
+
+---
+
 <p align="center">
   <img src="screenshots/cowork-oss4.jpeg" alt="CoWork OS Interface" width="700">
   <br>

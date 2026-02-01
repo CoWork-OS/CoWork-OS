@@ -30,6 +30,7 @@ const IPC_CHANNELS = {
   LLM_TEST_PROVIDER: 'llm:testProvider',
   LLM_GET_MODELS: 'llm:getModels',
   LLM_GET_CONFIG_STATUS: 'llm:getConfigStatus',
+  LLM_SET_MODEL: 'llm:setModel',
   LLM_GET_OLLAMA_MODELS: 'llm:getOllamaModels',
   LLM_GET_GEMINI_MODELS: 'llm:getGeminiModels',
   LLM_GET_OPENROUTER_MODELS: 'llm:getOpenRouterModels',
@@ -1336,6 +1337,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   testLLMProvider: (config: any) => ipcRenderer.invoke(IPC_CHANNELS.LLM_TEST_PROVIDER, config),
   getLLMModels: () => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_MODELS),
   getLLMConfigStatus: () => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_CONFIG_STATUS),
+  setLLMModel: (modelKey: string) => ipcRenderer.invoke(IPC_CHANNELS.LLM_SET_MODEL, modelKey),
   getOllamaModels: (baseUrl?: string) => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_OLLAMA_MODELS, baseUrl),
   getGeminiModels: (apiKey?: string) => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_GEMINI_MODELS, apiKey),
   getOpenRouterModels: (apiKey?: string) => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_OPENROUTER_MODELS, apiKey),
@@ -1986,6 +1988,7 @@ export interface ElectronAPI {
     providers: Array<{ type: 'anthropic' | 'bedrock' | 'ollama'; name: string; configured: boolean; source?: string }>;
     models: Array<{ key: string; displayName: string; description: string }>;
   }>;
+  setLLMModel: (modelKey: string) => Promise<{ success: boolean }>;
   getOllamaModels: (baseUrl?: string) => Promise<Array<{ name: string; size: number; modified: string }>>;
   getGeminiModels: (apiKey?: string) => Promise<Array<{ name: string; displayName: string; description: string }>>;
   getOpenRouterModels: (apiKey?: string) => Promise<Array<{ id: string; name: string; context_length: number }>>;
@@ -1995,7 +1998,7 @@ export interface ElectronAPI {
   getBedrockModels: (config?: { region?: string; accessKeyId?: string; secretAccessKey?: string; profile?: string }) => Promise<Array<{ id: string; name: string; provider: string; description: string }>>;
   // Gateway / Channel APIs
   getGatewayChannels: () => Promise<any[]>;
-  addGatewayChannel: (data: { type: string; name: string; botToken?: string; securityMode?: string; applicationId?: string; guildIds?: string[]; appToken?: string; signingSecret?: string; allowedNumbers?: string[]; selfChatMode?: boolean; responsePrefix?: string; cliPath?: string; dbPath?: string; allowedContacts?: string[]; dmPolicy?: string; groupPolicy?: string; phoneNumber?: string; dataDir?: string; mode?: string; trustMode?: string; sendReadReceipts?: boolean; sendTypingIndicators?: boolean; mattermostServerUrl?: string; mattermostToken?: string; mattermostTeamId?: string; matrixHomeserver?: string; matrixUserId?: string; matrixAccessToken?: string; matrixDeviceId?: string; matrixRoomIds?: string[]; twitchUsername?: string; twitchOauthToken?: string; twitchChannels?: string[]; twitchAllowWhispers?: boolean; lineChannelAccessToken?: string; lineChannelSecret?: string; lineWebhookPort?: number; lineWebhookPath?: string; blueBubblesServerUrl?: string; blueBubblesPassword?: string; blueBubblesWebhookPort?: number; blueBubblesAllowedContacts?: string[]; emailAddress?: string; emailPassword?: string; emailImapHost?: string; emailImapPort?: number; emailSmtpHost?: string; emailSmtpPort?: number; emailDisplayName?: string; emailAllowedSenders?: string[]; emailSubjectFilter?: string; appId?: string; appPassword?: string; tenantId?: string; webhookPort?: number }) => Promise<any>;
+  addGatewayChannel: (data: { type: string; name: string; botToken?: string; securityMode?: string; applicationId?: string; guildIds?: string[]; appToken?: string; signingSecret?: string; allowedNumbers?: string[]; selfChatMode?: boolean; responsePrefix?: string; cliPath?: string; dbPath?: string; allowedContacts?: string[]; dmPolicy?: string; groupPolicy?: string; phoneNumber?: string; dataDir?: string; mode?: string; trustMode?: string; sendReadReceipts?: boolean; sendTypingIndicators?: boolean; mattermostServerUrl?: string; mattermostToken?: string; mattermostTeamId?: string; matrixHomeserver?: string; matrixUserId?: string; matrixAccessToken?: string; matrixDeviceId?: string; matrixRoomIds?: string[]; twitchUsername?: string; twitchOauthToken?: string; twitchChannels?: string[]; twitchAllowWhispers?: boolean; lineChannelAccessToken?: string; lineChannelSecret?: string; lineWebhookPort?: number; lineWebhookPath?: string; blueBubblesServerUrl?: string; blueBubblesPassword?: string; blueBubblesWebhookPort?: number; blueBubblesAllowedContacts?: string[]; emailAddress?: string; emailPassword?: string; emailImapHost?: string; emailImapPort?: number; emailSmtpHost?: string; emailSmtpPort?: number; emailDisplayName?: string; emailAllowedSenders?: string[]; emailSubjectFilter?: string; appId?: string; appPassword?: string; tenantId?: string; webhookPort?: number; serviceAccountKeyPath?: string; projectId?: string; webhookPath?: string }) => Promise<any>;
   updateGatewayChannel: (data: { id: string; name?: string; securityMode?: string; config?: { selfChatMode?: boolean; responsePrefix?: string; [key: string]: unknown } }) => Promise<void>;
   removeGatewayChannel: (id: string) => Promise<void>;
   enableGatewayChannel: (id: string) => Promise<void>;

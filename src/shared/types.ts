@@ -1019,6 +1019,7 @@ export const IPC_CHANNELS = {
   LLM_TEST_PROVIDER: 'llm:testProvider',
   LLM_GET_MODELS: 'llm:getModels',
   LLM_GET_CONFIG_STATUS: 'llm:getConfigStatus',
+  LLM_SET_MODEL: 'llm:setModel',
   LLM_GET_OLLAMA_MODELS: 'llm:getOllamaModels',
   LLM_GET_GEMINI_MODELS: 'llm:getGeminiModels',
   LLM_GET_OPENROUTER_MODELS: 'llm:getOpenRouterModels',
@@ -1324,7 +1325,7 @@ export interface LLMConfigStatus {
 }
 
 // Gateway / Channel types
-export type ChannelType = 'telegram' | 'discord' | 'slack' | 'whatsapp' | 'imessage' | 'signal' | 'mattermost' | 'matrix' | 'twitch' | 'line' | 'bluebubbles' | 'email' | 'teams';
+export type ChannelType = 'telegram' | 'discord' | 'slack' | 'whatsapp' | 'imessage' | 'signal' | 'mattermost' | 'matrix' | 'twitch' | 'line' | 'bluebubbles' | 'email' | 'teams' | 'googlechat';
 export type ChannelStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 export type SecurityMode = 'open' | 'allowlist' | 'pairing';
 
@@ -1458,6 +1459,15 @@ export interface AddChannelRequest {
   emailDisplayName?: string;
   emailAllowedSenders?: string[];
   emailSubjectFilter?: string;
+  // Teams-specific fields
+  appId?: string;
+  appPassword?: string;
+  tenantId?: string;
+  webhookPort?: number;
+  // Google Chat-specific fields
+  serviceAccountKeyPath?: string;
+  projectId?: string;
+  webhookPath?: string;
 }
 
 export interface UpdateChannelRequest {

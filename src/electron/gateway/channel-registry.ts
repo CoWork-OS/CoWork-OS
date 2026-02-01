@@ -23,6 +23,7 @@ import {
   ImessageConfig,
   SignalConfig,
   TeamsConfig,
+  GoogleChatConfig,
 } from './channels/types';
 import { createTelegramAdapter } from './channels/telegram';
 import { createDiscordAdapter } from './channels/discord';
@@ -31,6 +32,7 @@ import { createWhatsAppAdapter } from './channels/whatsapp';
 import { createImessageAdapter } from './channels/imessage';
 import { createSignalAdapter } from './channels/signal';
 import { createTeamsAdapter } from './channels/teams';
+import { createGoogleChatAdapter } from './channels/google-chat';
 
 /**
  * Channel metadata for registration
@@ -569,6 +571,66 @@ export class ChannelRegistry extends EventEmitter {
         },
       },
       factory: (config) => createTeamsAdapter(config as TeamsConfig),
+    });
+
+    // Google Chat
+    this.register({
+      metadata: {
+        type: 'googlechat',
+        displayName: 'Google Chat',
+        description: 'Google Chat integration using Google Chat API with service account',
+        icon: '💚',
+        builtin: true,
+        capabilities: {
+          sendMessage: true,
+          receiveMessage: true,
+          attachments: false, // Limited - requires Google Drive integration
+          reactions: true,
+          inlineKeyboards: true, // Via cards
+          replyKeyboards: false,
+          polls: false,
+          voice: false,
+          video: false,
+          location: false,
+          editMessage: true,
+          deleteMessage: true,
+          typing: false,
+          readReceipts: false,
+          groups: true, // Spaces
+          threads: true,
+          webhooks: true,
+          e2eEncryption: false,
+        },
+        configSchema: {
+          type: 'object',
+          properties: {
+            serviceAccountKeyPath: {
+              type: 'string',
+              description: 'Path to service account JSON key file',
+            },
+            projectId: {
+              type: 'string',
+              description: 'Google Cloud project ID',
+            },
+            displayName: {
+              type: 'string',
+              description: 'Bot display name',
+            },
+            webhookPort: {
+              type: 'number',
+              description: 'Webhook endpoint port (default: 3979)',
+              default: 3979,
+            },
+            webhookPath: {
+              type: 'string',
+              description: 'Webhook path (default: /googlechat/webhook)',
+              default: '/googlechat/webhook',
+            },
+          },
+          required: [],
+        },
+      },
+      factory: (config) => createGoogleChatAdapter(config as GoogleChatConfig),
     });
   }
 

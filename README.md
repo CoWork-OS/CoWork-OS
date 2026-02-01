@@ -22,12 +22,12 @@
 
 **The operating system for personal AI assistants**
 
-Your AI needs a secure home. CoWork OS provides the runtime, security layers, and I/O channels to run AI agents across WhatsApp, Telegram, Discord, Slack, Microsoft Teams, iMessage, Signal, Mattermost, Matrix, Twitch, LINE, BlueBubbles, and Email — with the control you expect from an operating system.
+Your AI needs a secure home. CoWork OS provides the runtime, security layers, and I/O channels to run AI agents across WhatsApp, Telegram, Discord, Slack, Microsoft Teams, Google Chat, iMessage, Signal, Mattermost, Matrix, Twitch, LINE, BlueBubbles, and Email — with the control you expect from an operating system.
 
 | | |
 |---|---|
 | **6 AI Providers** | Claude, GPT-4, Gemini, Bedrock, OpenRouter, Ollama (free/local) |
-| **13 Messaging Channels** | WhatsApp, Telegram, Discord, Slack, Teams, iMessage, Signal, Mattermost, Matrix, Twitch, LINE, BlueBubbles, Email |
+| **14 Messaging Channels** | WhatsApp, Telegram, Discord, Slack, Teams, Google Chat, iMessage, Signal, Mattermost, Matrix, Twitch, LINE, BlueBubbles, Email |
 | **Security-First** | 1800+ unit tests, configurable guardrails, approval workflows |
 | **Local-First** | Your data stays on your machine. BYOK (Bring Your Own Key) |
 
@@ -74,7 +74,7 @@ Your AI needs a secure home. CoWork OS provides the runtime, security layers, an
 
 ### Connect from Anywhere
 
-- Message your AI from WhatsApp, Telegram, Discord, Slack, Microsoft Teams, iMessage, Signal, Mattermost, Matrix, Twitch, LINE, BlueBubbles, or Email
+- Message your AI from WhatsApp, Telegram, Discord, Slack, Microsoft Teams, Google Chat, iMessage, Signal, Mattermost, Matrix, Twitch, LINE, BlueBubbles, or Email
 - **Mobile Companions**: iOS and Android apps for on-the-go access via local network
 - Schedule recurring tasks with cron expressions
 - Secure remote access via Tailscale or SSH tunnels
@@ -171,6 +171,7 @@ CoWork OS is **free and open source**. To run tasks, configure your own model cr
 - **Discord**: Slash commands, DM support, guild integration
 - **Slack**: Socket Mode, channel mentions, file uploads
 - **Microsoft Teams**: Bot Framework SDK, DM/channel mentions, adaptive cards
+- **Google Chat**: Service account auth, spaces/DMs, threaded conversations, cards
 - **iMessage**: macOS native integration, pairing codes
 - **Signal**: End-to-end encrypted messaging via signal-cli
 - **Mattermost**: WebSocket real-time, REST API, team/channel support
@@ -540,7 +541,7 @@ Schedule recurring tasks with cron expressions and optional channel delivery.
 
 - **Cron Expressions**: Standard cron syntax (minute, hour, day, month, weekday)
 - **Workspace Binding**: Each job runs in a specific workspace
-- **Channel Delivery**: Send results to Telegram, Discord, Slack, Teams, WhatsApp, iMessage, Signal, Mattermost, Matrix, Twitch, LINE, BlueBubbles, or Email
+- **Channel Delivery**: Send results to Telegram, Discord, Slack, Teams, Google Chat, WhatsApp, iMessage, Signal, Mattermost, Matrix, Twitch, LINE, BlueBubbles, or Email
 - **Run History**: View execution history with status and duration
 - **Enable/Disable**: Toggle jobs without deleting them
 
@@ -734,6 +735,84 @@ Run tasks via Microsoft Teams using the Bot Framework SDK for full bi-directiona
 - **ngrok for Development**: Use ngrok or similar to expose local port 3978
 - **Rate Limits**: Teams has rate limits (50 requests/second per bot)
 - **Auto-Reconnect**: Built-in reconnection with exponential backoff
+
+---
+
+## Google Chat Bot Integration
+
+Run tasks via Google Chat using the Google Chat API with service account authentication.
+
+### Prerequisites
+
+- Google Cloud project with Chat API enabled
+- Service account with appropriate permissions
+- Public webhook URL (use ngrok for local development)
+
+### Setting Up Google Chat
+
+1. **Enable Google Chat API**:
+   - Go to [Google Cloud Console](https://console.cloud.google.com/apis/library/chat.googleapis.com)
+   - Enable the Google Chat API for your project
+
+2. **Create a Service Account**:
+   - Go to **IAM & Admin** > **Service Accounts**
+   - Click **Create Service Account**
+   - Give it a name and description
+   - Grant roles: `Chat Bots Viewer` and `Chat Bots Admin`
+   - Create a JSON key and download it
+
+3. **Configure Chat App**:
+   - Go to [Chat API Configuration](https://console.cloud.google.com/apis/api/chat.googleapis.com/hangouts-chat)
+   - Set **App Status** to "Live"
+   - Under **Connection settings**, select "HTTP endpoint URL"
+   - Enter your public webhook URL (e.g., `https://your-ngrok-url/googlechat/webhook`)
+
+4. **Set Up Webhook (for local development)**:
+   ```bash
+   ngrok http 3979
+   ```
+   - Copy the HTTPS URL and use it in the Chat API configuration
+
+5. **Configure in CoWork OS**:
+   - Open **Settings** > **Google Chat** tab
+   - Enter the path to your service account JSON key file
+   - Optionally enter Project ID
+   - Set webhook port (default: 3979)
+   - Click **Add Google Chat Bot**
+
+### Security Modes
+
+| Mode | Description |
+|------|-------------|
+| **Pairing** (default) | Users must enter a pairing code to interact |
+| **Allowlist** | Only pre-approved Google users can message |
+| **Open** | Anyone can message (not recommended) |
+
+### Bot Commands
+
+| Command | Description |
+|---------|-------------|
+| `/workspaces` | List available workspaces |
+| `/workspace <n>` | Select workspace by number |
+| `/newtask` | Start fresh conversation |
+| `/status` | Check bot status |
+| `/cancel` | Cancel running task |
+| `/pair <code>` | Pair with code |
+
+### Message Features
+
+- **Direct Messages**: Chat directly with the bot in 1:1 conversations
+- **Spaces**: Add the bot to Google Chat spaces for team access
+- **Threaded Replies**: Maintains conversation threads
+- **Cards**: Rich card formatting for responses (coming soon)
+- **Message Editing**: Edit and delete messages
+
+### Important Notes
+
+- **Webhook Required**: A public endpoint is needed to receive messages from Google Chat
+- **ngrok for Development**: Use ngrok or similar to expose local port 3979
+- **Service Account**: Different from OAuth - uses JWT for server-to-server auth
+- **Workspace Users Only**: Google Chat bots only work within Google Workspace organizations
 
 ---
 
@@ -1479,7 +1558,7 @@ Users must comply with their model provider's terms:
 ### Completed
 
 - [x] Multi-provider LLM support (6 providers)
-- [x] Multi-channel messaging (13 channels)
+- [x] Multi-channel messaging (14 channels)
 - [x] Configurable guardrails and security
 - [x] Browser automation with Playwright
 - [x] Code tools (glob, grep, edit_file)

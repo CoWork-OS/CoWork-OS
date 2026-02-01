@@ -8,7 +8,7 @@
 /**
  * Supported channel types
  */
-export type ChannelType = 'telegram' | 'discord' | 'slack' | 'whatsapp' | 'imessage' | 'signal' | 'mattermost' | 'matrix' | 'twitch' | 'line' | 'bluebubbles' | 'email' | 'teams';
+export type ChannelType = 'telegram' | 'discord' | 'slack' | 'whatsapp' | 'imessage' | 'signal' | 'mattermost' | 'matrix' | 'twitch' | 'line' | 'bluebubbles' | 'email' | 'teams' | 'googlechat';
 
 /**
  * Channel connection status
@@ -424,6 +424,39 @@ export interface TeamsConfig extends ChannelConfig {
   autoReconnect?: boolean;
   /** Maximum reconnection attempts (default: 5) */
   maxReconnectAttempts?: number;
+}
+
+/**
+ * Google Chat-specific configuration
+ * Uses Google Chat API with service account authentication
+ */
+export interface GoogleChatConfig extends ChannelConfig {
+  /** Path to service account JSON key file */
+  serviceAccountKeyPath?: string;
+  /** Service account credentials JSON (alternative to keyPath) */
+  serviceAccountKey?: {
+    client_email: string;
+    private_key: string;
+    project_id: string;
+  };
+  /** Google Cloud project ID */
+  projectId?: string;
+  /** Webhook port to listen on (default: 3979) */
+  webhookPort?: number;
+  /** Webhook path (default: /googlechat/webhook) */
+  webhookPath?: string;
+  /** Bot display name */
+  displayName?: string;
+  /** Response prefix for bot replies */
+  responsePrefix?: string;
+  /** Enable message deduplication (default: true) */
+  deduplicationEnabled?: boolean;
+  /** Auto-reconnect on connection failure (default: true) */
+  autoReconnect?: boolean;
+  /** Maximum reconnection attempts (default: 5) */
+  maxReconnectAttempts?: number;
+  /** Pub/Sub subscription name (alternative to webhook) */
+  pubsubSubscription?: string;
 }
 
 /**

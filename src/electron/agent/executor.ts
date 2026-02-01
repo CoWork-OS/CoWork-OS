@@ -932,23 +932,33 @@ export class TaskExecutor {
     private workspace: Workspace,
     private daemon: AgentDaemon
   ) {
-    // Initialize LLM provider using factory (respects user settings)
-    this.provider = LLMProviderFactory.createProvider();
-
-    // Get the model ID from settings
+    // Get base settings
     const settings = LLMProviderFactory.loadSettings();
+
+    // Check if task has a model override (for sub-agents)
+    const taskModelKey = task.agentConfig?.modelKey;
+
+    // Initialize LLM provider using factory, with optional model override for sub-agents
+    this.provider = taskModelKey
+      ? LLMProviderFactory.createProvider({ model: taskModelKey })
+      : LLMProviderFactory.createProvider();
+
+    // Use task's model key if specified, otherwise use global settings
+    const effectiveModelKey = taskModelKey || settings.modelKey;
+
+    // Get the model ID
     this.modelId = LLMProviderFactory.getModelId(
-      settings.modelKey,
+      effectiveModelKey,
       settings.providerType,
       settings.ollama?.model,
       settings.gemini?.model,
       settings.openrouter?.model,
       settings.openai?.model
     );
-    this.modelKey = settings.modelKey;
+    this.modelKey = effectiveModelKey;
 
     // Initialize context manager for handling long conversations
-    this.contextManager = new ContextManager(settings.modelKey);
+    this.contextManager = new ContextManager(effectiveModelKey);
 
     // Initialize tool registry
     this.toolRegistry = new ToolRegistry(workspace, daemon, task.id);
@@ -977,7 +987,7 @@ export class TaskExecutor {
     // Initialize file operation tracker to detect redundant reads and duplicate creations
     this.fileOperationTracker = new FileOperationTracker();
 
-    console.log(`TaskExecutor initialized with ${settings.providerType} provider, model: ${this.modelId}`);
+    console.log(`TaskExecutor initialized with ${settings.providerType} provider, model: ${this.modelId}${taskModelKey ? ` (sub-agent override: ${taskModelKey})` : ''}`);
   }
 
   /**

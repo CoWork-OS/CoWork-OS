@@ -46,12 +46,17 @@ export class UpdateManager {
     const version = app.getVersion();
     const isDev = !app.isPackaged;
     let isGitRepo = false;
+    let isNpmGlobal = false;
     let gitBranch: string | undefined;
     let gitCommit: string | undefined;
 
-    if (isDev) {
+    const appPath = app.getAppPath();
+
+    // Check if installed via npm global
+    isNpmGlobal = this.detectNpmGlobalInstall(appPath);
+
+    if (isDev && !isNpmGlobal) {
       try {
-        const appPath = app.getAppPath();
         const { stdout: branchOut } = await execAsync('git rev-parse --abbrev-ref HEAD', { cwd: appPath });
         gitBranch = branchOut.trim();
 
@@ -68,9 +73,26 @@ export class UpdateManager {
       version,
       isDev,
       isGitRepo,
+      isNpmGlobal,
       gitBranch,
       gitCommit,
     };
+  }
+
+  private detectNpmGlobalInstall(appPath: string): boolean {
+    // Check common npm global installation paths
+    const npmGlobalPatterns = [
+      '/usr/local/lib/node_modules',
+      '/usr/lib/node_modules',
+      '/opt/homebrew/lib/node_modules',
+      'node_modules/cowork-oss',
+      '.nvm/versions/node',
+      '.npm-global',
+      'AppData/Roaming/npm/node_modules', // Windows
+    ];
+
+    const normalizedPath = appPath.replace(/\\/g, '/');
+    return npmGlobalPatterns.some(pattern => normalizedPath.includes(pattern));
   }
 
   async checkForUpdates(): Promise<UpdateInfo> {
@@ -97,7 +119,7 @@ export class UpdateManager {
             available: false,
             currentVersion,
             latestVersion: currentVersion,
-            updateMode: versionInfo.isGitRepo ? 'git' : 'electron-updater',
+            updateMode: this.getUpdateMode(versionInfo),
           };
         }
         throw new Error(`GitHub API error: ${response.status}`);
@@ -107,8 +129,8 @@ export class UpdateManager {
       const latestVersion = release.tag_name.replace(/^v/, '');
       const available = this.isNewerVersion(latestVersion, currentVersion);
 
-      // If in dev mode with git, also check if there are new commits
-      let updateMode: 'git' | 'electron-updater' = versionInfo.isGitRepo ? 'git' : 'electron-updater';
+      // Determine update mode based on installation type
+      const updateMode = this.getUpdateMode(versionInfo);
 
       if (versionInfo.isGitRepo && !available) {
         // Only check for new commits if versions are equal (not if local version is newer)
@@ -181,6 +203,16 @@ export class UpdateManager {
     return false;
   }
 
+  private getUpdateMode(versionInfo: AppVersionInfo): 'git' | 'npm' | 'electron-updater' {
+    if (versionInfo.isNpmGlobal) {
+      return 'npm';
+    }
+    if (versionInfo.isGitRepo) {
+      return 'git';
+    }
+    return 'electron-updater';
+  }
+
   async downloadAndInstallUpdate(updateInfo: UpdateInfo): Promise<void> {
     if (this.isUpdating) {
       throw new Error('Update already in progress');
@@ -189,7 +221,9 @@ export class UpdateManager {
     this.isUpdating = true;
 
     try {
-      if (updateInfo.updateMode === 'git') {
+      if (updateInfo.updateMode === 'npm') {
+        await this.npmUpdate();
+      } else if (updateInfo.updateMode === 'git') {
         await this.gitUpdate();
       } else {
         await this.electronUpdaterUpdate();
@@ -238,6 +272,51 @@ export class UpdateManager {
       this.sendError(error.message);
       throw error;
     }
+  }
+
+  private async npmUpdate(): Promise<void> {
+    try {
+      // Step 1: Run npm update
+      this.sendProgress({ phase: 'downloading', percent: 20, message: 'Updating via npm...' });
+      await this.runNpmGlobalUpdate();
+
+      // Step 2: Complete
+      this.sendProgress({ phase: 'complete', percent: 100, message: 'Update complete! Please restart the application.' });
+
+      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+        this.mainWindow.webContents.send(IPC_CHANNELS.APP_UPDATE_DOWNLOADED, {
+          requiresRestart: true,
+          message: 'Update complete! Please restart the application to apply changes.',
+        });
+      }
+    } catch (error: any) {
+      this.sendProgress({ phase: 'error', message: `Update failed: ${error.message}` });
+      this.sendError(error.message);
+      throw error;
+    }
+  }
+
+  private runNpmGlobalUpdate(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+      const child = spawn(npm, ['install', '-g', 'cowork-oss@latest'], { shell: true });
+
+      let stderr = '';
+
+      child.stderr.on('data', (data) => {
+        stderr += data.toString();
+      });
+
+      child.on('close', (code) => {
+        if (code === 0) {
+          resolve();
+        } else {
+          reject(new Error(`npm update failed with code ${code}: ${stderr}`));
+        }
+      });
+
+      child.on('error', reject);
+    });
   }
 
   private runNpmInstall(cwd: string): Promise<void> {

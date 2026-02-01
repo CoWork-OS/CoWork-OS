@@ -86,11 +86,21 @@ export class TaskQueueManager {
 
   /**
    * Enqueue a new task - either start immediately or add to queue
+   *
+   * Sub-agents (tasks with parentTaskId) bypass the concurrency limit to prevent
+   * deadlocks where a parent task waits for sub-agents that are stuck in the queue.
    */
   async enqueue(task: Task): Promise<void> {
     console.log(`[TaskQueueManager] Enqueueing task ${task.id}: ${task.title}`);
 
-    if (this.canStartImmediately()) {
+    // Sub-agents bypass concurrency limits to prevent deadlock
+    // (parent would wait forever for sub-agents stuck in queue)
+    const isSubAgent = !!task.parentTaskId;
+
+    if (isSubAgent) {
+      console.log(`[TaskQueueManager] Starting sub-agent immediately (bypasses concurrency limit)`);
+      await this.startTask(task);
+    } else if (this.canStartImmediately()) {
       console.log(`[TaskQueueManager] Starting task immediately (${this.runningTaskIds.size}/${this.settings.maxConcurrentTasks} slots used)`);
       await this.startTask(task);
     } else {

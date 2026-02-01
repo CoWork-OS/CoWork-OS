@@ -7,8 +7,22 @@
 - Running `gh release create`
 - Bumping version in `package.json`
 - Pushing tags to origin
+- Running `npm publish`
 
 Wait for explicit user approval before releasing.
+
+## npm Publishing Reminder
+
+CoWork-OSS is published on npm (`npm install -g cowork-oss`). When the user creates a new release:
+
+1. **Remind them** to also publish to npm after pushing to GitHub
+2. **Release workflow**:
+   ```bash
+   npm version patch|minor|major  # Bump version
+   npm publish                     # Publish to npm
+   git push && git push --tags    # Push to GitHub
+   ```
+3. **Version must be valid semver** (3 parts only: MAJOR.MINOR.PATCH)
 
 ## Project Overview
 

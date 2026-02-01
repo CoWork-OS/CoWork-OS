@@ -6272,6 +6272,90 @@ button {
   color: var(--color-text);
 }
 
+/* Task Tree Hierarchy */
+.task-tree-node {
+  display: flex;
+  flex-direction: column;
+}
+
+.task-tree-children {
+  display: flex;
+  flex-direction: column;
+}
+
+.cli-tree-prefix {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-right: 4px;
+  opacity: 0.5;
+}
+
+.cli-collapse-btn {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 10px;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: none;
+  padding: 0 4px;
+  cursor: pointer;
+  width: 20px;
+  flex-shrink: 0;
+}
+
+.cli-collapse-btn:hover {
+  color: var(--color-accent);
+}
+
+/* Sub-agent task item styling */
+.task-item-subagent {
+  opacity: 0.85;
+  font-size: 11px;
+}
+
+.task-item-subagent .cli-task-title {
+  font-size: 11px;
+}
+
+.task-item-subagent .cli-task-status {
+  font-size: 10px;
+}
+
+/* Agent type badges */
+.cli-agent-type {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 8px;
+  font-weight: 600;
+  padding: 1px 4px;
+  border-radius: 2px;
+  margin-right: 4px;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.cli-agent-type.sub {
+  background: rgba(99, 102, 241, 0.2);
+  color: rgb(129, 140, 248);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+}
+
+.cli-agent-type.parallel {
+  background: rgba(34, 197, 94, 0.2);
+  color: rgb(74, 222, 128);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+/* Light theme adjustments for agent badges */
+.theme-light .cli-agent-type.sub {
+  background: rgba(99, 102, 241, 0.1);
+  color: rgb(79, 70, 229);
+}
+
+.theme-light .cli-agent-type.parallel {
+  background: rgba(34, 197, 94, 0.1);
+  color: rgb(22, 163, 74);
+}
+
 .cli-menu-danger:hover {
   background: rgba(239, 68, 68, 0.2) !important;
 }
@@ -6512,6 +6596,11 @@ button {
 .version-badge.dev {
   background: rgba(251, 191, 36, 0.15);
   color: var(--color-warning);
+}
+
+.version-badge.npm {
+  background: rgba(203, 56, 55, 0.15);
+  color: #cb3837;
 }
 
 .git-info {

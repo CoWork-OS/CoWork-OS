@@ -4,6 +4,7 @@ interface VersionInfo {
   version: string;
   isDev: boolean;
   isGitRepo: boolean;
+  isNpmGlobal: boolean;
   gitBranch?: string;
   gitCommit?: string;
 }
@@ -15,7 +16,7 @@ interface UpdateInfo {
   releaseNotes?: string;
   releaseUrl?: string;
   publishedAt?: string;
-  updateMode: 'git' | 'electron-updater';
+  updateMode: 'git' | 'npm' | 'electron-updater';
 }
 
 interface UpdateProgress {
@@ -125,6 +126,9 @@ export function UpdateSettings() {
           {versionInfo?.isDev && (
             <span className="version-badge dev">Development Mode</span>
           )}
+          {versionInfo?.isNpmGlobal && (
+            <span className="version-badge npm">Installed via npm</span>
+          )}
           {versionInfo?.isGitRepo && (
             <div className="git-info">
               <span className="git-branch">{versionInfo.gitBranch}</span>
@@ -139,7 +143,9 @@ export function UpdateSettings() {
       <div className="settings-section">
         <h3>Check for Updates</h3>
         <p className="settings-description">
-          {versionInfo?.isGitRepo
+          {versionInfo?.isNpmGlobal
+            ? 'Updates will be installed via npm.'
+            : versionInfo?.isGitRepo
             ? 'Updates will be pulled from GitHub and rebuilt automatically.'
             : 'Updates will be downloaded and installed automatically.'}
         </p>
@@ -194,7 +200,10 @@ export function UpdateSettings() {
                   </a>
                 )}
                 <div className="update-mode">
-                  Update method: <strong>{updateInfo.updateMode === 'git' ? 'Git Pull + Rebuild' : 'Auto-download'}</strong>
+                  Update method: <strong>{
+                    updateInfo.updateMode === 'npm' ? 'npm update' :
+                    updateInfo.updateMode === 'git' ? 'Git Pull + Rebuild' : 'Auto-download'
+                  }</strong>
                 </div>
               </>
             ) : (
@@ -240,7 +249,11 @@ export function UpdateSettings() {
             onClick={handleDownloadUpdate}
             disabled={updating}
           >
-            {versionInfo?.isGitRepo ? 'Update Now (Git Pull + Rebuild)' : 'Download & Install Update'}
+            {versionInfo?.isNpmGlobal
+              ? 'Update Now (npm install)'
+              : versionInfo?.isGitRepo
+              ? 'Update Now (Git Pull + Rebuild)'
+              : 'Download & Install Update'}
           </button>
         )}
 
@@ -257,15 +270,21 @@ export function UpdateSettings() {
       <div className="settings-section">
         <h3>Manual Update</h3>
         <p className="settings-description">
-          You can also manually update by running these commands in the terminal:
+          You can also manually update by running {versionInfo?.isNpmGlobal ? 'this command' : 'these commands'} in the terminal:
         </p>
         <div className="manual-update-commands">
-          <code>
-            git fetch origin{'\n'}
-            git pull origin main{'\n'}
-            npm install{'\n'}
-            npm run build
-          </code>
+          {versionInfo?.isNpmGlobal ? (
+            <code>
+              npm update -g cowork-oss
+            </code>
+          ) : (
+            <code>
+              git fetch origin{'\n'}
+              git pull origin main{'\n'}
+              npm install{'\n'}
+              npm run build
+            </code>
+          )}
         </div>
         <p className="settings-hint">
           After updating, restart the application to apply changes.

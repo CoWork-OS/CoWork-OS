@@ -235,6 +235,14 @@ export function App() {
         'task_cancelled': 'cancelled',
       };
 
+      // Check if this is a new task we don't know about (e.g., sub-agent created)
+      const isNewTask = !tasksRef.current.some(t => t.id === event.taskId);
+      if (isNewTask && event.type === 'task_created') {
+        // Refresh task list to include the new sub-agent task
+        loadTasks();
+        return;
+      }
+
       const newStatus = statusMap[event.type];
       if (newStatus) {
         setTasks(prev => prev.map(t =>

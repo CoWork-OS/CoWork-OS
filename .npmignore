@@ -1,0 +1,45 @@
+# Development files
+.git/
+.github/
+.vscode/
+.idea/
+
+# Screenshots and images (large files)
+screenshots/
+
+# Documentation (not needed for npm)
+docs/
+*.md
+!README.md
+!NPMREADME.md
+
+# Test files
+**/__tests__/
+tests/
+*.test.ts
+*.test.js
+*.spec.ts
+*.spec.js
+vitest.config.ts
+coverage/
+
+# Source files (dist is included)
+# Keep src/ for now as postinstall builds from source
+
+# Build artifacts not needed
+release/
+*.dmg
+*.zip
+*.tgz
+
+# Config files not needed at runtime
+.eslintrc*
+eslint.config.js
+.prettierrc*
+.editorconfig
+
+# Logs and temp files
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db

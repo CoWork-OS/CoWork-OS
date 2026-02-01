@@ -25,11 +25,22 @@ Describe specific use cases where this feature would be beneficial.
 1. Use case 1: ...
 2. Use case 2: ...
 
-## Mockups / Examples
-If applicable, add mockups, diagrams, or examples from other applications.
+## Category
+What area does this feature relate to?
+- [ ] Security / Guardrails
+- [ ] Messaging Channels (WhatsApp, Telegram, Discord, Slack, iMessage)
+- [ ] LLM Providers
+- [ ] Agent Capabilities / Tools
+- [ ] UI / UX
+- [ ] MCP Integration
+- [ ] Remote Access (Tailscale, SSH, WebSocket API)
+- [ ] Other
 
-## Implementation Considerations
-Any thoughts on how this might be implemented? (Optional)
+## Security Considerations
+Does this feature have security implications? If so, describe them.
+
+## Mockups / Examples
+If applicable, add mockups, diagrams, or examples.
 
 ## Priority
 How important is this feature to you?
@@ -41,4 +52,5 @@ How important is this feature to you?
 ## Checklist
 - [ ] I have searched existing issues/discussions to ensure this is not a duplicate
 - [ ] I have provided sufficient detail for the feature
+- [ ] I have considered security implications
 - [ ] I am willing to help implement this feature (optional)

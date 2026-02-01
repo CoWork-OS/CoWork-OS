@@ -28,8 +28,23 @@ If applicable, add screenshots to help explain your problem.
 - **OS**: macOS [version, e.g., 14.2]
 - **CoWork-OSS Version**: [e.g., 0.3.0]
 - **Node.js Version**: [e.g., 20.10.0]
-- **LLM Provider**: [Anthropic API / AWS Bedrock / Gemini / OpenRouter / Ollama]
+- **LLM Provider**: [Anthropic API / AWS Bedrock / Gemini / OpenRouter / OpenAI / Ollama]
+- **Messaging Channel**: [WhatsApp / Telegram / Discord / Slack / iMessage / N/A]
 - **MCP Servers**: [List any connected MCP servers, if applicable]
+
+## Category
+What area is affected?
+- [ ] Security / Access Control
+- [ ] Messaging Channels
+- [ ] LLM Provider Integration
+- [ ] Agent Execution / Tools
+- [ ] UI / Desktop App
+- [ ] MCP Integration
+- [ ] Remote Access (Tailscale, SSH, API)
+- [ ] Other
+
+## Security Impact
+Is this a security-related bug? If so, please consider reporting via our [security advisory process](SECURITY.md) instead of a public issue.
 
 ## Logs
 <details>
@@ -48,3 +63,4 @@ Add any other context about the problem here.
 - [ ] I have searched existing issues to ensure this is not a duplicate
 - [ ] I have included all relevant information above
 - [ ] I am using the latest version of CoWork-OSS
+- [ ] This is NOT a security vulnerability (report those via SECURITY.md)

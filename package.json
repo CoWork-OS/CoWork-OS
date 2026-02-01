@@ -1,7 +1,7 @@
 {
   "name": "cowork-oss",
   "version": "0.3.11",
-  "description": "CoWork-OSS - Open source agentic task automation for macOS",
+  "description": "Security-first personal AI assistant platform with multi-channel support",
   "overrides": {
     "undici": "^7.0.0"
   },
@@ -17,14 +17,26 @@
     "url": "https://github.com/CoWork-OS/cowork-oss/issues"
   },
   "keywords": [
-    "ai",
-    "agent",
-    "automation",
+    "ai-assistant",
+    "personal-ai",
+    "self-hosted",
+    "ai-gateway",
+    "whatsapp-bot",
+    "telegram-bot",
+    "discord-bot",
+    "slack-bot",
+    "ai-automation",
+    "llm",
     "claude",
+    "gpt",
+    "gemini",
+    "ollama",
+    "mcp",
     "electron",
     "macos",
-    "task-automation",
-    "llm"
+    "security",
+    "local-first",
+    "byok"
   ],
   "private": false,
   "scripts": {

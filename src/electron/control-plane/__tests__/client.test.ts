@@ -451,4 +451,316 @@ describe('ClientRegistry', () => {
       expect(status.clients).toHaveLength(2);
     });
   });
+
+  describe('Node Management', () => {
+    // Helper to create a node client
+    const createNodeClient = (options: {
+      displayName?: string;
+      platform?: 'ios' | 'android' | 'macos';
+      capabilities?: string[];
+      commands?: string[];
+    } = {}) => {
+      const socket = createMockSocket();
+      const client = new ControlPlaneClient(socket, '192.168.1.100', 'NodeApp/1.0');
+      client.authenticateAsNode({
+        deviceName: options.displayName || 'Test iPhone',
+        platform: options.platform || 'ios',
+        version: '1.0.0',
+        deviceId: 'test-device-id',
+        modelIdentifier: 'iPhone15,3',
+        capabilities: (options.capabilities || ['camera', 'location']) as any,
+        commands: options.commands || ['camera.snap', 'location.get'],
+        permissions: { camera: true, location: true },
+      });
+      return client;
+    };
+
+    describe('getNodes', () => {
+      it('should return only node clients', () => {
+        const operator = new ControlPlaneClient(mockSocket, '127.0.0.1');
+        operator.authenticate(['admin'], 'Operator');
+
+        const node = createNodeClient({ displayName: 'iPhone' });
+
+        registry.add(operator);
+        registry.add(node);
+
+        const nodes = registry.getNodes();
+
+        expect(nodes).toHaveLength(1);
+        expect(nodes[0].info.role).toBe('node');
+      });
+
+      it('should return empty array when no nodes', () => {
+        const operator = new ControlPlaneClient(mockSocket, '127.0.0.1');
+        operator.authenticate(['admin']);
+        registry.add(operator);
+
+        expect(registry.getNodes()).toEqual([]);
+      });
+    });
+
+    describe('getNodeByIdOrName', () => {
+      it('should find node by ID', () => {
+        const node = createNodeClient({ displayName: 'My iPhone' });
+        registry.add(node);
+
+        const found = registry.getNodeByIdOrName(node.id);
+
+        expect(found).toBe(node);
+      });
+
+      it('should find node by display name', () => {
+        const node = createNodeClient({ displayName: 'My iPhone' });
+        registry.add(node);
+
+        const found = registry.getNodeByIdOrName('My iPhone');
+
+        expect(found).toBe(node);
+      });
+
+      it('should return undefined for non-existent node', () => {
+        const node = createNodeClient({ displayName: 'My iPhone' });
+        registry.add(node);
+
+        expect(registry.getNodeByIdOrName('Non-existent')).toBeUndefined();
+      });
+    });
+
+    describe('getNodeInfoList', () => {
+      it('should return NodeInfo for all nodes', () => {
+        const node1 = createNodeClient({ displayName: 'iPhone 1', platform: 'ios' });
+        const node2 = createNodeClient({ displayName: 'Pixel 8', platform: 'android' });
+        registry.add(node1);
+        registry.add(node2);
+
+        const infoList = registry.getNodeInfoList();
+
+        expect(infoList).toHaveLength(2);
+        expect(infoList.map((n) => n.displayName)).toContain('iPhone 1');
+        expect(infoList.map((n) => n.displayName)).toContain('Pixel 8');
+      });
+    });
+
+    describe('nodeCount', () => {
+      it('should return correct node count', () => {
+        const operator = new ControlPlaneClient(mockSocket, '127.0.0.1');
+        operator.authenticate(['admin']);
+
+        const node1 = createNodeClient({ displayName: 'iPhone 1' });
+        const node2 = createNodeClient({ displayName: 'iPhone 2' });
+
+        registry.add(operator);
+        registry.add(node1);
+        registry.add(node2);
+
+        expect(registry.nodeCount).toBe(2);
+      });
+    });
+
+    describe('broadcastToNodes', () => {
+      it('should broadcast only to node clients', () => {
+        const operatorSocket = createMockSocket();
+        const operator = new ControlPlaneClient(operatorSocket, '127.0.0.1');
+        operator.authenticate(['admin']);
+
+        const node = createNodeClient({ displayName: 'iPhone' });
+
+        registry.add(operator);
+        registry.add(node);
+
+        const sent = registry.broadcastToNodes('node.event', { test: true });
+
+        expect(sent).toBe(1);
+        expect(operatorSocket.send).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('broadcastToOperators', () => {
+      it('should broadcast only to operator clients', () => {
+        const operatorSocket = createMockSocket();
+        const operator = new ControlPlaneClient(operatorSocket, '127.0.0.1');
+        operator.authenticate(['admin']);
+
+        const node = createNodeClient({ displayName: 'iPhone' });
+
+        registry.add(operator);
+        registry.add(node);
+
+        // Reset operator socket calls first to clear any previous sends
+        (operatorSocket.send as any).mockClear();
+
+        const sent = registry.broadcastToOperators('status.update', { test: true });
+
+        expect(sent).toBe(1);
+        expect(operatorSocket.send).toHaveBeenCalled();
+      });
+    });
+  });
+});
+
+describe('ControlPlaneClient Node Methods', () => {
+  let mockSocket: WebSocket;
+  let client: ControlPlaneClient;
+
+  beforeEach(() => {
+    mockSocket = createMockSocket();
+    client = new ControlPlaneClient(mockSocket, '192.168.1.100', 'NodeApp/1.0');
+  });
+
+  describe('authenticateAsNode', () => {
+    it('should set node-specific properties', () => {
+      client.authenticateAsNode({
+        deviceName: 'Test iPhone',
+        platform: 'ios',
+        version: '1.0.0',
+        deviceId: 'device-123',
+        modelIdentifier: 'iPhone15,3',
+        capabilities: ['camera', 'location'],
+        commands: ['camera.snap', 'location.get'],
+        permissions: { camera: true, location: false },
+      });
+
+      expect(client.info.role).toBe('node');
+      expect(client.info.platform).toBe('ios');
+      expect(client.info.version).toBe('1.0.0');
+      expect(client.info.deviceId).toBe('device-123');
+      expect(client.info.capabilities).toEqual(['camera', 'location']);
+      expect(client.info.commands).toEqual(['camera.snap', 'location.get']);
+      expect(client.info.permissions).toEqual({ camera: true, location: false });
+      expect(client.isAuthenticated).toBe(true);
+    });
+
+    it('should default isForeground to true', () => {
+      client.authenticateAsNode({
+        deviceName: 'Test',
+        platform: 'ios',
+        version: '1.0.0',
+        deviceId: 'device-123',
+        capabilities: [],
+        commands: [],
+        permissions: {},
+      });
+
+      expect(client.info.isForeground).toBe(true);
+    });
+  });
+
+  describe('updateCapabilities', () => {
+    beforeEach(() => {
+      client.authenticateAsNode({
+        deviceName: 'Test',
+        platform: 'ios',
+        version: '1.0.0',
+        deviceId: 'device-123',
+        capabilities: ['camera'],
+        commands: ['camera.snap'],
+        permissions: { camera: true },
+      });
+    });
+
+    it('should update all capabilities at once', () => {
+      client.updateCapabilities(
+        ['camera', 'location'],
+        ['camera.snap', 'location.get'],
+        { camera: true, location: true }
+      );
+
+      expect(client.info.capabilities).toEqual(['camera', 'location']);
+      expect(client.info.commands).toEqual(['camera.snap', 'location.get']);
+      expect(client.info.permissions).toEqual({ camera: true, location: true });
+    });
+
+    it('should not update for non-node clients', () => {
+      const operatorClient = new ControlPlaneClient(mockSocket, '127.0.0.1');
+      operatorClient.authenticate(['admin']);
+
+      operatorClient.updateCapabilities(['camera'], ['camera.snap'], { camera: true });
+
+      // Should remain undefined since it's not a node
+      expect(operatorClient.info.capabilities).toBeUndefined();
+    });
+  });
+
+  describe('setForeground', () => {
+    beforeEach(() => {
+      client.authenticateAsNode({
+        deviceName: 'Test',
+        platform: 'ios',
+        version: '1.0.0',
+        deviceId: 'device-123',
+        capabilities: [],
+        commands: [],
+        permissions: {},
+      });
+    });
+
+    it('should set foreground state', () => {
+      client.setForeground(false);
+      expect(client.info.isForeground).toBe(false);
+
+      client.setForeground(true);
+      expect(client.info.isForeground).toBe(true);
+    });
+  });
+
+  describe('getNodeInfo', () => {
+    it('should return null for non-node clients', () => {
+      expect(client.getNodeInfo()).toBeNull();
+    });
+
+    it('should return NodeInfo for node clients', () => {
+      client.authenticateAsNode({
+        deviceName: 'My iPhone',
+        platform: 'ios',
+        version: '1.0.0',
+        deviceId: 'device-123',
+        modelIdentifier: 'iPhone15,3',
+        capabilities: ['camera', 'location'],
+        commands: ['camera.snap', 'location.get'],
+        permissions: { camera: true, location: true },
+      });
+
+      const nodeInfo = client.getNodeInfo();
+
+      expect(nodeInfo).not.toBeNull();
+      expect(nodeInfo?.id).toBe(client.id);
+      expect(nodeInfo?.displayName).toBe('My iPhone');
+      expect(nodeInfo?.platform).toBe('ios');
+      expect(nodeInfo?.version).toBe('1.0.0');
+      expect(nodeInfo?.deviceId).toBe('device-123');
+      expect(nodeInfo?.capabilities).toEqual(['camera', 'location']);
+      expect(nodeInfo?.commands).toEqual(['camera.snap', 'location.get']);
+      expect(nodeInfo?.permissions).toEqual({ camera: true, location: true });
+      expect(nodeInfo?.isForeground).toBe(true);
+      expect(nodeInfo?.connectedAt).toBeDefined();
+      expect(nodeInfo?.lastActivityAt).toBeDefined();
+    });
+  });
+
+  describe('commands and capabilities via info', () => {
+    beforeEach(() => {
+      client.authenticateAsNode({
+        deviceName: 'Test',
+        platform: 'ios',
+        version: '1.0.0',
+        deviceId: 'device-123',
+        capabilities: ['camera', 'location'],
+        commands: ['camera.snap', 'camera.clip'],
+        permissions: { camera: true },
+      });
+    });
+
+    it('should check commands via info.commands', () => {
+      expect(client.info.commands?.includes('camera.snap')).toBe(true);
+      expect(client.info.commands?.includes('camera.clip')).toBe(true);
+      expect(client.info.commands?.includes('location.get')).toBe(false);
+    });
+
+    it('should check capabilities via info.capabilities', () => {
+      expect(client.info.capabilities?.includes('camera')).toBe(true);
+      expect(client.info.capabilities?.includes('location')).toBe(true);
+      expect(client.info.capabilities?.includes('sms')).toBe(false);
+    });
+  });
 });

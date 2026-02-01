@@ -19,8 +19,9 @@ import { ScheduledTasksSettings } from './ScheduledTasksSettings';
 import { HooksSettings } from './HooksSettings';
 import { ControlPlaneSettings } from './ControlPlaneSettings';
 import { PersonalitySettings } from './PersonalitySettings';
+import { NodesSettings } from './NodesSettings';
 
-type SettingsTab = 'appearance' | 'personality' | 'tray' | 'llm' | 'search' | 'telegram' | 'discord' | 'slack' | 'whatsapp' | 'imessage' | 'updates' | 'guardrails' | 'queue' | 'skills' | 'skillhub' | 'mcp' | 'tools' | 'scheduled' | 'hooks' | 'controlplane';
+type SettingsTab = 'appearance' | 'personality' | 'tray' | 'llm' | 'search' | 'telegram' | 'discord' | 'slack' | 'whatsapp' | 'imessage' | 'updates' | 'guardrails' | 'queue' | 'skills' | 'skillhub' | 'mcp' | 'tools' | 'scheduled' | 'hooks' | 'controlplane' | 'nodes';
 
 interface SettingsProps {
   onBack: () => void;
@@ -868,6 +869,16 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
             </svg>
             Control Plane
           </button>
+          <button
+            className={`settings-nav-item ${activeTab === 'nodes' ? 'active' : ''}`}
+            onClick={() => setActiveTab('nodes')}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
+              <line x1="12" y1="18" x2="12.01" y2="18" />
+            </svg>
+            Mobile Companions
+          </button>
           {/* NOTE: Updates tab should ALWAYS stay at the bottom as the last tab */}
           <button
             className={`settings-nav-item ${activeTab === 'updates' ? 'active' : ''}`}
@@ -925,6 +936,8 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
             <HooksSettings />
           ) : activeTab === 'controlplane' ? (
             <ControlPlaneSettings />
+          ) : activeTab === 'nodes' ? (
+            <NodesSettings />
           ) : loading ? (
             <div className="settings-loading">Loading settings...</div>
           ) : (

@@ -79,6 +79,14 @@ export const ErrorCodes = {
   INVALID_PARAMS: 'INVALID_PARAMS',
   METHOD_FAILED: 'METHOD_FAILED',
 
+  // Node errors (Mobile Companions)
+  NODE_NOT_FOUND: 'NODE_NOT_FOUND',
+  NODE_UNAVAILABLE: 'NODE_UNAVAILABLE',
+  NODE_TIMEOUT: 'NODE_TIMEOUT',
+  NODE_PERMISSION_DENIED: 'NODE_PERMISSION_DENIED',
+  NODE_COMMAND_FAILED: 'NODE_COMMAND_FAILED',
+  NODE_BACKGROUND_UNAVAILABLE: 'NODE_BACKGROUND_UNAVAILABLE',
+
   // Internal errors
   INTERNAL_ERROR: 'INTERNAL_ERROR',
 } as const;
@@ -212,6 +220,12 @@ export const Events = {
   TASK_FAILED: 'task.failed',
   TASK_EVENT: 'task.event',
 
+  // Node events (Mobile Companions)
+  NODE_CONNECTED: 'node.connected',
+  NODE_DISCONNECTED: 'node.disconnected',
+  NODE_CAPABILITIES_CHANGED: 'node.capabilities_changed',
+  NODE_EVENT: 'node.event',
+
   // System events
   HEARTBEAT: 'heartbeat',
   CONFIG_CHANGED: 'config.changed',
@@ -237,6 +251,12 @@ export const Methods = {
   // Agent operations
   AGENT_WAKE: 'agent.wake',
   AGENT_SEND: 'agent.send',
+
+  // Node operations (Mobile Companions)
+  NODE_LIST: 'node.list',
+  NODE_DESCRIBE: 'node.describe',
+  NODE_INVOKE: 'node.invoke',
+  NODE_EVENT: 'node.event',
 
   // System operations
   STATUS: 'status',

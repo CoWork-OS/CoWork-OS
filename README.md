@@ -182,6 +182,12 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
   - Encrypted transport with OS keychain token storage
   - Auto-reconnection with exponential backoff
   - Connection testing before committing
+- **Mobile Companions**: Connect iOS/Android devices as remote nodes:
+  - Mobile devices connect via WebSocket as "nodes" with device-specific capabilities
+  - Camera capture (front/back), GPS location, screen recording, SMS (Android)
+  - AI agent tools for interacting with mobile devices
+  - Real-time node status and event broadcasting
+  - Settings UI for viewing and testing connected devices
 - **Personality & Customization**: Customize agent behavior via prompts or Settings UI:
   - **Personalities**: Communication styles (professional, friendly, concise, creative, technical, casual)
   - **Personas**: Character overlays (Jarvis, Friday, HAL, Computer, Alfred, Intern, Sensei, Pirate, Noir)
@@ -247,6 +253,15 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
 │  - Token-based authentication                    │
 │  - Task management (create, cancel, monitor)     │
 │  - Real-time event streaming                     │
+│  - Mobile companion node management              │
+└─────────────────────────────────────────────────┘
+                      ↕
+┌─────────────────────────────────────────────────┐
+│           Mobile Companions (Optional)           │
+│  - iOS/Android devices as remote nodes           │
+│  - Camera, location, screen, SMS capabilities    │
+│  - WebSocket connection with role-based auth     │
+│  - Real-time device status and events            │
 └─────────────────────────────────────────────────┘
                       ↕
 ┌─────────────────────────────────────────────────┐
@@ -2295,6 +2310,112 @@ The Control Plane includes built-in protection against brute-force attacks:
 
 ---
 
+## Mobile Companions
+
+Mobile Companions allow you to connect iOS and Android devices as remote "nodes" to CoWork-OSS, exposing device-specific capabilities like camera, GPS, screen recording, and SMS to the AI agent.
+
+### Overview
+
+Mobile devices connect to the Control Plane as "nodes" via WebSocket, providing:
+- **Device Capabilities**: Camera capture, GPS location, screen recording, SMS sending
+- **Role-Based Auth**: Nodes authenticate with a separate role from operators
+- **Real-Time Status**: Foreground/background state, permission tracking
+- **Event Broadcasting**: Operators receive node connect/disconnect events
+
+### Enabling Mobile Companions
+
+1. Enable the **Control Plane** in Settings (required)
+2. Navigate to **Settings > Mobile Companions**
+3. Follow the pairing instructions for your mobile device
+4. Connected devices appear in the list with their capabilities
+
+### Supported Capabilities
+
+| Capability | Description | iOS | Android |
+|------------|-------------|-----|---------|
+| Camera | Photo capture (front/back) | ✓ | ✓ |
+| Location | GPS coordinates (coarse/precise) | ✓ | ✓ |
+| Screen | Screen recording | ✓ | ✓ |
+| SMS | Send text messages | - | ✓ |
+| Voice | Audio recording | ✓ | ✓ |
+
+### Standard Commands
+
+| Command | Description | Parameters |
+|---------|-------------|------------|
+| `camera.snap` | Take a photo | `facing?: 'front' \| 'back'`, `maxWidth?`, `quality?` |
+| `camera.clip` | Record video | `durationMs`, `facing?`, `noAudio?` |
+| `location.get` | Get GPS location | `accuracy?: 'coarse' \| 'precise'`, `maxAge?` |
+| `screen.record` | Record screen | `durationMs`, `fps?`, `noAudio?` |
+| `sms.send` | Send SMS (Android) | `to`, `message` |
+
+### AI Agent Tools
+
+The AI agent can interact with mobile companions using these tools:
+
+| Tool | Description |
+|------|-------------|
+| `node_list` | List connected mobile companions |
+| `node_describe` | Get detailed info about a specific node |
+| `node_camera_snap` | Take a photo using a mobile node's camera |
+| `node_location` | Get current location from a mobile node |
+| `node_screen_record` | Record screen on a mobile node |
+| `node_sms_send` | Send SMS via an Android node |
+
+### Protocol
+
+Nodes connect using the same WebSocket protocol as operators, but with `role: 'node'`:
+
+**Connect Request (Node):**
+```json
+{
+  "type": "req",
+  "id": "uuid",
+  "method": "connect",
+  "params": {
+    "token": "auth-token",
+    "role": "node",
+    "client": {
+      "id": "device-uuid",
+      "displayName": "iPhone 15 Pro",
+      "version": "1.0.0",
+      "platform": "ios"
+    },
+    "capabilities": ["camera", "location", "screen"],
+    "commands": ["camera.snap", "camera.clip", "location.get", "screen.record"],
+    "permissions": {
+      "camera": true,
+      "location": true,
+      "screen_record": false
+    }
+  }
+}
+```
+
+**Invoke Command:**
+```json
+{
+  "type": "req",
+  "id": "uuid",
+  "method": "node.invoke",
+  "params": {
+    "nodeId": "device-uuid",
+    "command": "camera.snap",
+    "params": { "facing": "back" }
+  }
+}
+```
+
+### Foreground Requirement
+
+Some commands require the mobile app to be in the foreground:
+- `camera.snap`, `camera.clip` - Camera access requires foreground
+- `screen.record` - Screen recording requires foreground
+
+The server tracks foreground state and returns an error if the app is in background.
+
+---
+
 ## Tailscale Integration
 
 CoWork-OSS integrates with [Tailscale](https://tailscale.com/) to securely expose the Control Plane to your private network (tailnet) or the public internet without complex firewall or router configuration.
@@ -2564,7 +2685,8 @@ cowork-oss/
 │   │   │   ├── protocol.ts    # Frame types and serialization
 │   │   │   ├── handlers.ts    # Method handlers (task operations)
 │   │   │   ├── settings.ts    # Settings persistence
-│   │   │   └── remote-client.ts # Remote gateway client (SSH tunnel)
+│   │   │   ├── remote-client.ts # Remote gateway client (SSH tunnel)
+│   │   │   └── node-manager.ts  # Mobile companion node management
 │   │   ├── tailscale/         # Tailscale integration
 │   │   │   ├── tailscale.ts   # CLI wrapper and status
 │   │   │   ├── exposure.ts    # Serve/Funnel mode manager

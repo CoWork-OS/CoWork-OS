@@ -358,13 +358,25 @@ export class ControlPlaneServer {
     // Handle close
     socket.on('close', (code, reason) => {
       clearTimeout(handshakeTimeout);
+
+      // If this was a node, broadcast disconnection event to operators
+      if (client.isNode) {
+        const nodeInfo = client.getNodeInfo();
+        this.clients.broadcastToOperators(Events.NODE_DISCONNECTED, {
+          nodeId: client.id,
+          node: nodeInfo,
+        });
+        console.info(`[ControlPlane] Node disconnected: ${client.id} (${nodeInfo?.displayName || 'unnamed'}) (code: ${code})`);
+      } else {
+        console.info(`[ControlPlane] Client disconnected: ${client.id} (code: ${code})`);
+      }
+
       this.clients.remove(client.id);
-      console.info(`[ControlPlane] Client disconnected: ${client.id} (code: ${code})`);
       this.emitEvent({
         action: 'client_disconnected',
         timestamp: Date.now(),
         clientId: client.id,
-        details: { code, reason: reason.toString() },
+        details: { code, reason: reason.toString(), wasNode: client.isNode },
       });
     });
 
@@ -438,6 +450,20 @@ export class ControlPlaneServer {
       token?: string;
       deviceName?: string;
       nonce?: string;
+      // Node-specific params (Mobile Companions)
+      role?: 'operator' | 'node';
+      client?: {
+        id?: string;
+        displayName?: string;
+        version?: string;
+        platform?: 'ios' | 'android' | 'macos';
+        mode?: string;
+        deviceFamily?: string;
+        modelIdentifier?: string;
+      };
+      capabilities?: string[];
+      commands?: string[];
+      permissions?: Record<string, boolean>;
     } | undefined;
 
     // Verify token
@@ -459,23 +485,72 @@ export class ControlPlaneServer {
     // Clear auth attempts on success
     this.authAttempts.delete(remoteAddress);
 
-    // Authenticate with admin scope (can be refined later)
-    const scopes: ClientScope[] = ['admin'];
-    client.authenticate(scopes, params?.deviceName);
+    // Check if this is a node (mobile companion) connection
+    const isNode = params?.role === 'node';
 
-    console.info(`[ControlPlane] Client authenticated: ${client.id} (${params?.deviceName || 'unnamed'})`);
-    this.emitEvent({
-      action: 'client_authenticated',
-      timestamp: Date.now(),
-      clientId: client.id,
-      details: { deviceName: params?.deviceName },
-    });
+    if (isNode) {
+      // Authenticate as a node
+      const platform = (params?.client?.platform || 'ios') as 'ios' | 'android' | 'macos';
+      const capabilities = (params?.capabilities || []) as any[];
+      const commands = params?.commands || [];
+      const permissions = params?.permissions || {};
 
-    // Send success response
-    client.send(createResponseFrame(request.id, {
-      clientId: client.id,
-      scopes,
-    }));
+      client.authenticateAsNode({
+        deviceName: params?.client?.displayName || params?.deviceName,
+        platform,
+        version: params?.client?.version || '0.0.0',
+        deviceId: params?.client?.id,
+        modelIdentifier: params?.client?.modelIdentifier,
+        capabilities,
+        commands,
+        permissions,
+      });
+
+      console.info(`[ControlPlane] Node authenticated: ${client.id} (${params?.client?.displayName || 'unnamed'}) [${platform}]`);
+      this.emitEvent({
+        action: 'client_authenticated',
+        timestamp: Date.now(),
+        clientId: client.id,
+        details: {
+          deviceName: params?.client?.displayName,
+          role: 'node',
+          platform,
+          capabilities,
+        },
+      });
+
+      // Broadcast node connected event to operators
+      this.clients.broadcastToOperators(Events.NODE_CONNECTED, {
+        nodeId: client.id,
+        node: client.getNodeInfo(),
+      });
+
+      // Send success response
+      client.send(createResponseFrame(request.id, {
+        clientId: client.id,
+        role: 'node',
+        scopes: ['read'],
+      }));
+    } else {
+      // Authenticate as operator with admin scope
+      const scopes: ClientScope[] = ['admin'];
+      client.authenticate(scopes, params?.deviceName);
+
+      console.info(`[ControlPlane] Client authenticated: ${client.id} (${params?.deviceName || 'unnamed'})`);
+      this.emitEvent({
+        action: 'client_authenticated',
+        timestamp: Date.now(),
+        clientId: client.id,
+        details: { deviceName: params?.deviceName, role: 'operator' },
+      });
+
+      // Send success response
+      client.send(createResponseFrame(request.id, {
+        clientId: client.id,
+        role: 'operator',
+        scopes,
+      }));
+    }
 
     // Send connect success event
     client.sendEvent(Events.CONNECT_SUCCESS, {
@@ -566,6 +641,164 @@ export class ControlPlaneServer {
 
     // Status
     this.registerMethod(Methods.STATUS, async () => this.getStatus());
+
+    // ===== Node (Mobile Companion) Methods =====
+
+    // List connected nodes
+    this.registerMethod(Methods.NODE_LIST, async () => {
+      return {
+        nodes: this.clients.getNodeInfoList(),
+      };
+    });
+
+    // Describe a specific node
+    this.registerMethod(Methods.NODE_DESCRIBE, async (client, params) => {
+      const { nodeId } = params as { nodeId?: string };
+      if (!nodeId) {
+        throw { code: ErrorCodes.INVALID_PARAMS, message: 'nodeId is required' };
+      }
+      const node = this.clients.getNodeByIdOrName(nodeId);
+      if (!node) {
+        throw { code: ErrorCodes.NODE_NOT_FOUND, message: `Node not found: ${nodeId}` };
+      }
+      return {
+        node: node.getNodeInfo(),
+      };
+    });
+
+    // Invoke a command on a node
+    this.registerMethod(Methods.NODE_INVOKE, async (client, params) => {
+      const { nodeId, command, params: commandParams, timeoutMs = 30000 } = params as {
+        nodeId?: string;
+        command?: string;
+        params?: Record<string, unknown>;
+        timeoutMs?: number;
+      };
+
+      if (!nodeId) {
+        throw { code: ErrorCodes.INVALID_PARAMS, message: 'nodeId is required' };
+      }
+      if (!command) {
+        throw { code: ErrorCodes.INVALID_PARAMS, message: 'command is required' };
+      }
+
+      const node = this.clients.getNodeByIdOrName(nodeId);
+      if (!node) {
+        throw { code: ErrorCodes.NODE_NOT_FOUND, message: `Node not found: ${nodeId}` };
+      }
+
+      // Check if node supports this command
+      const nodeInfo = node.getNodeInfo();
+      if (!nodeInfo?.commands.includes(command)) {
+        throw {
+          code: ErrorCodes.NODE_COMMAND_FAILED,
+          message: `Node does not support command: ${command}`,
+        };
+      }
+
+      // Check if node is in foreground (required for most commands)
+      if (!nodeInfo.isForeground && ['camera.snap', 'camera.clip', 'screen.record'].includes(command)) {
+        throw {
+          code: ErrorCodes.NODE_BACKGROUND_UNAVAILABLE,
+          message: 'Node app must be in foreground for this command',
+        };
+      }
+
+      // Forward the command to the node
+      return await this.invokeNodeCommand(node, command, commandParams, timeoutMs);
+    });
+
+    // Handle node events (from nodes to gateway)
+    this.registerMethod(Methods.NODE_EVENT, async (client, params) => {
+      if (!client.isNode) {
+        throw { code: ErrorCodes.UNAUTHORIZED, message: 'Only nodes can send node events' };
+      }
+
+      const { event, payload } = params as { event?: string; payload?: unknown };
+      if (!event) {
+        throw { code: ErrorCodes.INVALID_PARAMS, message: 'event is required' };
+      }
+
+      // Handle specific node events
+      if (event === 'foreground_changed') {
+        const isForeground = (payload as any)?.isForeground ?? true;
+        client.setForeground(isForeground);
+        this.clients.broadcastToOperators(Events.NODE_EVENT, {
+          nodeId: client.id,
+          event: 'foreground_changed',
+          isForeground,
+        });
+      } else if (event === 'capabilities_changed') {
+        const { capabilities, commands, permissions } = payload as any;
+        if (capabilities && commands && permissions) {
+          client.updateCapabilities(capabilities, commands, permissions);
+          this.clients.broadcastToOperators(Events.NODE_CAPABILITIES_CHANGED, {
+            nodeId: client.id,
+            node: client.getNodeInfo(),
+          });
+        }
+      }
+
+      return { ok: true };
+    });
+  }
+
+  /**
+   * Invoke a command on a node and wait for response
+   */
+  private async invokeNodeCommand(
+    node: ControlPlaneClient,
+    command: string,
+    params: Record<string, unknown> | undefined,
+    timeoutMs: number
+  ): Promise<{ ok: boolean; payload?: unknown; error?: { code: string; message: string } }> {
+    return new Promise((resolve) => {
+      const requestId = crypto.randomUUID();
+      let timeoutHandle: NodeJS.Timeout;
+
+      // Set up one-time response handler
+      const handleResponse = (data: Buffer | string) => {
+        try {
+          const message = data.toString();
+          const frame = parseFrame(message);
+          if (frame && frame.type === FrameType.Response && (frame as any).id === requestId) {
+            clearTimeout(timeoutHandle);
+            node.info.socket.removeListener('message', handleResponse);
+            const response = frame as any;
+            if (response.ok) {
+              resolve({ ok: true, payload: response.payload });
+            } else {
+              resolve({
+                ok: false,
+                error: response.error || { code: 'UNKNOWN', message: 'Command failed' },
+              });
+            }
+          }
+        } catch {
+          // Ignore parse errors
+        }
+      };
+
+      node.info.socket.on('message', handleResponse);
+
+      // Set timeout
+      timeoutHandle = setTimeout(() => {
+        node.info.socket.removeListener('message', handleResponse);
+        resolve({
+          ok: false,
+          error: { code: ErrorCodes.NODE_TIMEOUT, message: `Command timed out after ${timeoutMs}ms` },
+        });
+      }, timeoutMs);
+
+      // Send command to node
+      const requestFrame = {
+        type: FrameType.Request,
+        id: requestId,
+        method: 'node.invoke',
+        params: { command, params },
+      };
+      node.info.socket.send(JSON.stringify(requestFrame));
+    });
   }
 
   /**

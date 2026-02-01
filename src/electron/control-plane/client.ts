@@ -32,6 +32,21 @@ export type ClientScope =
   | 'operator'; // Task operations only
 
 /**
+ * Client role in the Control Plane
+ */
+export type ClientRole = 'operator' | 'node';
+
+/**
+ * Node capability categories
+ */
+export type NodeCapabilityType = 'camera' | 'location' | 'screen' | 'sms' | 'voice' | 'canvas' | 'system';
+
+/**
+ * Node platform type
+ */
+export type NodePlatform = 'ios' | 'android' | 'macos';
+
+/**
  * Information about a connected client
  */
 export interface ClientInfo {
@@ -59,6 +74,24 @@ export interface ClientInfo {
   deviceName?: string;
   /** Authentication nonce */
   authNonce?: string;
+  /** Client role: 'operator' (default) or 'node' (mobile companion) */
+  role: ClientRole;
+  /** Node platform (for nodes only) */
+  platform?: NodePlatform;
+  /** Node client version (for nodes only) */
+  version?: string;
+  /** Device identifier (persisted across connections) */
+  deviceId?: string;
+  /** Model identifier (e.g., "iPhone15,3") */
+  modelIdentifier?: string;
+  /** Node capability categories (for nodes only) */
+  capabilities?: NodeCapabilityType[];
+  /** Specific commands supported (for nodes only) */
+  commands?: string[];
+  /** Permission status for each capability (for nodes only) */
+  permissions?: Record<string, boolean>;
+  /** Whether the node app is in the foreground (for nodes only) */
+  isForeground?: boolean;
 }
 
 /**
@@ -86,6 +119,7 @@ export class ControlPlaneClient {
       lastActivityAt: Date.now(),
       lastHeartbeatAt: Date.now(),
       authNonce: randomUUID(),
+      role: 'operator', // Default role
     };
   }
 
@@ -118,6 +152,13 @@ export class ControlPlaneClient {
   }
 
   /**
+   * Check if client is a node (mobile companion)
+   */
+  get isNode(): boolean {
+    return this.info.role === 'node';
+  }
+
+  /**
    * Mark client as authenticated with given scopes
    */
   authenticate(scopes: ClientScope[], deviceName?: string): void {
@@ -125,6 +166,92 @@ export class ControlPlaneClient {
     this.info.scopes = scopes;
     this.info.deviceName = deviceName;
     this.updateActivity();
+  }
+
+  /**
+   * Authenticate as a node with capabilities
+   */
+  authenticateAsNode(options: {
+    deviceName?: string;
+    platform: NodePlatform;
+    version: string;
+    deviceId?: string;
+    modelIdentifier?: string;
+    capabilities: NodeCapabilityType[];
+    commands: string[];
+    permissions: Record<string, boolean>;
+  }): void {
+    this.info.authState = 'authenticated';
+    this.info.role = 'node';
+    this.info.scopes = ['read']; // Nodes have limited scope
+    this.info.deviceName = options.deviceName;
+    this.info.platform = options.platform;
+    this.info.version = options.version;
+    this.info.deviceId = options.deviceId;
+    this.info.modelIdentifier = options.modelIdentifier;
+    this.info.capabilities = options.capabilities;
+    this.info.commands = options.commands;
+    this.info.permissions = options.permissions;
+    this.info.isForeground = true; // Assume foreground on initial connect
+    this.updateActivity();
+  }
+
+  /**
+   * Update node capabilities (e.g., when permissions change)
+   */
+  updateCapabilities(
+    capabilities: NodeCapabilityType[],
+    commands: string[],
+    permissions: Record<string, boolean>
+  ): void {
+    if (this.info.role !== 'node') return;
+    this.info.capabilities = capabilities;
+    this.info.commands = commands;
+    this.info.permissions = permissions;
+    this.updateActivity();
+  }
+
+  /**
+   * Update node foreground state
+   */
+  setForeground(isForeground: boolean): void {
+    if (this.info.role !== 'node') return;
+    this.info.isForeground = isForeground;
+    this.updateActivity();
+  }
+
+  /**
+   * Get node info (for node clients only)
+   */
+  getNodeInfo(): {
+    id: string;
+    displayName: string;
+    platform: NodePlatform;
+    version: string;
+    deviceId?: string;
+    modelIdentifier?: string;
+    capabilities: NodeCapabilityType[];
+    commands: string[];
+    permissions: Record<string, boolean>;
+    connectedAt: number;
+    lastActivityAt: number;
+    isForeground?: boolean;
+  } | null {
+    if (this.info.role !== 'node') return null;
+    return {
+      id: this.info.id,
+      displayName: this.info.deviceName || 'Unknown Node',
+      platform: this.info.platform || 'ios',
+      version: this.info.version || '0.0.0',
+      deviceId: this.info.deviceId,
+      modelIdentifier: this.info.modelIdentifier,
+      capabilities: this.info.capabilities || [],
+      commands: this.info.commands || [],
+      permissions: this.info.permissions || {},
+      connectedAt: this.info.connectedAt,
+      lastActivityAt: this.info.lastActivityAt,
+      isForeground: this.info.isForeground,
+    };
   }
 
   /**
@@ -205,6 +332,9 @@ export class ControlPlaneClient {
     scopes: ClientScope[];
     connectedAt: number;
     lastActivityAt: number;
+    role: ClientRole;
+    platform?: NodePlatform;
+    capabilities?: NodeCapabilityType[];
   } {
     return {
       id: this.info.id,
@@ -214,6 +344,9 @@ export class ControlPlaneClient {
       scopes: this.info.scopes,
       connectedAt: this.info.connectedAt,
       lastActivityAt: this.info.lastActivityAt,
+      role: this.info.role,
+      platform: this.info.platform,
+      capabilities: this.info.capabilities,
     };
   }
 }
@@ -326,5 +459,69 @@ export class ClientRegistry {
       pending: all.filter((c) => c.info.authState === 'pending').length,
       clients: all.map((c) => c.getSummary()),
     };
+  }
+
+  // ===== Node (Mobile Companion) Methods =====
+
+  /**
+   * Get all connected nodes (mobile companions)
+   */
+  getNodes(): ControlPlaneClient[] {
+    return this.getAuthenticated().filter((c) => c.isNode);
+  }
+
+  /**
+   * Get node count
+   */
+  get nodeCount(): number {
+    return this.getNodes().length;
+  }
+
+  /**
+   * Get a node by ID or display name
+   */
+  getNodeByIdOrName(idOrName: string): ControlPlaneClient | undefined {
+    const nodes = this.getNodes();
+    // Try exact ID match first
+    const byId = nodes.find((n) => n.id === idOrName);
+    if (byId) return byId;
+    // Then try display name match (case-insensitive)
+    const lowerName = idOrName.toLowerCase();
+    return nodes.find((n) => n.info.deviceName?.toLowerCase() === lowerName);
+  }
+
+  /**
+   * Get all node info summaries
+   */
+  getNodeInfoList(): NonNullable<ReturnType<ControlPlaneClient['getNodeInfo']>>[] {
+    return this.getNodes()
+      .map((n) => n.getNodeInfo())
+      .filter((info): info is NonNullable<typeof info> => info !== null);
+  }
+
+  /**
+   * Broadcast an event to all connected nodes
+   */
+  broadcastToNodes(event: string, payload?: unknown, stateVersion?: string): number {
+    let sent = 0;
+    for (const client of this.getNodes()) {
+      if (client.sendEvent(event, payload, stateVersion)) {
+        sent++;
+      }
+    }
+    return sent;
+  }
+
+  /**
+   * Broadcast an event to all non-node (operator) clients
+   */
+  broadcastToOperators(event: string, payload?: unknown, stateVersion?: string): number {
+    let sent = 0;
+    for (const client of this.getAuthenticated()) {
+      if (!client.isNode && client.sendEvent(event, payload, stateVersion)) {
+        sent++;
+      }
+    }
+    return sent;
   }
 }

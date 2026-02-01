@@ -599,6 +599,107 @@ export function setupControlPlaneHandlers(mainWindow: BrowserWindow): void {
     }
   );
 
+  // ===== Node (Mobile Companion) Handlers =====
+
+  // List connected nodes
+  ipcMain.handle(IPC_CHANNELS.NODE_LIST, async (): Promise<{
+    ok: boolean;
+    nodes?: import('../../shared/types').NodeInfo[];
+    error?: string;
+  }> => {
+    try {
+      if (!controlPlaneServer || !controlPlaneServer.isRunning) {
+        return { ok: true, nodes: [] };
+      }
+      const nodes = (controlPlaneServer as any).clients.getNodeInfoList();
+      return { ok: true, nodes };
+    } catch (error: any) {
+      return { ok: false, error: error.message || String(error) };
+    }
+  });
+
+  // Get a specific node
+  ipcMain.handle(
+    IPC_CHANNELS.NODE_GET,
+    async (_, nodeId: string): Promise<{
+      ok: boolean;
+      node?: import('../../shared/types').NodeInfo;
+      error?: string;
+    }> => {
+      try {
+        if (!controlPlaneServer || !controlPlaneServer.isRunning) {
+          return { ok: false, error: 'Control Plane is not running' };
+        }
+        const client = (controlPlaneServer as any).clients.getNodeByIdOrName(nodeId);
+        if (!client) {
+          return { ok: false, error: `Node not found: ${nodeId}` };
+        }
+        return { ok: true, node: client.getNodeInfo() };
+      } catch (error: any) {
+        return { ok: false, error: error.message || String(error) };
+      }
+    }
+  );
+
+  // Invoke a command on a node
+  ipcMain.handle(
+    IPC_CHANNELS.NODE_INVOKE,
+    async (_, params: import('../../shared/types').NodeInvokeParams): Promise<import('../../shared/types').NodeInvokeResult> => {
+      try {
+        if (!controlPlaneServer || !controlPlaneServer.isRunning) {
+          return {
+            ok: false,
+            error: { code: 'SERVER_NOT_RUNNING', message: 'Control Plane is not running' },
+          };
+        }
+
+        const { nodeId, command, params: commandParams, timeoutMs = 30000 } = params;
+
+        // Find the node
+        const client = (controlPlaneServer as any).clients.getNodeByIdOrName(nodeId);
+        if (!client) {
+          return {
+            ok: false,
+            error: { code: 'NODE_NOT_FOUND', message: `Node not found: ${nodeId}` },
+          };
+        }
+
+        const nodeInfo = client.getNodeInfo();
+        if (!nodeInfo) {
+          return {
+            ok: false,
+            error: { code: 'NODE_NOT_FOUND', message: `Node not found: ${nodeId}` },
+          };
+        }
+
+        // Check if node supports the command
+        if (!nodeInfo.commands.includes(command)) {
+          return {
+            ok: false,
+            error: {
+              code: 'COMMAND_NOT_SUPPORTED',
+              message: `Node does not support command: ${command}`,
+            },
+          };
+        }
+
+        // Forward to the server's internal method
+        const result = await (controlPlaneServer as any).invokeNodeCommand(
+          client,
+          command,
+          commandParams,
+          timeoutMs
+        );
+        return result;
+      } catch (error: any) {
+        return {
+          ok: false,
+          error: { code: 'INVOKE_FAILED', message: error.message || String(error) },
+        };
+      }
+    }
+  );
+
   console.log('[ControlPlane] IPC handlers initialized');
 }
 

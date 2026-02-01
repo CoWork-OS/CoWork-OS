@@ -436,6 +436,33 @@ export interface ToolResult {
   timestamp: number;
 }
 
+/**
+ * Result from node tool handler execution
+ * Supports text, JSON, image, and video responses
+ */
+export interface NodeToolResult {
+  type: 'text' | 'json' | 'image' | 'video';
+  content: string;
+  mimeType?: string;
+  isError?: boolean;
+}
+
+/**
+ * Definition for node tools with handler functions
+ */
+export interface ToolDefinition {
+  name: string;
+  description: string;
+  inputSchema: {
+    type: 'object';
+    properties: Record<string, any>;
+    required: string[];
+  };
+  riskLevel: 'read' | 'write';
+  groups: readonly string[];
+  handler: (params: any) => Promise<NodeToolResult>;
+}
+
 export interface ApprovalRequest {
   id: string;
   taskId: string;
@@ -716,6 +743,12 @@ export const IPC_CHANNELS = {
   CANVAS_EXPORT_TO_FOLDER: 'canvas:exportToFolder',
   CANVAS_OPEN_IN_BROWSER: 'canvas:openInBrowser',
   CANVAS_GET_SESSION_DIR: 'canvas:getSessionDir',
+
+  // Mobile Companion Nodes
+  NODE_LIST: 'node:list',
+  NODE_GET: 'node:get',
+  NODE_INVOKE: 'node:invoke',
+  NODE_EVENT: 'node:event',
 } as const;
 
 // LLM Provider types
@@ -1002,7 +1035,7 @@ export const DEFAULT_BLOCKED_COMMAND_PATTERNS = [
 ];
 
 // App Update types
-export type UpdateMode = 'git' | 'electron-updater';
+export type UpdateMode = 'git' | 'npm' | 'electron-updater';
 
 export interface UpdateInfo {
   available: boolean;
@@ -1026,6 +1059,7 @@ export interface AppVersionInfo {
   version: string;
   isDev: boolean;
   isGitRepo: boolean;
+  isNpmGlobal: boolean;
   gitBranch?: string;
   gitCommit?: string;
 }
@@ -1401,6 +1435,236 @@ export interface ControlPlaneEvent {
   method?: string;
   error?: string;
   details?: unknown;
+}
+
+// ============ Mobile Companion Node Types ============
+
+/**
+ * Client role in the Control Plane
+ * - 'operator': Desktop client for task management
+ * - 'node': Mobile companion device exposing capabilities
+ */
+export type ClientRole = 'operator' | 'node';
+
+/**
+ * Node platform type
+ */
+export type NodePlatform = 'ios' | 'android' | 'macos';
+
+/**
+ * Node capability categories
+ */
+export type NodeCapabilityType = 'camera' | 'location' | 'screen' | 'sms' | 'voice' | 'canvas' | 'system';
+
+/**
+ * Standard node commands
+ */
+export type NodeCommand =
+  | 'camera.snap'
+  | 'camera.clip'
+  | 'location.get'
+  | 'screen.record'
+  | 'sms.send'
+  | 'canvas.navigate'
+  | 'canvas.snapshot'
+  | 'canvas.eval'
+  | 'system.notify';
+
+/**
+ * Information about a connected node (mobile companion)
+ */
+export interface NodeInfo {
+  /** Unique node connection ID */
+  id: string;
+  /** Display name for the node (e.g., "iPhone 15 Pro") */
+  displayName: string;
+  /** Platform type */
+  platform: NodePlatform;
+  /** Client version */
+  version: string;
+  /** Device identifier (persisted across connections) */
+  deviceId?: string;
+  /** Model identifier (e.g., "iPhone15,3") */
+  modelIdentifier?: string;
+  /** Capability categories supported by this node */
+  capabilities: NodeCapabilityType[];
+  /** Specific commands supported by this node */
+  commands: string[];
+  /** Permission status for each capability */
+  permissions: Record<string, boolean>;
+  /** Connection timestamp */
+  connectedAt: number;
+  /** Last activity timestamp */
+  lastActivityAt: number;
+  /** Whether the node app is in the foreground */
+  isForeground?: boolean;
+}
+
+/**
+ * Parameters for invoking a command on a node
+ */
+export interface NodeInvokeParams {
+  /** ID or display name of the target node */
+  nodeId: string;
+  /** Command to invoke (e.g., "camera.snap") */
+  command: string;
+  /** Command-specific parameters */
+  params?: Record<string, unknown>;
+  /** Timeout in milliseconds (default: 30000) */
+  timeoutMs?: number;
+}
+
+/**
+ * Result of a node command invocation
+ */
+export interface NodeInvokeResult {
+  /** Whether the command succeeded */
+  ok: boolean;
+  /** Command result payload (varies by command) */
+  payload?: unknown;
+  /** Error details if ok is false */
+  error?: {
+    code: string;
+    message: string;
+  };
+}
+
+/**
+ * Node event payload for UI updates
+ */
+export interface NodeEvent {
+  /** Event type */
+  type: 'connected' | 'disconnected' | 'capabilities_changed' | 'foreground_changed';
+  /** Node ID */
+  nodeId: string;
+  /** Node info (for connected/capabilities_changed events) */
+  node?: NodeInfo;
+  /** Timestamp */
+  timestamp: number;
+}
+
+/**
+ * Camera snap command parameters
+ */
+export interface CameraSnapParams {
+  /** Camera facing direction */
+  facing?: 'front' | 'back';
+  /** Maximum image width (for resizing) */
+  maxWidth?: number;
+  /** JPEG quality (0-1) */
+  quality?: number;
+}
+
+/**
+ * Camera snap command result
+ */
+export interface CameraSnapResult {
+  /** Image format (e.g., "jpeg", "png") */
+  format: string;
+  /** Base64-encoded image data */
+  base64: string;
+  /** Image width in pixels */
+  width?: number;
+  /** Image height in pixels */
+  height?: number;
+}
+
+/**
+ * Camera clip (video) command parameters
+ */
+export interface CameraClipParams {
+  /** Camera facing direction */
+  facing?: 'front' | 'back';
+  /** Duration in milliseconds (max: 60000) */
+  durationMs: number;
+  /** Whether to include audio */
+  noAudio?: boolean;
+}
+
+/**
+ * Camera clip command result
+ */
+export interface CameraClipResult {
+  /** Video format (e.g., "mp4") */
+  format: string;
+  /** Base64-encoded video data */
+  base64: string;
+  /** Video duration in milliseconds */
+  durationMs?: number;
+}
+
+/**
+ * Location get command parameters
+ */
+export interface LocationGetParams {
+  /** Desired accuracy: 'coarse' or 'precise' */
+  accuracy?: 'coarse' | 'precise';
+  /** Maximum age of cached location in milliseconds */
+  maxAge?: number;
+  /** Timeout for getting location in milliseconds */
+  timeout?: number;
+}
+
+/**
+ * Location get command result
+ */
+export interface LocationGetResult {
+  /** Latitude in degrees */
+  latitude: number;
+  /** Longitude in degrees */
+  longitude: number;
+  /** Accuracy in meters */
+  accuracy: number;
+  /** Altitude in meters (if available) */
+  altitude?: number;
+  /** Timestamp when location was captured */
+  timestamp: number;
+}
+
+/**
+ * Screen record command parameters
+ */
+export interface ScreenRecordParams {
+  /** Duration in milliseconds (max: 60000) */
+  durationMs: number;
+  /** Frames per second (default: 10) */
+  fps?: number;
+  /** Whether to include audio */
+  noAudio?: boolean;
+  /** Screen index for multi-display setups */
+  screen?: number;
+}
+
+/**
+ * Screen record command result
+ */
+export interface ScreenRecordResult {
+  /** Video format (e.g., "mp4") */
+  format: string;
+  /** Base64-encoded video data */
+  base64: string;
+  /** Video duration in milliseconds */
+  durationMs?: number;
+}
+
+/**
+ * SMS send command parameters (Android only)
+ */
+export interface SmsSendParams {
+  /** Phone number to send to */
+  to: string;
+  /** Message content */
+  message: string;
+}
+
+/**
+ * SMS send command result
+ */
+export interface SmsSendResult {
+  /** Whether the SMS was sent */
+  sent: boolean;
+  /** Error message if sending failed */
+  error?: string;
 }
 
 // ============ SSH Tunnel Types ============

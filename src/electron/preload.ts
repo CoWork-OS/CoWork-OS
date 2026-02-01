@@ -223,7 +223,38 @@ const IPC_CHANNELS = {
   CANVAS_EXPORT_TO_FOLDER: 'canvas:exportToFolder',
   CANVAS_OPEN_IN_BROWSER: 'canvas:openInBrowser',
   CANVAS_GET_SESSION_DIR: 'canvas:getSessionDir',
+  // Mobile Companion Nodes
+  NODE_LIST: 'node:list',
+  NODE_GET: 'node:get',
+  NODE_INVOKE: 'node:invoke',
+  NODE_EVENT: 'node:event',
 } as const;
+
+// Mobile Companion Node types (inlined for sandboxed preload)
+type NodePlatform = 'ios' | 'android' | 'macos';
+type NodeCapabilityType = 'camera' | 'location' | 'screen' | 'sms' | 'voice' | 'canvas' | 'system';
+
+interface NodeInfo {
+  id: string;
+  displayName: string;
+  platform: NodePlatform;
+  version: string;
+  deviceId?: string;
+  modelIdentifier?: string;
+  capabilities: NodeCapabilityType[];
+  commands: string[];
+  permissions: Record<string, boolean>;
+  connectedAt: number;
+  lastActivityAt: number;
+  isForeground?: boolean;
+}
+
+interface NodeEvent {
+  type: 'connected' | 'disconnected' | 'capabilities_changed' | 'foreground_changed';
+  nodeId: string;
+  node?: NodeInfo;
+  timestamp: number;
+}
 
 // Custom Skill types (inlined for sandboxed preload)
 interface SkillParameter {
@@ -1253,6 +1284,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on(IPC_CHANNELS.CANVAS_EVENT, subscription);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.CANVAS_EVENT, subscription);
   },
+
+  // Mobile Companion Nodes
+  nodeList: () => ipcRenderer.invoke(IPC_CHANNELS.NODE_LIST),
+  nodeGet: (nodeId: string) => ipcRenderer.invoke(IPC_CHANNELS.NODE_GET, nodeId),
+  nodeInvoke: (params: { nodeId: string; command: string; params?: Record<string, unknown>; timeoutMs?: number }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.NODE_INVOKE, params),
+  onNodeEvent: (callback: (event: { type: string; nodeId: string; node?: any; timestamp: number }) => void) => {
+    const subscription = (_: Electron.IpcRendererEvent, data: any) => callback(data);
+    ipcRenderer.on(IPC_CHANNELS.NODE_EVENT, subscription);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.NODE_EVENT, subscription);
+  },
 });
 
 // Type declarations for TypeScript
@@ -1361,6 +1403,7 @@ export interface ElectronAPI {
     version: string;
     isDev: boolean;
     isGitRepo: boolean;
+    isNpmGlobal: boolean;
     gitBranch?: string;
     gitCommit?: string;
   }>;
@@ -1371,7 +1414,7 @@ export interface ElectronAPI {
     releaseNotes?: string;
     releaseUrl?: string;
     publishedAt?: string;
-    updateMode: 'git' | 'electron-updater';
+    updateMode: 'git' | 'npm' | 'electron-updater';
   }>;
   downloadUpdate: (updateInfo: any) => Promise<{ success: boolean }>;
   installUpdate: () => Promise<{ success: boolean }>;
@@ -1678,6 +1721,13 @@ export interface ElectronAPI {
   canvasOpenInBrowser: (sessionId: string) => Promise<{ success: boolean; path: string }>;
   canvasGetSessionDir: (sessionId: string) => Promise<string | null>;
   onCanvasEvent: (callback: (event: CanvasEvent) => void) => () => void;
+
+  // Mobile Companion Nodes
+  nodeList: () => Promise<{ ok: boolean; nodes?: NodeInfo[]; error?: string }>;
+  nodeGet: (nodeId: string) => Promise<{ ok: boolean; node?: NodeInfo; error?: string }>;
+  nodeInvoke: (params: { nodeId: string; command: string; params?: Record<string, unknown>; timeoutMs?: number }) =>
+    Promise<{ ok: boolean; payload?: unknown; error?: { code: string; message: string } }>;
+  onNodeEvent: (callback: (event: NodeEvent) => void) => () => void;
 }
 
 declare global {

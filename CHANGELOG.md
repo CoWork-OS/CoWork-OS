@@ -8,6 +8,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Mobile Companions** - Connect iOS/Android devices as mobile nodes for device-specific actions
+  - **Node Architecture**: Mobile devices connect as "nodes" via WebSocket with role-based authentication
+  - **Device Capabilities**: Camera capture, location access, screen recording, SMS (Android only)
+  - **Standard Commands**:
+    - `camera.snap` - Take a photo with front/back camera
+    - `camera.clip` - Record video clip
+    - `location.get` - Get current GPS location (coarse or precise)
+    - `screen.record` - Record device screen
+    - `sms.send` - Send SMS message (Android only)
+  - **AI Agent Tools**: 6 new tools for agent interaction with mobile devices
+    - `node_list` - List connected mobile companions
+    - `node_describe` - Get detailed info about a specific node
+    - `node_camera_snap` - Take a photo using a mobile node's camera
+    - `node_location` - Get current location from a mobile node
+    - `node_screen_record` - Record screen on a mobile node
+    - `node_sms_send` - Send SMS via an Android node
+  - **Settings UI**: New "Mobile Companions" tab in Settings
+    - View connected devices with status and capabilities
+    - Test commands directly from the UI
+    - Connection instructions and troubleshooting
+  - **Foreground Detection**: Commands like camera/screen require the app to be in foreground
+  - **Permission Tracking**: Monitor granted permissions per capability
+  - **Event Broadcasting**: Operators receive real-time node connect/disconnect events
 - **Live Canvas Interactive Mode** - Full browser-like interaction directly in the preview
   - **Interactive mode** (default): Embedded webview for clicking, scrolling, and interacting with canvas content
   - **Snapshot mode**: Static screenshot with auto-refresh for monitoring

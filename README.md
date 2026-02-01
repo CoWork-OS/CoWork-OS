@@ -365,15 +365,15 @@ The packaged app will be in the `release/` directory.
 ## Screenshots
 
 <p align="center">
-  <img src="screenshots/cowork-oss2.jpeg" alt="CoWork OS Welcome Screen" width="800">
+  <img src="screenshots/cowork-os-main2.png" alt="CoWork OS Interface" width="800">
   <br>
-  <em>Welcome screen with AI disclosure and quick commands</em>
+  <em>Main interface with task timeline and execution view</em>
 </p>
 
 <p align="center">
-  <img src="screenshots/cowork-oss3.jpeg" alt="CoWork OS Task Execution" width="800">
+  <img src="screenshots/cowork-os-settings1.png" alt="CoWork OS Settings" width="800">
   <br>
-  <em>Real-time task execution with plan steps and tool calls</em>
+  <em>Settings panel for AI providers and channel configuration</em>
 </p>
 
 ---
@@ -406,9 +406,9 @@ Watch the task timeline as the agent:
 - Produces artifacts (files)
 
 <p align="center">
-  <img src="screenshots/cowork-oss1.jpeg" alt="Task Completion" width="800">
+  <img src="screenshots/cowork-os-settings2.png" alt="CoWork OS Security Settings" width="800">
   <br>
-  <em>Task completion with verification and file tracking</em>
+  <em>Security and workspace configuration options</em>
 </p>
 
 ### 4. Approve Requests

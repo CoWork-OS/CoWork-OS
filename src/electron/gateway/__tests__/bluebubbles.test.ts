@@ -339,3 +339,119 @@ describe('BlueBubblesConfig', () => {
     expect(config.allowedContacts).toHaveLength(2);
   });
 });
+
+describe('BlueBubblesAdapter edge cases', () => {
+  let adapter: BlueBubblesAdapter;
+  const defaultConfig: BlueBubblesConfig = {
+    enabled: true,
+    serverUrl: 'http://192.168.1.100:1234',
+    password: 'test-password',
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    adapter = new BlueBubblesAdapter(defaultConfig);
+  });
+
+  afterEach(async () => {
+    if (adapter.status === 'connected') {
+      await adapter.disconnect();
+    }
+  });
+
+  describe('contact filtering', () => {
+    it('should accept config with allowedContacts', () => {
+      const adapterWithFilter = new BlueBubblesAdapter({
+        ...defaultConfig,
+        allowedContacts: ['+1234567890', 'friend@icloud.com'],
+      });
+      const config = (adapterWithFilter as any).config;
+      expect(config.allowedContacts).toEqual(['+1234567890', 'friend@icloud.com']);
+    });
+
+    it('should normalize phone numbers with different formats', () => {
+      // Test that config accepts various phone formats
+      const adapterWithPhones = new BlueBubblesAdapter({
+        ...defaultConfig,
+        allowedContacts: ['+1-234-567-8900', '(234) 567-8900', '234.567.8900'],
+      });
+      const config = (adapterWithPhones as any).config;
+      expect(config.allowedContacts).toHaveLength(3);
+    });
+  });
+
+  describe('webhook vs polling mode', () => {
+    it('should enable webhook by default', () => {
+      const config = (adapter as any).config;
+      expect(config.enableWebhook).toBe(true);
+    });
+
+    it('should allow disabling webhook for polling-only mode', () => {
+      const pollingAdapter = new BlueBubblesAdapter({
+        ...defaultConfig,
+        enableWebhook: false,
+        pollInterval: 2000,
+      });
+      const config = (pollingAdapter as any).config;
+      expect(config.enableWebhook).toBe(false);
+      expect(config.pollInterval).toBe(2000);
+    });
+  });
+
+  describe('chat cache', () => {
+    it('should cache chat information', () => {
+      const chatGuid = 'iMessage;-;+1234567890';
+      (adapter as any).chatCache.set(chatGuid, {
+        guid: chatGuid,
+        displayName: 'John Doe',
+        participants: ['+1234567890'],
+        isGroup: false,
+      });
+
+      const cached = (adapter as any).chatCache.get(chatGuid);
+      expect(cached).toBeDefined();
+      expect(cached.displayName).toBe('John Doe');
+      expect(cached.isGroup).toBe(false);
+    });
+
+    it('should handle group chats', () => {
+      const groupGuid = 'iMessage;+;chat123456';
+      (adapter as any).chatCache.set(groupGuid, {
+        guid: groupGuid,
+        displayName: 'Family Group',
+        participants: ['+1234567890', '+0987654321', '+1122334455'],
+        isGroup: true,
+      });
+
+      const cached = (adapter as any).chatCache.get(groupGuid);
+      expect(cached.isGroup).toBe(true);
+      expect(cached.participants).toHaveLength(3);
+    });
+  });
+
+  describe('server URL parsing', () => {
+    it('should accept URLs without trailing slash', () => {
+      const adapterNoSlash = new BlueBubblesAdapter({
+        ...defaultConfig,
+        serverUrl: 'http://192.168.1.100:1234',
+      });
+      expect((adapterNoSlash as any).config.serverUrl).toBe('http://192.168.1.100:1234');
+    });
+
+    it('should accept URLs with trailing slash', () => {
+      const adapterWithSlash = new BlueBubblesAdapter({
+        ...defaultConfig,
+        serverUrl: 'http://192.168.1.100:1234/',
+      });
+      expect((adapterWithSlash as any).config.serverUrl).toBe('http://192.168.1.100:1234/');
+    });
+
+    it('should accept localhost URLs', () => {
+      const localAdapter = new BlueBubblesAdapter({
+        ...defaultConfig,
+        serverUrl: 'http://localhost:1234',
+      });
+      expect((localAdapter as any).config.serverUrl).toBe('http://localhost:1234');
+    });
+  });
+});

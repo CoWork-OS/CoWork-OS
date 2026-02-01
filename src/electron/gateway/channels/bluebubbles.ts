@@ -78,6 +78,13 @@ export class BlueBubblesAdapter implements ChannelAdapter {
   // Chat cache
   private chatCache: Map<string, BlueBubblesChat> = new Map();
 
+  // Auto-reconnect
+  private reconnectTimer?: ReturnType<typeof setTimeout>;
+  private reconnectAttempts = 0;
+  private readonly MAX_RECONNECT_ATTEMPTS = 5;
+  private readonly RECONNECT_BASE_DELAY = 5000; // 5 seconds
+  private shouldReconnect = true;
+
   constructor(config: BlueBubblesConfig) {
     this.config = {
       enableWebhook: true,
@@ -106,6 +113,7 @@ export class BlueBubblesAdapter implements ChannelAdapter {
     }
 
     this.setStatus('connecting');
+    this.shouldReconnect = true;
 
     try {
       // Create BlueBubbles client
@@ -143,6 +151,8 @@ export class BlueBubblesAdapter implements ChannelAdapter {
         console.log('BlueBubbles client disconnected');
         if (this._status === 'connected') {
           this.setStatus('disconnected');
+          // Attempt to reconnect if not intentionally disconnected
+          this.scheduleReconnect();
         }
       });
 
@@ -167,6 +177,14 @@ export class BlueBubblesAdapter implements ChannelAdapter {
    * Disconnect from BlueBubbles
    */
   async disconnect(): Promise<void> {
+    // Prevent auto-reconnect
+    this.shouldReconnect = false;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = undefined;
+    }
+    this.reconnectAttempts = 0;
+
     // Stop dedup cleanup
     if (this.dedupCleanupTimer) {
       clearInterval(this.dedupCleanupTimer);
@@ -185,6 +203,33 @@ export class BlueBubblesAdapter implements ChannelAdapter {
 
     this._botUsername = undefined;
     this.setStatus('disconnected');
+  }
+
+  /**
+   * Schedule a reconnection attempt with exponential backoff
+   */
+  private scheduleReconnect(): void {
+    if (!this.shouldReconnect || this.reconnectAttempts >= this.MAX_RECONNECT_ATTEMPTS) {
+      console.log(`BlueBubbles: Not reconnecting (shouldReconnect=${this.shouldReconnect}, attempts=${this.reconnectAttempts})`);
+      return;
+    }
+
+    const delay = this.RECONNECT_BASE_DELAY * Math.pow(2, this.reconnectAttempts);
+    console.log(`BlueBubbles: Scheduling reconnect attempt ${this.reconnectAttempts + 1}/${this.MAX_RECONNECT_ATTEMPTS} in ${delay}ms`);
+
+    this.reconnectTimer = setTimeout(async () => {
+      this.reconnectAttempts++;
+      try {
+        await this.connect();
+        // Reset attempts on successful connection
+        this.reconnectAttempts = 0;
+        console.log('BlueBubbles: Reconnected successfully');
+      } catch (error) {
+        console.error('BlueBubbles: Reconnect failed:', error);
+        // Schedule next attempt
+        this.scheduleReconnect();
+      }
+    }, delay);
   }
 
   /**

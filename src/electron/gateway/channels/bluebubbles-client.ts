@@ -231,8 +231,27 @@ export class BlueBubblesClient extends EventEmitter {
         this.handleWebhook(req, res);
       });
 
-      this.webhookServer.on('error', (error) => {
-        reject(error);
+      this.webhookServer.on('error', (error: NodeJS.ErrnoException) => {
+        let enhancedError = error;
+        // Provide better error messages for common issues
+        if (error.code === 'EADDRINUSE') {
+          enhancedError = new Error(
+            `Port ${this.options.webhookPort} is already in use. ` +
+            `Another application or BlueBubbles channel may be using this port. ` +
+            `Try a different webhook port in settings.`
+          ) as NodeJS.ErrnoException;
+          enhancedError.code = 'EADDRINUSE';
+        } else if (error.code === 'EACCES') {
+          enhancedError = new Error(
+            `Permission denied to use port ${this.options.webhookPort}. ` +
+            `Try a port number above 1024.`
+          ) as NodeJS.ErrnoException;
+          enhancedError.code = 'EACCES';
+        }
+        if (this.options.verbose) {
+          console.error('BlueBubbles webhook server error:', enhancedError);
+        }
+        reject(enhancedError);
       });
 
       this.webhookServer.listen(this.options.webhookPort, () => {

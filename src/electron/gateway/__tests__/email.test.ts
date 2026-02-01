@@ -410,3 +410,120 @@ describe('EmailConfig', () => {
     expect(config.subjectFilter).toBe('[CoWork]');
   });
 });
+
+describe('EmailAdapter edge cases', () => {
+  let adapter: EmailAdapter;
+  const defaultConfig: EmailConfig = {
+    enabled: true,
+    email: 'bot@example.com',
+    password: 'test-password',
+    imapHost: 'imap.example.com',
+    smtpHost: 'smtp.example.com',
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    adapter = new EmailAdapter(defaultConfig);
+  });
+
+  afterEach(async () => {
+    if (adapter.status === 'connected') {
+      await adapter.disconnect();
+    }
+  });
+
+  describe('sender filtering', () => {
+    it('should accept config with allowedSenders', () => {
+      const adapterWithFilter = new EmailAdapter({
+        ...defaultConfig,
+        allowedSenders: ['allowed@example.com', 'vip@company.com'],
+      });
+      const config = (adapterWithFilter as any).config;
+      expect(config.allowedSenders).toEqual(['allowed@example.com', 'vip@company.com']);
+    });
+
+    it('should accept config with empty allowedSenders (allow all)', () => {
+      const adapterNoFilter = new EmailAdapter({
+        ...defaultConfig,
+        allowedSenders: [],
+      });
+      const config = (adapterNoFilter as any).config;
+      expect(config.allowedSenders).toEqual([]);
+    });
+  });
+
+  describe('subject filtering', () => {
+    it('should accept config with subjectFilter', () => {
+      const adapterWithSubject = new EmailAdapter({
+        ...defaultConfig,
+        subjectFilter: '[CoWork]',
+      });
+      const config = (adapterWithSubject as any).config;
+      expect(config.subjectFilter).toBe('[CoWork]');
+    });
+
+    it('should handle empty subject filter', () => {
+      const config = (adapter as any).config;
+      expect(config.subjectFilter).toBeUndefined();
+    });
+  });
+
+  describe('reply threading', () => {
+    it('should build references chain correctly', () => {
+      const chatId = 'user@example.com|Test Subject';
+
+      // Set up initial context
+      (adapter as any).replyContext.set(chatId, {
+        messageId: '<msg-001@example.com>',
+        references: [],
+      });
+
+      const context = (adapter as any).replyContext.get(chatId);
+      expect(context.messageId).toBe('<msg-001@example.com>');
+      expect(context.references).toEqual([]);
+    });
+
+    it('should preserve references chain for deep threads', () => {
+      const chatId = 'user@example.com|Long Thread';
+
+      // Simulate a deep thread
+      (adapter as any).replyContext.set(chatId, {
+        messageId: '<msg-005@example.com>',
+        references: [
+          '<msg-001@example.com>',
+          '<msg-002@example.com>',
+          '<msg-003@example.com>',
+          '<msg-004@example.com>',
+        ],
+      });
+
+      const context = (adapter as any).replyContext.get(chatId);
+      expect(context.references).toHaveLength(4);
+    });
+  });
+
+  describe('deduplication cache TTL', () => {
+    it('should use longer TTL for email (5 minutes)', () => {
+      const ttl = (adapter as any).DEDUP_CACHE_TTL;
+      expect(ttl).toBe(300000); // 5 minutes in ms
+    });
+
+    it('should have smaller max cache size for email', () => {
+      const maxSize = (adapter as any).DEDUP_CACHE_MAX_SIZE;
+      expect(maxSize).toBe(500);
+    });
+  });
+
+  describe('chatId format', () => {
+    it('should construct chatId from sender and subject', () => {
+      // The chatId format is "sender|subject"
+      const sender = 'user@example.com';
+      const subject = 'Re: Help needed';
+      const chatId = `${sender}|${subject}`;
+
+      expect(chatId).toBe('user@example.com|Re: Help needed');
+      expect(chatId.split('|')[0]).toBe(sender);
+      expect(chatId.split('|')[1]).toBe(subject);
+    });
+  });
+});

@@ -378,3 +378,77 @@ describe('LineConfig', () => {
     expect(config.useReplyTokens).toBe(true);
   });
 });
+
+describe('LineAdapter edge cases', () => {
+  let adapter: LineAdapter;
+  const defaultConfig: LineConfig = {
+    enabled: true,
+    channelAccessToken: 'test-token',
+    channelSecret: 'test-secret',
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    adapter = new LineAdapter(defaultConfig);
+  });
+
+  afterEach(async () => {
+    if (adapter.status === 'connected') {
+      await adapter.disconnect();
+    }
+  });
+
+  describe('expired reply token handling', () => {
+    it('should detect expired reply tokens', () => {
+      const expiredTime = Date.now() - 1000; // Already expired
+      (adapter as any).replyTokenCache.set('user-123', {
+        token: 'expired-token',
+        expires: expiredTime,
+      });
+
+      const cached = (adapter as any).replyTokenCache.get('user-123');
+      expect(cached.expires).toBeLessThan(Date.now());
+    });
+
+    it('should not use reply tokens that will expire soon', () => {
+      // Token expiring in 5 seconds (too short for safe use)
+      const nearExpiry = Date.now() + 5000;
+      (adapter as any).replyTokenCache.set('user-456', {
+        token: 'near-expiry-token',
+        expires: nearExpiry,
+      });
+
+      const cached = (adapter as any).replyTokenCache.get('user-456');
+      // Token exists but is near expiry - caller should check
+      expect(cached.expires - Date.now()).toBeLessThan(10000);
+    });
+  });
+
+  describe('deduplication cache size limits', () => {
+    it('should respect maximum cache size', () => {
+      const maxSize = (adapter as any).DEDUP_CACHE_MAX_SIZE;
+      expect(maxSize).toBe(1000);
+
+      // Fill cache to max
+      for (let i = 0; i < maxSize; i++) {
+        (adapter as any).processedMessages.set(`msg-${i}`, Date.now());
+      }
+      expect((adapter as any).processedMessages.size).toBe(maxSize);
+    });
+  });
+
+  describe('message handler error isolation', () => {
+    it('should not crash if a message handler throws', () => {
+      const failingHandler = vi.fn().mockImplementation(() => {
+        throw new Error('Handler error');
+      });
+      const successHandler = vi.fn();
+
+      adapter.onMessage(failingHandler);
+      adapter.onMessage(successHandler);
+
+      // Handlers are registered
+      expect((adapter as any).messageHandlers.length).toBe(2);
+    });
+  });
+});

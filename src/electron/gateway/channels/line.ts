@@ -76,6 +76,16 @@ export class LineAdapter implements ChannelAdapter {
   // Reply token cache for quick replies
   private replyTokenCache: Map<string, { token: string; expires: number }> = new Map();
 
+  // Auto-reconnect
+  private reconnectTimer?: ReturnType<typeof setTimeout>;
+  private reconnectAttempts = 0;
+  private readonly MAX_RECONNECT_ATTEMPTS = 5;
+  private readonly RECONNECT_BASE_DELAY = 5000; // 5 seconds
+  private shouldReconnect = true;
+
+  // LINE message limits
+  private readonly MAX_MESSAGE_LENGTH = 5000;
+
   constructor(config: LineConfig) {
     this.config = {
       webhookPort: 3100,
@@ -103,6 +113,7 @@ export class LineAdapter implements ChannelAdapter {
     }
 
     this.setStatus('connecting');
+    this.shouldReconnect = true;
 
     try {
       // Create LINE client
@@ -147,6 +158,8 @@ export class LineAdapter implements ChannelAdapter {
         console.log('LINE webhook server stopped');
         if (this._status === 'connected') {
           this.setStatus('disconnected');
+          // Attempt to reconnect if not intentionally disconnected
+          this.scheduleReconnect();
         }
       });
 
@@ -171,6 +184,14 @@ export class LineAdapter implements ChannelAdapter {
    * Disconnect from LINE
    */
   async disconnect(): Promise<void> {
+    // Prevent auto-reconnect
+    this.shouldReconnect = false;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = undefined;
+    }
+    this.reconnectAttempts = 0;
+
     // Stop dedup cleanup
     if (this.dedupCleanupTimer) {
       clearInterval(this.dedupCleanupTimer);
@@ -194,6 +215,66 @@ export class LineAdapter implements ChannelAdapter {
   }
 
   /**
+   * Schedule a reconnection attempt with exponential backoff
+   */
+  private scheduleReconnect(): void {
+    if (!this.shouldReconnect || this.reconnectAttempts >= this.MAX_RECONNECT_ATTEMPTS) {
+      console.log(`LINE: Not reconnecting (shouldReconnect=${this.shouldReconnect}, attempts=${this.reconnectAttempts})`);
+      return;
+    }
+
+    const delay = this.RECONNECT_BASE_DELAY * Math.pow(2, this.reconnectAttempts);
+    console.log(`LINE: Scheduling reconnect attempt ${this.reconnectAttempts + 1}/${this.MAX_RECONNECT_ATTEMPTS} in ${delay}ms`);
+
+    this.reconnectTimer = setTimeout(async () => {
+      this.reconnectAttempts++;
+      try {
+        await this.connect();
+        // Reset attempts on successful connection
+        this.reconnectAttempts = 0;
+        console.log('LINE: Reconnected successfully');
+      } catch (error) {
+        console.error('LINE: Reconnect failed:', error);
+        // Schedule next attempt
+        this.scheduleReconnect();
+      }
+    }, delay);
+  }
+
+  /**
+   * Split a long message into chunks that fit LINE's message limit
+   */
+  private splitMessage(text: string): string[] {
+    if (text.length <= this.MAX_MESSAGE_LENGTH) {
+      return [text];
+    }
+
+    const chunks: string[] = [];
+    let remaining = text;
+
+    while (remaining.length > 0) {
+      if (remaining.length <= this.MAX_MESSAGE_LENGTH) {
+        chunks.push(remaining);
+        break;
+      }
+
+      // Try to split at a newline or space
+      let splitIndex = remaining.lastIndexOf('\n', this.MAX_MESSAGE_LENGTH);
+      if (splitIndex === -1 || splitIndex < this.MAX_MESSAGE_LENGTH * 0.5) {
+        splitIndex = remaining.lastIndexOf(' ', this.MAX_MESSAGE_LENGTH);
+      }
+      if (splitIndex === -1 || splitIndex < this.MAX_MESSAGE_LENGTH * 0.5) {
+        splitIndex = this.MAX_MESSAGE_LENGTH;
+      }
+
+      chunks.push(remaining.substring(0, splitIndex).trim());
+      remaining = remaining.substring(splitIndex).trim();
+    }
+
+    return chunks;
+  }
+
+  /**
    * Send a message
    */
   async sendMessage(message: OutgoingMessage): Promise<string> {
@@ -207,23 +288,35 @@ export class LineAdapter implements ChannelAdapter {
       text = `${this.config.responsePrefix} ${text}`;
     }
 
-    // Try to use reply token if available and enabled
-    if (this.config.useReplyTokens && message.replyTo) {
-      const cachedToken = this.replyTokenCache.get(message.chatId);
-      if (cachedToken && cachedToken.expires > Date.now()) {
-        try {
-          await this.client.replyMessage(cachedToken.token, [{ type: 'text', text }]);
-          this.replyTokenCache.delete(message.chatId);
-          return `reply-${Date.now()}`;
-        } catch {
-          // Reply token expired or invalid, fall through to push
+    // Split long messages
+    const chunks = this.splitMessage(text);
+    const messageIds: string[] = [];
+
+    for (const chunk of chunks) {
+      // Try to use reply token if available and enabled
+      // Only use tokens with at least 10 seconds remaining (safety buffer)
+      const REPLY_TOKEN_SAFETY_BUFFER = 10000; // 10 seconds
+      if (this.config.useReplyTokens && message.replyTo && messageIds.length === 0) {
+        const cachedToken = this.replyTokenCache.get(message.chatId);
+        if (cachedToken && cachedToken.expires > Date.now() + REPLY_TOKEN_SAFETY_BUFFER) {
+          try {
+            await this.client.replyMessage(cachedToken.token, [{ type: 'text', text: chunk }]);
+            this.replyTokenCache.delete(message.chatId);
+            messageIds.push(`reply-${Date.now()}`);
+            continue;
+          } catch {
+            // Reply token expired or invalid, fall through to push
+            console.log('LINE: Reply token failed, falling back to push message');
+          }
         }
       }
+
+      // Use push message (uses quota)
+      await this.client.pushMessage(message.chatId, [{ type: 'text', text: chunk }]);
+      messageIds.push(`push-${Date.now()}`);
     }
 
-    // Use push message (uses quota)
-    await this.client.pushMessage(message.chatId, [{ type: 'text', text }]);
-    return `push-${Date.now()}`;
+    return messageIds.join(',');
   }
 
   /**

@@ -341,10 +341,22 @@ export class MemoryService {
 
     try {
       // Get LLM provider for compression
-      const provider = LLMProviderFactory.getProvider();
+      const provider = LLMProviderFactory.createProvider();
+      const settings = LLMProviderFactory.getSettings();
+      const modelId = LLMProviderFactory.getModelId(
+        settings.modelKey,
+        settings.providerType,
+        settings.ollama?.model,
+        settings.gemini?.model,
+        settings.openrouter?.model,
+        settings.openai?.model
+      );
 
-      const response = await provider.chat(
-        [
+      const response = await provider.createMessage({
+        model: modelId,
+        maxTokens: 100,
+        system: 'You are a helpful assistant that summarizes text concisely.',
+        messages: [
           {
             role: 'user',
             content: `Summarize this observation in 1-2 sentences (max 50 words). Focus on the key insight, decision, or action taken. Be concise and factual.
@@ -355,11 +367,7 @@ ${memory.content}
 Summary:`,
           },
         ],
-        {
-          maxTokens: 100,
-          temperature: 0.3,
-        }
-      );
+      });
 
       // Extract summary from response
       let summary = '';

@@ -72,3 +72,7 @@ vm-bundle/
 tmp/
 temp/
 *.tmp
+
+# iOS companion project (separate repo)
+cowork-oss/
+docs/ios-companion-example.swift

@@ -21,6 +21,7 @@ export function ControlPlaneSettings() {
   const [connectionMode, setConnectionMode] = useState<ControlPlaneConnectionMode>('local');
   const [showToken, setShowToken] = useState(false);
   const [showRemoteToken, setShowRemoteToken] = useState(false);
+  const [allowLAN, setAllowLAN] = useState(false);
 
   // Remote config form state
   const [remoteUrl, setRemoteUrl] = useState('ws://127.0.0.1:18789');
@@ -72,6 +73,11 @@ export function ControlPlaneSettings() {
       // Set connection mode from settings
       if (settingsData?.connectionMode) {
         setConnectionMode(settingsData.connectionMode);
+      }
+
+      // Set LAN access from settings (host = 0.0.0.0 means LAN is enabled)
+      if (settingsData?.host) {
+        setAllowLAN(settingsData.host === '0.0.0.0');
       }
 
       // Set remote config from settings
@@ -152,6 +158,27 @@ export function ControlPlaneSettings() {
       await loadData();
     } catch (error) {
       console.error('Failed to regenerate token:', error);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleToggleLAN = async () => {
+    setSaving(true);
+    try {
+      const newAllowLAN = !allowLAN;
+      await window.electronAPI?.saveControlPlaneSettings?.({
+        host: newAllowLAN ? '0.0.0.0' : '127.0.0.1',
+      });
+      setAllowLAN(newAllowLAN);
+      // Need to restart server for host change to take effect
+      if (status?.running) {
+        await window.electronAPI?.stopControlPlane?.();
+        await window.electronAPI?.startControlPlane?.();
+      }
+      await loadData();
+    } catch (error) {
+      console.error('Failed to toggle LAN access:', error);
     } finally {
       setSaving(false);
     }
@@ -404,6 +431,23 @@ export function ControlPlaneSettings() {
             </div>
 
             {settings?.enabled && (
+              <div className="settings-row">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={allowLAN}
+                    onChange={handleToggleLAN}
+                    disabled={saving}
+                  />
+                  Allow LAN Connections (Mobile Companions)
+                </label>
+                <p className="hint" style={{ marginLeft: '1.5rem', marginTop: '0.25rem' }}>
+                  Enable this to allow connections from other devices on your local network (required for iOS/Android companion apps)
+                </p>
+              </div>
+            )}
+
+            {settings?.enabled && (
               <>
                 <div className="status-card">
                   <div className="status-indicator">
@@ -429,15 +473,23 @@ export function ControlPlaneSettings() {
                       </div>
                     </div>
                   )}
+                  {!status?.running && (
+                    <div className="status-details">
+                      <p className="hint" style={{ margin: 0 }}>
+                        Server is not running. Click the button below to start it.
+                      </p>
+                    </div>
+                  )}
                 </div>
 
-                <div className="button-row">
+                <div className="button-row" style={{ marginTop: '1rem' }}>
                   <button
                     onClick={handleStartStop}
                     disabled={saving}
-                    className={status?.running ? 'btn-secondary' : 'btn-primary'}
+                    className={status?.running ? 'btn-secondary' : 'btn-primary btn-large'}
+                    style={!status?.running ? { padding: '0.75rem 1.5rem', fontSize: '1rem', fontWeight: 500 } : {}}
                   >
-                    {status?.running ? 'Stop Server' : 'Start Server'}
+                    {saving ? 'Please wait...' : status?.running ? 'Stop Server' : '▶ Start Server'}
                   </button>
                 </div>
               </>

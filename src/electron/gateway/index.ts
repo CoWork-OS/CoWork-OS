@@ -47,6 +47,13 @@ import {
   Channel,
 } from '../database/repositories';
 import { AgentDaemon } from '../agent/daemon';
+import { PersonalityManager } from '../settings/personality-manager';
+import {
+  getChannelMessage,
+  DEFAULT_CHANNEL_CONTEXT,
+  type ChannelMessageContext,
+} from '../../shared/channelMessages';
+import { DEFAULT_QUIRKS } from '../../shared/types';
 
 export interface GatewayConfig {
   /** Router configuration */
@@ -96,6 +103,27 @@ export class ChannelGateway {
       this.agentDaemon = config.agentDaemon;
       this.setupAgentDaemonListeners(config.agentDaemon);
     }
+  }
+
+  /**
+   * Get the channel message context from personality settings
+   */
+  private getMessageContext(): ChannelMessageContext {
+    try {
+      if (PersonalityManager.isInitialized()) {
+        const settings = PersonalityManager.loadSettings();
+        return {
+          agentName: settings.agentName || 'CoWork',
+          userName: settings.relationship?.userName,
+          personality: settings.activePersonality || 'professional',
+          emojiUsage: settings.responseStyle?.emojiUsage || 'minimal',
+          quirks: settings.quirks || DEFAULT_QUIRKS,
+        };
+      }
+    } catch (error) {
+      console.error('[ChannelGateway] Failed to load personality settings:', error);
+    }
+    return DEFAULT_CHANNEL_CONTEXT;
   }
 
   /**
@@ -154,7 +182,8 @@ export class ChannelGateway {
     const onToolError = (data: { taskId: string; tool?: string; error?: string }) => {
       const toolName = data.tool || 'Unknown tool';
       const errorMsg = data.error || 'Unknown error';
-      this.router.sendTaskUpdate(data.taskId, `⚠️ Tool error (${toolName}): ${errorMsg}`);
+      const message = getChannelMessage('toolError', this.getMessageContext(), { tool: toolName, error: errorMsg });
+      this.router.sendTaskUpdate(data.taskId, message);
     };
     agentDaemon.on('tool_error', onToolError);
     this.daemonListeners.push({ event: 'tool_error', handler: onToolError });
@@ -179,7 +208,8 @@ export class ChannelGateway {
     const onFollowUpCompleted = async (data: { taskId: string }) => {
       // If no assistant messages were sent during the follow-up, send a confirmation
       if (!followUpMessagesSent.get(data.taskId)) {
-        this.router.sendTaskUpdate(data.taskId, '✅ Task completed!');
+        const message = getChannelMessage('followUpProcessed', this.getMessageContext());
+        this.router.sendTaskUpdate(data.taskId, message);
       }
       followUpMessagesSent.delete(data.taskId);
 
@@ -192,7 +222,8 @@ export class ChannelGateway {
     // Listen for follow-up failures
     const onFollowUpFailed = (data: { taskId: string; error?: string }) => {
       const errorMsg = data.error || 'Unknown error';
-      this.router.sendTaskUpdate(data.taskId, `❌ Follow-up failed: ${errorMsg}`);
+      const message = getChannelMessage('followUpFailed', this.getMessageContext(), { error: errorMsg });
+      this.router.sendTaskUpdate(data.taskId, message);
       followUpMessagesSent.delete(data.taskId);
     };
     agentDaemon.on('follow_up_failed', onFollowUpFailed);

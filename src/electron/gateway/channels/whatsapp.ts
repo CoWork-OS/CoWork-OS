@@ -22,11 +22,13 @@ import {
   makeCacheableSignalKeyStore,
   DisconnectReason,
   isJidGroup,
+  downloadContentFromMessage,
   type WASocket,
   type WAMessage,
   type AnyMessageContent,
   type ConnectionState,
   type proto,
+  type DownloadableMessage,
 } from '@whiskeysockets/baileys';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -412,6 +414,15 @@ export class WhatsAppAdapter implements ChannelAdapter {
       ? Number(msg.messageTimestamp) * 1000
       : undefined;
 
+    // Download audio attachment if present
+    const attachments: MessageAttachment[] = [];
+    if (msg.message?.audioMessage) {
+      const audioAttachment = await this.downloadAudioAttachment(msg.message);
+      if (audioAttachment) {
+        attachments.push(audioAttachment);
+      }
+    }
+
     // Create incoming message
     const incomingMessage: IncomingMessage = {
       messageId: id || `wa-${Date.now()}`,
@@ -419,8 +430,9 @@ export class WhatsAppAdapter implements ChannelAdapter {
       userId: senderE164 || participantJid || remoteJid,
       userName: msg.pushName || senderE164 || 'Unknown',
       chatId: remoteJid,
-      text: body || this.extractMediaPlaceholder(msg.message) || '',
+      text: body || (attachments.length === 0 ? this.extractMediaPlaceholder(msg.message) : '') || '',
       timestamp: messageTimestampMs ? new Date(messageTimestampMs) : new Date(),
+      attachments: attachments.length > 0 ? attachments : undefined,
       raw: msg,
     };
 
@@ -998,6 +1010,63 @@ export class WhatsAppAdapter implements ChannelAdapter {
     if (message.locationMessage) return '<location>';
 
     return undefined;
+  }
+
+  /**
+   * Download audio from a WhatsApp message and return as attachment
+   */
+  private async downloadAudioAttachment(message: proto.IMessage): Promise<MessageAttachment | null> {
+    const audioMessage = message.audioMessage;
+    if (!audioMessage) return null;
+
+    try {
+      console.log('[WhatsApp] Downloading audio message...');
+
+      // Download the audio content
+      const stream = await downloadContentFromMessage(
+        audioMessage as DownloadableMessage,
+        'audio'
+      );
+
+      // Collect the stream into a buffer
+      const chunks: Buffer[] = [];
+      for await (const chunk of stream) {
+        chunks.push(chunk as Buffer);
+      }
+      const audioBuffer = Buffer.concat(chunks);
+
+      console.log(`[WhatsApp] Downloaded audio: ${audioBuffer.length} bytes`);
+
+      // Determine mime type (usually audio/ogg for voice messages)
+      const mimeType = audioMessage.mimetype || 'audio/ogg; codecs=opus';
+      const isVoiceNote = audioMessage.ptt === true;
+      const fileName = isVoiceNote
+        ? `voice_message_${Date.now()}.ogg`
+        : `audio_${Date.now()}.${this.getAudioExtension(mimeType)}`;
+
+      return {
+        type: 'audio',
+        data: audioBuffer,
+        mimeType,
+        fileName,
+        size: audioBuffer.length,
+      };
+    } catch (error) {
+      console.error('[WhatsApp] Failed to download audio:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Get file extension from mime type
+   */
+  private getAudioExtension(mimeType: string): string {
+    if (mimeType.includes('ogg')) return 'ogg';
+    if (mimeType.includes('mp3') || mimeType.includes('mpeg')) return 'mp3';
+    if (mimeType.includes('wav')) return 'wav';
+    if (mimeType.includes('m4a') || mimeType.includes('mp4')) return 'm4a';
+    if (mimeType.includes('webm')) return 'webm';
+    return 'audio';
   }
 
   /**

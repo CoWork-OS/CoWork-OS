@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo, Fragment } from 'rea
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Task, TaskEvent, Workspace, ApprovalRequest, LLMModelInfo, SuccessCriteria, CustomSkill, EventType, TEMP_WORKSPACE_ID } from '../../shared/types';
+import { useVoiceInput } from '../hooks/useVoiceInput';
 
 // localStorage key for verbose mode
 const VERBOSE_STEPS_KEY = 'cowork:verboseSteps';
@@ -148,6 +149,63 @@ function MessageCopyButton({ text }: { text: string }) {
         </svg>
       )}
       <span>{copied ? 'Copied' : 'Copy'}</span>
+    </button>
+  );
+}
+
+// Speak button for assistant messages
+function MessageSpeakButton({ text, voiceEnabled }: { text: string; voiceEnabled: boolean }) {
+  const [speaking, setSpeaking] = useState(false);
+
+  const handleSpeak = async () => {
+    if (!voiceEnabled) return;
+
+    try {
+      setSpeaking(true);
+      // Strip markdown for cleaner speech
+      const cleanText = text
+        .replace(/```[\s\S]*?```/g, '') // Remove code blocks
+        .replace(/`[^`]+`/g, '') // Remove inline code
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // Keep link text only
+        .replace(/!\[([^\]]*)\]\([^)]+\)/g, '') // Remove images
+        .replace(/^#{1,6}\s+/gm, '') // Remove headers
+        .replace(/\*\*([^*]+)\*\*/g, '$1') // Remove bold
+        .replace(/\*([^*]+)\*/g, '$1') // Remove italic
+        .replace(/\[\[speak\]\]([\s\S]*?)\[\[\/speak\]\]/gi, '$1') // Extract speak tags
+        .trim();
+
+      if (cleanText) {
+        await window.electronAPI.voiceSpeak(cleanText);
+      }
+    } catch (err) {
+      console.error('Failed to speak:', err);
+    } finally {
+      setSpeaking(false);
+    }
+  };
+
+  if (!voiceEnabled) return null;
+
+  return (
+    <button
+      className={`message-speak-btn ${speaking ? 'speaking' : ''}`}
+      onClick={handleSpeak}
+      title={speaking ? 'Speaking...' : 'Speak message'}
+      disabled={speaking}
+    >
+      {speaking ? (
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <rect x="6" y="4" width="4" height="16" rx="1" />
+          <rect x="14" y="4" width="4" height="16" rx="1" />
+        </svg>
+      ) : (
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+          <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+          <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+        </svg>
+      )}
+      <span>{speaking ? 'Speaking' : 'Speak'}</span>
     </button>
   );
 }
@@ -375,7 +433,7 @@ interface GoalModeOptions {
   maxAttempts?: number;
 }
 
-type SettingsTab = 'appearance' | 'llm' | 'search' | 'telegram' | 'discord' | 'updates' | 'guardrails' | 'queue' | 'skills';
+type SettingsTab = 'appearance' | 'llm' | 'search' | 'telegram' | 'slack' | 'whatsapp' | 'teams' | 'morechannels' | 'updates' | 'guardrails' | 'queue' | 'skills';
 
 interface MainContentProps {
   task: Task | undefined;
@@ -444,6 +502,17 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
   const [showSkillsMenu, setShowSkillsMenu] = useState(false);
   const [skillsSearchQuery, setSkillsSearchQuery] = useState('');
   const [selectedSkillForParams, setSelectedSkillForParams] = useState<CustomSkill | null>(null);
+
+  // Voice input hook
+  const voiceInput = useVoiceInput({
+    onTranscript: (text) => {
+      // Append transcribed text to input
+      setInputValue(prev => prev ? `${prev} ${text}` : text);
+    },
+    onError: (error) => {
+      console.error('Voice input error:', error);
+    },
+  });
   const [viewerFilePath, setViewerFilePath] = useState<string | null>(null);
   // Canvas sessions state - track active canvas sessions for current task
   const [canvasSessions, setCanvasSessions] = useState<CanvasSession[]>([]);
@@ -455,6 +524,10 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
     const saved = localStorage.getItem(VERBOSE_STEPS_KEY);
     return saved === 'true';
   });
+  // Voice state - track if voice is enabled
+  const [voiceEnabled, setVoiceEnabled] = useState(false);
+  const [voiceResponseMode, setVoiceResponseMode] = useState<'auto' | 'manual' | 'smart'>('manual');
+  const lastSpokenMessageRef = useRef<string | null>(null);
   const skillsMenuRef = useRef<HTMLDivElement>(null);
   const workspaceDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -494,6 +567,76 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
       .then(info => setAppVersion(info.version))
       .catch(err => console.error('Failed to load version:', err));
   }, []);
+
+  // Load voice settings
+  useEffect(() => {
+    window.electronAPI.getVoiceSettings()
+      .then(settings => {
+        setVoiceEnabled(settings.enabled);
+        setVoiceResponseMode(settings.responseMode);
+      })
+      .catch(err => console.error('Failed to load voice settings:', err));
+
+    // Subscribe to voice state changes
+    const unsubscribe = window.electronAPI.onVoiceEvent((event) => {
+      if (event.type === 'voice:state-changed' && typeof event.data === 'object' && 'isActive' in event.data) {
+        setVoiceEnabled(event.data.isActive);
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Auto-speak new assistant messages based on response mode
+  useEffect(() => {
+    if (!voiceEnabled || voiceResponseMode === 'manual') return;
+
+    const assistantMessages = events.filter(e => e.type === 'assistant_message');
+    if (assistantMessages.length === 0) return;
+
+    const lastMessage = assistantMessages[assistantMessages.length - 1];
+    const messageText = lastMessage.payload?.message || '';
+
+    // Skip if already spoken
+    if (lastSpokenMessageRef.current === messageText) return;
+
+    // Check if should speak based on mode
+    const hasDirective = /\[\[speak\]\]/i.test(messageText);
+
+    if (voiceResponseMode === 'auto' || (voiceResponseMode === 'smart' && hasDirective)) {
+      // Extract text to speak
+      let textToSpeak = messageText;
+
+      // If smart mode, only speak content within [[speak]] tags
+      if (voiceResponseMode === 'smart' && hasDirective) {
+        const matches = messageText.match(/\[\[speak\]\]([\s\S]*?)\[\[\/speak\]\]/gi);
+        if (matches) {
+          textToSpeak = matches
+            .map((m: string) => m.replace(/\[\[speak\]\]/gi, '').replace(/\[\[\/speak\]\]/gi, ''))
+            .join(' ')
+            .trim();
+        }
+      } else {
+        // Strip markdown for cleaner speech
+        textToSpeak = textToSpeak
+          .replace(/```[\s\S]*?```/g, '')
+          .replace(/`[^`]+`/g, '')
+          .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+          .replace(/!\[([^\]]*)\]\([^)]+\)/g, '')
+          .replace(/^#{1,6}\s+/gm, '')
+          .replace(/\*\*([^*]+)\*\*/g, '$1')
+          .replace(/\*([^*]+)\*/g, '$1')
+          .trim();
+      }
+
+      if (textToSpeak) {
+        lastSpokenMessageRef.current = messageText;
+        window.electronAPI.voiceSpeak(textToSpeak).catch(err => {
+          console.error('Failed to auto-speak:', err);
+        });
+      }
+    }
+  }, [events, voiceEnabled, voiceResponseMode]);
 
   // Load custom skills (task skills only, excludes guidelines)
   useEffect(() => {
@@ -1047,6 +1190,37 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
                   onKeyDown={handleKeyDown}
                   rows={1}
                 />
+                <button
+                  className={`voice-input-btn welcome-voice-btn ${voiceInput.state}`}
+                  onClick={voiceInput.toggleRecording}
+                  disabled={voiceInput.state === 'processing'}
+                  title={
+                    voiceInput.state === 'idle' ? 'Start voice input' :
+                    voiceInput.state === 'recording' ? 'Stop recording' :
+                    'Processing...'
+                  }
+                >
+                  {voiceInput.state === 'processing' ? (
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="voice-processing-spin">
+                      <circle cx="12" cy="12" r="10" />
+                      <path d="M12 6v6l4 2" />
+                    </svg>
+                  ) : voiceInput.state === 'recording' ? (
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                      <rect x="6" y="6" width="12" height="12" rx="2" />
+                    </svg>
+                  ) : (
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                      <line x1="12" y1="19" x2="12" y2="23" />
+                      <line x1="8" y1="23" x2="16" y2="23" />
+                    </svg>
+                  )}
+                  {voiceInput.state === 'recording' && (
+                    <span className="voice-recording-indicator" style={{ width: `${voiceInput.audioLevel}%` }} />
+                  )}
+                </button>
                 <span className="cli-cursor"></span>
               </div>
 
@@ -1391,11 +1565,14 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
                           )}
                           <div className="chat-bubble-content markdown-content">
                             <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                              {messageText}
+                              {messageText.replace(/\[\[speak\]\]([\s\S]*?)\[\[\/speak\]\]/gi, '$1')}
                             </ReactMarkdown>
                           </div>
                         </div>
-                        <MessageCopyButton text={messageText} />
+                        <div className="message-actions">
+                          <MessageCopyButton text={messageText} />
+                          <MessageSpeakButton text={messageText} voiceEnabled={voiceEnabled} />
+                        </div>
                       </div>
                       {shouldRenderCommandOutput && (
                         <CommandOutput
@@ -1455,7 +1632,7 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
                           </div>
                           <div className="event-time">{formatTime(event.timestamp)}</div>
                         </div>
-                        {isExpanded && renderEventDetails(event)}
+                        {isExpanded && renderEventDetails(event, voiceEnabled)}
                       </div>
                     </div>
                     {shouldRenderCommandOutput && (
@@ -1525,6 +1702,37 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
                 selectedModel={selectedModel}
                 onModelChange={onModelChange}
               />
+              <button
+                className={`voice-input-btn ${voiceInput.state}`}
+                onClick={voiceInput.toggleRecording}
+                disabled={voiceInput.state === 'processing'}
+                title={
+                  voiceInput.state === 'idle' ? 'Start voice input' :
+                  voiceInput.state === 'recording' ? 'Stop recording' :
+                  'Processing...'
+                }
+              >
+                {voiceInput.state === 'processing' ? (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="voice-processing-spin">
+                    <circle cx="12" cy="12" r="10" />
+                    <path d="M12 6v6l4 2" />
+                  </svg>
+                ) : voiceInput.state === 'recording' ? (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                    <rect x="6" y="6" width="12" height="12" rx="2" />
+                  </svg>
+                ) : (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                    <line x1="12" y1="19" x2="12" y2="23" />
+                    <line x1="8" y1="23" x2="16" y2="23" />
+                  </svg>
+                )}
+                {voiceInput.state === 'recording' && (
+                  <span className="voice-recording-indicator" style={{ width: `${voiceInput.audioLevel}%` }} />
+                )}
+              </button>
               {task.status === 'executing' && onStopTask && (
                 <button
                   className="stop-btn-simple"
@@ -1675,7 +1883,7 @@ function renderEventTitle(
   }
 }
 
-function renderEventDetails(event: TaskEvent) {
+function renderEventDetails(event: TaskEvent, voiceEnabled: boolean) {
   switch (event.type) {
     case 'plan_created':
       return (
@@ -1707,10 +1915,13 @@ function renderEventDetails(event: TaskEvent) {
         <div className="event-details assistant-message event-details-scrollable">
           <div className="markdown-content">
             <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-              {event.payload.message}
+              {event.payload.message.replace(/\[\[speak\]\]([\s\S]*?)\[\[\/speak\]\]/gi, '$1')}
             </ReactMarkdown>
           </div>
-          <MessageCopyButton text={event.payload.message} />
+          <div className="message-actions">
+            <MessageCopyButton text={event.payload.message} />
+            <MessageSpeakButton text={event.payload.message} voiceEnabled={voiceEnabled} />
+          </div>
         </div>
       );
     case 'error':

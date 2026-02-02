@@ -2,13 +2,15 @@
  * Tailscale Settings Manager
  *
  * Manages Tailscale configuration persistence.
+ * Settings are stored encrypted in the database using SecureSettingsRepository.
  */
 
 import { app } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
+import { SecureSettingsRepository } from '../database/SecureSettingsRepository';
 
-const SETTINGS_FILE = 'tailscale-settings.json';
+const LEGACY_SETTINGS_FILE = 'tailscale-settings.json';
 
 /**
  * Tailscale mode options
@@ -46,9 +48,10 @@ export const DEFAULT_TAILSCALE_SETTINGS: TailscaleSettings = {
  * Tailscale Settings Manager
  */
 export class TailscaleSettingsManager {
-  private static settingsPath: string;
+  private static legacySettingsPath: string;
   private static cachedSettings: TailscaleSettings | null = null;
   private static initialized = false;
+  private static migrationCompleted = false;
 
   /**
    * Initialize the settings manager (must be called after app is ready)
@@ -57,10 +60,67 @@ export class TailscaleSettingsManager {
     if (this.initialized) return;
 
     const userDataPath = app.getPath('userData');
-    this.settingsPath = path.join(userDataPath, SETTINGS_FILE);
+    this.legacySettingsPath = path.join(userDataPath, LEGACY_SETTINGS_FILE);
     this.initialized = true;
 
-    console.log('[Tailscale Settings] Initialized with path:', this.settingsPath);
+    console.log('[Tailscale Settings] Initialized');
+
+    // Migrate from legacy JSON file to encrypted database
+    this.migrateFromLegacyFile();
+  }
+
+  /**
+   * Migrate settings from legacy JSON file to encrypted database
+   */
+  private static migrateFromLegacyFile(): void {
+    if (this.migrationCompleted) return;
+
+    try {
+      if (!SecureSettingsRepository.isInitialized()) {
+        console.log('[Tailscale Settings] SecureSettingsRepository not yet initialized, skipping migration');
+        return;
+      }
+
+      const repository = SecureSettingsRepository.getInstance();
+
+      if (repository.exists('tailscale')) {
+        console.log('[Tailscale Settings] Settings already in database, skipping migration');
+        this.migrationCompleted = true;
+        return;
+      }
+
+      if (!fs.existsSync(this.legacySettingsPath)) {
+        console.log('[Tailscale Settings] No legacy settings file found');
+        this.migrationCompleted = true;
+        return;
+      }
+
+      console.log('[Tailscale Settings] Migrating settings from legacy JSON file to encrypted database...');
+
+      // Create backup before migration
+      const backupPath = this.legacySettingsPath + '.migration-backup';
+      fs.copyFileSync(this.legacySettingsPath, backupPath);
+
+      try {
+        const data = fs.readFileSync(this.legacySettingsPath, 'utf-8');
+        const legacySettings = { ...DEFAULT_TAILSCALE_SETTINGS, ...JSON.parse(data) };
+
+        repository.save('tailscale', legacySettings);
+        console.log('[Tailscale Settings] Settings migrated to encrypted database');
+
+        // Migration successful - delete backup and original
+        fs.unlinkSync(backupPath);
+        fs.unlinkSync(this.legacySettingsPath);
+        console.log('[Tailscale Settings] Migration complete, cleaned up legacy files');
+
+        this.migrationCompleted = true;
+      } catch (migrationError) {
+        console.error('[Tailscale Settings] Migration failed, backup preserved at:', backupPath);
+        throw migrationError;
+      }
+    } catch (error) {
+      console.error('[Tailscale Settings] Migration failed:', error);
+    }
   }
 
   /**
@@ -73,7 +133,7 @@ export class TailscaleSettingsManager {
   }
 
   /**
-   * Load settings from disk
+   * Load settings from encrypted database
    */
   static loadSettings(): TailscaleSettings {
     this.ensureInitialized();
@@ -83,40 +143,43 @@ export class TailscaleSettingsManager {
     }
 
     try {
-      if (fs.existsSync(this.settingsPath)) {
-        const data = fs.readFileSync(this.settingsPath, 'utf-8');
-        const parsed = JSON.parse(data);
-
-        // Merge with defaults to handle missing fields
-        const merged: TailscaleSettings = {
-          ...DEFAULT_TAILSCALE_SETTINGS,
-          ...parsed,
-        };
-
-        this.cachedSettings = merged;
-        console.log('[Tailscale Settings] Loaded settings');
-      } else {
-        console.log('[Tailscale Settings] No settings file found, using defaults');
-        this.cachedSettings = { ...DEFAULT_TAILSCALE_SETTINGS };
+      if (SecureSettingsRepository.isInitialized()) {
+        const repository = SecureSettingsRepository.getInstance();
+        const stored = repository.load<TailscaleSettings>('tailscale');
+        if (stored) {
+          const merged: TailscaleSettings = {
+            ...DEFAULT_TAILSCALE_SETTINGS,
+            ...stored,
+          };
+          this.cachedSettings = merged;
+          console.log('[Tailscale Settings] Loaded settings from encrypted database');
+          return this.cachedSettings;
+        }
       }
     } catch (error) {
       console.error('[Tailscale Settings] Failed to load settings:', error);
-      this.cachedSettings = { ...DEFAULT_TAILSCALE_SETTINGS };
     }
 
+    console.log('[Tailscale Settings] No settings found, using defaults');
+    this.cachedSettings = { ...DEFAULT_TAILSCALE_SETTINGS };
     return this.cachedSettings;
   }
 
   /**
-   * Save settings to disk
+   * Save settings to encrypted database
    */
   static saveSettings(settings: TailscaleSettings): void {
     this.ensureInitialized();
 
     try {
-      fs.writeFileSync(this.settingsPath, JSON.stringify(settings, null, 2));
+      if (!SecureSettingsRepository.isInitialized()) {
+        throw new Error('SecureSettingsRepository not initialized');
+      }
+
+      const repository = SecureSettingsRepository.getInstance();
+      repository.save('tailscale', settings);
       this.cachedSettings = settings;
-      console.log('[Tailscale Settings] Saved settings');
+      console.log('[Tailscale Settings] Saved settings to encrypted database');
     } catch (error) {
       console.error('[Tailscale Settings] Failed to save settings:', error);
       throw error;

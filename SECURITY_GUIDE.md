@@ -174,29 +174,73 @@ Your data stays on your machine and only goes to the LLM provider you explicitly
 
 ## Data Storage
 
-### Local Storage Locations
+### Encrypted Settings Storage (SecureSettingsRepository)
+
+All settings are now stored encrypted in the database using the `SecureSettingsRepository`:
 
 | Data | Location | Encryption |
 |------|----------|------------|
-| API Keys | OS Keychain via Electron safeStorage | AES-256 |
-| Database | `~/.config/CoWork-OS/cowork-os.db` | None (local only) |
-| LLM Settings | `~/.config/CoWork-OS/llm-settings.json` | Keys encrypted |
-| Search Settings | `~/.config/CoWork-OS/search-settings.json` | Keys encrypted |
+| All Settings | `~/.config/CoWork-OS/cowork-os.db` | OS Keychain + AES-256 |
+| Database | `~/.config/CoWork-OS/cowork-os.db` | Settings encrypted per-category |
+| Machine ID | `~/.config/CoWork-OS/.cowork-machine-id` | Stable identifier for encryption |
+
+### Encryption Layers
+
+**Primary: OS Keychain (when available)**
+- macOS: Keychain Services
+- Windows: DPAPI (Data Protection API)
+- Linux: libsecret
+
+**Fallback: App-Level Encryption**
+- AES-256-GCM encryption
+- Key derived via PBKDF2 (100,000 iterations, SHA-512)
+- Stable machine ID prevents key changes on hostname updates
+
+### Settings Categories
+
+All these are stored encrypted in the database:
+
+| Category | Contents |
+|----------|----------|
+| `voice` | Voice settings, TTS/STT API keys |
+| `llm` | LLM provider settings, API keys |
+| `search` | Search provider settings, API keys |
+| `appearance` | Theme, accent color preferences |
+| `personality` | Agent personality settings |
+| `guardrails` | Safety limits and blocked patterns |
+| `hooks` | Automation hooks configuration |
+| `mcp` | MCP server configurations |
+| `controlplane` | Control plane settings |
+| `channels` | Channel/gateway configurations |
+| `builtintools` | Built-in tool settings |
+| `tailscale` | Tailscale integration settings |
+| `queue` | Task queue settings |
+| `tray` | Menu bar/tray settings |
+
+### Data Integrity
+
+Each stored setting includes:
+- SHA-256 checksum for integrity verification
+- Creation and update timestamps
+- Automatic corruption detection on load
 
 ### What's Stored in the Database
 
 - Workspace configurations
 - Task history and logs
 - Channel/gateway configurations
+- **All encrypted settings** (API keys, preferences, configurations)
 - No conversation content is permanently stored
 
 ### API Key Security
 
 Your API keys are:
-1. Encrypted using the macOS Keychain (via Electron's safeStorage)
-2. Decrypted only when needed for API calls
-3. Never logged or displayed in full
-4. Never passed to shell commands or subprocesses
+1. Encrypted using OS Keychain when available (macOS Keychain, Windows DPAPI, Linux libsecret)
+2. Fallback to AES-256 app-level encryption with stable machine-derived key
+3. Decrypted only when needed for API calls
+4. Never logged or displayed in full
+5. Never passed to shell commands or subprocesses
+6. Checksummed for integrity verification
 
 ---
 
@@ -528,5 +572,13 @@ CoWork OS is designed with security in mind:
 ### Guardrails Settings Location
 
 All guardrail settings can be configured at:
-- **Settings file**: `~/.config/CoWork-OS/guardrail-settings.json`
+- **Database**: Stored encrypted in `~/.config/CoWork-OS/cowork-os.db` (category: `guardrails`)
 - **UI**: Settings (gear icon) → Guardrails tab
+
+### Settings Migration
+
+Legacy JSON settings files are automatically migrated to the encrypted database:
+- Migration creates a `.migration-backup` file before proceeding
+- On successful migration, both backup and original are deleted
+- On failed migration, backup is preserved for recovery
+- Migration logs are available in the app console

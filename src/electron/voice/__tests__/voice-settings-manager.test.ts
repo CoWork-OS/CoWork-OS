@@ -1,13 +1,29 @@
 /**
  * Tests for VoiceSettingsManager
+ *
+ * Now tests the SecureSettingsRepository-based implementation
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import * as fs from 'fs';
-import * as path from 'path';
-import { app, safeStorage } from 'electron';
-import { VoiceSettingsManager } from '../voice-settings-manager';
-import { DEFAULT_VOICE_SETTINGS, VoiceSettings } from '../../../shared/types';
+
+// Define mock functions at module scope before imports
+const mockRepositorySave = vi.fn();
+const mockRepositoryLoad = vi.fn();
+const mockRepositoryDelete = vi.fn();
+const mockRepositoryExists = vi.fn();
+
+// Mock SecureSettingsRepository before importing VoiceSettingsManager
+vi.mock('../../database/SecureSettingsRepository', () => {
+  return {
+    SecureSettingsRepository: class MockSecureSettingsRepository {
+      save = mockRepositorySave;
+      load = mockRepositoryLoad;
+      delete = mockRepositoryDelete;
+      exists = mockRepositoryExists;
+      constructor(_db: any) {}
+    },
+  };
+});
 
 // Mock electron modules
 vi.mock('electron', () => ({
@@ -24,25 +40,40 @@ vi.mock('electron', () => ({
   },
 }));
 
-// Mock fs module
+// Mock fs module (for migration tests)
 vi.mock('fs', () => ({
-  existsSync: vi.fn(),
+  existsSync: vi.fn().mockReturnValue(false),
   readFileSync: vi.fn(),
   writeFileSync: vi.fn(),
+  renameSync: vi.fn(),
   unlinkSync: vi.fn(),
 }));
 
-describe('VoiceSettingsManager', () => {
-  const mockUserDataPath = '/mock/user/data';
-  const settingsPath = path.join(mockUserDataPath, 'voice-settings.json');
-  const secureKeysPath = path.join(mockUserDataPath, 'voice-keys.enc');
+// Import after mocks are set up
+import { app, safeStorage } from 'electron';
+import { VoiceSettingsManager } from '../voice-settings-manager';
+import { DEFAULT_VOICE_SETTINGS, VoiceSettings } from '../../../shared/types';
 
+// Mock database
+const mockDb = {
+  prepare: vi.fn().mockReturnValue({
+    run: vi.fn(),
+    get: vi.fn(),
+    all: vi.fn(),
+  }),
+} as any;
+
+describe('VoiceSettingsManager', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Reset cached settings
+    // Reset cached settings and repository
     VoiceSettingsManager.clearCache();
-    // Initialize the manager
-    VoiceSettingsManager.initialize();
+    (VoiceSettingsManager as any).repository = null;
+    (VoiceSettingsManager as any).migrationComplete = false;
+
+    // Default mock behavior - no existing settings
+    mockRepositoryExists.mockReturnValue(false);
+    mockRepositoryLoad.mockReturnValue(undefined);
   });
 
   afterEach(() => {
@@ -50,47 +81,49 @@ describe('VoiceSettingsManager', () => {
   });
 
   describe('initialize', () => {
-    it('should set the settings path', () => {
-      VoiceSettingsManager.initialize();
+    it('should set the user data path', () => {
+      VoiceSettingsManager.initialize(mockDb);
       expect(app.getPath).toHaveBeenCalledWith('userData');
+    });
+
+    it('should create a SecureSettingsRepository', () => {
+      VoiceSettingsManager.initialize(mockDb);
+      expect((VoiceSettingsManager as any).repository).toBeDefined();
     });
   });
 
   describe('loadSettings', () => {
-    it('should return default settings when no file exists', () => {
-      vi.mocked(fs.existsSync).mockReturnValue(false);
+    beforeEach(() => {
+      VoiceSettingsManager.initialize(mockDb);
+    });
+
+    it('should return default settings when no settings exist', () => {
+      mockRepositoryLoad.mockReturnValue(undefined);
 
       const settings = VoiceSettingsManager.loadSettings();
 
       expect(settings).toEqual(DEFAULT_VOICE_SETTINGS);
     });
 
-    it('should load settings from file', () => {
-      vi.mocked(fs.existsSync).mockImplementation((p) => {
-        return p === settingsPath;
+    it('should load settings from repository', () => {
+      mockRepositoryLoad.mockReturnValue({
+        enabled: true,
+        ttsProvider: 'openai',
+        volume: 75,
       });
-      vi.mocked(fs.readFileSync).mockReturnValue(
-        JSON.stringify({
-          enabled: true,
-          ttsProvider: 'openai',
-          volume: 75,
-        })
-      );
 
       const settings = VoiceSettingsManager.loadSettings();
 
       expect(settings.enabled).toBe(true);
       expect(settings.ttsProvider).toBe('openai');
       expect(settings.volume).toBe(75);
+      expect(mockRepositoryLoad).toHaveBeenCalledWith('voice');
     });
 
     it('should merge with defaults for missing fields', () => {
-      vi.mocked(fs.existsSync).mockImplementation((p) => p === settingsPath);
-      vi.mocked(fs.readFileSync).mockReturnValue(
-        JSON.stringify({
-          enabled: true,
-        })
-      );
+      mockRepositoryLoad.mockReturnValue({
+        enabled: true,
+      });
 
       const settings = VoiceSettingsManager.loadSettings();
 
@@ -100,51 +133,58 @@ describe('VoiceSettingsManager', () => {
       expect(settings.volume).toBe(DEFAULT_VOICE_SETTINGS.volume);
     });
 
-    it('should load secure API keys', () => {
-      vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(fs.readFileSync).mockImplementation((p) => {
-        if (p === settingsPath) {
-          return JSON.stringify({ enabled: true });
-        }
-        if (p === secureKeysPath) {
-          return Buffer.from('encrypted:{"elevenLabsApiKey":"secret-key"}');
-        }
-        return '';
+    it('should load API keys from repository', () => {
+      mockRepositoryLoad.mockReturnValue({
+        enabled: true,
+        elevenLabsApiKey: 'secret-key',
+        openaiApiKey: 'another-key',
       });
 
       const settings = VoiceSettingsManager.loadSettings();
 
       expect(settings.elevenLabsApiKey).toBe('secret-key');
+      expect(settings.openaiApiKey).toBe('another-key');
     });
 
     it('should cache loaded settings', () => {
-      vi.mocked(fs.existsSync).mockReturnValue(false);
+      mockRepositoryLoad.mockReturnValue({ enabled: true });
 
       VoiceSettingsManager.loadSettings();
-      const callsBefore = vi.mocked(fs.existsSync).mock.calls.length;
       VoiceSettingsManager.loadSettings();
-      const callsAfter = vi.mocked(fs.existsSync).mock.calls.length;
 
-      // Should not call existsSync again (cached)
-      expect(callsAfter).toBe(callsBefore);
+      // Should only call repository once (cached)
+      expect(mockRepositoryLoad).toHaveBeenCalledTimes(1);
     });
 
-    it('should return defaults on read error', () => {
-      vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(fs.readFileSync).mockImplementation(() => {
-        throw new Error('Read error');
+    it('should return defaults on load error', () => {
+      mockRepositoryLoad.mockImplementation(() => {
+        throw new Error('Load error');
       });
+
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const settings = VoiceSettingsManager.loadSettings();
+
+      expect(settings).toEqual(DEFAULT_VOICE_SETTINGS);
+      consoleSpy.mockRestore();
+    });
+
+    it('should return defaults when repository not initialized', () => {
+      (VoiceSettingsManager as any).repository = null;
+      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
       const settings = VoiceSettingsManager.loadSettings();
 
       expect(settings).toEqual(DEFAULT_VOICE_SETTINGS);
+      consoleSpy.mockRestore();
     });
   });
 
   describe('saveSettings', () => {
-    it('should save settings to file', () => {
-      vi.mocked(fs.existsSync).mockReturnValue(false);
+    beforeEach(() => {
+      VoiceSettingsManager.initialize(mockDb);
+    });
 
+    it('should save settings to repository', () => {
       const settings: VoiceSettings = {
         ...DEFAULT_VOICE_SETTINGS,
         enabled: true,
@@ -153,16 +193,13 @@ describe('VoiceSettingsManager', () => {
 
       VoiceSettingsManager.saveSettings(settings);
 
-      expect(fs.writeFileSync).toHaveBeenCalled();
-      const writtenContent = vi.mocked(fs.writeFileSync).mock.calls[0][1];
-      const parsed = JSON.parse(writtenContent as string);
-      expect(parsed.enabled).toBe(true);
-      expect(parsed.volume).toBe(80);
+      expect(mockRepositorySave).toHaveBeenCalledWith('voice', expect.objectContaining({
+        enabled: true,
+        volume: 80,
+      }));
     });
 
     it('should validate settings before saving', () => {
-      vi.mocked(fs.existsSync).mockReturnValue(false);
-
       const invalidSettings = {
         ...DEFAULT_VOICE_SETTINGS,
         volume: 200, // Invalid - should be clamped to 100
@@ -171,15 +208,13 @@ describe('VoiceSettingsManager', () => {
 
       VoiceSettingsManager.saveSettings(invalidSettings);
 
-      const writtenContent = vi.mocked(fs.writeFileSync).mock.calls[0][1];
-      const parsed = JSON.parse(writtenContent as string);
-      expect(parsed.volume).toBe(100);
-      expect(parsed.speechRate).toBe(2.0);
+      expect(mockRepositorySave).toHaveBeenCalledWith('voice', expect.objectContaining({
+        volume: 100,
+        speechRate: 2.0,
+      }));
     });
 
-    it('should store API keys securely', () => {
-      vi.mocked(fs.existsSync).mockReturnValue(false);
-
+    it('should save API keys in repository', () => {
       const settings: VoiceSettings = {
         ...DEFAULT_VOICE_SETTINGS,
         elevenLabsApiKey: 'secret-api-key',
@@ -187,47 +222,57 @@ describe('VoiceSettingsManager', () => {
 
       VoiceSettingsManager.saveSettings(settings);
 
-      // API key should not be in the main settings file
-      const mainContent = vi.mocked(fs.writeFileSync).mock.calls[0][1];
-      expect(mainContent).not.toContain('secret-api-key');
-
-      // API key should be in secure storage
-      expect(safeStorage.encryptString).toHaveBeenCalled();
+      // API key should be in the saved data
+      expect(mockRepositorySave).toHaveBeenCalledWith('voice', expect.objectContaining({
+        elevenLabsApiKey: 'secret-api-key',
+      }));
     });
 
     it('should update cache after saving', () => {
-      vi.mocked(fs.existsSync).mockReturnValue(false);
-
       const settings: VoiceSettings = {
         ...DEFAULT_VOICE_SETTINGS,
         enabled: true,
       };
 
       VoiceSettingsManager.saveSettings(settings);
-      VoiceSettingsManager.clearCache();
-      vi.mocked(fs.existsSync).mockImplementation((p) => p === settingsPath);
-      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ enabled: true }));
 
+      // Loading should return cached value without calling repository
+      mockRepositoryLoad.mockClear();
       const loaded = VoiceSettingsManager.loadSettings();
+
       expect(loaded.enabled).toBe(true);
+      expect(mockRepositoryLoad).not.toHaveBeenCalled();
+    });
+
+    it('should throw when repository not initialized', () => {
+      (VoiceSettingsManager as any).repository = null;
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      expect(() => VoiceSettingsManager.saveSettings(DEFAULT_VOICE_SETTINGS))
+        .toThrow('Settings repository not initialized');
+
+      consoleSpy.mockRestore();
     });
   });
 
   describe('updateSettings', () => {
+    beforeEach(() => {
+      VoiceSettingsManager.initialize(mockDb);
+    });
+
     it('should merge partial settings with existing', () => {
-      vi.mocked(fs.existsSync).mockReturnValue(false);
+      mockRepositoryLoad.mockReturnValue({ ...DEFAULT_VOICE_SETTINGS });
 
       VoiceSettingsManager.updateSettings({ enabled: true });
 
-      const writtenContent = vi.mocked(fs.writeFileSync).mock.calls[0][1];
-      const parsed = JSON.parse(writtenContent as string);
-      expect(parsed.enabled).toBe(true);
-      // Should preserve default values
-      expect(parsed.ttsProvider).toBe(DEFAULT_VOICE_SETTINGS.ttsProvider);
+      expect(mockRepositorySave).toHaveBeenCalledWith('voice', expect.objectContaining({
+        enabled: true,
+        ttsProvider: DEFAULT_VOICE_SETTINGS.ttsProvider,
+      }));
     });
 
     it('should return updated settings', () => {
-      vi.mocked(fs.existsSync).mockReturnValue(false);
+      mockRepositoryLoad.mockReturnValue({ ...DEFAULT_VOICE_SETTINGS });
 
       const updated = VoiceSettingsManager.updateSettings({ volume: 90 });
 
@@ -236,88 +281,127 @@ describe('VoiceSettingsManager', () => {
   });
 
   describe('clearCache', () => {
+    beforeEach(() => {
+      VoiceSettingsManager.initialize(mockDb);
+    });
+
     it('should clear the cached settings', () => {
-      vi.mocked(fs.existsSync).mockReturnValue(false);
+      mockRepositoryLoad.mockReturnValue({ enabled: true });
 
       VoiceSettingsManager.loadSettings();
-      const callsBeforeClear = vi.mocked(fs.existsSync).mock.calls.length;
+      expect(mockRepositoryLoad).toHaveBeenCalledTimes(1);
+
       VoiceSettingsManager.clearCache();
       VoiceSettingsManager.loadSettings();
-      const callsAfterReload = vi.mocked(fs.existsSync).mock.calls.length;
 
-      // Should have more calls after clearing cache and reloading
-      expect(callsAfterReload).toBeGreaterThan(callsBeforeClear);
+      // Should call repository again after clearing cache
+      expect(mockRepositoryLoad).toHaveBeenCalledTimes(2);
     });
   });
 
   describe('resetSettings', () => {
-    it('should delete settings files', () => {
-      vi.mocked(fs.existsSync).mockReturnValue(true);
+    beforeEach(() => {
+      VoiceSettingsManager.initialize(mockDb);
+    });
 
+    it('should delete settings from repository', () => {
       VoiceSettingsManager.resetSettings();
 
-      expect(fs.unlinkSync).toHaveBeenCalledTimes(2);
+      expect(mockRepositoryDelete).toHaveBeenCalledWith('voice');
     });
 
     it('should clear cache', () => {
-      vi.mocked(fs.existsSync).mockReturnValue(true);
+      mockRepositoryLoad.mockReturnValue({ enabled: true });
 
       VoiceSettingsManager.loadSettings();
-      const callsAfterFirstLoad = vi.mocked(fs.existsSync).mock.calls.length;
       VoiceSettingsManager.resetSettings();
-      vi.mocked(fs.existsSync).mockReturnValue(false);
-      VoiceSettingsManager.loadSettings();
-      const callsAfterReload = vi.mocked(fs.existsSync).mock.calls.length;
 
-      // Cache was cleared, so there should be more calls
-      expect(callsAfterReload).toBeGreaterThan(callsAfterFirstLoad);
+      // After reset, loading should hit repository again
+      mockRepositoryLoad.mockReturnValue(undefined);
+      VoiceSettingsManager.loadSettings();
+
+      expect(mockRepositoryLoad).toHaveBeenCalledTimes(2);
     });
   });
 
   describe('hasElevenLabsKey', () => {
+    beforeEach(() => {
+      VoiceSettingsManager.initialize(mockDb);
+    });
+
     it('should return true when key is configured', () => {
-      vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(fs.readFileSync).mockImplementation((p) => {
-        if (p === secureKeysPath) {
-          return Buffer.from('encrypted:{"elevenLabsApiKey":"key"}');
-        }
-        return JSON.stringify({});
+      mockRepositoryLoad.mockReturnValue({
+        ...DEFAULT_VOICE_SETTINGS,
+        elevenLabsApiKey: 'key',
       });
 
       expect(VoiceSettingsManager.hasElevenLabsKey()).toBe(true);
     });
 
     it('should return false when key is not configured', () => {
-      vi.mocked(fs.existsSync).mockReturnValue(false);
+      mockRepositoryLoad.mockReturnValue({
+        ...DEFAULT_VOICE_SETTINGS,
+        elevenLabsApiKey: undefined,
+      });
 
       expect(VoiceSettingsManager.hasElevenLabsKey()).toBe(false);
     });
   });
 
   describe('hasOpenAIKey', () => {
+    beforeEach(() => {
+      VoiceSettingsManager.initialize(mockDb);
+    });
+
     it('should return true when key is configured', () => {
-      vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(fs.readFileSync).mockImplementation((p) => {
-        if (p === secureKeysPath) {
-          return Buffer.from('encrypted:{"openaiApiKey":"key"}');
-        }
-        return JSON.stringify({});
+      mockRepositoryLoad.mockReturnValue({
+        ...DEFAULT_VOICE_SETTINGS,
+        openaiApiKey: 'key',
       });
 
       expect(VoiceSettingsManager.hasOpenAIKey()).toBe(true);
     });
 
     it('should return false when key is not configured', () => {
-      vi.mocked(fs.existsSync).mockReturnValue(false);
+      mockRepositoryLoad.mockReturnValue({
+        ...DEFAULT_VOICE_SETTINGS,
+        openaiApiKey: undefined,
+      });
 
       expect(VoiceSettingsManager.hasOpenAIKey()).toBe(false);
     });
   });
 
-  describe('validation', () => {
-    it('should validate ttsProvider', () => {
-      vi.mocked(fs.existsSync).mockReturnValue(false);
+  describe('hasAzureKey', () => {
+    beforeEach(() => {
+      VoiceSettingsManager.initialize(mockDb);
+    });
 
+    it('should return true when key is configured', () => {
+      mockRepositoryLoad.mockReturnValue({
+        ...DEFAULT_VOICE_SETTINGS,
+        azureApiKey: 'key',
+      });
+
+      expect(VoiceSettingsManager.hasAzureKey()).toBe(true);
+    });
+
+    it('should return false when key is not configured', () => {
+      mockRepositoryLoad.mockReturnValue({
+        ...DEFAULT_VOICE_SETTINGS,
+        azureApiKey: undefined,
+      });
+
+      expect(VoiceSettingsManager.hasAzureKey()).toBe(false);
+    });
+  });
+
+  describe('validation', () => {
+    beforeEach(() => {
+      VoiceSettingsManager.initialize(mockDb);
+    });
+
+    it('should validate ttsProvider', () => {
       const settings = {
         ...DEFAULT_VOICE_SETTINGS,
         ttsProvider: 'invalid' as any,
@@ -325,14 +409,12 @@ describe('VoiceSettingsManager', () => {
 
       VoiceSettingsManager.saveSettings(settings);
 
-      const writtenContent = vi.mocked(fs.writeFileSync).mock.calls[0][1];
-      const parsed = JSON.parse(writtenContent as string);
-      expect(parsed.ttsProvider).toBe(DEFAULT_VOICE_SETTINGS.ttsProvider);
+      expect(mockRepositorySave).toHaveBeenCalledWith('voice', expect.objectContaining({
+        ttsProvider: DEFAULT_VOICE_SETTINGS.ttsProvider,
+      }));
     });
 
     it('should validate inputMode', () => {
-      vi.mocked(fs.existsSync).mockReturnValue(false);
-
       const settings = {
         ...DEFAULT_VOICE_SETTINGS,
         inputMode: 'invalid' as any,
@@ -340,70 +422,53 @@ describe('VoiceSettingsManager', () => {
 
       VoiceSettingsManager.saveSettings(settings);
 
-      const writtenContent = vi.mocked(fs.writeFileSync).mock.calls[0][1];
-      const parsed = JSON.parse(writtenContent as string);
-      expect(parsed.inputMode).toBe(DEFAULT_VOICE_SETTINGS.inputMode);
+      expect(mockRepositorySave).toHaveBeenCalledWith('voice', expect.objectContaining({
+        inputMode: DEFAULT_VOICE_SETTINGS.inputMode,
+      }));
     });
 
     it('should clamp volume to 0-100', () => {
-      vi.mocked(fs.existsSync).mockReturnValue(false);
-
       VoiceSettingsManager.saveSettings({
         ...DEFAULT_VOICE_SETTINGS,
         volume: -10,
       });
 
-      let parsed = JSON.parse(vi.mocked(fs.writeFileSync).mock.calls[0][1] as string);
-      expect(parsed.volume).toBe(0);
+      expect(mockRepositorySave).toHaveBeenCalledWith('voice', expect.objectContaining({
+        volume: 0,
+      }));
 
-      vi.mocked(fs.writeFileSync).mockClear();
+      mockRepositorySave.mockClear();
 
       VoiceSettingsManager.saveSettings({
         ...DEFAULT_VOICE_SETTINGS,
         volume: 150,
       });
 
-      parsed = JSON.parse(vi.mocked(fs.writeFileSync).mock.calls[0][1] as string);
-      expect(parsed.volume).toBe(100);
+      expect(mockRepositorySave).toHaveBeenCalledWith('voice', expect.objectContaining({
+        volume: 100,
+      }));
     });
 
     it('should clamp speechRate to 0.5-2.0', () => {
-      vi.mocked(fs.existsSync).mockReturnValue(false);
-
       VoiceSettingsManager.saveSettings({
         ...DEFAULT_VOICE_SETTINGS,
         speechRate: 0.1,
       });
 
-      let parsed = JSON.parse(vi.mocked(fs.writeFileSync).mock.calls[0][1] as string);
-      expect(parsed.speechRate).toBe(0.5);
+      expect(mockRepositorySave).toHaveBeenCalledWith('voice', expect.objectContaining({
+        speechRate: 0.5,
+      }));
 
-      vi.mocked(fs.writeFileSync).mockClear();
+      mockRepositorySave.mockClear();
 
       VoiceSettingsManager.saveSettings({
         ...DEFAULT_VOICE_SETTINGS,
         speechRate: 3.0,
       });
 
-      parsed = JSON.parse(vi.mocked(fs.writeFileSync).mock.calls[0][1] as string);
-      expect(parsed.speechRate).toBe(2.0);
-    });
-  });
-
-  describe('encryption fallback', () => {
-    it('should fall back to plain text when encryption unavailable', () => {
-      vi.mocked(safeStorage.isEncryptionAvailable).mockReturnValue(false);
-      vi.mocked(fs.existsSync).mockReturnValue(false);
-
-      const settings: VoiceSettings = {
-        ...DEFAULT_VOICE_SETTINGS,
-        elevenLabsApiKey: 'test-key',
-      };
-
-      VoiceSettingsManager.saveSettings(settings);
-
-      // Should still save the secure keys file
-      expect(fs.writeFileSync).toHaveBeenCalledTimes(2);
+      expect(mockRepositorySave).toHaveBeenCalledWith('voice', expect.objectContaining({
+        speechRate: 2.0,
+      }));
     });
   });
 });

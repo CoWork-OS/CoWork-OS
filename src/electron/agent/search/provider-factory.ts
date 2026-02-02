@@ -14,9 +14,9 @@ import { TavilyProvider } from './tavily-provider';
 import { BraveProvider } from './brave-provider';
 import { SerpApiProvider } from './serpapi-provider';
 import { GoogleProvider } from './google-provider';
+import { SecureSettingsRepository } from '../../database/SecureSettingsRepository';
 
-const SETTINGS_FILE = 'search-settings.json';
-const MASKED_VALUE = '***configured***';
+const LEGACY_SETTINGS_FILE = 'search-settings.json';
 
 /**
  * Stored settings for Search provider
@@ -48,62 +48,127 @@ const DEFAULT_SETTINGS: SearchSettings = {
  * Factory for creating Search providers with fallback support
  */
 export class SearchProviderFactory {
-  private static settingsPath: string;
+  private static legacySettingsPath: string;
   private static cachedSettings: SearchSettings | null = null;
+  private static migrationCompleted = false;
 
   /**
-   * Initialize the settings path
+   * Initialize the factory
    */
   static initialize(): void {
     const userDataPath = app.getPath('userData');
-    this.settingsPath = path.join(userDataPath, SETTINGS_FILE);
+    this.legacySettingsPath = path.join(userDataPath, LEGACY_SETTINGS_FILE);
+
+    // Migrate from legacy JSON file to encrypted database
+    this.migrateFromLegacyFile();
   }
 
   /**
-   * Get the path to settings file (for testing)
+   * Migrate settings from legacy JSON file to encrypted database
+   */
+  private static migrateFromLegacyFile(): void {
+    if (this.migrationCompleted) return;
+
+    try {
+      // Check if SecureSettingsRepository is initialized
+      if (!SecureSettingsRepository.isInitialized()) {
+        console.log('[SearchProviderFactory] SecureSettingsRepository not yet initialized, skipping migration');
+        return;
+      }
+
+      const repository = SecureSettingsRepository.getInstance();
+
+      // Check if already migrated to database
+      if (repository.exists('search')) {
+        console.log('[SearchProviderFactory] Settings already in database, skipping migration');
+        this.migrationCompleted = true;
+        return;
+      }
+
+      // Check if legacy file exists
+      if (!fs.existsSync(this.legacySettingsPath)) {
+        console.log('[SearchProviderFactory] No legacy settings file found');
+        this.migrationCompleted = true;
+        return;
+      }
+
+      console.log('[SearchProviderFactory] Migrating settings from legacy JSON file to encrypted database...');
+
+      // Create backup before migration
+      const backupPath = this.legacySettingsPath + '.migration-backup';
+      fs.copyFileSync(this.legacySettingsPath, backupPath);
+
+      try {
+        // Read legacy settings
+        const data = fs.readFileSync(this.legacySettingsPath, 'utf-8');
+        const parsed = JSON.parse(data);
+
+        // Handle migration from old format (providerType -> primaryProvider)
+        if (parsed.providerType && !parsed.primaryProvider) {
+          parsed.primaryProvider = parsed.providerType;
+          delete parsed.providerType;
+        }
+
+        const legacySettings = { ...DEFAULT_SETTINGS, ...parsed };
+
+        // Save to encrypted database
+        repository.save('search', legacySettings);
+        console.log('[SearchProviderFactory] Settings migrated to encrypted database');
+
+        // Migration successful - delete backup and original
+        fs.unlinkSync(backupPath);
+        fs.unlinkSync(this.legacySettingsPath);
+        console.log('[SearchProviderFactory] Migration complete, cleaned up legacy files');
+
+        this.migrationCompleted = true;
+      } catch (migrationError) {
+        console.error('[SearchProviderFactory] Migration failed, backup preserved at:', backupPath);
+        throw migrationError;
+      }
+    } catch (error) {
+      console.error('[SearchProviderFactory] Migration failed:', error);
+    }
+  }
+
+  /**
+   * Get the path to legacy settings file (for testing)
    */
   static getSettingsPath(): string {
-    return this.settingsPath;
+    return this.legacySettingsPath;
   }
 
   /**
-   * Load settings from disk
+   * Load settings from encrypted database
    */
   static loadSettings(): SearchSettings {
     if (this.cachedSettings) {
       return this.cachedSettings;
     }
 
-    let settings: SearchSettings;
+    let settings: SearchSettings = { ...DEFAULT_SETTINGS };
 
     try {
-      if (this.settingsPath && fs.existsSync(this.settingsPath)) {
-        const data = fs.readFileSync(this.settingsPath, 'utf-8');
-        const parsed = JSON.parse(data);
-        // Handle migration from old format (providerType -> primaryProvider)
-        if (parsed.providerType && !parsed.primaryProvider) {
-          parsed.primaryProvider = parsed.providerType;
-          delete parsed.providerType;
+      // Try to load from encrypted database
+      if (SecureSettingsRepository.isInitialized()) {
+        const repository = SecureSettingsRepository.getInstance();
+        const stored = repository.load<SearchSettings>('search');
+        if (stored) {
+          settings = { ...DEFAULT_SETTINGS, ...stored };
         }
-        settings = { ...DEFAULT_SETTINGS, ...parsed };
-      } else {
-        settings = { ...DEFAULT_SETTINGS };
       }
     } catch (error) {
-      console.error('Failed to load Search settings:', error);
-      settings = { ...DEFAULT_SETTINGS };
+      console.error('[SearchProviderFactory] Failed to load settings from database:', error);
     }
 
     // Auto-detect and select providers if primaryProvider is not set
-    // This works both for new installations and when user hasn't explicitly selected one
     if (!settings.primaryProvider) {
       const configuredProviders = this.getConfiguredProvidersFromSettings(settings);
       if (configuredProviders.length > 0) {
         settings.primaryProvider = configuredProviders[0];
-        console.log(`Auto-selected primary Search provider: ${configuredProviders[0]}`);
+        console.log(`[SearchProviderFactory] Auto-selected primary provider: ${configuredProviders[0]}`);
         if (configuredProviders.length > 1 && !settings.fallbackProvider) {
           settings.fallbackProvider = configuredProviders[1];
-          console.log(`Auto-selected fallback Search provider: ${configuredProviders[1]}`);
+          console.log(`[SearchProviderFactory] Auto-selected fallback provider: ${configuredProviders[1]}`);
         }
       }
     }
@@ -140,20 +205,21 @@ export class SearchProviderFactory {
   }
 
   /**
-   * Save settings to disk
-   * API keys are stored directly so they can be used
+   * Save settings to encrypted database
    */
   static saveSettings(settings: SearchSettings): void {
     try {
+      if (!SecureSettingsRepository.isInitialized()) {
+        throw new Error('SecureSettingsRepository not initialized');
+      }
+
+      const repository = SecureSettingsRepository.getInstance();
+
       // Load existing settings to preserve API keys that weren't changed
       let existingSettings: SearchSettings = { ...DEFAULT_SETTINGS };
-      try {
-        if (this.settingsPath && fs.existsSync(this.settingsPath)) {
-          const data = fs.readFileSync(this.settingsPath, 'utf-8');
-          existingSettings = JSON.parse(data);
-        }
-      } catch {
-        // Ignore errors reading existing settings
+      const stored = repository.load<SearchSettings>('search');
+      if (stored) {
+        existingSettings = stored;
       }
 
       // Merge settings, preserving existing API keys if new ones aren't provided
@@ -174,10 +240,13 @@ export class SearchProviderFactory {
           : existingSettings.google,
       };
 
-      fs.writeFileSync(this.settingsPath, JSON.stringify(settingsToSave, null, 2));
+      // Save to encrypted database
+      repository.save('search', settingsToSave);
       this.cachedSettings = settingsToSave;
+
+      console.log('[SearchProviderFactory] Settings saved to encrypted database');
     } catch (error) {
-      console.error('Failed to save Search settings:', error);
+      console.error('[SearchProviderFactory] Failed to save settings:', error);
       throw error;
     }
   }

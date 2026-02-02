@@ -1,8 +1,8 @@
 /**
  * MCP Settings Manager
  *
- * Manages MCP server configurations with encrypted credential storage.
- * Follows the same pattern as LLMProviderFactory for settings management.
+ * Manages MCP server configurations with encrypted storage.
+ * Settings are stored encrypted in the database using SecureSettingsRepository.
  */
 
 import { app, safeStorage } from 'electron';
@@ -15,8 +15,9 @@ import {
   DEFAULT_MCP_SETTINGS,
 } from './types';
 import { v4 as uuidv4 } from 'uuid';
+import { SecureSettingsRepository } from '../database/SecureSettingsRepository';
 
-const SETTINGS_FILE = 'mcp-settings.json';
+const LEGACY_SETTINGS_FILE = 'mcp-settings.json';
 const MASKED_VALUE = '***configured***';
 const ENCRYPTED_PREFIX = 'encrypted:';
 
@@ -128,9 +129,10 @@ function decryptSettings(settings: MCPSettings): MCPSettings {
  * MCP Settings Manager
  */
 export class MCPSettingsManager {
-  private static settingsPath: string;
+  private static legacySettingsPath: string;
   private static cachedSettings: MCPSettings | null = null;
   private static initialized = false;
+  private static migrationCompleted = false;
   private static batchMode = false; // When true, defer saves until batch mode ends
   private static pendingSave = false;
 
@@ -141,14 +143,80 @@ export class MCPSettingsManager {
     if (this.initialized) return;
 
     const userDataPath = app.getPath('userData');
-    this.settingsPath = path.join(userDataPath, SETTINGS_FILE);
+    this.legacySettingsPath = path.join(userDataPath, LEGACY_SETTINGS_FILE);
     this.initialized = true;
 
-    console.log('[MCP Settings] Initialized with path:', this.settingsPath);
+    console.log('[MCP Settings] Initialized');
+
+    // Migrate from legacy JSON file to encrypted database
+    this.migrateFromLegacyFile();
   }
 
   /**
-   * Load settings from disk
+   * Migrate settings from legacy JSON file to encrypted database
+   */
+  private static migrateFromLegacyFile(): void {
+    if (this.migrationCompleted) return;
+
+    try {
+      if (!SecureSettingsRepository.isInitialized()) {
+        console.log('[MCP Settings] SecureSettingsRepository not yet initialized, skipping migration');
+        return;
+      }
+
+      const repository = SecureSettingsRepository.getInstance();
+
+      if (repository.exists('mcp')) {
+        console.log('[MCP Settings] Settings already in database, skipping migration');
+        this.migrationCompleted = true;
+        return;
+      }
+
+      if (!fs.existsSync(this.legacySettingsPath)) {
+        console.log('[MCP Settings] No legacy settings file found');
+        this.migrationCompleted = true;
+        return;
+      }
+
+      console.log('[MCP Settings] Migrating settings from legacy JSON file to encrypted database...');
+
+      // Create backup before migration
+      const backupPath = this.legacySettingsPath + '.migration-backup';
+      fs.copyFileSync(this.legacySettingsPath, backupPath);
+
+      try {
+        const data = fs.readFileSync(this.legacySettingsPath, 'utf-8');
+        const parsed = JSON.parse(data);
+
+        const merged = {
+          ...DEFAULT_MCP_SETTINGS,
+          ...parsed,
+          servers: parsed.servers || [],
+        };
+
+        // Decrypt any existing encrypted values before saving to the new encrypted database
+        const decrypted = decryptSettings(merged);
+
+        repository.save('mcp', decrypted);
+        console.log('[MCP Settings] Settings migrated to encrypted database');
+
+        // Migration successful - delete backup and original
+        fs.unlinkSync(backupPath);
+        fs.unlinkSync(this.legacySettingsPath);
+        console.log('[MCP Settings] Migration complete, cleaned up legacy files');
+
+        this.migrationCompleted = true;
+      } catch (migrationError) {
+        console.error('[MCP Settings] Migration failed, backup preserved at:', backupPath);
+        throw migrationError;
+      }
+    } catch (error) {
+      console.error('[MCP Settings] Migration failed:', error);
+    }
+  }
+
+  /**
+   * Load settings from encrypted database
    */
   static loadSettings(): MCPSettings {
     this.ensureInitialized();
@@ -158,35 +226,31 @@ export class MCPSettingsManager {
     }
 
     try {
-      if (fs.existsSync(this.settingsPath)) {
-        const data = fs.readFileSync(this.settingsPath, 'utf-8');
-        const parsed = JSON.parse(data);
-
-        // Merge with defaults to handle missing fields from older versions
-        const merged = {
-          ...DEFAULT_MCP_SETTINGS,
-          ...parsed,
-          // Ensure servers array exists
-          servers: parsed.servers || [],
-        };
-
-        // Decrypt credentials
-        this.cachedSettings = decryptSettings(merged);
-        console.log(`[MCP Settings] Loaded ${this.cachedSettings.servers.length} server(s)`);
-      } else {
-        console.log('[MCP Settings] No settings file found, using defaults');
-        this.cachedSettings = { ...DEFAULT_MCP_SETTINGS };
+      if (SecureSettingsRepository.isInitialized()) {
+        const repository = SecureSettingsRepository.getInstance();
+        const stored = repository.load<MCPSettings>('mcp');
+        if (stored) {
+          const merged = {
+            ...DEFAULT_MCP_SETTINGS,
+            ...stored,
+            servers: stored.servers || [],
+          };
+          this.cachedSettings = merged;
+          console.log(`[MCP Settings] Loaded ${this.cachedSettings.servers.length} server(s) from encrypted database`);
+          return this.cachedSettings;
+        }
       }
     } catch (error) {
       console.error('[MCP Settings] Failed to load settings:', error);
-      this.cachedSettings = { ...DEFAULT_MCP_SETTINGS };
     }
 
+    console.log('[MCP Settings] No settings found, using defaults');
+    this.cachedSettings = { ...DEFAULT_MCP_SETTINGS };
     return this.cachedSettings;
   }
 
   /**
-   * Save settings to disk
+   * Save settings to encrypted database
    */
   static saveSettings(settings: MCPSettings): void {
     this.ensureInitialized();
@@ -204,14 +268,17 @@ export class MCPSettingsManager {
   }
 
   /**
-   * Immediately save settings to disk (bypasses batch mode)
+   * Immediately save settings to database (bypasses batch mode)
    */
   private static saveSettingsImmediate(settings: MCPSettings): void {
     try {
-      // Encrypt credentials before saving
-      const encrypted = encryptSettings(settings);
-      fs.writeFileSync(this.settingsPath, JSON.stringify(encrypted, null, 2));
-      console.log(`[MCP Settings] Saved ${settings.servers.length} server(s)`);
+      if (!SecureSettingsRepository.isInitialized()) {
+        throw new Error('SecureSettingsRepository not initialized');
+      }
+
+      const repository = SecureSettingsRepository.getInstance();
+      repository.save('mcp', settings);
+      console.log(`[MCP Settings] Saved ${settings.servers.length} server(s) to encrypted database`);
     } catch (error) {
       console.error('[MCP Settings] Failed to save settings:', error);
       throw error;
@@ -220,7 +287,7 @@ export class MCPSettingsManager {
 
   /**
    * Enter batch mode - defers all saves until endBatch is called
-   * Use this during initialization to avoid redundant disk writes
+   * Use this during initialization to avoid redundant database writes
    */
   static beginBatch(): void {
     this.batchMode = true;

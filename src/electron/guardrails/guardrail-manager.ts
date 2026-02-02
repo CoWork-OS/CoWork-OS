@@ -2,15 +2,16 @@
  * Guardrail Manager
  *
  * Manages user-configurable safety guardrails for the agent.
- * Provides settings storage and helper methods for enforcement.
+ * Settings are stored encrypted in the database using SecureSettingsRepository.
  */
 
 import { app } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
 import { GuardrailSettings, DEFAULT_BLOCKED_COMMAND_PATTERNS, DEFAULT_TRUSTED_COMMAND_PATTERNS } from '../../shared/types';
+import { SecureSettingsRepository } from '../database/SecureSettingsRepository';
 
-const SETTINGS_FILE = 'guardrail-settings.json';
+const LEGACY_SETTINGS_FILE = 'guardrail-settings.json';
 
 const DEFAULT_SETTINGS: GuardrailSettings = {
   // Token Budget
@@ -43,19 +44,77 @@ const DEFAULT_SETTINGS: GuardrailSettings = {
 };
 
 export class GuardrailManager {
-  private static settingsPath: string;
+  private static legacySettingsPath: string;
   private static cachedSettings: GuardrailSettings | null = null;
+  private static migrationCompleted = false;
 
   /**
-   * Initialize the GuardrailManager with the settings path
+   * Initialize the GuardrailManager
    */
   static initialize(): void {
     const userDataPath = app.getPath('userData');
-    this.settingsPath = path.join(userDataPath, SETTINGS_FILE);
+    this.legacySettingsPath = path.join(userDataPath, LEGACY_SETTINGS_FILE);
+
+    // Migrate from legacy JSON file to encrypted database
+    this.migrateFromLegacyFile();
   }
 
   /**
-   * Load settings from disk (with caching)
+   * Migrate settings from legacy JSON file to encrypted database
+   */
+  private static migrateFromLegacyFile(): void {
+    if (this.migrationCompleted) return;
+
+    try {
+      if (!SecureSettingsRepository.isInitialized()) {
+        console.log('[GuardrailManager] SecureSettingsRepository not yet initialized, skipping migration');
+        return;
+      }
+
+      const repository = SecureSettingsRepository.getInstance();
+
+      if (repository.exists('guardrails')) {
+        console.log('[GuardrailManager] Settings already in database, skipping migration');
+        this.migrationCompleted = true;
+        return;
+      }
+
+      if (!fs.existsSync(this.legacySettingsPath)) {
+        console.log('[GuardrailManager] No legacy settings file found');
+        this.migrationCompleted = true;
+        return;
+      }
+
+      console.log('[GuardrailManager] Migrating settings from legacy JSON file to encrypted database...');
+
+      // Create backup before migration
+      const backupPath = this.legacySettingsPath + '.migration-backup';
+      fs.copyFileSync(this.legacySettingsPath, backupPath);
+
+      try {
+        const data = fs.readFileSync(this.legacySettingsPath, 'utf-8');
+        const legacySettings = { ...DEFAULT_SETTINGS, ...JSON.parse(data) };
+
+        repository.save('guardrails', legacySettings);
+        console.log('[GuardrailManager] Settings migrated to encrypted database');
+
+        // Migration successful - delete backup and original
+        fs.unlinkSync(backupPath);
+        fs.unlinkSync(this.legacySettingsPath);
+        console.log('[GuardrailManager] Migration complete, cleaned up legacy files');
+
+        this.migrationCompleted = true;
+      } catch (migrationError) {
+        console.error('[GuardrailManager] Migration failed, backup preserved at:', backupPath);
+        throw migrationError;
+      }
+    } catch (error) {
+      console.error('[GuardrailManager] Migration failed:', error);
+    }
+  }
+
+  /**
+   * Load settings from encrypted database (with caching)
    */
   static loadSettings(): GuardrailSettings {
     if (this.cachedSettings) {
@@ -63,30 +122,35 @@ export class GuardrailManager {
     }
 
     try {
-      if (fs.existsSync(this.settingsPath)) {
-        const data = fs.readFileSync(this.settingsPath, 'utf-8');
-        const parsed = JSON.parse(data);
-        // Merge with defaults to handle missing fields from older versions
-        this.cachedSettings = { ...DEFAULT_SETTINGS, ...parsed };
-      } else {
-        this.cachedSettings = { ...DEFAULT_SETTINGS };
+      if (SecureSettingsRepository.isInitialized()) {
+        const repository = SecureSettingsRepository.getInstance();
+        const stored = repository.load<GuardrailSettings>('guardrails');
+        if (stored) {
+          this.cachedSettings = { ...DEFAULT_SETTINGS, ...stored };
+          return this.cachedSettings;
+        }
       }
     } catch (error) {
       console.error('[GuardrailManager] Failed to load settings:', error);
-      this.cachedSettings = { ...DEFAULT_SETTINGS };
     }
 
-    return this.cachedSettings!;
+    this.cachedSettings = { ...DEFAULT_SETTINGS };
+    return this.cachedSettings;
   }
 
   /**
-   * Save settings to disk
+   * Save settings to encrypted database
    */
   static saveSettings(settings: GuardrailSettings): void {
     try {
-      fs.writeFileSync(this.settingsPath, JSON.stringify(settings, null, 2));
+      if (!SecureSettingsRepository.isInitialized()) {
+        throw new Error('SecureSettingsRepository not initialized');
+      }
+
+      const repository = SecureSettingsRepository.getInstance();
+      repository.save('guardrails', settings);
       this.cachedSettings = settings;
-      console.log('[GuardrailManager] Settings saved');
+      console.log('[GuardrailManager] Settings saved to encrypted database');
     } catch (error) {
       console.error('[GuardrailManager] Failed to save settings:', error);
       throw error;

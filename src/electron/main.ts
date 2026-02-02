@@ -1,8 +1,18 @@
 import path from 'path';
 import { app, BrowserWindow, ipcMain, dialog, session, shell, Notification } from 'electron';
 import { DatabaseManager } from './database/schema';
+import { SecureSettingsRepository } from './database/SecureSettingsRepository';
 import { setupIpcHandlers, getNotificationService } from './ipc/handlers';
+import { setupMissionControlHandlers } from './ipc/mission-control-handlers';
+import { TaskSubscriptionRepository } from './agents/TaskSubscriptionRepository';
+import { StandupReportService } from './reports/StandupReportService';
+import { HeartbeatService, HeartbeatServiceDeps } from './agents/HeartbeatService';
+import { AgentRoleRepository } from './agents/AgentRoleRepository';
+import { MentionRepository } from './agents/MentionRepository';
+import { ActivityRepository } from './activity/ActivityRepository';
+import { WorkingStateRepository } from './agents/WorkingStateRepository';
 import { AgentDaemon } from './agent/daemon';
+import { TaskRepository, WorkspaceRepository } from './database/repositories';
 import { LLMProviderFactory } from './agent/llm';
 import { SearchProviderFactory } from './agent/search';
 import { ChannelGateway } from './gateway';
@@ -121,6 +131,11 @@ app.whenReady().then(async () => {
 
   // Initialize database
   dbManager = new DatabaseManager();
+
+  // Initialize secure settings repository for encrypted settings storage
+  // This must be done early so all settings managers can use it
+  new SecureSettingsRepository(dbManager.getDatabase());
+  console.log('[Main] SecureSettingsRepository initialized');
 
   // Initialize agent daemon
   agentDaemon = new AgentDaemon(dbManager);
@@ -292,6 +307,68 @@ app.whenReady().then(async () => {
 
   // Setup IPC handlers
   await setupIpcHandlers(dbManager, agentDaemon, channelGateway);
+
+  // Initialize Mission Control services
+  try {
+    const db = dbManager.getDatabase();
+    const agentRoleRepo = new AgentRoleRepository(db);
+    const mentionRepo = new MentionRepository(db);
+    const activityRepo = new ActivityRepository(db);
+    const workingStateRepo = new WorkingStateRepository(db);
+    const taskSubscriptionRepo = new TaskSubscriptionRepository(db);
+    const standupService = new StandupReportService(db);
+
+    // Create repositories for heartbeat service
+    const taskRepo = new TaskRepository(db);
+    const workspaceRepo = new WorkspaceRepository(db);
+
+    // Initialize HeartbeatService with dependencies
+    const heartbeatDeps: HeartbeatServiceDeps = {
+      agentRoleRepo,
+      mentionRepo,
+      activityRepo,
+      workingStateRepo,
+      createTask: async (workspaceId, prompt, title, _agentRoleId) => {
+        // Create task via agentDaemon (doesn't support assignedAgentRoleId directly)
+        const task = await agentDaemon.createTask({
+          title,
+          prompt,
+          workspaceId,
+        });
+        // Note: Task assignment would need to be done separately if needed
+        return task;
+      },
+      getTasksForAgent: (agentRoleId, workspaceId) => {
+        // Get assigned tasks for the agent using the task repository
+        const tasks = workspaceId
+          ? taskRepo.findByWorkspace(workspaceId)
+          : taskRepo.findByStatus(['pending', 'running']);
+        return tasks.filter((t: { assignedAgentRoleId?: string }) => t.assignedAgentRoleId === agentRoleId);
+      },
+      getDefaultWorkspaceId: () => {
+        // Get the first workspace as default
+        const workspaces = workspaceRepo.findAll();
+        return workspaces[0]?.id;
+      },
+    };
+
+    const heartbeatService = new HeartbeatService(heartbeatDeps);
+    await heartbeatService.start();
+
+    // Setup Mission Control IPC handlers
+    setupMissionControlHandlers({
+      agentRoleRepo,
+      taskSubscriptionRepo,
+      standupService,
+      heartbeatService,
+      getMainWindow: () => mainWindow,
+    });
+
+    console.log('[Main] Mission Control services initialized');
+  } catch (error) {
+    console.error('[Main] Failed to initialize Mission Control:', error);
+    // Don't fail app startup if Mission Control init fails
+  }
 
   // Register canvas:// protocol handler (must be after app.ready)
   registerCanvasProtocol();

@@ -525,7 +525,39 @@ export interface Skill {
 /**
  * Capability types that define what an agent role can do
  */
-export type AgentCapability = 'code' | 'review' | 'research' | 'test' | 'document' | 'plan' | 'design' | 'analyze';
+export type AgentCapability =
+  // Technical
+  | 'code'        // Writing and editing code
+  | 'review'      // Reviewing code or content
+  | 'test'        // Writing and running tests
+  | 'design'      // UI/UX and visual design
+  | 'ops'         // DevOps, CI/CD, infrastructure
+  | 'security'    // Security analysis and auditing
+  // Analysis & Research
+  | 'research'    // Investigating and gathering information
+  | 'analyze'     // Data analysis and insights
+  | 'plan'        // Planning and architecture
+  // Communication & Content
+  | 'document'    // Writing documentation
+  | 'write'       // General content writing
+  | 'communicate' // Customer support, outreach
+  | 'market'      // Marketing and growth
+  // Management
+  | 'manage'      // Project management, coordination
+  | 'product';    // Product management, feature planning
+
+/**
+ * Agent autonomy level determines how independently an agent can act
+ * - intern: Needs approval for most actions, learning the system
+ * - specialist: Works independently in their domain
+ * - lead: Full autonomy, can delegate tasks to other agents
+ */
+export type AgentAutonomyLevel = 'intern' | 'specialist' | 'lead';
+
+/**
+ * Heartbeat status for tracking agent wake cycles
+ */
+export type HeartbeatStatus = 'idle' | 'running' | 'sleeping' | 'error';
 
 /**
  * Tool restriction configuration for an agent role
@@ -556,6 +588,15 @@ export interface AgentRole {
   sortOrder: number;                     // Display order
   createdAt: number;
   updatedAt: number;
+
+  // Mission Control fields
+  autonomyLevel?: AgentAutonomyLevel;    // How independently the agent can act
+  soul?: string;                         // Extended personality (JSON: communication style, focus areas, preferences)
+  heartbeatEnabled?: boolean;            // Whether agent participates in heartbeat system
+  heartbeatIntervalMinutes?: number;     // How often agent wakes up (default: 15)
+  heartbeatStaggerOffset?: number;       // Offset in minutes to stagger wakeups
+  lastHeartbeatAt?: number;              // Timestamp of last heartbeat
+  heartbeatStatus?: HeartbeatStatus;     // Current heartbeat state
 }
 
 /**
@@ -573,6 +614,12 @@ export interface CreateAgentRoleRequest {
   systemPrompt?: string;
   capabilities: AgentCapability[];
   toolRestrictions?: AgentToolRestrictions;
+  // Mission Control fields
+  autonomyLevel?: AgentAutonomyLevel;
+  soul?: string;
+  heartbeatEnabled?: boolean;
+  heartbeatIntervalMinutes?: number;
+  heartbeatStaggerOffset?: number;
 }
 
 /**
@@ -592,6 +639,12 @@ export interface UpdateAgentRoleRequest {
   toolRestrictions?: AgentToolRestrictions;
   isActive?: boolean;
   sortOrder?: number;
+  // Mission Control fields
+  autonomyLevel?: AgentAutonomyLevel;
+  soul?: string;
+  heartbeatEnabled?: boolean;
+  heartbeatIntervalMinutes?: number;
+  heartbeatStaggerOffset?: number;
 }
 
 /**
@@ -605,6 +658,7 @@ export const DEFAULT_AGENT_ROLES: Omit<AgentRole, 'id' | 'createdAt' | 'updatedA
     icon: '💻',
     color: '#3b82f6',
     capabilities: ['code', 'document'],
+    autonomyLevel: 'specialist',
     isSystem: true,
     isActive: true,
     sortOrder: 1,
@@ -616,6 +670,7 @@ export const DEFAULT_AGENT_ROLES: Omit<AgentRole, 'id' | 'createdAt' | 'updatedA
     icon: '🔍',
     color: '#8b5cf6',
     capabilities: ['review', 'analyze'],
+    autonomyLevel: 'specialist',
     isSystem: true,
     isActive: true,
     sortOrder: 2,
@@ -627,6 +682,7 @@ export const DEFAULT_AGENT_ROLES: Omit<AgentRole, 'id' | 'createdAt' | 'updatedA
     icon: '🔬',
     color: '#10b981',
     capabilities: ['research', 'analyze', 'document'],
+    autonomyLevel: 'specialist',
     isSystem: true,
     isActive: true,
     sortOrder: 3,
@@ -638,6 +694,7 @@ export const DEFAULT_AGENT_ROLES: Omit<AgentRole, 'id' | 'createdAt' | 'updatedA
     icon: '🧪',
     color: '#f59e0b',
     capabilities: ['test', 'review'],
+    autonomyLevel: 'specialist',
     isSystem: true,
     isActive: true,
     sortOrder: 4,
@@ -649,11 +706,196 @@ export const DEFAULT_AGENT_ROLES: Omit<AgentRole, 'id' | 'createdAt' | 'updatedA
     icon: '🏗️',
     color: '#ec4899',
     capabilities: ['plan', 'design', 'analyze'],
+    autonomyLevel: 'lead',  // Can delegate tasks to other agents
     isSystem: true,
     isActive: true,
     sortOrder: 5,
   },
+  {
+    name: 'writer',
+    displayName: 'Content Writer',
+    description: 'Writes documentation, blog posts, and marketing copy',
+    icon: '✍️',
+    color: '#06b6d4',
+    capabilities: ['document', 'research'],
+    autonomyLevel: 'specialist',
+    isSystem: true,
+    isActive: true,
+    sortOrder: 6,
+  },
+  {
+    name: 'designer',
+    displayName: 'Designer',
+    description: 'Creates UI mockups, diagrams, and visual designs',
+    icon: '🎨',
+    color: '#d946ef',
+    capabilities: ['design', 'plan'],
+    autonomyLevel: 'specialist',
+    isSystem: true,
+    isActive: true,
+    sortOrder: 7,
+  },
+  // === General Purpose Agents ===
+  {
+    name: 'project_manager',
+    displayName: 'Project Manager',
+    description: 'Coordinates tasks, tracks progress, manages timelines and team workload',
+    icon: '📋',
+    color: '#0ea5e9',
+    capabilities: ['manage', 'plan', 'communicate'],
+    autonomyLevel: 'lead',
+    isSystem: true,
+    isActive: true,
+    sortOrder: 8,
+  },
+  {
+    name: 'product_manager',
+    displayName: 'Product Manager',
+    description: 'Defines features, writes user stories, prioritizes backlog',
+    icon: '🎯',
+    color: '#14b8a6',
+    capabilities: ['product', 'plan', 'research'],
+    autonomyLevel: 'lead',
+    isSystem: true,
+    isActive: true,
+    sortOrder: 9,
+  },
+  {
+    name: 'data_analyst',
+    displayName: 'Data Analyst',
+    description: 'Analyzes data, creates reports, finds insights and trends',
+    icon: '📊',
+    color: '#6366f1',
+    capabilities: ['analyze', 'research', 'document'],
+    autonomyLevel: 'specialist',
+    isSystem: true,
+    isActive: true,
+    sortOrder: 10,
+  },
+  {
+    name: 'marketing',
+    displayName: 'Marketing Specialist',
+    description: 'Creates campaigns, social media content, growth strategies',
+    icon: '📣',
+    color: '#f43f5e',
+    capabilities: ['market', 'write', 'research'],
+    autonomyLevel: 'specialist',
+    isSystem: true,
+    isActive: true,
+    sortOrder: 11,
+  },
+  {
+    name: 'support',
+    displayName: 'Support Agent',
+    description: 'Handles user queries, troubleshooting, customer communication',
+    icon: '💬',
+    color: '#22c55e',
+    capabilities: ['communicate', 'research', 'document'],
+    autonomyLevel: 'specialist',
+    isSystem: true,
+    isActive: true,
+    sortOrder: 12,
+  },
+  {
+    name: 'devops',
+    displayName: 'DevOps Engineer',
+    description: 'Manages CI/CD pipelines, deployment, infrastructure and monitoring',
+    icon: '⚙️',
+    color: '#f97316',
+    capabilities: ['ops', 'code', 'security'],
+    autonomyLevel: 'specialist',
+    isSystem: true,
+    isActive: true,
+    sortOrder: 13,
+  },
+  {
+    name: 'security_analyst',
+    displayName: 'Security Analyst',
+    description: 'Performs security audits, vulnerability assessments, compliance checks',
+    icon: '🔒',
+    color: '#ef4444',
+    capabilities: ['security', 'review', 'analyze'],
+    autonomyLevel: 'specialist',
+    isSystem: true,
+    isActive: true,
+    sortOrder: 14,
+  },
+  {
+    name: 'assistant',
+    displayName: 'General Assistant',
+    description: 'Versatile helper for miscellaneous tasks, scheduling, and coordination',
+    icon: '🤖',
+    color: '#64748b',
+    capabilities: ['communicate', 'research', 'manage'],
+    autonomyLevel: 'intern',
+    isSystem: true,
+    isActive: true,
+    sortOrder: 15,
+  },
 ];
+
+// ============ Mission Control Types ============
+
+/**
+ * Task subscription for auto-notifications
+ * Agents subscribed to a task receive updates when new comments/activities occur
+ */
+export interface TaskSubscription {
+  id: string;
+  taskId: string;
+  agentRoleId: string;
+  subscriptionReason: 'assigned' | 'mentioned' | 'commented' | 'manual';
+  subscribedAt: number;
+}
+
+/**
+ * Daily standup report aggregating task status
+ */
+export interface StandupReport {
+  id: string;
+  workspaceId: string;
+  reportDate: string;  // YYYY-MM-DD format
+  completedTaskIds: string[];
+  inProgressTaskIds: string[];
+  blockedTaskIds: string[];
+  summary: string;
+  deliveredToChannel?: string;  // channel:id format
+  createdAt: number;
+}
+
+/**
+ * Result from a heartbeat check
+ */
+export interface HeartbeatResult {
+  agentRoleId: string;
+  status: 'ok' | 'work_done' | 'error';
+  pendingMentions: number;
+  assignedTasks: number;
+  relevantActivities: number;
+  taskCreated?: string;  // ID of task created if work was done
+  error?: string;
+}
+
+/**
+ * Heartbeat configuration for an agent
+ */
+export interface HeartbeatConfig {
+  heartbeatEnabled?: boolean;
+  heartbeatIntervalMinutes?: number;
+  heartbeatStaggerOffset?: number;
+}
+
+/**
+ * Heartbeat event emitted during heartbeat execution
+ */
+export interface HeartbeatEvent {
+  type: 'started' | 'completed' | 'error' | 'work_found' | 'no_work';
+  agentRoleId: string;
+  agentName: string;
+  timestamp: number;
+  result?: HeartbeatResult;
+  error?: string;
+}
 
 /**
  * Board column for task organization (Kanban)
@@ -931,6 +1173,28 @@ export const IPC_CHANNELS = {
   MENTION_COMPLETE: 'mention:complete',
   MENTION_DISMISS: 'mention:dismiss',
   MENTION_EVENT: 'mention:event',
+
+  // Mission Control - Heartbeat System
+  HEARTBEAT_GET_CONFIG: 'heartbeat:getConfig',
+  HEARTBEAT_UPDATE_CONFIG: 'heartbeat:updateConfig',
+  HEARTBEAT_TRIGGER: 'heartbeat:trigger',
+  HEARTBEAT_GET_STATUS: 'heartbeat:getStatus',
+  HEARTBEAT_GET_ALL_STATUS: 'heartbeat:getAllStatus',
+  HEARTBEAT_EVENT: 'heartbeat:event',
+
+  // Mission Control - Task Subscriptions
+  SUBSCRIPTION_LIST: 'subscription:list',
+  SUBSCRIPTION_ADD: 'subscription:add',
+  SUBSCRIPTION_REMOVE: 'subscription:remove',
+  SUBSCRIPTION_GET_SUBSCRIBERS: 'subscription:getSubscribers',
+  SUBSCRIPTION_GET_FOR_AGENT: 'subscription:getForAgent',
+  SUBSCRIPTION_EVENT: 'subscription:event',
+
+  // Mission Control - Standup Reports
+  STANDUP_GENERATE: 'standup:generate',
+  STANDUP_GET_LATEST: 'standup:getLatest',
+  STANDUP_LIST: 'standup:list',
+  STANDUP_DELIVER: 'standup:deliver',
 
   // Task Board (Kanban)
   TASK_MOVE_COLUMN: 'task:moveColumn',

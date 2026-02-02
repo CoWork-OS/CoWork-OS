@@ -1,35 +1,52 @@
 /**
  * Tests for Tailscale Settings Manager
+ *
+ * Now tests the SecureSettingsRepository-based implementation
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-let mockSettings: Record<string, unknown> = {};
-let writeCount = 0;
+// Mock repository storage
+let mockStoredSettings: Record<string, unknown> | undefined = undefined;
+const mockRepositorySave = vi.fn().mockImplementation((category: string, settings: unknown) => {
+  mockStoredSettings = settings as Record<string, unknown>;
+});
+const mockRepositoryLoad = vi.fn().mockImplementation(() => mockStoredSettings);
+const mockRepositoryExists = vi.fn().mockImplementation(() => mockStoredSettings !== undefined);
 
-// Mock fs module
-vi.mock('fs', () => ({
-  default: {
-    existsSync: vi.fn().mockImplementation(() => Object.keys(mockSettings).length > 0),
-    readFileSync: vi.fn().mockImplementation(() => JSON.stringify(mockSettings)),
-    writeFileSync: vi.fn().mockImplementation((path: string, data: string) => {
-      mockSettings = JSON.parse(data);
-      writeCount++;
-    }),
-  },
-  existsSync: vi.fn().mockImplementation(() => Object.keys(mockSettings).length > 0),
-  readFileSync: vi.fn().mockImplementation(() => JSON.stringify(mockSettings)),
-  writeFileSync: vi.fn().mockImplementation((path: string, data: string) => {
-    mockSettings = JSON.parse(data);
-    writeCount++;
-  }),
-}));
+// Mock SecureSettingsRepository
+vi.mock('../../database/SecureSettingsRepository', () => {
+  return {
+    SecureSettingsRepository: {
+      isInitialized: vi.fn().mockReturnValue(true),
+      getInstance: vi.fn().mockImplementation(() => ({
+        save: mockRepositorySave,
+        load: mockRepositoryLoad,
+        exists: mockRepositoryExists,
+      })),
+    },
+  };
+});
 
 // Mock electron
 vi.mock('electron', () => ({
   app: {
     getPath: vi.fn().mockReturnValue('/mock/user/data'),
   },
+}));
+
+// Mock fs module (for legacy migration - not used but imported)
+vi.mock('fs', () => ({
+  default: {
+    existsSync: vi.fn().mockReturnValue(false),
+    readFileSync: vi.fn(),
+    writeFileSync: vi.fn(),
+    renameSync: vi.fn(),
+  },
+  existsSync: vi.fn().mockReturnValue(false),
+  readFileSync: vi.fn(),
+  writeFileSync: vi.fn(),
+  renameSync: vi.fn(),
 }));
 
 // Import after mocking
@@ -48,25 +65,30 @@ describe('DEFAULT_TAILSCALE_SETTINGS', () => {
 describe('TailscaleSettingsManager', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockSettings = {};
-    writeCount = 0;
+    mockStoredSettings = undefined;
     TailscaleSettingsManager.clearCache();
+    // Reset migration flag
+    (TailscaleSettingsManager as any).migrationCompleted = false;
   });
 
   describe('loadSettings', () => {
-    it('should return defaults when no settings file exists', () => {
+    it('should return defaults when no settings exist', () => {
+      mockRepositoryLoad.mockReturnValue(undefined);
+      mockRepositoryExists.mockReturnValue(false);
+
       const settings = TailscaleSettingsManager.loadSettings();
 
       expect(settings.mode).toBe('off');
       expect(settings.resetOnExit).toBe(true);
     });
 
-    it('should load existing settings', () => {
-      mockSettings = {
+    it('should load existing settings from repository', () => {
+      mockStoredSettings = {
         mode: 'funnel',
         resetOnExit: false,
         lastHostname: 'my-machine.tail1234.ts.net',
       };
+      mockRepositoryLoad.mockReturnValue(mockStoredSettings);
 
       const settings = TailscaleSettingsManager.loadSettings();
 
@@ -76,9 +98,10 @@ describe('TailscaleSettingsManager', () => {
     });
 
     it('should merge with defaults for missing fields', () => {
-      mockSettings = {
+      mockStoredSettings = {
         mode: 'serve',
       };
+      mockRepositoryLoad.mockReturnValue(mockStoredSettings);
 
       const settings = TailscaleSettingsManager.loadSettings();
 
@@ -87,10 +110,12 @@ describe('TailscaleSettingsManager', () => {
     });
 
     it('should cache loaded settings', () => {
-      mockSettings = { mode: 'serve' };
+      mockStoredSettings = { mode: 'serve' };
+      mockRepositoryLoad.mockReturnValue(mockStoredSettings);
 
       const settings1 = TailscaleSettingsManager.loadSettings();
-      mockSettings = { mode: 'funnel' }; // Change mock
+      mockStoredSettings = { mode: 'funnel' }; // Change mock
+      mockRepositoryLoad.mockReturnValue(mockStoredSettings);
       const settings2 = TailscaleSettingsManager.loadSettings();
 
       // Should return cached value
@@ -99,80 +124,99 @@ describe('TailscaleSettingsManager', () => {
   });
 
   describe('saveSettings', () => {
-    it('should save settings to disk', () => {
-      const settings = TailscaleSettingsManager.loadSettings();
-      settings.mode = 'funnel';
+    it('should save settings to repository', () => {
+      const settings = { ...DEFAULT_TAILSCALE_SETTINGS, mode: 'funnel' as const };
       settings.lastHostname = 'test.ts.net';
 
       TailscaleSettingsManager.saveSettings(settings);
 
-      expect(writeCount).toBe(1);
-      expect(mockSettings.mode).toBe('funnel');
-      expect(mockSettings.lastHostname).toBe('test.ts.net');
+      expect(mockRepositorySave).toHaveBeenCalledWith('tailscale', expect.objectContaining({
+        mode: 'funnel',
+        lastHostname: 'test.ts.net',
+      }));
     });
 
     it('should update cache after save', () => {
+      mockRepositoryLoad.mockReturnValue(undefined);
       const settings = TailscaleSettingsManager.loadSettings();
       settings.mode = 'serve';
       TailscaleSettingsManager.saveSettings(settings);
 
+      mockRepositoryLoad.mockClear();
       const cached = TailscaleSettingsManager.loadSettings();
+
       expect(cached.mode).toBe('serve');
+      expect(mockRepositoryLoad).not.toHaveBeenCalled(); // Should use cache
     });
   });
 
   describe('updateSettings', () => {
     it('should update and save settings', () => {
+      mockRepositoryLoad.mockReturnValue(undefined);
+
       TailscaleSettingsManager.updateSettings({
         mode: 'funnel',
         lastHostname: 'test.ts.net',
       });
 
-      expect(mockSettings.mode).toBe('funnel');
-      expect(mockSettings.lastHostname).toBe('test.ts.net');
+      expect(mockRepositorySave).toHaveBeenCalledWith('tailscale', expect.objectContaining({
+        mode: 'funnel',
+        lastHostname: 'test.ts.net',
+      }));
     });
 
     it('should merge with existing settings', () => {
-      mockSettings = { mode: 'serve', resetOnExit: false };
-      TailscaleSettingsManager.clearCache();
+      mockStoredSettings = { mode: 'serve', resetOnExit: false };
+      mockRepositoryLoad.mockReturnValue(mockStoredSettings);
 
       TailscaleSettingsManager.updateSettings({ mode: 'funnel' });
 
-      expect(mockSettings.mode).toBe('funnel');
-      expect(mockSettings.resetOnExit).toBe(false); // preserved
+      expect(mockRepositorySave).toHaveBeenCalledWith('tailscale', expect.objectContaining({
+        mode: 'funnel',
+        resetOnExit: false, // preserved
+      }));
     });
   });
 
   describe('setMode', () => {
     it('should update mode setting', () => {
+      mockRepositoryLoad.mockReturnValue(undefined);
+
       const settings = TailscaleSettingsManager.setMode('funnel');
 
       expect(settings.mode).toBe('funnel');
-      expect(mockSettings.mode).toBe('funnel');
+      expect(mockRepositorySave).toHaveBeenCalledWith('tailscale', expect.objectContaining({
+        mode: 'funnel',
+      }));
     });
 
     it('should preserve other settings', () => {
-      mockSettings = {
+      mockStoredSettings = {
         mode: 'off',
         resetOnExit: false,
         lastHostname: 'test.ts.net',
       };
-      TailscaleSettingsManager.clearCache();
+      mockRepositoryLoad.mockReturnValue(mockStoredSettings);
 
       TailscaleSettingsManager.setMode('serve');
 
-      expect(mockSettings.resetOnExit).toBe(false);
-      expect(mockSettings.lastHostname).toBe('test.ts.net');
+      expect(mockRepositorySave).toHaveBeenCalledWith('tailscale', expect.objectContaining({
+        mode: 'serve',
+        resetOnExit: false,
+        lastHostname: 'test.ts.net',
+      }));
     });
   });
 
   describe('clearCache', () => {
     it('should clear the cached settings', () => {
-      mockSettings = { mode: 'serve' };
+      mockStoredSettings = { mode: 'serve' };
+      mockRepositoryLoad.mockReturnValue(mockStoredSettings);
       TailscaleSettingsManager.loadSettings();
 
       TailscaleSettingsManager.clearCache();
-      mockSettings = { mode: 'funnel' };
+      mockStoredSettings = { mode: 'funnel' };
+      mockRepositoryLoad.mockReturnValue(mockStoredSettings);
 
       const settings = TailscaleSettingsManager.loadSettings();
       expect(settings.mode).toBe('funnel');

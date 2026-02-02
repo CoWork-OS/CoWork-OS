@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Encrypted Settings Storage (SecureSettingsRepository)** - All settings now stored encrypted in database
+  - **OS Keychain Integration**: Settings encrypted using native OS keychain (macOS Keychain, Windows DPAPI, Linux libsecret)
+  - **Fallback Encryption**: App-level AES-256 encryption when OS keychain unavailable
+  - **Stable Machine ID**: Persistent machine identifier survives hostname changes and system updates
+  - **Data Integrity**: SHA-256 checksums detect corruption or tampering
+  - **Backup & Recovery**: Create encrypted backups of all settings, restore with optional overwrite
+  - **Health Checks**: `loadWithStatus()` and `checkHealth()` APIs for debugging encryption issues
+  - **Settings Categories**: voice, llm, search, appearance, personality, guardrails, hooks, mcp, controlplane, channels, builtintools, tailscale, claude-auth, queue, tray
+  - **Safe Migration**: Legacy JSON settings automatically migrated with backups preserved on failure
 - **Mobile Companions** - Connect iOS/Android devices as mobile nodes for device-specific actions
   - **Node Architecture**: Mobile devices connect as "nodes" via WebSocket with role-based authentication
   - **Device Capabilities**: Camera capture, location access, screen recording, SMS (Android only)

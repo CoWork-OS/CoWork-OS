@@ -16,12 +16,19 @@ import { OllamaProvider } from './ollama-provider';
 import { GeminiProvider } from './gemini-provider';
 import { OpenRouterProvider } from './openrouter-provider';
 import { OpenAIProvider } from './openai-provider';
+import { SecureSettingsRepository } from '../../database/SecureSettingsRepository';
 
-const SETTINGS_FILE = 'llm-settings.json';
+const LEGACY_SETTINGS_FILE = 'llm-settings.json';
 const MASKED_VALUE = '***configured***';
 const ENCRYPTED_PREFIX = 'encrypted:';
 
+// ============ Legacy Encryption Functions (for migration only) ============
+// These functions are only used to decrypt settings from legacy JSON files
+// during migration to the encrypted database. New settings use full-object
+// encryption via SecureSettingsRepository.
+
 /**
+ * @deprecated Used only for migration from legacy JSON files
  * Encrypt a secret using OS keychain via safeStorage
  */
 function encryptSecret(value?: string): string | undefined {
@@ -42,6 +49,7 @@ function encryptSecret(value?: string): string | undefined {
 }
 
 /**
+ * @deprecated Used only for migration from legacy JSON files
  * Decrypt a secret that was encrypted with safeStorage
  */
 function decryptSecret(value?: string): string | undefined {
@@ -76,6 +84,9 @@ function decryptSecret(value?: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Normalize a secret value, filtering out masked/encrypted values
+ */
 function normalizeSecret(value?: string): string | undefined {
   if (!value) return undefined;
   const trimmed = value.trim();
@@ -83,6 +94,10 @@ function normalizeSecret(value?: string): string | undefined {
   return trimmed;
 }
 
+/**
+ * @deprecated Used only for migration from legacy JSON files
+ * Decrypt all secrets in legacy settings
+ */
 function sanitizeSettings(settings: LLMSettings): LLMSettings {
   const sanitized: LLMSettings = { ...settings };
 
@@ -216,60 +231,124 @@ const DEFAULT_SETTINGS: LLMSettings = {
  * Factory for creating LLM providers
  */
 export class LLMProviderFactory {
-  private static settingsPath: string;
+  private static legacySettingsPath: string;
   private static cachedSettings: LLMSettings | null = null;
+  private static migrationCompleted = false;
 
   /**
-   * Initialize the settings path
+   * Initialize the factory
    */
   static initialize(): void {
     const userDataPath = app.getPath('userData');
-    this.settingsPath = path.join(userDataPath, SETTINGS_FILE);
+    this.legacySettingsPath = path.join(userDataPath, LEGACY_SETTINGS_FILE);
+
+    // Migrate from legacy JSON file to encrypted database
+    this.migrateFromLegacyFile();
   }
 
   /**
-   * Get the path to settings file (for testing)
+   * Migrate settings from legacy JSON file to encrypted database
+   */
+  private static migrateFromLegacyFile(): void {
+    if (this.migrationCompleted) return;
+
+    try {
+      // Check if SecureSettingsRepository is initialized
+      if (!SecureSettingsRepository.isInitialized()) {
+        console.log('[LLMProviderFactory] SecureSettingsRepository not yet initialized, skipping migration');
+        return;
+      }
+
+      const repository = SecureSettingsRepository.getInstance();
+
+      // Check if already migrated to database
+      if (repository.exists('llm')) {
+        console.log('[LLMProviderFactory] Settings already in database, skipping migration');
+        this.migrationCompleted = true;
+        return;
+      }
+
+      // Check if legacy file exists
+      if (!fs.existsSync(this.legacySettingsPath)) {
+        console.log('[LLMProviderFactory] No legacy settings file found');
+        this.migrationCompleted = true;
+        return;
+      }
+
+      console.log('[LLMProviderFactory] Migrating settings from legacy JSON file to encrypted database...');
+
+      // Create backup before migration
+      const backupPath = this.legacySettingsPath + '.migration-backup';
+      fs.copyFileSync(this.legacySettingsPath, backupPath);
+
+      try {
+        // Read and decrypt legacy settings
+        const data = fs.readFileSync(this.legacySettingsPath, 'utf-8');
+        const legacySettings = { ...DEFAULT_SETTINGS, ...JSON.parse(data) };
+        const decryptedSettings = sanitizeSettings(legacySettings);
+
+        // Save to encrypted database
+        repository.save('llm', decryptedSettings);
+        console.log('[LLMProviderFactory] Settings migrated to encrypted database');
+
+        // Migration successful - delete backup and original
+        fs.unlinkSync(backupPath);
+        fs.unlinkSync(this.legacySettingsPath);
+        console.log('[LLMProviderFactory] Migration complete, cleaned up legacy files');
+
+        this.migrationCompleted = true;
+      } catch (migrationError) {
+        console.error('[LLMProviderFactory] Migration failed, backup preserved at:', backupPath);
+        throw migrationError;
+      }
+    } catch (error) {
+      console.error('[LLMProviderFactory] Migration failed:', error);
+    }
+  }
+
+  /**
+   * Get the path to legacy settings file (for testing)
    */
   static getSettingsPath(): string {
-    return this.settingsPath;
+    return this.legacySettingsPath;
   }
 
   /**
-   * Load settings from disk
+   * Load settings from encrypted database
    */
   static loadSettings(): LLMSettings {
     if (this.cachedSettings) {
       return this.cachedSettings;
     }
 
-    let settings: LLMSettings;
-    let settingsFileExists = false;
+    let settings: LLMSettings = { ...DEFAULT_SETTINGS };
+    let settingsExist = false;
 
     try {
-      if (fs.existsSync(this.settingsPath)) {
-        settingsFileExists = true;
-        const data = fs.readFileSync(this.settingsPath, 'utf-8');
-        settings = { ...DEFAULT_SETTINGS, ...JSON.parse(data) };
-      } else {
-        settings = { ...DEFAULT_SETTINGS };
+      // Try to load from encrypted database
+      if (SecureSettingsRepository.isInitialized()) {
+        const repository = SecureSettingsRepository.getInstance();
+        const stored = repository.load<LLMSettings>('llm');
+        if (stored) {
+          settings = { ...DEFAULT_SETTINGS, ...stored };
+          settingsExist = true;
+        }
       }
     } catch (error) {
-      console.error('Failed to load LLM settings:', error);
-      settings = { ...DEFAULT_SETTINGS };
+      console.error('[LLMProviderFactory] Failed to load settings from database:', error);
     }
 
-    // Auto-detect provider if no settings file exists
-    if (!settingsFileExists) {
+    // Auto-detect provider if no settings exist
+    if (!settingsExist) {
       const detectedProvider = this.detectProviderFromSettings(settings);
       if (detectedProvider) {
         settings.providerType = detectedProvider;
-        console.log(`Auto-detected LLM provider: ${detectedProvider}`);
+        console.log(`[LLMProviderFactory] Auto-detected LLM provider: ${detectedProvider}`);
       }
     }
 
-    const sanitized = sanitizeSettings(settings);
-    this.cachedSettings = sanitized;
-    return sanitized;
+    this.cachedSettings = settings;
+    return settings;
   }
 
   /**
@@ -303,62 +382,24 @@ export class LLMProviderFactory {
   }
 
   /**
-   * Save settings to disk
+   * Save settings to encrypted database
    */
   static saveSettings(settings: LLMSettings): void {
     try {
-      // Encrypt sensitive data using OS keychain before saving
-      const settingsToSave = { ...settings };
-
-      // Encrypt API keys using safeStorage (OS keychain)
-      if (settingsToSave.anthropic?.apiKey) {
-        settingsToSave.anthropic = {
-          ...settingsToSave.anthropic,
-          apiKey: encryptSecret(settingsToSave.anthropic.apiKey),
-        };
+      if (!SecureSettingsRepository.isInitialized()) {
+        throw new Error('SecureSettingsRepository not initialized');
       }
 
-      if (settingsToSave.bedrock?.secretAccessKey) {
-        settingsToSave.bedrock = {
-          ...settingsToSave.bedrock,
-          secretAccessKey: encryptSecret(settingsToSave.bedrock.secretAccessKey),
-        };
-      }
+      const repository = SecureSettingsRepository.getInstance();
 
-      if (settingsToSave.ollama?.apiKey) {
-        settingsToSave.ollama = {
-          ...settingsToSave.ollama,
-          apiKey: encryptSecret(settingsToSave.ollama.apiKey),
-        };
-      }
-
-      if (settingsToSave.gemini?.apiKey) {
-        settingsToSave.gemini = {
-          ...settingsToSave.gemini,
-          apiKey: encryptSecret(settingsToSave.gemini.apiKey),
-        };
-      }
-
-      if (settingsToSave.openrouter?.apiKey) {
-        settingsToSave.openrouter = {
-          ...settingsToSave.openrouter,
-          apiKey: encryptSecret(settingsToSave.openrouter.apiKey),
-        };
-      }
-
-      if (settingsToSave.openai) {
-        settingsToSave.openai = {
-          ...settingsToSave.openai,
-          apiKey: settingsToSave.openai.apiKey ? encryptSecret(settingsToSave.openai.apiKey) : undefined,
-          accessToken: settingsToSave.openai.accessToken ? encryptSecret(settingsToSave.openai.accessToken) : undefined,
-          refreshToken: settingsToSave.openai.refreshToken ? encryptSecret(settingsToSave.openai.refreshToken) : undefined,
-        };
-      }
-
-      fs.writeFileSync(this.settingsPath, JSON.stringify(settingsToSave, null, 2));
+      // Save entire settings object to encrypted database
+      // No need for per-field encryption - the entire object is encrypted
+      repository.save('llm', settings);
       this.cachedSettings = settings;
+
+      console.log('[LLMProviderFactory] Settings saved to encrypted database');
     } catch (error) {
-      console.error('Failed to save LLM settings:', error);
+      console.error('[LLMProviderFactory] Failed to save settings:', error);
       throw error;
     }
   }

@@ -8,7 +8,7 @@
  * - Personality quirks (catchphrases, sign-offs)
  * - Relationship data (user name, milestones)
  *
- * Settings are persisted to disk in the userData directory.
+ * Settings are stored encrypted in the database using SecureSettingsRepository.
  */
 
 import { app } from 'electron';
@@ -33,8 +33,9 @@ import {
   getPersonalityById,
   getPersonaById,
 } from '../../shared/types';
+import { SecureSettingsRepository } from '../database/SecureSettingsRepository';
 
-const SETTINGS_FILE = 'personality-settings.json';
+const LEGACY_SETTINGS_FILE = 'personality-settings.json';
 
 const DEFAULT_AGENT_NAME = 'CoWork';
 
@@ -56,9 +57,10 @@ const MILESTONES = [1, 10, 25, 50, 100, 250, 500, 1000];
 const personalityEvents = new EventEmitter();
 
 export class PersonalityManager {
-  private static settingsPath: string;
+  private static legacySettingsPath: string;
   private static cachedSettings: PersonalitySettings | null = null;
   private static initialized = false;
+  private static migrationCompleted = false;
 
   /**
    * Subscribe to settings changed events.
@@ -86,16 +88,85 @@ export class PersonalityManager {
   }
 
   /**
-   * Initialize the PersonalityManager with the settings path
+   * Initialize the PersonalityManager
    */
   static initialize(): void {
     if (this.initialized) {
       return; // Already initialized
     }
     const userDataPath = app.getPath('userData');
-    this.settingsPath = path.join(userDataPath, SETTINGS_FILE);
+    this.legacySettingsPath = path.join(userDataPath, LEGACY_SETTINGS_FILE);
     this.initialized = true;
-    console.log('[PersonalityManager] Initialized with path:', this.settingsPath);
+    console.log('[PersonalityManager] Initialized');
+
+    // Migrate from legacy JSON file to encrypted database
+    this.migrateFromLegacyFile();
+  }
+
+  /**
+   * Migrate settings from legacy JSON file to encrypted database
+   */
+  private static migrateFromLegacyFile(): void {
+    if (this.migrationCompleted) return;
+
+    try {
+      // Check if SecureSettingsRepository is initialized
+      if (!SecureSettingsRepository.isInitialized()) {
+        console.log('[PersonalityManager] SecureSettingsRepository not yet initialized, skipping migration');
+        return;
+      }
+
+      const repository = SecureSettingsRepository.getInstance();
+
+      // Check if already migrated to database
+      if (repository.exists('personality')) {
+        console.log('[PersonalityManager] Settings already in database, skipping migration');
+        this.migrationCompleted = true;
+        return;
+      }
+
+      // Check if legacy file exists
+      if (!fs.existsSync(this.legacySettingsPath)) {
+        console.log('[PersonalityManager] No legacy settings file found');
+        this.migrationCompleted = true;
+        return;
+      }
+
+      console.log('[PersonalityManager] Migrating settings from legacy JSON file to encrypted database...');
+
+      // Create backup before migration
+      const backupPath = this.legacySettingsPath + '.migration-backup';
+      fs.copyFileSync(this.legacySettingsPath, backupPath);
+
+      try {
+        // Read legacy settings
+        const data = fs.readFileSync(this.legacySettingsPath, 'utf-8');
+        const parsed = JSON.parse(data);
+        const legacySettings = {
+          ...DEFAULT_SETTINGS,
+          ...parsed,
+          responseStyle: { ...DEFAULT_RESPONSE_STYLE, ...parsed.responseStyle },
+          quirks: { ...DEFAULT_QUIRKS, ...parsed.quirks },
+          relationship: { ...DEFAULT_RELATIONSHIP, ...parsed.relationship },
+        };
+
+        // Save to encrypted database
+        repository.save('personality', legacySettings);
+        console.log('[PersonalityManager] Settings migrated to encrypted database');
+
+        // Migration successful - delete backup and original
+        fs.unlinkSync(backupPath);
+        fs.unlinkSync(this.legacySettingsPath);
+        console.log('[PersonalityManager] Migration complete, cleaned up legacy files');
+
+        this.migrationCompleted = true;
+      } catch (migrationError) {
+        console.error('[PersonalityManager] Migration failed, backup preserved at:', backupPath);
+        throw migrationError;
+      }
+    } catch (error) {
+      console.error('[PersonalityManager] Migration failed:', error);
+    }
   }
 
   /**
@@ -108,31 +179,7 @@ export class PersonalityManager {
   }
 
   /**
-   * Atomically write settings to disk using a temp file + rename pattern
-   * This prevents file corruption if the app crashes mid-write
-   */
-  private static atomicWriteFile(filePath: string, data: string): void {
-    const tempPath = `${filePath}.tmp.${Date.now()}`;
-    try {
-      // Write to temp file first
-      fs.writeFileSync(tempPath, data, { encoding: 'utf-8', mode: 0o644 });
-      // Rename temp file to target (atomic on POSIX systems)
-      fs.renameSync(tempPath, filePath);
-    } catch (error) {
-      // Clean up temp file if it exists
-      try {
-        if (fs.existsSync(tempPath)) {
-          fs.unlinkSync(tempPath);
-        }
-      } catch {
-        // Ignore cleanup errors
-      }
-      throw error;
-    }
-  }
-
-  /**
-   * Load settings from disk (with caching)
+   * Load settings from encrypted database (with caching)
    */
   static loadSettings(): PersonalitySettings {
     this.ensureInitialized();
@@ -150,24 +197,27 @@ export class PersonalityManager {
     };
 
     try {
-      if (fs.existsSync(this.settingsPath)) {
-        const data = fs.readFileSync(this.settingsPath, 'utf-8');
-        const parsed = JSON.parse(data);
-        // Deep merge with defaults to handle missing nested fields
-        settings = {
-          ...DEFAULT_SETTINGS,
-          ...parsed,
-          responseStyle: { ...DEFAULT_RESPONSE_STYLE, ...parsed.responseStyle },
-          quirks: { ...DEFAULT_QUIRKS, ...parsed.quirks },
-          relationship: { ...DEFAULT_RELATIONSHIP, ...parsed.relationship },
-        };
-        // Validate values
-        if (!isValidPersonalityId(settings.activePersonality)) {
-          settings.activePersonality = DEFAULT_SETTINGS.activePersonality;
+      // Try to load from encrypted database
+      if (SecureSettingsRepository.isInitialized()) {
+        const repository = SecureSettingsRepository.getInstance();
+        const stored = repository.load<PersonalitySettings>('personality');
+        if (stored) {
+          settings = {
+            ...DEFAULT_SETTINGS,
+            ...stored,
+            responseStyle: { ...DEFAULT_RESPONSE_STYLE, ...stored.responseStyle },
+            quirks: { ...DEFAULT_QUIRKS, ...stored.quirks },
+            relationship: { ...DEFAULT_RELATIONSHIP, ...stored.relationship },
+          };
         }
-        if (!isValidPersonaId(settings.activePersona)) {
-          settings.activePersona = DEFAULT_SETTINGS.activePersona;
-        }
+      }
+
+      // Validate values
+      if (!isValidPersonalityId(settings.activePersonality)) {
+        settings.activePersonality = DEFAULT_SETTINGS.activePersonality;
+      }
+      if (!isValidPersonaId(settings.activePersona)) {
+        settings.activePersona = DEFAULT_SETTINGS.activePersona;
       }
     } catch (error) {
       console.error('[PersonalityManager] Failed to load settings:', error);
@@ -185,10 +235,14 @@ export class PersonalityManager {
   }
 
   /**
-   * Save settings to disk
+   * Save settings to encrypted database
    */
   static saveSettings(settings: PersonalitySettings): void {
     try {
+      if (!SecureSettingsRepository.isInitialized()) {
+        throw new Error('SecureSettingsRepository not initialized');
+      }
+
       // Load existing settings to preserve fields not being updated
       const existingSettings = this.loadSettings();
 
@@ -214,9 +268,10 @@ export class PersonalityManager {
           : existingSettings.relationship,
       };
 
-      this.atomicWriteFile(this.settingsPath, JSON.stringify(validatedSettings, null, 2));
+      const repository = SecureSettingsRepository.getInstance();
+      repository.save('personality', validatedSettings);
       this.cachedSettings = validatedSettings;
-      console.log('[PersonalityManager] Settings saved:', validatedSettings.activePersonality);
+      console.log('[PersonalityManager] Settings saved to encrypted database');
       this.emitSettingsChanged();
     } catch (error) {
       console.error('[PersonalityManager] Failed to save settings:', error);
@@ -697,7 +752,11 @@ You are ${agentName}, an AI assistant built into CoWork OS.
       }
     }
 
-    this.atomicWriteFile(this.settingsPath, JSON.stringify(newSettings, null, 2));
+    // Save to encrypted database
+    if (SecureSettingsRepository.isInitialized()) {
+      const repository = SecureSettingsRepository.getInstance();
+      repository.save('personality', newSettings);
+    }
     this.cachedSettings = newSettings;
     console.log('[PersonalityManager] Settings reset to defaults', preserveRelationship ? '(preserved relationship)' : '');
     this.emitSettingsChanged();

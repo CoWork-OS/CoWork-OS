@@ -3,14 +3,16 @@
  *
  * Manages parallel task execution with configurable concurrency limits.
  * Provides queue management, status tracking, and settings persistence.
+ * Settings are stored encrypted in the database using SecureSettingsRepository.
  */
 
 import { app } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
 import { Task, TaskStatus, QueueSettings, QueueStatus, DEFAULT_QUEUE_SETTINGS } from '../../shared/types';
+import { SecureSettingsRepository } from '../database/SecureSettingsRepository';
 
-const SETTINGS_FILE = 'queue-settings.json';
+const LEGACY_SETTINGS_FILE = 'queue-settings.json';
 
 // Forward declaration - will be set by daemon
 type DaemonCallbacks = {
@@ -26,19 +28,77 @@ export class TaskQueueManager {
   private runningTaskIds: Set<string> = new Set(); // Currently executing task IDs
   private taskStartTimes: Map<string, number> = new Map(); // Track when each task started
   private settings: QueueSettings;
-  private settingsPath: string;
+  private legacySettingsPath: string;
   private callbacks: DaemonCallbacks;
   private initialized: boolean = false;
   private timeoutCheckInterval?: ReturnType<typeof setInterval>;
+  private static migrationCompleted = false;
 
   constructor(callbacks: DaemonCallbacks) {
     this.callbacks = callbacks;
     const userDataPath = app.getPath('userData');
-    this.settingsPath = path.join(userDataPath, SETTINGS_FILE);
+    this.legacySettingsPath = path.join(userDataPath, LEGACY_SETTINGS_FILE);
+
+    // Migrate from legacy file if needed
+    this.migrateFromLegacyFile();
+
     this.settings = this.loadSettings();
 
     // Start periodic timeout check (every minute)
     this.timeoutCheckInterval = setInterval(() => this.checkForTimedOutTasks(), 60 * 1000);
+  }
+
+  /**
+   * Migrate settings from legacy JSON file to encrypted database
+   */
+  private migrateFromLegacyFile(): void {
+    if (TaskQueueManager.migrationCompleted) return;
+
+    try {
+      if (!SecureSettingsRepository.isInitialized()) {
+        return;
+      }
+
+      const repository = SecureSettingsRepository.getInstance();
+
+      if (repository.exists('queue')) {
+        console.log('[TaskQueueManager] Settings already in database, skipping migration');
+        TaskQueueManager.migrationCompleted = true;
+        return;
+      }
+
+      if (!fs.existsSync(this.legacySettingsPath)) {
+        TaskQueueManager.migrationCompleted = true;
+        return;
+      }
+
+      console.log('[TaskQueueManager] Migrating settings from legacy JSON file to encrypted database...');
+
+      // Create backup before migration
+      const backupPath = this.legacySettingsPath + '.migration-backup';
+      fs.copyFileSync(this.legacySettingsPath, backupPath);
+
+      try {
+        const data = fs.readFileSync(this.legacySettingsPath, 'utf-8');
+        const parsed = JSON.parse(data);
+        const merged = { ...DEFAULT_QUEUE_SETTINGS, ...parsed };
+
+        repository.save('queue', merged);
+        console.log('[TaskQueueManager] Settings migrated to encrypted database');
+
+        // Migration successful - delete backup and original
+        fs.unlinkSync(backupPath);
+        fs.unlinkSync(this.legacySettingsPath);
+        console.log('[TaskQueueManager] Migration complete, cleaned up legacy files');
+
+        TaskQueueManager.migrationCompleted = true;
+      } catch (migrationError) {
+        console.error('[TaskQueueManager] Migration failed, backup preserved at:', backupPath);
+        throw migrationError;
+      }
+    } catch (error) {
+      console.error('[TaskQueueManager] Migration failed:', error);
+    }
   }
 
   /**
@@ -218,8 +278,13 @@ export class TaskQueueManager {
     this.settings = { ...this.settings, ...newSettings };
 
     try {
-      fs.writeFileSync(this.settingsPath, JSON.stringify(this.settings, null, 2), 'utf-8');
-      console.log('[TaskQueueManager] Settings saved');
+      if (SecureSettingsRepository.isInitialized()) {
+        const repository = SecureSettingsRepository.getInstance();
+        repository.save('queue', this.settings);
+        console.log('[TaskQueueManager] Settings saved to encrypted database');
+      } else {
+        console.warn('[TaskQueueManager] SecureSettingsRepository not initialized, settings not persisted');
+      }
     } catch (error) {
       console.error('[TaskQueueManager] Failed to save settings:', error);
     }
@@ -323,15 +388,18 @@ export class TaskQueueManager {
   }
 
   /**
-   * Load settings from disk
+   * Load settings from encrypted database
    */
   private loadSettings(): QueueSettings {
     try {
-      if (fs.existsSync(this.settingsPath)) {
-        const data = fs.readFileSync(this.settingsPath, 'utf-8');
-        const parsed = JSON.parse(data);
-        // Merge with defaults to handle missing fields
-        return { ...DEFAULT_QUEUE_SETTINGS, ...parsed };
+      if (SecureSettingsRepository.isInitialized()) {
+        const repository = SecureSettingsRepository.getInstance();
+        const stored = repository.load<QueueSettings>('queue');
+        if (stored) {
+          // Merge with defaults to handle missing fields
+          console.log('[TaskQueueManager] Loaded settings from encrypted database');
+          return { ...DEFAULT_QUEUE_SETTINGS, ...stored };
+        }
       }
     } catch (error) {
       console.error('[TaskQueueManager] Failed to load settings:', error);

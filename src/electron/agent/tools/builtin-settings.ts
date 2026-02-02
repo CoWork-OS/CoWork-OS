@@ -1,11 +1,13 @@
 /**
  * Settings manager for built-in tools
  * Allows users to enable/disable and configure built-in tool categories
+ * Settings are stored encrypted in the database using SecureSettingsRepository.
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
 import { app } from 'electron';
+import { SecureSettingsRepository } from '../../database/SecureSettingsRepository';
 
 /**
  * Tool category configuration
@@ -164,37 +166,97 @@ const TOOL_CATEGORIES: Record<string, keyof BuiltinToolsSettings['categories']> 
   generate_image: 'image',
 };
 
+const LEGACY_SETTINGS_FILE = 'builtin-tools-settings.json';
+
 export class BuiltinToolsSettingsManager {
-  private static settingsPath: string | null = null;
+  private static legacySettingsPath: string | null = null;
   private static cachedSettings: BuiltinToolsSettings | null = null;
+  private static migrationCompleted = false;
 
   /**
-   * Get the settings file path
+   * Get the legacy settings file path
    */
-  private static getSettingsPath(): string {
-    if (!this.settingsPath) {
+  private static getLegacySettingsPath(): string {
+    if (!this.legacySettingsPath) {
       const userDataPath = app.getPath('userData');
-      this.settingsPath = path.join(userDataPath, 'builtin-tools-settings.json');
+      this.legacySettingsPath = path.join(userDataPath, LEGACY_SETTINGS_FILE);
     }
-    return this.settingsPath;
+    return this.legacySettingsPath;
   }
 
   /**
-   * Load settings from disk
+   * Migrate settings from legacy JSON file to encrypted database
+   */
+  private static migrateFromLegacyFile(): void {
+    if (this.migrationCompleted) return;
+
+    try {
+      if (!SecureSettingsRepository.isInitialized()) {
+        return;
+      }
+
+      const repository = SecureSettingsRepository.getInstance();
+
+      if (repository.exists('builtintools')) {
+        console.log('[BuiltinToolsSettings] Settings already in database, skipping migration');
+        this.migrationCompleted = true;
+        return;
+      }
+
+      const legacyPath = this.getLegacySettingsPath();
+      if (!fs.existsSync(legacyPath)) {
+        this.migrationCompleted = true;
+        return;
+      }
+
+      console.log('[BuiltinToolsSettings] Migrating settings from legacy JSON file to encrypted database...');
+
+      // Create backup before migration
+      const backupPath = legacyPath + '.migration-backup';
+      fs.copyFileSync(legacyPath, backupPath);
+
+      try {
+        const data = fs.readFileSync(legacyPath, 'utf-8');
+        const settings = JSON.parse(data) as BuiltinToolsSettings;
+        const merged = this.mergeWithDefaults(settings);
+
+        repository.save('builtintools', merged);
+        console.log('[BuiltinToolsSettings] Settings migrated to encrypted database');
+
+        // Migration successful - delete backup and original
+        fs.unlinkSync(backupPath);
+        fs.unlinkSync(legacyPath);
+        console.log('[BuiltinToolsSettings] Migration complete, cleaned up legacy files');
+
+        this.migrationCompleted = true;
+      } catch (migrationError) {
+        console.error('[BuiltinToolsSettings] Migration failed, backup preserved at:', backupPath);
+        throw migrationError;
+      }
+    } catch (error) {
+      console.error('[BuiltinToolsSettings] Migration failed:', error);
+    }
+  }
+
+  /**
+   * Load settings from encrypted database
    */
   static loadSettings(): BuiltinToolsSettings {
     if (this.cachedSettings) {
       return this.cachedSettings;
     }
 
+    // Try migration first
+    this.migrateFromLegacyFile();
+
     try {
-      const settingsPath = this.getSettingsPath();
-      if (fs.existsSync(settingsPath)) {
-        const data = fs.readFileSync(settingsPath, 'utf-8');
-        const settings = JSON.parse(data) as BuiltinToolsSettings;
-        // Merge with defaults to handle new fields
-        this.cachedSettings = this.mergeWithDefaults(settings);
-        return this.cachedSettings;
+      if (SecureSettingsRepository.isInitialized()) {
+        const repository = SecureSettingsRepository.getInstance();
+        const stored = repository.load<BuiltinToolsSettings>('builtintools');
+        if (stored) {
+          this.cachedSettings = this.mergeWithDefaults(stored);
+          return this.cachedSettings;
+        }
       }
     } catch (error) {
       console.error('[BuiltinToolsSettings] Error loading settings:', error);
@@ -207,14 +269,18 @@ export class BuiltinToolsSettingsManager {
   }
 
   /**
-   * Save settings to disk
+   * Save settings to encrypted database
    */
   static saveSettings(settings: BuiltinToolsSettings): void {
     try {
-      const settingsPath = this.getSettingsPath();
-      fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
+      if (!SecureSettingsRepository.isInitialized()) {
+        throw new Error('SecureSettingsRepository not initialized');
+      }
+
+      const repository = SecureSettingsRepository.getInstance();
+      repository.save('builtintools', settings);
       this.cachedSettings = settings;
-      console.log('[BuiltinToolsSettings] Settings saved successfully');
+      console.log('[BuiltinToolsSettings] Settings saved to encrypted database');
     } catch (error) {
       console.error('[BuiltinToolsSettings] Error saving settings:', error);
       throw error;

@@ -6,6 +6,8 @@
  * - Quick actions menu (new task, workspaces, settings)
  * - Show/hide main window on click
  * - Gateway status monitoring
+ *
+ * Settings are stored encrypted in the database using SecureSettingsRepository.
  */
 
 import { app, Tray, Menu, nativeImage, BrowserWindow, shell, NativeImage, globalShortcut } from 'electron';
@@ -18,6 +20,9 @@ import { TaskRepository, WorkspaceRepository } from '../database/repositories';
 import { AgentDaemon } from '../agent/daemon';
 import { QuickInputWindow } from './QuickInputWindow';
 import { TEMP_WORKSPACE_ID, TEMP_WORKSPACE_NAME, Workspace } from '../../shared/types';
+import { SecureSettingsRepository } from '../database/SecureSettingsRepository';
+
+const LEGACY_SETTINGS_FILE = 'tray-settings.json';
 
 export interface TrayManagerOptions {
   showDockIcon?: boolean;
@@ -56,8 +61,10 @@ export class TrayManager {
   private currentQuickTaskId: string | null = null;
   private quickTaskAccumulatedResponse: string = '';
   private currentStepInfo: string = '';
+  private legacySettingsPath: string;
 
   private static instance: TrayManager | null = null;
+  private static migrationCompleted = false;
 
   static getInstance(): TrayManager {
     if (!TrayManager.instance) {
@@ -66,7 +73,10 @@ export class TrayManager {
     return TrayManager.instance;
   }
 
-  private constructor() {}
+  private constructor() {
+    const userDataPath = app.getPath('userData');
+    this.legacySettingsPath = path.join(userDataPath, LEGACY_SETTINGS_FILE);
+  }
 
   /**
    * Initialize the tray manager
@@ -823,31 +833,99 @@ export class TrayManager {
   }
 
   /**
-   * Load settings from storage
+   * Migrate settings from legacy JSON file to encrypted database
    */
-  private loadSettings(): void {
+  private migrateFromLegacyFile(): void {
+    if (TrayManager.migrationCompleted) return;
+
     try {
-      const settingsPath = path.join(app.getPath('userData'), 'tray-settings.json');
-      const fs = require('fs');
-      if (fs.existsSync(settingsPath)) {
-        const data = fs.readFileSync(settingsPath, 'utf-8');
-        this.settings = { ...DEFAULT_SETTINGS, ...JSON.parse(data) };
+      if (!SecureSettingsRepository.isInitialized()) {
+        return;
+      }
+
+      const repository = SecureSettingsRepository.getInstance();
+
+      // Check if already migrated
+      if (repository.exists('tray')) {
+        console.log('[TrayManager] Settings already in database, skipping migration');
+        TrayManager.migrationCompleted = true;
+        return;
+      }
+
+      // Check if legacy file exists
+      if (!fs.existsSync(this.legacySettingsPath)) {
+        TrayManager.migrationCompleted = true;
+        return;
+      }
+
+      console.log('[TrayManager] Migrating settings from legacy JSON file to encrypted database...');
+
+      // Create backup before migration
+      const backupPath = this.legacySettingsPath + '.migration-backup';
+      fs.copyFileSync(this.legacySettingsPath, backupPath);
+
+      try {
+        const data = fs.readFileSync(this.legacySettingsPath, 'utf-8');
+        const parsed = JSON.parse(data);
+        const merged = { ...DEFAULT_SETTINGS, ...parsed };
+
+        repository.save('tray', merged);
+        console.log('[TrayManager] Settings migrated to encrypted database');
+
+        // Migration successful - delete backup and original
+        fs.unlinkSync(backupPath);
+        fs.unlinkSync(this.legacySettingsPath);
+        console.log('[TrayManager] Migration complete, cleaned up legacy files');
+
+        TrayManager.migrationCompleted = true;
+      } catch (migrationError) {
+        console.error('[TrayManager] Migration failed, backup preserved at:', backupPath);
+        throw migrationError;
       }
     } catch (error) {
-      console.error('[TrayManager] Failed to load settings:', error);
+      console.error('[TrayManager] Migration failed:', error);
     }
   }
 
   /**
-   * Save settings to storage
+   * Load settings from encrypted database
+   */
+  private loadSettings(): void {
+    // Migrate from legacy file if needed
+    this.migrateFromLegacyFile();
+
+    try {
+      if (SecureSettingsRepository.isInitialized()) {
+        const repository = SecureSettingsRepository.getInstance();
+        const stored = repository.load<TraySettings>('tray');
+        if (stored) {
+          this.settings = { ...DEFAULT_SETTINGS, ...stored };
+          console.log('[TrayManager] Loaded settings from encrypted database');
+          return;
+        }
+      }
+    } catch (error) {
+      console.error('[TrayManager] Failed to load settings:', error);
+    }
+
+    // Fall back to defaults
+    this.settings = { ...DEFAULT_SETTINGS };
+  }
+
+  /**
+   * Save settings to encrypted database
    */
   saveSettings(settings: Partial<TraySettings>): void {
     this.settings = { ...this.settings, ...settings };
 
     try {
-      const settingsPath = path.join(app.getPath('userData'), 'tray-settings.json');
-      const fs = require('fs');
-      fs.writeFileSync(settingsPath, JSON.stringify(this.settings, null, 2));
+      if (SecureSettingsRepository.isInitialized()) {
+        const repository = SecureSettingsRepository.getInstance();
+        repository.save('tray', this.settings);
+        console.log('[TrayManager] Settings saved to encrypted database');
+      } else {
+        console.warn('[TrayManager] SecureSettingsRepository not initialized, settings not persisted');
+      }
 
       // Apply settings immediately
       this.applyDockIconSetting();

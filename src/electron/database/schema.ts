@@ -863,6 +863,93 @@ export class DatabaseManager {
     } catch {
       // Column already exists, ignore
     }
+
+    // ============ Secure Settings Table ============
+    // All settings are encrypted using OS keychain (Electron safeStorage)
+    // Only this app can decrypt the values
+    try {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS secure_settings (
+          id TEXT PRIMARY KEY,
+          category TEXT NOT NULL,
+          encrypted_data TEXT NOT NULL,
+          checksum TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          UNIQUE(category)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_secure_settings_category ON secure_settings(category);
+      `);
+    } catch {
+      // Table already exists, ignore
+    }
+
+    // ============ Mission Control Migrations ============
+
+    // Migration: Add heartbeat and autonomy columns to agent_roles
+    const missionControlColumns = [
+      'ALTER TABLE agent_roles ADD COLUMN autonomy_level TEXT DEFAULT \'specialist\'',
+      'ALTER TABLE agent_roles ADD COLUMN soul TEXT',
+      'ALTER TABLE agent_roles ADD COLUMN heartbeat_enabled INTEGER DEFAULT 0',
+      'ALTER TABLE agent_roles ADD COLUMN heartbeat_interval_minutes INTEGER DEFAULT 15',
+      'ALTER TABLE agent_roles ADD COLUMN heartbeat_stagger_offset INTEGER DEFAULT 0',
+      'ALTER TABLE agent_roles ADD COLUMN last_heartbeat_at INTEGER',
+      'ALTER TABLE agent_roles ADD COLUMN heartbeat_status TEXT DEFAULT \'idle\'',
+    ];
+
+    for (const sql of missionControlColumns) {
+      try {
+        this.db.exec(sql);
+      } catch {
+        // Column already exists, ignore
+      }
+    }
+
+    // Migration: Create task_subscriptions table for thread subscriptions
+    try {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS task_subscriptions (
+          id TEXT PRIMARY KEY,
+          task_id TEXT NOT NULL,
+          agent_role_id TEXT NOT NULL,
+          subscription_reason TEXT NOT NULL,
+          subscribed_at INTEGER NOT NULL,
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+          FOREIGN KEY (agent_role_id) REFERENCES agent_roles(id) ON DELETE CASCADE,
+          UNIQUE(task_id, agent_role_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_task_subscriptions_task ON task_subscriptions(task_id);
+        CREATE INDEX IF NOT EXISTS idx_task_subscriptions_agent ON task_subscriptions(agent_role_id);
+      `);
+    } catch {
+      // Table already exists, ignore
+    }
+
+    // Migration: Create standup_reports table for daily standups
+    try {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS standup_reports (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          report_date TEXT NOT NULL,
+          completed_task_ids TEXT,
+          in_progress_task_ids TEXT,
+          blocked_task_ids TEXT,
+          summary TEXT NOT NULL,
+          delivered_to_channel TEXT,
+          created_at INTEGER NOT NULL,
+          FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
+          UNIQUE(workspace_id, report_date)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_standup_reports_workspace ON standup_reports(workspace_id);
+        CREATE INDEX IF NOT EXISTS idx_standup_reports_date ON standup_reports(report_date);
+      `);
+    } catch {
+      // Table already exists, ignore
+    }
   }
 
   private seedDefaultModels() {

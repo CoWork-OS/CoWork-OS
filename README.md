@@ -99,6 +99,7 @@ CoWork OS is designed with security as a core principle, not an afterthought.
 |-------|------------|
 | **Channel Access** | Pairing codes, allowlists, brute-force lockout (5 attempts, 15 min cooldown) |
 | **Context Policies** | Per-context security modes (DM vs group), tool restrictions per context |
+| **Encrypted Storage** | OS keychain (macOS/Windows/Linux) + AES-256 fallback, SHA-256 integrity checks |
 | **Tool Execution** | Risk-level categorization, context-aware isolation |
 | **Sandbox Isolation** | Docker containers (cross-platform) or macOS sandbox-exec |
 | **File Operations** | Workspace boundaries, path traversal protection |
@@ -206,7 +207,7 @@ Talk to your AI assistant with voice input and audio responses.
 | **Speech-to-Text** | OpenAI Whisper for accurate transcription |
 | **Multiple Voices** | Choose from ElevenLabs voices or OpenAI voices (alloy, echo, fable, onyx, nova, shimmer) |
 | **Customizable** | Volume, speech rate, language settings |
-| **Secure Storage** | API keys stored securely using Electron safeStorage |
+| **Secure Storage** | All settings encrypted via OS keychain (macOS/Windows/Linux) with AES-256 fallback |
 
 **Supported Providers:**
 

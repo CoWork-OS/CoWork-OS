@@ -1,8 +1,8 @@
 /**
  * Hooks Settings Manager
  *
- * Manages webhook configuration with encrypted credential storage.
- * Follows the same pattern as MCP Settings Manager.
+ * Manages webhook configuration with encrypted storage.
+ * Settings are stored encrypted in the database using SecureSettingsRepository.
  */
 
 import { app, safeStorage } from 'electron';
@@ -25,8 +25,9 @@ import {
   DEFAULT_GMAIL_SUBSCRIPTION,
   DEFAULT_GMAIL_TOPIC,
 } from './types';
+import { SecureSettingsRepository } from '../database/SecureSettingsRepository';
 
-const SETTINGS_FILE = 'hooks-settings.json';
+const LEGACY_SETTINGS_FILE = 'hooks-settings.json';
 const MASKED_VALUE = '***configured***';
 const ENCRYPTED_PREFIX = 'encrypted:';
 
@@ -118,9 +119,10 @@ function decryptSettings(settings: HooksConfig): HooksConfig {
  * Hooks Settings Manager
  */
 export class HooksSettingsManager {
-  private static settingsPath: string;
+  private static legacySettingsPath: string;
   private static cachedSettings: HooksConfig | null = null;
   private static initialized = false;
+  private static migrationCompleted = false;
 
   /**
    * Initialize the settings manager (must be called after app is ready)
@@ -129,14 +131,81 @@ export class HooksSettingsManager {
     if (this.initialized) return;
 
     const userDataPath = app.getPath('userData');
-    this.settingsPath = path.join(userDataPath, SETTINGS_FILE);
+    this.legacySettingsPath = path.join(userDataPath, LEGACY_SETTINGS_FILE);
     this.initialized = true;
 
-    console.log('[Hooks Settings] Initialized with path:', this.settingsPath);
+    console.log('[Hooks Settings] Initialized');
+
+    // Migrate from legacy JSON file to encrypted database
+    this.migrateFromLegacyFile();
   }
 
   /**
-   * Load settings from disk
+   * Migrate settings from legacy JSON file to encrypted database
+   */
+  private static migrateFromLegacyFile(): void {
+    if (this.migrationCompleted) return;
+
+    try {
+      if (!SecureSettingsRepository.isInitialized()) {
+        console.log('[Hooks Settings] SecureSettingsRepository not yet initialized, skipping migration');
+        return;
+      }
+
+      const repository = SecureSettingsRepository.getInstance();
+
+      if (repository.exists('hooks')) {
+        console.log('[Hooks Settings] Settings already in database, skipping migration');
+        this.migrationCompleted = true;
+        return;
+      }
+
+      if (!fs.existsSync(this.legacySettingsPath)) {
+        console.log('[Hooks Settings] No legacy settings file found');
+        this.migrationCompleted = true;
+        return;
+      }
+
+      console.log('[Hooks Settings] Migrating settings from legacy JSON file to encrypted database...');
+
+      // Create backup before migration
+      const backupPath = this.legacySettingsPath + '.migration-backup';
+      fs.copyFileSync(this.legacySettingsPath, backupPath);
+
+      try {
+        const data = fs.readFileSync(this.legacySettingsPath, 'utf-8');
+        const parsed = JSON.parse(data);
+
+        const merged: HooksConfig = {
+          ...DEFAULT_HOOKS_CONFIG,
+          ...parsed,
+          mappings: parsed.mappings || [],
+          presets: parsed.presets || [],
+        };
+
+        // Decrypt any existing encrypted values before saving to the new encrypted database
+        const decrypted = decryptSettings(merged);
+
+        repository.save('hooks', decrypted);
+        console.log('[Hooks Settings] Settings migrated to encrypted database');
+
+        // Migration successful - delete backup and original
+        fs.unlinkSync(backupPath);
+        fs.unlinkSync(this.legacySettingsPath);
+        console.log('[Hooks Settings] Migration complete, cleaned up legacy files');
+
+        this.migrationCompleted = true;
+      } catch (migrationError) {
+        console.error('[Hooks Settings] Migration failed, backup preserved at:', backupPath);
+        throw migrationError;
+      }
+    } catch (error) {
+      console.error('[Hooks Settings] Migration failed:', error);
+    }
+  }
+
+  /**
+   * Load settings from encrypted database
    */
   static loadSettings(): HooksConfig {
     this.ensureInitialized();
@@ -146,46 +215,45 @@ export class HooksSettingsManager {
     }
 
     try {
-      if (fs.existsSync(this.settingsPath)) {
-        const data = fs.readFileSync(this.settingsPath, 'utf-8');
-        const parsed = JSON.parse(data);
-
-        // Merge with defaults to handle missing fields from older versions
-        const merged: HooksConfig = {
-          ...DEFAULT_HOOKS_CONFIG,
-          ...parsed,
-          mappings: parsed.mappings || [],
-          presets: parsed.presets || [],
-        };
-
-        // Decrypt credentials
-        this.cachedSettings = decryptSettings(merged);
-        console.log('[Hooks Settings] Loaded settings');
-      } else {
-        console.log('[Hooks Settings] No settings file found, using defaults');
-        this.cachedSettings = { ...DEFAULT_HOOKS_CONFIG };
+      if (SecureSettingsRepository.isInitialized()) {
+        const repository = SecureSettingsRepository.getInstance();
+        const stored = repository.load<HooksConfig>('hooks');
+        if (stored) {
+          const merged: HooksConfig = {
+            ...DEFAULT_HOOKS_CONFIG,
+            ...stored,
+            mappings: stored.mappings || [],
+            presets: stored.presets || [],
+          };
+          this.cachedSettings = merged;
+          console.log('[Hooks Settings] Loaded settings from encrypted database');
+          return this.cachedSettings;
+        }
       }
     } catch (error) {
       console.error('[Hooks Settings] Failed to load settings:', error);
-      this.cachedSettings = { ...DEFAULT_HOOKS_CONFIG };
     }
 
+    console.log('[Hooks Settings] No settings found, using defaults');
+    this.cachedSettings = { ...DEFAULT_HOOKS_CONFIG };
     return this.cachedSettings;
   }
 
   /**
-   * Save settings to disk
+   * Save settings to encrypted database
    */
   static saveSettings(settings: HooksConfig): void {
     this.ensureInitialized();
 
     try {
-      // Encrypt credentials before saving
-      const encrypted = encryptSettings(settings);
-      fs.writeFileSync(this.settingsPath, JSON.stringify(encrypted, null, 2));
-      // Only update cache AFTER successful file write to avoid cache/disk inconsistency
+      if (!SecureSettingsRepository.isInitialized()) {
+        throw new Error('SecureSettingsRepository not initialized');
+      }
+
+      const repository = SecureSettingsRepository.getInstance();
+      repository.save('hooks', settings);
       this.cachedSettings = settings;
-      console.log('[Hooks Settings] Saved settings');
+      console.log('[Hooks Settings] Saved settings to encrypted database');
     } catch (error) {
       console.error('[Hooks Settings] Failed to save settings:', error);
       throw error;

@@ -1,7 +1,8 @@
 /**
  * Control Plane Settings Manager
  *
- * Manages WebSocket control plane configuration with secure token storage.
+ * Manages WebSocket control plane configuration with encrypted storage.
+ * Settings are stored encrypted in the database using SecureSettingsRepository.
  */
 
 import { app, safeStorage } from 'electron';
@@ -13,8 +14,9 @@ import type {
   ControlPlaneConnectionMode,
   RemoteGatewayConfig,
 } from '../../shared/types';
+import { SecureSettingsRepository } from '../database/SecureSettingsRepository';
 
-const SETTINGS_FILE = 'control-plane-settings.json';
+const LEGACY_SETTINGS_FILE = 'control-plane-settings.json';
 const MASKED_VALUE = '***configured***';
 const ENCRYPTED_PREFIX = 'encrypted:';
 
@@ -134,9 +136,10 @@ function decryptSecret(value?: string): string | undefined {
  * Control Plane Settings Manager
  */
 export class ControlPlaneSettingsManager {
-  private static settingsPath: string;
+  private static legacySettingsPath: string;
   private static cachedSettings: ControlPlaneSettings | null = null;
   private static initialized = false;
+  private static migrationCompleted = false;
 
   /**
    * Initialize the settings manager (must be called after app is ready)
@@ -145,10 +148,86 @@ export class ControlPlaneSettingsManager {
     if (this.initialized) return;
 
     const userDataPath = app.getPath('userData');
-    this.settingsPath = path.join(userDataPath, SETTINGS_FILE);
+    this.legacySettingsPath = path.join(userDataPath, LEGACY_SETTINGS_FILE);
     this.initialized = true;
 
-    console.log('[ControlPlane Settings] Initialized with path:', this.settingsPath);
+    console.log('[ControlPlane Settings] Initialized');
+
+    // Migrate from legacy JSON file to encrypted database
+    this.migrateFromLegacyFile();
+  }
+
+  /**
+   * Migrate settings from legacy JSON file to encrypted database
+   */
+  private static migrateFromLegacyFile(): void {
+    if (this.migrationCompleted) return;
+
+    try {
+      if (!SecureSettingsRepository.isInitialized()) {
+        console.log('[ControlPlane Settings] SecureSettingsRepository not yet initialized, skipping migration');
+        return;
+      }
+
+      const repository = SecureSettingsRepository.getInstance();
+
+      if (repository.exists('controlplane')) {
+        console.log('[ControlPlane Settings] Settings already in database, skipping migration');
+        this.migrationCompleted = true;
+        return;
+      }
+
+      if (!fs.existsSync(this.legacySettingsPath)) {
+        console.log('[ControlPlane Settings] No legacy settings file found');
+        this.migrationCompleted = true;
+        return;
+      }
+
+      console.log('[ControlPlane Settings] Migrating settings from legacy JSON file to encrypted database...');
+
+      // Create backup before migration
+      const backupPath = this.legacySettingsPath + '.migration-backup';
+      fs.copyFileSync(this.legacySettingsPath, backupPath);
+
+      try {
+        const data = fs.readFileSync(this.legacySettingsPath, 'utf-8');
+        const parsed = JSON.parse(data);
+
+        const merged: ControlPlaneSettings = {
+          ...DEFAULT_CONTROL_PLANE_SETTINGS,
+          ...parsed,
+          tailscale: {
+            ...DEFAULT_CONTROL_PLANE_SETTINGS.tailscale,
+            ...parsed.tailscale,
+          },
+        };
+
+        // Decrypt any existing encrypted values
+        merged.token = decryptSecret(merged.token) || '';
+        if (parsed.remote) {
+          merged.remote = {
+            ...DEFAULT_REMOTE_GATEWAY_CONFIG,
+            ...parsed.remote,
+            token: decryptSecret(parsed.remote.token) || '',
+          };
+        }
+
+        repository.save('controlplane', merged);
+        console.log('[ControlPlane Settings] Settings migrated to encrypted database');
+
+        // Migration successful - delete backup and original
+        fs.unlinkSync(backupPath);
+        fs.unlinkSync(this.legacySettingsPath);
+        console.log('[ControlPlane Settings] Migration complete, cleaned up legacy files');
+
+        this.migrationCompleted = true;
+      } catch (migrationError) {
+        console.error('[ControlPlane Settings] Migration failed, backup preserved at:', backupPath);
+        throw migrationError;
+      }
+    } catch (error) {
+      console.error('[ControlPlane Settings] Migration failed:', error);
+    }
   }
 
   /**
@@ -161,7 +240,7 @@ export class ControlPlaneSettingsManager {
   }
 
   /**
-   * Load settings from disk
+   * Load settings from encrypted database
    */
   static loadSettings(): ControlPlaneSettings {
     this.ensureInitialized();
@@ -171,70 +250,53 @@ export class ControlPlaneSettingsManager {
     }
 
     try {
-      if (fs.existsSync(this.settingsPath)) {
-        const data = fs.readFileSync(this.settingsPath, 'utf-8');
-        const parsed = JSON.parse(data);
-
-        // Merge with defaults
-        const merged: ControlPlaneSettings = {
-          ...DEFAULT_CONTROL_PLANE_SETTINGS,
-          ...parsed,
-          tailscale: {
-            ...DEFAULT_CONTROL_PLANE_SETTINGS.tailscale,
-            ...parsed.tailscale,
-          },
-        };
-
-        // Decrypt local token
-        merged.token = decryptSecret(merged.token) || '';
-
-        // Handle remote config with encrypted token
-        if (parsed.remote) {
-          merged.remote = {
-            ...DEFAULT_REMOTE_GATEWAY_CONFIG,
-            ...parsed.remote,
-            token: decryptSecret(parsed.remote.token) || '',
+      if (SecureSettingsRepository.isInitialized()) {
+        const repository = SecureSettingsRepository.getInstance();
+        const stored = repository.load<ControlPlaneSettings>('controlplane');
+        if (stored) {
+          const merged: ControlPlaneSettings = {
+            ...DEFAULT_CONTROL_PLANE_SETTINGS,
+            ...stored,
+            tailscale: {
+              ...DEFAULT_CONTROL_PLANE_SETTINGS.tailscale,
+              ...stored.tailscale,
+            },
           };
+          if (stored.remote) {
+            merged.remote = {
+              ...DEFAULT_REMOTE_GATEWAY_CONFIG,
+              ...stored.remote,
+            };
+          }
+          this.cachedSettings = merged;
+          console.log('[ControlPlane Settings] Loaded settings from encrypted database');
+          return this.cachedSettings;
         }
-
-        this.cachedSettings = merged;
-        console.log('[ControlPlane Settings] Loaded settings');
-      } else {
-        console.log('[ControlPlane Settings] No settings file, using defaults');
-        this.cachedSettings = { ...DEFAULT_CONTROL_PLANE_SETTINGS };
       }
     } catch (error) {
       console.error('[ControlPlane Settings] Failed to load:', error);
-      this.cachedSettings = { ...DEFAULT_CONTROL_PLANE_SETTINGS };
     }
 
+    console.log('[ControlPlane Settings] No settings found, using defaults');
+    this.cachedSettings = { ...DEFAULT_CONTROL_PLANE_SETTINGS };
     return this.cachedSettings;
   }
 
   /**
-   * Save settings to disk
+   * Save settings to encrypted database
    */
   static saveSettings(settings: ControlPlaneSettings): void {
     this.ensureInitialized();
 
     try {
-      // Encrypt tokens before saving
-      const toSave: any = {
-        ...settings,
-        token: encryptSecret(settings.token) || '',
-      };
-
-      // Encrypt remote token if present
-      if (settings.remote) {
-        toSave.remote = {
-          ...settings.remote,
-          token: encryptSecret(settings.remote.token) || '',
-        };
+      if (!SecureSettingsRepository.isInitialized()) {
+        throw new Error('SecureSettingsRepository not initialized');
       }
 
-      fs.writeFileSync(this.settingsPath, JSON.stringify(toSave, null, 2));
+      const repository = SecureSettingsRepository.getInstance();
+      repository.save('controlplane', settings);
       this.cachedSettings = settings;
-      console.log('[ControlPlane Settings] Saved settings');
+      console.log('[ControlPlane Settings] Saved settings to encrypted database');
     } catch (error) {
       console.error('[ControlPlane Settings] Failed to save:', error);
       throw error;

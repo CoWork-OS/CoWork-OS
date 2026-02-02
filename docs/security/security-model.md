@@ -16,6 +16,9 @@ CoWork OS implements a layered security model with multiple defense mechanisms.
 |  [4-Layer Monotonic Deny-Wins System]                            |
 |  [Tool Groups] [Blocked Patterns] [Approval Gates]               |
 +------------------------------------------------------------------+
+|                    Encrypted Storage Layer                        |
+|  [OS Keychain] [AES-256 Fallback] [Integrity Checksums]          |
++------------------------------------------------------------------+
 |                    Sandbox Layer                                  |
 |  [macOS sandbox-exec] [Docker Containers] [Process Isolation]    |
 +------------------------------------------------------------------+
@@ -125,6 +128,44 @@ Multiple validation layers prevent `../` escape:
 - Path normalization
 - Relative path detection
 - Workspace prefix checking
+
+## Encrypted Settings Storage
+
+All application settings are stored encrypted using `SecureSettingsRepository`:
+
+### Encryption Hierarchy
+
+```
++------------------------------------------+
+|     OS Keychain (Primary)                |
+|  macOS Keychain / Windows DPAPI / libsecret |
++------------------------------------------+
+              |
+              v (fallback when unavailable)
++------------------------------------------+
+|     App-Level Encryption                 |
+|  AES-256-GCM + PBKDF2 key derivation    |
++------------------------------------------+
+```
+
+### Features
+
+| Feature | Description |
+|---------|-------------|
+| **Multi-layer encryption** | OS keychain preferred, AES-256 fallback |
+| **Stable machine ID** | Survives hostname/user changes |
+| **Integrity checks** | SHA-256 checksums per setting |
+| **Safe migration** | Backups preserved on failure |
+| **Health diagnostics** | Status APIs for debugging |
+
+### Protected Categories
+
+All sensitive settings including API keys, preferences, and configurations are stored encrypted:
+- LLM provider settings and API keys
+- Voice/TTS/STT configurations
+- Search provider credentials
+- Channel/gateway settings
+- All user preferences
 
 ## Rate Limiting
 

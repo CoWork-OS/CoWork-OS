@@ -119,7 +119,15 @@ app.whenReady().then(async () => {
     });
   }
 
-  // Initialize provider factories (loads settings from disk)
+  // Initialize database first - required for SecureSettingsRepository
+  dbManager = new DatabaseManager();
+
+  // Initialize secure settings repository for encrypted settings storage
+  // This MUST be done before provider factories so they can migrate legacy settings
+  new SecureSettingsRepository(dbManager.getDatabase());
+  console.log('[Main] SecureSettingsRepository initialized');
+
+  // Initialize provider factories (loads settings from disk, migrates legacy files)
   LLMProviderFactory.initialize();
   SearchProviderFactory.initialize();
   GuardrailManager.initialize();
@@ -128,14 +136,6 @@ app.whenReady().then(async () => {
 
   // Migrate .env configuration to Settings (one-time upgrade path)
   const migrationResult = await migrateEnvToSettings();
-
-  // Initialize database
-  dbManager = new DatabaseManager();
-
-  // Initialize secure settings repository for encrypted settings storage
-  // This must be done early so all settings managers can use it
-  new SecureSettingsRepository(dbManager.getDatabase());
-  console.log('[Main] SecureSettingsRepository initialized');
 
   // Initialize agent daemon
   agentDaemon = new AgentDaemon(dbManager);

@@ -84,8 +84,19 @@ const canvasAPI: CanvasAPI = {
   },
 };
 
-// Expose the API to the renderer
-contextBridge.exposeInMainWorld('coworkCanvas', canvasAPI);
+const shouldExposeCanvasApi = (() => {
+  try {
+    const location = (globalThis as { location?: { protocol?: string } }).location;
+    return location?.protocol === 'canvas:';
+  } catch {
+    return false;
+  }
+})();
 
-// Log that preload script loaded successfully
-console.log('[CanvasPreload] Canvas preload script loaded');
+if (shouldExposeCanvasApi) {
+  // Expose the API to trusted canvas:// content only
+  contextBridge.exposeInMainWorld('coworkCanvas', canvasAPI);
+  console.log('[CanvasPreload] Canvas preload script loaded (canvas://)');
+} else {
+  console.log('[CanvasPreload] Canvas preload script loaded (no API exposed)');
+}

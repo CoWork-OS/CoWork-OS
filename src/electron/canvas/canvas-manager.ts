@@ -20,6 +20,7 @@ import { randomUUID } from 'crypto';
 import chokidar, { type FSWatcher } from 'chokidar';
 import type {
   CanvasSession,
+  CanvasSessionMode,
   CanvasEvent,
   CanvasA2UIAction,
   CanvasSnapshot,
@@ -38,22 +39,44 @@ const DEFAULT_HTML = `<!DOCTYPE html>
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       margin: 0;
       padding: 20px;
-      background: #1a1a2e;
-      color: #eee;
+      background: #0f1220;
+      color: #e7e9f2;
       min-height: 100vh;
+      display: grid;
+      place-items: center;
     }
     .loading {
       display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
-      height: 80vh;
-      font-size: 1.2em;
-      color: #888;
+      gap: 16px;
+      text-align: center;
+    }
+    .spinner {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      border: 4px solid rgba(255, 255, 255, 0.15);
+      border-top-color: #52d1dc;
+      animation: spin 0.9s linear infinite;
+      box-shadow: 0 0 18px rgba(82, 209, 220, 0.35);
+    }
+    .message {
+      font-size: 1.05em;
+      color: #a3acc4;
+      letter-spacing: 0.2px;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
     }
   </style>
 </head>
 <body>
-  <div class="loading">Waiting for content...</div>
+  <div class="loading">
+    <div class="spinner"></div>
+    <div class="message">Waiting for content...</div>
+  </div>
 </body>
 </html>`;
 
@@ -72,6 +95,28 @@ export class CanvasManager {
   private a2uiCallback: ((action: CanvasA2UIAction) => void) | null = null;
 
   private constructor() {}
+
+  private getSessionMode(session: CanvasSession): CanvasSessionMode {
+    return session.mode || 'html';
+  }
+
+  private getCanvasUrl(sessionId: string): string {
+    return `canvas://${sessionId}/index.html`;
+  }
+
+  private normalizeUrl(rawUrl: string): string {
+    const trimmed = rawUrl.trim();
+    if (!trimmed) {
+      throw new Error('URL cannot be empty');
+    }
+
+    const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+    const parsed = new URL(withScheme);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error('Only http and https URLs are supported for canvas browsing');
+    }
+    return parsed.toString();
+  }
 
   /**
    * Get the singleton instance
@@ -145,7 +190,8 @@ export class CanvasManager {
   async createSession(
     taskId: string,
     workspaceId: string,
-    title?: string
+    title?: string,
+    options?: { mode?: CanvasSessionMode; url?: string }
   ): Promise<CanvasSession> {
     const sessionId = randomUUID();
     const sessionDir = path.join(
@@ -164,11 +210,15 @@ export class CanvasManager {
       'utf-8'
     );
 
+    const normalizedUrl = options?.url ? this.normalizeUrl(options.url) : undefined;
+    const normalizedMode = options?.mode === 'browser' && normalizedUrl ? 'browser' : 'html';
     const session: CanvasSession = {
       id: sessionId,
       taskId,
       workspaceId,
       sessionDir,
+      mode: normalizedMode,
+      url: normalizedMode === 'browser' ? normalizedUrl : undefined,
       status: 'active',
       title: title || `Canvas ${new Date().toLocaleTimeString()}`,
       createdAt: Date.now(),
@@ -239,11 +289,17 @@ export class CanvasManager {
       throw new Error(`Canvas session not found: "${sessionId}". Available sessions: ${existingSessions.join(', ') || 'none'}`);
     }
 
+    const wasBrowser = this.getSessionMode(session) === 'browser';
+
     // Sanitize filename to prevent path traversal
     const safeFilename = path.basename(filename);
     const filePath = path.join(session.sessionDir, safeFilename);
 
     await fs.writeFile(filePath, content, 'utf-8');
+
+    // Switch back to HTML mode when content is pushed
+    session.mode = 'html';
+    session.url = undefined;
 
     // Update session timestamp
     session.lastUpdatedAt = Date.now();
@@ -253,7 +309,15 @@ export class CanvasManager {
 
     // Ensure a hidden window exists for snapshots (NOT shown to user)
     // The window will only be shown when user explicitly requests via showCanvas()
-    await this.ensureWindowForSnapshots(sessionId);
+    const window = await this.ensureWindowForSnapshots(sessionId);
+
+    // If the session previously loaded a remote URL, navigate back to canvas content
+    if (wasBrowser && window && !window.isDestroyed()) {
+      await window.loadURL(this.getCanvasUrl(sessionId));
+    }
+
+    // Ensure watcher is running for HTML mode
+    this.startWatcher(sessionId, session.sessionDir, window);
 
     // Emit event
     this.emitEvent({
@@ -263,7 +327,63 @@ export class CanvasManager {
       timestamp: Date.now(),
     });
 
+    this.emitEvent({
+      type: 'session_updated',
+      sessionId,
+      taskId: session.taskId,
+      timestamp: Date.now(),
+      session,
+    });
+
     console.log(`[CanvasManager] Pushed ${safeFilename} to session ${sessionId}`);
+  }
+
+  /**
+   * Open a remote URL inside the canvas window (browser mode)
+   */
+  async openUrl(
+    sessionId: string,
+    rawUrl: string,
+    options?: { show?: boolean }
+  ): Promise<string> {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      const existingSessions = Array.from(this.sessions.keys());
+      console.error(`[CanvasManager] Session not found: "${sessionId}"`);
+      console.error(`[CanvasManager] Existing sessions: ${existingSessions.length > 0 ? existingSessions.join(', ') : 'none'}`);
+      throw new Error(`Canvas session not found: "${sessionId}". Available sessions: ${existingSessions.join(', ') || 'none'}`);
+    }
+
+    const normalizedUrl = this.normalizeUrl(rawUrl);
+
+    session.mode = 'browser';
+    session.url = normalizedUrl;
+    session.lastUpdatedAt = Date.now();
+
+    this.persistSessions().catch(err => console.error('[CanvasManager] Failed to persist after openUrl:', err));
+
+    const window = await this.ensureWindowForSnapshots(sessionId);
+    if (window && !window.isDestroyed()) {
+      this.stopWatcher(sessionId);
+      if (window.webContents.getURL() !== normalizedUrl) {
+        await window.loadURL(normalizedUrl);
+      }
+    }
+
+    this.emitEvent({
+      type: 'session_updated',
+      sessionId,
+      taskId: session.taskId,
+      timestamp: Date.now(),
+      session,
+    });
+
+    if (options?.show) {
+      await this.showCanvas(sessionId);
+    }
+
+    console.log(`[CanvasManager] Opened URL in session ${sessionId}: ${normalizedUrl}`);
+    return normalizedUrl;
   }
 
   /**
@@ -328,11 +448,35 @@ export class CanvasManager {
         this.stopWatcher(sessionId);
       });
 
-      // Load the canvas URL
-      await window.loadURL(`canvas://${sessionId}/index.html`);
+      const mode = this.getSessionMode(session);
+      let targetUrl = this.getCanvasUrl(sessionId);
+      if (mode === 'browser' && session.url) {
+        try {
+          targetUrl = this.normalizeUrl(session.url);
+        } catch (error) {
+          console.warn('[CanvasManager] Invalid stored URL, falling back to canvas content:', error);
+          session.mode = 'html';
+          session.url = undefined;
+        }
+      }
 
-      // Start file watcher for auto-reload
-      this.startWatcher(sessionId, session.sessionDir, window);
+      // Load the canvas URL (or remote URL for browser mode)
+      await window.loadURL(targetUrl);
+
+      // Start file watcher for auto-reload only in HTML mode
+      if (mode === 'html') {
+        this.startWatcher(sessionId, session.sessionDir, window);
+      }
+    }
+
+    // Ensure watcher state is correct for existing windows
+    if (window && !window.isDestroyed()) {
+      const mode = this.getSessionMode(session);
+      if (mode === 'html') {
+        this.startWatcher(sessionId, session.sessionDir, window);
+      } else {
+        this.stopWatcher(sessionId);
+      }
     }
 
     return window;
@@ -378,10 +522,11 @@ export class CanvasManager {
     window.setPosition(bounds.x, bounds.y);
     window.setSize(bounds.width, bounds.height);
 
-    // Show the window without stealing focus (using setVisibleOnAllWorkspaces to ensure visibility)
+    // Show and focus the window so keyboard input works for interactive browsing
     if (!window.isVisible()) {
-      window.showInactive();
+      window.show();
     }
+    window.focus();
 
     // Ensure bounds are applied after show (some systems need this)
     window.setBounds(bounds);
@@ -533,6 +678,12 @@ export class CanvasManager {
     const session = this.sessions.get(sessionId);
     if (!session) {
       throw new Error(`Canvas session not found: ${sessionId}`);
+    }
+
+    if (this.getSessionMode(session) === 'browser' && session.url) {
+      await shell.openExternal(session.url);
+      console.log(`[CanvasManager] Opened session ${sessionId} in browser: ${session.url}`);
+      return { success: true, path: session.url };
     }
 
     const htmlPath = path.join(session.sessionDir, 'index.html');

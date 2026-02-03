@@ -1,19 +1,11 @@
 import { useRef, useEffect, useState, useCallback, useMemo, memo } from 'react';
-
-interface CanvasSession {
-  id: string;
-  taskId: string;
-  workspaceId: string;
-  sessionDir: string;
-  status: 'active' | 'paused' | 'closed';
-  title?: string;
-  createdAt: number;
-  lastUpdatedAt: number;
-}
+import type { CanvasSession } from '../../shared/types';
+import { useAgentContext } from '../hooks/useAgentContext';
 
 interface CanvasPreviewProps {
   session: CanvasSession;
   onClose?: () => void;
+  forceSnapshot?: boolean;
 }
 
 interface SnapshotHistoryEntry {
@@ -140,20 +132,22 @@ const CanvasImage = memo(function CanvasImage({
   );
 });
 
-export function CanvasPreview({ session, onClose }: CanvasPreviewProps) {
+export function CanvasPreview({ session, onClose, forceSnapshot = false }: CanvasPreviewProps) {
+  const isBrowserCanvas = session.mode === 'browser';
+  const agentContext = useAgentContext();
   const [imageData, setImageData] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [errorDetails, setErrorDetails] = useState<string | null>(null);
   const [isMinimized, setIsMinimized] = useState(false);
-  const [isPaused, setIsPaused] = useState(true); // Paused by default since interactive mode is default
+  const [isPaused, setIsPaused] = useState(isBrowserCanvas ? false : true);
   const [imageDimensions, setImageDimensions] = useState({ width: 0, height: 0 });
   const [initialLoadComplete, setInitialLoadComplete] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
   const [sessionStatus, setSessionStatus] = useState(session.status);
 
   // New feature states
-  const [refreshRate, setRefreshRate] = useState<RefreshRate>(2000);
+  const [refreshRate, setRefreshRate] = useState<RefreshRate>(forceSnapshot ? 0 : 2000);
   const [showRefreshMenu, setShowRefreshMenu] = useState(false);
   const [previewHeight, setPreviewHeight] = useState(DEFAULT_PREVIEW_HEIGHT);
   const [isResizing, setIsResizing] = useState(false);
@@ -163,7 +157,7 @@ export function CanvasPreview({ session, onClose }: CanvasPreviewProps) {
   const [consoleLogs, setConsoleLogs] = useState<ConsoleLogEntry[]>([]);
   const [showConsole, setShowConsole] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
-  const [isInteractiveMode, setIsInteractiveMode] = useState(true); // Interactive by default
+  const [isInteractiveMode, setIsInteractiveMode] = useState(!isBrowserCanvas && !forceSnapshot);
 
   const refreshIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -181,6 +175,21 @@ export function CanvasPreview({ session, onClose }: CanvasPreviewProps) {
   useEffect(() => {
     setSessionStatus(session.status);
   }, [session.status]);
+
+  useEffect(() => {
+    if (isBrowserCanvas) {
+      setIsInteractiveMode(false);
+      setIsPaused(false);
+    }
+  }, [isBrowserCanvas]);
+
+  // Force snapshot mode for archived/previous canvases
+  useEffect(() => {
+    if (!forceSnapshot) return;
+    setIsInteractiveMode(false);
+    setIsPaused(true);
+    setRefreshRate(0);
+  }, [forceSnapshot]);
 
   // Add snapshot to history
   const addToHistory = useCallback((newImageData: string, dimensions: { width: number; height: number }) => {
@@ -622,6 +631,11 @@ export function CanvasPreview({ session, onClose }: CanvasPreviewProps) {
 
   // Toggle interactive mode
   const handleToggleInteractiveMode = useCallback(() => {
+    if (isBrowserCanvas) {
+      setIsInteractiveMode(false);
+      setIsPaused(false);
+      return;
+    }
     setIsInteractiveMode(prev => !prev);
     // Toggle pause state based on mode
     if (!isInteractiveMode) {
@@ -631,7 +645,7 @@ export function CanvasPreview({ session, onClose }: CanvasPreviewProps) {
       // Switching to snapshot mode - resume snapshots
       setIsPaused(false);
     }
-  }, [isInteractiveMode]);
+  }, [isInteractiveMode, isBrowserCanvas]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -868,11 +882,14 @@ export function CanvasPreview({ session, onClose }: CanvasPreviewProps) {
                 </svg>
               </button>
               {/* Interactive mode toggle */}
-              <button
-                className={`canvas-action-btn ${isInteractiveMode ? 'active' : ''}`}
-                onClick={handleToggleInteractiveMode}
-                title={isInteractiveMode ? 'Switch to snapshot mode (I)' : 'Switch to interactive mode (I)'}
-              >
+          <button
+            className={`canvas-action-btn ${isInteractiveMode ? 'active' : ''} ${(isBrowserCanvas || forceSnapshot) ? 'disabled' : ''}`}
+            onClick={handleToggleInteractiveMode}
+            disabled={isBrowserCanvas || forceSnapshot}
+            title={isBrowserCanvas
+              ? 'Interactive preview unavailable for browser pages. Use Open in window.'
+              : (forceSnapshot ? 'Snapshot locked for previous canvases' : (isInteractiveMode ? 'Switch to snapshot mode (I)' : 'Switch to interactive mode (I)'))}
+          >
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M5 3l14 9-7 2-4 6-3-17z" />
                 </svg>
@@ -1041,7 +1058,7 @@ export function CanvasPreview({ session, onClose }: CanvasPreviewProps) {
                   <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
                   <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
                 </svg>
-                <span>Loading canvas...</span>
+                <span>{agentContext.getUiCopy('canvasLoading')}</span>
               </div>
             )}
             {!isInteractiveMode && error && !currentDisplayImage && (

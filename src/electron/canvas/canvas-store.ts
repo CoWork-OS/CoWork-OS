@@ -40,11 +40,17 @@ const MAX_SESSIONS = 50;
 function isValidSession(s: unknown): s is CanvasSession {
   if (!s || typeof s !== 'object') return false;
   const session = s as Record<string, unknown>;
+  const mode = session.mode;
+  const isValidMode = mode === undefined || mode === 'html' || mode === 'browser';
+  const url = session.url;
+  const isValidUrl = url === undefined || typeof url === 'string';
   return (
     typeof session.id === 'string' &&
     typeof session.taskId === 'string' &&
     typeof session.workspaceId === 'string' &&
     typeof session.sessionDir === 'string' &&
+    isValidMode &&
+    isValidUrl &&
     typeof session.status === 'string' &&
     ['active', 'paused', 'closed'].includes(session.status as string) &&
     typeof session.createdAt === 'number' &&

@@ -14,12 +14,15 @@ import { Workspace } from '../../../shared/types';
 import { AgentDaemon } from '../daemon';
 import { CanvasManager } from '../../canvas/canvas-manager';
 import { LLMTool } from '../llm/types';
+import * as fs from 'fs/promises';
+import * as path from 'path';
 
 /**
  * CanvasTools provides agent capabilities for visual content rendering
  */
 export class CanvasTools {
   private manager: CanvasManager;
+  private sessionCutoff: number | null = null;
 
   constructor(
     private workspace: Workspace,
@@ -27,6 +30,24 @@ export class CanvasTools {
     private taskId: string
   ) {
     this.manager = CanvasManager.getInstance();
+  }
+
+  /**
+   * Set a cutoff timestamp for enforcing new canvas sessions on follow-ups.
+   * Any canvas_push/open_url targeting sessions created before this cutoff will be rejected.
+   */
+  setSessionCutoff(cutoff: number | null): void {
+    this.sessionCutoff = cutoff;
+  }
+
+  private enforceSessionCutoff(sessionId: string, action: 'canvas_push' | 'canvas_open_url'): void {
+    if (!this.sessionCutoff) return;
+    const session = this.manager.getSession(sessionId);
+    if (session && session.createdAt < this.sessionCutoff) {
+      const message = 'Canvas session belongs to a previous run. Create a new session with canvas_create for follow-up content instead of reusing an older session.';
+      console.error(`[CanvasTools] ${action} blocked for stale session. sessionId=${sessionId}, createdAt=${session.createdAt}, cutoff=${this.sessionCutoff}`);
+      throw new Error(message);
+    }
   }
 
   /**
@@ -83,8 +104,65 @@ export class CanvasTools {
     content: string,
     filename: string = 'index.html'
   ): Promise<{ success: boolean }> {
-    // Validate content parameter
-    if (content === undefined || content === null) {
+    this.enforceSessionCutoff(sessionId, 'canvas_push');
+    let resolvedContent = content;
+    const defaultMarker = 'Waiting for content...';
+    const contentProvided = typeof content === 'string' && content.trim().length > 0;
+
+    // Validate content parameter; if missing, attempt to reuse existing canvas file
+    if (resolvedContent === undefined || resolvedContent === null) {
+      const session = this.manager.getSession(sessionId);
+      if (session) {
+        const safeFilename = path.basename(filename || 'index.html');
+        const filePath = path.join(session.sessionDir, safeFilename);
+        try {
+          resolvedContent = await fs.readFile(filePath, 'utf-8');
+          console.warn(`[CanvasTools] canvas_push missing content; reusing existing ${safeFilename} from session ${sessionId}`);
+        } catch (error) {
+          console.error(`[CanvasTools] Failed to read existing canvas content from ${filePath}:`, error);
+        }
+      }
+    }
+
+    // If we still have no content or only the default placeholder, try the most recent session for this task
+    if (
+      resolvedContent === undefined ||
+      resolvedContent === null ||
+      (typeof resolvedContent === 'string' && resolvedContent.includes(defaultMarker))
+    ) {
+      const otherSessions = this.manager
+        .listSessionsForTask(this.taskId)
+        .filter((s) => s.id !== sessionId && s.status === 'active')
+        .sort((a, b) => (b.lastUpdatedAt || 0) - (a.lastUpdatedAt || 0));
+
+      for (const session of otherSessions) {
+        const safeFilename = path.basename(filename || 'index.html');
+        const filePath = path.join(session.sessionDir, safeFilename);
+        try {
+          const candidate = await fs.readFile(filePath, 'utf-8');
+          if (!candidate.includes(defaultMarker)) {
+            resolvedContent = candidate;
+            console.warn(`[CanvasTools] canvas_push missing content; copied ${safeFilename} from session ${session.id}`);
+            break;
+          }
+        } catch (error) {
+          console.error(`[CanvasTools] Failed to read canvas content from ${filePath}:`, error);
+        }
+      }
+    }
+
+    const isPlaceholder = typeof resolvedContent === 'string' && resolvedContent.includes(defaultMarker);
+
+    if (!contentProvided && (resolvedContent === undefined || resolvedContent === null || isPlaceholder)) {
+      console.error(
+        `[CanvasTools] canvas_push called without content and no non-placeholder HTML found. sessionId=${sessionId}, filename=${filename}`
+      );
+      throw new Error(
+        'Content parameter is required for canvas_push. The agent must provide HTML content to display.'
+      );
+    }
+
+    if (resolvedContent === undefined || resolvedContent === null) {
       console.error(`[CanvasTools] canvas_push called without content. sessionId=${sessionId}, filename=${filename}, content type=${typeof content}`);
       throw new Error('Content parameter is required for canvas_push. The agent must provide HTML content to display.');
     }
@@ -93,11 +171,11 @@ export class CanvasTools {
       tool: 'canvas_push',
       sessionId,
       filename,
-      contentLength: content.length,
+      contentLength: resolvedContent.length,
     });
 
     try {
-      await this.manager.pushContent(sessionId, content, filename);
+      await this.manager.pushContent(sessionId, resolvedContent, filename);
 
       this.daemon.logEvent(this.taskId, 'tool_result', {
         tool: 'canvas_push',
@@ -109,6 +187,42 @@ export class CanvasTools {
       const message = error instanceof Error ? error.message : 'Unknown error';
       this.daemon.logEvent(this.taskId, 'tool_error', {
         tool: 'canvas_push',
+        error: message,
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Open a remote URL inside the canvas window (browser mode)
+   */
+  async openUrl(
+    sessionId: string,
+    url: string,
+    show: boolean = true
+  ): Promise<{ success: boolean; url: string }> {
+    this.enforceSessionCutoff(sessionId, 'canvas_open_url');
+    this.daemon.logEvent(this.taskId, 'tool_call', {
+      tool: 'canvas_open_url',
+      sessionId,
+      url,
+      show,
+    });
+
+    try {
+      const normalizedUrl = await this.manager.openUrl(sessionId, url, { show });
+
+      this.daemon.logEvent(this.taskId, 'tool_result', {
+        tool: 'canvas_open_url',
+        success: true,
+        url: normalizedUrl,
+      });
+
+      return { success: true, url: normalizedUrl };
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      this.daemon.logEvent(this.taskId, 'tool_error', {
+        tool: 'canvas_open_url',
         error: message,
       });
       throw error;
@@ -298,7 +412,8 @@ export class CanvasTools {
         description:
           'Create a new Live Canvas session for displaying interactive HTML/CSS/JS content. ' +
           'The canvas opens in a separate window where you can render visual content. ' +
-          'Returns a session ID that you use for subsequent canvas operations.',
+          'Returns a session ID that you use for subsequent canvas operations. ' +
+          'For new user requests or follow-ups, create a NEW session instead of reusing an older one unless the user explicitly asks to update the existing canvas.',
         input_schema: {
           type: 'object',
           properties: {
@@ -316,7 +431,8 @@ export class CanvasTools {
           'Push HTML/CSS/JS content to a canvas session. ' +
           'You MUST provide both session_id and content parameters. ' +
           'The content parameter must be a complete HTML string (e.g., "<!DOCTYPE html><html><body>...</body></html>"). ' +
-          'Use this to display interactive visualizations, forms, dashboards, or any web content.',
+          'Use this to display interactive visualizations, forms, dashboards, or any web content. ' +
+          'Do NOT overwrite an older session on follow-ups; create a new session with canvas_create unless explicitly asked to update the existing canvas.',
         input_schema: {
           type: 'object',
           properties: {
@@ -351,6 +467,31 @@ export class CanvasTools {
             },
           },
           required: ['session_id'],
+        },
+      },
+      {
+        name: 'canvas_open_url',
+        description:
+          'Open a remote web page inside the canvas window for full in-app browsing. ' +
+          'Use this for websites that cannot be embedded in iframes/webviews (to avoid blank screens). ' +
+          'Pass show=true to open the interactive canvas window immediately.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            session_id: {
+              type: 'string',
+              description: 'The canvas session ID returned from canvas_create',
+            },
+            url: {
+              type: 'string',
+              description: 'The URL to open (http/https). If no scheme is provided, https:// will be used.',
+            },
+            show: {
+              type: 'boolean',
+              description: 'Whether to show the interactive canvas window immediately (default: true)',
+            },
+          },
+          required: ['session_id', 'url'],
         },
       },
       {

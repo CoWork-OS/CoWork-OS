@@ -1,4 +1,5 @@
 import path from 'path';
+import { pathToFileURL } from 'url';
 import { app, BrowserWindow, ipcMain, dialog, session, shell, Notification } from 'electron';
 import { DatabaseManager } from './database/schema';
 import { SecureSettingsRepository } from './database/SecureSettingsRepository';
@@ -100,7 +101,12 @@ function createWindow() {
 app.whenReady().then(async () => {
   // Set up Content Security Policy for production builds
   if (process.env.NODE_ENV !== 'development') {
+    const appRoot = pathToFileURL(path.join(__dirname, '../../renderer')).toString();
     session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+      if (!details.url.startsWith(appRoot)) {
+        callback({ responseHeaders: details.responseHeaders });
+        return;
+      }
       callback({
         responseHeaders: {
           ...details.responseHeaders,

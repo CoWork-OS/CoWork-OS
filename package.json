@@ -44,9 +44,10 @@
     "dev": "concurrently \"npm run dev:react\" \"npm run dev:electron\"",
     "dev:react": "vite",
     "dev:electron": "tsc -p tsconfig.electron.json && cross-env NODE_ENV=development electron .",
-    "build": "npm run build:react && npm run build:electron",
+    "build": "npm run build:react && npm run build:electron && npm run build:connectors",
     "build:react": "vite build",
     "build:electron": "tsc -p tsconfig.electron.json",
+    "build:connectors": "concurrently -k -n salesforce,jira,hubspot,zendesk,servicenow,linear,asana,okta \"tsc -p connectors/salesforce-mcp/tsconfig.json\" \"tsc -p connectors/jira-mcp/tsconfig.json\" \"tsc -p connectors/hubspot-mcp/tsconfig.json\" \"tsc -p connectors/zendesk-mcp/tsconfig.json\" \"tsc -p connectors/servicenow-mcp/tsconfig.json\" \"tsc -p connectors/linear-mcp/tsconfig.json\" \"tsc -p connectors/asana-mcp/tsconfig.json\" \"tsc -p connectors/okta-mcp/tsconfig.json\"",
     "package": "npm run build && electron-builder",
     "lint": "eslint src --ext ts,tsx",
     "type-check": "tsc --noEmit",
@@ -136,6 +137,15 @@
         "to": "skills",
         "filter": [
           "**/*.json"
+        ]
+      },
+      {
+        "from": "connectors",
+        "to": "connectors",
+        "filter": [
+          "**/dist/**",
+          "**/README.md",
+          "**/package.json"
         ]
       }
     ],

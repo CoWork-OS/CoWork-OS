@@ -33,6 +33,31 @@ Your AI needs a secure home. CoWork OS provides the runtime, security layers, an
 | **Security-First** | 2350+ unit tests, configurable guardrails, approval workflows |
 | **Local-First** | Your data stays on your machine. BYOK (Bring Your Own Key) |
 
+### Feature Comparison (CoWork OS vs OpenClaw vs Claude Cowork)
+
+| Feature | CoWork OS | OpenClaw | Claude Cowork |
+|---|---|---|---|
+| Model providers / BYOK | 20+ providers (Claude, OpenAI, Gemini, Bedrock, OpenRouter, Ollama, Groq, xAI, Kimi, Mistral, Cerebras, MiniMax, Qwen, Copilot, and more); BYOK | Any model supported; OAuth + API keys (Anthropic/OpenAI listed) | Claude plans (Pro/Max/Team/Enterprise); other providers not mentioned |
+| Local-first data control | Data stays on your machine; BYOK | Run on your own devices; local-first gateway | Runs locally in an isolated VM; choose folders/connectors; local history for Team/Enterprise |
+| Desktop platforms | macOS (cross-platform planned) | macOS, Linux, Windows (via WSL2) | macOS only (research preview) |
+| Messaging channels | 14 channels: WhatsApp, Telegram, Discord, Slack, Teams, Google Chat, iMessage, Signal, Mattermost, Matrix, Twitch, LINE, BlueBubbles, Email | Multi-channel inbox: WhatsApp, Telegram, Slack, Discord, Google Chat, Signal, BlueBubbles, iMessage, Teams, Matrix, Zalo, WebChat, macOS, iOS/Android | Not stated (desktop app + connectors) |
+| Enterprise connectors | Salesforce, Jira, HubSpot, Zendesk, ServiceNow, Linear, Asana, Okta | Not stated | Connectors supported; examples include Slack, Notion, GitHub, Linear |
+| Cloud storage connectors | Notion, Box, OneDrive, Google Workspace, Dropbox, SharePoint | Not stated | Not stated |
+| Mobile companions | iOS + Android companion apps (local network) | iOS/Android nodes + macOS menu bar app | Not stated (macOS only) |
+| Scheduling / cron | Recurring tasks via cron expressions | Cron + wakeups | Not stated |
+| Remote access | Tailscale or SSH tunnels | Tailscale Serve/Funnel or SSH tunnels | Not stated |
+| WebSocket API / control plane | WebSocket API for custom integrations | Gateway WebSocket control plane | Not stated |
+| Browser automation | Playwright automation | Browser control (Chrome/Chromium) | Browser access via Chrome connector |
+| Skills / plugins | 75+ bundled skills | Skills platform (bundled, managed, workspace skills) | Not stated |
+| MCP support | Yes | Not stated | Not stated |
+| Guardrails (token/cost/iteration limits) | Configurable guardrails | Not stated | Not stated |
+| Approval workflows | Required for destructive operations | Not stated | Human approval before significant actions |
+| Access control (pairing/allowlists) | Pairing codes + per-channel allowlists | DM pairing + allowlists | Folder/connector access controls |
+| Sandbox isolation | macOS sandbox-exec or Docker | Not stated | Runs locally in an isolated VM |
+| Encrypted credential storage | OS keychain + AES-256 fallback | Not stated | Not stated |
+
+_Sources: [OpenClaw README](https://github.com/openclaw/openclaw), [OpenClaw docs](https://docs.openclaw.ai), and the [Claude Cowork product page](https://claude.com/product/cowork). “Not stated” means not documented in public materials._
+
 > **Status**: macOS desktop app (cross-platform support planned)
 
 ---

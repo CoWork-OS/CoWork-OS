@@ -1,6 +1,6 @@
 {
   "name": "cowork-os",
-  "version": "0.3.27",
+  "version": "0.3.28",
   "description": "CoWork OS - The operating system for personal AI assistants",
   "overrides": {
     "undici": "^7.0.0"
@@ -124,7 +124,6 @@
   "build": {
     "appId": "com.cowork-os.app",
     "productName": "CoWork OS",
-    "forceCodeSigning": true,
     "directories": {
       "output": "release"
     },
@@ -157,7 +156,7 @@
         "zip"
       ],
       "category": "public.app-category.productivity",
-      "hardenedRuntime": true,
+      "hardenedRuntime": false,
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist"

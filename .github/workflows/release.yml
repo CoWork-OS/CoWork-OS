@@ -36,46 +36,11 @@ jobs:
       - name: Build application
         run: npm run build
 
-      - name: Validate macOS signing and notarization secrets
-        env:
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          missing=""
-          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
-            if [ -z "${!name}" ]; then
-              missing="${missing} ${name}"
-            fi
-          done
-
-          if [ -n "${missing}" ]; then
-            echo "::error::Missing required secrets for signed/notarized macOS release:${missing}"
-            echo "::error::Add all required secrets in GitHub Actions settings before creating release tags."
-            exit 1
-          fi
-
       - name: Package and publish Electron app
         run: npm run package
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          # electron-builder handles publishing to GitHub releases
-
-      - name: Verify DMG notarization staple
-        run: |
-          DMG_FILE="$(ls release/*.dmg | head -n 1)"
-          if [ -z "${DMG_FILE}" ]; then
-            echo "::error::No DMG file found in release/ after packaging."
-            exit 1
-          fi
-          xcrun stapler validate "${DMG_FILE}"
+          # unsigned macOS build publishing to GitHub releases
 
       - name: Publish draft GitHub release
         run: gh release edit "${GITHUB_REF_NAME}" --draft=false --repo "${GITHUB_REPOSITORY}"

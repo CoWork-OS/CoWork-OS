@@ -183,6 +183,9 @@ export class SecurityManager {
     // Use synchronous mutex key for this channel to prevent concurrent generation issues
     const mutexKey = `pairing:generate:${channel.id}`;
 
+    // Clear any stale or existing pending entries so only the newest code remains.
+    this.userRepo.deletePendingByChannel(channel.id);
+
     // Generate code (synchronous operation, but we track idempotency)
     const code = this.createPairingCode();
     const ttl = channel.securityConfig.pairingCodeTTL || 300; // 5 minutes default
@@ -318,11 +321,16 @@ export class SecurityManager {
 
     // Check expiration
     if (codeOwner.pairingExpiresAt && Date.now() > codeOwner.pairingExpiresAt) {
-      // Clear expired code
-      this.userRepo.update(codeOwner.id, {
-        pairingCode: undefined,
-        pairingExpiresAt: undefined,
-      });
+      // Remove expired pending placeholders entirely
+      if (codeOwner.channelUserId.startsWith('pending_')) {
+        this.userRepo.delete(codeOwner.id);
+      } else {
+        // Clear expired code for real users
+        this.userRepo.update(codeOwner.id, {
+          pairingCode: undefined,
+          pairingExpiresAt: undefined,
+        });
+      }
       return { success: false, error: 'Pairing code has expired. Please request a new one.' };
     }
 
@@ -338,10 +346,14 @@ export class SecurityManager {
       });
       // Clear the code from wherever it was stored
       if (codeOwner.id !== existingUser.id) {
-        this.userRepo.update(codeOwner.id, {
-          pairingCode: undefined,
-          pairingExpiresAt: undefined,
-        });
+        if (codeOwner.channelUserId.startsWith('pending_')) {
+          this.userRepo.delete(codeOwner.id);
+        } else {
+          this.userRepo.update(codeOwner.id, {
+            pairingCode: undefined,
+            pairingExpiresAt: undefined,
+          });
+        }
       }
       return { success: true, user: { ...existingUser, allowed: true } };
     } else {

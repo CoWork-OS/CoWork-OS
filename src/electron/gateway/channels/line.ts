@@ -451,6 +451,8 @@ export class LineAdapter implements ChannelAdapter {
       });
     }
 
+    const isGroup = lineMessage.source.type !== 'user';
+
     // Convert to IncomingMessage
     const message: IncomingMessage = {
       messageId: lineMessage.id,
@@ -458,6 +460,7 @@ export class LineAdapter implements ChannelAdapter {
       userId: lineMessage.source.userId || '',
       userName,
       chatId,
+      isGroup,
       text: lineMessage.text,
       timestamp: lineMessage.timestamp,
       raw: lineMessage,

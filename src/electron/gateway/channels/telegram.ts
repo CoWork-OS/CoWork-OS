@@ -1660,6 +1660,7 @@ export class TelegramAdapter implements ChannelAdapter {
     const msg = ctx.message!;
     const from = msg.from!;
     const chat = msg.chat;
+    const isGroup = chat.type !== 'private';
 
     // Check for forum topic (message_thread_id indicates a forum topic)
     const threadId = msg.message_thread_id?.toString();
@@ -1671,6 +1672,7 @@ export class TelegramAdapter implements ChannelAdapter {
       userId: from.id.toString(),
       userName: from.first_name + (from.last_name ? ` ${from.last_name}` : ''),
       chatId: chat.id.toString(),
+      isGroup,
       text: overrideText ?? msg.text ?? '',
       timestamp: new Date(msg.date * 1000),
       replyTo: msg.reply_to_message?.message_id.toString(),

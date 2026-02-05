@@ -1014,6 +1014,7 @@ export class DiscordAdapter implements ChannelAdapter {
     // Check for thread context
     const isThread = message.channel.isThread();
     const threadId = isThread ? message.channelId : undefined;
+    const isGroup = message.channel.type !== DiscordChannelType.DM;
 
     return {
       messageId: message.id,
@@ -1021,6 +1022,7 @@ export class DiscordAdapter implements ChannelAdapter {
       userId: message.author.id,
       userName: message.author.displayName || message.author.username,
       chatId: isThread ? (message.channel as ThreadChannel).parentId! : message.channelId,
+      isGroup,
       text: commandText || text,
       timestamp: message.createdAt,
       replyTo: message.reference?.messageId,
@@ -1073,6 +1075,7 @@ export class DiscordAdapter implements ChannelAdapter {
 
     // Check for thread context
     const isThread = interaction.channel?.isThread() ?? false;
+    const isGroup = Boolean(interaction.guildId);
 
     return {
       messageId: interaction.id,
@@ -1080,6 +1083,7 @@ export class DiscordAdapter implements ChannelAdapter {
       userId: interaction.user.id,
       userName: interaction.user.displayName || interaction.user.username,
       chatId: interaction.channelId!,
+      isGroup,
       text,
       timestamp: new Date(interaction.createdTimestamp),
       threadId: isThread ? interaction.channelId! : undefined,

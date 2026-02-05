@@ -393,6 +393,8 @@ export class MattermostAdapter implements ChannelAdapter {
     // Convert attachments
     const attachments = this.convertAttachments(post);
 
+    const isGroup = channelType !== 'D';
+
     // Convert to IncomingMessage
     const message: IncomingMessage = {
       messageId: post.id,
@@ -400,6 +402,7 @@ export class MattermostAdapter implements ChannelAdapter {
       userId: post.user_id,
       userName,
       chatId: post.channel_id,
+      isGroup,
       text: post.message,
       timestamp: new Date(post.create_at),
       replyTo: post.root_id || undefined,

@@ -82,11 +82,13 @@ export class SlackAdapter implements ChannelAdapter {
 
         // Check if it's a DM or mentions the bot
         const channelInfo = await client.conversations.info({ channel: message.channel });
-        const isDM = channelInfo.channel?.is_im || channelInfo.channel?.is_mpim;
+        const isDirect = channelInfo.channel?.is_im === true;
+        const isMultiPartyDm = channelInfo.channel?.is_mpim === true;
+        const isGroup = isDirect ? false : true;
         const isMentioned = message.text.includes(`<@${this._botId}>`);
 
-        if (isDM || isMentioned) {
-          const incomingMessage = await this.mapMessageToIncoming(message, client);
+        if (isDirect || isMultiPartyDm || isMentioned) {
+          const incomingMessage = await this.mapMessageToIncoming(message, client, isGroup);
           console.log(`Processing Slack message from ${incomingMessage.userName}: ${incomingMessage.text.slice(0, 50)}`);
           await this.handleIncomingMessage(incomingMessage);
         }
@@ -96,12 +98,14 @@ export class SlackAdapter implements ChannelAdapter {
       this.app.command(/.*/, async ({ command, ack, respond }) => {
         await ack();
 
+        const isGroup = command.channel_id ? !command.channel_id.startsWith('D') : undefined;
         const incomingMessage: IncomingMessage = {
           messageId: command.trigger_id,
           channel: 'slack',
           userId: command.user_id,
           userName: command.user_name,
           chatId: command.channel_id,
+          isGroup,
           text: `/${command.command.replace('/', '')} ${command.text}`.trim(),
           timestamp: new Date(),
           raw: command,
@@ -363,7 +367,7 @@ export class SlackAdapter implements ChannelAdapter {
 
   // Private methods
 
-  private async mapMessageToIncoming(message: any, client: any): Promise<IncomingMessage> {
+  private async mapMessageToIncoming(message: any, client: any, isGroup?: boolean): Promise<IncomingMessage> {
     // Remove bot mention from the text if present
     let text = message.text || '';
     if (this._botId) {
@@ -390,6 +394,7 @@ export class SlackAdapter implements ChannelAdapter {
       userId: message.user || '',
       userName,
       chatId: message.channel || '',
+      isGroup,
       text: commandText || text,
       timestamp: new Date(parseFloat(message.ts || '0') * 1000),
       replyTo: message.thread_ts,

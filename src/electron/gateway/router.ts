@@ -570,7 +570,7 @@ export class MessageRouter {
     });
 
     // Security check
-    const securityResult = await this.securityManager.checkAccess(channel, message);
+    const securityResult = await this.securityManager.checkAccess(channel, message, message.isGroup);
 
     if (!securityResult.allowed) {
       // Handle unauthorized access
@@ -1842,6 +1842,13 @@ export class MessageRouter {
         text: this.getUiCopy('pairingSuccess'),
         replyTo: message.messageId,
       });
+
+      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+        this.mainWindow.webContents.send('gateway:users-updated', {
+          channelId: channel.id,
+          channelType: adapter.type,
+        });
+      }
 
       this.emitEvent({
         type: 'user:paired',

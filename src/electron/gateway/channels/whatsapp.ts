@@ -36,6 +36,7 @@ import { app } from 'electron';
 import {
   ChannelAdapter,
   ChannelStatus,
+  ChannelConfig,
   IncomingMessage,
   OutgoingMessage,
   MessageHandler,
@@ -110,6 +111,8 @@ export class WhatsAppAdapter implements ChannelAdapter {
   private backoffAttempt = 0;
   private backoffTimer?: ReturnType<typeof setTimeout>;
   private currentQr?: string;
+  private shouldReconnect = true;
+  private selfChatIgnoreLogAt = 0;
 
   private readonly DEFAULT_BACKOFF: BackoffConfig = {
     initialDelay: 2000,
@@ -136,6 +139,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
     // In self-chat mode, disable read receipts by default
     if (this.config.selfChatMode && config.sendReadReceipts === undefined) {
       this.config.sendReadReceipts = false;
+      console.log('[WhatsApp] Self-chat mode enabled; defaulting sendReadReceipts to false.');
     }
 
     // Set auth directory
@@ -187,6 +191,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
       return;
     }
 
+    this.shouldReconnect = true;
     this.setStatus('connecting');
     this.resetBackoff();
 
@@ -255,6 +260,17 @@ export class WhatsAppAdapter implements ChannelAdapter {
    */
   private handleConnectionUpdate(update: Partial<ConnectionState>): void {
     const { connection, lastDisconnect, qr } = update;
+
+    if (!this.shouldReconnect) {
+      if (connection === 'open') {
+        // If a manual disconnect happened mid-handshake, close immediately.
+        this.sock?.ws?.close();
+        this.setStatus('disconnected');
+      } else if (connection === 'close') {
+        this.setStatus('disconnected');
+      }
+      return;
+    }
 
     // Handle QR code for authentication
     if (qr) {
@@ -345,6 +361,14 @@ export class WhatsAppAdapter implements ChannelAdapter {
       const remoteJidNormalized = normalizeJid(remoteJid);
 
       if (remoteJidNormalized !== selfJidNormalized) {
+        const now = Date.now();
+        if (now - this.selfChatIgnoreLogAt > 30000) {
+          console.log(
+            `WhatsApp: Ignoring message from ${remoteJidNormalized} because self-chat mode is enabled. ` +
+            'Disable self-chat mode to accept messages from other numbers.'
+          );
+          this.selfChatIgnoreLogAt = now;
+        }
         // Message is NOT in self-chat, silently ignore it
         return;
       }
@@ -430,6 +454,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
       userId: senderE164 || participantJid || remoteJid,
       userName: msg.pushName || senderE164 || 'Unknown',
       chatId: remoteJid,
+      isGroup,
       text: body || (attachments.length === 0 ? this.extractMediaPlaceholder(msg.message) : '') || '',
       timestamp: messageTimestampMs ? new Date(messageTimestampMs) : new Date(),
       attachments: attachments.length > 0 ? attachments : undefined,
@@ -444,6 +469,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
    * Disconnect from WhatsApp
    */
   async disconnect(): Promise<void> {
+    this.shouldReconnect = false;
     this.resetBackoff();
 
     // Clear timers
@@ -747,6 +773,37 @@ export class WhatsAppAdapter implements ChannelAdapter {
   }
 
   /**
+   * Update adapter configuration at runtime
+   */
+  updateConfig(config: ChannelConfig): void {
+    const next = config as Partial<WhatsAppConfig>;
+    const prevDedupEnabled = this.config.deduplicationEnabled !== false;
+    const prevSelfChat = this.config.selfChatMode === true;
+
+    this.config = {
+      ...this.config,
+      ...next,
+    };
+
+    // If self-chat was just enabled and read receipts weren't explicitly set, default to false.
+    if (!prevSelfChat && this.config.selfChatMode && next.sendReadReceipts === undefined) {
+      this.config.sendReadReceipts = false;
+      console.log('[WhatsApp] Self-chat mode enabled; defaulting sendReadReceipts to false.');
+    }
+
+    const nextDedupEnabled = this.config.deduplicationEnabled !== false;
+    if (nextDedupEnabled && !prevDedupEnabled) {
+      this.startDedupCleanup();
+    } else if (!nextDedupEnabled && prevDedupEnabled) {
+      if (this.dedupCleanupTimer) {
+        clearInterval(this.dedupCleanupTimer);
+        this.dedupCleanupTimer = undefined;
+      }
+      this.processedMessages.clear();
+    }
+  }
+
+  /**
    * Get channel info
    */
   async getInfo(): Promise<ChannelInfo> {
@@ -839,6 +896,10 @@ export class WhatsAppAdapter implements ChannelAdapter {
    * Attempt reconnection with exponential backoff
    */
   private async attemptReconnection(): Promise<void> {
+    if (!this.shouldReconnect) {
+      return;
+    }
+
     if (this.isReconnecting) return;
 
     const config = this.DEFAULT_BACKOFF;
@@ -857,6 +918,11 @@ export class WhatsAppAdapter implements ChannelAdapter {
 
     this.backoffTimer = setTimeout(async () => {
       try {
+        if (!this.shouldReconnect) {
+          this.isReconnecting = false;
+          return;
+        }
+
         this.sock = null;
         this.isReconnecting = false;
         this.setStatus('disconnected');

@@ -357,12 +357,14 @@ export class TwitchAdapter implements ChannelAdapter {
 
     // Convert to IncomingMessage
     // For Twitch, chatId is the channel name (without #)
+    const isGroup = !twitchMessage.isWhisper;
     const message: IncomingMessage = {
       messageId: twitchMessage.id,
       channel: 'twitch',
       userId: twitchMessage.userId,
       userName: twitchMessage.displayName || twitchMessage.username,
       chatId: twitchMessage.channel || twitchMessage.username, // Use username for whispers
+      isGroup,
       text: twitchMessage.message,
       timestamp: twitchMessage.timestamp,
       replyTo: twitchMessage.replyTo?.messageId,

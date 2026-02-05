@@ -491,6 +491,8 @@ export class SignalAdapter implements ChannelAdapter {
       return;
     }
 
+    const isGroup = Boolean(dataMessage.groupInfo?.groupId);
+
     // Convert to IncomingMessage
     const message: IncomingMessage = {
       messageId,
@@ -498,6 +500,7 @@ export class SignalAdapter implements ChannelAdapter {
       userId: envelope.source,
       userName: envelope.source, // Signal doesn't provide names in messages
       chatId: dataMessage.groupInfo?.groupId || envelope.source,
+      isGroup,
       text: dataMessage.message,
       timestamp: new Date(envelope.timestamp),
       replyTo: dataMessage.quote?.id?.toString(),

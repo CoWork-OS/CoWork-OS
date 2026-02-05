@@ -29,6 +29,8 @@ export interface IncomingMessage {
   userName: string;
   /** Chat/conversation ID (for group chats) */
   chatId: string;
+  /** Whether this message is from a group chat */
+  isGroup?: boolean;
   /** Message content */
   text: string;
   /** Timestamp */
@@ -529,6 +531,12 @@ export interface ChannelAdapter {
    * @param handler Function to call when a message is received
    */
   onMessage(handler: MessageHandler): void;
+
+  /**
+   * Update adapter configuration at runtime (if supported).
+   * Useful for channels with dynamic settings like self-chat mode.
+   */
+  updateConfig?(config: ChannelConfig): void;
 
   /**
    * Register a callback query handler (for inline keyboard buttons)

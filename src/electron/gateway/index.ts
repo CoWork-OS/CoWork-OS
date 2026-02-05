@@ -5,14 +5,17 @@
  * Manages channel adapters, routing, and sessions.
  */
 
-import { BrowserWindow } from 'electron';
+import { BrowserWindow, app } from 'electron';
 import Database from 'better-sqlite3';
+import * as fs from 'fs';
+import * as path from 'path';
 import { MessageRouter, RouterConfig } from './router';
 import { SecurityManager } from './security';
 import { SessionManager } from './session';
 import {
   ChannelAdapter,
   ChannelType,
+  ChannelConfig,
   TelegramConfig,
   DiscordConfig,
   SlackConfig,
@@ -84,6 +87,7 @@ export class ChannelGateway {
   private initialized = false;
   private agentDaemon?: AgentDaemon;
   private daemonListeners: Array<{ event: string; handler: (...args: any[]) => void }> = [];
+  private pendingCleanupInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(db: Database.Database, config: GatewayConfig = {}) {
     this.db = db;
@@ -256,6 +260,8 @@ export class ChannelGateway {
       await this.router.connectAll();
     }
 
+    this.startPendingCleanup();
+
     this.initialized = true;
     console.log('Channel Gateway initialized');
   }
@@ -280,8 +286,46 @@ export class ChannelGateway {
     }
 
     await this.router.disconnectAll();
+    this.stopPendingCleanup();
     this.initialized = false;
     console.log('Channel Gateway shutdown');
+  }
+
+  private startPendingCleanup(): void {
+    if (this.pendingCleanupInterval) return;
+    // Run once at startup to clear any stale entries.
+    this.cleanupPendingUsers();
+    // Then run every 10 minutes.
+    this.pendingCleanupInterval = setInterval(() => {
+      this.cleanupPendingUsers();
+    }, 10 * 60 * 1000);
+  }
+
+  private stopPendingCleanup(): void {
+    if (this.pendingCleanupInterval) {
+      clearInterval(this.pendingCleanupInterval);
+      this.pendingCleanupInterval = null;
+    }
+  }
+
+  private cleanupPendingUsers(): void {
+    const channels = this.channelRepo.findAll();
+    for (const channel of channels) {
+      const removed = this.userRepo.deleteExpiredPending(channel.id);
+      if (removed > 0) {
+        this.emitUsersUpdated(channel);
+      }
+    }
+  }
+
+  private emitUsersUpdated(channel: Channel): void {
+    const mainWindow = this.router.getMainWindow();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('gateway:users-updated', {
+        channelId: channel.id,
+        channelType: channel.type,
+      });
+    }
   }
 
   // Channel Management
@@ -401,6 +445,9 @@ export class ChannelGateway {
     if (existing) {
       throw new Error('WhatsApp channel already configured. Update or remove it first.');
     }
+
+    // Always clear any stale auth so a new QR is required for a new number.
+    this.clearWhatsAppAuthDir();
 
     // Create channel record
     const channel = this.channelRepo.create({
@@ -772,6 +819,16 @@ export class ChannelGateway {
    */
   updateChannel(channelId: string, updates: Partial<Channel>): void {
     this.channelRepo.update(channelId, updates);
+
+    if (updates.config === undefined) return;
+
+    const channel = this.channelRepo.findById(channelId);
+    if (!channel) return;
+
+    const adapter = this.router.getAdapter(channel.type as ChannelType);
+    if (adapter?.updateConfig) {
+      adapter.updateConfig(channel.config as ChannelConfig);
+    }
   }
 
   /**
@@ -897,6 +954,8 @@ export class ChannelGateway {
     const adapter = this.router.getAdapter('whatsapp') as WhatsAppAdapter | undefined;
     if (adapter) {
       await adapter.logout();
+    } else {
+      this.clearWhatsAppAuthDir();
     }
 
     const channel = this.channelRepo.findByType('whatsapp');
@@ -909,7 +968,21 @@ export class ChannelGateway {
    * Remove a channel
    */
   async removeChannel(channelId: string): Promise<void> {
-    await this.disableChannel(channelId);
+    const channel = this.channelRepo.findById(channelId);
+    if (!channel) return;
+
+    if (channel.type === 'whatsapp') {
+      const adapter = this.router.getAdapter('whatsapp') as WhatsAppAdapter | undefined;
+      if (adapter) {
+        await adapter.logout();
+      } else {
+        const tempAdapter = this.createAdapterForChannel(channel) as WhatsAppAdapter;
+        await tempAdapter.logout();
+      }
+      this.clearWhatsAppAuthDir(channel);
+    } else {
+      await this.disableChannel(channelId);
+    }
 
     // Delete associated data first (to avoid foreign key constraint errors)
     this.messageRepo.deleteByChannelId(channelId);
@@ -1084,6 +1157,25 @@ export class ChannelGateway {
   }
 
   // Private methods
+
+  private resolveWhatsAppAuthDir(channel?: Channel): string {
+    const configured = (channel?.config as { authDir?: string } | undefined)?.authDir;
+    if (configured && configured.trim()) {
+      return configured;
+    }
+    return path.join(app.getPath('userData'), 'whatsapp-auth');
+  }
+
+  private clearWhatsAppAuthDir(channel?: Channel): void {
+    try {
+      const authDir = this.resolveWhatsAppAuthDir(channel);
+      if (fs.existsSync(authDir)) {
+        fs.rmSync(authDir, { recursive: true, force: true });
+      }
+    } catch (error) {
+      console.error('Failed to clear WhatsApp auth directory:', error);
+    }
+  }
 
   /**
    * Load and register channel adapters

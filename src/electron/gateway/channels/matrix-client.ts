@@ -192,6 +192,21 @@ export class MatrixClient extends EventEmitter {
   }
 
   /**
+   * Get direct (1:1) room IDs from account data
+   */
+  async getDirectRooms(): Promise<string[]> {
+    try {
+      const response = await this.apiRequest<Record<string, string[]>>(
+        'GET',
+        `/_matrix/client/v3/user/${encodeURIComponent(this.options.userId)}/account_data/m.direct`
+      );
+      return Object.values(response || {}).flat().filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
    * Start syncing (receiving messages)
    */
   async startReceiving(): Promise<void> {

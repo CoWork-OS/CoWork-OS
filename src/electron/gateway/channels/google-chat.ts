@@ -464,6 +464,8 @@ export class GoogleChatAdapter implements ChannelAdapter {
     const userName = message.sender?.displayName || 'Unknown User';
     const userId = message.sender?.name || '';
 
+    const isGroup = message.space.type !== 'DM';
+
     // Map to IncomingMessage format
     const incomingMessage: IncomingMessage = {
       messageId: messageId,
@@ -471,6 +473,7 @@ export class GoogleChatAdapter implements ChannelAdapter {
       userId: userId,
       userName: userName,
       chatId: spaceId,
+      isGroup,
       text: text,
       timestamp: message.createTime ? new Date(message.createTime) : new Date(),
       threadId: message.thread?.name,

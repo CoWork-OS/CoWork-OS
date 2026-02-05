@@ -299,6 +299,9 @@ export class TeamsAdapter implements ChannelAdapter {
     const userName = activity.from?.name || 'Unknown User';
     const userId = activity.from?.id || '';
 
+    const conversationType = activity.conversation?.conversationType;
+    const isGroup = conversationType ? conversationType !== 'personal' : undefined;
+
     // Map to IncomingMessage format
     const incomingMessage: IncomingMessage = {
       messageId: messageId,
@@ -306,6 +309,7 @@ export class TeamsAdapter implements ChannelAdapter {
       userId: userId,
       userName: userName,
       chatId: activity.conversation.id,
+      isGroup,
       text: text.trim(),
       timestamp: activity.timestamp ? new Date(activity.timestamp) : new Date(),
       replyTo: activity.replyToId,

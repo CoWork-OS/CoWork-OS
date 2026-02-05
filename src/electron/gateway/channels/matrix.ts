@@ -50,6 +50,11 @@ export class MatrixAdapter implements ChannelAdapter {
   // User cache
   private userCache: Map<string, MatrixUser> = new Map();
 
+  // Direct (1:1) rooms cache
+  private directRooms: Set<string> | null = null;
+  private directRoomsLoadedAt = 0;
+  private readonly DIRECT_ROOMS_TTL_MS = 5 * 60 * 1000;
+
   // Message deduplication
   private processedMessages: Map<string, number> = new Map();
   private readonly DEDUP_CACHE_TTL = 60000; // 1 minute
@@ -479,6 +484,9 @@ export class MatrixAdapter implements ChannelAdapter {
     // Get reply-to
     const replyTo = event.content['m.relates_to']?.['m.in_reply_to']?.event_id;
 
+    const directRooms = await this.getDirectRooms();
+    const isGroup = directRooms ? !directRooms.has(event.room_id) : undefined;
+
     // Convert to IncomingMessage
     const message: IncomingMessage = {
       messageId: event.event_id,
@@ -486,6 +494,7 @@ export class MatrixAdapter implements ChannelAdapter {
       userId: event.sender,
       userName,
       chatId: event.room_id,
+      isGroup,
       text: body,
       timestamp: new Date(event.origin_server_ts),
       replyTo,
@@ -550,6 +559,28 @@ export class MatrixAdapter implements ChannelAdapter {
         size: event.content.info?.size,
       },
     ];
+  }
+
+  private async getDirectRooms(): Promise<Set<string> | null> {
+    if (!this.client) {
+      return this.directRooms;
+    }
+
+    const now = Date.now();
+    if (this.directRooms && now - this.directRoomsLoadedAt < this.DIRECT_ROOMS_TTL_MS) {
+      return this.directRooms;
+    }
+
+    try {
+      const rooms = await this.client.getDirectRooms();
+      this.directRooms = new Set(rooms);
+      this.directRoomsLoadedAt = now;
+      return this.directRooms;
+    } catch (error) {
+      console.warn('Failed to load Matrix direct rooms:', error);
+      this.directRoomsLoadedAt = now;
+      return null;
+    }
   }
 
   /**

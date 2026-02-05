@@ -244,7 +244,7 @@ describe('GrepTools', () => {
     // Since we can't mock fs.readdirSync in ESM, we test the logic indirectly
     // through the grep method which triggers the heuristic
 
-    it('should return false for non-existent workspace paths', () => {
+    it('should return false for non-existent workspace paths', async () => {
       // The workspace path doesn't exist, so readdirSync will throw
       // and the method should return false
       const testGrepTools = new GrepTools(
@@ -253,15 +253,15 @@ describe('GrepTools', () => {
         'test-task-id'
       );
 
-      const result = (testGrepTools as any).isDocumentHeavyWorkspace();
+      const result = await (testGrepTools as any).isDocumentHeavyWorkspace();
 
       expect(result).toBe(false);
     });
 
-    it('should check files in the workspace root directory', () => {
+    it('should check files in the workspace root directory', async () => {
       // This tests that the method runs without throwing
       // The actual test workspace likely has few or no PDF files
-      const result = (grepTools as any).isDocumentHeavyWorkspace();
+      const result = await (grepTools as any).isDocumentHeavyWorkspace();
 
       // Since /test/workspace doesn't exist, it should return false
       expect(result).toBe(false);

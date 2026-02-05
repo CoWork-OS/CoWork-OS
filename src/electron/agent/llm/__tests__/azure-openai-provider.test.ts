@@ -60,7 +60,7 @@ describe('AzureOpenAIProvider', () => {
     const body = JSON.parse(options.body);
     expect(body.model).toBe('my deployment');
     expect(body.messages).toEqual([{ role: 'user', content: 'Hi' }]);
-    expect(body.max_tokens).toBe(10);
+    expect(body.max_tokens).toBe(16);
   });
 
   it('returns Azure error details when connection fails', async () => {
@@ -93,8 +93,8 @@ describe('AzureOpenAIProvider', () => {
 
     const firstBody = JSON.parse(mockFetch.mock.calls[0][1].body);
     const secondBody = JSON.parse(mockFetch.mock.calls[1][1].body);
-    expect(firstBody.max_tokens).toBe(10);
-    expect(secondBody.max_completion_tokens).toBe(10);
+    expect(firstBody.max_tokens).toBe(16);
+    expect(secondBody.max_completion_tokens).toBe(16);
   });
 
   it('falls back to Responses API when chat completions are unsupported during connection test', async () => {

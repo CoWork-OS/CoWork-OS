@@ -168,6 +168,7 @@ describe('SearchProviderFactory', () => {
 
     it('should use exponential backoff delay', async () => {
       const sleepSpy = vi.spyOn(SearchProviderFactory as any, 'sleep').mockResolvedValue(undefined);
+      const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
 
       const mockProvider = {
         search: vi.fn()
@@ -185,8 +186,9 @@ describe('SearchProviderFactory', () => {
         { query: 'test', searchType: 'web' }
       );
 
-      // First retry should use 400ms delay (400 * 1)
-      expect(sleepSpy).toHaveBeenCalledWith(400);
+      // First retry should use 1000ms delay (1000 * 1) with zero jitter
+      expect(sleepSpy).toHaveBeenCalledWith(1000);
+      randomSpy.mockRestore();
     });
 
     it('should not retry when maxAttempts is 1', async () => {
@@ -206,6 +208,7 @@ describe('SearchProviderFactory', () => {
 
     it('should increase delay on subsequent retries', async () => {
       const sleepSpy = vi.spyOn(SearchProviderFactory as any, 'sleep').mockResolvedValue(undefined);
+      const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
 
       const mockProvider = {
         search: vi.fn()
@@ -225,9 +228,10 @@ describe('SearchProviderFactory', () => {
         3
       );
 
-      // First retry: 400 * 1 = 400ms, Second retry: 400 * 2 = 800ms
-      expect(sleepSpy).toHaveBeenNthCalledWith(1, 400);
-      expect(sleepSpy).toHaveBeenNthCalledWith(2, 800);
+      // First retry: 1000 * 1 = 1000ms, Second retry: 1000 * 2 = 2000ms (zero jitter)
+      expect(sleepSpy).toHaveBeenNthCalledWith(1, 1000);
+      expect(sleepSpy).toHaveBeenNthCalledWith(2, 2000);
+      randomSpy.mockRestore();
     });
 
     it('should throw fallback error when lastError is undefined', async () => {

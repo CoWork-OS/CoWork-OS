@@ -1,4 +1,4 @@
-import { Task, Workspace, Plan, PlanStep, TaskEvent, SuccessCriteria } from '../../shared/types';
+import { Task, Workspace, Plan, PlanStep, TaskEvent, SuccessCriteria, TEMP_WORKSPACE_ID } from '../../shared/types';
 import * as fs from 'fs';
 import * as path from 'path';
 import { AgentDaemon } from './daemon';
@@ -170,30 +170,6 @@ function isAskingQuestion(text: string): boolean {
   const trimmed = text.trim();
   if (!trimmed) return false;
 
-  // Keep this lightweight and conservative: only pause on questions that
-  // clearly request input/decisions needed to proceed.
-  const blockingQuestionPatterns = [
-    // Direct requests for info or confirmation
-    /(?:^|\n)\s*(?:please\s+)?(?:provide|share|send|upload|enter|paste|specify|clarify|confirm|choose|pick|select)\b/i,
-    /(?:can|could|would)\s+you\s+(?:please\s+)?(?:provide|share|send|upload|enter|paste|specify|clarify|confirm|choose|pick|select)\b/i,
-
-    // Decision/approval questions
-    /would\s+you\s+like\s+me\s+to\b/i,
-    /would\s+you\s+prefer\b/i,
-    /should\s+i\b/i,
-    /do\s+you\s+want\s+me\s+to\b/i,
-    /do\s+you\s+prefer\b/i,
-    /is\s+it\s+(?:ok|okay|alright)\s+if\s+i\b/i,
-
-    // Clarifying questions about specifics
-    /\bwhat\s+(?:is|are|was|were|should|would|can|could|do|does|did)\s+(?:the|your|this|that)\b/i,
-    /\bwhat\s+should\s+i\b/i,
-    /\bwhich\s+(?:one|option|approach|method|file|version|environment|format|branch|repo|path)\b/i,
-    /\bwhere\s+(?:is|are|should|can|could)\b/i,
-    /\bwhen\s+(?:is|are|should|can|could)\b/i,
-    /\bhow\s+should\s+i\b/i,
-  ];
-
   const nonBlockingQuestionPatterns = [
     // Conversational/offboarding prompts that shouldn't pause execution
     /\bwhat\s+(?:else\s+)?can\s+i\s+help\b/i,
@@ -206,23 +182,73 @@ function isAskingQuestion(text: string): boolean {
     /\bdoes\s+that\s+(?:help|make\s+sense)\b/i,
   ];
 
-  const isShort = trimmed.length < 1000;
-  if (!isShort) return false;
+  const maxLengthForAnalysis = 4000;
+  const sample = trimmed.slice(0, maxLengthForAnalysis);
 
-  // If we see explicit blocking cues, pause.
-  if (blockingQuestionPatterns.some(pattern => pattern.test(trimmed))) {
+  const blockingCuePatterns = [
+    /(?:need|required)\s+(?:your|a|the)\b/i,
+    /before\s+i\s+can\s+(?:proceed|continue)\b/i,
+    /to\s+(?:proceed|continue|move\s+forward)\b/i,
+    /i\s+can(?:not|'t)\s+(?:proceed|continue)\b/i,
+    /\bawaiting\s+your\b/i,
+  ];
+
+  const explicitProceedPatterns = [
+    /\bi\s+(?:will|\'ll)\s+(?:proceed|continue|go\s+ahead|move\s+forward)\b/i,
+    /\bi\s+can\s+(?:proceed|continue|move\s+forward)\b/i,
+    /\bi\s+(?:will|\'ll)\s+assume\b/i,
+    /\bif\s+you\s+do\s+not\s+(?:respond|answer|reply)\b/i,
+    /\bif\s+you\s+don\'t\s+(?:respond|answer|reply)\b/i,
+  ];
+
+  const questionWordPatterns = [
+    /^(?:who|what|where|when|why|how|which)\b/i,
+  ];
+
+  const imperativePatterns = [
+    /^(?:please\s+)?(?:provide|share|send|upload|enter|paste|specify|clarify|confirm|choose|pick|select|list|tell|give)\b/i,
+  ];
+
+  const decisionPatterns = [
+    /^(?:do\s+you\s+want|do\s+you\s+prefer|would\s+you\s+like|would\s+you\s+prefer|should\s+i|is\s+it\s+(?:ok|okay|alright)\s+if\s+i)\b/i,
+  ];
+
+  const hasBlockingCue = blockingCuePatterns.some(pattern => pattern.test(sample));
+  const hasExplicitProceed = explicitProceedPatterns.some(pattern => pattern.test(sample));
+  if (hasBlockingCue) return true;
+  const lines = sample.split('\n').map(l => l.trim()).filter(Boolean);
+  if (lines.length === 0) return false;
+
+  const lastLine = lines[lines.length - 1] ?? sample;
+  const sentenceMatch = lastLine.match(/[^.!?]+[.!?]*$/);
+  const lastSentence = sentenceMatch ? sentenceMatch[0].trim() : lastLine;
+  const hasNonBlockingTail = nonBlockingQuestionPatterns.some(pattern => pattern.test(lastSentence));
+
+  const tailLines = lines.slice(-2);
+  let tailQuestion = false;
+  let tailImperative = false;
+
+  for (const line of tailLines) {
+    const normalized = line.replace(/^[\-\*]?\s*\d*[\).]?\s*/, '').trim();
+    if (!normalized) continue;
+    if (nonBlockingQuestionPatterns.some(pattern => pattern.test(normalized))) {
+      continue;
+    }
+    if (imperativePatterns.some(pattern => pattern.test(normalized)) || decisionPatterns.some(pattern => pattern.test(normalized))) {
+      tailImperative = true;
+    }
+    if (normalized.endsWith('?') || questionWordPatterns.some(pattern => pattern.test(normalized))) {
+      tailQuestion = true;
+    }
+  }
+
+  if (tailImperative) return true;
+  if (tailQuestion) {
+    if (hasNonBlockingTail) return false;
+    if (hasExplicitProceed) return false;
     return true;
   }
 
-  // If it's a non-blocking conversational prompt, don't pause.
-  const lastLine = trimmed.split('\n').filter(Boolean).pop() ?? trimmed;
-  const sentenceMatch = lastLine.match(/[^.!?]+[.!?]*$/);
-  const lastSentence = sentenceMatch ? sentenceMatch[0].trim() : lastLine;
-  if (nonBlockingQuestionPatterns.some(pattern => pattern.test(lastSentence))) {
-    return false;
-  }
-
-  // Default to not pausing on generic questions.
   return false;
 }
 
@@ -1036,6 +1062,11 @@ export class TaskExecutor {
   private conversationHistory: LLMMessage[] = [];
   private systemPrompt: string = '';
   private lastUserMessage: string;
+  private toolResultMemory: Array<{ tool: string; summary: string; timestamp: number }> = [];
+  private lastAssistantOutput: string | null = null;
+  private lastNonVerificationOutput: string | null = null;
+  private readonly toolResultMemoryLimit = 8;
+  private readonly shouldPauseForQuestions: boolean;
 
   // Plan revision tracking to prevent infinite revision loops
   private planRevisionCount: number = 0;
@@ -1064,6 +1095,8 @@ export class TaskExecutor {
   ) {
     this.lastUserMessage = task.prompt;
     this.requiresTestRun = this.detectTestRequirement(`${task.title}\n${task.prompt}`);
+    // Only main tasks should pause for user input. Sub/parallel tasks should complete and report back.
+    this.shouldPauseForQuestions = !task.parentTaskId && (task.agentType ?? 'main') === 'main';
     // Get base settings
     const settings = LLMProviderFactory.loadSettings();
 
@@ -1532,6 +1565,35 @@ export class TaskExecutor {
       return { input, modified, inference: modified ? inference : undefined };
     }
 
+    // Handle web_search - normalize region/country inputs
+    if (toolName === 'web_search') {
+      let modified = false;
+      let inference = '';
+
+      if (!input?.region && input?.country && typeof input.country === 'string') {
+        input.region = input.country;
+        modified = true;
+        inference = 'Normalized country -> region';
+      }
+
+      if (input?.region && typeof input.region === 'string') {
+        const raw = input.region.trim();
+        const upper = raw.toUpperCase();
+        let normalized = upper;
+        if (upper === 'UK') normalized = 'GB';
+        if (upper === 'USA') normalized = 'US';
+        if (normalized !== raw) {
+          input.region = normalized;
+          modified = true;
+          inference = `${inference ? `${inference}; ` : ''}Normalized region "${raw}" -> "${normalized}"`;
+        }
+      }
+
+      if (modified) {
+        return { input, modified, inference };
+      }
+    }
+
     return { input, modified: false };
   }
 
@@ -1681,6 +1743,7 @@ export class TaskExecutor {
     this.systemPrompt = `You are an AI assistant helping with tasks. Use the available tools to complete the work.
 Current time: ${getCurrentDateTimeContext()}
 Workspace: ${this.workspace.path}
+Workspace is temporary: ${this.workspace.isTemp ? 'true' : 'false'}
 Always ask for approval before deleting files or making destructive changes.
 Be concise in your responses. When reading files, only read what you need.
 
@@ -1996,6 +2059,9 @@ You are continuing a previous conversation. The context from the previous conver
 
     // Reset tool failure tracker (tools might work on retry)
     this.toolFailureTracker = new ToolFailureTracker();
+    this.toolResultMemory = [];
+    this.lastAssistantOutput = null;
+    this.lastNonVerificationOutput = null;
 
     // Add context for LLM about retry
     this.conversationHistory.push({
@@ -2250,6 +2316,365 @@ You are continuing a previous conversation. The context from the previous conver
     return { additionalContext: additionalContext || undefined, taskType };
   }
 
+  private classifyWorkspaceNeed(prompt: string): 'none' | 'new_ok' | 'ambiguous' | 'needs_existing' {
+    const text = prompt.toLowerCase();
+
+    const newProjectPatterns = [
+      /from\s+scratch/i,
+      /\bnew\s+project\b/i,
+      /\bcreate\s+(?:a|an)\s+new\b/i,
+      /\bstart\s+(?:a|an)\s+new\b/i,
+      /\bscaffold\b/i,
+      /\bbootstrap\b/i,
+      /\binitialize\b/i,
+      /\binit\b/i,
+      /\bgreenfield\b/i,
+    ];
+
+    const existingProjectPatterns = [
+      /\bexisting\b/i,
+      /\bcurrent\b/i,
+      /\balready\b/i,
+      /\bin\s+(?:this|the)\s+(?:repo|repository|project|codebase)\b/i,
+      /\bfix\b/i,
+      /\bbug\b/i,
+      /\bdebug\b/i,
+      /\brefactor\b/i,
+      /\bupdate\b/i,
+      /\bmodify\b/i,
+      // Note: 'add' is intentionally omitted - it's ambiguous (could be new or existing)
+      /\bextend\b/i,
+      /\bmigrate\b/i,
+      /\bpatch\b/i,
+    ];
+
+    const pathOrFilePatterns = [
+      /(?:^|[\s/\\])[\w.\-\/\\]+?\.(ts|tsx|js|jsx|py|rs|go|java|kt|swift|json|yml|yaml|toml|md|sol|c|cpp|h|hpp)\b/i,
+      /\b(?:src|app|apps|packages|programs|frontend|backend|server|client|contracts|lib|services)\//i,
+    ];
+
+    const codeTaskPatterns = [
+      /\bapp\b/i,
+      /\bdapp\b/i,
+      /\bweb\b/i,
+      /\bfrontend\b/i,
+      /\bbackend\b/i,
+      /\bapi\b/i,
+      /\bservice\b/i,
+      /\bprogram\b/i,
+      /\bsmart\s+contract\b/i,
+      /\bcontract\b/i,
+      /\bblockchain\b/i,
+      /\bsolana\b/i,
+      /\breact\b/i,
+      /\bnode\b/i,
+      /\btypescript\b/i,
+      /\bjavascript\b/i,
+      /\bpython\b/i,
+      /\brust\b/i,
+      /\bgo\b/i,
+      /\bjava\b/i,
+      /\bkotlin\b/i,
+      /\bswift\b/i,
+      /\bdatabase\b/i,
+      /\bschema\b/i,
+      /\bmigration\b/i,
+      /\brepo\b/i,
+      /\brepository\b/i,
+      /\bcodebase\b/i,
+    ];
+
+    const mentionsNew = newProjectPatterns.some(pattern => pattern.test(text));
+    const isCodeTask = codeTaskPatterns.some(pattern => pattern.test(text));
+    const mentionsExisting = pathOrFilePatterns.some(pattern => pattern.test(text)) ||
+      (existingProjectPatterns.some(pattern => pattern.test(text)) && isCodeTask);
+
+    if (mentionsExisting) return 'needs_existing';
+    if (mentionsNew) return 'new_ok';
+    if (isCodeTask) return 'ambiguous';
+    return 'none';
+  }
+
+  private getWorkspaceSignals(): { hasProjectMarkers: boolean; hasCodeFiles: boolean; hasAppDirs: boolean } {
+    const projectMarkers = new Set([
+      'package.json',
+      'pnpm-lock.yaml',
+      'yarn.lock',
+      'package-lock.json',
+      'Cargo.toml',
+      'Anchor.toml',
+      'pyproject.toml',
+      'requirements.txt',
+      'go.mod',
+      'pom.xml',
+      'build.gradle',
+      'settings.gradle',
+      'Gemfile',
+      'composer.json',
+      'mix.exs',
+      'Makefile',
+      'CMakeLists.txt',
+    ]);
+
+    const codeExtensions = new Set([
+      '.ts', '.tsx', '.js', '.jsx', '.py', '.rs', '.go', '.java', '.kt', '.swift',
+      '.cs', '.cpp', '.c', '.h', '.hpp', '.sol',
+    ]);
+
+    const appDirs = new Set([
+      'src', 'app', 'apps', 'packages', 'programs', 'frontend', 'backend',
+      'server', 'client', 'contracts', 'lib', 'services', 'web', 'api',
+    ]);
+
+    try {
+      const entries = fs.readdirSync(this.workspace.path, { withFileTypes: true });
+      let hasProjectMarkers = false;
+      let hasCodeFiles = false;
+      let hasAppDirs = false;
+
+      for (const entry of entries) {
+        if (entry.isFile()) {
+          if (projectMarkers.has(entry.name)) {
+            hasProjectMarkers = true;
+          }
+          const ext = path.extname(entry.name).toLowerCase();
+          if (codeExtensions.has(ext)) {
+            hasCodeFiles = true;
+          }
+        } else if (entry.isDirectory()) {
+          if (appDirs.has(entry.name)) {
+            hasAppDirs = true;
+          }
+        }
+
+        if (hasProjectMarkers && hasCodeFiles && hasAppDirs) break;
+      }
+
+      return { hasProjectMarkers, hasCodeFiles, hasAppDirs };
+    } catch {
+      return { hasProjectMarkers: false, hasCodeFiles: false, hasAppDirs: false };
+    }
+  }
+
+  private pauseForUserInput(message: string, reason: string): void {
+    this.waitingForUserInput = true;
+    this.daemon.updateTaskStatus(this.task.id, 'paused');
+    this.daemon.logEvent(this.task.id, 'assistant_message', { message });
+    this.daemon.logEvent(this.task.id, 'task_paused', { message, reason });
+    this.daemon.logEvent(this.task.id, 'progress_update', {
+      phase: 'execution',
+      completedSteps: this.plan?.steps.filter(s => s.status === 'completed').length ?? 0,
+      totalSteps: this.plan?.steps.length ?? 0,
+      progress: 0,
+      message: 'Paused - awaiting user input',
+    });
+
+    if (this.conversationHistory.length === 0) {
+      this.conversationHistory.push({
+        role: 'user',
+        content: this.task.prompt,
+      });
+    }
+
+    this.conversationHistory.push({
+      role: 'assistant',
+      content: [{ type: 'text', text: message }],
+    });
+    this.saveConversationSnapshot();
+  }
+
+  private preflightWorkspaceCheck(): boolean {
+    const workspaceNeed = this.classifyWorkspaceNeed(this.task.prompt);
+    if (workspaceNeed === 'none') return false;
+
+    const signals = this.getWorkspaceSignals();
+    const looksLikeProject = signals.hasProjectMarkers || signals.hasCodeFiles || signals.hasAppDirs;
+    const isTemp = this.workspace.isTemp || this.workspace.id === TEMP_WORKSPACE_ID;
+
+    if (isTemp && !looksLikeProject) {
+      if (workspaceNeed === 'needs_existing') {
+        this.pauseForUserInput(
+          'I am in the temporary workspace, but this task looks like it targets an existing project. ' +
+          'Please select the project folder or provide its path so I can switch to it. ' +
+          'If you want a new project created here instead, say so.',
+          'workspace_required'
+        );
+        return true;
+      }
+
+      if (workspaceNeed === 'ambiguous') {
+        this.pauseForUserInput(
+          'I am in the temporary workspace and this task could be a new project or changes to an existing one. ' +
+          'Choose one:\n' +
+          '1. Create a new project in the temporary workspace\n' +
+          '2. Switch to an existing project folder (share the path or select a workspace)',
+          'workspace_selection'
+        );
+        return true;
+      }
+    }
+
+    if (!isTemp && workspaceNeed === 'needs_existing' && !looksLikeProject) {
+      this.pauseForUserInput(
+        'I am in the selected workspace, but I do not see typical project files here. ' +
+        'If this task targets an existing project, please confirm the correct folder or provide its path. ' +
+        'If this is a new project, tell me to scaffold it here.',
+        'workspace_mismatch'
+      );
+      return true;
+    }
+
+    return false;
+  }
+
+  private summarizeToolResult(toolName: string, result: any): string | null {
+    if (!result) return null;
+
+    if (toolName === 'web_search') {
+      const query = typeof result.query === 'string' ? result.query : '';
+      const items = Array.isArray(result.results) ? result.results : [];
+      if (items.length === 0) {
+        return query ? `query "${query}": no results` : 'no results';
+      }
+      const formatted = items.slice(0, 5).map((item: any) => {
+        const title = item?.title ? String(item.title).trim() : 'Untitled';
+        const url = item?.url ? String(item.url) : '';
+        let host = '';
+        if (url) {
+          try {
+            host = new URL(url).hostname.replace(/^www\./, '');
+          } catch {
+            host = '';
+          }
+        }
+        return host ? `${title} (${host})` : title;
+      });
+      const prefix = query ? `query "${query}": ` : '';
+      return `${prefix}${formatted.join(' | ')}`;
+    }
+
+    if (toolName === 'web_fetch') {
+      const url = typeof result.url === 'string' ? result.url : '';
+      const content = typeof result.content === 'string' ? result.content : '';
+      const snippet = content
+        ? content.replace(/\s+/g, ' ').slice(0, 300)
+        : '';
+      if (url && snippet) return `${url} — ${snippet}`;
+      if (url) return url;
+      if (snippet) return snippet;
+      return null;
+    }
+
+    if (toolName === 'search_files') {
+      const totalFound = typeof result.totalFound === 'number' ? result.totalFound : undefined;
+      if (totalFound !== undefined) return `matches found: ${totalFound}`;
+    }
+
+    if (toolName === 'glob') {
+      const totalMatches = typeof result.totalMatches === 'number' ? result.totalMatches : undefined;
+      const pattern = typeof result.pattern === 'string' ? result.pattern : '';
+      if (totalMatches !== undefined) {
+        return pattern ? `pattern "${pattern}" matched ${totalMatches} item(s)` : `matched ${totalMatches} item(s)`;
+      }
+    }
+
+    return null;
+  }
+
+  private recordToolResult(toolName: string, result: any): void {
+    const summary = this.summarizeToolResult(toolName, result);
+    if (!summary) return;
+    this.toolResultMemory.push({ tool: toolName, summary, timestamp: Date.now() });
+    if (this.toolResultMemory.length > this.toolResultMemoryLimit) {
+      this.toolResultMemory.splice(0, this.toolResultMemory.length - this.toolResultMemoryLimit);
+    }
+  }
+
+  private getRecentToolResultSummary(maxEntries = 6): string {
+    if (this.toolResultMemory.length === 0) return '';
+    const entries = this.toolResultMemory.slice(-maxEntries);
+    return entries.map(entry => `- ${entry.tool}: ${entry.summary}`).join('\n');
+  }
+
+  private isVerificationStep(step: PlanStep): boolean {
+    const desc = step.description.toLowerCase().trim();
+    if (desc.startsWith('verify')) return true;
+    if (desc.startsWith('review')) return true;
+    return desc.includes('verify:') || desc.includes('verification') || desc.includes('verify ');
+  }
+
+  private isSummaryStep(step: PlanStep): boolean {
+    const desc = step.description.toLowerCase();
+    return desc.includes('summary') || desc.includes('summarize') || desc.includes('compile') || desc.includes('report');
+  }
+
+  private isLastPlanStep(step: PlanStep): boolean {
+    if (!this.plan || this.plan.steps.length === 0) return false;
+    const last = this.plan.steps[this.plan.steps.length - 1];
+    return last?.id === step.id;
+  }
+
+  private taskLikelyNeedsWebEvidence(): boolean {
+    const prompt = `${this.task.title}\n${this.task.prompt}`.toLowerCase();
+    const signals = [
+      'news',
+      'latest',
+      'today',
+      'trending',
+      'breaking',
+      'reddit',
+      'search',
+      'headline',
+      'current events',
+    ];
+    return signals.some(signal => prompt.includes(signal));
+  }
+
+  private taskRequiresTodayContext(): boolean {
+    const prompt = `${this.task.title}\n${this.task.prompt}`.toLowerCase();
+    return prompt.includes('today');
+  }
+
+  private hasWebEvidence(): boolean {
+    return this.toolResultMemory.some(entry =>
+      entry.tool === 'web_search' || entry.tool === 'web_fetch'
+    );
+  }
+
+  private normalizeToolName(name: string): { name: string; modified: boolean; original: string } {
+    if (!name) return { name, modified: false, original: name };
+    if (!name.includes('.')) return { name, modified: false, original: name };
+    const [prefix, ...rest] = name.split('.');
+    if (rest.length === 0) return { name, modified: false, original: name };
+    if (['functions', 'tool', 'tools'].includes(prefix)) {
+      const normalized = rest.join('.');
+      return { name: normalized, modified: normalized !== name, original: name };
+    }
+    return { name, modified: false, original: name };
+  }
+
+  private recordAssistantOutput(messages: LLMMessage[], step: PlanStep): void {
+    if (!messages || messages.length === 0) return;
+    const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');
+    if (!lastAssistant || !lastAssistant.content) return;
+    const text = (Array.isArray(lastAssistant.content) ? lastAssistant.content : [])
+      .filter((item: any) => item.type === 'text' && item.text)
+      .map((item: any) => String(item.text))
+      .join('\n')
+      .trim();
+    if (!text) return;
+    const truncated = text.length > 1500 ? `${text.slice(0, 1500)}…` : text;
+    if (!this.isVerificationStep(step)) {
+      this.lastAssistantOutput = truncated;
+      this.lastNonVerificationOutput = truncated;
+    } else {
+      if (!this.lastAssistantOutput) {
+        this.lastAssistantOutput = truncated;
+      }
+      // Preserve lastNonVerificationOutput for future steps/follow-ups.
+    }
+  }
+
   /**
    * Main execution loop
    */
@@ -2400,6 +2825,7 @@ You are continuing a previous conversation. The context from the previous conver
 
 Current time: ${getCurrentDateTimeContext()}
 You have access to a workspace folder at: ${this.workspace.path}
+Workspace is temporary: ${this.workspace.isTemp ? 'true' : 'false'}
 Workspace permissions: ${JSON.stringify(this.workspace.permissions)}
 
 Available tools:
@@ -2411,6 +2837,12 @@ PLANNING RULES:
 - DO NOT include redundant "verify" or "review" steps for each action.
 - DO NOT plan to create multiple versions of files - pick ONE target file.
 - DO NOT plan to read the same file multiple times in different steps.
+
+WORKSPACE MODE (CRITICAL):
+- There are two modes: temporary workspace (no user-selected folder) and user-selected workspace.
+- If the workspace is temporary and the task likely targets an existing project, your FIRST step must be to ask for the correct folder or to switch workspaces.
+- If the task could be new or existing, ask the user to choose between scaffolding here or switching to an existing folder.
+- Do NOT assume a repo exists in the temporary workspace unless you find it.
 
 PATH DISCOVERY (CRITICAL):
 - When users mention a folder or path (e.g., "electron/agent folder"), they may give a PARTIAL path, not the full path.
@@ -2450,6 +2882,11 @@ WEB RESEARCH & CONTENT EXTRACTION (IMPORTANT):
 - NEVER use run_command with curl, wget, or other network commands for web access.
 - NEVER create a plan that says "cannot be done" if alternative tools are available.
 - NEVER plan to ask the user for content you can extract yourself.
+
+REDDIT POSTS (WHEN UPVOTE COUNTS REQUIRED):
+- Prefer web_fetch against Reddit's JSON endpoints to get reliable titles and upvote counts.
+- Example: https://www.reddit.com/r/<sub>/top/.json?t=day&limit=5
+- Use web_search only to discover the right subreddit if needed, not for score counts.
 
 TOOL SELECTION GUIDE (web tools):
 - web_search: Best for research, news, finding information, exploring topics (PREFERRED for most research)
@@ -2668,23 +3105,26 @@ Format your plan as a JSON object with this structure:
       throw new Error('No plan available');
     }
 
-    const totalSteps = this.plan.steps.length;
-    let completedSteps = 0;
+    if (this.preflightWorkspaceCheck()) {
+      return;
+    }
 
     // Emit initial progress event
     this.daemon.logEvent(this.task.id, 'progress_update', {
       phase: 'execution',
-      completedSteps,
-      totalSteps,
+      completedSteps: this.plan.steps.filter(s => s.status === 'completed').length,
+      totalSteps: this.plan.steps.length,
       progress: 0,
-      message: `Starting execution of ${totalSteps} steps`,
+      message: `Starting execution of ${this.plan.steps.length} steps`,
     });
 
-    for (const step of this.plan.steps) {
+    let index = 0;
+    while (index < this.plan.steps.length) {
+      const step = this.plan.steps[index];
       if (this.cancelled) break;
 
       if (step.status === 'completed') {
-        completedSteps++;
+        index++;
         continue;
       }
 
@@ -2692,6 +3132,9 @@ Format your plan as a JSON object with this structure:
       while (this.paused && !this.cancelled) {
         await new Promise(resolve => setTimeout(resolve, 100));
       }
+
+      const completedSteps = this.plan.steps.filter(s => s.status === 'completed').length;
+      const totalSteps = this.plan.steps.length;
 
       // Emit step starting progress
       this.daemon.logEvent(this.task.id, 'progress_update', {
@@ -2750,22 +3193,34 @@ Format your plan as a JSON object with this structure:
             message: `Step timed out after ${STEP_TIMEOUT_MS / 1000}s`,
           });
           // Continue with next step instead of failing entire task
-          completedSteps++;
+          const updatedIndex = this.plan.steps.findIndex(s => s.id === step.id);
+          if (updatedIndex === -1) {
+            index = Math.min(index + 1, this.plan.steps.length);
+          } else {
+            index = updatedIndex + 1;
+          }
           continue;
         }
         throw error;
       }
 
-      completedSteps++;
+      const updatedIndex = this.plan.steps.findIndex(s => s.id === step.id);
+      if (updatedIndex === -1) {
+        index = Math.min(index + 1, this.plan.steps.length);
+      } else {
+        index = updatedIndex + 1;
+      }
+      const completedAfterStep = this.plan.steps.filter(s => s.status === 'completed').length;
+      const totalAfterStep = this.plan.steps.length;
 
       // Emit step completed progress
       this.daemon.logEvent(this.task.id, 'progress_update', {
         phase: 'execution',
         currentStep: step.id,
-        completedSteps,
-        totalSteps,
-        progress: Math.round((completedSteps / totalSteps) * 100),
-        message: `Completed step ${completedSteps}/${totalSteps}`,
+        completedSteps: completedAfterStep,
+        totalSteps: totalAfterStep,
+        progress: totalAfterStep > 0 ? Math.round((completedAfterStep / totalAfterStep) * 100) : 100,
+        message: `Completed step ${step.id}: ${step.description}`,
       });
     }
 
@@ -2781,11 +3236,13 @@ Format your plan as a JSON object with this structure:
       // If critical steps failed (not just verification), this should be marked
       const criticalFailures = failedSteps.filter(s => !s.description.toLowerCase().includes('verify'));
       if (criticalFailures.length > 0) {
+        const totalSteps = this.plan.steps.length;
+        const progress = totalSteps > 0 ? Math.round((successfulSteps.length / totalSteps) * 100) : 0;
         this.daemon.logEvent(this.task.id, 'progress_update', {
           phase: 'execution',
           completedSteps: successfulSteps.length,
           totalSteps,
-          progress: Math.round((successfulSteps.length / totalSteps) * 100),
+          progress,
           message: `Completed with ${criticalFailures.length} failed step(s)`,
           hasFailures: true,
         });
@@ -2797,8 +3254,8 @@ Format your plan as a JSON object with this structure:
     // Emit completion progress (only if no critical failures)
     this.daemon.logEvent(this.task.id, 'progress_update', {
       phase: 'execution',
-      completedSteps,
-      totalSteps,
+      completedSteps: successfulSteps.length,
+      totalSteps: this.plan.steps.length,
       progress: 100,
       message: 'All steps completed',
     });
@@ -2865,6 +3322,11 @@ IMPORTANT INSTRUCTIONS:
 - Always use tools to accomplish tasks. Do not just describe what you would do - actually call the tools.
 - The delete_file tool has a built-in approval mechanism that will prompt the user. Just call the tool directly.
 - Do NOT ask "Should I proceed?" or wait for permission in text - the tools handle approvals automatically.
+
+USER INPUT GATE (CRITICAL):
+- If you ask the user for required information or a decision, STOP and wait.
+- Do NOT continue executing steps or call tools after asking such questions.
+- If safe defaults exist, state the assumption and proceed without asking.
 
 PATH DISCOVERY (CRITICAL):
 - When a task mentions a folder or path (e.g., "electron/agent folder"), users often give PARTIAL paths.
@@ -2955,6 +3417,11 @@ RESEARCH WORKFLOW:
 - Only fall back to browser_navigate if web_fetch fails (e.g., JavaScript-required content)
 - Many sites (X/Twitter, Reddit logged-in content, LinkedIn) require authentication - web_search can still find public discussions
 
+REDDIT POSTS (WHEN UPVOTE COUNTS REQUIRED):
+- Prefer web_fetch against Reddit's JSON endpoints to get reliable titles and upvote counts.
+- Example: https://www.reddit.com/r/<sub>/top/.json?t=day&limit=5
+- Use web_search only to discover the right subreddit if needed, not for score counts.
+
 BROWSER TOOLS (when needed):
 - Treat browser_navigate + browser_get_content as ONE ATOMIC OPERATION
 - For dynamic content, use browser_wait then browser_get_content
@@ -3013,10 +3480,46 @@ SCHEDULING & REMINDERS:
         stepContext += `\n\nDo NOT repeat work from previous steps. Focus only on: ${step.description}`;
       }
 
+      const isVerifyStep = this.isVerificationStep(step);
+      const isSummaryStep = this.isSummaryStep(step);
+      const isLastStep = this.isLastPlanStep(step);
+
       // Add accumulated knowledge from previous steps (discovered files, directories, etc.)
       const knowledgeSummary = this.fileOperationTracker.getKnowledgeSummary();
       if (knowledgeSummary) {
         stepContext += `\n\nKNOWLEDGE FROM PREVIOUS STEPS (use this instead of re-reading/re-listing):\n${knowledgeSummary}`;
+      }
+
+      const toolResultSummary = this.getRecentToolResultSummary();
+      if (toolResultSummary) {
+        stepContext += `\n\nRECENT TOOL RESULTS (from previous steps; do not look in the filesystem for these):\n${toolResultSummary}`;
+      }
+
+      const shouldIncludePreviousOutput = !isVerifyStep || !this.lastNonVerificationOutput;
+      if (this.lastAssistantOutput && shouldIncludePreviousOutput) {
+        stepContext += `\n\nPREVIOUS STEP OUTPUT:\n${this.lastAssistantOutput}`;
+      }
+
+      if (isVerifyStep) {
+        stepContext += `\n\nVERIFICATION MODE:\n- This is a verification step. Keep the response brief (1-3 sentences).\n- Do NOT output a checklist. Do NOT restate the full deliverable.\n- If the deliverable has NOT been provided earlier, provide it now, then add a one-sentence verification note.\n`;
+        if (isLastStep) {
+          stepContext += `- This is the FINAL step. Include a very short recap (2-4 sentences) of the deliverable before the verification note so the last message still answers the user.\n`;
+        }
+        if (this.lastNonVerificationOutput) {
+          stepContext += `\n\nMOST RECENT DELIVERABLE (use this for verification):\n${this.lastNonVerificationOutput}`;
+        } else if (this.lastAssistantOutput) {
+          stepContext += `\n\nMOST RECENT DELIVERABLE (use this for verification):\n${this.lastAssistantOutput}`;
+        }
+      }
+
+      if (isSummaryStep) {
+        stepContext += `\n\nDELIVERABLE RULES:\n- If you write a file, you MUST also provide the key summary in your response.\n- Do not defer the answer to a verification step.\n`;
+        if (this.taskLikelyNeedsWebEvidence() && !this.hasWebEvidence()) {
+          stepContext += `\n\nEVIDENCE REQUIRED:\n- No web evidence has been gathered yet. Use web_search/web_fetch now before summarizing.\n- If you find no results, say so explicitly instead of guessing.\n`;
+        }
+        if (this.taskRequiresTodayContext()) {
+          stepContext += `\n\nDATE REQUIREMENT:\n- This task explicitly asks for “today.” Only present items as “today” if you can confirm the date from sources.\n- If you cannot confirm any items from today, state that clearly, then optionally list the most recent items as “recent (not today)”.\n`;
+        }
       }
 
       // Start fresh messages for this step
@@ -3034,6 +3537,8 @@ SCHEDULING & REMINDERS:
       let lastFailureReason = '';  // Track the reason for failure
       let hadToolError = false;
       let hadToolSuccessAfterError = false;
+      let hadAnyToolSuccess = false;
+      const toolErrors = new Set<string>();
       let lastToolErrorReason = '';
       let awaitingUserInput = false;
       let hadRunCommandFailure = false;
@@ -3155,6 +3660,16 @@ SCHEDULING & REMINDERS:
 
         for (const content of response.content || []) {
           if (content.type === 'tool_use') {
+            // Normalize tool names like "functions.web_fetch" -> "web_fetch"
+            const normalizedTool = this.normalizeToolName(content.name);
+            if (normalizedTool.modified) {
+              this.daemon.logEvent(this.task.id, 'parameter_inference', {
+                tool: content.name,
+                inference: `Normalized tool name "${normalizedTool.original}" -> "${normalizedTool.name}"`,
+              });
+              content.name = normalizedTool.name;
+            }
+
             // Check if this tool is disabled (circuit breaker tripped)
             if (this.toolFailureTracker.isDisabled(content.name)) {
               const lastError = this.toolFailureTracker.getLastError(content.name);
@@ -3292,7 +3807,7 @@ SCHEDULING & REMINDERS:
             try {
               // Execute tool with timeout to prevent hanging
               const toolTimeoutMs = this.getToolTimeoutMs(content.name, content.input);
-              const result = await withTimeout(
+              let result = await withTimeout(
                 this.toolRegistry.executeTool(
                   content.name,
                   content.input as any
@@ -3300,6 +3815,32 @@ SCHEDULING & REMINDERS:
                 toolTimeoutMs,
                 `Tool ${content.name}`
               );
+
+              // Fallback: retry grep without glob if the glob produced an invalid regex
+              if (content.name === 'grep' && result && result.success === false && content.input?.glob) {
+                const errorText = String(result.error || '');
+                if (/invalid regex pattern|nothing to repeat/i.test(errorText)) {
+                  this.daemon.logEvent(this.task.id, 'tool_fallback', {
+                    tool: 'grep',
+                    reason: 'invalid_glob_regex',
+                    originalGlob: content.input.glob,
+                  });
+                  const fallbackInput = { ...content.input };
+                  delete (fallbackInput as any).glob;
+                  try {
+                    const fallbackResult = await withTimeout(
+                      this.toolRegistry.executeTool('grep', fallbackInput as any),
+                      toolTimeoutMs,
+                      'Tool grep (fallback)'
+                    );
+                    if (fallbackResult && fallbackResult.success !== false) {
+                      result = fallbackResult;
+                    }
+                  } catch {
+                    // Keep original error if fallback fails
+                  }
+                }
+              }
 
               // Tool succeeded - reset failure counter
               this.toolFailureTracker.recordSuccess(content.name);
@@ -3313,6 +3854,11 @@ SCHEDULING & REMINDERS:
               this.recordCommandExecution(content.name, content.input, result);
 
               const toolSucceeded = !(result && result.success === false);
+
+              if (toolSucceeded) {
+                hadAnyToolSuccess = true;
+                this.recordToolResult(content.name, result);
+              }
 
               if (content.name === 'run_command' && !toolSucceeded) {
                 hadRunCommandFailure = true;
@@ -3333,6 +3879,7 @@ SCHEDULING & REMINDERS:
                   || (typeof result.exitCode === 'number' ? `exit code ${result.exitCode}` : undefined)
                   || 'unknown error';
                 hadToolError = true;
+                toolErrors.add(content.name);
                 lastToolErrorReason = `Tool ${content.name} failed: ${reason}`;
                 // Check if this is a non-retryable error
                 const shouldDisable = this.toolFailureTracker.recordFailure(content.name, result.error || reason);
@@ -3392,6 +3939,7 @@ SCHEDULING & REMINDERS:
               console.error(`Tool execution failed:`, error);
 
               hadToolError = true;
+              toolErrors.add(content.name);
               lastToolErrorReason = `Tool ${content.name} failed: ${error.message}`;
               if (content.name === 'run_command') {
                 hadRunCommandFailure = true;
@@ -3444,8 +3992,8 @@ SCHEDULING & REMINDERS:
           }
         }
 
-        // If assistant asked a question and there are no tool calls, stop and wait for user
-        if (assistantAskedQuestion && toolResults.length === 0) {
+        // If assistant asked a blocking question, stop and wait for user
+        if (assistantAskedQuestion && this.shouldPauseForQuestions) {
           console.log('[TaskExecutor] Assistant asked a question, pausing for user input');
           awaitingUserInput = true;
           continueLoop = false;
@@ -3453,9 +4001,13 @@ SCHEDULING & REMINDERS:
       }
 
       if (hadToolError && !hadToolSuccessAfterError) {
-        stepFailed = true;
-        if (!lastFailureReason) {
-          lastFailureReason = lastToolErrorReason || 'One or more tools failed without recovery.';
+        const nonCriticalErrorTools = new Set(['web_search', 'web_fetch']);
+        const onlyNonCriticalErrors = toolErrors.size > 0 && Array.from(toolErrors).every(t => nonCriticalErrorTools.has(t));
+        if (!(hadAnyToolSuccess && onlyNonCriticalErrors)) {
+          stepFailed = true;
+          if (!lastFailureReason) {
+            lastFailureReason = lastToolErrorReason || 'One or more tools failed without recovery.';
+          }
         }
       }
 
@@ -3474,6 +4026,8 @@ SCHEDULING & REMINDERS:
       }
 
       // Step completed or failed
+
+      this.recordAssistantOutput(messages, step);
 
       // Save conversation history for follow-up messages
       this.conversationHistory = messages;
@@ -3621,9 +4175,13 @@ SCHEDULING & REMINDERS:
     const shouldResumeAfterFollowup = previousStatus === 'paused' || this.waitingForUserInput;
     const shouldStartNewCanvasSession = ['completed', 'failed', 'cancelled'].includes(previousStatus);
     let resumeAttempted = false;
+    let pausedForUserInput = false;
     this.waitingForUserInput = false;
     this.paused = false;
     this.lastUserMessage = message;
+    if (shouldResumeAfterFollowup) {
+      this.task.prompt = `${this.task.prompt}\n\nUSER UPDATE:\n${message}`;
+    }
     this.toolRegistry.setCanvasSessionCutoff(shouldStartNewCanvasSession ? Date.now() : null);
     this.daemon.updateTaskStatus(this.task.id, 'executing');
     this.daemon.logEvent(this.task.id, 'executing', { message: 'Processing follow-up message' });
@@ -3674,6 +4232,11 @@ IMPORTANT INSTRUCTIONS:
 - Always use tools to accomplish tasks. Do not just describe what you would do - actually call the tools.
 - The delete_file tool has a built-in approval mechanism that will prompt the user. Just call the tool directly.
 - Do NOT ask "Should I proceed?" or wait for permission in text - the tools handle approvals automatically.
+
+USER INPUT GATE (CRITICAL):
+- If you ask the user for required information or a decision, STOP and wait.
+- Do NOT continue executing steps or call tools after asking such questions.
+- If safe defaults exist, state the assumption and proceed without asking.
 
 PATH DISCOVERY (CRITICAL):
 - When a task mentions a folder or path (e.g., "electron/agent folder"), users often give PARTIAL paths.
@@ -3921,6 +4484,16 @@ SCHEDULING & REMINDERS:
 
         for (const content of response.content || []) {
           if (content.type === 'tool_use') {
+            // Normalize tool names like "functions.web_fetch" -> "web_fetch"
+            const normalizedTool = this.normalizeToolName(content.name);
+            if (normalizedTool.modified) {
+              this.daemon.logEvent(this.task.id, 'parameter_inference', {
+                tool: content.name,
+                inference: `Normalized tool name "${normalizedTool.original}" -> "${normalizedTool.name}"`,
+              });
+              content.name = normalizedTool.name;
+            }
+
             // Check if this tool is disabled (circuit breaker tripped)
             if (this.toolFailureTracker.isDisabled(content.name)) {
               const lastError = this.toolFailureTracker.getLastError(content.name);
@@ -4145,6 +4718,13 @@ SCHEDULING & REMINDERS:
           }
         }
 
+        if (assistantAskedQuestion && shouldResumeAfterFollowup && this.shouldPauseForQuestions) {
+          console.log('[TaskExecutor] Assistant asked a question during follow-up, pausing for user input');
+          this.waitingForUserInput = true;
+          pausedForUserInput = true;
+          continueLoop = false;
+        }
+
         // Check if agent wants to end but hasn't provided a text response yet
         // If tools were called but no summary was given, request one
         if (wantsToEnd && !hasTextInThisResponse && hadToolCalls && !hasProvidedTextResponse) {
@@ -4174,6 +4754,14 @@ SCHEDULING & REMINDERS:
       this.daemon.logEvent(this.task.id, 'follow_up_completed', {
         message: 'Follow-up message processed',
       });
+
+      if (pausedForUserInput) {
+        this.daemon.updateTaskStatus(this.task.id, 'paused');
+        this.daemon.logEvent(this.task.id, 'task_paused', {
+          message: 'Paused - awaiting user input',
+        });
+        return;
+      }
 
       if (shouldResumeAfterFollowup && this.plan) {
         resumeAttempted = true;

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { ChatGPTImportWizard } from './ChatGPTImportWizard';
 
 // Types inlined since preload types aren't directly importable in renderer
 type PrivacyMode = 'normal' | 'strict' | 'disabled';
@@ -32,6 +33,7 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [clearing, setClearing] = useState(false);
+  const [showImportWizard, setShowImportWizard] = useState(false);
 
   useEffect(() => {
     if (workspaceId) {
@@ -92,6 +94,17 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
     );
   }
 
+  // Show import wizard full-screen in the settings panel
+  if (showImportWizard) {
+    return (
+      <ChatGPTImportWizard
+        workspaceId={workspaceId}
+        onClose={() => { setShowImportWizard(false); loadData(); }}
+        onImportComplete={() => loadData()}
+      />
+    );
+  }
+
   return (
     <div className="settings-section">
       <h3 className="settings-section-title">Memory System</h3>
@@ -129,6 +142,26 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
           </div>
         </div>
       )}
+
+      {/* Import from ChatGPT */}
+      <div className="settings-form-group" style={{ marginBottom: '20px', paddingBottom: '16px', borderBottom: '1px solid var(--color-border)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <div style={{ fontWeight: 500, color: 'var(--color-text-primary)', marginBottom: '4px' }}>Import from ChatGPT</div>
+            <p className="settings-form-hint" style={{ margin: 0 }}>
+              Import your ChatGPT conversation history to build richer context. Your data stays on your device.
+            </p>
+          </div>
+          <button
+            className="chatgpt-import-btn chatgpt-import-btn-primary"
+            onClick={() => setShowImportWizard(true)}
+            disabled={!settings.enabled}
+            style={{ opacity: settings.enabled ? 1 : 0.5, whiteSpace: 'nowrap' }}
+          >
+            Import
+          </button>
+        </div>
+      </div>
 
       {/* Enable/Disable Toggle */}
       <div className="settings-form-group">

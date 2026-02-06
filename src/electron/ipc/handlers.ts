@@ -2677,7 +2677,7 @@ export async function setupIpcHandlers(
   setupNotificationHandlers();
 
   // Hooks (Webhooks & Gmail Pub/Sub) handlers
-  setupHooksHandlers(agentDaemon);
+  await setupHooksHandlers(agentDaemon);
 
   // Memory system handlers
   setupMemoryHandlers();
@@ -3084,9 +3084,95 @@ export function getHooksServer(): HooksServer | null {
 /**
  * Set up Hooks (Webhooks & Gmail Pub/Sub) IPC handlers
  */
-function setupHooksHandlers(agentDaemon: AgentDaemon): void {
+async function setupHooksHandlers(agentDaemon: AgentDaemon): Promise<void> {
   // Initialize settings manager
   HooksSettingsManager.initialize();
+
+  const getHooksRuntimeSettings = () => {
+    const settings = HooksSettingsManager.loadSettings();
+    const forceEnabled = process.env.COWORK_HOOKS_AUTOSTART === '1';
+    const tokenOverride = process.env.COWORK_HOOKS_TOKEN?.trim();
+    // Runtime-only overrides to simplify local/CI automation. Values are NOT persisted.
+    return {
+      ...settings,
+      ...(forceEnabled ? { enabled: true } : {}),
+      ...(tokenOverride ? { token: tokenOverride } : {}),
+    };
+  };
+
+  const ensureHooksServerRunning = async (): Promise<void> => {
+    const settings = getHooksRuntimeSettings();
+
+    if (!settings.enabled) return;
+
+    if (!settings.token?.trim()) {
+      console.warn('[Hooks] Enabled but missing token. Open Settings > Hooks and regenerate the token.');
+      return;
+    }
+
+    // If already running, just refresh config (covers mapping updates + token overrides).
+    if (hooksServer?.isRunning()) {
+      hooksServer.setHooksConfig(settings);
+      return;
+    }
+
+    // Prevent concurrent start attempts (IPC + auto-start).
+    if (hooksServerStarting) return;
+    hooksServerStarting = true;
+
+    const server = new HooksServer({
+      port: DEFAULT_HOOKS_PORT,
+      host: '127.0.0.1',
+      enabled: true,
+    });
+
+    server.setHooksConfig(settings);
+
+    // Set up handlers for hook actions
+    server.setHandlers({
+      onWake: async (action) => {
+        console.log('[Hooks] Wake action:', action);
+        // For now, just log. In the future, this could trigger a heartbeat
+      },
+      onAgent: async (action) => {
+        console.log('[Hooks] Agent action:', action.message.substring(0, 100));
+
+        // Create a task for the agent action
+        const task = await agentDaemon.createTask({
+          title: action.name || 'Webhook Task',
+          prompt: action.message,
+          workspaceId: action.workspaceId || TEMP_WORKSPACE_ID,
+        });
+
+        return { taskId: task.id };
+      },
+      onEvent: (event) => {
+        console.log('[Hooks] Server event:', event.action);
+        // Forward events to renderer (with error handling for destroyed windows)
+        const windows = BrowserWindow.getAllWindows();
+        for (const win of windows) {
+          try {
+            if (win.webContents && !win.isDestroyed()) {
+              win.webContents.send(IPC_CHANNELS.HOOKS_EVENT, event);
+            }
+          } catch (err) {
+            // Window may have been destroyed between check and send
+            console.warn('[Hooks] Failed to send event to window:', err);
+          }
+        }
+      },
+    });
+
+    try {
+      await server.start();
+      hooksServer = server;
+    } catch (err) {
+      console.error('[Hooks] Failed to start hooks server:', err);
+      throw new Error(`Failed to start hooks server: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      hooksServerStarting = false;
+    }
+  };
 
   // Get hooks settings
   ipcMain.handle(IPC_CHANNELS.HOOKS_GET_SETTINGS, async (): Promise<HooksSettingsData> => {
@@ -3149,63 +3235,8 @@ function setupHooksHandlers(agentDaemon: AgentDaemon): void {
 
     const settings = HooksSettingsManager.enableHooks();
 
-    // Start the hooks server if not running
-    if (!hooksServer) {
-      hooksServerStarting = true;
-
-      const server = new HooksServer({
-        port: DEFAULT_HOOKS_PORT,
-        host: '127.0.0.1',
-        enabled: true,
-      });
-
-      server.setHooksConfig(settings);
-
-      // Set up handlers for hook actions
-      server.setHandlers({
-        onWake: async (action) => {
-          console.log('[Hooks] Wake action:', action);
-          // For now, just log. In the future, this could trigger a heartbeat
-        },
-        onAgent: async (action) => {
-          console.log('[Hooks] Agent action:', action.message.substring(0, 100));
-
-          // Create a task for the agent action
-          const task = await agentDaemon.createTask({
-            title: action.name || 'Webhook Task',
-            prompt: action.message,
-            workspaceId: action.workspaceId || TEMP_WORKSPACE_ID,
-          });
-
-          return { taskId: task.id };
-        },
-        onEvent: (event) => {
-          console.log('[Hooks] Server event:', event.action);
-          // Forward events to renderer (with error handling for destroyed windows)
-          const windows = BrowserWindow.getAllWindows();
-          for (const win of windows) {
-            try {
-              if (win.webContents && !win.isDestroyed()) {
-                win.webContents.send(IPC_CHANNELS.HOOKS_EVENT, event);
-              }
-            } catch (err) {
-              // Window may have been destroyed between check and send
-              console.warn('[Hooks] Failed to send event to window:', err);
-            }
-          }
-        },
-      });
-
-      try {
-        await server.start();
-        hooksServer = server;
-      } catch (err) {
-        console.error('[Hooks] Failed to start hooks server:', err);
-        throw new Error(`Failed to start hooks server: ${err instanceof Error ? err.message : String(err)}`);
-      } finally {
-        hooksServerStarting = false;
-      }
-    }
+    // Start the hooks server (or refresh running server config)
+    await ensureHooksServerRunning();
 
     // Start Gmail watcher if configured (capture result for response)
     let gmailWatcherError: string | undefined;
@@ -3271,6 +3302,24 @@ function setupHooksHandlers(agentDaemon: AgentDaemon): void {
       gogAvailable,
     };
   });
+
+  // Auto-start the server on boot if hooks are enabled.
+  // This avoids "hooks enabled but nothing listens" after app restarts.
+  try {
+    await ensureHooksServerRunning();
+
+    // Auto-start Gmail watcher if configured (best-effort).
+    const settings = getHooksRuntimeSettings();
+    if (settings.enabled && settings.gmail?.account && !isGmailWatcherRunning()) {
+      const result = await startGmailWatcher(settings);
+      if (!result.started) {
+        console.warn('[Hooks] Gmail watcher not started:', result.reason);
+      }
+    }
+  } catch (err) {
+    console.error('[Hooks] Auto-start failed:', err);
+    // Non-fatal: user can still start it manually from Settings.
+  }
 
   // Add a hook mapping
   ipcMain.handle(IPC_CHANNELS.HOOKS_ADD_MAPPING, async (_, mapping: HookMappingData) => {
@@ -3525,6 +3574,35 @@ function setupMemoryHandlers(): void {
       throw error;
     }
   });
+
+  // ChatGPT Import handler
+  ipcMain.handle(
+    IPC_CHANNELS.MEMORY_IMPORT_CHATGPT,
+    async (event, options: { workspaceId: string; filePath: string; maxConversations?: number; minMessages?: number; forcePrivate?: boolean }) => {
+      checkRateLimit(IPC_CHANNELS.MEMORY_IMPORT_CHATGPT, RATE_LIMIT_CONFIGS.limited);
+      try {
+        const { ChatGPTImporter } = await import('../memory/ChatGPTImporter');
+
+        // Forward progress events to renderer
+        const unsubscribe = ChatGPTImporter.onProgress((progress) => {
+          const win = BrowserWindow.fromWebContents(event.sender);
+          if (win && !win.isDestroyed()) {
+            win.webContents.send(IPC_CHANNELS.MEMORY_IMPORT_CHATGPT_PROGRESS, progress);
+          }
+        });
+
+        try {
+          const result = await ChatGPTImporter.import(options);
+          return result;
+        } finally {
+          unsubscribe();
+        }
+      } catch (error) {
+        console.error('[Memory] ChatGPT import failed:', error);
+        throw error;
+      }
+    }
+  );
 
   console.log('[Memory] Handlers initialized');
 

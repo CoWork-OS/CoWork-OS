@@ -192,6 +192,7 @@ export const TOOL_GROUPS = {
   // Read-only operations - lowest risk
   'group:read': [
     'read_file',
+    'read_files',
     'list_directory',
     'search_files',
     'system_info',
@@ -1746,6 +1747,8 @@ export const IPC_CHANNELS = {
   MEMORY_GET_STATS: 'memory:getStats',
   MEMORY_CLEAR: 'memory:clear',
   MEMORY_EVENT: 'memory:event',
+  MEMORY_IMPORT_CHATGPT: 'memory:importChatGPT',
+  MEMORY_IMPORT_CHATGPT_PROGRESS: 'memory:importChatGPTProgress',
 
   // Memory Features (Global Toggles)
   MEMORY_FEATURES_GET_SETTINGS: 'memoryFeatures:getSettings',

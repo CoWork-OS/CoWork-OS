@@ -388,6 +388,9 @@ export const PI_PROVIDERS = {
 
 export type PiProviderKey = keyof typeof PI_PROVIDERS;
 
+/** Default model used when no Pi model is explicitly configured */
+export const DEFAULT_PI_MODEL = 'claude-sonnet-4-5-20250514';
+
 /**
  * Popular Ollama models with their details
  * Users can use any model available on their Ollama server

@@ -4,6 +4,7 @@ import {
   getProviders,
   complete as piAiComplete,
   type Model,
+  type AssistantMessage as PiAiAssistantMessage,
   type Message as PiAiMessage,
   type Context as PiAiContext,
   type Tool as PiAiTool,
@@ -19,9 +20,21 @@ import {
   LLMTool,
   LLMToolResult,
   PI_PROVIDERS,
+  PiProviderKey,
 } from './types';
 
 const DEFAULT_PI_PROVIDER: KnownProvider = 'anthropic';
+
+/** Placeholder usage data for historical assistant messages replayed as context.
+ *  pi-ai requires these fields but the actual values are unknown for past messages. */
+const PLACEHOLDER_USAGE = {
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  totalTokens: 0,
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+} as const;
 
 /**
  * Pi provider implementation using pi-ai unified LLM API.
@@ -37,7 +50,13 @@ export class PiProvider implements LLMProvider {
   private modelId: string;
 
   constructor(config: LLMProviderConfig) {
-    this.piProvider = (config.piProvider as KnownProvider) || DEFAULT_PI_PROVIDER;
+    const requestedProvider = config.piProvider || DEFAULT_PI_PROVIDER;
+    if (!(requestedProvider in PI_PROVIDERS)) {
+      throw new Error(
+        `Unknown Pi backend provider: "${requestedProvider}". Valid providers: ${Object.keys(PI_PROVIDERS).join(', ')}`
+      );
+    }
+    this.piProvider = requestedProvider as KnownProvider;
     this.apiKey = config.piApiKey || '';
     this.modelId = config.model;
 
@@ -176,44 +195,21 @@ export class PiProvider implements LLMProvider {
   }
 
   /**
-   * Resolve model from pi-ai's registry
+   * Resolve model from pi-ai's registry.
+   * Requires an exact match — no partial or fallback matching to avoid
+   * silently routing to an unintended (and potentially costly) model.
    */
   private resolveModel(modelId: string): Model<any> {
-    try {
-      const availableModels = getModels(this.piProvider);
-      const found = availableModels.find((m) => m.id === modelId);
-      if (found) {
-        return found;
-      }
-
-      // Try partial match
-      const partial = availableModels.find(
-        (m) =>
-          m.id.includes(modelId) || modelId.includes(m.id)
-      );
-      if (partial) {
-        console.log(
-          `[Pi] Exact model ${modelId} not found, using partial match: ${partial.id}`
-        );
-        return partial;
-      }
-
-      // Fall back to first available model
-      if (availableModels.length > 0) {
-        console.log(
-          `[Pi] Model ${modelId} not found for ${this.piProvider}, using default: ${availableModels[0].id}`
-        );
-        return availableModels[0];
-      }
-
-      throw new Error(
-        `No models available for provider ${this.piProvider}`
-      );
-    } catch (error) {
-      throw new Error(
-        `Failed to resolve model ${modelId} for provider ${this.piProvider}: ${error}`
-      );
+    const availableModels = getModels(this.piProvider);
+    const found = availableModels.find((m) => m.id === modelId);
+    if (found) {
+      return found;
     }
+
+    const availableIds = availableModels.map((m) => m.id).slice(0, 10).join(', ');
+    throw new Error(
+      `Model "${modelId}" not found for provider ${this.piProvider}. Available models: ${availableIds}${availableModels.length > 10 ? '...' : ''}`
+    );
   }
 
   /**
@@ -222,6 +218,9 @@ export class PiProvider implements LLMProvider {
   private convertMessagesToPiAi(messages: LLMMessage[]): PiAiMessage[] {
     const result: PiAiMessage[] = [];
     const now = Date.now();
+    // Track tool call IDs to their names so we can populate toolName on results.
+    // LLMToolResult doesn't carry tool_name, but pi-ai requires it.
+    const toolCallNames = new Map<string, string>();
 
     for (const msg of messages) {
       if (typeof msg.content === 'string') {
@@ -232,26 +231,16 @@ export class PiProvider implements LLMProvider {
             timestamp: now,
           });
         } else {
+          // pi-ai's AssistantMessage type requires api/provider/model/usage/stopReason
+          // fields. These are synthetic placeholders for historical messages being replayed
+          // as conversation context — the actual values are unknown at this point.
           result.push({
             role: 'assistant',
             content: [{ type: 'text', text: msg.content }],
             api: 'openai-completions',
             provider: this.piProvider,
             model: this.modelId,
-            usage: {
-              input: 0,
-              output: 0,
-              cacheRead: 0,
-              cacheWrite: 0,
-              totalTokens: 0,
-              cost: {
-                input: 0,
-                output: 0,
-                cacheRead: 0,
-                cacheWrite: 0,
-                total: 0,
-              },
-            },
+            usage: PLACEHOLDER_USAGE,
             stopReason: 'stop',
             timestamp: now,
           });
@@ -267,7 +256,7 @@ export class PiProvider implements LLMProvider {
             result.push({
               role: 'toolResult',
               toolCallId: toolResult.tool_use_id,
-              toolName: '',
+              toolName: toolCallNames.get(toolResult.tool_use_id) || '',
               content: [{ type: 'text', text: toolResult.content }],
               isError: toolResult.is_error || false,
               timestamp: now,
@@ -298,36 +287,26 @@ export class PiProvider implements LLMProvider {
               if (item.type === 'text') {
                 content.push({ type: 'text', text: (item as any).text });
               } else if (item.type === 'tool_use') {
+                const toolUse = item as any;
+                toolCallNames.set(toolUse.id, toolUse.name);
                 content.push({
                   type: 'toolCall',
-                  id: (item as any).id,
-                  name: (item as any).name,
-                  arguments: (item as any).input,
+                  id: toolUse.id,
+                  name: toolUse.name,
+                  arguments: toolUse.input,
                 });
               }
             }
 
             if (content.length > 0) {
+              // Synthetic metadata — see comment above for string assistant messages
               result.push({
                 role: 'assistant',
                 content,
                 api: 'openai-completions',
                 provider: this.piProvider,
                 model: this.modelId,
-                usage: {
-                  input: 0,
-                  output: 0,
-                  cacheRead: 0,
-                  cacheWrite: 0,
-                  totalTokens: 0,
-                  cost: {
-                    input: 0,
-                    output: 0,
-                    cacheRead: 0,
-                    cacheWrite: 0,
-                    total: 0,
-                  },
-                },
+                usage: PLACEHOLDER_USAGE,
                 stopReason: 'stop',
                 timestamp: now,
               });
@@ -354,7 +333,7 @@ export class PiProvider implements LLMProvider {
   /**
    * Convert pi-ai response to CoWork OS format
    */
-  private convertPiAiResponse(response: any): LLMResponse {
+  private convertPiAiResponse(response: PiAiAssistantMessage): LLMResponse {
     const content: LLMContent[] = [];
 
     if (response.content) {

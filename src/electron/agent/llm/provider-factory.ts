@@ -15,6 +15,7 @@ import {
   KIMI_MODELS,
   ModelKey,
   DEFAULT_MODEL,
+  DEFAULT_PI_MODEL,
 } from './types';
 import { AnthropicProvider } from './anthropic-provider';
 import { BedrockProvider } from './bedrock-provider';
@@ -821,7 +822,7 @@ export class LLMProviderFactory {
     // For Pi, use the specific model from settings
     if (providerType === 'pi') {
       const settings = this.loadSettings();
-      return settings.pi?.model || 'claude-sonnet-4-5-20250514';
+      return settings.pi?.model || DEFAULT_PI_MODEL;
     }
 
     // For Bedrock, prefer an explicit Bedrock model ID if configured.
@@ -1197,7 +1198,7 @@ export class LLMProviderFactory {
       }
 
       case 'pi': {
-        const currentModel = settings.pi?.model || 'claude-sonnet-4-5-20250514';
+        const currentModel = settings.pi?.model || DEFAULT_PI_MODEL;
         const modelList = settings.cachedPiModels && settings.cachedPiModels.length > 0
           ? settings.cachedPiModels
           : PiProvider.getAvailableModels(settings.pi?.provider).map((m) => ({

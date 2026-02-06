@@ -872,8 +872,120 @@ export class MessageRouter {
       return;
     }
 
-    // Check if session has no workspace - might be workspace selection
     const session = this.sessionRepo.findById(sessionId);
+    const ctx = session?.context as any;
+    const pendingSelection = ctx?.pendingSelection as any;
+    const PENDING_SELECTION_TTL_MS = 2 * 60 * 1000;
+
+    if (pendingSelection && typeof pendingSelection === 'object' && typeof pendingSelection.type === 'string') {
+      const createdAt = typeof pendingSelection.createdAt === 'number' ? pendingSelection.createdAt : 0;
+      const ageMs = Date.now() - createdAt;
+
+      if (ageMs > PENDING_SELECTION_TTL_MS) {
+        // Expired - clear and proceed normally.
+        this.sessionManager.updateSessionContext(sessionId, { pendingSelection: undefined });
+      } else {
+        // Only treat as a selection if the user reply looks like a selection (not a full task).
+        const looksLikeSelection = /^[0-9]+$/.test(text) || (!/\s/.test(text) && text.length <= 48);
+        if (!looksLikeSelection) {
+          // User likely sent a real task; clear pending selection and continue.
+          this.sessionManager.updateSessionContext(sessionId, { pendingSelection: undefined });
+        } else if (pendingSelection.type === 'workspace') {
+          const workspaces = this.workspaceRepo.findAll();
+          const isNumeric = /^[0-9]+$/.test(text);
+          const num = parseInt(text, 10);
+          let workspace: Workspace | undefined;
+          if (isNumeric) {
+            if (!isNaN(num) && num > 0 && num <= workspaces.length) {
+              workspace = workspaces[num - 1];
+            } else {
+              // Likely attempted a selection but it's out of range: keep selection mode.
+              await adapter.sendMessage({
+                chatId: message.chatId,
+                text: this.getUiCopy('workspaceNotFound', { selector: text }),
+              });
+              return;
+            }
+          } else {
+            const lowered = text.toLowerCase();
+            workspace = workspaces.find(
+              ws => ws.name.toLowerCase() === lowered || ws.name.toLowerCase().startsWith(lowered)
+            );
+          }
+
+          if (workspace) {
+            this.sessionManager.setSessionWorkspace(sessionId, workspace.id);
+            if (workspace.id !== TEMP_WORKSPACE_ID) {
+              try {
+                this.workspaceRepo.updateLastUsedAt(workspace.id);
+              } catch (error) {
+                console.warn('Failed to update workspace last used time:', error);
+              }
+            }
+            this.sessionManager.updateSessionContext(sessionId, { pendingSelection: undefined });
+            const selectedText = this.getUiCopy('workspaceSelected', { workspaceName: workspace.name });
+            const exampleText = this.getUiCopy('workspaceSelectedExample');
+            await adapter.sendMessage({
+              chatId: message.chatId,
+              text: `${selectedText}\n\n${exampleText}`,
+              parseMode: 'markdown',
+            });
+            return;
+          }
+
+          // Not a valid selection; treat the next message as a normal task prompt.
+          this.sessionManager.updateSessionContext(sessionId, { pendingSelection: undefined });
+        } else if (pendingSelection.type === 'provider') {
+          const selector = text.toLowerCase();
+          const providerMap: Record<string, LLMProviderType> = {
+            '1': 'anthropic',
+            'anthropic': 'anthropic',
+            'api': 'anthropic',
+            '2': 'openai',
+            'openai': 'openai',
+            'chatgpt': 'openai',
+            '3': 'azure',
+            'azure': 'azure',
+            'azure-openai': 'azure',
+            '4': 'gemini',
+            'gemini': 'gemini',
+            'google': 'gemini',
+            '5': 'openrouter',
+            'openrouter': 'openrouter',
+            'or': 'openrouter',
+            '6': 'bedrock',
+            'bedrock': 'bedrock',
+            'aws': 'bedrock',
+            '7': 'ollama',
+            'ollama': 'ollama',
+            'local': 'ollama',
+          };
+
+          if (!providerMap[selector]) {
+            // If it's a numeric reply, user likely intended selection.
+            if (/^[0-9]+$/.test(text)) {
+              await adapter.sendMessage({
+                chatId: message.chatId,
+                text: `❌ Unknown provider: "${text}". Reply with \`1\`- \`7\` or a name like \`openai\`, \`bedrock\`, \`ollama\`.\n\nTip: use /providers to list options again.`,
+                parseMode: 'markdown',
+              });
+              return;
+            }
+
+            // Otherwise, treat as normal task prompt.
+            this.sessionManager.updateSessionContext(sessionId, { pendingSelection: undefined });
+          } else {
+            this.sessionManager.updateSessionContext(sessionId, { pendingSelection: undefined });
+            await this.handleProviderCommand(adapter, message, [text]);
+            return;
+          }
+
+          // fallthrough: proceed normally
+        }
+      }
+    }
+
+    // Check if session has no workspace - might be workspace selection
     if (!session?.workspaceId) {
       // Check if this looks like workspace selection (number or short name)
       const workspaces = this.workspaceRepo.findAll();
@@ -962,7 +1074,7 @@ export class MessageRouter {
         break;
 
       case '/workspaces':
-        await this.handleWorkspacesCommand(adapter, message);
+        await this.handleWorkspacesCommand(adapter, message, sessionId);
         break;
 
       case '/workspace':
@@ -1050,7 +1162,7 @@ export class MessageRouter {
         break;
 
       case '/providers':
-        await this.handleProvidersCommand(adapter, message);
+        await this.handleProvidersCommand(adapter, message, sessionId);
         break;
 
       case '/settings':
@@ -1116,7 +1228,8 @@ export class MessageRouter {
    */
   private async handleWorkspacesCommand(
     adapter: ChannelAdapter,
-    message: IncomingMessage
+    message: IncomingMessage,
+    sessionId: string
   ): Promise<void> {
     const workspaces = this.workspaceRepo.findAll();
 
@@ -1142,6 +1255,12 @@ export class MessageRouter {
         chatId: message.chatId,
         text,
         parseMode: 'markdown',
+      });
+
+      // Allow a plain numeric reply (e.g., "1") to select a workspace even when
+      // one is already set (important for WhatsApp/iMessage UX).
+      this.sessionManager.updateSessionContext(sessionId, {
+        pendingSelection: { type: 'workspace', createdAt: Date.now() },
       });
       return;
     }
@@ -3289,7 +3408,8 @@ ${status.queuedCount > 0 ? `Queued task IDs: ${status.queuedTaskIds.join(', ')}`
    */
   private async handleProvidersCommand(
     adapter: ChannelAdapter,
-    message: IncomingMessage
+    message: IncomingMessage,
+    sessionId: string
   ): Promise<void> {
     const status = LLMProviderFactory.getConfigStatus();
     const current = status.currentProvider;
@@ -3354,6 +3474,11 @@ ${status.queuedCount > 0 ? `Queued task IDs: ${status.queuedTaskIds.join(', ')}`
         text,
         parseMode: 'markdown',
         threadId: message.threadId,
+      });
+
+      // Allow a plain numeric reply (e.g., "1") to select provider.
+      this.sessionManager.updateSessionContext(sessionId, {
+        pendingSelection: { type: 'provider', createdAt: Date.now() },
       });
     } else {
       let text = `🤖 *AI Providers*\n\nCurrent: ${currentProviderInfo?.name || current}\n\nTap to switch:`;
@@ -3526,7 +3651,7 @@ Node.js: \`${nodeVersion}\`
 
     // Show workspaces if none selected
     if (!session?.workspaceId && workspaces.length > 0) {
-      await this.handleWorkspacesCommand(adapter, message);
+      await this.handleWorkspacesCommand(adapter, message, sessionId);
     }
   }
 

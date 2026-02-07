@@ -201,6 +201,7 @@ export const TOOL_GROUPS = {
   // Write operations - medium risk
   'group:write': [
     'write_file',
+    'edit_file',
     'copy_file',
     'rename_file',
     'create_directory',

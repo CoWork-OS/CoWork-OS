@@ -602,7 +602,7 @@ export class AgentDaemon extends EventEmitter {
   /**
    * Resume a paused task
    */
-  async resumeTask(taskId: string): Promise<void> {
+  async resumeTask(taskId: string): Promise<boolean> {
     const cached = this.activeTasks.get(taskId);
     if (cached) {
       cached.lastAccessed = Date.now();
@@ -610,7 +610,9 @@ export class AgentDaemon extends EventEmitter {
       this.updateTaskStatus(taskId, 'executing');
       this.logEvent(taskId, 'task_resumed', { message: 'Task resumed' });
       await cached.executor.resume();
+      return true;
     }
+    return false;
   }
 
   /**

@@ -3882,10 +3882,11 @@ ${skillDescriptions}`;
       ? input.types.filter((t): t is string => typeof t === 'string').map((t) => t.trim()).filter(Boolean)
       : undefined;
 
+    // Exclude tool_result by default — it echoes full tool output and can
+    // be very large. Callers can explicitly request it via the types param.
     const defaultTypes: string[] = [
       'assistant_message',
       'tool_call',
-      'tool_result',
       'tool_error',
       'error',
       'log',
@@ -3966,7 +3967,11 @@ ${skillDescriptions}`;
       return { success: false, task_id: resolved.taskId, message: `Cannot resume task in status "${resolved.task.status}"`, error: 'TASK_NOT_PAUSED' };
     }
 
-    await this.daemon.resumeTask(resolved.taskId);
+    const resumed = await this.daemon.resumeTask(resolved.taskId);
+    if (!resumed) {
+      return { success: false, task_id: resolved.taskId, message: 'Task has no active executor — it may need to be re-queued', error: 'NO_EXECUTOR' };
+    }
+
     const refreshed = await this.daemon.getTaskById(resolved.taskId);
     if (refreshed && refreshed.status !== 'executing') {
       this.daemon.updateTaskStatus(resolved.taskId, 'executing');

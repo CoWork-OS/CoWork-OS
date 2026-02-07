@@ -210,4 +210,232 @@ describe('ToolRegistry child task control tools', () => {
     expect(result.events[0]).toEqual({ timestamp: 1, type: 'assistant_message', summary: 'hello' });
     expect(result.events[1].type).toBe('file_created');
   });
+
+  it('cancel_agent cancels a descendant task', async () => {
+    const tasks = new Map<string, Task>([
+      [
+        'child-task',
+        {
+          id: 'child-task',
+          title: 'Child',
+          prompt: 'x',
+          status: 'executing',
+          workspaceId: workspace.id,
+          createdAt: 1,
+          updatedAt: 1,
+          parentTaskId: 'parent-task',
+          agentType: 'sub',
+          depth: 1,
+        },
+      ],
+    ]);
+
+    const daemon = {
+      getTaskById: vi.fn().mockImplementation(async (id: string) => tasks.get(id)),
+      cancelTask: vi.fn().mockResolvedValue(undefined),
+      updateTask: vi.fn(),
+      logEvent: vi.fn(),
+    } as any;
+
+    const registry = new ToolRegistry(workspace, daemon, 'parent-task');
+    const result = await registry.executeTool('cancel_agent', { task_id: 'child-task' });
+
+    expect(result.success).toBe(true);
+    expect(result.message).toBe('Task cancelled');
+    expect(daemon.cancelTask).toHaveBeenCalledWith('child-task');
+  });
+
+  it('cancel_agent rejects already-finished tasks', async () => {
+    const tasks = new Map<string, Task>([
+      [
+        'child-task',
+        {
+          id: 'child-task',
+          title: 'Child',
+          prompt: 'x',
+          status: 'completed',
+          workspaceId: workspace.id,
+          createdAt: 1,
+          updatedAt: 1,
+          parentTaskId: 'parent-task',
+          agentType: 'sub',
+          depth: 1,
+        },
+      ],
+    ]);
+
+    const daemon = {
+      getTaskById: vi.fn().mockImplementation(async (id: string) => tasks.get(id)),
+      logEvent: vi.fn(),
+    } as any;
+
+    const registry = new ToolRegistry(workspace, daemon, 'parent-task');
+    const result = await registry.executeTool('cancel_agent', { task_id: 'child-task' });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('TASK_ALREADY_FINISHED');
+  });
+
+  it('pause_agent pauses an executing descendant task', async () => {
+    const tasks = new Map<string, Task>([
+      [
+        'child-task',
+        {
+          id: 'child-task',
+          title: 'Child',
+          prompt: 'x',
+          status: 'executing',
+          workspaceId: workspace.id,
+          createdAt: 1,
+          updatedAt: 1,
+          parentTaskId: 'parent-task',
+          agentType: 'sub',
+          depth: 1,
+        },
+      ],
+    ]);
+
+    const daemon = {
+      getTaskById: vi.fn().mockImplementation(async (id: string) => tasks.get(id)),
+      pauseTask: vi.fn().mockResolvedValue(undefined),
+      updateTaskStatus: vi.fn(),
+      logEvent: vi.fn(),
+    } as any;
+
+    const registry = new ToolRegistry(workspace, daemon, 'parent-task');
+    const result = await registry.executeTool('pause_agent', { task_id: 'child-task' });
+
+    expect(result.success).toBe(true);
+    expect(result.message).toBe('Task paused');
+    expect(daemon.pauseTask).toHaveBeenCalledWith('child-task');
+    expect(daemon.updateTaskStatus).toHaveBeenCalledWith('child-task', 'paused');
+  });
+
+  it('pause_agent rejects tasks not in a running state', async () => {
+    const tasks = new Map<string, Task>([
+      [
+        'child-task',
+        {
+          id: 'child-task',
+          title: 'Child',
+          prompt: 'x',
+          status: 'paused',
+          workspaceId: workspace.id,
+          createdAt: 1,
+          updatedAt: 1,
+          parentTaskId: 'parent-task',
+          agentType: 'sub',
+          depth: 1,
+        },
+      ],
+    ]);
+
+    const daemon = {
+      getTaskById: vi.fn().mockImplementation(async (id: string) => tasks.get(id)),
+      logEvent: vi.fn(),
+    } as any;
+
+    const registry = new ToolRegistry(workspace, daemon, 'parent-task');
+    const result = await registry.executeTool('pause_agent', { task_id: 'child-task' });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('TASK_NOT_RUNNING');
+  });
+
+  it('resume_agent resumes a paused descendant task', async () => {
+    const tasks = new Map<string, Task>([
+      [
+        'child-task',
+        {
+          id: 'child-task',
+          title: 'Child',
+          prompt: 'x',
+          status: 'paused',
+          workspaceId: workspace.id,
+          createdAt: 1,
+          updatedAt: 1,
+          parentTaskId: 'parent-task',
+          agentType: 'sub',
+          depth: 1,
+        },
+      ],
+    ]);
+
+    const daemon = {
+      getTaskById: vi.fn().mockImplementation(async (id: string) => tasks.get(id)),
+      resumeTask: vi.fn().mockResolvedValue(true),
+      updateTaskStatus: vi.fn(),
+      logEvent: vi.fn(),
+    } as any;
+
+    const registry = new ToolRegistry(workspace, daemon, 'parent-task');
+    const result = await registry.executeTool('resume_agent', { task_id: 'child-task' });
+
+    expect(result.success).toBe(true);
+    expect(result.message).toBe('Task resumed');
+    expect(daemon.resumeTask).toHaveBeenCalledWith('child-task');
+  });
+
+  it('resume_agent fails when task has no in-memory executor', async () => {
+    const tasks = new Map<string, Task>([
+      [
+        'child-task',
+        {
+          id: 'child-task',
+          title: 'Child',
+          prompt: 'x',
+          status: 'paused',
+          workspaceId: workspace.id,
+          createdAt: 1,
+          updatedAt: 1,
+          parentTaskId: 'parent-task',
+          agentType: 'sub',
+          depth: 1,
+        },
+      ],
+    ]);
+
+    const daemon = {
+      getTaskById: vi.fn().mockImplementation(async (id: string) => tasks.get(id)),
+      resumeTask: vi.fn().mockResolvedValue(false),
+      logEvent: vi.fn(),
+    } as any;
+
+    const registry = new ToolRegistry(workspace, daemon, 'parent-task');
+    const result = await registry.executeTool('resume_agent', { task_id: 'child-task' });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('NO_EXECUTOR');
+  });
+
+  it('resume_agent rejects tasks not in paused state', async () => {
+    const tasks = new Map<string, Task>([
+      [
+        'child-task',
+        {
+          id: 'child-task',
+          title: 'Child',
+          prompt: 'x',
+          status: 'executing',
+          workspaceId: workspace.id,
+          createdAt: 1,
+          updatedAt: 1,
+          parentTaskId: 'parent-task',
+          agentType: 'sub',
+          depth: 1,
+        },
+      ],
+    ]);
+
+    const daemon = {
+      getTaskById: vi.fn().mockImplementation(async (id: string) => tasks.get(id)),
+      logEvent: vi.fn(),
+    } as any;
+
+    const registry = new ToolRegistry(workspace, daemon, 'parent-task');
+    const result = await registry.executeTool('resume_agent', { task_id: 'child-task' });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('TASK_NOT_PAUSED');
+  });
 });

@@ -367,57 +367,50 @@ export function ChatGPTImportWizard({ workspaceId, onClose, onImportComplete }: 
               <option value="default">
                 Use current model{currentModelName ? ` (${currentModelName})` : ''}
               </option>
-              {/* Show models for the user's configured provider */}
-              {currentProvider && PROVIDER_MODELS[currentProvider]?.models.length > 0 && (
-                <optgroup label={`${PROVIDER_MODELS[currentProvider].label} models`}>
-                  {PROVIDER_MODELS[currentProvider].models.map((m) => (
-                    <option key={m.model} value={`${currentProvider}:${m.model}`}>
-                      {m.label} — {m.description}
+              {/* Show cached models from the user's provider (fetched via Refresh Models in settings) */}
+              {availableModels.length > 0 && (
+                <optgroup label={`${PROVIDER_LABELS[currentProvider] || currentProvider} models`}>
+                  {availableModels.map((m) => (
+                    <option key={m.key} value={m.key}>
+                      {m.displayName}{m.description ? ` — ${m.description}` : ''}
                     </option>
                   ))}
                 </optgroup>
               )}
-              <option value="custom">Custom provider & model...</option>
+              <option value="custom">Enter model ID manually...</option>
             </select>
+            {availableModels.length === 0 && currentProvider && CACHED_MODELS_KEY[currentProvider] && (
+              <p className="settings-form-hint" style={{ color: 'var(--color-warning, #f59e0b)' }}>
+                No cached models found. Go to Settings → LLM Provider and click &quot;Refresh Models&quot; to load available models.
+              </p>
+            )}
             <p className="settings-form-hint">
               Each conversation requires an LLM call. For large imports, pick a cheaper/faster model to reduce cost.
             </p>
           </div>
 
           {distillPreset === 'custom' && (
-            <div className="settings-form-group" style={{ display: 'flex', gap: '12px' }}>
-              <div style={{ flex: 1 }}>
-                <label className="settings-label">Provider</label>
-                <select
-                  value={customProvider}
-                  onChange={(e) => setCustomProvider(e.target.value)}
-                  className="settings-select"
-                >
-                  <option value="">Same as current{currentProvider ? ` (${PROVIDER_MODELS[currentProvider]?.label || currentProvider})` : ''}</option>
-                  {Object.entries(PROVIDER_MODELS).map(([key, { label }]) => (
-                    <option key={key} value={key}>{label}</option>
-                  ))}
-                </select>
-              </div>
-              <div style={{ flex: 2 }}>
-                <label className="settings-label">Model ID</label>
-                <input
-                  type="text"
-                  value={customModel}
-                  onChange={(e) => setCustomModel(e.target.value)}
-                  placeholder="e.g. claude-3-5-haiku-20241022"
-                  className="settings-input"
-                  style={{
-                    width: '100%',
-                    padding: '8px 12px',
-                    borderRadius: '6px',
-                    border: '1px solid var(--color-border)',
-                    background: 'var(--color-bg-secondary)',
-                    color: 'var(--color-text-primary)',
-                    fontSize: '13px',
-                  }}
-                />
-              </div>
+            <div className="settings-form-group">
+              <label className="settings-label">Model ID</label>
+              <input
+                type="text"
+                value={customModel}
+                onChange={(e) => setCustomModel(e.target.value)}
+                placeholder={currentProvider === 'bedrock' ? 'e.g. us.anthropic.claude-3-5-haiku-20241022-v1:0' : 'e.g. claude-3-5-haiku-20241022'}
+                className="settings-input"
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                  border: '1px solid var(--color-border)',
+                  background: 'var(--color-bg-secondary)',
+                  color: 'var(--color-text-primary)',
+                  fontSize: '13px',
+                }}
+              />
+              <p className="settings-form-hint">
+                Enter the exact model ID for your {PROVIDER_LABELS[currentProvider] || 'LLM'} provider.
+              </p>
             </div>
           )}
 

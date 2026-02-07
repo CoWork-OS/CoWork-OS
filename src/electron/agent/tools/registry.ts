@@ -3596,16 +3596,16 @@ ${skillDescriptions}`;
           error: task.error,
         });
 
-        return {
-          success: isSuccess,
-          status: task.status,
-          message: isSuccess
-            ? `Agent completed successfully`
-            : `Agent ${task.status}: ${task.error || 'Unknown error'}`,
-          resultSummary: task.resultSummary,
-          error: task.error,
-        };
-      }
+	        return {
+	          success: isSuccess,
+	          status: task.status,
+	          message: isSuccess
+	            ? `Agent completed successfully`
+	            : `Agent ${task.status}: ${task.error || 'Unknown error'}`,
+	          resultSummary: task.resultSummary,
+	          error: typeof task.error === 'string' ? task.error : undefined,
+	        };
+	      }
 
       // Wait before polling again
       await new Promise(resolve => setTimeout(resolve, pollInterval));
@@ -3700,18 +3700,18 @@ ${skillDescriptions}`;
 	      tasks = await this.daemon.getChildTasks(this.taskId);
 	    }
 
-	    const agents = [
-	      ...tasks.map((task) => ({
-	        task_id: task.id,
-	        title: task.title,
-	        status: task.status,
-	        agent_type: task.agentType || 'main',
-	        model_key: task.agentConfig?.modelKey,
-	        result_summary: task.resultSummary,
-	        error: task.error,
-	        created_at: task.createdAt,
-	        completed_at: task.completedAt,
-	      })),
+		    const agents = [
+		      ...tasks.map((task) => ({
+		        task_id: task.id,
+		        title: task.title,
+		        status: task.status,
+		        agent_type: task.agentType || 'main',
+		        model_key: task.agentConfig?.modelKey,
+		        result_summary: task.resultSummary,
+		        error: typeof task.error === 'string' ? task.error : undefined,
+		        created_at: task.createdAt,
+		        completed_at: task.completedAt,
+		      })),
 	      ...rejected.map((item) => ({
 	        task_id: item.task_id,
 	        title: '(unavailable)',

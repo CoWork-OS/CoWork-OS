@@ -41,8 +41,9 @@ import { NodesSettings } from './NodesSettings';
 import { ExtensionsSettings } from './ExtensionsSettings';
 import { VoiceSettings } from './VoiceSettings';
 import { MissionControlPanel } from './MissionControlPanel';
+import { MemorySettings } from './MemorySettings';
 
-type SettingsTab = 'appearance' | 'personality' | 'missioncontrol' | 'tray' | 'voice' | 'llm' | 'search' | 'telegram' | 'slack' | 'whatsapp' | 'teams' | 'x' | 'morechannels' | 'integrations' | 'updates' | 'guardrails' | 'queue' | 'skills' | 'skillhub' | 'connectors' | 'mcp' | 'tools' | 'scheduled' | 'hooks' | 'controlplane' | 'nodes' | 'extensions';
+type SettingsTab = 'appearance' | 'personality' | 'missioncontrol' | 'tray' | 'voice' | 'llm' | 'search' | 'telegram' | 'slack' | 'whatsapp' | 'teams' | 'x' | 'morechannels' | 'integrations' | 'updates' | 'guardrails' | 'queue' | 'skills' | 'skillhub' | 'connectors' | 'mcp' | 'tools' | 'scheduled' | 'hooks' | 'controlplane' | 'nodes' | 'extensions' | 'memory';
 
 // Secondary channels shown inside "More Channels" tab
 type SecondaryChannel = 'discord' | 'imessage' | 'signal' | 'mattermost' | 'matrix' | 'twitch' | 'line' | 'bluebubbles' | 'email' | 'googlechat';
@@ -62,6 +63,7 @@ interface SettingsProps {
   initialTab?: SettingsTab;
   onShowOnboarding?: () => void;
   onboardingCompletedAt?: string;
+  workspaceId?: string;
 }
 
 interface ModelOption {
@@ -263,6 +265,7 @@ const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: ReactNode; ma
   { tab: 'morechannels', label: 'More Channels', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /><circle cx="5" cy="12" r="1" /></svg> },
   { tab: 'integrations', label: 'Integrations', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2v4" /><path d="M12 18v4" /><path d="M4.93 4.93l2.83 2.83" /><path d="M16.24 16.24l2.83 2.83" /><path d="M2 12h4" /><path d="M18 12h4" /><path d="M4.93 19.07l2.83-2.83" /><path d="M16.24 7.76l2.83-2.83" /><circle cx="12" cy="12" r="3" /></svg> },
   { tab: 'guardrails', label: 'Guardrails', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg> },
+  { tab: 'memory', label: 'Memory', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44A2.5 2.5 0 0 1 5.5 17c0-1 .59-1.85 1.44-2.25A2.5 2.5 0 0 1 5.5 12.5c0-1 .59-1.85 1.44-2.25A2.5 2.5 0 0 1 9.5 2z" /><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44A2.5 2.5 0 0 0 18.5 17c0-1-.59-1.85-1.44-2.25A2.5 2.5 0 0 0 18.5 12.5c0-1-.59-1.85-1.44-2.25A2.5 2.5 0 0 0 14.5 2z" /></svg> },
   { tab: 'queue', label: 'Task Queue', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="4" rx="1" /><rect x="3" y="10" width="18" height="4" rx="1" /><rect x="3" y="16" width="18" height="4" rx="1" /></svg> },
   { tab: 'skills', label: 'Custom Skills', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" /></svg> },
   { tab: 'skillhub', label: 'SkillHub', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><path d="M12 16v-4" /><path d="M12 8h.01" /><path d="M8 12h8" /></svg> },
@@ -386,7 +389,7 @@ const getLLMProviderIcon = (providerType: string, customEntry?: { compatibility?
   );
 };
 
-export function Settings({ onBack, onSettingsChanged, themeMode, visualTheme, accentColor, onThemeChange, onVisualThemeChange, onAccentChange, initialTab = 'appearance', onShowOnboarding, onboardingCompletedAt }: SettingsProps) {
+export function Settings({ onBack, onSettingsChanged, themeMode, visualTheme, accentColor, onThemeChange, onVisualThemeChange, onAccentChange, initialTab = 'appearance', onShowOnboarding, onboardingCompletedAt, workspaceId }: SettingsProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
   const [activeSecondaryChannel, setActiveSecondaryChannel] = useState<SecondaryChannel>('discord');
   const [activeIntegration, setActiveIntegration] = useState<IntegrationChannel>('notion');
@@ -1433,6 +1436,8 @@ export function Settings({ onBack, onSettingsChanged, themeMode, visualTheme, ac
               <NodesSettings />
             ) : activeTab === 'extensions' ? (
               <ExtensionsSettings />
+            ) : activeTab === 'memory' ? (
+              <MemorySettings workspaceId={workspaceId || ''} onSettingsChanged={onSettingsChanged} />
             ) : loading ? (
               <div className="settings-loading">Loading settings...</div>
             ) : (

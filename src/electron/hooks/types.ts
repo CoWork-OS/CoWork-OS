@@ -121,6 +121,16 @@ export interface AgentHookPayload {
   workspaceId?: string;
 }
 
+export interface TaskMessageHookPayload {
+  taskId: string;
+  message: string;
+}
+
+export interface ApprovalRespondHookPayload {
+  approvalId: string;
+  approved: boolean;
+}
+
 // ============ Hook Actions ============
 
 export type HookAction =

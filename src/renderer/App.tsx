@@ -837,6 +837,7 @@ export function App() {
           initialTab={settingsTab}
           onShowOnboarding={handleShowOnboarding}
           onboardingCompletedAt={onboardingCompletedAt}
+          workspaceId={currentWorkspace?.id}
         />
       )}
       {currentView === 'browser' && (

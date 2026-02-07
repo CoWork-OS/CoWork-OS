@@ -15,6 +15,8 @@ import {
   HookAction,
   WakeHookPayload,
   AgentHookPayload,
+  TaskMessageHookPayload,
+  ApprovalRespondHookPayload,
   HookServerEvent,
   DEFAULT_HOOKS_PATH,
   DEFAULT_HOOKS_MAX_BODY_BYTES,
@@ -50,6 +52,19 @@ export interface HooksServerHandlers {
     timeoutSeconds?: number;
     workspaceId?: string;
   }) => Promise<{ taskId?: string }>;
+
+  /**
+   * Handle a follow-up message to an existing task
+   */
+  onTaskMessage?: (action: { taskId: string; message: string }) => Promise<void>;
+
+  /**
+   * Respond to an approval request for a task
+   */
+  onApprovalRespond?: (action: {
+    approvalId: string;
+    approved: boolean;
+  }) => Promise<'handled' | 'duplicate' | 'not_found' | 'in_progress'>;
 
   /**
    * Event callback for logging/monitoring
@@ -256,6 +271,16 @@ export class HooksServer {
       return;
     }
 
+    if (hookPath === 'task/message' && req.method === 'POST') {
+      await this.handleTaskMessage(req, res);
+      return;
+    }
+
+    if (hookPath === 'approval/respond' && req.method === 'POST') {
+      await this.handleApprovalRespond(req, res);
+      return;
+    }
+
     // Handle mapped endpoints
     if (req.method === 'POST') {
       await this.handleMapped(req, res, url, hookPath);
@@ -337,6 +362,81 @@ export class HooksServer {
       }
     } else {
       this.sendJsonResponse(res, 503, { success: false, error: 'Agent handler not configured' });
+    }
+  }
+
+  /**
+   * Handle /hooks/task/message endpoint
+   */
+  private async handleTaskMessage(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const body = await this.parseJsonBody<TaskMessageHookPayload>(req);
+    if (!body) {
+      this.sendJsonResponse(res, 400, { success: false, error: 'Invalid JSON body' });
+      return;
+    }
+
+    const taskId = body.taskId?.trim();
+    if (!taskId) {
+      this.sendJsonResponse(res, 400, { success: false, error: 'taskId required' });
+      return;
+    }
+
+    const message = body.message?.trim();
+    if (!message) {
+      this.sendJsonResponse(res, 400, { success: false, error: 'message required' });
+      return;
+    }
+
+    if (!this.handlers.onTaskMessage) {
+      this.sendJsonResponse(res, 503, { success: false, error: 'Task message handler not configured' });
+      return;
+    }
+
+    try {
+      await this.handlers.onTaskMessage({ taskId, message });
+      // Return 202 Accepted for async operation
+      this.sendJsonResponse(res, 202, { success: true });
+    } catch (error: any) {
+      const statusCode =
+        typeof error?.statusCode === 'number' && Number.isFinite(error.statusCode) ? error.statusCode : 500;
+      console.error('[HooksServer] Task message handler error:', error);
+      this.sendJsonResponse(res, statusCode, { success: false, error: String(error) });
+    }
+  }
+
+  /**
+   * Handle /hooks/approval/respond endpoint
+   */
+  private async handleApprovalRespond(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const body = await this.parseJsonBody<ApprovalRespondHookPayload>(req);
+    if (!body) {
+      this.sendJsonResponse(res, 400, { success: false, error: 'Invalid JSON body' });
+      return;
+    }
+
+    const approvalId = body.approvalId?.trim();
+    if (!approvalId) {
+      this.sendJsonResponse(res, 400, { success: false, error: 'approvalId required' });
+      return;
+    }
+
+    if (typeof body.approved !== 'boolean') {
+      this.sendJsonResponse(res, 400, { success: false, error: 'approved must be boolean' });
+      return;
+    }
+
+    if (!this.handlers.onApprovalRespond) {
+      this.sendJsonResponse(res, 503, { success: false, error: 'Approval respond handler not configured' });
+      return;
+    }
+
+    try {
+      const status = await this.handlers.onApprovalRespond({ approvalId, approved: body.approved });
+      const httpStatus = status === 'not_found' ? 404 : 200;
+      this.sendJsonResponse(res, httpStatus, { success: true, status });
+    } catch (error) {
+      console.error('[HooksServer] Approval respond handler error:', error);
+      this.sendJsonResponse(res, 500, { success: false, error: String(error) });
     }
   }
 

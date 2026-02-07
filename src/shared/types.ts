@@ -426,7 +426,7 @@ export interface Task {
   completedAt?: number;
   budgetTokens?: number;
   budgetCost?: number;
-  error?: string;
+  error?: string | null;
   // Goal Mode fields
   successCriteria?: SuccessCriteria;
   maxAttempts?: number;        // Default: 3, max: 10
@@ -496,7 +496,7 @@ export interface TaskExportItem {
   usage?: TaskUsageTotals;
   files?: TaskFileChanges;
   resultSummary?: string;
-  error?: string;
+  error?: string | null;
 }
 
 export interface TaskExportJson {

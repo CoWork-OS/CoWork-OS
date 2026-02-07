@@ -353,6 +353,76 @@ describe('HooksServer', () => {
       );
     });
 
+    it('should call onTaskMessage handler', async () => {
+      const onTaskMessage = vi.fn().mockResolvedValue(undefined);
+      server.setHandlers({ onTaskMessage });
+
+      const response = await makeRequest(
+        'POST',
+        '/hooks/task/message',
+        { taskId: 'task-123', message: 'Hello' },
+        { 'Authorization': 'Bearer test-secret-token' },
+      );
+
+      expect(response.statusCode).toBe(202);
+      expect(onTaskMessage).toHaveBeenCalledWith({ taskId: 'task-123', message: 'Hello' });
+    });
+
+    it('should return 400 for task message without taskId', async () => {
+      const onTaskMessage = vi.fn().mockResolvedValue(undefined);
+      server.setHandlers({ onTaskMessage });
+
+      const response = await makeRequest(
+        'POST',
+        '/hooks/task/message',
+        { message: 'Hello' },
+        { 'Authorization': 'Bearer test-secret-token' },
+      );
+
+      expect(response.statusCode).toBe(400);
+    });
+
+    it('should return 503 when no task message handler configured', async () => {
+      const response = await makeRequest(
+        'POST',
+        '/hooks/task/message',
+        { taskId: 'task-123', message: 'Hello' },
+        { 'Authorization': 'Bearer test-secret-token' },
+      );
+      expect(response.statusCode).toBe(503);
+    });
+
+    it('should call onApprovalRespond handler', async () => {
+      const onApprovalRespond = vi.fn().mockResolvedValue('handled');
+      server.setHandlers({ onApprovalRespond });
+
+      const response = await makeRequest(
+        'POST',
+        '/hooks/approval/respond',
+        { approvalId: 'approval-1', approved: true },
+        { 'Authorization': 'Bearer test-secret-token' },
+      );
+
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.body);
+      expect(body.success).toBe(true);
+      expect(body.status).toBe('handled');
+      expect(onApprovalRespond).toHaveBeenCalledWith({ approvalId: 'approval-1', approved: true });
+    });
+
+    it('should return 404 when approval respond returns not_found', async () => {
+      const onApprovalRespond = vi.fn().mockResolvedValue('not_found');
+      server.setHandlers({ onApprovalRespond });
+
+      const response = await makeRequest(
+        'POST',
+        '/hooks/approval/respond',
+        { approvalId: 'approval-404', approved: true },
+        { 'Authorization': 'Bearer test-secret-token' },
+      );
+      expect(response.statusCode).toBe(404);
+    });
+
     it('should return 503 when no wake handler configured', async () => {
       const response = await makeRequest(
         'POST',

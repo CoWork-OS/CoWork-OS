@@ -49,6 +49,23 @@ app.commandLine.appendSwitch('ignore-gpu-blocklist');
 // Register canvas:// protocol scheme (must be called before app.ready)
 registerCanvasScheme();
 
+// Ensure only one CoWork OS instance runs at a time.
+// Without this, a second instance can mark in-flight tasks as "orphaned" (failed) and contend on the DB.
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    // Focus the existing window instead of starting a second instance.
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+      return;
+    }
+    // If the window was closed (but app kept running), recreate it.
+    createWindow();
+  });
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1600,
@@ -536,3 +553,5 @@ ipcMain.handle('dialog:selectFiles', async () => {
 
   return entries.filter((entry): entry is { path: string; name: string; size: number; mimeType: string | undefined } => Boolean(entry));
 });
+
+} // single-instance guard

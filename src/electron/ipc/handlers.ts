@@ -3202,7 +3202,21 @@ async function setupHooksHandlers(agentDaemon: AgentDaemon): Promise<void> {
       },
       onTaskMessage: async (action) => {
         console.log('[Hooks] Task message:', action.taskId);
-        await agentDaemon.sendMessage(action.taskId, action.message);
+        // Don't block the webhook call until the whole follow-up run completes.
+        // We only validate that the task exists; execution happens asynchronously.
+        const task = agentDaemon.getTask(action.taskId);
+        if (!task) {
+          const err: any = new Error(`Task ${action.taskId} not found`);
+          err.statusCode = 404;
+          throw err;
+        }
+        void agentDaemon.sendMessage(action.taskId, action.message).catch((err) => {
+          console.error('[Hooks] Failed to process task message:', err);
+        });
+      },
+      onApprovalRespond: async (action) => {
+        console.log('[Hooks] Approval respond:', action.approvalId, action.approved ? 'approve' : 'deny');
+        return agentDaemon.respondToApproval(action.approvalId, action.approved);
       },
       onEvent: (event) => {
         console.log('[Hooks] Server event:', event.action);

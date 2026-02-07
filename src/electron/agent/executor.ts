@@ -1056,6 +1056,10 @@ export class TaskExecutor {
   private paused = false;
   private taskCompleted = false;  // Prevents any further processing after task completes
   private waitingForUserInput = false;
+  // If the user confirms they want to proceed despite workspace preflight warnings,
+  // we should not keep re-pausing on the same gate.
+  private workspacePreflightAcknowledged = false;
+  private lastPauseReason: string | null = null;
   private plan?: Plan;
   private modelId: string;
   private modelKey: string;
@@ -2646,6 +2650,7 @@ You are continuing a previous conversation. The context from the previous conver
 
   private pauseForUserInput(message: string, reason: string): void {
     this.waitingForUserInput = true;
+    this.lastPauseReason = reason;
     this.daemon.updateTaskStatus(this.task.id, 'paused');
     this.daemon.logEvent(this.task.id, 'assistant_message', { message });
     this.daemon.logEvent(this.task.id, 'task_paused', { message, reason });
@@ -2673,6 +2678,11 @@ You are continuing a previous conversation. The context from the previous conver
 
   private preflightWorkspaceCheck(): boolean {
     if (!this.shouldPauseForQuestions) {
+      return false;
+    }
+
+    // If the user has acknowledged the workspace preflight warning, don't block again.
+    if (this.workspacePreflightAcknowledged) {
       return false;
     }
 
@@ -4440,6 +4450,11 @@ SCHEDULING & REMINDERS:
     this.paused = false;
     this.lastUserMessage = message;
     if (shouldResumeAfterFollowup) {
+      // If we paused on a workspace preflight gate, treat any user response as acknowledgement.
+      // This prevents an infinite pause/resume loop when the user wants to proceed anyway.
+      if (this.lastPauseReason?.startsWith('workspace_')) {
+        this.workspacePreflightAcknowledged = true;
+      }
       this.task.prompt = `${this.task.prompt}\n\nUSER UPDATE:\n${message}`;
     }
     this.toolRegistry.setCanvasSessionCutoff(shouldStartNewCanvasSession ? Date.now() : null);
@@ -5142,6 +5157,10 @@ SCHEDULING & REMINDERS:
   async resume(): Promise<void> {
     this.paused = false;
     if (this.waitingForUserInput) {
+      // Resume implies the user acknowledged any workspace preflight warning.
+      if (this.lastPauseReason?.startsWith('workspace_')) {
+        this.workspacePreflightAcknowledged = true;
+      }
       this.waitingForUserInput = false;
       await this.resumeAfterPause();
     }

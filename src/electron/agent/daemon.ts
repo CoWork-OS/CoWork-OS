@@ -1227,6 +1227,8 @@ export class AgentDaemon extends EventEmitter {
     const updates: Partial<Task> = {
       status: 'completed',
       completedAt: Date.now(),
+      // Clear any previous error so completed tasks don't display stale failure state.
+      error: null,
     };
     if (typeof resultSummary === 'string' && resultSummary.trim().length > 0) {
       updates.resultSummary = resultSummary.trim();

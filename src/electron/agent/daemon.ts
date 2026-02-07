@@ -15,7 +15,7 @@ import { ActivityRepository } from '../activity/ActivityRepository';
 import { AgentRoleRepository } from '../agents/AgentRoleRepository';
 import { MentionRepository } from '../agents/MentionRepository';
 import { buildAgentDispatchPrompt } from '../agents/agent-dispatch';
-import { Task, TaskStatus, IPC_CHANNELS, QueueSettings, QueueStatus, Workspace, WorkspacePermissions, AgentConfig, AgentType, ActivityActorType, ActivityType, CreateActivityRequest, Plan, BoardColumn, Activity, AgentMention } from '../../shared/types';
+import { Task, TaskStatus, TaskEvent, IPC_CHANNELS, QueueSettings, QueueStatus, Workspace, WorkspacePermissions, AgentConfig, AgentType, ActivityActorType, ActivityType, CreateActivityRequest, Plan, BoardColumn, Activity, AgentMention } from '../../shared/types';
 import { TaskExecutor } from './executor';
 import { TaskQueueManager } from './queue-manager';
 import { approvalIdempotency, taskIdempotency, IdempotencyManager } from '../security/concurrency';
@@ -642,7 +642,7 @@ export class AgentDaemon extends EventEmitter {
   /**
    * Resume a paused task
    */
-  async resumeTask(taskId: string): Promise<void> {
+  async resumeTask(taskId: string): Promise<boolean> {
     const cached = this.activeTasks.get(taskId);
     if (cached) {
       cached.lastAccessed = Date.now();
@@ -650,7 +650,9 @@ export class AgentDaemon extends EventEmitter {
       this.updateTaskStatus(taskId, 'executing');
       this.logEvent(taskId, 'task_resumed', { message: 'Task resumed' });
       await cached.executor.resume();
+      return true;
     }
+    return false;
   }
 
   /**
@@ -1150,6 +1152,20 @@ export class AgentDaemon extends EventEmitter {
    */
   getTask(taskId: string): Task | undefined {
     return this.taskRepo.findById(taskId);
+  }
+
+  getTaskEvents(taskId: string, options?: { limit?: number; types?: string[] }): TaskEvent[] {
+    const all = this.eventRepo.findByTaskId(taskId);
+    const normalizedTypes = (options?.types || []).map((t) => (typeof t === 'string' ? t.trim() : '')).filter(Boolean);
+    const filtered = normalizedTypes.length > 0 ? all.filter((event) => normalizedTypes.includes(event.type)) : all;
+    const limit = typeof options?.limit === 'number' && Number.isFinite(options.limit)
+      ? Math.min(Math.max(options.limit, 1), 200)
+      : undefined;
+    if (typeof limit !== 'number') {
+      return filtered;
+    }
+    // Return the most recent events, preserving chronological order.
+    return filtered.slice(Math.max(filtered.length - limit, 0));
   }
 
   /**

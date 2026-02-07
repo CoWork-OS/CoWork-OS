@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as fsPromises from 'fs/promises';
 import * as path from 'path';
-import { Workspace, GatewayContextType, AgentConfig, AgentType, Task, TOOL_GROUPS, ToolGroupName } from '../../../shared/types';
+import { Workspace, GatewayContextType, AgentConfig, AgentType, Task, TaskEvent, TOOL_GROUPS, ToolGroupName } from '../../../shared/types';
 import { AgentDaemon } from '../daemon';
 import { FileTools } from './file-tools';
 import { SkillTools } from './skill-tools';
@@ -346,7 +346,24 @@ export class ToolRegistry {
         return true;
       }
       // Meta tools are always enabled
-      if (['revise_plan', 'set_personality', 'set_persona', 'set_agent_name', 'set_user_name', 'set_response_style', 'set_quirks', 'spawn_agent', 'wait_for_agent', 'get_agent_status', 'list_agents'].includes(tool.name)) {
+      if ([
+        'revise_plan',
+        'set_personality',
+        'set_persona',
+        'set_agent_name',
+        'set_user_name',
+        'set_response_style',
+        'set_quirks',
+        'spawn_agent',
+        'wait_for_agent',
+        'get_agent_status',
+        'list_agents',
+        'send_agent_message',
+        'capture_agent_events',
+        'cancel_agent',
+        'pause_agent',
+        'resume_agent',
+      ].includes(tool.name)) {
         return true;
       }
       // Check built-in tool settings
@@ -871,13 +888,28 @@ ${skillDescriptions}`;
     if (name === 'get_agent_status') {
       return await this.getAgentStatus(input);
     }
-    if (name === 'list_agents') {
-      return await this.listAgents(input);
-    }
+	    if (name === 'list_agents') {
+	      return await this.listAgents(input);
+	    }
+	    if (name === 'send_agent_message') {
+	      return await this.sendAgentMessage(input);
+	    }
+	    if (name === 'capture_agent_events') {
+	      return await this.captureAgentEvents(input);
+	    }
+	    if (name === 'cancel_agent') {
+	      return await this.cancelAgent(input);
+	    }
+	    if (name === 'pause_agent') {
+	      return await this.pauseAgent(input);
+	    }
+	    if (name === 'resume_agent') {
+	      return await this.resumeAgent(input);
+	    }
 
-    // MCP tools (prefixed with mcp_ by default)
-    const mcpToolResult = await this.tryExecuteMCPTool(name, input);
-    if (mcpToolResult !== null) {
+	    // MCP tools (prefixed with mcp_ by default)
+	    const mcpToolResult = await this.tryExecuteMCPTool(name, input);
+	    if (mcpToolResult !== null) {
       return mcpToolResult;
     }
 
@@ -3369,6 +3401,39 @@ ${skillDescriptions}`;
     return 'concise'; // Default for sub-agents
   }
 
+  private async resolveDescendantTask(taskIdInput: unknown): Promise<
+    | { ok: true; taskId: string; task: Task }
+    | { ok: false; taskId?: string; error: 'TASK_ID_REQUIRED' | 'TASK_NOT_FOUND' | 'FORBIDDEN'; message: string }
+  > {
+    const taskId = typeof taskIdInput === 'string' ? taskIdInput.trim() : '';
+    if (!taskId) {
+      return { ok: false, error: 'TASK_ID_REQUIRED', message: 'task_id is required' };
+    }
+    if (taskId === this.taskId) {
+      return { ok: false, taskId, error: 'FORBIDDEN', message: 'task_id must refer to a child task (not the current task)' };
+    }
+
+    const task = await this.daemon.getTaskById(taskId);
+    if (!task) {
+      return { ok: false, taskId, error: 'TASK_NOT_FOUND', message: `Task ${taskId} not found` };
+    }
+
+    // Walk parent chain to ensure the target task is a descendant of the current task.
+    // Depth is already bounded elsewhere, but keep a hard guard to avoid cycles.
+    let cursor: Task | undefined = task;
+    for (let i = 0; i < 20; i++) {
+      const parentId = cursor.parentTaskId;
+      if (!parentId) break;
+      if (parentId === this.taskId) {
+        return { ok: true, taskId, task };
+      }
+      cursor = await this.daemon.getTaskById(parentId);
+      if (!cursor) break;
+    }
+
+    return { ok: false, taskId, error: 'FORBIDDEN', message: `Task ${taskId} is not a child of the current task` };
+  }
+
   /**
    * Spawn a child agent to work on a subtask
    */
@@ -3491,18 +3556,30 @@ ${skillDescriptions}`;
     resultSummary?: string;
     error?: string;
   }> {
+    const resolved = await this.resolveDescendantTask(taskId);
+    if (!resolved.ok) {
+      return {
+        success: false,
+        status: resolved.error === 'TASK_NOT_FOUND' ? 'not_found' : 'forbidden',
+        message: resolved.message,
+        error: resolved.error,
+      };
+    }
+
+    const resolvedTaskId = resolved.taskId;
+
     const timeoutMs = timeoutSeconds * 1000;
     const startTime = Date.now();
     const pollInterval = 1000; // Check every second
 
     while (Date.now() - startTime < timeoutMs) {
-      const task = await this.daemon.getTaskById(taskId);
+      const task = await this.daemon.getTaskById(resolvedTaskId);
 
       if (!task) {
         return {
           success: false,
           status: 'not_found',
-          message: `Task ${taskId} not found`,
+          message: `Task ${resolvedTaskId} not found`,
           error: 'TASK_NOT_FOUND',
         };
       }
@@ -3513,7 +3590,7 @@ ${skillDescriptions}`;
 
         // Log result event to parent
         this.daemon.logEvent(this.taskId, isSuccess ? 'agent_completed' : 'agent_failed', {
-          childTaskId: taskId,
+          childTaskId: resolvedTaskId,
           childStatus: task.status,
           resultSummary: task.resultSummary,
           error: task.error,
@@ -3538,7 +3615,7 @@ ${skillDescriptions}`;
     return {
       success: false,
       status: 'timeout',
-      message: `Timeout waiting for agent ${taskId} (${timeoutSeconds}s)`,
+      message: `Timeout waiting for agent ${resolvedTaskId} (${timeoutSeconds}s)`,
       error: 'TIMEOUT',
     };
   }
@@ -3578,57 +3655,78 @@ ${skillDescriptions}`;
   /**
    * Get status of spawned agents
    */
-  private async getAgentStatus(input: {
-    task_ids?: string[];
-  }): Promise<{
-    agents: Array<{
-      task_id: string;
-      title: string;
-      status: string;
-      agent_type: string;
-      model_key?: string;
-      result_summary?: string;
-      error?: string;
-      created_at: number;
-      completed_at?: number;
-    }>;
-    message: string;
-  }> {
-    const { task_ids } = input;
+	  private async getAgentStatus(input: {
+	    task_ids?: string[];
+	  }): Promise<{
+	    agents: Array<{
+	      task_id: string;
+	      title: string;
+	      status: string;
+	      agent_type: string;
+	      model_key?: string;
+	      result_summary?: string;
+	      error?: string;
+	      created_at: number;
+	      completed_at?: number;
+	    }>;
+	    message: string;
+	  }> {
+	    const { task_ids } = input;
 
-    let tasks: Task[];
+	    let tasks: Task[] = [];
+	    const rejected: Array<{
+	      task_id: string;
+	      status: string;
+	      error?: string;
+	    }> = [];
 
-    if (task_ids && task_ids.length > 0) {
-      // Get specific tasks
-      tasks = [];
-      for (const id of task_ids) {
-        const task = await this.daemon.getTaskById(id);
-        if (task) {
-          tasks.push(task);
-        }
-      }
-    } else {
-      // Get all child tasks of current task
-      tasks = await this.daemon.getChildTasks(this.taskId);
-    }
+	    if (task_ids && task_ids.length > 0) {
+	      // Get specific tasks (restricted to descendants only)
+	      for (const id of task_ids) {
+	        const resolved = await this.resolveDescendantTask(id);
+	        if (!resolved.ok) {
+	          const taskId = resolved.taskId || (typeof id === 'string' ? id : String(id));
+	          rejected.push({
+	            task_id: taskId,
+	            status: resolved.error === 'TASK_NOT_FOUND' ? 'not_found' : 'forbidden',
+	            error: resolved.message,
+	          });
+	          continue;
+	        }
+	        tasks.push(resolved.task);
+	      }
+	    } else {
+	      // Get all child tasks of current task
+	      tasks = await this.daemon.getChildTasks(this.taskId);
+	    }
 
-    const agents = tasks.map(task => ({
-      task_id: task.id,
-      title: task.title,
-      status: task.status,
-      agent_type: task.agentType || 'main',
-      model_key: task.agentConfig?.modelKey,
-      result_summary: task.resultSummary,
-      error: task.error,
-      created_at: task.createdAt,
-      completed_at: task.completedAt,
-    }));
+	    const agents = [
+	      ...tasks.map((task) => ({
+	        task_id: task.id,
+	        title: task.title,
+	        status: task.status,
+	        agent_type: task.agentType || 'main',
+	        model_key: task.agentConfig?.modelKey,
+	        result_summary: task.resultSummary,
+	        error: task.error,
+	        created_at: task.createdAt,
+	        completed_at: task.completedAt,
+	      })),
+	      ...rejected.map((item) => ({
+	        task_id: item.task_id,
+	        title: '(unavailable)',
+	        status: item.status,
+	        agent_type: 'unknown',
+	        error: item.error,
+	        created_at: 0,
+	      })),
+	    ];
 
-    return {
-      agents,
-      message: `Found ${agents.length} agent(s)`,
-    };
-  }
+	    return {
+	      agents,
+	      message: `Found ${tasks.length} agent(s)${rejected.length > 0 ? ` (${rejected.length} rejected)` : ''}`,
+	    };
+	  }
 
   /**
    * List all spawned child agents for the current task
@@ -3704,6 +3802,220 @@ ${skillDescriptions}`;
         ? `Found ${agents.length} child agent(s)`
         : `Found ${agents.length} ${status_filter} agent(s) (${summary.total} total)`,
     };
+  }
+
+  private truncateForSummary(text: string, maxChars: number): string {
+    if (text.length <= maxChars) return text;
+    return text.slice(0, maxChars) + '...';
+  }
+
+  private summarizeAgentEvent(event: TaskEvent): { timestamp: number; type: string; summary: string } {
+    const payload = event.payload ?? {};
+    const maxChars = 900;
+
+    const toolName = typeof payload?.tool === 'string'
+      ? payload.tool
+      : (typeof payload?.name === 'string' ? payload.name : '');
+
+    switch (event.type) {
+      case 'assistant_message': {
+        const content =
+          (typeof payload?.content === 'string' && payload.content) ||
+          (typeof payload?.message === 'string' && payload.message) ||
+          '';
+        return { timestamp: event.timestamp, type: event.type, summary: this.truncateForSummary(content || '[assistant_message]', maxChars) };
+      }
+      case 'tool_call': {
+        return { timestamp: event.timestamp, type: event.type, summary: toolName ? `tool_call ${toolName}` : 'tool_call' };
+      }
+      case 'tool_result': {
+        const raw =
+          typeof payload?.result === 'string'
+            ? payload.result
+            : (payload?.result ? JSON.stringify(payload.result) : '');
+        const summary = toolName ? `tool_result ${toolName}: ${raw}` : `tool_result: ${raw}`;
+        return { timestamp: event.timestamp, type: event.type, summary: this.truncateForSummary(summary, maxChars) };
+      }
+      case 'tool_error': {
+        const error = typeof payload?.error === 'string' ? payload.error : '';
+        const summary = toolName ? `tool_error ${toolName}: ${error}` : `tool_error: ${error}`;
+        return { timestamp: event.timestamp, type: event.type, summary: this.truncateForSummary(summary, maxChars) };
+      }
+      case 'file_created':
+      case 'file_modified':
+      case 'file_deleted': {
+        const pathValue = typeof payload?.path === 'string' ? payload.path : '';
+        return {
+          timestamp: event.timestamp,
+          type: event.type,
+          summary: pathValue ? `${event.type}: ${pathValue}` : event.type,
+        };
+      }
+      case 'step_started':
+      case 'step_completed':
+      case 'step_failed': {
+        const desc = typeof payload?.step?.description === 'string' ? payload.step.description : '';
+        const err = typeof payload?.error === 'string' ? payload.error : '';
+        const suffix = err ? ` (${err})` : '';
+        return {
+          timestamp: event.timestamp,
+          type: event.type,
+          summary: this.truncateForSummary(desc ? `${event.type}: ${desc}${suffix}` : `${event.type}${suffix}`, maxChars),
+        };
+      }
+      case 'error': {
+        const error = typeof payload?.error === 'string' ? payload.error : '';
+        return { timestamp: event.timestamp, type: event.type, summary: this.truncateForSummary(error ? `error: ${error}` : 'error', maxChars) };
+      }
+      default: {
+        let raw = '';
+        try {
+          raw = JSON.stringify(payload);
+        } catch {
+          raw = String(payload);
+        }
+        return { timestamp: event.timestamp, type: event.type, summary: this.truncateForSummary(raw || event.type, maxChars) };
+      }
+    }
+  }
+
+  private async sendAgentMessage(input: { task_id: unknown; message: unknown }): Promise<{
+    success: boolean;
+    task_id?: string;
+    message: string;
+    error?: string;
+  }> {
+    const resolved = await this.resolveDescendantTask(input?.task_id);
+    if (!resolved.ok) {
+      return { success: false, task_id: resolved.taskId, message: resolved.message, error: resolved.error };
+    }
+
+    const message = typeof input?.message === 'string' ? input.message.trim() : '';
+    if (!message) {
+      return { success: false, task_id: resolved.taskId, message: 'message is required', error: 'MESSAGE_REQUIRED' };
+    }
+
+    await this.daemon.sendMessage(resolved.taskId, message);
+    return { success: true, task_id: resolved.taskId, message: 'Message sent' };
+  }
+
+  private async captureAgentEvents(input: { task_id: unknown; limit?: unknown; types?: unknown }): Promise<{
+    success: boolean;
+    task_id?: string;
+    events?: Array<{ timestamp: number; type: string; summary: string }>;
+    message: string;
+    error?: string;
+  }> {
+    const resolved = await this.resolveDescendantTask(input?.task_id);
+    if (!resolved.ok) {
+      return { success: false, task_id: resolved.taskId, message: resolved.message, error: resolved.error };
+    }
+
+    const limit = typeof input?.limit === 'number' && Number.isFinite(input.limit)
+      ? Math.min(Math.max(input.limit, 1), 100)
+      : 30;
+
+    const requestedTypes = Array.isArray(input?.types)
+      ? input.types.filter((t): t is string => typeof t === 'string').map((t) => t.trim()).filter(Boolean)
+      : undefined;
+
+    // Exclude tool_result by default — it echoes full tool output and can
+    // be very large. Callers can explicitly request it via the types param.
+    const defaultTypes: string[] = [
+      'assistant_message',
+      'tool_call',
+      'tool_error',
+      'error',
+      'log',
+      'file_created',
+      'file_modified',
+      'file_deleted',
+      'sub_agent_result',
+    ];
+
+    const types = (requestedTypes && requestedTypes.length > 0) ? requestedTypes : defaultTypes;
+    const events = this.daemon.getTaskEvents(resolved.taskId, { limit, types });
+    const summarized = events.map((event) => this.summarizeAgentEvent(event));
+
+    return {
+      success: true,
+      task_id: resolved.taskId,
+      events: summarized,
+      message: `Captured ${summarized.length} event(s)`,
+    };
+  }
+
+  private async cancelAgent(input: { task_id: unknown }): Promise<{
+    success: boolean;
+    task_id?: string;
+    message: string;
+    error?: string;
+  }> {
+    const resolved = await this.resolveDescendantTask(input?.task_id);
+    if (!resolved.ok) {
+      return { success: false, task_id: resolved.taskId, message: resolved.message, error: resolved.error };
+    }
+
+    if (['completed', 'failed', 'cancelled'].includes(resolved.task.status)) {
+      return { success: false, task_id: resolved.taskId, message: `Task is already ${resolved.task.status}`, error: 'TASK_ALREADY_FINISHED' };
+    }
+
+    await this.daemon.cancelTask(resolved.taskId);
+    // Ensure DB status reflects the cancellation even when called outside renderer IPC.
+    this.daemon.updateTask(resolved.taskId, { status: 'cancelled', completedAt: Date.now() });
+
+    return { success: true, task_id: resolved.taskId, message: 'Task cancelled' };
+  }
+
+  private async pauseAgent(input: { task_id: unknown }): Promise<{
+    success: boolean;
+    task_id?: string;
+    message: string;
+    error?: string;
+  }> {
+    const resolved = await this.resolveDescendantTask(input?.task_id);
+    if (!resolved.ok) {
+      return { success: false, task_id: resolved.taskId, message: resolved.message, error: resolved.error };
+    }
+
+    if (!['planning', 'executing'].includes(resolved.task.status)) {
+      return { success: false, task_id: resolved.taskId, message: `Cannot pause task in status "${resolved.task.status}"`, error: 'TASK_NOT_RUNNING' };
+    }
+
+    await this.daemon.pauseTask(resolved.taskId);
+    this.daemon.updateTaskStatus(resolved.taskId, 'paused');
+    this.daemon.logEvent(resolved.taskId, 'task_paused', { message: 'Task paused by parent agent', parentTaskId: this.taskId });
+
+    return { success: true, task_id: resolved.taskId, message: 'Task paused' };
+  }
+
+  private async resumeAgent(input: { task_id: unknown }): Promise<{
+    success: boolean;
+    task_id?: string;
+    message: string;
+    error?: string;
+  }> {
+    const resolved = await this.resolveDescendantTask(input?.task_id);
+    if (!resolved.ok) {
+      return { success: false, task_id: resolved.taskId, message: resolved.message, error: resolved.error };
+    }
+
+    if (resolved.task.status !== 'paused') {
+      return { success: false, task_id: resolved.taskId, message: `Cannot resume task in status "${resolved.task.status}"`, error: 'TASK_NOT_PAUSED' };
+    }
+
+    const resumed = await this.daemon.resumeTask(resolved.taskId);
+    if (!resumed) {
+      return { success: false, task_id: resolved.taskId, message: 'Task has no active executor — it may need to be re-queued', error: 'NO_EXECUTOR' };
+    }
+
+    const refreshed = await this.daemon.getTaskById(resolved.taskId);
+    if (refreshed && refreshed.status !== 'executing') {
+      this.daemon.updateTaskStatus(resolved.taskId, 'executing');
+      this.daemon.logEvent(resolved.taskId, 'task_resumed', { message: 'Task resumed by parent agent', parentTaskId: this.taskId });
+    }
+
+    return { success: true, task_id: resolved.taskId, message: 'Task resumed' };
   }
 
   /**
@@ -3987,6 +4299,96 @@ ${skillDescriptions}`;
               description: 'Filter agents by status. Default: "all"',
             },
           },
+        },
+      },
+      {
+        name: 'send_agent_message',
+        description:
+          'Send a follow-up message to a descendant child agent task. Use this to clarify instructions, provide missing ' +
+          'context, or steer a running sub-agent. This tool only works for tasks spawned by the current task (descendants).',
+        input_schema: {
+          type: 'object',
+          properties: {
+            task_id: {
+              type: 'string',
+              description: 'The descendant child task ID',
+            },
+            message: {
+              type: 'string',
+              description: 'The message to send to the child task',
+            },
+          },
+          required: ['task_id', 'message'],
+        },
+      },
+      {
+        name: 'capture_agent_events',
+        description:
+          'Capture recent events/output from a descendant child agent task. Returns a compact, summarized event list. ' +
+          'This tool only works for tasks spawned by the current task (descendants).',
+        input_schema: {
+          type: 'object',
+          properties: {
+            task_id: {
+              type: 'string',
+              description: 'The descendant child task ID',
+            },
+            limit: {
+              type: 'number',
+              description: 'Maximum number of recent events to return (default: 30, max: 100)',
+            },
+            types: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Optional list of event types to include (defaults to a safe, high-signal subset)',
+            },
+          },
+          required: ['task_id'],
+        },
+      },
+      {
+        name: 'cancel_agent',
+        description:
+          'Cancel a descendant child agent task. This tool only works for tasks spawned by the current task (descendants).',
+        input_schema: {
+          type: 'object',
+          properties: {
+            task_id: {
+              type: 'string',
+              description: 'The descendant child task ID',
+            },
+          },
+          required: ['task_id'],
+        },
+      },
+      {
+        name: 'pause_agent',
+        description:
+          'Pause a running descendant child agent task. This tool only works for tasks spawned by the current task (descendants).',
+        input_schema: {
+          type: 'object',
+          properties: {
+            task_id: {
+              type: 'string',
+              description: 'The descendant child task ID',
+            },
+          },
+          required: ['task_id'],
+        },
+      },
+      {
+        name: 'resume_agent',
+        description:
+          'Resume a paused descendant child agent task. This tool only works for tasks spawned by the current task (descendants).',
+        input_schema: {
+          type: 'object',
+          properties: {
+            task_id: {
+              type: 'string',
+              description: 'The descendant child task ID',
+            },
+          },
+          required: ['task_id'],
         },
       },
     ];

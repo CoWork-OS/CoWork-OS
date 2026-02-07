@@ -259,15 +259,23 @@ export class GlobTools {
 
     // Convert each pattern to regex
     const regexParts = expandedPatterns.map((p) => {
+      // Use a placeholder so "*" replacement doesn't accidentally rewrite the globstar expansion.
+      const GLOBSTAR = '__COWORK_GLOBSTAR__';
+      const GLOBSTAR_SLASH = '__COWORK_GLOBSTAR_SLASH__';
       let regex = p
         // Escape special regex characters (except glob chars * and ?)
         .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+        // **/ matches zero or more path segments (including none)
+        .replace(/\*\*\//g, GLOBSTAR_SLASH)
         // ** matches any path (including /) - must be before single * replacement
-        .replace(/\*\*/g, '.*')
+        .replace(/\*\*/g, GLOBSTAR)
         // * matches anything except /
         .replace(/\*/g, '[^/]*')
         // ? matches single character except /
-        .replace(/\?/g, '[^/]');
+        .replace(/\?/g, '[^/]')
+        // Expand globstar placeholder after single-star replacement
+        .replace(new RegExp(GLOBSTAR_SLASH, 'g'), '(?:.*/)?')
+        .replace(new RegExp(GLOBSTAR, 'g'), '.*');
 
       return regex;
     });

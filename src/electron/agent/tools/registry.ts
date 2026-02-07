@@ -27,6 +27,7 @@ import { GoogleCalendarTools } from './google-calendar-tools';
 import { DropboxTools } from './dropbox-tools';
 import { SharePointTools } from './sharepoint-tools';
 import { VoiceCallTools } from './voice-call-tools';
+import { readFilesByPatterns } from './read-files';
 import { LLMTool } from '../llm/types';
 import { SearchProviderFactory } from '../search';
 import { MCPClientManager } from '../../mcp/client/MCPClientManager';
@@ -538,6 +539,7 @@ export class ToolRegistry {
     let descriptions = `
 File Operations:
 - read_file: Read contents of a file (supports plain text, DOCX, and PDF)
+- read_files: Read multiple files matched by glob patterns (supports exclusion patterns with leading "!")
 - write_file: Write content to a file (creates or overwrites). Use edit_file for targeted changes instead.
 - edit_file: Surgical text replacement (preferred over write_file for modifications)
 - copy_file: Copy a file (supports binary files like DOCX, PDF, images)
@@ -686,6 +688,7 @@ ${skillDescriptions}`;
   async executeTool(name: string, input: any): Promise<any> {
     // File tools
     if (name === 'read_file') return await this.fileTools.readFile(input.path);
+    if (name === 'read_files') return await readFilesByPatterns(input, { globTools: this.globTools, fileTools: this.fileTools });
     if (name === 'write_file') return await this.fileTools.writeFile(input.path, input.content);
     if (name === 'copy_file') return await this.fileTools.copyFile(input.sourcePath, input.destPath);
     if (name === 'list_directory') return await this.fileTools.listDirectory(input.path);
@@ -1533,6 +1536,40 @@ ${skillDescriptions}`;
             },
           },
           required: ['path'],
+        },
+      },
+      {
+        name: 'read_files',
+        description:
+          'Read multiple files in one call using glob patterns. Useful for quickly attaching context without many read_file calls. ' +
+          'Supports exclusion patterns by prefixing with "!". Example: ["src/**/*.ts", "!src/**/__tests__/**"].',
+        input_schema: {
+          type: 'object',
+          properties: {
+            patterns: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Glob patterns to include/exclude. Prefix a pattern with "!" to exclude.',
+            },
+            path: {
+              type: 'string',
+              description:
+                'Base directory for globs (relative to workspace unless absolute path is allowed). Defaults to workspace root.',
+            },
+            maxFiles: {
+              type: 'number',
+              description: 'Maximum number of files to include (default: 12, max: 100)',
+            },
+            maxResults: {
+              type: 'number',
+              description: 'Maximum glob matches per pattern (default: 500, max: 5000)',
+            },
+            maxTotalChars: {
+              type: 'number',
+              description: 'Maximum total characters across returned file contents (default: 30000, max: 200000)',
+            },
+          },
+          required: ['patterns'],
         },
       },
       {

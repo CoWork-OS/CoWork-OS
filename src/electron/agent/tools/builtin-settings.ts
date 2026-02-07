@@ -162,6 +162,7 @@ const TOOL_CATEGORIES: Record<string, keyof BuiltinToolsSettings['categories']> 
   run_applescript: 'system',
   // File tools
   read_file: 'file',
+  read_files: 'file',
   write_file: 'file',
   copy_file: 'file',
   list_directory: 'file',

@@ -347,7 +347,6 @@ export class GeminiProvider implements LLMProvider {
         /native-audio/i,     // Native audio models
         /live/i,             // Live/streaming models (not for text generation)
         /nano/i,             // Nano models (on-device/specialized)
-        /banana/i,           // Image generation models (nano banana)
         /veo/i,              // Video generation models
         /diffusion/i,        // Diffusion models (image generation)
       ];

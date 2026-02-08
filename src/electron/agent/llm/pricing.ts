@@ -71,8 +71,8 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
   // Google Gemini image generation models
   // Note: Image generation is priced per image, not per token
   // These are approximate costs (actual pricing may vary)
-  'gemini-2.5-flash-image': { inputPer1M: 0.00, outputPer1M: 0.00 },      // Nano Banana
-  'gemini-3-pro-image-preview': { inputPer1M: 0.00, outputPer1M: 0.00 },  // Nano Banana Pro
+  'gemini-2.5-flash-image': { inputPer1M: 0.00, outputPer1M: 0.00 },
+  'gemini-3-pro-image-preview': { inputPer1M: 0.00, outputPer1M: 0.00 },
 };
 
 /**
@@ -80,10 +80,8 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
  * Separate from token-based pricing for LLMs
  */
 export const IMAGE_GENERATION_PRICING: Record<string, number> = {
-  'gemini-2.5-flash-image': 0.02,         // Nano Banana - ~$0.02 per image
-  'gemini-3-pro-image-preview': 0.04,     // Nano Banana Pro - ~$0.04 per image
-  'nano-banana': 0.02,                    // Alias
-  'nano-banana-pro': 0.04,                // Alias
+  'gemini-2.5-flash-image': 0.02,
+  'gemini-3-pro-image-preview': 0.04,
 };
 
 /**
@@ -157,14 +155,14 @@ export function formatCost(cost: number): string {
 
 /**
  * Calculate the cost of image generation
- * @param modelId The image model identifier (e.g., 'nano-banana', 'imagen-3.0-fast-generate-001')
+ * @param modelId The image model identifier (e.g., 'gemini-3-pro-image-preview', 'imagen-3.0-fast-generate-001')
  * @param numberOfImages Number of images generated
  * @returns Cost in USD
  */
 export function calculateImageCost(modelId: string, numberOfImages: number): number {
   const pricePerImage = IMAGE_GENERATION_PRICING[modelId] || IMAGE_GENERATION_PRICING[modelId.toLowerCase()];
   if (!pricePerImage) {
-    // Default to Nano Banana pricing if unknown model
+    // Default to common Gemini image pricing if unknown model
     return 0.03 * numberOfImages;
   }
   return pricePerImage * numberOfImages;

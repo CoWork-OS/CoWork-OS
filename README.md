@@ -267,6 +267,8 @@ All channels support:
 - Brute-force protection
 - Session management
 - Rate limiting
+- Inbound attachment persistence (files saved to `.cowork/inbox/attachments/`)
+- Chat commands: `/schedule`, `/digest`, `/followups`, `/brief` (see channel docs below)
 
 ### Visual Theme System
 
@@ -296,6 +298,8 @@ Configure in **Settings** > **Appearance**.
 - **Workspace Memory Kit**: `.cowork/` directory indexing with markdown search and context injection
 - **Agent Teams**: Multi-agent collaboration with shared checklists, coordinated runs, and team management UI
 - **Voice Calls**: Outbound phone calls via ElevenLabs Agents (list agents, list numbers, initiate calls)
+- **Vision**: Analyze workspace images (screenshots, photos, diagrams) via `analyze_image` tool (OpenAI, Anthropic, or Gemini)
+- **Email IMAP Access**: Direct IMAP mailbox access via `email_imap_unread` — check unread emails without needing Google Workspace
 - **Workspace Recency**: Workspaces ordered by last used time for quick access
 
 ### Voice Mode
@@ -662,6 +666,9 @@ Schedule recurring tasks with cron expressions and optional channel delivery.
 - **Cron Expressions**: Standard cron syntax (minute, hour, day, month, weekday)
 - **Workspace Binding**: Each job runs in a specific workspace
 - **Channel Delivery**: Send results to Telegram, Discord, Slack, Teams, Google Chat, WhatsApp, iMessage, Signal, Mattermost, Matrix, Twitch, LINE, BlueBubbles, or Email
+- **Conditional Delivery**: Only post results when non-empty (`deliverOnlyIfResult`) — useful for monitors that should stay silent on no-ops
+- **Template Variables**: Use `{{today}}`, `{{tomorrow}}`, `{{week_end}}`, `{{now}}` in job prompts for dynamic date context
+- **Chat Context Variables**: Jobs with channel delivery can use `{{chat_messages}}`, `{{chat_since}}`, `{{chat_until}}`, `{{chat_message_count}}`, `{{chat_truncated}}` to inject recent chat history into prompts
 - **Run History**: View execution history with status and duration
 - **Enable/Disable**: Toggle jobs without deleting them
 
@@ -712,6 +719,10 @@ Run tasks via WhatsApp using the Baileys library for Web WhatsApp connections.
 | `/status` | Check bot status |
 | `/cancel` | Cancel running task |
 | `/pair <code>` | Pair with code |
+| `/schedule <prompt>` | Schedule a recurring task |
+| `/digest [lookback]` | Digest of recent chat messages |
+| `/followups [lookback]` | Extract follow-ups/commitments |
+| `/brief [today\|week]` | Generate a brief summary (DM only) |
 
 ---
 
@@ -735,6 +746,10 @@ Run tasks remotely via Telegram bot.
 | `/addworkspace <path>` | Add new workspace |
 | `/status` | Show session status |
 | `/cancel` | Cancel running task |
+| `/schedule <prompt>` | Schedule a recurring task |
+| `/digest [lookback]` | Digest of recent chat messages |
+| `/followups [lookback]` | Extract follow-ups/commitments |
+| `/brief [today\|week]` | Generate a brief summary (DM only) |
 
 ---
 
@@ -759,6 +774,10 @@ Run tasks via Discord slash commands or direct messages.
 | `/task <prompt>` | Run task directly |
 | `/status` | Show session status |
 | `/cancel` | Cancel running task |
+| `/schedule <prompt>` | Schedule a recurring task |
+| `/digest [lookback]` | Digest of recent chat messages |
+| `/followups [lookback]` | Extract follow-ups/commitments |
+| `/brief [today\|week]` | Generate a brief summary (DM only) |
 
 ---
 
@@ -839,6 +858,10 @@ Run tasks via Microsoft Teams using the Bot Framework SDK for full bi-directiona
 | `/status` | Check bot status |
 | `/cancel` | Cancel running task |
 | `/pair <code>` | Pair with code |
+| `/schedule <prompt>` | Schedule a recurring task |
+| `/digest [lookback]` | Digest of recent chat messages |
+| `/followups [lookback]` | Extract follow-ups/commitments |
+| `/brief [today\|week]` | Generate a brief summary (DM only) |
 
 ### Message Features
 
@@ -918,6 +941,10 @@ Run tasks via Google Chat using the Google Chat API with service account authent
 | `/status` | Check bot status |
 | `/cancel` | Cancel running task |
 | `/pair <code>` | Pair with code |
+| `/schedule <prompt>` | Schedule a recurring task |
+| `/digest [lookback]` | Digest of recent chat messages |
+| `/followups [lookback]` | Extract follow-ups/commitments |
+| `/brief [today\|week]` | Generate a brief summary (DM only) |
 
 ### Message Features
 
@@ -1024,6 +1051,10 @@ Run tasks via Signal with end-to-end encryption using `signal-cli`.
 | `/status` | Check bot status |
 | `/cancel` | Cancel running task |
 | `/pair <code>` | Pair with code |
+| `/schedule <prompt>` | Schedule a recurring task |
+| `/digest [lookback]` | Digest of recent chat messages |
+| `/followups [lookback]` | Extract follow-ups/commitments |
+| `/brief [today\|week]` | Generate a brief summary (DM only) |
 
 ### Important Notes
 
@@ -1073,6 +1104,10 @@ Run tasks via Mattermost using the REST API and WebSocket for real-time messagin
 | `/status` | Check bot status |
 | `/cancel` | Cancel running task |
 | `/pair <code>` | Pair with code |
+| `/schedule <prompt>` | Schedule a recurring task |
+| `/digest [lookback]` | Digest of recent chat messages |
+| `/followups [lookback]` | Extract follow-ups/commitments |
+| `/brief [today\|week]` | Generate a brief summary (DM only) |
 
 ---
 
@@ -1119,6 +1154,10 @@ Run tasks via Matrix protocol with support for federated messaging and rooms.
 | `/status` | Check bot status |
 | `/cancel` | Cancel running task |
 | `/pair <code>` | Pair with code |
+| `/schedule <prompt>` | Schedule a recurring task |
+| `/digest [lookback]` | Digest of recent chat messages |
+| `/followups [lookback]` | Extract follow-ups/commitments |
+| `/brief [today\|week]` | Generate a brief summary (DM only) |
 
 ### Important Notes
 
@@ -1172,6 +1211,10 @@ Run tasks via Twitch chat using IRC over WebSocket.
 | `/status` | Check bot status |
 | `/cancel` | Cancel running task |
 | `/pair <code>` | Pair with code |
+| `/schedule <prompt>` | Schedule a recurring task |
+| `/digest [lookback]` | Digest of recent chat messages |
+| `/followups [lookback]` | Extract follow-ups/commitments |
+| `/brief [today\|week]` | Generate a brief summary (DM only) |
 
 ### Limitations
 
@@ -1231,6 +1274,10 @@ Run tasks via LINE Messaging API with webhooks and push/reply messages.
 | `/status` | Check bot status |
 | `/cancel` | Cancel running task |
 | `/pair <code>` | Pair with code |
+| `/schedule <prompt>` | Schedule a recurring task |
+| `/digest [lookback]` | Digest of recent chat messages |
+| `/followups [lookback]` | Extract follow-ups/commitments |
+| `/brief [today\|week]` | Generate a brief summary (DM only) |
 
 ### Message Types
 
@@ -1287,6 +1334,10 @@ Run tasks via iMessage using BlueBubbles server running on a Mac.
 | `/status` | Check bot status |
 | `/cancel` | Cancel running task |
 | `/pair <code>` | Pair with code |
+| `/schedule <prompt>` | Schedule a recurring task |
+| `/digest [lookback]` | Digest of recent chat messages |
+| `/followups [lookback]` | Extract follow-ups/commitments |
+| `/brief [today\|week]` | Generate a brief summary (DM only) |
 
 ### Features
 
@@ -1347,6 +1398,10 @@ Run tasks via email using IMAP/SMTP. Universal channel that works with any email
 | `/status` | Check bot status |
 | `/cancel` | Cancel running task |
 | `/pair <code>` | Pair with code |
+| `/schedule <prompt>` | Schedule a recurring task |
+| `/digest [lookback]` | Digest of recent chat messages |
+| `/followups [lookback]` | Extract follow-ups/commitments |
+| `/brief [today\|week]` | Generate a brief summary (DM only) |
 
 ### Filtering Options
 
@@ -2000,6 +2055,11 @@ Users must comply with their model provider's terms:
 - [x] Gateway pending selection state for workspace/provider commands (improved WhatsApp/iMessage UX)
 - [x] Task result summary persistence from executor to daemon
 - [x] Memory retention isolation for sub-agents and public contexts
+- [x] Vision tool (`analyze_image`) for workspace image analysis via OpenAI, Anthropic, or Gemini
+- [x] Email IMAP tool (`email_imap_unread`) for direct mailbox access without Google Workspace
+- [x] Chat commands: `/schedule`, `/digest`, `/followups`, `/brief` across all gateway channels
+- [x] Inbound attachment persistence (channel messages save files to `.cowork/inbox/attachments/`)
+- [x] Cron template variables (`{{today}}`, `{{chat_messages}}`, etc.) and conditional delivery
 
 ### Planned
 

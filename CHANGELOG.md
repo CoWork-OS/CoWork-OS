@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Vision Tool** - Analyze workspace images (screenshots, photos, diagrams) via `analyze_image`
+  - Supports OpenAI, Anthropic, and Google Gemini vision providers
+  - Workspace-safe file resolution with MIME type detection
+  - Handles images up to 20 MB
+- **Email IMAP Tool** - Direct IMAP mailbox access via `email_imap_unread`
+  - Check unread emails without requiring Google Workspace integration
+  - Uses existing Email channel IMAP/SMTP configuration
+- **Chat Commands** - New slash commands available across all gateway channels
+  - `/schedule <prompt>` - Schedule recurring agent tasks with results delivered back to the chat
+  - `/digest [lookback]` - Generate on-demand digest of recent chat messages
+  - `/followups [lookback]` - Extract follow-ups and commitments from recent chat messages
+  - `/brief [today|tomorrow|week]` - Generate brief summaries (DM only)
+  - `/brief schedule|list|unschedule` - Manage recurring brief schedules
+- **Inbound Attachment Persistence** - Channel messages with attachments are saved to workspace
+  - Files persisted under `.cowork/inbox/attachments/<date>/<channel>/<chat>/<message>/`
+  - Attachment extraction added to Discord, Slack, Teams, Telegram, Google Chat, and iMessage adapters
+  - Saved paths appended to task prompts so agents can inspect files (and images via `analyze_image`)
+- **Cron Template Variables** - Dynamic variables in scheduled task prompts
+  - Date variables: `{{today}}`, `{{tomorrow}}`, `{{week_end}}`, `{{now}}`
+  - Chat context variables: `{{chat_messages}}`, `{{chat_since}}`, `{{chat_until}}`, `{{chat_message_count}}`, `{{chat_truncated}}`
+  - Conditional delivery: `deliverOnlyIfResult` skips posting when the task produces no output
+- **Chat Transcript Formatter** - New `formatChatTranscriptForPrompt()` utility for injecting chat history into agent prompts
+- **Tool Restrictions Tests** - New test suite for agent tool restriction enforcement
+
+### Changed
+- **Task Export** - Moved from `telemetry/` to `reports/` to better reflect purpose (structured task summaries, not telemetry)
+- **Skill Metadata** - Added `requires.bins` and `invocation.disableModelInvocation` to gog and himalaya skills
+- **Local Websearch Skill** - Updated branding (moltbot → cowork) and paths to `Application Support/cowork-os`
+- **Agent Executor** - Improved email fallback logic: prefers `email_imap_unread` when Google Workspace tools are unavailable
+- **Agent Executor** - Fixed missing `tool_result` entries on pause/cancel to keep API message history valid
+- **Channel Tools** - Added channel status and warning metadata to `channel_list_chats` and `channel_history` results
+- **Cron Delivery** - When a task has a non-empty result, delivery messages now include the result text directly instead of a generic status line
+- **Email Client TLS** - Load macOS system keychain CAs for IMAP/SMTP connections (fixes corporate proxy/antivirus TLS inspection)
+- **Email Client IMAP** - Improved response buffering and greeting handling reliability
+
+### Fixed
+- **Gateway Message Logging** - Outgoing message persistence is now best-effort (never fails delivery)
+- **Security Docs** - Corrected `userData` paths, documented platform-specific locations
+- **Architecture Docs** - Added vision tool, chat commands, attachment handling, and cron template variable documentation
+
 ## [0.3.25] - 2025-02-05
 
 ### Added

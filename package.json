@@ -56,13 +56,13 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.72.1",
+    "@anthropic-ai/sdk": "^0.74.0",
     "@aws-sdk/client-bedrock": "^3.980.0",
     "@aws-sdk/client-bedrock-runtime": "^3.980.0",
     "@google/generative-ai": "^0.24.1",
     "@grammyjs/runner": "^2.0.3",
     "@grammyjs/transformer-throttler": "^1.2.1",
-    "@mariozechner/pi-ai": "^0.51.0",
+    "@mariozechner/pi-ai": "^0.52.9",
     "@slack/bolt": "^4.6.0",
     "@types/jszip": "^3.4.1",
     "@whiskeysockets/baileys": "^6.7.16",

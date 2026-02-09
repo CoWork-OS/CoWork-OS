@@ -169,7 +169,9 @@ function buildKitSections(workspacePath: string, taskPrompt: string, now: Date):
     {
       relPath: path.join(KIT_DIRNAME, 'SOUL.md'),
       title: 'Assistant Style',
-      extractor: (raw) => sanitizeForInjection(extractFilledFieldLines(raw)),
+      // SOUL.md is intentionally free-form; inject the (sanitized) document rather than
+      // only extracting filled "- Key: value" template lines.
+      extractor: (raw) => sanitizeForInjection(clampSection(raw, MAX_SECTION_CHARS)),
     },
     {
       relPath: path.join(KIT_DIRNAME, 'IDENTITY.md'),

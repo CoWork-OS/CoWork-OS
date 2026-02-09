@@ -86,6 +86,17 @@ describe('WorkspaceKitContext', () => {
     expect(out).not.toContain('#### Lessons Learned');
   });
 
+  it('includes SOUL.md as free-form content (not just filled template fields)', () => {
+    writeFile(
+      path.join(tmpDir, '.cowork', 'SOUL.md'),
+      ['# SOUL', '', '## Rules', '- Be blunt', ''].join('\n')
+    );
+    const out = buildWorkspaceKitContext(tmpDir, 'any');
+    expect(out).toContain('Assistant Style (.cowork/SOUL.md)');
+    expect(out).toContain('## Rules');
+    expect(out).toContain('Be blunt');
+  });
+
   it('sanitizes injection-like markers', () => {
     writeFile(
       path.join(tmpDir, '.cowork', 'AGENTS.md'),

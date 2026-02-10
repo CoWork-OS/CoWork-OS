@@ -62,8 +62,8 @@ export type JsonExtractOptions = {
 function extractFencedBlocks(text: string): string[] {
   const blocks: string[] = [];
   const patterns = [
-    /```json\\s*([\\s\\S]*?)\\s*```/gi,
-    /```\\s*([\\s\\S]*?)\\s*```/g,
+    /```json\s*([\s\S]*?)\s*```/gi,
+    /```\s*([\s\S]*?)\s*```/g,
   ];
 
   for (const re of patterns) {
@@ -115,7 +115,7 @@ function scanBalancedJsonCandidates(text: string, maxCandidateChars: number): st
         escaped = false;
         continue;
       }
-      if (ch === '\\\\') {
+      if (ch === '\\') {
         escaped = true;
         continue;
       }
@@ -166,15 +166,15 @@ function scanBalancedJsonCandidates(text: string, maxCandidateChars: number): st
 function repairJsonString(text: string): string {
   let s = text.trim();
 
-  s = s.replace(/\\bNone\\b/g, 'null');
-  s = s.replace(/\\bTrue\\b/g, 'true');
-  s = s.replace(/\\bFalse\\b/g, 'false');
+  s = s.replace(/\bNone\b/g, 'null');
+  s = s.replace(/\bTrue\b/g, 'true');
+  s = s.replace(/\bFalse\b/g, 'false');
 
-  s = s.replace(/,(\\s*[}\\]])/g, '$1');
-  s = s.replace(/([{,]\\s*)([A-Za-z_][A-Za-z0-9_-]*)(\\s*:)/g, '$1\"$2\"$3');
-  s = s.replace(/:\\s*'([^'\\\\]*(?:\\\\.[^'\\\\]*)*)'\\s*([,}])/g, (_m, inner, tail) => {
-    const escaped = String(inner).replace(/\\\"/g, '\"').replace(/\"/g, '\\\\\"');
-    return `: \"${escaped}\"${tail}`;
+  s = s.replace(/,(\s*[}\]])/g, '$1');
+  s = s.replace(/([{,]\s*)([A-Za-z_][A-Za-z0-9_-]*)(\s*:)/g, '$1"$2"$3');
+  s = s.replace(/:\s*'([^'\\]*(?:\\.[^'\\]*)*)'\s*([,}])/g, (_m, inner, tail) => {
+    const escaped = String(inner).replace(/\\"/g, '"').replace(/"/g, '\\"');
+    return `: "${escaped}"${tail}`;
   });
 
   return s;
@@ -231,4 +231,3 @@ export function extractJsonValues(text: string, options?: JsonExtractOptions): u
 
   return values.slice(0, maxResults);
 }
-

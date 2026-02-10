@@ -200,6 +200,11 @@ function buildKitSections(workspacePath: string, taskPrompt: string, now: Date):
       extractor: (raw) => sanitizeForInjection(clampSection(raw, MAX_SECTION_CHARS)),
     },
     {
+      relPath: path.join(KIT_DIRNAME, 'MISTAKES.md'),
+      title: 'Mistakes / Preferences',
+      extractor: (raw) => sanitizeForInjection(clampSection(raw, MAX_SECTION_CHARS)),
+    },
+    {
       relPath: path.join(KIT_DIRNAME, 'memory', `${stamp}.md`),
       title: `Daily Log (${stamp})`,
       extractor: (raw) =>

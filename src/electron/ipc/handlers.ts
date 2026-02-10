@@ -3979,6 +3979,19 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository): void {
           `- \n`,
       },
       {
+        relPath: path.join(kitDirName, 'MISTAKES.md'),
+        content:
+          `# Mistakes / Preferences\n\n` +
+          `This file is workspace-local and can be auto-updated by the system.\n` +
+          `Use it to capture rejection reasons and durable preference patterns.\n\n` +
+          `## Patterns\n` +
+          `<!-- cowork:auto:mistakes:start -->\n` +
+          `- (none)\n` +
+          `<!-- cowork:auto:mistakes:end -->\n\n` +
+          `## Notes\n` +
+          `- \n`,
+      },
+      {
         relPath: path.join(kitDirName, 'projects', 'README.md'),
         content:
           `# Project Contexts\n\n` +
@@ -4052,6 +4065,7 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository): void {
     await ensureDir(workspacePath, path.join(kitDirName, 'transforms'));
     await ensureDir(workspacePath, path.join(kitDirName, 'router'));
     await ensureDir(workspacePath, path.join(kitDirName, 'policy'));
+    await ensureDir(workspacePath, path.join(kitDirName, 'feedback'));
 
     const now = new Date();
     const templates = templatesForInit(now);

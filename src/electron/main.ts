@@ -15,6 +15,7 @@ import { MentionRepository } from './agents/MentionRepository';
 import { ActivityRepository } from './activity/ActivityRepository';
 import { WorkingStateRepository } from './agents/WorkingStateRepository';
 import { CrossSignalService } from './agents/CrossSignalService';
+import { FeedbackService } from './agents/FeedbackService';
 import { AgentDaemon } from './agent/daemon';
 import {
   ChannelMessageRepository,
@@ -49,6 +50,7 @@ let agentDaemon: AgentDaemon;
 let channelGateway: ChannelGateway;
 let cronService: CronService | null = null;
 let crossSignalService: CrossSignalService | null = null;
+let feedbackService: FeedbackService | null = null;
 
 // Suppress GPU-related Chromium errors that occur with transparent windows and vibrancy
 // These are cosmetic errors that don't affect functionality
@@ -185,6 +187,15 @@ app.whenReady().then(async () => {
     console.log('[Main] CrossSignalService initialized');
   } catch (error) {
     console.error('[Main] Failed to initialize CrossSignalService:', error);
+  }
+
+  // Initialize feedback logger (best-effort; persists approve/reject/edit/next into workspace kit files)
+  try {
+    feedbackService = new FeedbackService(dbManager.getDatabase());
+    await feedbackService.start(agentDaemon);
+    console.log('[Main] FeedbackService initialized');
+  } catch (error) {
+    console.error('[Main] Failed to initialize FeedbackService:', error);
   }
 
   // Initialize Memory Service for cross-session context

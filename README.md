@@ -80,7 +80,7 @@ npm run dev
 
 If `npm run setup` fails with `Killed: 9`, macOS terminated the native build due to memory pressure.
 
-This repo’s `setup:native` script automatically uses reduced parallelism on macOS and retries automatically if the OS kills the process. If it still fails, close other apps and run `npm run setup` again.
+This repo’s `setup:native` script automatically uses reduced parallelism on macOS and retries with exponential backoff if the OS kills the process. Let it finish retrying; if it still fails, close other apps and run `npm run setup` again.
 
 #### Build for Production
 

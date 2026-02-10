@@ -1,6 +1,6 @@
 {
   "name": "cowork-os",
-  "version": "0.3.55",
+  "version": "0.3.56",
   "description": "CoWork OS - The operating system for personal AI assistants",
   "overrides": {
     "undici": "^7.0.0"
@@ -40,8 +40,8 @@
   ],
   "private": false,
   "scripts": {
-    "setup": "npm install --no-audit --no-fund && (node scripts/setup_native_driver.mjs || node scripts/setup_native_driver.mjs || node scripts/setup_native_driver.mjs)",
-    "setup:native": "node scripts/setup_native_driver.mjs || node scripts/setup_native_driver.mjs || node scripts/setup_native_driver.mjs",
+    "setup": "npm install --no-audit --no-fund && npm run setup:native",
+    "setup:native": "sh scripts/setup_native_retry.sh",
     "setup:server": "npm install && npm rebuild --ignore-scripts=false better-sqlite3",
     "postinstall": "electron-rebuild -f -w better-sqlite3",
     "dev": "concurrently \"npm run dev:react\" \"npm run dev:electron\"",

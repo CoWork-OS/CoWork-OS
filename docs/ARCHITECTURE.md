@@ -51,11 +51,18 @@ CoWork OS exposes "tools" to the agent. Tools include:
 - Vision: analyze workspace images (screenshots/photos) via `analyze_image`
 - Image generation: `generate_image` with multi-provider support (Gemini, OpenAI, Azure OpenAI) and automatic provider selection
 - Visual annotation: `visual_open_annotator` / `visual_update_annotator` for iterative image refinement via Live Canvas
+- Apple Calendar: create, update, delete calendar events via `apple_calendar_action` (macOS AppleScript)
+- Apple Reminders: create, complete, update, list reminders via `apple_reminders_action` (macOS AppleScript)
 - Integrations: Google Drive/Gmail/Calendar, Dropbox, Box, OneDrive, SharePoint, Notion
 - MCP tools from external MCP servers
 
+Headless mode:
+- When running in headless/daemon mode, `SystemTools.getToolDefinitions({ headless: true })` returns a reduced subset (system_info, get_env, get_app_paths, search_memories) — clipboard, screenshot, open_application, open_url, and other desktop-only tools are excluded.
+
 Key code:
 - Tool registry and execution: `src/electron/agent/tools/registry.ts`
+- Apple Calendar tools: `src/electron/agent/tools/apple-calendar-tools.ts`
+- Apple Reminders tools: `src/electron/agent/tools/apple-reminders-tools.ts`
 - Image generation: `src/electron/agent/skills/image-generator.ts`
 - Visual annotation tools: `src/electron/agent/tools/visual-tools.ts`
 - Sandbox runner: `src/electron/agent/sandbox/runner.ts`
@@ -67,7 +74,7 @@ Notes on "skills":
 - Skill sources and precedence (highest wins):
   - Workspace skills: `<workspace>/skills/`
   - Managed skills: Electron `userData/skills/` (on macOS typically `~/Library/Application Support/cowork-os/skills/`)
-  - Bundled skills: `resources/skills/`
+  - Bundled skills: `resources/skills/` (includes use-case templates: booking options, draft reply, family digest, household capture, newsletter digest, transaction scan)
 
 ### 3. Messaging Gateway (Channels)
 
@@ -104,6 +111,10 @@ Channel commands (chat):
 Attachment handling:
 - If an inbound channel message includes `attachments`, the gateway persists them under `<workspace>/.cowork/inbox/attachments/...`
 - The persisted workspace paths are appended into the task prompt so agents can inspect them with normal file tools (and `analyze_image` for images)
+
+Channel operational modes:
+- **Ambient mode**: When `ambientMode` is enabled on a channel config, all non-slash-command messages are ingested (persisted to the local message store) but NOT routed to the agent. Slash commands and pairing codes still pass through. Unauthorized messages are silently dropped (no error reply).
+- **Self-message capture**: Channels with `captureSelfMessages` enabled (WhatsApp, iMessage, BlueBubbles) ingest outgoing user messages as `direction: 'outgoing_user'` with `ingestOnly: true`, providing conversation context without triggering reply loops.
 
 Security modes commonly used by channels:
 - `pairing`: require a pairing code
@@ -177,6 +188,7 @@ Code:
 
 Scheduling:
 - Cron jobs can create tasks on schedules (`at`, `every`, `cron`) and optionally deliver results to channels.
+- When scheduling from the global temp workspace, a dedicated managed workspace is auto-created under `<userDataDir>/scheduled-workspaces/` to ensure job persistence.
 - Cron webhooks can trigger jobs externally (disabled by default).
 - For noisy monitors, delivery can be configured to only post on success when a non-empty result is available (used by `/schedule ... --if-result ...`).
 - Job prompts support template variables such as `{{today}}`, `{{tomorrow}}`, `{{week_end}}`, `{{now}}`.
@@ -212,9 +224,15 @@ It can be exposed via SSH tunnels or Tailscale (Serve/Funnel).
 Docs:
 - `docs/remote-access.md`
 
+Web UI:
+- The control plane serves a built-in HTML dashboard at `/` (same host/port) for headless management.
+- Manage tasks, approvals, workspaces, and channels from a browser via SSH tunnel or Tailscale.
+- Code: `src/electron/control-plane/web-ui.ts`
+
 Code:
 - Control plane server: `src/electron/control-plane/server.ts`
 - Control plane protocol: `src/electron/control-plane/protocol.ts`
+- Web UI: `src/electron/control-plane/web-ui.ts`
 - Tailscale integration: `src/electron/tailscale/`
 
 Defaults:
@@ -362,15 +380,23 @@ Entry points:
 - Main process boot: `src/electron/main.ts`
 - Renderer boot: `src/renderer/main.tsx`
 - IPC bridge: `src/electron/preload.ts`
+- Node daemon boot: `src/daemon/main.ts` (non-Electron headless)
+- CLI entry: `bin/coworkd.js` (headless Electron), `bin/coworkd-node.js` (Node-only), `bin/coworkctl.js` (control client)
+
+Headless credential import:
+- When `COWORK_IMPORT_ENV_SETTINGS=1` is set, `importProcessEnvToSettings()` reads LLM and search provider keys from environment variables (e.g. `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `TAVILY_API_KEY`, etc.) and writes them into encrypted settings on startup. Supports `merge` (default, fill blanks only) and `overwrite` modes.
+- Code: `src/electron/utils/env-migration.ts`
 
 ## Repo Map (Where Things Live)
 
 Top-level:
 - `src/electron/`: Electron main process runtime (backend)
+- `src/daemon/`: Node-only daemon entrypoint (headless, no Electron dependency)
 - `src/renderer/`: React UI (frontend)
 - `src/shared/`: shared types and utilities used by both processes
 - `resources/skills/`: bundled skill JSON files shipped with the app
 - `connectors/`: MCP connector servers (enterprise integrations)
+- `deploy/`: deployment artifacts (systemd unit files, env examples)
 - `docs/`: focused technical docs (security, remote access, canvas, connectors)
 
 Notable main-process subsystems:
@@ -389,8 +415,13 @@ Notable main-process subsystems:
 
 ### Electron `userData` directory
 
-CoWork OS persists state under Electron's `app.getPath('userData')` directory.
-On macOS this is typically under `~/Library/Application Support/` for the app.
+CoWork OS persists state under a configurable user-data directory, resolved by `getUserDataDir()` (`src/electron/utils/user-data-dir.ts`).
+
+Resolution order:
+1. `COWORK_USER_DATA_DIR` environment variable (supports `~` expansion)
+2. `--user-data-dir <path>` CLI argument
+3. Electron `app.getPath('userData')` (macOS: `~/Library/Application Support/cowork-os/`)
+4. Fallback: `$HOME/.cowork` (when running without Electron, e.g. Node daemon)
 
 What is stored there (see `src/electron/database/schema.ts` migration logic):
 - SQLite DB: `cowork-os.db`
@@ -441,6 +472,9 @@ See also:
 - `docs/remote-access.md`: control plane exposure via SSH/Tailscale
 - `docs/live-canvas.md`: live canvas UX + API/tools
 - `docs/enterprise-connectors.md`: connector contract + MCP-first strategy
+- `docs/node-daemon.md`: Node-only daemon setup and configuration
+- `docs/vps-linux.md`: VPS/Linux deployment with Docker and systemd
+- `docs/use-cases.md`: use-case skill template documentation
 
 ## Keeping This File Updated (Process)
 

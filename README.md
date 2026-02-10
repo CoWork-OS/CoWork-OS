@@ -33,7 +33,7 @@ Your AI needs a secure home. CoWork OS provides the runtime, security layers, an
 | **Voice Calls** | Outbound phone calls via ElevenLabs Agents |
 | **Agent Teams** | Multi-agent collaboration with shared checklists and coordinated runs |
 | **Workspace Kit** | Workspace `.cowork/` kit (projects, access rules, context injection, per-workspace settings) |
-| **Security-First** | 2350+ unit tests, configurable guardrails, approval workflows, gateway hardening |
+| **Security-First** | 2800+ unit tests, configurable guardrails, approval workflows, gateway hardening |
 | **Local-First** | Your data stays on your machine. BYOK (Bring Your Own Key) |
 
 > **Status**: macOS desktop app + headless/server mode (Linux/VPS). Cross-platform desktop support planned.
@@ -126,7 +126,7 @@ Run CoWork OS without a GUI and manage it remotely via the WebSocket Control Pla
 - **Dangerous command blocking**: Built-in patterns + custom regex rules
 - **Approval workflows**: User consent required for destructive operations
 - **Pairing & allowlists**: Control who can access your AI via messaging channels
-- **2350+ tests**: Comprehensive test coverage for access control and policies
+- **2800+ tests**: Comprehensive test coverage for access control and policies
 
 ### Your Data, Your Control
 
@@ -173,8 +173,8 @@ CoWork OS is designed with security as a core principle, not an afterthought.
 
 ### Security Test Coverage
 
-- **132 security unit tests** for access control and policy enforcement
-- **259 WebSocket protocol tests** for API security
+- **132+ security unit tests** for access control and policy enforcement
+- **259+ WebSocket protocol tests** for API security
 - Monotonic policy precedence (deny-wins across security layers)
 - Context-aware tool isolation for shared gateway environments
 
@@ -281,6 +281,8 @@ All channels support:
 - Rate limiting
 - Inbound attachment persistence (files saved to `.cowork/inbox/attachments/`)
 - Chat commands: `/schedule`, `/digest`, `/followups`, `/brief` (see channel docs below)
+- **Ambient mode**: Passively ingest all messages without responding (slash commands still routed); enable per-channel in settings
+- **Self-message capture**: Capture your own outgoing messages as context (`captureSelfMessages` on WhatsApp, iMessage, BlueBubbles)
 
 ### Visual Theme System
 
@@ -450,6 +452,8 @@ Full Playwright integration:
 - Open applications, URLs, and file paths
 - Run AppleScript to automate macOS apps
 - Get system information and environment variables
+- **Apple Calendar**: Create, update, delete calendar events via `apple_calendar_action`
+- **Apple Reminders**: Create, complete, update, list reminders via `apple_reminders_action`
 
 ### Remote Access
 
@@ -1931,13 +1935,14 @@ Configure these in **Settings** > **LLM Provider** by entering API keys/tokens, 
 |----------|--------|
 | **Developer** | GitHub, GitLab, Linear, Jira, Sentry, Code Reviewer, Multi-PR Review, Developer Growth Analysis |
 | **Communication** | Slack, Discord, Telegram, Email, Voice Calls (ElevenLabs Agents) |
-| **Productivity** | Notion, Obsidian, Todoist, Apple Notes/Reminders, PRD Generator, Memory Kit |
+| **Productivity** | Notion, Obsidian, Todoist, Apple Notes/Reminders/Calendar, PRD Generator, Memory Kit |
 | **Media** | Spotify, YouTube, SoundCloud |
 | **Image** | Image Generation (Gemini/OpenAI/Azure), Agentic Image Loop (visual annotation workflow) |
 | **Documents** | Excel, Word, PDF, PowerPoint |
 | **Frontend** | Frontend Design, React Native Best Practices |
 | **Data** | Supabase SDK Patterns |
 | **Search** | Local Web Search (SearXNG), Bird |
+| **Use Cases** | Booking Options, Draft Reply, Family Digest, Household Capture, Newsletter Digest, Transaction Scan |
 
 ---
 
@@ -2010,6 +2015,9 @@ Programmatic API for external automation and mobile companion apps.
 - Full task API (create, list, get, cancel)
 - Real-time event streaming
 - **LAN Access**: Enable "Allow LAN Connections" for mobile companion support
+- **Web Dashboard**: Built-in HTML dashboard at `http://127.0.0.1:18789/` for headless management (tasks, approvals, workspaces, channels)
+- **Approval API**: List and respond to pending approvals remotely (`approval.list`, `approval.respond`)
+- **Channel Management**: Create, update, enable/disable, test, and remove channels via API
 
 ### Connection Modes
 
@@ -2067,7 +2075,7 @@ Users must comply with their model provider's terms:
 - [x] Tailscale and SSH remote access
 - [x] Personality system
 - [x] 85+ bundled skills (code reviewer, PRD, multi-PR review, frontend design, local websearch, developer growth, React Native, Supabase, bird)
-- [x] 2350+ unit tests
+- [x] 2800+ unit tests
 - [x] Docker-based sandboxing (cross-platform)
 - [x] Per-context security policies (DM vs group)
 - [x] Enhanced pairing code UI with countdown
@@ -2100,6 +2108,14 @@ Users must comply with their model provider's terms:
 - [x] Visual annotation tools and Agentic Image Loop skill for iterative image refinement
 - [x] Inline image preview in task event timeline
 - [x] Local memory embeddings and cross-workspace ChatGPT imported memory search
+- [x] Apple Calendar and Reminders tools (macOS native via AppleScript)
+- [x] Gateway ambient mode (passive message ingestion) and self-message capture
+- [x] Use-case skill templates (booking, draft reply, family digest, household capture, newsletter digest, transaction scan)
+- [x] Headless Electron mode with env-based credential import (`COWORK_IMPORT_ENV_SETTINGS`)
+- [x] Node.js daemon entrypoint for non-Electron headless deployments (`coworkd-node.js`)
+- [x] Control plane web dashboard, approval API, and channel management API
+- [x] Docker and VPS deployment support (Dockerfiles, docker-compose, systemd units)
+- [x] Dedicated workspaces for scheduled cron jobs (auto-created from temp workspace)
 
 ### Planned
 

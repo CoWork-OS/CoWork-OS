@@ -7,6 +7,7 @@ const fs = require('fs');
 const packageDir = path.resolve(__dirname, '..');
 const electronPath = require.resolve('electron');
 const mainPath = path.join(packageDir, 'dist', 'electron', 'electron', 'main.js');
+const args = process.argv.slice(2);
 
 // Check if the app has been built
 if (!fs.existsSync(mainPath)) {
@@ -30,7 +31,7 @@ if (!fs.existsSync(mainPath)) {
 }
 
 function launchApp() {
-  const electron = spawn(electronPath, [mainPath], {
+  const electron = spawn(electronPath, [mainPath, ...args], {
     cwd: packageDir,
     stdio: 'inherit',
     env: { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' }

@@ -348,8 +348,11 @@ export const AddWhatsAppChannelSchema = z.object({
   name: z.string().min(1).max(MAX_TITLE_LENGTH),
   allowedNumbers: z.array(z.string().max(20)).max(100).optional(),
   securityMode: SecurityModeSchema.optional(),
+  ambientMode: z.boolean().optional(),
+  silentUnauthorized: z.boolean().optional(),
   selfChatMode: z.boolean().optional(),
   responsePrefix: z.string().max(20).optional(),
+  ingestNonSelfChatsInSelfChatMode: z.boolean().optional(),
 });
 
 export const DmPolicySchema = z.enum(['open', 'allowlist', 'pairing', 'disabled']);
@@ -364,9 +367,12 @@ export const AddImessageChannelSchema = z.object({
   dbPath: z.string().max(500).optional(),
   allowedContacts: z.array(z.string().max(100)).max(100).optional(),
   securityMode: SecurityModeSchema.optional(),
+  ambientMode: z.boolean().optional(),
+  silentUnauthorized: z.boolean().optional(),
   dmPolicy: DmPolicySchema.optional(),
   groupPolicy: GroupPolicySchema.optional(),
   responsePrefix: z.string().max(20).optional(),
+  captureSelfMessages: z.boolean().optional(),
 });
 
 export const AddSignalChannelSchema = z.object({
@@ -430,6 +436,9 @@ export const AddBlueBubblesChannelSchema = z.object({
   blueBubblesWebhookPort: z.number().int().min(1024).max(65535).optional(),
   blueBubblesAllowedContacts: z.array(z.string().max(100)).max(100).optional(),
   securityMode: SecurityModeSchema.optional(),
+  ambientMode: z.boolean().optional(),
+  silentUnauthorized: z.boolean().optional(),
+  captureSelfMessages: z.boolean().optional(),
 });
 
 export const AddEmailChannelSchema = z.object({

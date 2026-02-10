@@ -30,7 +30,7 @@ import { SearchProviderFactory } from './agent/search';
 import { ChannelGateway } from './gateway';
 import { formatChatTranscriptForPrompt } from './gateway/chat-transcript';
 import { updateManager } from './updater';
-import { migrateEnvToSettings } from './utils/env-migration';
+import { importProcessEnvToSettings, migrateEnvToSettings } from './utils/env-migration';
 import { GuardrailManager } from './guardrails/guardrail-manager';
 import { AppearanceManager } from './settings/appearance-manager';
 import { MemoryFeaturesManager } from './settings/memory-features-manager';
@@ -39,7 +39,9 @@ import { MCPClientManager } from './mcp/client/MCPClientManager';
 import { trayManager } from './tray';
 import { CronService, setCronService, getCronStorePath } from './cron';
 import { MemoryService } from './memory/MemoryService';
-import { setupControlPlaneHandlers, shutdownControlPlane } from './control-plane';
+import { ControlPlaneSettingsManager, setupControlPlaneHandlers, shutdownControlPlane, startControlPlaneFromSettings } from './control-plane';
+import { getArgValue, getEnvSettingsImportModeFromArgsOrEnv, isHeadlessMode, shouldEnableControlPlaneFromArgsOrEnv, shouldImportEnvSettingsFromArgsOrEnv, shouldPrintControlPlaneTokenFromArgsOrEnv } from './utils/runtime-mode';
+import { getUserDataDir } from './utils/user-data-dir';
 // Live Canvas feature
 import { registerCanvasScheme, registerCanvasProtocol, CanvasManager } from './canvas';
 import { setupCanvasHandlers, cleanupCanvasHandlers } from './ipc/canvas-handlers';
@@ -51,6 +53,12 @@ let channelGateway: ChannelGateway;
 let cronService: CronService | null = null;
 let crossSignalService: CrossSignalService | null = null;
 let feedbackService: FeedbackService | null = null;
+
+const HEADLESS = isHeadlessMode();
+const FORCE_ENABLE_CONTROL_PLANE = shouldEnableControlPlaneFromArgsOrEnv();
+const PRINT_CONTROL_PLANE_TOKEN = shouldPrintControlPlaneTokenFromArgsOrEnv();
+const IMPORT_ENV_SETTINGS = shouldImportEnvSettingsFromArgsOrEnv();
+const IMPORT_ENV_SETTINGS_MODE = getEnvSettingsImportModeFromArgsOrEnv();
 
 // Suppress GPU-related Chromium errors that occur with transparent windows and vibrancy
 // These are cosmetic errors that don't affect functionality
@@ -68,6 +76,7 @@ if (!gotTheLock) {
   app.quit();
 } else {
   app.on('second-instance', () => {
+    if (HEADLESS) return;
     // Focus the existing window instead of starting a second instance.
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
@@ -131,6 +140,19 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  // Allow overriding userData path for headless/VPS deployments (e.g., mount a persistent volume).
+  const userDataOverride = process.env.COWORK_USER_DATA_DIR || getArgValue('--user-data-dir');
+  if (userDataOverride && typeof userDataOverride === 'string' && userDataOverride.trim().length > 0) {
+    const resolved = path.resolve(userDataOverride.trim());
+    try {
+      await fs.mkdir(resolved, { recursive: true });
+      app.setPath('userData', resolved);
+      console.log(`[Main] Using userData directory override: ${resolved}`);
+    } catch (error) {
+      console.warn('[Main] Failed to apply userData directory override:', error);
+    }
+  }
+
   // Set up Content Security Policy for production builds
   if (process.env.NODE_ENV !== 'development') {
     const appRoot = pathToFileURL(path.join(__dirname, '../../renderer')).toString();
@@ -176,9 +198,78 @@ app.whenReady().then(async () => {
   // Migrate .env configuration to Settings (one-time upgrade path)
   const migrationResult = await migrateEnvToSettings();
 
+  // Optional: import process.env keys into Settings (explicit opt-in; useful for headless/server deployments).
+  if (IMPORT_ENV_SETTINGS) {
+    const importResult = await importProcessEnvToSettings({ mode: IMPORT_ENV_SETTINGS_MODE });
+    if (importResult.migrated && importResult.migratedKeys.length > 0) {
+      console.log(
+        `[Main] Imported credentials from process.env (${IMPORT_ENV_SETTINGS_MODE}): ${importResult.migratedKeys.join(', ')}`
+      );
+    }
+    if (importResult.error) {
+      console.warn('[Main] Failed to import credentials from process.env:', importResult.error);
+    }
+  }
+
+  // Headless deployments commonly forget to configure LLM creds; warn early with a concrete next step.
+  if (HEADLESS) {
+    try {
+      const llmSettings = LLMProviderFactory.loadSettings();
+      const hasAnyLlmCreds = !!(
+        llmSettings?.anthropic?.apiKey ||
+        llmSettings?.openai?.apiKey ||
+        llmSettings?.openai?.accessToken ||
+        llmSettings?.gemini?.apiKey ||
+        llmSettings?.openrouter?.apiKey ||
+        llmSettings?.groq?.apiKey ||
+        llmSettings?.xai?.apiKey ||
+        llmSettings?.kimi?.apiKey ||
+        llmSettings?.azure?.apiKey ||
+        llmSettings?.bedrock?.accessKeyId ||
+        llmSettings?.bedrock?.profile
+      );
+      if (!hasAnyLlmCreds) {
+        console.warn(
+          '[Main] No LLM credentials configured. In headless mode, set COWORK_IMPORT_ENV_SETTINGS=1 and an LLM key (e.g. OPENAI_API_KEY or ANTHROPIC_API_KEY), then restart.'
+        );
+      }
+    } catch (error) {
+      console.warn('[Main] Failed to check LLM credential configuration:', error);
+    }
+  }
+
   // Initialize agent daemon
   agentDaemon = new AgentDaemon(dbManager);
   await agentDaemon.initialize();
+
+  // Optional: bootstrap a default workspace on startup for headless/server deployments.
+  // This makes a fresh VPS instance usable without first opening the desktop UI.
+  try {
+    const bootstrapPathRaw = process.env.COWORK_BOOTSTRAP_WORKSPACE_PATH || getArgValue('--bootstrap-workspace');
+    if (bootstrapPathRaw && typeof bootstrapPathRaw === 'string' && bootstrapPathRaw.trim().length > 0) {
+      const raw = bootstrapPathRaw.trim();
+      const expanded = raw.startsWith('~/') && process.env.HOME
+        ? path.join(process.env.HOME, raw.slice(2))
+        : raw;
+      const workspacePath = path.resolve(expanded);
+      await fs.mkdir(workspacePath, { recursive: true });
+
+      const existing = agentDaemon.getWorkspaceByPath(workspacePath);
+      if (!existing) {
+        const nameFromEnv = process.env.COWORK_BOOTSTRAP_WORKSPACE_NAME || getArgValue('--bootstrap-workspace-name');
+        const workspaceName = (typeof nameFromEnv === 'string' && nameFromEnv.trim().length > 0)
+          ? nameFromEnv.trim()
+          : path.basename(workspacePath) || 'Workspace';
+
+        const ws = agentDaemon.createWorkspace(workspaceName, workspacePath);
+        console.log(`[Main] Bootstrapped workspace: ${ws.id} (${ws.name}) at ${ws.path}`);
+      } else {
+        console.log(`[Main] Bootstrap workspace exists: ${existing.id} (${existing.name}) at ${existing.path}`);
+      }
+    }
+  } catch (error) {
+    console.warn('[Main] Failed to bootstrap workspace:', error);
+  }
 
   // Initialize cross-agent signal tracker (best-effort; do not block app startup)
   try {
@@ -262,8 +353,11 @@ app.whenReady().then(async () => {
           template.includes('{{chat_truncated}}');
         if (!wantsChatVars) return {};
 
-        const channelType = job.delivery?.channelType;
-        const chatId = job.delivery?.channelId;
+        const chatContext = job.chatContext || (job.delivery?.channelType && job.delivery?.channelId
+          ? { channelType: job.delivery.channelType, channelId: job.delivery.channelId }
+          : null);
+        const channelType = chatContext?.channelType;
+        const chatId = chatContext?.channelId;
         if (!channelType || !chatId) return {};
 
         const channel = channelRepo.findByType(channelType);
@@ -523,6 +617,80 @@ app.whenReady().then(async () => {
     // Don't fail app startup if Mission Control init fails
   }
 
+  if (HEADLESS) {
+    console.log('[Main] Headless mode enabled (no UI)');
+    console.log(`[Main] userData: ${getUserDataDir()}`);
+
+    // For security, only print the token when explicitly requested, or when it was just generated.
+    let hadControlPlaneToken = false;
+    if (FORCE_ENABLE_CONTROL_PLANE || PRINT_CONTROL_PLANE_TOKEN) {
+      try {
+        ControlPlaneSettingsManager.initialize();
+        const before = ControlPlaneSettingsManager.loadSettings();
+        hadControlPlaneToken = Boolean(before?.token);
+      } catch {
+        // ignore
+      }
+    }
+
+    // Apply Control Plane overrides (optional)
+    const cpHost = process.env.COWORK_CONTROL_PLANE_HOST || getArgValue('--control-plane-host');
+    const cpPortRaw = process.env.COWORK_CONTROL_PLANE_PORT || getArgValue('--control-plane-port');
+    const cpPort = cpPortRaw ? Number.parseInt(cpPortRaw, 10) : undefined;
+    if ((typeof cpHost === 'string' && cpHost.trim()) || (typeof cpPort === 'number' && Number.isFinite(cpPort))) {
+      try {
+        ControlPlaneSettingsManager.updateSettings({
+          ...(typeof cpHost === 'string' && cpHost.trim() ? { host: cpHost.trim() } : {}),
+          ...(typeof cpPort === 'number' && Number.isFinite(cpPort) ? { port: cpPort } : {}),
+        });
+      } catch (error) {
+        console.warn('[Main] Failed to apply Control Plane overrides:', error);
+      }
+    }
+
+    // Initialize messaging gateway without a BrowserWindow
+    try {
+      await channelGateway.initialize();
+    } catch (error) {
+      console.error('[Main] Failed to initialize Channel Gateway (headless):', error);
+      // Don't fail app startup if gateway init fails
+    }
+
+    // Start Control Plane if enabled (or force-enabled via flag/env)
+    const cp = await startControlPlaneFromSettings({
+      deps: { agentDaemon, dbManager, channelGateway },
+      forceEnable: FORCE_ENABLE_CONTROL_PLANE,
+      onEvent: (event) => {
+        try {
+          const action = typeof event?.action === 'string' ? event.action : 'event';
+          console.log(`[ControlPlane] ${action}`);
+        } catch {
+          // ignore
+        }
+      },
+    });
+
+    if (!cp.ok) {
+      console.error('[Main] Control Plane failed to start:', cp.error);
+    } else if (!cp.skipped && cp.address) {
+      console.log(`[Main] Control Plane listening: ${cp.address.wsUrl}`);
+      if ((FORCE_ENABLE_CONTROL_PLANE || PRINT_CONTROL_PLANE_TOKEN) && (PRINT_CONTROL_PLANE_TOKEN || !hadControlPlaneToken)) {
+        try {
+          const settings = ControlPlaneSettingsManager.loadSettings();
+          if (settings?.token) {
+            console.log(`[Main] Control Plane token: ${settings.token}`);
+          }
+        } catch {
+          // ignore
+        }
+      }
+    } else if (cp.skipped) {
+      console.log('[Main] Control Plane disabled (skipping auto-start)');
+    }
+
+    return;
+  }
+
   // Register canvas:// protocol handler (must be after app.ready)
   registerCanvasProtocol();
 
@@ -544,7 +712,9 @@ app.whenReady().then(async () => {
     await CanvasManager.getInstance().restoreSessions();
 
     // Initialize control plane (WebSocket gateway)
-    setupControlPlaneHandlers(mainWindow, { agentDaemon, dbManager });
+    setupControlPlaneHandlers(mainWindow, { agentDaemon, dbManager, channelGateway });
+    // Auto-start control plane if enabled (and register methods/bridge)
+    await startControlPlaneFromSettings({ deps: { agentDaemon, dbManager, channelGateway } });
 
     // Initialize menu bar tray (macOS native companion)
     if (process.platform === 'darwin') {
@@ -577,10 +747,21 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => {
+  if (HEADLESS) return;
   if (process.platform !== 'darwin') {
     app.quit();
   }
 });
+
+// In headless/server mode, allow clean shutdown via systemd/docker signals.
+if (HEADLESS) {
+  for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+    process.on(sig, () => {
+      console.log(`[Main] Received ${sig}, shutting down...`);
+      app.quit();
+    });
+  }
+}
 
 app.on('before-quit', async () => {
   // Destroy tray

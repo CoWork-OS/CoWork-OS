@@ -4,10 +4,14 @@
  * through natural language interaction
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
+import { v4 as uuidv4 } from 'uuid';
 import { Workspace, TEMP_WORKSPACE_ID } from '../../../shared/types';
 import { AgentDaemon } from '../daemon';
 import { LLMTool } from '../llm/types';
 import { getCronService } from '../../cron';
+import { getUserDataDir } from '../../utils/user-data-dir';
 import type {
   CronJob,
   CronJobCreate,
@@ -30,11 +34,37 @@ export class CronTools {
     private taskId: string
   ) {}
 
+  private static readonly SCHEDULED_WORKSPACES_DIR = 'scheduled-workspaces';
+
   /**
    * Update the workspace for this tool
    */
   setWorkspace(workspace: Workspace): void {
     this.workspace = workspace;
+  }
+
+  private static slugify(value: string): string {
+    const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+    const slug = normalized
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+/, '')
+      .replace(/-+$/, '');
+    return slug.length > 0 ? slug.slice(0, 60) : 'scheduled-task';
+  }
+
+  private ensureDedicatedWorkspaceForScheduledJob(jobName: string): Workspace {
+    const userDataDir = getUserDataDir();
+    const root = path.join(userDataDir, CronTools.SCHEDULED_WORKSPACES_DIR);
+    fs.mkdirSync(root, { recursive: true });
+
+    const slug = CronTools.slugify(jobName);
+    const dirName = `${slug}-${Date.now()}-${uuidv4().slice(0, 8)}`;
+    const jobDir = path.join(root, dirName);
+    fs.mkdirSync(jobDir, { recursive: true });
+
+    // Keep it obvious in DB listings, but treat as a real workspace (UUID id).
+    const workspaceName = `Scheduled: ${jobName}`.trim();
+    return this.daemon.createWorkspace(workspaceName, jobDir);
   }
 
   /**
@@ -118,12 +148,30 @@ export class CronTools {
       return { success: false, error: 'Scheduler service is not running' };
     }
 
-    // Validate workspace ID is a proper UUID (not temp workspace)
-    if (this.workspace.id === TEMP_WORKSPACE_ID || !UUID_REGEX.test(this.workspace.id)) {
+    // Scheduled jobs need a stable, persisted workspace. If we're currently in the
+    // global temp workspace, create a dedicated managed workspace directory for this job.
+    let workspaceForJob: Workspace = this.workspace;
+    if (workspaceForJob.id === TEMP_WORKSPACE_ID) {
+      try {
+        workspaceForJob = this.ensureDedicatedWorkspaceForScheduledJob(params.name);
+      } catch (error: any) {
+        return {
+          success: false,
+          error:
+            `Failed to create a dedicated workspace for scheduled job "${params.name}": ` +
+            (error?.message ? String(error.message) : String(error)),
+        };
+      }
+    }
+
+    // Validate workspace ID is a proper UUID (not temp workspace).
+    // Note: WorkspaceRepository.create always uses UUIDs; this mainly prevents scheduling
+    // into "fake" workspaces that won't exist when the job runs.
+    if (!UUID_REGEX.test(workspaceForJob.id)) {
       return {
         success: false,
         error:
-          'Cannot schedule tasks in the temporary workspace. ' +
+          'Cannot schedule tasks without a persisted workspace. ' +
           'Please create or select a proper workspace first, then try scheduling again.',
       };
     }
@@ -147,7 +195,7 @@ export class CronTools {
       enabled: params.enabled ?? true,
       deleteAfterRun: params.deleteAfterRun ?? (params.schedule.type === 'once'),
       schedule,
-      workspaceId: this.workspace.id,
+      workspaceId: workspaceForJob.id,
       taskPrompt: params.prompt,
       taskTitle: params.name,
     };

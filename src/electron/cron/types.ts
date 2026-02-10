@@ -86,6 +86,13 @@ export interface CronJob {
   maxHistoryEntries?: number; // Max run history entries to keep (default: 10)
   // Agent config (tool restrictions, gateway context, etc.)
   taskAgentConfig?: AgentConfig;
+  /**
+   * Optional chat context used when resolving chat template variables ({{chat_messages}}, etc.).
+   *
+   * If not provided, template variables default to the delivery chat (job.delivery.channelType/channelId).
+   * This enables "summarize chat A and deliver to chat B" workflows.
+   */
+  chatContext?: { channelType: ChannelType; channelId: string };
   // Channel delivery
   delivery?: CronDeliveryConfig;
   // Runtime state

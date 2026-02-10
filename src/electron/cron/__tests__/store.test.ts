@@ -8,6 +8,8 @@ import os from 'node:os';
 import path from 'node:path';
 import type { CronStoreFile, CronJob } from '../types';
 
+const ORIGINAL_COWORK_USER_DATA_DIR = process.env.COWORK_USER_DATA_DIR;
+
 // Mock electron app
 vi.mock('electron', () => ({
   app: {
@@ -25,6 +27,18 @@ import {
 } from '../store';
 
 describe('resolveCronStorePath', () => {
+  beforeEach(() => {
+    process.env.COWORK_USER_DATA_DIR = '/mock/user/data';
+  });
+
+  afterEach(() => {
+    if (ORIGINAL_COWORK_USER_DATA_DIR === undefined) {
+      delete process.env.COWORK_USER_DATA_DIR;
+    } else {
+      process.env.COWORK_USER_DATA_DIR = ORIGINAL_COWORK_USER_DATA_DIR;
+    }
+  });
+
   it('should return default path when no path provided', () => {
     const result = resolveCronStorePath();
     expect(result).toBe('/mock/user/data/cron/jobs.json');

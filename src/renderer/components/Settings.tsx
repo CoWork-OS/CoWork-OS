@@ -99,9 +99,18 @@ interface SearchableSelectProps {
   onChange: (value: string) => void;
   placeholder?: string;
   className?: string;
+  /** Allow entering a custom value that isn't in the options list */
+  allowCustomValue?: boolean;
 }
 
-function SearchableSelect({ options, value, onChange, placeholder = 'Select...', className = '' }: SearchableSelectProps) {
+function SearchableSelect({
+  options,
+  value,
+  onChange,
+  placeholder = 'Select...',
+  className = '',
+  allowCustomValue = false,
+}: SearchableSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [highlightedIndex, setHighlightedIndex] = useState(0);
@@ -116,6 +125,10 @@ function SearchableSelect({ options, value, onChange, placeholder = 'Select...',
     opt.value.toLowerCase().includes(search.toLowerCase()) ||
     (opt.description && opt.description.toLowerCase().includes(search.toLowerCase()))
   );
+
+  const customValue = search.trim();
+  const showCustomOption = allowCustomValue && filteredOptions.length === 0 && customValue.length > 0;
+  const optionCount = filteredOptions.length > 0 ? filteredOptions.length : (showCustomOption ? 1 : 0);
 
   // Reset highlighted index when search changes
   useEffect(() => {
@@ -156,16 +169,24 @@ function SearchableSelect({ options, value, onChange, placeholder = 'Select...',
     switch (e.key) {
       case 'ArrowDown':
         e.preventDefault();
-        setHighlightedIndex(i => Math.min(i + 1, filteredOptions.length - 1));
+        if (optionCount > 0) {
+          setHighlightedIndex(i => Math.min(i + 1, optionCount - 1));
+        }
         break;
       case 'ArrowUp':
         e.preventDefault();
-        setHighlightedIndex(i => Math.max(i - 1, 0));
+        if (optionCount > 0) {
+          setHighlightedIndex(i => Math.max(i - 1, 0));
+        }
         break;
       case 'Enter':
         e.preventDefault();
         if (filteredOptions[highlightedIndex]) {
           onChange(filteredOptions[highlightedIndex].value);
+          setIsOpen(false);
+          setSearch('');
+        } else if (showCustomOption) {
+          onChange(customValue);
           setIsOpen(false);
           setSearch('');
         }
@@ -198,7 +219,7 @@ function SearchableSelect({ options, value, onChange, placeholder = 'Select...',
         tabIndex={0}
       >
         <span className="searchable-select-value">
-          {selectedOption ? selectedOption.label : placeholder}
+          {selectedOption ? selectedOption.label : (value ? value : placeholder)}
         </span>
         <svg className="searchable-select-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <path d="M6 9l6 6 6-6" />
@@ -224,7 +245,20 @@ function SearchableSelect({ options, value, onChange, placeholder = 'Select...',
           </div>
           <div ref={listRef} className="searchable-select-options">
             {filteredOptions.length === 0 ? (
-              <div className="searchable-select-no-results">No models found</div>
+              showCustomOption ? (
+                <div
+                  key={`__custom__:${customValue}`}
+                  data-index={0}
+                  className={`searchable-select-option ${customValue === value ? 'selected' : ''} ${highlightedIndex === 0 ? 'highlighted' : ''}`}
+                  onClick={() => handleSelect(customValue)}
+                  onMouseEnter={() => setHighlightedIndex(0)}
+                >
+                  <span className="searchable-select-option-label">{customValue}</span>
+                  <span className="searchable-select-option-desc">Use custom model ID</span>
+                </div>
+              ) : (
+                <div className="searchable-select-no-results">No models found</div>
+              )
             ) : (
               filteredOptions.map((opt, index) => (
                 <div
@@ -850,8 +884,9 @@ export function Settings({ onBack, onSettingsChanged, themeMode, visualTheme, ac
       setLoadingOpenAIModels(true);
       const models = await window.electronAPI.getOpenAIModels(apiKey || openaiApiKey);
       setOpenaiModels(models || []);
-      // If we got models and current model isn't in the list, select the first one
-      if (models && models.length > 0 && !models.some(m => m.id === openaiModel)) {
+      // If we got models and no model is selected yet, select the first one
+      // (Don't override custom model IDs that may not be in the list.)
+      if (models && models.length > 0 && !openaiModel) {
         setOpenaiModel(models[0].id);
       }
       // Notify main page that models were refreshed (they're now cached)
@@ -1770,6 +1805,7 @@ export function Settings({ onBack, onSettingsChanged, themeMode, visualTheme, ac
                             value={openaiModel}
                             onChange={setOpenaiModel}
                             placeholder="Select a model..."
+                            allowCustomValue
                           />
                         ) : (
                           <input

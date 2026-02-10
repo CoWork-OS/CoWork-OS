@@ -39,8 +39,19 @@ const IMPORTANT_EVENT_TYPES: EventType[] = [
 ];
 
 // Helper to check if an event is important (shown in non-verbose mode)
+// Note: We intentionally hide most tool traffic in Summary mode, but some tools
+// produce user-facing output (e.g. scheduling) that should remain visible.
 const isImportantEvent = (event: TaskEvent): boolean => {
-  return IMPORTANT_EVENT_TYPES.includes(event.type);
+  if (IMPORTANT_EVENT_TYPES.includes(event.type)) return true;
+
+  // Keep schedule confirmation visible even in Summary mode so users can see
+  // what was created (name/schedule/next run via event title/details).
+  if (event.type === 'tool_result') {
+    const tool = String((event as any)?.payload?.tool || '');
+    if (tool === 'schedule_task') return true;
+  }
+
+  return false;
 };
 
 // In non-verbose mode, hide verification noise (verification steps are still executed by the agent).
@@ -2639,7 +2650,10 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
                   'step_failed',
                   'verification_failed',
                 ]);
-                const showEvenWithoutSteps = alwaysVisibleEvents.has(event.type) || isImageFileEvent(event);
+                const showEvenWithoutSteps =
+                  alwaysVisibleEvents.has(event.type) ||
+                  isImageFileEvent(event) ||
+                  (event.type === 'tool_result' && event.payload?.tool === 'schedule_task');
                 if (!showSteps && !showEvenWithoutSteps) {
                   // Even if we're not showing steps, we may still need to render CommandOutput here
                   if (shouldRenderCommandOutput) {
@@ -3032,6 +3046,73 @@ function renderEventTitle(
       const result = event.payload.result;
       const success = result?.success !== false && !result?.error;
       const status = success ? 'done' : 'issue';
+
+      // schedule_task is user-facing; surface a compact summary in the title.
+      if (event.payload.tool === 'schedule_task') {
+        const describeEvery = (ms: number): string => {
+          if (!Number.isFinite(ms) || ms <= 0) return `${ms}ms`;
+          const day = 24 * 60 * 60 * 1000;
+          const hour = 60 * 60 * 1000;
+          const minute = 60 * 1000;
+          const second = 1000;
+
+          if (ms >= day && ms % day === 0) {
+            const days = ms / day;
+            return `Every ${days} day${days === 1 ? '' : 's'}`;
+          }
+          if (ms >= hour && ms % hour === 0) {
+            const hours = ms / hour;
+            return `Every ${hours} hour${hours === 1 ? '' : 's'}`;
+          }
+          if (ms >= minute && ms % minute === 0) {
+            const minutes = ms / minute;
+            return `Every ${minutes} minute${minutes === 1 ? '' : 's'}`;
+          }
+          if (ms >= second && ms % second === 0) {
+            const seconds = ms / second;
+            return `Every ${seconds} second${seconds === 1 ? '' : 's'}`;
+          }
+          return `Every ${Math.round(ms / 1000)}s`;
+        };
+
+        const describeScheduleShort = (schedule: any): string | null => {
+          if (!schedule || typeof schedule !== 'object') return null;
+          if (schedule.kind === 'every' && typeof schedule.everyMs === 'number') {
+            return describeEvery(schedule.everyMs);
+          }
+          if (schedule.kind === 'cron' && typeof schedule.expr === 'string') {
+            return `Cron: ${schedule.expr}`;
+          }
+          if (schedule.kind === 'at' && typeof schedule.atMs === 'number') {
+            return `Once at ${new Date(schedule.atMs).toLocaleString()}`;
+          }
+          return null;
+        };
+
+        // Error-first title for schedule failures.
+        if (!success && result?.error) {
+          const errorMsg = typeof result.error === 'string' ? result.error : 'Unknown error';
+          const clipped = errorMsg.slice(0, 80) + (errorMsg.length > 80 ? '...' : '');
+          return `schedule_task issue: ${clipped}`;
+        }
+
+        // "create"/"update" responses include { success, job }.
+        const job = result?.job;
+        if (job && typeof job === 'object') {
+          const jobName = String((job as any).name || '').trim() || 'Scheduled task';
+          const scheduleDesc = describeScheduleShort((job as any).schedule);
+          const nextRunAtMs = (job as any).state?.nextRunAtMs;
+          const next = typeof nextRunAtMs === 'number' ? new Date(nextRunAtMs).toLocaleString() : null;
+          const parts = [scheduleDesc, next ? `Next: ${next}` : null].filter(Boolean) as string[];
+          return parts.length > 0 ? `${jobName} → ${parts.join(' • ')}` : jobName;
+        }
+
+        // "list" returns an array of jobs.
+        if (Array.isArray(result)) {
+          const n = result.length;
+          return `schedule_task ${status} → ${n} task${n === 1 ? '' : 's'}`;
+        }
+      }
 
       // Extract useful info from result to show inline
       let detail = '';

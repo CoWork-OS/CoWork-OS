@@ -28,6 +28,7 @@ import { buildWorkspaceKitContext } from '../memory/WorkspaceKitContext';
 import { MemoryFeaturesManager } from '../settings/memory-features-manager';
 import { InputSanitizer, OutputFilter } from './security';
 import { BuiltinToolsSettingsManager } from './tools/builtin-settings';
+import { describeSchedule, parseIntervalToMs } from '../cron/types';
 
 class AwaitingUserInputError extends Error {
   constructor(message: string) {
@@ -90,6 +91,10 @@ const INPUT_DEPENDENT_ERROR_PATTERNS = [
   /must be.*string/i,          // Type validation: "must be a non-empty string"
   /expected.*but received/i,   // Type validation: "expected string but received undefined"
   /timed out/i,        // Command/operation timed out (often due to slow query)
+  // Network/navigation failures are often domain- or environment-specific; do not trip the
+  // systemic circuit breaker aggressively (e.g., OpenTable frequently fails with HTTP/2 errors).
+  /net::ERR_/i,        // Playwright/Chromium navigation errors
+  /ERR_HTTP2_PROTOCOL_ERROR/i, // Common site-specific failure
   /syntax error/i,     // Script syntax errors (AppleScript, shell, etc.)
   /applescript execution failed/i, // AppleScript errors are input-related
   /user denied/i,      // User denied an approval request
@@ -653,6 +658,11 @@ class ToolFailureTracker {
     // Content validation errors
     if (error.includes('content') && (error.includes('empty') || error.includes('required'))) {
       return 'SUGGESTION: The content parameter must be a non-empty array of content blocks. Example: [{ type: "paragraph", text: "Your text here" }]';
+    }
+
+    // Browser navigation errors (often domain-specific blocks or flaky HTTP/2)
+    if (toolName === 'browser_navigate' && (/net::ERR_/i.test(error) || /http2/i.test(error))) {
+      return 'SUGGESTION: This looks like a site/network-specific navigation failure. Try an alternative web tool (web_fetch/web_search) or use MCP puppeteer tools (puppeteer_navigate/puppeteer_screenshot) for JS-heavy pages.';
     }
 
     return undefined;
@@ -3696,6 +3706,345 @@ You are continuing a previous conversation. The context from the previous conver
   }
 
   /**
+   * Handle `/schedule ...` commands locally to ensure the cron job is actually created.
+   *
+   * Why: When users type `/schedule ...` in the desktop app, we don't want scheduling to depend on
+   * the LLM deciding to call `schedule_task`. If the provider errors or returns empty responses,
+   * the app can otherwise "plan" and mark steps complete without creating a job.
+   */
+  private async maybeHandleScheduleSlashCommand(): Promise<boolean> {
+    const raw = String(this.task.prompt || this.task.title || '').trim();
+    if (!raw) return false;
+
+    // Only intercept explicit /schedule commands at the start of the prompt.
+    const lowered = raw.toLowerCase();
+    if (!lowered.startsWith('/schedule')) return false;
+
+    const tokens = raw.split(/\s+/);
+    const cmd = String(tokens.shift() || '').trim().toLowerCase();
+    if (cmd !== '/schedule') {
+      // Allow other slash commands to go through normal executor flow.
+      return false;
+    }
+
+    const sub = String(tokens.shift() || '').trim().toLowerCase();
+
+    const helpText =
+      'Usage:\n' +
+      '- /schedule list\n' +
+      '- /schedule daily <time> <prompt>\n' +
+      '- /schedule weekdays <time> <prompt>\n' +
+      '- /schedule weekly <mon|tue|...> <time> <prompt>\n' +
+      '- /schedule every <interval> <prompt>\n' +
+      '- /schedule at <YYYY-MM-DD HH:MM> <prompt>\n' +
+      '- /schedule off <#|name|id>\n' +
+      '- /schedule on <#|name|id>\n' +
+      '- /schedule delete <#|name|id>\n\n' +
+      'Examples:\n' +
+      '- /schedule daily 9am Check my inbox for urgent messages.\n' +
+      '- /schedule weekdays 09:00 Run tests and post results.\n' +
+      '- /schedule weekly mon 18:30 Send a weekly status update.\n' +
+      '- /schedule every 6h Pull latest logs and summarize.\n' +
+      '- /schedule at 2026-02-08 18:30 Remind me to submit expenses.';
+
+    const logAssistant = (message: string) => {
+      this.daemon.logEvent(this.task.id, 'assistant_message', { message });
+      // Also keep a minimal conversation snapshot for follow-ups/debugging.
+      this.conversationHistory = [
+        { role: 'user', content: [{ type: 'text', text: raw }] },
+        { role: 'assistant', content: [{ type: 'text', text: message }] },
+      ];
+      this.lastAssistantOutput = message;
+      this.lastNonVerificationOutput = message;
+    };
+
+    const finishOk = (resultSummary: string) => {
+      this.saveConversationSnapshot();
+      this.taskCompleted = true;
+      this.daemon.completeTask(this.task.id, resultSummary);
+    };
+
+    const runScheduleTool = async (input: any): Promise<any> => {
+      this.daemon.logEvent(this.task.id, 'tool_call', { tool: 'schedule_task', input });
+      const result = await this.toolRegistry.executeTool('schedule_task', input);
+      this.daemon.logEvent(this.task.id, 'tool_result', { tool: 'schedule_task', result });
+      return result;
+    };
+
+    const parseTimeOfDay = (input: string): { hour: number; minute: number } | null => {
+      const value = (input || '').trim().toLowerCase();
+      if (!value) return null;
+      const match = value.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i);
+      if (!match) return null;
+      const hRaw = parseInt(match[1], 10);
+      const mRaw = match[2] ? parseInt(match[2], 10) : 0;
+      const meridiem = match[3]?.toLowerCase();
+      if (!Number.isFinite(hRaw) || !Number.isFinite(mRaw)) return null;
+      if (mRaw < 0 || mRaw > 59) return null;
+      let hour = hRaw;
+      const minute = mRaw;
+      if (meridiem) {
+        if (hour < 1 || hour > 12) return null;
+        if (meridiem === 'am') {
+          if (hour === 12) hour = 0;
+        } else if (meridiem === 'pm') {
+          if (hour !== 12) hour += 12;
+        }
+      } else {
+        if (hour < 0 || hour > 23) return null;
+      }
+      return { hour, minute };
+    };
+
+    const parseWeekday = (input: string): number | null => {
+      const value = (input || '').trim().toLowerCase();
+      if (!value) return null;
+      const map: Record<string, number> = {
+        sun: 0, sunday: 0,
+        mon: 1, monday: 1,
+        tue: 2, tues: 2, tuesday: 2,
+        wed: 3, wednesday: 3,
+        thu: 4, thur: 4, thurs: 4, thursday: 4,
+        fri: 5, friday: 5,
+        sat: 6, saturday: 6,
+      };
+      return Object.prototype.hasOwnProperty.call(map, value) ? map[value] : null;
+    };
+
+    const parseAtMs = (parts: string[]): { atMs: number; consumed: number } | null => {
+      const a = String(parts[0] || '').trim();
+      const b = String(parts[1] || '').trim();
+      if (!a) return null;
+
+      // Accept unix ms
+      if (/^\d{12,}$/.test(a)) {
+        const n = Number(a);
+        if (!Number.isFinite(n)) return null;
+        return { atMs: n, consumed: 1 };
+      }
+
+      // Accept "YYYY-MM-DD HH:MM" as local time
+      if (a && b && /^\d{4}-\d{2}-\d{2}$/.test(a) && /^\d{1,2}:\d{2}$/.test(b)) {
+        const [yearS, monthS, dayS] = a.split('-');
+        const [hourS, minuteS] = b.split(':');
+        const year = Number(yearS);
+        const month = Number(monthS);
+        const day = Number(dayS);
+        const hour = Number(hourS);
+        const minute = Number(minuteS);
+        if (![year, month, day, hour, minute].every(Number.isFinite)) return null;
+        const d = new Date(year, month - 1, day, hour, minute, 0, 0);
+        const ms = d.getTime();
+        if (isNaN(ms)) return null;
+        return { atMs: ms, consumed: 2 };
+      }
+
+      // Fallback: ISO string or Date.parse-compatible input
+      const d = new Date(a);
+      const ms = d.getTime();
+      if (isNaN(ms)) return null;
+      return { atMs: ms, consumed: 1 };
+    };
+
+    // Normalize a minimal status update so the UI doesn't show "planning" forever.
+    this.daemon.updateTaskStatus(this.task.id, 'executing');
+
+    if (!sub || sub === 'help') {
+      logAssistant(helpText);
+      finishOk('Scheduling help shown.');
+      return true;
+    }
+
+    if (sub === 'list') {
+      const result = await runScheduleTool({ action: 'list', includeDisabled: true });
+      if (!Array.isArray(result)) {
+        const err = String(result?.error || 'Failed to list scheduled tasks.');
+        throw new Error(err);
+      }
+
+      if (result.length === 0) {
+        logAssistant('No scheduled tasks found. Use `/schedule help` to create one.');
+        finishOk('No scheduled tasks.');
+        return true;
+      }
+
+      const sorted = [...result].sort((a: any, b: any) => (b.updatedAtMs ?? 0) - (a.updatedAtMs ?? 0));
+      const lines = sorted.slice(0, 20).map((job: any, idx: number) => {
+        const enabled = job.enabled ? 'ON' : 'OFF';
+        const next = job.state?.nextRunAtMs ? new Date(job.state.nextRunAtMs).toLocaleString() : 'n/a';
+        const schedule = job.schedule ? describeSchedule(job.schedule) : 'n/a';
+        const id = job.id ? String(job.id).slice(0, 8) : 'n/a';
+        return `${idx + 1}. ${job.name} (${enabled})\n   Schedule: ${schedule}\n   Next: ${next}\n   Id: ${id}`;
+      });
+
+      const suffix = result.length > 20 ? `\n\nShowing 20 of ${result.length}.` : '';
+      logAssistant(`Scheduled tasks:\n\n${lines.join('\n')}${suffix}`);
+      finishOk(`Listed ${result.length} scheduled task(s).`);
+      return true;
+    }
+
+    const resolveJobSelectorToId = async (selectorRaw: string): Promise<string> => {
+      const selector = String(selectorRaw || '').trim();
+      if (!selector) throw new Error('Missing selector. Use `/schedule list` to find a job.');
+
+      // If selector looks like a UUID, use as-is.
+      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(selector)) {
+        return selector;
+      }
+
+      // Numeric selector: resolve against the current list ordering.
+      const list = await runScheduleTool({ action: 'list', includeDisabled: true });
+      if (!Array.isArray(list) || list.length === 0) {
+        throw new Error('No scheduled tasks found. Use `/schedule help` to create one.');
+      }
+
+      const sorted = [...list].sort((a: any, b: any) => (b.updatedAtMs ?? 0) - (a.updatedAtMs ?? 0));
+
+      if (/^\d+$/.test(selector)) {
+        const n = parseInt(selector, 10);
+        if (!isNaN(n) && n >= 1 && n <= sorted.length) {
+          return sorted[n - 1].id;
+        }
+        throw new Error(`Index out of range. Use 1-${sorted.length}.`);
+      }
+
+      // Name match (exact first, then partial).
+      const loweredSel = selector.toLowerCase();
+      const exact = sorted.find((j: any) => String(j.name || '').toLowerCase() === loweredSel);
+      if (exact) return exact.id;
+      const partial = sorted.find((j: any) => String(j.name || '').toLowerCase().includes(loweredSel));
+      if (partial) return partial.id;
+
+      throw new Error('No matching scheduled task found. Use `/schedule list`.');
+    };
+
+    if (sub === 'off' || sub === 'disable' || sub === 'stop' || sub === 'on' || sub === 'enable' || sub === 'start') {
+      const enabled = sub === 'on' || sub === 'enable' || sub === 'start';
+      const selector = String(tokens[0] || '').trim();
+      const id = await resolveJobSelectorToId(selector);
+      const result = await runScheduleTool({ action: 'update', id, updates: { enabled } });
+      if (!result || result.success === false || result.error) {
+        throw new Error(String(result?.error || 'Failed to update scheduled task.'));
+      }
+      const jobName = result?.job?.name ? String(result.job.name) : 'Scheduled task';
+      logAssistant(`✅ ${enabled ? 'Enabled' : 'Disabled'}: ${jobName}`);
+      finishOk(`${enabled ? 'Enabled' : 'Disabled'}: ${jobName}`);
+      return true;
+    }
+
+    if (sub === 'delete' || sub === 'remove' || sub === 'rm') {
+      const selector = String(tokens[0] || '').trim();
+      const id = await resolveJobSelectorToId(selector);
+      const result = await runScheduleTool({ action: 'remove', id });
+      if (!result || result.success === false || result.error) {
+        throw new Error(String(result?.error || 'Failed to remove scheduled task.'));
+      }
+      logAssistant('✅ Removed scheduled task.');
+      finishOk('Removed scheduled task.');
+      return true;
+    }
+
+    // Create or update a scheduled task.
+    const scheduleKind = sub;
+    let scheduleInput: any | null = null;
+    let promptParts: string[] = [];
+
+    if (scheduleKind === 'daily' || scheduleKind === 'weekdays') {
+      const time = parseTimeOfDay(tokens[0] || '');
+      if (!time) {
+        throw new Error('Invalid time. Examples: 9am, 09:00, 18:30');
+      }
+      const expr = scheduleKind === 'weekdays'
+        ? `${time.minute} ${time.hour} * * 1-5`
+        : `${time.minute} ${time.hour} * * *`;
+      scheduleInput = { type: 'cron', cron: expr };
+      promptParts = tokens.slice(1);
+    } else if (scheduleKind === 'weekly') {
+      const dow = parseWeekday(tokens[0] || '');
+      const time = parseTimeOfDay(tokens[1] || '');
+      if (dow === null || !time) {
+        throw new Error('Invalid weekly schedule. Example: `/schedule weekly mon 09:00 <prompt>`');
+      }
+      scheduleInput = { type: 'cron', cron: `${time.minute} ${time.hour} * * ${dow}` };
+      promptParts = tokens.slice(2);
+    } else if (scheduleKind === 'every') {
+      const interval = String(tokens[0] || '').trim();
+      const everyMs = interval ? parseIntervalToMs(interval) : null;
+      if (!everyMs || !Number.isFinite(everyMs) || everyMs < 60_000) {
+        throw new Error('Invalid interval. Examples: 30m, 6h, 1d (minimum 1m)');
+      }
+      scheduleInput = { type: 'interval', every: interval };
+      promptParts = tokens.slice(1);
+    } else if (scheduleKind === 'at' || scheduleKind === 'once') {
+      const parsed = parseAtMs(tokens);
+      if (!parsed) {
+        throw new Error('Invalid datetime. Examples: `2026-02-08 18:30`, `2026-02-08T18:30:00`, or unix ms.');
+      }
+      scheduleInput = { type: 'once', at: parsed.atMs };
+      promptParts = tokens.slice(parsed.consumed);
+    } else {
+      throw new Error('Unknown schedule. Use: daily, weekdays, weekly, every, or at. See `/schedule help`.');
+    }
+
+    const prompt = promptParts.join(' ').trim();
+    if (!prompt) {
+      throw new Error('Missing prompt. Example: `/schedule every 6h <prompt>`');
+    }
+
+    const name = prompt.length > 48 ? `${prompt.slice(0, 48).trim()}...` : prompt;
+    const description = `Created via /schedule (task=${this.task.id})`;
+
+    // Best-effort upsert: reuse most recently updated job with the same name.
+    const existing = await runScheduleTool({ action: 'list', includeDisabled: true });
+    const existingMatches: any[] = Array.isArray(existing)
+      ? existing
+        .filter((j: any) => String(j.name || '').toLowerCase() === name.toLowerCase())
+        .sort((a: any, b: any) => (b.updatedAtMs ?? 0) - (a.updatedAtMs ?? 0))
+      : [];
+
+    const result = existingMatches.length > 0
+      ? await runScheduleTool({
+        action: 'update',
+        id: existingMatches[0].id,
+        updates: {
+          enabled: true,
+          prompt,
+          schedule: scheduleInput,
+        },
+      })
+      : await runScheduleTool({
+        action: 'create',
+        name,
+        description,
+        prompt,
+        schedule: scheduleInput,
+        enabled: true,
+        deleteAfterRun: scheduleInput?.type === 'once',
+      });
+
+    if (!result || result.success === false || result.error) {
+      throw new Error(String(result?.error || 'Failed to schedule task.'));
+    }
+
+    const job = result.job;
+    if (!job || typeof job !== 'object') {
+      throw new Error('Failed to schedule task: missing job details.');
+    }
+
+    const scheduleDesc = job.schedule ? describeSchedule(job.schedule) : 'n/a';
+    const next = job.state?.nextRunAtMs ? new Date(job.state.nextRunAtMs).toLocaleString() : 'unknown';
+    const msg =
+      `✅ Scheduled "${job.name}".\n\n` +
+      `Schedule: ${scheduleDesc}\n` +
+      `Next run: ${next}\n\n` +
+      'You can view and edit it in Settings > Scheduled Tasks.';
+
+    logAssistant(msg);
+    finishOk(msg);
+    return true;
+  }
+
+  /**
    * Main execution loop
    */
   async execute(): Promise<void> {
@@ -3714,6 +4063,12 @@ You are continuing a previous conversation. The context from the previous conver
           message: `Security: Potential injection patterns detected (${securityReport.threatLevel})`,
           details: securityReport,
         });
+      }
+
+      // Handle local slash-commands (e.g. /schedule ...) deterministically without relying on the LLM.
+      // This prevents "plan-only" runs that never create the underlying cron job.
+      if (await this.maybeHandleScheduleSlashCommand()) {
+        return;
       }
 
       // Phase 0: Pre-task Analysis (like Cowork's AskUserQuestion)
@@ -3996,6 +4351,7 @@ VERIFICATION STEP (REQUIRED):
 
 7. GOOGLE WORKSPACE (Gmail/Calendar/Drive):
    - Use gmail_action/calendar_action/google_drive_action ONLY when those tools are available (Google Workspace integration enabled).
+   - On macOS, you can use apple_calendar_action for Apple Calendar even if Google Workspace is not connected.
    - If Google Workspace tools are unavailable:
      - For inbox/unread summaries, use email_imap_unread when available (direct IMAP mailbox access).
      - For emails that have already been ingested into the local gateway message log, use channel_list_chats/channel_history with channel "email".
@@ -4529,6 +4885,13 @@ BROWSER TOOLS (when needed):
 - For dynamic content, use browser_wait then browser_get_content
 - If content is insufficient, use browser_screenshot to see visual layout
 
+SCREENSHOTS & VISION (CRITICAL):
+- Never invent image filenames. If a tool saves an image, it will tell you the exact filename/path (often "Saved image: ..."). Use that exact value for any follow-up vision/image-analysis tool calls.
+- For MCP puppeteer screenshots, always pass a stable "name" and then reference "<name>.png" (unless the tool output says otherwise).
+
+INTERMEDIATE RESULTS (CRITICAL):
+- When you compute structured results that will be referenced later (e.g., a list of available reservation slots across dates), write them to a workspace file (JSON/CSV/MD) and cite the path in later steps.
+
 ANTI-PATTERNS (NEVER DO THESE):
 - DO NOT: Use browser tools for simple research when web_search works
 - DO NOT: Navigate to login-required pages and expect to extract content
@@ -4571,6 +4934,7 @@ SCHEDULING & REMINDERS:
 
 GOOGLE WORKSPACE (Gmail/Calendar/Drive):
 - Use gmail_action/calendar_action/google_drive_action ONLY when those tools are available (Google Workspace integration enabled).
+- On macOS, you can use apple_calendar_action for Apple Calendar even if Google Workspace is not connected.
 - If Google Workspace tools are unavailable:
   - For inbox/unread summaries, use email_imap_unread when available (direct IMAP mailbox access).
   - For emails that have already been ingested into the local gateway message log, use channel_list_chats/channel_history with channel "email".
@@ -5336,6 +5700,17 @@ TASK / CONVERSATION HISTORY:
         }
       }
 
+      // If the model repeatedly returned empty content, treat this as a hard failure.
+      // Otherwise we risk marking steps "completed" without doing any work.
+      if (emptyResponseCount >= maxEmptyResponses) {
+        stepFailed = true;
+        if (!lastFailureReason) {
+          lastFailureReason =
+            'LLM returned empty responses repeatedly. This usually indicates a provider/tool-call error. ' +
+            'Try again or switch models/providers.';
+        }
+      }
+
       if (hadToolError && !hadToolSuccessAfterError) {
         const nonCriticalErrorTools = new Set(['web_search', 'web_fetch']);
         const onlyNonCriticalErrors = toolErrors.size > 0 && Array.from(toolErrors).every(t => nonCriticalErrorTools.has(t));
@@ -5876,6 +6251,7 @@ SCHEDULING & REMINDERS:
 
 GOOGLE WORKSPACE (Gmail/Calendar/Drive):
 - Use gmail_action/calendar_action/google_drive_action ONLY when those tools are available (Google Workspace integration enabled).
+- On macOS, you can use apple_calendar_action for Apple Calendar even if Google Workspace is not connected.
 - If Google Workspace tools are unavailable:
   - For inbox/unread summaries, use email_imap_unread when available (direct IMAP mailbox access).
   - For emails that have already been ingested into the local gateway message log, use channel_list_chats/channel_history with channel "email".
@@ -6059,7 +6435,7 @@ TASK / CONVERSATION HISTORY:
         const availableToolNames = new Set(availableTools.map(tool => tool.name));
 
         // Use retry wrapper for resilient API calls
-        const response = await this.callLLMWithRetry(
+        let response = await this.callLLMWithRetry(
           () => withTimeout(
             this.provider.createMessage({
               model: this.modelId,

@@ -210,8 +210,8 @@ function buildKitSections(workspacePath: string, taskPrompt: string, now: Date):
       extractor: (raw) =>
         sanitizeForInjection(
           extractBulletSections(raw, {
-            onlyHeadings: new Set(['Open Loops', 'Next Actions', 'Decisions']),
-            maxSections: 3,
+            onlyHeadings: new Set(['Open Loops', 'Next Actions', 'Decisions', 'Summary']),
+            maxSections: 4,
           })
         ),
     },

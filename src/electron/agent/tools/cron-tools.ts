@@ -206,7 +206,12 @@ export class CronTools {
     let jobId = params.id;
     if (!jobId && params.name) {
       const jobs = await service.list({ includeDisabled: true });
-      const job = jobs.find((j) => j.name.toLowerCase() === params.name!.toLowerCase());
+      const target = params.name.toLowerCase();
+      const inWorkspace = jobs.find(
+        (j) => j.workspaceId === this.workspace.id && j.name.toLowerCase() === target
+      );
+      const global = jobs.find((j) => j.name.toLowerCase() === target);
+      const job = inWorkspace ?? global;
       if (job) {
         jobId = job.id;
       }
@@ -271,7 +276,12 @@ export class CronTools {
     let jobId = params.id;
     if (!jobId && params.name) {
       const jobs = await service.list({ includeDisabled: true });
-      const job = jobs.find((j) => j.name.toLowerCase() === params.name!.toLowerCase());
+      const target = params.name.toLowerCase();
+      const inWorkspace = jobs.find(
+        (j) => j.workspaceId === this.workspace.id && j.name.toLowerCase() === target
+      );
+      const global = jobs.find((j) => j.name.toLowerCase() === target);
+      const job = inWorkspace ?? global;
       if (job) {
         jobId = job.id;
       }
@@ -321,7 +331,12 @@ export class CronTools {
     let jobId = params.id;
     if (!jobId && params.name) {
       const jobs = await service.list({ includeDisabled: true });
-      const job = jobs.find((j) => j.name.toLowerCase() === params.name!.toLowerCase());
+      const target = params.name.toLowerCase();
+      const inWorkspace = jobs.find(
+        (j) => j.workspaceId === this.workspace.id && j.name.toLowerCase() === target
+      );
+      const global = jobs.find((j) => j.name.toLowerCase() === target);
+      const job = inWorkspace ?? global;
       if (job) {
         jobId = job.id;
       }
@@ -373,7 +388,12 @@ export class CronTools {
     let jobId = params.id;
     if (!jobId && params.name) {
       const jobs = await service.list({ includeDisabled: true });
-      const job = jobs.find((j) => j.name.toLowerCase() === params.name!.toLowerCase());
+      const target = params.name.toLowerCase();
+      const inWorkspace = jobs.find(
+        (j) => j.workspaceId === this.workspace.id && j.name.toLowerCase() === target
+      );
+      const global = jobs.find((j) => j.name.toLowerCase() === target);
+      const job = inWorkspace ?? global;
       if (job) {
         jobId = job.id;
       }

@@ -132,6 +132,8 @@ import type { MemorySettings } from '../database/repositories';
 import { VoiceSettingsManager } from '../voice/voice-settings-manager';
 import { getVoiceService } from '../voice/VoiceService';
 import { AgentPerformanceReviewService } from '../reports/AgentPerformanceReviewService';
+import { getCronService } from '../cron';
+import type { CronJobCreate } from '../cron/types';
 
 // Global notification service instance
 let notificationService: NotificationService | null = null;
@@ -3745,7 +3747,10 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository): void {
       path.join(kitDirName, 'HEARTBEAT.md'),
       path.join(kitDirName, 'PRIORITIES.md'),
       path.join(kitDirName, 'CROSS_SIGNALS.md'),
+      path.join(kitDirName, 'MISTAKES.md'),
       path.join(kitDirName, 'memory'),
+      path.join(kitDirName, 'memory', 'hourly'),
+      path.join(kitDirName, 'memory', 'weekly'),
       path.join(kitDirName, 'projects'),
       path.join(kitDirName, 'agents'),
     ];
@@ -3938,6 +3943,10 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository): void {
           `- (add durable rules and lessons here)\n\n` +
           `## Preferences\n` +
           `- (add preferred defaults and conventions here)\n\n` +
+          `## Auto Learnings\n` +
+          `<!-- cowork:auto:memory:start -->\n` +
+          `- (none)\n` +
+          `<!-- cowork:auto:memory:end -->\n\n` +
           `## Known Constraints\n` +
           `- (add constraints and guardrails here)\n`,
       },
@@ -4007,12 +4016,29 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository): void {
           `Optional workspace-local notes about agent roles, working agreements, and conventions.\n`,
       },
       {
+        relPath: path.join(kitDirName, 'memory', 'hourly', 'README.md'),
+        content:
+          `# Hourly Logs\n\n` +
+          `This folder is intended for auto-generated hourly digests to reduce context loss.\n`,
+      },
+      {
+        relPath: path.join(kitDirName, 'memory', 'weekly', 'README.md'),
+        content:
+          `# Weekly Syntheses\n\n` +
+          `This folder is intended for auto-generated weekly syntheses and compounding learnings.\n`,
+      },
+      {
         relPath: path.join(kitDirName, 'memory', `${stamp}.md`),
         content:
           `# Daily Log (${stamp})\n\n` +
+          `<!-- cowork:auto:daily:start -->\n` +
           `## Open Loops\n\n` +
           `## Next Actions\n\n` +
-          `## Decisions\n`,
+          `## Decisions\n\n` +
+          `## Summary\n\n` +
+          `<!-- cowork:auto:daily:end -->\n\n` +
+          `## Notes\n` +
+          `- \n`,
       },
     ];
   };
@@ -4039,6 +4065,183 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository): void {
     await fs.mkdir(absPath, { recursive: true });
   };
 
+  const ensureDefaultKitCronJobs = async (workspaceId: string): Promise<void> => {
+    if (!workspaceId || workspaceId === TEMP_WORKSPACE_ID) return;
+
+    const cron = getCronService();
+    if (!cron) return;
+
+    const markers = {
+      hourly: 'cowork:kit:memory:hourly:v1',
+      daily: 'cowork:kit:memory:daily:v1',
+      weekly: 'cowork:kit:memory:weekly:v1',
+    } as const;
+
+    const buildHourlyPrompt = () =>
+      [
+        'You are the scheduled hourly memory digest for this workspace.',
+        '',
+        'Goal: preserve continuity by writing a structured hourly summary to `.cowork/memory/hourly/{{date}}.md`.',
+        '',
+        'Steps:',
+        '1) Call tool `task_events` with:',
+        '   - period: "custom"',
+        '   - from: "{{prev_run}}"',
+        '   - to: "{{now}}"',
+        '   - limit: 500',
+        `   - workspace_id: "${workspaceId}"`,
+        '   - include_payload: true',
+        '2) Ignore events where the taskTitle is one of:',
+        '   - "Kit: Hourly Memory Digest"',
+        '   - "Kit: Daily Context Sync"',
+        '   - "Kit: Weekly Synthesis"',
+        '3) Produce a concise structured summary ONLY from the tool output (do not hallucinate).',
+        '4) Ensure `.cowork/memory/hourly/{{date}}.md` exists. If missing, create it with:',
+        '   - `# Hourly Log ({{date}})`',
+        '   - a blank line',
+        '   - `<!-- cowork:auto:hourly:start -->`',
+        '   - `<!-- cowork:auto:hourly:end -->`',
+        '5) Insert a new entry immediately before `<!-- cowork:auto:hourly:end -->` (do not modify anything outside the markers).',
+        '',
+        'Entry format (must match):',
+        '### <local timestamp YYYY-MM-DD HH:MM> ({{prev_run}} -> {{now}})',
+        'Topics:',
+        '- ...',
+        'Decisions:',
+        '- ...',
+        'Action Items:',
+        '- ...',
+        'Risks/Blockers:',
+        '- ...',
+        'Signals:',
+        '- ...',
+        'Feedback:',
+        '- ...',
+        'Stats: <events> events | <user> user msgs | <assistant> assistant msgs | <toolCalls> tool calls (<toolErrors> errors) | files: +<created> ~<modified> -<deleted>',
+        '',
+        'Return 1-3 sentences confirming the write (do not paste the entire entry).',
+      ].join('\n');
+
+    const buildDailyPrompt = () =>
+      [
+        'You are the scheduled daily context sync for this workspace.',
+        '',
+        'Goal: consolidate today\'s work into `.cowork/memory/{{date}}.md` without destroying manual notes.',
+        '',
+        'Steps:',
+        '1) Call tool `task_events` with:',
+        '   - period: "today"',
+        '   - limit: 500',
+        `   - workspace_id: "${workspaceId}"`,
+        '   - include_payload: true',
+        '2) Ignore events where the taskTitle is one of:',
+        '   - "Kit: Hourly Memory Digest"',
+        '   - "Kit: Daily Context Sync"',
+        '   - "Kit: Weekly Synthesis"',
+        '3) Summarize ONLY from the tool output (do not hallucinate). Focus on: open loops, next actions, decisions, and a short narrative summary.',
+        '4) Update `.cowork/memory/{{date}}.md` by upserting an auto section delimited by these markers:',
+        '   - `<!-- cowork:auto:daily:start -->`',
+        '   - `<!-- cowork:auto:daily:end -->`',
+        '   If the file or markers are missing, create/append them; do not remove or rewrite other content.',
+        '',
+        'Auto section body format (must match):',
+        '## Open Loops',
+        '- ...',
+        '',
+        '## Next Actions',
+        '- ...',
+        '',
+        '## Decisions',
+        '- ...',
+        '',
+        '## Summary',
+        '- ...',
+        '',
+        'Return 1-3 sentences confirming the update (do not paste the entire section).',
+      ].join('\n');
+
+    const buildWeeklyPrompt = () =>
+      [
+        'You are the scheduled weekly synthesis for this workspace.',
+        '',
+        'Goal: distill compounding learnings and next-week focus, then update `.cowork/MEMORY.md` (auto section) and write a weekly report file.',
+        '',
+        'Steps:',
+        '1) Call tool `task_events` with:',
+        '   - period: "last_7_days"',
+        '   - limit: 500',
+        `   - workspace_id: "${workspaceId}"`,
+        '   - include_payload: true',
+        '2) Read `.cowork/MISTAKES.md` to ground preference patterns in actual recorded feedback.',
+        '3) Write a weekly report to `.cowork/memory/weekly/{{date}}.md` with:',
+        '   - Wins (what shipped / moved forward)',
+        '   - Misses (what stalled / why)',
+        '   - Patterns (approval/rejection themes)',
+        '   - Process updates (what to do differently)',
+        '   - Next week focus (top 3)',
+        '4) Update `.cowork/MEMORY.md` by upserting an auto section delimited by:',
+        '   - `<!-- cowork:auto:memory:start -->`',
+        '   - `<!-- cowork:auto:memory:end -->`',
+        '   Keep it to 5-15 bullets, only durable learnings and preferences (no daily noise).',
+        '',
+        'Constraints:',
+        '- Do not hallucinate; ground everything in tool output and `.cowork/MISTAKES.md`.',
+        '- Ignore events from tasks titled "Kit: Hourly Memory Digest" / "Kit: Daily Context Sync" / "Kit: Weekly Synthesis".',
+        '',
+        'Return 1-3 sentences confirming the write (do not paste the full report).',
+      ].join('\n');
+
+    try {
+      const existing = await cron.list({ includeDisabled: true });
+      const hasMarker = (marker: string) =>
+        existing.some((j) => j.workspaceId === workspaceId && typeof j.description === 'string' && j.description.includes(marker));
+
+      const jobs: CronJobCreate[] = [
+        {
+          name: 'Kit: Hourly Memory Digest',
+          description: `Automated hourly memory digest. [${markers.hourly}]`,
+          enabled: true,
+          schedule: { kind: 'cron', expr: '0 * * * *' },
+          workspaceId,
+          taskPrompt: buildHourlyPrompt(),
+          taskTitle: 'Kit: Hourly Memory Digest',
+          maxHistoryEntries: 25,
+        },
+        {
+          name: 'Kit: Daily Context Sync',
+          description: `Automated daily context sync. [${markers.daily}]`,
+          enabled: true,
+          schedule: { kind: 'cron', expr: '0 21 * * *' },
+          workspaceId,
+          taskPrompt: buildDailyPrompt(),
+          taskTitle: 'Kit: Daily Context Sync',
+          maxHistoryEntries: 25,
+        },
+        {
+          name: 'Kit: Weekly Synthesis',
+          description: `Automated weekly synthesis. [${markers.weekly}]`,
+          enabled: true,
+          schedule: { kind: 'cron', expr: '0 18 * * 0' },
+          workspaceId,
+          taskPrompt: buildWeeklyPrompt(),
+          taskTitle: 'Kit: Weekly Synthesis',
+          maxHistoryEntries: 25,
+        },
+      ];
+
+      for (const job of jobs) {
+        const marker = job.description?.match(/\[(.+)\]/)?.[1] || '';
+        if (marker && hasMarker(marker)) continue;
+        const res = await cron.add(job);
+        if (!res.ok) {
+          console.warn('[Kit] Failed to add scheduled job:', job.name, res.error);
+        }
+      }
+    } catch (error) {
+      console.warn('[Kit] Failed to ensure default scheduled jobs:', error);
+    }
+  };
+
   ipcMain.handle(IPC_CHANNELS.KIT_GET_STATUS, async (_event, workspaceId: string) => {
     try {
       return await computeStatus(workspaceId);
@@ -4059,6 +4262,8 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository): void {
     const workspacePath = getWorkspacePath(request.workspaceId);
 
     await ensureDir(workspacePath, path.join(kitDirName, 'memory'));
+    await ensureDir(workspacePath, path.join(kitDirName, 'memory', 'hourly'));
+    await ensureDir(workspacePath, path.join(kitDirName, 'memory', 'weekly'));
     await ensureDir(workspacePath, path.join(kitDirName, 'projects'));
     await ensureDir(workspacePath, path.join(kitDirName, 'agents'));
     await ensureDir(workspacePath, path.join(kitDirName, 'uploads'));
@@ -4072,6 +4277,8 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository): void {
     for (const t of templates) {
       await writeTemplate(workspacePath, t.relPath, t.content, mode);
     }
+
+    await ensureDefaultKitCronJobs(request.workspaceId);
 
     return await computeStatus(request.workspaceId);
   });

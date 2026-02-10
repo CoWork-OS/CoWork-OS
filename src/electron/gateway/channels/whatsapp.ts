@@ -32,7 +32,7 @@ import {
 } from '@whiskeysockets/baileys';
 import * as fs from 'fs';
 import * as path from 'path';
-import { app } from 'electron';
+import { getUserDataDir } from '../../utils/user-data-dir';
 import {
   ChannelAdapter,
   ChannelStatus,
@@ -143,7 +143,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
     }
 
     // Set auth directory
-    this.authDir = config.authDir || path.join(app.getPath('userData'), 'whatsapp-auth');
+    this.authDir = config.authDir || path.join(getUserDataDir(), 'whatsapp-auth');
   }
 
   /**
@@ -352,8 +352,11 @@ export class WhatsAppAdapter implements ChannelAdapter {
     // Skip status and broadcast messages
     if (remoteJid.endsWith('@status') || remoteJid.endsWith('@broadcast')) return;
 
-    // CRITICAL: In self-chat mode, ONLY process messages from self-chat
-    // This prevents the bot from responding to messages sent to other people
+    // CRITICAL: In self-chat mode, only ROUTE messages from self-chat.
+    // For ambient workflows we can optionally ingest other chats into the local message log
+    // without routing them to the agent (log-only).
+    let ingestOnly = false;
+    let nonSelfChat = false;
     if (this.isSelfChatMode && this._selfJid) {
       // Normalize JIDs by removing device suffix (e.g., "123:5@s.whatsapp.net" -> "123@s.whatsapp.net")
       const normalizeJid = (jid: string) => jid.replace(/:[\d]+@/, '@');
@@ -361,16 +364,21 @@ export class WhatsAppAdapter implements ChannelAdapter {
       const remoteJidNormalized = normalizeJid(remoteJid);
 
       if (remoteJidNormalized !== selfJidNormalized) {
-        const now = Date.now();
-        if (now - this.selfChatIgnoreLogAt > 30000) {
-          console.log(
-            `WhatsApp: Ignoring message from ${remoteJidNormalized} because self-chat mode is enabled. ` +
-            'Disable self-chat mode to accept messages from other numbers.'
-          );
-          this.selfChatIgnoreLogAt = now;
+        nonSelfChat = true;
+        if (this.config.ingestNonSelfChatsInSelfChatMode) {
+          ingestOnly = true;
+        } else {
+          const now = Date.now();
+          if (now - this.selfChatIgnoreLogAt > 30000) {
+            console.log(
+              `WhatsApp: Ignoring message from ${remoteJidNormalized} because self-chat mode is enabled. ` +
+              'Disable self-chat mode to accept messages from other numbers.'
+            );
+            this.selfChatIgnoreLogAt = now;
+          }
+          // Message is NOT in self-chat, silently ignore it
+          return;
         }
-        // Message is NOT in self-chat, silently ignore it
-        return;
       }
     }
 
@@ -392,6 +400,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
     const senderE164 = isGroup
       ? participantJid ? this.jidToE164(participantJid) : null
       : from;
+    const isFromMe = msg.key?.fromMe === true;
 
     // Check access control
     if (this.config.allowedNumbers && this.config.allowedNumbers.length > 0) {
@@ -418,7 +427,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
     }
 
     // Send read receipt
-    if (id && this.config.sendReadReceipts && upsertType === 'notify') {
+    if (!ingestOnly && id && this.config.sendReadReceipts && upsertType === 'notify') {
       try {
         await this.sock?.readMessages([{
           remoteJid,
@@ -440,7 +449,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
 
     // Download audio attachment if present
     const attachments: MessageAttachment[] = [];
-    if (msg.message?.audioMessage) {
+    if (!ingestOnly && msg.message?.audioMessage) {
       const audioAttachment = await this.downloadAudioAttachment(msg.message);
       if (audioAttachment) {
         attachments.push(audioAttachment);
@@ -448,16 +457,26 @@ export class WhatsAppAdapter implements ChannelAdapter {
     }
 
     // Create incoming message
+    // Note: In self-chat mode we may ingest other chats into the message log (ingestOnly).
+    // If the message is from our own account in a non-self chat, treat it as an outgoing user message.
+    const authorId = nonSelfChat && isFromMe
+      ? (this._selfE164 || this._selfJid || 'self')
+      : (senderE164 || participantJid || remoteJid);
+    const authorName = nonSelfChat && isFromMe
+      ? 'Me'
+      : (msg.pushName || senderE164 || 'Unknown');
     const incomingMessage: IncomingMessage = {
       messageId: id || `wa-${Date.now()}`,
       channel: 'whatsapp',
-      userId: senderE164 || participantJid || remoteJid,
-      userName: msg.pushName || senderE164 || 'Unknown',
+      userId: authorId,
+      userName: authorName,
       chatId: remoteJid,
       isGroup,
+      ...(nonSelfChat && isFromMe ? { direction: 'outgoing_user' as const } : {}),
       text: body || (attachments.length === 0 ? this.extractMediaPlaceholder(msg.message) : '') || '',
       timestamp: messageTimestampMs ? new Date(messageTimestampMs) : new Date(),
       attachments: attachments.length > 0 ? attachments : undefined,
+      ...(ingestOnly ? { ingestOnly: true } : {}),
       raw: msg,
     };
 

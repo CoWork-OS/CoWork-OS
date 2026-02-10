@@ -20,6 +20,7 @@ export function WhatsAppSettings({ onStatusChange }: WhatsAppSettingsProps) {
   const [allowedNumbers, setAllowedNumbers] = useState('');
   const [selfChatMode, setSelfChatMode] = useState(true);
   const [responsePrefix, setResponsePrefix] = useState('🤖');
+  const [ingestNonSelfChatsInSelfChatMode, setIngestNonSelfChatsInSelfChatMode] = useState(false);
 
   // QR code state
   const [qrCode, setQrCode] = useState<string | null>(null);
@@ -45,6 +46,7 @@ export function WhatsAppSettings({ onStatusChange }: WhatsAppSettingsProps) {
         if (whatsappChannel.config) {
           setSelfChatMode(whatsappChannel.config.selfChatMode ?? true);
           setResponsePrefix(whatsappChannel.config.responsePrefix ?? '🤖');
+          setIngestNonSelfChatsInSelfChatMode(whatsappChannel.config.ingestNonSelfChatsInSelfChatMode ?? false);
         }
 
         // Load users for this channel
@@ -137,6 +139,7 @@ export function WhatsAppSettings({ onStatusChange }: WhatsAppSettingsProps) {
           .filter(Boolean),
         selfChatMode,
         responsePrefix,
+        ingestNonSelfChatsInSelfChatMode,
       });
 
       await loadChannel();
@@ -278,6 +281,27 @@ export function WhatsAppSettings({ onStatusChange }: WhatsAppSettingsProps) {
     }
   };
 
+  const handleUpdateIngestNonSelfChats = async (enabled: boolean) => {
+    if (!channel) return;
+
+    try {
+      await window.electronAPI.updateGatewayChannel({
+        id: channel.id,
+        config: {
+          ...channel.config,
+          ingestNonSelfChatsInSelfChatMode: enabled,
+        },
+      });
+      setIngestNonSelfChatsInSelfChatMode(enabled);
+      setChannel({
+        ...channel,
+        config: { ...channel.config, ingestNonSelfChatsInSelfChatMode: enabled },
+      });
+    } catch (error: any) {
+      console.error('Failed to update ingest setting:', error);
+    }
+  };
+
   const handleGeneratePairingCode = async () => {
     if (!channel) return;
 
@@ -385,6 +409,23 @@ export function WhatsAppSettings({ onStatusChange }: WhatsAppSettingsProps) {
               />
               <p className="settings-hint">
                 Prefix added to bot messages (e.g., "🤖" or "[CoWork]")
+              </p>
+            </div>
+          )}
+
+          {selfChatMode && (
+            <div className="settings-field">
+              <label className="settings-checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={ingestNonSelfChatsInSelfChatMode}
+                  onChange={(e) => setIngestNonSelfChatsInSelfChatMode(e.target.checked)}
+                />
+                <span>Ingest Other Chats (Log-Only)</span>
+              </label>
+              <p className="settings-hint">
+                When enabled, CoWork OS will ingest messages from your other WhatsApp chats into the local log
+                (for scheduled digests/follow-ups), but will not reply outside the self-chat.
               </p>
             </div>
           )}
@@ -542,6 +583,27 @@ export function WhatsAppSettings({ onStatusChange }: WhatsAppSettingsProps) {
             </div>
           )}
 
+          {selfChatMode && (
+            <div className="settings-field">
+              <label className="settings-checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={ingestNonSelfChatsInSelfChatMode}
+                  onChange={(e) => {
+                    setIngestNonSelfChatsInSelfChatMode(e.target.checked);
+                    if (channel) {
+                      handleUpdateIngestNonSelfChats(e.target.checked);
+                    }
+                  }}
+                />
+                <span>Ingest Other Chats (Log-Only)</span>
+              </label>
+              <p className="settings-hint">
+                In self-chat mode, this ingests your other WhatsApp chats into the local log without replying.
+              </p>
+            </div>
+          )}
+
           <div className="settings-info-box">
             <strong>💡 Tip:</strong> For the best experience, use a separate WhatsApp number for the bot.
             Then disable self-chat mode - your bot will appear as a separate contact.
@@ -689,6 +751,22 @@ export function WhatsAppSettings({ onStatusChange }: WhatsAppSettingsProps) {
             </div>
             <p className="settings-hint">
               Prefix added to bot messages (e.g., "🤖" or "[CoWork]")
+            </p>
+          </div>
+        )}
+
+        {selfChatMode && (
+          <div className="settings-field">
+            <label className="settings-checkbox-label">
+              <input
+                type="checkbox"
+                checked={ingestNonSelfChatsInSelfChatMode}
+                onChange={(e) => handleUpdateIngestNonSelfChats(e.target.checked)}
+              />
+              <span>Ingest Other Chats (Log-Only)</span>
+            </label>
+            <p className="settings-hint">
+              In self-chat mode, ingest messages from your other WhatsApp chats into the local log without replying.
             </p>
           </div>
         )}

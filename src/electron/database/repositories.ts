@@ -935,7 +935,13 @@ export interface ChannelMessage {
   channelMessageId: string;
   chatId: string;
   userId?: string;
-  direction: 'incoming' | 'outgoing';
+  /**
+   * Message direction as recorded by the gateway.
+   * - incoming: message received from another user/device
+   * - outgoing: message sent by CoWork OS back into the chat
+   * - outgoing_user: message sent by the local user (captured from some channels when enabled)
+   */
+  direction: 'incoming' | 'outgoing' | 'outgoing_user';
   content: string;
   attachments?: Array<{ type: string; url?: string; fileName?: string }>;
   timestamp: number;
@@ -1428,6 +1434,10 @@ export class ChannelMessageRepository {
   }
 
   private mapRowToMessage(row: Record<string, unknown>): ChannelMessage {
+    const directionRaw = String(row.direction ?? '').trim();
+    const direction: ChannelMessage['direction'] =
+      directionRaw === 'outgoing' || directionRaw === 'outgoing_user' ? directionRaw : 'incoming';
+
     return {
       id: row.id as string,
       channelId: row.channel_id as string,
@@ -1435,7 +1445,7 @@ export class ChannelMessageRepository {
       channelMessageId: row.channel_message_id as string,
       chatId: row.chat_id as string,
       userId: (row.user_id as string) || undefined,
-      direction: row.direction as 'incoming' | 'outgoing',
+      direction,
       content: row.content as string,
       attachments: row.attachments ? safeJsonParse(row.attachments as string, undefined, 'message.attachments') : undefined,
       timestamp: row.timestamp as number,

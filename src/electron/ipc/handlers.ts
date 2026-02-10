@@ -4,6 +4,7 @@ import * as fs from 'fs/promises';
 import * as fsSync from 'fs';
 import mammoth from 'mammoth';
 import mime from 'mime-types';
+import { getUserDataDir } from '../utils/user-data-dir';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const pdfParseModule = require('pdf-parse');
@@ -1757,7 +1758,12 @@ export async function setupIpcHandlers(
         validated.allowedNumbers,
         validated.securityMode || 'pairing',
         validated.selfChatMode ?? true,
-        validated.responsePrefix ?? '🤖'
+        validated.responsePrefix ?? '🤖',
+        {
+          ambientMode: validated.ambientMode ?? false,
+          silentUnauthorized: validated.silentUnauthorized ?? false,
+          ingestNonSelfChatsInSelfChatMode: validated.ingestNonSelfChatsInSelfChatMode ?? false,
+        }
       );
 
       // Automatically enable and connect WhatsApp to start QR code generation
@@ -1786,7 +1792,12 @@ export async function setupIpcHandlers(
         validated.allowedContacts,
         validated.securityMode || 'pairing',
         validated.dmPolicy || 'pairing',
-        validated.groupPolicy || 'allowlist'
+        validated.groupPolicy || 'allowlist',
+        {
+          ambientMode: validated.ambientMode ?? false,
+          silentUnauthorized: validated.silentUnauthorized ?? false,
+          captureSelfMessages: validated.captureSelfMessages ?? false,
+        }
       );
 
       // Automatically enable and connect iMessage
@@ -1951,7 +1962,12 @@ export async function setupIpcHandlers(
         validated.blueBubblesPassword!,
         validated.blueBubblesWebhookPort ?? 3101,
         validated.blueBubblesAllowedContacts,
-        validated.securityMode || 'pairing'
+        validated.securityMode || 'pairing',
+        {
+          ambientMode: validated.ambientMode ?? false,
+          silentUnauthorized: validated.silentUnauthorized ?? false,
+          captureSelfMessages: validated.captureSelfMessages ?? false,
+        }
       );
 
       // Automatically enable and connect BlueBubbles
@@ -4598,7 +4614,7 @@ function setupMemoryHandlers(): void {
   // === Migration Status Handlers ===
   // These handlers help show one-time notifications after app migration (cowork-oss → cowork-os)
 
-  const userDataPath = app.getPath('userData');
+  const userDataPath = getUserDataDir();
   const migrationMarkerPath = path.join(userDataPath, '.migrated-from-cowork-oss');
   const notificationDismissedPath = path.join(userDataPath, '.migration-notification-dismissed');
 

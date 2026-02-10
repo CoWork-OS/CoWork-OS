@@ -31,6 +31,16 @@ export interface IncomingMessage {
   chatId: string;
   /** Whether this message is from a group chat */
   isGroup?: boolean;
+  /**
+   * Optional direction hint for persistence.
+   * Default: incoming
+   */
+  direction?: 'incoming' | 'outgoing_user';
+  /**
+   * If true, the gateway will persist this message but will NOT route it to the agent
+   * or send any replies (useful for ambient/monitoring ingestion).
+   */
+  ingestOnly?: boolean;
   /** Message content */
   text: string;
   /** Timestamp */
@@ -195,6 +205,14 @@ export interface WhatsAppConfig extends ChannelConfig {
    * Only used when selfChatMode is true. Default: "🤖"
    */
   responsePrefix?: string;
+  /**
+   * When selfChatMode is enabled, also ingest messages from other chats (DMs/groups) into the local
+   * message log without routing them to the agent (ambient/log-only).
+   *
+   * This enables scheduled digests/follow-up extraction across your existing chats while still
+   * preventing the bot from responding outside the self-chat.
+   */
+  ingestNonSelfChatsInSelfChatMode?: boolean;
 }
 
 /**
@@ -222,6 +240,12 @@ export interface ImessageConfig extends ChannelConfig {
   deduplicationEnabled?: boolean;
   /** Response prefix for bot messages */
   responsePrefix?: string;
+  /**
+   * Capture messages that are "from me" (sent by the local Messages account).
+   * When enabled, these messages are ingested into the local message log as direction=outgoing_user
+   * and marked ingestOnly to avoid reply loops.
+   */
+  captureSelfMessages?: boolean;
 }
 
 /**
@@ -363,6 +387,12 @@ export interface BlueBubblesConfig extends ChannelConfig {
   deduplicationEnabled?: boolean;
   /** Allowed contacts (phone numbers or emails) */
   allowedContacts?: string[];
+  /**
+   * Capture messages that are "from me" (sent by the linked iMessage account).
+   * When enabled, these messages are ingested into the local message log as direction=outgoing_user
+   * and marked ingestOnly to avoid reply loops.
+   */
+  captureSelfMessages?: boolean;
 }
 
 /**

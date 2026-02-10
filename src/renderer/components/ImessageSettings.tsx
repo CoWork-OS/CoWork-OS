@@ -24,6 +24,9 @@ export function ImessageSettings({ onStatusChange }: ImessageSettingsProps) {
   const [allowedContacts, setAllowedContacts] = useState('');
   const [dmPolicy, setDmPolicy] = useState<DmPolicy>('pairing');
   const [groupPolicy, setGroupPolicy] = useState<GroupPolicy>('allowlist');
+  const [ambientMode, setAmbientMode] = useState(false);
+  const [silentUnauthorized, setSilentUnauthorized] = useState(false);
+  const [captureSelfMessages, setCaptureSelfMessages] = useState(false);
 
   // Pairing code state
   const [pairingCode, setPairingCode] = useState<string | null>(null);
@@ -51,6 +54,9 @@ export function ImessageSettings({ onStatusChange }: ImessageSettingsProps) {
           setGroupPolicy(imessageChannel.config.groupPolicy as GroupPolicy || 'allowlist');
           const contacts = imessageChannel.config.allowedContacts as string[] || [];
           setAllowedContacts(contacts.join(', '));
+          setAmbientMode(Boolean(imessageChannel.config.ambientMode));
+          setSilentUnauthorized(Boolean(imessageChannel.config.silentUnauthorized));
+          setCaptureSelfMessages(Boolean(imessageChannel.config.captureSelfMessages));
         }
 
         // Load users for this channel
@@ -100,6 +106,9 @@ export function ImessageSettings({ onStatusChange }: ImessageSettingsProps) {
           .split(',')
           .map(c => c.trim())
           .filter(Boolean),
+        ambientMode,
+        silentUnauthorized,
+        captureSelfMessages,
       });
 
       await loadChannel();
@@ -176,6 +185,20 @@ export function ImessageSettings({ onStatusChange }: ImessageSettingsProps) {
       setChannel({ ...channel, securityMode: mode });
     } catch (error: any) {
       console.error('Failed to update security mode:', error);
+    }
+  };
+
+  const handleUpdateConfig = async (next: Record<string, unknown>) => {
+    if (!channel) return;
+
+    try {
+      await window.electronAPI.updateGatewayChannel({
+        id: channel.id,
+        config: { ...channel.config, ...next },
+      });
+      setChannel({ ...channel, config: { ...channel.config, ...next } });
+    } catch (error: any) {
+      console.error('Failed to update iMessage config:', error);
     }
   };
 
@@ -354,6 +377,48 @@ export function ImessageSettings({ onStatusChange }: ImessageSettingsProps) {
             </p>
           </div>
 
+          <div className="settings-field">
+            <label className="settings-checkbox-label">
+              <input
+                type="checkbox"
+                checked={ambientMode}
+                onChange={(e) => setAmbientMode(e.target.checked)}
+              />
+              <span>Ambient Mode (Log-Only)</span>
+            </label>
+            <p className="settings-hint">
+              When enabled, iMessage messages are ingested into the local log but only commands (messages starting with "/") are processed.
+            </p>
+          </div>
+
+          <div className="settings-field">
+            <label className="settings-checkbox-label">
+              <input
+                type="checkbox"
+                checked={captureSelfMessages}
+                onChange={(e) => setCaptureSelfMessages(e.target.checked)}
+              />
+              <span>Capture Self Messages</span>
+            </label>
+            <p className="settings-hint">
+              Ingest messages sent by the local Messages account into the log (as outgoing_user) for better follow-up extraction.
+            </p>
+          </div>
+
+          <div className="settings-field">
+            <label className="settings-checkbox-label">
+              <input
+                type="checkbox"
+                checked={silentUnauthorized}
+                onChange={(e) => setSilentUnauthorized(e.target.checked)}
+              />
+              <span>Silent Unauthorized</span>
+            </label>
+            <p className="settings-hint">
+              Do not send "pairing required" or "unauthorized" replies (useful for ambient ingestion).
+            </p>
+          </div>
+
           {testResult && (
             <div className={`settings-callout ${testResult.success ? 'success' : 'error'}`}>
               {testResult.success ? 'Connection successful!' : testResult.error}
@@ -467,6 +532,61 @@ export function ImessageSettings({ onStatusChange }: ImessageSettingsProps) {
             )}
           </div>
         )}
+      </div>
+
+      <div className="settings-section">
+        <h4>Ambient Inbox</h4>
+
+        <div className="settings-field">
+          <label className="settings-checkbox-label">
+            <input
+              type="checkbox"
+              checked={ambientMode}
+              onChange={(e) => {
+                setAmbientMode(e.target.checked);
+                handleUpdateConfig({ ambientMode: e.target.checked });
+              }}
+            />
+            <span>Ambient Mode (Log-Only)</span>
+          </label>
+          <p className="settings-hint">
+            Ingest messages into the local log, but only process explicit commands (messages starting with "/").
+          </p>
+        </div>
+
+        <div className="settings-field">
+          <label className="settings-checkbox-label">
+            <input
+              type="checkbox"
+              checked={captureSelfMessages}
+              onChange={(e) => {
+                setCaptureSelfMessages(e.target.checked);
+                handleUpdateConfig({ captureSelfMessages: e.target.checked });
+              }}
+            />
+            <span>Capture Self Messages</span>
+          </label>
+          <p className="settings-hint">
+            Ingest messages sent by the local Messages account (direction=outgoing_user). These are log-only to avoid loops.
+          </p>
+        </div>
+
+        <div className="settings-field">
+          <label className="settings-checkbox-label">
+            <input
+              type="checkbox"
+              checked={silentUnauthorized}
+              onChange={(e) => {
+                setSilentUnauthorized(e.target.checked);
+                handleUpdateConfig({ silentUnauthorized: e.target.checked });
+              }}
+            />
+            <span>Silent Unauthorized</span>
+          </label>
+          <p className="settings-hint">
+            Do not send "pairing required" / "unauthorized" replies.
+          </p>
+        </div>
       </div>
 
       {users.length > 0 && (

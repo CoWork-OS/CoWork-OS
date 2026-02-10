@@ -242,7 +242,10 @@ export class ChannelTools {
       const ts = typeof r.timestamp === 'number' ? r.timestamp : Number(r.timestamp ?? 0);
       const content = String(r.content ?? '');
       const preview = content.length > 200 ? content.slice(0, 200) + '...' : content;
-      const direction = (r.direction === 'incoming' || r.direction === 'outgoing') ? r.direction : 'incoming';
+      const directionRaw = typeof r.direction === 'string' ? r.direction : String(r.direction ?? '');
+      const direction = (directionRaw === 'incoming' || directionRaw === 'outgoing' || directionRaw === 'outgoing_user')
+        ? directionRaw
+        : 'incoming';
       const messageCount = typeof r.message_count === 'number' ? r.message_count : Number(r.message_count ?? 0);
       return {
         chat_id: chatId,
@@ -379,10 +382,14 @@ export class ChannelTools {
           ? { id: channelUserId, name: displayName }
           : undefined;
         const attachments = parseAttachments(r.attachments);
+        const directionRaw = typeof r.direction === 'string' ? r.direction : String(r.direction ?? '');
+        const dir = (directionRaw === 'incoming' || directionRaw === 'outgoing' || directionRaw === 'outgoing_user')
+          ? directionRaw
+          : 'incoming';
         return {
           id: String(r.id ?? ''),
           channel_message_id: String(r.channel_message_id ?? ''),
-          direction: (r.direction === 'incoming' || r.direction === 'outgoing') ? r.direction : 'incoming',
+          direction: dir,
           timestamp_ms: ts,
           timestamp: new Date(ts).toISOString(),
           user,

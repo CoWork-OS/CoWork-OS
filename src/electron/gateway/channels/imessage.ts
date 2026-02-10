@@ -319,8 +319,10 @@ export class ImessageAdapter implements ChannelAdapter {
    * Process an inbound message
    */
   private async processInboundMessage(payload: ImessagePayload): Promise<void> {
-    // Skip messages from self
-    if (payload.is_from_me) {
+    const isFromMe = payload.is_from_me === true;
+    // By default, skip messages from self to avoid reply loops.
+    // When captureSelfMessages is enabled, ingest them into the local log as outgoing_user and do not route.
+    if (isFromMe && this.config.captureSelfMessages !== true) {
       return;
     }
 
@@ -368,6 +370,7 @@ export class ImessageAdapter implements ChannelAdapter {
       text: text || '<attachment>',
       timestamp: payload.created_at ? new Date(payload.created_at) : new Date(),
       ...(attachments && attachments.length > 0 ? { attachments } : {}),
+      ...(isFromMe ? { direction: 'outgoing_user' as const, ingestOnly: true } : {}),
       raw: payload,
     };
 

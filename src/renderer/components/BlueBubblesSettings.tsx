@@ -22,6 +22,9 @@ export function BlueBubblesSettings({ onStatusChange }: BlueBubblesSettingsProps
   const [password, setPassword] = useState('');
   const [webhookPort, setWebhookPort] = useState(3101);
   const [allowedContacts, setAllowedContacts] = useState('');
+  const [ambientMode, setAmbientMode] = useState(false);
+  const [captureSelfMessages, setCaptureSelfMessages] = useState(false);
+  const [silentUnauthorized, setSilentUnauthorized] = useState(false);
 
   // Pairing code state
   const [pairingCode, setPairingCode] = useState<string | null>(null);
@@ -51,6 +54,9 @@ export function BlueBubblesSettings({ onStatusChange }: BlueBubblesSettingsProps
           setWebhookPort(bbChannel.config.webhookPort as number || 3101);
           const contacts = bbChannel.config.allowedContacts as string[] || [];
           setAllowedContacts(contacts.join(', '));
+          setAmbientMode(Boolean(bbChannel.config.ambientMode));
+          setCaptureSelfMessages(Boolean(bbChannel.config.captureSelfMessages));
+          setSilentUnauthorized(Boolean(bbChannel.config.silentUnauthorized));
         }
 
         // Load users for this channel
@@ -106,6 +112,9 @@ export function BlueBubblesSettings({ onStatusChange }: BlueBubblesSettingsProps
         type: 'bluebubbles',
         name: channelName,
         securityMode,
+        ambientMode,
+        silentUnauthorized,
+        captureSelfMessages,
         blueBubblesServerUrl: serverUrl.trim(),
         blueBubblesPassword: password.trim(),
         blueBubblesWebhookPort: webhookPort,
@@ -186,6 +195,26 @@ export function BlueBubblesSettings({ onStatusChange }: BlueBubblesSettingsProps
       setChannel({ ...channel, securityMode: newMode });
     } catch (error: any) {
       console.error('Failed to update security mode:', error);
+    }
+  };
+
+  const handleUpdateConfig = async (updates: Record<string, unknown>) => {
+    if (!channel) return;
+    try {
+      setSaving(true);
+      await window.electronAPI.updateGatewayChannel({
+        id: channel.id,
+        config: {
+          ...(channel.config || {}),
+          ...updates,
+        },
+      });
+      await loadChannel();
+    } catch (error: any) {
+      console.error('Failed to update BlueBubbles config:', error);
+      setTestResult({ success: false, error: error.message });
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -318,6 +347,48 @@ export function BlueBubblesSettings({ onStatusChange }: BlueBubblesSettingsProps
           </div>
 
           <div className="settings-field">
+            <label className="settings-checkbox-label">
+              <input
+                type="checkbox"
+                checked={ambientMode}
+                onChange={(e) => setAmbientMode(e.target.checked)}
+              />
+              <span>Ambient Mode (Log-Only)</span>
+            </label>
+            <p className="settings-hint">
+              When enabled, messages are ingested into the local log but only commands (messages starting with "/") are processed.
+            </p>
+          </div>
+
+          <div className="settings-field">
+            <label className="settings-checkbox-label">
+              <input
+                type="checkbox"
+                checked={captureSelfMessages}
+                onChange={(e) => setCaptureSelfMessages(e.target.checked)}
+              />
+              <span>Capture Self Messages</span>
+            </label>
+            <p className="settings-hint">
+              Ingest messages sent by your iMessage account into the log (as outgoing_user) for better follow-up extraction.
+            </p>
+          </div>
+
+          <div className="settings-field">
+            <label className="settings-checkbox-label">
+              <input
+                type="checkbox"
+                checked={silentUnauthorized}
+                onChange={(e) => setSilentUnauthorized(e.target.checked)}
+              />
+              <span>Silent Unauthorized</span>
+            </label>
+            <p className="settings-hint">
+              Do not send "pairing required" or "unauthorized" replies (useful for ambient ingestion).
+            </p>
+          </div>
+
+          <div className="settings-field">
             <label>Security Mode</label>
             <select
               className="settings-select"
@@ -441,6 +512,66 @@ export function BlueBubblesSettings({ onStatusChange }: BlueBubblesSettingsProps
           <option value="allowlist">Allowlist Only</option>
           <option value="open">Open</option>
         </select>
+      </div>
+
+      <div className="settings-section">
+        <h4>Ambient Inbox</h4>
+        <div className="settings-field">
+          <label className="settings-checkbox-label">
+            <input
+              type="checkbox"
+              checked={ambientMode}
+              onChange={async (e) => {
+                const checked = e.target.checked;
+                setAmbientMode(checked);
+                await handleUpdateConfig({ ambientMode: checked });
+              }}
+              disabled={saving}
+            />
+            <span>Ambient Mode (Log-Only)</span>
+          </label>
+          <p className="settings-hint">
+            When enabled, messages are ingested into the local log but only commands (messages starting with "/") are processed.
+          </p>
+        </div>
+
+        <div className="settings-field">
+          <label className="settings-checkbox-label">
+            <input
+              type="checkbox"
+              checked={captureSelfMessages}
+              onChange={async (e) => {
+                const checked = e.target.checked;
+                setCaptureSelfMessages(checked);
+                await handleUpdateConfig({ captureSelfMessages: checked });
+              }}
+              disabled={saving}
+            />
+            <span>Capture Self Messages</span>
+          </label>
+          <p className="settings-hint">
+            Ingest messages sent by your iMessage account into the log (as outgoing_user) for better follow-up extraction.
+          </p>
+        </div>
+
+        <div className="settings-field">
+          <label className="settings-checkbox-label">
+            <input
+              type="checkbox"
+              checked={silentUnauthorized}
+              onChange={async (e) => {
+                const checked = e.target.checked;
+                setSilentUnauthorized(checked);
+                await handleUpdateConfig({ silentUnauthorized: checked });
+              }}
+              disabled={saving}
+            />
+            <span>Silent Unauthorized</span>
+          </label>
+          <p className="settings-hint">
+            Do not send "pairing required" or "unauthorized" replies (useful for ambient ingestion).
+          </p>
+        </div>
       </div>
 
       {securityMode === 'pairing' && (

@@ -5,7 +5,7 @@
  * Manages message flow: Security → Session → Task/Response
  */
 
-import { BrowserWindow } from 'electron';
+import type { BrowserWindow } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
 import {
@@ -33,15 +33,15 @@ import {
 } from '../database/repositories';
 import Database from 'better-sqlite3';
 import { AgentDaemon } from '../agent/daemon';
-import { Task, IPC_CHANNELS, TEMP_WORKSPACE_ID, TEMP_WORKSPACE_NAME, Workspace } from '../../shared/types';
+import { Task, IPC_CHANNELS, TEMP_WORKSPACE_ID, TEMP_WORKSPACE_NAME, Workspace, WorkspacePermissions } from '../../shared/types';
 import * as os from 'os';
 import { LLMProviderFactory, LLMSettings } from '../agent/llm/provider-factory';
 import { LLMProviderType } from '../agent/llm/types';
 import { getCustomSkillLoader } from '../agent/custom-skill-loader';
-import { app } from 'electron';
 import { getVoiceService } from '../voice/VoiceService';
 import { PersonalityManager } from '../settings/personality-manager';
 import { describeSchedule, getCronService, parseIntervalToMs, type CronSchedule } from '../cron';
+import { getUserDataDir } from '../utils/user-data-dir';
 import {
   getChannelMessage,
   getCompletionMessage,
@@ -53,6 +53,34 @@ import { DEFAULT_QUIRKS } from '../../shared/types';
 import { formatChatTranscriptForPrompt } from './chat-transcript';
 import { evaluateWorkspaceRouterRules } from './router-rules';
 import { extractJsonValues } from '../utils/json-utils';
+
+function getCoworkVersion(): string {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const electron = require('electron') as any;
+    const app = electron?.app;
+    if (typeof app?.getVersion === 'function') {
+      const v = String(app.getVersion() || '').trim();
+      if (v) return v;
+    }
+  } catch {
+    // ignore
+  }
+
+  const env = process.env.npm_package_version;
+  if (typeof env === 'string' && env.trim()) return env.trim();
+
+  try {
+    const raw = fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf-8');
+    const parsed = JSON.parse(raw) as any;
+    const v = typeof parsed?.version === 'string' ? parsed.version.trim() : '';
+    if (v) return v;
+  } catch {
+    // ignore
+  }
+
+  return 'unknown';
+}
 
 export interface RouterConfig {
   /** Default workspace ID to use for new sessions */
@@ -317,6 +345,29 @@ export class MessageRouter {
     );
 
     return tempWorkspace;
+  }
+
+  private static slugify(value: string): string {
+    const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+    const slug = normalized
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+/, '')
+      .replace(/-+$/, '');
+    return slug.length > 0 ? slug.slice(0, 60) : 'scheduled-task';
+  }
+
+  private createDedicatedWorkspaceForScheduledJob(jobName: string): Workspace {
+    const root = path.join(getUserDataDir(), 'scheduled-workspaces');
+    fs.mkdirSync(root, { recursive: true });
+
+    const slug = MessageRouter.slugify(jobName);
+    const dirName = `${slug}-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+    const jobDir = path.join(root, dirName);
+    fs.mkdirSync(jobDir, { recursive: true });
+
+    const permissions: WorkspacePermissions = { read: true, write: true, delete: false, network: true, shell: false };
+    const name = `Scheduled: ${jobName}`.trim();
+    return this.workspaceRepo.create(name, jobDir, permissions);
   }
 
   /**
@@ -1290,11 +1341,18 @@ export class MessageRouter {
       return;
     }
 
+    const channelConfig = (channel.config || {}) as any;
+    const ambientMode = channelConfig.ambientMode === true;
+    const silentUnauthorized = channelConfig.silentUnauthorized === true || ambientMode;
+    const textTrimmed = (message.text || '').trim();
+    const ambientIngestOnly = ambientMode && !(textTrimmed.startsWith('/') || this.looksLikePairingCode(textTrimmed));
+    const ingestOnly = message.ingestOnly === true || ambientIngestOnly;
+
     // Security check first (avoid doing extra work like transcription for unauthorized users)
     const securityResult = await this.securityManager.checkAccess(channel, message, message.isGroup);
 
     // Transcribe any audio attachments before processing (authorized only)
-    if (securityResult.allowed) {
+    if (securityResult.allowed && !ingestOnly) {
       await this.transcribeAudioAttachments(message);
     }
 
@@ -1304,7 +1362,7 @@ export class MessageRouter {
       channelMessageId: message.messageId,
       chatId: message.chatId,
       userId: securityResult.user?.id,
-      direction: 'incoming',
+      direction: message.direction === 'outgoing_user' ? 'outgoing_user' : 'incoming',
       content: message.text,
       attachments: this.toDbAttachments(message.attachments),
       timestamp: message.timestamp.getTime(),
@@ -1322,9 +1380,14 @@ export class MessageRouter {
       },
     });
 
+    // Ingest-only mode: persist the message but do not route to the agent or reply.
+    if (ingestOnly) {
+      return;
+    }
+
     if (!securityResult.allowed) {
       // Handle unauthorized access
-      await this.handleUnauthorizedMessage(adapter, message, securityResult);
+      await this.handleUnauthorizedMessage(adapter, message, securityResult, { silent: silentUnauthorized });
       return;
     }
 
@@ -1361,8 +1424,10 @@ export class MessageRouter {
   private async handleUnauthorizedMessage(
     adapter: ChannelAdapter,
     message: IncomingMessage,
-    securityResult: { reason?: string; pairingRequired?: boolean }
+    securityResult: { reason?: string; pairingRequired?: boolean },
+    opts?: { silent?: boolean }
   ): Promise<void> {
+    const silent = opts?.silent === true;
     // If pairing is required, check if the message IS a pairing code or /pair command
     if (securityResult.pairingRequired) {
       const text = message.text.trim();
@@ -1382,6 +1447,12 @@ export class MessageRouter {
         await this.handlePairingAttempt(adapter, message, text);
         return;
       }
+    }
+
+    // Silent mode: do not send "unauthorized" / "pairing required" messages to the chat.
+    // Useful for ambient ingestion where we want to log messages without responding.
+    if (silent) {
+      return;
     }
 
     // Not a pairing code or pairing not required - send appropriate message
@@ -2023,9 +2094,9 @@ export class MessageRouter {
       '- Suggested next actions: 3-7 bullet items, ordered by urgency.',
       '',
       'Data sources (use what is available):',
-      '- Prefer calendar_action + gmail_action if configured.',
+      '- Prefer calendar_action + gmail_action if configured. If calendar_action is unavailable and you are on macOS, use apple_calendar_action for Apple Calendar.',
       '- If gmail_action is unavailable, use email_imap_unread if available; otherwise use the Email channel message log via channel_list_chats/channel_history.',
-      '- If Apple Reminders is available on this machine, include relevant reminders; otherwise skip reminders.',
+      '- If Apple Reminders is available on this machine, use apple_reminders_action to include relevant reminders; otherwise skip reminders.',
       '',
       'Output should be readable on mobile. Use short bullets, no long paragraphs.',
     ].join('\n');
@@ -2557,14 +2628,8 @@ export class MessageRouter {
       return;
     }
 
-    // Ensure a workspace is set for the session (scheduled tasks still need a workspaceId).
     const session = this.sessionRepo.findById(sessionId);
-    let workspaceId = session?.workspaceId;
-    if (!workspaceId) {
-      const temp = this.getOrCreateTempWorkspace();
-      this.sessionManager.setSessionWorkspace(sessionId, temp.id);
-      workspaceId = temp.id;
-    }
+    const sessionWorkspaceId = session?.workspaceId;
 
     const delivery = {
       enabled: true,
@@ -2587,6 +2652,13 @@ export class MessageRouter {
         job.delivery.channelType === adapter.type &&
         job.delivery.channelId === message.chatId
       );
+
+    const workspaceId = (() => {
+      const existing = existingJobs[0]?.workspaceId;
+      if (existing && existing !== TEMP_WORKSPACE_ID) return existing;
+      if (sessionWorkspaceId && sessionWorkspaceId !== TEMP_WORKSPACE_ID) return sessionWorkspaceId;
+      return this.createDedicatedWorkspaceForScheduledJob(jobName).id;
+    })();
 
     const result = existingJobs.length > 0
       ? await cronService.update(existingJobs[0].id, {
@@ -2794,6 +2866,7 @@ export class MessageRouter {
           '- `/schedule every 6h Pull latest logs and summarize.`\n' +
           '- `/schedule at 2026-02-08 18:30 Remind me to submit expenses.`\n\n' +
           'Tip: In scheduled prompts you can use `{{today}}`, `{{tomorrow}}`, `{{week_end}}`, `{{now}}`, plus `{{chat_messages}}`, `{{chat_since}}`, `{{chat_until}}`.\n' +
+          'Advanced: add `--source-chat <chatId>` (and optional `--source-channel <channel>`) before your prompt to resolve `{{chat_*}}` from a different chat than the delivery chat.\n' +
           'Add `--if-result` before your prompt to only post when the task produces a non-empty result.',
       });
       return;
@@ -2806,6 +2879,8 @@ export class MessageRouter {
     let schedule: CronSchedule | null = null;
     let promptParts: string[] = [];
     let deliverOnlyIfResult = false;
+    let sourceChatId: string | undefined;
+    let sourceChannelType: ChannelType | undefined;
 
     if (scheduleKind === 'daily' || scheduleKind === 'weekdays') {
       const time = this.parseTimeOfDay(rest[0] || '');
@@ -2885,9 +2960,79 @@ export class MessageRouter {
     }
 
     const deliverFlags = new Set(['--if-result', '--only-if-result', '--quiet', '--silent']);
-    while (promptParts.length > 0 && deliverFlags.has(String(promptParts[0] || '').toLowerCase())) {
-      deliverOnlyIfResult = true;
-      promptParts = promptParts.slice(1);
+    const sourceChatFlags = new Set(['--source-chat', '--chat']);
+    const sourceChannelFlags = new Set(['--source-channel', '--channel']);
+    const channelTypes: Set<string> = new Set([
+      'telegram',
+      'discord',
+      'slack',
+      'whatsapp',
+      'imessage',
+      'signal',
+      'mattermost',
+      'matrix',
+      'twitch',
+      'line',
+      'bluebubbles',
+      'email',
+      'teams',
+      'googlechat',
+    ]);
+
+    // Parse leading flags before the prompt.
+    while (promptParts.length > 0) {
+      const head = String(promptParts[0] || '').trim().toLowerCase();
+      if (!head.startsWith('--')) break;
+
+      if (deliverFlags.has(head)) {
+        deliverOnlyIfResult = true;
+        promptParts = promptParts.slice(1);
+        continue;
+      }
+
+      if (sourceChatFlags.has(head)) {
+        const value = String(promptParts[1] || '').trim();
+        if (!value) {
+          await adapter.sendMessage({
+            chatId: message.chatId,
+            replyTo: message.messageId,
+            parseMode: 'markdown',
+            text: 'Missing value for `--source-chat`. Example: `/schedule daily 9am --source-chat <chatId> <prompt>`',
+          });
+          return;
+        }
+        sourceChatId = value;
+        promptParts = promptParts.slice(2);
+        continue;
+      }
+
+      if (sourceChannelFlags.has(head)) {
+        const value = String(promptParts[1] || '').trim().toLowerCase();
+        if (!value) {
+          await adapter.sendMessage({
+            chatId: message.chatId,
+            replyTo: message.messageId,
+            parseMode: 'markdown',
+            text: 'Missing value for `--source-channel`. Example: `/schedule daily 9am --source-channel slack --source-chat C0123 <prompt>`',
+          });
+          return;
+        }
+        if (!channelTypes.has(value)) {
+          await adapter.sendMessage({
+            chatId: message.chatId,
+            replyTo: message.messageId,
+            parseMode: 'markdown',
+            text: `Invalid \`--source-channel\`: \`${value}\`. Valid: ${Array.from(channelTypes).join(', ')}`,
+          });
+          return;
+        }
+        sourceChannelType = value as ChannelType;
+        promptParts = promptParts.slice(2);
+        continue;
+      }
+
+      // Unknown flag - stop parsing and treat it as part of the prompt.
+      break;
     }
 
     const prompt = promptParts.join(' ').trim();
@@ -2901,14 +3046,8 @@ export class MessageRouter {
       return;
     }
 
-    // Workspace selection
     const session = this.sessionRepo.findById(sessionId);
-    let workspaceId = session?.workspaceId;
-    if (!workspaceId) {
-      const temp = this.getOrCreateTempWorkspace();
-      this.sessionManager.setSessionWorkspace(sessionId, temp.id);
-      workspaceId = temp.id;
-    }
+    const sessionWorkspaceId = session?.workspaceId;
 
     const inferredIsGroup = message.isGroup ?? (message.chatId !== message.userId);
     const contextType = securityContext?.contextType ?? (inferredIsGroup ? 'group' : 'dm');
@@ -2922,6 +3061,10 @@ export class MessageRouter {
       summaryOnly: false,
       ...(deliverOnlyIfResult ? { deliverOnlyIfResult: true } : {}),
     };
+
+    const chatContext = sourceChatId
+      ? { channelType: sourceChannelType ?? adapter.type, channelId: sourceChatId }
+      : undefined;
 
     const name = prompt.length > 48 ? `${prompt.slice(0, 48).trim()}...` : prompt;
     const description = `${MessageRouter.SCHEDULE_CRON_TAG} channel=${adapter.type} chat=${message.chatId}`;
@@ -2937,6 +3080,13 @@ export class MessageRouter {
         job.name.toLowerCase() === name.toLowerCase()
       );
 
+    const workspaceId = (() => {
+      const existing = existingJobs[0]?.workspaceId;
+      if (existing && existing !== TEMP_WORKSPACE_ID) return existing;
+      if (sessionWorkspaceId && sessionWorkspaceId !== TEMP_WORKSPACE_ID) return sessionWorkspaceId;
+      return this.createDedicatedWorkspaceForScheduledJob(name).id;
+    })();
+
     const result = existingJobs.length > 0
       ? await cronService.update(existingJobs[0].id, {
         enabled: true,
@@ -2945,6 +3095,7 @@ export class MessageRouter {
         taskPrompt: prompt,
         taskTitle: name,
         description,
+        ...(chatContext ? { chatContext } : {}),
         delivery,
         taskAgentConfig: {
           gatewayContext,
@@ -2960,6 +3111,7 @@ export class MessageRouter {
         workspaceId,
         taskPrompt: prompt,
         taskTitle: name,
+        ...(chatContext ? { chatContext } : {}),
         delivery,
         taskAgentConfig: {
           gatewayContext,
@@ -5922,8 +6074,8 @@ ${status.queuedCount > 0 ? `Queued task IDs: ${status.queuedTaskIds.join(', ')}`
     adapter: ChannelAdapter,
     message: IncomingMessage
   ): Promise<void> {
-    const version = app.getVersion();
-    const electronVersion = process.versions.electron;
+    const version = getCoworkVersion();
+    const electronVersion = process.versions.electron || 'none';
     const nodeVersion = process.versions.node;
     const platform = process.platform;
     const arch = process.arch;

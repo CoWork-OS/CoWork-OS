@@ -5,13 +5,14 @@
  * Manages channel adapters, routing, and sessions.
  */
 
-import { BrowserWindow, app } from 'electron';
+import type { BrowserWindow } from 'electron';
 import Database from 'better-sqlite3';
 import * as fs from 'fs';
 import * as path from 'path';
 import { MessageRouter, RouterConfig } from './router';
 import { SecurityManager } from './security';
 import { SessionManager } from './session';
+import { getUserDataDir } from '../utils/user-data-dir';
 import {
   ChannelAdapter,
   ChannelType,
@@ -521,7 +522,12 @@ export class ChannelGateway {
     allowedNumbers?: string[],
     securityMode: 'open' | 'allowlist' | 'pairing' = 'pairing',
     selfChatMode: boolean = true,
-    responsePrefix: string = '🤖'
+    responsePrefix: string = '🤖',
+    opts?: {
+      ambientMode?: boolean;
+      silentUnauthorized?: boolean;
+      ingestNonSelfChatsInSelfChatMode?: boolean;
+    }
   ): Promise<Channel> {
     // Check if WhatsApp channel already exists
     const existing = this.channelRepo.findByType('whatsapp');
@@ -541,6 +547,9 @@ export class ChannelGateway {
         allowedNumbers,
         selfChatMode,
         responsePrefix,
+        ...(opts?.ambientMode ? { ambientMode: true } : {}),
+        ...(opts?.silentUnauthorized ? { silentUnauthorized: true } : {}),
+        ...(opts?.ingestNonSelfChatsInSelfChatMode ? { ingestNonSelfChatsInSelfChatMode: true } : {}),
       },
       securityConfig: {
         mode: securityMode,
@@ -565,7 +574,12 @@ export class ChannelGateway {
     allowedContacts?: string[],
     securityMode: 'open' | 'allowlist' | 'pairing' = 'pairing',
     dmPolicy: 'open' | 'allowlist' | 'pairing' | 'disabled' = 'pairing',
-    groupPolicy: 'open' | 'allowlist' | 'disabled' = 'allowlist'
+    groupPolicy: 'open' | 'allowlist' | 'disabled' = 'allowlist',
+    opts?: {
+      ambientMode?: boolean;
+      silentUnauthorized?: boolean;
+      captureSelfMessages?: boolean;
+    }
   ): Promise<Channel> {
     // Check if iMessage channel already exists
     const existing = this.channelRepo.findByType('imessage');
@@ -584,6 +598,9 @@ export class ChannelGateway {
         allowedContacts,
         dmPolicy,
         groupPolicy,
+        ...(opts?.ambientMode ? { ambientMode: true } : {}),
+        ...(opts?.silentUnauthorized ? { silentUnauthorized: true } : {}),
+        ...(opts?.captureSelfMessages ? { captureSelfMessages: true } : {}),
       },
       securityConfig: {
         mode: securityMode,
@@ -818,7 +835,12 @@ export class ChannelGateway {
     password: string,
     webhookPort: number = 3101,
     allowedContacts?: string[],
-    securityMode: 'open' | 'allowlist' | 'pairing' = 'pairing'
+    securityMode: 'open' | 'allowlist' | 'pairing' = 'pairing',
+    opts?: {
+      ambientMode?: boolean;
+      silentUnauthorized?: boolean;
+      captureSelfMessages?: boolean;
+    }
   ): Promise<Channel> {
     // Check if BlueBubbles channel already exists
     const existing = this.channelRepo.findByType('bluebubbles');
@@ -836,6 +858,9 @@ export class ChannelGateway {
         password,
         webhookPort,
         allowedContacts,
+        ...(opts?.ambientMode ? { ambientMode: true } : {}),
+        ...(opts?.silentUnauthorized ? { silentUnauthorized: true } : {}),
+        ...(opts?.captureSelfMessages ? { captureSelfMessages: true } : {}),
       },
       securityConfig: {
         mode: securityMode,
@@ -1250,7 +1275,7 @@ export class ChannelGateway {
     if (configured && configured.trim()) {
       return configured;
     }
-    return path.join(app.getPath('userData'), 'whatsapp-auth');
+    return path.join(getUserDataDir(), 'whatsapp-auth');
   }
 
   private clearWhatsAppAuthDir(channel?: Channel): void {

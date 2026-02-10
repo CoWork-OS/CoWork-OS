@@ -357,13 +357,16 @@ export class BlueBubblesAdapter implements ChannelAdapter {
    * Handle incoming BlueBubbles message
    */
   private async handleIncomingMessage(bbMessage: BlueBubblesMessage): Promise<void> {
+    const isFromMe = bbMessage.isFromMe === true;
+
     // Skip empty messages
     if (!bbMessage.text) {
       return;
     }
 
-    // Skip own messages
-    if (bbMessage.isFromMe) {
+    // By default, skip messages from self to avoid reply loops.
+    // When captureSelfMessages is enabled, ingest them into the local log as outgoing_user and do not route.
+    if (isFromMe && this.config.captureSelfMessages !== true) {
       return;
     }
 
@@ -378,8 +381,8 @@ export class BlueBubblesAdapter implements ChannelAdapter {
       this.markMessageProcessed(bbMessage.guid);
     }
 
-    // Check allowlist if configured
-    if (this.config.allowedContacts && this.config.allowedContacts.length > 0) {
+    // Check allowlist if configured (skip for self-ingested messages)
+    if (!isFromMe && this.config.allowedContacts && this.config.allowedContacts.length > 0) {
       const senderAddress = bbMessage.handle?.address || '';
       const isAllowed = this.config.allowedContacts.some((allowed) => {
         const normalizedAllowed = allowed.replace(/[^0-9+@.]/g, '');
@@ -410,6 +413,7 @@ export class BlueBubblesAdapter implements ChannelAdapter {
       chatId: bbMessage.chatGuid,
       text: bbMessage.text,
       timestamp: new Date(bbMessage.dateCreated),
+      ...(isFromMe ? { direction: 'outgoing_user' as const, ingestOnly: true } : {}),
       raw: bbMessage,
     };
 

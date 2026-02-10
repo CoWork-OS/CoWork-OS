@@ -5,7 +5,13 @@ export interface ChatTranscriptOptions {
   agentName?: string;
   sinceMs?: number;
   untilMs?: number;
+  /** Include CoWork OS responses that were sent back into the chat (direction=outgoing). Default: true. */
   includeOutgoing?: boolean;
+  /**
+   * Include messages sent by the local user account when the channel supports capturing them
+   * (direction=outgoing_user). Default: true.
+   */
+  includeUserOutgoing?: boolean;
   dropCommands?: boolean;
   maxMessages?: number;
   maxChars?: number;
@@ -31,6 +37,7 @@ export function formatChatTranscriptForPrompt(
   const sinceMs = Number.isFinite(opts?.sinceMs) ? opts!.sinceMs : undefined;
   const untilMs = Number.isFinite(opts?.untilMs) ? opts!.untilMs : undefined;
   const includeOutgoing = opts?.includeOutgoing !== false;
+  const includeUserOutgoing = opts?.includeUserOutgoing !== false;
   const dropCommands = opts?.dropCommands !== false;
   const maxMessages = Math.max(1, Math.floor(opts?.maxMessages ?? DEFAULT_MAX_MESSAGES));
   const maxChars = Math.max(256, Math.floor(opts?.maxChars ?? DEFAULT_MAX_CHARS));
@@ -41,6 +48,7 @@ export function formatChatTranscriptForPrompt(
     const content = m.content.trim();
     if (!content) return false;
     if (!includeOutgoing && m.direction === 'outgoing') return false;
+    if (!includeUserOutgoing && m.direction === 'outgoing_user') return false;
     if (dropCommands && content.startsWith('/')) return false;
     if (sinceMs !== undefined && Number.isFinite(m.timestamp) && m.timestamp < sinceMs) return false;
     if (untilMs !== undefined && Number.isFinite(m.timestamp) && m.timestamp > untilMs) return false;
@@ -62,6 +70,15 @@ export function formatChatTranscriptForPrompt(
 
   const formatSpeaker = (m: ChannelMessage): string => {
     if (m.direction === 'outgoing') return agentName;
+    if (m.direction === 'outgoing_user') {
+      const userId = typeof m.userId === 'string' ? m.userId : '';
+      if (userId && lookupUser) {
+        const user = lookupUser(userId);
+        if (user?.displayName) return user.displayName;
+        if (user?.username) return user.username;
+      }
+      return 'Me';
+    }
     const userId = typeof m.userId === 'string' ? m.userId : '';
     if (userId && lookupUser) {
       const user = lookupUser(userId);
@@ -120,4 +137,3 @@ export function formatChatTranscriptForPrompt(
     truncated,
   };
 }
-

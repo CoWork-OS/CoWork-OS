@@ -138,17 +138,41 @@ The packaged app will be in the `release/` directory.
 
 ### Linux VPS (Headless / Server Mode)
 
-Run CoWork OS without a GUI and manage it remotely via the WebSocket Control Plane (Web UI + CLI):
+If this is your first VPS install, start here (Node-only, no Docker):
 
-- Overview / positioning: `docs/self-hosting.md`
+1. On your VPS (SSH terminal), install and start CoWork OS:
+
+```bash
+ssh user@your-vps
+npm install -g cowork-os@latest
+export COWORK_IMPORT_ENV_SETTINGS=1
+export OPENAI_API_KEY=your_key_here   # or ANTHROPIC_API_KEY=your_key_here
+coworkd-node --print-control-plane-token
+```
+
+Keep this terminal open. It runs the server and prints your Control Plane token.
+
+2. On your local machine (second terminal), create the SSH tunnel:
+
+```bash
+ssh -N -L 18789:127.0.0.1:18789 user@your-vps
+```
+
+If local port `18789` is busy:
+
+```bash
+ssh -N -L 28789:127.0.0.1:18789 user@your-vps
+```
+
+3. Open the web UI in your browser:
+
+- `http://127.0.0.1:18789/` (or `http://127.0.0.1:28789/` if you used 28789)
+- Paste the token from step 1
+
+For production/persistent setup and Docker/systemd options, use:
+
 - Guide: `docs/vps-linux.md`
-- Start (Node-only, no Electron/Xvfb): `node bin/coworkd-node.js`
-- Start (headless Electron): `node bin/coworkd.js`
-- Web UI (via tunnel): `http://127.0.0.1:18789/`
-- If local port `18789` is busy, tunnel with another local port (example): `ssh -N -L 28789:127.0.0.1:18789 user@your-vps`
-- Headless creds: set `COWORK_IMPORT_ENV_SETTINGS=1` + `OPENAI_API_KEY`/`ANTHROPIC_API_KEY` (see guide)
-- Docker: `docker compose up --build -d`
-- systemd templates: `deploy/systemd/`
+- Overview: `docs/self-hosting.md`
 
 ---
 

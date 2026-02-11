@@ -17,6 +17,66 @@ If you want an overview (what the interface is, which runtime to pick, what work
 
 - `docs/self-hosting.md`
 
+## Start Here (First-Time VPS Install)
+
+If you just want to get CoWork OS running and open the web UI, use this path first.
+
+What you need:
+
+- SSH access to your VPS (`user@your-vps`)
+- One LLM API key (`OPENAI_API_KEY` or `ANTHROPIC_API_KEY`)
+- Two terminals (one for server, one for SSH tunnel)
+
+1. On your VPS (server terminal):
+
+```bash
+ssh user@your-vps
+```
+
+2. Check Node.js + npm:
+
+```bash
+node -v
+npm -v
+```
+
+If either command is missing, install Node.js 22:
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt-get install -y nodejs
+```
+
+3. Install and start CoWork OS (Node-only daemon):
+
+```bash
+npm install -g cowork-os@latest
+export COWORK_IMPORT_ENV_SETTINGS=1
+export OPENAI_API_KEY=your_key_here   # or: export ANTHROPIC_API_KEY=your_key_here
+coworkd-node --print-control-plane-token
+```
+
+Keep this terminal open. It runs the server and prints the token you need for login.
+
+4. On your local machine (second terminal), open SSH tunnel:
+
+```bash
+ssh -N -L 18789:127.0.0.1:18789 user@your-vps
+```
+
+If local port `18789` is busy:
+
+```bash
+ssh -N -L 28789:127.0.0.1:18789 user@your-vps
+```
+
+5. Open the dashboard in your browser:
+
+- `http://127.0.0.1:18789/` (or `http://127.0.0.1:28789/` if you used 28789)
+- Paste the Control Plane token printed in step 3
+
+This quick start is great for first run/testing. For always-on production, continue with **Option A (Docker)** or **Option B (Systemd)** below.
+
 ## Option A: Docker (Headless Electron)
 
 This repo includes a headless Docker image that runs CoWork OS as a daemon.

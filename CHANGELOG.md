@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.67] - 2026-02-11
+
+### Added
+- Added npm CLI command support: `cowork-os`, `coworkctl`, `coworkd`, and `coworkd-node`.
+
+### Fixed
+- Fixed launcher script to resolve the Electron binary correctly (`require('electron')` instead of `require.resolve`).
+- Included `dist/` in published npm files so the `cowork-os` command can start without requiring a local build step.
+- Moved `electron` to runtime dependencies so CLI launch works after normal npm install.
+
 ## [0.3.66] - 2026-02-11
 
 ### Fixed

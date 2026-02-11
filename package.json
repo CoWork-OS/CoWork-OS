@@ -1,6 +1,6 @@
 {
   "name": "cowork-os",
-  "version": "0.3.66",
+  "version": "0.3.67",
   "description": "CoWork OS - The operating system for personal AI assistants",
   "overrides": {
     "@whiskeysockets/baileys": {
@@ -42,6 +42,7 @@
     "byok"
   ],
   "files": [
+    "dist",
     "src",
     "scripts",
     "resources",
@@ -61,6 +62,12 @@
     "tsconfig.node.json",
     "vite.config.ts"
   ],
+  "bin": {
+    "cowork-os": "bin/cowork.js",
+    "coworkctl": "bin/coworkctl.js",
+    "coworkd": "bin/coworkd.js",
+    "coworkd-node": "bin/coworkd-node.js"
+  },
   "private": false,
   "bundleDependencies": [
     "@mariozechner/pi-ai",
@@ -102,6 +109,7 @@
     "discord.js": "^14.25.1",
     "docx": "^9.5.1",
     "electron-updater": "^6.3.9",
+    "electron": "^40.1.0",
     "eventsource": "^4.1.0",
     "exceljs": "^4.4.0",
     "grammy": "^1.39.3",
@@ -144,7 +152,6 @@
     "@vitest/coverage-v8": "^4.0.18",
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
-    "electron": "^40.1.0",
     "electron-builder": "^26.7.0",
     "eslint": "^9.39.2",
     "globals": "^17.3.0",

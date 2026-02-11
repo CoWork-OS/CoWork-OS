@@ -5,39 +5,56 @@ const path = require('path');
 const fs = require('fs');
 
 const packageDir = path.resolve(__dirname, '..');
-const electronPath = require.resolve('electron');
 const mainPath = path.join(packageDir, 'dist', 'electron', 'electron', 'main.js');
 const args = process.argv.slice(2);
+const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
-// Check if the app has been built
-if (!fs.existsSync(mainPath)) {
-  console.log('CoWork-OSS: Building application...');
-  const build = spawn('npm', ['run', 'build'], {
+function buildAppAndLaunch() {
+  console.log('[cowork-os] Build artifacts not found, running npm run build...');
+  const build = spawn(npmCmd, ['run', 'build'], {
     cwd: packageDir,
     stdio: 'inherit',
-    shell: true
+    shell: process.platform === 'win32',
   });
 
-  build.on('close', (code) => {
-    if (code === 0) {
-      launchApp();
-    } else {
-      console.error('Build failed. Please run "npm run build" manually.');
-      process.exit(1);
+  build.on('exit', (code) => {
+    if (code !== 0) {
+      console.error('[cowork-os] Build failed. Run `npm run build` and retry.');
+      process.exit(code || 1);
     }
+    launchApp();
   });
-} else {
+}
+
+if (fs.existsSync(mainPath)) {
   launchApp();
+} else {
+  buildAppAndLaunch();
 }
 
 function launchApp() {
-  const electron = spawn(electronPath, [mainPath, ...args], {
+  let electronBinary;
+  try {
+    electronBinary = require('electron');
+  } catch {
+    console.error(
+      '[cowork-os] Electron runtime is missing. Reinstall with:\n' +
+      '  npm install cowork-os@latest --include=dev\n'
+    );
+    process.exit(1);
+  }
+
+  const electron = spawn(electronBinary, [packageDir, ...args], {
     cwd: packageDir,
     stdio: 'inherit',
-    env: { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' }
+    env: process.env
   });
 
-  electron.on('close', (code) => {
-    process.exit(code);
+  electron.on('exit', (code, signal) => {
+    if (signal) {
+      process.kill(process.pid, signal);
+      return;
+    }
+    process.exit(code || 0);
   });
 }

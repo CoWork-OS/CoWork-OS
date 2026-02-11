@@ -53,6 +53,25 @@ Your AI needs a secure home. CoWork OS provides the runtime, security layers, an
 - If the app closes immediately with a `dyld` signature error, run: `codesign --force --deep --sign - "/Applications/CoWork OS.app"`
 - `spctl --add` / `spctl --enable` are deprecated on newer macOS and may show "This operation is no longer supported"
 
+### From npm (CLI Launch)
+
+```bash
+# Install into a local folder
+mkdir -p /tmp/cowork-run
+cd /tmp/cowork-run
+npm install cowork-os@latest --no-audit --no-fund
+
+# Start app
+npx cowork-os
+```
+
+You can also install globally and launch directly:
+
+```bash
+npm install -g cowork-os
+cowork-os
+```
+
 ### From GitHub Source (Development)
 
 #### Prerequisites

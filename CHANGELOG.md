@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.64] - 2026-02-11
+
+### Fixed
+- Release workflow could stall for a long time at `Install dependencies` when git-based dependencies attempted SSH transport on GitHub runners.
+- CI now forces GitHub git dependencies to HTTPS before `npm ci` in all release/publish jobs.
+- Added explicit workflow timeouts and `npm ci --no-audit --no-fund` to reduce long-running hangs during release.
+
 ## [0.3.63] - 2026-02-11
 
 ### Fixed

@@ -1,6 +1,6 @@
 {
   "name": "cowork-os",
-  "version": "0.3.63",
+  "version": "0.3.64",
   "description": "CoWork OS - The operating system for personal AI assistants",
   "overrides": {
     "undici": "^7.0.0"

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.65] - 2026-02-11
+
+### Fixed
+- npm publishing no longer waits for the macOS packaging job in `release.yml`.
+- This prevents npm release delays when GitHub macOS runners are stalled while still allowing desktop packaging to run independently.
+
 ## [0.3.64] - 2026-02-11
 
 ### Fixed

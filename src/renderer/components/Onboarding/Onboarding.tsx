@@ -16,7 +16,7 @@ const PROVIDERS: {
   requiresKey: boolean;
 }[] = [
   { id: 'anthropic', name: 'Claude', requiresKey: true },
-  { id: 'openai', name: 'GPT', requiresKey: true },
+  { id: 'openai', name: 'OpenAI', requiresKey: true },
   { id: 'gemini', name: 'Gemini', requiresKey: true },
   { id: 'ollama', name: 'Ollama', requiresKey: false },
   { id: 'openrouter', name: 'OpenRouter', requiresKey: true },

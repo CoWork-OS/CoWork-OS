@@ -17,11 +17,39 @@
 
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 
 const BETTER_SQLITE3_VERSION = "12.6.2";
+const NPM_CMD = process.platform === "win32" ? "npm.cmd" : "npm";
+const cwdRequire = (() => {
+  try {
+    return createRequire(path.join(process.cwd(), "package.json"));
+  } catch {
+    return createRequire(import.meta.url);
+  }
+})();
+
+function resolveFromCwd(specifier) {
+  try {
+    return cwdRequire.resolve(specifier);
+  } catch {
+    return null;
+  }
+}
+
+function getElectronBinaryPath() {
+  try {
+    const electronBinary = cwdRequire("electron");
+    return typeof electronBinary === "string" && electronBinary.length > 0
+      ? electronBinary
+      : null;
+  } catch {
+    return null;
+  }
+}
 
 function run(cmd, args, opts = {}) {
   const pretty = [cmd, ...(args || [])].join(" ");
@@ -69,7 +97,9 @@ function readJson(filePath) {
 
 function getElectronVersion() {
   try {
-    const pkg = readJson(path.join("node_modules", "electron", "package.json"));
+    const pkgPath = resolveFromCwd("electron/package.json");
+    if (!pkgPath) return null;
+    const pkg = readJson(pkgPath);
     return String(pkg.version || "").trim() || null;
   } catch {
     return null;
@@ -77,9 +107,12 @@ function getElectronVersion() {
 }
 
 function getElectronModulesAbi(env) {
+  const electronBinary = getElectronBinaryPath();
+  if (!electronBinary) return null;
+
   // Use Electron's bundled Node in "run as node" mode so this doesn't start a GUI app.
   const res = spawnSync(
-    path.join("node_modules", ".bin", "electron"),
+    electronBinary,
     ["-p", "process.versions.modules"],
     { env: { ...env, ELECTRON_RUN_AS_NODE: "1" }, encoding: "utf8" }
   );
@@ -88,23 +121,24 @@ function getElectronModulesAbi(env) {
 }
 
 function testBetterSqlite3InElectron(env) {
+  const electronBinary = getElectronBinaryPath();
+  if (!electronBinary) return { status: 1, signal: null };
+
   const res = spawnSync(
-    path.join("node_modules", ".bin", "electron"),
-    ["-e", "require('better-sqlite3'); console.log('ok')"],
+    electronBinary,
+    [
+      "-e",
+      "const Database=require('better-sqlite3');const db=new Database(':memory:');db.close();console.log('ok')",
+    ],
     { env: { ...env, ELECTRON_RUN_AS_NODE: "1" }, encoding: "utf8" }
   );
   return res;
 }
 
 function ensureBetterSqlite3(env) {
-  const pkgPath = path.join(
-    process.cwd(),
-    "node_modules",
-    "better-sqlite3",
-    "package.json"
-  );
+  const pkgPath = resolveFromCwd("better-sqlite3/package.json");
 
-  if (fs.existsSync(pkgPath)) {
+  if (pkgPath && fs.existsSync(pkgPath)) {
     return { status: 0, signal: null };
   }
 
@@ -112,7 +146,7 @@ function ensureBetterSqlite3(env) {
     `[cowork] better-sqlite3 is missing; installing ${BETTER_SQLITE3_VERSION}...`
   );
   return run(
-    "npm",
+    NPM_CMD,
     [
       "install",
       "--no-audit",
@@ -175,11 +209,17 @@ function main() {
 
   const attempt = (attemptJobs) => {
     const env = baseEnvWithJobs(attemptJobs);
+    const electronInstallScript = resolveFromCwd("electron/install.js");
+
+    if (!electronInstallScript) {
+      console.error(
+        "[cowork] Electron install script not found. Ensure the `electron` dependency is installed."
+      );
+      return { status: 1, signal: null };
+    }
 
     // 1) Ensure Electron binary exists (postinstall is often skipped due to ignore-scripts=true).
-    const installRes = run(process.execPath, ["node_modules/electron/install.js"], {
-      env,
-    });
+    const installRes = run(process.execPath, [electronInstallScript], { env });
     if (installRes.status !== 0) return installRes;
 
     // If optional dependency install was skipped/failed earlier, recover here.
@@ -206,7 +246,7 @@ function main() {
         npm_config_arch: process.arch,
       };
       const rebuildElectronRes = run(
-        "npm",
+        NPM_CMD,
         ["rebuild", "--ignore-scripts=false", "better-sqlite3"],
         { env: electronEnv }
       );
@@ -228,14 +268,11 @@ function main() {
     }
 
     // 3) Fallback: electron-rebuild (most expensive). Keep it sequential and only rebuild the one module.
-    const electronRebuildCli = path.join(
-      "node_modules",
-      "@electron",
-      "rebuild",
-      "lib",
-      "cli.js"
-    );
-    if (!fs.existsSync(electronRebuildCli)) {
+    const electronRebuildEntry = resolveFromCwd("@electron/rebuild");
+    const electronRebuildCli = electronRebuildEntry
+      ? path.join(path.dirname(electronRebuildEntry), "cli.js")
+      : null;
+    if (!electronRebuildCli || !fs.existsSync(electronRebuildCli)) {
       console.log(
         "[cowork] @electron/rebuild is not installed; skipping fallback rebuild."
       );

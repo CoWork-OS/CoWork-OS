@@ -1,6 +1,6 @@
 {
   "name": "cowork-os",
-  "version": "0.3.67",
+  "version": "0.3.69",
   "description": "CoWork OS - The operating system for personal AI assistants",
   "overrides": {
     "@whiskeysockets/baileys": {
@@ -99,10 +99,10 @@
     "@google/generative-ai": "^0.24.1",
     "@grammyjs/runner": "^2.0.3",
     "@grammyjs/transformer-throttler": "^1.2.1",
+    "@electron/rebuild": "^4.0.3",
     "@mariozechner/pi-ai": "^0.52.9",
     "@pydantic/monty": "^0.0.4",
     "@slack/bolt": "^4.6.0",
-    "@types/jszip": "^3.4.1",
     "@whiskeysockets/baileys": "6.7.16",
     "botbuilder": "^4.23.3",
     "chokidar": "^5.0.0",
@@ -119,7 +119,7 @@
     "openai": "^6.17.0",
     "pdf-parse": "^2.4.5",
     "pdfkit": "^0.17.2",
-    "playwright": "^1.58.1",
+    "playwright": "npm:playwright-core@^1.58.2",
     "pptxgenjs": "^4.0.1",
     "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",
@@ -136,8 +136,8 @@
     "better-sqlite3": "12.6.2"
   },
   "devDependencies": {
-    "@electron/rebuild": "^4.0.3",
     "@types/better-sqlite3": "^7.6.8",
+    "@types/jszip": "^3.4.1",
     "@types/mime-types": "^3.0.1",
     "@types/node": "^25.2.0",
     "@types/pdf-parse": "^1.1.5",

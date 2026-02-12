@@ -5,6 +5,7 @@ import { AgentDaemon } from '../daemon';
 import { GuardrailManager } from '../../guardrails/guardrail-manager';
 import { checkProjectAccess, getProjectIdFromWorkspaceRelPath, getWorkspaceRelativePosixPath } from '../../security/project-access';
 import mammoth from 'mammoth';
+import { extractPptxContentFromFile } from '../../utils/pptx-extractor';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const pdfParseModule = require('pdf-parse');
 // Handle both ESM default export and CommonJS module.exports
@@ -213,7 +214,7 @@ export class FileTools {
         ? Math.max(1, Math.min(10_000_000, options.maxBytes))
         : 1_000_000;
 
-    const binaryExtensions = ['.docx', '.xlsx', '.pptx', '.pdf', '.zip', '.png', '.jpg', '.jpeg', '.gif', '.mp3', '.mp4', '.exe', '.dmg'];
+    const binaryExtensions = ['.docx', '.xlsx', '.pptx', '.ppt', '.pdf', '.zip', '.png', '.jpg', '.jpeg', '.gif', '.mp3', '.mp4', '.exe', '.dmg'];
 
     this.checkPermission('read');
     let fullPath = this.resolvePath(relativePath, 'read');
@@ -272,7 +273,7 @@ export class FileTools {
 
   /**
    * Read file contents (with size limit to prevent context overflow)
-   * Supports plain text, DOCX, and PDF files
+   * Supports plain text, DOCX, PDF, and PPTX files
    */
   async readFile(relativePath: string): Promise<{ content: string; size: number; truncated?: boolean; format?: string }> {
     // Validate input
@@ -313,6 +314,16 @@ export class FileTools {
       // Handle PDF files
       if (ext === '.pdf') {
         return await this.readPdfFile(fullPath, stats.size);
+      }
+
+      // Handle PPTX files
+      if (ext === '.pptx') {
+        return await this.readPptxFile(fullPath, stats.size);
+      }
+
+      // Legacy PPT files
+      if (ext === '.ppt') {
+        throw new Error('Legacy .ppt files are not supported. Please upload as .pptx.');
       }
 
       // Handle plain text files
@@ -463,6 +474,27 @@ export class FileTools {
   }
 
   /**
+   * Read PPTX file and extract slide text content
+   */
+  private async readPptxFile(fullPath: string, size: number): Promise<{ content: string; size: number; truncated?: boolean; format: string }> {
+    try {
+      const content = await extractPptxContentFromFile(fullPath, {
+        outputCharLimit: MAX_FILE_SIZE,
+        maxFileSizeBytes: 50 * 1024 * 1024,
+      });
+      const truncated = content.includes('[... Content truncated.');
+      return {
+        content,
+        size,
+        truncated,
+        format: 'pptx',
+      };
+    } catch (error: any) {
+      throw new Error(`Failed to read PPTX file: ${error.message}`);
+    }
+  }
+
+  /**
    * Write file contents
    */
   async writeFile(relativePath: string, content: string): Promise<{ success: boolean; path: string }> {
@@ -473,7 +505,7 @@ export class FileTools {
 
     // Check for binary file extensions that shouldn't be written with write_file
     const ext = path.extname(relativePath).toLowerCase();
-    const binaryExtensions = ['.docx', '.xlsx', '.pptx', '.pdf', '.zip', '.png', '.jpg', '.jpeg', '.gif', '.mp3', '.mp4', '.exe', '.dmg'];
+    const binaryExtensions = ['.docx', '.xlsx', '.pptx', '.ppt', '.pdf', '.zip', '.png', '.jpg', '.jpeg', '.gif', '.mp3', '.mp4', '.exe', '.dmg'];
     if (binaryExtensions.includes(ext)) {
       const suggestions: Record<string, string> = {
         '.docx': 'Use "create_document" or "edit_document" tool instead',

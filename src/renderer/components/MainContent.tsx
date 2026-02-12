@@ -8,6 +8,15 @@ import type { AgentRoleData } from '../../electron/preload';
 import { useVoiceInput } from '../hooks/useVoiceInput';
 import { useAgentContext, type AgentContext } from '../hooks/useAgentContext';
 import { getMessage } from '../utils/agentMessages';
+import {
+  ATTACHMENT_CONTENT_END_MARKER,
+  ATTACHMENT_CONTENT_START_MARKER,
+  MAX_IMAGE_OCR_CHARS,
+  buildImageAttachmentViewerOptions,
+  stripHtmlForText,
+  stripPptxBubbleContent,
+  truncateTextForTaskPrompt,
+} from './utils/attachment-content';
 
 // localStorage key for verbose mode
 const VERBOSE_STEPS_KEY = 'cowork:verboseSteps';
@@ -107,18 +116,73 @@ const formatFileSize = (size: number): string => {
   return `${mb.toFixed(1)} MB`;
 };
 
-const buildAttachmentSummary = (attachments: ImportedAttachment[]): string => {
-  if (attachments.length === 0) return '';
-  const lines = attachments.map((attachment) => (
-    `- ${attachment.fileName} (${attachment.relativePath})`
-  ));
-  return `Attached files (relative to workspace):\n${lines.join('\n')}`;
-};
 
-const composeMessageWithAttachments = (text: string, attachments: ImportedAttachment[]): string => {
+const composeMessageWithAttachments = async (
+  workspacePath: string | undefined,
+  text: string,
+  attachments: ImportedAttachment[]
+): Promise<{ message: string; extractionWarnings: string[] }> => {
+  const extractedByPath: Record<string, string> = {};
+  const extractionWarnings: string[] = [];
+
+  if (workspacePath && attachments.length > 0) {
+    for (const attachment of attachments) {
+      try {
+        const options = buildImageAttachmentViewerOptions(text, attachment.fileName);
+        const result = await window.electronAPI.readFileForViewer(
+          attachment.relativePath,
+          workspacePath,
+          {
+            ...options,
+            imageOcrMaxChars: MAX_IMAGE_OCR_CHARS,
+          }
+        );
+
+        if (!result.success || !result.data) continue;
+
+        const fileType = result.data.fileType;
+        if (fileType === 'unsupported') continue;
+        if (fileType === 'image' && !result.data.ocrText?.trim()) continue;
+
+        let content = fileType === 'image'
+          ? (result.data.ocrText ?? null)
+          : result.data.content;
+        if (!content && result.data.htmlContent) {
+          content = stripHtmlForText(result.data.htmlContent);
+        }
+        if ((!content || !content.trim()) && result.data.ocrText?.trim()) {
+          content = result.data.ocrText;
+        }
+        if (!content?.trim()) continue;
+
+        extractedByPath[attachment.relativePath] = truncateTextForTaskPrompt(content);
+      } catch {
+        extractionWarnings.push(attachment.fileName);
+        // Continue to next attachment on extraction errors.
+      }
+    }
+  }
+
   const base = text.trim() || 'Please review the attached files.';
-  const summary = buildAttachmentSummary(attachments);
-  return summary ? `${base}\n\n${summary}` : base;
+  const attachmentSummaryLines = attachments.map((attachment) => {
+    const lines = [`- ${attachment.fileName} (${attachment.relativePath})`];
+    const extracted = extractedByPath[attachment.relativePath];
+    if (extracted) {
+      lines.push('  Extracted content:');
+      lines.push(`  ${ATTACHMENT_CONTENT_START_MARKER}`);
+      for (const row of extracted.split('\n')) {
+        lines.push(`    ${row}`);
+      }
+      lines.push(`  ${ATTACHMENT_CONTENT_END_MARKER}`);
+    }
+    return lines.join('\n');
+  });
+
+  const summary = attachmentSummaryLines.length === 0 ? '' : `Attached files (relative to workspace):\n${attachmentSummaryLines.join('\n\n')}`;
+  return {
+    message: summary ? `${base}\n\n${summary}` : base,
+    extractionWarnings,
+  };
 };
 
 type MentionOption = {
@@ -876,6 +940,7 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [isUploadingAttachments, setIsUploadingAttachments] = useState(false);
+  const [isPreparingMessage, setIsPreparingMessage] = useState(false);
   const [agentRoles, setAgentRoles] = useState<AgentRoleData[]>([]);
   const [mentionQuery, setMentionQuery] = useState('');
   const [mentionTarget, setMentionTarget] = useState<{ start: number; end: number } | null>(null);
@@ -1781,58 +1846,76 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
   };
 
   const handleSend = async () => {
+    if (isUploadingAttachments || isPreparingMessage) {
+      return;
+    }
+
     const trimmedInput = inputValue.trim();
     const hasAttachments = pendingAttachments.length > 0;
 
     if (!trimmedInput && !hasAttachments) return;
 
     let importedAttachments: ImportedAttachment[] = [];
-
+    setIsPreparingMessage(true);
+    setAttachmentError(null);
+    let sendFailed = false;
     if (hasAttachments) {
       setIsUploadingAttachments(true);
-      try {
+    }
+
+    try {
+      if (hasAttachments) {
         importedAttachments = await importAttachmentsToWorkspace();
-      } catch (error) {
-        console.error('Failed to import attachments:', error);
-        reportAttachmentError(error instanceof Error ? error.message : 'Failed to upload attachments.');
-        setIsUploadingAttachments(false);
-        return;
-      } finally {
-        setIsUploadingAttachments(false);
+      }
+
+      const composeResult = await composeMessageWithAttachments(workspace?.path, trimmedInput, importedAttachments);
+      const hasExtractionWarnings = composeResult.extractionWarnings.length > 0;
+      if (hasExtractionWarnings) {
+        const warningList = composeResult.extractionWarnings.join(', ');
+        setAttachmentError(`I had trouble reading ${warningList}. They were attached, but I may not have had full content.`);
+      }
+      const message = composeResult.message;
+
+      // Use selectedTaskId to determine if we should follow-up or create new task
+      // This fixes the bug where old tasks (beyond the 100 most recent) would create new tasks
+      // instead of sending follow-up messages
+      if (!selectedTaskId && onCreateTask) {
+        // No task selected - create new task with optional Goal Mode options
+        const titleSource = trimmedInput || (pendingAttachments[0]?.name ? `Review ${pendingAttachments[0].name}` : 'New task');
+        const title = buildTaskTitle(titleSource);
+        const options: GoalModeOptions | undefined = goalModeEnabled && verificationCommand
+          ? {
+            successCriteria: { type: 'shell_command' as const, command: verificationCommand },
+            maxAttempts,
+          }
+          : undefined;
+        onCreateTask(title, message, options);
+        // Reset Goal Mode state
+        setGoalModeEnabled(false);
+        setVerificationCommand('');
+        setMaxAttempts(3);
+      } else {
+        // Task is selected (even if not in current list) - send follow-up message
+        onSendMessage(message);
+      }
+
+      setInputValue('');
+      setPendingAttachments([]);
+      setMentionOpen(false);
+      setMentionQuery('');
+      setMentionTarget(null);
+    } catch (error) {
+      console.error('Failed to send message:', error);
+      sendFailed = true;
+      const baseError = error instanceof Error ? error.message : 'Failed to send message.';
+      reportAttachmentError(baseError);
+    } finally {
+      setIsUploadingAttachments(false);
+      setIsPreparingMessage(false);
+      if (!sendFailed) {
+        setAttachmentError(null);
       }
     }
-
-    const message = composeMessageWithAttachments(trimmedInput, importedAttachments);
-
-    // Use selectedTaskId to determine if we should follow-up or create new task
-    // This fixes the bug where old tasks (beyond the 100 most recent) would create new tasks
-    // instead of sending follow-up messages
-    if (!selectedTaskId && onCreateTask) {
-      // No task selected - create new task with optional Goal Mode options
-      const titleSource = trimmedInput || (pendingAttachments[0]?.name ? `Review ${pendingAttachments[0].name}` : 'New task');
-      const title = buildTaskTitle(titleSource);
-      const options: GoalModeOptions | undefined = goalModeEnabled && verificationCommand
-        ? {
-          successCriteria: { type: 'shell_command' as const, command: verificationCommand },
-          maxAttempts,
-        }
-        : undefined;
-      onCreateTask(title, message, options);
-      // Reset Goal Mode state
-      setGoalModeEnabled(false);
-      setVerificationCommand('');
-      setMaxAttempts(3);
-    } else {
-      // Task is selected (even if not in current list) - send follow-up message
-      onSendMessage(message);
-    }
-
-    setInputValue('');
-    setPendingAttachments([]);
-    setAttachmentError(null);
-    setMentionOpen(false);
-    setMentionQuery('');
-    setMentionTarget(null);
   };
 
   const handleClearQueue = () => {
@@ -2036,6 +2119,15 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
   const handleQuickAction = (action: string) => {
     setInputValue(action);
   };
+
+  useEffect(() => {
+    if (task?.status === 'paused' && textareaRef.current) {
+      const inputEl = textareaRef.current;
+      window.requestAnimationFrame(() => {
+        inputEl.focus();
+      });
+    }
+  }, [task?.status]);
 
   const formatTime = (timestamp: number) => {
     return new Date(timestamp).toLocaleTimeString(undefined, {
@@ -2442,7 +2534,7 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
                   <button
                     className="lets-go-btn lets-go-btn-sm"
                     onClick={handleSend}
-                    disabled={(!inputValue.trim() && pendingAttachments.length === 0) || isUploadingAttachments}
+                    disabled={(!inputValue.trim() && pendingAttachments.length === 0) || isUploadingAttachments || isPreparingMessage}
                   >
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <path d="M12 19V5M5 12l7-7 7 7" />
@@ -2567,7 +2659,7 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
 
                 // Render user messages as chat bubbles on the right
                 if (isUserMessage) {
-                  const messageText = event.payload?.message || 'User message';
+                  const messageText = stripPptxBubbleContent(event.payload?.message || 'User message');
                   return (
                     <Fragment key={event.id || `event-${item.eventIndex}`}>
                       <div className="chat-message user-message">
@@ -2603,7 +2695,7 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
                           {isLastAssistant && (
                             <div className="chat-bubble-header">
                               {task.status === 'completed' && <span className="chat-status">{agentContext.getMessage('taskComplete')}</span>}
-                              {task.status === 'paused' && <span className="chat-status">{agentContext.getMessage('taskPaused') || 'Paused'}</span>}
+                              {task.status === 'paused' && <span className="chat-status">Waiting for your direction</span>}
                               {task.status === 'blocked' && <span className="chat-status">{agentContext.getMessage('taskBlocked') || 'Needs approval'}</span>}
                               {task.status === 'executing' && (
                                 <span className="chat-status executing">
@@ -2775,19 +2867,17 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
               </button>
             </div>
           )}
-          {task.status === 'paused' && (
-            <div className="task-status-banner task-status-banner-paused">
-              <div className="task-status-banner-content">
-                <strong>Paused — waiting on your input</strong>
-                {latestPauseEvent?.payload?.message && (
-                  <span className="task-status-banner-detail">{latestPauseEvent.payload.message}</span>
-                )}
-              </div>
-              <button className="btn-secondary" onClick={() => window.electronAPI.resumeTask(task.id)}>
-                Resume
-              </button>
+        {task.status === 'paused' && (
+          <div className="task-status-banner task-status-banner-paused">
+            <div className="task-status-banner-content">
+              <strong>Quick check-in - I'm at a decision point.</strong>
+              {latestPauseEvent?.payload?.message && (
+                <span className="task-status-banner-detail">{latestPauseEvent.payload.message}</span>
+              )}
+              <span className="task-status-banner-detail">Share your next instruction below and I'll continue right away.</span>
             </div>
-          )}
+          </div>
+        )}
           {task.status === 'blocked' && (
             <div className="task-status-banner task-status-banner-blocked">
               <div className="task-status-banner-content">
@@ -2874,7 +2964,7 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
               <button
                 className="lets-go-btn lets-go-btn-sm"
                 onClick={handleSend}
-                disabled={(!inputValue.trim() && pendingAttachments.length === 0) || isUploadingAttachments}
+                disabled={(!inputValue.trim() && pendingAttachments.length === 0) || isUploadingAttachments || isPreparingMessage}
                 title="Send message"
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -2959,7 +3049,11 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
               <span>Shell {shellEnabled ? 'ON' : 'OFF'}</span>
             </button>
             <span className="keyboard-hint">
-              <kbd>Enter</kbd> to send · <kbd>Shift+Enter</kbd> for new line
+              {isPreparingMessage ? (
+                <span>Preparing your message...</span>
+              ) : (
+                <span><kbd>Enter</kbd> to send · <kbd>Shift+Enter</kbd> for new line</span>
+              )}
             </span>
           </div>
         </div>

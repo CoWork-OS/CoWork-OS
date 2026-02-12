@@ -1532,6 +1532,12 @@ interface UpdateContextPolicyOptions {
   toolRestrictions?: string[];
 }
 
+interface ReadFileForViewerOptions {
+  enableImageOcr?: boolean;
+  imageOcrMaxChars?: number;
+  includeImageContent?: boolean;
+}
+
 // Expose protected methods that allow the renderer process to use ipcRenderer
 contextBridge.exposeInMainWorld('electronAPI', {
   // Dialog APIs
@@ -1541,7 +1547,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // File APIs
   openFile: (filePath: string, workspacePath?: string) => ipcRenderer.invoke('file:open', filePath, workspacePath),
   showInFinder: (filePath: string, workspacePath?: string) => ipcRenderer.invoke('file:showInFinder', filePath, workspacePath),
-  readFileForViewer: (filePath: string, workspacePath?: string) => ipcRenderer.invoke('file:readForViewer', { filePath, workspacePath }),
+  readFileForViewer: (filePath: string, workspacePath?: string, options?: ReadFileForViewerOptions) =>
+    ipcRenderer.invoke('file:readForViewer', { filePath, workspacePath, ...options }),
   importFilesToWorkspace: (data: { workspaceId: string; files: string[] }) => ipcRenderer.invoke('file:importToWorkspace', data),
   importDataToWorkspace: (data: { workspaceId: string; files: Array<{ name: string; data: string; mimeType?: string }> }) =>
     ipcRenderer.invoke('file:importDataToWorkspace', data),
@@ -2370,6 +2377,7 @@ export interface FileViewerResult {
     fileType: 'markdown' | 'code' | 'text' | 'docx' | 'pdf' | 'image' | 'pptx' | 'html' | 'unsupported';
     content: string | null;
     htmlContent?: string;
+    ocrText?: string;
     size: number;
   };
   error?: string;
@@ -2449,7 +2457,7 @@ export interface ElectronAPI {
   selectFiles: () => Promise<Array<{ path: string; name: string; size: number; mimeType?: string }>>;
   openFile: (filePath: string, workspacePath?: string) => Promise<string>;
   showInFinder: (filePath: string, workspacePath?: string) => Promise<void>;
-  readFileForViewer: (filePath: string, workspacePath?: string) => Promise<FileViewerResult>;
+  readFileForViewer: (filePath: string, workspacePath?: string, options?: ReadFileForViewerOptions) => Promise<FileViewerResult>;
   importFilesToWorkspace: (data: { workspaceId: string; files: string[] }) => Promise<Array<{ relativePath: string; fileName: string; size: number; mimeType?: string }>>;
   importDataToWorkspace: (data: { workspaceId: string; files: Array<{ name: string; data: string; mimeType?: string }> }) => Promise<Array<{ relativePath: string; fileName: string; size: number; mimeType?: string }>>;
   openExternal: (url: string) => Promise<void>;

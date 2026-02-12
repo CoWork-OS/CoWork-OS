@@ -801,6 +801,8 @@ export class MessageRouter {
     if (mime === 'audio/wav') return '.wav';
     if (mime === 'video/mp4') return '.mp4';
     if (mime === 'application/pdf') return '.pdf';
+    if (mime === 'application/vnd.openxmlformats-officedocument.presentationml.presentation') return '.pptx';
+    if (mime === 'application/vnd.ms-powerpoint') return '.ppt';
     return '';
   }
 

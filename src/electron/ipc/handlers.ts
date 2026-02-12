@@ -5,15 +5,12 @@ import * as fsSync from 'fs';
 import mammoth from 'mammoth';
 import mime from 'mime-types';
 import { getUserDataDir } from '../utils/user-data-dir';
-
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const pdfParseModule = require('pdf-parse');
-// Handle both ESM default export and CommonJS module.exports
-const pdfParse = (typeof pdfParseModule === 'function' ? pdfParseModule : pdfParseModule.default) as (dataBuffer: Buffer) => Promise<{
-  text: string;
-  numpages: number;
-  info: { Title?: string; Author?: string };
-}>;
+import {
+  resolveImageOcrChars,
+  runOcrFromImagePath,
+  shouldRunImageOcr,
+} from './image-viewer-ocr';
+import { extractPptxContentFromFile } from '../utils/pptx-extractor';
 
 import { DatabaseManager } from '../database/schema';
 import {
@@ -135,6 +132,22 @@ import { getVoiceService } from '../voice/VoiceService';
 import { AgentPerformanceReviewService } from '../reports/AgentPerformanceReviewService';
 import { getCronService } from '../cron';
 import type { CronJobCreate } from '../cron/types';
+
+type FileViewerRequestOptions = {
+  workspacePath?: string;
+  enableImageOcr?: boolean;
+  imageOcrMaxChars?: number;
+  includeImageContent?: boolean;
+};
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const pdfParseModule = require('pdf-parse');
+// Handle both ESM default export and CommonJS module.exports
+const pdfParse = (typeof pdfParseModule === 'function' ? pdfParseModule : pdfParseModule.default) as (dataBuffer: Buffer) => Promise<{
+  text: string;
+  numpages: number;
+  info: { Title?: string; Author?: string };
+}>;
 
 // Global notification service instance
 let notificationService: NotificationService | null = null;
@@ -371,8 +384,14 @@ export async function setupIpcHandlers(
   // File viewer handler - read file content for in-app preview
   // Note: This handler allows viewing any file on the system for convenience.
   // File operations like open/showInFinder remain workspace-restricted.
-  ipcMain.handle('file:readForViewer', async (_, data: { filePath: string; workspacePath?: string }) => {
-    const { filePath, workspacePath } = data;
+  ipcMain.handle('file:readForViewer', async (_, data: { filePath: string } & FileViewerRequestOptions) => {
+    const {
+      filePath,
+      workspacePath,
+      enableImageOcr,
+      imageOcrMaxChars,
+      includeImageContent = true,
+    } = data;
 
     // Resolve the path - if absolute use directly, otherwise resolve relative to workspace or cwd
     const resolvedPath = path.isAbsolute(filePath)
@@ -412,21 +431,32 @@ export async function setupIpcHandlers(
     };
 
     const fileType = getFileType(extension);
+    const shouldAttemptImageOcr =
+      shouldRunImageOcr({
+        enableImageOcr,
+        extension,
+        fileSizeBytes: stats.size,
+      });
 
     // Size limits
     const MAX_TEXT_SIZE = 5 * 1024 * 1024; // 5MB
     const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10MB
+    const MAX_PPTX_VIEWER_SIZE = 50 * 1024 * 1024; // 50MB before hard-stop
 
     if (fileType === 'image' && stats.size > MAX_IMAGE_SIZE) {
       return { success: false, error: 'File too large for preview (max 10MB for images)' };
     }
-    if (fileType !== 'image' && fileType !== 'unsupported' && stats.size > MAX_TEXT_SIZE) {
+    if (fileType === 'pptx' && stats.size > MAX_PPTX_VIEWER_SIZE) {
+      return { success: false, error: 'PPTX file too large for preview (max 50MB)' };
+    }
+    if (fileType !== 'image' && fileType !== 'unsupported' && fileType !== 'pptx' && stats.size > MAX_TEXT_SIZE) {
       return { success: false, error: 'File too large for preview (max 5MB for text files)' };
     }
 
     try {
       let content: string | null = null;
       let htmlContent: string | undefined;
+      let ocrText: string | undefined;
 
       switch (fileType) {
         case 'markdown':
@@ -452,7 +482,6 @@ export async function setupIpcHandlers(
         }
 
         case 'image': {
-          const buffer = await fs.readFile(resolvedPath);
           const mimeTypes: Record<string, string> = {
             '.png': 'image/png',
             '.jpg': 'image/jpeg',
@@ -463,8 +492,17 @@ export async function setupIpcHandlers(
             '.bmp': 'image/bmp',
             '.ico': 'image/x-icon',
           };
-          const mimeType = mimeTypes[extension] || 'image/png';
-          content = `data:${mimeType};base64,${buffer.toString('base64')}`;
+
+          if (includeImageContent) {
+            const buffer = await fs.readFile(resolvedPath);
+            const mimeType = mimeTypes[extension] || 'image/png';
+            content = `data:${mimeType};base64,${buffer.toString('base64')}`;
+          }
+
+          if (shouldAttemptImageOcr) {
+            const requestOcrChars = resolveImageOcrChars(imageOcrMaxChars);
+            ocrText = (await runOcrFromImagePath(resolvedPath, requestOcrChars)) ?? undefined;
+          }
           break;
         }
 
@@ -475,8 +513,7 @@ export async function setupIpcHandlers(
         }
 
         case 'pptx':
-          // PowerPoint files are complex to render, return placeholder
-          content = null;
+          content = await extractPptxContentFromFile(resolvedPath);
           break;
 
         default:
@@ -492,6 +529,7 @@ export async function setupIpcHandlers(
           content,
           htmlContent,
           size: stats.size,
+          ocrText,
         },
       };
     } catch (error: any) {

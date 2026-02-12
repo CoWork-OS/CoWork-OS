@@ -77,6 +77,7 @@ export class FolderOrganizer {
       '.pdf': 'Documents',
       '.doc': 'Documents',
       '.docx': 'Documents',
+      '.pptx': 'Documents',
       '.txt': 'Documents',
       '.xlsx': 'Spreadsheets',
       '.csv': 'Spreadsheets',

@@ -127,7 +127,7 @@ export class GrepTools {
           totalMatches: 0,
           filesSearched: 0,
           truncated: false,
-          warning: 'Workspace appears document-heavy (PDF/DOCX). The grep tool only searches text files. Use read_file for those documents.',
+          warning: 'Workspace appears document-heavy (PDF/DOCX/PPTX). The grep tool only searches text files. Use read_file for those documents.',
         };
       }
 

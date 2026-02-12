@@ -4,7 +4,7 @@
   "description": "Create a summary of all files in a folder",
   "icon": "📋",
   "category": "Documentation",
-  "prompt": "Please analyze all the files in {{path}} and create a comprehensive summary.\n\nInclude:\n- Overview of the folder structure\n- Purpose of each file/module\n- Key functions and classes\n- Dependencies and relationships between files\n- Any notable patterns or conventions\n\nFormat the output as a clear, well-organized document.",
+  "prompt": "Please analyze all the files in {{path}} and create a comprehensive summary.\n\nInclude:\n- Overview of the folder structure\n- Purpose of each file/module\n- Key functions and classes\n- Dependencies and relationships between files\n- Any notable patterns or conventions\n\nWrite the summary to:\n- `{artifactDir}/summary.md`\n\nFormat the output as a clear, well-organized document.",
   "parameters": [
     {
       "name": "path",
@@ -14,5 +14,16 @@
       "default": "."
     }
   ],
-  "enabled": true
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when the user asks to create a summary of all files in a folder.",
+      "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
+      "outputs": "Outcome from Summarize Folder: task-specific result plus concrete action notes.",
+      "successCriteria": "Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior.",
+      "expectedArtifacts": [
+        "summary.md"
+      ]
+    }
+  }
 }

@@ -6,5 +6,13 @@
   "category": "Tools",
   "prompt": "# imsg\n\nUse `imsg` to read and send Messages.app iMessage/SMS on macOS.\n\nRequirements\n\n- Messages.app signed in\n- Full Disk Access for your terminal\n- Automation permission to control Messages.app (for sending)\n\nCommon commands\n\n- List chats: `imsg chats --limit 10 --json`\n- History: `imsg history --chat-id 1 --limit 20 --attachments --json`\n- Watch: `imsg watch --chat-id 1 --attachments`\n- Send: `imsg send --to \"+14155551212\" --text \"hi\" --file /path/pic.jpg`\n\nNotes\n\n- `--service imessage|sms|auto` controls delivery.\n- Confirm recipient + message before sending.",
   "parameters": [],
-  "enabled": true
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when the user asks to iMessage/SMS CLI for listing chats, history, watch, and sending.",
+      "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
+      "outputs": "Outcome from Imsg: task-specific result plus concrete action notes.",
+      "successCriteria": "Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior."
+    }
+  }
 }

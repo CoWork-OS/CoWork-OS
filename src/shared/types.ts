@@ -2841,6 +2841,13 @@ export interface SkillMetadata {
   license?: string;
   tags?: string[];
   primaryEnv?: string;  // Main environment variable for API key etc.
+  routing?: {
+    useWhen?: string;
+    dontUseWhen?: string;
+    outputs?: string;
+    successCriteria?: string;
+    expectedArtifacts?: string[];
+  };
 }
 
 export interface CustomSkill {

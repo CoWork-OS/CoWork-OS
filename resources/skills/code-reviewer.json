@@ -8,6 +8,12 @@
   "parameters": [],
   "enabled": true,
   "metadata": {
+    "routing": {
+      "useWhen": "Use for formal, structured review workflows on local diffs or GitHub PRs.",
+      "dontUseWhen": "Don't use for one-off formatting checks without code-quality feedback.",
+      "outputs": "Findings grouped by severity with rationale and approval/revise recommendation.",
+      "successCriteria": "Covers correctness, maintainability, performance, security, and testability."
+    },
     "version": "1.0.0",
     "author": "google-gemini",
     "repository": "https://github.com/google-gemini/gemini-cli/tree/main/.gemini/skills/code-reviewer"

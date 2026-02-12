@@ -8,9 +8,19 @@
   "parameters": [],
   "enabled": true,
   "requires": {
-    "bins": ["himalaya"]
+    "bins": [
+      "himalaya"
+    ]
   },
   "invocation": {
     "disableModelInvocation": true
+  },
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when the user asks to cLI to manage emails via IMAP/SMTP. Use himalaya to list, read, write, reply, forward, search, and organize emails from the terminal. Supports multiple accounts and message composition with MML MIME Meta Language.",
+      "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead. Avoid using in non-interactive environments unless automation can fully satisfy prompts.",
+      "outputs": "Outcome from Himalaya: task-specific result plus concrete action notes.",
+      "successCriteria": "Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior."
+    }
   }
 }

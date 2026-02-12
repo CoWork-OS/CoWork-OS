@@ -19,5 +19,13 @@
       "required": true
     }
   ],
-  "enabled": true
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when renaming identifiers across files requires consistent symbol-level updates.",
+      "dontUseWhen": "Don't use when simple local rename in a single file can be done manually.",
+      "outputs": "List of files edited, replacement counts, and ambiguous cases flagged for review.",
+      "successCriteria": "Only real symbol references are changed, with exports/imports kept consistent."
+    }
+  }
 }

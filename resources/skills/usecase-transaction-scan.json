@@ -11,7 +11,11 @@
       "type": "select",
       "description": "Where transaction alerts arrive",
       "required": true,
-      "options": ["email", "slack", "imessage"]
+      "options": [
+        "email",
+        "slack",
+        "imessage"
+      ]
     },
     {
       "name": "chat_hint",
@@ -42,5 +46,13 @@
       "default": 200
     }
   ],
-  "enabled": true
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when the user asks to scan recent messages/emails for card transactions and flag suspicious charges.",
+      "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
+      "outputs": "Outcome from Transaction Scan: task-specific result plus concrete action notes.",
+      "successCriteria": "Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior."
+    }
+  }
 }

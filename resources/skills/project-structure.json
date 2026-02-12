@@ -6,5 +6,13 @@
   "category": "Project",
   "prompt": "Please analyze this project's structure and architecture.\n\nProvide:\n1. **Directory Structure**: Visual tree of important directories\n2. **Architecture Overview**: How the project is organized\n3. **Key Files**: Entry points, configs, main modules\n4. **Data Flow**: How data moves through the system\n5. **Dependencies**: External libraries and their purposes\n6. **Design Patterns**: Patterns used in the codebase\n7. **Tech Stack**: Languages, frameworks, tools used\n\nFormat as a clear, well-organized document that would help a new developer understand the project.",
   "parameters": [],
-  "enabled": true
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when the user asks to analyze and explain project architecture.",
+      "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
+      "outputs": "Outcome from Project Structure: task-specific result plus concrete action notes.",
+      "successCriteria": "Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior."
+    }
+  }
 }

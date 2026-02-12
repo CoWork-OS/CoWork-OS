@@ -12,7 +12,11 @@
       "description": "Time range to summarize",
       "required": false,
       "default": "today",
-      "options": ["today", "tomorrow", "week"]
+      "options": [
+        "today",
+        "tomorrow",
+        "week"
+      ]
     },
     {
       "name": "recipient",
@@ -27,8 +31,20 @@
       "description": "Writing tone",
       "required": false,
       "default": "concise",
-      "options": ["concise", "friendly", "formal"]
+      "options": [
+        "concise",
+        "friendly",
+        "formal"
+      ]
     }
   ],
-  "enabled": true
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when the user asks to draft a daily digest based on calendar + tasks. Stops before sending.",
+      "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
+      "outputs": "Outcome from Family Digest: task-specific result plus concrete action notes.",
+      "successCriteria": "Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior."
+    }
+  }
 }

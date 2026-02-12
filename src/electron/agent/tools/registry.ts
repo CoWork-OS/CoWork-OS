@@ -739,7 +739,7 @@ Integration Status:
 - Email channel (IMAP/SMTP): ${emailChannelStatus}
 
 File Operations:
-- read_file: Read contents of a file (supports plain text, DOCX, and PDF)
+- read_file: Read contents of a file (supports plain text, DOCX, PDF, and PPTX)
 - read_files: Read multiple files matched by glob patterns (supports exclusion patterns with leading "!")
 - write_file: Write content to a file (creates or overwrites). Use edit_file for targeted changes instead.
 - edit_file: Surgical text replacement (preferred over write_file for modifications)
@@ -756,7 +756,7 @@ Skills:
 - edit_document: Edit/append content to existing DOCX files
 - create_presentation: Create PowerPoint presentations
 - organize_folder: Organize and structure files in folders
-- use_skill: Invoke a custom skill by ID to help accomplish tasks (see available skills below)
+- use_skill: Invoke a custom skill by ID to help accomplish tasks (see available skills below). Use explicit IDs for deterministic workflows ("Use the <skill id> skill."). If the skill writes files, use the "{artifactDir}" placeholder for deterministic workspace output.
 
 Skill Management (create, modify, duplicate skills):
 - skill_list: List all skills with metadata (source, path, status)
@@ -1447,7 +1447,56 @@ ${skillDescriptions}`;
       };
     }
 
+    const status = await skillLoader.getSkillStatusEntry(skill_id);
+    if (status && !status.eligible) {
+      if (status.disabled) {
+        return {
+          success: false,
+          error: `Skill '${skill_id}' is disabled`,
+          reason: 'The selected skill is disabled in configuration.',
+          suggestion: 'Enable it in skill settings or use an alternative skill.',
+        };
+      }
+
+      if (status.blockedByAllowlist) {
+        return {
+          success: false,
+          error: `Skill '${skill_id}' is blocked by skill allowlist/denylist policy`,
+          reason: 'Current workspace/instance policy does not allow this skill.',
+        };
+      }
+
+      const missing = status.missing;
+      const missingItems = [
+        ...missing.bins.map((bin) => `bin:${bin}`),
+        ...missing.anyBins.map((bin) => `any-bin:${bin}`),
+        ...missing.env.map((env) => `env:${env}`),
+        ...missing.config.map((cfg) => `config:${cfg}`),
+        ...missing.os.map((os) => `os:${os}`),
+      ];
+
+      if (missingItems.length > 0) {
+        return {
+          success: false,
+          error: `Skill '${skill_id}' is not currently executable`,
+          reason: 'Missing or invalid skill prerequisites.',
+          missing_requirements: missing,
+          missing_items: missingItems,
+          suggestion: 'Install required binaries/tools, set required environment variables, or switch OS context, then retry.',
+        };
+      }
+    }
+
     // Check for required parameters
+    const artifactDir = path.join(this.workspace.path, 'artifacts', 'skills', this.taskId, skill_id);
+    try {
+      if (!fs.existsSync(artifactDir)) {
+        await fsPromises.mkdir(artifactDir, { recursive: true });
+      }
+    } catch {
+      // Best-effort: keep tool usable even when the workspace path is restricted.
+    }
+
     const missingParams: string[] = [];
     if (skill.parameters) {
       for (const param of skill.parameters) {
@@ -1474,7 +1523,7 @@ ${skillDescriptions}`;
     }
 
     // Expand the skill prompt with provided parameters
-    const expandedPrompt = skillLoader.expandPrompt(skill, parameters);
+    const expandedPrompt = skillLoader.expandPrompt(skill, parameters, { artifactDir });
 
     // Log the skill invocation
     this.daemon.logEvent(this.taskId, 'log', {
@@ -1888,7 +1937,7 @@ ${skillDescriptions}`;
     return [
       {
         name: 'read_file',
-        description: 'Read the contents of a file in the workspace. Supports plain text files, DOCX (Word documents), and PDF files. For DOCX and PDF, extracts and returns the text content.',
+        description: 'Read the contents of a file in the workspace. Supports plain text files, DOCX (Word documents), PDF, and PPTX. For DOCX/PDF/PPTX, extracts and returns the text content.',
         input_schema: {
           type: 'object',
           properties: {
@@ -2536,7 +2585,8 @@ ${skillDescriptions}`;
         name: 'x_action',
         description:
           'Use the connected X/Twitter account to read, search, and post. ' +
-          'Posting actions (tweet/reply/follow/unfollow) require user approval.',
+          'Posting actions (tweet/reply/follow/unfollow) require user approval. ' +
+          'If X blocks a request (rate limit/challenge/auth/access issue), this tool attempts browser-mode fallback for read/write actions.',
         input_schema: {
           type: 'object',
           properties: {

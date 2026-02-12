@@ -25,5 +25,13 @@
       ]
     }
   ],
-  "enabled": true
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when user asks for a conceptual explanation of function behavior, architecture, or control flow.",
+      "dontUseWhen": "Don't use when the task requires code edits or strict formal API docs.",
+      "outputs": "Step-by-step explanation with key abstractions, assumptions, and edge-case behavior.",
+      "successCriteria": "Explanation matches code intent at requested level with minimal speculation and clear terminology."
+    }
+  }
 }

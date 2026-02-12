@@ -6,5 +6,13 @@
   "category": "Tools",
   "prompt": "# Video Frames (ffmpeg)\n\nExtract a single frame from a video, or create quick thumbnails for inspection.\n\n## Quick start\n\nFirst frame:\n\n```bash\n{baseDir}/scripts/frame.sh /path/to/video.mp4 --out /tmp/frame.jpg\n```\n\nAt a timestamp:\n\n```bash\n{baseDir}/scripts/frame.sh /path/to/video.mp4 --time 00:00:10 --out /tmp/frame-10s.jpg\n```\n\n## Notes\n\n- Prefer `--time` for “what is happening around here?”.\n- Use a `.jpg` for quick share; use `.png` for crisp UI frames.",
   "parameters": [],
-  "enabled": true
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when the user asks to extract frames or short clips from videos using ffmpeg.",
+      "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
+      "outputs": "Outcome from Video-frames: task-specific result plus concrete action notes.",
+      "successCriteria": "Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior."
+    }
+  }
 }

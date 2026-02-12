@@ -51,5 +51,13 @@
       "required": false
     }
   ],
-  "enabled": true
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when the user asks to aI CFO for bootstrapped startups. Provides financial frameworks for cash management, runway calculations, unit economics LTV:CAC, capital allocation, hiring ROI, burn rate analysis, working capital optimization, and forecasting.",
+      "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
+      "outputs": "Outcome from Startup CFO: task-specific result plus concrete action notes.",
+      "successCriteria": "Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior."
+    }
+  }
 }

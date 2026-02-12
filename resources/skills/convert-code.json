@@ -30,5 +30,13 @@
       ]
     }
   ],
-  "enabled": true
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when asked to translate source code from one language to another while preserving behavior.",
+      "dontUseWhen": "Don't use when target language constraints, API semantics, or requirements are unclear.",
+      "outputs": "Converted source plus migration notes and any intentional semantic deviations.",
+      "successCriteria": "Core logic and behavior stay equivalent, with idiomatic target-language usage."
+    }
+  }
 }

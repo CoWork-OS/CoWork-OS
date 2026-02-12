@@ -6,5 +6,13 @@
   "category": "Tools",
   "prompt": "# Gemini CLI\n\nUse Gemini in one-shot mode with a positional prompt (avoid interactive mode).\n\nQuick start\n\n- `gemini \"Answer this question...\"`\n- `gemini --model <name> \"Prompt...\"`\n- `gemini --output-format json \"Return JSON\"`\n\nExtensions\n\n- List: `gemini --list-extensions`\n- Manage: `gemini extensions <command>`\n\nNotes\n\n- If auth is required, run `gemini` once interactively and follow the login flow.\n- Avoid `--yolo` for safety.",
   "parameters": [],
-  "enabled": true
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when the user asks to gemini CLI for one-shot Q&A, summaries, and generation.",
+      "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead. Avoid using in non-interactive environments unless automation can fully satisfy prompts.",
+      "outputs": "Outcome from Gemini: task-specific result plus concrete action notes.",
+      "successCriteria": "Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior."
+    }
+  }
 }

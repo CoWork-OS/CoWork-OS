@@ -4,7 +4,7 @@
   "description": "Generate JSDoc/docstrings for functions",
   "icon": "📚",
   "category": "Development",
-  "prompt": "Please add documentation to all functions in {{path}}.\n\nRequirements:\n- Use {{style}} documentation style\n- Document all parameters with types\n- Document return values\n- Add brief description of what each function does\n- Include @example where helpful\n- Note any side effects or exceptions\n\nPreserve existing documentation if it's accurate, enhance if needed.",
+  "prompt": "Please add documentation to all functions in {{path}}.\n\nRequirements:\n- Use {{style}} documentation style\n- Document all parameters with types\n- Document return values\n- Add brief description of what each function does\n- Include @example where helpful\n- Note any side effects or exceptions\n\nPreserve existing documentation if it's accurate, enhance if needed.\n\nWrite the final edited file or patch artifacts to:\n- `{artifactDir}/documentation-summary.md` for the summary.\n- `{artifactDir}` when creating optional snapshots.",
   "parameters": [
     {
       "name": "path",
@@ -27,5 +27,16 @@
       ]
     }
   ],
-  "enabled": true
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when users ask for in-code docs, docstring addition, or API-level comments.",
+      "dontUseWhen": "Don't use for content translation or narrative changelogs.",
+      "outputs": "Updated code artifacts with improved inline documentation.",
+      "successCriteria": "Retains behavior while improving doc clarity and consistency.",
+      "expectedArtifacts": [
+        "documentation-summary.md"
+      ]
+    }
+  }
 }

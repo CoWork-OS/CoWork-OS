@@ -8,9 +8,19 @@
   "parameters": [],
   "enabled": true,
   "requires": {
-    "bins": ["gog"]
+    "bins": [
+      "gog"
+    ]
   },
   "invocation": {
     "disableModelInvocation": true
+  },
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when the user asks to google Workspace CLI for Gmail, Calendar, Drive, Contacts, Sheets, and Docs.",
+      "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
+      "outputs": "Outcome from Gog: task-specific result plus concrete action notes.",
+      "successCriteria": "Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior."
+    }
   }
 }

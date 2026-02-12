@@ -10,6 +10,12 @@
   "metadata": {
     "version": "1.0.0",
     "author": "ComposioHQ",
-    "repository": "https://github.com/ComposioHQ/awesome-claude-skills/tree/master/developer-growth-analysis"
+    "repository": "https://github.com/ComposioHQ/awesome-claude-skills/tree/master/developer-growth-analysis",
+    "routing": {
+      "useWhen": "Use when the user asks to analyze recent coding patterns and generate a personalized developer growth report.",
+      "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
+      "outputs": "Outcome from developer-growth-analysis: task-specific result plus concrete action notes.",
+      "successCriteria": "Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior."
+    }
   }
 }

@@ -6,5 +6,13 @@
   "category": "Tools",
   "prompt": "# nano-pdf\n\nUse `nano-pdf` to apply edits to a specific page in a PDF using a natural-language instruction.\n\n## Quick start\n\n```bash\nnano-pdf edit deck.pdf 1 \"Change the title to 'Q3 Results' and fix the typo in the subtitle\"\n```\n\nNotes:\n\n- Page numbers are 0-based or 1-based depending on the tool’s version/config; if the result looks off by one, retry with the other.\n- Always sanity-check the output PDF before sending it out.",
   "parameters": [],
-  "enabled": true
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when the user asks to edit PDFs with natural-language instructions using the nano-pdf CLI.",
+      "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
+      "outputs": "Outcome from Nano-pdf: task-specific result plus concrete action notes.",
+      "successCriteria": "Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior."
+    }
+  }
 }

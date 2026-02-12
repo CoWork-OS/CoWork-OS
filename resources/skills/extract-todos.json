@@ -14,5 +14,13 @@
       "default": "."
     }
   ],
-  "enabled": true
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when the user wants TODO/FIXME/HACK/XXX inventorying, triage, or stale-task cleanup.",
+      "dontUseWhen": "Don't use for implementation requests or when a code review already includes a TODO pass.",
+      "outputs": "Prioritized TODO inventory with counts, file grouping, and stale candidates.",
+      "successCriteria": "Findings list all TODO-like markers with location, context, and suggested priority rationale."
+    }
+  }
 }

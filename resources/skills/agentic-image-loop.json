@@ -6,5 +6,13 @@
   "category": "Tools",
   "prompt": "# Agentic Image Loop (Generate -> Annotate -> Refine -> Repeat)\n\nGoal: run an iterative visual workflow inside CoWork OS:\n\n1) Generate an image.\n2) Open the Visual Annotator so the user can mark what to change visually.\n3) Convert the user's annotations + notes into a refined prompt.\n4) Regenerate and update the annotator.\n5) Repeat until the user approves.\n\n## How to run the loop\n\n### Step A: Generate the first image\n\n- Use `generate_image`.\n- By default, do NOT specify `provider` or `model` unless the user explicitly requests one.\n- Save the prompt you used as `currentPrompt` in your working memory so you can refine it.\n\n### Step B: Open the Visual Annotator\n\n- Call `visual_open_annotator` with:\n  - `imagePath`: the workspace-relative filename returned by `generate_image`.\n  - `title`: include the use-case, e.g. \"Blog cover iteration 1\".\n  - `iteration`: 1\n  - `target`: include context like size, usage, style.\n\n### Step C: Wait for the user's visual feedback\n\nThe annotator sends a message that begins with `[Canvas Interaction]` and includes:\n- `Action: visual_feedback` (just feedback)\n- `Action: visual_regenerate` (feedback + regenerate)\n- `Action: visual_approve` (done)\n\nThe JSON under `Context:` contains `export.markdown` plus normalized regions and notes.\n\n### Step D: Refine prompt and regenerate\n\nWhen you receive `visual_regenerate`:\n\n- Start from `currentPrompt`.\n- Apply the user's `export.markdown` changes as explicit edits.\n- Add specificity pressure:\n  - constraints: aspect ratio, safe margins, typography rules\n  - composition: focal point, hierarchy\n  - color: palette and contrast requirements\n  - iconography: style consistency\n\nThen:\n\n- Call `generate_image` again with the refined prompt.\n- Call `visual_update_annotator` with:\n  - `sessionId`: from the canvas interaction message\n  - `imagePath`: new image\n  - `iteration`: increment\n  - keep the same `target`\n\nLoop until the user sends `visual_approve`.\n\n## Output expectations\n\n- Always keep the latest image in the workspace.\n- On approval, summarize what changed across iterations and provide the final prompt you used.\n",
   "parameters": [],
-  "enabled": true
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when the user asks to generate -> annotate -> refine -> repeat using generate_image + Visual Annotator Live Canvas.",
+      "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
+      "outputs": "Outcome from Agentic Image Loop: task-specific result plus concrete action notes.",
+      "successCriteria": "Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior."
+    }
+  }
 }

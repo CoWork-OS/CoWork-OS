@@ -13,5 +13,13 @@
       "required": true
     }
   ],
-  "enabled": true
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when asked to analyze a CSV file for schema, data quality, statistical summaries, or anomalies.",
+      "dontUseWhen": "Don't use this for non-tabular files or for purely visual charting without data inspection.",
+      "outputs": "Concise dataset summary with column stats, missing-value signals, and actionable insights.",
+      "successCriteria": "Reports include row/column counts, datatype observations, numeric statistics, and high-confidence anomalies."
+    }
+  }
 }

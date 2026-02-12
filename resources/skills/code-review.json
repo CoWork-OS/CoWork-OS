@@ -4,7 +4,7 @@
   "description": "Review code for best practices and potential issues",
   "icon": "🔍",
   "category": "Development",
-  "prompt": "Please review the code in {{path}} and provide feedback on:\n- Code quality and best practices\n- Potential bugs or issues\n- Performance considerations\n- Security concerns\n- Suggestions for improvement\n\nBe constructive and specific in your feedback.",
+  "prompt": "Please review the code in {{path}} and provide feedback on:\n- Code quality and best practices\n- Potential bugs or issues\n- Performance considerations\n- Security concerns\n- Suggestions for improvement\n\nBe constructive and specific in your feedback.\n\nWrite a concise findings artifact to:\n- `{artifactDir}/review-notes.md`",
   "parameters": [
     {
       "name": "path",
@@ -14,5 +14,16 @@
       "default": "."
     }
   ],
-  "enabled": true
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when a user explicitly asks for a code review, bug-risk sweep, or pre-merge feedback for a specific path.",
+      "dontUseWhen": "Don't use when the task is a broad architecture rewrite or only formatting fixes.",
+      "outputs": "Findings grouped by severity and file-level recommendations.",
+      "successCriteria": "Returns prioritized issues with concrete fixes and no false-critical claims.",
+      "expectedArtifacts": [
+        "review-notes.md"
+      ]
+    }
+  }
 }

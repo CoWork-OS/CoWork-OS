@@ -10,6 +10,12 @@
   "metadata": {
     "version": "1.0.0",
     "author": "dyad-sh",
-    "repository": "https://github.com/dyad-sh/dyad/tree/main/.claude/skills/multi-pr-review"
+    "repository": "https://github.com/dyad-sh/dyad/tree/main/.claude/skills/multi-pr-review",
+    "routing": {
+      "useWhen": "Use when the user asks to run a consensus-style multi-agent review of a PR with severity-based findings.",
+      "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
+      "outputs": "Outcome from multi-pr-review: task-specific result plus concrete action notes.",
+      "successCriteria": "Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior."
+    }
   }
 }

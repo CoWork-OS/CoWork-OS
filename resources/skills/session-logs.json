@@ -6,5 +6,13 @@
   "category": "Tools",
   "prompt": "# session-logs (Deprecated)\n\nConversation/session history is stored in the local Cowork OS database, not in filesystem JSONL logs.\n\nUse this skill when the user asks about prior chats like:\n\n- \"What did we talk about yesterday?\"\n- \"What did I ask earlier today?\"\n- \"Show my last 10 tasks\"\n\n## Primary tool\n\nUse the `task_history` tool.\n\n### Example: yesterday\n\n```json\n{\n  \"period\": \"yesterday\",\n  \"limit\": 20,\n  \"include_messages\": true\n}\n```\n\n### Example: last 7 days, filtered\n\n```json\n{\n  \"period\": \"last_7_days\",\n  \"query\": \"Gmail\",\n  \"limit\": 20,\n  \"include_messages\": true\n}\n```\n\n### Example: custom range\n\n```json\n{\n  \"period\": \"custom\",\n  \"from\": \"2026-02-06T00:00:00Z\",\n  \"to\": \"2026-02-07T00:00:00Z\",\n  \"limit\": 50,\n  \"include_messages\": true\n}\n```\n\n## Notes\n\n- Returned prompts/messages may be truncated; if the user needs more detail, narrow the query/time range.\n- In group/public contexts, task history may be unavailable for privacy. In that case, explain the limitation and ask the user to continue in a private chat.",
   "parameters": [],
-  "enabled": true
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when the user asks to query prior conversations/tasks via the task_history tool replaces filesystem JSONL session logs.",
+      "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
+      "outputs": "Outcome from Session Logs (Deprecated): task-specific result plus concrete action notes.",
+      "successCriteria": "Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior."
+    }
+  }
 }

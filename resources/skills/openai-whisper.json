@@ -6,5 +6,13 @@
   "category": "Tools",
   "prompt": "# Whisper (CLI)\n\nUse `whisper` to transcribe audio locally.\n\nQuick start\n\n- `whisper /path/audio.mp3 --model medium --output_format txt --output_dir .`\n- `whisper /path/audio.m4a --task translate --output_format srt`\n\nNotes\n\n- Models download to `~/.cache/whisper` on first run.\n- `--model` defaults to `turbo` on this install.\n- Use smaller models for speed, larger for accuracy.",
   "parameters": [],
-  "enabled": true
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when the user asks to local speech-to-text with the Whisper CLI no API key.",
+      "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
+      "outputs": "Outcome from Openai-whisper: task-specific result plus concrete action notes.",
+      "successCriteria": "Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior."
+    }
+  }
 }

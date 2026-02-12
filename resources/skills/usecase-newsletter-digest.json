@@ -11,7 +11,10 @@
       "type": "select",
       "description": "Where the newsletter feed arrives",
       "required": true,
-      "options": ["slack", "email"]
+      "options": [
+        "slack",
+        "email"
+      ]
     },
     {
       "name": "chat_hint",
@@ -39,8 +42,19 @@
       "description": "How to format the digest",
       "required": false,
       "default": "bullets",
-      "options": ["bullets", "table"]
+      "options": [
+        "bullets",
+        "table"
+      ]
     }
   ],
-  "enabled": true
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when the user asks to summarize newsletter/email feed messages from the last N hours and propose follow-ups.",
+      "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
+      "outputs": "Outcome from Newsletter Digest: task-specific result plus concrete action notes.",
+      "successCriteria": "Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior."
+    }
+  }
 }

@@ -10,6 +10,12 @@
   "metadata": {
     "version": "1.0.0",
     "author": "Anthropic",
-    "repository": "https://github.com/anthropics/skills/tree/main/skills/frontend-design"
+    "repository": "https://github.com/anthropics/skills/tree/main/skills/frontend-design",
+    "routing": {
+      "useWhen": "Use when the user asks to design and build production-grade frontends with bold, distinctive aesthetics.",
+      "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
+      "outputs": "Outcome from frontend-design: task-specific result plus concrete action notes.",
+      "successCriteria": "Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior."
+    }
   }
 }

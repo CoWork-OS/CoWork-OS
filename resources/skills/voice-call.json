@@ -6,5 +6,13 @@
   "category": "Tools",
   "prompt": "# Voice Call (Phone Calls)\n\nUse the built-in `voice_call` tool to initiate outbound phone calls via ElevenLabs Agents.\n\n## Setup\n\n1) Configure in **Settings** > **Voice** > **Phone Calls (ElevenLabs Agents)**:\n\n- Agents API Key (recommended scope: `agents-write`)\n- Agent ID\n- Outbound Phone Number ID\n\n2) Ensure your workspace has **Network** permission enabled.\n\n## Tool\n\nUse `voice_call` with one of these actions:\n\n- `list_agents`\n- `list_phone_numbers`\n- `initiate_call` (requires user approval)\n\nExample call:\n\n```json\n{\n  \"action\": \"initiate_call\",\n  \"to_number\": \"+15555550123\"\n}\n```\n\nOptional parameters for `initiate_call`:\n\n- `agent_id` / `agent_phone_number_id` to override defaults\n- `dynamic_variables` (object) to pass per-call variables\n- `prompt` / `first_message` (advanced per-call overrides)\n\nNotes:\n\n- `to_number` must be E.164 (e.g., `+15555550123`).\n- The app always requests approval before placing a call.",
   "parameters": [],
-  "enabled": true
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when the user asks to initiate outbound phone calls via ElevenLabs Agents.",
+      "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
+      "outputs": "Outcome from Voice Call: task-specific result plus concrete action notes.",
+      "successCriteria": "Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior."
+    }
+  }
 }

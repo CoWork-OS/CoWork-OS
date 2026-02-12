@@ -19,8 +19,25 @@
       "description": "Target AI tool for the prompts",
       "required": false,
       "default": "Any",
-      "options": ["Any", "ChatGPT", "Claude", "Midjourney", "DALL-E", "Stable Diffusion", "Cursor", "Claude Code"]
+      "options": [
+        "Any",
+        "ChatGPT",
+        "Claude",
+        "Midjourney",
+        "DALL-E",
+        "Stable Diffusion",
+        "Cursor",
+        "Claude Code"
+      ]
     }
   ],
-  "enabled": true
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when the user asks to research topics across Reddit and X from the past month to generate working prompts.",
+      "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
+      "outputs": "Outcome from Last 30 Days: task-specific result plus concrete action notes.",
+      "successCriteria": "Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior."
+    }
+  }
 }

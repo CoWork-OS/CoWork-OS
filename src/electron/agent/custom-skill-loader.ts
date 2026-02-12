@@ -35,6 +35,19 @@ export interface SkillLoaderConfig {
 }
 
 export class CustomSkillLoader {
+  private static readonly LOW_SIGNAL_ROUTING_HINT_PATTERNS = {
+    dontUseWhen: [
+      /planning documents,\s*high-level strategy,\s*or non-executable discussion/i,
+    ],
+    outputs: [
+      /^Outcome from .*task-specific result plus concrete action notes\.?$/i,
+    ],
+    successCriteria: [
+      /returns concrete actions and decisions matching the requested task/i,
+      /no fabricated tool-side behavior/i,
+    ],
+  } as const;
+
   private bundledSkillsDir: string;
   private managedSkillsDir: string;
   private workspaceSkillsDir: string | null = null;
@@ -370,10 +383,54 @@ export class CustomSkillLoader {
           ? ` (params: ${skill.parameters.map(p => p.name + (p.required ? '*' : '')).join(', ')})`
           : '';
         lines.push(`- ${skill.id}: ${skill.description}${paramInfo}`);
+
+        const routingHints = this.getSkillRoutingHints(skill);
+        for (const hint of routingHints) {
+          lines.push(`  ${hint}`);
+        }
       }
     }
 
     return lines.join('\n');
+  }
+
+  /**
+   * Build compact routing and success hints for model prompt listing.
+   * These are intentionally short and should act like decision boundaries.
+   */
+  private getSkillRoutingHints(skill: CustomSkill): string[] {
+    const routing = skill.metadata?.routing;
+    if (!routing) {
+      return [];
+    }
+
+    const hints: string[] = [];
+    if (routing.useWhen) {
+      hints.push(`Use when: ${routing.useWhen}`);
+    }
+    if (routing.dontUseWhen && !this.isLowSignalRoutingHint('dontUseWhen', routing.dontUseWhen)) {
+      hints.push(`Don't use when: ${routing.dontUseWhen}`);
+    }
+    if (routing.outputs && !this.isLowSignalRoutingHint('outputs', routing.outputs)) {
+      hints.push(`Outputs: ${routing.outputs}`);
+    }
+    if (routing.successCriteria && !this.isLowSignalRoutingHint('successCriteria', routing.successCriteria)) {
+      hints.push(`Success criteria: ${routing.successCriteria}`);
+    }
+    if (routing.expectedArtifacts?.length) {
+      hints.push(`Artifacts: ${routing.expectedArtifacts.join(', ')}`);
+    }
+
+    return hints;
+  }
+
+  private isLowSignalRoutingHint(
+    kind: 'dontUseWhen' | 'outputs' | 'successCriteria',
+    value: string
+  ): boolean {
+    const normalized = value.trim();
+    if (!normalized) return true;
+    return CustomSkillLoader.LOW_SIGNAL_ROUTING_HINT_PATTERNS[kind].some((pattern) => pattern.test(normalized));
   }
 
   /**
@@ -388,9 +445,10 @@ export class CustomSkillLoader {
    */
   expandPrompt(
     skill: CustomSkill,
-    parameterValues: Record<string, string | number | boolean>
+    parameterValues: Record<string, string | number | boolean>,
+    context: { artifactDir?: string } = {}
   ): string {
-    let prompt = this.expandBaseDir(skill.prompt, skill);
+    let prompt = this.expandSkillPromptPlaceholders(skill.prompt, skill, context);
 
     // Replace {{param}} placeholders with values
     if (skill.parameters) {
@@ -416,6 +474,18 @@ export class CustomSkillLoader {
     }
     const baseDir = this.resolveBaseDir(skill);
     return prompt.replace(/\{baseDir\}/g, baseDir);
+  }
+
+  private expandSkillPromptPlaceholders(
+    prompt: string,
+    skill: CustomSkill,
+    context: { artifactDir?: string }
+  ): string {
+    let output = this.expandBaseDir(prompt, skill);
+    if (context.artifactDir) {
+      output = output.replace(/\{artifactDir\}/g, context.artifactDir);
+    }
+    return output;
   }
 
   private resolveBaseDir(skill: CustomSkill): string {

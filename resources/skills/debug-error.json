@@ -4,7 +4,7 @@
   "description": "Analyze an error message and suggest fixes",
   "icon": "🐛",
   "category": "Development",
-  "prompt": "Please help me debug this error:\n\n{{error}}\n\nSteps:\n1. Analyze the error message and stack trace\n2. Identify the root cause\n3. Search for the relevant code in the project\n4. Suggest specific fixes with code examples\n5. Explain why the error occurred and how to prevent it\n\nIf you need more context, ask me to provide relevant files.",
+  "prompt": "Please help me debug this error:\n\n{{error}}\n\nSteps:\n1. Analyze the error message and stack trace\n2. Identify the root cause\n3. Search for the relevant code in the project\n4. Suggest specific fixes with code examples\n5. Explain why the error occurred and how to prevent it\n\nIf you need more context, ask me to provide relevant files.\n\nIf you create a structured troubleshooting note, write it to:\n- `{artifactDir}/debug-notes.md`.",
   "parameters": [
     {
       "name": "error",
@@ -13,5 +13,16 @@
       "required": true
     }
   ],
-  "enabled": true
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when user shares an error message and asks for root-cause analysis.",
+      "dontUseWhen": "Don't use for feature requests or non-debug planning questions.",
+      "outputs": "Root-cause analysis and concrete remediation steps.",
+      "successCriteria": "Provides plausible cause, fix plan, and verification step.",
+      "expectedArtifacts": [
+        "debug-notes.md"
+      ]
+    }
+  }
 }

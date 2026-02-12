@@ -6,5 +6,13 @@
   "category": "Tools",
   "prompt": "# camsnap\n\nUse `camsnap` to grab snapshots, clips, or motion events from configured cameras.\n\nSetup\n\n- Config file: `~/.config/camsnap/config.yaml`\n- Add camera: `camsnap add --name kitchen --host 192.168.0.10 --user user --pass pass`\n\nCommon commands\n\n- Discover: `camsnap discover --info`\n- Snapshot: `camsnap snap kitchen --out shot.jpg`\n- Clip: `camsnap clip kitchen --dur 5s --out clip.mp4`\n- Motion watch: `camsnap watch kitchen --threshold 0.2 --action '...'`\n- Doctor: `camsnap doctor --probe`\n\nNotes\n\n- Requires `ffmpeg` on PATH.\n- Prefer a short test capture before longer clips.",
   "parameters": [],
-  "enabled": true
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when the user asks to capture frames or clips from RTSP/ONVIF cameras.",
+      "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
+      "outputs": "Outcome from Camsnap: task-specific result plus concrete action notes.",
+      "successCriteria": "Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior."
+    }
+  }
 }

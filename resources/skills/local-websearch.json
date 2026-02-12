@@ -9,6 +9,12 @@
   "enabled": true,
   "metadata": {
     "version": "1.0.0",
-    "author": "stperic"
+    "author": "stperic",
+    "routing": {
+      "useWhen": "Use when users ask for web lookup, private browsing, or recent facts not in local files.",
+      "dontUseWhen": "Don't use for internal workspace-only questions already covered by local docs or files.",
+      "outputs": "Structured search results with titles, URLs, and snippets.",
+      "successCriteria": "Returns concise results with enough context to support a cited answer."
+    }
   }
 }

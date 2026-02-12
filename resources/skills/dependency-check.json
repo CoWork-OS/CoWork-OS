@@ -6,5 +6,13 @@
   "category": "Project",
   "prompt": "Please audit the project dependencies.\n\nSteps:\n1. Identify the package manager (npm, yarn, pip, etc.)\n2. List all dependencies with current versions\n3. Check for available updates\n4. Run security audit if available (npm audit, pip-audit, etc.)\n5. Identify deprecated packages\n\nReport:\n- Outdated packages with latest versions\n- Security vulnerabilities with severity\n- Deprecated packages that need replacement\n- Recommendations for updates\n\nBe careful about breaking changes in major version updates.",
   "parameters": [],
-  "enabled": true
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when requested to inspect dependency freshness, vulnerabilities, or deprecated packages.",
+      "dontUseWhen": "Don't use for single-file code changes without project dependency context.",
+      "outputs": "Dependency audit table with stale versions, risk flags, and safe upgrade notes.",
+      "successCriteria": "Identifies package manager, flags vulnerability and deprecation signals, and gives practical upgrade sequencing."
+    }
+  }
 }

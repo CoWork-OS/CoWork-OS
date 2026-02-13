@@ -286,34 +286,38 @@ export class MessageRouter {
   private getOrCreateTempWorkspace(): Workspace {
     // Check if temp workspace exists
     const existing = this.workspaceRepo.findById(TEMP_WORKSPACE_ID);
-    if (existing) {
-      const updatedPermissions = {
-        ...existing.permissions,
-        read: true,
-        write: true,
-        delete: true,
-        network: true,
-        shell: existing.permissions.shell ?? false,
-        unrestrictedFileAccess: true,
-      };
-
-      if (!existing.permissions.unrestrictedFileAccess) {
-        this.workspaceRepo.updatePermissions(existing.id, updatedPermissions);
-      }
-
-      // Verify directory exists
-      if (fs.existsSync(existing.path)) {
-        return { ...existing, permissions: updatedPermissions, isTemp: true };
-      }
-      // Directory was deleted, recreate it
-      const tempDir = path.join(os.tmpdir(), 'cowork-os-temp');
-      fs.mkdirSync(tempDir, { recursive: true });
-      return { ...existing, permissions: updatedPermissions, isTemp: true };
-    }
-
-    // Create temp directory
     const tempDir = path.join(os.tmpdir(), 'cowork-os-temp');
-    fs.mkdirSync(tempDir, { recursive: true });
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true });
+    }
+    const permissions = existing
+      ? {
+          ...existing.permissions,
+          read: true,
+          write: true,
+          delete: true,
+          network: true,
+          shell: existing.permissions.shell ?? false,
+          unrestrictedFileAccess: true,
+        }
+      : {
+          read: true,
+          write: true,
+          delete: true,
+          network: true,
+          shell: false,
+          unrestrictedFileAccess: true,
+        };
+
+    if (existing) {
+      if (!existing.permissions.unrestrictedFileAccess) {
+        this.workspaceRepo.updatePermissions(existing.id, permissions);
+      }
+
+      if (existing.path === tempDir) {
+        return { ...existing, permissions, isTemp: true };
+      }
+    }
 
     // Create workspace record
     const tempWorkspace: Workspace = {
@@ -321,20 +325,18 @@ export class MessageRouter {
       name: TEMP_WORKSPACE_NAME,
       path: tempDir,
       createdAt: Date.now(),
-      permissions: {
-        read: true,
-        write: true,
-        delete: true,
-        network: true,
-        shell: false,
-        unrestrictedFileAccess: true,
-      },
+      permissions,
       isTemp: true,
     };
 
     const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO workspaces (id, name, path, created_at, permissions)
+      INSERT INTO workspaces (id, name, path, created_at, permissions)
       VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name,
+        path = excluded.path,
+        created_at = excluded.created_at,
+        permissions = excluded.permissions
     `);
     stmt.run(
       tempWorkspace.id,

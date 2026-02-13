@@ -291,56 +291,55 @@ export async function setupIpcHandlers(
   const getOrCreateTempWorkspace = async (): Promise<Workspace> => {
     // Check if temp workspace already exists in database
     const existing = workspaceRepo.findById(TEMP_WORKSPACE_ID);
-    if (existing) {
-      const updatedPermissions = {
-        ...existing.permissions,
-        read: true,
-        write: true,
-        delete: true,
-        network: true,
-        shell: existing.permissions.shell ?? false,
-        unrestrictedFileAccess: true,
-      };
+    const tempDir = path.join(os.tmpdir(), 'cowork-os-temp');
+    await fs.mkdir(tempDir, { recursive: true });
+    const normalizedPermissions = existing
+      ? {
+          ...existing.permissions,
+          read: true,
+          write: true,
+          delete: true,
+          network: true,
+          shell: existing.permissions.shell ?? false,
+          unrestrictedFileAccess: true,
+        }
+      : {
+          read: true,
+          write: true,
+          delete: true,
+          network: true,
+          shell: false,
+          unrestrictedFileAccess: true,
+        };
 
+    if (existing) {
       if (!existing.permissions.unrestrictedFileAccess) {
-        workspaceRepo.updatePermissions(existing.id, updatedPermissions);
+        workspaceRepo.updatePermissions(existing.id, normalizedPermissions);
       }
 
-      // Verify the temp directory still exists, recreate if not
-      try {
-        await fs.access(existing.path);
-        return { ...existing, permissions: updatedPermissions, isTemp: true };
-      } catch {
-        // Directory was deleted, delete the workspace record and recreate
-        workspaceRepo.delete(TEMP_WORKSPACE_ID);
+      if (existing.path === tempDir) {
+        return { ...existing, permissions: normalizedPermissions, isTemp: true };
       }
     }
 
-    // Create temp directory
-    const tempDir = path.join(os.tmpdir(), 'cowork-os-temp');
-    await fs.mkdir(tempDir, { recursive: true });
-
-    // Create the temp workspace with a known ID
     const tempWorkspace: Workspace = {
       id: TEMP_WORKSPACE_ID,
       name: TEMP_WORKSPACE_NAME,
       path: tempDir,
       createdAt: Date.now(),
-      permissions: {
-        read: true,
-        write: true,
-        delete: true,
-        network: true,
-        shell: false,
-        unrestrictedFileAccess: true,
-      },
+      permissions: normalizedPermissions,
       isTemp: true,
     };
 
     // Insert directly using raw SQL to use our specific ID
     const stmt = db.prepare(`
-      INSERT OR REPLACE INTO workspaces (id, name, path, created_at, permissions)
+      INSERT INTO workspaces (id, name, path, created_at, permissions)
       VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name,
+        path = excluded.path,
+        created_at = excluded.created_at,
+        permissions = excluded.permissions
     `);
     stmt.run(
       tempWorkspace.id,

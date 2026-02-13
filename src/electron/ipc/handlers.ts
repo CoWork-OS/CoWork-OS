@@ -151,8 +151,33 @@ const pdfParse = (typeof pdfParseModule === 'function' ? pdfParseModule : pdfPar
 
 // Global notification service instance
 let notificationService: NotificationService | null = null;
+type HooksWakeSubmitter = (action: { text: string; mode: 'now' | 'next-heartbeat' }) => Promise<void> | void;
+let heartbeatWakeSubmitter: HooksWakeSubmitter | null = null;
+type HooksWakeAction = { text: string; mode: 'now' | 'next-heartbeat' };
+const MAX_PENDING_HEARTBEAT_WAKES = 200;
+const pendingHeartbeatWakes: HooksWakeAction[] = [];
 const resolveCustomProviderId = (providerType: string) =>
   providerType === 'kimi-coding' ? 'kimi-code' : providerType;
+
+export function setHeartbeatWakeSubmitter(submitter: HooksWakeSubmitter | null): void {
+  heartbeatWakeSubmitter = submitter;
+
+  if (!submitter) {
+    return;
+  }
+
+  const pending = [...pendingHeartbeatWakes];
+  pendingHeartbeatWakes.length = 0;
+  void (async () => {
+    for (const action of pending) {
+      try {
+        await submitter(action);
+      } catch (error) {
+        console.error('[Hooks] Failed to flush buffered wake action:', error);
+      }
+    }
+  })();
+}
 
 /**
  * Get the notification service instance
@@ -3440,8 +3465,14 @@ async function setupHooksHandlers(agentDaemon: AgentDaemon): Promise<void> {
     // Set up handlers for hook actions
     server.setHandlers({
       onWake: async (action) => {
-        console.log('[Hooks] Wake action:', action);
-        // For now, just log. In the future, this could trigger a heartbeat
+        if (heartbeatWakeSubmitter) {
+          await heartbeatWakeSubmitter(action);
+        } else {
+          pendingHeartbeatWakes.push(action);
+          if (pendingHeartbeatWakes.length > MAX_PENDING_HEARTBEAT_WAKES) {
+            pendingHeartbeatWakes.shift();
+          }
+        }
       },
       onAgent: async (action) => {
         console.log('[Hooks] Agent action:', action.message.substring(0, 100));

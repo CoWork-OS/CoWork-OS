@@ -1399,12 +1399,28 @@ interface HeartbeatResult {
 }
 
 interface HeartbeatEvent {
-  type: 'started' | 'completed' | 'work_found' | 'no_work' | 'error';
+  type:
+    | 'started'
+    | 'completed'
+    | 'work_found'
+    | 'no_work'
+    | 'error'
+    | 'wake_queued'
+    | 'wake_coalesced'
+    | 'wake_queue_saturated'
+    | 'wake_immediate_deferred';
   agentRoleId: string;
   agentName: string;
   timestamp: number;
   result?: HeartbeatResult;
   error?: string;
+  wake?: {
+    source: 'hook' | 'cron' | 'api' | 'manual';
+    mode: 'now' | 'next-heartbeat';
+    text: string;
+    deferredMs?: number;
+    reason?: 'ready' | 'drain';
+  };
 }
 
 type SubscriptionReason = 'assigned' | 'mentioned' | 'commented' | 'manual';

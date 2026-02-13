@@ -206,7 +206,8 @@ export function MissionControlPanel({ onClose: _onClose }: MissionControlPanelPr
           return {
             ...status,
             heartbeatStatus: event.type === 'started' ? 'running' :
-                            event.type === 'error' ? 'error' : 'sleeping',
+                            ['work_found', 'no_work', 'completed'].includes(event.type) ? 'sleeping' :
+                            event.type === 'error' ? 'error' : status.heartbeatStatus,
             lastHeartbeatAt: ['completed', 'no_work', 'work_found'].includes(event.type)
               ? event.timestamp
               : status.lastHeartbeatAt,

@@ -5,7 +5,7 @@ import { app, BrowserWindow, ipcMain, dialog, session, shell, Notification } fro
 import mime from 'mime-types';
 import { DatabaseManager } from './database/schema';
 import { SecureSettingsRepository } from './database/SecureSettingsRepository';
-import { setupIpcHandlers, getNotificationService } from './ipc/handlers';
+import { setupIpcHandlers, getNotificationService, setHeartbeatWakeSubmitter } from './ipc/handlers';
 import { setupMissionControlHandlers } from './ipc/mission-control-handlers';
 import { TaskSubscriptionRepository } from './agents/TaskSubscriptionRepository';
 import { StandupReportService } from './reports/StandupReportService';
@@ -549,7 +549,8 @@ app.whenReady().then(async () => {
   // Setup IPC handlers
   await setupIpcHandlers(dbManager, agentDaemon, channelGateway);
 
-  // Initialize Mission Control services
+  // Initialize heartbeat and Mission Control services
+  let heartbeatService: HeartbeatService | null = null;
   try {
     const db = dbManager.getDatabase();
     const agentRoleRepo = new AgentRoleRepository(db);
@@ -563,8 +564,6 @@ app.whenReady().then(async () => {
     const mentionRepo = new MentionRepository(db);
     const activityRepo = new ActivityRepository(db);
     const workingStateRepo = new WorkingStateRepository(db);
-    const taskSubscriptionRepo = new TaskSubscriptionRepository(db);
-    const standupService = new StandupReportService(db);
 
     // Create repositories for heartbeat service
     const taskRepo = new TaskRepository(db);
@@ -582,27 +581,29 @@ app.whenReady().then(async () => {
       activityRepo,
       workingStateRepo,
       createTask: async (workspaceId, prompt, title, _agentRoleId) => {
-        // Create task via agentDaemon (doesn't support assignedAgentRoleId directly)
         const task = await agentDaemon.createTask({
           title,
           prompt,
           workspaceId,
         });
-        // Note: Task assignment would need to be done separately if needed
+        if (_agentRoleId) {
+          taskRepo.update(task.id, {
+            assignedAgentRoleId: _agentRoleId,
+          });
+        }
         return task;
       },
       getTasksForAgent: (agentRoleId, workspaceId) => {
-        // Get assigned tasks for the agent using the task repository
         const tasks = workspaceId
           ? taskRepo.findByWorkspace(workspaceId)
           : taskRepo.findByStatus(['pending', 'running']);
         return tasks.filter((t: { assignedAgentRoleId?: string }) => t.assignedAgentRoleId === agentRoleId);
       },
       getDefaultWorkspaceId: () => {
-        return resolveDefaultWorkspace()?.id;
+        return resolveDefaultWorkspace()?.id ?? TEMP_WORKSPACE_ID;
       },
       getDefaultWorkspacePath: () => {
-        return resolveDefaultWorkspace()?.path;
+        return resolveDefaultWorkspace()?.path || workspaceRepo.findById(TEMP_WORKSPACE_ID)?.path;
       },
       getWorkspacePath: (workspaceId: string) => {
         const workspace = workspaceRepo.findById(workspaceId);
@@ -610,19 +611,41 @@ app.whenReady().then(async () => {
       },
     };
 
-    const heartbeatService = new HeartbeatService(heartbeatDeps);
+    heartbeatService = new HeartbeatService(heartbeatDeps);
     await heartbeatService.start();
 
-    // Setup Mission Control IPC handlers
-    setupMissionControlHandlers({
-      agentRoleRepo,
-      taskSubscriptionRepo,
-      standupService,
-      heartbeatService,
-      getMainWindow: () => mainWindow,
+    setHeartbeatWakeSubmitter(async ({ text, mode }) => {
+      heartbeatService?.submitWakeForAll({
+        text,
+        mode,
+        source: 'hook',
+      });
     });
+  } catch (error) {
+    console.error('[Main] Failed to initialize Heartbeat:', error);
+    // Don't fail app startup if heartbeat init fails
+  }
 
-    console.log('[Main] Mission Control services initialized');
+  // Setup Mission Control IPC handlers
+  try {
+    if (!heartbeatService) {
+      console.error('[Main] Mission Control handlers skipped: Heartbeat service unavailable');
+    } else {
+      const db = dbManager.getDatabase();
+      const agentRoleRepo = new AgentRoleRepository(db);
+      const taskSubscriptionRepo = new TaskSubscriptionRepository(db);
+      const standupService = new StandupReportService(db);
+
+      setupMissionControlHandlers({
+        agentRoleRepo,
+        taskSubscriptionRepo,
+        standupService,
+        heartbeatService,
+        getMainWindow: () => mainWindow,
+      });
+
+      console.log('[Main] Mission Control services initialized');
+    }
   } catch (error) {
     console.error('[Main] Failed to initialize Mission Control:', error);
     // Don't fail app startup if Mission Control init fails

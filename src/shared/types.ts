@@ -1241,12 +1241,28 @@ export interface HeartbeatConfig {
  * Heartbeat event emitted during heartbeat execution
  */
 export interface HeartbeatEvent {
-  type: 'started' | 'completed' | 'error' | 'work_found' | 'no_work';
+  type:
+    | 'started'
+    | 'completed'
+    | 'error'
+    | 'work_found'
+    | 'no_work'
+    | 'wake_queued'
+    | 'wake_coalesced'
+    | 'wake_queue_saturated'
+    | 'wake_immediate_deferred';
   agentRoleId: string;
   agentName: string;
   timestamp: number;
   result?: HeartbeatResult;
   error?: string;
+  wake?: {
+    source: 'hook' | 'cron' | 'api' | 'manual';
+    mode: 'now' | 'next-heartbeat';
+    text: string;
+    deferredMs?: number;
+    reason?: 'ready' | 'drain';
+  };
 }
 
 /**

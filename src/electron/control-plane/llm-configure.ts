@@ -1,12 +1,12 @@
 import { LLMProviderFactory } from '../agent/llm';
-import { ErrorCodes } from './protocol';
+import { ErrorCodes, type ErrorCode } from './protocol';
 import type { LLMProviderType } from '../../shared/types';
 import { LLM_PROVIDER_TYPES } from '../../shared/types';
 
 const VALID_LLM_PROVIDER_TYPES = new Set<string>(LLM_PROVIDER_TYPES as readonly string[]);
 const BASE_URL_PROVIDER_KEYS = new Set<string>(['openrouter', 'groq', 'xai', 'kimi', 'ollama']);
 
-type LlmValidationError = Error & { code: ErrorCodes };
+type LlmValidationError = Error & { code: ErrorCode };
 
 type SanitizedLlmConfigureParams = {
   providerType: LLMProviderType;

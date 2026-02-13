@@ -837,7 +837,7 @@ export function getControlPlaneWebUIHtml(): string {
         }
 
         const state = matched.configured ? 'configured' : 'not configured';
-        llmProviderStatus.textContent = `Selected provider status: ${state}`;
+        llmProviderStatus.textContent = 'Selected provider status: ' + state;
       }
 
       async function refreshStatus() {

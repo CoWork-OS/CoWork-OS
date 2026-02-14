@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.78] - 2026-02-14
+
+### Fixed
+- **Release build hardening**: restored the missing `src/electron/agent/executor-helpers.ts` source file so builds can resolve `executor.ts` imports after packaging from a fresh clone.
+- **TypeScript strictness fixes**: fixed implicit `any` errors in `executor.ts` that could break release builds on CI.
+- **TLS fingerprint callback typing fix**: aligned `remote-client.ts` callback signature/type usage with current `ws` client typings to satisfy strict build checks.
+
 ## [0.3.77] - 2026-02-14
 
 ### Fixed
@@ -534,6 +541,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 0.3.78 | 2026-02-14 | Fixes missing release-time `executor-helpers` source and remaining strict-mode TypeScript blockers |
 | 0.3.77 | 2026-02-14 | Skips lifecycle scripts during setup reinstall and prevents setup-time SIGKILL in user-first installs |
 | 0.3.76 | 2026-02-14 | Pinned Electron to 40.2.1 for first-run installability and aligned README CLI flow |
 | 0.3.75 | 2026-02-14 | Restored 0.3.71-compatible Electron lockfile for installability and release confidence |
@@ -548,7 +556,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | 0.1.0 | 2025-01-24 | First public release with core features |
 | 0.0.1 | 2025-01-20 | Initial development setup |
 
-[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.3.77...HEAD
+[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.3.78...HEAD
+[0.3.78]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.78
 [0.3.77]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.77
 [0.3.76]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.76
 [0.3.75]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.75

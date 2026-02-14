@@ -1291,7 +1291,7 @@ ${transcript}
   private stepRequiresImageVerification(step: PlanStep): boolean {
     const description = (step.description || '').toLowerCase();
     if (!description.includes('verify')) return false;
-    return IMAGE_VERIFICATION_KEYWORDS.some((keyword) => description.includes(keyword));
+    return IMAGE_VERIFICATION_KEYWORDS.some((keyword: string) => description.includes(keyword));
   }
 
   private hasNewImageFromGlobResult(result: any, since: number): boolean {
@@ -1736,8 +1736,10 @@ ${transcript}
     if (createdFiles.length === 0) return false;
 
     if (!contract.requiredArtifactExtensions.length) return true;
-    const lowered = createdFiles.map(file => String(file).toLowerCase());
-    return contract.requiredArtifactExtensions.some(ext => lowered.some(file => file.endsWith(ext)));
+    const lowered = createdFiles.map((file: unknown) => String(file).toLowerCase());
+    return contract.requiredArtifactExtensions.some((ext: string) =>
+      lowered.some((file: string) => file.endsWith(ext))
+    );
   }
 
   private hasVerificationEvidence(bestCandidate: string): boolean {

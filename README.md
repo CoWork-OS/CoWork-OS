@@ -36,11 +36,11 @@ Your AI needs a secure home. CoWork OS provides the runtime, security layers, an
 | **Security-First** | 2800+ unit tests, configurable guardrails, approval workflows, gateway hardening |
 | **Local-First** | Your data stays on your machine. BYOK (Bring Your Own Key) |
 
-### What’s new in 0.3.77
+### What’s new in 0.3.78
 
 - **Install reliability fix for first-run users**: `npm run --prefix node_modules/cowork-os setup` now skips lifecycle scripts during reinstall, preventing `electron-winstaller` from being SIGKILLed on some macOS machines.
 - **CLI-first install verification**: confirms the exact `/tmp/cowork-run` commands in this README for a fresh macOS install path.
-- **Version sync**: bumped to `0.3.77` so the fix is published and discoverable for npm and GitHub release users.
+- **Version sync**: bumped to `0.3.78` so the fix is published and discoverable for npm and GitHub release users.
 
 > **Status**: macOS desktop app + headless/server mode (Linux/VPS). Cross-platform desktop support planned.
 

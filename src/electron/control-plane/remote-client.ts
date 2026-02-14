@@ -175,16 +175,17 @@ export class RemoteGatewayClient {
       // Apply TLS fingerprint validation for test connections too
       if (this.config.tlsFingerprint && this.config.url.startsWith('wss://')) {
         const expectedFingerprint = this.config.tlsFingerprint.toLowerCase().replace(/:/g, '');
-        testOptions.checkServerIdentity = (_hostname: string, cert: tls.PeerCertificate) => {
-          const certFingerprint = cert.fingerprint256
+        testOptions.checkServerIdentity = (_hostname: string, cert: unknown) => {
+          const peerCert = typeof cert === 'object' && cert !== null ? cert as tls.PeerCertificate : null;
+          if (!peerCert?.fingerprint256) return false;
+
+          const certFingerprint = String(peerCert.fingerprint256)
             .toLowerCase()
             .replace(/:/g, '');
           if (certFingerprint !== expectedFingerprint) {
-            return new Error(
-              `TLS fingerprint mismatch: expected ${expectedFingerprint}, got ${certFingerprint}`
-            );
+            return false;
           }
-          return undefined;
+          return true;
         };
       }
 
@@ -264,16 +265,17 @@ export class RemoteGatewayClient {
         // TLS certificate fingerprint pinning for wss:// connections
         if (this.config.tlsFingerprint && this.config.url.startsWith('wss://')) {
           const expectedFingerprint = this.config.tlsFingerprint.toLowerCase().replace(/:/g, '');
-          wsOptions.checkServerIdentity = (_hostname: string, cert: tls.PeerCertificate) => {
-            const certFingerprint = cert.fingerprint256
+          wsOptions.checkServerIdentity = (_hostname: string, cert: unknown) => {
+            const peerCert = typeof cert === 'object' && cert !== null ? cert as tls.PeerCertificate : null;
+            if (!peerCert?.fingerprint256) return false;
+
+            const certFingerprint = String(peerCert.fingerprint256)
               .toLowerCase()
               .replace(/:/g, '');
             if (certFingerprint !== expectedFingerprint) {
-              return new Error(
-                `TLS fingerprint mismatch: expected ${expectedFingerprint}, got ${certFingerprint}`
-              );
+              return false;
             }
-            return undefined;
+            return true;
           };
         }
 

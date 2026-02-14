@@ -1,6 +1,6 @@
 {
   "name": "cowork-os",
-  "version": "0.3.74",
+  "version": "0.3.75",
   "description": "CoWork OS - The operating system for personal AI assistants",
   "overrides": {
     "@whiskeysockets/baileys": {

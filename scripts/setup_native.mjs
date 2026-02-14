@@ -145,13 +145,16 @@ function ensureBetterSqlite3(env) {
   console.log(
     `[cowork] better-sqlite3 is missing; installing ${BETTER_SQLITE3_VERSION}...`
   );
+
   return run(
     NPM_CMD,
     [
       "install",
       "--no-audit",
       "--no-fund",
-      "--ignore-scripts=false",
+      "--ignore-scripts",
+      "--omit=dev",
+      "--package-lock=false",
       "--no-save",
       `better-sqlite3@${BETTER_SQLITE3_VERSION}`,
     ],
@@ -210,6 +213,7 @@ function main() {
   const attempt = (attemptJobs) => {
     const env = baseEnvWithJobs(attemptJobs);
     const electronInstallScript = resolveFromCwd("electron/install.js");
+    const electronBinary = getElectronBinaryPath();
 
     if (!electronInstallScript) {
       console.error(
@@ -219,8 +223,12 @@ function main() {
     }
 
     // 1) Ensure Electron binary exists (postinstall is often skipped due to ignore-scripts=true).
-    const installRes = run(process.execPath, [electronInstallScript], { env });
-    if (installRes.status !== 0) return installRes;
+    if (electronBinary && fs.existsSync(electronBinary)) {
+      console.log("[cowork] Electron binary already present; skipping electron/install.js.");
+    } else {
+      const installRes = run(process.execPath, [electronInstallScript], { env });
+      if (installRes.status !== 0) return installRes;
+    }
 
     // If optional dependency install was skipped/failed earlier, recover here.
     const ensureBetterRes = ensureBetterSqlite3(env);
@@ -235,8 +243,8 @@ function main() {
       }`
     );
 
-    // 2) Prefer the Electron-targeted rebuild for better-sqlite3.
-    // This keeps binaries aligned with Electron ABI and avoids Node/host ABI mismatches.
+    // 2) electron-rebuild for the one module (keeps rebuild surface small).
+    // 2) Prefer an Electron-targeted rebuild for better-sqlite3 (often prebuilt, lighter).
     if (electronVersion) {
       const electronEnv = {
         ...env,
@@ -259,7 +267,8 @@ function main() {
       }
 
       console.log(
-        "[cowork] better-sqlite3 did not load after Electron-targeted rebuild; falling back to electron-rebuild path with inferred settings."
+        "[cowork] better-sqlite3 did not load after Electron-targeted rebuild; " +
+          "falling back to electron-rebuild."
       );
     } else {
       console.log(
@@ -267,7 +276,7 @@ function main() {
       );
     }
 
-    // 3) Fallback: electron-rebuild (most expensive). Keep it sequential and only rebuild the one module.
+    // 3) Fallback: electron-rebuild.
     const electronRebuildEntry = resolveFromCwd("@electron/rebuild");
     const electronRebuildCli = electronRebuildEntry
       ? path.join(path.dirname(electronRebuildEntry), "cli.js")
@@ -281,12 +290,25 @@ function main() {
 
     const rebuildRes = run(
       process.execPath,
-      [electronRebuildCli, "-f", "--only", "better-sqlite3", "--sequential"],
+      [
+        electronRebuildCli,
+        "-f",
+        "--only",
+        "better-sqlite3",
+        "--sequential",
+      ],
       { env }
     );
     if (rebuildRes.status !== 0) return rebuildRes;
 
-    return testBetterSqlite3InElectron(env);
+    const testRes = testBetterSqlite3InElectron(env);
+    if (testRes.status === 0) {
+      console.log("[cowork] better-sqlite3 loads in Electron.");
+      return testRes;
+    }
+
+    console.log("[cowork] better-sqlite3 did not load after electron-rebuild.");
+    return testRes;
   };
 
   let res = attempt(jobs);

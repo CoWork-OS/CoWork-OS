@@ -36,11 +36,11 @@ Your AI needs a secure home. CoWork OS provides the runtime, security layers, an
 | **Security-First** | 2800+ unit tests, configurable guardrails, approval workflows, gateway hardening |
 | **Local-First** | Your data stays on your machine. BYOK (Bring Your Own Key) |
 
-### What’s new in 0.3.79
+### What’s new in 0.3.82
 
-- **0.3.71-style SIGKILL workaround carried forward**: the README macOS first-install flow (`npm install --ignore-scripts ...` then `npm run --prefix node_modules/cowork-os setup`) is now the officially documented path and includes retry/backoff handling for native setup SIGKILLs.
-- **Releaseability alignment**: this release includes the release workflow hardening that guarantees a draft release exists before Electron packaging, so desktop assets can be attached reliably on each tag.
-- **Version sync**: bumped to `0.3.79` so the fix is published for npm and GitHub releases.
+- **SIGKILL regression fixed**: runtime native setup no longer uses script-enabled `npm install` for missing `better-sqlite3`, so `electron-winstaller` lifecycle scripts are not triggered during first-time install setup.
+- **0.3.71 reliability behavior preserved**: first-install flow remains `npm install --ignore-scripts --omit=optional` followed by `npm run --prefix node_modules/cowork-os setup`, with retry handling.
+- **Version sync**: bumped to `0.3.82`.
 
 > **Status**: macOS desktop app + headless/server mode (Linux/VPS). Cross-platform desktop support planned.
 
@@ -67,7 +67,7 @@ Use this flow to test like a first-time user in a clean folder:
 # Install into a local folder
 mkdir -p /tmp/cowork-run
 cd /tmp/cowork-run
-npm install --ignore-scripts cowork-os@latest --no-audit --no-fund
+npm install --ignore-scripts --omit=optional cowork-os@latest --no-audit --no-fund
 
 # Prepare native runtime (Electron binary + native module cache)
 npm run --prefix node_modules/cowork-os setup
@@ -81,7 +81,16 @@ npx cowork-os
 
 This is the first install path users should try on macOS:
 
-> If you run plain `npm install cowork-os@latest`, macOS can still intermittently kill lifecycle scripts during dependency extraction. Use the `--ignore-scripts` flow above and `npm run --prefix node_modules/cowork-os setup` every time before first launch.
+> If you run plain `npm install cowork-os@latest`, macOS can still intermittently kill lifecycle scripts during dependency extraction. Use the flow above with `--ignore-scripts --omit=optional` and `npm run --prefix node_modules/cowork-os setup` before first launch.
+
+For strict reproducibility on low-memory machines:
+
+```bash
+export COWORK_SETUP_JOBS=1
+export COWORK_SETUP_NATIVE_OUTER_ATTEMPTS=10
+export COWORK_SETUP_NATIVE_SHELL_ATTEMPTS=10
+npm run --prefix node_modules/cowork-os setup
+```
 
 #### Install reliability notes (macOS / low-memory environments)
 
@@ -96,7 +105,7 @@ This is the first install path users should try on macOS:
 You can also install globally and launch directly:
 
 ```bash
-npm install -g --ignore-scripts --no-audit --no-fund cowork-os
+npm install -g --ignore-scripts --omit=optional --no-audit --no-fund cowork-os
 
 # Optional: verify installed version
 npm list -g cowork-os --depth=0
@@ -143,10 +152,20 @@ npm run dev
 
 If you see `Killed: 9` during `npm run setup`, macOS terminated a native build due to memory pressure.
 
-`npm run setup` already retries native setup automatically with backoff. Let it continue until it exits. If it still exits non-zero, close heavy apps and run the same command again:
+`npm run setup` already retries native setup automatically with backoff. Let it continue until it exits. If it still exits non-zero:
 
 ```bash
-npm run setup
+pkill -f '/cowork-os' || true
+npm run --prefix node_modules/cowork-os setup
+```
+
+If the shell shows `zsh: killed` again, this usually means your system killed a child process. Repeat with lower-memory settings:
+
+```bash
+COWORK_SETUP_JOBS=1 \
+COWORK_SETUP_NATIVE_OUTER_ATTEMPTS=12 \
+COWORK_SETUP_NATIVE_SHELL_ATTEMPTS=12 \
+npm run --prefix node_modules/cowork-os setup
 ```
 
 #### Build for Production

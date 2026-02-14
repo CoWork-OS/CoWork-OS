@@ -36,29 +36,88 @@ jobs:
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 
-      - name: Run tests
-        run: npm test
-
-      - name: Build application
-        run: npm run build
-
       - name: Resolve release metadata
         id: release_metadata
         run: |
           npm_version="$(node -p "require('./package.json').version")"
+
           if [ "${GITHUB_REF_NAME}" != "${npm_version}" ] && [ "${GITHUB_REF_NAME}" != "v${npm_version}" ]; then
             echo "Tag mismatch: GITHUB_REF_NAME=${GITHUB_REF_NAME} but package.json is ${npm_version}" >&2
             exit 1
           fi
 
+          release_tag="v${npm_version}"
           if [ "${GITHUB_REF_NAME}" = "${npm_version}" ]; then
             release_tag="v${npm_version}"
-          else
-            release_tag="${GITHUB_REF_NAME}"
           fi
 
           echo "npm_version=${npm_version}" >> "$GITHUB_OUTPUT"
           echo "release_tag=${release_tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Run tests
+        run: npm test
+
+      - name: Validate published-package first-install flow
+        env:
+          CO_WORK_INSTALL_VERSION: ${{ steps.release_metadata.outputs.npm_version }}
+        run: |
+          set -euo pipefail
+          repo_root="${GITHUB_WORKSPACE:-$(pwd)}"
+          tarball="$(npm pack --silent)"
+          tmp_dir="$(mktemp -d)"
+
+          if npm view "cowork-os@${CO_WORK_INSTALL_VERSION}" >/dev/null 2>&1; then
+            install_source="cowork-os@${CO_WORK_INSTALL_VERSION}"
+          else
+            install_source="${repo_root}/${tarball}"
+          fi
+
+          smoke_test() {
+            source_path="$1"
+            if [ -z "$source_path" ]; then
+              echo "Smoke test source is empty" >&2
+              exit 1
+            fi
+
+            test_dir="${tmp_dir}/smoke"
+            rm -rf "$test_dir"
+            mkdir -p "$test_dir"
+            cd "$test_dir"
+            npm init -y >/dev/null 2>&1
+            npm install --ignore-scripts --omit=optional --no-audit --no-fund "$source_path"
+            npm run --prefix node_modules/cowork-os setup
+            node - <<'NODE'
+            const { execFileSync } = require('node:child_process');
+            const electron = require('./node_modules/cowork-os/node_modules/electron');
+            const out = execFileSync(
+              electron,
+              [
+                '-e',
+                "const Database=require('better-sqlite3');const db=new Database(':memory:');db.close();console.log('ok')",
+              ],
+              {
+                encoding: 'utf8',
+                env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+              }
+            );
+            if ((out || '').trim() !== 'ok') {
+              console.error('Installed package check failed; better-sqlite3 not loading in Electron.');
+              process.exit(1);
+            }
+            NODE
+          }
+
+          smoke_test "$install_source"
+
+          # Validate both install paths where possible (published registry package and local
+          # npm pack tarball), so we catch regressions in both command variants.
+          local_tgz="${repo_root}/${tarball}"
+          if [ "$install_source" != "$local_tgz" ]; then
+            smoke_test "$local_tgz"
+          fi
+
+      - name: Build application
+        run: npm run build
 
       - name: Generate release notes from changelog
         run: |

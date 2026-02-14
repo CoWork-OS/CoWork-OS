@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.82] - 2026-02-14
+
+### Fixed
+- **SIGKILL regression fix for npm installs**: `setup_native` no longer uses `npm install --ignore-scripts=false` when recovering missing `better-sqlite3`, preventing `electron-winstaller` lifecycle scripts from being executed during first-time setup.
+- **Recovery install hardening**: missing runtime dependency repair now uses `--omit=dev` and `--package-lock=false` to avoid reifying packaging/dev dependency trees in user runtime installs.
+
+## [0.3.81] - 2026-02-14
+
+### Fixed
+- **README install path hardening**: `npm run setup` now skips a full dependency reinstall when the Electron dependency is already present, so fresh `/tmp` installs avoid avoidable reinstall-driven SIGKILL pressure.
+- **Native setup reliability**: restores the 0.3.71-style flow with retryable native setup and keeps `better-sqlite3` installation script-safe, then rebuilds it explicitly against Electron ABI.
+
+## [0.3.80] - 2026-02-14
+
+### Fixed
+- **macOS install reliability hardening**: setup now skips optional dependency reinstall during `npm run setup`, avoids propagating child SIGKILL events from native setup back to the shell, and documents a first-install flow that avoids macOS-terminating paths.
+- **Release validation hardening**: CI now resolves release metadata before install validation and validates installability from either published npm tarball (if already published) or local `npm pack` fallback, preventing release regressions for first-release tags.
+
 ## [0.3.79] - 2026-02-14
 
 ### Fixed
@@ -548,6 +566,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 0.3.82 | 2026-02-14 | Removes script-enabled recovery installs that triggered electron-winstaller SIGKILL and hardens runtime repair install flags |
+| 0.3.81 | 2026-02-14 | Restored reliable /tmp install flow with retry-safe native setup and CI validation for both registry and npm-pack install paths |
+| 0.3.80 | 2026-02-14 | Fixed macOS first-install runtime setup reliability and hardened release validation so new tags can still run installation checks |
 | 0.3.79 | 2026-02-14 | Retained the 0.3.71 SIGKILL workaround and hardened draft release preparation so desktop assets upload reliably |
 | 0.3.78 | 2026-02-14 | Fixes missing release-time `executor-helpers` source and remaining strict-mode TypeScript blockers |
 | 0.3.77 | 2026-02-14 | Skips lifecycle scripts during setup reinstall and prevents setup-time SIGKILL in user-first installs |
@@ -564,7 +585,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | 0.1.0 | 2025-01-24 | First public release with core features |
 | 0.0.1 | 2025-01-20 | Initial development setup |
 
-[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.3.79...HEAD
+[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.3.82...HEAD
+[0.3.82]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.82
+[0.3.81]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.81
+[0.3.80]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.80
 [0.3.79]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.79
 [0.3.78]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.78
 [0.3.77]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.77

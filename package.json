@@ -1,6 +1,6 @@
 {
   "name": "cowork-os",
-  "version": "0.3.79",
+  "version": "0.3.82",
   "description": "CoWork OS - The operating system for personal AI assistants",
   "overrides": {
     "@whiskeysockets/baileys": {
@@ -74,13 +74,13 @@
     "@whiskeysockets/baileys"
   ],
   "scripts": {
-    "setup": "npm install --ignore-scripts --no-audit --no-fund --omit=dev && { sleep 2; i=1; max=${COWORK_SETUP_NATIVE_OUTER_ATTEMPTS:-6}; delay=2; while [ $i -le $max ]; do echo \"[cowork] setup:native (outer attempt $i/$max)\"; sh scripts/setup_native_retry.sh; s=$?; if [ $s -eq 0 ]; then exit 0; fi; if [ $s -ne 137 ] && [ $s -ne 9 ]; then exit $s; fi; echo \"[cowork] setup:native was killed; retrying in ${delay}s...\"; sleep $delay; delay=$((delay * 2)); if [ $delay -gt 20 ]; then delay=20; fi; i=$((i + 1)); done; exit $s; }",
+    "setup": "if [ ! -f node_modules/electron/package.json ]; then npm install --ignore-scripts --omit=optional --omit=dev --no-audit --no-fund --no-save; fi; { sleep 2; i=1; max=${COWORK_SETUP_NATIVE_OUTER_ATTEMPTS:-6}; delay=2; while [ $i -le $max ]; do echo \"[cowork] setup:native (outer attempt $i/$max)\"; sh scripts/setup_native_retry.sh; s=$?; if [ $s -eq 0 ]; then exit 0; fi; if [ $s -ne 137 ] && [ $s -ne 9 ]; then exit $s; fi; echo \"[cowork] setup:native was killed; retrying in ${delay}s...\"; sleep $delay; delay=$((delay * 2)); if [ $delay -gt 20 ]; then delay=20; fi; i=$((i + 1)); done; exit $s; }",
     "setup:native": "sleep 2; i=1; max=${COWORK_SETUP_NATIVE_OUTER_ATTEMPTS:-6}; delay=2; while [ $i -le $max ]; do echo \"[cowork] setup:native (outer attempt $i/$max)\"; sh scripts/setup_native_retry.sh; s=$?; if [ $s -eq 0 ]; then exit 0; fi; if [ $s -ne 137 ] && [ $s -ne 9 ]; then exit $s; fi; echo \"[cowork] setup:native was killed; retrying in ${delay}s...\"; sleep $delay; delay=$((delay * 2)); if [ $delay -gt 20 ]; then delay=20; fi; i=$((i + 1)); done; exit $s",
     "setup:server": "npm install && npm rebuild --ignore-scripts=false better-sqlite3",
     "dev": "concurrently \"npm run dev:react\" \"npm run dev:electron\"",
     "dev:react": "vite",
     "dev:electron": "tsc -p tsconfig.electron.json && cross-env NODE_ENV=development electron .",
-    "build": "npm run build:react && npm run build:electron && npm run build:daemon && npm run build:connectors",
+    "build": "npm run build:react && concurrently -n electron,daemon \"npm run build:electron\" \"npm run build:daemon\" && npm run build:connectors",
     "build:react": "vite build",
     "build:electron": "tsc -p tsconfig.electron.json",
     "build:daemon": "tsc -p tsconfig.daemon.json",
@@ -116,6 +116,7 @@
     "eventsource": "^4.1.0",
     "exceljs": "^4.4.0",
     "grammy": "^1.39.3",
+    "i18next": "^25.8.7",
     "jszip": "^3.10.1",
     "mammoth": "^1.11.0",
     "mime-types": "^3.0.2",
@@ -128,6 +129,7 @@
     "qrcode-terminal": "^0.12.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
+    "react-i18next": "^16.5.4",
     "react-markdown": "^10.1.0",
     "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
@@ -159,7 +161,7 @@
     "eslint": "^9.39.2",
     "globals": "^17.3.0",
     "oxlint": "^1.47.0",
-    "typescript": "^5.7.3",
+    "typescript": "^5.9.0",
     "vite": "^7.3.1",
     "vite-plugin-electron": "^0.29.0",
     "vitest": "^4.0.18"

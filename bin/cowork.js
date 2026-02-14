@@ -10,6 +10,13 @@ const mainPath = path.join(packageDir, 'dist', 'electron', 'electron', 'main.js'
 const args = process.argv.slice(2);
 const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
+function mapSignalToCode(signal) {
+  if (signal === 'SIGKILL') return 137;
+  if (signal === 'SIGTERM') return 143;
+  if (signal === 'SIGINT') return 130;
+  return 1;
+}
+
 function buildAppAndLaunch() {
   console.log('[cowork-os] Build artifacts not found, running npm run build...');
   const build = spawn(npmCmd, ['run', 'build'], {
@@ -70,6 +77,8 @@ function ensureRuntimeDeps() {
     '--no-audit',
     '--no-fund',
     '--ignore-scripts',
+    '--omit=dev',
+    '--package-lock=false',
     ...missing.map((dep) => `${dep.name}@${dep.version}`)
   ];
 
@@ -135,7 +144,14 @@ function runNativeSetup(onDone) {
 
   setup.on('exit', (code, signal) => {
     if (signal) {
-      process.kill(process.pid, signal);
+      const exitCode = mapSignalToCode(signal);
+      console.error(
+        `[cowork-os] Native setup was terminated (${signal}).` +
+          (signal === 'SIGKILL'
+            ? ' Close other memory-heavy apps and rerun `npm run setup`.'
+            : '')
+      );
+      process.exit(exitCode);
       return;
     }
     if (code !== 0) {
@@ -157,7 +173,7 @@ function prepareAndLaunchApp() {
     if (!electronBinary) {
       console.error(
         '[cowork-os] Electron runtime is still missing after setup. Reinstall with:\n' +
-          '  npm install --ignore-scripts --no-audit --no-fund cowork-os@latest\n'
+          '  npm install --ignore-scripts --omit=optional --no-audit --no-fund cowork-os@latest\n'
       );
       process.exit(1);
     }
@@ -192,7 +208,7 @@ function launchApp(electronBinary) {
 
   electron.on('exit', (code, signal) => {
     if (signal) {
-      process.kill(process.pid, signal);
+      process.exit(mapSignalToCode(signal));
       return;
     }
     process.exit(code || 0);

@@ -31,12 +31,39 @@ import { AgentTeamMemberRepository } from '../agents/AgentTeamMemberRepository';
 import { AgentTeamRunRepository } from '../agents/AgentTeamRunRepository';
 import { AgentTeamItemRepository } from '../agents/AgentTeamItemRepository';
 import { AgentTeamOrchestrator } from '../agents/AgentTeamOrchestrator';
-	import { TaskLabelRepository } from '../database/TaskLabelRepository';
-	import { WorkingStateRepository } from '../agents/WorkingStateRepository';
-	import { ContextPolicyManager } from '../gateway/context-policy';
-	import { IPC_CHANNELS, LLMSettingsData, AddChannelRequest, UpdateChannelRequest, SecurityMode, UpdateInfo, TEMP_WORKSPACE_ID_PREFIX, TEMP_WORKSPACE_NAME, TEMP_WORKSPACE_ROOT_DIR_NAME, Workspace, AgentRole, Task, BoardColumn, XSettingsData, NotionSettingsData, BoxSettingsData, OneDriveSettingsData, GoogleWorkspaceSettingsData, DropboxSettingsData, SharePointSettingsData, TaskExportQuery, WorkspaceKitStatus, WorkspaceKitInitRequest, WorkspaceKitProjectCreateRequest, isTempWorkspaceId } from '../../shared/types';
-	import * as os from 'os';
-	import { AgentDaemon } from '../agent/daemon';
+import { TaskLabelRepository } from '../database/TaskLabelRepository';
+import { WorkingStateRepository } from '../agents/WorkingStateRepository';
+import { ContextPolicyManager } from '../gateway/context-policy';
+import {
+  IPC_CHANNELS,
+  LLMSettingsData,
+  AddChannelRequest,
+  UpdateChannelRequest,
+  SecurityMode,
+  UpdateInfo,
+  TEMP_WORKSPACE_ID_PREFIX,
+  TEMP_WORKSPACE_NAME,
+  TEMP_WORKSPACE_ROOT_DIR_NAME,
+  Workspace,
+  AgentRole,
+  Task,
+  BoardColumn,
+  XSettingsData,
+  NotionSettingsData,
+  BoxSettingsData,
+  OneDriveSettingsData,
+  GoogleWorkspaceSettingsData,
+  DropboxSettingsData,
+  SharePointSettingsData,
+  TaskExportQuery,
+  WorkspaceKitStatus,
+  WorkspaceKitInitRequest,
+  WorkspaceKitProjectCreateRequest,
+  isTempWorkspaceId,
+  AgentConfig,
+} from '../../shared/types';
+import * as os from 'os';
+import { AgentDaemon } from '../agent/daemon';
 import {
   LLMProviderFactory,
   LLMProviderConfig,
@@ -45,9 +72,9 @@ import {
 } from '../agent/llm';
 import { SearchProviderFactory, SearchSettings, SearchProviderType } from '../agent/search';
 import { ChannelGateway } from '../gateway';
-	import { updateManager } from '../updater';
-	import { rateLimiter, RATE_LIMIT_CONFIGS } from '../utils/rate-limiter';
-	import { buildTaskExportJson } from '../reports/task-export';
+import { updateManager } from '../updater';
+import { rateLimiter, RATE_LIMIT_CONFIGS } from '../utils/rate-limiter';
+import { buildTaskExportJson } from '../reports/task-export';
 import {
   validateInput,
   WorkspaceCreateSchema,
@@ -802,7 +829,7 @@ export async function setupIpcHandlers(
     checkRateLimit(IPC_CHANNELS.TASK_CREATE);
     const validated = validateInput(TaskCreateSchema, data, 'task');
     const { title, prompt, workspaceId, budgetTokens, budgetCost, agentConfig } = validated;
-    const normalizedAgentConfig = agentConfig
+    const normalizedAgentConfig: AgentConfig | undefined = agentConfig
       ? {
         ...agentConfig,
         ...(agentConfig.autonomousMode ? { allowUserInput: false } : {}),

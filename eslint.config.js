@@ -6,7 +6,10 @@ import globals from 'globals';
 export default [
   js.configs.recommended,
   {
-    files: ['src/electron/**/*.ts'],
+    files: [
+      'src/electron/**/*.ts',
+      'src/daemon/**/*.ts',
+    ],
     languageOptions: {
       parser: typescriptParser,
       parserOptions: {
@@ -28,6 +31,7 @@ export default [
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
       '@typescript-eslint/no-explicit-any': 'warn',
       '@typescript-eslint/no-require-imports': 'warn',
+      'no-empty': ['error', { allowEmptyCatch: true }],
       'no-control-regex': 'off',
     },
   },

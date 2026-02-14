@@ -5,13 +5,26 @@
 
 import * as path from 'path';
 import { z } from 'zod';
-import { LLM_PROVIDER_TYPES, isTempWorkspaceId } from '../../shared/types';
+import { LLM_PROVIDER_TYPES, isTempWorkspaceId, PersonalityId } from '../../shared/types';
 
 // Common validation patterns
 const MAX_STRING_LENGTH = 10000;
 const MAX_PATH_LENGTH = 4096;
 const MAX_TITLE_LENGTH = 500;
 const MAX_PROMPT_LENGTH = 100000;
+
+const PersonalityIdSchema = z.preprocess(
+  (value) => (typeof value === 'string' ? value.trim() : value),
+  z.enum([
+    'professional',
+    'friendly',
+    'concise',
+    'creative',
+    'technical',
+    'casual',
+    'custom',
+  ] as const satisfies readonly PersonalityId[])
+);
 
 // ============ Workspace Schemas ============
 
@@ -35,7 +48,7 @@ export const WorkspaceCreateSchema = z.object({
 const AgentConfigSchema = z.object({
   providerType: z.enum(LLM_PROVIDER_TYPES).optional(),
   modelKey: z.string().max(200).optional(),
-  personalityId: z.string().max(100).optional(),
+  personalityId: PersonalityIdSchema.optional(),
   gatewayContext: z.enum(['private', 'group', 'public']).optional(),
   toolRestrictions: z.array(z.string().min(1).max(200)).max(50).optional(),
   maxTurns: z.number().int().min(1).max(100).optional(),

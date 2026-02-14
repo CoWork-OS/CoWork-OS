@@ -118,6 +118,11 @@ describe('TaskExecutor workspace preflight acknowledgement', () => {
         updateTaskWorkspace: vi.fn(),
         logEvent: vi.fn(),
       },
+      getWorkspaceSignalsForPath: vi.fn(() => ({
+        hasProjectMarkers: true,
+        hasCodeFiles: false,
+        hasAppDirs: false,
+      })),
     };
 
     const switched = (TaskExecutor as any).prototype.tryAutoSwitchToPreferredWorkspaceForAmbiguousTask.call(

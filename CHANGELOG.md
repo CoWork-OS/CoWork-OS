@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.73] - 2026-02-14
+
+### Fixed
+- **Release pipeline fix**: included daemon TypeScript sources in shared ESLint targets so `npm run lint` runs instead of failing with parse errors before build/publish steps.
+- **Workspace/task validation fix**: enforced `PersonalityId` validation for task agent configs to prevent runtime/inference mismatches during task creation.
+- **CLI and release install tests alignment**: updated control-plane and skill validation tests to match current runtime behaviors and skill metadata output.
+- **Workspace preflight reliability**: stabilized ambiguous temp-task auto-switch behavior when project-signals are present and tests now validate that behavior.
+
 ## [0.3.72] - 2026-02-14
 
 ### Added
@@ -501,6 +509,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 0.3.73 | 2026-02-14 | Release automation hardening and task/workspace validation fixes |
 | 0.3.72 | 2026-02-14 | Session-based temp workspaces, autonomous execution mode, safer completion validation |
 | 0.3.29 | 2025-02-08 | Multi-provider image generation, visual annotation, local embeddings, verification UX |
 | 0.3.25 | 2025-02-05 | Google Workspace integration, gateway enhancements, agent retry logic |
@@ -511,7 +520,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | 0.1.0 | 2025-01-24 | First public release with core features |
 | 0.0.1 | 2025-01-20 | Initial development setup |
 
-[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.3.72...HEAD
+[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.3.73...HEAD
+[0.3.73]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.73
 [0.3.72]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.72
 [0.3.71]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.71
 [0.3.29]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.29

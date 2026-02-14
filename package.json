@@ -1,6 +1,6 @@
 {
   "name": "cowork-os",
-  "version": "0.3.72",
+  "version": "0.3.73",
   "description": "CoWork OS - The operating system for personal AI assistants",
   "overrides": {
     "@whiskeysockets/baileys": {
@@ -108,6 +108,7 @@
     "@whiskeysockets/baileys": "6.7.16",
     "botbuilder": "^4.23.3",
     "chokidar": "^5.0.0",
+    "cowork-os": "file:cowork-os-0.3.73.tgz",
     "discord.js": "^14.25.1",
     "docx": "^9.5.1",
     "electron": "^40.1.0",

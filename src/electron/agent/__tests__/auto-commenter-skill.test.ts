@@ -142,6 +142,7 @@ describe('Auto Commenter Skill', () => {
         'type',
         'priority',
         'invocation',
+        'metadata',
       ];
       const skillKeys = Object.keys(skillData);
       for (const key of skillKeys) {

@@ -36,13 +36,12 @@ Your AI needs a secure home. CoWork OS provides the runtime, security layers, an
 | **Security-First** | 2800+ unit tests, configurable guardrails, approval workflows, gateway hardening |
 | **Local-First** | Your data stays on your machine. BYOK (Bring Your Own Key) |
 
-### What’s new in 0.3.72
+### What’s new in 0.3.73
 
-- **Session-temporary workspace isolation**: temporary tasks can now use per-session temp folders that are tracked, pruned, and isolated from user workspaces.
-- **Smarter search reliability**: Brave is now preferred when multiple search providers are configured, with automatic provider fallback execution and clearer failure reporting.
-- **Completion quality guardrails**: task finalization now validates required execution signals and output artifacts before marking tasks complete.
-- **Autonomous execution mode**: optional mode for trusted prompts that skips manual approvals for gated actions while preserving safety checks.
-- **More resilient tool execution**: stronger handling of tool failures, duplicate calls, and blocked/unavailable tools to avoid partial task completion.
+- **Release and install reliability**: fixed publish-blocking type/lint regressions so npm desktop/client releases can be published reliably.
+- **Task config validation**: stricter `personalityId` validation for task `agentConfig` avoids malformed IDs reaching task execution.
+- **Control-plane/LLM error handling alignment**: tests and runtime error codes now match shared validation shapes for predictable client behavior.
+- **Workspace auto-switch confidence**: improved ambiguous temp-task preflight handling when preferred workspace signals are available.
 
 > **Status**: macOS desktop app + headless/server mode (Linux/VPS). Cross-platform desktop support planned.
 
@@ -77,6 +76,16 @@ pkill -f '/cowork-os' || true
 # Start app
 npx cowork-os
 ```
+
+#### Install reliability notes (macOS / low-memory environments)
+
+- If install fails with `SIGKILL` during `node_modules/electron/install.js`, use a two-step install:
+  - `npm install --ignore-scripts cowork-os@latest --no-audit --no-fund`
+  - `npm run setup` (from the install directory) before launching the CLI
+- For local package testing, use the same `--ignore-scripts` flow with the tarball:
+  - `npm init -y`  
+  - `npm install --ignore-scripts /path/to/cowork-os-<version>.tgz`
+- If you already have a global install, verify with `coworkd-node --version` and avoid launching without dependency setup on first run.
 
 You can also install globally and launch directly:
 

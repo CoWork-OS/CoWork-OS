@@ -7,6 +7,7 @@ import {
   CheckIcon,
   ClipboardIcon,
   DotIcon,
+  ShieldIcon,
   FileIcon,
   PackageIcon,
   PauseIcon,

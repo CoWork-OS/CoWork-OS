@@ -75,7 +75,7 @@ describe('control-plane llm-configure', () => {
       throw new Error('Expected unsupported provider to throw');
     } catch (error: any) {
       expect(error).toMatchObject({
-        code: -32602,
+        code: 'INVALID_PARAMS',
       });
       expect(String(error.message)).toContain('Unsupported providerType');
     }
@@ -90,7 +90,7 @@ describe('control-plane llm-configure', () => {
       throw new Error('Expected bedrock configuration to throw');
     } catch (error: any) {
       expect(error).toMatchObject({
-        code: -32602,
+        code: 'INVALID_PARAMS',
       });
       expect(String(error.message)).toContain('providerType=bedrock');
     }

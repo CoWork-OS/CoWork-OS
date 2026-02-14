@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.74] - 2026-02-14
+
+### Fixed
+- **Release pipeline reliability**: updated the GitHub release publish step to find and publish the tag created by `electron-builder` instead of assuming the trigger ref matches exactly.
+- **Release docs/notes alignment**: updated release notes and README "What’s new" section for `0.3.74` to reflect install and CI reliability fixes.
+- **Release artifact consistency**: ensured workflow publishes desktop artifacts and release notes from the same release tag path used by electron packaging.
+
 ## [0.3.73] - 2026-02-14
 
 ### Fixed

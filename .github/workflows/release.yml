@@ -65,7 +65,20 @@ jobs:
           # unsigned macOS build publishing to GitHub releases
 
       - name: Publish draft GitHub release
-        run: gh release edit "${GITHUB_REF_NAME}" --draft=false --repo "${GITHUB_REPOSITORY}"
+        run: |
+          npm_version="$(node -p "require('./package.json').version")"
+          candidate_tags=("${GITHUB_REF_NAME}" "v${npm_version}" "${npm_version}")
+
+          for tag in "${candidate_tags[@]}"; do
+            if gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+              echo "Found release tag: ${tag}"
+              gh release edit "${tag}" --draft=false --repo "${GITHUB_REPOSITORY}"
+              exit 0
+            fi
+          done
+
+          echo "No matching draft release found for tags: ${candidate_tags[*]}" >&2
+          exit 1
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

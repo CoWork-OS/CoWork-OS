@@ -17,7 +17,7 @@
   <a href="https://github.com/CoWork-OS/CoWork-OS/actions/workflows/ci.yml"><img src="https://github.com/CoWork-OS/CoWork-OS/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
   <a href="https://www.apple.com/macos/"><img src="https://img.shields.io/badge/platform-macOS-blue.svg" alt="macOS"></a>
-  <a href="https://www.electronjs.org/"><img src="https://img.shields.io/badge/electron-40.0.0-47848F.svg" alt="Electron"></a>
+  <a href="https://www.electronjs.org/"><img src="https://img.shields.io/badge/electron-40.4.1-47848F.svg" alt="Electron"></a>
   <a href="https://github.com/sponsors/CoWork-OS"><img src="https://img.shields.io/badge/Sponsor-CoWork%20OS-ff4d4f?logo=github-sponsors&logoColor=white" alt="Sponsor on GitHub"></a>
 </p>
 
@@ -29,7 +29,7 @@ Your AI needs a secure home. CoWork OS provides the runtime, security layers, an
 |---|---|
 | **20+ AI Providers** | Claude, OpenAI, Gemini, Bedrock, OpenRouter, Ollama (free/local), Groq, xAI, Kimi, Mistral, Cerebras, MiniMax, Qwen, Copilot, and more |
 | **14 Messaging Channels** | WhatsApp, Telegram, Discord, Slack, Teams, Google Chat, iMessage, Signal, Mattermost, Matrix, Twitch, LINE, BlueBubbles, Email |
-| **8 Enterprise Connectors** | Salesforce, Jira, HubSpot, Zendesk, ServiceNow, Linear, Asana, Okta |
+| **9 Enterprise Connectors** | Salesforce, Jira, HubSpot, Zendesk, ServiceNow, Linear, Asana, Okta, Resend |
 | **6 Cloud Storage** | Notion, Box, OneDrive, Google Workspace (Drive/Gmail/Calendar), Dropbox, SharePoint |
 | **Voice Calls** | Outbound phone calls via ElevenLabs Agents |
 | **Agentic Tribe** | Agent collaboration through shared checklists, coordinated runs, and agentic tool-calling |
@@ -2204,6 +2204,7 @@ Pre-built MCP server connectors for enterprise integrations. Install from **Sett
 | **Linear** | Product/Issue | `health`, `list_issues`, `get_issue`, `search_issues`, `create_issue`, `update_issue` |
 | **Asana** | Work Management | `health`, `list_tasks`, `get_task`, `search_tasks`, `create_task`, `update_task` |
 | **Okta** | Identity | `health`, `list_users`, `get_user`, `search_users`, `create_user`, `update_user` |
+| **Resend** | Email | `health`, `send_email`, `list_webhooks`, `create_webhook`, `delete_webhook`, `get_received_email` |
 
 ### Setup
 
@@ -2308,7 +2309,7 @@ Users must comply with their model provider's terms:
 - [x] Persistent memory system with privacy protection
 - [x] Mobile Companions with LAN access support
 - [x] Voice Mode with ElevenLabs and OpenAI integration
-- [x] Enterprise MCP Connectors (Salesforce, Jira, HubSpot, Zendesk, ServiceNow, Linear, Asana, Okta)
+- [x] Enterprise MCP Connectors (Salesforce, Jira, HubSpot, Zendesk, ServiceNow, Linear, Asana, Okta, Resend)
 - [x] Cloud Storage Integrations (Notion, Box, OneDrive, Google Drive, Dropbox, SharePoint)
 - [x] Visual Theme System (Modern/Terminal visual styles + Light/Dark/System color modes)
 - [x] Workspace recency ordering

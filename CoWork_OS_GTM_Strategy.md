@@ -1,1 +1,3 @@
-Let me create this properly with all the structured content:
+# CoWork OS — GTM Strategy
+
+See `docs/gtm-strategy.md` for the full document.

@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Intent-routed task strategy runtime**: tasks are now classified into `chat`, `advice`, `planning`, `execution`, or `mixed` and receive derived strategy defaults (conversation mode, turns, quality passes, answer-first flags).
+- **Relationship memory lifecycle APIs**: added relationship memory and commitment IPC/preload surfaces:
+  - `memory:relationshipList`
+  - `memory:relationshipUpdate`
+  - `memory:relationshipDelete`
+  - `memory:commitmentsGet`
+  - `memory:commitmentsDueSoon`
+- **Relationship memory UI controls** in Memory Settings for edit/forget and commitment status management.
+- **Dedicated relationship-agent architecture + UAT docs**:
+  - `docs/relationship-agent-architecture.md`
+  - `docs/relationship-agent-uat.md`
+
+### Changed
+- **Execution strategy orchestration** in daemon lifecycle:
+  - strategy derivation at task creation
+  - runtime strategy re-application for queued/legacy tasks
+  - relationship-memory outcome recording on top-level task completion
+- **Memory context composition** now combines `UserProfileService` facts with layered relationship memory context for prompt injection.
+- **Soft-deadline behavior** in executor now switches from deep step execution to best-effort finalization before hard timeout.
+
+### Fixed
+- **Timeout-abort completion gap**: timeout-triggered cancellation paths now attempt best-effort finalization instead of exiting without a user-facing answer.
+- **Cancellation observability**: executor cancellation logs now include cancellation reason (`user`, `timeout`, `shutdown`, etc.) for clearer diagnosis.
+
 ## [0.3.86] - 2026-02-14
 
 ### Added

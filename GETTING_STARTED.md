@@ -55,17 +55,36 @@ This will:
    - Under **Workspace Kit**, click **Initialize**
    - This creates a `.cowork/` directory in your workspace for durable context and project scaffolding
 
-2. **Create a Task**
+3. **Create a Task**
    - Click "+ New Task"
    - Title: "Organize my files"
    - Description: "Please organize all files in this folder by file type (Images, Documents, etc.)"
    - Click "Create Task"
 
-3. **Watch it Work**
+4. **Watch it Work**
    - The agent will create a plan
    - Execute steps using available tools
    - Show real-time progress in the timeline
    - Request approval before destructive changes
+
+### Step 5: Validate Relationship-Agent Behavior
+
+Use this acceptance check after setup:
+
+1. Create a strategic prompt:
+   - `I built you, how should I position you, who should I target, and what should I aim to achieve?`
+2. Confirm response quality:
+   - You should get a direct answer early, then deeper execution if needed.
+3. Confirm completion:
+   - Task should end in `completed` with a usable final answer.
+4. Confirm timeout handling:
+   - If a step times out, the task should still produce a best-effort final answer.
+5. Confirm memory continuity:
+   - Send: `Call me Mesut. I prefer concise responses. Remind me to send investor update tomorrow.`
+   - Open **Settings** > **Memory System** and confirm relationship memory + commitments are visible.
+6. Confirm memory controls:
+   - Edit a relationship item, mark a commitment done/reopen, and forget one item.
+   - Restart app and verify changes persist.
 
 ## Example Tasks to Try
 
@@ -136,6 +155,23 @@ Description: Navigate to https://example.com and take a screenshot. Save it as e
   - Tool calls
   - Files created/modified
   - Errors
+
+### Memory System (Relationship Controls)
+
+In **Settings** > **Memory System**:
+
+- **User Memory Facts**: curated profile facts (existing functionality).
+- **Relationship Memory**: layered continuity memory:
+  - identity
+  - preferences
+  - context
+  - history
+  - commitments
+- **Commitment controls**:
+  - Mark done/reopen
+  - Edit text
+  - Forget item
+  - View due-soon reminders
 
 ### Approval Dialogs
 

@@ -40,12 +40,12 @@ node -v
 npm -v
 ```
 
-`cowork-os` requires Node `>=22.12.0`.
+`cowork-os` requires Node `>=24.0.0`.
 
-If either command is missing, or you see `v20`/`v21`, install Node.js 22:
+If either command is missing, or you see `v22`/`v23`, install Node.js 24:
 
 ```bash
-curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
 sudo apt-get install -y nodejs
 node -v
 ```
@@ -87,7 +87,7 @@ This quick start is great for first run/testing. For always-on production, conti
 ### Common First-Run Errors
 
 - `npm WARN EBADENGINE`:
-  Node version is too old. Install Node 22 and retry step 3.
+  Node version is too old. Install Node 24 and retry step 3.
 - `npm ERR! EACCES` on `npm install -g ...`:
   This guide intentionally uses local install (`npm install` + `npx coworkd-node`) so you do not need global npm permissions.
 - `sh: 1: tsc: not found` after `npx coworkd-node`:

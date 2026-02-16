@@ -74,7 +74,7 @@ Notes on "skills":
 - Skill sources and precedence (highest wins):
   - Workspace skills: `<workspace>/skills/`
   - Managed skills: Electron `userData/skills/` (on macOS typically `~/Library/Application Support/cowork-os/skills/`)
-  - Bundled skills: `resources/skills/` (includes use-case templates: booking options, draft reply, family digest, household capture, newsletter digest, transaction scan)
+  - Bundled skills: `resources/skills/` (includes use-case templates: booking options, draft reply, family digest, household capture, newsletter digest, transaction scan, inbox manager, chief-of-staff briefing, smart-home brain, dev task queue, figure-it-out agent)
 
 ### 3. Messaging Gateway (Channels)
 
@@ -104,6 +104,8 @@ Core gateway code:
 - Shared channel types: `src/electron/gateway/channels/types.ts`
 
 Channel commands (chat):
+- `/inbox [triage|autopilot|followups] [limit]` runs DM-only inbox triage workflow with confirmation gates for external actions.
+- `/brief [morning|today|tomorrow|week]` generates a DM-only chief-of-staff style brief.
 - `/schedule ...` creates scheduled agent tasks that deliver results back to the originating chat (works in DM + group contexts).
 - `/digest [lookback]` generates an on-demand digest of recent chat messages (group-safe; uses the local channel message store).
 - `/followups [lookback]` extracts follow-ups/commitments from recent chat messages (group-safe; uses the local channel message store).
@@ -147,7 +149,7 @@ Key code:
 - Registry/one-click installs: `src/electron/mcp/registry/MCPRegistryManager.ts`
 
 Enterprise connectors included in this repo (as MCP servers):
-- `connectors/*-mcp/` (Salesforce, Jira, HubSpot, Zendesk, ServiceNow, Linear, Asana, Okta)
+- `connectors/*-mcp/` (Salesforce, Jira, HubSpot, Zendesk, ServiceNow, Linear, Asana, Okta, Resend)
 - Reference doc: `docs/enterprise-connectors.md`
 
 ### 6. Memory System (Local-First)

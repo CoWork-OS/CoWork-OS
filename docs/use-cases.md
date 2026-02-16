@@ -10,10 +10,16 @@ Use cases:
 - Household logistics (capture tasks, keep you on track)
 - Booking + forms (find availability, fill forms, stop before final submit)
 - Visibility for others (daily digest to family)
+- Inbox autopilot (triage, drafts, cleanup suggestions)
+- Chief-of-staff briefing (morning executive brief)
+- Dev task queue management (agent-ready backlog execution)
+- Smart-home orchestration via integrations
+- "Figure it out" fallback orchestration for hard tasks
 
 Cowork OS supports these via:
 - Channels: Slack, iMessage, WhatsApp, Telegram, Email, etc.
 - Scheduling: `/schedule ...` and `schedule_task`
+- Inbox + briefing commands: `/inbox`, `/brief [morning|today|tomorrow|week]`
 - Integrations: Notion, Gmail/Google Calendar (if configured), Apple Calendar/Reminders (macOS)
 - Web automation: browser tools (plus MCP puppeteer fallback for some sites)
 
@@ -108,4 +114,89 @@ Create a daily digest for "tomorrow" with:
 
 Draft it as a short message I can send to my family.
 STOP before sending and ask me to confirm the final message and where to send it.
+```
+
+### 7) Inbox Autopilot (Triage + Drafts + Cleanup, Ask Before Acting)
+
+Prompt:
+```
+Run inbox triage for the last 24h.
+Prefer gmail_action; if unavailable use email_imap_unread; if unavailable use Email channel history.
+
+Classify each message as urgent, today, this-week, or no-action.
+Output:
+- Priority table
+- Draft replies for urgent/today items
+- Cleanup candidates (newsletter/promotions) with unsubscribe/archive suggestions
+- Follow-up reminders to create
+
+STOP before sending, unsubscribing, archiving, deleting, or labeling anything.
+Ask me what to execute.
+```
+
+Command shortcut:
+```
+/inbox autopilot 180
+```
+
+### 8) Morning Briefing Agent (Chief Of Staff)
+
+Prompt:
+```
+Create my morning chief-of-staff brief.
+Include:
+- Executive summary (3-6 bullets)
+- Calendar risks/prep
+- Inbox priorities
+- Reminders/tasks due soon
+- Optional ops signals if available (weather, urgent GitHub notifications, revenue/payment changes)
+- Recommended next actions in urgency order
+
+If any signal source is unavailable, add a Missing Data section.
+Format for mobile reading.
+```
+
+Command shortcuts:
+```
+/brief morning
+/brief schedule morning weekdays 08:00
+```
+
+### 9) Smart Home Brain (Integration-First, Confirm Before State Changes)
+
+Prompt:
+```
+Act as a smart-home orchestrator for this request: "Set evening mode at home".
+First discover available smart-home integrations/tools.
+Then produce a dry-run action plan (device + action + expected effect + rollback).
+Respect quiet hours 22:00-07:00.
+STOP and ask me to confirm before any physical state change.
+If integrations are missing, give me a setup checklist and fallback manual steps.
+```
+
+### 10) Dev Task Queue Agent (Queue + Parallel Execution + Progress)
+
+Prompt:
+```
+Build a dev task queue for repo owner/repo from open high-priority issues.
+For each item include acceptance criteria, dependencies, risk, and suggested owner (agent or human).
+Run up to 3 tasks in parallel and provide progress checkpoints.
+For any code changes, summarize diffs and STOP before merge/deploy unless I approve.
+```
+
+### 11) "Figure It Out" Agent (Fallback Orchestration)
+
+Prompt:
+```
+Objective: book a table for 2 next week between 7pm-8:30pm and avoid calendar conflicts.
+
+Try the direct path first. If it fails, switch methods/tools and keep an attempt log:
+- attempt number
+- method/tool used
+- observed result
+- failure/success reason
+
+Use up to 3 fallback attempts.
+Never claim success without evidence.
+STOP before irreversible external actions and ask for confirmation.
 ```

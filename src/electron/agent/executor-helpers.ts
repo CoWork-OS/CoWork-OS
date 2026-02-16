@@ -37,8 +37,14 @@ export type CompletionContract = {
 // Timeout for LLM API calls (2 minutes)
 export const LLM_TIMEOUT_MS = 2 * 60 * 1000;
 
-// Per-step timeout (5 minutes max per step)
-export const STEP_TIMEOUT_MS = 5 * 60 * 1000;
+// Per-step timeout (15 minutes max per step).
+// A single 32000-token write at ~60 tps takes ~533s. With tool calls and
+// quality refinement overhead, a typical write-heavy step runs ~560-600s.
+// 15 minutes (900s, soft deadline ~810s) accommodates this with margin.
+// If max_tokens recovery triggers at 32K (rare), a second attempt pushes to
+// ~1066s which will exceed the soft deadline — but recovery at 32K should
+// only occur for unusually massive documents (>25K words).
+export const STEP_TIMEOUT_MS = 15 * 60 * 1000;
 
 // Default per-tool execution timeout (overrideable per tool)
 export const TOOL_TIMEOUT_MS = 30 * 1000;
@@ -91,6 +97,11 @@ export const INPUT_DEPENDENT_ERROR_PATTERNS = [
   /invalid.*parameter/i,       // "Invalid content" type errors
   /must be.*string/i,          // Type validation: "must be a non-empty string"
   /expected.*but received/i,   // Type validation: "expected string but received undefined"
+  /cannot specify both/i,      // Parameter conflict: "Cannot specify both head and tail"
+  /mutually exclusive/i,       // "parameters are mutually exclusive"
+  /invalid.*argument/i,        // "Invalid argument" from tool validation
+  /unexpected.*parameter/i,    // "Unexpected parameter" from strict schemas
+  /not a valid/i,              // "X is not a valid value for Y"
   /timed out/i,        // Command/operation timed out (often due to slow query)
   // Network/navigation failures are often domain- or environment-specific
   /net::ERR_/i,        // Playwright/Chromium navigation errors
@@ -193,8 +204,13 @@ export function isAskingQuestion(text: string): boolean {
   const trimmed = text.trim();
   if (!trimmed) return false;
 
+  const maxLengthForAnalysis = 4000;
+  const sample = trimmed.slice(0, maxLengthForAnalysis);
+  const lines = sample.split('\n').map(l => l.trim()).filter(Boolean);
+  if (lines.length === 0) return false;
+  const tailLines = lines.slice(-2);
+
   const nonBlockingQuestionPatterns = [
-    // Conversational/offboarding prompts that shouldn't pause execution
     /\bwhat\s+(?:else\s+)?can\s+i\s+help\b/i,
     /\bhow\s+can\s+i\s+help\b/i,
     /\bis\s+there\s+anything\s+else\s+(?:i\s+can\s+help|you\s+need|you'd\s+like)\b/i,
@@ -205,8 +221,12 @@ export function isAskingQuestion(text: string): boolean {
     /\bdoes\s+that\s+(?:help|make\s+sense)\b/i,
   ];
 
-  const maxLengthForAnalysis = 4000;
-  const sample = trimmed.slice(0, maxLengthForAnalysis);
+  const looksLikeNonBlockingTail = tailLines.length > 0 && tailLines.every((line) => {
+    const normalized = line.replace(/^[-*]?\s*\d*[).]?\s*/, '').trim();
+    if (!normalized) return true;
+    return nonBlockingQuestionPatterns.some(pattern => pattern.test(normalized));
+  });
+  if (looksLikeNonBlockingTail) return false;
 
   const blockingCuePatterns = [
     /(?:need|required)\s+(?:your|a|the)\b/i,
@@ -214,6 +234,10 @@ export function isAskingQuestion(text: string): boolean {
     /to\s+(?:proceed|continue|move\s+forward)\b/i,
     /i\s+can(?:not|'t)\s+(?:proceed|continue)\b/i,
     /\bawaiting\s+your\b/i,
+    /\baction\s+required\b/i,
+    /\bwaiting\s+for\s+your\b/i,
+    /\bcannot\s+complete\s+without\b/i,
+    /\brequires?\s+your\s+(?:input|approval|confirmation|decision)\b/i,
   ];
 
   const explicitProceedPatterns = [
@@ -236,20 +260,29 @@ export function isAskingQuestion(text: string): boolean {
     /^(?:do\s+you\s+want|do\s+you\s+prefer|would\s+you\s+like|would\s+you\s+prefer|should\s+i|is\s+it\s+(?:ok|okay|alright)\s+if\s+i)\b/i,
   ];
 
+  const explicitResponseRequestPatterns = [
+    /\breply\s+with\b/i,
+    /\brespond\s+with\b/i,
+    /\bplease\s+(?:reply|respond|confirm|choose|pick|select|provide|share|send|clarify)\b/i,
+    /\bchoose\s+(?:one|between|from)\b/i,
+    /\bpick\s+(?:one|between|from)\b/i,
+    /\bselect\s+(?:one|between|from)\b/i,
+    /\bwhich\s+(?:one|option|approach|path)\b/i,
+    /\bdo\s+you\s+want\s+me\s+to\b/i,
+    /\bwould\s+you\s+like\s+me\s+to\b/i,
+    /\bshould\s+i\b/i,
+    /\bcan\s+you\s+(?:provide|share|confirm|clarify)\b/i,
+    /\bcould\s+you\s+(?:provide|share|confirm|clarify)\b/i,
+  ];
+
+  const decisionQuestionPatterns = [
+    /^(?:do\s+you\s+want|would\s+you\s+like|should\s+i|can\s+you|could\s+you|which|what(?:\s+option)?|is\s+it\s+ok(?:ay)?\s+if)\b/i,
+  ];
+
   const hasBlockingCue = blockingCuePatterns.some(pattern => pattern.test(sample));
   const hasExplicitProceed = explicitProceedPatterns.some(pattern => pattern.test(sample));
   if (hasBlockingCue) return true;
-  const lines = sample.split('\n').map(l => l.trim()).filter(Boolean);
-  if (lines.length === 0) return false;
-
-  const lastLine = lines[lines.length - 1] ?? sample;
-  const sentenceMatch = lastLine.match(/[^.!?]+[.!?]*$/);
-  const lastSentence = sentenceMatch ? sentenceMatch[0].trim() : lastLine;
-  const hasNonBlockingTail = nonBlockingQuestionPatterns.some(pattern => pattern.test(lastSentence));
-
-  const tailLines = lines.slice(-2);
-  let tailQuestion = false;
-  let tailImperative = false;
+  let tailRequiresResponse = false;
 
   for (const line of tailLines) {
     const normalized = line.replace(/^[-*]?\s*\d*[).]?\s*/, '').trim();
@@ -257,22 +290,18 @@ export function isAskingQuestion(text: string): boolean {
     if (nonBlockingQuestionPatterns.some(pattern => pattern.test(normalized))) {
       continue;
     }
-    if (imperativePatterns.some(pattern => pattern.test(normalized)) || decisionPatterns.some(pattern => pattern.test(normalized))) {
-      tailImperative = true;
+    if (explicitResponseRequestPatterns.some(pattern => pattern.test(normalized))) {
+      tailRequiresResponse = true;
     }
-    if (normalized.endsWith('?') || questionWordPatterns.some(pattern => pattern.test(normalized))) {
-      tailQuestion = true;
+    const looksLikeQuestion =
+      normalized.endsWith('?') ||
+      questionWordPatterns.some(pattern => pattern.test(normalized));
+    if (looksLikeQuestion && decisionQuestionPatterns.some(pattern => pattern.test(normalized))) {
+      tailRequiresResponse = true;
     }
   }
 
-  if (tailImperative) return true;
-  if (tailQuestion) {
-    if (hasNonBlockingTail) return false;
-    if (hasExplicitProceed) return false;
-    return true;
-  }
-
-  return false;
+  return tailRequiresResponse && !hasExplicitProceed;
 }
 
 // ===== Tool Call Deduplicator =====
@@ -517,6 +546,31 @@ export class ToolCallDeduplicator {
   }
 
   /**
+   * Clear read/list call history after filesystem mutations.
+   * This prevents stale cached read results from being reused immediately
+   * after a file was updated.
+   */
+  clearReadOnlyHistory(): void {
+    const readLikePrefixes = ['read_file:', 'read_multiple_files:', 'list_directory:', 'list_directory_with_sizes:'];
+    for (const key of Array.from(this.recentCalls.keys())) {
+      if (readLikePrefixes.some(prefix => key.startsWith(prefix))) {
+        this.recentCalls.delete(key);
+      }
+    }
+
+    for (const key of Array.from(this.semanticPatterns.keys())) {
+      if (key.startsWith('read_file:') || key.startsWith('list_directory:')) {
+        this.semanticPatterns.delete(key);
+      }
+    }
+
+    this.rateLimitCounters.delete('read_file');
+    this.rateLimitCounters.delete('read_multiple_files');
+    this.rateLimitCounters.delete('list_directory');
+    this.rateLimitCounters.delete('list_directory_with_sizes');
+  }
+
+  /**
    * Check if a tool is idempotent (safe to cache/skip duplicates)
    */
   static isIdempotentTool(toolName: string): boolean {
@@ -574,6 +628,9 @@ export class ToolFailureTracker {
     // AppleScript often needs a few iterative syntax/quoting fixes before succeeding.
     if (toolName === 'run_applescript') {
       return 8;
+    }
+    if (toolName.startsWith('browser_')) {
+      return 6;
     }
     return this.maxInputDependentFailures;
   }
@@ -709,6 +766,9 @@ export class ToolFailureTracker {
     if (toolName === 'browser_navigate' && (/net::ERR_/i.test(error) || /http2/i.test(error))) {
       return 'SUGGESTION: This looks like a site/network-specific navigation failure. Try an alternative web tool (web_fetch/web_search) or use MCP puppeteer tools (puppeteer_navigate/puppeteer_screenshot) for JS-heavy pages.';
     }
+    if (toolName.startsWith('browser_') && (/timed out/i.test(error) || /timeout/i.test(error))) {
+      return 'SUGGESTION: Wait for the selector to be stable first (browser_wait), then retry with a more specific selector. Keep timeout longer with timeout_ms only when needed.';
+    }
 
     if (/cannot be done|not available|not allowed|permission|access denied|disabled|tool .* disabled/i.test(error)) {
       return 'SUGGESTION: If the normal tool path is blocked, try a different workflow and, if needed, suggest a minimal in-repo implementation patch so the task can still be completed.';
@@ -746,7 +806,12 @@ export class ToolFailureTracker {
  */
 export class FileOperationTracker {
   // Track files that have been read (path -> { count, lastReadTime, contentSummary })
-  private readFiles: Map<string, { count: number; lastReadTime: number; contentLength: number }> = new Map();
+  private readFiles: Map<string, {
+    count: number;
+    lastReadTime: number;
+    contentLength: number;
+    cachedResult?: string;
+  }> = new Map();
   // Track files that have been created (normalized name -> full path)
   private createdFiles: Map<string, string> = new Map();
   // Track file operation counts per type
@@ -756,6 +821,7 @@ export class FileOperationTracker {
 
   private readonly maxReadsPerFile: number = 2;
   private readonly readCooldownMs: number = 30000; // 30 seconds between reads of same file
+  private readonly maxCachedReadResultLength: number = 20000;
   private readonly maxListingsPerDir: number = 2;
   private readonly listingCooldownMs: number = 60000; // 60 seconds between listings of same directory
 
@@ -763,7 +829,7 @@ export class FileOperationTracker {
    * Check if a file read should be blocked (redundant read)
    * @returns Object with blocked flag and reason if blocked
    */
-  checkFileRead(filePath: string): { blocked: boolean; reason?: string; suggestion?: string } {
+  checkFileRead(filePath: string): { blocked: boolean; reason?: string; suggestion?: string; cachedResult?: string } {
     const normalized = this.normalizePath(filePath);
     const existing = this.readFiles.get(normalized);
     const now = Date.now();
@@ -771,12 +837,21 @@ export class FileOperationTracker {
     if (existing) {
       const timeSinceLastRead = now - existing.lastReadTime;
 
+      // If the read cooldown has elapsed, reset the duplicate count so the next
+      // real read can proceed without stale throttling.
+      if (timeSinceLastRead > this.readCooldownMs) {
+        existing.count = 1;
+        existing.lastReadTime = now;
+        return { blocked: false };
+      }
+
       // If file was read recently (within cooldown), block
       if (timeSinceLastRead < this.readCooldownMs && existing.count >= this.maxReadsPerFile) {
         return {
           blocked: true,
           reason: `File "${filePath}" was already read ${existing.count} times in the last ${this.readCooldownMs / 1000}s`,
           suggestion: 'Use the content from the previous read instead of reading the file again. If you need specific parts, describe what you need.',
+          cachedResult: existing.cachedResult,
         };
       }
     }
@@ -787,17 +862,30 @@ export class FileOperationTracker {
   /**
    * Record a file read operation
    */
-  recordFileRead(filePath: string, contentLength: number): void {
+  recordFileRead(filePath: string, content: string): void {
     const normalized = this.normalizePath(filePath);
     const existing = this.readFiles.get(normalized);
     const now = Date.now();
+    const safeContent = typeof content === 'string' ? content : String(content ?? '');
+    const contentLength = safeContent.length;
+    const truncatedContent = contentLength > this.maxCachedReadResultLength
+      ? `${safeContent.slice(0, this.maxCachedReadResultLength)}\n\n[... cached content truncated ...]`
+      : safeContent;
 
     if (existing) {
       existing.count++;
       existing.lastReadTime = now;
       existing.contentLength = contentLength;
+      if (truncatedContent) {
+        existing.cachedResult = truncatedContent;
+      }
     } else {
-      this.readFiles.set(normalized, { count: 1, lastReadTime: now, contentLength });
+      this.readFiles.set(normalized, {
+        count: 1,
+        lastReadTime: now,
+        contentLength,
+        cachedResult: truncatedContent,
+      });
     }
 
     this.incrementOperation('read_file');
@@ -950,6 +1038,22 @@ export class FileOperationTracker {
   }
 
   /**
+   * Invalidate cached read tracking for a file that was modified.
+   */
+  invalidateFileRead(filePath: string): void {
+    const normalized = this.normalizePath(filePath);
+    this.readFiles.delete(normalized);
+  }
+
+  /**
+   * Invalidate cached directory listing tracking for a directory that changed.
+   */
+  invalidateDirectoryListing(dirPath: string): void {
+    const normalized = this.normalizePath(dirPath);
+    this.directoryListings.delete(normalized);
+  }
+
+  /**
    * Reset tracker (e.g., for a new task)
    */
   reset(): void {
@@ -1060,9 +1164,19 @@ export class FileOperationTracker {
 /**
  * Wrap a promise with a timeout
  */
-export function withTimeout<T>(promise: Promise<T>, timeoutMs: number, operation: string): Promise<T> {
+export function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  operation: string,
+  onTimeout?: () => void
+): Promise<T> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
+      try {
+        onTimeout?.();
+      } catch {
+        // Best-effort timeout hook; preserve timeout error semantics.
+      }
       reject(new Error(`${operation} timed out after ${timeoutMs / 1000}s`));
     }, timeoutMs);
 

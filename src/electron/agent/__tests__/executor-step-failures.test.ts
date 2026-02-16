@@ -85,6 +85,9 @@ function createExecutorWithStubs(responses: LLMResponse[], toolResults: Record<s
     { name: 'run_command', description: '', input_schema: { type: 'object', properties: {} } },
     { name: 'glob', description: '', input_schema: { type: 'object', properties: {} } },
     { name: 'web_search', description: '', input_schema: { type: 'object', properties: {} } },
+    { name: 'write_file', description: '', input_schema: { type: 'object', properties: {} } },
+    { name: 'create_document', description: '', input_schema: { type: 'object', properties: {} } },
+    { name: 'edit_file', description: '', input_schema: { type: 'object', properties: {} } },
   ]);
   executor.handleCanvasPushFallback = vi.fn();
   executor.getToolTimeoutMs = vi.fn().mockReturnValue(1000);
@@ -446,6 +449,119 @@ describe('TaskExecutor executeStep failure handling', () => {
 
     expect(shouldPause).toBe(false);
     expect((executor as any).pauseForUserInput).not.toHaveBeenCalled();
+  });
+
+  it('treats provider cancellation messages as abort-like errors', () => {
+    executor = createExecutorWithStubs([textResponse('done')], {});
+
+    expect((executor as any).isAbortLikeError(new Error('Request cancelled'))).toBe(true);
+    expect((executor as any).isAbortLikeError(new Error('Request canceled'))).toBe(true);
+  });
+
+  it('does not infer write_file content from assistant narration fallback', () => {
+    executor = createExecutorWithStubs([textResponse('done')], {});
+    (executor as any).lastAssistantText = 'Now let me write the full whitepaper:';
+    (executor as any).lastNonVerificationOutput = 'Now let me write the full whitepaper:';
+    (executor as any).lastAssistantOutput = 'Now let me write the full whitepaper:';
+
+    const inferred = (executor as any).inferMissingParameters('write_file', { path: 'NexusChain-Whitepaper.md' });
+
+    expect(inferred.input.content).toBeUndefined();
+  });
+
+  it('does not infer create_document content from assistant narration fallback', () => {
+    executor = createExecutorWithStubs([textResponse('done')], {});
+    (executor as any).lastAssistantText = 'Now let me write the full whitepaper:';
+    (executor as any).lastNonVerificationOutput = 'Now let me write the full whitepaper:';
+    (executor as any).lastAssistantOutput = 'Now let me write the full whitepaper:';
+
+    const inferred = (executor as any).inferMissingParameters('create_document', {
+      filename: 'spec.docx',
+      format: 'docx',
+    });
+
+    expect(inferred.input.content).toBeUndefined();
+  });
+
+  it('fails write/create deliverable steps when no file mutation evidence exists', async () => {
+    executor = createExecutorWithStubs(
+      [
+        textResponse('I wrote the complete whitepaper and it is ready.'),
+      ],
+      {}
+    );
+
+    const step: any = {
+      id: 'artifact-1',
+      description: 'Write the complete KARU founding whitepaper document',
+      status: 'pending',
+    };
+
+    await (executor as any).executeStep(step);
+
+    expect(step.status).toBe('failed');
+    expect(step.error).toContain('written artifact');
+  });
+
+  it('keeps write/create deliverable steps completed when a file mutation succeeds', async () => {
+    executor = createExecutorWithStubs(
+      [
+        toolUseResponse('write_file', { path: 'KARU_Whitepaper.md', content: '# KARU' }),
+        textResponse('Saved the complete whitepaper to KARU_Whitepaper.md'),
+      ],
+      {
+        write_file: { success: true, path: 'KARU_Whitepaper.md' },
+      }
+    );
+
+    const step: any = {
+      id: 'artifact-2',
+      description: 'Write the complete KARU founding whitepaper document',
+      status: 'pending',
+    };
+
+    await (executor as any).executeStep(step);
+
+    expect(step.status).toBe('completed');
+  });
+
+  it('fails final verification steps unless the response is exactly OK', async () => {
+    executor = createExecutorWithStubs(
+      [
+        textResponse('The whitepaper is missing required sections.'),
+      ],
+      {}
+    );
+
+    const step: any = {
+      id: 'verify-1',
+      description: 'Final verification: Review the completed whitepaper for completeness',
+      status: 'pending',
+    };
+    (executor as any).plan = { description: 'Plan', steps: [step] };
+
+    await (executor as any).executeStep(step);
+
+    expect(step.status).toBe('failed');
+    expect(step.error).toContain('Verification failed');
+  });
+
+  it('rethrows abort-like errors without marking step as failed inside executeStep', async () => {
+    executor = createExecutorWithStubs([], {});
+    (executor as any).callLLMWithRetry = vi.fn(async () => {
+      throw new Error('Request cancelled');
+    });
+
+    const step: any = { id: 'abort-1', description: 'Generate a large document', status: 'pending' };
+
+    await expect((executor as any).executeStep(step)).rejects.toThrow('Request cancelled');
+    expect(step.status).not.toBe('failed');
+    expect(step.error).toBeUndefined();
+    expect((executor as any).daemon.logEvent).not.toHaveBeenCalledWith(
+      'task-1',
+      'step_failed',
+      expect.objectContaining({ reason: 'Request cancelled' })
+    );
   });
 
   it('does not fail step when only web_search errors occur after a successful tool', async () => {

@@ -8,6 +8,7 @@ import { SandboxRunner } from './sandbox/runner';
 import {
   LLMProvider,
   LLMProviderFactory,
+  LLMRequest,
   LLMMessage,
   LLMToolResult,
   LLMToolUse,
@@ -24,6 +25,7 @@ import { PersonalityManager } from '../settings/personality-manager';
 import { calculateCost, formatCost } from './llm/pricing';
 import { getCustomSkillLoader } from './custom-skill-loader';
 import { MemoryService } from '../memory/MemoryService';
+import { UserProfileService } from '../memory/UserProfileService';
 import { buildWorkspaceKitContext } from '../memory/WorkspaceKitContext';
 import { MemoryFeaturesManager } from '../settings/memory-features-manager';
 import { InputSanitizer, OutputFilter } from './security';
@@ -68,6 +70,7 @@ export class TaskExecutor {
   private executionToolLastError = '';
   private allowExecutionWithoutShell = false;
   private cancelled = false;
+  private cancelReason: 'user' | 'timeout' | 'shutdown' | 'system' | 'unknown' | null = null;
   private paused = false;
   private taskCompleted = false;  // Prevents any further processing after task completes
   private waitingForUserInput = false;
@@ -94,6 +97,7 @@ export class TaskExecutor {
   private lastAssistantText: string | null = null;
   private lastPreCompactionFlushAt: number = 0;
   private lastPreCompactionFlushTokenCount: number = 0;
+  private observedOutputTokensPerSecond: number | null = null;
 
   private static readonly MIN_RESULT_SUMMARY_LENGTH = 20;
   private static readonly RESULT_SUMMARY_PLACEHOLDERS = new Set<string>([
@@ -137,6 +141,10 @@ export class TaskExecutor {
   private static readonly PINNED_COMPACTION_SUMMARY_CLOSE_TAG = '</cowork_compaction_summary>';
   private static readonly PINNED_SHARED_CONTEXT_TAG = '<cowork_shared_context>';
   private static readonly PINNED_SHARED_CONTEXT_CLOSE_TAG = '</cowork_shared_context>';
+  private static readonly PINNED_USER_PROFILE_TAG = '<cowork_user_profile>';
+  private static readonly PINNED_USER_PROFILE_CLOSE_TAG = '</cowork_user_profile>';
+
+  private static readonly BROWSER_TOOL_TIMEOUT_MS = 90 * 1000;
 
   private upsertPinnedUserBlock(
     messages: LLMMessage[],
@@ -415,14 +423,12 @@ ${transcript}
 
     try {
       const response = await this.callLLMWithRetry(
-        () => withTimeout(
-          this.provider.createMessage({
+        () => this.createMessageWithTimeout({
             model: this.modelId,
             maxTokens: outputBudget,
             system,
             messages: [{ role: 'user', content: user }],
-            signal: this.abortController.signal,
-          }),
+          },
           LLM_TIMEOUT_MS,
           'Compaction summary'
         ),
@@ -505,6 +511,8 @@ ${transcript}
       if (!t) return true;
       if (t.startsWith(TaskExecutor.PINNED_MEMORY_RECALL_TAG)) return false;
       if (t.startsWith(TaskExecutor.PINNED_COMPACTION_SUMMARY_TAG)) return false;
+      if (t.startsWith(TaskExecutor.PINNED_SHARED_CONTEXT_TAG)) return false;
+      if (t.startsWith(TaskExecutor.PINNED_USER_PROFILE_TAG)) return false;
       return true;
     });
     const transcript = this.formatMessagesForCompactionSummary(filtered, maxInputChars);
@@ -540,14 +548,12 @@ ${transcript}
 
     try {
       const response = await this.callLLMWithRetry(
-        () => withTimeout(
-          this.provider.createMessage({
+        () => this.createMessageWithTimeout({
             model: this.modelId,
             maxTokens: outputBudget,
             system,
             messages: [{ role: 'user', content: user }],
-            signal: this.abortController.signal,
-          }),
+          },
           LLM_TIMEOUT_MS,
           'Pre-compaction flush'
         ),
@@ -763,6 +769,8 @@ ${transcript}
   // Global turn tracking (across all steps) - similar to Claude Agent SDK's maxTurns
   private globalTurnCount: number = 0;
   private readonly maxGlobalTurns: number = 100; // Configurable global limit
+  private llmCallSequence: number = 0;
+  private softDeadlineTriggered: boolean = false;
 
   constructor(
     private task: Task,
@@ -935,6 +943,107 @@ ${transcript}
     return lines.join('\n');
   }
 
+  private resolveConversationMode(prompt: string): 'task' | 'chat' {
+    const mode = this.task.agentConfig?.conversationMode ?? 'hybrid';
+    if (mode === 'task') return 'task';
+    if (mode === 'chat') return 'chat';
+    return this.isCompanionPrompt(prompt) ? 'chat' : 'task';
+  }
+
+  private buildUserProfileBlock(maxFacts = 10): string {
+    const context = UserProfileService.buildPromptContext(maxFacts);
+    if (!context) return '';
+    return [
+      TaskExecutor.PINNED_USER_PROFILE_TAG,
+      context,
+      TaskExecutor.PINNED_USER_PROFILE_CLOSE_TAG,
+    ].join('\n');
+  }
+
+  private async respondInChatMode(message: string, previousStatus?: string): Promise<void> {
+    const personalityIdOverride = this.task.agentConfig?.personalityId;
+    const personalityPrompt = personalityIdOverride
+      ? PersonalityManager.getPersonalityPromptById(personalityIdOverride)
+      : PersonalityManager.getPersonalityPrompt();
+    const identityPrompt = PersonalityManager.getIdentityPrompt();
+    const roleContext = this.getRoleContextPrompt();
+    const profileContext = this.buildUserProfileBlock(10);
+
+    const recent = this.conversationHistory.slice(-8);
+    const messages: LLMMessage[] = [
+      ...recent,
+      { role: 'user', content: [{ type: 'text', text: message }] },
+    ];
+
+    const systemPrompt = [
+      'You are a warm, friendly companion.',
+      `WORKSPACE: ${this.workspace.path}`,
+      `Current time: ${getCurrentDateTimeContext()}`,
+      identityPrompt,
+      roleContext ? `ROLE CONTEXT:\n${roleContext}` : '',
+      profileContext,
+      personalityPrompt,
+      'Response rules:',
+      '- Keep replies concise and conversational.',
+      '- This is a check-in conversation, not a full task execution turn.',
+      '- Respond naturally as a friendly teammate.',
+      '- Do not claim to run tools in this turn.',
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+
+    try {
+      const response = await this.callLLMWithRetry(
+        () => this.createMessageWithTimeout({
+            model: this.modelId,
+            maxTokens: 260,
+            system: systemPrompt,
+            messages,
+          },
+          LLM_TIMEOUT_MS,
+          'Chat-mode follow-up response'
+        ),
+        'Chat-mode follow-up response'
+      );
+
+      if (response.usage) {
+        this.updateTracking(response.usage.inputTokens, response.usage.outputTokens);
+      }
+
+      const text = this.extractTextFromLLMContent(response.content || []);
+      const assistantText = String(text || '').trim() || this.generateCompanionFallbackResponse(message);
+      this.daemon.logEvent(this.task.id, 'assistant_message', { message: assistantText });
+      this.lastAssistantOutput = assistantText;
+      this.lastNonVerificationOutput = assistantText;
+      this.lastAssistantText = assistantText;
+      this.conversationHistory = [...messages, { role: 'assistant', content: [{ type: 'text', text: assistantText }] }];
+      this.saveConversationSnapshot();
+      this.daemon.logEvent(this.task.id, 'follow_up_completed', { message: 'Follow-up message processed (chat mode)' });
+      if (previousStatus) {
+        this.daemon.updateTaskStatus(this.task.id, previousStatus as any);
+        this.daemon.logEvent(this.task.id, 'task_status', { status: previousStatus });
+      }
+    } catch (error: any) {
+      const fallback = this.generateCompanionFallbackResponse(message);
+      this.daemon.logEvent(this.task.id, 'assistant_message', { message: fallback });
+      this.lastAssistantOutput = fallback;
+      this.lastNonVerificationOutput = fallback;
+      this.lastAssistantText = fallback;
+      this.conversationHistory = [
+        ...this.conversationHistory.slice(-8),
+        { role: 'user', content: [{ type: 'text', text: message }] },
+        { role: 'assistant', content: [{ type: 'text', text: fallback }] },
+      ];
+      this.saveConversationSnapshot();
+      this.daemon.logEvent(this.task.id, 'follow_up_completed', { message: 'Follow-up fallback processed (chat mode)' });
+      if (previousStatus) {
+        this.daemon.updateTaskStatus(this.task.id, previousStatus as any);
+        this.daemon.logEvent(this.task.id, 'task_status', { status: previousStatus });
+      }
+      console.error('[TaskExecutor] Chat-mode follow-up failed, using fallback:', error);
+    }
+  }
+
   /**
    * Make an LLM API call with exponential backoff retry
    * @param requestFn - Function that returns the LLM request promise
@@ -942,13 +1051,19 @@ ${transcript}
    * @param maxRetries - Maximum number of retry attempts (default: 3)
    */
   private async callLLMWithRetry(
-    requestFn: () => Promise<any>,
+    requestFn: (attempt: number) => Promise<any>,
     operation: string,
     maxRetries = 3
   ): Promise<any> {
+    const llmCallId = ++this.llmCallSequence;
+    console.log(
+      `[TaskExecutor][LLM ${llmCallId}] start: ${operation} (max attempts: ${maxRetries + 1})`
+    );
     let lastError: Error | null = null;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const attemptNumber = attempt + 1;
+      const attemptStart = Date.now();
       try {
         if (attempt > 0) {
           const delay = calculateBackoffDelay(attempt - 1);
@@ -967,35 +1082,69 @@ ${transcript}
           throw new Error('Request cancelled');
         }
 
-        return await requestFn();
+        const response = await requestFn(attempt);
+        const elapsedMs = Date.now() - attemptStart;
+        const stopReason = response?.stopReason;
+        const contentBlocks = Array.isArray(response?.content) ? response.content.length : 0;
+        const inputTokens = response?.usage?.inputTokens;
+        const outputTokens = response?.usage?.outputTokens;
+        const totalTokens =
+          typeof inputTokens === 'number' && typeof outputTokens === 'number'
+            ? inputTokens + outputTokens
+            : undefined;
+        this.recordObservedOutputThroughput(outputTokens, elapsedMs);
+
+        console.log(
+          `[TaskExecutor][LLM ${llmCallId}] success: ${operation} ` +
+          `(attempt ${attemptNumber}/${maxRetries + 1}, ${elapsedMs}ms, stopReason=${stopReason || 'unknown'}, blocks=${contentBlocks}` +
+          `${totalTokens !== undefined ? `, tokens=${totalTokens}` : ''})`
+        );
+        return response;
       } catch (error: any) {
         lastError = error;
+        const elapsedMs = Date.now() - attemptStart;
+        const errorMessage = error?.message || 'Unknown error';
+        const isCancellation =
+          errorMessage === 'Request cancelled' ||
+          error.name === 'AbortError';
 
         // Don't retry on cancellation or non-retryable errors
         if (
-          error.message === 'Request cancelled' ||
+          isCancellation ||
           error.name === 'AbortError' ||
           isNonRetryableError(error.message)
         ) {
+          console.log(
+            `[TaskExecutor][LLM ${llmCallId}] terminal failure: ${operation} ` +
+            `(attempt ${attemptNumber}/${maxRetries + 1}, ${elapsedMs}ms, cancellation=${isCancellation}) -> ${errorMessage}`
+          );
           throw error;
         }
 
         // Check if it's a retryable error (rate limit, timeout, network error)
+        const errorText = String(error?.message || '').toLowerCase();
         const isRetryable =
-          error.message?.includes('timeout') ||
-          error.message?.includes('429') ||
-          error.message?.includes('rate limit') ||
-          error.message?.includes('ECONNRESET') ||
-          error.message?.includes('ETIMEDOUT') ||
-          error.message?.includes('ENOTFOUND') ||
-          error.message?.includes('EAI_AGAIN') ||
-          error.message?.includes('ECONNREFUSED') ||
-          error.message?.includes('network') ||
+          errorText.includes('timeout') ||
+          errorText.includes('timed out') ||
+          errorText.includes('429') ||
+          errorText.includes('rate limit') ||
+          errorText.includes('econnreset') ||
+          errorText.includes('etimedout') ||
+          errorText.includes('enotfound') ||
+          errorText.includes('eai_again') ||
+          errorText.includes('econnrefused') ||
+          errorText.includes('network') ||
           error.status === 429 ||
+          error.status === 408 ||
           error.status === 503 ||
-          error.status === 502;
+          error.status === 502 ||
+          error.status === 504;
 
         if (!isRetryable || attempt === maxRetries) {
+          console.log(
+            `[TaskExecutor][LLM ${llmCallId}] terminal failure: ${operation} ` +
+            `(attempt ${attemptNumber}/${maxRetries + 1}, ${elapsedMs}ms, retryable=${isRetryable}) -> ${errorMessage}`
+          );
           throw error;
         }
 
@@ -1004,6 +1153,233 @@ ${transcript}
     }
 
     throw lastError || new Error(`${operation} failed after ${maxRetries + 1} attempts`);
+  }
+
+  private normalizePositiveTokenLimit(value: unknown): number | null {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+    const normalized = Math.floor(value);
+    if (normalized <= 0) return null;
+    return normalized;
+  }
+
+  /**
+   * Estimate per-call max output tokens from observed provider throughput and
+   * timeout budget. This keeps requests inside timeout windows without forcing
+   * a fixed hardcoded token ceiling.
+   */
+  /**
+   * Minimum output token floor for tool-bearing requests.
+   * Modelled after Claude Code's 3 000-token floor.  If the budget drops
+   * below this we are almost guaranteed to truncate mid-tool-call, causing
+   * a cascading error spiral.
+   */
+  private static readonly TOOL_OUTPUT_TOKEN_FLOOR = 8192;
+
+  private applyRetryTokenCap(
+    baseMaxTokens: number,
+    attempt: number,
+    timeoutMs: number,
+    hasTools = false
+  ): number {
+    const baselineCap = this.estimateTimeoutBoundOutputTokens(timeoutMs);
+    const retryDecay = attempt <= 0 ? 1 : Math.pow(this.getRetryTokenDecayFactor(), attempt);
+    let retryAwareCap = Math.max(256, Math.floor(baselineCap * retryDecay));
+
+    if (hasTools) {
+      // For tool-bearing requests, ensure we request at least getToolResponseMaxTokens()
+      // so the model has room to complete tool calls without truncation.
+      // maxTokens is an upper bound, not a target — requesting more doesn't slow anything.
+      // The timeout-based estimate is too conservative for tool calls whose JSON payloads
+      // can easily exceed a few thousand tokens.
+      const toolMax = this.getToolResponseMaxTokens();
+      retryAwareCap = Math.max(retryAwareCap, toolMax);
+      // Absolute floor as safety net for edge cases where toolMax is misconfigured low.
+      retryAwareCap = Math.max(retryAwareCap, TaskExecutor.TOOL_OUTPUT_TOKEN_FLOOR);
+    }
+
+    return Math.max(256, Math.min(baseMaxTokens, retryAwareCap));
+  }
+
+  /**
+   * Retries use progressively shorter deadlines to avoid spending several full
+   * timeout windows on one stalled response.
+   *
+   * When `hasTools` is true the base timeout is first raised to cover the full
+   * maxTokens budget at observed throughput — otherwise we abort requests that
+   * are legitimately generating long tool-call payloads (e.g. write_file with
+   * large document content).  Retry decay is also skipped for tool-bearing
+   * requests because a shorter timeout would just guarantee another timeout.
+   */
+  private getRetryTimeoutMs(
+    baseTimeoutMs: number,
+    attempt: number,
+    hasTools = false,
+    maxTokensBudget?: number
+  ): number {
+    let effective = baseTimeoutMs;
+
+    // For tool-bearing requests, ensure the timeout is long enough for the
+    // model to actually produce the full maxTokens budget.
+    if (hasTools && typeof maxTokensBudget === 'number' && maxTokensBudget > 0) {
+      const tps = this.getExpectedOutputTokensPerSecond();
+      // 1.3× safety margin so we don't race against the wire
+      const minNeeded = Math.ceil((maxTokensBudget / tps) * 1.3) * 1_000;
+      effective = Math.max(effective, minNeeded);
+    }
+
+    // For tool-bearing requests, don't decay the timeout on retries:
+    // if the model timed out writing a document, a shorter deadline
+    // guarantees the retry will also time out.
+    if (hasTools || attempt <= 0) return effective;
+
+    const decay = this.getRetryTimeoutDecayFactor();
+    const floorRatio = this.getRetryTimeoutFloorRatio();
+    const decayed = Math.floor(effective * Math.pow(decay, attempt));
+    const floorMs = Math.max(20_000, Math.floor(effective * floorRatio));
+    return Math.max(floorMs, decayed);
+  }
+
+  private estimateTimeoutBoundOutputTokens(timeoutMs: number): number {
+    const effectiveTimeoutMs = Math.max(1_000, timeoutMs);
+    const tps = this.getExpectedOutputTokensPerSecond();
+    const safety = this.getTimeoutSafetyFactor();
+    const estimated = Math.floor((effectiveTimeoutMs / 1_000) * tps * safety);
+    return Math.max(256, estimated);
+  }
+
+  private recordObservedOutputThroughput(outputTokens: unknown, elapsedMs: number): void {
+    if (typeof outputTokens !== 'number' || !Number.isFinite(outputTokens)) return;
+    if (outputTokens <= 0 || elapsedMs <= 0) return;
+
+    const rawTps = outputTokens / (elapsedMs / 1_000);
+    if (!Number.isFinite(rawTps) || rawTps <= 0) return;
+
+    const boundedTps = Math.min(200, Math.max(1, rawTps));
+    const previous = this.observedOutputTokensPerSecond;
+    this.observedOutputTokensPerSecond =
+      previous === null ? boundedTps : previous * 0.8 + boundedTps * 0.2;
+  }
+
+  private getExpectedOutputTokensPerSecond(): number {
+    if (this.observedOutputTokensPerSecond && Number.isFinite(this.observedOutputTokensPerSecond)) {
+      return this.observedOutputTokensPerSecond;
+    }
+
+    const fallback = Number(process.env.COWORK_LLM_OUTPUT_TPS_FALLBACK ?? '35');
+    if (Number.isFinite(fallback) && fallback > 0) return fallback;
+    return 35;
+  }
+
+  private getTimeoutSafetyFactor(): number {
+    const configured = Number(process.env.COWORK_LLM_TIMEOUT_SAFETY_FACTOR ?? '0.7');
+    if (!Number.isFinite(configured)) return 0.7;
+    return Math.min(0.95, Math.max(0.2, configured));
+  }
+
+  private getRetryTokenDecayFactor(): number {
+    const configured = Number(process.env.COWORK_LLM_RETRY_TOKEN_DECAY ?? '0.65');
+    if (!Number.isFinite(configured)) return 0.65;
+    return Math.min(0.95, Math.max(0.3, configured));
+  }
+
+  private getRetryTimeoutDecayFactor(): number {
+    const configured = Number(process.env.COWORK_LLM_RETRY_TIMEOUT_DECAY ?? '0.75');
+    if (!Number.isFinite(configured)) return 0.75;
+    return Math.min(0.95, Math.max(0.35, configured));
+  }
+
+  private getRetryTimeoutFloorRatio(): number {
+    const configured = Number(process.env.COWORK_LLM_RETRY_TIMEOUT_FLOOR_RATIO ?? '0.35');
+    if (!Number.isFinite(configured)) return 0.35;
+    return Math.min(0.9, Math.max(0.15, configured));
+  }
+
+  private getToolResponseMaxTokens(): number {
+    // 32000 tokens allows writing large documents (~25K words) in a single
+    // tool call without hitting max_tokens.  At ~60 tps this takes ~533s;
+    // the dynamic timeout scales to (32000/60)*1.3 ≈ 693s which fits
+    // within the 810s soft step deadline.  Previous default of 16000
+    // caused repeated max_tokens recovery loops on document-write steps.
+    const configured = Number(process.env.COWORK_LLM_TOOL_RESPONSE_MAX_TOKENS ?? '32000');
+    if (!Number.isFinite(configured)) return 32000;
+    return Math.max(256, Math.min(64000, Math.floor(configured)));
+  }
+
+  /**
+   * Execute a provider request with a hard timeout that actively aborts
+   * the in-flight LLM call to avoid orphaned long-running requests.
+   */
+  private async createMessageWithTimeout(
+    request: Omit<LLMRequest, 'signal'>,
+    timeoutMs: number,
+    operation: string
+  ): Promise<any> {
+    const parentSignal = this.abortController.signal;
+    const requestAbort = new AbortController();
+    const onParentAbort = () => requestAbort.abort();
+
+    if (parentSignal.aborted) {
+      requestAbort.abort();
+    } else {
+      parentSignal.addEventListener('abort', onParentAbort, { once: true });
+    }
+
+    try {
+      return await withTimeout(
+        this.provider.createMessage({
+          ...request,
+          signal: requestAbort.signal,
+        }),
+        timeoutMs,
+        operation,
+        () => requestAbort.abort()
+      );
+    } finally {
+      parentSignal.removeEventListener('abort', onParentAbort);
+    }
+  }
+
+  /**
+   * Resolve per-call max tokens from available context, optional task-level cap,
+   * and an optional caller-provided ceiling.
+   */
+  private resolveLLMMaxTokens(opts: {
+    messages: LLMMessage[];
+    system: string;
+    requestedMaxTokens?: number;
+  }): number {
+    const contextLimit = (() => {
+      const manager = this.contextManager as any;
+      if (manager && typeof manager.estimateMaxOutputTokens === 'function') {
+        return manager.estimateMaxOutputTokens(opts.messages, opts.system);
+      }
+
+      const modelLimit = this.normalizePositiveTokenLimit(
+        manager && typeof manager.getModelTokenLimit === 'function'
+          ? manager.getModelTokenLimit()
+          : null
+      );
+
+      if (modelLimit !== null) {
+        return Math.max(1, modelLimit - estimateTotalTokens(opts.messages, opts.system));
+      }
+
+      // Backward-compatible fallback for legacy/test doubles that don't expose
+      // context sizing helpers yet.
+      return Number.MAX_SAFE_INTEGER;
+    })();
+    const taskLimit = this.normalizePositiveTokenLimit(this.task.agentConfig?.maxTokens);
+    const requestedLimit = this.normalizePositiveTokenLimit(opts.requestedMaxTokens);
+
+    let effective = contextLimit;
+    if (taskLimit !== null) {
+      effective = Math.min(effective, taskLimit);
+    }
+    if (requestedLimit !== null) {
+      effective = Math.min(effective, requestedLimit);
+    }
+
+    return Math.max(1, effective);
   }
 
   /**
@@ -1106,6 +1482,18 @@ ${transcript}
         return Math.round(inputTimeout);
       }
       return normalizedSettingsTimeout ?? TOOL_TIMEOUT_MS;
+    }
+
+    const browserActionTimeout = typeof toolInput.timeout_ms === 'number' && Number.isFinite(toolInput.timeout_ms) && toolInput.timeout_ms > 0
+      ? Math.round(toolInput.timeout_ms)
+      : undefined;
+    if (browserActionTimeout) {
+      return clampToStepTimeout(Math.max(browserActionTimeout, TaskExecutor.BROWSER_TOOL_TIMEOUT_MS));
+    }
+
+    if (toolName.startsWith('browser_')) {
+      const configured = normalizedSettingsTimeout ?? TaskExecutor.BROWSER_TOOL_TIMEOUT_MS;
+      return clampToStepTimeout(Math.max(configured, TaskExecutor.BROWSER_TOOL_TIMEOUT_MS));
     }
 
     // Child-agent coordination tools can legitimately run longer than the default timeout.
@@ -1225,6 +1613,14 @@ ${transcript}
       const check = this.fileOperationTracker.checkFileRead(input.path);
       if (check.blocked) {
         console.log(`[TaskExecutor] Blocking redundant file read: ${input.path}`);
+        if (check.cachedResult) {
+          return {
+            blocked: true,
+            reason: check.reason,
+            suggestion: check.suggestion,
+            cachedResult: check.cachedResult,
+          };
+        }
         return check;
       }
     }
@@ -1285,6 +1681,8 @@ ${transcript}
    * Record a file operation after successful execution
    */
   private recordFileOperation(toolName: string, input: any, result: any): void {
+    const toolSucceeded = !(result && typeof result === 'object' && (result as any).success === false);
+
     // Track web fetch outcomes to prevent placeholder writes
     if (toolName === 'web_fetch' || toolName === 'http_request') {
       if (result?.success === false) {
@@ -1302,8 +1700,11 @@ ${transcript}
 
     // Record file reads
     if (toolName === 'read_file' && input?.path) {
-      const contentLength = typeof result === 'string' ? result.length : JSON.stringify(result).length;
-      this.fileOperationTracker.recordFileRead(input.path, contentLength);
+      const readFailed = result && (typeof result === 'object') && (result as any).success === false;
+      if (!readFailed) {
+        const readResult = typeof result === 'string' ? result : JSON.stringify(result);
+        this.fileOperationTracker.recordFileRead(input.path, readResult);
+      }
     }
 
     // Record directory listings
@@ -1323,11 +1724,33 @@ ${transcript}
 
     // Record file creations
     const fileCreationTools = ['create_document', 'write_file', 'copy_file'];
-    if (fileCreationTools.includes(toolName)) {
+    if (toolSucceeded && fileCreationTools.includes(toolName)) {
       const filename = result?.path || result?.filename || input?.filename || input?.path || input?.destPath;
       if (filename) {
         this.fileOperationTracker.recordFileCreation(filename);
       }
+    }
+
+    // A successful mutation invalidates stale read/list dedupe/cache state.
+    const mutatingTools = ['create_document', 'write_file', 'copy_file', 'edit_file', 'edit_document'];
+    if (toolSucceeded && mutatingTools.includes(toolName)) {
+      const changedPath =
+        result?.path ||
+        input?.path ||
+        input?.destPath ||
+        input?.file_path ||
+        input?.sourcePath ||
+        input?.filename;
+
+      if (typeof changedPath === 'string' && changedPath.trim()) {
+        this.fileOperationTracker.invalidateFileRead(changedPath);
+        const parentDir = path.dirname(changedPath);
+        if (parentDir && parentDir !== '.') {
+          this.fileOperationTracker.invalidateDirectoryListing(parentDir);
+        }
+      }
+
+      this.toolCallDeduplicator.clearReadOnlyHistory();
     }
   }
 
@@ -1444,15 +1867,6 @@ ${transcript}
         }
       }
 
-      if (!input.content) {
-        const fallback = this.getContentFallback();
-        if (fallback) {
-          input.content = fallback;
-          modified = true;
-          inference = `${inference ? `${inference}; ` : ''}Inferred content from latest assistant output`;
-        }
-      }
-
       return { input, modified, inference: modified ? inference : undefined };
     }
 
@@ -1465,15 +1879,6 @@ ${transcript}
         input.path = String(input.filename);
         modified = true;
         inference = 'Normalized filename -> path';
-      }
-
-      if (!input.content) {
-        const fallback = this.getContentFallback();
-        if (fallback) {
-          input.content = fallback;
-          modified = true;
-          inference = `${inference ? `${inference}; ` : ''}Inferred content from latest assistant output`;
-        }
       }
 
       return { input, modified, inference: modified ? inference : undefined };
@@ -1545,6 +1950,16 @@ ${transcript}
       }
 
       // Normalize session_id variants
+      if (!input?.session_id) {
+        const inferredSessionId = this.toolRegistry.getLatestCanvasSessionId?.();
+        if (inferredSessionId) {
+          input = input || {};
+          input.session_id = inferredSessionId;
+          modified = true;
+          inference = 'Recovered canvas session_id from latest active canvas session';
+        }
+      }
+
       if (!input?.session_id) {
         const sessionAlts = ['sessionId', 'canvas_id', 'canvasId', 'id'];
         for (const alt of sessionAlts) {
@@ -1744,9 +2159,35 @@ ${transcript}
       /\bi\s+(reviewed|read|analyzed|assessed|verified|checked)\b/.test(normalized) ||
       /\bafter\s+(reviewing|reading|analyzing)\b/.test(normalized) ||
       /\bbased on\b/.test(normalized) ||
+      /\baccording to\b/.test(normalized) ||
+      /\b(i|we)\s+found\b/.test(normalized) ||
+      /\b(?:my|the)\s+analysis\b/.test(normalized) ||
       /\bfindings\b/.test(normalized) ||
       /\bkey takeaways\b/.test(normalized) ||
       /\brecommendation\b/.test(normalized)
+    );
+  }
+
+  private responseHasReasonedConclusionSignal(text: string): boolean {
+    const normalized = String(text || '').toLowerCase();
+    if (!normalized.trim()) return false;
+
+    const hasConclusionCue =
+      this.responseHasDecisionSignal(normalized) ||
+      /\b(recommend(?:ation)?|conclusion|overall|in summary|it appears|i believe)\b/.test(normalized);
+    const hasReasoningCue =
+      /\b(because|since|therefore|as a result|due to|which means|this suggests|that indicates|given that)\b/.test(normalized);
+
+    return hasConclusionCue && hasReasoningCue;
+  }
+
+  private hasVerificationToolEvidence(): boolean {
+    if (!Array.isArray(this.toolResultMemory) || this.toolResultMemory.length === 0) return false;
+    return this.toolResultMemory.some(entry =>
+      entry.tool === 'web_search' ||
+      entry.tool === 'web_fetch' ||
+      entry.tool === 'search_files' ||
+      entry.tool === 'glob'
     );
   }
 
@@ -1839,11 +2280,25 @@ ${transcript}
         /\b(review|evaluate|assess|verify|check|read|audit|analy[sz]e)\b/i.test(step.description || '')
       )
     );
-    return hasCompletedReviewStep || this.responseHasVerificationSignal(bestCandidate);
+    const hasReviewBackedConclusion = this.responseHasVerificationSignal(bestCandidate);
+    if (hasCompletedReviewStep || hasReviewBackedConclusion) {
+      return true;
+    }
+
+    // Allow implicit verification phrasing when the agent demonstrably gathered evidence via tools.
+    return this.hasVerificationToolEvidence() && this.responseHasReasonedConclusionSignal(bestCandidate);
   }
 
   private getFinalOutcomeGuardError(): string | null {
     const contract = this.buildCompletionContract();
+    const bestEffortMode = this.shouldPreferBestEffortCompletion() &&
+      (this.softDeadlineTriggered || this.cancelReason === 'timeout');
+    if (bestEffortMode) {
+      const bestCandidate = this.getBestFinalResponseCandidate();
+      if (bestCandidate.trim()) {
+        return null;
+      }
+    }
 
     if (contract.requiresExecutionEvidence && !this.hasExecutionEvidence()) {
       return 'Task missing execution evidence: no plan step completed successfully.';
@@ -1886,6 +2341,24 @@ ${transcript}
     const summary = (typeof resultSummary === 'string' && resultSummary.trim())
       ? resultSummary.trim()
       : this.buildResultSummary();
+    this.task.status = 'completed';
+    this.task.completedAt = Date.now();
+    this.task.resultSummary = summary;
+    this.daemon.completeTask(this.task.id, summary);
+  }
+
+  private finalizeTaskBestEffort(resultSummary?: string, reason?: string): void {
+    this.saveConversationSnapshot();
+    this.taskCompleted = true;
+    const summary = (typeof resultSummary === 'string' && resultSummary.trim())
+      ? resultSummary.trim()
+      : this.buildResultSummary();
+    this.task.status = 'completed';
+    this.task.completedAt = Date.now();
+    this.task.resultSummary = summary;
+    if (reason) {
+      this.daemon.logEvent(this.task.id, 'log', { message: reason });
+    }
     this.daemon.completeTask(this.task.id, summary);
   }
 
@@ -1899,7 +2372,60 @@ ${transcript}
       if (!input?.path) return 'write_file requires a path';
       if (!input?.content) return 'write_file requires content';
     }
+    if (toolName === 'canvas_push') {
+      return null;
+    }
     return null;
+  }
+
+  private isCanvasPlaceholderHtml(content: string): boolean {
+    const marker = 'Waiting for content...';
+    const normalized = String(content || '').trim();
+    return (
+      !normalized ||
+      normalized === marker ||
+      normalized.includes(marker)
+    );
+  }
+
+  private sanitizeForCanvasText(raw: string): string {
+    return String(raw || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  private normalizeCanvasContent(payload: string, fallbackPrompt: string): string {
+    const trimmed = String(payload || '').trim();
+
+    if (!trimmed) {
+      return this.buildCanvasFallbackHtml(fallbackPrompt, 'No content was provided.');
+    }
+
+    if (this.isCanvasPlaceholderHtml(trimmed)) {
+      return this.buildCanvasFallbackHtml(fallbackPrompt, 'Placeholder content received.');
+    }
+
+    const hasDocument = /<html[\s>]/i.test(trimmed) || /<!doctype\s+html/i.test(trimmed);
+    if (hasDocument) {
+      return trimmed;
+    }
+
+    if (/<[a-z][\s\S]*>/i.test(trimmed)) {
+      return `<!DOCTYPE html>\n<html>\n<head>\n  <meta charset="UTF-8">\n  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n  <title>Canvas Output</title>\n  <style>\n    body {\n      margin: 0;\n      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;\n      background: #0f1220;\n      color: #e7e9f2;\n      padding: 24px;\n    }\n  </style>\n</head>\n<body>\n${trimmed}\n</body>\n</html>`;
+    }
+
+    return this.buildCanvasFallbackHtml(fallbackPrompt, this.sanitizeForCanvasText(trimmed));
+  }
+
+  private buildCanvasFallbackHtml(prompt: string, details: string): string {
+    const title = 'Canvas Output';
+    const summary = this.sanitizeForCanvasText((prompt || 'Request content').slice(0, 300));
+    const detailText = this.sanitizeForCanvasText(String(details || ''));
+
+    return `<!DOCTYPE html>\n<html>\n<head>\n  <meta charset="UTF-8">\n  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n  <title>${title}</title>\n  <style>\n    body {\n      margin: 0;\n      min-height: 100vh;\n      display: grid;\n      place-items: center;\n      background: linear-gradient(130deg, #0f1220, #11152f);\n      color: #e7e9f2;\n      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;\n      padding: 20px;\n      box-sizing: border-box;\n      text-align: center;\n    }\n    .card {\n      width: min(760px, 100%);\n      background: rgba(24, 29, 54, 0.85);\n      border: 1px solid rgba(255, 255, 255, 0.12);\n      border-radius: 14px;\n      padding: 20px;\n      box-shadow: 0 14px 40px rgba(0, 0, 0, 0.35);\n    }\n    h1 {\n      margin: 0 0 12px;\n      font-size: 24px;\n      letter-spacing: 0.2px;\n    }\n    p {\n      margin: 0;\n      color: #b4bed3;\n      line-height: 1.5;\n      font-size: 14px;\n      white-space: pre-wrap;\n    }\n    .details {\n      margin-top: 12px;\n      color: #93a0c1;\n      font-size: 13px;\n    }\n  </style>\n</head>\n<body>\n  <div class="card">\n    <h1>${title}</h1>\n    <p>${summary}</p>\n    <p class="details">${detailText || 'Preparing visual output...'}</p>\n  </div>\n</body>\n</html>`;
   }
 
   private isHardToolFailure(toolName: string, result: any, failureReason = ''): boolean {
@@ -1948,20 +2474,21 @@ ${transcript}
     const inputContent = content.input?.content;
     const hasContent = typeof inputContent === 'string' && inputContent.trim().length > 0;
     const filename = content.input?.filename;
-    const isHtmlTarget = !filename || filename === 'index.html';
-    if (hasContent || !isHtmlTarget) {
+    const shouldProcess = !filename || filename === 'index.html';
+
+    if (hasContent && shouldProcess && !this.isCanvasPlaceholderHtml(inputContent)) {
+      return;
+    }
+
+    if (!shouldProcess) {
       return;
     }
 
     const extracted = this.extractHtmlFromText(assistantText);
     const generated = extracted || await this.generateCanvasHtml(this.lastUserMessage || this.task.prompt);
-    if (!generated) {
-      return;
-    }
-
     content.input = {
       ...(content.input || {}),
-      content: generated,
+      content: this.normalizeCanvasContent(generated, this.lastUserMessage || this.task.prompt),
     };
     this.daemon.logEvent(this.task.id, 'parameter_inference', {
       tool: content.name,
@@ -1971,20 +2498,68 @@ ${transcript}
     });
   }
 
+  private isVisualCanvasTask(): boolean {
+    const text = `${this.task.title} ${this.task.prompt} ${this.lastUserMessage || ''}`.toLowerCase();
+    return /\b(canvas|visual|chart|graph|diagram|dashboard|preview|ui|interface|interactive|html|website|webpage|browser|screenshot|layout|wireframe|prototype|design|render|inspect|mockup|map|timeline)\b/.test(text);
+  }
+
+  private isCanvasTool(toolName: string): boolean {
+    return /^canvas_/.test(toolName);
+  }
+
+  private getTaskToolRestrictions(): Set<string> {
+    const raw = this.task.agentConfig?.toolRestrictions ?? [];
+    const restrictions = new Set<string>();
+
+    for (const toolName of raw) {
+      if (typeof toolName !== 'string') continue;
+      const trimmed = toolName.trim();
+      if (!trimmed) continue;
+      restrictions.add(trimmed);
+    }
+
+    return restrictions;
+  }
+
+  private isToolRestrictedByPolicy(toolName: string): boolean {
+    const restrictions = this.getTaskToolRestrictions();
+    return restrictions.has('*') || restrictions.has(toolName);
+  }
+
   /**
    * Get available tools, filtering out disabled ones
    * This prevents the LLM from trying to use tools that have been disabled by the circuit breaker
    */
   private getAvailableTools() {
     const allTools = this.toolRegistry.getTools();
+    const restrictedTools = this.getTaskToolRestrictions();
+    const restrictedByTask = (name: string) =>
+      restrictedTools.has('*') || restrictedTools.has(name);
     const disabledTools = this.toolFailureTracker.getDisabledTools();
 
-    if (disabledTools.length === 0) {
+    if (disabledTools.length === 0 && restrictedTools.size === 0) {
+      if (!this.isVisualCanvasTask()) {
+        return allTools.filter(tool => !this.isCanvasTool(tool.name));
+      }
       return allTools;
     }
 
-    const filtered = allTools.filter(tool => !disabledTools.includes(tool.name));
-    console.log(`[TaskExecutor] Filtered out ${disabledTools.length} disabled tools: ${disabledTools.join(', ')}`);
+    const filtered = allTools
+      .filter(tool => !restrictedByTask(tool.name))
+      .filter(tool => !disabledTools.includes(tool.name));
+    if (filtered.length !== allTools.length) {
+      console.log(
+        `[TaskExecutor] Filtered out ${allTools.length - filtered.length} tools by policy/denials`
+      );
+    }
+
+    if (disabledTools.length > 0) {
+      console.log(`[TaskExecutor] Filtered out ${disabledTools.length} disabled tools: ${disabledTools.join(', ')}`);
+    }
+
+    if (!this.isVisualCanvasTask()) {
+      return filtered.filter(tool => !this.isCanvasTool(tool.name));
+    }
     return filtered;
   }
 
@@ -3134,6 +3709,9 @@ You are continuing a previous conversation. The context from the previous conver
 
     if (isTemp && !looksLikeProject) {
       if (workspaceNeed === 'needs_existing') {
+        if (this.tryAutoSwitchToPreferredWorkspaceForAmbiguousTask('required_existing_workspace_auto_switch')) {
+          return false;
+        }
         this.pauseForUserInput(
           'I am in the temporary workspace, but this task looks like it targets an existing project. ' +
           'Please select the project folder or provide its path so I can switch to it. ' +
@@ -3145,6 +3723,9 @@ You are continuing a previous conversation. The context from the previous conver
     }
 
     if (!isTemp && workspaceNeed === 'needs_existing' && !looksLikeProject) {
+      if (this.tryAutoSwitchToPreferredWorkspaceForAmbiguousTask('workspace_mismatch_auto_switch')) {
+        return false;
+      }
       this.pauseForUserInput(
         'I am in the selected workspace, but I do not see typical project files here. ' +
         'If this task targets an existing project, please confirm the correct folder or provide its path. ' +
@@ -3191,6 +3772,147 @@ You are continuing a previous conversation. The context from the previous conver
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Prune noisy tool_result entries from older messages to save context tokens.
+   * Targets:
+   *  - Duplicate-call errors (provide no useful info after the first occurrence)
+   *  - Redundant-file-operation errors
+   * Only modifies messages BEFORE the last user message (the most recent exchange
+   * must stay intact for the API's tool_use/tool_result pairing requirement).
+   */
+  private pruneStaleToolErrors(messages: LLMMessage[]): void {
+    // Find the index of the second-to-last user message.
+    // We never touch the last user message (it must keep tool_result pairing).
+    let lastUserIdx = -1;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'user' && Array.isArray(messages[i].content)) {
+        lastUserIdx = i;
+        break;
+      }
+    }
+    if (lastUserIdx < 0) return;
+
+    let pruned = 0;
+    for (let i = 0; i < lastUserIdx; i++) {
+      const msg = messages[i];
+      if (msg.role !== 'user' || !Array.isArray(msg.content)) continue;
+
+      const toolResults = msg.content as any[];
+      for (let j = 0; j < toolResults.length; j++) {
+        const tr = toolResults[j];
+        if (tr?.type !== 'tool_result' || !tr.is_error) continue;
+        const content = typeof tr.content === 'string' ? tr.content : '';
+        // Match duplicate and redundant-file-operation errors
+        if (content.includes('"duplicate":true') || content.includes('"blocked":true')) {
+          // Replace verbose content with minimal placeholder
+          tr.content = '{"error":"pruned"}';
+          pruned++;
+        }
+      }
+    }
+
+    if (pruned > 0) {
+      console.log(`[TaskExecutor]   │ Pruned ${pruned} stale tool-error result(s) from context`);
+    }
+  }
+
+  /**
+   * For run_command tool calls, parse the command string to detect the inner
+   * tool category and file target. Returns { tool, file } or null.
+   */
+  private parseRunCommandForLoop(command: string): { tool: string; file: string } | null {
+    if (!command || typeof command !== 'string') return null;
+    // Match common shell commands that operate on files:
+    // grep/egrep/fgrep, sed, awk, cat, head, tail, wc, sort, cut
+    const cmdMatch = command.match(
+      /\b(grep|egrep|fgrep|sed|awk|cat|head|tail|wc|sort|cut|less|more)\b/
+    );
+    if (!cmdMatch) return null;
+    const tool = cmdMatch[1];
+    // Extract file path: look for absolute paths or paths after the last argument
+    const fileMatch = command.match(/\s(\/[^\s|>]+)/);
+    if (!fileMatch) return null;
+    return { tool, file: fileMatch[1] };
+  }
+
+  /**
+   * Extract a canonical "target" string from a tool call's input for loop detection.
+   * Returns the primary resource the tool is operating on (file path, URL, etc.).
+   */
+  private extractToolTarget(toolName: string, input: any): string {
+    if (!input || typeof input !== 'object') return '';
+
+    // For run_command, parse the command string to extract the target file
+    if ((toolName === 'run_command' || toolName === 'execute_command') && input.command) {
+      const parsed = this.parseRunCommandForLoop(input.command);
+      if (parsed) return parsed.file;
+      return '';
+    }
+
+    // Common path/file arguments
+    const pathKey = input.path || input.file_path || input.filePath || input.directory || input.url || '';
+    if (pathKey) return String(pathKey);
+    // For tools like grep/search, use the pattern + path combo
+    if (input.pattern) return `${input.pattern}@${input.path || ''}`;
+    return '';
+  }
+
+  /**
+   * Normalize a tool name to a category for loop detection.
+   * Groups similar tools (grep, search_files, run_command wrapping grep, etc.)
+   * so that varying tool calls on the same target are detected as a loop.
+   */
+  private normalizeToolCategory(toolName: string, input: any): string {
+    // For run_command, detect the inner command
+    if ((toolName === 'run_command' || toolName === 'execute_command') && input?.command) {
+      const parsed = this.parseRunCommandForLoop(input.command);
+      if (parsed) {
+        const inner = parsed.tool;
+        if (/grep|egrep|fgrep/.test(inner)) return 'search';
+        if (/sed|awk|cat|head|tail|less|more/.test(inner)) return 'read';
+        return `cmd:${inner}`;
+      }
+      return 'run_command';
+    }
+    if (/grep|search_files|ripgrep/i.test(toolName)) return 'search';
+    if (/read_file|read_text_file|mcp_read_text_file/i.test(toolName)) return 'read';
+    return toolName;
+  }
+
+  /**
+   * Detect degenerate tool call loops: the model calling the same tool on the
+   * same target repeatedly without making meaningful progress.
+   * Returns true if a loop is detected and a break message should be injected.
+   */
+  private detectToolLoop(
+    recentCalls: Array<{ tool: string; target: string }>,
+    toolName: string,
+    input: any,
+    threshold: number = 3,
+  ): boolean {
+    const category = this.normalizeToolCategory(toolName, input);
+    const target = this.extractToolTarget(toolName, input);
+    recentCalls.push({ tool: category, target });
+
+    // Keep only the last `threshold + 1` entries for memory efficiency
+    if (recentCalls.length > threshold + 1) {
+      recentCalls.splice(0, recentCalls.length - (threshold + 1));
+    }
+
+    if (recentCalls.length < threshold) return false;
+
+    // Check if the last `threshold` calls are all the same tool category on the same target
+    const recent = recentCalls.slice(-threshold);
+    const baseTarget = recent[0].target;
+    if (!baseTarget) return false; // Can't detect loops without a target
+
+    const baseTool = recent[0].tool;
+    const allSameCategory = recent.every(c => c.tool === baseTool);
+    const allSameFile = recent.every(c => c.target === baseTarget);
+
+    return allSameCategory && allSameFile;
   }
 
   private summarizeToolResult(toolName: string, result: any): string | null {
@@ -3272,6 +3994,44 @@ You are continuing a previous conversation. The context from the previous conver
   private isSummaryStep(step: PlanStep): boolean {
     const desc = step.description.toLowerCase();
     return desc.includes('summary') || desc.includes('summarize') || desc.includes('compile') || desc.includes('report');
+  }
+
+  private stepRequiresArtifactEvidence(step: PlanStep): boolean {
+    if (this.isVerificationStep(step)) return false;
+    const desc = String(step.description || '').toLowerCase();
+    if (!desc.trim()) return false;
+
+    const hasExplicitExtension = /\.(pdf|docx|md|csv|xlsx|json|txt|pptx)\b/.test(desc);
+    const hasArtifactCue =
+      /\b(file|document|docx?|pdf|whitepaper|markdown|csv|xlsx|json|txt|pptx|presentation|slides?|spec(?:ification)?|proposal)\b/.test(desc) ||
+      /\bmd\b/.test(desc);
+    const hasWriteVerb = /\b(write|create|draft|generate|produce|compose|prepare|build|save|author)\b/.test(desc);
+
+    return hasExplicitExtension || (hasWriteVerb && hasArtifactCue);
+  }
+
+  private isFileMutationTool(toolName: string): boolean {
+    return (
+      toolName === 'create_document' ||
+      toolName === 'write_file' ||
+      toolName === 'copy_file' ||
+      toolName === 'edit_file' ||
+      toolName === 'edit_document'
+    );
+  }
+
+  private getLatestAssistantText(messages: LLMMessage[]): string {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const msg = messages[i];
+      if (msg.role !== 'assistant' || !Array.isArray(msg.content)) continue;
+      const text = msg.content
+        .filter((item: any) => item?.type === 'text' && typeof item.text === 'string')
+        .map((item: any) => String(item.text))
+        .join('\n')
+        .trim();
+      if (text) return text;
+    }
+    return '';
   }
 
   private isLastPlanStep(step: PlanStep): boolean {
@@ -3824,6 +4584,7 @@ You are continuing a previous conversation. The context from the previous conver
       : PersonalityManager.getPersonalityPrompt();
     const identityPrompt = PersonalityManager.getIdentityPrompt();
     const roleContext = this.getRoleContextPrompt();
+    const profileContext = this.buildUserProfileBlock(10);
 
     this.daemon.updateTaskStatus(this.task.id, 'executing');
 
@@ -3833,6 +4594,7 @@ You are continuing a previous conversation. The context from the previous conver
       `Current time: ${getCurrentDateTimeContext()}`,
       identityPrompt,
       roleContext ? `ROLE CONTEXT:\n${roleContext}` : '',
+      profileContext,
       personalityPrompt,
       'Response rules:',
       '- Keep replies concise and conversational.',
@@ -3846,14 +4608,12 @@ You are continuing a previous conversation. The context from the previous conver
 
     try {
       const response = await this.callLLMWithRetry(
-        () => withTimeout(
-          this.provider.createMessage({
+        () => this.createMessageWithTimeout({
             model: this.modelId,
             maxTokens: 220,
             system: systemPrompt,
             messages: [{ role: 'user', content: rawPrompt }],
-            signal: this.abortController.signal,
-          }),
+          },
           LLM_TIMEOUT_MS,
           'Companion response'
         ),
@@ -3896,6 +4656,186 @@ You are continuing a previous conversation. The context from the previous conver
   /**
    * Main execution loop
    */
+  private isAbortLikeError(error: any): boolean {
+    const message = String(error?.message || '').toLowerCase();
+    return (
+      error?.name === 'AbortError' ||
+      message.includes('aborted') ||
+      message.includes('timeout') ||
+      message.includes('timed out') ||
+      message.includes('request cancelled') ||
+      message.includes('request canceled')
+    );
+  }
+
+  private buildTimeoutFallbackSummary(error: any): string {
+    const priorAnswer = String(this.lastNonVerificationOutput || this.lastAssistantOutput || this.lastAssistantText || '').trim();
+    if (priorAnswer) {
+      return priorAnswer;
+    }
+
+    const completedSteps = this.plan?.steps?.filter((step) => step.status === 'completed').length ?? 0;
+    const totalSteps = this.plan?.steps?.length ?? 0;
+    const failedSteps = this.plan?.steps
+      ?.filter((step) => step.status === 'failed')
+      .map((step) => step.description)
+      .slice(0, 2) ?? [];
+
+    const progressLine = totalSteps > 0
+      ? `I completed ${completedSteps}/${totalSteps} planned step(s) before timing out.`
+      : 'I ran into a timeout before I could finish.';
+    const blockedLine = failedSteps.length > 0
+      ? `Blocked step(s): ${failedSteps.join('; ')}.`
+      : '';
+    const reason = String(error?.message || '').trim();
+    const reasonLine = reason ? `Reason: ${reason}.` : '';
+
+    return [progressLine, blockedLine, reasonLine, 'I can continue from the exact point of failure and finish the task.']
+      .filter(Boolean)
+      .join(' ');
+  }
+
+  private async buildTimeoutRecoveryAnswer(error: any): Promise<string> {
+    const baseSummary = String(this.buildResultSummary() || '').trim();
+    const fallbackSummary = this.buildTimeoutFallbackSummary(error);
+    const partialAnswer = String(this.lastNonVerificationOutput || this.lastAssistantOutput || this.lastAssistantText || '').trim();
+    const completedSteps = this.plan?.steps
+      ?.filter((step) => step.status === 'completed')
+      .map((step) => `- ${step.description}`)
+      .slice(0, 6)
+      .join('\n') || '';
+
+    const recoveryPrompt = [
+      'Produce the final user-facing answer immediately.',
+      'You are in timeout-recovery mode: do not ask to continue researching.',
+      'Requirements:',
+      '- Directly answer the original user request first.',
+      '- If work is partial, clearly mark what is complete vs pending.',
+      '- Keep it concise and actionable.',
+      '',
+      `Original request:\n${this.task.prompt}`,
+      '',
+      partialAnswer ? `Best partial answer so far:\n${partialAnswer}` : '',
+      completedSteps ? `Completed plan steps:\n${completedSteps}` : '',
+      baseSummary ? `Execution summary:\n${baseSummary}` : '',
+      `Fallback summary:\n${fallbackSummary}`,
+    ].filter(Boolean).join('\n');
+
+    try {
+      const response = await this.createMessageWithTimeout({
+          model: this.modelId,
+          maxTokens: 700,
+          system: 'Return a concise, user-facing best-effort final answer.',
+          messages: [{ role: 'user', content: recoveryPrompt }],
+        },
+        35_000,
+        'Timeout recovery answer'
+      );
+
+      if (response.usage) {
+        this.updateTracking(response.usage.inputTokens, response.usage.outputTokens);
+      }
+
+      const text = this.extractTextFromLLMContent(response.content || []);
+      return String(text || '').trim() || baseSummary || fallbackSummary;
+    } catch (recoveryError) {
+      console.warn('[TaskExecutor] Timeout recovery answer generation failed:', recoveryError);
+      return baseSummary || fallbackSummary;
+    }
+  }
+
+  private async finalizeWithTimeoutRecovery(error: any): Promise<boolean> {
+    const recoveryAnswer = await this.buildTimeoutRecoveryAnswer(error);
+    const finalText = String(recoveryAnswer || '').trim();
+    if (!finalText) {
+      return false;
+    }
+
+    this.daemon.logEvent(this.task.id, 'log', {
+      message: 'Step timeout detected. Finalizing task with best-effort recovery answer.',
+      error: String(error?.message || error || ''),
+    });
+
+    this.lastAssistantOutput = finalText;
+    this.lastNonVerificationOutput = finalText;
+    this.lastAssistantText = finalText;
+    try {
+      this.finalizeTask(finalText);
+    } catch (guardError) {
+      console.warn('[TaskExecutor] Timeout recovery guard blocked strict completion, using best-effort finalization:', guardError);
+      this.finalizeTaskBestEffort(
+        finalText,
+        'Timeout recovery finalized with best-effort answer.'
+      );
+    }
+    return true;
+  }
+
+  private shouldEmitAnswerFirst(): boolean {
+    return /\banswer_first=true\b/i.test(String(this.task.prompt || ''));
+  }
+
+  private shouldPreferBestEffortCompletion(): boolean {
+    return /\btimeout_finalize_bias=true\b/i.test(String(this.task.prompt || ''));
+  }
+
+  private hasDirectAnswerReady(): boolean {
+    const candidate = this.getBestFinalResponseCandidate();
+    if (!candidate) return false;
+    return this.responseDirectlyAddressesPrompt(candidate, this.buildCompletionContract());
+  }
+
+  private shouldSuppressQuestionPause(): boolean {
+    const candidate = this.getBestFinalResponseCandidate();
+    if (!candidate) return false;
+    // Never suppress a pause when the candidate itself is a blocking question.
+    if (isAskingQuestion(candidate)) return false;
+    return this.responseDirectlyAddressesPrompt(candidate, this.buildCompletionContract());
+  }
+
+  private shouldShortCircuitAfterAnswerFirst(): boolean {
+    if (!this.shouldEmitAnswerFirst()) return false;
+    if (!this.hasDirectAnswerReady()) return false;
+
+    const contract = this.buildCompletionContract();
+    if (contract.requiresExecutionEvidence) return false;
+    if (contract.requiresArtifactEvidence) return false;
+    if (contract.requiresVerificationEvidence) return false;
+
+    return true;
+  }
+
+  private async emitAnswerFirstResponse(): Promise<void> {
+    const response = await this.createMessageWithTimeout({
+        model: this.modelId,
+        maxTokens: 320,
+        system: 'Return a direct, concise answer to the user.',
+        messages: [{
+          role: 'user',
+          content: [
+            'Provide a direct answer to this user request in 4-8 lines.',
+            'Do not mention internal planning or tools.',
+            `User request:\n${this.task.prompt}`,
+          ].join('\n\n'),
+        }],
+      },
+      25_000,
+      'Answer-first response'
+    );
+
+    if (response.usage) {
+      this.updateTracking(response.usage.inputTokens, response.usage.outputTokens);
+    }
+
+    const text = String(this.extractTextFromLLMContent(response.content || []) || '').trim();
+    if (!text) return;
+
+    this.daemon.logEvent(this.task.id, 'assistant_message', { message: text });
+    this.lastAssistantOutput = text;
+    this.lastNonVerificationOutput = text;
+    this.lastAssistantText = text;
+  }
+
   async execute(): Promise<void> {
     try {
       // Security: Analyze task prompt for potential injection attempts
@@ -3920,8 +4860,8 @@ You are continuing a previous conversation. The context from the previous conver
         return;
       }
 
-      // Friendly companion-mode for conversational prompts (greetings/check-ins).
-      if (this.isCompanionPrompt(this.task.prompt)) {
+      // Friendly companion-mode when conversation mode resolves to chat.
+      if (this.resolveConversationMode(this.task.prompt) === 'chat') {
         await this.handleCompanionPrompt();
         return;
       }
@@ -3937,6 +4877,36 @@ You are continuing a previous conversation. The context from the previous conver
         this.task.prompt = `${this.task.prompt}\n\nADDITIONAL CONTEXT:\n${taskAnalysis.additionalContext}`;
       }
 
+      if (this.shouldEmitAnswerFirst()) {
+        try {
+          await this.emitAnswerFirstResponse();
+        } catch (answerFirstError) {
+          this.daemon.logEvent(this.task.id, 'log', {
+            message: 'Answer-first pre-response failed; continuing with full execution.',
+            error: String((answerFirstError as any)?.message || answerFirstError),
+          });
+        }
+      }
+
+      if (this.shouldShortCircuitAfterAnswerFirst()) {
+        const quickAnswer = this.getBestFinalResponseCandidate();
+        if (quickAnswer) {
+          this.daemon.logEvent(this.task.id, 'log', {
+            message: 'Answer-first short-circuit active. Skipping deep plan execution and finalizing.',
+          });
+          try {
+            this.finalizeTask(quickAnswer);
+          } catch (guardError) {
+            console.warn('[TaskExecutor] Short-circuit guard blocked strict completion, using best-effort finalization:', guardError);
+            this.finalizeTaskBestEffort(
+              quickAnswer,
+              'Answer-first short-circuit finalized with best-effort answer.'
+            );
+          }
+          return;
+        }
+      }
+
       // Phase 1: Planning
       this.daemon.updateTaskStatus(this.task.id, 'planning');
       await this.createPlan();
@@ -3947,6 +4917,7 @@ You are continuing a previous conversation. The context from the previous conver
 
       // Phase 2: Execution with verification retry loop
       const maxAttempts = this.task.maxAttempts || 1;
+      this.softDeadlineTriggered = false;
 
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         if (this.cancelled) break;
@@ -3972,6 +4943,23 @@ You are continuing a previous conversation. The context from the previous conver
         }
 
         if (this.cancelled) break;
+
+        if (this.softDeadlineTriggered) {
+          const recoveryAnswer = await this.buildTimeoutRecoveryAnswer(new Error('Soft deadline reached'));
+          if (recoveryAnswer) {
+            const trimmed = String(recoveryAnswer).trim();
+            if (trimmed) {
+              this.lastAssistantOutput = trimmed;
+              this.lastNonVerificationOutput = trimmed;
+              this.lastAssistantText = trimmed;
+            }
+          }
+          this.daemon.logEvent(this.task.id, 'log', {
+            message: 'Soft deadline reached during execution. Finalizing with best-effort answer.',
+            attempt,
+          });
+          break;
+        }
 
         // Verify success criteria if defined (verification mode)
         if (this.task.successCriteria) {
@@ -4021,16 +5009,27 @@ You are continuing a previous conversation. The context from the previous conver
       // Phase 3: Completion (single guarded finalizer path)
       this.finalizeTask(this.buildResultSummary());
     } catch (error: any) {
-      // Don't log cancellation as an error - it's intentional
-      const isCancellation = this.cancelled ||
-        error.message === 'Request cancelled' ||
-        error.name === 'AbortError' ||
-        error.message?.includes('aborted');
-
-      if (isCancellation) {
-        console.log(`[TaskExecutor] Task cancelled - not logging as error`);
+      // Only explicit user/system cancellation should skip finalization.
+      // Timeout-aborted steps should still end with a best-effort answer.
+      if (this.cancelled) {
+        if (this.cancelReason === 'timeout') {
+          const recovered = await this.finalizeWithTimeoutRecovery(
+            error || new Error('Task cancelled due to timeout')
+          );
+          if (recovered) {
+            return;
+          }
+        }
+        console.log(`[TaskExecutor] Task cancelled - not logging as error (reason: ${this.cancelReason || 'unknown'})`);
         // Status will be updated by the daemon's cancelTask method
         return;
+      }
+
+      if (this.isAbortLikeError(error)) {
+        const recovered = await this.finalizeWithTimeoutRecovery(error);
+        if (recovered) {
+          return;
+        }
       }
 
       if (this.isTransientProviderError(error)) {
@@ -4084,6 +5083,9 @@ You are continuing a previous conversation. The context from the previous conver
     } catch {
       // optional
     }
+    const availableTools = this.getAvailableTools();
+    const toolDescriptions = this.toolRegistry.getToolDescriptions(availableTools.map((tool) => tool.name));
+
     const systemPrompt = `You are an autonomous task executor. Your job is to:
 1. Analyze the user's request thoroughly - understand what files are involved and what changes are needed
 2. Create a detailed, step-by-step plan with specific actions
@@ -4096,7 +5098,12 @@ Workspace is temporary: ${this.workspace.isTemp ? 'true' : 'false'}
 Workspace permissions: ${JSON.stringify(this.workspace.permissions)}
 
 Available tools:
-${this.toolRegistry.getToolDescriptions()}
+${toolDescriptions}
+
+Canvas policy:
+- Use Live Canvas tools only when the user explicitly asks for a visual artifact, interactive UI, preview, or in-app browse experience.
+- For text guidance, summaries, recommendations, planning, and file/content workflows, prefer direct text responses and avoid canvas tools.
+- If you decide to call canvas_push, always provide a complete HTML document in content.
 
 PLANNING RULES:
 - Create a plan with 3-7 SPECIFIC steps. Each step must describe a concrete action.
@@ -4263,23 +5270,30 @@ Format your plan as a JSON object with this structure:
       console.log(`[Task ${this.task.id}] Calling LLM API for plan creation...`);
 
       // Use retry wrapper for resilient API calls
+      const planMessages: LLMMessage[] = [
+        {
+          role: 'user',
+          content: `Task: ${this.task.title}\n\nDetails: ${this.task.prompt}\n\nCreate an execution plan.`,
+        },
+      ];
+      const planMaxTokens = this.resolveLLMMaxTokens({
+        messages: planMessages,
+        system: systemPrompt,
+      });
+
       response = await this.callLLMWithRetry(
-        () => withTimeout(
-          this.provider.createMessage({
+        (attempt) => {
+          const requestTimeoutMs = this.getRetryTimeoutMs(LLM_TIMEOUT_MS, attempt);
+          return this.createMessageWithTimeout({
             model: this.modelId,
-            maxTokens: 4096,
+            maxTokens: this.applyRetryTokenCap(planMaxTokens, attempt, requestTimeoutMs),
             system: systemPrompt,
-            messages: [
-              {
-                role: 'user',
-                content: `Task: ${this.task.title}\n\nDetails: ${this.task.prompt}\n\nCreate an execution plan.`,
-              },
-            ],
-            signal: this.abortController.signal,
-          }),
-          LLM_TIMEOUT_MS,
+            messages: planMessages,
+          },
+          requestTimeoutMs,
           'Plan creation'
-        ),
+        );
+        },
         'Plan creation'
       );
 
@@ -4451,6 +5465,22 @@ Format your plan as a JSON object with this structure:
 
       // Execute step with timeout enforcement
       // Create a step-specific timeout that will abort ongoing LLM requests
+      let stepSoftTimedOut = false;
+      const softStepTimeoutMs = Math.max(
+        20_000,
+        Math.min(STEP_TIMEOUT_MS - 10_000, Math.floor(STEP_TIMEOUT_MS * 0.9))
+      );
+      const stepSoftTimeoutId = setTimeout(() => {
+        stepSoftTimedOut = true;
+        console.log(
+          `[TaskExecutor] Step "${step.description}" reached soft deadline after ${Math.round(softStepTimeoutMs / 1000)}s - switching to best-effort mode`
+        );
+        this.daemon.logEvent(this.task.id, 'log', {
+          message: `Step soft deadline reached (${Math.round(softStepTimeoutMs / 1000)}s): ${step.description}`,
+        });
+        this.abortController.abort();
+        this.abortController = new AbortController();
+      }, softStepTimeoutMs);
       const stepTimeoutId = setTimeout(() => {
         console.log(`[TaskExecutor] Step "${step.description}" timed out after ${STEP_TIMEOUT_MS / 1000}s - aborting`);
         // Abort any in-flight LLM requests for this step
@@ -4461,8 +5491,10 @@ Format your plan as a JSON object with this structure:
 
       try {
         await this.executeStep(step);
+        clearTimeout(stepSoftTimeoutId);
         clearTimeout(stepTimeoutId);
       } catch (error: any) {
+        clearTimeout(stepSoftTimeoutId);
         clearTimeout(stepTimeoutId);
 
         if (error instanceof AwaitingUserInputError) {
@@ -4485,15 +5517,24 @@ Format your plan as a JSON object with this structure:
         }
 
         // If step was aborted due to timeout or cancellation
-        if (error.name === 'AbortError' || error.message.includes('aborted') || error.message.includes('timed out')) {
+        if (this.isAbortLikeError(error)) {
           step.status = 'failed';
-          step.error = `Step timed out after ${STEP_TIMEOUT_MS / 1000}s`;
+          step.error = stepSoftTimedOut
+            ? `Step soft-deadline reached after ${Math.round(softStepTimeoutMs / 1000)}s`
+            : `Step timed out after ${STEP_TIMEOUT_MS / 1000}s`;
           step.completedAt = Date.now();
           this.daemon.logEvent(this.task.id, 'step_timeout', {
             step,
-            timeout: STEP_TIMEOUT_MS,
-            message: `Step timed out after ${STEP_TIMEOUT_MS / 1000}s`,
+            timeout: stepSoftTimedOut ? softStepTimeoutMs : STEP_TIMEOUT_MS,
+            message: stepSoftTimedOut
+              ? `Step soft-deadline reached after ${Math.round(softStepTimeoutMs / 1000)}s`
+              : `Step timed out after ${STEP_TIMEOUT_MS / 1000}s`,
           });
+          if (stepSoftTimedOut) {
+            this.softDeadlineTriggered = true;
+            index = this.plan.steps.length;
+            continue;
+          }
           // Continue with next step instead of failing entire task
           const updatedIndex = this.plan.steps.findIndex(s => s.id === step.id);
           if (updatedIndex === -1) {
@@ -4540,6 +5581,18 @@ Format your plan as a JSON object with this structure:
       }
     }
 
+    if (this.softDeadlineTriggered) {
+      this.daemon.logEvent(this.task.id, 'progress_update', {
+        phase: 'execution',
+        completedSteps: this.plan.steps.filter(s => s.status === 'completed').length,
+        totalSteps: this.plan.steps.length,
+        progress: 100,
+        message: 'Execution stopped at soft deadline; switching to best-effort finalization',
+        hasFailures: true,
+      });
+      return;
+    }
+
     const incompleteSteps = this.plan.steps.filter(s => s.status === 'pending' || s.status === 'in_progress');
     if (incompleteSteps.length > 0) {
       const totalSteps = this.plan.steps.length;
@@ -4583,18 +5636,43 @@ Format your plan as a JSON object with this structure:
       const failedDescriptions = unrecoveredFailedSteps.map(s => s.description).join(', ');
       console.log(`[TaskExecutor] ${unrecoveredFailedSteps.length} unrecovered step(s) failed: ${failedDescriptions}`);
 
-      const totalSteps = this.plan.steps.length;
-      const progress = totalSteps > 0 ? Math.round((successfulSteps.length / totalSteps) * 100) : 0;
-      this.daemon.logEvent(this.task.id, 'progress_update', {
-        phase: 'execution',
-        completedSteps: successfulSteps.length,
-        totalSteps,
-        progress,
-        message: `Execution failed: ${unrecoveredFailedSteps.length} step(s) failed`,
-        hasFailures: true,
-      });
+      // If the only failures are verification steps AND all non-verification steps
+      // succeeded, treat as "completed with warnings" rather than hard failure.
+      // A verification step failing due to tool errors (e.g. bad params for read_file)
+      // should not negate successfully completed work.
+      const onlyVerificationStepsFailed = unrecoveredFailedSteps.every(s => this.isVerificationStep(s));
+      const nonVerificationSteps = this.plan.steps.filter(s => !this.isVerificationStep(s));
+      const allNonVerificationSucceeded = nonVerificationSteps.length > 0 &&
+        nonVerificationSteps.every(s => s.status === 'completed');
 
-      throw new Error(`Task failed: ${unrecoveredFailedSteps.length} step(s) failed - ${unrecoveredFailedSteps.map(s => s.description).join('; ')}`);
+      if (onlyVerificationStepsFailed && allNonVerificationSucceeded) {
+        console.log(
+          `[TaskExecutor] Only verification step(s) failed but all work steps completed. ` +
+          `Treating as completed with warnings: ${failedDescriptions}`
+        );
+        this.daemon.logEvent(this.task.id, 'progress_update', {
+          phase: 'execution',
+          completedSteps: successfulSteps.length,
+          totalSteps: this.plan.steps.length,
+          progress: 100,
+          message: `Completed with warnings: verification step(s) failed but all work steps succeeded`,
+          hasWarnings: true,
+        });
+        // Don't throw — allow task to complete
+      } else {
+        const totalSteps = this.plan.steps.length;
+        const progress = totalSteps > 0 ? Math.round((successfulSteps.length / totalSteps) * 100) : 0;
+        this.daemon.logEvent(this.task.id, 'progress_update', {
+          phase: 'execution',
+          completedSteps: successfulSteps.length,
+          totalSteps,
+          progress,
+          message: `Execution failed: ${unrecoveredFailedSteps.length} step(s) failed`,
+          hasFailures: true,
+        });
+
+        throw new Error(`Task failed: ${unrecoveredFailedSteps.length} step(s) failed - ${unrecoveredFailedSteps.map(s => s.description).join('; ')}`);
+      }
     }
 
     if (failedSteps.length > 0 && unrecoveredFailedSteps.length === 0) {
@@ -4643,7 +5721,10 @@ Format your plan as a JSON object with this structure:
     const isSubAgentTask = (this.task.agentType ?? 'main') === 'sub' || !!this.task.parentTaskId;
     const retainMemory = this.task.agentConfig?.retainMemory ?? !isSubAgentTask;
     const gatewayContext = this.task.agentConfig?.gatewayContext ?? 'private';
-    const allowMemoryInjection = retainMemory && gatewayContext === 'private';
+    const allowTrustedSharedMemory =
+      this.task.agentConfig?.allowSharedContextMemory === true &&
+      (gatewayContext === 'group' || gatewayContext === 'public');
+    const allowMemoryInjection = retainMemory && (gatewayContext === 'private' || allowTrustedSharedMemory);
     let kitContext = '';
     let contextPackInjectionEnabled = false;
     try {
@@ -4657,7 +5738,8 @@ Format your plan as a JSON object with this structure:
     } catch {
       // optional
     }
-    const allowSharedContextInjection = gatewayContext === 'private' && contextPackInjectionEnabled;
+    const allowSharedContextInjection =
+      contextPackInjectionEnabled && (gatewayContext === 'private' || allowTrustedSharedMemory);
 
     // Best-effort: keep `.cowork/` notes searchable for hybrid recall (sync is debounced internally).
     if (allowMemoryInjection && this.workspace.permissions.read) {
@@ -4837,9 +5919,8 @@ ANTI-PATTERNS (NEVER DO THESE):
 - DO: Start with web_search, use web_fetch for specific URLs, fall back to browser only when needed
 
 CRITICAL TOOL PARAMETER REQUIREMENTS:
-- canvas_push: MUST provide BOTH 'session_id' AND 'content' parameters. The 'content' MUST be a complete HTML string.
+- canvas_push: Provide session_id and/or content as needed for the requested visual output. If either is omitted, the system can recover using inferred active sessions and generated placeholders.
   Example: canvas_push({ session_id: "abc-123", content: "<!DOCTYPE html><html><head><style>body{background:#1a1a2e;color:#fff;font-family:sans-serif;padding:20px}</style></head><body><h1>Dashboard</h1><p>Content here</p></body></html>" })
-  FAILURE TO INCLUDE 'content' WILL CAUSE THE TOOL TO FAIL.
 - edit_document: MUST provide 'sourcePath' (path to existing DOCX file) and 'newContent' (array of content blocks)
   Example: edit_document({ sourcePath: "document.docx", newContent: [{ type: "heading", text: "New Section", level: 2 }, { type: "paragraph", text: "Content here" }] })
 - copy_file: MUST provide 'sourcePath' and 'destPath'
@@ -4955,6 +6036,9 @@ TASK / CONVERSATION HISTORY:
       let emptyResponseCount = 0;
       let stepFailed = false;  // Track if step failed due to all tools being disabled/erroring
       let lastFailureReason = '';  // Track the reason for failure
+      const stepRequiresArtifactEvidence = this.stepRequiresArtifactEvidence(step);
+      const createdFilesBeforeStep = this.fileOperationTracker?.getCreatedFiles?.().length || 0;
+      let stepSucceededWithFileMutation = false;
       let stepAttemptedToolUse = false;
       let stepAttemptedExecutionTool = false;
       let capabilityRefusalDetected = false;
@@ -4976,13 +6060,18 @@ TASK / CONVERSATION HISTORY:
           ? this.task.createdAt
           : (step.startedAt ?? Date.now());
       let foundNewImage = false;
-      const maxIterations = 5;  // Reduced from 10 to prevent excessive iterations per step
+      const maxIterations = 8;  // Allow enough iterations for scaffolding steps (dirs + files + verify)
       const maxEmptyResponses = 3;
+      const maxMaxTokensRecoveries = 3; // Max recovery attempts for max_tokens truncation (mirrors Claude Code)
+      let maxTokensRecoveryCount = 0;
       let lastTurnMemoryRecallQuery = '';
       let lastTurnMemoryRecallBlock = '';
       let lastSharedContextKey = '';
       let lastSharedContextBlock = '';
       let toolRecoveryHintInjected = false;
+      // Loop detection: track recent tool calls to detect degenerate loops
+      const recentToolCalls: Array<{ tool: string; target: string }> = [];
+      let loopBreakInjected = false;
 
       const getUserActionRequiredPauseReason = (toolName: string, errorMessage: string): string | null => {
         const message = typeof errorMessage === 'string' ? errorMessage : String(errorMessage || '');
@@ -5035,6 +6124,14 @@ TASK / CONVERSATION HISTORY:
         return null;
       };
 
+      const stepStartTime = Date.now();
+      let stepToolCallCount = 0;
+
+      console.log(
+        `[TaskExecutor] ▶ Step "${step.description}" started | stepId=${step.id} | maxIter=${maxIterations} | ` +
+        `maxTokensRecoveries=${maxMaxTokensRecoveries}`
+      );
+
       while (continueLoop && iterationCount < maxIterations) {
         // Check if task is cancelled or already completed
         if (this.cancelled || this.taskCompleted) {
@@ -5043,6 +6140,12 @@ TASK / CONVERSATION HISTORY:
         }
 
         iterationCount++;
+        const iterStartTime = Date.now();
+        const stepElapsed = ((iterStartTime - stepStartTime) / 1000).toFixed(1);
+        console.log(
+          `[TaskExecutor]   ┌ Iteration ${iterationCount}/${maxIterations} | stepElapsed=${stepElapsed}s | ` +
+          `toolCalls=${stepToolCallCount} | maxTokensRecoveries=${maxTokensRecoveryCount}/${maxMaxTokensRecoveries}`
+        );
 
         // Check for too many empty responses
         if (emptyResponseCount >= maxEmptyResponses) {
@@ -5051,6 +6154,18 @@ TASK / CONVERSATION HISTORY:
 
         // Check guardrail budgets before each LLM call
         this.checkBudgets();
+
+        // User profile memory (turn-level): keep stable personal preferences pinned.
+        const userProfileBlock = this.buildUserProfileBlock(10);
+        if (userProfileBlock) {
+          this.upsertPinnedUserBlock(messages, {
+            tag: TaskExecutor.PINNED_USER_PROFILE_TAG,
+            content: userProfileBlock,
+            insertAfterTag: TaskExecutor.PINNED_COMPACTION_SUMMARY_TAG,
+          });
+        } else {
+          this.removePinnedUserBlock(messages, TaskExecutor.PINNED_USER_PROFILE_TAG);
+        }
 
         // Shared context (turn-level): keep priorities + cross-agent signals pinned and fresh.
         if (allowSharedContextInjection) {
@@ -5064,7 +6179,7 @@ TASK / CONVERSATION HISTORY:
             this.upsertPinnedUserBlock(messages, {
               tag: TaskExecutor.PINNED_SHARED_CONTEXT_TAG,
               content: lastSharedContextBlock,
-              insertAfterTag: TaskExecutor.PINNED_COMPACTION_SUMMARY_TAG,
+              insertAfterTag: TaskExecutor.PINNED_USER_PROFILE_TAG,
             });
           } else {
             this.removePinnedUserBlock(messages, TaskExecutor.PINNED_SHARED_CONTEXT_TAG);
@@ -5138,23 +6253,53 @@ TASK / CONVERSATION HISTORY:
           }
         }
 
+        // Prune stale duplicate/blocked tool errors from older messages to save context
+        this.pruneStaleToolErrors(messages);
+
         const availableTools = this.getAvailableTools();
 
         // Use retry wrapper for resilient API calls
+        const stepMaxTokens = this.resolveLLMMaxTokens({
+          messages,
+          system: this.systemPrompt,
+        });
+
+        const llmCallStart = Date.now();
+        // Pre-compute effective values at attempt=0 for logging (actual values may differ on retries)
+        const effectiveMaxTokens_log = this.applyRetryTokenCap(stepMaxTokens, 0, LLM_TIMEOUT_MS, true);
+        const effectiveTimeout_log = this.getRetryTimeoutMs(LLM_TIMEOUT_MS, 0, true, effectiveMaxTokens_log);
+        console.log(
+          `[TaskExecutor]   │ LLM call start | budget=${stepMaxTokens} | effectiveMaxTokens=${effectiveMaxTokens_log} | ` +
+          `timeout=${(effectiveTimeout_log / 1000).toFixed(0)}s | tools=${availableTools.length} | ` +
+          `msgCount=${messages.length}`
+        );
+
         let response = await this.callLLMWithRetry(
-          () => withTimeout(
-            this.provider.createMessage({
+          (attempt) => {
+            const effectiveMaxTokens = this.applyRetryTokenCap(stepMaxTokens, attempt, LLM_TIMEOUT_MS, true);
+            const requestTimeoutMs = this.getRetryTimeoutMs(LLM_TIMEOUT_MS, attempt, true, effectiveMaxTokens);
+            return this.createMessageWithTimeout({
               model: this.modelId,
-              maxTokens: 4096,
+              maxTokens: effectiveMaxTokens,
               system: this.systemPrompt,
               tools: availableTools,
               messages,
-              signal: this.abortController.signal,
-            }),
-            LLM_TIMEOUT_MS,
+            },
+            requestTimeoutMs,
             'LLM execution step'
-          ),
+          );
+          },
           `Step execution (iteration ${iterationCount})`
+        );
+
+        const llmCallDuration = ((Date.now() - llmCallStart) / 1000).toFixed(1);
+        const toolUseBlocks = (response.content || []).filter((c: any) => c.type === 'tool_use');
+        const textBlocks_log = (response.content || []).filter((c: any) => c.type === 'text');
+        const textLen = textBlocks_log.reduce((sum: number, b: any) => sum + (b.text?.length || 0), 0);
+        console.log(
+          `[TaskExecutor]   │ LLM call done | duration=${llmCallDuration}s | stopReason=${response.stopReason} | ` +
+          `toolUseBlocks=${toolUseBlocks.length} | textLen=${textLen} | ` +
+          `inputTokens=${response.usage?.inputTokens ?? '?'} | outputTokens=${response.usage?.outputTokens ?? '?'}`
         );
 
         // Update tracking after response
@@ -5165,6 +6310,85 @@ TASK / CONVERSATION HISTORY:
         const responseHasToolUse = (response.content || []).some((c: any) => c && c.type === 'tool_use');
         if (responseHasToolUse) {
           stepAttemptedToolUse = true;
+        }
+
+        // ── max_tokens truncation recovery (mirrors Claude Code's approach) ──
+        // When stop_reason is 'max_tokens' the response may contain truncated
+        // tool_use blocks with malformed/incomplete JSON input.  Executing them
+        // causes cascading errors and an irrecoverable spiral.
+        //
+        // Strategy (modelled after Claude Code Agent SDK v0.2.42):
+        //   1. Strip any tool_use blocks from the truncated response (they are
+        //      unreliable).
+        //   2. Keep text blocks (partial reasoning is still useful context).
+        //   3. Inject a recovery user message asking the model to continue with
+        //      smaller output.
+        //   4. Allow up to maxMaxTokensRecoveries (3) before giving up.
+        if (response.stopReason === 'max_tokens') {
+          maxTokensRecoveryCount++;
+          console.log(
+            `[TaskExecutor] max_tokens hit (recovery ${maxTokensRecoveryCount}/${maxMaxTokensRecoveries}), ` +
+            `stripping truncated tool calls`
+          );
+          this.daemon.logEvent(this.task.id, 'max_tokens_recovery', {
+            stepId: step.id,
+            attempt: maxTokensRecoveryCount,
+            maxAttempts: maxMaxTokensRecoveries,
+            hadToolUse: responseHasToolUse,
+          });
+
+          if (maxTokensRecoveryCount > maxMaxTokensRecoveries) {
+            // Exhausted recovery attempts – mark step failed and break
+            console.log(`[TaskExecutor] max_tokens recovery exhausted after ${maxMaxTokensRecoveries} attempts`);
+            stepFailed = true;
+            lastFailureReason =
+              `Response repeatedly exceeded the output token limit (${maxMaxTokensRecoveries} recovery attempts). ` +
+              'The step may require simpler sub-steps or fewer parallel tool calls.';
+            continueLoop = false;
+            // Still add whatever text we have as assistant message
+            const textOnly = (response.content || []).filter((c: any) => c.type === 'text');
+            if (textOnly.length > 0) {
+              messages.push({ role: 'assistant', content: textOnly });
+            }
+            continue;
+          }
+
+          // Strip tool_use blocks, keep only text
+          const textBlocks = (response.content || []).filter((c: any) => c.type === 'text');
+          if (textBlocks.length > 0) {
+            messages.push({ role: 'assistant', content: textBlocks });
+          } else {
+            messages.push({
+              role: 'assistant',
+              content: [{ type: 'text', text: 'I understand. Let me continue.' }],
+            });
+          }
+
+          // Inject recovery instruction (like Claude Code's "continue from where you left off")
+          messages.push({
+            role: 'user',
+            content: [{
+              type: 'text',
+              text: 'Your response was cut off because it exceeded the output token limit. ' +
+                    'You MUST reduce the size of your next response. Strategies:\n' +
+                    '1. If writing a file, split the content across MULTIPLE write_file calls ' +
+                    '(e.g., write the first half now, then the second half in the next turn).\n' +
+                    '2. Call only ONE tool at a time instead of multiple parallel calls.\n' +
+                    '3. Write shorter, more concise content.\n' +
+                    'Continue from where you left off.',
+            }],
+          });
+
+          // Don't count this recovery iteration against the step limit –
+          // otherwise recovery on the last iteration (e.g. 5/5) is wasted
+          // because the while-loop condition will terminate immediately.
+          iterationCount--;
+          continueLoop = true;
+          continue; // Skip tool processing, go directly to next LLM call
+        }
+        // Reset recovery counter on successful non-truncated responses
+        if (response.stopReason !== 'max_tokens') {
+          maxTokensRecoveryCount = 0;
         }
 
         // Optional quality loop for final text-only outputs (no tool calls).
@@ -5404,6 +6628,7 @@ TASK / CONVERSATION HISTORY:
             // Validate tool availability before attempting any inference
             if (!availableToolNames.has(content.name)) {
               console.log(`[TaskExecutor] Tool not available in this context: ${content.name}`);
+              const expectedRestriction = this.isToolRestrictedByPolicy(content.name);
               hadToolError = true;
               toolErrors.add(content.name);
               const unavailableFailureReason = `Tool ${content.name} failed: Tool not available`;
@@ -5423,7 +6648,9 @@ TASK / CONVERSATION HISTORY:
                 is_error: true,
               });
               hasUnavailableToolAttempt = true;
-              hasHardToolFailureAttempt = true;
+              if (!expectedRestriction) {
+                hasHardToolFailureAttempt = true;
+              }
               if (isExecutionToolCall) {
                 this.executionToolLastError = 'Execution tool not available in current permissions/context.';
               }
@@ -5552,9 +6779,23 @@ TASK / CONVERSATION HISTORY:
               input: content.input,
             });
 
+            stepToolCallCount++;
+            const toolExecStart = Date.now();
+
             try {
               // Execute tool with timeout to prevent hanging
               const toolTimeoutMs = this.getToolTimeoutMs(content.name, content.input);
+              const truncatedInput = (() => {
+                try {
+                  const s = JSON.stringify(content.input);
+                  return s.length > 200 ? s.slice(0, 200) + '…' : s;
+                } catch { return '(unserializable)'; }
+              })();
+              console.log(
+                `[TaskExecutor]   │ ⚙ Tool #${stepToolCallCount} "${content.name}" start | ` +
+                `id=${content.id} | timeout=${toolTimeoutMs}ms | input=${truncatedInput}`
+              );
+
               let result = await this.executeToolWithHeartbeat(
                 content.name,
                 content.input,
@@ -5594,15 +6835,23 @@ TASK / CONVERSATION HISTORY:
               const resultStr = JSON.stringify(result);
               this.toolCallDeduplicator.recordCall(content.name, content.input, resultStr);
 
+              const toolExecDuration = ((Date.now() - toolExecStart) / 1000).toFixed(1);
+              const toolSucceeded = !(result && result.success === false);
+              console.log(
+                `[TaskExecutor]   │ ⚙ Tool #${stepToolCallCount} "${content.name}" done | ` +
+                `duration=${toolExecDuration}s | success=${toolSucceeded} | resultSize=${resultStr.length}`
+              );
+
               // Record file operation for tracking
               this.recordFileOperation(content.name, content.input, result);
               this.recordCommandExecution(content.name, content.input, result);
 
-              const toolSucceeded = !(result && result.success === false);
-
               if (toolSucceeded) {
                 hadAnyToolSuccess = true;
                 this.recordToolResult(content.name, result);
+                if (this.isFileMutationTool(content.name)) {
+                  stepSucceededWithFileMutation = true;
+                }
               }
 
               if (content.name === 'run_command' && !toolSucceeded) {
@@ -5703,7 +6952,11 @@ TASK / CONVERSATION HISTORY:
                 is_error: resultIsError,
               });
             } catch (error: any) {
-              console.error(`Tool execution failed:`, error);
+              const toolExecDuration = ((Date.now() - toolExecStart) / 1000).toFixed(1);
+              console.error(
+                `[TaskExecutor]   │ ⚙ Tool #${stepToolCallCount} "${content.name}" EXCEPTION | ` +
+                `duration=${toolExecDuration}s | error=${error?.message || 'unknown'}`
+              );
 
               const failureMessage = error?.message || 'Tool execution failed';
               if (isExecutionToolCall) {
@@ -5750,11 +7003,48 @@ TASK / CONVERSATION HISTORY:
           }
         }
 
+        {
+          const iterEndTime = Date.now();
+          const iterDuration = ((iterEndTime - iterStartTime) / 1000).toFixed(1);
+          const stepElapsedEnd = ((iterEndTime - stepStartTime) / 1000).toFixed(1);
+          const successCount = toolResults.filter(r => !r.is_error).length;
+          const failCount = toolResults.filter(r => r.is_error).length;
+          console.log(
+            `[TaskExecutor]   └ Iteration ${iterationCount} done | iterDuration=${iterDuration}s | ` +
+            `stepElapsed=${stepElapsedEnd}s | toolResults=${toolResults.length} (ok=${successCount}, err=${failCount})`
+          );
+        }
+
         if (toolResults.length > 0) {
           messages.push({
             role: 'user',
             content: toolResults,
           });
+
+          // --- Loop detection: detect model stuck calling same tool on same target ---
+          if (!loopBreakInjected) {
+            for (const content of response.content || []) {
+              if (content.type === 'tool_use') {
+                const isLoop = this.detectToolLoop(recentToolCalls, content.name, content.input, 3);
+                if (isLoop) {
+                  loopBreakInjected = true;
+                  console.log(
+                    `[TaskExecutor]   │ ⚠ Loop detected: ${content.name} called ${3}+ times on same target — injecting break message`
+                  );
+                  messages.push({
+                    role: 'user',
+                    content: [{
+                      type: 'text',
+                      text: 'You are stuck in a loop calling the same tool repeatedly on the same target without making progress. ' +
+                        'STOP using this tool and respond directly with what you have found so far. ' +
+                        'If you need different information, try a completely different approach or tool.',
+                    }],
+                  });
+                  break;
+                }
+              }
+            }
+          }
 
           const allToolsFailed = toolResults.every(r => r.is_error);
           if (hasHardToolFailureAttempt && !lastFailureReason) {
@@ -5823,8 +7113,12 @@ TASK / CONVERSATION HISTORY:
 
         // If assistant asked a blocking question, stop and wait for user.
         // Exception: capability upgrade requests should not stop on limitation-style questions.
+        const questionLooksBlocking =
+          this.isUserActionRequiredFailure(assistantText || '') || assistantAskedQuestion;
         const shouldPauseForQuestion = assistantAskedQuestion &&
+          questionLooksBlocking &&
           this.shouldPauseForQuestions &&
+          !this.shouldSuppressQuestionPause() &&
           !(this.capabilityUpgradeRequested && capabilityRefusalDetected);
         if (shouldPauseForQuestion) {
           console.log('[TaskExecutor] Assistant asked a question, pausing for user input');
@@ -5901,12 +7195,45 @@ TASK / CONVERSATION HISTORY:
         }
       }
 
+      if (!stepFailed && stepRequiresArtifactEvidence) {
+        const createdFilesAfterStep = this.fileOperationTracker?.getCreatedFiles?.().length || 0;
+        const createdFileDetected = createdFilesAfterStep > createdFilesBeforeStep;
+        if (!stepSucceededWithFileMutation && !createdFileDetected) {
+          stepFailed = true;
+          if (!lastFailureReason) {
+            lastFailureReason =
+              'Step expected a written artifact but no successful file mutation was detected.';
+          }
+        }
+      }
+
+      const finalAssistantText = this.getLatestAssistantText(messages).trim();
+      const enforceVerificationOk =
+        isVerifyStep &&
+        (isPlanVerifyStep || isLastStep || /\bfinal verification\b/i.test(step.description || ''));
+      if (!stepFailed && enforceVerificationOk && finalAssistantText !== 'OK') {
+        stepFailed = true;
+        if (!lastFailureReason) {
+          lastFailureReason = finalAssistantText
+            ? `Verification failed: ${finalAssistantText}`
+            : 'Verification failed: verification step did not return "OK".';
+        }
+      }
+
       // Step completed or failed
 
       this.recordAssistantOutput(messages, step);
 
       // Save conversation history for follow-up messages
       this.conversationHistory = messages;
+
+      if (awaitingUserInput && this.shouldSuppressQuestionPause()) {
+        awaitingUserInput = false;
+        awaitingUserInputReason = '';
+        this.daemon.logEvent(this.task.id, 'log', {
+          message: 'Suppressed user-input pause because a direct answer is already available.',
+        });
+      }
 
       if (awaitingUserInput) {
         throw new AwaitingUserInputError(awaitingUserInputReason || 'Awaiting user input');
@@ -5965,6 +7292,11 @@ TASK / CONVERSATION HISTORY:
           }
         }
 
+        const totalStepDuration = ((Date.now() - stepStartTime) / 1000).toFixed(1);
+        console.log(
+          `[TaskExecutor] ✗ Step "${step.description}" FAILED | duration=${totalStepDuration}s | ` +
+          `iterations=${iterationCount} | toolCalls=${stepToolCallCount} | reason=${lastFailureReason}`
+        );
         this.daemon.logEvent(this.task.id, 'step_failed', {
           step,
           reason: lastFailureReason,
@@ -5974,10 +7306,20 @@ TASK / CONVERSATION HISTORY:
         step.completedAt = Date.now();
         this.lastRecoveryFailureSignature = '';
         this.getRecoveredFailureStepIdSet().delete(step.id);
+        const totalStepDuration = ((Date.now() - stepStartTime) / 1000).toFixed(1);
+        console.log(
+          `[TaskExecutor] ✓ Step "${step.description}" completed | duration=${totalStepDuration}s | ` +
+          `iterations=${iterationCount} | toolCalls=${stepToolCallCount}`
+        );
         this.daemon.logEvent(this.task.id, 'step_completed', { step });
       }
     } catch (error: any) {
       if (error instanceof AwaitingUserInputError) {
+        throw error;
+      }
+      if (this.isAbortLikeError(error)) {
+        // Let executePlan/execute apply timeout-recovery handling without
+        // emitting a generic step_failed(Request cancelled) event here.
         throw error;
       }
       step.status = 'failed';
@@ -6065,8 +7407,7 @@ TASK / CONVERSATION HISTORY:
       try {
         this.checkBudgets();
         const response = await this.callLLMWithRetry(
-          () => withTimeout(
-            this.provider.createMessage({
+          () => this.createMessageWithTimeout({
               model: this.modelId,
               maxTokens: 1600,
               system: this.systemPrompt || '',
@@ -6086,8 +7427,7 @@ TASK / CONVERSATION HISTORY:
                   ].join('\n'),
                 },
               ],
-              signal: this.abortController.signal,
-            }),
+            },
             LLM_TIMEOUT_MS,
             `Quality refine (${opts.contextLabel})`
           ),
@@ -6118,8 +7458,7 @@ TASK / CONVERSATION HISTORY:
     try {
       this.checkBudgets();
       const critiqueResp = await this.callLLMWithRetry(
-        () => withTimeout(
-          this.provider.createMessage({
+        () => this.createMessageWithTimeout({
             model: this.modelId,
             maxTokens: 900,
             system: this.systemPrompt || '',
@@ -6145,8 +7484,7 @@ TASK / CONVERSATION HISTORY:
                 ].join('\n'),
               },
             ],
-            signal: this.abortController.signal,
-          }),
+          },
           LLM_TIMEOUT_MS,
           `Quality critique (${opts.contextLabel})`
         ),
@@ -6173,8 +7511,7 @@ TASK / CONVERSATION HISTORY:
     try {
       this.checkBudgets();
       const refineResp = await this.callLLMWithRetry(
-        () => withTimeout(
-          this.provider.createMessage({
+        () => this.createMessageWithTimeout({
             model: this.modelId,
             maxTokens: 1800,
             system: this.systemPrompt || '',
@@ -6201,8 +7538,7 @@ TASK / CONVERSATION HISTORY:
                 ].join('\n'),
               },
             ],
-            signal: this.abortController.signal,
-          }),
+          },
           LLM_TIMEOUT_MS,
           `Quality refine (${opts.contextLabel})`
         ),
@@ -6244,7 +7580,7 @@ TASK / CONVERSATION HISTORY:
     return null;
   }
 
-  private async generateCanvasHtml(prompt: string): Promise<string | null> {
+  private async generateCanvasHtml(prompt: string): Promise<string> {
     const system = [
       'You generate a single self-contained HTML document for an in-app canvas.',
       'Output ONLY the HTML document (no markdown, no commentary).',
@@ -6253,35 +7589,50 @@ TASK / CONVERSATION HISTORY:
     ].join(' ');
 
     try {
-      const response = await this.provider.createMessage({
-        model: this.modelId,
-        maxTokens: 1800,
-        system,
-        messages: [
-          {
-            role: 'user',
-            content: `Build an interactive HTML demo for this request:\n${prompt}`,
-          },
-        ],
-      });
+      const response = await this.createMessageWithTimeout(
+        {
+          model: this.modelId,
+          maxTokens: 1800,
+          system,
+          messages: [
+            {
+              role: 'user',
+              content: `Build an interactive HTML demo for this request:\n${prompt}`,
+            },
+          ],
+        },
+        LLM_TIMEOUT_MS,
+        'Canvas HTML generation'
+      );
 
       const text = (response.content || [])
-        .filter((c) => c.type === 'text')
-        .map((c) => c.text)
+        .filter((c: any) => c.type === 'text')
+        .map((c: any) => c.text)
         .join('\n');
 
-      return this.extractHtmlFromText(text);
+      const extracted = this.extractHtmlFromText(text);
+      if (extracted) {
+        return extracted;
+      }
     } catch (error) {
       console.error('[TaskExecutor] Failed to auto-generate canvas HTML:', error);
-      return null;
     }
+
+    return this.buildCanvasFallbackHtml(prompt, 'Auto-generation failed, showing a fallback canvas preview.');
   }
 
   /**
    * Send a follow-up message to continue the conversation
    */
   async sendMessage(message: string): Promise<void> {
-    const previousStatus = this.daemon.getTask(this.task.id)?.status || this.task.status;
+    const persistedTask = this.daemon.getTask(this.task.id);
+    if (persistedTask) {
+      this.task = {
+        ...this.task,
+        ...persistedTask
+      };
+    }
+    const previousStatus = persistedTask?.status || this.task.status;
     const shouldResumeAfterFollowup = previousStatus === 'paused' || this.waitingForUserInput;
     const shouldStartNewCanvasSession = ['completed', 'failed', 'cancelled'].includes(previousStatus);
     let resumeAttempted = false;
@@ -6347,6 +7698,11 @@ TASK / CONVERSATION HISTORY:
     this.daemon.updateTaskStatus(this.task.id, 'executing');
     this.daemon.logEvent(this.task.id, 'executing', { message: 'Processing follow-up message' });
     this.daemon.logEvent(this.task.id, 'user_message', { message });
+
+    if (!shouldResumeAfterFollowup && this.resolveConversationMode(message) === 'chat') {
+      await this.respondInChatMode(message, previousStatus);
+      return;
+    }
 
     // Get enabled guidelines from custom skills
     const skillLoader = getCustomSkillLoader();
@@ -6536,7 +7892,10 @@ TASK / CONVERSATION HISTORY:
     const isSubAgentTask = (this.task.agentType ?? 'main') === 'sub' || !!this.task.parentTaskId;
     const retainMemory = this.task.agentConfig?.retainMemory ?? !isSubAgentTask;
     const gatewayContext = this.task.agentConfig?.gatewayContext ?? 'private';
-    const allowMemoryInjection = retainMemory && gatewayContext === 'private';
+    const allowTrustedSharedMemory =
+      this.task.agentConfig?.allowSharedContextMemory === true &&
+      (gatewayContext === 'group' || gatewayContext === 'public');
+    const allowMemoryInjection = retainMemory && (gatewayContext === 'private' || allowTrustedSharedMemory);
 
     let contextPackInjectionEnabled = false;
     try {
@@ -6545,7 +7904,8 @@ TASK / CONVERSATION HISTORY:
     } catch {
       // optional
     }
-    const allowSharedContextInjection = gatewayContext === 'private' && contextPackInjectionEnabled;
+    const allowSharedContextInjection =
+      contextPackInjectionEnabled && (gatewayContext === 'private' || allowTrustedSharedMemory);
 
     // Best-effort: keep `.cowork/` notes searchable for hybrid recall (sync is debounced internally).
     if (allowMemoryInjection && this.workspace.permissions.read) {
@@ -6579,9 +7939,14 @@ TASK / CONVERSATION HISTORY:
     let hasProvidedTextResponse = false;  // Track if agent has given a text answer
     let hadToolCalls = false;  // Track if any tool calls were made
     let capabilityRefusalCount = 0;
-    const maxIterations = 5;  // Reduced from 10 to prevent excessive iterations
+    const maxIterations = 8;  // Allow enough iterations for multi-tool follow-up messages
     const maxEmptyResponses = 3;
+    const maxMaxTokensRecoveries = 3; // Max recovery attempts for max_tokens truncation
+    let maxTokensRecoveryCount = 0;
     let toolRecoveryHintInjected = false;
+    // Loop detection: track recent tool calls to detect degenerate loops
+    const recentToolCalls: Array<{ tool: string; target: string }> = [];
+    let loopBreakInjected = false;
     const requiresExecutionToolProgress =
       this.followUpRequiresCommandExecution(message) && !this.allowExecutionWithoutShell;
     let attemptedExecutionTool = false;
@@ -6600,6 +7965,13 @@ TASK / CONVERSATION HISTORY:
         this.taskCompleted = false;  // Allow this follow-up to be processed
       }
 
+      const followUpStartTime = Date.now();
+      let followUpToolCallCount = 0;
+
+      console.log(
+        `[TaskExecutor] ▶ Follow-up message processing started | maxIter=${maxIterations}`
+      );
+
       while (continueLoop && iterationCount < maxIterations) {
         // Only check cancelled - taskCompleted should not block follow-ups
         if (this.cancelled) {
@@ -6608,6 +7980,12 @@ TASK / CONVERSATION HISTORY:
         }
 
         iterationCount++;
+        const iterStartTime = Date.now();
+        const followUpElapsed = ((iterStartTime - followUpStartTime) / 1000).toFixed(1);
+        console.log(
+          `[TaskExecutor]   ┌ Follow-up iteration ${iterationCount}/${maxIterations} | elapsed=${followUpElapsed}s | ` +
+          `toolCalls=${followUpToolCallCount} | maxTokensRecoveries=${maxTokensRecoveryCount}/${maxMaxTokensRecoveries}`
+        );
 
         // Check for too many empty responses
         if (emptyResponseCount >= maxEmptyResponses) {
@@ -6616,6 +7994,18 @@ TASK / CONVERSATION HISTORY:
 
         // Check guardrail budgets before each LLM call
         this.checkBudgets();
+
+        // User profile memory (turn-level): keep stable personal preferences pinned.
+        const userProfileBlock = this.buildUserProfileBlock(10);
+        if (userProfileBlock) {
+          this.upsertPinnedUserBlock(messages, {
+            tag: TaskExecutor.PINNED_USER_PROFILE_TAG,
+            content: userProfileBlock,
+            insertAfterTag: TaskExecutor.PINNED_COMPACTION_SUMMARY_TAG,
+          });
+        } else {
+          this.removePinnedUserBlock(messages, TaskExecutor.PINNED_USER_PROFILE_TAG);
+        }
 
         // Shared context (turn-level): keep priorities + cross-agent signals pinned and fresh.
         if (allowSharedContextInjection) {
@@ -6629,7 +8019,7 @@ TASK / CONVERSATION HISTORY:
             this.upsertPinnedUserBlock(messages, {
               tag: TaskExecutor.PINNED_SHARED_CONTEXT_TAG,
               content: lastSharedContextBlock,
-              insertAfterTag: TaskExecutor.PINNED_COMPACTION_SUMMARY_TAG,
+              insertAfterTag: TaskExecutor.PINNED_USER_PROFILE_TAG,
             });
           } else {
             this.removePinnedUserBlock(messages, TaskExecutor.PINNED_SHARED_CONTEXT_TAG);
@@ -6703,29 +8093,115 @@ TASK / CONVERSATION HISTORY:
           }
         }
 
+        // Prune stale duplicate/blocked tool errors from older messages to save context
+        this.pruneStaleToolErrors(messages);
+
         const availableTools = this.getAvailableTools();
         const availableToolNames = new Set(availableTools.map(tool => tool.name));
 
         // Use retry wrapper for resilient API calls
+        const followUpMaxTokens = this.resolveLLMMaxTokens({
+          messages,
+          system: this.systemPrompt,
+        });
+
+        const llmCallStart = Date.now();
+        // Pre-compute effective values at attempt=0 for logging (actual values may differ on retries)
+        const effectiveMaxTokens_log = this.applyRetryTokenCap(followUpMaxTokens, 0, LLM_TIMEOUT_MS, true);
+        const effectiveTimeout_log = this.getRetryTimeoutMs(LLM_TIMEOUT_MS, 0, true, effectiveMaxTokens_log);
+        console.log(
+          `[TaskExecutor]   │ LLM call start | budget=${followUpMaxTokens} | effectiveMaxTokens=${effectiveMaxTokens_log} | ` +
+          `timeout=${(effectiveTimeout_log / 1000).toFixed(0)}s | tools=${availableTools.length} | ` +
+          `msgCount=${messages.length}`
+        );
+
         let response = await this.callLLMWithRetry(
-          () => withTimeout(
-            this.provider.createMessage({
+          (attempt) => {
+            const effectiveMaxTokens = this.applyRetryTokenCap(followUpMaxTokens, attempt, LLM_TIMEOUT_MS, true);
+            const requestTimeoutMs = this.getRetryTimeoutMs(LLM_TIMEOUT_MS, attempt, true, effectiveMaxTokens);
+            return this.createMessageWithTimeout({
               model: this.modelId,
-              maxTokens: 4096,
+              maxTokens: effectiveMaxTokens,
               system: this.systemPrompt,
               tools: availableTools,
               messages,
-              signal: this.abortController.signal,
-            }),
-            LLM_TIMEOUT_MS,
+            },
+            requestTimeoutMs,
             'LLM message processing'
-          ),
+          );
+          },
           `Message processing (iteration ${iterationCount})`
+        );
+
+        const llmCallDuration = ((Date.now() - llmCallStart) / 1000).toFixed(1);
+        const toolUseBlocks = (response.content || []).filter((c: any) => c.type === 'tool_use');
+        const textBlocks_log = (response.content || []).filter((c: any) => c.type === 'text');
+        const textLen = textBlocks_log.reduce((sum: number, b: any) => sum + (b.text?.length || 0), 0);
+        console.log(
+          `[TaskExecutor]   │ LLM call done | duration=${llmCallDuration}s | stopReason=${response.stopReason} | ` +
+          `toolUseBlocks=${toolUseBlocks.length} | textLen=${textLen} | ` +
+          `inputTokens=${response.usage?.inputTokens ?? '?'} | outputTokens=${response.usage?.outputTokens ?? '?'}`
         );
 
         // Update tracking after response
         if (response.usage) {
           this.updateTracking(response.usage.inputTokens, response.usage.outputTokens);
+        }
+
+        // ── max_tokens truncation recovery (follow-up loop) ──
+        if (response.stopReason === 'max_tokens') {
+          maxTokensRecoveryCount++;
+          console.log(
+            `[TaskExecutor] Follow-up: max_tokens hit (recovery ${maxTokensRecoveryCount}/${maxMaxTokensRecoveries}), ` +
+            `stripping truncated tool calls`
+          );
+          this.daemon.logEvent(this.task.id, 'max_tokens_recovery', {
+            context: 'follow_up',
+            attempt: maxTokensRecoveryCount,
+            maxAttempts: maxMaxTokensRecoveries,
+          });
+
+          if (maxTokensRecoveryCount > maxMaxTokensRecoveries) {
+            console.log(`[TaskExecutor] Follow-up: max_tokens recovery exhausted after ${maxMaxTokensRecoveries} attempts`);
+            const textOnly = (response.content || []).filter((c: any) => c.type === 'text');
+            if (textOnly.length > 0) {
+              messages.push({ role: 'assistant', content: textOnly });
+            }
+            continueLoop = false;
+            continue;
+          }
+
+          const textBlocks = (response.content || []).filter((c: any) => c.type === 'text');
+          if (textBlocks.length > 0) {
+            messages.push({ role: 'assistant', content: textBlocks });
+          } else {
+            messages.push({
+              role: 'assistant',
+              content: [{ type: 'text', text: 'I understand. Let me continue.' }],
+            });
+          }
+
+          messages.push({
+            role: 'user',
+            content: [{
+              type: 'text',
+              text: 'Your response was cut off because it exceeded the output token limit. ' +
+                    'You MUST reduce the size of your next response. Strategies:\n' +
+                    '1. If writing a file, split the content across MULTIPLE write_file calls ' +
+                    '(e.g., write the first half now, then the second half in the next turn).\n' +
+                    '2. Call only ONE tool at a time instead of multiple parallel calls.\n' +
+                    '3. Write shorter, more concise content.\n' +
+                    'Continue from where you left off.',
+            }],
+          });
+
+          // Don't count this recovery iteration against the iteration limit
+          iterationCount--;
+          continueLoop = true;
+          continue;
+        }
+        if (response.stopReason !== 'max_tokens') {
+          maxTokensRecoveryCount = 0;
         }
 
         // Optional quality loop for final text-only outputs (no tool calls).
@@ -6876,7 +8352,10 @@ TASK / CONVERSATION HISTORY:
             // Validate tool availability before attempting any inference
             if (!availableToolNames.has(content.name)) {
               console.log(`[TaskExecutor] Tool not available in this context: ${content.name}`);
-              hasHardToolFailureAttempt = true;
+              const expectedRestriction = this.isToolRestrictedByPolicy(content.name);
+              if (!expectedRestriction) {
+                hasHardToolFailureAttempt = true;
+              }
               this.daemon.logEvent(this.task.id, 'tool_error', {
                 tool: content.name,
                 error: 'Tool not available in current context or permissions',
@@ -7020,9 +8499,23 @@ TASK / CONVERSATION HISTORY:
               input: content.input,
             });
 
+            followUpToolCallCount++;
+            const toolExecStart = Date.now();
+
             try {
               // Execute tool with timeout to prevent hanging
               const toolTimeoutMs = this.getToolTimeoutMs(content.name, content.input);
+              const truncatedInput = (() => {
+                try {
+                  const s = JSON.stringify(content.input);
+                  return s.length > 200 ? s.slice(0, 200) + '…' : s;
+                } catch { return '(unserializable)'; }
+              })();
+              console.log(
+                `[TaskExecutor]   │ ⚙ Tool #${followUpToolCallCount} "${content.name}" start | ` +
+                `id=${content.id} | timeout=${toolTimeoutMs}ms | input=${truncatedInput}`
+              );
+
               const result = await this.executeToolWithHeartbeat(
                 content.name,
                 content.input,
@@ -7035,6 +8528,13 @@ TASK / CONVERSATION HISTORY:
               // Record this call for deduplication
               const resultStr = JSON.stringify(result);
               this.toolCallDeduplicator.recordCall(content.name, content.input, resultStr);
+
+              const toolExecDuration = ((Date.now() - toolExecStart) / 1000).toFixed(1);
+              const toolSucceeded = !(result && result.success === false);
+              console.log(
+                `[TaskExecutor]   │ ⚙ Tool #${followUpToolCallCount} "${content.name}" done | ` +
+                `duration=${toolExecDuration}s | success=${toolSucceeded} | resultSize=${resultStr.length}`
+              );
 
               // Record file operation for tracking
               this.recordFileOperation(content.name, content.input, result);
@@ -7089,7 +8589,11 @@ TASK / CONVERSATION HISTORY:
                 is_error: resultIsError,
               });
             } catch (error: any) {
-              console.error(`Tool execution failed:`, error);
+              const toolExecDuration = ((Date.now() - toolExecStart) / 1000).toFixed(1);
+              console.error(
+                `[TaskExecutor]   │ ⚙ Tool #${followUpToolCallCount} "${content.name}" EXCEPTION | ` +
+                `duration=${toolExecDuration}s | error=${error?.message || 'unknown'}`
+              );
 
               const failureMessage = error?.message || 'Tool execution failed';
               if (isExecutionToolCall) {
@@ -7123,12 +8627,50 @@ TASK / CONVERSATION HISTORY:
           }
         }
 
+        {
+          const iterEndTime = Date.now();
+          const iterDuration = ((iterEndTime - iterStartTime) / 1000).toFixed(1);
+          const followUpElapsedEnd = ((iterEndTime - followUpStartTime) / 1000).toFixed(1);
+          const successCount = toolResults.filter(r => !r.is_error).length;
+          const failCount = toolResults.filter(r => r.is_error).length;
+          console.log(
+            `[TaskExecutor]   └ Follow-up iteration ${iterationCount} done | iterDuration=${iterDuration}s | ` +
+            `elapsed=${followUpElapsedEnd}s | toolResults=${toolResults.length} (ok=${successCount}, err=${failCount})`
+          );
+        }
+
         if (toolResults.length > 0) {
           hadToolCalls = true;  // Track that tools were used
           messages.push({
             role: 'user',
             content: toolResults,
           });
+
+          // --- Loop detection: detect model stuck calling same tool on same target ---
+          if (!loopBreakInjected) {
+            // Track each tool call from this iteration
+            for (const content of response.content || []) {
+              if (content.type === 'tool_use') {
+                const isLoop = this.detectToolLoop(recentToolCalls, content.name, content.input, 3);
+                if (isLoop) {
+                  loopBreakInjected = true;
+                  console.log(
+                    `[TaskExecutor]   │ ⚠ Loop detected: ${content.name} called ${3}+ times on same target — injecting break message`
+                  );
+                  messages.push({
+                    role: 'user',
+                    content: [{
+                      type: 'text',
+                      text: 'You are stuck in a loop calling the same tool repeatedly on the same target without making progress. ' +
+                        'STOP using this tool and respond directly with what you have found so far. ' +
+                        'If you need different information, try a completely different approach or tool.',
+                    }],
+                  });
+                  break;
+                }
+              }
+            }
+          }
 
           const allToolsFailed = toolResults.every(r => r.is_error);
           const shouldStopFromFailures =
@@ -7214,9 +8756,13 @@ TASK / CONVERSATION HISTORY:
           }
         }
 
+        const followupQuestionLooksBlocking =
+          this.isUserActionRequiredFailure(assistantText || '') || assistantAskedQuestion;
         const shouldPauseForFollowupQuestion = assistantAskedQuestion &&
+          followupQuestionLooksBlocking &&
           shouldResumeAfterFollowup &&
           this.shouldPauseForQuestions &&
+          !this.shouldSuppressQuestionPause() &&
           !(this.capabilityUpgradeRequested && capabilityRefusalDetected);
         if (shouldPauseForFollowupQuestion) {
           console.log('[TaskExecutor] Assistant asked a question during follow-up, pausing for user input');
@@ -7391,8 +8937,9 @@ TASK / CONVERSATION HISTORY:
   /**
    * Cancel execution
    */
-  async cancel(): Promise<void> {
+  async cancel(reason: 'user' | 'timeout' | 'shutdown' | 'system' | 'unknown' = 'unknown'): Promise<void> {
     this.cancelled = true;
+    this.cancelReason = reason;
     this.taskCompleted = true;  // Also mark as completed to prevent any further processing
 
     // Abort any in-flight LLM requests immediately

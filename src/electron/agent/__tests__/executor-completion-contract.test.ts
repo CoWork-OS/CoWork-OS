@@ -161,6 +161,29 @@ describe('TaskExecutor completion contract integration', () => {
     );
   });
 
+  it('accepts reasoned recommendations when evidence tools were used', async () => {
+    const executor = createExecuteHarness({
+      title: 'Video decision',
+      prompt: 'Transcribe this video and then let me know if I should spend my time watching it or skip it.',
+      lastOutput: 'You should skip it because it repeats beginner concepts.',
+      planStepDescription: 'Transcribe the video',
+    });
+    (executor as any).toolResultMemory = [
+      { tool: 'web_fetch', summary: 'https://example.com/transcript', timestamp: Date.now() },
+    ];
+
+    await (executor as any).execute();
+
+    expect(executor.daemon.completeTask).toHaveBeenCalledTimes(1);
+    expect(executor.daemon.updateTask).not.toHaveBeenCalledWith(
+      'task-1',
+      expect.objectContaining({
+        status: 'failed',
+        error: expect.stringContaining('missing verification evidence'),
+      })
+    );
+  });
+
   it('completes only when the completion contract requirements are satisfied', async () => {
     const executor = createExecuteHarness({
       title: 'Video review',
@@ -193,6 +216,29 @@ describe('TaskExecutor completion contract integration', () => {
     await (executor as any).execute();
 
     expect(executor.daemon.completeTask).toHaveBeenCalledTimes(1);
+    expect(executor.daemon.updateTask).not.toHaveBeenCalledWith(
+      'task-1',
+      expect.objectContaining({ status: 'failed' })
+    );
+  });
+
+  it('routes provider request-cancelled errors through timeout recovery instead of failing', async () => {
+    const executor = createExecuteHarness({
+      title: 'Draft whitepaper',
+      prompt: 'Create a detailed whitepaper draft.',
+      lastOutput: 'Initial summary',
+      planStepDescription: 'Write the draft',
+    });
+    const recoverySpy = vi.fn(async () => true);
+
+    (executor as any).executePlan = vi.fn(async () => {
+      throw new Error('Request cancelled');
+    });
+    (executor as any).finalizeWithTimeoutRecovery = recoverySpy;
+
+    await (executor as any).execute();
+
+    expect(recoverySpy).toHaveBeenCalledTimes(1);
     expect(executor.daemon.updateTask).not.toHaveBeenCalledWith(
       'task-1',
       expect.objectContaining({ status: 'failed' })

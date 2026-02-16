@@ -5,6 +5,8 @@ import {
   LLMProvider,
   LLMProviderConfig,
   LLMProviderType,
+  LLMRequest,
+  LLMResponse,
   MODELS,
   GEMINI_MODELS,
   OPENROUTER_MODELS,
@@ -44,9 +46,258 @@ import { getSafeStorage } from '../../utils/safe-storage';
 const LEGACY_SETTINGS_FILE = 'llm-settings.json';
 const MASKED_VALUE = '***configured***';
 const ENCRYPTED_PREFIX = 'encrypted:';
+let llmCallLogCounter = 0;
+const observedModelMaxTokens = new Map<string, number>();
 const CUSTOM_PROVIDER_ALIASES: Partial<Record<LLMProviderType, LLMProviderType>> = {
   'kimi-coding': 'kimi-code',
 };
+
+function safeContentLength(value: unknown): number {
+  if (typeof value === 'string') return value.length;
+  if (value == null) return 0;
+  try {
+    return JSON.stringify(value).length;
+  } catch {
+    return 0;
+  }
+}
+
+function summarizeLLMRequest(request: LLMRequest): Record<string, unknown> {
+  const messages = Array.isArray(request.messages) ? request.messages : [];
+  let userMessages = 0;
+  let assistantMessages = 0;
+  let textBlocks = 0;
+  let textChars = 0;
+  let toolUseBlocks = 0;
+  let toolResultBlocks = 0;
+  let toolResultChars = 0;
+  let toolResultErrors = 0;
+
+  for (const message of messages) {
+    if (message?.role === 'user') userMessages++;
+    else if (message?.role === 'assistant') assistantMessages++;
+
+    const content: any = (message as any)?.content;
+    if (typeof content === 'string') {
+      textBlocks++;
+      textChars += content.length;
+      continue;
+    }
+
+    if (!Array.isArray(content)) continue;
+    for (const block of content) {
+      if (!block || typeof block !== 'object') continue;
+      const type = (block as any).type;
+      if (type === 'text') {
+        const text = (block as any).text;
+        if (typeof text === 'string') {
+          textBlocks++;
+          textChars += text.length;
+        }
+      } else if (type === 'tool_use') {
+        toolUseBlocks++;
+      } else if (type === 'tool_result') {
+        toolResultBlocks++;
+        toolResultChars += safeContentLength((block as any).content);
+        if ((block as any).is_error) toolResultErrors++;
+      }
+    }
+  }
+
+  return {
+    model: request.model,
+    maxTokens: request.maxTokens,
+    toolsOffered: request.tools?.length || 0,
+    messages: messages.length,
+    userMessages,
+    assistantMessages,
+    textBlocks,
+    textChars,
+    toolUseBlocks,
+    toolResultBlocks,
+    toolResultChars,
+    toolResultErrors,
+    systemChars: typeof request.system === 'string' ? request.system.length : 0,
+    signalAborted: request.signal?.aborted === true,
+  };
+}
+
+function summarizeLLMResponse(response: LLMResponse): Record<string, unknown> {
+  const content = Array.isArray(response?.content) ? response.content : [];
+  let textBlocks = 0;
+  let textChars = 0;
+  let toolUseBlocks = 0;
+
+  for (const block of content as any[]) {
+    if (!block || typeof block !== 'object') continue;
+    if (block.type === 'text' && typeof block.text === 'string') {
+      textBlocks++;
+      textChars += block.text.length;
+    } else if (block.type === 'tool_use') {
+      toolUseBlocks++;
+    }
+  }
+
+  const inputTokens = response?.usage?.inputTokens ?? null;
+  const outputTokens = response?.usage?.outputTokens ?? null;
+  const totalTokens = inputTokens != null && outputTokens != null
+    ? inputTokens + outputTokens
+    : null;
+
+  return {
+    stopReason: response?.stopReason,
+    contentBlocks: content.length,
+    textBlocks,
+    textChars,
+    toolUseBlocks,
+    inputTokens,
+    outputTokens,
+    totalTokens,
+  };
+}
+
+function parseMaxTokensLimitFromError(error: any): number | null {
+  const message = String(error?.message || '');
+  if (!message) return null;
+
+  const patterns = [
+    /model limit of\s+(\d+)/i,
+    /lower than\s+(\d+)/i,
+    /max(?:imum)?\s+tokens(?:\s+value)?\s+(?:that is\s+)?lower than\s+(\d+)/i,
+    /maximum tokens[^0-9]*(\d+)/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = message.match(pattern);
+    if (!match) continue;
+    const parsed = Number(match[1]);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.floor(parsed);
+    }
+  }
+
+  return null;
+}
+
+function clampRequestToObservedModelLimit(request: LLMRequest): { request: LLMRequest; adjusted: boolean; observedLimit: number | null } {
+  const model = typeof request.model === 'string' ? request.model : '';
+  if (!model) return { request, adjusted: false, observedLimit: null };
+
+  const observedLimit = observedModelMaxTokens.get(model) ?? null;
+  if (!observedLimit || !Number.isFinite(request.maxTokens) || request.maxTokens <= 0) {
+    return { request, adjusted: false, observedLimit };
+  }
+
+  const capped = Math.max(1, observedLimit - 1);
+  if (request.maxTokens <= capped) {
+    return { request, adjusted: false, observedLimit };
+  }
+
+  return {
+    request: { ...request, maxTokens: capped },
+    adjusted: true,
+    observedLimit,
+  };
+}
+
+function wrapProviderWithDetailedLogging(provider: LLMProvider): LLMProvider {
+  const alreadyWrapped = (provider as any).__detailedLLMLoggingWrapped === true;
+  if (alreadyWrapped) return provider;
+
+  const wrapped: LLMProvider = {
+    type: provider.type,
+    async createMessage(request: LLMRequest): Promise<LLMResponse> {
+      const callId = ++llmCallLogCounter;
+      const startedAt = Date.now();
+      const preflight = clampRequestToObservedModelLimit(request);
+      const effectiveRequest = preflight.request;
+      // Tag side-channel calls (no tools, very short system, small maxTokens) to avoid
+      // confusing them with main agentic loop calls in the logs.
+      const isSideCall = !effectiveRequest.tools?.length &&
+        effectiveRequest.maxTokens <= 200 &&
+        (typeof effectiveRequest.system === 'string' ? effectiveRequest.system.length : 0) < 120;
+      const tag = isSideCall ? ' [side]' : '';
+      console.log(`[LLM:${provider.type}] #${callId}${tag} start`, summarizeLLMRequest(effectiveRequest));
+      if (preflight.adjusted) {
+        console.log(
+          `[LLM:${provider.type}] #${callId} using observed model token limit`,
+          {
+            model: effectiveRequest.model,
+            observedLimit: preflight.observedLimit,
+            requestedMaxTokens: request.maxTokens,
+            adjustedMaxTokens: effectiveRequest.maxTokens,
+          }
+        );
+      }
+
+      try {
+        const response = await provider.createMessage(effectiveRequest);
+        console.log(
+          `[LLM:${provider.type}] #${callId}${tag} success in ${Date.now() - startedAt}ms`,
+          summarizeLLMResponse(response)
+        );
+        return response;
+      } catch (error: any) {
+        const parsedLimit = parseMaxTokensLimitFromError(error);
+        if (
+          parsedLimit &&
+          Number.isFinite(effectiveRequest.maxTokens) &&
+          effectiveRequest.maxTokens >= parsedLimit
+        ) {
+          const model = typeof effectiveRequest.model === 'string' ? effectiveRequest.model : '';
+          if (model) {
+            observedModelMaxTokens.set(model, parsedLimit);
+          }
+          const retryMaxTokens = Math.max(1, parsedLimit - 1);
+          const shouldRetry = retryMaxTokens !== effectiveRequest.maxTokens;
+          if (shouldRetry) {
+            console.warn(
+              `[LLM:${provider.type}] #${callId} retrying with provider token cap`,
+              {
+                model: effectiveRequest.model,
+                parsedLimit,
+                previousMaxTokens: effectiveRequest.maxTokens,
+                retryMaxTokens,
+              }
+            );
+            const retriedRequest: LLMRequest = { ...effectiveRequest, maxTokens: retryMaxTokens };
+            try {
+              const response = await provider.createMessage(retriedRequest);
+              console.log(
+                `[LLM:${provider.type}] #${callId}${tag} success in ${Date.now() - startedAt}ms`,
+                {
+                  ...summarizeLLMResponse(response),
+                  retriedWithMaxTokens: retryMaxTokens,
+                  learnedModelLimit: parsedLimit,
+                }
+              );
+              return response;
+            } catch (retryError: any) {
+              error = retryError;
+            }
+          }
+        }
+
+        const message = String(error?.message || '');
+        const lower = message.toLowerCase();
+        const cancelled = error?.name === 'AbortError' || lower.includes('aborted') || lower.includes('cancel');
+        console.error(`[LLM:${provider.type}] #${callId}${tag} ${cancelled ? 'cancelled' : 'error'} in ${Date.now() - startedAt}ms`, {
+          name: error?.name,
+          message,
+          status: error?.status || error?.$metadata?.httpStatusCode,
+          requestId: error?.$metadata?.requestId,
+        });
+        throw error;
+      }
+    },
+    async testConnection(): Promise<{ success: boolean; error?: string }> {
+      return provider.testConnection();
+    },
+  };
+
+  (wrapped as any).__detailedLLMLoggingWrapped = true;
+  return wrapped;
+}
 
 function resolveCustomProviderId(providerType: LLMProviderType): LLMProviderType {
   return CUSTOM_PROVIDER_ALIASES[providerType] || providerType;
@@ -728,35 +979,49 @@ export class LLMProviderFactory {
     const customEntry = getCustomProviderEntry(config.type);
     if (customEntry) {
       const resolvedType = resolveCustomProviderId(config.type);
-      return createCustomProvider(config, customEntry, resolvedType);
+      return wrapProviderWithDetailedLogging(createCustomProvider(config, customEntry, resolvedType));
     }
 
+    let provider: LLMProvider;
     switch (config.type) {
       case 'anthropic':
-        return new AnthropicProvider(config);
+        provider = new AnthropicProvider(config);
+        break;
       case 'bedrock':
-        return new BedrockProvider(config);
+        provider = new BedrockProvider(config);
+        break;
       case 'ollama':
-        return new OllamaProvider(config);
+        provider = new OllamaProvider(config);
+        break;
       case 'gemini':
-        return new GeminiProvider(config);
+        provider = new GeminiProvider(config);
+        break;
       case 'openrouter':
-        return new OpenRouterProvider(config);
+        provider = new OpenRouterProvider(config);
+        break;
       case 'openai':
-        return new OpenAIProvider(config);
+        provider = new OpenAIProvider(config);
+        break;
       case 'azure':
-        return new AzureOpenAIProvider(config);
+        provider = new AzureOpenAIProvider(config);
+        break;
       case 'groq':
-        return new GroqProvider(config);
+        provider = new GroqProvider(config);
+        break;
       case 'xai':
-        return new XAIProvider(config);
+        provider = new XAIProvider(config);
+        break;
       case 'kimi':
-        return new KimiProvider(config);
+        provider = new KimiProvider(config);
+        break;
       case 'pi':
-        return new PiProvider(config);
+        provider = new PiProvider(config);
+        break;
       default:
         throw new Error(`Unknown provider type: ${config.type}`);
     }
+
+    return wrapProviderWithDetailedLogging(provider);
   }
 
   /**

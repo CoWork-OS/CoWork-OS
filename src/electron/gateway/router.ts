@@ -18,6 +18,7 @@ import {
   CallbackQuery,
   InlineKeyboardButton,
   MessageAttachment,
+  ChannelConfig,
 } from './channels/types';
 import { TelegramAdapter } from './channels/telegram';
 import { SecurityManager } from './security';
@@ -39,10 +40,12 @@ import {
   TEMP_WORKSPACE_ID_PREFIX,
   TEMP_WORKSPACE_NAME,
   TEMP_WORKSPACE_ROOT_DIR_NAME,
+  AgentRole,
   Workspace,
   WorkspacePermissions,
   isTempWorkspaceId,
 } from '../../shared/types';
+import { AgentRoleRepository } from '../agents/AgentRoleRepository';
 import * as os from 'os';
 import { LLMProviderFactory, LLMSettings } from '../agent/llm/provider-factory';
 import { LLMProviderType } from '../agent/llm/types';
@@ -83,10 +86,18 @@ import {
   formatLocalTimestamp,
   updatePrioritiesMarkdown,
   buildBriefPrompt,
+  buildInboxPrompt,
   parseTimeOfDay,
   parseWeekday,
 } from './router-helpers';
+import { normalizeWhatsAppNaturalCommand, stripWhatsAppCommandPreamble } from './whatsapp-command-utils';
 export type { RouterConfig } from './router-helpers';
+
+type MessageSecurityContext = {
+  contextType?: 'dm' | 'group';
+  deniedTools?: string[];
+  agentRoleId?: string;
+};
 
 export class MessageRouter {
   private adapters: Map<ChannelType, ChannelAdapter> = new Map();
@@ -106,6 +117,7 @@ export class MessageRouter {
   private workspaceRepo: WorkspaceRepository;
   private taskRepo: TaskRepository;
   private artifactRepo: ArtifactRepository;
+  private agentRoleRepo: AgentRoleRepository;
 
   // Track pending responses for tasks
   private pendingTaskResponses: Map<string, {
@@ -180,6 +192,7 @@ export class MessageRouter {
     this.workspaceRepo = new WorkspaceRepository(db);
     this.taskRepo = new TaskRepository(db);
     this.artifactRepo = new ArtifactRepository(db);
+    this.agentRoleRepo = new AgentRoleRepository(db);
 
     // Initialize managers
     this.securityManager = new SecurityManager(db);
@@ -256,6 +269,175 @@ export class MessageRouter {
     }
 
     return normalized;
+  }
+
+  private isSimpleChannelToolNoise(text: string): boolean {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+      return false;
+    }
+
+    if (
+      /i ran into an issue with\s+/.test(normalized) &&
+      /tool|canvas|visual|webview|browser|command|action|screenshot|annotation/i.test(normalized)
+    ) {
+      return true;
+    }
+
+    if (
+      normalized.startsWith('tool error:') &&
+      /not available|unavailable in this context|unsupported|cannot be used|disabled|failed|permission/i.test(normalized)
+    ) {
+      return true;
+    }
+
+    if (
+      /tool.+(not available|unavailable in this context|unsupported|cannot be used|disabled|failed|permission)/i.test(normalized)
+      && /canvas|visual|webview|browser|file|command|network|screenshot/i.test(normalized)
+    ) {
+      return true;
+    }
+
+    if (
+      normalized.includes('canvas_push') &&
+      /required|missing|failed|error|unavailable|not available|content parameter|session|no active|placeholder/i.test(text)
+    ) {
+      return true;
+    }
+
+    if (/^i ran into an issue with\s+canvas/.test(normalized)) {
+      return true;
+    }
+
+    if (/^tool error:.*\bcanvas/i.test(normalized)) {
+      return true;
+    }
+
+    if (
+      /tool.+(not available|unavailable in this context|unsupported|cannot be used)/i.test(normalized)
+      && /canvas|visual|webview|browser/i.test(normalized)
+    ) {
+      return true;
+    }
+
+    return false;
+  }
+
+  private isTextOnlyChannel(channelType?: ChannelType): boolean {
+    return typeof channelType === 'string' && MessageRouter.TEXT_ONLY_CHANNELS.has(channelType as ChannelType);
+  }
+
+  private static readonly TEXT_ONLY_CHANNELS = new Set<ChannelType>([
+    'telegram',
+    'discord',
+    'slack',
+    'whatsapp',
+    'imessage',
+    'signal',
+    'mattermost',
+    'matrix',
+    'twitch',
+    'line',
+    'bluebubbles',
+    'email',
+    'teams',
+    'googlechat',
+  ]);
+
+  private static readonly TEXT_ONLY_RESTRICTED_TOOLS = [
+    'canvas_create',
+    'canvas_push',
+    'canvas_show',
+    'canvas_open_url',
+    'canvas_hide',
+    'canvas_close',
+    'canvas_eval',
+    'canvas_snapshot',
+    'canvas_list',
+    'canvas_checkpoint',
+    'canvas_restore',
+    'canvas_checkpoints',
+    'visual_open_annotator',
+    'visual_update_annotator',
+  ] as const;
+
+  private getChannelBasedToolRestrictions(channelType?: ChannelType): string[] {
+    if (!channelType || !MessageRouter.TEXT_ONLY_CHANNELS.has(channelType)) {
+      return [];
+    }
+    return [...MessageRouter.TEXT_ONLY_RESTRICTED_TOOLS];
+  }
+
+  private buildTaskToolRestrictions(channelType: ChannelType, baseRestrictions?: string[]): string[] {
+    const merged = new Set<string>();
+    for (const raw of baseRestrictions ?? []) {
+      if (typeof raw === 'string') {
+        const trimmed = raw.trim();
+        if (trimmed) {
+          merged.add(trimmed);
+        }
+      }
+    }
+
+    for (const restriction of this.getChannelBasedToolRestrictions(channelType)) {
+      merged.add(restriction);
+    }
+
+    return Array.from(merged);
+  }
+
+  private normalizeIncomingTextForRouting(channelType: ChannelType, text: string): string {
+    const trimmed = text.trim();
+    if (!trimmed || trimmed.startsWith('/')) {
+      return trimmed;
+    }
+
+    if (channelType !== 'whatsapp') {
+      return trimmed;
+    }
+
+    const replyStrippedText = this.stripWhatsAppReplyContextForRouting(trimmed);
+
+    const commandFromReply = normalizeWhatsAppNaturalCommand(replyStrippedText);
+    if (commandFromReply) {
+      return commandFromReply;
+    }
+
+    const preambleStrippedText = stripWhatsAppCommandPreamble(replyStrippedText);
+    if (preambleStrippedText !== replyStrippedText) {
+      const commandFromPreamble = normalizeWhatsAppNaturalCommand(preambleStrippedText);
+      return commandFromPreamble ?? preambleStrippedText;
+    }
+
+    const command = normalizeWhatsAppNaturalCommand(trimmed);
+    if (command) {
+      return command;
+    }
+
+    return trimmed;
+  }
+
+  private stripWhatsAppReplyContextForRouting(text: string): string {
+    const lines = text.split('\n');
+    if (!lines.length || !lines[0].startsWith('💬 In reply to ')) {
+      return text.trim();
+    }
+
+    let idx = 0;
+    while (idx < lines.length) {
+      const line = lines[idx].trim();
+      if (!line) {
+        idx++;
+        continue;
+      }
+      if (line.startsWith('💬 In reply to ') || line.startsWith('>')) {
+        idx++;
+        continue;
+      }
+      break;
+    }
+
+    return lines.slice(idx).join('\n').trim();
   }
 
   private getUiCopy(
@@ -611,7 +793,7 @@ export class MessageRouter {
     }
   }
 
-  private resolveTaskRequesterFromSessionContext(session: { context?: unknown }): {
+  private resolveTaskRequesterFromSessionContext(session: { context?: unknown } | undefined | null): {
     requestingUserId?: string;
     requestingUserName?: string;
     lastChannelMessageId?: string;
@@ -627,6 +809,42 @@ export class MessageRouter {
         : (typeof ctx?.lastChannelUserName === 'string' ? ctx.lastChannelUserName : undefined);
     const lastChannelMessageId = typeof ctx?.lastChannelMessageId === 'string' ? ctx.lastChannelMessageId : undefined;
     return { requestingUserId, requestingUserName, lastChannelMessageId };
+  }
+
+  private getSessionPreferredAgentRoleId(session: { context?: unknown } | undefined): string | undefined {
+    const context = session?.context as any;
+    return typeof context?.preferredAgentRoleId === 'string' ? context.preferredAgentRoleId : undefined;
+  }
+
+  private resolveAgentRoleForSelector(selector: string): { role?: AgentRole; matches: AgentRole[] } {
+    const normalized = selector.trim();
+    if (!normalized) {
+      return { role: undefined, matches: [] };
+    }
+
+    const directMatch = this.agentRoleRepo.findById(normalized);
+    if (directMatch) {
+      return { role: directMatch, matches: [] };
+    }
+
+    const lower = normalized.toLowerCase();
+    const candidates = this.agentRoleRepo.findActive();
+    const exactByName = candidates.find((r) => r.name.toLowerCase() === lower || r.displayName.toLowerCase() === lower);
+    if (exactByName) {
+      return { role: exactByName, matches: [] };
+    }
+
+    const matches = candidates.filter((r) => {
+      const name = r.name.toLowerCase();
+      const displayName = r.displayName.toLowerCase();
+      return name.includes(lower) || displayName.includes(lower);
+    });
+
+    if (matches.length === 1) {
+      return { role: matches[0], matches: [] };
+    }
+
+    return { role: undefined, matches };
   }
 
   /**
@@ -1059,6 +1277,7 @@ export class MessageRouter {
     const channelConfig = (channel.config || {}) as any;
     const ambientMode = channelConfig.ambientMode === true;
     const silentUnauthorized = channelConfig.silentUnauthorized === true || ambientMode;
+    message.text = this.normalizeIncomingTextForRouting(adapter.type, message.text);
     const textTrimmed = (message.text || '').trim();
     const ambientIngestOnly = ambientMode && !(textTrimmed.startsWith('/') || this.looksLikePairingCode(textTrimmed));
     const ingestOnly = message.ingestOnly === true || ambientIngestOnly;
@@ -1201,7 +1420,7 @@ export class MessageRouter {
     adapter: ChannelAdapter,
     message: IncomingMessage,
     sessionId: string,
-    securityContext?: { contextType?: 'dm' | 'group'; deniedTools?: string[] }
+    securityContext?: MessageSecurityContext
   ): Promise<void> {
     const text = message.text.trim();
 
@@ -1507,7 +1726,7 @@ export class MessageRouter {
           if (ruleResult.action === 'set_agent') {
             // Route to a specific agent role (and optionally a workspace)
             if (!securityContext) securityContext = {};
-            (securityContext as any).agentRoleId = ruleResult.agentRoleId;
+            securityContext.agentRoleId = ruleResult.agentRoleId;
             if (ruleResult.workspaceId) {
               const nextWs = this.workspaceRepo.findById(ruleResult.workspaceId);
               if (nextWs) {
@@ -1535,7 +1754,7 @@ export class MessageRouter {
     adapter: ChannelAdapter,
     message: IncomingMessage,
     sessionId: string,
-    securityContext?: { contextType?: 'dm' | 'group'; deniedTools?: string[] }
+    securityContext?: MessageSecurityContext
   ): Promise<void> {
     const [command, ...args] = message.text.trim().split(/\s+/);
 
@@ -1558,6 +1777,10 @@ export class MessageRouter {
 
       case '/brief':
         await this.handleBriefCommand(adapter, message, sessionId, args, securityContext);
+        break;
+
+      case '/inbox':
+        await this.handleInboxCommand(adapter, message, sessionId, args, securityContext);
         break;
 
       case '/schedule':
@@ -1586,9 +1809,23 @@ export class MessageRouter {
         await this.handleCancelCommand(adapter, message, sessionId);
         break;
 
+      case '/pause':
+      case '/interrupt':
+        await this.handlePauseCommand(adapter, message, sessionId);
+        break;
+
+      case '/resume':
+      case '/continue':
+        await this.handleResumeCommand(adapter, message, sessionId);
+        break;
+
       case '/newtask':
         // Start a new task (unlink current session)
         await this.handleNewTaskCommand(adapter, message, sessionId);
+        break;
+
+      case '/task':
+        await this.handleTaskCommand(adapter, message, sessionId);
         break;
 
       case '/addworkspace':
@@ -1673,12 +1910,52 @@ export class MessageRouter {
         await this.handleSettingsCommand(adapter, message, sessionId);
         break;
 
+      case '/activation':
+        await this.handleActivationCommand(adapter, message, args);
+        break;
+
+      case '/memorytrust':
+        await this.handleMemoryTrustCommand(adapter, message, args);
+        break;
+
+      case '/selfchat':
+        await this.handleSelfChatCommand(adapter, message, args);
+        break;
+
+      case '/ambient':
+        await this.handleAmbientModeCommand(adapter, message, args);
+        break;
+
+      case '/ingest':
+        await this.handleIngestOnlyCommand(adapter, message, args);
+        break;
+
+      case '/prefix':
+        await this.handleResponsePrefixCommand(adapter, message, args);
+        break;
+
+      case '/numbers':
+        await this.handleAllowedNumbersCommand(adapter, message, args);
+        break;
+
+      case '/allow':
+        await this.handleAllowedNumberCommand(adapter, message, args, 'add');
+        break;
+
+      case '/disallow':
+        await this.handleAllowedNumberCommand(adapter, message, args, 'remove');
+        break;
+
       case '/debug':
         await this.handleDebugCommand(adapter, message, sessionId);
         break;
 
       case '/version':
         await this.handleVersionCommand(adapter, message);
+        break;
+
+      case '/agent':
+        await this.handleAgentCommand(adapter, message, sessionId, args);
         break;
 
       default:
@@ -1688,6 +1965,1120 @@ export class MessageRouter {
           replyTo: message.messageId,
         });
     }
+  }
+
+  private isSessionTaskController(session: { context?: unknown } | undefined, userId: string): boolean {
+    const requester = this.resolveTaskRequesterFromSessionContext(session);
+    if (!requester.requestingUserId) {
+      return true;
+    }
+
+    return requester.requestingUserId === userId;
+  }
+
+  /**
+   * Handle /pause and /interrupt
+   */
+  private async handlePauseCommand(
+    adapter: ChannelAdapter,
+    message: IncomingMessage,
+    sessionId: string
+  ): Promise<void> {
+    const session = this.sessionRepo.findById(sessionId);
+
+    if (!session?.taskId) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: this.getUiCopy('cancelNoActive'),
+        replyTo: message.messageId,
+      });
+      return;
+    }
+
+    const task = this.taskRepo.findById(session.taskId);
+    if (!task) {
+      this.sessionManager.unlinkSessionFromTask(sessionId);
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: this.getUiCopy('cancelNoActive'),
+        replyTo: message.messageId,
+      });
+      return;
+    }
+
+    if (message.isGroup && !this.isSessionTaskController(session, message.userId)) {
+      const requesterName = this.resolveTaskRequesterFromSessionContext(session).requestingUserName;
+      const who = requesterName ? `*${requesterName}*` : 'the task owner';
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        parseMode: 'markdown',
+        text: `⚠️ Only ${who} can pause this task in a group chat.`,
+        replyTo: message.messageId,
+      });
+      return;
+    }
+
+    if (task.status === 'paused') {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: '⏸️ Task is already paused.',
+        replyTo: message.messageId,
+      });
+      return;
+    }
+
+    if (task.status === 'blocked') {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: '🚧 This task is already waiting for your input. Send your reply, or use /cancel if you want to stop it.',
+        replyTo: message.messageId,
+      });
+      return;
+    }
+
+    if (task.status === 'queued' || task.status === 'pending') {
+      const queueHint = task.status === 'queued'
+        ? 'It is in the queue and will start automatically.'
+        : 'It is pending and not running yet.';
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: `🟡 ${queueHint} Use /cancel to stop it, or just keep the workflow going and it will continue shortly.`,
+        replyTo: message.messageId,
+      });
+      return;
+    }
+
+    if (!['planning', 'executing'].includes(task.status)) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: `⚠️ I can't pause this task while it is ${task.status}.`,
+        replyTo: message.messageId,
+      });
+      return;
+    }
+
+    if (!this.agentDaemon) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: '⚠️ Task runtime is not connected. I can pause tasks only when the runtime is active.',
+        replyTo: message.messageId,
+      });
+      return;
+    }
+
+    try {
+      await this.agentDaemon.pauseTask(task.id);
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: `⏸️ Paused: "${task.title}". Send /resume when you're ready to continue.`,
+        replyTo: message.messageId,
+      });
+    } catch (error) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: `❌ Failed to pause task: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        replyTo: message.messageId,
+      });
+    }
+  }
+
+  /**
+   * Handle /resume
+   */
+  private async handleResumeCommand(
+    adapter: ChannelAdapter,
+    message: IncomingMessage,
+    sessionId: string
+  ): Promise<void> {
+    const session = this.sessionRepo.findById(sessionId);
+
+    if (!session?.taskId) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: this.getUiCopy('cancelNoActive'),
+        replyTo: message.messageId,
+      });
+      return;
+    }
+
+    const task = this.taskRepo.findById(session.taskId);
+    if (!task) {
+      this.sessionManager.unlinkSessionFromTask(sessionId);
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: this.getUiCopy('cancelNoActive'),
+        replyTo: message.messageId,
+      });
+      return;
+    }
+
+    if (message.isGroup && !this.isSessionTaskController(session, message.userId)) {
+      const requesterName = this.resolveTaskRequesterFromSessionContext(session).requestingUserName;
+      const who = requesterName ? `*${requesterName}*` : 'the task owner';
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        parseMode: 'markdown',
+        text: `⚠️ Only ${who} can resume this task in a group chat.`,
+        replyTo: message.messageId,
+      });
+      return;
+    }
+
+    if (task.status !== 'paused') {
+      if (task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled') {
+        await adapter.sendMessage({
+          chatId: message.chatId,
+          text: `🛑 This task is already ${task.status}. Send a new message to start a fresh request.`,
+          replyTo: message.messageId,
+        });
+        return;
+      }
+
+      if (task.status === 'blocked') {
+        await adapter.sendMessage({
+          chatId: message.chatId,
+          text: 'This task is already waiting for your input. Send your reply and I will continue.',
+          replyTo: message.messageId,
+        });
+        return;
+      }
+
+      if (task.status === 'queued' || task.status === 'pending') {
+        await adapter.sendMessage({
+          chatId: message.chatId,
+          text: `🟡 This task is ${task.status} and has not started execution yet. Send /newtask to switch to a fresh request.`,
+          replyTo: message.messageId,
+        });
+        return;
+      }
+
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: `⏯️ This task is currently ${task.status}. Use /pause to pause and /newtask for a fresh session.`,
+        replyTo: message.messageId,
+      });
+      return;
+    }
+
+    if (!this.agentDaemon) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: '⚠️ Task runtime is not connected. I can resume tasks only when the runtime is active.',
+        replyTo: message.messageId,
+      });
+      return;
+    }
+
+    try {
+      const resumed = await this.agentDaemon.resumeTask(task.id);
+      if (!resumed) {
+        await adapter.sendMessage({
+          chatId: message.chatId,
+          text: '❌ Could not resume this task. Try sending a follow-up message or start fresh with /newtask.',
+          replyTo: message.messageId,
+        });
+        return;
+      }
+
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: `▶️ Resumed: "${task.title}".`,
+        replyTo: message.messageId,
+      });
+    } catch (error) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: `❌ Failed to resume task: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        replyTo: message.messageId,
+      });
+    }
+  }
+
+  /**
+   * Handle /task - concise current task status
+   */
+  private async handleTaskCommand(
+    adapter: ChannelAdapter,
+    message: IncomingMessage,
+    sessionId: string
+  ): Promise<void> {
+    const session = this.sessionRepo.findById(sessionId);
+    if (!session?.taskId) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: 'No task is attached to this chat yet. Send a task message to start one.',
+        replyTo: message.messageId,
+      });
+      return;
+    }
+
+    const task = this.taskRepo.findById(session.taskId);
+    if (!task) {
+      this.sessionManager.unlinkSessionFromTask(sessionId);
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: 'No task is attached to this chat yet. Send a task message to start one.',
+        replyTo: message.messageId,
+      });
+      return;
+    }
+
+    const workspace = this.workspaceRepo.findById(task.workspaceId);
+    const startedAt = formatLocalTimestamp(new Date(task.createdAt));
+    const updatedAt = formatLocalTimestamp(new Date(task.updatedAt));
+
+    const statusLine = (() => {
+      switch (task.status) {
+        case 'paused':
+          return '⏸️ Paused';
+        case 'executing':
+          return '⚙️ Running';
+        case 'planning':
+          return '🧠 Planning';
+        case 'pending':
+          return '🧪 Pending';
+        case 'queued':
+          return '📥 Queued';
+        case 'blocked':
+          return '🚧 Waiting for input';
+        case 'completed':
+          return '✅ Completed';
+        case 'failed':
+          return '❌ Failed';
+        case 'cancelled':
+          return '🚫 Cancelled';
+        default:
+          return `⚠️ ${task.status}`;
+      }
+    })();
+
+    const title = task.title.length > 72 ? `${task.title.substring(0, 72)}...` : task.title;
+    const isFinished = ['completed', 'failed', 'cancelled'].includes(task.status);
+
+    const messageText =
+      '🧭 Task Snapshot\n\n' +
+      `• Title: ${title}\n` +
+      `• Status: ${statusLine}\n` +
+      `• Workspace: ${workspace ? workspace.name : task.workspaceId}\n` +
+      `• Started: ${startedAt}\n` +
+      `• Updated: ${updatedAt}\n` +
+      `• Task ID: ${task.id}\n\n` +
+      (isFinished
+        ? 'This task is finished. Send /newtask for a fresh context.'
+        : task.status === 'paused'
+          ? 'Use /resume to continue this task.'
+          : 'Reply here to continue.');
+
+    await adapter.sendMessage({
+      chatId: message.chatId,
+      text: messageText,
+      parseMode: 'markdown',
+      replyTo: message.messageId,
+    });
+  }
+
+  private async handleActivationCommand(
+    adapter: ChannelAdapter,
+    message: IncomingMessage,
+    args: string[]
+  ): Promise<void> {
+    if (adapter.type !== 'whatsapp') {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: '📌 /activation currently only controls WhatsApp group routing mode.',
+        parseMode: 'markdown',
+        replyTo: message.messageId,
+      });
+      return;
+    }
+
+    const channel = this.channelRepo.findByType(adapter.type);
+    if (!channel) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: '⚠️ Channel config not found.',
+        replyTo: message.messageId,
+      });
+      return;
+    }
+
+    const input = args.join(' ').trim().toLowerCase();
+    const currentModeRaw = typeof channel.config?.groupRoutingMode === 'string'
+      ? channel.config.groupRoutingMode
+      : 'mentionsOrCommands';
+    const currentMode = this.formatWhatsAppGroupRoutingMode(currentModeRaw);
+
+    if (!input || input === 'help') {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        parseMode: 'markdown',
+        replyTo: message.messageId,
+        text:
+          `⚙️ *WhatsApp Group Routing*\n\n` +
+          `Current mode: ${currentMode}\n\n` +
+          `Usage: \`/activation <mode>\`\n\n` +
+          `Modes:\n` +
+          `• \`all\` - route every group message\n` +
+          `• \`mention\` - route only when @mentioned\n` +
+          `• \`commands\` - route only commands\n\n` +
+          `Examples:\n` +
+          `• \`/activation all\`\n` +
+          `• \`/activation mention\`\n` +
+          `• \`/activation commands\``,
+      });
+      return;
+    }
+
+    const mode = this.resolveWhatsAppGroupMode(input);
+    if (!mode) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        parseMode: 'markdown',
+        replyTo: message.messageId,
+        text:
+          `I didn't recognize **${input}**.\n\n` +
+          'Use one of: `all`, `mention`, `commands`.',
+      });
+      return;
+    }
+
+    const nextConfig = {
+      ...(channel.config || {}),
+      groupRoutingMode: mode,
+    };
+    this.channelRepo.update(channel.id, { config: nextConfig });
+
+    if (adapter.updateConfig) {
+      this.applyWhatsAppConfigPatch(adapter, channel, { groupRoutingMode: mode });
+    }
+
+    const nextMode = this.formatWhatsAppGroupRoutingMode(mode);
+    await adapter.sendMessage({
+      chatId: message.chatId,
+      parseMode: 'markdown',
+      replyTo: message.messageId,
+      text: `✅ Updated group routing mode to: **${nextMode}**`,
+    });
+  }
+
+  private resolveWhatsAppGroupMode(
+    value: string
+  ): 'all' | 'mentionsOnly' | 'mentionsOrCommands' | 'commandsOnly' | undefined {
+    const normalized = value.trim().toLowerCase().replace(/[\\s\\-_]/g, '');
+    if (!normalized) return undefined;
+
+    if (['all', 'always', 'alwaysall', 'allmessages', 'allmessage', 'all-message', 'alwaysallmessages'].includes(normalized)) {
+      return 'all';
+    }
+
+    if (['mention', 'mentions', 'mentiononly', 'mentionsonly', 'mentiononlymode', 'atmention', 'tag'].includes(normalized)) {
+      return 'mentionsOnly';
+    }
+
+    if (['mentionsorcommands', 'mentionsandcommands'].includes(normalized)) {
+      return 'mentionsOrCommands';
+    }
+
+    if ([
+      'commands',
+      'command',
+      'commandonly',
+      'commandsonly',
+      'commandsmode',
+      'slash',
+      'slashonly'
+    ].includes(normalized)) {
+      return 'commandsOnly';
+    }
+
+    return undefined;
+  }
+
+  private async handleMemoryTrustCommand(
+    adapter: ChannelAdapter,
+    message: IncomingMessage,
+    args: string[]
+  ): Promise<void> {
+    if (adapter.type !== 'whatsapp') {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: '📌 /memorytrust currently only controls WhatsApp group memory trust mode.',
+        parseMode: 'markdown',
+        replyTo: message.messageId,
+      });
+      return;
+    }
+
+    const channel = this.channelRepo.findByType(adapter.type);
+    if (!channel) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: '⚠️ Channel config not found.',
+        replyTo: message.messageId,
+      });
+      return;
+    }
+
+    const current = channel.config?.trustedGroupMemoryOptIn === true;
+    const input = args.join(' ').trim().toLowerCase();
+
+    if (!input || input === 'help') {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        parseMode: 'markdown',
+        replyTo: message.messageId,
+        text:
+          `🧠 *Group Memory Trust*\n\n` +
+          `Current: ${current ? 'ON' : 'OFF'}\n\n` +
+          `Usage: \`/memorytrust <on|off>\`\n\n` +
+          `When ON, group conversations can contribute to and use shared memory context.\n` +
+          `When OFF (default), group conversations stay memory-isolated.`,
+      });
+      return;
+    }
+
+    let next: boolean | null = null;
+    if (['on', 'true', 'enable', 'enabled', 'yes', 'y'].includes(input)) next = true;
+    if (['off', 'false', 'disable', 'disabled', 'no', 'n'].includes(input)) next = false;
+
+    if (next === null) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        parseMode: 'markdown',
+        replyTo: message.messageId,
+        text: `I didn't recognize **${input}**. Use \`/memorytrust on\` or \`/memorytrust off\`.`,
+      });
+      return;
+    }
+
+    this.applyWhatsAppConfigPatch(adapter, channel, { trustedGroupMemoryOptIn: next });
+
+    await adapter.sendMessage({
+      chatId: message.chatId,
+      parseMode: 'markdown',
+      replyTo: message.messageId,
+      text: `✅ Group memory trust is now **${next ? 'ON' : 'OFF'}**.`,
+    });
+  }
+
+  private formatWhatsAppGroupRoutingMode(mode: string): string {
+    const normalized = this.resolveWhatsAppGroupMode(mode) || this.resolveWhatsAppGroupMode('mentionsorcommands');
+    switch (normalized) {
+      case 'all':
+        return 'all';
+      case 'mentionsOnly':
+        return 'mentions only';
+      case 'commandsOnly':
+        return 'commands only';
+      case 'mentionsOrCommands':
+        return 'mentions and commands';
+      default:
+        return 'mentions and commands';
+    }
+  }
+
+  private async handleSelfChatCommand(
+    adapter: ChannelAdapter,
+    message: IncomingMessage,
+    args: string[]
+  ): Promise<void> {
+    if (adapter.type !== 'whatsapp') {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        parseMode: 'markdown',
+        text: '📌 /selfchat only controls WhatsApp behavior.',
+        replyTo: message.messageId,
+      });
+      return;
+    }
+
+    const channel = this.channelRepo.findByType(adapter.type);
+    if (!channel) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: '⚠️ Channel config not found.',
+        replyTo: message.messageId,
+      });
+      return;
+    }
+
+    const channelConfig = (channel.config || {}) as Record<string, unknown>;
+    const adapterAny = adapter as unknown as { isSelfChatMode?: boolean };
+    const current = typeof channelConfig.selfChatMode === 'boolean'
+      ? channelConfig.selfChatMode
+      : adapterAny.isSelfChatMode === true;
+
+    if (args.length === 0) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        parseMode: 'markdown',
+        replyTo: message.messageId,
+        text:
+          '📱 *WhatsApp Self-Chat Mode*\n\n' +
+          `Current: ${current ? '✅ enabled' : '❌ disabled'}\n\n` +
+          'When enabled, only messages from your own number are routable.\n' +
+          'Use:\n' +
+          '• `/selfchat on` - enable\n' +
+          '• `/selfchat off` - disable',
+      });
+      return;
+    }
+
+    const nextMode = this.parseBooleanCommandValue(args[0]);
+    if (typeof nextMode !== 'boolean') {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        parseMode: 'markdown',
+        replyTo: message.messageId,
+        text: '⚠️ Please use `/selfchat on` or `/selfchat off`.',
+      });
+      return;
+    }
+
+    const nextConfig = this.applyWhatsAppConfigPatch(adapter, channel, {
+      selfChatMode: nextMode,
+    });
+
+    const next = typeof nextConfig.selfChatMode === 'boolean' ? nextConfig.selfChatMode : false;
+    await adapter.sendMessage({
+      chatId: message.chatId,
+      parseMode: 'markdown',
+      replyTo: message.messageId,
+      text: `✅ Self-chat mode ${next ? 'enabled' : 'disabled'}.`,
+    });
+  }
+
+  private async handleAmbientModeCommand(
+    adapter: ChannelAdapter,
+    message: IncomingMessage,
+    args: string[]
+  ): Promise<void> {
+    if (adapter.type !== 'whatsapp') {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        parseMode: 'markdown',
+        text: '📌 /ambient only controls WhatsApp behavior.',
+        replyTo: message.messageId,
+      });
+      return;
+    }
+
+    const channel = this.channelRepo.findByType(adapter.type);
+    if (!channel) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: '⚠️ Channel config not found.',
+        replyTo: message.messageId,
+      });
+      return;
+    }
+
+    const channelConfig = (channel.config || {}) as Record<string, unknown>;
+    const current = typeof channelConfig.ambientMode === 'boolean' ? channelConfig.ambientMode : false;
+
+    if (args.length === 0) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        parseMode: 'markdown',
+        replyTo: message.messageId,
+        text:
+          '🌐 *WhatsApp Ambient Mode*\n\n' +
+          `Current: ${current ? '✅ enabled' : '❌ disabled'}\n\n` +
+          'When enabled, non-command messages are logged only (inbox for summaries/alerts).\n' +
+          'Use:\n' +
+          '• `/ambient on` - enable\n' +
+          '• `/ambient off` - disable',
+      });
+      return;
+    }
+
+    const nextMode = this.parseBooleanCommandValue(args[0]);
+    if (typeof nextMode !== 'boolean') {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        parseMode: 'markdown',
+        replyTo: message.messageId,
+        text: '⚠️ Please use `/ambient on` or `/ambient off`.',
+      });
+      return;
+    }
+
+    this.applyWhatsAppConfigPatch(adapter, channel, { ambientMode: nextMode });
+
+    await adapter.sendMessage({
+      chatId: message.chatId,
+      parseMode: 'markdown',
+      replyTo: message.messageId,
+      text: `✅ Ambient mode ${nextMode ? 'enabled' : 'disabled'}.`,
+    });
+  }
+
+  private async handleIngestOnlyCommand(
+    adapter: ChannelAdapter,
+    message: IncomingMessage,
+    args: string[]
+  ): Promise<void> {
+    if (adapter.type !== 'whatsapp') {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        parseMode: 'markdown',
+        text: '📌 /ingest only controls WhatsApp behavior.',
+        replyTo: message.messageId,
+      });
+      return;
+    }
+
+    const channel = this.channelRepo.findByType(adapter.type);
+    if (!channel) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: '⚠️ Channel config not found.',
+        replyTo: message.messageId,
+      });
+      return;
+    }
+
+    const channelConfig = (channel.config || {}) as Record<string, unknown>;
+    const current = typeof channelConfig.ingestNonSelfChatsInSelfChatMode === 'boolean'
+      ? channelConfig.ingestNonSelfChatsInSelfChatMode
+      : false;
+    const selfChatEnabled = typeof channelConfig.selfChatMode === 'boolean'
+      ? channelConfig.selfChatMode
+      : (adapter as unknown as { isSelfChatMode?: boolean }).isSelfChatMode === true;
+
+    if (args.length === 0) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        parseMode: 'markdown',
+        replyTo: message.messageId,
+        text:
+          '🧩 *WhatsApp Ingest-Only Mode*\n\n' +
+          `Current: ${current ? '✅ enabled' : '❌ disabled'}\n\n` +
+          'When self-chat is enabled, this also ingests messages from other chats without routing.\n' +
+          `Self-chat: ${selfChatEnabled ? '✅ enabled' : '❌ disabled'}\n\n` +
+          'Use:\n' +
+          '• `/ingest on` - enable\n' +
+          '• `/ingest off` - disable',
+      });
+      return;
+    }
+
+    const nextMode = this.parseBooleanCommandValue(args[0]);
+    if (typeof nextMode !== 'boolean') {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        parseMode: 'markdown',
+        replyTo: message.messageId,
+        text: '⚠️ Please use `/ingest on` or `/ingest off`.',
+      });
+      return;
+    }
+
+    this.applyWhatsAppConfigPatch(adapter, channel, { ingestNonSelfChatsInSelfChatMode: nextMode });
+
+    let note = '';
+    if (nextMode && !selfChatEnabled) {
+      note = '\n\n⚠️ This only affects incoming messages while self-chat is enabled.';
+    }
+
+    await adapter.sendMessage({
+      chatId: message.chatId,
+      parseMode: 'markdown',
+      replyTo: message.messageId,
+      text: `✅ Ingest-only mode for non-self chats ${nextMode ? 'enabled' : 'disabled'}.${note}`,
+    });
+  }
+
+  private async handleResponsePrefixCommand(
+    adapter: ChannelAdapter,
+    message: IncomingMessage,
+    args: string[]
+  ): Promise<void> {
+    if (adapter.type !== 'whatsapp') {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        parseMode: 'markdown',
+        text: '📌 /prefix only controls WhatsApp behavior.',
+        replyTo: message.messageId,
+      });
+      return;
+    }
+
+    const channel = this.channelRepo.findByType(adapter.type);
+    if (!channel) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: '⚠️ Channel config not found.',
+        replyTo: message.messageId,
+      });
+      return;
+    }
+
+    const currentRaw = (channel.config && typeof (channel.config as Record<string, unknown>).responsePrefix === 'string')
+      ? String((channel.config as Record<string, unknown>).responsePrefix)
+      : undefined;
+    const current = currentRaw === '' ? 'off' : (currentRaw ?? '🤖');
+
+    if (args.length === 0) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        parseMode: 'markdown',
+        replyTo: message.messageId,
+        text:
+          '🏷️ *WhatsApp Response Prefix*\n\n' +
+          `Current: ${current === 'off' ? 'off' : `\`${current}\``}\n\n` +
+          'Examples:\n' +
+          '• `/prefix 🤖`\n' +
+          '• `/prefix [bot]`\n' +
+          '• `/prefix off`',
+      });
+      return;
+    }
+
+    const rawValue = args.join(' ').trim();
+    if (!rawValue) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        parseMode: 'markdown',
+        replyTo: message.messageId,
+        text: '⚠️ Please provide a prefix value, e.g. `/prefix 🤖` or `/prefix off`.',
+      });
+      return;
+    }
+
+    const normalized = rawValue.toLowerCase();
+    let nextValue: string;
+    if (['off', 'none', 'disable', 'disabled', 'clear', 'remove'].includes(normalized)) {
+      nextValue = '';
+    } else if (['default', 'reset', 'restore'].includes(normalized)) {
+      nextValue = '🤖';
+    } else {
+      nextValue = rawValue;
+    }
+
+    this.applyWhatsAppConfigPatch(adapter, channel, { responsePrefix: nextValue });
+
+    const displayed = nextValue === '' ? 'off' : nextValue;
+    await adapter.sendMessage({
+      chatId: message.chatId,
+      parseMode: 'markdown',
+      replyTo: message.messageId,
+      text: `✅ WhatsApp response prefix set to: ${displayed === 'off' ? 'off' : `\`${displayed}\``}.`,
+    });
+  }
+
+  private async handleAllowedNumbersCommand(
+    adapter: ChannelAdapter,
+    message: IncomingMessage,
+    args: string[]
+  ): Promise<void> {
+    if (adapter.type !== 'whatsapp') {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        parseMode: 'markdown',
+        text: '📌 /numbers only controls WhatsApp behavior.',
+        replyTo: message.messageId,
+      });
+      return;
+    }
+
+    const channel = this.channelRepo.findByType(adapter.type);
+    if (!channel) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: '⚠️ Channel config not found.',
+        replyTo: message.messageId,
+      });
+      return;
+    }
+
+    const currentNumbers = this.getWhatsAppAllowedNumbers(channel.config);
+    const request = args.join(' ').trim().toLowerCase();
+    if (request === 'clear' || request === 'reset' || request === 'off') {
+      this.applyWhatsAppConfigPatch(adapter, channel, { allowedNumbers: [] });
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        parseMode: 'markdown',
+        replyTo: message.messageId,
+        text: '✅ Number allowlist cleared. All WhatsApp numbers are now allowed.',
+      });
+      return;
+    }
+
+    if (request) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        parseMode: 'markdown',
+        replyTo: message.messageId,
+        text:
+          '⚠️ Use `/numbers` to view the allowlist, `/allow` to add, and `/disallow` to remove.\n\n' +
+          'Tip: use `/numbers clear` to allow all numbers.',
+      });
+      return;
+    }
+
+    const allowlistText = currentNumbers.length === 0
+      ? 'No restriction (all numbers can interact).'
+      : currentNumbers.map((value, index) => `${index + 1}. \`${value}\``).join('\n');
+
+    await adapter.sendMessage({
+      chatId: message.chatId,
+      parseMode: 'markdown',
+      replyTo: message.messageId,
+      text:
+        '📞 *WhatsApp Allowed Numbers*\n\n' +
+        `${allowlistText}\n\n` +
+        'Commands:\n' +
+        '• `/allow +14155551234`\n' +
+        '• `/disallow +14155551234`\n' +
+        '• `/numbers clear`',
+    });
+  }
+
+  private async handleAllowedNumberCommand(
+    adapter: ChannelAdapter,
+    message: IncomingMessage,
+    args: string[],
+    action: 'add' | 'remove'
+  ): Promise<void> {
+    if (adapter.type !== 'whatsapp') {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        parseMode: 'markdown',
+        text: `📌 /${action} only controls WhatsApp behavior.`,
+        replyTo: message.messageId,
+      });
+      return;
+    }
+
+    const channel = this.channelRepo.findByType(adapter.type);
+    if (!channel) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: '⚠️ Channel config not found.',
+        replyTo: message.messageId,
+      });
+      return;
+    }
+
+    if (args.length === 0) {
+      const usage = action === 'add'
+        ? 'Usage: `/allow +14155551234`'
+        : 'Usage: `/disallow +14155551234`';
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        parseMode: 'markdown',
+        replyTo: message.messageId,
+        text: usage,
+      });
+      return;
+    }
+
+    const parsed = this.parseWhatsAppNumbers(args);
+    if (parsed.length === 0) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        parseMode: 'markdown',
+        replyTo: message.messageId,
+        text: '⚠️ I could not parse a valid phone number from that input.',
+      });
+      return;
+    }
+
+    const current = this.getWhatsAppAllowedNumbers(channel.config);
+    const currentSet = new Set(current);
+    let next: string[];
+    if (action === 'add') {
+      next = [...current];
+      for (const number of parsed) {
+        if (!currentSet.has(number)) {
+          next.push(number);
+          currentSet.add(number);
+        }
+      }
+    } else {
+      const removeSet = new Set(parsed);
+      next = current.filter((number) => !removeSet.has(number));
+    }
+
+    if (JSON.stringify(next) === JSON.stringify(current)) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        parseMode: 'markdown',
+        replyTo: message.messageId,
+        text: action === 'add'
+          ? 'ℹ️ The number(s) were already in the allowlist.'
+          : 'ℹ️ The number(s) were not found in the allowlist.',
+      });
+      return;
+    }
+
+    this.applyWhatsAppConfigPatch(adapter, channel, { allowedNumbers: next });
+    const result = next.length === 0
+      ? 'Allowlist is now empty (all numbers allowed).'
+      : `Allowlist updated: ${next.map((item) => `\`${item}\``).join(', ')}`;
+
+    await adapter.sendMessage({
+      chatId: message.chatId,
+      parseMode: 'markdown',
+      replyTo: message.messageId,
+      text: result,
+    });
+  }
+
+  private parseBooleanCommandValue(value: string): boolean | undefined {
+    const normalized = value.trim().toLowerCase();
+    if (['on', 'enable', 'enabled', 'true', '1', 'yes', 'y'].includes(normalized)) {
+      return true;
+    }
+    if (['off', 'disable', 'disabled', 'false', '0', 'no', 'n'].includes(normalized)) {
+      return false;
+    }
+    return undefined;
+  }
+
+  private parseWhatsAppNumbers(args: string[]): string[] {
+    const raw = args.join(' ');
+    const groups = raw.match(/(?:\+?\d[\d\s().-]{3,}\d)/g);
+    const normalized = (groups && groups.length > 0 ? groups : raw.split(/[\s,]+/))
+      .map((item) => item.replace(/\D+/g, '').trim())
+      .filter((item): item is string => item.length >= 5);
+
+    return [...new Set(normalized)];
+  }
+
+  private getWhatsAppAllowedNumbers(channelConfig: unknown): string[] {
+    const raw = (channelConfig as Record<string, unknown>)?.allowedNumbers;
+    if (!Array.isArray(raw)) {
+      return [];
+    }
+    const values = raw
+      .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
+      .filter((entry) => entry.length >= 5);
+    return [...new Set(values)];
+  }
+
+  private applyWhatsAppConfigPatch(
+    adapter: ChannelAdapter,
+    channel: { id: string; config?: unknown },
+    patch: Partial<ChannelConfig>
+  ): Record<string, unknown> {
+    const current = typeof channel.config === 'object' && channel.config !== null
+      ? channel.config as Record<string, unknown>
+      : {};
+    const nextConfig = {
+      ...current,
+      ...patch,
+    };
+    this.channelRepo.update(channel.id, { config: nextConfig });
+    if (adapter.updateConfig) {
+      adapter.updateConfig(patch as ChannelConfig);
+    }
+    return nextConfig;
+  }
+
+  private async handleAgentCommand(
+    adapter: ChannelAdapter,
+    message: IncomingMessage,
+    sessionId: string,
+    args: string[]
+  ): Promise<void> {
+    const session = this.sessionRepo.findById(sessionId);
+    const roles = this.agentRoleRepo.findActive();
+    const selectedRoleId = this.getSessionPreferredAgentRoleId(session);
+    const selectedRole = selectedRoleId ? roles.find((role) => role.id === selectedRoleId) : undefined;
+
+    const sendRoleList = async (): Promise<void> => {
+      if (!roles.length) {
+        await adapter.sendMessage({
+          chatId: message.chatId,
+          text: 'No active agent roles found.\n\nCreate one in Agent Roles settings, then try again.',
+        });
+        return;
+      }
+
+      const roleRows = roles.map((role, index) => {
+        const isActive = role.id === selectedRoleId ? ' (active for this chat)' : '';
+        return `${index + 1}. ${role.icon} ${role.name} — ${role.displayName}${isActive}`;
+      });
+
+      const status = selectedRole
+        ? `Current selection: ${selectedRole.name} (${selectedRole.displayName})`
+        : 'Current selection: not set (using channel default)';
+
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        parseMode: 'markdown',
+        text:
+          `${status}\n\n` +
+          `Available agents:\n` +
+          `${roleRows.join('\n')}\n\n` +
+          `Use:\n` +
+          `• /agent <name-or-id> — set preferred agent for next tasks\n` +
+          `• /agent clear — use channel default`,
+      });
+    };
+
+    const action = (args[0] || '').trim().toLowerCase();
+
+    if (!action || action === 'list') {
+      await sendRoleList();
+      return;
+    }
+
+    if (action === 'clear' || action === 'reset' || action === 'default' || action === 'off') {
+      this.sessionManager.updateSessionContext(sessionId, { preferredAgentRoleId: null });
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: '✅ Cleared agent preference for this chat. New tasks will use channel/router defaults.',
+      });
+      return;
+    }
+
+    if (action === 'help') {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        parseMode: 'markdown',
+        text:
+          'Usage:\n' +
+          '- `/agent` — list available agent roles\n' +
+          '- `/agent <name-or-id>` — pin one role for this chat\n' +
+          '- `/agent clear` — clear pin and use default routing',
+      });
+      return;
+    }
+
+    const selector = args.join(' ').trim();
+    const { role, matches } = this.resolveAgentRoleForSelector(selector);
+
+    if (!role) {
+      if (matches.length > 0) {
+        const suggestionRows = matches
+          .slice(0, 5)
+          .map((match, index) => `${index + 1}. ${match.name} (${match.displayName})`)
+          .join('\n');
+        const extra = matches.length > 5 ? `\n…and ${matches.length - 5} more` : '';
+        await adapter.sendMessage({
+          chatId: message.chatId,
+          text:
+            `No exact match for "${selector}".\n\n` +
+            `Candidates:\n${suggestionRows}${extra}\n\n` +
+            'Use the exact role name or ID, or /agent list.',
+        });
+      } else {
+        await adapter.sendMessage({
+          chatId: message.chatId,
+          text: `No agent role found for "${selector}".\n\nUse /agent to list available roles.`,
+        });
+      }
+      return;
+    }
+
+    this.sessionManager.updateSessionContext(sessionId, { preferredAgentRoleId: role.id });
+    await adapter.sendMessage({
+      chatId: message.chatId,
+      text: `✅ Saved preference for this chat: ${role.icon} ${role.name} (${role.displayName})`,
+    });
   }
 
   /**
@@ -1736,7 +3127,7 @@ export class MessageRouter {
     message: IncomingMessage,
     sessionId: string,
     args: string[],
-    securityContext?: { contextType?: 'dm' | 'group'; deniedTools?: string[] }
+    securityContext?: MessageSecurityContext
   ): Promise<void> {
     const contextType = securityContext?.contextType ?? (message.isGroup ? 'group' : 'dm');
     if (contextType === 'group') {
@@ -1764,24 +3155,101 @@ export class MessageRouter {
     }
 
     const mode = (args[0] || 'today').trim().toLowerCase();
-    const allowedModes = new Set(['today', 'tomorrow', 'week']);
+    const allowedModes = new Set(['morning', 'today', 'tomorrow', 'week']);
     if (!allowedModes.has(mode)) {
       await adapter.sendMessage({
         chatId: message.chatId,
         text:
-          'Usage: `/brief [today|tomorrow|week]`\n\n' +
-          'Example: `/brief today`',
+          'Usage: `/brief [morning|today|tomorrow|week]`\n\n' +
+          'Example: `/brief morning`',
         parseMode: 'markdown',
         replyTo: message.messageId,
       });
       return;
     }
 
-    const prompt = buildBriefPrompt(mode as any);
+    const prompt = buildBriefPrompt(mode as 'morning' | 'today' | 'tomorrow' | 'week');
 
     const synthetic: IncomingMessage = {
       ...message,
       // Ensure this does not get treated as a command by the agent side.
+      text: prompt,
+    };
+
+    await this.forwardToDesktopApp(adapter, synthetic, sessionId, securityContext);
+  }
+
+  private async handleInboxCommand(
+    adapter: ChannelAdapter,
+    message: IncomingMessage,
+    sessionId: string,
+    args: string[],
+    securityContext?: MessageSecurityContext
+  ): Promise<void> {
+    const contextType = securityContext?.contextType ?? (message.isGroup ? 'group' : 'dm');
+    if (contextType === 'group') {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: 'For privacy, `/inbox` is only available in a direct message.',
+        parseMode: 'markdown',
+        replyTo: message.messageId,
+      });
+      return;
+    }
+
+    const first = (args[0] || '').trim().toLowerCase();
+    const second = (args[1] || '').trim().toLowerCase();
+    const modeSet = new Set(['triage', 'autopilot', 'followups']);
+
+    let mode: 'triage' | 'autopilot' | 'followups' = 'triage';
+    let limit = 120;
+
+    if (first) {
+      if (modeSet.has(first)) {
+        mode = first as typeof mode;
+        if (second) {
+          const parsed = parseInt(second, 10);
+          if (!Number.isFinite(parsed) || parsed < 20 || parsed > 300) {
+            await adapter.sendMessage({
+              chatId: message.chatId,
+              parseMode: 'markdown',
+              replyTo: message.messageId,
+              text: 'Invalid message limit. Use a number between 20 and 300.',
+            });
+            return;
+          }
+          limit = parsed;
+        }
+      } else {
+        const parsed = parseInt(first, 10);
+        if (!Number.isFinite(parsed) || parsed < 20 || parsed > 300) {
+          await adapter.sendMessage({
+            chatId: message.chatId,
+            parseMode: 'markdown',
+            replyTo: message.messageId,
+            text:
+              'Usage:\n' +
+              '- `/inbox`\n' +
+              '- `/inbox <limit>`\n' +
+              '- `/inbox triage|autopilot|followups [limit]`\n\n' +
+              'Examples:\n' +
+              '- `/inbox`\n' +
+              '- `/inbox 150`\n' +
+              '- `/inbox autopilot 180`',
+          });
+          return;
+        }
+        limit = parsed;
+      }
+    }
+
+    const prompt = buildInboxPrompt({
+      mode,
+      maxMessages: limit,
+    });
+
+    const synthetic: IncomingMessage = {
+      ...message,
       text: prompt,
     };
 
@@ -1802,7 +3270,7 @@ export class MessageRouter {
     message: IncomingMessage,
     sessionId: string,
     params: { title: string; prompt: string },
-    securityContext?: { contextType?: 'dm' | 'group'; deniedTools?: string[] }
+    securityContext?: MessageSecurityContext
   ): Promise<void> {
     if (!this.agentDaemon) {
       await adapter.sendMessage({
@@ -1839,7 +3307,7 @@ export class MessageRouter {
 
     const baseRestrictions =
       securityContext?.deniedTools?.filter((t) => typeof t === 'string' && t.trim().length > 0) ?? [];
-    const toolRestrictions = Array.from(new Set([...baseRestrictions, '*']));
+    const toolRestrictions = this.buildTaskToolRestrictions(adapter.type, [...baseRestrictions, '*']);
 
     const task = this.taskRepo.create({
       workspaceId: workspace.id,
@@ -1850,6 +3318,7 @@ export class MessageRouter {
       agentConfig: {
         gatewayContext,
         toolRestrictions,
+        originChannel: adapter.type,
         allowUserInput: false,
         retainMemory: false,
       },
@@ -1918,7 +3387,7 @@ export class MessageRouter {
     message: IncomingMessage,
     sessionId: string,
     args: string[],
-    securityContext?: { contextType?: 'dm' | 'group'; deniedTools?: string[] }
+    securityContext?: MessageSecurityContext
   ): Promise<void> {
     const sub = (args[0] || '').trim().toLowerCase();
     if (sub === 'help' || sub === '-h' || sub === '--help') {
@@ -2049,7 +3518,7 @@ export class MessageRouter {
     message: IncomingMessage,
     sessionId: string,
     args: string[],
-    securityContext?: { contextType?: 'dm' | 'group'; deniedTools?: string[] }
+    securityContext?: MessageSecurityContext
   ): Promise<void> {
     const sub = (args[0] || '').trim().toLowerCase();
     if (sub === 'help' || sub === '-h' || sub === '--help') {
@@ -2191,8 +3660,8 @@ export class MessageRouter {
       return;
     }
 
-    const allowedModes = new Set(['today', 'tomorrow', 'week'] as const);
-    let mode: 'today' | 'tomorrow' | 'week' = 'today';
+    const allowedModes = new Set(['morning', 'today', 'tomorrow', 'week'] as const);
+    let mode: 'morning' | 'today' | 'tomorrow' | 'week' = 'today';
     let rest = [...args];
 
     const maybeMode = (rest[0] || '').trim().toLowerCase();
@@ -2208,11 +3677,12 @@ export class MessageRouter {
         replyTo: message.messageId,
         text:
           'Usage:\n' +
-          '- `/brief schedule [today|tomorrow|week] daily <time>`\n' +
-          '- `/brief schedule [today|tomorrow|week] weekdays <time>`\n' +
-          '- `/brief schedule [today|tomorrow|week] weekly <mon|tue|...> <time>`\n' +
-          '- `/brief schedule [today|tomorrow|week] every <interval>`\n\n' +
+          '- `/brief schedule [morning|today|tomorrow|week] daily <time>`\n' +
+          '- `/brief schedule [morning|today|tomorrow|week] weekdays <time>`\n' +
+          '- `/brief schedule [morning|today|tomorrow|week] weekly <mon|tue|...> <time>`\n' +
+          '- `/brief schedule [morning|today|tomorrow|week] every <interval>`\n\n' +
           'Examples:\n' +
+          '- `/brief schedule morning daily 8am`\n' +
           '- `/brief schedule daily 9am`\n' +
           '- `/brief schedule weekdays 09:00`\n' +
           '- `/brief schedule weekly mon 18:30`\n' +
@@ -2457,7 +3927,7 @@ export class MessageRouter {
     message: IncomingMessage,
     sessionId: string,
     args: string[],
-    securityContext?: { contextType?: 'dm' | 'group'; deniedTools?: string[] }
+    securityContext?: MessageSecurityContext
   ): Promise<void> {
     const cronService = getCronService();
     if (!cronService) {
@@ -2695,7 +4165,17 @@ export class MessageRouter {
     const inferredIsGroup = message.isGroup ?? (message.chatId !== message.userId);
     const contextType = securityContext?.contextType ?? (inferredIsGroup ? 'group' : 'dm');
     const gatewayContext = contextType === 'group' ? 'group' : 'private';
-    const toolRestrictions = securityContext?.deniedTools?.filter((t) => typeof t === 'string' && t.trim().length > 0);
+    const toolRestrictions =
+      this.buildTaskToolRestrictions(
+        adapter.type,
+        securityContext?.deniedTools?.filter((t) => typeof t === 'string' && t.trim().length > 0)
+      );
+
+    const taskAgentConfig = {
+      gatewayContext,
+      originChannel: adapter.type,
+      ...(toolRestrictions.length > 0 ? { toolRestrictions } : {}),
+    };
 
     const delivery = {
       enabled: true,
@@ -2740,10 +4220,7 @@ export class MessageRouter {
         description,
         ...(chatContext ? { chatContext } : {}),
         delivery,
-        taskAgentConfig: {
-          gatewayContext,
-          ...(toolRestrictions && toolRestrictions.length > 0 ? { toolRestrictions } : {}),
-        },
+        taskAgentConfig,
       } as any)
       : await cronService.add({
         name,
@@ -2756,10 +4233,7 @@ export class MessageRouter {
         taskTitle: name,
         ...(chatContext ? { chatContext } : {}),
         delivery,
-        taskAgentConfig: {
-          gatewayContext,
-          ...(toolRestrictions && toolRestrictions.length > 0 ? { toolRestrictions } : {}),
-        },
+        taskAgentConfig,
       } as any);
 
     if (!result.ok) {
@@ -3890,7 +5364,7 @@ export class MessageRouter {
     adapter: ChannelAdapter,
     message: IncomingMessage,
     sessionId: string,
-    securityContext?: { contextType?: 'dm' | 'group'; deniedTools?: string[]; agentRoleId?: string }
+    securityContext?: MessageSecurityContext
   ): Promise<void> {
     let session = this.sessionRepo.findById(sessionId);
 
@@ -4024,11 +5498,17 @@ export class MessageRouter {
       : message.text;
 
     const gatewayContext = contextType === 'group' ? 'group' : 'private';
-    const toolRestrictions = securityContext?.deniedTools?.filter((t) => typeof t === 'string' && t.trim().length > 0);
+    const toolRestrictions = this.buildTaskToolRestrictions(
+      adapter.type,
+      securityContext?.deniedTools?.filter((t) => typeof t === 'string' && t.trim().length > 0)
+    );
 
-    // Resolve agent role: router rule > channel config > none
+    // Resolve agent role: router rule > session preference > channel default
     const routedChannel = this.channelRepo.findByType(adapter.type);
+    const trustedGroupMemoryOptIn = routedChannel?.config?.trustedGroupMemoryOptIn === true;
+    const allowSharedContextMemory = gatewayContext !== 'private' && trustedGroupMemoryOptIn;
     const resolvedAgentRoleId = securityContext?.agentRoleId
+      || this.getSessionPreferredAgentRoleId(session)
       || (typeof routedChannel?.config?.defaultAgentRoleId === 'string' ? routedChannel.config.defaultAgentRoleId : undefined);
 
     const task = this.taskRepo.create({
@@ -4038,11 +5518,13 @@ export class MessageRouter {
       status: 'pending',
       agentConfig: {
         gatewayContext,
-        ...(toolRestrictions && toolRestrictions.length > 0 ? { toolRestrictions } : {}),
+        ...(allowSharedContextMemory ? { allowSharedContextMemory: true } : {}),
+        ...(toolRestrictions.length > 0 ? { toolRestrictions } : {}),
+        originChannel: adapter.type,
       },
     });
 
-    // Apply agent role assignment if resolved from router rules or channel config
+    // Apply agent role assignment when routing determines one.
     if (resolvedAgentRoleId) {
       this.taskRepo.update(task.id, { assignedAgentRoleId: resolvedAgentRoleId } as any);
       (task as any).assignedAgentRoleId = resolvedAgentRoleId;
@@ -4140,13 +5622,14 @@ export class MessageRouter {
 
     try {
       const sendNow = async (pendingEntry: typeof pending, rawText: string): Promise<void> => {
+        const isTextOnlyChannel = this.isTextOnlyChannel(pendingEntry.adapter.type);
         const msgCtx = this.getMessageContext();
-        const normalizedText = pendingEntry.adapter.type === 'whatsapp'
+        const normalizedText = isTextOnlyChannel
           ? this.normalizeSimpleChannelMessage(rawText, msgCtx)
           : rawText;
 
         // Split long updates for simple messaging channels to avoid silent drops.
-        if (pendingEntry.adapter.type === 'whatsapp' || pendingEntry.adapter.type === 'imessage') {
+        if (isTextOnlyChannel) {
           const chunks = this.splitMessage(normalizedText, 4000);
           for (const chunk of chunks) {
             await this.sendMessage(pendingEntry.adapter.type, {
@@ -4167,6 +5650,13 @@ export class MessageRouter {
 
       const trimmed = (text || '').trim();
       if (!trimmed) {
+        return;
+      }
+
+      if (this.isTextOnlyChannel(pending.adapter.type) && this.isSimpleChannelToolNoise(trimmed)) {
+        console.log(
+          `[MessageRouter] Suppressed noisy simple-channel update for task ${taskId}: ${trimmed.slice(0, 120)}`
+        );
         return;
       }
 
@@ -4818,7 +6308,7 @@ export class MessageRouter {
     message: IncomingMessage,
     sessionId: string,
     args: string[],
-    securityContext?: { contextType?: 'dm' | 'group' }
+    securityContext?: MessageSecurityContext
   ): Promise<void> {
     const session = this.sessionRepo.findById(sessionId);
     const taskId = session?.taskId;
@@ -5696,6 +7186,51 @@ ${status.queuedCount > 0 ? `Queued task IDs: ${status.queuedTaskIds.join(', ')}`
     text += '*Session*\n';
     text += `🔧 Shell commands: ${session?.shellEnabled ? '✅' : '❌'}\n`;
     text += `📝 Debug mode: ${session?.debugMode ? '✅' : '❌'}\n`;
+
+    const channel = this.channelRepo.findByType(adapter.type);
+    const channelConfig = (channel?.config || {}) as Record<string, unknown>;
+    if (adapter.type === 'whatsapp') {
+      const rawMode = typeof channelConfig.groupRoutingMode === 'string'
+        ? channelConfig.groupRoutingMode
+        : 'mentionsOrCommands';
+      text += '\n*WhatsApp*\n';
+      text += `🧩 Group routing mode: ${this.formatWhatsAppGroupRoutingMode(rawMode)}\n`;
+
+      const selfChatMode = typeof channelConfig.selfChatMode === 'boolean' ? channelConfig.selfChatMode : undefined;
+      if (selfChatMode !== undefined) {
+        text += `📱 Self-chat mode: ${selfChatMode ? '✅' : '❌'}\n`;
+      }
+
+      const ambientMode = typeof channelConfig.ambientMode === 'boolean' ? channelConfig.ambientMode : undefined;
+      if (ambientMode !== undefined) {
+        text += `🌐 Ambient mode: ${ambientMode ? '✅' : '❌'}\n`;
+      }
+
+      const ingestNonSelfChats = typeof channelConfig.ingestNonSelfChatsInSelfChatMode === 'boolean'
+        ? channelConfig.ingestNonSelfChatsInSelfChatMode
+        : undefined;
+      if (ingestNonSelfChats !== undefined) {
+        text += `🧪 Ingest non-self chats in self-chat mode: ${ingestNonSelfChats ? '✅' : '❌'}\n`;
+      }
+
+      const responsePrefix = typeof channelConfig.responsePrefix === 'string'
+        ? channelConfig.responsePrefix
+        : undefined;
+      const responsePrefixDisplay = responsePrefix === '' || responsePrefix === undefined
+        ? 'off'
+        : `\`${responsePrefix}\``;
+      text += `🏷️ Response prefix: ${responsePrefixDisplay}\n`;
+
+      const allowedNumbers = this.getWhatsAppAllowedNumbers(channelConfig);
+      if (allowedNumbers.length === 0) {
+        text += '📞 Allowed numbers: any\n';
+      } else {
+        const preview = allowedNumbers.length <= 5
+          ? allowedNumbers.map((number) => `\`${number}\``).join(', ')
+          : `${allowedNumbers.slice(0, 5).map((number) => `\`${number}\``).join(', ')} (+${allowedNumbers.length - 5} more)`;
+        text += `📞 Allowed numbers: ${preview}\n`;
+      }
+    }
 
     await adapter.sendMessage({
       chatId: message.chatId,

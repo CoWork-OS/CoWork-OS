@@ -3,6 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { normalizeWhatsAppPhoneTarget } from '../channels/whatsapp';
 
 // Mock electron
 vi.mock('electron', () => ({
@@ -231,6 +232,30 @@ describe('WhatsApp Adapter updateConfig', () => {
     it('should be true by default', () => {
       expect(adapter.shouldReconnect).toBe(true);
     });
+  });
+});
+
+describe('normalizeWhatsAppPhoneTarget', () => {
+  it('normalizes user JIDs with device suffix', () => {
+    expect(normalizeWhatsAppPhoneTarget('41796666864:0@s.whatsapp.net')).toBe('41796666864');
+    expect(normalizeWhatsAppPhoneTarget('1234567890:123@s.whatsapp.net')).toBe('1234567890');
+    expect(normalizeWhatsAppPhoneTarget('1555123@s.whatsapp.net')).toBe('1555123');
+  });
+
+  it('normalizes @lid JIDs', () => {
+    expect(normalizeWhatsAppPhoneTarget('123456789@lid')).toBe('123456789');
+    expect(normalizeWhatsAppPhoneTarget('123456789@LID')).toBe('123456789');
+  });
+
+  it('handles repeated whatsapp: prefixes and direct phone values', () => {
+    expect(normalizeWhatsAppPhoneTarget('whatsapp:41796666864:0@s.whatsapp.net')).toBe('41796666864');
+    expect(normalizeWhatsAppPhoneTarget('whatsapp:whatsapp:1555123')).toBe('1555123');
+  });
+
+  it('rejects malformed WhatsApp targets', () => {
+    expect(normalizeWhatsAppPhoneTarget('abc@s.whatsapp.net')).toBeNull();
+    expect(normalizeWhatsAppPhoneTarget('group:120@g.us')).toBeNull();
+    expect(normalizeWhatsAppPhoneTarget('foo')).toBeNull();
   });
 });
 

@@ -49,6 +49,8 @@ export interface IncomingMessage {
   replyTo?: string;
   /** Optional attachments */
   attachments?: MessageAttachment[];
+  /** Optional channel-specific metadata */
+  metadata?: Record<string, unknown>;
   /** Forum topic thread ID (Telegram) */
   threadId?: string;
   /** Whether this is a forum topic message */
@@ -127,6 +129,8 @@ export interface MessageAttachment {
   url?: string;
   /** File data buffer */
   data?: Buffer;
+  /** Indicates if an audio attachment should be sent as a WhatsApp voice note */
+  isVoiceNote?: boolean;
   /** MIME type */
   mimeType?: string;
   /** File name */
@@ -200,12 +204,30 @@ export interface WhatsAppConfig extends ChannelConfig {
   /** Enable message deduplication (default: true) */
   deduplicationEnabled?: boolean;
   /**
+   * Group routing policy:
+   * - all: route every group message
+   * - mentionsOnly: route only messages mentioning the bot
+   * - mentionsOrCommands: route mentions or command-style messages
+   * - commandsOnly: route slash or natural commands
+   *
+   * Defaults to mentionsOrCommands to reduce group noise.
+   */
+  groupRoutingMode?: 'all' | 'mentionsOnly' | 'mentionsOrCommands' | 'commandsOnly';
+  /**
    * Self-chat mode: When true, the bot is running on the same WhatsApp account
    * as the user (messaging yourself). This mode:
    * - Disables read receipts (to avoid marking your own messages as read)
    * - Adds a response prefix to distinguish bot messages from user messages
    */
   selfChatMode?: boolean;
+  /**
+   * Ambient mode:
+   * - true: all non-command inbound messages are ingested and never routed.
+   * - false: normal routing rules apply (subject to command and authorization checks).
+   *
+   * Useful for monitoring a busy conversation stream while keeping command-based interaction.
+   */
+  ambientMode?: boolean;
   /**
    * Prefix to add to bot responses (e.g., "[CoWork]" or "🤖")
    * Only used when selfChatMode is true. Default: "🤖"

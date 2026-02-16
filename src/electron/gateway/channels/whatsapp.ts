@@ -47,6 +47,45 @@ import {
   CallbackQueryHandler,
   WhatsAppConfig,
 } from './types';
+import { isLikelyWhatsAppNaturalCommand, stripWhatsAppCommandPreamble } from '../whatsapp-command-utils';
+
+const WHATSAPP_USER_JID_RE = /^(\d+)(?::\d+)?@s\.whatsapp\.net$/i;
+const WHATSAPP_LID_JID_RE = /^(\d+)@lid$/i;
+
+function stripWhatsAppTargetPrefixes(value: string): string {
+  let candidate = value.trim();
+  while (true) {
+    const stripped = candidate.replace(/^whatsapp:/i, '').trim();
+    if (stripped === candidate) {
+      return candidate;
+    }
+    candidate = stripped;
+  }
+}
+
+export function normalizeWhatsAppPhoneTarget(value: string): string | null {
+  const candidate = stripWhatsAppTargetPrefixes(value);
+  if (!candidate) {
+    return null;
+  }
+
+  const userMatch = candidate.match(WHATSAPP_USER_JID_RE);
+  if (userMatch) {
+    return userMatch[1];
+  }
+
+  const lidMatch = candidate.match(WHATSAPP_LID_JID_RE);
+  if (lidMatch) {
+    return lidMatch[1];
+  }
+
+  if (candidate.includes('@')) {
+    return null;
+  }
+
+  const digits = candidate.replace(/\D+/g, '');
+  return digits.length > 0 ? digits : null;
+}
 
 /**
  * Exponential backoff configuration
@@ -103,6 +142,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
   private processedMessages: Map<string, number> = new Map();
   private readonly DEDUP_CACHE_TTL = 60000; // 1 minute
   private readonly DEDUP_CACHE_MAX_SIZE = 1000;
+  private readonly MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024; // 25MB
   private dedupCleanupTimer?: ReturnType<typeof setTimeout>;
 
   // Connection state
@@ -125,6 +165,11 @@ export class WhatsAppAdapter implements ChannelAdapter {
   // Group metadata cache
   private groupMetaCache: Map<string, { subject?: string; expires: number }> = new Map();
   private readonly GROUP_META_TTL_MS = 5 * 60 * 1000; // 5 minutes
+  private readonly MESSAGE_SEND_RETRY_ATTEMPTS = 3;
+  private readonly MESSAGE_SEND_RETRY_BASE_MS = 250;
+  private readonly MESSAGE_SEND_RETRY_MAX_MS = 2000;
+  private readonly MESSAGE_SEND_RETRY_MULTIPLIER = 1.8;
+  private readonly MESSAGE_SEND_RETRY_JITTER = 0.25;
 
   constructor(config: WhatsAppConfig) {
     this.config = {
@@ -133,6 +178,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
       printQrToTerminal: false,
       selfChatMode: true, // Default to self-chat mode since most users use their own number
       responsePrefix: '🤖', // Default prefix for bot responses
+      groupRoutingMode: 'mentionsOrCommands',
       ...config,
     };
 
@@ -157,7 +203,10 @@ export class WhatsAppAdapter implements ChannelAdapter {
    * Get the response prefix for bot messages
    */
   get responsePrefix(): string {
-    return this.config.responsePrefix || '🤖';
+    if (typeof this.config.responsePrefix === 'string') {
+      return this.config.responsePrefix;
+    }
+    return '🤖';
   }
 
   get status(): ChannelStatus {
@@ -352,16 +401,30 @@ export class WhatsAppAdapter implements ChannelAdapter {
     // Skip status and broadcast messages
     if (remoteJid.endsWith('@status') || remoteJid.endsWith('@broadcast')) return;
 
+    const rawBody = this.extractText(msg.message) ?? '';
+    const body = rawBody.trim();
+    const isGroup = isJidGroup(remoteJid) === true;
+    const participantJid = msg.key?.participant;
+    const quotedMessageContext = this.extractQuotedMessageContext(msg.message);
+    const isCommand = body.startsWith('/');
+    const isPairingCode = body.length > 0 && this.looksLikePairingCode(body);
+    const isNaturalCommand = isLikelyWhatsAppNaturalCommand(body);
+    const botMentioned = isGroup ? this.isSelfMentionedInMessage(msg.message, body) : false;
+    const shouldRouteGroupMessage = this.shouldRouteGroupMessage(isGroup, {
+      isCommand,
+      isPairingCode,
+      botMentioned,
+      isNaturalCommand,
+    });
+
     // CRITICAL: In self-chat mode, only ROUTE messages from self-chat.
     // For ambient workflows we can optionally ingest other chats into the local message log
     // without routing them to the agent (log-only).
     let ingestOnly = false;
     let nonSelfChat = false;
     if (this.isSelfChatMode && this._selfJid) {
-      // Normalize JIDs by removing device suffix (e.g., "123:5@s.whatsapp.net" -> "123@s.whatsapp.net")
-      const normalizeJid = (jid: string) => jid.replace(/:[\d]+@/, '@');
-      const selfJidNormalized = normalizeJid(this._selfJid);
-      const remoteJidNormalized = normalizeJid(remoteJid);
+      const selfJidNormalized = this.normalizeJid(this._selfJid);
+      const remoteJidNormalized = this.normalizeJid(remoteJid);
 
       if (remoteJidNormalized !== selfJidNormalized) {
         nonSelfChat = true;
@@ -384,7 +447,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
 
     // Deduplication
     if (id && this.config.deduplicationEnabled) {
-      const dedupeKey = `${remoteJid}:${id}`;
+      const dedupeKey = `${this.normalizeJid(remoteJid)}:${id}`;
       if (this.processedMessages.has(dedupeKey)) return;
       this.processedMessages.set(dedupeKey, Date.now());
 
@@ -394,18 +457,22 @@ export class WhatsAppAdapter implements ChannelAdapter {
       }
     }
 
-    const isGroup = isJidGroup(remoteJid) === true;
-    const participantJid = msg.key?.participant;
     const from = isGroup ? remoteJid : this.jidToE164(remoteJid) || remoteJid;
     const senderE164 = isGroup
       ? participantJid ? this.jidToE164(participantJid) : null
       : from;
     const isFromMe = msg.key?.fromMe === true;
+    const normalizedText = isGroup ? this.normalizeGroupMessageText(body, botMentioned) : body;
+    const groupTextForRouting = isGroup ? stripWhatsAppCommandPreamble(normalizedText) : normalizedText;
+    if (isGroup && !shouldRouteGroupMessage) {
+      ingestOnly = true;
+    }
 
     // Check access control
-    if (this.config.allowedNumbers && this.config.allowedNumbers.length > 0) {
+    const allowedNumbers = this.getAllowedNumbersSet(this.config.allowedNumbers);
+    if (allowedNumbers.size > 0) {
       const senderNumber = senderE164?.replace(/[^0-9]/g, '');
-      if (senderNumber && !this.config.allowedNumbers.includes(senderNumber)) {
+      if (senderNumber && !allowedNumbers.has(senderNumber)) {
         console.log(`WhatsApp: Ignoring message from unauthorized number: ${senderNumber}`);
         return;
       }
@@ -419,8 +486,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
     }
 
     // Extract message text
-    const body = this.extractText(msg.message);
-    if (!body) {
+    if (!normalizedText) {
       // Check for media placeholder
       const mediaPlaceholder = this.extractMediaPlaceholder(msg.message);
       if (!mediaPlaceholder) return;
@@ -447,14 +513,89 @@ export class WhatsAppAdapter implements ChannelAdapter {
       ? Number(msg.messageTimestamp) * 1000
       : undefined;
 
-    // Download audio attachment if present
+    // Download media attachments if present
+    const mediaIdSuffix = id ? `-${id}` : '';
     const attachments: MessageAttachment[] = [];
-    if (!ingestOnly && msg.message?.audioMessage) {
-      const audioAttachment = await this.downloadAudioAttachment(msg.message);
+
+    if (msg.message?.imageMessage) {
+      const imageAttachment = await this.downloadMediaMessage({
+        media: msg.message.imageMessage as DownloadableMessage,
+        mediaType: 'image',
+        attachmentType: 'image',
+        mimeType: (msg.message.imageMessage as any)?.mimetype,
+        fileName: this.extractWaFilename(msg.message.imageMessage as any),
+        defaultBaseName: `image${mediaIdSuffix}`,
+      });
+      if (imageAttachment) {
+        attachments.push(imageAttachment);
+      }
+    }
+
+    if (msg.message?.videoMessage) {
+      const videoAttachment = await this.downloadMediaMessage({
+        media: msg.message.videoMessage as DownloadableMessage,
+        mediaType: 'video',
+        attachmentType: 'video',
+        mimeType: (msg.message.videoMessage as any)?.mimetype,
+        fileName: this.extractWaFilename(msg.message.videoMessage as any),
+        defaultBaseName: `video${mediaIdSuffix}`,
+      });
+      if (videoAttachment) {
+        attachments.push(videoAttachment);
+      }
+    }
+
+    if (msg.message?.documentMessage) {
+      const documentAttachment = await this.downloadMediaMessage({
+        media: msg.message.documentMessage as DownloadableMessage,
+        mediaType: 'document',
+        attachmentType: 'document',
+        mimeType: (msg.message.documentMessage as any)?.mimetype,
+        fileName: this.extractWaFilename(msg.message.documentMessage as any),
+        defaultBaseName: `document${mediaIdSuffix}`,
+      });
+      if (documentAttachment) {
+        attachments.push(documentAttachment);
+      }
+    }
+
+    if (msg.message?.stickerMessage) {
+      const stickerAttachment = await this.downloadMediaMessage({
+        media: msg.message.stickerMessage as DownloadableMessage,
+        mediaType: 'sticker',
+        attachmentType: 'image',
+        mimeType: (msg.message.stickerMessage as any)?.mimetype,
+        fileName: this.extractWaFilename(msg.message.stickerMessage as any),
+        defaultBaseName: `sticker${mediaIdSuffix}`,
+      });
+      if (stickerAttachment) {
+        attachments.push(stickerAttachment);
+      }
+    }
+
+    if (msg.message?.audioMessage) {
+      const audioAttachment = await this.downloadAudioAttachment({
+        audioMessage: msg.message.audioMessage as DownloadableMessage,
+        mimeType: (msg.message.audioMessage as any)?.mimetype,
+        isVoiceNote: (msg.message.audioMessage as any)?.ptt === true,
+        fileName: this.extractWaFilename(msg.message.audioMessage as any),
+        defaultBaseName: `audio${mediaIdSuffix}`,
+      });
       if (audioAttachment) {
         attachments.push(audioAttachment);
       }
     }
+
+    const mediaPlaceholder = attachments.length === 0 ? this.extractMediaPlaceholder(msg.message) : '';
+    const quotedContextBlock = this.formatQuotedMessageContextBlock(quotedMessageContext);
+    const rawText = normalizedText || mediaPlaceholder || '';
+    const routingText = isGroup ? (groupTextForRouting || mediaPlaceholder || '') : rawText;
+    const textWithReplyContext = quotedContextBlock
+      ? (rawText ? `${quotedContextBlock}\n\n${rawText}` : quotedContextBlock)
+      : rawText;
+    const textForRoutingWithReplyContext = quotedContextBlock
+      ? (routingText ? `${quotedContextBlock}\n\n${routingText}` : quotedContextBlock)
+      : routingText;
 
     // Create incoming message
     // Note: In self-chat mode we may ingest other chats into the message log (ingestOnly).
@@ -473,10 +614,27 @@ export class WhatsAppAdapter implements ChannelAdapter {
       chatId: remoteJid,
       isGroup,
       ...(nonSelfChat && isFromMe ? { direction: 'outgoing_user' as const } : {}),
-      text: body || (attachments.length === 0 ? this.extractMediaPlaceholder(msg.message) : '') || '',
+      ...(quotedMessageContext.messageId ? { replyTo: quotedMessageContext.messageId } : {}),
+      text: isGroup ? textForRoutingWithReplyContext : textWithReplyContext,
       timestamp: messageTimestampMs ? new Date(messageTimestampMs) : new Date(),
       attachments: attachments.length > 0 ? attachments : undefined,
       ...(ingestOnly ? { ingestOnly: true } : {}),
+      metadata: {
+        groupRoutingMode: this.config.groupRoutingMode,
+        botMentioned,
+        groupMessageRoutable: isGroup ? shouldRouteGroupMessage : true,
+        ...(quotedMessageContext.body || quotedMessageContext.senderE164 || quotedMessageContext.senderName || quotedMessageContext.senderJid
+          ? {
+            quotedMessage: {
+              messageId: quotedMessageContext.messageId,
+              senderJid: quotedMessageContext.senderJid,
+              senderE164: quotedMessageContext.senderE164,
+              senderName: quotedMessageContext.senderName,
+              body: quotedMessageContext.body,
+            },
+          }
+          : {}),
+      },
       raw: msg,
     };
 
@@ -578,12 +736,23 @@ export class WhatsAppAdapter implements ChannelAdapter {
 
     // Send media attachments first
     if (message.attachments && message.attachments.length > 0) {
+      let didAttachWithCaption = false;
       for (const attachment of message.attachments) {
-        const result = await this.sendMediaAttachment(jid, attachment, textToSend);
-        messageId = result;
-        // Clear text after first media with caption
-        if (textToSend) {
+        try {
+          const captionForAttachment = didAttachWithCaption
+            ? undefined
+            : textToSend?.trim()
+              ? textToSend
+              : undefined;
+          const result = await this.sendWithRetry(
+            () => this.sendMediaAttachment(jid, attachment, captionForAttachment),
+            'sendMediaAttachment'
+          );
+          messageId = result;
+          didAttachWithCaption = true;
           textToSend = '';
+        } catch (error) {
+          console.error('Failed to send media attachment; sending fallback message only:', error);
         }
       }
     }
@@ -593,7 +762,10 @@ export class WhatsAppAdapter implements ChannelAdapter {
       // Send composing presence
       await this.sendComposingTo(jid);
 
-      const result = await this.sock.sendMessage(jid, { text: textToSend });
+      const result = await this.sendWithRetry(
+        () => this.sock!.sendMessage(jid, { text: textToSend }),
+        'sendText'
+      );
       messageId = result?.key?.id || `wa-${Date.now()}`;
     }
 
@@ -610,34 +782,52 @@ export class WhatsAppAdapter implements ChannelAdapter {
   ): Promise<string> {
     if (!this.sock) throw new Error('WhatsApp is not connected');
 
+    const resolvedType = attachment.type === 'file' ? 'document' : attachment.type;
+    const payload = await this.resolveAttachmentPayload(attachment);
+
+    if (!payload || payload.length === 0) {
+      throw new Error(`No payload for attachment: ${attachment.fileName || attachment.type}`);
+    }
+
+    if (payload.length > this.MAX_ATTACHMENT_BYTES) {
+      throw new Error(`Attachment too large: ${payload.length} bytes`);
+    }
+    if (attachment.size && attachment.size > this.MAX_ATTACHMENT_BYTES) {
+      throw new Error(`Attachment metadata size exceeds limit: ${attachment.size} bytes`);
+    }
+
+    const isVoiceNote = attachment.isVoiceNote === true;
+    const fileUrlName = this.extractAttachmentFileNameFromUrl(attachment.url);
+    const inferredDocumentExt = this.inferAttachmentExtension(attachment.mimeType, resolvedType, attachment.fileName || fileUrlName);
+    const documentFileName = this.normalizeAttachmentName(
+      attachment.fileName || fileUrlName || `document.${inferredDocumentExt}`,
+      inferredDocumentExt
+    );
+
     let content: AnyMessageContent;
 
-    if (attachment.type === 'image' && attachment.url) {
-      const buffer = fs.readFileSync(attachment.url);
+    if (resolvedType === 'image') {
       content = {
-        image: buffer,
+        image: payload,
         caption,
         mimetype: attachment.mimeType || 'image/jpeg',
       };
-    } else if (attachment.type === 'document' && attachment.url) {
-      const buffer = fs.readFileSync(attachment.url);
+    } else if (resolvedType === 'document') {
       content = {
-        document: buffer,
-        fileName: attachment.fileName || path.basename(attachment.url),
+        document: payload,
+        fileName: documentFileName,
         mimetype: attachment.mimeType || 'application/octet-stream',
         caption,
       };
-    } else if (attachment.type === 'audio' && attachment.url) {
-      const buffer = fs.readFileSync(attachment.url);
+    } else if (resolvedType === 'audio') {
       content = {
-        audio: buffer,
+        audio: payload,
         mimetype: attachment.mimeType || 'audio/mpeg',
-        ptt: true, // Voice note
+        ptt: isVoiceNote,
       };
-    } else if (attachment.type === 'video' && attachment.url) {
-      const buffer = fs.readFileSync(attachment.url);
+    } else if (resolvedType === 'video') {
       content = {
-        video: buffer,
+        video: payload,
         caption,
         mimetype: attachment.mimeType || 'video/mp4',
       };
@@ -645,8 +835,132 @@ export class WhatsAppAdapter implements ChannelAdapter {
       throw new Error(`Unsupported attachment type: ${attachment.type}`);
     }
 
-    const result = await this.sock.sendMessage(jid, content);
+    const result = await this.sendWithRetry(
+      () => this.sock!.sendMessage(jid, content),
+      'sendMediaAttachment'
+    );
     return result?.key?.id || `wa-${Date.now()}`;
+  }
+
+  /**
+   * Resolve attachment data from either in-memory payload or local/remote URL.
+   */
+  private async resolveAttachmentPayload(attachment: MessageAttachment): Promise<Buffer | null> {
+    if (attachment.data && attachment.data.length > 0) {
+      return attachment.data;
+    }
+
+    const source = attachment.url?.trim();
+    if (!source) {
+      return null;
+    }
+
+    if (fs.existsSync(source)) {
+      const fileStats = fs.statSync(source);
+      if (!fileStats.isFile()) {
+        throw new Error(`Attachment source is not a file: ${source}`);
+      }
+      if (fileStats.size > this.MAX_ATTACHMENT_BYTES) {
+        throw new Error(`Attachment file exceeds size limit: ${fileStats.size} bytes`);
+      }
+      return fs.readFileSync(source);
+    }
+
+    if (/^file:\/\//i.test(source)) {
+      const filePath = decodeURIComponent(new URL(source).pathname || '');
+      if (filePath && fs.existsSync(filePath)) {
+        const fileStats = fs.statSync(filePath);
+        if (!fileStats.isFile()) {
+          throw new Error(`Attachment source is not a file: ${filePath}`);
+        }
+        if (fileStats.size > this.MAX_ATTACHMENT_BYTES) {
+          throw new Error(`Attachment file exceeds size limit: ${fileStats.size} bytes`);
+        }
+        return fs.readFileSync(filePath);
+      }
+    }
+
+    if (/^https?:\/\//i.test(source) || source.startsWith('data:')) {
+      const response = await fetch(source);
+      if (!response.ok) {
+        throw new Error(`Failed to download attachment from URL: ${response.status} ${response.statusText}`);
+      }
+      const headerLength = response.headers.get('content-length');
+      if (headerLength) {
+        const contentLength = Number.parseInt(headerLength, 10);
+        if (Number.isFinite(contentLength) && contentLength > this.MAX_ATTACHMENT_BYTES) {
+          throw new Error(`Remote attachment exceeds size limit: ${contentLength} bytes`);
+        }
+      }
+      const arrayBuffer = await response.arrayBuffer();
+      return Buffer.from(arrayBuffer);
+    }
+
+    return null;
+  }
+
+  /**
+   * Extract a stable file name from an attachment URL or path.
+   */
+  private extractAttachmentFileNameFromUrl(url?: string): string | undefined {
+    if (!url) {
+      return undefined;
+    }
+
+    const trimmed = url.trim();
+    if (!trimmed) {
+      return undefined;
+    }
+
+    try {
+      const parsed = new URL(trimmed);
+      const base = path.basename(parsed.pathname || '');
+      return base && base !== '/' && base !== '.' ? base : undefined;
+    } catch {
+      const base = path.basename(trimmed);
+      return base && base !== '.' ? base : undefined;
+    }
+  }
+
+  /**
+   * Send operation with retry + exponential jitter.
+   */
+  private async sendWithRetry<T>(operation: () => Promise<T>, operationName = 'operation'): Promise<T> {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= this.MESSAGE_SEND_RETRY_ATTEMPTS; attempt++) {
+      try {
+        return await operation();
+      } catch (error) {
+        lastError = error;
+        if (attempt >= this.MESSAGE_SEND_RETRY_ATTEMPTS) {
+          break;
+        }
+
+        const delayMs = this.calculateSendRetryDelay(attempt);
+        console.warn(`[WhatsApp] ${operationName} attempt ${attempt} failed, retrying in ${delayMs}ms`);
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+
+    throw new Error(
+      `WhatsApp ${operationName} failed after ${this.MESSAGE_SEND_RETRY_ATTEMPTS} attempts: ${
+        lastError instanceof Error ? lastError.message : 'Unknown error'
+      }`
+    );
+  }
+
+  /**
+   * Calculate exponential backoff delay with jitter.
+   */
+  private calculateSendRetryDelay(attempt: number): number {
+    const exponentialDelay = Math.min(
+      this.MESSAGE_SEND_RETRY_MAX_MS,
+      this.MESSAGE_SEND_RETRY_BASE_MS * Math.pow(this.MESSAGE_SEND_RETRY_MULTIPLIER, attempt - 1)
+    );
+    const jitter = exponentialDelay * this.MESSAGE_SEND_RETRY_JITTER;
+    const minDelay = Math.max(150, exponentialDelay - jitter);
+    const maxDelay = exponentialDelay + jitter;
+    return Math.floor(minDelay + Math.random() * (maxDelay - minDelay));
   }
 
   /**
@@ -1028,12 +1342,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
    */
   private jidToE164(jid: string | null | undefined): string | null {
     if (!jid) return null;
-
-    // Remove @s.whatsapp.net or @c.us suffix
-    const match = jid.match(/^(\d+)@/);
-    if (!match) return null;
-
-    return match[1];
+    return normalizeWhatsAppPhoneTarget(jid);
   }
 
   /**
@@ -1080,9 +1389,75 @@ export class WhatsAppAdapter implements ChannelAdapter {
     return undefined;
   }
 
+  private extractQuotedMessageContext(message: proto.IMessage | null | undefined): {
+    messageId?: string;
+    senderJid?: string;
+    senderE164?: string;
+    senderName?: string;
+    body?: string;
+  } {
+    const contextInfo =
+      (message as any)?.extendedTextMessage?.contextInfo ??
+      (message as any)?.imageMessage?.contextInfo ??
+      (message as any)?.videoMessage?.contextInfo ??
+      (message as any)?.documentMessage?.contextInfo ??
+      (message as any)?.audioMessage?.contextInfo ??
+      (message as any)?.stickerMessage?.contextInfo;
+
+    if (!contextInfo) {
+      return {};
+    }
+
+    const quotedMessage = typeof contextInfo.quotedMessage === 'object'
+      ? (contextInfo.quotedMessage as proto.IMessage)
+      : undefined;
+    const senderJid = typeof contextInfo.participant === 'string' ? contextInfo.participant : undefined;
+    const senderE164 = senderJid ? (this.jidToE164(senderJid) ?? undefined) : undefined;
+    const quotedBody = this.extractText(quotedMessage)?.trim();
+    const quotedMediaPlaceholder = quotedMessage
+      ? this.extractMediaPlaceholder(quotedMessage as proto.IMessage)
+      : undefined;
+
+    const quotedText = quotedBody
+      ? quotedBody
+      : (typeof contextInfo.quotedMessageText === 'string' && contextInfo.quotedMessageText.trim())
+        ? contextInfo.quotedMessageText.trim()
+        : quotedMediaPlaceholder;
+
+    return {
+      messageId:
+        typeof contextInfo.stanzaId === 'string'
+          ? contextInfo.stanzaId
+          : (typeof contextInfo.quotedMessageId === 'string'
+            ? contextInfo.quotedMessageId
+            : undefined),
+      senderJid,
+      senderE164,
+      senderName: senderE164 ?? senderJid ?? undefined,
+      body: quotedText ? this.truncateTextForReplyContext(quotedText, 500) : undefined,
+    };
+  }
+
+  private formatQuotedMessageContextBlock(context: {
+    senderE164?: string;
+    senderName?: string;
+    body?: string;
+  }): string | undefined {
+    const rawBody = (context.body || '').trim();
+    if (!rawBody) return undefined;
+
+    const quotedFrom = context.senderName || context.senderE164 || 'a previous message';
+    return `💬 In reply to ${quotedFrom}\n> ${rawBody.replace(/\n/g, '\n> ')}`;
+  }
+
+  private truncateTextForReplyContext(value: string, maxLength: number): string {
+    if (value.length <= maxLength) return value;
+    return `${value.slice(0, maxLength).trimEnd()}…`;
+  }
+
   /**
    * Extract media placeholder from message
-   */
+  */
   private extractMediaPlaceholder(message: proto.IMessage | null | undefined): string | undefined {
     if (!message) return undefined;
 
@@ -1100,58 +1475,285 @@ export class WhatsAppAdapter implements ChannelAdapter {
   /**
    * Download audio from a WhatsApp message and return as attachment
    */
-  private async downloadAudioAttachment(message: proto.IMessage): Promise<MessageAttachment | null> {
-    const audioMessage = message.audioMessage;
-    if (!audioMessage) return null;
+  private async downloadAudioAttachment(params: {
+    audioMessage: DownloadableMessage;
+    mimeType?: string;
+    isVoiceNote?: boolean;
+    fileName?: string;
+    defaultBaseName?: string;
+  }): Promise<MessageAttachment | null> {
+    const defaultBaseName = params.isVoiceNote
+      ? `voice_message${params.defaultBaseName ? `-${params.defaultBaseName}` : ''}`
+      : (params.defaultBaseName || 'audio');
+    return this.downloadMediaMessage({
+      media: params.audioMessage,
+      mediaType: 'audio',
+      attachmentType: 'audio',
+      mimeType: params.mimeType,
+      fileName: params.fileName,
+      defaultBaseName,
+      isVoiceNote: params.isVoiceNote,
+    });
+  }
 
+  private async downloadMediaMessage(params: {
+    media: DownloadableMessage;
+    mediaType: 'audio' | 'image' | 'video' | 'document' | 'sticker';
+    attachmentType: MessageAttachment['type'];
+    mimeType?: string;
+    fileName?: string;
+    isVoiceNote?: boolean;
+    defaultBaseName: string;
+  }): Promise<MessageAttachment | null> {
     try {
-      console.log('[WhatsApp] Downloading audio message...');
-
-      // Download the audio content
-      const stream = await downloadContentFromMessage(
-        audioMessage as DownloadableMessage,
-        'audio'
-      );
-
-      // Collect the stream into a buffer
-      const chunks: Buffer[] = [];
-      for await (const chunk of stream) {
-        chunks.push(chunk as Buffer);
+      const buffer = await this.bufferFromWhatsAppMedia(params.media, params.mediaType);
+      if (!buffer.length || buffer.length > this.MAX_ATTACHMENT_BYTES) {
+        console.warn('[WhatsApp] Attachment download skipped (size unacceptable):', params.defaultBaseName, buffer.length);
+        return null;
       }
-      const audioBuffer = Buffer.concat(chunks);
 
-      console.log(`[WhatsApp] Downloaded audio: ${audioBuffer.length} bytes`);
-
-      // Determine mime type (usually audio/ogg for voice messages)
-      const mimeType = audioMessage.mimetype || 'audio/ogg; codecs=opus';
-      const isVoiceNote = audioMessage.ptt === true;
-      const fileName = isVoiceNote
-        ? `voice_message_${Date.now()}.ogg`
-        : `audio_${Date.now()}.${this.getAudioExtension(mimeType)}`;
+      const ext = this.inferAttachmentExtension(params.mimeType, params.attachmentType, params.fileName);
+      const fileName = this.normalizeAttachmentName(params.fileName || `${params.defaultBaseName}.${ext}`, ext);
 
       return {
-        type: 'audio',
-        data: audioBuffer,
-        mimeType,
+        type: params.attachmentType,
+        data: buffer,
+        mimeType: params.mimeType,
         fileName,
-        size: audioBuffer.length,
+        size: buffer.length,
+        isVoiceNote: params.isVoiceNote,
       };
     } catch (error) {
-      console.error('[WhatsApp] Failed to download audio:', error);
+      console.error('[WhatsApp] Failed to download attachment:', error);
       return null;
     }
   }
 
+  private async bufferFromWhatsAppMedia(
+    media: DownloadableMessage,
+    mediaType: 'audio' | 'image' | 'video' | 'document' | 'sticker'
+  ): Promise<Buffer> {
+    const stream = await downloadContentFromMessage(media, mediaType);
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) {
+      chunks.push(chunk as Buffer);
+    }
+    return Buffer.concat(chunks);
+  }
+
+  private normalizeAttachmentName(fileName: string, ext: string): string {
+    const trimmed = fileName.trim();
+    const currentExt = path.extname(trimmed);
+    if (currentExt) {
+      return trimmed;
+    }
+    const safe = trimmed.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/_{2,}/g, '_');
+    return `${safe}.${ext || 'bin'}`;
+  }
+
+  private inferAttachmentExtension(
+    mimeType: string | undefined,
+    attachmentType: MessageAttachment['type'],
+    fileName?: string
+  ): string {
+    const explicitExt = fileName ? path.extname(fileName).replace(/^\./, '').toLowerCase() : '';
+    if (explicitExt) return explicitExt;
+
+    if (!mimeType) {
+      return attachmentType === 'audio' ? 'ogg' : attachmentType === 'image' ? 'jpg' : 'bin';
+    }
+
+    const mime = mimeType.toLowerCase();
+    if (mime.includes('image/jpeg')) return 'jpg';
+    if (mime.includes('image/png')) return 'png';
+    if (mime.includes('image/webp')) return 'webp';
+    if (mime.includes('image/gif')) return 'gif';
+    if (mime.includes('image/bmp')) return 'bmp';
+    if (mime.includes('audio/mpeg') || mime.includes('audio/mp3')) return 'mp3';
+    if (mime.includes('audio/m4a') || mime.includes('audio/aac')) return 'm4a';
+    if (mime.includes('audio/ogg')) return 'ogg';
+    if (mime.includes('audio/wav')) return 'wav';
+    if (mime.includes('audio/aac')) return 'm4a';
+    if (mime.includes('audio/webm')) return 'webm';
+    if (mime.includes('video/mp4')) return 'mp4';
+    if (mime.includes('video/webm')) return 'webm';
+    if (mime.includes('video/quicktime')) return 'mov';
+    if (mime.includes('application/pdf')) return 'pdf';
+    if (mime.includes('text/plain')) return 'txt';
+    return attachmentType === 'audio' ? 'ogg' : attachmentType === 'image' ? 'jpg' : 'bin';
+  }
+
+  private extractWaFilename(message: { fileName?: string } | null | undefined): string | undefined {
+    const candidate = message?.fileName?.trim();
+    return candidate && candidate.length > 0 ? candidate : undefined;
+  }
+
   /**
-   * Get file extension from mime type
+   * Check if text looks like a pairing code.
    */
-  private getAudioExtension(mimeType: string): string {
-    if (mimeType.includes('ogg')) return 'ogg';
-    if (mimeType.includes('mp3') || mimeType.includes('mpeg')) return 'mp3';
-    if (mimeType.includes('wav')) return 'wav';
-    if (mimeType.includes('m4a') || mimeType.includes('mp4')) return 'm4a';
-    if (mimeType.includes('webm')) return 'webm';
-    return 'audio';
+  private looksLikePairingCode(text: string): boolean {
+    return /^[A-Z0-9]{6,8}$/i.test(text);
+  }
+
+  /**
+   * Normalize a WhatsApp JID (removes device suffix like :x).
+   */
+  private normalizeJid(jid: string): string {
+    const candidate = stripWhatsAppTargetPrefixes(jid);
+    return candidate.replace(/:\d+@/, '@');
+  }
+
+  /**
+   * Strip non-digits from a phone/JID value.
+   */
+  private extractDigits(value: string): string {
+    return value.replace(/\D+/g, '');
+  }
+
+  /**
+   * Candidate tokens that identify the bot account.
+   */
+  private getBotMentionTokens(): string[] {
+    const tokens = new Set<string>();
+
+    if (this._selfJid) {
+      tokens.add(this.normalizeJid(this._selfJid));
+      tokens.add(this.extractDigits(this._selfJid));
+    }
+
+    if (this._selfE164) {
+      tokens.add(this._selfE164);
+      tokens.add(`@${this._selfE164}`);
+      tokens.add(this.normalizeJid(`${this._selfE164}@s.whatsapp.net`));
+    }
+
+    return [...tokens].filter(Boolean);
+  }
+
+  /**
+   * Extract mention-like tokens from text (e.g. '@1415...', '@cowork').
+   */
+  private extractMentionTokensFromText(text: string): string[] {
+    return text
+      .match(/@[^\s@.,!?;:\)\]]+/g)
+      ?.map((token) => token.trim())
+      ?.filter((token) => token.length > 1) ?? [];
+  }
+
+  private getAllowedNumbersSet(allowedNumbers: unknown): Set<string> {
+    if (!Array.isArray(allowedNumbers) || allowedNumbers.length === 0) {
+      return new Set();
+    }
+
+    const values = allowedNumbers
+      .filter((value): value is string => typeof value === 'string')
+      .map((value) => normalizeWhatsAppPhoneTarget(value))
+      .filter((value): value is string => Boolean(value))
+      .flatMap((value) => {
+        const normalized = value.replace(/[^0-9]/g, '').trim();
+        return normalized.length >= 5 ? [normalized] : [];
+      });
+
+    return new Set(values);
+  }
+
+  /**
+   * Check whether this group message mentions the bot.
+   */
+  private isSelfMentionedInMessage(message: proto.IMessage | null | undefined, text: string): boolean {
+    const botTokens = this.getBotMentionTokens();
+    const botDigits = new Set(botTokens.map((token) => this.extractDigits(token)));
+    if (botDigits.size === 0) {
+      return false;
+    }
+
+    const contextInfo =
+      (message as any)?.extendedTextMessage?.contextInfo ??
+      (message as any)?.imageMessage?.contextInfo ??
+      (message as any)?.videoMessage?.contextInfo ??
+      (message as any)?.documentMessage?.contextInfo;
+
+    const mentionedJids = Array.isArray(contextInfo?.mentionedJid)
+      ? contextInfo.mentionedJid
+      : [];
+
+    for (const mentioned of mentionedJids) {
+      if (typeof mentioned === 'string' && botDigits.has(this.extractDigits(mentioned))) {
+        return true;
+      }
+    }
+
+    for (const mention of this.extractMentionTokensFromText(text)) {
+      if (botDigits.has(this.extractDigits(mention))) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Determine whether a group message should be routed to the agent.
+   */
+  private shouldRouteGroupMessage(
+    isGroup: boolean,
+    params: {
+      isCommand: boolean;
+      isPairingCode: boolean;
+      botMentioned: boolean;
+      isNaturalCommand: boolean;
+    }
+  ): boolean {
+    if (!isGroup) {
+      return true;
+    }
+
+    if (params.isPairingCode) {
+      return true;
+    }
+
+    const mode = this.config.groupRoutingMode || 'mentionsOrCommands';
+    if (mode === 'all') {
+      return true;
+    }
+    if (mode === 'mentionsOrCommands') {
+      return params.botMentioned || params.isCommand || params.isNaturalCommand;
+    }
+    if (mode === 'commandsOnly') {
+      return params.isCommand || params.isNaturalCommand;
+    }
+    if (mode === 'mentionsOnly') {
+      return params.botMentioned;
+    }
+    return params.botMentioned || params.isCommand || params.isNaturalCommand;
+  }
+
+  /**
+   * Normalize group messages by removing self mentions before forwarding.
+   */
+  private normalizeGroupMessageText(body: string, botMentioned: boolean): string {
+    if (!botMentioned) {
+      return body;
+    }
+
+    const botDigits = new Set(
+      this.getBotMentionTokens().map((token) => this.extractDigits(token)).filter(Boolean)
+    );
+
+    let normalized = body;
+    const mentions = this.extractMentionTokensFromText(body);
+
+    for (const mention of mentions) {
+      if (!botDigits.has(this.extractDigits(mention))) {
+        continue;
+      }
+
+      const escaped = mention.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const tokenPattern = new RegExp(`\\s*${escaped}\\s*`, 'gi');
+      normalized = normalized.replace(tokenPattern, ' ');
+    }
+
+    return normalized.replace(/\s+/g, ' ').trim();
   }
 
   /**

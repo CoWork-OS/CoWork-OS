@@ -320,8 +320,9 @@ export function parseWeekday(input: string): number | null {
 
 // ── Prompt builders ─────────────────────────────────────────────────────────
 
-export function buildBriefPrompt(mode: 'today' | 'tomorrow' | 'week', opts?: { templateForCron?: boolean }): string {
+export function buildBriefPrompt(mode: 'morning' | 'today' | 'tomorrow' | 'week', opts?: { templateForCron?: boolean }): string {
   const templateForCron = opts?.templateForCron === true;
+  const normalizedMode = mode === 'morning' ? 'today' : mode;
 
   const formatLocalYmd = (d: Date): string =>
     `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -336,35 +337,87 @@ export function buildBriefPrompt(mode: 'today' | 'tomorrow' | 'week', opts?: { t
   const weekEnd = formatLocalYmd(weekEndDate);
 
   const rangeText = templateForCron
-    ? (mode === 'today'
+    ? (normalizedMode === 'today'
       ? 'Date: {{today}}'
-      : mode === 'tomorrow'
+      : normalizedMode === 'tomorrow'
         ? 'Date: {{tomorrow}}'
         : 'Range: {{today}} to {{week_end}}')
-    : (mode === 'today'
+    : (normalizedMode === 'today'
       ? `Date: ${today}`
-      : mode === 'tomorrow'
+      : normalizedMode === 'tomorrow'
         ? `Date: ${tomorrow}`
         : `Range: ${today} to ${weekEnd}`);
 
   return [
-    'Generate a concise personal brief.',
+    'Generate a concise chief-of-staff brief.',
     '',
     `Timeframe: ${mode}`,
     rangeText,
     '',
     'Include sections:',
-    '- Calendar: upcoming events in this timeframe (times, locations if available, conflicts).',
-    '- Inbox: important new messages/emails that likely need action.',
-    '- Reminders / tasks: anything due soon.',
-    '- Suggested next actions: 3-7 bullet items, ordered by urgency.',
+    '- Executive summary: 3-6 bullets of what matters most right now.',
+    '- Calendar: upcoming events in this timeframe (times, locations if available, conflicts, prep items).',
+    '- Inbox triage: important new messages/emails that likely need action, grouped as urgent/today/this-week.',
+    '- Reminders / tasks: anything due soon, including likely blockers.',
+    '- Ops signals (optional): notable GitHub notifications, revenue/payment changes, weather, and market/context signals if available.',
+    '- Suggested next actions: 4-8 bullet items ordered by urgency with explicit owner and suggested timing.',
+    '- Missing data: briefly note sources that were unavailable so the user knows what to connect.',
     '',
     'Data sources (use what is available):',
     '- Prefer calendar_action + gmail_action if configured. If calendar_action is unavailable and you are on macOS, use apple_calendar_action for Apple Calendar.',
     '- If gmail_action is unavailable, use email_imap_unread if available; otherwise use the Email channel message log via channel_list_chats/channel_history.',
     '- If Apple Reminders is available on this machine, use apple_reminders_action to include relevant reminders; otherwise skip reminders.',
+    '- If weather tools are available (or web_fetch/search access is enabled), include a short weather signal for key travel/meeting windows.',
+    '- If GitHub/Stripe/finance MCP tools are connected, include only high-signal changes (e.g., failing builds, urgent mentions, unusual revenue movement).',
+    '- For newsletter load, use channel history digests if relevant and available.',
     '',
-    'Output should be readable on mobile. Use short bullets, no long paragraphs.',
+    'Output should be readable on mobile and suitable for Telegram/WhatsApp delivery.',
+    'Use short bullets, no long paragraphs, and never fabricate unavailable data.',
+  ].join('\n');
+}
+
+export function buildInboxPrompt(opts?: {
+  mode?: 'triage' | 'autopilot' | 'followups';
+  maxMessages?: number;
+}): string {
+  const mode = opts?.mode ?? 'triage';
+  const rawMaxMessages = typeof opts?.maxMessages === 'number' ? opts.maxMessages : Number.NaN;
+  const maxMessages = Number.isFinite(rawMaxMessages)
+    ? Math.max(20, Math.min(300, Math.trunc(rawMaxMessages)))
+    : 120;
+
+  const modeGuidance = mode === 'autopilot'
+    ? 'Focus on full inbox autopilot recommendations (prioritize, cleanup, and draft responses).'
+    : mode === 'followups'
+      ? 'Focus on extracting follow-ups and commitments that need replies.'
+      : 'Focus on fast inbox triage and priority sorting.';
+
+  return [
+    'Run an inbox manager workflow.',
+    '',
+    `Mode: ${mode}`,
+    `Message limit target: ${maxMessages}`,
+    '',
+    modeGuidance,
+    '',
+    'Data collection (use available sources in this order):',
+    '- Prefer gmail_action (search/list/read) when configured.',
+    '- Fallback to email_imap_unread for unread mailbox access.',
+    '- If email APIs are unavailable, use Email channel logs via channel_list_chats + channel_history.',
+    '',
+    `Fetch up to ${maxMessages} recent/unread items and classify each as: urgent, today, this-week, or no-action.`,
+    '',
+    'Required output:',
+    '- Priority triage table (sender, subject, category, why it matters).',
+    '- Reply-needed list with concise draft replies.',
+    '- Cleanup candidates (newsletters/promotions) with unsubscribe/archive suggestions.',
+    '- Follow-up queue with suggested reminders.',
+    '- Proposed automation rules the user can schedule (for example daily triage or newsletter digests).',
+    '',
+    'Safety rules:',
+    '- Do not send, archive, delete, label, unsubscribe, or contact anyone without explicit user confirmation.',
+    '- If any required capability is missing, report exactly what is missing and continue with available data.',
+    '- Keep output concise and mobile-friendly.',
   ].join('\n');
 }
 

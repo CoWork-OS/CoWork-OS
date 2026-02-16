@@ -115,6 +115,17 @@ const CONNECTORS: ConnectorDefinition[] = [
       { key: 'OKTA_API_TOKEN', label: 'API Token', type: 'password' },
     ],
   },
+  {
+    key: 'resend',
+    name: 'Resend',
+    registryId: 'resend',
+    description: 'Transactional email send + inbound webhook management.',
+    supportsOAuth: false,
+    envFields: [
+      { key: 'RESEND_API_KEY', label: 'API Key', type: 'password' },
+      { key: 'RESEND_BASE_URL', label: 'Base URL', placeholder: 'https://api.resend.com' },
+    ],
+  },
 ];
 
 const getStatusColor = (status: MCPConnectionStatus): string => {

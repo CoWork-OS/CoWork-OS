@@ -16,5 +16,6 @@ Reference implementations:
 - `connectors/linear-mcp`
 - `connectors/asana-mcp`
 - `connectors/okta-mcp`
+- `connectors/resend-mcp`
 
 See `docs/enterprise-connectors.md` for the Phase 1 connector contract.

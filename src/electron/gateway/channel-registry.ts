@@ -365,10 +365,35 @@ export class ChannelRegistry extends EventEmitter {
               description: 'Enable self-chat mode (messaging yourself)',
               default: true,
             },
+            groupRoutingMode: {
+              type: 'string',
+              description: 'Group message routing mode (all, mentionsOnly, mentionsOrCommands, commandsOnly)',
+              default: 'mentionsOrCommands',
+            },
+            sendReadReceipts: {
+              type: 'boolean',
+              description: 'Send read receipts',
+              default: true,
+            },
+            ambientMode: {
+              type: 'boolean',
+              description: 'Enable ambient ingestion (non-command messages are logged only)',
+              default: false,
+            },
+            deduplicationEnabled: {
+              type: 'boolean',
+              description: 'Enable message deduplication',
+              default: true,
+            },
             responsePrefix: {
               type: 'string',
               description: 'Prefix for bot responses',
               default: '🤖',
+            },
+            ingestNonSelfChatsInSelfChatMode: {
+              type: 'boolean',
+              description: 'Ingest non-self-chat messages in self-chat mode without routing to the agent',
+              default: false,
             },
           },
           required: [],

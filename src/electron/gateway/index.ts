@@ -246,6 +246,17 @@ export class ChannelGateway {
     const onToolError = (data: { taskId: string; tool?: string; error?: string }) => {
       const toolName = data.tool || 'Unknown tool';
       const errorMsg = data.error || 'Unknown error';
+      const normalizedTool = String(toolName).toLowerCase();
+      const isCanvasTool = normalizedTool.startsWith('canvas_');
+      const noisyCanvasError =
+        isCanvasTool &&
+        /content parameter is required|no non-placeholder HTML|placeholder|session_id|required session|no active canvas|session .*not found|canvas session|could not locate|not available in current context|not available|tool unavailable|temporarily unavailable|tool disabled/i.test(
+          errorMsg
+        );
+      if (noisyCanvasError) {
+        console.log(`[ChannelGateway] Suppressed non-user-facing canvas tool error for task ${data.taskId}`);
+        return;
+      }
       const message = getChannelMessage('toolError', this.getMessageContext(), { tool: toolName, error: errorMsg });
       this.router.sendTaskUpdate(data.taskId, message);
     };
@@ -530,6 +541,10 @@ export class ChannelGateway {
       ambientMode?: boolean;
       silentUnauthorized?: boolean;
       ingestNonSelfChatsInSelfChatMode?: boolean;
+      trustedGroupMemoryOptIn?: boolean;
+      sendReadReceipts?: boolean;
+      deduplicationEnabled?: boolean;
+      groupRoutingMode?: 'all' | 'mentionsOnly' | 'mentionsOrCommands' | 'commandsOnly';
     }
   ): Promise<Channel> {
     // Check if WhatsApp channel already exists
@@ -550,6 +565,10 @@ export class ChannelGateway {
         allowedNumbers,
         selfChatMode,
         responsePrefix,
+        ...(opts?.sendReadReceipts !== undefined ? { sendReadReceipts: opts.sendReadReceipts } : {}),
+        ...(opts?.deduplicationEnabled !== undefined ? { deduplicationEnabled: opts.deduplicationEnabled } : {}),
+        ...(opts?.groupRoutingMode ? { groupRoutingMode: opts.groupRoutingMode } : {}),
+        ...(opts?.trustedGroupMemoryOptIn !== undefined ? { trustedGroupMemoryOptIn: opts.trustedGroupMemoryOptIn } : {}),
         ...(opts?.ambientMode ? { ambientMode: true } : {}),
         ...(opts?.silentUnauthorized ? { silentUnauthorized: true } : {}),
         ...(opts?.ingestNonSelfChatsInSelfChatMode ? { ingestNonSelfChatsInSelfChatMode: true } : {}),
@@ -1342,6 +1361,9 @@ export class ChannelGateway {
           allowedNumbers: channel.config.allowedNumbers as string[] | undefined,
           printQrToTerminal: true, // For debugging
           selfChatMode: channel.config.selfChatMode as boolean | undefined ?? true,
+          sendReadReceipts: channel.config.sendReadReceipts as boolean | undefined,
+          deduplicationEnabled: channel.config.deduplicationEnabled as boolean | undefined,
+          groupRoutingMode: channel.config.groupRoutingMode as 'all' | 'mentionsOnly' | 'mentionsOrCommands' | 'commandsOnly' | undefined,
           responsePrefix: channel.config.responsePrefix as string | undefined ?? '🤖',
         });
 

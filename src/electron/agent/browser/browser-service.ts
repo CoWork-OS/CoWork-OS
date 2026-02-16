@@ -1,4 +1,4 @@
-import { chromium, Browser, Page, BrowserContext } from 'playwright';
+import { chromium, Browser, Page, BrowserContext, Locator } from 'playwright';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import { Workspace } from '../../../shared/types';
@@ -57,12 +57,20 @@ export interface PageContent {
 export interface ClickResult {
   success: boolean;
   element?: string;
+  error?: string;
+  screenshot?: string;
+  url?: string;
+  content?: string;
 }
 
 export interface FillResult {
   success: boolean;
   selector: string;
   value: string;
+  error?: string;
+  screenshot?: string;
+  url?: string;
+  content?: string;
 }
 
 export interface EvaluateResult {
@@ -89,6 +97,7 @@ function normalizeEvaluateScript(script: string): string {
  * BrowserService provides browser automation capabilities using Playwright
  */
 export class BrowserService {
+  private static readonly DEFAULT_ACTION_TIMEOUT_MS = 90_000;
   private browser: Browser | null = null;
   private context: BrowserContext | null = null;
   private page: Page | null = null;
@@ -99,11 +108,102 @@ export class BrowserService {
     this.workspace = workspace;
     this.options = {
       headless: options.headless ?? true,
-      timeout: options.timeout ?? 30000,
+      timeout: options.timeout ?? BrowserService.DEFAULT_ACTION_TIMEOUT_MS,
       viewport: options.viewport ?? { width: 1280, height: 720 },
       userDataDir: options.userDataDir,
       channel: options.channel,
     };
+  }
+
+  private getActionTimeout(timeoutMs?: number): number {
+    const fallback = this.options.timeout ?? BrowserService.DEFAULT_ACTION_TIMEOUT_MS;
+    const normalized = Number(timeoutMs);
+    if (!Number.isFinite(normalized) || normalized <= 0) return fallback;
+    return Math.round(normalized);
+  }
+
+  private isRetryableBrowserError(error: unknown): boolean {
+    const message = String((error as Error)?.message || error || '').toLowerCase();
+    const retryable = [
+      'timeout',
+      'not visible',
+      'not found',
+      'detached',
+      'stale',
+      'element is not attached',
+      'not attached',
+      'not stable',
+      'interception',
+      'click',
+      'fill',
+    ];
+
+    return retryable.some((token) => message.includes(token));
+  }
+
+  private async runLocatorActionWithRetry<T>(
+    selector: string,
+    timeoutMs: number | undefined,
+    operation: (locator: Locator, timeout: number) => Promise<T>,
+  ): Promise<T> {
+    const baseTimeout = this.getActionTimeout(timeoutMs);
+    const attempts = 2;
+    const perAttemptTimeout = Math.max(5_000, Math.floor(baseTimeout / attempts));
+    let lastError: unknown;
+
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      try {
+        const locator = this.page!.locator(selector);
+        await locator.waitFor({ state: 'visible', timeout: perAttemptTimeout });
+        await locator.scrollIntoViewIfNeeded();
+        if (attempt > 0) {
+          await this.page!.waitForTimeout(200).catch(() => {});
+        }
+        return await operation(locator, perAttemptTimeout);
+      } catch (error) {
+        lastError = error;
+        if (attempt === attempts - 1 || !this.isRetryableBrowserError(error)) {
+          break;
+        }
+      }
+    }
+
+    throw lastError instanceof Error ? lastError : new Error(String(lastError));
+  }
+
+  private async captureFailureContext(action: string, selector?: string): Promise<{
+    screenshot?: string;
+    url?: string;
+    content?: string;
+    selector?: string;
+  }> {
+    const context: {
+      screenshot?: string;
+      url?: string;
+      content?: string;
+      selector?: string;
+    } = { selector };
+
+    if (!this.page) {
+      return context;
+    }
+
+    try {
+      const screenshot = await this.screenshot(`browser-${action}-failure-${Date.now()}.png`, false);
+      context.screenshot = screenshot.path;
+      context.url = this.page.url();
+      context.content = await this.page.evaluate(`
+        () => {
+          const body = (globalThis as any).document?.body;
+          if (!body || !body.innerText) return '';
+          return String(body.innerText).replace(/\\s+/g, ' ').trim().slice(0, 2000);
+        }
+      `);
+    } catch {
+      // Best effort for diagnostics
+    }
+
+    return context;
   }
 
   private async resolveBraveExecutablePath(): Promise<string | undefined> {
@@ -487,22 +587,29 @@ export class BrowserService {
   /**
    * Click on an element
    */
-  async click(selector: string): Promise<ClickResult> {
+  async click(selector: string, timeoutMs?: number): Promise<ClickResult> {
     await this.ensurePage();
 
+    const actionTimeout = this.getActionTimeout(timeoutMs);
+
     try {
-      await this.page!.click(selector, { timeout: this.options.timeout });
-      const element = await this.page!.$(selector);
-      const text = element ? await element.textContent() : '';
+      const locator = await this.runLocatorActionWithRetry(selector, actionTimeout, async (candidate, actionTimeoutForAttempt) => {
+        await candidate.click({ timeout: actionTimeoutForAttempt });
+        return candidate;
+      });
+      const text = await locator.textContent().catch(() => null);
 
       return {
         success: true,
         element: text?.trim().slice(0, 100)
       };
     } catch (error) {
+      const context = await this.captureFailureContext('click', selector);
       return {
         success: false,
-        element: (error as Error).message
+        element: selector,
+        error: (error as Error).message,
+        ...context
       };
     }
   }
@@ -510,11 +617,15 @@ export class BrowserService {
   /**
    * Fill a form field
    */
-  async fill(selector: string, value: string): Promise<FillResult> {
+  async fill(selector: string, value: string, timeoutMs?: number): Promise<FillResult> {
     await this.ensurePage();
+    const actionTimeout = this.getActionTimeout(timeoutMs);
 
     try {
-      await this.page!.fill(selector, value, { timeout: this.options.timeout });
+      const locator = await this.runLocatorActionWithRetry(selector, actionTimeout, async (candidate, actionTimeoutForAttempt) => {
+        await candidate.fill(value, { timeout: actionTimeoutForAttempt });
+        return candidate;
+      });
 
       return {
         success: true,
@@ -522,10 +633,13 @@ export class BrowserService {
         value
       };
     } catch (error) {
+      const context = await this.captureFailureContext('fill', selector);
       return {
         success: false,
         selector,
-        value: (error as Error).message
+        value,
+        error: (error as Error).message,
+        ...context
       };
     }
   }
@@ -533,11 +647,16 @@ export class BrowserService {
   /**
    * Type text (with key events)
    */
-  async type(selector: string, text: string, delay: number = 50): Promise<FillResult> {
+  async type(selector: string, text: string, delay: number = 50, timeoutMs?: number): Promise<FillResult> {
     await this.ensurePage();
+    const actionTimeout = this.getActionTimeout(timeoutMs);
 
     try {
-      await this.page!.type(selector, text, { delay });
+      const locator = await this.runLocatorActionWithRetry(selector, actionTimeout, async (candidate, actionTimeoutForAttempt) => {
+        await candidate.click({ timeout: actionTimeoutForAttempt });
+        await candidate.type(text, { delay, timeout: actionTimeoutForAttempt });
+        return candidate;
+      });
 
       return {
         success: true,
@@ -545,10 +664,13 @@ export class BrowserService {
         value: text
       };
     } catch (error) {
+      const context = await this.captureFailureContext('type', selector);
       return {
         success: false,
         selector,
-        value: (error as Error).message
+        value: text,
+        error: (error as Error).message,
+        ...context
       };
     }
   }
@@ -574,7 +696,8 @@ export class BrowserService {
     await this.ensurePage();
 
     try {
-      await this.page!.waitForSelector(selector, { timeout: timeout ?? this.options.timeout });
+      const actionTimeout = this.getActionTimeout(timeout);
+      await this.page!.waitForSelector(selector, { timeout: actionTimeout });
       return { success: true, selector };
     } catch (error) {
       return { success: false, selector: (error as Error).message };
@@ -588,7 +711,8 @@ export class BrowserService {
     await this.ensurePage();
 
     try {
-      await this.page!.waitForLoadState('load', { timeout: timeout ?? this.options.timeout });
+      const actionTimeout = this.getActionTimeout(timeout);
+      await this.page!.waitForLoadState('load', { timeout: actionTimeout });
       return { success: true, url: this.page!.url() };
     } catch (error) {
       return { success: false, url: (error as Error).message };

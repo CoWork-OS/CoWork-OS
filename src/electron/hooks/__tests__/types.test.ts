@@ -17,6 +17,7 @@ import {
   DEFAULT_GMAIL_MAX_BYTES,
   DEFAULT_GMAIL_RENEW_MINUTES,
   GMAIL_PRESET_MAPPING,
+  RESEND_PRESET_MAPPING,
   HOOK_PRESET_MAPPINGS,
 } from '../types';
 
@@ -135,6 +136,10 @@ describe('HOOK_PRESET_MAPPINGS', () => {
     expect(HOOK_PRESET_MAPPINGS).toHaveProperty('gmail');
   });
 
+  it('should have resend preset', () => {
+    expect(HOOK_PRESET_MAPPINGS).toHaveProperty('resend');
+  });
+
   it('should have gmail preset as array with one mapping', () => {
     expect(Array.isArray(HOOK_PRESET_MAPPINGS.gmail)).toBe(true);
     expect(HOOK_PRESET_MAPPINGS.gmail).toHaveLength(1);
@@ -142,5 +147,9 @@ describe('HOOK_PRESET_MAPPINGS', () => {
 
   it('should have gmail preset mapping matching GMAIL_PRESET_MAPPING', () => {
     expect(HOOK_PRESET_MAPPINGS.gmail[0]).toEqual(GMAIL_PRESET_MAPPING);
+  });
+
+  it('should have resend preset mapping matching RESEND_PRESET_MAPPING', () => {
+    expect(HOOK_PRESET_MAPPINGS.resend[0]).toEqual(RESEND_PRESET_MAPPING);
   });
 });

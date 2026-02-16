@@ -1,4 +1,5 @@
 import * as fs from 'fs/promises';
+import * as fsSync from 'fs';
 import * as path from 'path';
 import { Workspace } from '../../../shared/types';
 import { AgentDaemon } from '../daemon';
@@ -89,6 +90,33 @@ export class FileTools {
   }
 
   /**
+   * If the model produced a stale absolute path rooted in a previous location
+   * (for example "/old/root/<workspaceName>/..."), remap it into the active
+   * workspace when the original absolute path no longer exists.
+   */
+  private remapStaleAbsolutePathToWorkspace(absolutePath: string, normalizedWorkspace: string): string | null {
+    if (!path.isAbsolute(absolutePath)) return null;
+    if (fsSync.existsSync(absolutePath)) return null;
+
+    const workspaceName = path.basename(normalizedWorkspace).toLowerCase();
+    if (!workspaceName) return null;
+
+    const normalizedAbsolute = path.normalize(absolutePath);
+    const parts = normalizedAbsolute.split(path.sep).filter(Boolean);
+    const workspaceIdx = parts.findIndex(part => part.toLowerCase() === workspaceName);
+    if (workspaceIdx < 0) return null;
+
+    const suffix = parts.slice(workspaceIdx + 1);
+    const remapped = suffix.length > 0
+      ? path.join(normalizedWorkspace, ...suffix)
+      : normalizedWorkspace;
+    const relative = path.relative(normalizedWorkspace, remapped);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) return null;
+
+    return remapped;
+  }
+
+  /**
    * Resolve path, supporting both workspace-relative and absolute paths
    * When unrestrictedFileAccess is enabled, allows absolute paths anywhere (except protected locations)
    * When allowedPaths is configured, allows specific paths outside workspace
@@ -104,6 +132,16 @@ export class FileTools {
       const relativeToWorkspace = path.relative(normalizedWorkspace, absolutePath);
       if (!relativeToWorkspace.startsWith('..') && !path.isAbsolute(relativeToWorkspace)) {
         return absolutePath;
+      }
+
+      // Recover from stale absolute paths that still embed the current
+      // workspace folder name but point to an old root.
+      const remappedPath = this.remapStaleAbsolutePathToWorkspace(absolutePath, normalizedWorkspace);
+      if (remappedPath) {
+        this.daemon.logEvent(this.taskId, 'log', {
+          message: `Remapped stale absolute path to workspace: ${absolutePath} -> ${remappedPath}`,
+        });
+        return remappedPath;
       }
 
       // Outside workspace - check permissions
@@ -125,7 +163,8 @@ export class FileTools {
 
       throw new Error(
         'Path is outside workspace boundary. Enable "Unrestricted File Access" in workspace settings ' +
-        'or add specific paths to "Allowed Paths" to access files outside the workspace.'
+        'or add specific paths to "Allowed Paths" to access files outside the workspace. ' +
+        `Attempted path: ${absolutePath}. Workspace: ${normalizedWorkspace}.`
       );
     }
 
@@ -151,7 +190,8 @@ export class FileTools {
 
       throw new Error(
         'Path traversal outside workspace is not allowed. Enable "Unrestricted File Access" ' +
-        'in workspace settings to access files outside the workspace.'
+        'in workspace settings to access files outside the workspace. ' +
+        `Attempted path: ${resolved}. Workspace: ${normalizedWorkspace}.`
       );
     }
 

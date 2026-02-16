@@ -14,6 +14,7 @@ vi.mock('electron', () => ({
 import { resolveHooksConfig, HooksServer } from '../server';
 import type { HooksConfig } from '../types';
 import http from 'http';
+import crypto from 'crypto';
 
 // Helper to wait a bit between requests
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -451,6 +452,246 @@ describe('HooksServer', () => {
         { 'Authorization': 'Bearer test-secret-token' },
       );
       expect(response.statusCode).toBe(404);
+    });
+
+    it('should accept a signed resend webhook when secret is configured', async () => {
+      const secretMaterial = Buffer.from('test-resend-secret').toString('base64');
+      const webhookSecret = `whsec_${secretMaterial}`;
+
+      server.setHooksConfig({
+        enabled: true,
+        token: 'test-secret-token',
+        path: '/hooks',
+        maxBodyBytes: 256 * 1024,
+        presets: ['resend'],
+        mappings: [],
+        resend: {
+          webhookSecret,
+        },
+      });
+
+      const onAgent = vi.fn().mockResolvedValue({ taskId: 'task-resend-1' });
+      server.setHandlers({ onAgent });
+
+      const payload = JSON.stringify({
+        type: 'email.received',
+        data: {
+          email_id: 'email_123',
+          from: 'sender@example.com',
+          to: 'inbox@example.com',
+          subject: 'Hello',
+          text: 'Body',
+        },
+      });
+
+      const svixId = 'msg_123';
+      const svixTimestamp = String(Math.floor(Date.now() / 1000));
+      const signedContent = `${svixId}.${svixTimestamp}.${payload}`;
+      const signature = crypto
+        .createHmac('sha256', Buffer.from(secretMaterial, 'base64'))
+        .update(signedContent)
+        .digest('base64');
+
+      const response = await makeRequestRaw(
+        'POST',
+        '/hooks/resend',
+        payload,
+        {
+          'Authorization': 'Bearer test-secret-token',
+          'Content-Type': 'application/json',
+          'svix-id': svixId,
+          'svix-timestamp': svixTimestamp,
+          'svix-signature': `v1,${signature}`,
+        },
+      );
+
+      expect(response.statusCode).toBe(202);
+      expect(onAgent).toHaveBeenCalledTimes(1);
+    });
+
+    it('should reject resend webhook with invalid signature when secret is configured', async () => {
+      const secretMaterial = Buffer.from('test-resend-secret').toString('base64');
+      const webhookSecret = `whsec_${secretMaterial}`;
+
+      server.setHooksConfig({
+        enabled: true,
+        token: 'test-secret-token',
+        path: '/hooks',
+        maxBodyBytes: 256 * 1024,
+        presets: ['resend'],
+        mappings: [],
+        resend: {
+          webhookSecret,
+        },
+      });
+
+      server.setHandlers({
+        onAgent: vi.fn().mockResolvedValue({ taskId: 'task-resend-2' }),
+      });
+
+      const payload = JSON.stringify({
+        type: 'email.received',
+        data: { email_id: 'email_456', subject: 'Invalid sig test' },
+      });
+
+      const response = await makeRequestRaw(
+        'POST',
+        '/hooks/resend',
+        payload,
+        {
+          'Authorization': 'Bearer test-secret-token',
+          'Content-Type': 'application/json',
+          'svix-id': 'msg_invalid',
+          'svix-timestamp': String(Math.floor(Date.now() / 1000)),
+          'svix-signature': 'v1,invalid-signature',
+        },
+      );
+
+      expect(response.statusCode).toBe(401);
+      const body = JSON.parse(response.body);
+      expect(body.error).toContain('signature');
+    });
+
+    it('should require resend signature for trailing-slash path when secret is configured', async () => {
+      const secretMaterial = Buffer.from('test-resend-secret').toString('base64');
+      const webhookSecret = `whsec_${secretMaterial}`;
+
+      server.setHooksConfig({
+        enabled: true,
+        token: 'test-secret-token',
+        path: '/hooks',
+        maxBodyBytes: 256 * 1024,
+        presets: ['resend'],
+        mappings: [],
+        resend: {
+          webhookSecret,
+        },
+      });
+
+      const onAgent = vi.fn().mockResolvedValue({ taskId: 'task-resend-3' });
+      server.setHandlers({ onAgent });
+
+      const payload = JSON.stringify({
+        type: 'email.received',
+        data: { email_id: 'email_789', subject: 'Trailing slash test' },
+      });
+
+      const response = await makeRequestRaw(
+        'POST',
+        '/hooks/resend/',
+        payload,
+        {
+          'Authorization': 'Bearer test-secret-token',
+          'Content-Type': 'application/json',
+        },
+      );
+
+      expect(response.statusCode).toBe(401);
+      expect(onAgent).not.toHaveBeenCalled();
+    });
+
+    it('should skip non-inbound resend events without creating tasks', async () => {
+      const secretMaterial = Buffer.from('test-resend-secret').toString('base64');
+      const webhookSecret = `whsec_${secretMaterial}`;
+
+      server.setHooksConfig({
+        enabled: true,
+        token: 'test-secret-token',
+        path: '/hooks',
+        maxBodyBytes: 256 * 1024,
+        presets: ['resend'],
+        mappings: [],
+        resend: {
+          webhookSecret,
+        },
+      });
+
+      const onAgent = vi.fn().mockResolvedValue({ taskId: 'task-resend-4' });
+      server.setHandlers({ onAgent });
+
+      const payload = JSON.stringify({
+        type: 'email.delivered',
+        data: { email_id: 'email_900', subject: 'Delivery event' },
+      });
+
+      const svixId = 'msg_delivered_1';
+      const svixTimestamp = String(Math.floor(Date.now() / 1000));
+      const signedContent = `${svixId}.${svixTimestamp}.${payload}`;
+      const signature = crypto
+        .createHmac('sha256', Buffer.from(secretMaterial, 'base64'))
+        .update(signedContent)
+        .digest('base64');
+
+      const response = await makeRequestRaw(
+        'POST',
+        '/hooks/resend',
+        payload,
+        {
+          'Authorization': 'Bearer test-secret-token',
+          'Content-Type': 'application/json',
+          'svix-id': svixId,
+          'svix-timestamp': svixTimestamp,
+          'svix-signature': `v1,${signature}`,
+        },
+      );
+
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.body);
+      expect(body.skipped).toBe(true);
+      expect(onAgent).not.toHaveBeenCalled();
+    });
+
+    it('should reject replayed resend webhook signatures by svix-id', async () => {
+      const secretMaterial = Buffer.from('test-resend-secret').toString('base64');
+      const webhookSecret = `whsec_${secretMaterial}`;
+
+      server.setHooksConfig({
+        enabled: true,
+        token: 'test-secret-token',
+        path: '/hooks',
+        maxBodyBytes: 256 * 1024,
+        presets: ['resend'],
+        mappings: [],
+        resend: {
+          webhookSecret,
+        },
+      });
+
+      const onAgent = vi.fn().mockResolvedValue({ taskId: 'task-resend-5' });
+      server.setHandlers({ onAgent });
+
+      const payload = JSON.stringify({
+        type: 'email.received',
+        data: {
+          email_id: 'email_901',
+          from: 'sender@example.com',
+          to: 'inbox@example.com',
+          subject: 'Replay test',
+        },
+      });
+
+      const svixId = 'msg_replay_1';
+      const svixTimestamp = String(Math.floor(Date.now() / 1000));
+      const signedContent = `${svixId}.${svixTimestamp}.${payload}`;
+      const signature = crypto
+        .createHmac('sha256', Buffer.from(secretMaterial, 'base64'))
+        .update(signedContent)
+        .digest('base64');
+
+      const headers = {
+        'Authorization': 'Bearer test-secret-token',
+        'Content-Type': 'application/json',
+        'svix-id': svixId,
+        'svix-timestamp': svixTimestamp,
+        'svix-signature': `v1,${signature}`,
+      };
+
+      const first = await makeRequestRaw('POST', '/hooks/resend', payload, headers);
+      expect(first.statusCode).toBe(202);
+
+      const second = await makeRequestRaw('POST', '/hooks/resend', payload, headers);
+      expect(second.statusCode).toBe(401);
+      expect(onAgent).toHaveBeenCalledTimes(1);
     });
 
     it('should handle OPTIONS preflight', async () => {

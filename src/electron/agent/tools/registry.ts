@@ -40,6 +40,8 @@ import { LLMTool } from '../llm/types';
 import { SearchProviderFactory } from '../search';
 import { MCPClientManager } from '../../mcp/client/MCPClientManager';
 import { MCPSettingsManager } from '../../mcp/settings';
+import { MCPRegistryManager } from '../../mcp/registry/MCPRegistryManager';
+import type { MCPServerConfig } from '../../mcp/types';
 import { isToolAllowedQuick } from '../../security/policy-manager';
 import { evaluateMontyToolPolicy } from '../../security/monty-tool-policy';
 import { BuiltinToolsSettingsManager } from './builtin-settings';
@@ -48,6 +50,7 @@ import { PersonalityManager } from '../../settings/personality-manager';
 import { PersonalityId, PersonaId, PERSONALITY_DEFINITIONS, PERSONA_DEFINITIONS } from '../../../shared/types';
 import { resolveModelPreferenceToModelKey, resolvePersonalityPreference } from '../../../shared/agent-preferences';
 import { isHeadlessMode } from '../../utils/runtime-mode';
+import { HooksSettingsManager } from '../../hooks/settings';
 
 function sanitizeFilename(raw: string, maxLen = 120): string {
   const base = path.basename(String(raw || '').trim() || 'artifact');
@@ -232,6 +235,11 @@ export class ToolRegistry {
    */
   setCanvasSessionCutoff(cutoff: number | null): void {
     this.canvasTools.setSessionCutoff(cutoff);
+  }
+
+  getLatestCanvasSessionId(): string | null {
+    const latestSession = this.canvasTools.getLatestActiveSessionForTask();
+    return latestSession?.id || null;
   }
 
   /**
@@ -445,6 +453,7 @@ export class ToolRegistry {
         'set_user_name',
         'set_response_style',
         'set_quirks',
+        'integration_setup',
         'spawn_agent',
         'wait_for_agent',
         'get_agent_status',
@@ -703,7 +712,14 @@ export class ToolRegistry {
   /**
    * Get human-readable tool descriptions
    */
-  getToolDescriptions(): string {
+  getToolDescriptions(visibleTools?: string[]): string {
+    const visibleToolSet = visibleTools?.length
+      ? new Set(visibleTools.map((tool) => tool.trim()).filter(Boolean))
+      : null;
+    const isVisible = (toolName: string): boolean => !visibleToolSet || visibleToolSet.has(toolName);
+    const hasAnyVisibleTools = (...toolNames: string[]): boolean =>
+      !visibleToolSet || toolNames.some((toolName) => isVisible(toolName));
+
     const googleWorkspaceEnabled =
       GmailTools.isEnabled() || GoogleCalendarTools.isEnabled() || GoogleDriveTools.isEnabled();
 
@@ -859,10 +875,25 @@ Scheduling:
   - One-time tasks: "at 3pm tomorrow, do X"
   - Cron schedules: standard cron expressions supported
 
+${hasAnyVisibleTools(
+  'canvas_create',
+  'canvas_push',
+  'canvas_open_url',
+  'canvas_show',
+  'canvas_hide',
+  'canvas_close',
+  'canvas_eval',
+  'canvas_snapshot',
+  'canvas_list'
+)
+  ? `
 Live Canvas (Visual Workspace):
-- canvas_create: Create a new canvas session for displaying interactive content
-- canvas_push: Push HTML/CSS/JS content to the canvas. REQUIRED parameters: session_id and content (the HTML string).
+- canvas_create: Create a new canvas session for displaying interactive content when the user explicitly asks for live UI, dashboard, or in-app browsing.
+- canvas_push: Push HTML/CSS/JS content to the canvas. session_id and/or content may be omitted for recovery fallback.
+  Only use for explicit visual-output tasks (interactive interfaces, charts, rich previews, app-style content).
+  Do NOT use for status updates, summaries, planning, file operations, or checklist-style tasks.
   Example: canvas_push({ session_id: "abc-123", content: "<!DOCTYPE html><html><body><h1>Hello</h1></body></html>" })
+  If session_id is not provided, the tool can attempt to continue the latest active canvas session for this task.
 - canvas_open_url: Open a remote web page inside the canvas window for full in-app browsing (use for sites that block embedding)
 - canvas_show: OPTIONAL - Only use if user needs full interactivity (clicking buttons, forms)
 - canvas_hide: Hide the canvas window
@@ -870,23 +901,31 @@ Live Canvas (Visual Workspace):
 - canvas_eval: Execute JavaScript in the canvas context
 - canvas_snapshot: Take a screenshot of the canvas
 - canvas_list: List all active canvas sessions
-IMPORTANT: When using canvas_push, you MUST provide the 'content' parameter with the full HTML string to display.
+IMPORTANT: When using canvas_push for visual output, provide content when available.
+If omitted, the runtime fills in a safe fallback so execution can continue.
+`
+  : ''}
 
+${hasAnyVisibleTools('visual_open_annotator', 'visual_update_annotator')
+  ? `
 Agentic Image Iteration (Visual Annotator):
 - visual_open_annotator: Open an image annotation UI in Live Canvas for a workspace image
 - visual_update_annotator: Update an existing annotator session with a new image iteration
 The annotator sends [Canvas Interaction] messages back to the running task with structured JSON feedback.
+`
+  : ''}
 
 ${this.channelTools ? `
 Channel Message Log (Local Gateway):
 - channel_list_chats: List recently active chats for a channel (discover chat IDs)
 - channel_history: Fetch recent messages for a specific chat ID (use for summarization/monitoring)` : ''}
 
-	Plan Control:
-	- revise_plan: Modify remaining plan steps when obstacles are encountered or new information discovered
-	- task_history: Query recent task history/messages (use for "what did we talk about yesterday?")
-	- switch_workspace: Switch to a different workspace/working directory. Use when you need to work in a different folder.
-	- set_personality: Change the assistant's communication style (professional, friendly, concise, creative, technical, casual).
+		Plan Control:
+		- revise_plan: Modify remaining plan steps when obstacles are encountered or new information discovered
+		- task_history: Query recent task history/messages (use for "what did we talk about yesterday?")
+		- switch_workspace: Switch to a different workspace/working directory. Use when you need to work in a different folder.
+		- integration_setup: Inspect/configure integrations from chat (e.g., enable email sending via Resend, ask for missing API keys, provide setup links).
+		- set_personality: Change the assistant's communication style (professional, friendly, concise, creative, technical, casual).
 	- set_persona: Change the assistant's character persona (jarvis, friday, hal, computer, alfred, intern, sensei, pirate, noir, companion, or none).
 	- set_response_style: Adjust response preferences (emoji_usage, response_length, code_comments, explanation_depth).
 	- set_quirks: Set personality quirks (catchphrase, sign_off, analogy_domain).
@@ -1076,7 +1115,28 @@ ${skillDescriptions}`;
       console.log(`[ToolRegistry] canvas_push input keys:`, Object.keys(input || {}));
       console.log(`[ToolRegistry] canvas_push session_id:`, input?.session_id);
       console.log(`[ToolRegistry] canvas_push content present:`, 'content' in (input || {}), `content length:`, input?.content?.length ?? 'N/A');
-      return await this.canvasTools.pushContent(input.session_id, input.content, input.filename);
+      const canvasInput = input || {};
+      const rawSessionId = canvasInput.session_id;
+      const inferredSessionId = rawSessionId || this.getLatestCanvasSessionId();
+      if (!canvasInput.session_id && inferredSessionId) {
+        canvasInput.session_id = inferredSessionId;
+      }
+      try {
+        return await this.canvasTools.pushContent(canvasInput.session_id, canvasInput.content, canvasInput.filename);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown canvas push error';
+        this.daemon.logEvent(this.taskId, 'tool_error', {
+          tool: 'canvas_push',
+          error: message,
+          softFailure: true,
+        });
+        return {
+          success: true,
+          warning:
+            'Canvas preview could not be refreshed right now, but execution can continue without it.',
+          fallback: true,
+        };
+      }
     }
     if (name === 'canvas_open_url') return await this.canvasTools.openUrl(input.session_id, input.url, input.show);
     if (name === 'canvas_show') return await this.canvasTools.showCanvas(input.session_id);
@@ -1152,6 +1212,10 @@ ${skillDescriptions}`;
 
     if (name === 'switch_workspace') {
       return await this.switchWorkspace(input);
+    }
+
+    if (name === 'integration_setup') {
+      return await this.integrationSetup(input);
     }
 
     if (name === 'set_personality') {
@@ -3641,6 +3705,366 @@ ${skillDescriptions}`;
     ];
   }
 
+  private async integrationSetup(input: {
+    action?: string;
+    provider?: string;
+    api_key?: string;
+    webhook_secret?: string;
+    base_url?: string;
+    enable_inbound?: boolean;
+    connect_now?: boolean;
+    allow_unsafe_external_content?: boolean;
+  }): Promise<{
+    success: boolean;
+    action: 'inspect' | 'configure';
+    provider: 'resend';
+    installed: boolean;
+    configured: boolean;
+    connected: boolean;
+    email_sending_ready: boolean;
+    inbound: {
+      requested: boolean;
+      hooks_enabled: boolean;
+      preset_enabled: boolean;
+      endpoint_path: string;
+      token_configured: boolean;
+      signing_secret_configured: boolean;
+    };
+    missing_inputs: Array<{
+      field: 'api_key';
+      label: string;
+      prompt: string;
+      create_url: string;
+      docs_url: string;
+    }>;
+    links: {
+      dashboard: string;
+      create_api_key: string;
+      api_keys_docs: string;
+      webhooks_docs: string;
+    };
+    message: string;
+    notes?: string[];
+    connection_error?: string;
+    health_error?: string;
+    health_text?: string;
+    server_id?: string;
+  }> {
+    const action: 'inspect' | 'configure' = input?.action === 'configure' ? 'configure' : 'inspect';
+    const provider = (input?.provider || 'resend').trim().toLowerCase();
+    if (provider !== 'resend') {
+      throw new Error(`Unsupported provider: ${provider}. Currently supported: resend`);
+    }
+
+    const links = this.getResendSetupLinks();
+    const enableInbound = Boolean(input?.enable_inbound);
+    const connectNow = input?.connect_now !== false;
+    const mcpClient = MCPClientManager.getInstance();
+    const providedApiKey = typeof input?.api_key === 'string' ? input.api_key.trim() : '';
+    const providedBaseUrl = typeof input?.base_url === 'string' ? input.base_url.trim() : '';
+    const providedWebhookSecret =
+      typeof input?.webhook_secret === 'string' ? input.webhook_secret.trim() : undefined;
+
+    MCPSettingsManager.initialize();
+
+    let settings = MCPSettingsManager.loadSettings();
+    let server = this.findResendConnectorServer(settings);
+    let installError: string | undefined;
+    let installedNow = false;
+
+    if (action === 'configure' && !server) {
+      try {
+        await MCPRegistryManager.installServer('resend');
+        installedNow = true;
+      } catch (error: any) {
+        const message = error?.message || String(error);
+        if (!/already installed/i.test(message)) {
+          installError = message;
+        }
+      }
+
+      settings = MCPSettingsManager.loadSettings();
+      server = this.findResendConnectorServer(settings);
+    }
+
+    const existingApiKey = server?.env?.RESEND_API_KEY?.trim() || '';
+    const resolvedApiKey = providedApiKey || existingApiKey;
+    const resolvedBaseUrl = providedBaseUrl || server?.env?.RESEND_BASE_URL?.trim() || 'https://api.resend.com';
+
+    const missingInputs: Array<{
+      field: 'api_key';
+      label: string;
+      prompt: string;
+      create_url: string;
+      docs_url: string;
+    }> = [];
+    if (!resolvedApiKey) {
+      missingInputs.push({
+        field: 'api_key',
+        label: 'Resend API key',
+        prompt: 'Provide your Resend API key (starts with re_) so I can finish setup.',
+        create_url: links.create_api_key,
+        docs_url: links.api_keys_docs,
+      });
+    }
+
+    if (action === 'inspect') {
+      let connected = false;
+      let serverId: string | undefined;
+      if (server) {
+        serverId = server.id;
+        try {
+          connected = mcpClient.getServerStatus(server.id)?.status === 'connected';
+        } catch {
+          connected = false;
+        }
+      }
+
+      HooksSettingsManager.initialize();
+      const hooks = HooksSettingsManager.loadSettings();
+      return {
+        success: true,
+        action,
+        provider: 'resend',
+        installed: Boolean(server),
+        configured: Boolean(resolvedApiKey),
+        connected,
+        email_sending_ready: Boolean(server && resolvedApiKey && connected),
+        inbound: {
+          requested: false,
+          hooks_enabled: hooks.enabled,
+          preset_enabled: hooks.presets.includes('resend'),
+          endpoint_path: `${hooks.path || '/hooks'}/resend`,
+          token_configured: Boolean(hooks.token),
+          signing_secret_configured: Boolean(hooks.resend?.webhookSecret),
+        },
+        missing_inputs: missingInputs,
+        links,
+        server_id: serverId,
+        message: server
+          ? (resolvedApiKey
+            ? 'Resend connector is installed. Provide missing values or ask to configure/connect if needed.'
+            : 'Resend connector is installed but API key is missing.')
+          : 'Resend connector is not installed yet.',
+        notes: [
+          'Use action="configure" with api_key to enable email sending.',
+          'If you also want inbound email automation, set enable_inbound=true (webhook signing secret is recommended).',
+        ],
+      };
+    }
+
+    if (!server) {
+      return {
+        success: false,
+        action,
+        provider: 'resend',
+        installed: false,
+        configured: false,
+        connected: false,
+        email_sending_ready: false,
+        inbound: {
+          requested: enableInbound,
+          hooks_enabled: false,
+          preset_enabled: false,
+          endpoint_path: '/hooks/resend',
+          token_configured: false,
+          signing_secret_configured: false,
+        },
+        missing_inputs: missingInputs,
+        links,
+        message: 'Could not install or locate the Resend connector.',
+        notes: installError ? [installError] : undefined,
+      };
+    }
+
+    const env: Record<string, string> = {
+      ...(server.env || {}),
+      RESEND_BASE_URL: resolvedBaseUrl,
+    };
+    if (resolvedApiKey) {
+      env.RESEND_API_KEY = resolvedApiKey;
+    }
+
+    const updated = MCPSettingsManager.updateServer(server.id, {
+      env,
+      enabled: Boolean(resolvedApiKey),
+    });
+    if (!updated) {
+      throw new Error(`Failed to update Resend connector settings for server ${server.id}`);
+    }
+
+    let connected = false;
+    try {
+      connected = mcpClient.getServerStatus(server.id)?.status === 'connected';
+    } catch {
+      connected = false;
+    }
+
+    let connectionError: string | undefined;
+    if (connectNow && resolvedApiKey && !connected) {
+      try {
+        await mcpClient.connectServer(server.id);
+        connected = true;
+      } catch (error: any) {
+        connectionError = error?.message || String(error);
+        try {
+          connected = mcpClient.getServerStatus(server.id)?.status === 'connected';
+          if (connected) {
+            connectionError = undefined;
+          }
+        } catch {
+          connected = false;
+        }
+      }
+    }
+
+    let healthError: string | undefined;
+    let healthText: string | undefined;
+    if (connected) {
+      try {
+        const health = await mcpClient.callTool('resend.health', {});
+        healthText = this.extractMcpTextContent(health) || undefined;
+        if (health?.isError) {
+          healthError = healthText || 'Connector health call returned an error';
+        }
+      } catch (error: any) {
+        healthError = error?.message || String(error);
+      }
+    }
+
+    let hooksEnabled = false;
+    let presetEnabled = false;
+    let hookPath = '/hooks/resend';
+    let hookTokenConfigured = false;
+    let hookSigningSecretConfigured = false;
+
+    if (enableInbound) {
+      HooksSettingsManager.initialize();
+      let hooks = HooksSettingsManager.loadSettings();
+
+      if (!hooks.enabled) {
+        hooks = HooksSettingsManager.enableHooks();
+      }
+
+      const nextPresets = new Set(hooks.presets || []);
+      nextPresets.add('resend');
+
+      let nextWebhookSecret = hooks.resend?.webhookSecret;
+      if (providedWebhookSecret !== undefined) {
+        nextWebhookSecret = providedWebhookSecret || undefined;
+      }
+
+      hooks = HooksSettingsManager.updateConfig({
+        ...hooks,
+        presets: Array.from(nextPresets),
+        resend: {
+          ...hooks.resend,
+          webhookSecret: nextWebhookSecret,
+          allowUnsafeExternalContent:
+            typeof input.allow_unsafe_external_content === 'boolean'
+              ? input.allow_unsafe_external_content
+              : hooks.resend?.allowUnsafeExternalContent,
+        },
+      });
+
+      hooksEnabled = hooks.enabled;
+      presetEnabled = hooks.presets.includes('resend');
+      hookPath = `${hooks.path || '/hooks'}/resend`;
+      hookTokenConfigured = Boolean(hooks.token);
+      hookSigningSecretConfigured = Boolean(hooks.resend?.webhookSecret);
+    } else {
+      HooksSettingsManager.initialize();
+      const hooks = HooksSettingsManager.loadSettings();
+      hooksEnabled = hooks.enabled;
+      presetEnabled = hooks.presets.includes('resend');
+      hookPath = `${hooks.path || '/hooks'}/resend`;
+      hookTokenConfigured = Boolean(hooks.token);
+      hookSigningSecretConfigured = Boolean(hooks.resend?.webhookSecret);
+    }
+
+    const emailSendingReady = Boolean(resolvedApiKey && connected && !healthError);
+    const notes: string[] = [];
+    if (installedNow) notes.push('Installed Resend connector.');
+    if (enableInbound) {
+      notes.push(
+        `Inbound endpoint configured at ${hookPath}. Use your hooks token with this URL when registering webhook endpoints.`,
+      );
+      if (!hookSigningSecretConfigured) {
+        notes.push(
+          'Webhook signing secret is recommended. You can set it with webhook_secret in a follow-up configure call.',
+        );
+      }
+    }
+    if (!resolvedApiKey) {
+      notes.push('API key is still missing. Provide api_key and run configure again.');
+    }
+
+    return {
+      success: emailSendingReady && (enableInbound ? presetEnabled : true),
+      action,
+      provider: 'resend',
+      installed: true,
+      configured: Boolean(resolvedApiKey),
+      connected,
+      email_sending_ready: emailSendingReady,
+      inbound: {
+        requested: enableInbound,
+        hooks_enabled: hooksEnabled,
+        preset_enabled: presetEnabled,
+        endpoint_path: hookPath,
+        token_configured: hookTokenConfigured,
+        signing_secret_configured: hookSigningSecretConfigured,
+      },
+      missing_inputs: missingInputs,
+      links,
+      server_id: server.id,
+      connection_error: connectionError,
+      health_error: healthError,
+      health_text: healthText,
+      message: emailSendingReady
+        ? 'Resend email sending is configured and healthy.'
+        : (resolvedApiKey
+          ? 'Resend connector is configured, but connection/health still needs attention.'
+          : 'Resend connector is installed; API key is required to finish setup.'),
+      notes: notes.length > 0 ? notes : undefined,
+    };
+  }
+
+  private getResendSetupLinks(): {
+    dashboard: string;
+    create_api_key: string;
+    api_keys_docs: string;
+    webhooks_docs: string;
+  } {
+    return {
+      dashboard: 'https://resend.com/dashboard',
+      create_api_key: 'https://resend.com/api-keys',
+      api_keys_docs: 'https://resend.com/docs/dashboard/api-keys/introduction',
+      webhooks_docs: 'https://resend.com/docs/dashboard/webhooks/introduction',
+    };
+  }
+
+  private findResendConnectorServer(settings: { servers: MCPServerConfig[] }): MCPServerConfig | undefined {
+    return settings.servers.find((server) => {
+      const lowerName = (server.name || '').toLowerCase();
+      if (lowerName === 'resend' || lowerName.includes('resend')) return true;
+
+      const command = (server.command || '').toLowerCase();
+      if (command.includes('resend')) return true;
+
+      const args = (server.args || []).map((arg) => String(arg).toLowerCase());
+      return args.some((arg) => arg.includes('resend-mcp') || arg.includes('/connectors/resend'));
+    });
+  }
+
+  private extractMcpTextContent(result: any): string {
+    const content = Array.isArray(result?.content) ? result.content : [];
+    const texts = content
+      .filter((item: any) => item && item.type === 'text' && typeof item.text === 'string')
+      .map((item: any) => item.text);
+    return texts.join('\n').trim();
+  }
+
   /**
    * Set the agent's personality
    */
@@ -4642,6 +5066,53 @@ ${skillDescriptions}`;
             workspace_id: {
               type: 'string',
               description: 'ID of an existing workspace to switch to',
+            },
+          },
+        },
+      },
+      {
+        name: 'integration_setup',
+        description:
+          'Inspect or configure integrations directly from chat. ' +
+          'Use this when the user asks to enable email sending or connect Resend. ' +
+          'If credentials are missing, this tool returns required inputs and direct setup links.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            action: {
+              type: 'string',
+              enum: ['inspect', 'configure'],
+              description: 'inspect = show readiness/missing inputs, configure = apply settings',
+            },
+            provider: {
+              type: 'string',
+              enum: ['resend'],
+              description: 'Integration provider to configure',
+            },
+            api_key: {
+              type: 'string',
+              description: 'Provider API key (for Resend, starts with re_)',
+            },
+            base_url: {
+              type: 'string',
+              description: 'Optional API base URL override (default: https://api.resend.com)',
+            },
+            connect_now: {
+              type: 'boolean',
+              description: 'Whether to connect/test immediately after configuration (default: true)',
+            },
+            enable_inbound: {
+              type: 'boolean',
+              description: 'Enable inbound webhook preset configuration (/hooks/resend)',
+            },
+            webhook_secret: {
+              type: 'string',
+              description:
+                'Optional webhook signing secret for inbound verification (Resend Svix secret, usually starts with whsec_)',
+            },
+            allow_unsafe_external_content: {
+              type: 'boolean',
+              description: 'Set allowUnsafeExternalContent for inbound mapped tasks',
             },
           },
         },

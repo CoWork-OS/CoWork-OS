@@ -111,5 +111,39 @@ describe('readFilesByPatterns', () => {
     expect(res.files.length).toBeGreaterThan(0);
     expect(res.files[0].content.length).toBeLessThanOrEqual(1000);
   });
-});
 
+  it('remaps stale absolute paths that include the workspace folder name', async () => {
+    const workspaceRoot = path.join(tmpDir, 'new-bitcoin2');
+    const workspaceScoped: Workspace = {
+      ...workspace,
+      path: workspaceRoot,
+      isTemp: false,
+      permissions: {
+        ...workspace.permissions,
+        unrestrictedFileAccess: false,
+      } as any,
+    };
+    const daemon = {
+      logEvent: vi.fn(),
+      requestApproval: vi.fn(),
+    } as any;
+    const scopedFileTools = new FileTools(workspaceScoped, daemon, 'task-2');
+
+    const filename = 'research_step1_crypto_imperfections.md';
+    const expectedContent = 'evidence in current workspace';
+    writeFile(path.join(workspaceRoot, filename), expectedContent);
+
+    const staleAbsolutePath = path.join(
+      path.sep,
+      'Users',
+      'mesut',
+      'Desktop',
+      'new',
+      'new-bitcoin2',
+      filename
+    );
+
+    const out = await scopedFileTools.readFile(staleAbsolutePath);
+    expect(out.content).toContain(expectedContent);
+  });
+});

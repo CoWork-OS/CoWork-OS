@@ -24,6 +24,9 @@ import {
 } from './types';
 import { resolveHookMappings, applyHookMappings, normalizeHooksPath } from './mappings';
 
+const RESEND_SIGNATURE_ALLOWED_DRIFT_SECONDS = 300;
+const RESEND_REPLAY_CACHE_MAX_ENTRIES = 10_000;
+
 export interface HooksServerConfig {
   port: number;
   host?: string;
@@ -103,6 +106,12 @@ export function resolveHooksConfig(config: HooksConfig): HooksConfigResolved | n
     token,
     maxBodyBytes,
     mappings,
+    resend: config.resend
+      ? {
+          ...config.resend,
+          webhookSecret: config.resend.webhookSecret?.trim() || undefined,
+        }
+      : undefined,
   };
 }
 
@@ -111,6 +120,7 @@ export class HooksServer {
   private config: HooksServerConfig;
   private hooksConfig: HooksConfigResolved | null = null;
   private handlers: HooksServerHandlers = {};
+  private resendSeenSvixIds: Map<string, number> = new Map();
 
   constructor(config: HooksServerConfig) {
     this.config = config;
@@ -121,6 +131,7 @@ export class HooksServer {
    */
   setHooksConfig(config: HooksConfig): void {
     this.hooksConfig = resolveHooksConfig(config);
+    this.resendSeenSvixIds.clear();
   }
 
   /**
@@ -239,7 +250,7 @@ export class HooksServer {
     }
 
     // Extract the hook path after base
-    const hookPath = url.pathname.slice(basePath.length).replace(/^\/+/, '');
+    const hookPath = url.pathname.slice(basePath.length).replace(/^\/+/, '').replace(/\/+$/, '');
 
     // Emit request event
     this.emitEvent({
@@ -454,13 +465,24 @@ export class HooksServer {
       return;
     }
 
-    const body = await this.parseJsonBody<Record<string, unknown>>(req);
+    const headers = this.normalizeHeaders(req);
+    const rawBody = await this.parseTextBody(req);
+    if (rawBody === null) {
+      this.sendJsonResponse(res, 400, { success: false, error: 'Invalid JSON body' });
+      return;
+    }
+
+    if (hookPath === 'resend' && !this.verifyResendSignature(headers, rawBody)) {
+      this.sendJsonResponse(res, 401, { success: false, error: 'Invalid Resend webhook signature' });
+      return;
+    }
+
+    const body = this.parseJsonFromText<Record<string, unknown>>(rawBody);
     if (!body) {
       this.sendJsonResponse(res, 400, { success: false, error: 'Invalid JSON body' });
       return;
     }
 
-    const headers = this.normalizeHeaders(req);
     const ctx: HookMappingContext = {
       payload: body,
       headers,
@@ -471,6 +493,17 @@ export class HooksServer {
     const result = await applyHookMappings(this.hooksConfig.mappings, ctx);
 
     if (!result) {
+      if (hookPath === 'resend') {
+        const eventType = typeof body.type === 'string' ? body.type : undefined;
+        if (eventType && eventType !== 'email.received') {
+          this.sendJsonResponse(res, 200, {
+            success: true,
+            skipped: true,
+            reason: `resend event '${eventType}' is not mapped`,
+          });
+          return;
+        }
+      }
       this.sendJsonResponse(res, 404, { success: false, error: 'No matching hook mapping' });
       return;
     }
@@ -589,9 +622,9 @@ export class HooksServer {
   }
 
   /**
-   * Parse JSON body from request with timeout to prevent slow client DoS
+   * Parse raw request body with timeout to prevent slow client DoS
    */
-  private parseJsonBody<T>(req: http.IncomingMessage): Promise<T | null> {
+  private parseTextBody(req: http.IncomingMessage): Promise<string | null> {
     const maxBytes = this.hooksConfig?.maxBodyBytes || DEFAULT_HOOKS_MAX_BODY_BYTES;
     const REQUEST_TIMEOUT_MS = 30000; // 30 second timeout for request body
 
@@ -630,16 +663,7 @@ export class HooksServer {
         if (done) return;
         done = true;
         cleanup();
-        const raw = Buffer.concat(chunks).toString('utf-8').trim();
-        if (!raw) {
-          resolve({} as T);
-          return;
-        }
-        try {
-          resolve(JSON.parse(raw) as T);
-        } catch {
-          resolve(null);
-        }
+        resolve(Buffer.concat(chunks).toString('utf-8'));
       });
 
       req.on('error', () => {
@@ -649,6 +673,116 @@ export class HooksServer {
         resolve(null);
       });
     });
+  }
+
+  /**
+   * Parse JSON body from request with timeout to prevent slow client DoS
+   */
+  private async parseJsonBody<T>(req: http.IncomingMessage): Promise<T | null> {
+    const raw = await this.parseTextBody(req);
+    if (raw === null) return null;
+    return this.parseJsonFromText<T>(raw);
+  }
+
+  private parseJsonFromText<T>(raw: string): T | null {
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      return {} as T;
+    }
+    try {
+      return JSON.parse(trimmed) as T;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Verify Resend webhook signature headers (Svix format) when a webhook secret is configured.
+   * If no secret is configured, this check is skipped.
+   */
+  private verifyResendSignature(headers: Record<string, string>, rawBody: string): boolean {
+    const secret = this.hooksConfig?.resend?.webhookSecret?.trim();
+    if (!secret) return true;
+
+    const svixId = headers['svix-id'];
+    const svixTimestamp = headers['svix-timestamp'];
+    const svixSignature = headers['svix-signature'];
+    if (!svixId || !svixTimestamp || !svixSignature) return false;
+
+    const tsSeconds = Number(svixTimestamp);
+    if (!Number.isFinite(tsSeconds)) return false;
+
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const allowedDriftSeconds = RESEND_SIGNATURE_ALLOWED_DRIFT_SECONDS;
+    if (Math.abs(nowSeconds - tsSeconds) > allowedDriftSeconds) return false;
+
+    const signedContent = `${svixId}.${svixTimestamp}.${rawBody}`;
+    const secretMaterial = secret.startsWith('whsec_') ? secret.slice('whsec_'.length) : secret;
+    const normalizedSecret = secretMaterial.replace(/-/g, '+').replace(/_/g, '/');
+
+    let key: Buffer;
+    if (/^[A-Za-z0-9+/=]+$/.test(normalizedSecret)) {
+      const decoded = Buffer.from(normalizedSecret, 'base64');
+      const reencoded = decoded.toString('base64').replace(/=+$/g, '');
+      const original = normalizedSecret.replace(/=+$/g, '');
+      key = decoded.length > 0 && reencoded === original
+        ? decoded
+        : Buffer.from(secretMaterial, 'utf8');
+    } else {
+      key = Buffer.from(secretMaterial, 'utf8');
+    }
+
+    const expected = crypto.createHmac('sha256', key).update(signedContent).digest('base64');
+    const expectedBuffer = Buffer.from(expected, 'utf8');
+
+    const candidates = Array.from(svixSignature.matchAll(/v1,([^,\s]+)/g)).map(
+      (match) => match[1],
+    );
+
+    for (const candidate of candidates) {
+      const candidateBuffer = Buffer.from(candidate, 'utf8');
+      if (
+        candidateBuffer.length === expectedBuffer.length &&
+        crypto.timingSafeEqual(candidateBuffer, expectedBuffer)
+      ) {
+        if (this.isReplayResendMessage(svixId, nowSeconds)) {
+          return false;
+        }
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private isReplayResendMessage(svixId: string, nowSeconds: number): boolean {
+    this.pruneResendReplayCache(nowSeconds);
+    if (this.resendSeenSvixIds.has(svixId)) {
+      return true;
+    }
+    this.resendSeenSvixIds.set(svixId, nowSeconds);
+    return false;
+  }
+
+  private pruneResendReplayCache(nowSeconds: number): void {
+    const cutoff = nowSeconds - RESEND_SIGNATURE_ALLOWED_DRIFT_SECONDS;
+
+    // Entries are inserted in arrival order, so stale entries appear first.
+    while (this.resendSeenSvixIds.size > 0) {
+      const first = this.resendSeenSvixIds.entries().next().value as [string, number] | undefined;
+      if (!first || first[1] >= cutoff) break;
+      this.resendSeenSvixIds.delete(first[0]);
+    }
+
+    if (this.resendSeenSvixIds.size <= RESEND_REPLAY_CACHE_MAX_ENTRIES) return;
+
+    const overflow = this.resendSeenSvixIds.size - RESEND_REPLAY_CACHE_MAX_ENTRIES;
+    let removed = 0;
+    for (const key of this.resendSeenSvixIds.keys()) {
+      this.resendSeenSvixIds.delete(key);
+      removed += 1;
+      if (removed >= overflow) break;
+    }
   }
 
   /**

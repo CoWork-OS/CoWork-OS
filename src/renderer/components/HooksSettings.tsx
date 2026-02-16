@@ -1,5 +1,10 @@
 import { useState, useEffect } from 'react';
-import type { HooksSettingsData, HooksStatus, GmailHooksSettingsData } from '../../shared/types';
+import type {
+  HooksSettingsData,
+  HooksStatus,
+  GmailHooksSettingsData,
+  ResendHooksSettingsData,
+} from '../../shared/types';
 
 export function HooksSettings() {
   const [settings, setSettings] = useState<HooksSettingsData | null>(null);
@@ -19,6 +24,8 @@ export function HooksSettings() {
   // Gmail configuration state
   const [gmailAccount, setGmailAccount] = useState('');
   const [gmailTopic, setGmailTopic] = useState('');
+  const [resendWebhookSecret, setResendWebhookSecret] = useState('');
+  const [resendAllowUnsafe, setResendAllowUnsafe] = useState(false);
 
   useEffect(() => {
     loadSettings();
@@ -33,6 +40,10 @@ export function HooksSettings() {
       if (data.gmail) {
         setGmailAccount(data.gmail.account || '');
         setGmailTopic(data.gmail.topic || '');
+      }
+      if (data.resend) {
+        setResendWebhookSecret(data.resend.webhookSecret || '');
+        setResendAllowUnsafe(Boolean(data.resend.allowUnsafeExternalContent));
       }
     } catch (err) {
       console.error('Failed to load hooks settings:', err);
@@ -137,6 +148,42 @@ export function HooksSettings() {
       await loadGmailStatus();
     } catch (err: any) {
       setError(err.message || 'Failed to configure Gmail hooks');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleConfigureResend = async () => {
+    if (!settings?.enabled) {
+      setError('Enable webhooks first');
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+    try {
+      const resendConfig: ResendHooksSettingsData = {
+        allowUnsafeExternalContent: resendAllowUnsafe,
+      };
+
+      const secret = resendWebhookSecret.trim();
+      if (secret !== '***configured***') {
+        resendConfig.webhookSecret = secret;
+      }
+
+      const presetSet = new Set(settings.presets || []);
+      presetSet.add('resend');
+
+      await window.electronAPI.saveHooksSettings({
+        presets: Array.from(presetSet),
+        resend: resendConfig,
+      });
+
+      setSuccess('Resend inbound webhook preset configured');
+      await loadSettings();
+      await loadStatus();
+    } catch (err: any) {
+      setError(err.message || 'Failed to configure Resend webhook preset');
     } finally {
       setSaving(false);
     }
@@ -293,6 +340,12 @@ export function HooksSettings() {
                 <span className="endpoint-desc">Gmail Pub/Sub notifications (preset)</span>
               </div>
             )}
+            {settings.presets.includes('resend') && (
+              <div className="endpoint-item">
+                <code>POST /hooks/resend</code>
+                <span className="endpoint-desc">Inbound email events via Resend webhook preset</span>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -396,6 +449,73 @@ export function HooksSettings() {
         )}
       </div>
 
+      {/* Resend Inbound Section */}
+      <div className="settings-section">
+        <h3>Resend Inbound Webhook</h3>
+        <p className="settings-description">
+          Configure a preset mapping for inbound email webhooks. Use this endpoint when creating a webhook:
+        </p>
+        <div className="hooks-status">
+          <div className="status-indicator">
+            <span className={`status-dot ${settings?.presets.includes('resend') ? 'connected' : 'disconnected'}`} />
+            <span>{settings?.presets.includes('resend') ? 'Preset enabled' : 'Preset not enabled'}</span>
+          </div>
+          <span className="status-address">
+            POST /hooks/resend
+          </span>
+        </div>
+
+        <p className="settings-hint">
+          For provider setup, append your hooks token in the URL query:
+          <br />
+          <code>
+            https://YOUR_HOST/hooks/resend?token=YOUR_TOKEN
+          </code>
+        </p>
+
+        <div className="settings-row">
+          <label>Webhook Signing Secret (optional)</label>
+          <input
+            type="password"
+            value={resendWebhookSecret}
+            onChange={(e) => setResendWebhookSecret(e.target.value)}
+            placeholder="whsec_..."
+            disabled={saving || !settings?.enabled}
+          />
+          <p className="settings-hint">
+            If provided, CoWork verifies Svix signature headers before processing webhook events.
+          </p>
+        </div>
+
+        <div className="settings-row">
+          <label className="registry-verified-checkbox">
+            <input
+              type="checkbox"
+              checked={resendAllowUnsafe}
+              onChange={(e) => setResendAllowUnsafe(e.target.checked)}
+              disabled={saving || !settings?.enabled}
+            />
+            Allow unsafe external content in mapped tasks
+          </label>
+        </div>
+
+        <div className="settings-row button-row">
+          <button
+            className="settings-button"
+            onClick={handleConfigureResend}
+            disabled={saving || !settings?.enabled}
+          >
+            {saving ? 'Saving...' : 'Save Resend Configuration'}
+          </button>
+        </div>
+
+        {!settings?.enabled && (
+          <p className="settings-hint warning">
+            Enable webhooks first to configure the Resend preset.
+          </p>
+        )}
+      </div>
+
       {/* Usage Examples */}
       <div className="settings-section">
         <h3>Usage Examples</h3>
@@ -416,6 +536,15 @@ export function HooksSettings() {
   -H 'X-CoWork-Token: YOUR_TOKEN' \\
   -H 'Content-Type: application/json' \\
   -d '{"text": "New event received", "mode": "now"}'`}
+          </pre>
+        </div>
+
+        <div className="code-example">
+          <p className="example-title">Inbound email webhook (Resend preset):</p>
+          <pre>
+{`curl -X POST "http://127.0.0.1:${settings?.port || 9877}/hooks/resend?token=YOUR_TOKEN" \\
+  -H 'Content-Type: application/json' \\
+  -d '{"type":"email.received","data":{"from":"sender@example.com","to":"inbox@example.com","subject":"Hello","email_id":"abc123","text":"Hi there"}}'`}
           </pre>
         </div>
       </div>

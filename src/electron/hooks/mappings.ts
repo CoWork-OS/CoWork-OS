@@ -61,6 +61,7 @@ export function resolveHookMappings(hooks?: HooksConfig): HookMappingResolved[] 
 
   const presets = hooks.presets ?? [];
   const gmailAllowUnsafe = hooks.gmail?.allowUnsafeExternalContent;
+  const resendAllowUnsafe = hooks.resend?.allowUnsafeExternalContent;
   const mappings: HookMappingConfig[] = [];
 
   // Add custom mappings first
@@ -78,6 +79,15 @@ export function resolveHookMappings(hooks?: HooksConfig): HookMappingResolved[] 
         ...presetMappings.map((mapping) => ({
           ...mapping,
           allowUnsafeExternalContent: gmailAllowUnsafe,
+        })),
+      );
+      continue;
+    }
+    if (preset === 'resend' && typeof resendAllowUnsafe === 'boolean') {
+      mappings.push(
+        ...presetMappings.map((mapping) => ({
+          ...mapping,
+          allowUnsafeExternalContent: resendAllowUnsafe,
         })),
       );
       continue;
@@ -139,6 +149,7 @@ function normalizeHookMapping(
   const id = mapping.id?.trim() || `mapping-${index + 1}`;
   const matchPath = normalizeMatchPath(mapping.match?.path);
   const matchSource = mapping.match?.source?.trim();
+  const matchType = mapping.match?.type?.trim();
   const action = mapping.action ?? 'agent';
   const wakeMode = mapping.wakeMode ?? 'now';
   const transform = mapping.transform
@@ -152,6 +163,7 @@ function normalizeHookMapping(
     id,
     matchPath,
     matchSource,
+    matchType,
     action,
     wakeMode,
     name: mapping.name,
@@ -179,6 +191,10 @@ function mappingMatches(mapping: HookMappingResolved, ctx: HookMappingContext): 
   if (mapping.matchSource) {
     const source = typeof ctx.payload.source === 'string' ? ctx.payload.source : undefined;
     if (!source || source !== mapping.matchSource) return false;
+  }
+  if (mapping.matchType) {
+    const eventType = typeof ctx.payload.type === 'string' ? ctx.payload.type : undefined;
+    if (!eventType || eventType !== mapping.matchType) return false;
   }
   return true;
 }

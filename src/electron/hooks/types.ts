@@ -17,6 +17,7 @@ export interface HooksConfig {
   mappings: HookMappingConfig[];
   transformsDir?: string;
   gmail?: GmailHooksConfig;
+  resend?: ResendHooksConfig;
 }
 
 export interface GmailHooksConfig {
@@ -44,6 +45,11 @@ export interface GmailHooksConfig {
   };
 }
 
+export interface ResendHooksConfig {
+  webhookSecret?: string;
+  allowUnsafeExternalContent?: boolean;
+}
+
 // ============ Hook Mapping Configuration ============
 
 export interface HookMappingConfig {
@@ -51,6 +57,7 @@ export interface HookMappingConfig {
   match?: {
     path?: string;
     source?: string;
+    type?: string;
   };
   action?: 'wake' | 'agent';
   wakeMode?: 'now' | 'next-heartbeat';
@@ -79,6 +86,7 @@ export interface HookMappingResolved {
   id: string;
   matchPath?: string;
   matchSource?: string;
+  matchType?: string;
   action: 'wake' | 'agent';
   wakeMode?: 'now' | 'next-heartbeat';
   name?: string;
@@ -175,6 +183,7 @@ export interface HooksConfigResolved {
   token: string;
   maxBodyBytes: number;
   mappings: HookMappingResolved[];
+  resend?: ResendHooksConfig;
 }
 
 // ============ Gmail Runtime Config ============
@@ -250,6 +259,18 @@ export const GMAIL_PRESET_MAPPING: HookMappingConfig = {
     'New email from {{messages[0].from}}\nSubject: {{messages[0].subject}}\n{{messages[0].snippet}}\n{{messages[0].body}}',
 };
 
+export const RESEND_PRESET_MAPPING: HookMappingConfig = {
+  id: 'resend',
+  match: { path: 'resend', type: 'email.received' },
+  action: 'agent',
+  wakeMode: 'now',
+  name: 'Resend',
+  sessionKey: 'hook:resend:{{data.email_id}}',
+  messageTemplate:
+    'Inbound email event: {{type}}\nFrom: {{data.from}}\nTo: {{data.to}}\nSubject: {{data.subject}}\nEmail ID: {{data.email_id}}\n\nIf email_id is present, call resend.get_received_email to retrieve full body/headers before drafting or replying.',
+};
+
 export const HOOK_PRESET_MAPPINGS: Record<string, HookMappingConfig[]> = {
   gmail: [GMAIL_PRESET_MAPPING],
+  resend: [RESEND_PRESET_MAPPING],
 };

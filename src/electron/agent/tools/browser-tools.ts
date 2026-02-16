@@ -39,6 +39,15 @@ export class BrowserTools {
     this.browserState = { headless: true, profile: null, browserChannel: 'chromium' };
   }
 
+  private getTimeoutMs(input: unknown): number | undefined {
+    const toolInput = input && typeof input === 'object' ? (input as Record<string, unknown>) : {};
+    const rawTimeout = toolInput?.timeout_ms;
+    if (typeof rawTimeout === 'number' && Number.isFinite(rawTimeout) && rawTimeout > 0) {
+      return Math.round(rawTimeout);
+    }
+    return undefined;
+  }
+
   private getPersistentUserDataDir(profile: string): string {
     const safe = path
       .basename(profile.trim())
@@ -179,6 +188,10 @@ export class BrowserTools {
             selector: {
               type: 'string',
               description: 'CSS selector or text selector (e.g., "button.submit", "text=Login", "#myButton")'
+            },
+            timeout_ms: {
+              type: 'number',
+              description: 'Action timeout in ms. Use 60000+ for slow pages (default: 90_000)'
             }
           },
           required: ['selector']
@@ -197,6 +210,10 @@ export class BrowserTools {
             value: {
               type: 'string',
               description: 'The text to fill in'
+            },
+            timeout_ms: {
+              type: 'number',
+              description: 'Action timeout in ms. Use 60000+ for slow pages (default: 90_000)'
             }
           },
           required: ['selector', 'value']
@@ -219,6 +236,10 @@ export class BrowserTools {
             delay: {
               type: 'number',
               description: 'Delay between keystrokes in ms. Default: 50'
+            },
+            timeout_ms: {
+              type: 'number',
+              description: 'Action timeout in ms. Use 60000+ for slow pages (default: 90_000)'
             }
           },
           required: ['selector', 'text']
@@ -453,7 +474,7 @@ export class BrowserTools {
       }
 
       case 'browser_click': {
-        const result = await this.browserService.click(input.selector);
+        const result = await this.browserService.click(input.selector, this.getTimeoutMs(input));
         this.daemon.logEvent(this.taskId, 'browser_action', {
           action: 'click',
           selector: input.selector,
@@ -463,7 +484,7 @@ export class BrowserTools {
       }
 
       case 'browser_fill': {
-        const result = await this.browserService.fill(input.selector, input.value);
+        const result = await this.browserService.fill(input.selector, input.value, this.getTimeoutMs(input));
         this.daemon.logEvent(this.taskId, 'browser_action', {
           action: 'fill',
           selector: input.selector,
@@ -476,7 +497,8 @@ export class BrowserTools {
         const result = await this.browserService.type(
           input.selector,
           input.text,
-          input.delay || 50
+          input.delay || 50,
+          this.getTimeoutMs(input),
         );
         this.daemon.logEvent(this.taskId, 'browser_action', {
           action: 'type',

@@ -120,6 +120,25 @@ describe('resolveHookMappings', () => {
     expect(resolved[0].name).toBe('Gmail');
   });
 
+  it('should resolve resend preset', () => {
+    const config: HooksConfig = {
+      enabled: true,
+      token: 'test-token',
+      path: '/hooks',
+      maxBodyBytes: 256 * 1024,
+      presets: ['resend'],
+      mappings: [],
+    };
+
+    const resolved = resolveHookMappings(config);
+    expect(resolved).toHaveLength(1);
+    expect(resolved[0].id).toBe('resend');
+    expect(resolved[0].matchPath).toBe('resend');
+    expect(resolved[0].matchType).toBe('email.received');
+    expect(resolved[0].action).toBe('agent');
+    expect(resolved[0].name).toBe('Resend');
+  });
+
   it('should place custom mappings before preset mappings', () => {
     const config: HooksConfig = {
       enabled: true,
@@ -283,6 +302,43 @@ describe('applyHookMappings', () => {
     const result = await applyHookMappings(
       mappings,
       createContext('webhook', { source: 'slack' }),
+    );
+    expect(result).toBeNull();
+  });
+
+  it('should match by event type in payload', async () => {
+    const mappings: HookMappingResolved[] = [
+      {
+        id: 'test',
+        matchType: 'email.received',
+        action: 'agent',
+        wakeMode: 'now',
+        messageTemplate: 'Hello',
+      },
+    ];
+
+    const result = await applyHookMappings(
+      mappings,
+      createContext('resend', { type: 'email.received' }),
+    );
+    expect(result).not.toBeNull();
+    expect(result?.ok).toBe(true);
+  });
+
+  it('should not match if event type does not match', async () => {
+    const mappings: HookMappingResolved[] = [
+      {
+        id: 'test',
+        matchType: 'email.received',
+        action: 'agent',
+        wakeMode: 'now',
+        messageTemplate: 'Hello',
+      },
+    ];
+
+    const result = await applyHookMappings(
+      mappings,
+      createContext('resend', { type: 'email.delivered' }),
     );
     expect(result).toBeNull();
   });

@@ -11,6 +11,7 @@ import crypto from 'crypto';
 import {
   HooksConfig,
   GmailHooksConfig,
+  ResendHooksConfig,
   HookMappingConfig,
   DEFAULT_HOOKS_CONFIG,
   DEFAULT_HOOKS_PATH,
@@ -101,6 +102,12 @@ function encryptSettings(settings: HooksConfig): HooksConfig {
       ...settings.gmail,
       pushToken: encryptSecret(settings.gmail.pushToken),
     } : undefined,
+    resend: settings.resend
+      ? {
+          ...settings.resend,
+          webhookSecret: encryptSecret(settings.resend.webhookSecret),
+        }
+      : undefined,
   };
 }
 
@@ -115,6 +122,12 @@ function decryptSettings(settings: HooksConfig): HooksConfig {
       ...settings.gmail,
       pushToken: decryptSecret(settings.gmail.pushToken),
     } : undefined,
+    resend: settings.resend
+      ? {
+          ...settings.resend,
+          webhookSecret: decryptSecret(settings.resend.webhookSecret),
+        }
+      : undefined,
   };
 }
 
@@ -439,7 +452,31 @@ export class HooksSettingsManager {
         ...settings.gmail,
         pushToken: settings.gmail.pushToken ? MASKED_VALUE : undefined,
       } : undefined,
+      resend: settings.resend
+        ? {
+            ...settings.resend,
+            webhookSecret: settings.resend.webhookSecret ? MASKED_VALUE : undefined,
+          }
+        : undefined,
     };
+  }
+
+  /**
+   * Configure Resend webhook settings
+   */
+  static configureResend(resendConfig: ResendHooksConfig): HooksConfig {
+    const settings = this.loadSettings();
+    settings.resend = {
+      ...settings.resend,
+      ...resendConfig,
+    };
+
+    if (resendConfig.webhookSecret && !settings.presets.includes('resend')) {
+      settings.presets.push('resend');
+    }
+
+    this.saveSettings(settings);
+    return settings;
   }
 
   /**

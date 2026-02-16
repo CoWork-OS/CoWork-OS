@@ -17,7 +17,38 @@ vi.mock('../../../mcp/client/MCPClientManager', () => ({
 
 vi.mock('../../../mcp/settings', () => ({
   MCPSettingsManager: {
+    initialize: vi.fn(),
     loadSettings: vi.fn().mockReturnValue({ toolNamePrefix: 'mcp_' }),
+    updateServer: vi.fn().mockReturnValue({}),
+  },
+}));
+
+vi.mock('../../../mcp/registry/MCPRegistryManager', () => ({
+  MCPRegistryManager: {
+    installServer: vi.fn(),
+  },
+}));
+
+vi.mock('../../../hooks/settings', () => ({
+  HooksSettingsManager: {
+    initialize: vi.fn(),
+    loadSettings: vi.fn().mockReturnValue({
+      enabled: false,
+      token: '',
+      path: '/hooks',
+      maxBodyBytes: 256 * 1024,
+      presets: [],
+      mappings: [],
+    }),
+    enableHooks: vi.fn().mockReturnValue({
+      enabled: true,
+      token: 'token',
+      path: '/hooks',
+      maxBodyBytes: 256 * 1024,
+      presets: [],
+      mappings: [],
+    }),
+    updateConfig: vi.fn().mockImplementation((cfg: any) => cfg),
   },
 }));
 

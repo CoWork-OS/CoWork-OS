@@ -768,7 +768,7 @@ File Operations:
 
 Skills:
 - create_spreadsheet: Create Excel spreadsheets with data and formulas
-- create_document: Create Word documents or PDFs
+- create_document: Create Word/PDF (only when user explicitly requests DOCX or PDF — otherwise use write_file with .md)
 - edit_document: Edit/append content to existing DOCX files
 - create_presentation: Create PowerPoint presentations
 - organize_folder: Organize and structure files in folders
@@ -2271,7 +2271,7 @@ ${skillDescriptions}`;
       },
       {
         name: 'create_document',
-        description: 'Create a formatted Word document or PDF',
+        description: 'Create a Word document (.docx) or PDF. Only use when the user EXPLICITLY requests Word/DOCX/PDF format. For all other documents, prefer writing Markdown (.md) files with write_file.',
         input_schema: {
           type: 'object',
           properties: {

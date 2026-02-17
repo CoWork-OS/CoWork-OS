@@ -246,9 +246,12 @@ export class CustomSkillLoader {
       total: this.skills.size,
     };
 
+    const rawTotal = counts.bundled + counts.managed + counts.workspace;
+    const overridden = rawTotal - counts.total;
     console.log(
       `[CustomSkillLoader] Loaded ${counts.total} skills ` +
-        `(bundled: ${counts.bundled}, managed: ${counts.managed}, workspace: ${counts.workspace})`
+        `(bundled: ${counts.bundled}, managed: ${counts.managed}, workspace: ${counts.workspace}` +
+        (overridden > 0 ? `, ${overridden} overridden` : '') + ')'
     );
 
     return this.listSkills();

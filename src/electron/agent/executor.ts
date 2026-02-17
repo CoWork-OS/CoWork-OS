@@ -1035,9 +1035,13 @@ ${transcript}
       if (previousStatus === 'failed') {
         this.daemon.updateTask(this.task.id, { status: 'completed', error: null, completedAt: Date.now() });
         this.daemon.logEvent(this.task.id, 'task_completed', { message: 'Completed via follow-up' });
-      } else if (previousStatus) {
+      } else if (previousStatus && previousStatus !== 'executing') {
         this.daemon.updateTaskStatus(this.task.id, previousStatus as any);
         this.daemon.logEvent(this.task.id, 'task_status', { status: previousStatus });
+      } else {
+        // Safety net: never leave status as 'executing' after follow-up
+        this.daemon.updateTask(this.task.id, { status: 'completed', completedAt: Date.now() });
+        this.daemon.logEvent(this.task.id, 'task_completed', { message: 'Completed via chat follow-up' });
       }
     } catch (error: any) {
       const fallback = this.generateCompanionFallbackResponse(message);
@@ -1052,10 +1056,9 @@ ${transcript}
       ];
       this.saveConversationSnapshot();
       this.daemon.logEvent(this.task.id, 'follow_up_completed', { message: 'Follow-up fallback processed (chat mode)' });
-      if (previousStatus) {
-        this.daemon.updateTaskStatus(this.task.id, previousStatus as any);
-        this.daemon.logEvent(this.task.id, 'task_status', { status: previousStatus });
-      }
+      // Restore previous status, but never restore 'executing' (would leave spinner stuck)
+      const safeRestore = previousStatus && previousStatus !== 'executing' ? previousStatus : 'completed';
+      this.daemon.updateTaskStatus(this.task.id, safeRestore as any);
       console.error(`${this.logTag} Chat-mode follow-up failed, using fallback:`, error);
     }
   }
@@ -2348,7 +2351,13 @@ ${transcript}
     }
 
     if (contract.requiresVerificationEvidence && !this.hasVerificationEvidence(bestCandidate)) {
-      return 'Task missing verification evidence: no completed review/verification step or review-backed conclusion was detected.';
+      // If the task produced artifact output (documents/files), skip verification evidence.
+      // Creating artifacts from input data demonstrates the agent processed the input —
+      // requiring an additional verification step for a creation task is wrong.
+      const createdFiles = this.fileOperationTracker?.getCreatedFiles?.() || [];
+      if (createdFiles.length === 0) {
+        return 'Task missing verification evidence: no completed review/verification step or review-backed conclusion was detected.';
+      }
     }
 
     return null;
@@ -3465,16 +3474,22 @@ You are continuing a previous conversation. The context from the previous conver
       prompt.includes('duplicate') || prompt.includes('copy') || prompt.includes('version')
     );
 
-    // Document creation requires explicit document format mention OR specific document phrases
-    const isDocumentCreation = !isCodeTask && (
-      mentionsDocFormat ||
-      mentionsSpecificFile ||
+    // Document creation requires explicit OUTPUT format request — not just mentioning
+    // an input file. Attachment filenames (e.g. "26targets.xlsx") should NOT trigger this.
+    const hasDocCreationIntent = /\b(create|write|make|generate|produce|draft|prepare)\b/.test(prompt) &&
+      /\b(docx|word|pdf|powerpoint|pptx|document|report|presentation|slides?)\b/.test(prompt);
+    const hasExplicitDocPhrase =
       prompt.includes('write a document') ||
       prompt.includes('create a document') ||
       prompt.includes('write a word') ||
       prompt.includes('create a pdf') ||
-      prompt.includes('make a pdf')
-    );
+      prompt.includes('make a pdf') ||
+      prompt.includes('create a docx') ||
+      prompt.includes('as a pdf') ||
+      prompt.includes('as a docx') ||
+      prompt.includes('in docx') ||
+      prompt.includes('in pdf');
+    const isDocumentCreation = !isCodeTask && (hasDocCreationIntent || hasExplicitDocPhrase);
 
     let additionalContext = '';
     let taskType = 'general';
@@ -3512,9 +3527,10 @@ You are continuing a previous conversation. The context from the previous conver
         taskType = 'document_creation';
 
         additionalContext += `DOCUMENT CREATION BEST PRACTICES:
-1. Use create_document for new Word/PDF files
-2. Required parameters: filename, format ('docx' or 'pdf'), content (array of blocks)
-3. Content blocks: { type: 'heading'|'paragraph'|'list', text: '...', level?: 1-6 }`;
+1. DEFAULT to Markdown (.md) using write_file — it is the preferred output format.
+2. ONLY use create_document (docx/pdf) when the user EXPLICITLY requests Word, DOCX, or PDF format.
+3. create_document parameters: filename, format ('docx' or 'pdf'), content (array of blocks)
+4. Content blocks: { type: 'heading'|'paragraph'|'list', text: '...', level?: 1-6 }`;
       }
 
       // Log the analysis result
@@ -4067,11 +4083,17 @@ You are continuing a previous conversation. The context from the previous conver
     const desc = String(step.description || '').toLowerCase();
     if (!desc.trim()) return false;
 
+    const hasWriteVerb = /\b(write|create|draft|generate|produce|compose|prepare|build|save|author)\b/.test(desc);
+
+    // Steps that only read/analyze existing files should not require artifact output,
+    // even if the step description mentions filenames with extensions (e.g. "Read the 26targets.xlsx file").
+    const hasReadOnlyIntent = /\b(read|analy[sz]e|review|understand|examine|inspect|check|parse|extract|summarize|study|explore|investigate|look)\b/.test(desc);
+    if (hasReadOnlyIntent && !hasWriteVerb) return false;
+
     const hasExplicitExtension = /\.(pdf|docx|md|csv|xlsx|json|txt|pptx)\b/.test(desc);
     const hasArtifactCue =
       /\b(file|document|docx?|pdf|whitepaper|markdown|csv|xlsx|json|txt|pptx|presentation|slides?|spec(?:ification)?|proposal)\b/.test(desc) ||
       /\bmd\b/.test(desc);
-    const hasWriteVerb = /\b(write|create|draft|generate|produce|compose|prepare|build|save|author)\b/.test(desc);
 
     return hasExplicitExtension || (hasWriteVerb && hasArtifactCue);
   }
@@ -5732,9 +5754,9 @@ Format your plan as a JSON object with this structure:
           hasWarnings: true,
         });
         // Don't throw — allow task to complete
-      } else if (finalStepCompleted && majorityCompleted) {
-        // Final deliverable step completed and most steps succeeded —
-        // treat as completed with warnings rather than hard failure.
+      } else if (finalStepCompleted) {
+        // Final deliverable step completed — the task produced useful output
+        // even though some earlier steps failed. Treat as completed with warnings.
         console.log(
           `${this.logTag} Final step completed and ${successfulSteps.length}/${this.plan.steps.length} steps succeeded. ` +
           `Treating as completed with warnings despite failed step(s): ${failedDescriptions}`
@@ -6161,6 +6183,10 @@ TASK / CONVERSATION HISTORY:
       // Loop detection: track recent tool calls to detect degenerate loops
       const recentToolCalls: Array<{ tool: string; target: string }> = [];
       let loopBreakInjected = false;
+      // Varied failure detection: non-resetting per-tool failure counter (not reset on success)
+      const persistentToolFailures = new Map<string, number>();
+      let variedFailureNudgeInjected = false;
+      const VARIED_FAILURE_THRESHOLD = 5;
 
       const getUserActionRequiredPauseReason = (toolName: string, errorMessage: string): string | null => {
         const message = typeof errorMessage === 'string' ? errorMessage : String(errorMessage || '');
@@ -6655,6 +6681,7 @@ TASK / CONVERSATION HISTORY:
               console.log(`${this.logTag} Skipping disabled tool: ${content.name}`);
               hadToolError = true;
               toolErrors.add(content.name);
+              persistentToolFailures.set(content.name, (persistentToolFailures.get(content.name) || 0) + 1);
               const disabledFailureReason = `Tool ${content.name} failed: ${lastError}`;
               lastToolErrorReason = disabledFailureReason;
               this.daemon.logEvent(this.task.id, 'tool_error', {
@@ -6961,6 +6988,7 @@ TASK / CONVERSATION HISTORY:
                 hadToolError = true;
                 toolErrors.add(content.name);
                 lastToolErrorReason = `Tool ${content.name} failed: ${reason}`;
+                persistentToolFailures.set(content.name, (persistentToolFailures.get(content.name) || 0) + 1);
                 if (isExecutionToolCall) {
                   this.executionToolLastError = reason;
                 }
@@ -7055,6 +7083,7 @@ TASK / CONVERSATION HISTORY:
               hadToolError = true;
               toolErrors.add(content.name);
               lastToolErrorReason = `Tool ${content.name} failed: ${failureMessage}`;
+              persistentToolFailures.set(content.name, (persistentToolFailures.get(content.name) || 0) + 1);
               if (content.name === 'run_command') {
                 hadRunCommandFailure = true;
               }
@@ -7131,6 +7160,36 @@ TASK / CONVERSATION HISTORY:
                   });
                   break;
                 }
+              }
+            }
+          }
+
+          // Varied failure detection: same tool failing repeatedly with different inputs
+          if (!variedFailureNudgeInjected) {
+            for (const [failedToolName, failCount] of persistentToolFailures) {
+              if (failCount >= VARIED_FAILURE_THRESHOLD) {
+                variedFailureNudgeInjected = true;
+                console.log(
+                  `${this.logTag}   │ ⚠ Varied failure loop: ${failedToolName} failed ${failCount} times this step — injecting nudge`
+                );
+                this.daemon.logEvent(this.task.id, 'varied_failure_loop_detected', {
+                  stepId: step.id,
+                  tool: failedToolName,
+                  failureCount: failCount,
+                });
+                messages.push({
+                  role: 'user',
+                  content: [{
+                    type: 'text',
+                    text: `IMPORTANT: The tool "${failedToolName}" has now failed ${failCount} times during this step, each time with different inputs. ` +
+                      `You are stuck in a retry loop with variations that are not working. ` +
+                      `STOP retrying "${failedToolName}" for this goal. Instead:\n` +
+                      `1) Accept that this specific approach is not working in the current environment.\n` +
+                      `2) Try a FUNDAMENTALLY different approach (different tool, different strategy, or skip this sub-goal).\n` +
+                      `3) If no alternative exists, report the blocker to the user and move on to the next part of the task.`,
+                  }],
+                });
+                break;
               }
             }
           }
@@ -7425,7 +7484,13 @@ TASK / CONVERSATION HISTORY:
   }
 
   private async resumeAfterPause(): Promise<void> {
-    if (this.cancelled || this.taskCompleted) return;
+    if (this.cancelled || this.taskCompleted) {
+      // If task is already completed/cancelled, ensure status is not stuck in 'executing'
+      if (this.taskCompleted && this.task.status !== 'completed') {
+        this.daemon.updateTask(this.task.id, { status: 'completed', completedAt: Date.now() });
+      }
+      return;
+    }
     if (!this.plan) {
       throw new Error('No plan available');
     }
@@ -8036,6 +8101,10 @@ TASK / CONVERSATION HISTORY:
     // Loop detection: track recent tool calls to detect degenerate loops
     const recentToolCalls: Array<{ tool: string; target: string }> = [];
     let loopBreakInjected = false;
+    // Varied failure detection: non-resetting per-tool failure counter (not reset on success)
+    const persistentToolFailures = new Map<string, number>();
+    let variedFailureNudgeInjected = false;
+    const VARIED_FAILURE_THRESHOLD = 5;
     const requiresExecutionToolProgress =
       this.followUpRequiresCommandExecution(message) && !this.allowExecutionWithoutShell;
     let attemptedExecutionTool = false;
@@ -8416,6 +8485,7 @@ TASK / CONVERSATION HISTORY:
               const lastError = this.toolFailureTracker.getLastError(content.name);
               console.log(`${this.logTag} Skipping disabled tool: ${content.name}`);
               hasHardToolFailureAttempt = true;
+              persistentToolFailures.set(content.name, (persistentToolFailures.get(content.name) || 0) + 1);
               this.daemon.logEvent(this.task.id, 'tool_error', {
                 tool: content.name,
                 error: `Tool disabled due to repeated failures: ${lastError}`,
@@ -8648,6 +8718,8 @@ TASK / CONVERSATION HISTORY:
                     disabled: true,
                   });
                 }
+                // Track persistent failures (non-resetting) for varied-failure loop detection
+                persistentToolFailures.set(content.name, (persistentToolFailures.get(content.name) || 0) + 1);
               } else if (isExecutionToolCall) {
                 successfulExecutionTool = true;
                 this.executionToolRunObserved = true;
@@ -8696,6 +8768,8 @@ TASK / CONVERSATION HISTORY:
               if (shouldDisable || isHardFailure) {
                 hasHardToolFailureAttempt = true;
               }
+              // Track persistent failures (non-resetting) for varied-failure loop detection
+              persistentToolFailures.set(content.name, (persistentToolFailures.get(content.name) || 0) + 1);
 
               this.daemon.logEvent(this.task.id, 'tool_error', {
                 tool: content.name,
@@ -8757,6 +8831,36 @@ TASK / CONVERSATION HISTORY:
                   });
                   break;
                 }
+              }
+            }
+          }
+
+          // --- Varied failure loop detection: catch tools failing with different inputs ---
+          if (!variedFailureNudgeInjected) {
+            for (const [failedToolName, failCount] of persistentToolFailures) {
+              if (failCount >= VARIED_FAILURE_THRESHOLD) {
+                variedFailureNudgeInjected = true;
+                console.log(
+                  `${this.logTag}   │ ⚠ Varied failure loop: ${failedToolName} failed ${failCount} times this follow-up — injecting nudge`
+                );
+                this.daemon.logEvent(this.task.id, 'varied_failure_loop_detected', {
+                  tool: failedToolName,
+                  failureCount: failCount,
+                  followUp: true,
+                });
+                messages.push({
+                  role: 'user',
+                  content: [{
+                    type: 'text',
+                    text: `IMPORTANT: The tool "${failedToolName}" has now failed ${failCount} times during this follow-up, each time with different inputs. ` +
+                      `You are stuck in a retry loop with variations that are not working. ` +
+                      `STOP retrying "${failedToolName}" for this goal. Instead:\n` +
+                      `1) Accept that this specific approach is not working in the current environment.\n` +
+                      `2) Try a FUNDAMENTALLY different approach (different tool, different strategy, or skip this sub-goal).\n` +
+                      `3) If no alternative exists, report the blocker to the user and move on to the next part of the task.`,
+                  }],
+                });
+                break;
               }
             }
           }
@@ -8955,13 +9059,37 @@ TASK / CONVERSATION HISTORY:
         return;
       }
 
-      // If the task was previously failed and the follow-up succeeded, mark as completed
+      // Determine final status after follow-up processing.
+      // If the follow-up did productive work (tool calls), mark as completed rather than
+      // restoring a potentially stale previousStatus (especially 'executing' which would
+      // leave the spinner stuck forever).
+      const followUpElapsedFinal = ((Date.now() - followUpStartTime) / 1000).toFixed(1);
+      console.log(
+        `${this.logTag} Follow-up finished | iterations=${iterationCount}/${maxIterations} | ` +
+        `toolCalls=${followUpToolCallCount} | hadToolCalls=${hadToolCalls} | ` +
+        `hasTextResponse=${hasProvidedTextResponse} | previousStatus=${previousStatus} | elapsed=${followUpElapsedFinal}s`
+      );
+
       if (previousStatus === 'failed') {
         this.daemon.updateTask(this.task.id, { status: 'completed', error: null, completedAt: Date.now() });
         this.daemon.logEvent(this.task.id, 'task_completed', { message: 'Completed via follow-up' });
-      } else if (previousStatus) {
+      } else if (hadToolCalls || iterationCount >= maxIterations) {
+        // Follow-up did real work or exhausted iterations — mark as completed
+        // so the task doesn't get stuck in 'executing' state.
+        this.daemon.updateTask(this.task.id, { status: 'completed', completedAt: Date.now() });
+        this.daemon.logEvent(this.task.id, 'task_completed', {
+          message: hadToolCalls
+            ? `Follow-up completed (${followUpToolCallCount} tool calls)`
+            : 'Follow-up completed (iterations exhausted)',
+        });
+      } else if (previousStatus && previousStatus !== 'executing') {
+        // Chat-only follow-up (no tools) — restore previous status, but never restore 'executing'
         this.daemon.updateTaskStatus(this.task.id, previousStatus);
         this.daemon.logEvent(this.task.id, 'task_status', { status: previousStatus });
+      } else {
+        // Fallback safety net: 'executing' is never a valid final state
+        this.daemon.updateTask(this.task.id, { status: 'completed', completedAt: Date.now() });
+        this.daemon.logEvent(this.task.id, 'task_completed', { message: 'Follow-up completed (status safety net)' });
       }
     } catch (error: any) {
       // Don't log cancellation as an error - it's intentional
@@ -8990,9 +9118,9 @@ TASK / CONVERSATION HISTORY:
         });
         return;
       }
-      if (previousStatus) {
-        this.daemon.updateTaskStatus(this.task.id, previousStatus);
-      }
+      // Restore previous status, but never restore 'executing' (would leave spinner stuck)
+      const safeRestoreStatus = previousStatus && previousStatus !== 'executing' ? previousStatus : 'completed';
+      this.daemon.updateTaskStatus(this.task.id, safeRestoreStatus as any);
       this.daemon.logEvent(this.task.id, 'log', {
         message: `Follow-up failed: ${error.message}`,
       });

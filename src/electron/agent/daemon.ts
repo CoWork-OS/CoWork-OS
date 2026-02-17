@@ -2290,6 +2290,19 @@ export class AgentDaemon extends EventEmitter {
     });
     this.pendingApprovals.clear();
 
+    // Persist cancelled status to DB before cancelling executors.
+    // This prevents tasks from being detected as "orphaned" on next startup.
+    this.activeTasks.forEach((_cached, taskId) => {
+      try {
+        this.taskRepo.update(taskId, {
+          status: 'cancelled' as TaskStatus,
+          error: 'Application shutdown while task was running',
+        });
+      } catch (err) {
+        console.error(`[AgentDaemon] Failed to update task ${taskId} status on shutdown:`, err);
+      }
+    });
+
     // Cancel all active tasks and wait for them to complete
     const cancelPromises: Promise<void>[] = [];
     this.activeTasks.forEach((cached, taskId) => {

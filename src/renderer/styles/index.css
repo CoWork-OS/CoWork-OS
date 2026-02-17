@@ -1730,6 +1730,38 @@ a,
   text-decoration: underline;
 }
 
+.bubble-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.bubble-attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  max-width: 200px;
+}
+
+.bubble-attachment-chip svg {
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.bubble-attachment-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .chat-bubble.user-bubble p {
   color: var(--color-text);
   line-height: 1.6;

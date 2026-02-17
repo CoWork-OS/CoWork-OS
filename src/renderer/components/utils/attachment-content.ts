@@ -39,6 +39,7 @@ const stripPptxBubbleContent = (value: string): string => {
   const lines = value.split('\n');
   const output: string[] = [];
   let inExtractedSection = false;
+  let inAttachmentSection = false;
 
   for (const line of lines) {
     const trimmed = line.trim();
@@ -66,12 +67,52 @@ const stripPptxBubbleContent = (value: string): string => {
       continue;
     }
 
+    // Strip the attachment listing section entirely
+    if (trimmed === 'Attached files (relative to workspace):') {
+      inAttachmentSection = true;
+      continue;
+    }
+
+    if (inAttachmentSection) {
+      if (trimmed === '' || /^- .+\(.+\)$/.test(trimmed)) {
+        continue;
+      }
+      inAttachmentSection = false;
+    }
+
     output.push(line);
   }
 
   return output.join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+};
+
+const extractAttachmentNames = (value: string): string[] => {
+  const names: string[] = [];
+  const lines = value.split('\n');
+  let inAttachmentSection = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    if (trimmed === 'Attached files (relative to workspace):') {
+      inAttachmentSection = true;
+      continue;
+    }
+
+    if (inAttachmentSection) {
+      const match = trimmed.match(/^- (.+?) \(.+\)$/);
+      if (match) {
+        names.push(match[1]);
+      } else if (trimmed !== '' && trimmed !== ATTACHMENT_CONTENT_START_MARKER && trimmed !== ATTACHMENT_CONTENT_END_MARKER && trimmed !== 'Extracted content:' && trimmed !== 'Attachment content:') {
+        // Non-attachment line after the section; stop parsing
+        break;
+      }
+    }
+  }
+
+  return names;
 };
 
 const buildImageAttachmentViewerOptions = (inputText: string, fileName: string) => {
@@ -90,6 +131,7 @@ export {
   MAX_IMAGE_OCR_CHARS,
   OCR_REQUEST_PATTERNS,
   buildImageAttachmentViewerOptions,
+  extractAttachmentNames,
   shouldRequestImageOcr,
   stripHtmlForText,
   stripPptxBubbleContent,

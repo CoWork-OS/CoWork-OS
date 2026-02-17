@@ -14,6 +14,7 @@ import {
   ATTACHMENT_CONTENT_START_MARKER,
   MAX_IMAGE_OCR_CHARS,
   buildImageAttachmentViewerOptions,
+  extractAttachmentNames,
   stripHtmlForText,
   stripPptxBubbleContent,
   truncateTextForTaskPrompt,
@@ -343,9 +344,9 @@ function CollapsibleUserBubble({ children }: { children: React.ReactNode }) {
         {children}
         {collapsed && <div className="user-bubble-fade" />}
       </div>
-      {collapsed && (
-        <button className="user-bubble-expand-btn" onClick={() => setExpanded(true)}>
-          Show more
+      {needsCollapse && (
+        <button className="user-bubble-expand-btn" onClick={() => setExpanded(!expanded)}>
+          {collapsed ? 'Show more' : 'Show less'}
         </button>
       )}
     </>
@@ -2631,8 +2632,21 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
           <div className="chat-message user-message">
             <CollapsibleUserBubble>
               <ReactMarkdown remarkPlugins={userMarkdownPlugins} components={markdownComponents}>
-                {task.prompt}
+                {stripPptxBubbleContent(task.prompt)}
               </ReactMarkdown>
+              {extractAttachmentNames(task.prompt).length > 0 && (
+                <div className="bubble-attachments">
+                  {extractAttachmentNames(task.prompt).map((name, i) => (
+                    <span className="bubble-attachment-chip" key={i}>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                        <path d="M14 2v6h6" />
+                      </svg>
+                      <span className="bubble-attachment-name" title={name}>{name}</span>
+                    </span>
+                  ))}
+                </div>
+              )}
             </CollapsibleUserBubble>
             <MessageCopyButton text={task.prompt} />
           </div>
@@ -2705,7 +2719,9 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
 
                 // Render user messages as chat bubbles on the right
                 if (isUserMessage) {
-                  const messageText = stripPptxBubbleContent(event.payload?.message || 'User message');
+                  const rawMessage = event.payload?.message || 'User message';
+                  const messageText = stripPptxBubbleContent(rawMessage);
+                  const attachmentNames = extractAttachmentNames(rawMessage);
                   return (
                     <Fragment key={event.id || `event-${item.eventIndex}`}>
                       <div className="chat-message user-message">
@@ -2713,6 +2729,19 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
                           <ReactMarkdown remarkPlugins={userMarkdownPlugins} components={markdownComponents}>
                             {messageText}
                           </ReactMarkdown>
+                          {attachmentNames.length > 0 && (
+                            <div className="bubble-attachments">
+                              {attachmentNames.map((name, i) => (
+                                <span className="bubble-attachment-chip" key={i}>
+                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                    <path d="M14 2v6h6" />
+                                  </svg>
+                                  <span className="bubble-attachment-name" title={name}>{name}</span>
+                                </span>
+                              ))}
+                            </div>
+                          )}
                         </CollapsibleUserBubble>
                         <MessageCopyButton text={messageText} />
                       </div>

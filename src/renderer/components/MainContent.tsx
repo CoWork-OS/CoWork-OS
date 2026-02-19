@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo, Fragment, Children } from 'react';
+import { memo, useState, useEffect, useRef, useCallback, useMemo, Fragment, Children } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
@@ -212,7 +212,7 @@ const normalizeMentionSearch = (value: string): string =>
 import { SkillParameterModal } from './SkillParameterModal';
 import { FileViewer } from './FileViewer';
 import { ThemeIcon } from './ThemeIcon';
-import { AlertTriangleIcon, BookIcon, ChartIcon, CheckIcon, ClipboardIcon, EditIcon, FolderIcon, InfoIcon, SearchIcon, UsersIcon, XIcon } from './LineIcons';
+import { AlertTriangleIcon, BookIcon, CalendarIcon, ChartIcon, CheckIcon, ClipboardIcon, CodeIcon, EditIcon, FileTextIcon, FolderIcon, GlobeIcon, InfoIcon, MessageIcon, SearchIcon, ShieldIcon, SlidersIcon, UsersIcon, XIcon, ZapIcon } from './LineIcons';
 import { CommandOutput } from './CommandOutput';
 import { CanvasPreview } from './CanvasPreview';
 import { InlineImagePreview } from './InlineImagePreview';
@@ -286,7 +286,7 @@ function CodeBlock({ children, className, ...props }: CodeBlockProps) {
 }
 
 // Copy button for user messages
-function MessageCopyButton({ text }: { text: string }) {
+const MessageCopyButton = memo(function MessageCopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -318,7 +318,7 @@ function MessageCopyButton({ text }: { text: string }) {
       <span>{copied ? 'Copied' : 'Copy'}</span>
     </button>
   );
-}
+});
 
 // Collapsible user message bubble - limits height and expands on click
 function CollapsibleUserBubble({ children }: { children: React.ReactNode }) {
@@ -382,7 +382,7 @@ function stopCurrentAudio() {
 }
 
 // Speak button for assistant messages
-function MessageSpeakButton({ text, voiceEnabled }: { text: string; voiceEnabled: boolean }) {
+const MessageSpeakButton = memo(function MessageSpeakButton({ text, voiceEnabled }: { text: string; voiceEnabled: boolean }) {
   const [speaking, setSpeaking] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -483,7 +483,7 @@ function MessageSpeakButton({ text, voiceEnabled }: { text: string; voiceEnabled
       <span>{speaking ? 'Stop' : loading ? 'Loading' : 'Speak'}</span>
     </button>
   );
-}
+});
 
 const HEADING_EMOJI_REGEX = /^([\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}][\uFE0F\uFE0E]?)(\s+)?/u;
 
@@ -947,7 +947,97 @@ interface CreateTaskOptions {
   autonomousMode?: boolean;
 }
 
-type SettingsTab = 'appearance' | 'llm' | 'search' | 'telegram' | 'slack' | 'whatsapp' | 'teams' | 'x' | 'morechannels' | 'integrations' | 'updates' | 'guardrails' | 'queue' | 'skills' | 'voice';
+type SettingsTab =
+  | 'appearance'
+  | 'llm'
+  | 'search'
+  | 'telegram'
+  | 'slack'
+  | 'whatsapp'
+  | 'teams'
+  | 'x'
+  | 'morechannels'
+  | 'integrations'
+  | 'updates'
+  | 'guardrails'
+  | 'queue'
+  | 'skills'
+  | 'voice'
+  | 'scheduled'
+  | 'mcp';
+
+// ---- Focused mode card pool ----
+interface FocusedCard {
+  id: string;
+  emoji: string;
+  iconName: string;
+  title: string;
+  desc: string;
+  action: { type: 'prompt'; prompt: string } | { type: 'settings'; tab: SettingsTab };
+  category: 'task' | 'setup' | 'discover';
+}
+
+const FOCUSED_CARD_POOL: FocusedCard[] = [
+  // --- Task starters ---
+  { id: 'write', emoji: '✏️', iconName: 'edit', title: 'Write something', desc: 'Emails, reports, documents, or creative content', action: { type: 'prompt', prompt: "I have a writing task for you. Let me describe what I need and let's create it together." }, category: 'task' },
+  { id: 'research', emoji: '🔍', iconName: 'search', title: 'Research a topic', desc: 'Deep-dive into any subject and get a summary', action: { type: 'prompt', prompt: "I need help researching a topic. Let me tell you what I'm looking into." }, category: 'task' },
+  { id: 'analyze', emoji: '📊', iconName: 'chart', title: 'Analyze data', desc: 'Crunch numbers, find patterns, build reports', action: { type: 'prompt', prompt: "I have some data I'd like to analyze. Let me share the files and tell you what I'm looking for." }, category: 'task' },
+  { id: 'files', emoji: '📁', iconName: 'folder', title: 'Work with files', desc: 'Sort, rename, convert, or organize anything', action: { type: 'prompt', prompt: "I need help working with some files. Let me point you to the folder and explain what I need." }, category: 'task' },
+  { id: 'build', emoji: '⚡', iconName: 'zap', title: 'Build something', desc: 'Code, automate, or create from scratch', action: { type: 'prompt', prompt: "I need help building or coding something. Let me describe the project." }, category: 'task' },
+  { id: 'chat', emoji: '💬', iconName: 'message', title: 'Just chat', desc: 'Think out loud, brainstorm, or ask me anything', action: { type: 'prompt', prompt: "Let's just chat. I have something on my mind I'd like to talk through." }, category: 'task' },
+  { id: 'meeting', emoji: '📋', iconName: 'clipboard', title: 'Prep for a meeting', desc: 'Create agendas, talking points, and notes', action: { type: 'prompt', prompt: "Help me prepare for a meeting. I need an agenda and talking points." }, category: 'task' },
+  { id: 'document', emoji: '📄', iconName: 'filetext', title: 'Create a document', desc: 'Word docs, PDFs, presentations, or spreadsheets', action: { type: 'prompt', prompt: "I need to create a document. Let me describe the format and content I need." }, category: 'task' },
+  { id: 'email', emoji: '✉️', iconName: 'edit', title: 'Draft an email', desc: 'Professional, clear, and on-point every time', action: { type: 'prompt', prompt: "Help me draft an email. Here's the context and who it's for." }, category: 'task' },
+  { id: 'summarize', emoji: '📝', iconName: 'filetext', title: 'Summarize something', desc: 'Condense long texts, articles, or meeting notes', action: { type: 'prompt', prompt: "I have something I need summarized. Let me share it with you." }, category: 'task' },
+  { id: 'code', emoji: '💻', iconName: 'code', title: 'Debug or review code', desc: 'Find bugs, explain code, or suggest improvements', action: { type: 'prompt', prompt: "I have some code I need help with. Let me share it and explain the issue." }, category: 'task' },
+  { id: 'translate', emoji: '🌐', iconName: 'globe', title: 'Translate content', desc: 'Translate text between any languages', action: { type: 'prompt', prompt: "I need something translated. Let me share the text and the target language." }, category: 'task' },
+
+  // --- Setup & integration suggestions ---
+  { id: 'setup-whatsapp', emoji: '📱', iconName: 'message', title: 'Connect WhatsApp', desc: 'Chat with your AI from WhatsApp', action: { type: 'settings', tab: 'whatsapp' }, category: 'setup' },
+  { id: 'setup-telegram', emoji: '✈️', iconName: 'message', title: 'Connect Telegram', desc: 'Send tasks from Telegram anytime', action: { type: 'settings', tab: 'telegram' }, category: 'setup' },
+  { id: 'setup-slack', emoji: '💼', iconName: 'message', title: 'Connect Slack', desc: 'Bring your AI into your team workspace', action: { type: 'settings', tab: 'slack' }, category: 'setup' },
+  { id: 'setup-voice', emoji: '🎙️', iconName: 'sliders', title: 'Set up voice', desc: 'Talk to your AI using your microphone', action: { type: 'settings', tab: 'voice' }, category: 'setup' },
+  { id: 'setup-skills', emoji: '🧩', iconName: 'zap', title: 'Explore skills', desc: 'Add custom skills to extend capabilities', action: { type: 'settings', tab: 'skills' }, category: 'setup' },
+  { id: 'setup-schedule', emoji: '⏰', iconName: 'calendar', title: 'Schedule a task', desc: 'Set up recurring tasks that run automatically', action: { type: 'settings', tab: 'scheduled' }, category: 'setup' },
+  { id: 'setup-mcp', emoji: '🔌', iconName: 'sliders', title: 'Add MCP servers', desc: 'Connect to external tools and services', action: { type: 'settings', tab: 'mcp' }, category: 'setup' },
+  { id: 'setup-guardrails', emoji: '🛡️', iconName: 'shield', title: 'Configure guardrails', desc: 'Control what your AI can and cannot do', action: { type: 'settings', tab: 'guardrails' }, category: 'setup' },
+
+  // --- Feature discovery ---
+  { id: 'discover-memory', emoji: '🧠', iconName: 'book', title: 'I remember things', desc: 'I learn your preferences over time', action: { type: 'prompt', prompt: "What do you remember about me and my preferences?" }, category: 'discover' },
+  { id: 'discover-browse', emoji: '🌍', iconName: 'globe', title: 'I can browse the web', desc: 'Search, read pages, and fetch live data', action: { type: 'prompt', prompt: "Search the web for the latest news on a topic I'll describe." }, category: 'discover' },
+  { id: 'discover-files', emoji: '📂', iconName: 'folder', title: 'I can read your files', desc: 'Drop files here or point me to a folder', action: { type: 'prompt', prompt: "Show me what files are in my current workspace." }, category: 'discover' },
+  { id: 'discover-agents', emoji: '🤖', iconName: 'zap', title: 'I work autonomously', desc: 'Give me a goal and I\'ll figure out the steps', action: { type: 'prompt', prompt: "I have a complex task that needs multiple steps. Let me describe the goal and you plan it out." }, category: 'discover' },
+  { id: 'discover-multimodel', emoji: '🔄', iconName: 'sliders', title: 'Switch AI models', desc: 'Use Claude, GPT, Gemini, or local models', action: { type: 'settings', tab: 'llm' }, category: 'discover' },
+];
+
+const CARDS_TO_SHOW = 6;
+
+function shuffleArray<T>(arr: T[]): T[] {
+  const shuffled = [...arr];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
+}
+
+function pickFocusedCards(pool: FocusedCard[], count: number): FocusedCard[] {
+  // Ensure a good mix: at least 3 tasks, 1-2 setup, 1 discover
+  const tasks = shuffleArray(pool.filter(c => c.category === 'task'));
+  const setup = shuffleArray(pool.filter(c => c.category === 'setup'));
+  const discover = shuffleArray(pool.filter(c => c.category === 'discover'));
+  const picked: FocusedCard[] = [
+    ...tasks.slice(0, 3),
+    ...setup.slice(0, 1),
+    ...discover.slice(0, 1),
+  ];
+  // Fill remaining from the rest
+  const usedIds = new Set(picked.map(c => c.id));
+  const remaining = shuffleArray(pool.filter(c => !usedIds.has(c.id)));
+  picked.push(...remaining.slice(0, count - picked.length));
+  // Shuffle final order so categories aren't grouped
+  return shuffleArray(picked);
+}
 
 interface MainContentProps {
   task: Task | undefined;
@@ -964,6 +1054,7 @@ interface MainContentProps {
   selectedModel: string;
   availableModels: LLMModelInfo[];
   onModelChange: (model: string) => void;
+  uiDensity?: 'focused' | 'full';
 }
 
 // Track active command execution state
@@ -975,7 +1066,7 @@ interface ActiveCommand {
   startTimestamp: number; // When the command started, for positioning in timeline
 }
 
-export function MainContent({ task, selectedTaskId, workspace, events, onSendMessage, onCreateTask, onChangeWorkspace, onSelectWorkspace, onOpenSettings, onStopTask, onOpenBrowserView, selectedModel, availableModels, onModelChange }: MainContentProps) {
+export function MainContent({ task, selectedTaskId, workspace, events, onSendMessage, onCreateTask, onChangeWorkspace, onSelectWorkspace, onOpenSettings, onStopTask, onOpenBrowserView, selectedModel, availableModels, onModelChange, uiDensity = 'focused' }: MainContentProps) {
   // Agent personality context for personalized messages
   const agentContext = useAgentContext();
   const [inputValue, setInputValue] = useState('');
@@ -989,6 +1080,12 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
   const [mentionTarget, setMentionTarget] = useState<{ start: number; end: number } | null>(null);
   const [mentionOpen, setMentionOpen] = useState(false);
   const [mentionSelectedIndex, setMentionSelectedIndex] = useState(0);
+  // Focused mode card pool - pick random 6 on mount
+  const focusedCards = useMemo(
+    () => pickFocusedCards(FOCUSED_CARD_POOL, CARDS_TO_SHOW),
+    []
+  );
+
   // Shell permission state - tracks current workspace's shell permission
   const [shellEnabled, setShellEnabled] = useState(workspace?.permissions?.shell ?? false);
   // Active command execution state
@@ -1070,6 +1167,12 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
   const lastSpokenMessageRef = useRef<string | null>(null);
   const skillsMenuRef = useRef<HTMLDivElement>(null);
   const workspaceDropdownRef = useRef<HTMLDivElement>(null);
+  // Focused mode overflow menu state
+  const [showOverflowMenu, setShowOverflowMenu] = useState(false);
+  const overflowMenuRef = useRef<HTMLDivElement>(null);
+  const overflowToggleBtnRef = useRef<HTMLButtonElement>(null);
+  const [showModelDropdownFromLabel, setShowModelDropdownFromLabel] = useState(false);
+  const modelLabelRef = useRef<HTMLDivElement>(null);
 
   // Filter events based on verbose mode
   const filteredEvents = useMemo(() => {
@@ -1298,6 +1401,18 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
       .catch(err => console.error('Failed to load agent roles:', err));
   }, []);
 
+  // Pre-normalize agent role search strings once when roles change (avoids per-keystroke string ops)
+  const normalizedRoleIndex = useMemo(() => {
+    const index = new Map<string, string>();
+    for (const role of agentRoles) {
+      const haystack = normalizeMentionSearch(
+        `${role.displayName} ${role.name} ${role.description ?? ''}`
+      );
+      index.set(role.id, haystack);
+    }
+    return index;
+  }, [agentRoles]);
+
   // Load canvas sessions when task changes
   useEffect(() => {
     if (!task?.id) {
@@ -1433,6 +1548,95 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showWorkspaceDropdown]);
 
+  // Close overflow menu on click outside (focused mode)
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (overflowMenuRef.current && !overflowMenuRef.current.contains(e.target as Node)) {
+        setShowOverflowMenu(false);
+      }
+    };
+    if (showOverflowMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showOverflowMenu]);
+
+  const getOverflowMenuItems = useCallback((): HTMLElement[] => {
+    if (!overflowMenuRef.current) return [];
+    return Array.from(
+      overflowMenuRef.current.querySelectorAll<HTMLElement>(
+        '[data-overflow-menu-item]:not([disabled])'
+      )
+    );
+  }, []);
+
+  useEffect(() => {
+    if (!showOverflowMenu) return;
+    const items = getOverflowMenuItems();
+    items[0]?.focus();
+  }, [showOverflowMenu, getOverflowMenuItems]);
+
+  const handleOverflowButtonKeyDown = useCallback((e: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setShowOverflowMenu(true);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setShowOverflowMenu(false);
+    }
+  }, []);
+
+  const handleOverflowMenuKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    const items = getOverflowMenuItems();
+    if (items.length === 0) return;
+    const activeIndex = items.findIndex((item) => item === document.activeElement);
+
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      setShowOverflowMenu(false);
+      overflowToggleBtnRef.current?.focus();
+      return;
+    }
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      const nextIndex = activeIndex < 0 ? 0 : (activeIndex + 1) % items.length;
+      items[nextIndex]?.focus();
+      return;
+    }
+
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      const prevIndex = activeIndex < 0 ? items.length - 1 : (activeIndex - 1 + items.length) % items.length;
+      items[prevIndex]?.focus();
+      return;
+    }
+
+    if (e.key === 'Home') {
+      e.preventDefault();
+      items[0]?.focus();
+      return;
+    }
+
+    if (e.key === 'End') {
+      e.preventDefault();
+      items[items.length - 1]?.focus();
+    }
+  }, [getOverflowMenuItems]);
+
+  // Close model dropdown from label on click outside (focused mode)
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (modelLabelRef.current && !modelLabelRef.current.contains(e.target as Node)) {
+        setShowModelDropdownFromLabel(false);
+      }
+    };
+    if (showModelDropdownFromLabel) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showModelDropdownFromLabel]);
+
   // Handle workspace dropdown toggle - load workspaces when opening
   const handleWorkspaceDropdownToggle = async () => {
     if (!showWorkspaceDropdown) {
@@ -1552,13 +1756,22 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
   const placeholderMeasureRef = useRef<HTMLSpanElement>(null);
   const [cursorLeft, setCursorLeft] = useState<number>(0);
 
-  // Auto-resize textarea as content changes
+  // Auto-resize textarea as content changes (uses requestAnimationFrame to batch with browser paint)
+  const resizeRafRef = useRef<number>(0);
   const autoResizeTextarea = useCallback(() => {
-    const textarea = textareaRef.current;
-    if (textarea) {
-      textarea.style.height = 'auto';
-      textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
-    }
+    if (resizeRafRef.current) cancelAnimationFrame(resizeRafRef.current);
+    resizeRafRef.current = requestAnimationFrame(() => {
+      const textarea = textareaRef.current;
+      if (textarea) {
+        textarea.style.height = 'auto';
+        textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
+      }
+    });
+  }, []);
+
+  // Cleanup RAF on unmount
+  useEffect(() => {
+    return () => { if (resizeRafRef.current) cancelAnimationFrame(resizeRafRef.current); };
   }, []);
 
   // Auto-resize when input value changes
@@ -2004,11 +2217,11 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
     }
 
     const filteredAgents = agentRoles
-      .filter((role) => role.isActive)
       .filter((role) => {
         if (!query) return true;
-        const haystacks = [role.displayName, role.name, role.description ?? ''];
-        return haystacks.some((text) => normalizeMentionSearch(text).includes(query));
+        // Use pre-normalized index for O(1) lookup instead of per-keystroke normalization
+        const haystack = normalizedRoleIndex.get(role.id) ?? '';
+        return haystack.includes(query);
       })
       .sort((a, b) => {
         if (a.sortOrder !== b.sortOrder) {
@@ -2029,7 +2242,7 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
     });
 
     return options;
-  }, [mentionOpen, mentionQuery, agentRoles]);
+  }, [mentionOpen, mentionQuery, agentRoles, normalizedRoleIndex]);
 
   useEffect(() => {
     if (mentionSelectedIndex >= mentionOptions.length) {
@@ -2048,17 +2261,37 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [mentionOpen]);
 
+  const mentionOpenRef = useRef(mentionOpen);
+  const mentionQueryRef = useRef(mentionQuery);
+  const mentionTargetRef = useRef(mentionTarget);
+
+  useEffect(() => {
+    mentionOpenRef.current = mentionOpen;
+  }, [mentionOpen]);
+
+  useEffect(() => {
+    mentionQueryRef.current = mentionQuery;
+  }, [mentionQuery]);
+
+  useEffect(() => {
+    mentionTargetRef.current = mentionTarget;
+  }, [mentionTarget]);
+
   const updateMentionState = useCallback((value: string, cursor: number | null) => {
     const mention = findMentionAtCursor(value, cursor);
     if (!mention) {
-      setMentionOpen(false);
-      setMentionQuery('');
-      setMentionTarget(null);
+      // Only update state if it actually changed — avoids unnecessary re-renders
+      if (mentionOpenRef.current) setMentionOpen(false);
+      if (mentionQueryRef.current !== '') setMentionQuery('');
+      if (mentionTargetRef.current !== null) setMentionTarget(null);
       return;
     }
-    setMentionOpen(true);
-    setMentionQuery(mention.query);
-    setMentionTarget({ start: mention.start, end: mention.end });
+    if (!mentionOpenRef.current) setMentionOpen(true);
+    if (mentionQueryRef.current !== mention.query) setMentionQuery(mention.query);
+    const prev = mentionTargetRef.current;
+    if (!prev || prev.start !== mention.start || prev.end !== mention.end) {
+      setMentionTarget({ start: mention.start, end: mention.end });
+    }
     setMentionSelectedIndex(0);
   }, []);
 
@@ -2205,18 +2438,25 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
     return (
       <div className="main-content">
         <div className="main-body welcome-view">
-          <div className="welcome-content cli-style">
+          <div className={`welcome-content cli-style${uiDensity === 'focused' ? ' welcome-content-focused' : ''}`}>
             {/* Logo */}
-            <div className="welcome-header-modern modern-only">
-              <div className="modern-logo-container">
+            {uiDensity === 'focused' ? (
+              <div className="welcome-header-focused modern-only">
                 <img src="./cowork-os-logo.png" alt="CoWork OS" className="modern-logo" />
-                <div className="modern-title-container">
-                  <h1 className="modern-title">CoWork OS</h1>
-                  <span className="modern-version">{appVersion ? `v${appVersion}` : ''}</span>
-                </div>
+                <h1 className="focused-greeting">{agentContext.getMessage('welcomeSubtitle')}</h1>
               </div>
-              <p className="modern-subtitle">{agentContext.getMessage('welcomeSubtitle')}</p>
-            </div>
+            ) : (
+              <div className="welcome-header-modern modern-only">
+                <div className="modern-logo-container">
+                  <img src="./cowork-os-logo.png" alt="CoWork OS" className="modern-logo" />
+                  <div className="modern-title-container">
+                    <h1 className="modern-title">CoWork OS</h1>
+                    <span className="modern-version">{appVersion ? `v${appVersion}` : ''}</span>
+                  </div>
+                </div>
+                <p className="modern-subtitle">{agentContext.getMessage('welcomeSubtitle')}</p>
+              </div>
+            )}
 
             <div className="terminal-only">
               <div className="welcome-logo">
@@ -2254,43 +2494,75 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
 
             {/* Quick Start */}
             <div className="cli-commands">
-              <div className="cli-commands-header">
-                <span className="cli-prompt">&gt;</span>
-                <span className="terminal-only">QUICK START</span>
-                <span className="modern-only">Quick start</span>
-              </div>
-              <div className="quick-start-grid">
-                <button className="quick-start-card" onClick={() => handleQuickAction('Let\'s organize the files in this folder together. Sort them by type and rename them with clear, consistent names.')} title="Let's sort and tidy up the workspace">
-                  <ThemeIcon className="quick-start-icon" emoji="📁" icon={<FolderIcon size={22} />} />
-                  <span className="quick-start-title">Organize files</span>
-                  <span className="quick-start-desc">Let's sort and tidy up the workspace</span>
-                </button>
-                <button className="quick-start-card" onClick={() => handleQuickAction('Let\'s write a document together. I\'ll describe what I need and we can create it.')} title="Co-create reports, summaries, or notes">
-                  <ThemeIcon className="quick-start-icon" emoji="📝" icon={<EditIcon size={22} />} />
-                  <span className="quick-start-title">Write together</span>
-                  <span className="quick-start-desc">Co-create reports, summaries, or notes</span>
-                </button>
-                <button className="quick-start-card" onClick={() => handleQuickAction('Let\'s analyze the data files in this folder together. We\'ll summarize the key findings and create a report.')} title="Work through spreadsheets or data files">
-                  <ThemeIcon className="quick-start-icon" emoji="📊" icon={<ChartIcon size={22} />} />
-                  <span className="quick-start-title">Analyze data</span>
-                  <span className="quick-start-desc">Work through spreadsheets or data files</span>
-                </button>
-                <button className="quick-start-card" onClick={() => handleQuickAction('Let\'s generate documentation for this project together. We can create a README, API docs, or code comments as needed.')} title="Build documentation for the project">
-                  <ThemeIcon className="quick-start-icon" emoji="📖" icon={<BookIcon size={22} />} />
-                  <span className="quick-start-title">Generate docs</span>
-                  <span className="quick-start-desc">Build documentation for the project</span>
-                </button>
-                <button className="quick-start-card" onClick={() => handleQuickAction('Let\'s research and summarize information from the files in this folder together.')} title="Dig through files and find insights">
-                  <ThemeIcon className="quick-start-icon" emoji="🔍" icon={<SearchIcon size={22} />} />
-                  <span className="quick-start-title">Research together</span>
-                  <span className="quick-start-desc">Dig through files and find insights</span>
-                </button>
-                <button className="quick-start-card" onClick={() => handleQuickAction('Let\'s prepare for a meeting together. We\'ll create an agenda, talking points, and organize materials needed.')} title="Get everything ready for a clean meeting">
-                  <ThemeIcon className="quick-start-icon" emoji="📋" icon={<ClipboardIcon size={22} />} />
-                  <span className="quick-start-title">Meeting prep</span>
-                  <span className="quick-start-desc">Get everything ready for a clean meeting</span>
-                </button>
-              </div>
+              {uiDensity !== 'focused' && (
+                <div className="cli-commands-header">
+                  <span className="cli-prompt">&gt;</span>
+                  <span className="terminal-only">QUICK START</span>
+                  <span className="modern-only">Quick start</span>
+                </div>
+              )}
+              {uiDensity === 'focused' ? (
+                <div className="quick-start-grid focused-cards">
+                  {focusedCards.map((card) => {
+                    const iconMap: Record<string, React.ReactNode> = {
+                      edit: <EditIcon size={22} />, search: <SearchIcon size={22} />,
+                      chart: <ChartIcon size={22} />, folder: <FolderIcon size={22} />,
+                      zap: <ZapIcon size={22} />, message: <MessageIcon size={22} />,
+                      clipboard: <ClipboardIcon size={22} />, filetext: <FileTextIcon size={22} />,
+                      code: <CodeIcon size={22} />, globe: <GlobeIcon size={22} />,
+                      book: <BookIcon size={22} />, calendar: <CalendarIcon size={22} />,
+                      sliders: <SlidersIcon size={22} />, shield: <ShieldIcon size={22} />,
+                    };
+                    const handleClick = () => {
+                      if (card.action.type === 'prompt') {
+                        handleQuickAction(card.action.prompt);
+                      } else {
+                        onOpenSettings?.(card.action.tab);
+                      }
+                    };
+                    return (
+                      <button key={card.id} className={`quick-start-card ${card.category !== 'task' ? 'card-' + card.category : ''}`} onClick={handleClick} title={card.desc}>
+                        <ThemeIcon className="quick-start-icon" emoji={card.emoji} icon={iconMap[card.iconName] || <ZapIcon size={22} />} />
+                        <span className="quick-start-title">{card.title}</span>
+                        <span className="quick-start-desc">{card.desc}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="quick-start-grid">
+                  <button className="quick-start-card" onClick={() => handleQuickAction('Let\'s organize the files in this folder together. Sort them by type and rename them with clear, consistent names.')} title="Let's sort and tidy up the workspace">
+                    <ThemeIcon className="quick-start-icon" emoji="📁" icon={<FolderIcon size={22} />} />
+                    <span className="quick-start-title">Organize files</span>
+                    <span className="quick-start-desc">Let's sort and tidy up the workspace</span>
+                  </button>
+                  <button className="quick-start-card" onClick={() => handleQuickAction('Let\'s write a document together. I\'ll describe what I need and we can create it.')} title="Co-create reports, summaries, or notes">
+                    <ThemeIcon className="quick-start-icon" emoji="📝" icon={<EditIcon size={22} />} />
+                    <span className="quick-start-title">Write together</span>
+                    <span className="quick-start-desc">Co-create reports, summaries, or notes</span>
+                  </button>
+                  <button className="quick-start-card" onClick={() => handleQuickAction('Let\'s analyze the data files in this folder together. We\'ll summarize the key findings and create a report.')} title="Work through spreadsheets or data files">
+                    <ThemeIcon className="quick-start-icon" emoji="📊" icon={<ChartIcon size={22} />} />
+                    <span className="quick-start-title">Analyze data</span>
+                    <span className="quick-start-desc">Work through spreadsheets or data files</span>
+                  </button>
+                  <button className="quick-start-card" onClick={() => handleQuickAction('Let\'s generate documentation for this project together. We can create a README, API docs, or code comments as needed.')} title="Build documentation for the project">
+                    <ThemeIcon className="quick-start-icon" emoji="📖" icon={<BookIcon size={22} />} />
+                    <span className="quick-start-title">Generate docs</span>
+                    <span className="quick-start-desc">Build documentation for the project</span>
+                  </button>
+                  <button className="quick-start-card" onClick={() => handleQuickAction('Let\'s research and summarize information from the files in this folder together.')} title="Dig through files and find insights">
+                    <ThemeIcon className="quick-start-icon" emoji="🔍" icon={<SearchIcon size={22} />} />
+                    <span className="quick-start-title">Research together</span>
+                    <span className="quick-start-desc">Dig through files and find insights</span>
+                  </button>
+                  <button className="quick-start-card" onClick={() => handleQuickAction('Let\'s prepare for a meeting together. We\'ll create an agenda, talking points, and organize materials needed.')} title="Get everything ready for a clean meeting">
+                    <ThemeIcon className="quick-start-icon" emoji="📋" icon={<ClipboardIcon size={22} />} />
+                    <span className="quick-start-title">Meeting prep</span>
+                    <span className="quick-start-desc">Get everything ready for a clean meeting</span>
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Input Area */}
@@ -2352,18 +2624,20 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
                 {!inputValue && <span className="cli-cursor" style={{ left: cursorLeft }} />}
               </div>
 
-              {/* Task mode options */}
-              <div className="goal-mode-section">
-                <label className="goal-mode-toggle">
-                  <input
-                    type="checkbox"
-                    checked={autonomousModeEnabled}
-                    onChange={(e) => setAutonomousModeEnabled(e.target.checked)}
-                  />
-                  <span className="goal-mode-label">Autonomous mode</span>
-                  <span className="goal-mode-hint">Skip confirmation prompts and keep working</span>
-                </label>
-              </div>
+              {/* Task mode options - hidden in focused mode */}
+              {uiDensity !== 'focused' && (
+                <div className="goal-mode-section">
+                  <label className="goal-mode-toggle">
+                    <input
+                      type="checkbox"
+                      checked={autonomousModeEnabled}
+                      onChange={(e) => setAutonomousModeEnabled(e.target.checked)}
+                    />
+                    <span className="goal-mode-label">Autonomous mode</span>
+                    <span className="goal-mode-hint">Skip confirmation prompts and keep working</span>
+                  </label>
+                </div>
+              )}
 
               <div className="welcome-input-footer">
                 <div className="input-left-actions">
@@ -2386,190 +2660,331 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
                       <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
                     </svg>
                   </button>
-                  <div className="workspace-dropdown-container" ref={workspaceDropdownRef}>
-                    <button className="folder-selector" onClick={handleWorkspaceDropdownToggle}>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
-                      </svg>
-                      <span>{workspace?.isTemp || isTempWorkspaceId(workspace?.id) ? 'Work in a folder' : (workspace?.name || 'Work in a folder')}</span>
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={showWorkspaceDropdown ? 'chevron-up' : ''}>
-                        <path d="M6 9l6 6 6-6" />
-                      </svg>
-                    </button>
-                    {showWorkspaceDropdown && (
-                      <div className="workspace-dropdown">
-                        {workspacesList.length > 0 && (
-                          <>
-                            <div className="workspace-dropdown-header">Recent Folders</div>
-                            <div className="workspace-dropdown-list">
-                              {workspacesList.slice(0, 10).map((w) => (
-                                <button
-                                  key={w.id}
-                                  className={`workspace-dropdown-item ${workspace?.id === w.id ? 'active' : ''}`}
-                                  onClick={() => handleWorkspaceSelect(w)}
-                                >
-                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                    <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
-                                  </svg>
-                                  <div className="workspace-item-info">
-                                    <span className="workspace-item-name">{w.name}</span>
-                                    <span className="workspace-item-path">{w.path}</span>
-                                  </div>
-                                  {workspace?.id === w.id && (
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="check-icon">
-                                      <path d="M20 6L9 17l-5-5" />
-                                    </svg>
-                                  )}
-                                </button>
-                              ))}
-                            </div>
-                            <div className="workspace-dropdown-divider" />
-                          </>
-                        )}
-                        <button className="workspace-dropdown-item new-folder" onClick={handleSelectNewFolder}>
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path d="M12 5v14M5 12h14" />
-                          </svg>
-                          <span>Work in another folder...</span>
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                  <button
-                    className={`shell-toggle ${shellEnabled ? 'enabled' : ''}`}
-                    onClick={handleShellToggle}
-                    title={shellEnabled ? 'Shell commands enabled - click to disable' : 'Shell commands disabled - click to enable'}
-                  >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M4 17l6-6-6-6M12 19h8" />
-                    </svg>
-                    <span>Shell {shellEnabled ? 'ON' : 'OFF'}</span>
-                  </button>
-                </div>
-                <div className="input-right-actions">
-                  <ModelDropdown
-                    models={availableModels}
-                    selectedModel={selectedModel}
-                    onModelChange={onModelChange}
-                    onOpenSettings={onOpenSettings}
-                  />
-                  {/* Skills Menu Button */}
-                  <div className="skills-menu-container" ref={skillsMenuRef}>
-                    <button
-                      className={`skills-menu-btn ${showSkillsMenu ? 'active' : ''}`}
-                      onClick={() => setShowSkillsMenu(!showSkillsMenu)}
-                      title="Custom Skills"
-                    >
-                      <span>/</span>
-                    </button>
-                    {showSkillsMenu && (
-                      <div className="skills-dropdown">
-                        <div className="skills-dropdown-header">Custom Skills</div>
-                        <div className="skills-dropdown-search">
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <circle cx="11" cy="11" r="8" />
-                            <path d="M21 21l-4.35-4.35" />
-                          </svg>
-                          <input
-                            type="text"
-                            placeholder="Search skills..."
-                            value={skillsSearchQuery}
-                            onChange={(e) => setSkillsSearchQuery(e.target.value)}
-                            autoFocus
-                          />
+                  {uiDensity === 'focused' ? (
+                    <div className="overflow-menu-container" ref={overflowMenuRef}>
+                      <button
+                        ref={overflowToggleBtnRef}
+                        className={`overflow-menu-btn ${showOverflowMenu ? 'active' : ''}`}
+                        onClick={() => setShowOverflowMenu(!showOverflowMenu)}
+                        onKeyDown={handleOverflowButtonKeyDown}
+                        title="More options"
+                        aria-label="More options"
+                        aria-haspopup="menu"
+                        aria-expanded={showOverflowMenu}
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /><circle cx="5" cy="12" r="1" />
+                        </svg>
+                      </button>
+                      {showOverflowMenu && (
+                        <div
+                          className="overflow-menu-dropdown"
+                          role="menu"
+                          aria-label="More options"
+                          onKeyDown={handleOverflowMenuKeyDown}
+                        >
+                          <div className="overflow-menu-item" role="none">
+                            <button
+                              className="folder-selector"
+                              onClick={() => { setShowOverflowMenu(false); handleWorkspaceDropdownToggle(); }}
+                              role="menuitem"
+                              data-overflow-menu-item
+                            >
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+                              </svg>
+                              <span>{workspace?.isTemp || isTempWorkspaceId(workspace?.id) ? 'Work in a folder' : (workspace?.name || 'Work in a folder')}</span>
+                            </button>
+                          </div>
+                          <div className="overflow-menu-item" role="none">
+                            <button
+                              className={`shell-toggle ${shellEnabled ? 'enabled' : ''}`}
+                              onClick={() => { handleShellToggle(); setShowOverflowMenu(false); }}
+                              role="menuitem"
+                              data-overflow-menu-item
+                            >
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M4 17l6-6-6-6M12 19h8" />
+                              </svg>
+                              <span>Shell {shellEnabled ? 'ON' : 'OFF'}</span>
+                            </button>
+                          </div>
+                          <div className="overflow-menu-item" role="none">
+                            <button
+                              className="skills-menu-btn"
+                              onClick={() => { setShowOverflowMenu(false); setShowSkillsMenu(!showSkillsMenu); }}
+                              role="menuitem"
+                              data-overflow-menu-item
+                            >
+                              <span>/</span>
+                              <span>Custom Skills</span>
+                            </button>
+                          </div>
+                          <div className="overflow-menu-item" role="none">
+                            <button
+                              className="goal-mode-toggle"
+                              style={{ margin: 0 }}
+                              onClick={() => setAutonomousModeEnabled((prev) => !prev)}
+                              role="menuitemcheckbox"
+                              aria-checked={autonomousModeEnabled}
+                              data-overflow-menu-item
+                            >
+                              <span className="goal-mode-label">Autonomous {autonomousModeEnabled ? 'ON' : 'OFF'}</span>
+                            </button>
+                          </div>
                         </div>
-                        {customSkills.length > 0 ? (
-                          filteredSkills.length > 0 ? (
-                            <div className="skills-dropdown-list">
-                              {filteredSkills.map(skill => (
-                                <div
-                                  key={skill.id}
-                                  className="skills-dropdown-item"
-                                  style={{ cursor: 'pointer' }}
-                                  onClick={() => handleSkillSelect(skill)}
-                                >
-                                  <span className="skills-dropdown-icon">{skill.icon}</span>
-                                  <div className="skills-dropdown-info">
-                                    <span className="skills-dropdown-name">{skill.name}</span>
-                                    <span className="skills-dropdown-desc">{skill.description}</span>
-                                  </div>
+                      )}
+                    </div>
+                  ) : (
+                    <>
+                      <div className="workspace-dropdown-container" ref={workspaceDropdownRef}>
+                        <button className="folder-selector" onClick={handleWorkspaceDropdownToggle}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+                          </svg>
+                          <span>{workspace?.isTemp || isTempWorkspaceId(workspace?.id) ? 'Work in a folder' : (workspace?.name || 'Work in a folder')}</span>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={showWorkspaceDropdown ? 'chevron-up' : ''}>
+                            <path d="M6 9l6 6 6-6" />
+                          </svg>
+                        </button>
+                        {showWorkspaceDropdown && (
+                          <div className="workspace-dropdown">
+                            {workspacesList.length > 0 && (
+                              <>
+                                <div className="workspace-dropdown-header">Recent Folders</div>
+                                <div className="workspace-dropdown-list">
+                                  {workspacesList.slice(0, 10).map((w) => (
+                                    <button
+                                      key={w.id}
+                                      className={`workspace-dropdown-item ${workspace?.id === w.id ? 'active' : ''}`}
+                                      onClick={() => handleWorkspaceSelect(w)}
+                                    >
+                                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+                                      </svg>
+                                      <div className="workspace-item-info">
+                                        <span className="workspace-item-name">{w.name}</span>
+                                        <span className="workspace-item-path">{w.path}</span>
+                                      </div>
+                                      {workspace?.id === w.id && (
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="check-icon">
+                                          <path d="M20 6L9 17l-5-5" />
+                                        </svg>
+                                      )}
+                                    </button>
+                                  ))}
                                 </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="skills-dropdown-empty">
-                              No skills match "{skillsSearchQuery}"
-                            </div>
-                          )
-                        ) : (
-                          <div className="skills-dropdown-empty">
-                            No custom skills yet.
+                                <div className="workspace-dropdown-divider" />
+                              </>
+                            )}
+                            <button className="workspace-dropdown-item new-folder" onClick={handleSelectNewFolder}>
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M12 5v14M5 12h14" />
+                              </svg>
+                              <span>Work in another folder...</span>
+                            </button>
                           </div>
                         )}
-                        <div className="skills-dropdown-footer">
-                          <button
-                            className="skills-dropdown-create"
-                            onClick={() => {
-                              setShowSkillsMenu(false);
-                              setSkillsSearchQuery('');
-                              onOpenSettings?.('skills');
-                            }}
-                          >
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <line x1="12" y1="5" x2="12" y2="19" />
-                              <line x1="5" y1="12" x2="19" y2="12" />
-                            </svg>
-                            <span>Create New Skill</span>
-                          </button>
-                        </div>
                       </div>
-                    )}
-                  </div>
-                  <button
-                    className={`voice-input-btn ${voiceInput.state}`}
-                    onClick={voiceInput.toggleRecording}
-                    disabled={voiceInput.state === 'processing'}
-                    title={
-                      voiceInput.state === 'idle' ? 'Start voice input' :
-                        voiceInput.state === 'recording' ? 'Stop recording' :
-                          'Processing...'
-                    }
-                  >
-                    {voiceInput.state === 'processing' ? (
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="voice-processing-spin">
-                        <circle cx="12" cy="12" r="10" />
-                        <path d="M12 6v6l4 2" />
-                      </svg>
-                    ) : voiceInput.state === 'recording' ? (
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                        <rect x="6" y="6" width="12" height="12" rx="2" />
-                      </svg>
-                    ) : (
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-                        <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                        <line x1="12" y1="19" x2="12" y2="23" />
-                        <line x1="8" y1="23" x2="16" y2="23" />
-                      </svg>
-                    )}
-                    {voiceInput.state === 'recording' && (
-                      <span className="voice-recording-indicator" style={{ width: `${voiceInput.audioLevel}%` }} />
-                    )}
-                  </button>
-                  <button
-                    className="lets-go-btn lets-go-btn-sm"
-                    onClick={handleSend}
-                    disabled={(!inputValue.trim() && pendingAttachments.length === 0) || isUploadingAttachments || isPreparingMessage}
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M12 19V5M5 12l7-7 7 7" />
-                    </svg>
-                  </button>
+                      <button
+                        className={`shell-toggle ${shellEnabled ? 'enabled' : ''}`}
+                        onClick={handleShellToggle}
+                        title={shellEnabled ? 'Shell commands enabled - click to disable' : 'Shell commands disabled - click to enable'}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M4 17l6-6-6-6M12 19h8" />
+                        </svg>
+                        <span>Shell {shellEnabled ? 'ON' : 'OFF'}</span>
+                      </button>
+                    </>
+                  )}
+                </div>
+                <div className="input-right-actions">
+                  {uiDensity === 'focused' ? (
+                    <>
+                      <div className="model-label-container" ref={modelLabelRef}>
+                        <button
+                          className="model-label-subtle"
+                          onClick={() => setShowModelDropdownFromLabel(!showModelDropdownFromLabel)}
+                          title="Change model"
+                        >
+                          {availableModels.find(m => m.key === selectedModel)?.displayName || selectedModel}
+                        </button>
+                        {showModelDropdownFromLabel && (
+                          <div className="model-label-dropdown">
+                            {availableModels.map(m => (
+                              <button
+                                key={m.key}
+                                className={`model-label-dropdown-item ${m.key === selectedModel ? 'active' : ''}`}
+                                onClick={() => { onModelChange(m.key); setShowModelDropdownFromLabel(false); }}
+                              >
+                                {m.displayName}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        className={`voice-input-btn ${voiceInput.state}`}
+                        onClick={voiceInput.toggleRecording}
+                        disabled={voiceInput.state === 'processing'}
+                        title={voiceInput.state === 'idle' ? 'Start voice input' : voiceInput.state === 'recording' ? 'Stop recording' : 'Processing...'}
+                      >
+                        {voiceInput.state === 'processing' ? (
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="voice-processing-spin"><circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" /></svg>
+                        ) : voiceInput.state === 'recording' ? (
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
+                        ) : (
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="23" /><line x1="8" y1="23" x2="16" y2="23" /></svg>
+                        )}
+                        {voiceInput.state === 'recording' && (
+                          <span className="voice-recording-indicator" style={{ width: `${voiceInput.audioLevel}%` }} />
+                        )}
+                      </button>
+                      <button
+                        className="lets-go-btn lets-go-btn-sm"
+                        onClick={handleSend}
+                        disabled={(!inputValue.trim() && pendingAttachments.length === 0) || isUploadingAttachments || isPreparingMessage}
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M12 19V5M5 12l7-7 7 7" />
+                        </svg>
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <ModelDropdown
+                        models={availableModels}
+                        selectedModel={selectedModel}
+                        onModelChange={onModelChange}
+                        onOpenSettings={onOpenSettings}
+                      />
+                      {/* Skills Menu Button */}
+                      <div className="skills-menu-container" ref={skillsMenuRef}>
+                        <button
+                          className={`skills-menu-btn ${showSkillsMenu ? 'active' : ''}`}
+                          onClick={() => setShowSkillsMenu(!showSkillsMenu)}
+                          title="Custom Skills"
+                        >
+                          <span>/</span>
+                        </button>
+                        {showSkillsMenu && (
+                          <div className="skills-dropdown">
+                            <div className="skills-dropdown-header">Custom Skills</div>
+                            <div className="skills-dropdown-search">
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <circle cx="11" cy="11" r="8" />
+                                <path d="M21 21l-4.35-4.35" />
+                              </svg>
+                              <input
+                                type="text"
+                                placeholder="Search skills..."
+                                value={skillsSearchQuery}
+                                onChange={(e) => setSkillsSearchQuery(e.target.value)}
+                                autoFocus
+                              />
+                            </div>
+                            {customSkills.length > 0 ? (
+                              filteredSkills.length > 0 ? (
+                                <div className="skills-dropdown-list">
+                                  {filteredSkills.map(skill => (
+                                    <div
+                                      key={skill.id}
+                                      className="skills-dropdown-item"
+                                      style={{ cursor: 'pointer' }}
+                                      onClick={() => handleSkillSelect(skill)}
+                                    >
+                                      <span className="skills-dropdown-icon">{skill.icon}</span>
+                                      <div className="skills-dropdown-info">
+                                        <span className="skills-dropdown-name">{skill.name}</span>
+                                        <span className="skills-dropdown-desc">{skill.description}</span>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <div className="skills-dropdown-empty">
+                                  No skills match "{skillsSearchQuery}"
+                                </div>
+                              )
+                            ) : (
+                              <div className="skills-dropdown-empty">
+                                No custom skills yet.
+                              </div>
+                            )}
+                            <div className="skills-dropdown-footer">
+                              <button
+                                className="skills-dropdown-create"
+                                onClick={() => {
+                                  setShowSkillsMenu(false);
+                                  setSkillsSearchQuery('');
+                                  onOpenSettings?.('skills');
+                                }}
+                              >
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <line x1="12" y1="5" x2="12" y2="19" />
+                                  <line x1="5" y1="12" x2="19" y2="12" />
+                                </svg>
+                                <span>Create New Skill</span>
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        className={`voice-input-btn ${voiceInput.state}`}
+                        onClick={voiceInput.toggleRecording}
+                        disabled={voiceInput.state === 'processing'}
+                        title={
+                          voiceInput.state === 'idle' ? 'Start voice input' :
+                            voiceInput.state === 'recording' ? 'Stop recording' :
+                              'Processing...'
+                        }
+                      >
+                        {voiceInput.state === 'processing' ? (
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="voice-processing-spin">
+                            <circle cx="12" cy="12" r="10" />
+                            <path d="M12 6v6l4 2" />
+                          </svg>
+                        ) : voiceInput.state === 'recording' ? (
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                            <rect x="6" y="6" width="12" height="12" rx="2" />
+                          </svg>
+                        ) : (
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                            <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                            <line x1="12" y1="19" x2="12" y2="23" />
+                            <line x1="8" y1="23" x2="16" y2="23" />
+                          </svg>
+                        )}
+                        {voiceInput.state === 'recording' && (
+                          <span className="voice-recording-indicator" style={{ width: `${voiceInput.audioLevel}%` }} />
+                        )}
+                      </button>
+                      <button
+                        className="lets-go-btn lets-go-btn-sm"
+                        onClick={handleSend}
+                        disabled={(!inputValue.trim() && pendingAttachments.length === 0) || isUploadingAttachments || isPreparingMessage}
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M12 19V5M5 12l7-7 7 7" />
+                        </svg>
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
           </div>
         </div>
+
+        {/* Suggestion hint in focused mode */}
+        {uiDensity === 'focused' && !task && (
+          <p className="welcome-hint">
+            Try: &quot;Help me organize my project files&quot; or &quot;Write a summary report about...&quot;
+          </p>
+        )}
 
         {/* Modal for skills with parameters - Welcome View */}
         {selectedSkillForParams && (

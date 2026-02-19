@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, type ReactNode } from 'react';
-import { LLMSettingsData, ThemeMode, VisualTheme, AccentColor, type LLMProviderType, type CustomProviderConfig } from '../../shared/types';
+import { LLMSettingsData, ThemeMode, VisualTheme, AccentColor, UiDensity, type LLMProviderType, type CustomProviderConfig } from '../../shared/types';
 import { CUSTOM_PROVIDER_MAP } from '../../shared/llm-provider-catalog';
 import { TelegramSettings } from './TelegramSettings';
 import { DiscordSettings } from './DiscordSettings';
@@ -42,8 +42,9 @@ import { ExtensionsSettings } from './ExtensionsSettings';
 import { VoiceSettings } from './VoiceSettings';
 import { MissionControlPanel } from './MissionControlPanel';
 import { MemoryHubSettings } from './MemoryHubSettings';
+import { ConwaySettings } from './ConwaySettings';
 
-type SettingsTab = 'appearance' | 'personality' | 'missioncontrol' | 'tray' | 'voice' | 'llm' | 'search' | 'telegram' | 'slack' | 'whatsapp' | 'teams' | 'x' | 'morechannels' | 'integrations' | 'updates' | 'guardrails' | 'queue' | 'skills' | 'skillhub' | 'connectors' | 'mcp' | 'tools' | 'scheduled' | 'hooks' | 'controlplane' | 'nodes' | 'extensions' | 'memory';
+type SettingsTab = 'appearance' | 'personality' | 'missioncontrol' | 'tray' | 'voice' | 'llm' | 'search' | 'telegram' | 'slack' | 'whatsapp' | 'teams' | 'x' | 'morechannels' | 'integrations' | 'updates' | 'guardrails' | 'queue' | 'skills' | 'skillhub' | 'connectors' | 'conway' | 'mcp' | 'tools' | 'scheduled' | 'hooks' | 'controlplane' | 'nodes' | 'extensions' | 'memory';
 
 // Secondary channels shown inside "More Channels" tab
 type SecondaryChannel = 'discord' | 'imessage' | 'signal' | 'mattermost' | 'matrix' | 'twitch' | 'line' | 'bluebubbles' | 'email' | 'googlechat';
@@ -60,6 +61,8 @@ interface SettingsProps {
   onThemeChange: (theme: ThemeMode) => void;
   onVisualThemeChange: (theme: VisualTheme) => void;
   onAccentChange: (accent: AccentColor) => void;
+  uiDensity: UiDensity;
+  onUiDensityChange: (density: UiDensity) => void;
   initialTab?: SettingsTab;
   onShowOnboarding?: () => void;
   onboardingCompletedAt?: string;
@@ -305,6 +308,7 @@ const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: ReactNode; ma
   { tab: 'skillhub', label: 'SkillHub', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><path d="M12 16v-4" /><path d="M12 8h.01" /><path d="M8 12h8" /></svg> },
   { tab: 'scheduled', label: 'Scheduled Tasks', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg> },
   { tab: 'connectors', label: 'Connectors', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="7" height="7" rx="1" /><rect x="14" y="4" width="7" height="7" rx="1" /><rect x="3" y="13" width="7" height="7" rx="1" /><rect x="14" y="13" width="7" height="7" rx="1" /></svg> },
+  { tab: 'conway', label: 'Conway Terminal', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" /></svg> },
   { tab: 'mcp', label: 'MCP Servers', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2" /><path d="M8 21h8" /><path d="M12 17v4" /><path d="M7 8h2M15 8h2" /><path d="M9 12h6" /></svg> },
   { tab: 'tools', label: 'Built-in Tools', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" /></svg> },
   { tab: 'hooks', label: 'Webhooks', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg> },
@@ -423,7 +427,7 @@ const getLLMProviderIcon = (providerType: string, customEntry?: { compatibility?
   );
 };
 
-export function Settings({ onBack, onSettingsChanged, themeMode, visualTheme, accentColor, onThemeChange, onVisualThemeChange, onAccentChange, initialTab = 'appearance', onShowOnboarding, onboardingCompletedAt, workspaceId }: SettingsProps) {
+export function Settings({ onBack, onSettingsChanged, themeMode, visualTheme, accentColor, onThemeChange, onVisualThemeChange, onAccentChange, uiDensity, onUiDensityChange, initialTab = 'appearance', onShowOnboarding, onboardingCompletedAt, workspaceId }: SettingsProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
   const [activeSecondaryChannel, setActiveSecondaryChannel] = useState<SecondaryChannel>('discord');
   const [activeIntegration, setActiveIntegration] = useState<IntegrationChannel>('notion');
@@ -1339,6 +1343,7 @@ export function Settings({ onBack, onSettingsChanged, themeMode, visualTheme, ac
                 <button
                   key={item.tab}
                   className={`settings-nav-item ${activeTab === item.tab ? 'active' : ''}`}
+                  data-tab={item.tab}
                   onClick={() => setActiveTab(item.tab)}
                 >
                   {item.icon}
@@ -1364,6 +1369,8 @@ export function Settings({ onBack, onSettingsChanged, themeMode, visualTheme, ac
                 onThemeChange={onThemeChange}
                 onVisualThemeChange={onVisualThemeChange}
                 onAccentChange={onAccentChange}
+                uiDensity={uiDensity}
+                onUiDensityChange={onUiDensityChange}
                 onShowOnboarding={onShowOnboarding}
                 onboardingCompletedAt={onboardingCompletedAt}
               />
@@ -1459,6 +1466,8 @@ export function Settings({ onBack, onSettingsChanged, themeMode, visualTheme, ac
               <ScheduledTasksSettings />
             ) : activeTab === 'connectors' ? (
               <ConnectorsSettings />
+            ) : activeTab === 'conway' ? (
+              <ConwaySettings />
             ) : activeTab === 'mcp' ? (
               <MCPSettings />
             ) : activeTab === 'tools' ? (

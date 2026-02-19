@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
-import { Task, Workspace } from '../../shared/types';
+import { useState, useRef, useEffect, useMemo, useCallback, Fragment } from 'react';
+import { Task, Workspace, UiDensity, ConwaySetupStatus } from '../../shared/types';
 
 interface SidebarProps {
   workspace: Workspace | null;
@@ -10,6 +10,7 @@ interface SidebarProps {
   onOpenSettings: () => void;
   onOpenMissionControl: () => void;
   onTasksChanged: () => void;
+  uiDensity?: UiDensity;
 }
 
 // Tree node structure for hierarchical display
@@ -27,13 +28,27 @@ export function Sidebar({
   onOpenSettings,
   onOpenMissionControl,
   onTasksChanged,
+  uiDensity = 'focused',
 }: SidebarProps) {
   const [menuOpenTaskId, setMenuOpenTaskId] = useState<string | null>(null);
   const [renameTaskId, setRenameTaskId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [collapsedTasks, setCollapsedTasks] = useState<Set<string>>(new Set());
+  const [showFailedSessions, setShowFailedSessions] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const menuButtonRef = useRef<Map<string, HTMLButtonElement>>(new Map());
   const renameInputRef = useRef<HTMLInputElement>(null);
+
+  // Helper to get date group for a timestamp
+  const getDateGroup = useCallback((timestamp: number): string => {
+    const now = new Date();
+    const date = new Date(timestamp);
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const yesterday = new Date(today.getTime() - 86400000);
+    if (date >= today) return 'Today';
+    if (date >= yesterday) return 'Yesterday';
+    return 'Earlier';
+  }, []);
 
   // Build task tree from flat list
   const taskTree = useMemo(() => {
@@ -62,12 +77,66 @@ export function Sidebar({
     };
 
     // Get root tasks (no parent) and sort by creation time (newest first)
-    const rootTasks = tasks
+    let rootTasks = tasks
       .filter(t => !t.parentTaskId)
       .sort((a, b) => b.createdAt - a.createdAt);
 
+    // In focused mode, hide failed/cancelled sessions by default
+    if (uiDensity === 'focused' && !showFailedSessions) {
+      rootTasks = rootTasks.filter(t => t.status !== 'failed' && t.status !== 'cancelled');
+    }
+
     return rootTasks.map(buildNode);
-  }, [tasks]);
+  }, [tasks, uiDensity, showFailedSessions]);
+
+  // Count hidden failed sessions for the toggle label
+  const failedSessionCount = useMemo(() => {
+    if (uiDensity !== 'focused') return 0;
+    return tasks.filter(t => !t.parentTaskId && (t.status === 'failed' || t.status === 'cancelled')).length;
+  }, [tasks, uiDensity]);
+
+  const focusedTaskEntries = useMemo(() => {
+    if (uiDensity !== 'focused') return [];
+    return taskTree.reduce<Array<{
+      node: TaskTreeNode;
+      index: number;
+      group: string;
+      showHeader: boolean;
+      isLast: boolean;
+    }>>((acc, node, index) => {
+      const group = getDateGroup(node.task.createdAt);
+      const previousGroup = acc.length > 0 ? acc[acc.length - 1].group : '';
+      const isLast = index === taskTree.length - 1;
+      acc.push({
+        node,
+        index,
+        group,
+        showHeader: group !== previousGroup,
+        isLast,
+      });
+      return acc;
+    }, []);
+  }, [getDateGroup, taskTree, uiDensity]);
+
+  // Auto-collapse sub-agent trees in focused mode
+  const hasInitializedCollapse = useRef(false);
+  useEffect(() => {
+    if (uiDensity === 'focused' && !hasInitializedCollapse.current) {
+      const parentsWithChildren = new Set<string>();
+      for (const task of tasks) {
+        if (task.parentTaskId) {
+          parentsWithChildren.add(task.parentTaskId);
+        }
+      }
+      if (parentsWithChildren.size > 0) {
+        setCollapsedTasks(parentsWithChildren);
+        hasInitializedCollapse.current = true;
+      }
+    }
+    if (uiDensity === 'full') {
+      hasInitializedCollapse.current = false;
+    }
+  }, [uiDensity, tasks]);
 
   // Close menu when clicking outside
   useEffect(() => {
@@ -91,6 +160,71 @@ export function Sidebar({
   const handleMenuToggle = (e: React.MouseEvent, taskId: string) => {
     e.stopPropagation();
     setMenuOpenTaskId(menuOpenTaskId === taskId ? null : taskId);
+  };
+
+  const focusMenuButton = (taskId: string) => {
+    const button = menuButtonRef.current.get(taskId);
+    if (button) {
+      button.focus();
+    }
+  };
+
+  const focusFirstMenuItem = () => {
+    const menu = menuRef.current;
+    const first = menu?.querySelector<HTMLButtonElement>('button[data-menu-option]');
+    first?.focus();
+  };
+
+  const focusMenuItem = (offset: 1 | -1) => {
+    const menu = menuRef.current;
+    if (!menu) return;
+
+    const options = Array.from(menu.querySelectorAll<HTMLButtonElement>('button[data-menu-option]'));
+    if (options.length === 0) return;
+
+    const currentIndex = options.indexOf(document.activeElement as HTMLButtonElement);
+    const nextIndex = (currentIndex + offset + options.length) % options.length;
+    const next = options[nextIndex];
+    next?.focus();
+  };
+
+  const closeMenu = (taskId: string) => {
+    setMenuOpenTaskId(null);
+    focusMenuButton(taskId);
+  };
+
+  const handleMenuButtonKeyDown = (e: React.KeyboardEvent, taskId: string) => {
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      const nextOpen = menuOpenTaskId === taskId ? null : taskId;
+      setMenuOpenTaskId(nextOpen);
+      if (nextOpen) {
+        requestAnimationFrame(() => focusFirstMenuItem());
+      }
+      return;
+    }
+
+    if (e.key === 'Escape') {
+      closeMenu(taskId);
+    }
+  };
+
+  const handleMenuItemKeyDown = (e: React.KeyboardEvent, taskId: string) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      focusMenuItem(1);
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      focusMenuItem(-1);
+      return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeMenu(taskId);
+      return;
+    }
   };
 
   const handleRenameClick = (e: React.MouseEvent, task: Task) => {
@@ -307,24 +441,48 @@ export function Sidebar({
           </div>
 
           <div className="task-item-actions cli-task-actions" ref={menuOpenTaskId === task.id ? menuRef : null}>
-            <button
-              className="task-item-more cli-more-btn"
-              onClick={(e) => handleMenuToggle(e, task.id)}
-            >
-              ···
-            </button>
+              <button
+                className="task-item-more cli-more-btn"
+                aria-haspopup="menu"
+                aria-expanded={menuOpenTaskId === task.id}
+                aria-controls={`task-menu-${task.id}`}
+                aria-label={`Session actions for ${task.title}`}
+                onClick={(e) => handleMenuToggle(e, task.id)}
+                onKeyDown={(e) => handleMenuButtonKeyDown(e, task.id)}
+                ref={(el) => {
+                  if (el) {
+                    menuButtonRef.current.set(task.id, el);
+                  } else {
+                    menuButtonRef.current.delete(task.id);
+                  }
+                }}
+              >
+                ···
+              </button>
             {menuOpenTaskId === task.id && (
-              <div className="task-item-menu cli-task-menu">
+              <div
+                id={`task-menu-${task.id}`}
+                className="task-item-menu cli-task-menu"
+                role="menu"
+                aria-label="Session actions"
+                ref={menuRef}
+              >
                 <button
                   className="task-item-menu-option cli-menu-option"
+                  role="menuitem"
+                  data-menu-option="rename"
                   onClick={(e) => handleRenameClick(e, task)}
+                  onKeyDown={(e) => handleMenuItemKeyDown(e, task.id)}
                 >
                   <span className="cli-menu-prefix">&gt;</span>
                   rename
                 </button>
                 <button
                   className="task-item-menu-option task-item-menu-option-danger cli-menu-option cli-menu-danger"
+                  role="menuitem"
+                  data-menu-option="archive"
                   onClick={(e) => handleArchiveClick(e, task.id)}
+                  onKeyDown={(e) => handleMenuItemKeyDown(e, task.id)}
                 >
                   <span className="cli-menu-prefix">&gt;</span>
                   archive
@@ -386,16 +544,43 @@ export function Sidebar({
           <span className="cli-section-prompt">&gt;</span>
           <span className="terminal-only">SESSIONS</span>
           <span className="modern-only">Sessions</span>
+          {uiDensity === 'focused' && failedSessionCount > 0 && (
+            <button
+              className="show-failed-toggle"
+              onClick={() => setShowFailedSessions(!showFailedSessions)}
+            >
+              {showFailedSessions ? 'Hide' : 'Show'} failed ({failedSessionCount})
+            </button>
+          )}
         </div>
         {taskTree.length === 0 ? (
-          <div className="sidebar-empty cli-empty">
+          <div className={`sidebar-empty cli-empty ${uiDensity === 'focused' ? 'sidebar-empty-focused' : ''}`}>
             <pre className="cli-tree terminal-only">{`├── (no sessions yet)
 └── ...`}</pre>
-            <p className="cli-hint">
-              <span className="terminal-only"># start a new session above</span>
-              <span className="modern-only">Start a new session to begin</span>
-            </p>
+            {uiDensity === 'focused' ? (
+              <div className="sidebar-empty-message">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.3 }}>
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                </svg>
+                <p>Your conversations will appear here</p>
+                <span>Start a new session to get going</span>
+              </div>
+            ) : (
+              <p className="cli-hint">
+                <span className="terminal-only"># start a new session above</span>
+                <span className="modern-only">Start a new session to begin</span>
+              </p>
+            )}
           </div>
+        ) : uiDensity === 'focused' ? (
+          focusedTaskEntries.map((entry) => (
+            <Fragment key={entry.node.task.id}>
+              {entry.showHeader && (
+                <div className="sidebar-date-group">{entry.group}</div>
+              )}
+              {renderTaskNode(entry.node, entry.index, 0, entry.isLast)}
+            </Fragment>
+          ))
         ) : (
           taskTree.map((node, index) =>
             renderTaskNode(node, index, 0, index === taskTree.length - 1)
@@ -405,6 +590,7 @@ export function Sidebar({
 
       {/* Footer */}
       <div className="sidebar-footer cli-sidebar-footer">
+        <ConwayWalletBadge onOpenSettings={onOpenSettings} />
         <div className="cli-footer-actions">
           <button className="settings-btn cli-settings-btn" onClick={onOpenSettings} title="Settings">
             <span className="terminal-only">[cfg]</span>
@@ -419,5 +605,59 @@ export function Sidebar({
         </div>
       </div>
     </div>
+  );
+}
+
+function ConwayWalletBadge({ onOpenSettings }: { onOpenSettings: () => void }) {
+  const [balance, setBalance] = useState<string | null>(null);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const ipcAPI = window.electronAPI;
+    if (!ipcAPI?.conwayGetStatus || !ipcAPI?.conwayGetSettings) return;
+
+    const load = async () => {
+      try {
+        const [status, settings] = await Promise.all([
+          ipcAPI.conwayGetStatus(),
+          ipcAPI.conwayGetSettings(),
+        ]);
+        if (settings?.showWalletInSidebar && status?.state === 'ready' && status?.balance?.balance) {
+          setBalance(String(status.balance.balance));
+          setVisible(true);
+        } else {
+          setVisible(false);
+        }
+      } catch {
+        setVisible(false);
+      }
+    };
+
+    load();
+
+    const unsubscribe = ipcAPI.onConwayStatusChange?.((status: ConwaySetupStatus) => {
+      if (status?.state === 'ready' && status?.balance?.balance) {
+        setBalance(String(status.balance.balance));
+        setVisible(true);
+      }
+    });
+    return () => unsubscribe?.();
+  }, []);
+
+  if (!visible || !balance) return null;
+
+  return (
+    <button
+      type="button"
+      className="conway-wallet-badge"
+      onClick={onOpenSettings}
+      title="Conway Terminal — click to open settings"
+      aria-label="Open Conway Terminal settings"
+    >
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+      </svg>
+      <span className="conway-wallet-balance">{balance} USDC</span>
+    </button>
   );
 }

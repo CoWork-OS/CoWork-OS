@@ -10,7 +10,7 @@ import { BrowserView } from './components/BrowserView';
 import { ToastContainer } from './components/Toast';
 import { QuickTaskFAB } from './components/QuickTaskFAB';
 import { NotificationPanel } from './components/NotificationPanel';
-import { Task, Workspace, TaskEvent, LLMModelInfo, LLMProviderInfo, UpdateInfo, ThemeMode, VisualTheme, AccentColor, QueueStatus, ToastNotification, ApprovalRequest, isTempWorkspaceId } from '../shared/types';
+import { Task, Workspace, TaskEvent, LLMModelInfo, LLMProviderInfo, UpdateInfo, ThemeMode, VisualTheme, AccentColor, UiDensity, QueueStatus, ToastNotification, ApprovalRequest, isTempWorkspaceId } from '../shared/types';
 import { applyPersistedLanguage } from './i18n';
 
 
@@ -50,7 +50,7 @@ export function App() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [currentView, setCurrentView] = useState<AppView>('main');
   const [browserUrl, setBrowserUrl] = useState<string>('');
-  const [settingsTab, setSettingsTab] = useState<'appearance' | 'llm' | 'search' | 'telegram' | 'slack' | 'whatsapp' | 'teams' | 'x' | 'morechannels' | 'integrations' | 'updates' | 'guardrails' | 'queue' | 'skills' | 'scheduled' | 'voice' | 'missioncontrol'>('appearance');
+  const [settingsTab, setSettingsTab] = useState<'appearance' | 'llm' | 'search' | 'telegram' | 'slack' | 'whatsapp' | 'teams' | 'x' | 'morechannels' | 'integrations' | 'updates' | 'guardrails' | 'queue' | 'skills' | 'scheduled' | 'voice' | 'missioncontrol' | 'mcp'>('appearance');
   const [events, setEvents] = useState<TaskEvent[]>([]);
 
   // Model selection state
@@ -66,6 +66,7 @@ export function App() {
   const [themeMode, setThemeMode] = useState<ThemeMode>('dark');
   const [visualTheme, setVisualTheme] = useState<VisualTheme>('warm');
   const [accentColor, setAccentColor] = useState<AccentColor>('cyan');
+  const [uiDensity, setUiDensity] = useState<UiDensity>('focused');
 
   // Queue state
   const [queueStatus, setQueueStatus] = useState<QueueStatus | null>(null);
@@ -168,6 +169,7 @@ export function App() {
         setThemeMode(settings.themeMode);
         setVisualTheme(settings.visualTheme || 'warm');
         setAccentColor(settings.accentColor);
+        setUiDensity(settings.uiDensity || 'focused');
         applyPersistedLanguage(settings.language);
         setDisclaimerAccepted(settings.disclaimerAccepted ?? false);
         setOnboardingCompleted(settings.onboardingCompleted ?? false);
@@ -290,7 +292,14 @@ export function App() {
 
     // Apply accent class
     root.classList.add(`accent-${accentColor}`);
-  }, [themeMode, visualTheme, accentColor]);
+
+    // Apply density class
+    root.classList.remove('density-focused', 'density-full');
+    root.classList.add(`density-${uiDensity}`);
+
+    // Cache density in localStorage for instant restore on next startup
+    try { localStorage.setItem('uiDensity', uiDensity); } catch (_) { /* ignore */ }
+  }, [themeMode, visualTheme, accentColor, uiDensity]);
 
   // Listen for system theme changes when in 'system' mode
   useEffect(() => {
@@ -909,6 +918,16 @@ export function App() {
     window.electronAPI.saveAppearanceSettings({ themeMode, visualTheme, accentColor: accent });
   };
 
+  const handleUiDensityChange = (density: UiDensity) => {
+    setUiDensity(density);
+    window.electronAPI.saveAppearanceSettings({ themeMode, visualTheme, accentColor, uiDensity: density });
+  };
+
+  // Smart right panel visibility: auto-collapse on welcome screen in focused mode
+  const effectiveRightCollapsed = uiDensity === 'full'
+    ? rightSidebarCollapsed
+    : (!selectedTaskId ? true : rightSidebarCollapsed);
+
   // Show loading state while checking disclaimer/onboarding status
   if (disclaimerAccepted === null || onboardingCompleted === null) {
     return (
@@ -946,8 +965,9 @@ export function App() {
             className="title-bar-btn"
             onClick={() => setLeftSidebarCollapsed(!leftSidebarCollapsed)}
             title={leftSidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
+            aria-label={leftSidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+            <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
               <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
               <line x1="9" y1="3" x2="9" y2="21" />
             </svg>
@@ -956,15 +976,16 @@ export function App() {
         <div className="title-bar-actions">
           <button
             type="button"
-            className="title-bar-btn"
+            className="title-bar-btn title-bar-theme-toggle"
             onClick={() => {
               const effectiveTheme = getEffectiveTheme(themeMode);
               handleThemeChange(effectiveTheme === 'dark' ? 'light' : 'dark');
             }}
             title={`Switch to ${getEffectiveTheme(themeMode) === 'dark' ? 'light' : 'dark'} mode`}
+            aria-label={`Switch to ${getEffectiveTheme(themeMode) === 'dark' ? 'light' : 'dark'} mode`}
           >
             {getEffectiveTheme(themeMode) === 'dark' ? (
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+              <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
                 <circle cx="12" cy="12" r="5" />
                 <line x1="12" y1="1" x2="12" y2="3" />
                 <line x1="12" y1="21" x2="12" y2="23" />
@@ -976,7 +997,7 @@ export function App() {
                 <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
               </svg>
             ) : (
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+              <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
                 <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
               </svg>
             )}
@@ -1001,11 +1022,33 @@ export function App() {
           />
           <button
             type="button"
-            className="title-bar-btn"
-            onClick={() => setRightSidebarCollapsed(!rightSidebarCollapsed)}
-            title={rightSidebarCollapsed ? 'Show panel' : 'Hide panel'}
+            className={`title-bar-btn density-toggle ${uiDensity}`}
+            onClick={() => handleUiDensityChange(uiDensity === 'focused' ? 'full' : 'focused')}
+            title={uiDensity === 'focused' ? 'Switch to Full mode' : 'Switch to Focused mode'}
+            aria-label={uiDensity === 'focused' ? 'Switch to Full mode' : 'Switch to Focused mode'}
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+            {uiDensity === 'focused' ? (
+              <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+                <rect x="4" y="5" width="16" height="14" rx="2" />
+                <line x1="4" y1="12" x2="20" y2="12" />
+              </svg>
+            ) : (
+              <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+                <rect x="4" y="4" width="16" height="16" rx="2" />
+                <line x1="4" y1="9" x2="20" y2="9" />
+                <line x1="4" y1="14" x2="20" y2="14" />
+                <line x1="12" y1="4" x2="12" y2="20" />
+              </svg>
+            )}
+          </button>
+          <button
+            type="button"
+            className="title-bar-btn title-bar-panel-toggle"
+            onClick={() => setRightSidebarCollapsed(!rightSidebarCollapsed)}
+            title={effectiveRightCollapsed ? 'Show panel' : 'Hide panel'}
+            aria-label={effectiveRightCollapsed ? 'Show panel' : 'Hide panel'}
+          >
+            <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
               <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
               <line x1="15" y1="3" x2="15" y2="21" />
             </svg>
@@ -1045,7 +1088,7 @@ export function App() {
       )}
       {currentView === 'main' && (
         <>
-          <div className={`app-layout ${leftSidebarCollapsed ? 'left-collapsed' : ''} ${rightSidebarCollapsed ? 'right-collapsed' : ''}`}>
+          <div className={`app-layout ${leftSidebarCollapsed ? 'left-collapsed' : ''} ${effectiveRightCollapsed ? 'right-collapsed' : ''}`}>
             {!leftSidebarCollapsed && (
               <Sidebar
                 workspace={currentWorkspace}
@@ -1059,6 +1102,7 @@ export function App() {
                   setCurrentView('settings');
                 }}
                 onTasksChanged={loadTasks}
+                uiDensity={uiDensity}
               />
             )}
             <MainContent
@@ -1079,8 +1123,9 @@ export function App() {
               selectedModel={selectedModel}
               availableModels={availableModels}
               onModelChange={handleModelChange}
+              uiDensity={uiDensity}
             />
-            {!rightSidebarCollapsed && (
+            {!effectiveRightCollapsed && (
               <RightPanel
                 task={selectedTask}
                 workspace={currentWorkspace}
@@ -1116,6 +1161,8 @@ export function App() {
           onThemeChange={handleThemeChange}
           onVisualThemeChange={handleVisualThemeChange}
           onAccentChange={handleAccentChange}
+          uiDensity={uiDensity}
+          onUiDensityChange={handleUiDensityChange}
           initialTab={settingsTab}
           onShowOnboarding={handleShowOnboarding}
           onboardingCompletedAt={onboardingCompletedAt}

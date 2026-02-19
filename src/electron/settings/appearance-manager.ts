@@ -7,7 +7,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { AppearanceSettings, ThemeMode, VisualTheme, AccentColor } from '../../shared/types';
+import { AppearanceSettings, ThemeMode, VisualTheme, AccentColor, UiDensity } from '../../shared/types';
 import { SecureSettingsRepository } from '../database/SecureSettingsRepository';
 import { getUserDataDir } from '../utils/user-data-dir';
 
@@ -17,6 +17,7 @@ const DEFAULT_SETTINGS: AppearanceSettings = {
   themeMode: 'dark',
   visualTheme: 'warm',
   accentColor: 'cyan',
+  uiDensity: 'focused',
   disclaimerAccepted: false,
   onboardingCompleted: false,
   onboardingCompletedAt: undefined,
@@ -107,6 +108,7 @@ export class AppearanceManager {
     }
 
     let settings: AppearanceSettings = { ...DEFAULT_SETTINGS };
+    let needsWrite = false;
 
     try {
       // Try to load from encrypted database
@@ -115,6 +117,10 @@ export class AppearanceManager {
         const stored = repository.load<AppearanceSettings>('appearance');
         if (stored) {
           settings = { ...DEFAULT_SETTINGS, ...stored };
+          // If stored data was missing uiDensity, persist the default back
+          if (!isValidUiDensity(stored.uiDensity)) {
+            needsWrite = true;
+          }
         }
       }
 
@@ -132,12 +138,29 @@ export class AppearanceManager {
       if (!isValidAccentColor(settings.accentColor)) {
         settings.accentColor = DEFAULT_SETTINGS.accentColor;
       }
+      if (!isValidUiDensity(settings.uiDensity)) {
+        settings.uiDensity = DEFAULT_SETTINGS.uiDensity;
+        needsWrite = true;
+      }
     } catch (error) {
       console.error('[AppearanceManager] Failed to load settings:', error);
       settings = { ...DEFAULT_SETTINGS };
     }
 
     this.cachedSettings = settings;
+
+    // Persist defaults for newly added fields so they survive future saves
+    if (needsWrite && SecureSettingsRepository.isInitialized()) {
+      try {
+        const repository = SecureSettingsRepository.getInstance();
+        repository.save('appearance', settings);
+        console.log('[AppearanceManager] Persisted default uiDensity:', settings.uiDensity);
+      } catch (e) {
+        // Non-fatal: cache is correct, DB will catch up on next save
+      }
+    }
+
+    console.debug('[AppearanceManager] Loaded settings → uiDensity:', settings.uiDensity);
     return settings;
   }
 
@@ -168,6 +191,7 @@ export class AppearanceManager {
         onboardingCompleted: settings.onboardingCompleted ?? existingSettings.onboardingCompleted,
         onboardingCompletedAt: settings.onboardingCompletedAt ?? existingSettings.onboardingCompletedAt,
         assistantName: settings.assistantName ?? existingSettings.assistantName,
+        uiDensity: isValidUiDensity(settings.uiDensity) ? settings.uiDensity : existingSettings.uiDensity,
       };
 
       const repository = SecureSettingsRepository.getInstance();
@@ -199,4 +223,8 @@ function isValidVisualTheme(value: unknown): value is VisualTheme {
 function isValidAccentColor(value: unknown): value is AccentColor {
   const validColors: AccentColor[] = ['cyan', 'blue', 'purple', 'pink', 'rose', 'orange', 'green', 'teal', 'coral'];
   return validColors.includes(value as AccentColor);
+}
+
+function isValidUiDensity(value: unknown): value is UiDensity {
+  return value === 'focused' || value === 'full';
 }

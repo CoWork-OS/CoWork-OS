@@ -1,8 +1,8 @@
-import * as path from "node:path";
+import * as path from "path";
 import { contextBridge, ipcRenderer } from "electron";
-import * as fs from "node:fs";
-import * as os from "node:os";
-import { randomBytes } from "node:crypto";
+import * as fs from "fs";
+import * as os from "os";
+import { randomBytes } from "crypto";
 import type {
   AgentTeam,
   AgentTeamItem,
@@ -82,9 +82,9 @@ const normalizeAttachmentName = (value: unknown): string => {
   }
   const noExt = path.parse(base).name;
   const sanitized = noExt
-    .replace(/[^\w.\-]/g, "_")
+    .replace(/[^\w.-]/g, "_")
     .replace(/_+/g, "_")
-    .replace(/^\.+|\.{2,}+/g, "_")
+    .replace(/^\.+|\.{2,}/g, "_")
     .slice(0, 80);
   return sanitized || "image";
 };
@@ -153,7 +153,7 @@ function validateSendMessageAttachments(images?: ImageAttachment[]): ImageAttach
       let data: string | undefined;
       let filePath: string | undefined;
       let resolvedFileSize: number | undefined;
-      if (hasFilePath) {
+      if (hasFilePath && image.filePath) {
         if (!path.isAbsolute(image.filePath)) {
           throw new Error(`Image attachment at index ${index} filePath must be an absolute path.`);
         }

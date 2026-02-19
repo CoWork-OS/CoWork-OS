@@ -129,6 +129,7 @@ if (!gotTheLock) {
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,
+        sandbox: false, // Preload needs Node built-ins (path/fs/os/crypto)
         webviewTag: true, // Enable webview for canvas interactive mode
         preload: path.join(__dirname, "preload.js"),
       },

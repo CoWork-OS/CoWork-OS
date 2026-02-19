@@ -67,6 +67,9 @@ coverage/
 # Claude Code
 .claude/
 
+# CoWork local state
+.cowork/
+
 # VM artifacts
 vm-bundle/
 *.img
@@ -79,6 +82,18 @@ vm-bundle/
 tmp/
 temp/
 *.tmp
+
+# Media files — user audio/voice recordings must never be committed
+*.ogg
+*.opus
+*.mp3
+*.wav
+*.m4a
+*.aac
+*.flac
+*.webm
+*.caf
+*.aiff
 
 # iOS companion project (separate repo)
 cowork-oss/

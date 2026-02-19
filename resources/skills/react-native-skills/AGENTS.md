@@ -18,6 +18,24 @@ Comprehensive performance optimization guide for React Native applications, desi
 
 ---
 
+## Repo Workflows (CoWork OS)
+
+Commands verified from `package.json` scripts.
+
+- Setup (native deps + retry): `npm run setup`
+- Setup (native-only): `npm run setup:native`
+- Setup (server deps + sqlite rebuild): `npm run setup:server`
+- Dev (React + Electron): `npm run dev`
+- Build (all targets): `npm run build`
+- Package (build + electron-builder): `npm run package`
+- Lint: `npm run lint`
+- Type check: `npm run type-check`
+- Tests (routing validation + vitest): `npm run test`
+- Tests (watch): `npm run test:watch`
+- Tests (coverage): `npm run test:coverage`
+
+---
+
 ## Table of Contents
 
 1. [Core Rendering](#1-core-rendering) — **CRITICAL**

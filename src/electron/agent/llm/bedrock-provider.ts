@@ -67,10 +67,8 @@ export class BedrockProvider implements LLMProvider {
 
   async createMessage(request: LLMRequest): Promise<LLMResponse> {
     const toolNameMap = request.tools ? this.buildToolNameMap(request.tools) : undefined;
-    const messages = this.convertMessages(
-      this.ensureConversationEndsWithUserMessage(request.messages),
-      toolNameMap,
-    );
+    const preparedMessages = this.prepareMessagesForConverse(request.messages);
+    const messages = this.convertMessages(preparedMessages, toolNameMap);
     const system = this.convertSystem(request.system);
     const toolConfig = request.tools ? this.convertTools(request.tools, toolNameMap) : undefined;
 
@@ -404,6 +402,211 @@ export class BedrockProvider implements LLMProvider {
       message.content[0]?.type === "text" &&
       message.content[0].text === BedrockProvider.CONTINUE_PLACEHOLDER_TEXT
     );
+  }
+
+  private prepareMessagesForConverse(messages: LLMMessage[]): LLMMessage[] {
+    const userTerminal = this.ensureConversationEndsWithUserMessage(messages);
+    const mergeResult = this.mergeConsecutiveUserMessages(userTerminal);
+    const assistantRepair = this.rewriteUnpairedAssistantToolUse(mergeResult.messages);
+    const repairResult = this.rewriteInvalidUserToolResults(assistantRepair.messages);
+    const totalRewritten = assistantRepair.rewrittenBlocks + repairResult.rewrittenBlocks;
+
+    if (mergeResult.mergedTurns > 0 || totalRewritten > 0) {
+      console.warn(
+        `[Bedrock] Repaired message transcript before Converse call ` +
+          `(mergedUserTurns=${mergeResult.mergedTurns}, rewrittenToolBlocks=${totalRewritten})`,
+      );
+    }
+
+    return repairResult.messages;
+  }
+
+  private mergeConsecutiveUserMessages(messages: LLMMessage[]): {
+    messages: LLMMessage[];
+    mergedTurns: number;
+  } {
+    type Normalized = { role: "user" | "assistant"; blocks: any[] };
+
+    const merged: Normalized[] = [];
+    let mergedTurns = 0;
+
+    for (const msg of messages || []) {
+      if (!msg || (msg.role !== "user" && msg.role !== "assistant")) continue;
+      const blocks = this.messageContentToBlocks(msg.content);
+      const last = merged[merged.length - 1];
+      // Only merge consecutive user turns (pinned/context blocks). Assistant turns
+      // are kept distinct so tool_use semantics remain tied to their own turn.
+      if (last && last.role === "user" && msg.role === "user") {
+        last.blocks.push(...blocks);
+        mergedTurns++;
+        continue;
+      }
+      merged.push({ role: msg.role, blocks: [...blocks] });
+    }
+
+    return {
+      mergedTurns,
+      messages: merged.map((msg) => ({
+        role: msg.role,
+        content: this.blocksToMessageContent(msg.blocks),
+      })),
+    };
+  }
+
+  private rewriteUnpairedAssistantToolUse(messages: LLMMessage[]): {
+    messages: LLMMessage[];
+    rewrittenBlocks: number;
+  } {
+    const out: LLMMessage[] = [...messages];
+    let rewrittenBlocks = 0;
+
+    for (let i = 0; i < out.length; i++) {
+      const message = out[i];
+      if (message.role !== "assistant") continue;
+
+      const blocks = this.messageContentToBlocks(message.content);
+      const hasToolUse = blocks.some((b) => b?.type === "tool_use");
+      if (!hasToolUse) continue;
+
+      const nextMessage = i + 1 < out.length ? out[i + 1] : null;
+      const nextResultIds = this.collectUserToolResultIds(nextMessage);
+      const matchedIds = new Set<string>();
+
+      const repaired = blocks.map((block) => {
+        if (block?.type !== "tool_use") return block;
+
+        const id = String(block.id || "").trim();
+        const hasImmediateResult = id.length > 0 && nextResultIds.has(id);
+        const duplicate = matchedIds.has(id);
+
+        if (hasImmediateResult && !duplicate) {
+          matchedIds.add(id);
+          return block;
+        }
+
+        rewrittenBlocks++;
+        return {
+          type: "text" as const,
+          text: "[Recovered prior tool request omitted to preserve valid tool-call sequencing.]",
+        };
+      });
+
+      out[i] = {
+        role: "assistant",
+        content: this.blocksToMessageContent(repaired),
+      };
+    }
+
+    return { messages: out, rewrittenBlocks };
+  }
+
+  private rewriteInvalidUserToolResults(messages: LLMMessage[]): {
+    messages: LLMMessage[];
+    rewrittenBlocks: number;
+  } {
+    const out: LLMMessage[] = [];
+    let rewrittenBlocks = 0;
+
+    for (const message of messages) {
+      if (message.role !== "user") {
+        out.push(message);
+        continue;
+      }
+
+      const blocks = this.messageContentToBlocks(message.content);
+      const hasToolResult = blocks.some((b) => b?.type === "tool_result");
+      if (!hasToolResult) {
+        out.push(message);
+        continue;
+      }
+
+      const prev = out.length > 0 ? out[out.length - 1] : null;
+      const allowedToolUseIds = this.collectToolUseIds(prev);
+      const seenToolUseIds = new Set<string>();
+      const validToolResultBlocks: any[] = [];
+      const trailingUserBlocks: any[] = [];
+
+      for (const block of blocks) {
+        if (block?.type !== "tool_result") {
+          trailingUserBlocks.push(block);
+          continue;
+        }
+
+        const toolUseId = String(block.tool_use_id || "").trim();
+        const isValid = toolUseId.length > 0 && allowedToolUseIds.has(toolUseId);
+        const isDuplicate = seenToolUseIds.has(toolUseId);
+        if (isValid && !isDuplicate) {
+          seenToolUseIds.add(toolUseId);
+          validToolResultBlocks.push(block);
+          continue;
+        }
+
+        rewrittenBlocks++;
+        trailingUserBlocks.push({
+          type: "text" as const,
+          text: "[Recovered prior tool output omitted to preserve valid tool-call sequencing.]",
+        });
+      }
+
+      // Keep tool_result blocks as a dedicated immediate user turn after tool_use.
+      if (validToolResultBlocks.length > 0) {
+        out.push({
+          role: "user",
+          content: this.blocksToMessageContent(validToolResultBlocks),
+        });
+      }
+
+      if (trailingUserBlocks.length > 0) {
+        out.push({
+          role: "user",
+          content: this.blocksToMessageContent(trailingUserBlocks),
+        });
+      }
+    }
+
+    return { messages: out, rewrittenBlocks };
+  }
+
+  private messageContentToBlocks(content: LLMMessage["content"]): any[] {
+    if (typeof content === "string") {
+      if (!content) return [];
+      return [{ type: "text", text: content }];
+    }
+    if (!Array.isArray(content)) return [];
+    return content.filter(Boolean);
+  }
+
+  private blocksToMessageContent(blocks: any[]): LLMMessage["content"] {
+    if (blocks.length === 1 && blocks[0]?.type === "text") {
+      return String(blocks[0].text || "");
+    }
+    return blocks as any;
+  }
+
+  private collectToolUseIds(message: LLMMessage | null): Set<string> {
+    if (!message || message.role !== "assistant" || !Array.isArray(message.content)) {
+      return new Set<string>();
+    }
+    const ids = new Set<string>();
+    for (const block of message.content as any[]) {
+      if (block?.type !== "tool_use") continue;
+      const id = String(block.id || "").trim();
+      if (id) ids.add(id);
+    }
+    return ids;
+  }
+
+  private collectUserToolResultIds(message: LLMMessage | null): Set<string> {
+    if (!message || message.role !== "user" || !Array.isArray(message.content)) {
+      return new Set<string>();
+    }
+    const ids = new Set<string>();
+    for (const block of message.content as any[]) {
+      if (block?.type !== "tool_result") continue;
+      const id = String(block.tool_use_id || "").trim();
+      if (id) ids.add(id);
+    }
+    return ids;
   }
 
   private convertMessages(messages: LLMMessage[], toolNameMap?: ToolNameMap): Message[] {

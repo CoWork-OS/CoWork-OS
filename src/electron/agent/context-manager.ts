@@ -86,6 +86,16 @@ function isPinnedMessage(message: LLMMessage): boolean {
   return PINNED_MESSAGE_TAG_PREFIXES.some((prefix) => text.startsWith(prefix));
 }
 
+function messageHasToolUse(message: LLMMessage): boolean {
+  if (!Array.isArray(message.content)) return false;
+  return message.content.some((block: any) => block?.type === "tool_use");
+}
+
+function messageHasToolResult(message: LLMMessage): boolean {
+  if (!Array.isArray(message.content)) return false;
+  return message.content.some((block: any) => block?.type === "tool_result");
+}
+
 /**
  * Estimate token count from text (rough approximation)
  * LLMs use ~4 characters per token on average for English text
@@ -383,6 +393,27 @@ export class ContextManager {
       if (keep.has(i)) continue;
       const msg = messages[i];
       const msgTokens = estimateMessageTokens(msg);
+
+      const prevIdx = i - 1;
+      const preserveAdjacentToolPair =
+        msg.role === "user" &&
+        messageHasToolResult(msg) &&
+        prevIdx >= 0 &&
+        !keep.has(prevIdx) &&
+        messages[prevIdx]?.role === "assistant" &&
+        messageHasToolUse(messages[prevIdx]);
+
+      if (preserveAdjacentToolPair) {
+        const prevTokens = estimateMessageTokens(messages[prevIdx]);
+        if (currentTokens + msgTokens + prevTokens > targetTokens) {
+          break;
+        }
+        keep.add(prevIdx);
+        keep.add(i);
+        currentTokens += msgTokens + prevTokens;
+        i = prevIdx;
+        continue;
+      }
 
       if (currentTokens + msgTokens > targetTokens) {
         break;

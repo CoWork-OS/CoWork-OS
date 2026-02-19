@@ -58,4 +58,38 @@ describe("ContextManager.compactMessagesWithMeta", () => {
     expect(res.messages[0]?.role).toBe("user");
     expect(res.messages[0]?.content).toBe("task context");
   });
+
+  it("does not keep a user tool_result without its preceding assistant tool_use turn", () => {
+    const cm = new ContextManager("gpt-3.5-turbo");
+    const messages: LLMMessage[] = [
+      { role: "user", content: "task context" },
+      { role: "assistant", content: "older context " + "x".repeat(600) },
+      {
+        role: "assistant",
+        content: [{ type: "tool_use", id: "tool_1", name: "read_file", input: { path: "a.ts" } }],
+      },
+      {
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: "tool_1", content: "y".repeat(320) }],
+      },
+    ];
+
+    const targetTokens = 100;
+    const result = (cm as any).removeOlderMessagesWithMeta(messages, targetTokens);
+    const compacted = result.messages as LLMMessage[];
+
+    for (let i = 0; i < compacted.length; i++) {
+      const current = compacted[i];
+      if (!Array.isArray(current.content)) continue;
+      const hasToolResult = current.content.some((block: any) => block?.type === "tool_result");
+      if (!hasToolResult) continue;
+
+      const previous = i > 0 ? compacted[i - 1] : null;
+      const previousHasToolUse =
+        previous?.role === "assistant" &&
+        Array.isArray(previous.content) &&
+        previous.content.some((block: any) => block?.type === "tool_use");
+      expect(previousHasToolUse).toBe(true);
+    }
+  });
 });

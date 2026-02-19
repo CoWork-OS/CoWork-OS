@@ -200,10 +200,16 @@ function prepareAndLaunchApp() {
 }
 
 function launchApp(electronBinary) {
+  // Strip ELECTRON_RUN_AS_NODE so Electron starts as a full GUI/app process,
+  // not as plain Node.js.  This env var can leak from parent processes
+  // (e.g. VS Code terminals, other Electron-based tools).
+  const env = { ...process.env };
+  delete env.ELECTRON_RUN_AS_NODE;
+
   const electron = spawn(electronBinary, [packageDir, ...args], {
     cwd: packageDir,
     stdio: 'inherit',
-    env: process.env
+    env,
   });
 
   electron.on('exit', (code, signal) => {

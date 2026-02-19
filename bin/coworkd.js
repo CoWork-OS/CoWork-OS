@@ -33,10 +33,11 @@ function run(cmd, args, opts) {
 async function probeBetterSqlite3ForElectron(electronPath, packageDir) {
   try {
     // Require alone may not load the native binding; open an in-memory DB to force dlopen.
+    // Use ELECTRON_RUN_AS_NODE env var (not --runAsNode flag) so the binary runs as Node.
     await run(
       electronPath,
-      ['--runAsNode', '-e', "const Database=require('better-sqlite3'); const db=new Database(':memory:'); db.close();"],
-      { cwd: packageDir, stdio: 'ignore', shell: false }
+      ['-e', "const Database=require('better-sqlite3'); const db=new Database(':memory:'); db.close();"],
+      { cwd: packageDir, stdio: 'ignore', shell: false, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } }
     );
     return true;
   } catch {
@@ -46,7 +47,7 @@ async function probeBetterSqlite3ForElectron(electronPath, packageDir) {
 
 async function main() {
   const packageDir = path.resolve(__dirname, '..');
-  const electronPath = require.resolve('electron');
+  const electronPath = require('electron');
   const mainPath = path.join(packageDir, 'dist', 'electron', 'electron', 'main.js');
 
   const argv = process.argv.slice(2);
@@ -111,10 +112,14 @@ async function main() {
   const defaultArgs = ['--headless', '--enable-control-plane', '--import-env-settings'];
   const args = [...defaultArgs, ...argv];
 
+  // Strip ELECTRON_RUN_AS_NODE so Electron starts as a full app process.
+  const env = { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' };
+  delete env.ELECTRON_RUN_AS_NODE;
+
   const electron = spawn(electronPath, [mainPath, ...args], {
     cwd: packageDir,
     stdio: 'inherit',
-    env: { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' },
+    env,
   });
 
   electron.on('close', (code) => {

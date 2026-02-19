@@ -1,15 +1,24 @@
 import {
   LLMContent,
+  LLMImageContent,
   LLMMessage,
   LLMResponse,
   LLMTool,
 } from './types';
+import { imageToTextFallback } from './image-utils';
+
+export interface OpenAICompatibleMessageOptions {
+  /** Set to false to replace image blocks with text fallback (default: false) */
+  supportsImages?: boolean;
+}
 
 export function toOpenAICompatibleMessages(
   messages: LLMMessage[],
-  system?: string
+  system?: string,
+  options?: OpenAICompatibleMessageOptions,
 ): Array<{ role: string; content: any; tool_call_id?: string; tool_calls?: any[] }> {
   const result: Array<{ role: string; content: any; tool_call_id?: string; tool_calls?: any[] }> = [];
+  const supportsImages = options?.supportsImages === true;
 
   if (system) {
     result.push({ role: 'system', content: system });
@@ -21,6 +30,15 @@ export function toOpenAICompatibleMessages(
       continue;
     }
 
+    if (!Array.isArray(msg.content)) {
+      continue;
+    }
+
+    const imageBlocks: LLMImageContent[] = [];
+    const textParts: string[] = [];
+    const toolCalls: any[] = [];
+    const shouldInlineImages = supportsImages && msg.role === 'user';
+
     for (const item of msg.content) {
       if (item.type === 'tool_result') {
         result.push({
@@ -29,21 +47,52 @@ export function toOpenAICompatibleMessages(
           tool_call_id: item.tool_use_id,
         });
       } else if (item.type === 'tool_use') {
-        result.push({
-          role: 'assistant',
-          content: null,
-          tool_calls: [{
-            id: item.id,
-            type: 'function',
-            function: {
-              name: item.name,
-              arguments: JSON.stringify(item.input),
-            },
-          }],
+        toolCalls.push({
+          id: item.id,
+          type: 'function',
+          function: {
+            name: item.name,
+            arguments: JSON.stringify(item.input),
+          },
         });
       } else if (item.type === 'text') {
-        result.push({ role: msg.role, content: item.text });
+        textParts.push(item.text);
+      } else if (item.type === 'image') {
+        if (shouldInlineImages) {
+          imageBlocks.push(item);
+        } else {
+          textParts.push(imageToTextFallback(item));
+        }
       }
+    }
+
+    if (msg.role === 'assistant' && toolCalls.length > 0) {
+      const assistantContent = textParts.length > 0 ? textParts.join('\n') : null;
+      result.push({
+        role: msg.role,
+        content: assistantContent,
+        tool_calls: toolCalls,
+      });
+      continue;
+    }
+
+    if (imageBlocks.length > 0) {
+      const contentParts: any[] = [];
+      if (textParts.length > 0) {
+        contentParts.push({ type: 'text', text: textParts.join('\n') });
+      }
+      for (const img of imageBlocks) {
+        contentParts.push({
+          type: 'image_url',
+          image_url: { url: `data:${img.mimeType};base64,${img.data}` },
+        });
+      }
+      result.push({ role: msg.role, content: contentParts });
+      continue;
+    }
+
+    if (textParts.length > 0) {
+      result.push({ role: msg.role, content: textParts.join('\n') });
     }
   }
 

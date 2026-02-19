@@ -137,6 +137,13 @@ export class GeminiProvider implements LLMProvider {
             parts.push(functionCallPart);
           } else if (item.type === 'text') {
             parts.push({ text: item.text });
+          } else if (item.type === 'image') {
+            parts.push({
+              inlineData: {
+                mimeType: item.mimeType,
+                data: item.data,
+              },
+            });
           }
         }
       }

@@ -76,7 +76,43 @@ export interface LLMTextContent {
   text: string;
 }
 
-export type LLMContent = LLMToolUse | LLMTextContent;
+/** Supported image MIME types across providers */
+export type LLMImageMimeType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+
+export interface LLMImageContent {
+  type: 'image';
+  /** Base64-encoded image data (no data URL prefix) */
+  data: string;
+  /** MIME type of the image */
+  mimeType: LLMImageMimeType;
+  /** Original byte size before any processing (for limit enforcement) */
+  originalSizeBytes?: number;
+}
+
+export type LLMContent = LLMToolUse | LLMTextContent | LLMImageContent;
+
+/** Per-provider image capability limits */
+export interface LLMProviderImageCaps {
+  supportsImages: boolean;
+  maxImageBytes: number;
+  supportedMimeTypes: LLMImageMimeType[];
+}
+
+export const PROVIDER_IMAGE_CAPS: Record<string, LLMProviderImageCaps> = {
+  anthropic:              { supportsImages: true,  maxImageBytes: 5 * 1024 * 1024,  supportedMimeTypes: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'] },
+  bedrock:                { supportsImages: true,  maxImageBytes: 5 * 1024 * 1024,  supportedMimeTypes: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'] },
+  openai:                 { supportsImages: true,  maxImageBytes: 20 * 1024 * 1024, supportedMimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'] },
+  gemini:                 { supportsImages: true,  maxImageBytes: 20 * 1024 * 1024, supportedMimeTypes: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'] },
+  azure:                  { supportsImages: true,  maxImageBytes: 20 * 1024 * 1024, supportedMimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'] },
+  ollama:                 { supportsImages: true,  maxImageBytes: 10 * 1024 * 1024, supportedMimeTypes: ['image/jpeg', 'image/png'] },
+  openrouter:             { supportsImages: true,  maxImageBytes: 20 * 1024 * 1024, supportedMimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'] },
+  xai:                    { supportsImages: true,  maxImageBytes: 20 * 1024 * 1024, supportedMimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'] },
+  'openai-compatible':    { supportsImages: true,  maxImageBytes: 20 * 1024 * 1024, supportedMimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'] },
+  'anthropic-compatible': { supportsImages: true,  maxImageBytes: 5 * 1024 * 1024,  supportedMimeTypes: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'] },
+  groq:                   { supportsImages: false, maxImageBytes: 0, supportedMimeTypes: [] },
+  kimi:                   { supportsImages: false, maxImageBytes: 0, supportedMimeTypes: [] },
+  pi:                     { supportsImages: false, maxImageBytes: 0, supportedMimeTypes: [] },
+};
 
 export interface LLMToolResult {
   type: 'tool_result';

@@ -22,6 +22,7 @@ import {
   PI_PROVIDERS,
   PiProviderKey,
 } from './types';
+import { imageToTextFallback } from './image-utils';
 
 const DEFAULT_PI_PROVIDER: KnownProvider = 'anthropic';
 
@@ -263,14 +264,17 @@ export class PiProvider implements LLMProvider {
             });
           }
         } else {
-          // Handle mixed content (text and tool_use)
+          // Handle mixed content (text, tool_use, image)
           if (msg.role === 'user') {
-            const textContent = msg.content
-              .filter((item) => item.type === 'text')
-              .map((item) => ({
-                type: 'text' as const,
-                text: (item as any).text,
-              }));
+            const textContent: Array<{ type: 'text'; text: string }> = [];
+            for (const item of msg.content) {
+              if (item.type === 'text') {
+                textContent.push({ type: 'text' as const, text: (item as any).text });
+              } else if (item.type === 'image') {
+                // pi-ai SDK doesn't support inline images; use text fallback
+                textContent.push({ type: 'text' as const, text: imageToTextFallback(item) });
+              }
+            }
 
             if (textContent.length > 0) {
               result.push({

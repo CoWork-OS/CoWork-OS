@@ -32,6 +32,7 @@ export class BedrockProvider implements LLMProvider {
   private credentials?: any;
   private resolvedModelCache = new Map<string, string>();
   private inferenceProfileCache?: { fetchedAt: number; profiles: InferenceProfileCandidate[] };
+  private static readonly CONTINUE_PLACEHOLDER_TEXT = 'I understand. Let me continue.';
 
   private static readonly toolNameRegex = /^[a-zA-Z0-9_-]+$/;
 
@@ -66,7 +67,7 @@ export class BedrockProvider implements LLMProvider {
 
   async createMessage(request: LLMRequest): Promise<LLMResponse> {
     const toolNameMap = request.tools ? this.buildToolNameMap(request.tools) : undefined;
-    const messages = this.convertMessages(request.messages, toolNameMap);
+    const messages = this.convertMessages(this.ensureConversationEndsWithUserMessage(request.messages), toolNameMap);
     const system = this.convertSystem(request.system);
     const toolConfig = request.tools ? this.convertTools(request.tools, toolNameMap) : undefined;
 
@@ -355,6 +356,46 @@ export class BedrockProvider implements LLMProvider {
     return [{ text: system }];
   }
 
+  private ensureConversationEndsWithUserMessage(messages: LLMMessage[]): LLMMessage[] {
+    if (!Array.isArray(messages) || messages.length === 0) {
+      return messages;
+    }
+
+    const last = messages[messages.length - 1];
+    if (last?.role !== 'assistant') return messages;
+
+    if (!this.isSyntheticAssistantPlaceholder(last)) {
+      return messages;
+    }
+
+    console.log(
+      `[Bedrock] Rewriting terminal assistant message as user message to satisfy Converse user-terminal format`
+    );
+
+    return [
+      ...messages.slice(0, -1),
+      {
+        role: 'user',
+        content: last.content,
+      },
+    ];
+  }
+
+  private isSyntheticAssistantPlaceholder(message: LLMMessage): boolean {
+    if (typeof message?.content === 'string') {
+      return message.content.trim().length === 0;
+    }
+
+    if (!Array.isArray(message?.content)) return false;
+    if (message.content.length === 0) return true;
+
+    return (
+      message.content.length === 1 &&
+      message.content[0]?.type === 'text' &&
+      message.content[0].text === BedrockProvider.CONTINUE_PLACEHOLDER_TEXT
+    );
+  }
+
   private convertMessages(messages: LLMMessage[], toolNameMap?: ToolNameMap): Message[] {
     return messages.map((msg) => {
       const content: ContentBlock[] = [];
@@ -380,6 +421,15 @@ export class BedrockProvider implements LLMProvider {
                 toolUseId: item.tool_use_id,
                 content: [{ text: item.content }],
                 status: item.is_error ? 'error' : 'success',
+              },
+            });
+          } else if (item.type === 'image') {
+            content.push({
+              image: {
+                format: item.mimeType.split('/')[1] as 'jpeg' | 'png' | 'gif' | 'webp',
+                source: {
+                  bytes: new Uint8Array(Buffer.from(item.data, 'base64')),
+                },
               },
             });
           }

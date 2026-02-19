@@ -128,7 +128,9 @@ export class OpenRouterProvider implements LLMProvider {
       if (typeof msg.content === 'string') {
         result.push({ role: msg.role, content: msg.content });
       } else {
-        // Handle array content (tool results or mixed content)
+        // Handle array content (tool results, mixed content, images)
+        const textParts: string[] = [];
+        const imageBlocks: Array<{ type: 'image'; data: string; mimeType: string }> = [];
         for (const item of msg.content) {
           if (item.type === 'tool_result') {
             result.push({
@@ -151,8 +153,27 @@ export class OpenRouterProvider implements LLMProvider {
               }],
             } as any);
           } else if (item.type === 'text') {
-            result.push({ role: msg.role, content: item.text });
+            textParts.push(item.text);
+          } else if (item.type === 'image') {
+            imageBlocks.push(item);
           }
+        }
+
+        // Emit text + images as a single message with content array
+        if (imageBlocks.length > 0) {
+          const contentParts: any[] = [];
+          if (textParts.length > 0) {
+            contentParts.push({ type: 'text', text: textParts.join('\n') });
+          }
+          for (const img of imageBlocks) {
+            contentParts.push({
+              type: 'image_url',
+              image_url: { url: `data:${img.mimeType};base64,${img.data}` },
+            });
+          }
+          result.push({ role: msg.role, content: contentParts });
+        } else if (textParts.length > 0) {
+          result.push({ role: msg.role, content: textParts.join('\n') });
         }
       }
     }

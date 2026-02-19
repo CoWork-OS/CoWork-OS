@@ -19,6 +19,7 @@ import {
   LLMToolResult,
 } from './types';
 import { OpenAIOAuth, OpenAIOAuthTokens } from './openai-oauth';
+import { imageToTextFallback } from './image-utils';
 
 // Default model for openai-codex (ChatGPT backend)
 const DEFAULT_CODEX_MODEL = 'gpt-5.1-codex-mini';
@@ -452,11 +453,17 @@ export class OpenAIProvider implements LLMProvider {
             });
           }
         } else {
-          // Handle mixed content (text and tool_use)
+          // Handle mixed content (text, tool_use, image)
           if (msg.role === 'user') {
-            const textContent = msg.content
-              .filter((item) => item.type === 'text')
-              .map((item) => ({ type: 'text' as const, text: (item as any).text }));
+            const textContent: Array<{ type: 'text'; text: string }> = [];
+            for (const item of msg.content) {
+              if (item.type === 'text') {
+                textContent.push({ type: 'text' as const, text: (item as any).text });
+              } else if (item.type === 'image') {
+                // pi-ai SDK doesn't support inline images; use text fallback
+                textContent.push({ type: 'text' as const, text: imageToTextFallback(item) });
+              }
+            }
 
             if (textContent.length > 0) {
               result.push({
@@ -590,8 +597,28 @@ export class OpenAIProvider implements LLMProvider {
               content: toolResult.content,
             });
           }
+          // If there are also image/text blocks alongside tool_results, emit them separately
+          const nonToolItems = msg.content.filter((item) => item.type !== 'tool_result');
+          const hasImages = nonToolItems.some((item) => item.type === 'image');
+          if (hasImages) {
+            const contentParts: Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }> = [];
+            for (const item of nonToolItems) {
+              if (item.type === 'text') {
+                contentParts.push({ type: 'text', text: item.text });
+              } else if (item.type === 'image') {
+                contentParts.push({
+                  type: 'image_url',
+                  image_url: { url: `data:${item.mimeType};base64,${item.data}` },
+                });
+              }
+            }
+            if (contentParts.length > 0) {
+              result.push({ role: 'user', content: contentParts } as any);
+            }
+          }
         } else {
-          // Handle mixed content (text and tool_use)
+          // Handle mixed content (text, tool_use, image)
+          const hasImages = msg.content.some((item) => item.type === 'image');
           const textContent = msg.content
             .filter((item) => item.type === 'text')
             .map((item) => (item as { type: 'text'; text: string }).text)
@@ -617,6 +644,20 @@ export class OpenAIProvider implements LLMProvider {
             }
 
             result.push(assistantMsg);
+          } else if (hasImages) {
+            // Build multi-part content array with text and image_url blocks
+            const contentParts: Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }> = [];
+            for (const item of msg.content) {
+              if (item.type === 'text') {
+                contentParts.push({ type: 'text', text: item.text });
+              } else if (item.type === 'image') {
+                contentParts.push({
+                  type: 'image_url',
+                  image_url: { url: `data:${item.mimeType};base64,${item.data}` },
+                });
+              }
+            }
+            result.push({ role: 'user', content: contentParts } as any);
           } else {
             result.push({
               role: msg.role,

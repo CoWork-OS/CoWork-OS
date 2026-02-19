@@ -106,6 +106,16 @@ export class AnthropicProvider implements LLMProvider {
             input: item.input,
           };
         }
+        if (item.type === 'image') {
+          return {
+            type: 'image' as const,
+            source: {
+              type: 'base64' as const,
+              media_type: item.mimeType as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp',
+              data: item.data,
+            },
+          };
+        }
         return {
           type: 'text' as const,
           text: item.text,

@@ -190,9 +190,10 @@ export class OllamaProvider implements LLMProvider {
           content: msg.content,
         });
       } else {
-        // Handle array content (tool results or mixed content)
+        // Handle array content (tool results, mixed content, images)
         const textParts: string[] = [];
         const toolCalls: OllamaToolCall[] = [];
+        const images: string[] = [];
 
         for (const item of msg.content) {
           if (item.type === 'text') {
@@ -210,14 +211,18 @@ export class OllamaProvider implements LLMProvider {
               role: 'tool',
               content: item.content,
             });
+          } else if (item.type === 'image') {
+            // Ollama expects raw base64 in a top-level images array
+            images.push(item.data);
           }
         }
 
-        if (textParts.length > 0 || toolCalls.length > 0) {
+        if (textParts.length > 0 || toolCalls.length > 0 || images.length > 0) {
           ollamaMessages.push({
             role: msg.role === 'user' ? 'user' : 'assistant',
             content: textParts.join('\n') || '',
             ...(toolCalls.length > 0 && { tool_calls: toolCalls }),
+            ...(images.length > 0 && { images }),
           });
         }
       }
@@ -306,6 +311,7 @@ interface OllamaMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
   tool_calls?: OllamaToolCall[];
+  images?: string[]; // Base64-encoded image data for vision models
 }
 
 interface OllamaToolCall {

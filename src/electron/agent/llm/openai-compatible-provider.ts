@@ -3,6 +3,7 @@ import {
   LLMProviderType,
   LLMRequest,
   LLMResponse,
+  PROVIDER_IMAGE_CAPS,
 } from './types';
 import {
   toOpenAICompatibleMessages,
@@ -37,7 +38,9 @@ export class OpenAICompatibleProvider implements LLMProvider {
   }
 
   async createMessage(request: LLMRequest): Promise<LLMResponse> {
-    const messages = toOpenAICompatibleMessages(request.messages, request.system);
+    const caps = PROVIDER_IMAGE_CAPS[this.type];
+    const supportsImages = caps?.supportsImages === true;
+    const messages = toOpenAICompatibleMessages(request.messages, request.system, { supportsImages });
     const tools = request.tools ? toOpenAICompatibleTools(request.tools) : undefined;
 
     try {

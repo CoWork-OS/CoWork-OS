@@ -1,4 +1,5 @@
 import { LLMMessage, LLMContent, LLMToolResult } from './llm';
+import { estimateImageTokens } from './llm/image-utils';
 
 /**
  * Context Manager handles conversation history to prevent "input too long" errors
@@ -105,6 +106,8 @@ export function estimateMessageTokens(message: LLMMessage): number {
       tokens += estimateTokens(content.name) + estimateTokens(JSON.stringify(content.input));
     } else if (content.type === 'tool_result') {
       tokens += estimateTokens(content.content);
+    } else if (content.type === 'image') {
+      tokens += estimateImageTokens(content);
     }
   }
   return tokens;

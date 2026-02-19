@@ -16,7 +16,7 @@ import { AgentRoleRepository } from '../agents/AgentRoleRepository';
 import { MentionRepository } from '../agents/MentionRepository';
 import { buildAgentDispatchPrompt } from '../agents/agent-dispatch';
 import { extractMentionedRoles } from '../agents/mentions';
-import { Task, TaskStatus, TaskEvent, IPC_CHANNELS, QueueSettings, QueueStatus, Workspace, WorkspacePermissions, AgentConfig, AgentType, ActivityActorType, ActivityType, CreateActivityRequest, Plan, BoardColumn, Activity, AgentMention, AgentRole, isTempWorkspaceId } from '../../shared/types';
+import { Task, TaskStatus, TaskEvent, IPC_CHANNELS, QueueSettings, QueueStatus, Workspace, WorkspacePermissions, AgentConfig, AgentType, ActivityActorType, ActivityType, CreateActivityRequest, Plan, BoardColumn, Activity, AgentMention, AgentRole, isTempWorkspaceId, ImageAttachment } from '../../shared/types';
 import { TaskExecutor } from './executor';
 import { TaskQueueManager } from './queue-manager';
 import { approvalIdempotency, taskIdempotency, IdempotencyManager } from '../security/concurrency';
@@ -2122,7 +2122,7 @@ export class AgentDaemon extends EventEmitter {
   /**
    * Send a follow-up message to a task
    */
-  async sendMessage(taskId: string, message: string): Promise<void> {
+  async sendMessage(taskId: string, message: string, images?: ImageAttachment[]): Promise<void> {
     let cached = this.activeTasks.get(taskId);
     let executor: TaskExecutor;
 
@@ -2163,7 +2163,7 @@ export class AgentDaemon extends EventEmitter {
     }
 
     // Send the message
-    await executor.sendMessage(message);
+    await executor.sendMessage(message, images);
   }
 
   // ===== Queue Management Methods =====

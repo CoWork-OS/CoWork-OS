@@ -9,6 +9,7 @@ import {
   LLMToolResult,
   LLMToolUse,
   LLMTextContent,
+  LLMImageContent,
 } from './types';
 import {
   toOpenAICompatibleMessages,
@@ -24,6 +25,8 @@ const isToolUse = (item: LLMContent | LLMToolResult): item is LLMToolUse =>
   item?.type === 'tool_use';
 const isTextContent = (item: LLMContent | LLMToolResult): item is LLMTextContent =>
   item?.type === 'text';
+const isImageContent = (item: LLMContent | LLMToolResult): item is LLMImageContent =>
+  item?.type === 'image';
 
 export class AzureOpenAIProvider implements LLMProvider {
   readonly type = 'azure' as const;
@@ -74,7 +77,7 @@ export class AzureOpenAIProvider implements LLMProvider {
   }
 
   private buildChatCompletionsBody(request: LLMRequest, useMaxCompletionTokens: boolean): Record<string, any> {
-    const messages = toOpenAICompatibleMessages(request.messages, request.system);
+    const messages = toOpenAICompatibleMessages(request.messages, request.system, { supportsImages: true });
     const tools = request.tools ? toOpenAICompatibleTools(request.tools) : undefined;
     const tokenField = useMaxCompletionTokens ? 'max_completion_tokens' : 'max_tokens';
 
@@ -119,14 +122,22 @@ export class AzureOpenAIProvider implements LLMProvider {
       }
 
       const textBlocks = msg.content.filter(isTextContent);
-      if (textBlocks.length > 0) {
+      const imageBlocks = msg.content.filter(isImageContent);
+      if (textBlocks.length > 0 || imageBlocks.length > 0) {
+        const contentParts: any[] = textBlocks.map((block) => ({
+          type: msg.role === 'assistant' ? 'output_text' : 'input_text',
+          text: block.text,
+        }));
+        for (const img of imageBlocks) {
+          contentParts.push({
+            type: 'input_image',
+            image_url: `data:${img.mimeType};base64,${img.data}`,
+          });
+        }
         input.push({
           type: 'message',
           role: msg.role,
-          content: textBlocks.map((block) => ({
-            type: msg.role === 'assistant' ? 'output_text' : 'input_text',
-            text: block.text,
-          })),
+          content: contentParts,
         });
       }
 

@@ -226,7 +226,7 @@ export class VisionTools {
             lastError = "Anthropic API key not configured.";
             continue;
           }
-          const defaultModel = MODELS["sonnet-4-5"]?.anthropic || "claude-3-5-sonnet-20241022";
+          const defaultModel = MODELS["sonnet-4-6"]?.anthropic || "claude-sonnet-4-6";
           const model = modelOverride || defaultModel;
           const text = await this.analyzeWithAnthropic({
             apiKey,

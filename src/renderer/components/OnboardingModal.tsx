@@ -506,7 +506,7 @@ export function OnboardingModal({
       case "openrouter":
         return "anthropic/claude-3.5-sonnet";
       case "bedrock":
-        return "sonnet-4-5";
+        return "sonnet-4-6";
       case "groq":
         return "llama-3.1-8b-instant";
       case "xai":

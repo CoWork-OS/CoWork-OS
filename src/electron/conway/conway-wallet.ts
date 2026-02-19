@@ -17,8 +17,12 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import { exec } from "child_process";
+import { promisify } from "util";
 import { ethers } from "ethers";
 import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
+
+const execAsync = promisify(exec);
 
 const CONWAY_DIR = path.join(os.homedir(), ".conway");
 const WALLET_FILE = path.join(CONWAY_DIR, "wallet.json");
@@ -29,6 +33,8 @@ interface EncryptedWalletData {
   address: string;
   network: string;
   createdAt: string;
+  /** Conway API key obtained from --provision */
+  apiKey?: string;
 }
 
 interface WalletFileFormat {
@@ -95,6 +101,53 @@ export class ConwayWalletManager {
       network: data.network,
       createdAt: data.createdAt,
     };
+  }
+
+  /**
+   * Provision the wallet with Conway's API to get an API key.
+   * Runs `npx conway-terminal --provision` and stores the key encrypted.
+   */
+  static async provision(): Promise<string | null> {
+    try {
+      const { stdout } = await execAsync("npx -y conway-terminal --provision", {
+        timeout: 60000,
+        env: { ...process.env, NODE_ENV: "production" },
+      });
+
+      const result = JSON.parse(stdout.trim());
+      if (!result.apiKey) {
+        console.warn("[ConwayWallet] Provision response missing apiKey");
+        return null;
+      }
+
+      // Save API key into the encrypted wallet data
+      const stored = this.loadFromEncryptedStore();
+      if (stored) {
+        stored.apiKey = result.apiKey;
+        this.saveToEncryptedStore(stored);
+        console.log("[ConwayWallet] API key provisioned and stored encrypted");
+      }
+
+      return result.apiKey;
+    } catch (error) {
+      console.warn("[ConwayWallet] Provisioning failed:", error);
+      return null;
+    }
+  }
+
+  /**
+   * Get the stored Conway API key from encrypted database
+   */
+  static getApiKey(): string | null {
+    const data = this.loadFromEncryptedStore();
+    return data?.apiKey || null;
+  }
+
+  /**
+   * Check if we have a provisioned API key
+   */
+  static hasApiKey(): boolean {
+    return !!this.getApiKey();
   }
 
   /**
@@ -218,7 +271,9 @@ export class ConwayWalletManager {
         return { address: this.getAddress(), status: "ok" };
       }
       if (integrity === "file_tampered") {
-        console.warn("[ConwayWallet] Wallet file was tampered with — restoring from encrypted backup");
+        console.warn(
+          "[ConwayWallet] Wallet file was tampered with — restoring from encrypted backup",
+        );
         this.restoreWalletFile();
         return { address: this.getAddress(), status: "restored_from_backup" };
       }

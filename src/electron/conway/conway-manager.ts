@@ -54,13 +54,23 @@ export class ConwayManager extends EventEmitter {
       // Wallet integrity check — import, restore, or verify as needed
       const walletCheck = ConwayWalletManager.startupCheck();
       if (walletCheck.status !== "no_wallet") {
-        console.log(`[Conway] Wallet check: ${walletCheck.status}, address: ${walletCheck.address}`);
+        console.log(
+          `[Conway] Wallet check: ${walletCheck.status}, address: ${walletCheck.address}`,
+        );
       }
 
       const server = this.findConwayServer();
 
       if (server) {
         this.setupState = "ready";
+
+        // Ensure API key env is set on the server config
+        const serverEnv = this.buildServerEnv();
+        if (Object.keys(serverEnv).length > 0 && (!server.env || !server.env.CONWAY_API_KEY)) {
+          MCPSettingsManager.updateServer(server.id, {
+            env: { ...(server.env || {}), ...serverEnv },
+          });
+        }
 
         if (settings.enabled && settings.autoConnect) {
           try {
@@ -111,9 +121,22 @@ export class ConwayManager extends EventEmitter {
         this.setupState = "installed";
         this.emitStatusChange();
 
-        // Step 2: Create or find MCP server entry
+        // Step 2: Provision API key if not already done
+        if (!ConwayWalletManager.hasApiKey()) {
+          console.log("[Conway] Provisioning API key...");
+          const apiKey = await ConwayWalletManager.provision();
+          if (apiKey) {
+            console.log("[Conway] API key provisioned successfully");
+          } else {
+            console.warn("[Conway] Provisioning failed — sandbox operations may not work");
+          }
+        }
+
+        // Step 3: Create or find MCP server entry (with API key in env)
         this.setupState = "initializing";
         this.emitStatusChange();
+
+        const serverEnv = this.buildServerEnv();
 
         let server = this.findConwayServer();
         if (!server) {
@@ -123,10 +146,15 @@ export class ConwayManager extends EventEmitter {
             transport: "stdio" as const,
             command: CONWAY_COMMAND,
             args: [...CONWAY_ARGS],
+            env: serverEnv,
           });
           console.log("[Conway] Created MCP server entry:", server.id);
-        } else if (!server.enabled) {
-          MCPSettingsManager.updateServer(server.id, { enabled: true });
+        } else {
+          // Update env with API key if server already exists
+          MCPSettingsManager.updateServer(server.id, {
+            enabled: true,
+            env: serverEnv,
+          });
         }
 
         // Step 3: Connect the MCP server (skip if already connected)
@@ -174,6 +202,19 @@ export class ConwayManager extends EventEmitter {
       (s) =>
         s.name === CONWAY_SERVER_NAME || (s.args || []).some((a) => a.includes("conway-terminal")),
     );
+  }
+
+  /**
+   * Build environment variables for the Conway MCP server process.
+   * Includes CONWAY_API_KEY from encrypted store if available.
+   */
+  private buildServerEnv(): Record<string, string> {
+    const env: Record<string, string> = {};
+    const apiKey = ConwayWalletManager.getApiKey();
+    if (apiKey) {
+      env.CONWAY_API_KEY = apiKey;
+    }
+    return env;
   }
 
   /**
@@ -287,6 +328,8 @@ export class ConwayManager extends EventEmitter {
    */
   async connect(): Promise<void> {
     await this.withExclusiveOperation(async () => {
+      const serverEnv = this.buildServerEnv();
+
       let server = this.findConwayServer();
       if (!server) {
         server = MCPSettingsManager.addServer({
@@ -295,6 +338,12 @@ export class ConwayManager extends EventEmitter {
           transport: "stdio" as const,
           command: CONWAY_COMMAND,
           args: [...CONWAY_ARGS],
+          env: serverEnv,
+        });
+      } else if (Object.keys(serverEnv).length > 0) {
+        // Ensure env is up to date with API key
+        MCPSettingsManager.updateServer(server.id, {
+          env: { ...(server.env || {}), ...serverEnv },
         });
       }
 
@@ -361,11 +410,7 @@ export class ConwayManager extends EventEmitter {
       () => undefined,
       () => undefined,
     );
-    try {
-      return await next;
-    } catch (error) {
-      throw error;
-    }
+    return await next;
   }
 
   /**

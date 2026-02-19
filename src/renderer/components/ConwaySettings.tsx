@@ -314,8 +314,9 @@ export function ConwaySettings() {
                 {status?.walletFileExists === false && (
                   <div className="conway-wallet-warning">
                     <p>
-                      Wallet file (<code>~/.conway/wallet.json</code>) not found on disk.
-                      Your private key is safely stored in CoWork OS's encrypted database and can be restored.
+                      Wallet file (<code>~/.conway/wallet.json</code>) not found on disk. Your
+                      private key is safely stored in CoWork OS's encrypted database and can be
+                      restored.
                     </p>
                     <button
                       type="button"
@@ -334,9 +335,9 @@ export function ConwaySettings() {
                 <div className="conway-wallet-safety">
                   <strong>Wallet Security</strong>
                   <p>
-                    Your private key is encrypted and stored in CoWork OS's secure database
-                    (backed by your OS keychain). The plaintext file at <code>~/.conway/wallet.json</code> is
-                    written for Conway's MCP server and can be restored automatically if deleted.
+                    Your private key is encrypted and stored in CoWork OS's secure database (backed
+                    by your OS keychain). The plaintext file at <code>~/.conway/wallet.json</code>{" "}
+                    is written for Conway's MCP server and can be restored automatically if deleted.
                     CoWork OS never transmits your private key.
                   </p>
                 </div>
@@ -487,8 +488,8 @@ export function ConwaySettings() {
           <div className="conway-danger-section">
             <h3>Reset</h3>
             <p className="settings-description">
-              Disconnects the Conway MCP server and clears app settings.
-              Your wallet private key stays encrypted in CoWork OS's secure database and can be restored.
+              Disconnects the Conway MCP server and clears app settings. Your wallet private key
+              stays encrypted in CoWork OS's secure database and can be restored.
             </p>
             <button className="button-danger" onClick={handleReset}>
               Reset Conway Terminal

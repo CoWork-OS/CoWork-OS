@@ -18,6 +18,7 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
   // Anthropic Claude models
   "claude-opus-4-5-20251101": { inputPer1M: 15.0, outputPer1M: 75.0 },
   "claude-opus-4-5-20250101": { inputPer1M: 15.0, outputPer1M: 75.0 },
+  "claude-sonnet-4-6": { inputPer1M: 3.0, outputPer1M: 15.0 },
   "claude-sonnet-4-5-20250514": { inputPer1M: 3.0, outputPer1M: 15.0 },
   "claude-sonnet-4-20250514": { inputPer1M: 3.0, outputPer1M: 15.0 },
   "claude-3-5-sonnet-20241022": { inputPer1M: 3.0, outputPer1M: 15.0 },
@@ -40,6 +41,7 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
   "us.anthropic.claude-sonnet-4-5-20250514-v1:0": { inputPer1M: 3.0, outputPer1M: 15.0 },
   "anthropic.claude-sonnet-4-5-20250514": { inputPer1M: 3.0, outputPer1M: 15.0 },
   "us.anthropic.claude-sonnet-4-20250514-v1:0": { inputPer1M: 3.0, outputPer1M: 15.0 },
+  "anthropic.claude-sonnet-4-6": { inputPer1M: 3.0, outputPer1M: 15.0 },
 
   // Google Gemini models (prices may vary, free tier has limits)
   "gemini-2.0-flash": { inputPer1M: 0.1, outputPer1M: 0.4 },

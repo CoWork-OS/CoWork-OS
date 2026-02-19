@@ -213,6 +213,11 @@ export const MODELS = {
     bedrock: "anthropic.claude-opus-4-5-20251101",
     displayName: "Opus 4.5",
   },
+  "sonnet-4-6": {
+    anthropic: "claude-sonnet-4-6",
+    bedrock: "anthropic.claude-sonnet-4-6",
+    displayName: "Sonnet 4.6",
+  },
   "sonnet-4-5": {
     anthropic: "claude-sonnet-4-5-20250514",
     bedrock: "anthropic.claude-sonnet-4-5-20250514",

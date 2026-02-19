@@ -20,7 +20,7 @@ export function resolveModelPreferenceToModelKey(
     case "opus":
       return "opus-4-5";
     case "sonnet":
-      return "sonnet-4-5";
+      return "sonnet-4-6";
     default:
       // If the preference is unknown, don't override model selection.
       return undefined;

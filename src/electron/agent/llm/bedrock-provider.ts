@@ -43,7 +43,7 @@ export class BedrockProvider implements LLMProvider {
     this.region = config.awsRegion || "us-east-1";
 
     // Store the model for use in testConnection
-    this.model = config.model || "anthropic.claude-3-5-sonnet-20241022-v2:0";
+    this.model = config.model || "anthropic.claude-sonnet-4-6";
 
     // Use explicit credentials if provided
     if (config.awsAccessKeyId && config.awsSecretAccessKey) {

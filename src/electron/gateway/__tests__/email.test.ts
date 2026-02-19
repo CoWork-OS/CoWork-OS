@@ -125,6 +125,11 @@ describe('EmailAdapter', () => {
       const config = (adapterDefault as any).config;
       expect(config.markAsRead).toBe(true);
     });
+
+    it('should default protocol to imap-smtp', () => {
+      const config = (adapter as any).config;
+      expect(config.protocol).toBe('imap-smtp');
+    });
   });
 
   describe('createEmailAdapter factory', () => {
@@ -178,6 +183,52 @@ describe('EmailAdapter', () => {
         imapHost: 'imap.example.com',
         smtpHost: '',
       })).toThrow('SMTP host is required');
+    });
+
+    it('should create adapter with valid loom config', () => {
+      const newAdapter = createEmailAdapter({
+        enabled: true,
+        protocol: 'loom',
+        loomBaseUrl: 'http://127.0.0.1:8787',
+        loomAccessToken: 'token_123',
+      });
+      expect(newAdapter).toBeInstanceOf(EmailAdapter);
+      expect((newAdapter as any).config.protocol).toBe('loom');
+    });
+
+    it('should reject insecure non-localhost loom base URL', () => {
+      expect(() => createEmailAdapter({
+        enabled: true,
+        protocol: 'loom',
+        loomBaseUrl: 'http://loom.example.com',
+        loomAccessToken: 'token_123',
+      })).toThrow('LOOM base URL must use HTTPS');
+    });
+
+    it('should throw error if loom base URL is missing in loom mode', () => {
+      expect(() => createEmailAdapter({
+        enabled: true,
+        protocol: 'loom',
+        loomAccessToken: 'token_123',
+      })).toThrow('LOOM base URL is required');
+    });
+
+    it('should throw error if loom access token is missing in loom mode', () => {
+      expect(() => createEmailAdapter({
+        enabled: true,
+        protocol: 'loom',
+        loomBaseUrl: 'http://127.0.0.1:8787',
+      })).toThrow('LOOM access token is required');
+    });
+
+    it('should reject invalid LOOM mailbox folder', () => {
+      expect(() => createEmailAdapter({
+        enabled: true,
+        protocol: 'loom',
+        loomBaseUrl: 'http://127.0.0.1:8787',
+        loomAccessToken: 'token_123',
+        loomMailboxFolder: 'INBOX/../Work',
+      })).toThrow('LOOM mailbox folder contains invalid characters');
     });
   });
 

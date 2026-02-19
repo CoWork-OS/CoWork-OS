@@ -45,6 +45,7 @@ import { createTwitchAdapter } from './channels/twitch';
 import { createLineAdapter } from './channels/line';
 import { createBlueBubblesAdapter } from './channels/bluebubbles';
 import { createEmailAdapter } from './channels/email';
+import { assertSafeLoomMailboxFolder, isSecureOrLocalLoomUrl, normalizeEmailProtocol } from '../utils/loom';
 
 /**
  * Channel metadata for registration
@@ -1011,7 +1012,7 @@ export class ChannelRegistry extends EventEmitter {
       metadata: {
         type: 'email',
         displayName: 'Email',
-        description: 'Email integration using IMAP/SMTP',
+        description: 'Email integration using IMAP/SMTP or LOOM protocol',
         icon: '📧',
         builtin: true,
         capabilities: {
@@ -1037,10 +1038,14 @@ export class ChannelRegistry extends EventEmitter {
         configSchema: {
           type: 'object',
           properties: {
+            protocol: {
+              type: 'string',
+              description: 'Transport protocol: "imap-smtp" (default) or "loom"',
+              default: 'imap-smtp',
+            },
             imapHost: {
               type: 'string',
-              description: 'IMAP server host',
-              required: true,
+              description: 'IMAP server host (required for IMAP/SMTP mode)',
             },
             imapPort: {
               type: 'number',
@@ -1049,8 +1054,7 @@ export class ChannelRegistry extends EventEmitter {
             },
             smtpHost: {
               type: 'string',
-              description: 'SMTP server host',
-              required: true,
+              description: 'SMTP server host (required for IMAP/SMTP mode)',
             },
             smtpPort: {
               type: 'number',
@@ -1059,13 +1063,11 @@ export class ChannelRegistry extends EventEmitter {
             },
             email: {
               type: 'string',
-              description: 'Email address',
-              required: true,
+              description: 'Email address (required for IMAP/SMTP mode)',
             },
             password: {
               type: 'string',
-              description: 'Password or app password',
-              required: true,
+              description: 'Password or app password (required for IMAP/SMTP mode)',
               secret: true,
             },
             displayName: {
@@ -1085,8 +1087,31 @@ export class ChannelRegistry extends EventEmitter {
               type: 'array',
               description: 'Allowed sender email addresses',
             },
+            loomBaseUrl: {
+              type: 'string',
+              description: 'LOOM node base URL (required for LOOM mode)',
+            },
+            loomAccessToken: {
+              type: 'string',
+              description: 'LOOM bearer access token (required for LOOM mode)',
+              secret: true,
+            },
+            loomIdentity: {
+              type: 'string',
+              description: 'LOOM actor identity (optional)',
+            },
+            loomMailboxFolder: {
+              type: 'string',
+              description: 'LOOM mailbox folder (default: INBOX)',
+              default: 'INBOX',
+            },
+            loomPollInterval: {
+              type: 'number',
+              description: 'LOOM mailbox poll interval in ms',
+              default: 30000,
+            },
           },
-          required: ['imapHost', 'smtpHost', 'email', 'password'],
+          required: ['protocol'],
         },
       },
       factory: (config) => createEmailAdapter(config as EmailConfig),
@@ -1243,6 +1268,51 @@ export class ChannelRegistry extends EventEmitter {
 
       if (expectedType !== actualType) {
         errors.push(`Field ${key} should be ${expectedType}, got ${actualType}`);
+      }
+    }
+
+    if (type === 'email') {
+      const protocolValue = typeof config.protocol === 'string' ? config.protocol.trim().toLowerCase() : '';
+      if (protocolValue && protocolValue !== 'imap-smtp' && protocolValue !== 'loom') {
+        errors.push(`Invalid email protocol: ${config.protocol}`);
+        return { valid: false, errors };
+      }
+
+      const protocol = normalizeEmailProtocol(protocolValue);
+      if (protocol === 'loom') {
+        if (!config.loomBaseUrl) {
+          errors.push('Missing required field: loomBaseUrl');
+        }
+        if (typeof config.loomBaseUrl === 'string' && !isSecureOrLocalLoomUrl(config.loomBaseUrl)) {
+          errors.push('Invalid LOOM base URL: must use HTTPS unless using localhost/127.0.0.1/::1');
+        }
+        if (!config.loomAccessToken) {
+          errors.push('Missing required field: loomAccessToken');
+        }
+        if (typeof config.loomMailboxFolder !== 'undefined' && typeof config.loomMailboxFolder !== 'string') {
+          errors.push('Invalid LOOM mailbox folder');
+        } else if (typeof config.loomMailboxFolder === 'string') {
+          try {
+            assertSafeLoomMailboxFolder(config.loomMailboxFolder);
+          } catch (error) {
+            const message =
+              error instanceof Error ? error.message : 'Invalid LOOM mailbox folder';
+            errors.push(message);
+          }
+        }
+      } else {
+        if (!config.email) {
+          errors.push('Missing required field: email');
+        }
+        if (!config.password) {
+          errors.push('Missing required field: password');
+        }
+        if (!config.imapHost) {
+          errors.push('Missing required field: imapHost');
+        }
+        if (!config.smtpHost) {
+          errors.push('Missing required field: smtpHost');
+        }
       }
     }
 

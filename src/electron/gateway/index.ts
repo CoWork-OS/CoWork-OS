@@ -902,14 +902,24 @@ export class ChannelGateway {
    */
   async addEmailChannel(
     name: string,
-    email: string,
-    password: string,
-    imapHost: string,
-    smtpHost: string,
+    email: string | undefined,
+    password: string | undefined,
+    imapHost: string | undefined,
+    smtpHost: string | undefined,
     displayName?: string,
     allowedSenders?: string[],
     subjectFilter?: string,
-    securityMode: 'open' | 'allowlist' | 'pairing' = 'pairing'
+    securityMode: 'open' | 'allowlist' | 'pairing' = 'pairing',
+    options?: {
+      protocol?: 'imap-smtp' | 'loom';
+      imapPort?: number;
+      smtpPort?: number;
+      loomBaseUrl?: string;
+      loomAccessToken?: string;
+      loomIdentity?: string;
+      loomMailboxFolder?: string;
+      loomPollInterval?: number;
+    }
   ): Promise<Channel> {
     // Check if Email channel already exists
     const existing = this.channelRepo.findByType('email');
@@ -917,27 +927,43 @@ export class ChannelGateway {
       throw new Error('Email channel already configured. Update or remove it first.');
     }
 
+    const protocol = options?.protocol === 'loom' ? 'loom' : 'imap-smtp';
+
+    const config =
+      protocol === 'loom'
+        ? {
+            protocol: 'loom',
+            loomBaseUrl: options?.loomBaseUrl,
+            loomAccessToken: options?.loomAccessToken,
+            loomIdentity: options?.loomIdentity,
+            loomMailboxFolder: options?.loomMailboxFolder ?? 'INBOX',
+            loomPollInterval: options?.loomPollInterval ?? 30000,
+            displayName,
+          }
+        : {
+            protocol: 'imap-smtp',
+            email,
+            password,
+            imapHost,
+            imapPort: options?.imapPort ?? 993,
+            imapSecure: true,
+            smtpHost,
+            smtpPort: options?.smtpPort ?? 587,
+            smtpSecure: false,
+            displayName,
+            allowedSenders,
+            subjectFilter,
+          };
+
     // Create channel record
     const channel = this.channelRepo.create({
       type: 'email',
       name,
       enabled: false, // Don't enable until connected
-      config: {
-        email,
-        password,
-        imapHost,
-        imapPort: 993,
-        imapSecure: true,
-        smtpHost,
-        smtpPort: 587,
-        smtpSecure: false,
-        displayName,
-        allowedSenders,
-        subjectFilter,
-      },
+      config,
       securityConfig: {
         mode: securityMode,
-        allowedUsers: allowedSenders || [],
+        allowedUsers: protocol === 'loom' ? [] : allowedSenders || [],
         pairingCodeTTL: 300,
         maxPairingAttempts: 5,
         rateLimitPerMinute: 30,
@@ -1450,8 +1476,12 @@ export class ChannelGateway {
         });
 
       case 'email':
+        const loomStatePath = channel.type === 'email'
+          ? this.getLoomStatePath(channel.id)
+          : undefined;
         return createEmailAdapter({
           enabled: channel.enabled,
+          protocol: channel.config.protocol as 'imap-smtp' | 'loom' | undefined,
           imapHost: channel.config.imapHost as string,
           imapPort: channel.config.imapPort as number | undefined,
           imapSecure: channel.config.imapSecure as boolean | undefined,
@@ -1467,11 +1497,21 @@ export class ChannelGateway {
           allowedSenders: channel.config.allowedSenders as string[] | undefined,
           subjectFilter: channel.config.subjectFilter as string | undefined,
           responsePrefix: channel.config.responsePrefix as string | undefined,
+          loomBaseUrl: channel.config.loomBaseUrl as string | undefined,
+          loomAccessToken: channel.config.loomAccessToken as string | undefined,
+          loomIdentity: channel.config.loomIdentity as string | undefined,
+          loomMailboxFolder: channel.config.loomMailboxFolder as string | undefined,
+          loomPollInterval: channel.config.loomPollInterval as number | undefined,
+          loomStatePath,
         });
 
       default:
         throw new Error(`Unsupported channel type: ${channel.type}`);
     }
+  }
+
+  private getLoomStatePath(channelId: string): string {
+    return path.join(getUserDataDir(), 'loom', `${channelId}.json`);
   }
 }
 
@@ -1500,5 +1540,6 @@ export { BlueBubblesAdapter, createBlueBubblesAdapter } from './channels/bluebub
 export { BlueBubblesClient } from './channels/bluebubbles-client';
 export { EmailAdapter, createEmailAdapter } from './channels/email';
 export { EmailClient } from './channels/email-client';
+export { LoomEmailClient } from './channels/loom-client';
 export { TunnelManager, getAvailableTunnelProviders, createAutoTunnel } from './tunnel';
 export type { TunnelProvider, TunnelStatus, TunnelConfig, TunnelInfo } from './tunnel';

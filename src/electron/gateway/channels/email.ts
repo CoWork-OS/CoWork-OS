@@ -26,6 +26,7 @@ import {
   ChannelStatus,
   IncomingMessage,
   OutgoingMessage,
+  EmailTransportClient,
   MessageHandler,
   ErrorHandler,
   StatusHandler,
@@ -33,11 +34,13 @@ import {
   EmailConfig,
 } from './types';
 import { EmailClient, EmailMessage } from './email-client';
+import { LoomEmailClient } from './loom-client';
+import { assertSafeLoomBaseUrl, assertSafeLoomMailboxFolder, normalizeEmailProtocol } from '../../utils/loom';
 
 export class EmailAdapter implements ChannelAdapter {
   readonly type = 'email' as const;
 
-  private client: EmailClient | null = null;
+  private client: EmailTransportClient | null = null;
   private _status: ChannelStatus = 'disconnected';
   private _botUsername?: string;
   private messageHandlers: MessageHandler[] = [];
@@ -62,8 +65,11 @@ export class EmailAdapter implements ChannelAdapter {
   private shouldReconnect = true;
 
   constructor(config: EmailConfig) {
+    const protocol = normalizeEmailProtocol(config.protocol);
+
     this.config = {
       ...config,
+      protocol,
       imapPort: config.imapPort ?? 993,
       imapSecure: config.imapSecure ?? true,
       smtpPort: config.smtpPort ?? 587,
@@ -72,6 +78,8 @@ export class EmailAdapter implements ChannelAdapter {
       pollInterval: config.pollInterval ?? 30000,
       markAsRead: config.markAsRead ?? true,
       deduplicationEnabled: config.deduplicationEnabled ?? true,
+      loomMailboxFolder: config.loomMailboxFolder ?? 'INBOX',
+      loomPollInterval: config.loomPollInterval ?? config.pollInterval ?? 30000,
     };
   }
 
@@ -95,21 +103,58 @@ export class EmailAdapter implements ChannelAdapter {
     this.shouldReconnect = true;
 
     try {
-      // Create email client
-      this.client = new EmailClient({
-        imapHost: this.config.imapHost,
-        imapPort: this.config.imapPort!,
-        imapSecure: this.config.imapSecure!,
-        smtpHost: this.config.smtpHost,
-        smtpPort: this.config.smtpPort!,
-        smtpSecure: this.config.smtpSecure!,
-        email: this.config.email,
-        password: this.config.password,
-        displayName: this.config.displayName,
-        mailbox: this.config.mailbox!,
-        pollInterval: this.config.pollInterval!,
-        verbose: process.env.NODE_ENV === 'development',
-      });
+      const protocol = normalizeEmailProtocol(this.config.protocol);
+      if (protocol === 'loom') {
+        const loomBaseUrl = this.config.loomBaseUrl;
+        if (!loomBaseUrl) {
+          throw new Error('LOOM base URL is required');
+        }
+
+        const getLoomAccessToken = () => this.config.loomAccessToken;
+        if (!getLoomAccessToken()) {
+          throw new Error('LOOM access token is required');
+        }
+
+        this.client = new LoomEmailClient({
+          baseUrl: loomBaseUrl,
+          accessTokenProvider: () => {
+            const token = getLoomAccessToken();
+            if (!token) {
+              throw new Error('LOOM access token is required');
+            }
+            return token;
+          },
+          identity: this.config.loomIdentity,
+          folder: assertSafeLoomMailboxFolder(this.config.loomMailboxFolder || 'INBOX'),
+          pollInterval: this.config.loomPollInterval || this.config.pollInterval || 30000,
+          stateFilePath: this.config.loomStatePath,
+          verbose: process.env.NODE_ENV === 'development',
+        });
+      } else {
+        const imapHost = this.config.imapHost;
+        const smtpHost = this.config.smtpHost;
+        const email = this.config.email;
+        const password = this.config.password;
+        if (!imapHost) throw new Error('IMAP host is required');
+        if (!smtpHost) throw new Error('SMTP host is required');
+        if (!email) throw new Error('Email address is required');
+        if (!password) throw new Error('Email password is required');
+
+        this.client = new EmailClient({
+          imapHost,
+          imapPort: this.config.imapPort ?? 993,
+          imapSecure: this.config.imapSecure ?? true,
+          smtpHost,
+          smtpPort: this.config.smtpPort ?? 587,
+          smtpSecure: this.config.smtpSecure ?? false,
+          email,
+          password,
+          displayName: this.config.displayName,
+          mailbox: this.config.mailbox || 'INBOX',
+          pollInterval: this.config.pollInterval || 30000,
+          verbose: process.env.NODE_ENV === 'development',
+        });
+      }
 
       // Check connection
       const check = await this.client.checkConnection();
@@ -117,7 +162,8 @@ export class EmailAdapter implements ChannelAdapter {
         throw new Error(check.error || 'Failed to connect to email server');
       }
 
-      this._botUsername = this.config.displayName || this.config.email;
+      this._botUsername =
+        this.config.displayName || this.client.getEmail?.() || this.config.email || this.config.loomIdentity;
 
       // Set up event handlers
       this.client.on('message', (message: EmailMessage) => {
@@ -313,14 +359,18 @@ export class EmailAdapter implements ChannelAdapter {
     return {
       type: 'email',
       status: this._status,
-      botId: this.config.email,
+      botId: this.config.email || this.config.loomIdentity || this.config.loomBaseUrl,
       botUsername: this._botUsername,
       botDisplayName: `Email (${this._botUsername || 'Not connected'})`,
       extra: {
+        protocol: normalizeEmailProtocol(this.config.protocol),
         email: this.config.email,
         imapHost: this.config.imapHost,
         smtpHost: this.config.smtpHost,
         mailbox: this.config.mailbox,
+        loomBaseUrl: this.config.loomBaseUrl,
+        loomIdentity: this.config.loomIdentity,
+        loomMailboxFolder: this.config.loomMailboxFolder,
       },
     };
   }
@@ -500,6 +550,24 @@ export class EmailAdapter implements ChannelAdapter {
  * Create an Email adapter from configuration
  */
 export function createEmailAdapter(config: EmailConfig): EmailAdapter {
+  const protocol = normalizeEmailProtocol(config.protocol);
+
+  if (protocol === 'loom') {
+    if (!config.loomBaseUrl) {
+      throw new Error('LOOM base URL is required');
+    }
+    if (!config.loomAccessToken) {
+      throw new Error('LOOM access token is required');
+    }
+    assertSafeLoomBaseUrl(config.loomBaseUrl);
+    const safeLoomMailboxFolder = assertSafeLoomMailboxFolder(config.loomMailboxFolder);
+    return new EmailAdapter({
+      ...config,
+      protocol: 'loom',
+      loomMailboxFolder: safeLoomMailboxFolder,
+    });
+  }
+
   if (!config.imapHost) {
     throw new Error('IMAP host is required');
   }
@@ -512,5 +580,8 @@ export function createEmailAdapter(config: EmailConfig): EmailAdapter {
   if (!config.password) {
     throw new Error('Email password is required');
   }
-  return new EmailAdapter(config);
+  return new EmailAdapter({
+    ...config,
+    protocol: 'imap-smtp',
+  });
 }

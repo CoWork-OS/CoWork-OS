@@ -19,3 +19,4 @@ export * from './twitch';
 export * from './line';
 export * from './bluebubbles';
 export * from './email';
+export * from './loom-client';

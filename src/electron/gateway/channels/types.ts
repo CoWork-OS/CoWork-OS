@@ -425,25 +425,31 @@ export interface BlueBubblesConfig extends ChannelConfig {
 
 /**
  * Email-specific configuration
- * Uses IMAP for receiving and SMTP for sending
+ * Supports:
+ * - IMAP/SMTP mode (legacy)
+ * - LOOM mode (agent-native email protocol via LOOM node API)
  */
 export interface EmailConfig extends ChannelConfig {
+  /** Transport protocol mode (default: "imap-smtp") */
+  protocol?: 'imap-smtp' | 'loom';
+
+  // Legacy IMAP/SMTP mode
   /** IMAP server host */
-  imapHost: string;
+  imapHost?: string;
   /** IMAP server port (default: 993) */
   imapPort?: number;
   /** IMAP use SSL/TLS (default: true) */
   imapSecure?: boolean;
   /** SMTP server host */
-  smtpHost: string;
+  smtpHost?: string;
   /** SMTP server port (default: 587) */
   smtpPort?: number;
   /** SMTP use SSL/TLS (default: false for STARTTLS) */
   smtpSecure?: boolean;
   /** Email address (used for both IMAP and SMTP) */
-  email: string;
+  email?: string;
   /** Password or app password */
-  password: string;
+  password?: string;
   /** Display name for outgoing emails */
   displayName?: string;
   /** IMAP mailbox to monitor (default: INBOX) */
@@ -460,6 +466,38 @@ export interface EmailConfig extends ChannelConfig {
   allowedSenders?: string[];
   /** Subject prefix filter (only process emails with this prefix) */
   subjectFilter?: string;
+
+  // LOOM mode
+  /** LOOM node base URL (e.g., http://127.0.0.1:8787) */
+  loomBaseUrl?: string;
+  /** LOOM bearer access token */
+  loomAccessToken?: string;
+  /** LOOM actor identity (for display/context) */
+  loomIdentity?: string;
+  /** LOOM mailbox folder to poll (default: INBOX) */
+  loomMailboxFolder?: string;
+  /** Poll interval in ms for LOOM mailbox polling (default: 30000) */
+  loomPollInterval?: number;
+  /** Optional path for LOOM client persistent state */
+  loomStatePath?: string;
+}
+
+export interface EmailTransportClient {
+  checkConnection(): Promise<{ success: boolean; email?: string; error?: string }>;
+  startReceiving(): Promise<void>;
+  stopReceiving(): Promise<void>;
+  sendEmail(options: {
+    to: string;
+    subject: string;
+    text: string;
+    inReplyTo?: string;
+    references?: string[];
+  }): Promise<string>;
+  markAsRead(uid: number): Promise<void>;
+  getEmail?(): string;
+  on(event: 'message', listener: (message: unknown) => void): this;
+  on(event: 'error', listener: (error: Error) => void): this;
+  on(event: 'connected' | 'disconnected', listener: () => void): this;
 }
 
 /**

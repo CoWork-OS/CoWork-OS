@@ -3,6 +3,8 @@ import { AgentDaemon } from '../daemon';
 import { LLMTool } from '../llm/types';
 import { ChannelRepository } from '../../database/repositories';
 import { EmailClient } from '../../gateway/channels/email-client';
+import { LoomEmailClient } from '../../gateway/channels/loom-client';
+import { assertSafeLoomMailboxFolder } from '../../utils/loom';
 
 function asNonEmptyString(value: unknown): string | null {
   if (typeof value !== 'string') return null;
@@ -35,6 +37,16 @@ export class EmailImapTools {
     if (!channel.enabled) return false;
 
     const cfg = channel.config as any;
+    const protocol = asNonEmptyString(cfg?.protocol) === 'loom' ? 'loom' : 'imap-smtp';
+    if (protocol === 'loom') {
+      return (
+        typeof cfg === 'object' &&
+        cfg !== null &&
+        typeof cfg.loomBaseUrl === 'string' &&
+        typeof cfg.loomAccessToken === 'string'
+      );
+    }
+
     return (
       typeof cfg === 'object' &&
       cfg !== null &&
@@ -50,7 +62,7 @@ export class EmailImapTools {
       {
         name: 'email_imap_unread',
         description:
-          'Fetch unread emails directly from the configured Email (IMAP) channel mailbox. ' +
+          'Fetch unread emails directly from the configured Email channel mailbox (IMAP/SMTP or LOOM mode). ' +
           'Does not mark messages as read. Useful when Google Workspace (gmail_action) is unavailable.',
         input_schema: {
           type: 'object',
@@ -111,6 +123,65 @@ export class EmailImapTools {
     }
 
     const cfg = channel.config as any;
+    const protocol = asNonEmptyString(cfg?.protocol) === 'loom' ? 'loom' : 'imap-smtp';
+
+    if (protocol === 'loom') {
+      const loomBaseUrl = asNonEmptyString(cfg?.loomBaseUrl);
+      const loomIdentity = asNonEmptyString(cfg?.loomIdentity) || undefined;
+      const mailbox = mailboxOverride ?? asNonEmptyString(cfg?.loomMailboxFolder) ?? 'INBOX';
+      const pollInterval = asNumber(cfg?.loomPollInterval) ?? 30000;
+
+      const getLoomAccessToken = () => asNonEmptyString(cfg?.loomAccessToken);
+      if (!loomBaseUrl || !getLoomAccessToken()) {
+        return {
+          success: false,
+          error:
+            'Email channel is missing required LOOM configuration (loomBaseUrl/loomAccessToken). Check Settings > Channels > Email.',
+        };
+      }
+
+      const client = new LoomEmailClient({
+        baseUrl: loomBaseUrl,
+        accessTokenProvider: () => {
+          const token = getLoomAccessToken();
+          if (!token) {
+            throw new Error('LOOM access token is required');
+          }
+          return token;
+        },
+        identity: loomIdentity,
+        folder: assertSafeLoomMailboxFolder(mailbox),
+        pollInterval,
+        verbose: process.env.NODE_ENV === 'development',
+      });
+
+      const messages = await client.fetchUnreadEmails(limit);
+
+      return {
+        success: true,
+        protocol: 'loom',
+        account: loomIdentity || loomBaseUrl,
+        mailbox,
+        unread: messages.length,
+        messages: messages.map((m) => {
+          const body = typeof m.text === 'string' ? m.text : '';
+          const snippet =
+            maxBodyChars <= 0
+              ? undefined
+              : (body.length > maxBodyChars ? body.slice(0, maxBodyChars) + '...' : body) || undefined;
+          return {
+            uid: m.uid,
+            message_id: m.messageId,
+            from: m.from,
+            subject: m.subject,
+            date: m.date instanceof Date ? m.date.toISOString() : String(m.date),
+            is_read: m.isRead,
+            ...(snippet ? { snippet } : {}),
+          };
+        }),
+      };
+    }
+
     const imapHost = asNonEmptyString(cfg?.imapHost);
     const smtpHost = asNonEmptyString(cfg?.smtpHost);
     const email = asNonEmptyString(cfg?.email);
@@ -150,6 +221,7 @@ export class EmailImapTools {
 
     return {
       success: true,
+      protocol: 'imap-smtp',
       account: email,
       mailbox,
       unread: messages.length,
@@ -172,4 +244,3 @@ export class EmailImapTools {
     };
   }
 }
-

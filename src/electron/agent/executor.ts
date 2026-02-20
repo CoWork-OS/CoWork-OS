@@ -1969,7 +1969,7 @@ ${transcript}
     }
 
     // Check for duplicate file creations
-    const fileCreationTools = ["create_document", "write_file", "copy_file"];
+    const fileCreationTools = ["create_document", "write_file", "copy_file", "create_spreadsheet", "create_presentation"];
     if (fileCreationTools.includes(toolName)) {
       const filename = input?.filename || input?.path || input?.destPath || input?.destination;
       if (filename) {
@@ -2061,7 +2061,7 @@ ${transcript}
     }
 
     // Record file creations
-    const fileCreationTools = ["create_document", "write_file", "copy_file"];
+    const fileCreationTools = ["create_document", "write_file", "copy_file", "create_spreadsheet", "create_presentation"];
     if (toolSucceeded && fileCreationTools.includes(toolName)) {
       const filename =
         result?.path || result?.filename || input?.filename || input?.path || input?.destPath;
@@ -2077,6 +2077,8 @@ ${transcript}
       "copy_file",
       "edit_file",
       "edit_document",
+      "create_spreadsheet",
+      "create_presentation",
     ];
     if (toolSucceeded && mutatingTools.includes(toolName)) {
       const changedPath =
@@ -2786,6 +2788,14 @@ ${transcript}
     if (toolName === "write_file") {
       if (!input?.path) return "write_file requires a path";
       if (!input?.content) return "write_file requires content";
+    }
+    if (toolName === "create_spreadsheet") {
+      if (!input?.filename) return "create_spreadsheet requires a filename";
+      if (!input?.sheets) return "create_spreadsheet requires sheets";
+    }
+    if (toolName === "create_presentation") {
+      if (!input?.filename) return "create_presentation requires a filename";
+      if (!input?.slides) return "create_presentation requires slides";
     }
     if (toolName === "canvas_push") {
       return null;
@@ -4705,7 +4715,9 @@ You are continuing a previous conversation. The context from the previous conver
       toolName === "write_file" ||
       toolName === "copy_file" ||
       toolName === "edit_file" ||
-      toolName === "edit_document"
+      toolName === "edit_document" ||
+      toolName === "create_spreadsheet" ||
+      toolName === "create_presentation"
     );
   }
 

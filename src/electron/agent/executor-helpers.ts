@@ -357,7 +357,7 @@ export class ToolCallDeduplicator {
     if (!input) return toolName;
 
     // For file operations, normalize the filename to detect variants
-    if (toolName === "create_document" || toolName === "write_file") {
+    if (toolName === "create_document" || toolName === "write_file" || toolName === "create_spreadsheet" || toolName === "create_presentation") {
       const filename = input.filename || input.path || "";
       // Extract base name without version suffixes like _v2.4, _COMPLETE, _Final, etc.
       const baseName = filename

@@ -23,6 +23,7 @@ import {
   SecureStorage,
   PluginType,
 } from "./types";
+import { createToolFromConnector, validateConnector } from "./declarative-connector-loader";
 import { discoverPlugins, loadPlugin, getPluginDataPath, isPluginCompatible } from "./loader";
 import { ChannelAdapter, ChannelConfig } from "../gateway/channels/types";
 
@@ -147,6 +148,10 @@ export class PluginRegistry extends EventEmitter {
 
       // Register the plugin
       await loadedPlugin.instance.register(api);
+
+      // Handle composite declarative content (skills, agentRoles, connectors)
+      await this.registerDeclarativeContent(loadedPlugin.manifest, pluginName);
+
       loadedPlugin.state = "registered";
 
       this.emitPluginEvent("plugin:registered", pluginName);
@@ -250,6 +255,74 @@ export class PluginRegistry extends EventEmitter {
         this.pluginEventHandlers.get(pluginName)?.get(event)?.delete(handler);
       },
     };
+  }
+
+  /**
+   * Register declarative content from a composite plugin manifest.
+   * Handles inline skills, agent roles, and declarative connectors.
+   */
+  private async registerDeclarativeContent(
+    manifest: PluginManifest,
+    pluginName: string,
+  ): Promise<void> {
+    // 1. Register inline skills
+    if (manifest.skills && manifest.skills.length > 0) {
+      try {
+        const { getCustomSkillLoader } = await import("../agent/custom-skill-loader");
+        const loader = getCustomSkillLoader();
+        for (const skill of manifest.skills) {
+          skill.source = "managed" as const;
+          skill.metadata = {
+            ...skill.metadata,
+            pluginSource: pluginName,
+          };
+          if (typeof loader.registerPluginSkill === "function") {
+            loader.registerPluginSkill(skill);
+          }
+        }
+        console.log(
+          `[PluginRegistry] Registered ${manifest.skills.length} skill(s) from ${pluginName}`,
+        );
+      } catch (error) {
+        console.error(`[PluginRegistry] Failed to register skills from ${pluginName}:`, error);
+      }
+    }
+
+    // 2. Register agent roles
+    if (manifest.agentRoles && manifest.agentRoles.length > 0) {
+      for (const role of manifest.agentRoles) {
+        try {
+          this.emit("plugin:register-role", { pluginName, role });
+        } catch (error) {
+          console.error(
+            `[PluginRegistry] Failed to emit role registration from ${pluginName}:`,
+            error,
+          );
+        }
+      }
+      console.log(
+        `[PluginRegistry] Emitted ${manifest.agentRoles.length} role(s) from ${pluginName}`,
+      );
+    }
+
+    // 3. Register declarative connectors as tools
+    if (manifest.connectors && manifest.connectors.length > 0) {
+      let registered = 0;
+      for (const connector of manifest.connectors) {
+        const validationError = validateConnector(connector);
+        if (validationError) {
+          console.warn(
+            `[PluginRegistry] Skipping invalid connector ${connector.name} from ${pluginName}: ${validationError}`,
+          );
+          continue;
+        }
+        const toolOptions = createToolFromConnector(connector, pluginName);
+        const toolKey = `${pluginName}:${toolOptions.name}`;
+        this.tools.set(toolKey, toolOptions);
+        registered++;
+      }
+      console.log(`[PluginRegistry] Registered ${registered} connector(s) from ${pluginName}`);
+    }
   }
 
   /**
@@ -500,7 +573,7 @@ export class PluginRegistry extends EventEmitter {
     await this.unloadPlugin(name);
 
     // Clear require cache
-    const entryPoint = path.join(pluginPath, plugin.manifest.main);
+    const entryPoint = path.join(pluginPath, plugin.manifest.main || "index.js");
     delete require.cache[require.resolve(entryPoint)];
 
     // Reload

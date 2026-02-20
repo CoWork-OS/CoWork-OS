@@ -41,8 +41,8 @@ export interface PluginManifest {
   /** Plugin type */
   type: PluginType;
 
-  /** Entry point file (relative to plugin directory) */
-  main: string;
+  /** Entry point file (relative to plugin directory). Optional for declarative-only plugins. */
+  main?: string;
 
   /** Configuration schema for the plugin */
   configSchema?: PluginConfigSchema;
@@ -66,12 +66,44 @@ export interface PluginManifest {
 
   /** Keywords for discovery */
   keywords?: string[];
+
+  /** Inline skill definitions (declarative, no code required) */
+  skills?: import("../../shared/types").CustomSkill[];
+
+  /** Slash command definitions mapping to skill IDs */
+  slashCommands?: SlashCommandDefinition[];
+
+  /** Agent role definitions for sub-agents */
+  agentRoles?: AgentRoleDefinition[];
+
+  /** Declarative connector/tool definitions (JSON-based, no code required) */
+  connectors?: DeclarativeConnector[];
+}
+
+/**
+ * Agent role definition within a plugin manifest
+ */
+export interface AgentRoleDefinition {
+  /** Unique role name (e.g., "sales-agent") */
+  name: string;
+  /** Human-readable display name */
+  displayName: string;
+  /** Role description */
+  description?: string;
+  /** Role icon (emoji) */
+  icon: string;
+  /** Role color (hex) */
+  color: string;
+  /** Agent capabilities */
+  capabilities?: string[];
+  /** Additional system prompt for the role */
+  systemPrompt?: string;
 }
 
 /**
  * Plugin types
  */
-export type PluginType = "channel" | "tool" | "provider" | "integration";
+export type PluginType = "channel" | "tool" | "provider" | "integration" | "pack";
 
 /**
  * Plugin configuration schema
@@ -265,6 +297,68 @@ export interface RegisterToolOptions {
 
   /** Tool handler */
   handler(input: Record<string, unknown>): Promise<unknown>;
+}
+
+/**
+ * Declarative connector definition (JSON-only, no code required).
+ * Allows tools to be defined as JSON within plugin manifests.
+ */
+export interface DeclarativeConnector {
+  /** Connector name (used as the tool name) */
+  name: string;
+
+  /** Human-readable description */
+  description: string;
+
+  /** JSON Schema for input parameters */
+  inputSchema: Record<string, unknown>;
+
+  /** Connector type */
+  type: "http" | "shell" | "script";
+
+  /** HTTP connector configuration */
+  http?: {
+    /** URL template with {{param}} placeholders */
+    url: string;
+    /** HTTP method */
+    method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+    /** Headers with optional {{param}} placeholders */
+    headers?: Record<string, string>;
+    /** Body template (JSON string with {{param}} placeholders) */
+    body?: string;
+    /** Response format */
+    responseFormat?: "json" | "text";
+  };
+
+  /** Shell connector configuration */
+  shell?: {
+    /** Command template with {{param}} placeholders */
+    command: string;
+    /** Working directory */
+    cwd?: string;
+    /** Timeout in milliseconds */
+    timeout?: number;
+  };
+
+  /** Script connector configuration */
+  script?: {
+    /** JavaScript function body (receives `input` as parameter) */
+    body: string;
+    /** Timeout in milliseconds */
+    timeout?: number;
+  };
+}
+
+/**
+ * Slash command definition mapping a command name to a skill ID
+ */
+export interface SlashCommandDefinition {
+  /** Command name (without the leading /) */
+  name: string;
+  /** Description shown in the autocomplete dropdown */
+  description: string;
+  /** Reference to a skill ID (must exist in skills array or skill loader) */
+  skillId: string;
 }
 
 /**

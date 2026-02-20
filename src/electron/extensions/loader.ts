@@ -34,6 +34,15 @@ const getDefaultExtensionsDirs = (): string[] => {
     dirs.push(builtinDir);
   }
 
+  // Built-in plugin packs
+  const isDev = process.env.NODE_ENV === "development";
+  const pluginPacksDir = isDev
+    ? path.join(process.cwd(), "resources", "plugin-packs")
+    : path.join(process.resourcesPath || "", "plugin-packs");
+  if (fs.existsSync(pluginPacksDir)) {
+    dirs.push(pluginPacksDir);
+  }
+
   // User extensions directory
   const userDataPath = app?.getPath?.("userData") || path.join(process.env.HOME || "", ".cowork");
   const userExtensionsDir = path.join(userDataPath, "extensions");
@@ -73,15 +82,19 @@ export function validateManifest(manifest: unknown): manifest is PluginManifest 
 
   if (
     typeof m.type !== "string" ||
-    !["channel", "tool", "provider", "integration"].includes(m.type)
+    !["channel", "tool", "provider", "integration", "pack"].includes(m.type)
   ) {
     throw new Error(
-      "Plugin manifest has invalid type. Must be: channel, tool, provider, or integration",
+      "Plugin manifest has invalid type. Must be: channel, tool, provider, integration, or pack",
     );
   }
 
-  if (typeof m.main !== "string" || !m.main) {
-    throw new Error("Plugin manifest missing required field: main");
+  // main is required UNLESS declarative content is present
+  const hasDeclarativeContent = !!(m.skills || m.agentRoles || m.connectors || m.slashCommands);
+  if (!hasDeclarativeContent && (typeof m.main !== "string" || !m.main)) {
+    throw new Error(
+      "Plugin manifest missing required field: main (or provide declarative content: skills, agentRoles, connectors, slashCommands)",
+    );
   }
 
   // Validate version format (semver-like)
@@ -200,6 +213,26 @@ export async function loadPlugin(pluginPath: string): Promise<PluginLoadResult> 
           error: new Error(`Plugin does not support platform: ${process.platform}`),
         };
       }
+    }
+
+    // Declarative-only plugins (no main entry point)
+    if (!manifest.main) {
+      const declarativePlugin: Plugin = {
+        manifest,
+        register: async () => {
+          // Registration of declarative content is handled by the registry
+        },
+      };
+
+      const loadedPlugin: LoadedPlugin = {
+        manifest,
+        instance: declarativePlugin,
+        path: pluginPath,
+        state: "loaded",
+        loadedAt: new Date(),
+      };
+
+      return { success: true, plugin: loadedPlugin };
     }
 
     // Resolve entry point

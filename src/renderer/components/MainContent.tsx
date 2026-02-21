@@ -12,6 +12,7 @@ import {
   DEFAULT_QUIRKS,
   CanvasSession,
   isTempWorkspaceId,
+  ImageAttachment,
 } from "../../shared/types";
 import { isVerificationStepDescription } from "../../shared/plan-utils";
 import type { AgentRoleData } from "../../electron/preload";
@@ -45,6 +46,7 @@ const ACTIVE_WORK_EVENT_TYPES: EventType[] = [
   "tool_result",
   "verification_started",
   "retry_started",
+  "llm_streaming",
 ];
 
 // Important event types shown in non-verbose mode
@@ -1509,8 +1511,8 @@ interface MainContentProps {
   selectedTaskId: string | null; // Added to distinguish "no task" from "task not in list"
   workspace: Workspace | null;
   events: TaskEvent[];
-  onSendMessage: (message: string) => void;
-  onCreateTask?: (title: string, prompt: string, options?: CreateTaskOptions) => void;
+  onSendMessage: (message: string, images?: ImageAttachment[]) => void;
+  onCreateTask?: (title: string, prompt: string, options?: CreateTaskOptions, images?: ImageAttachment[]) => void;
   onChangeWorkspace?: () => void;
   onSelectWorkspace?: (workspace: Workspace) => void;
   onOpenSettings?: (tab?: SettingsTab) => void;
@@ -1679,6 +1681,7 @@ export function MainContent({
     if (!task) return false;
     if (task.status === "executing") return true;
     if (
+      task.status === "completed" ||
       task.status === "paused" ||
       task.status === "blocked" ||
       task.status === "failed" ||
@@ -1697,6 +1700,7 @@ export function MainContent({
         event.type === "approval_requested" ||
         event.type === "task_completed" ||
         event.type === "task_cancelled" ||
+        event.type === "follow_up_completed" ||
         event.type === "error"
       ) {
         return false;
@@ -1714,6 +1718,22 @@ export function MainContent({
 
     return false;
   }, [task, events]);
+
+  // Extract latest streaming progress for the live token counter
+  const streamingProgress = useMemo(() => {
+    if (!task || !isTaskWorking) return null;
+    for (let i = events.length - 1; i >= 0; i--) {
+      const e = events[i];
+      if (e.taskId !== task.id) continue;
+      if (e.type === "llm_streaming" && e.payload?.streaming === true) {
+        // Only show if the event is recent (within 2s)
+        return Date.now() - e.timestamp <= 2000 ? e.payload : null;
+      }
+      // Any non-streaming event means streaming has ended
+      if (e.type !== "llm_streaming") return null;
+    }
+    return null;
+  }, [task, events, isTaskWorking]);
 
   const latestCanvasSessionId = useMemo(() => {
     if (canvasSessions.length === 0) return null;
@@ -2713,6 +2733,32 @@ export function MainContent({
         importedAttachments = await importAttachmentsToWorkspace();
       }
 
+      // Build native ImageAttachment[] from image-type attachments so the LLM
+      // can see the actual pixels (vision) instead of relying on OCR text only.
+      const IMAGE_MIME_SET = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+      const nativeImageAttachments: ImageAttachment[] = [];
+      for (let i = 0; i < pendingAttachments.length; i++) {
+        const pa = pendingAttachments[i];
+        if (!pa.mimeType || !IMAGE_MIME_SET.has(pa.mimeType)) continue;
+        if (pa.dataBase64) {
+          nativeImageAttachments.push({
+            data: pa.dataBase64,
+            mimeType: pa.mimeType as ImageAttachment["mimeType"],
+            filename: pa.name,
+            sizeBytes: pa.size,
+          });
+        } else if (pa.path) {
+          nativeImageAttachments.push({
+            filePath: pa.path,
+            mimeType: pa.mimeType as ImageAttachment["mimeType"],
+            filename: pa.name,
+            sizeBytes: pa.size,
+          });
+        }
+      }
+      const imagePayload = nativeImageAttachments.length > 0 ? nativeImageAttachments : undefined;
+
+      // Compose text message (with OCR fallback for non-image files)
       const composeResult = await composeMessageWithAttachments(
         workspace?.path,
         trimmedInput,
@@ -2739,12 +2785,12 @@ export function MainContent({
         const options: CreateTaskOptions | undefined = autonomousModeEnabled
           ? { autonomousMode: true }
           : undefined;
-        onCreateTask(title, message, options);
+        onCreateTask(title, message, options, imagePayload);
         // Reset task mode state
         setAutonomousModeEnabled(false);
       } else {
         // Task is selected (even if not in current list) - send follow-up message
-        onSendMessage(message);
+        onSendMessage(message, imagePayload);
       }
 
       setInputValue("");
@@ -4116,7 +4162,25 @@ export function MainContent({
               <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
               <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
             </svg>
-            {agentContext.getMessage("taskWorking")}
+            {streamingProgress ? (
+              <span className="streaming-stats">
+                {agentContext.getMessage("taskWorking")}
+                <span className="streaming-separator"> · </span>
+                <span className="streaming-token-up" title="Input tokens">
+                  ↑{formatTokenCount(streamingProgress.totalInputTokens)}
+                </span>
+                {" "}
+                <span className="streaming-token-down" title="Output tokens">
+                  ↓{formatTokenCount(streamingProgress.totalOutputTokens)}
+                </span>
+                <span className="streaming-separator"> · </span>
+                <span className="streaming-elapsed">
+                  {formatStreamElapsed(streamingProgress.elapsedMs)}
+                </span>
+              </span>
+            ) : (
+              agentContext.getMessage("taskWorking")
+            )}
           </span>
         </div>
       )}
@@ -4170,13 +4234,20 @@ export function MainContent({
               </button>
               {showSteps && (
                 <>
-                  <button
-                    className={`verbose-toggle-btn ${verboseSteps ? "active" : ""}`}
-                    onClick={toggleVerboseSteps}
+                  <label
+                    className="verbose-switch"
                     title={verboseSteps ? "Show important steps only" : "Show all steps (verbose)"}
                   >
-                    {verboseSteps ? "Verbose" : "Summary"}
-                  </button>
+                    <span className="verbose-switch-label">Verbose</span>
+                    <button
+                      role="switch"
+                      aria-checked={verboseSteps}
+                      className={`verbose-switch-track ${verboseSteps ? "on" : ""}`}
+                      onClick={toggleVerboseSteps}
+                    >
+                      <span className="verbose-switch-thumb" />
+                    </button>
+                  </label>
                   <button
                     className={`verbose-toggle-btn ${codePreviewsExpanded ? "active" : ""}`}
                     onClick={toggleCodePreviews}
@@ -4903,6 +4974,22 @@ export function MainContent({
       )}
     </div>
   );
+}
+
+function formatTokenCount(count: number): string {
+  if (!Number.isFinite(count) || count < 0) return "0";
+  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
+  if (count >= 10_000) return `${Math.round(count / 1_000)}k`;
+  if (count >= 1_000) return `${(count / 1_000).toFixed(1)}k`;
+  return count.toLocaleString();
+}
+
+function formatStreamElapsed(ms: number): string {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return `${minutes}m${String(remainingSeconds).padStart(2, "0")}s`;
 }
 
 /**

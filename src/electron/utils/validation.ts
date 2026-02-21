@@ -94,22 +94,6 @@ const AgentConfigSchema = z
 const isValidWorkspaceId = (workspaceId: string): boolean =>
   isTempWorkspaceId(workspaceId) || z.string().uuid().safeParse(workspaceId).success;
 
-export const TaskCreateSchema = z.object({
-  title: z.string().min(1).max(MAX_TITLE_LENGTH),
-  prompt: z.string().min(1).max(MAX_PROMPT_LENGTH),
-  workspaceId: z
-    .string()
-    .refine(isValidWorkspaceId, { message: "Must be a valid UUID or temp workspace ID" }),
-  budgetTokens: z.number().int().positive().optional(),
-  budgetCost: z.number().positive().optional(),
-  agentConfig: AgentConfigSchema.optional(),
-});
-
-export const TaskRenameSchema = z.object({
-  id: z.string().uuid(),
-  title: z.string().min(1).max(MAX_TITLE_LENGTH),
-});
-
 const ImageAttachmentSchema = z
   .object({
     data: z.string().trim().min(1).optional(),
@@ -156,6 +140,23 @@ const ImageAttachmentSchema = z
       }
     }
   });
+
+export const TaskCreateSchema = z.object({
+  title: z.string().min(1).max(MAX_TITLE_LENGTH),
+  prompt: z.string().min(1).max(MAX_PROMPT_LENGTH),
+  workspaceId: z
+    .string()
+    .refine(isValidWorkspaceId, { message: "Must be a valid UUID or temp workspace ID" }),
+  budgetTokens: z.number().int().positive().optional(),
+  budgetCost: z.number().positive().optional(),
+  agentConfig: AgentConfigSchema.optional(),
+  images: z.array(ImageAttachmentSchema).max(MAX_IMAGES_PER_MESSAGE).optional(),
+});
+
+export const TaskRenameSchema = z.object({
+  id: z.string().uuid(),
+  title: z.string().min(1).max(MAX_TITLE_LENGTH),
+});
 
 export const TaskMessageSchema = z
   .object({

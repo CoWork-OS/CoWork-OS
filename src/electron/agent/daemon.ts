@@ -119,6 +119,8 @@ export class AgentDaemon extends EventEmitter {
    *  Set via IPC when the user clicks "Approve all" in the UI.
    *  Persists for the app lifetime (survives HMR/renderer reloads). */
   private sessionAutoApproveAll = false;
+  /** Transient storage for images attached to task creation (not persisted to DB). */
+  private pendingTaskImages: Map<string, ImageAttachment[]> = new Map();
 
   constructor(private dbManager: DatabaseManager) {
     super();
@@ -391,7 +393,11 @@ export class AgentDaemon extends EventEmitter {
    * Queue a task for execution
    * The task will either start immediately or be queued based on concurrency limits
    */
-  async startTask(task: Task): Promise<void> {
+  async startTask(task: Task, images?: ImageAttachment[]): Promise<void> {
+    // Store images transiently until the task starts executing
+    if (images && images.length > 0) {
+      this.pendingTaskImages.set(task.id, images);
+    }
     await this.queueManager.enqueue(task);
 
     // If the task was queued (concurrency full), emit an explicit event so
@@ -467,6 +473,12 @@ export class AgentDaemon extends EventEmitter {
     try {
       console.log(`[AgentDaemon] Creating TaskExecutor...`);
       executor = new TaskExecutor(executionTask, workspace, this);
+      // Attach any images that were provided at task creation time
+      const initialImages = this.pendingTaskImages.get(executionTask.id);
+      if (initialImages && initialImages.length > 0) {
+        executor.setInitialImages(initialImages);
+        this.pendingTaskImages.delete(executionTask.id);
+      }
       console.log(`[AgentDaemon] TaskExecutor created successfully`);
     } catch (error: any) {
       console.error(`[AgentDaemon] Task ${effectiveTask.id} failed to initialize:`, error);
@@ -475,6 +487,7 @@ export class AgentDaemon extends EventEmitter {
         error: error.message || "Failed to initialize task executor",
         completedAt: Date.now(),
       });
+      this.pendingTaskImages.delete(effectiveTask.id);
       this.clearRetryState(effectiveTask.id);
       this.logEvent(effectiveTask.id, "error", { error: error.message });
       // Notify queue manager so it can start next task
@@ -833,6 +846,7 @@ export class AgentDaemon extends EventEmitter {
     // Check if task is queued (not yet started)
     if (this.queueManager.cancelQueuedTask(taskId)) {
       this.taskRepo.update(taskId, { status: "cancelled", completedAt: Date.now() });
+      this.pendingTaskImages.delete(taskId);
       this.clearRetryState(taskId);
       this.logEvent(taskId, "task_cancelled", {
         message: "Task removed from queue",
@@ -861,6 +875,7 @@ export class AgentDaemon extends EventEmitter {
     this.queueManager.onTaskFinished(taskId);
 
     // Always emit cancelled event so UI updates
+    this.pendingTaskImages.delete(taskId);
     this.clearRetryState(taskId);
     this.logEvent(taskId, "task_cancelled", {
       message: "Task was stopped by user",
@@ -1155,6 +1170,13 @@ export class AgentDaemon extends EventEmitter {
    * Log an event for a task
    */
   logEvent(taskId: string, type: string, payload: any): void {
+    // Streaming progress events are ephemeral UI state (~3/sec).
+    // Skip DB persistence, activity logging, and memory capture.
+    if (type === "llm_streaming") {
+      this.emitTaskEvent(taskId, type, payload);
+      return;
+    }
+
     this.eventRepo.create({
       taskId,
       timestamp: Date.now(),
@@ -2386,6 +2408,7 @@ export class AgentDaemon extends EventEmitter {
       status: "failed",
       error: "Task timed out - exceeded maximum allowed execution time",
     });
+    this.pendingTaskImages.delete(taskId);
     this.clearRetryState(taskId);
 
     // Emit timeout event
@@ -2462,6 +2485,7 @@ export class AgentDaemon extends EventEmitter {
     ]);
 
     this.activeTasks.clear();
+    this.pendingTaskImages.clear();
 
     // Remove all EventEmitter listeners to prevent memory leaks
     this.removeAllListeners();

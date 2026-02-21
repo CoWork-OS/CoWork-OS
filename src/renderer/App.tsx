@@ -25,6 +25,7 @@ import {
   ToastNotification,
   ApprovalRequest,
   isTempWorkspaceId,
+  ImageAttachment,
 } from "../shared/types";
 import { applyPersistedLanguage } from "./i18n";
 
@@ -808,7 +809,20 @@ export function App() {
 
       // Add event to events list if it's for the selected task
       if (event.taskId === selectedTaskId) {
-        setEvents((prev) => capTaskEvents([...prev, event]));
+        if (event.type === "llm_streaming") {
+          // Replace the previous streaming event to avoid array bloat
+          setEvents((prev) => {
+            const lastIdx = prev.length - 1;
+            if (lastIdx >= 0 && prev[lastIdx].type === "llm_streaming") {
+              const updated = [...prev];
+              updated[lastIdx] = event;
+              return updated;
+            }
+            return capTaskEvents([...prev, event]);
+          });
+        } else {
+          setEvents((prev) => capTaskEvents([...prev, event]));
+        }
       }
     });
 
@@ -897,6 +911,7 @@ export function App() {
     options?: {
       autonomousMode?: boolean;
     },
+    images?: ImageAttachment[],
   ) => {
     if (!currentWorkspace) return;
     if (options?.autonomousMode) {
@@ -916,6 +931,7 @@ export function App() {
         prompt,
         workspaceId: currentWorkspace.id,
         ...(agentConfig && { agentConfig }),
+        ...(images && images.length > 0 && { images }),
       });
 
       setTasks((prev) => [task, ...prev]);
@@ -945,7 +961,7 @@ export function App() {
 
   const selectedTask = tasks.find((t) => t.id === selectedTaskId);
 
-  const handleSendMessage = async (message: string) => {
+  const handleSendMessage = async (message: string, images?: ImageAttachment[]) => {
     if (!selectedTaskId) return;
 
     try {
@@ -969,7 +985,7 @@ export function App() {
         }
       }
 
-      await window.electronAPI.sendMessage(selectedTaskId, message);
+      await window.electronAPI.sendMessage(selectedTaskId, message, images);
     } catch (error: unknown) {
       console.error("Failed to send message:", error);
       const errorMessage = error instanceof Error ? error.message : "Failed to send message";

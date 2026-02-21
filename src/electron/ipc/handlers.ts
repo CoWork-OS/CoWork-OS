@@ -1138,7 +1138,7 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.TASK_CREATE, async (_, data) => {
     checkRateLimit(IPC_CHANNELS.TASK_CREATE);
     const validated = validateInput(TaskCreateSchema, data, "task");
-    const { title, prompt, workspaceId, budgetTokens, budgetCost, agentConfig } = validated;
+    const { title, prompt, workspaceId, budgetTokens, budgetCost, agentConfig, images: validatedImages } = validated;
     const normalizedAgentConfig: AgentConfig | undefined = agentConfig
       ? {
           ...agentConfig,
@@ -1191,7 +1191,7 @@ export async function setupIpcHandlers(
 
     // Start task execution in agent daemon
     try {
-      await agentDaemon.startTask(task);
+      await agentDaemon.startTask(task, validatedImages);
     } catch (error: any) {
       // Update task status to failed if we can't start it
       taskRepo.update(task.id, {

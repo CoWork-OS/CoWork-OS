@@ -25,6 +25,7 @@ import {
   LLMContent,
   LLMImageContent,
   LLMImageMimeType,
+  StreamProgressCallback,
 } from "./llm";
 import {
   ContextManager,
@@ -122,6 +123,7 @@ export class TaskExecutor {
   private executionToolAttemptObserved = false;
   private executionToolLastError = "";
   private allowExecutionWithoutShell = false;
+  private planCompletedEffectively = false;
   private cancelled = false;
   private cancelReason: "user" | "timeout" | "shutdown" | "system" | "unknown" | null = null;
   private paused = false;
@@ -152,6 +154,8 @@ export class TaskExecutor {
   private lastPreCompactionFlushTokenCount: number = 0;
   private observedOutputTokensPerSecond: number | null = null;
   private readonly conwayContextProvider: ConwayContextProvider;
+  /** Images attached to the initial task creation (not follow-up messages). */
+  private initialImages?: ImageAttachment[];
 
   private static readonly MIN_RESULT_SUMMARY_LENGTH = 20;
   private static readonly RESULT_SUMMARY_PLACEHOLDERS = new Set<string>([
@@ -1107,6 +1111,11 @@ ${transcript}
     );
   }
 
+  /** Attach images from the initial task creation (before execute() is called). */
+  setInitialImages(images: ImageAttachment[]): void {
+    this.initialImages = images;
+  }
+
   private getRoleContextPrompt(): string {
     const roleId = this.task.assignedAgentRoleId;
     if (!roleId) return "";
@@ -1624,11 +1633,25 @@ ${transcript}
       parentSignal.addEventListener("abort", onParentAbort, { once: true });
     }
 
+    // Stream progress callback — emits llm_streaming events for real-time UI updates
+    const onStreamProgress: StreamProgressCallback = (progress) => {
+      if (this.cancelled || this.taskCompleted) return;
+      this.daemon.logEvent(this.task.id, "llm_streaming", {
+        inputTokens: progress.inputTokens,
+        outputTokens: progress.outputTokens,
+        elapsedMs: progress.elapsedMs,
+        streaming: progress.streaming,
+        totalInputTokens: this.totalInputTokens + progress.inputTokens,
+        totalOutputTokens: this.totalOutputTokens + progress.outputTokens,
+      });
+    };
+
     try {
       return await withTimeout(
         this.provider.createMessage({
           ...request,
           signal: requestAbort.signal,
+          onStreamProgress,
         }),
         timeoutMs,
         operation,
@@ -2711,10 +2734,23 @@ ${transcript}
     }
 
     if (!this.hasArtifactEvidence(contract)) {
-      const requested = contract.requiredArtifactExtensions.join(", ");
-      return requested
-        ? `Task missing artifact evidence: expected an output artifact (${requested}) but no matching created file was detected.`
-        : "Task missing artifact evidence: expected an output file/document but no created file was detected.";
+      // If the agent produced a substantive text response without ever creating
+      // (or attempting to create) files, it determined that a direct text answer
+      // was the appropriate response.  The regex-based artifact heuristic can
+      // false-positive on prompts that *mention* artifact nouns (e.g. "slides",
+      // "document") without actually requesting file creation.  Respect the
+      // agent's decision in that case.
+      const candidate = this.getBestFinalResponseCandidate();
+      const hasSubstantiveText = candidate.trim().length >= 50;
+      const createdFiles = this.fileOperationTracker?.getCreatedFiles?.() || [];
+      if (hasSubstantiveText && createdFiles.length === 0) {
+        // Agent answered in text without attempting file creation — accept
+      } else {
+        const requested = contract.requiredArtifactExtensions.join(", ");
+        return requested
+          ? `Task missing artifact evidence: expected an output artifact (${requested}) but no matching created file was detected.`
+          : "Task missing artifact evidence: expected an output file/document but no created file was detected.";
+      }
     }
 
     const bestCandidate = this.getBestFinalResponseCandidate();
@@ -3588,7 +3624,7 @@ You are continuing a previous conversation. The context from the previous conver
         lower,
       );
     const executionTarget =
-      /\b(?:command|commands|cli|terminal|script|token|solana|devnet|npm|pnpm|yarn)\b/.test(lower);
+      /\b(?:command|commands|cli|terminal|script|solana|devnet|npm|pnpm|yarn)\b/.test(lower);
     return executionVerb && executionTarget;
   }
 
@@ -4670,7 +4706,15 @@ You are continuing a previous conversation. The context from the previous conver
   private isVerificationStep(step: PlanStep): boolean {
     const desc = step.description.toLowerCase().trim();
     if (desc.startsWith("verify")) return true;
-    if (desc.startsWith("review")) return true;
+    if (desc.startsWith("review")) {
+      // "Review" steps that also contain action/mutation verbs are work steps, not pure verification.
+      // e.g. "Review the article for AI slop patterns and tighten it" is an edit step.
+      const hasMutationVerb =
+        /\b(tighten|edit|fix|update|rewrite|revise|modify|change|improve|refactor|clean|polish|rework|adjust|correct|enhance|optimize|replace|remove|add|implement|apply|write|create|draft|generate|save)\b/.test(
+          desc,
+        );
+      return !hasMutationVerb;
+    }
     return desc.includes("verify:") || desc.includes("verification") || desc.includes("verify ");
   }
 
@@ -5407,6 +5451,8 @@ You are continuing a previous conversation. The context from the previous conver
       .filter(Boolean)
       .join("\n\n");
 
+    const companionUserContent = await this.buildUserContent(rawPrompt, this.initialImages);
+
     try {
       const response = await this.callLLMWithRetry(
         () =>
@@ -5415,7 +5461,7 @@ You are continuing a previous conversation. The context from the previous conver
               model: this.modelId,
               maxTokens: 220,
               system: systemPrompt,
-              messages: [{ role: "user", content: rawPrompt }],
+              messages: [{ role: "user", content: companionUserContent }],
             },
             LLM_TIMEOUT_MS,
             "Companion response",
@@ -5435,8 +5481,11 @@ You are continuing a previous conversation. The context from the previous conver
       this.lastAssistantOutput = assistantText;
       this.lastNonVerificationOutput = assistantText;
       this.lastAssistantText = assistantText;
+      const userHistoryContent = typeof companionUserContent === "string"
+        ? [{ type: "text" as const, text: companionUserContent }]
+        : companionUserContent;
       this.updateConversationHistory([
-        { role: "user", content: [{ type: "text", text: rawPrompt }] },
+        { role: "user", content: userHistoryContent },
         { role: "assistant", content: [{ type: "text", text: assistantText }] },
       ]);
       const resultSummary = this.buildResultSummary() || assistantText;
@@ -5624,6 +5673,12 @@ You are continuing a previous conversation. The context from the previous conver
   }
 
   private async emitAnswerFirstResponse(): Promise<void> {
+    const textPrompt = [
+      "Provide a direct answer to this user request in 4-8 lines.",
+      "Do not mention internal planning or tools.",
+      `User request:\n${this.task.prompt}`,
+    ].join("\n\n");
+    const userContent = await this.buildUserContent(textPrompt, this.initialImages);
     const response = await this.createMessageWithTimeout(
       {
         model: this.modelId,
@@ -5632,11 +5687,7 @@ You are continuing a previous conversation. The context from the previous conver
         messages: [
           {
             role: "user",
-            content: [
-              "Provide a direct answer to this user request in 4-8 lines.",
-              "Do not mention internal planning or tools.",
-              `User request:\n${this.task.prompt}`,
-            ].join("\n\n"),
+            content: userContent,
           },
         ],
       },
@@ -5830,7 +5881,8 @@ You are continuing a previous conversation. The context from the previous conver
       if (
         this.requiresExecutionToolRun &&
         !this.allowExecutionWithoutShell &&
-        !this.executionToolRunObserved
+        !this.executionToolRunObserved &&
+        !this.planCompletedEffectively
       ) {
         const shellDisabled = !this.workspace.permissions.shell;
         const blocker = shellDisabled
@@ -6119,10 +6171,12 @@ Format your plan as a JSON object with this structure:
       console.log(`[Task ${this.task.id}] Calling LLM API for plan creation...`);
 
       // Use retry wrapper for resilient API calls
+      const planTextPrompt = `Task: ${this.task.title}\n\nDetails: ${this.task.prompt}\n\nCreate an execution plan.`;
+      const planUserContent = await this.buildUserContent(planTextPrompt, this.initialImages);
       const planMessages: LLMMessage[] = [
         {
           role: "user",
-          content: `Task: ${this.task.title}\n\nDetails: ${this.task.prompt}\n\nCreate an execution plan.`,
+          content: planUserContent,
         },
       ];
       const planMaxTokens = this.resolveLLMMaxTokens({
@@ -6483,6 +6537,10 @@ Format your plan as a JSON object with this structure:
     });
     const successfulSteps = this.plan.steps.filter((s) => s.status === "completed");
 
+    if (unrecoveredFailedSteps.length === 0) {
+      this.planCompletedEffectively = true;
+    }
+
     if (failedSteps.length > 0 && unrecoveredFailedSteps.length > 0) {
       // Log warning about failed steps
       const failedDescriptions = unrecoveredFailedSteps.map((s) => s.description).join(", ");
@@ -6523,6 +6581,7 @@ Format your plan as a JSON object with this structure:
           hasWarnings: true,
         });
         // Don't throw — allow task to complete
+        this.planCompletedEffectively = true;
       } else if (finalStepCompleted) {
         // Final deliverable step completed — the task produced useful output
         // even though some earlier steps failed. Treat as completed with warnings.
@@ -6539,6 +6598,7 @@ Format your plan as a JSON object with this structure:
           hasWarnings: true,
         });
         // Don't throw — allow task to complete with warnings
+        this.planCompletedEffectively = true;
       } else {
         const totalSteps = this.plan.steps.length;
         const progress =
@@ -6909,10 +6969,15 @@ TASK / CONVERSATION HISTORY:
       }
 
       // Start fresh messages for this step
+      // Include initial images in the first step so the LLM can see attached visuals
+      const isFirstStep = completedSteps.length === 0;
+      const stepUserContent = isFirstStep
+        ? await this.buildUserContent(stepContext, this.initialImages)
+        : stepContext;
       let messages: LLMMessage[] = [
         {
           role: "user",
-          content: stepContext,
+          content: stepUserContent,
         },
       ];
 
@@ -8480,6 +8545,15 @@ TASK / CONVERSATION HISTORY:
           if (img.mimeType && img.mimeType !== imageContent.mimeType) {
             imageContent.mimeType = img.mimeType as LLMImageMimeType;
           }
+          // Cache the loaded base64 data back into the attachment so subsequent
+          // calls (e.g. plan creation → first step) don't need the file on disk.
+          img.data = imageContent.data;
+          const tempFilePath = img.filePath;
+          img.filePath = undefined;
+          // Clean up managed temp files now that data is in memory
+          if (img.tempFile) {
+            fs.promises.unlink(tempFilePath).catch(() => {});
+          }
         } else {
           imageContent = {
             type: "image",
@@ -9082,10 +9156,10 @@ TASK / CONVERSATION HISTORY:
       messageWithContext = `${message}\n\nKNOWLEDGE FROM PREVIOUS STEPS (use this context):\n${knowledgeSummary}`;
     }
 
-    // Add user message to conversation history
+    // Add user message to conversation history (including any image attachments)
     this.appendConversationHistory({
       role: "user",
-      content: messageWithContext,
+      content: await this.buildUserContent(messageWithContext, images),
     });
 
     let messages = this.conversationHistory;
@@ -10194,7 +10268,14 @@ TASK / CONVERSATION HISTORY:
       } else if (previousStatus && previousStatus !== "executing") {
         // Chat-only follow-up (no tools) — restore previous status, but never restore 'executing'
         this.daemon.updateTaskStatus(this.task.id, previousStatus);
-        this.daemon.logEvent(this.task.id, "task_status", { status: previousStatus });
+        // Emit the canonical event type so renderers recognise the terminal state
+        if (previousStatus === "completed") {
+          this.daemon.logEvent(this.task.id, "task_completed", {
+            message: "Follow-up completed (chat reply)",
+          });
+        } else {
+          this.daemon.logEvent(this.task.id, "task_status", { status: previousStatus });
+        }
       } else {
         // Fallback safety net: 'executing' is never a valid final state
         this.daemon.updateTask(this.task.id, { status: "completed", completedAt: Date.now() });

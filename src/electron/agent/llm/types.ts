@@ -166,6 +166,18 @@ export interface LLMMessage {
   content: string | LLMContent[] | LLMToolResult[];
 }
 
+/** Progress info emitted periodically during streaming LLM responses. */
+export interface StreamProgress {
+  inputTokens: number;
+  outputTokens: number;
+  outputChars: number;
+  elapsedMs: number;
+  /** `true` while still streaming; `false` on the final event. */
+  streaming: boolean;
+}
+
+export type StreamProgressCallback = (progress: StreamProgress) => void;
+
 export interface LLMRequest {
   model: string;
   maxTokens: number;
@@ -174,6 +186,8 @@ export interface LLMRequest {
   tools?: LLMTool[];
   /** Optional abort signal to cancel the request */
   signal?: AbortSignal;
+  /** Optional callback for streaming progress (token counts, elapsed time). */
+  onStreamProgress?: StreamProgressCallback;
 }
 
 export interface LLMResponse {

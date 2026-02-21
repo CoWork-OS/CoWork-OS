@@ -195,6 +195,8 @@ export type EventType =
   | "command_output"
   // LLM usage tracking (tokens/cost)
   | "llm_usage"
+  // Real-time streaming progress (ephemeral, not persisted to DB)
+  | "llm_streaming"
   // Sub-Agent / Parallel Agent events
   | "agent_spawned" // Parent spawned a child agent
   | "agent_completed" // Child agent completed successfully

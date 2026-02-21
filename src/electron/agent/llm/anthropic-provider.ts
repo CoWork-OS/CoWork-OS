@@ -34,6 +34,12 @@ export class AnthropicProvider implements LLMProvider {
 
     try {
       console.log(`[Anthropic] Calling API with model: ${request.model}`);
+
+      // Use streaming when a progress callback is provided
+      if (request.onStreamProgress) {
+        return await this.createMessageStreaming(request, messages, tools);
+      }
+
       const response = await this.client.messages.create(
         {
           model: request.model,
@@ -55,6 +61,96 @@ export class AnthropicProvider implements LLMProvider {
       }
 
       console.error(`[Anthropic] API error:`, {
+        status: error.status,
+        message: error.message,
+        type: error.type || error.name,
+        headers: error.headers ? Object.fromEntries(error.headers) : undefined,
+      });
+      throw error;
+    }
+  }
+
+  private async createMessageStreaming(
+    request: LLMRequest,
+    messages: Anthropic.MessageParam[],
+    tools: Anthropic.Tool[] | undefined,
+  ): Promise<LLMResponse> {
+    const onProgress = request.onStreamProgress!;
+    const startedAt = Date.now();
+    let inputTokens = 0;
+    let outputChars = 0;
+    let lastEmitAt = 0;
+    const THROTTLE_MS = 300;
+
+    const emitProgress = (streaming: boolean): void => {
+      const now = Date.now();
+      if (streaming && now - lastEmitAt < THROTTLE_MS) return;
+      lastEmitAt = now;
+      try {
+        onProgress({
+          inputTokens,
+          outputTokens: Math.ceil(outputChars / 4),
+          outputChars,
+          elapsedMs: now - startedAt,
+          streaming,
+        });
+      } catch {
+        // Progress callback errors must not crash the stream
+      }
+    };
+
+    const stream = this.client.messages.stream({
+      model: request.model,
+      max_tokens: request.maxTokens,
+      system: request.system,
+      messages,
+      ...(tools && { tools }),
+    });
+
+    // Wire abort signal
+    if (request.signal) {
+      if (request.signal.aborted) {
+        stream.abort();
+      } else {
+        request.signal.addEventListener("abort", () => stream.abort(), { once: true });
+      }
+    }
+
+    // Capture input tokens from the initial message event
+    stream.on("message", (message) => {
+      inputTokens = message.usage?.input_tokens ?? 0;
+      emitProgress(true);
+    });
+
+    // Track output characters from text deltas
+    stream.on("text", (textDelta) => {
+      outputChars += textDelta.length;
+      emitProgress(true);
+    });
+
+    // Track output characters from tool input JSON deltas
+    stream.on("inputJson", (partialJson) => {
+      outputChars += partialJson.length;
+      emitProgress(true);
+    });
+
+    try {
+      const finalMessage = await stream.finalMessage();
+
+      // Emit final progress with streaming=false
+      emitProgress(false);
+
+      return this.convertResponse(finalMessage as Anthropic.Message);
+    } catch (error: any) {
+      // Always signal streaming ended so the UI clears the indicator
+      emitProgress(false);
+
+      if (error.name === "AbortError" || error.message?.includes("aborted")) {
+        console.log(`[Anthropic] Streaming request aborted`);
+        throw new Error("Request cancelled");
+      }
+
+      console.error(`[Anthropic] Streaming API error:`, {
         status: error.status,
         message: error.message,
         type: error.type || error.name,

@@ -3,12 +3,18 @@ import * as path from "path";
 import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import {
+  BedrockRuntimeClient,
+  BedrockRuntimeClientConfig,
+  ConverseCommand,
+} from "@aws-sdk/client-bedrock-runtime";
+import { fromIni } from "@aws-sdk/credential-provider-ini";
 import { Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { LLMTool, MODELS } from "../llm/types";
-import { LLMProviderFactory } from "../llm/provider-factory";
+import { LLMProviderFactory, type LLMSettings } from "../llm/provider-factory";
 
-type VisionProvider = "openai" | "anthropic" | "gemini";
+type VisionProvider = "openai" | "anthropic" | "gemini" | "bedrock";
 
 const DEFAULT_MAX_TOKENS = 900;
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024; // 20MB
@@ -48,6 +54,8 @@ function buildSetupHint(provider: VisionProvider): { type: string; label: string
       return { type: "open_settings", label: "Set up Anthropic API key", target: "anthropic" };
     case "gemini":
       return { type: "open_settings", label: "Set up Gemini API key", target: "gemini" };
+    case "bedrock":
+      return { type: "open_settings", label: "Set up Amazon Bedrock credentials", target: "bedrock" };
   }
 }
 
@@ -85,7 +93,7 @@ export class VisionTools {
             },
             provider: {
               type: "string",
-              enum: ["openai", "anthropic", "gemini"],
+              enum: ["openai", "anthropic", "gemini", "bedrock"],
               description:
                 "Optional provider override (default: uses configured provider if vision-capable, otherwise falls back).",
             },
@@ -173,7 +181,8 @@ export class VisionTools {
     const preferred =
       providerOverride === "openai" ||
       providerOverride === "anthropic" ||
-      providerOverride === "gemini"
+      providerOverride === "gemini" ||
+      providerOverride === "bedrock"
         ? (providerOverride as VisionProvider)
         : undefined;
 
@@ -182,11 +191,12 @@ export class VisionTools {
       : (() => {
           const type = settings.providerType;
           const order: VisionProvider[] = [];
+          if (type === "bedrock" || type === "amazon-bedrock") order.push("bedrock");
           if (type === "openai") order.push("openai");
           if (type === "anthropic") order.push("anthropic");
           if (type === "gemini") order.push("gemini");
           // Fallbacks if current provider is not vision-capable or not configured for vision
-          order.push("openai", "anthropic", "gemini");
+          order.push("bedrock", "openai", "anthropic", "gemini");
           // Dedupe while preserving order
           return order.filter((p, idx) => order.indexOf(p) === idx);
         })();
@@ -230,6 +240,34 @@ export class VisionTools {
           const model = modelOverride || defaultModel;
           const text = await this.analyzeWithAnthropic({
             apiKey,
+            model,
+            prompt,
+            base64,
+            mimeType,
+            maxTokens,
+          });
+          this.daemon.logEvent(this.taskId, "tool_result", {
+            tool: "analyze_image",
+            success: true,
+            provider,
+            model,
+          });
+          return { success: true, provider, model, text };
+        }
+
+        if (provider === "bedrock") {
+          const hasCredentials =
+            (settings.bedrock?.accessKeyId && settings.bedrock?.secretAccessKey) ||
+            settings.bedrock?.profile ||
+            settings.bedrock?.useDefaultCredentials;
+          if (!hasCredentials) {
+            lastError = "Amazon Bedrock credentials not configured.";
+            continue;
+          }
+          const defaultModel = MODELS["sonnet-4-6"]?.bedrock || "anthropic.claude-sonnet-4-6";
+          const model = modelOverride || settings.bedrock?.model || defaultModel;
+          const text = await this.analyzeWithBedrock({
+            settings,
             model,
             prompt,
             base64,
@@ -391,5 +429,63 @@ export class VisionTools {
     });
 
     return result.response.text().trim();
+  }
+
+  private async analyzeWithBedrock(args: {
+    settings: LLMSettings;
+    model: string;
+    prompt: string;
+    base64: string;
+    mimeType: string;
+    maxTokens: number;
+  }): Promise<string> {
+    const bedrock = args.settings.bedrock;
+    const clientConfig: BedrockRuntimeClientConfig = {
+      region: bedrock?.region || "us-east-1",
+    };
+
+    if (bedrock?.accessKeyId && bedrock?.secretAccessKey) {
+      clientConfig.credentials = {
+        accessKeyId: bedrock.accessKeyId,
+        secretAccessKey: bedrock.secretAccessKey,
+        ...(bedrock.sessionToken && { sessionToken: bedrock.sessionToken }),
+      };
+    } else if (bedrock?.profile) {
+      clientConfig.credentials = fromIni({ profile: bedrock.profile });
+    }
+
+    const client = new BedrockRuntimeClient(clientConfig);
+    const format = args.mimeType.split("/")[1] as "jpeg" | "png" | "gif" | "webp";
+
+    const command = new ConverseCommand({
+      modelId: args.model,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { text: args.prompt },
+            {
+              image: {
+                format,
+                source: {
+                  bytes: new Uint8Array(Buffer.from(args.base64, "base64")),
+                },
+              },
+            },
+          ],
+        },
+      ],
+      inferenceConfig: {
+        maxTokens: args.maxTokens,
+      },
+    });
+
+    const response = await client.send(command);
+    const outputBlocks = response.output?.message?.content ?? [];
+    return outputBlocks
+      .filter((b) => "text" in b && b.text)
+      .map((b) => (b as { text: string }).text)
+      .join("\n")
+      .trim();
   }
 }

@@ -39,35 +39,18 @@ CoWork OS is a local-first runtime for secure, multi-channel AI agents. It combi
 | **Security-First Execution** | Approval workflows, IPC/input validation hardening, redaction, and gateway safety controls |
 | **Local-First + BYOK** | Your data and keys stay with you |
 
-### Latest Release: 0.3.89 (2026-02-20)
+### Platform Capability Overview
 
-- **Declarative plugin architecture shipped**: manifest-based extensions now register connectors, skills, roles, and slash commands.
-- **Built-in plugin packs included**: reusable vertical packs for marketing, support, data, DevOps, and sales.
-- **Agent toolchain expanded**: native `create_spreadsheet` and `create_presentation` workflows.
-- **Provider UX and model quality updates**: Bedrock profile/display-name cleanup and Sonnet 4.6 model defaults.
-- **Security hardening pass**: stricter preload/IPC/channel validation and attachment safety checks.
+- **Agent runtime and orchestration**: task-based execution, dynamic re-planning, intent-aware behavior, agent teams, and child-task controls.
+- **LLM stack**: broad provider support (built-in + custom provider types), model flexibility, and multimodal execution.
+- **Multichannel interaction**: unified operations across 14 chat/email channels with desktop + headless runtime support.
+- **Integrations and productivity**: enterprise connectors, cloud-storage integrations, and native document/spreadsheet/presentation workflows.
+- **Extensibility**: built-in skills, custom skills, declarative plugins/plugin packs, and MCP client/host/registry support.
+- **Memory and continuity**: persistent memory, relationship context, and commitment lifecycle management.
+- **Security and governance**: approval workflows, configurable guardrails, per-context restrictions, validation hardening, and sensitive-data redaction.
+- **Operator UX**: live task timelines, talk mode, i18n, file previews (including XLSX), and control-plane telemetry/export surfaces.
 
-### Released Highlights Since 0.3.73
-
-| Release(s) | Date(s) | Shipped highlights |
-|---|---|---|
-| **0.3.89** | 2026-02-20 | Declarative plugin system, built-in plugin packs, spreadsheet/presentation creation tools, Bedrock/model UX cleanup, security hardening |
-| **0.3.88** | 2026-02-19 | Vision support across providers, task image attachments, LOOM email protocol, Conway Terminal integration with safety caps, Electron launch reliability fixes |
-| **0.3.87** | 2026-02-17 | ChatGPT history import wizard, child-task control tools, task telemetry export, role stage presets, CI/runtime hardening |
-| **0.3.86** | 2026-02-14 | ACP + Canvas control-plane endpoints, canvas checkpoint tooling, i18n (EN/JA/ZH), Talk Mode UX, shell approval/runtime hardening |
-| **0.3.74–0.3.85** | 2026-02-14 | Release/install reliability wave: npm/macOS setup stability, SIGKILL mitigation, native dependency recovery, release pipeline hardening |
-
-#### Capability Deltas Shipped After 0.3.73
-
-- **Agent runtime quality**: stuck-`executing` safety fixes, varied-failure loop detection, smarter artifact verification, answer-first response behavior, soft-deadline finalization, and timeout recovery with final answers.
-- **Memory and context**: relationship memory lifecycle APIs + UI controls, commitments management (`open`/`done`/`due soon`), stronger identity-leakage prevention, and richer context composition.
-- **Channels and gateway resilience**: Slack Socket Mode timeout tuning, WhatsApp connection-flap backoff, LOOM email support, and slash-command UX improvements (including autocomplete).
-- **LLM and multimodal execution**: cross-provider vision/image support, task image attachments for creation and follow-ups, Bedrock model/profile naming cleanup, and updated Sonnet 4.6 defaults.
-- **Extensibility and control plane**: declarative plugin manifests, built-in plugin packs, ACP/Canvas APIs, canvas checkpoint/restore tools, and expanded child-task/team orchestration controls.
-- **UI and operator experience**: XLSX extraction + inline spreadsheet preview, compact attachment chips in chat, language selection (English/Japanese/Simplified Chinese), Talk Mode controls, and cleaner operational logging.
-- **Operational reliability**: broad install/release hardening from `0.3.74` onward (first-install stability, native dependency recovery, publish pipeline resilience).
-
-For full per-version details, see `CHANGELOG.md`.
+For release-by-release history, see `CHANGELOG.md`.
 
 > **Status**: macOS desktop app + headless/server mode (Linux/VPS). Cross-platform desktop support planned.
 

@@ -43,6 +43,7 @@ import { SharePointTools } from "./sharepoint-tools";
 import { VoiceCallTools } from "./voice-call-tools";
 import { ChannelTools } from "./channel-tools";
 import { EmailImapTools } from "./email-imap-tools";
+import { GitTools } from "./git-tools";
 import { ChannelRepository } from "../../database/repositories";
 import { readFilesByPatterns } from "./read-files";
 import { LLMTool } from "../llm/types";
@@ -233,6 +234,7 @@ export class ToolRegistry {
   private voiceCallTools: VoiceCallTools;
   private channelTools?: ChannelTools;
   private emailImapTools?: EmailImapTools;
+  private gitTools: GitTools;
   private gatewayContext?: GatewayContextType;
   private deniedTools: Set<string> = new Set();
   private deniedGroups: Set<ToolGroupName> = new Set();
@@ -275,6 +277,7 @@ export class ToolRegistry {
     this.dropboxTools = new DropboxTools(workspace, daemon, taskId);
     this.sharePointTools = new SharePointTools(workspace, daemon, taskId);
     this.voiceCallTools = new VoiceCallTools(workspace, daemon, taskId);
+    this.gitTools = new GitTools(workspace, daemon, taskId);
     // Some unit tests stub daemon as a plain object. Make channel history tools optional.
     const dbGetter = (daemon as any)?.getDatabase;
     if (typeof dbGetter === "function") {
@@ -353,6 +356,7 @@ export class ToolRegistry {
     this.dropboxTools.setWorkspace(workspace);
     this.sharePointTools.setWorkspace(workspace);
     this.voiceCallTools.setWorkspace(workspace);
+    this.gitTools.setWorkspace(workspace);
   }
 
   /**
@@ -498,6 +502,8 @@ export class ToolRegistry {
     // Only add shell tool if workspace has shell permission
     if (this.workspace.permissions.shell) {
       allTools.push(...this.getShellToolDefinitions());
+      // Git tools: available in git repos with shell permission
+      allTools.push(...GitTools.getToolDefinitions());
     }
 
     // Always add image tools; they will surface setup guidance if API keys are missing
@@ -1262,6 +1268,12 @@ ${skillDescriptions}`;
 
     // Shell tools
     if (name === "run_command") return await this.shellTools.runCommand(input.command, input);
+
+    // Git tools
+    if (name === "git_status") return await this.gitTools.gitStatus();
+    if (name === "git_diff") return await this.gitTools.gitDiff(input);
+    if (name === "git_commit") return await this.gitTools.gitCommit(input);
+    if (name === "git_merge_to_base") return await this.gitTools.gitMergeToBase();
 
     // Image tools
     if (name === "generate_image") return await this.imageTools.generateImage(input);

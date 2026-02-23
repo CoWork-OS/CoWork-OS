@@ -55,7 +55,11 @@ function buildSetupHint(provider: VisionProvider): { type: string; label: string
     case "gemini":
       return { type: "open_settings", label: "Set up Gemini API key", target: "gemini" };
     case "bedrock":
-      return { type: "open_settings", label: "Set up Amazon Bedrock credentials", target: "bedrock" };
+      return {
+        type: "open_settings",
+        label: "Set up Amazon Bedrock credentials",
+        target: "bedrock",
+      };
   }
 }
 
@@ -189,12 +193,17 @@ export class VisionTools {
     const tryOrder: VisionProvider[] = preferred
       ? [preferred]
       : (() => {
-          const type = settings.providerType;
+          const rawProviderType = String(
+            (settings as { providerType?: string }).providerType || "",
+          );
+          // Legacy settings may still contain "amazon-bedrock"; normalize it to "bedrock".
+          const normalizedProviderType =
+            rawProviderType === "amazon-bedrock" ? "bedrock" : rawProviderType;
           const order: VisionProvider[] = [];
-          if (type === "bedrock" || type === "amazon-bedrock") order.push("bedrock");
-          if (type === "openai") order.push("openai");
-          if (type === "anthropic") order.push("anthropic");
-          if (type === "gemini") order.push("gemini");
+          if (normalizedProviderType === "bedrock") order.push("bedrock");
+          if (normalizedProviderType === "openai") order.push("openai");
+          if (normalizedProviderType === "anthropic") order.push("anthropic");
+          if (normalizedProviderType === "gemini") order.push("gemini");
           // Fallbacks if current provider is not vision-capable or not configured for vision
           order.push("bedrock", "openai", "anthropic", "gemini");
           // Dedupe while preserving order

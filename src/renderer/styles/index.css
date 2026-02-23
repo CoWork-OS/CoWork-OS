@@ -9439,6 +9439,20 @@ button {
   background: var(--color-text-tertiary);
 }
 
+.settings-nav-group-header {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted);
+  padding: 12px 12px 4px;
+  user-select: none;
+}
+
+.settings-nav-group-header:first-child {
+  padding-top: 4px;
+}
+
 .settings-nav-no-results {
   padding: 12px;
   text-align: center;
@@ -19757,7 +19771,9 @@ button {
   color: var(--color-text-primary, #e5e7eb);
 }
 .overflow-menu-item .goal-mode-toggle {
-  gap: 8px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
 }
 
 /* Subtle model label for focused mode */

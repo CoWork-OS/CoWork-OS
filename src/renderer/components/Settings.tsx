@@ -361,11 +361,17 @@ function SearchableSelect({
 }
 
 // Sidebar navigation items configuration
-const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: ReactNode; macOnly?: boolean }> =
-  [
+const sidebarItems: Array<{
+  tab: SettingsTab;
+  label: string;
+  icon: ReactNode;
+  macOnly?: boolean;
+  group: string;
+}> = [
     {
       tab: "appearance",
       label: "Appearance",
+      group: "General",
       icon: (
         <svg
           width="18"
@@ -383,6 +389,7 @@ const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: ReactNode; ma
     {
       tab: "personality",
       label: "Personality",
+      group: "General",
       icon: (
         <svg
           width="18"
@@ -400,6 +407,7 @@ const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: ReactNode; ma
     {
       tab: "missioncontrol",
       label: "Mission Control",
+      group: "General",
       icon: (
         <svg
           width="18"
@@ -419,6 +427,7 @@ const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: ReactNode; ma
     {
       tab: "tray",
       label: "Menu Bar",
+      group: "General",
       icon: (
         <svg
           width="18"
@@ -438,6 +447,7 @@ const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: ReactNode; ma
     {
       tab: "voice",
       label: "Voice Mode",
+      group: "General",
       icon: (
         <svg
           width="18"
@@ -457,6 +467,7 @@ const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: ReactNode; ma
     {
       tab: "llm",
       label: "AI Model",
+      group: "AI & Models",
       icon: (
         <svg
           width="18"
@@ -473,6 +484,7 @@ const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: ReactNode; ma
     {
       tab: "search",
       label: "Web Search",
+      group: "AI & Models",
       icon: (
         <svg
           width="18"
@@ -490,6 +502,7 @@ const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: ReactNode; ma
     {
       tab: "whatsapp",
       label: "WhatsApp",
+      group: "Communication",
       icon: (
         <svg
           width="18"
@@ -506,6 +519,7 @@ const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: ReactNode; ma
     {
       tab: "telegram",
       label: "Telegram",
+      group: "Communication",
       icon: (
         <svg
           width="18"
@@ -522,6 +536,7 @@ const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: ReactNode; ma
     {
       tab: "slack",
       label: "Slack",
+      group: "Communication",
       icon: (
         <svg
           width="18"
@@ -545,6 +560,7 @@ const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: ReactNode; ma
     {
       tab: "teams",
       label: "Teams",
+      group: "Communication",
       icon: (
         <svg
           width="18"
@@ -564,6 +580,7 @@ const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: ReactNode; ma
     {
       tab: "x",
       label: "X (Twitter)",
+      group: "Communication",
       icon: (
         <svg
           width="18"
@@ -581,6 +598,7 @@ const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: ReactNode; ma
     {
       tab: "morechannels",
       label: "More Channels",
+      group: "Communication",
       icon: (
         <svg
           width="18"
@@ -599,6 +617,7 @@ const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: ReactNode; ma
     {
       tab: "integrations",
       label: "Integrations",
+      group: "Integrations",
       icon: (
         <svg
           width="18"
@@ -623,6 +642,7 @@ const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: ReactNode; ma
     {
       tab: "guardrails",
       label: "Safety Limits",
+      group: "AI & Models",
       icon: (
         <svg
           width="18"
@@ -639,6 +659,7 @@ const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: ReactNode; ma
     {
       tab: "memory",
       label: "Memory",
+      group: "AI & Models",
       icon: (
         <svg
           width="18"
@@ -656,6 +677,7 @@ const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: ReactNode; ma
     {
       tab: "queue",
       label: "Task Queue",
+      group: "Automation",
       icon: (
         <svg
           width="18"
@@ -674,6 +696,7 @@ const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: ReactNode; ma
     {
       tab: "git",
       label: "Git",
+      group: "Integrations",
       icon: (
         <svg
           width="18"
@@ -693,6 +716,7 @@ const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: ReactNode; ma
     {
       tab: "skills",
       label: "Custom Skills",
+      group: "Skills & Tools",
       icon: (
         <svg
           width="18"
@@ -709,6 +733,7 @@ const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: ReactNode; ma
     {
       tab: "skillhub",
       label: "Skill Store",
+      group: "Skills & Tools",
       icon: (
         <svg
           width="18"
@@ -728,6 +753,7 @@ const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: ReactNode; ma
     {
       tab: "scheduled",
       label: "Scheduled Tasks",
+      group: "Automation",
       icon: (
         <svg
           width="18"
@@ -745,6 +771,7 @@ const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: ReactNode; ma
     {
       tab: "connectors",
       label: "Connectors",
+      group: "Integrations",
       icon: (
         <svg
           width="18"
@@ -764,6 +791,7 @@ const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: ReactNode; ma
     {
       tab: "infrastructure",
       label: "Infrastructure",
+      group: "Integrations",
       icon: (
         <svg
           width="18"
@@ -780,6 +808,7 @@ const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: ReactNode; ma
     {
       tab: "mcp",
       label: "Connected Tools",
+      group: "Skills & Tools",
       icon: (
         <svg
           width="18"
@@ -800,6 +829,7 @@ const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: ReactNode; ma
     {
       tab: "tools",
       label: "Built-in Tools",
+      group: "Skills & Tools",
       icon: (
         <svg
           width="18"
@@ -816,6 +846,7 @@ const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: ReactNode; ma
     {
       tab: "hooks",
       label: "Webhooks",
+      group: "Automation",
       icon: (
         <svg
           width="18"
@@ -833,6 +864,7 @@ const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: ReactNode; ma
     {
       tab: "controlplane",
       label: "Remote Access",
+      group: "Advanced",
       icon: (
         <svg
           width="18"
@@ -851,6 +883,7 @@ const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: ReactNode; ma
     {
       tab: "nodes",
       label: "Mobile Companions",
+      group: "Advanced",
       icon: (
         <svg
           width="18"
@@ -868,6 +901,7 @@ const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: ReactNode; ma
     {
       tab: "extensions",
       label: "Extensions",
+      group: "Advanced",
       icon: (
         <svg
           width="18"
@@ -884,6 +918,7 @@ const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: ReactNode; ma
     {
       tab: "insights",
       label: "Usage Insights",
+      group: "Advanced",
       icon: (
         <svg
           width="18"
@@ -900,6 +935,7 @@ const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: ReactNode; ma
     {
       tab: "updates",
       label: "Updates",
+      group: "Advanced",
       icon: (
         <svg
           width="18"
@@ -2432,17 +2468,31 @@ export function Settings({
                 }
                 return true;
               })
-              .map((item) => (
-                <button
-                  key={item.tab}
-                  className={`settings-nav-item ${activeTab === item.tab ? "active" : ""}`}
-                  data-tab={item.tab}
-                  onClick={() => setActiveTab(item.tab)}
-                >
-                  {item.icon}
-                  {item.label}
-                </button>
-              ))}
+              .reduce<{ lastGroup: string; elements: ReactNode[] }>(
+                (acc, item) => {
+                  if (!sidebarSearch && item.group !== acc.lastGroup) {
+                    acc.elements.push(
+                      <div key={`group-${item.group}`} className="settings-nav-group-header">
+                        {item.group}
+                      </div>,
+                    );
+                    acc.lastGroup = item.group;
+                  }
+                  acc.elements.push(
+                    <button
+                      key={item.tab}
+                      className={`settings-nav-item ${activeTab === item.tab ? "active" : ""}`}
+                      data-tab={item.tab}
+                      onClick={() => setActiveTab(item.tab)}
+                    >
+                      {item.icon}
+                      {item.label}
+                    </button>,
+                  );
+                  return acc;
+                },
+                { lastGroup: "", elements: [] },
+              ).elements}
             {sidebarSearch &&
               sidebarItems.filter((item) => {
                 if (item.macOnly && !navigator.platform.toLowerCase().includes("mac")) return false;

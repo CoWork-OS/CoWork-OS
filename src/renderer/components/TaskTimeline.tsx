@@ -23,6 +23,52 @@ import {
 import type { AgentContext } from "../hooks/useAgentContext";
 import { getUiCopy, type UiCopyKey } from "../utils/agentMessages";
 
+/**
+ * Maps raw system/API errors to human-readable messages.
+ * Returns the original message if no mapping matches.
+ */
+function humanizeError(raw: string): string {
+  if (!raw || typeof raw !== "string") return raw;
+  const mappings: Array<[RegExp, string]> = [
+    // Auth
+    [/401|unauthorized/i, "Your API key was rejected — double-check it in Settings."],
+    [/403|forbidden/i, "Access denied — your key may not have permission for this model."],
+    // Rate limits / quota
+    [/429|too many requests|rate.limit/i, "Rate limited — wait a moment and try again."],
+    [
+      /quota.*exceeded|exceeded.*quota|resource.*exhausted/i,
+      "Your usage quota is reached. Check billing at your provider.",
+    ],
+    [
+      /billing|payment.*required|upgrade your plan/i,
+      "Billing issue with your AI provider — check your payment method.",
+    ],
+    // Network
+    [/ECONNRESET/i, "Connection was interrupted. Check your internet and try again."],
+    [/ETIMEDOUT|timed?\s*out/i, "Request timed out. Try again in a moment."],
+    [/ENOTFOUND/i, "Could not reach the server. Check your internet connection."],
+    [/ECONNREFUSED/i, "Connection refused — the service may be down. Try again shortly."],
+    [/fetch.*failed|network.*error/i, "Network error. Check your internet connection and try again."],
+    // Server errors
+    [/500|internal server error/i, "The AI provider had an internal error — try again."],
+    [/502|bad gateway/i, "The AI provider is temporarily unreachable. Try again shortly."],
+    [/503|service unavailable|overloaded/i, "The AI service is overloaded. Try again in a minute."],
+    // Model / context
+    [
+      /context.*length|too.*long|max.*tokens.*exceeded/i,
+      "Conversation too long for this model. Start a new task or switch models.",
+    ],
+    [
+      /model.*not found|no endpoints found|invalid.*model/i,
+      "The selected model is not available. Try a different model in Settings.",
+    ],
+  ];
+  for (const [pattern, message] of mappings) {
+    if (pattern.test(raw)) return message;
+  }
+  return raw;
+}
+
 interface TaskTimelineProps {
   events: TaskEvent[];
   agentContext?: AgentContext;
@@ -237,7 +283,9 @@ export function TaskTimeline({ events, agentContext }: TaskTimelineProps) {
           </div>
         );
       case "error": {
-        const errorMessage = event.payload.error || event.payload.message;
+        const errorMessage = humanizeError(
+          String(event.payload.error || event.payload.message || ""),
+        );
         const actionHint = event.payload.actionHint;
         // Turn URLs in the error text into clickable links
         const renderWithLinks = (text: string) => {

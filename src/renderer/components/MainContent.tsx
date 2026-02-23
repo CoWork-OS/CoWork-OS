@@ -3840,6 +3840,9 @@ export function MainContent({
                                 <span className="goal-mode-label">
                                   Autonomous {autonomousModeEnabled ? "ON" : "OFF"}
                                 </span>
+                                <span className="goal-mode-hint">
+                                  Runs without asking for approval
+                                </span>
                               </button>
                             </div>
                             <div className="overflow-menu-item" role="none">
@@ -3856,6 +3859,9 @@ export function MainContent({
                                 <span className="goal-mode-label">
                                   Collab {collaborativeModeEnabled ? "ON" : "OFF"}
                                 </span>
+                                <span className="goal-mode-hint">
+                                  Multiple agents share perspectives
+                                </span>
                               </button>
                             </div>
                             {availableProviders.filter((p) => p.configured).length >= 2 && (
@@ -3870,6 +3876,9 @@ export function MainContent({
                                 >
                                   <span className="goal-mode-label">
                                     Multi-LLM {multiLlmModeEnabled ? "ON" : "OFF"}
+                                  </span>
+                                  <span className="goal-mode-hint">
+                                    Sends task to multiple AI models
                                   </span>
                                 </button>
                               </div>
@@ -4182,6 +4191,9 @@ export function MainContent({
                                 <span className="goal-mode-label">
                                   Autonomous {autonomousModeEnabled ? "ON" : "OFF"}
                                 </span>
+                                <span className="goal-mode-hint">
+                                  Runs without asking for approval
+                                </span>
                               </button>
                             </div>
                             <div className="overflow-menu-item" role="none">
@@ -4198,6 +4210,9 @@ export function MainContent({
                                 <span className="goal-mode-label">
                                   Collab {collaborativeModeEnabled ? "ON" : "OFF"}
                                 </span>
+                                <span className="goal-mode-hint">
+                                  Multiple agents share perspectives
+                                </span>
                               </button>
                             </div>
                             {availableProviders.filter((p) => p.configured).length >= 2 && (
@@ -4212,6 +4227,9 @@ export function MainContent({
                                 >
                                   <span className="goal-mode-label">
                                     Multi-LLM {multiLlmModeEnabled ? "ON" : "OFF"}
+                                  </span>
+                                  <span className="goal-mode-hint">
+                                    Sends task to multiple AI models
                                   </span>
                                 </button>
                               </div>
@@ -4229,6 +4247,9 @@ export function MainContent({
                               >
                                 <span className="goal-mode-label">
                                   Verify {verificationAgentEnabled ? "ON" : "OFF"}
+                                </span>
+                                <span className="goal-mode-hint">
+                                  Double-checks results before finishing
                                 </span>
                               </button>
                             </div>

@@ -174,12 +174,15 @@ npm run setup
 #### Build for Production
 
 ```bash
-npm run setup   # if not already done
-npm run build
-npm run package
+npm install            # install all dependencies
+npm run setup          # build native modules for Electron
+npm run build          # compile TypeScript and bundle the UI
+npm run package        # package into a macOS .app / .dmg
 ```
 
-The packaged app will be in the `release/` directory.
+Once complete, the packaged app will be in the `release/` folder:
+- **`CoWork OS-<version>-arm64.dmg`** — open this, drag CoWork OS to your Applications folder
+- **`mac-arm64/CoWork OS.app`** — the app itself (can also double-click to run directly)
 
 ### Linux VPS (Headless / Server Mode)
 

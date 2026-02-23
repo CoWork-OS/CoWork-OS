@@ -61,7 +61,9 @@ export type SettingsCategory =
   | "user-profile"
   | "relationship-memory"
   | "conway"
-  | "conway-wallet";
+  | "conway-wallet"
+  | "infra"
+  | "infra-wallet";
 
 interface SecureSettingsRow {
   id: string;

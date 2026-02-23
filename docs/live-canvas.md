@@ -83,6 +83,63 @@ The export menu (E key or export button) provides three options:
 
 The in-app preview allows you to interact with canvas content directly without switching windows. Use interactive mode (default) for full browser-like interaction, or switch to snapshot mode when you just want to monitor changes.
 
+## Build Mode
+
+Build Mode is a dedicated "idea → working prototype" workflow layered on top of Live Canvas. It guides the agent through four structured phases, each producing a named checkpoint that you can revert to or diff against.
+
+### Phases
+
+| Phase | What Happens |
+|-------|-------------|
+| **Concept** | Agent restates the idea, identifies core requirements, and selects a tech stack |
+| **Plan** | Breaks down into components, defines file structure, outlines implementation steps |
+| **Scaffold** | Generates working code, pushes to canvas, creates a checkpoint |
+| **Iterate** | Refines based on feedback — adds features, fixes bugs, polishes UI |
+
+### Using Build Mode
+
+Build Mode is available as a built-in skill (`build-mode`). You can activate it by:
+
+1. Selecting the **Build Mode** skill from the skill picker
+2. Providing your idea and optionally a tech stack preference
+3. The agent walks through each phase, creating canvas checkpoints at each stage
+
+### Phase Checkpoints
+
+Each phase creates a named checkpoint (e.g., `build:concept`, `build:plan`, `build:scaffold`, `build:iterate`). You can:
+
+- **View timeline**: See all phases with their checkpoint IDs and timestamps
+- **Revert to phase**: Roll back to any previous phase's checkpoint
+- **Diff between phases**: Compare file-level changes between any two phase checkpoints (added, removed, modified files)
+
+### Implementation Files
+
+- `src/electron/canvas/build-mode-orchestrator.ts` — Phase management, checkpoint mapping, revert/diff logic
+- `resources/skills/build-mode.json` — Skill definition with phase prompts and parameters
+
+---
+
+## Named Checkpoints
+
+Canvas sessions support named checkpoints for saving, restoring, and comparing canvas states.
+
+### Checkpoint Tools
+
+| Tool | Description |
+|------|-------------|
+| `canvas_checkpoint` | Save current state with an optional label |
+| `canvas_restore` | Restore a previous checkpoint by ID |
+| `canvas_checkpoints` | List all checkpoints for a session |
+
+### Advanced Checkpoint Methods
+
+| Method | Description |
+|--------|-------------|
+| `findCheckpointByLabel(sessionId, label)` | Look up a checkpoint by its label name |
+| `diffCheckpoints(sessionId, fromId, toId)` | Compare two checkpoints and return added, removed, and modified files |
+
+---
+
 ## Architecture
 
 ```
@@ -526,5 +583,6 @@ See the following files for implementation details:
 - `src/electron/canvas/canvas-protocol.ts` - URL protocol handler
 - `src/electron/agent/tools/canvas-tools.ts` - Agent tool definitions
 - `src/electron/ipc/canvas-handlers.ts` - IPC handlers
+- `src/electron/canvas/build-mode-orchestrator.ts` - Build Mode phase management
 - `src/renderer/components/CanvasPreview.tsx` - In-app preview component
 - `src/renderer/components/MainContent.tsx` - Canvas session integration

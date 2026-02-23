@@ -30,29 +30,16 @@
   <img src="screenshots/cowork-os-main-focus.png" alt="CoWork OS Interface" width="700">
 </p>
 
-## Looking for an OpenClaw Alternative?
-
-OpenClaw is a great project. With its founder's move to OpenAI, many in the community are exploring independent alternatives. CoWork OS is built for that — fully independent, community-driven, and designed to go further.
-
-### CoWork OS vs OpenClaw
-
-| | CoWork OS | OpenClaw |
-|---|---|---|
-| **LLM providers** | 30+ (12 built-in + 20+ compatible/gateway) | Limited built-in |
-| **Messaging channels** | 14 | ~11 |
-| **Built-in skills** | 100+ | ~30 |
-| **Enterprise connectors** | 9 MCP connectors (Salesforce, Jira, HubSpot, etc.) | — |
-| **Agent orchestration** | Mission Control: Kanban board, teams, performance reviews | Basic task queue |
-| **Execution modes** | 3 per-task (Autonomous, Collaborative, Multi-LLM) | Single |
-| **Security** | 3200+ tests, [ZeroLeaks top score](https://zeroleaks.ai/), sandbox isolation, AES-256 | Basic pairing + allowlists |
-| **Governance** | Independent, community-driven, no corporate parent | Founder now at OpenAI |
-
 ### Why CoWork OS?
 
 - **30+ LLM providers** — Anthropic, OpenAI, Google, Ollama, AWS Bedrock, OpenRouter, and more. Bring your own keys.
 - **14 messaging channels** — WhatsApp, Telegram, Discord, Slack, Teams, iMessage, Signal, and more. Chat with your AI from anywhere.
 - **100+ built-in skills** — Documents, code review, web search, image generation, cloud integrations, and more.
-- **Agent teams** — Multi-agent collaboration with shared checklists, collaborative mode, and multi-LLM synthesis.
+- **Agent teams** — Multi-agent collaboration with shared checklists, collaborative mode, multi-LLM synthesis, and persistent teams.
+- **Think With Me mode** — Socratic brainstorming that helps you clarify thinking without executing actions.
+- **Build Mode** — Go from idea to working prototype with a phased canvas workflow (Concept → Plan → Scaffold → Iterate) and named checkpoints.
+- **AI Playbook** — Auto-captures what worked from successful tasks and injects relevant patterns into future prompts.
+- **Usage Insights** — Dashboard showing task stats, cost/token tracking by model, activity heatmaps, and top skills.
 - **Security-first** — Approval workflows, sandboxed execution, configurable guardrails, encrypted storage, and 3200+ tests.
 - **Local-first & BYOK** — Your data and API keys stay on your machine. No telemetry. No middleman.
 
@@ -95,19 +82,34 @@ See the [Development Guide](docs/development.md) for prerequisites and details.
 
 ### Agent Runtime
 
-Task-based execution with dynamic re-planning, three per-task modes (Autonomous, Collaborative, Multi-LLM), agent teams, agent comparison, git worktree isolation, and performance reviews. [Learn more](docs/features.md#agent-capabilities)
+Task-based execution with dynamic re-planning, four per-task modes (Autonomous, Collaborative, Multi-LLM, Think With Me), agent teams with persistence, agent comparison, git worktree isolation, AI playbook, and performance reviews. [Learn more](docs/features.md#agent-capabilities)
 
 ### Mission Control
 
 Centralized agent orchestration dashboard with a Kanban task board, real-time activity feed, agent heartbeat monitoring, standup reports, and performance reviews. [Learn more](docs/mission-control.md)
 
-### Live Canvas
+### Live Canvas & Build Mode
 
-Agent-driven visual workspace for interactive HTML/CSS/JS content, data visualization, and iterative image annotation. [Learn more](docs/features.md#live-canvas)
+Agent-driven visual workspace for interactive HTML/CSS/JS content, data visualization, and iterative image annotation. **Build Mode** adds a phased idea-to-prototype workflow with named checkpoints and revert support. [Learn more](docs/live-canvas.md)
 
 ### Multichannel Gateway
 
 Unified AI gateway across 14 channels with security modes, rate limiting, ambient mode, scheduled tasks, and chat commands. [Learn more](docs/channels.md)
+
+### Infrastructure
+
+Built-in cloud infrastructure tools — no external processes or MCP servers needed. The agent can spin up sandboxes, register domains, and make payments natively.
+
+- **Cloud Sandboxes (E2B)**: Create, manage, and execute commands in isolated Linux VMs. Expose ports, read/write files — all from natural language.
+- **Domain Registration (Namecheap)**: Search available domains, register, and manage DNS records (A, AAAA, CNAME, MX, TXT).
+- **Crypto Wallet**: Built-in USDC wallet on Base network. Auto-generated, encrypted in OS keychain. Balance displayed in sidebar.
+- **x402 Payments**: Machine-to-machine HTTP payment protocol. Agent can pay for API access automatically with EIP-712 signed USDC transactions (requires approval).
+
+All infrastructure operations that involve spending (domain registration, x402 payments) require explicit user approval. Configure in **Settings** > **Infrastructure**. [Learn more](docs/features.md#infrastructure)
+
+### Web Scraping
+
+Advanced web scraping powered by [Scrapling](https://github.com/D4Vinci/Scrapling) with anti-bot bypass, stealth browsing, and structured data extraction. Three fetcher modes — fast HTTP with TLS fingerprinting, stealth with Cloudflare bypass, and full Playwright browser. Includes batch scraping, persistent sessions, proxy support, and five built-in skills (web scraper, price tracker, site mapper, lead scraper, content monitor). Configure in **Settings** > **Web Scraping**. [Learn more](docs/features.md#web-scraping-scrapling)
 
 ### Integrations
 
@@ -116,6 +118,10 @@ Unified AI gateway across 14 channels with security modes, rate limiting, ambien
 - **Developer Tools**: Claude Code-style `glob`/`grep`/`edit_file`, Playwright browser automation, MCP client/host/registry
 
 [Learn more](docs/features.md)
+
+### Usage Insights
+
+Dashboard with task metrics, cost/token tracking by model, activity heatmaps (day-of-week and hourly), and top skills usage with 7/14/30-day period selection. Access from **Settings** > **Usage Insights**. [Learn more](docs/features.md#usage-insights)
 
 ### LLM Providers
 
@@ -131,6 +137,10 @@ Unified AI gateway across 14 channels with security modes, rate limiting, ambien
 ### Voice Mode
 
 Text-to-speech (ElevenLabs, OpenAI, Web Speech API), speech-to-text (Whisper), and outbound phone calls. [Learn more](docs/features.md#voice-mode)
+
+### Knowledge Graph
+
+Built-in structured entity and relationship memory backed by SQLite. The agent builds a knowledge graph of your workspace — people, projects, technologies, services, and their relationships — with 9 dedicated tools, FTS5 search, multi-hop graph traversal, auto-extraction from task results, and confidence scoring with decay. [Learn more](docs/knowledge-graph.md)
 
 ### Memory & Context
 
@@ -163,10 +173,11 @@ Persistent memory with privacy protection, FTS5 search, LLM compression, and wor
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Execution Layer                               │
 │  File Ops │ Skills │ Browser │ LLM Providers (30+) │ MCP        │
+│  Infrastructure (E2B Sandboxes │ Domains │ Wallet │ x402)       │
 └─────────────────────────────────────────────────────────────────┘
                               ↕
 ┌─────────────────────────────────────────────────────────────────┐
-│  SQLite DB │ MCP Host │ WebSocket Control Plane │ Remote Access  │
+│  SQLite DB │ Knowledge Graph │ MCP Host │ WebSocket │ Remote Access  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -236,6 +247,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
 | [Self-Hosting](docs/self-hosting.md) | Docker and systemd deployment |
 | [VPS/Linux](docs/vps-linux.md) | Headless server deployment |
 | [Remote Access](docs/remote-access.md) | Tailscale, SSH tunnels, WebSocket API |
+| [Knowledge Graph](docs/knowledge-graph.md) | Structured entity/relationship memory |
 | [Mission Control](docs/mission-control.md) | Agent orchestration dashboard |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
 | [Uninstall](docs/uninstall.md) | Uninstall instructions |

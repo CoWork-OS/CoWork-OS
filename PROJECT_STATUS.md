@@ -108,6 +108,19 @@ CoWork OS is a **security-first personal AI assistant platform** with multi-chan
 - [x] web_fetch - Fetch and parse web pages
 - [x] http_request - Full HTTP client (curl-like)
 
+#### Web Scraping Tools (5 tools, Scrapling integration)
+- [x] scrape_page - Anti-bot bypass scraping with TLS fingerprinting, Cloudflare bypass, stealth mode
+- [x] scrape_multiple - Batch scrape up to 20 URLs
+- [x] scrape_extract - Structured data extraction (tables, lists, headings, metadata, custom selectors)
+- [x] scrape_session - Multi-step persistent sessions (login → navigate → extract)
+- [x] scraping_status - Installation and version check
+- [x] Python bridge architecture (stdin/stdout JSON)
+- [x] Three fetcher modes: default (HTTP+TLS), stealth (Cloudflare bypass), playwright (full browser)
+- [x] Proxy support, rate limiting, configurable timeout
+- [x] Settings UI with installation status check
+- [x] Five bundled skills: web-scraper, price-tracker, site-mapper, lead-scraper, content-monitor
+- [x] Located: `src/electron/scraping/`, `src/electron/agent/tools/scraping-tools.ts`
+
 #### Shell Tools
 - [x] execute_command - Shell command execution (requires approval)
 
@@ -177,6 +190,16 @@ CoWork OS is a **security-first personal AI assistant platform** with multi-chan
 - [x] Focused mode hides advanced settings
 - [x] Power mode shows all settings and features
 - [x] Configurable in Settings > Appearance
+
+#### Infrastructure (Native Cloud Tools)
+- [x] Cloud sandboxes via E2B (create, exec, file read/write, list, delete, expose ports)
+- [x] Domain registration via Namecheap (search, register, DNS management)
+- [x] Built-in USDC wallet on Base (auto-generated, OS keychain encrypted, balance polling)
+- [x] x402 payment protocol (EIP-712 signed USDC payments for HTTP APIs)
+- [x] Infrastructure status tool for provider health checks
+- [x] Approval gating for all payment and registration operations
+- [x] Settings UI with provider status, API key config, wallet display, and tool toggles
+- [x] Located: `src/electron/infra/`
 
 #### Starter Missions & Skills
 - [x] 10 one-click starter mission templates with categories
@@ -298,6 +321,7 @@ cowork-os/
 │   │   │   └── guardrails/    # Safety limits
 │   │   ├── gateway/           # WhatsApp, Telegram, Discord & Slack
 │   │   ├── canvas/            # Canvas manager, Build Mode orchestrator
+│   │   ├── infra/             # Infrastructure (E2B, domains, wallet, x402)
 │   │   ├── reports/           # Usage insights, daily briefing
 │   │   ├── memory/            # Memory, playbook, user profile
 │   │   ├── agents/            # Agent teams, orchestrator
@@ -417,6 +441,10 @@ Operations Requiring Approval:
 23. Receive proactive daily briefings with task stats and priorities
 24. Create persistent agent teams that survive across sessions
 25. Adjust UI complexity (focused, standard, power) to match your experience level
+26. Spin up cloud sandboxes and run code in isolated Linux VMs
+27. Search and register domains with DNS management
+28. Use a built-in crypto wallet for infrastructure payments
+29. Make x402 HTTP payments for API access and premium content
 
 ### You Cannot (Yet):
 1. Execute arbitrary code in a VM sandbox
@@ -439,6 +467,8 @@ Operations Requiring Approval:
 - `docx` - Word document creation
 - `pdfkit` - PDF creation
 - `pptxgenjs` - PowerPoint creation
+- `e2b` - Cloud sandbox VMs
+- `ethers` - Crypto wallet and EIP-712 signing
 - `electron-updater` - Auto-updates
 
 ### Development
@@ -510,6 +540,7 @@ Expected behavior:
 - Usage Insights dashboard with cost/activity analytics
 - AI Playbook with auto-captured success patterns
 - Persistent agent teams and adaptive UI complexity
+- Native infrastructure: cloud sandboxes, domain registration, wallet, x402 payments
 
 ### Planned
 - VM sandbox using macOS Virtualization.framework

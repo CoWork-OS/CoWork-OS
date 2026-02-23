@@ -29,6 +29,7 @@
 - **100+ Built-in Skills**: GitHub, Slack, Notion, Spotify, Apple Notes, and more
 - **Document Creation**: Excel, Word, PDF, PowerPoint with professional formatting
 - **Persistent Memory**: Cross-session context with privacy-aware observation capture
+- **Knowledge Graph**: SQLite-backed entity/relationship memory with FTS5 search, graph traversal, and auto-extraction
 - **Workspace Kit**: `.cowork/` project kit + markdown indexing with context injection
 - **Agent Teams**: Multi-agent collaboration with shared checklists, coordinated runs, and team management UI
 - **Collaborative Mode**: Auto-create ephemeral teams where multiple agents work on the same task, sharing thoughts in real-time
@@ -49,7 +50,7 @@
 - **Think With Me Mode**: Socratic brainstorming mode that helps clarify thinking without executing tools. Activated via toggle or auto-detected from brainstorm/trade-off patterns.
 - **Problem Framing Pre-flight**: Complex tasks show a structured problem restatement, assumptions, risks, and approach before execution begins
 - **Graceful Uncertainty**: Agent expresses uncertainty honestly and rates confidence on recommendations. Low-confidence messages display with an amber indicator.
-- **AI Playbook**: Auto-captures successful patterns (approach, outcome, tools) and lessons from failures. Relevant entries injected into system prompts. View in Settings > AI Playbook.
+- **AI Playbook**: Auto-captures successful patterns (approach, outcome, tools) and lessons from failures with error classification (7 categories: tool failure, wrong approach, missing context, permission denied, timeout, rate limit, user correction). Time-based decay scoring deprioritises stale entries. Proven patterns reinforced on repeated success. Mid-task user corrections automatically detected and captured. Relevant entries injected into system prompts. View in Settings > AI Playbook.
 
 ### Per-Task Execution Modes
 
@@ -103,6 +104,49 @@ Configure in **Settings** > **Voice**.
 **Privacy Modes:** Normal (auto-detect sensitive data), Strict (all private), Disabled (no capture).
 
 Configure in **Settings** > **Memory**.
+
+---
+
+## Self-Improving Agent
+
+Multi-layered learning system that improves agent behaviour across sessions. No external dependencies — all learning runs locally.
+
+| Layer | Service | What It Learns |
+|-------|---------|----------------|
+| **Task Patterns** | PlaybookService | Successful approaches, failure categories, error recovery strategies |
+| **Core Memory** | MemoryService | Observations, decisions, insights with hybrid semantic + BM25 search |
+| **User Profile** | UserProfileService | Name, preferences, location, goals, constraints |
+| **Relationship** | RelationshipMemoryService | 5-layer context: identity, preferences, context, history, commitments |
+| **Feedback** | FeedbackService | Rejection patterns, preference corrections, workspace-local MISTAKES.md |
+
+**Key mechanisms:**
+- **Error classification**: 7 categories for targeted recovery strategies
+- **Confidence decay**: older playbook entries receive lower relevance scores (30d: 0.8x, 90d: 0.5x)
+- **Reinforcement**: successful patterns are boosted via reinforcement memories
+- **Mid-task correction detection**: regex-based detection of user corrections during execution
+- **`/learn` skill**: manually teach the agent insights, corrections, preferences, or rules
+
+See [Self-Improving Agent](self-improving-agent.md) for the full architecture guide.
+
+---
+
+## Knowledge Graph
+
+SQLite-backed structured entity and relationship memory with full-text search and graph traversal.
+
+| Feature | Description |
+|---------|-------------|
+| **10 built-in entity types** | person, organization, project, technology, concept, file, service, api_endpoint, database_table, environment |
+| **15 built-in edge types** | uses, depends_on, part_of, created_by, maintained_by, deployed_to, and more |
+| **FTS5 search** | Full-text search with BM25 ranking over entity names and descriptions |
+| **Graph traversal** | Iterative BFS up to 3 hops with edge type filtering |
+| **Observations** | Append-only timestamped fact log per entity |
+| **Auto-extraction** | Regex-based entity extraction from completed task results |
+| **Confidence decay** | Auto-extracted entities decay over time (floor: 0.3) |
+| **9 agent tools** | kg_create_entity, kg_update_entity, kg_delete_entity, kg_create_edge, kg_delete_edge, kg_add_observation, kg_search, kg_get_neighbors, kg_get_subgraph |
+| **Context injection** | Relevant entities auto-injected into task system prompts |
+
+See [Knowledge Graph](knowledge-graph.md) for the full architecture guide.
 
 ---
 
@@ -217,7 +261,7 @@ Three-tier UI density controlling which features and settings are visible:
 
 | Tier | Description |
 |------|-------------|
-| **Focused** | Simplified view — hides Connected Tools, Remote Access, Extensions, Remote Terminal. Shows only core settings. |
+| **Focused** | Simplified view — hides Connected Tools, Remote Access, Extensions, Infrastructure. Shows only core settings. |
 | **Standard** | Default view — all settings visible (default) |
 | **Power** | Full power-user view with all settings and advanced options |
 
@@ -283,6 +327,54 @@ Full Playwright integration:
 
 ---
 
+## Web Scraping (Scrapling)
+
+Advanced web scraping powered by [Scrapling](https://github.com/D4Vinci/Scrapling) — anti-bot bypass, stealth browsing, adaptive element tracking, and structured data extraction.
+
+| Feature | Description |
+|---------|-------------|
+| **Anti-Bot Bypass** | TLS fingerprinting impersonates real browsers at the network level |
+| **Stealth Mode** | Cloudflare Turnstile bypass, stealth headers, browser fingerprint masking |
+| **Playwright Fetcher** | Full browser rendering for JavaScript-heavy sites |
+| **Structured Extraction** | Auto-detect and extract tables, lists, headings, and metadata |
+| **Batch Scraping** | Scrape up to 20 URLs in a single operation |
+| **Persistent Sessions** | Multi-step workflows with login → navigate → extract |
+| **Proxy Support** | Route requests through HTTP/HTTPS/SOCKS5 proxies |
+| **Rate Limiting** | Configurable requests-per-minute throttling |
+
+### Agent Tools
+
+| Tool | Description |
+|------|-------------|
+| `scrape_page` | Scrape a single URL with fetcher selection, CSS selectors, link/image/table extraction |
+| `scrape_multiple` | Batch scrape multiple URLs with shared config |
+| `scrape_extract` | Extract structured data (tables, lists, headings, meta, or custom selectors) |
+| `scrape_session` | Multi-step session with persistent browser state |
+| `scraping_status` | Check Scrapling installation and version |
+
+### Fetcher Modes
+
+| Mode | Best For | Speed |
+|------|----------|-------|
+| **Default** | Most sites — fast HTTP with TLS fingerprinting | Fast |
+| **Stealth** | Cloudflare-protected sites, anti-bot detection | Medium |
+| **Playwright** | JavaScript-rendered SPAs, dynamic content | Slow |
+
+### Skills
+
+Five scraping-specific skills are included: **Web Scraper** (general-purpose), **Price Tracker** (e-commerce), **Site Mapper** (crawl + structure), **Lead Scraper** (contact extraction), **Content Monitor** (change detection + scheduling).
+
+### Setup
+
+```bash
+pip install scrapling
+scrapling install   # downloads stealth browsers
+```
+
+Configure in **Settings** > **Web Scraping**. Disabled by default — enable to make scraping tools available to agents.
+
+---
+
 ## System Tools
 
 - Screenshots (full screen or specific windows)
@@ -345,6 +437,79 @@ See [Enterprise Connectors](enterprise-connectors.md) for the full contract.
 | **SharePoint** | `sharepoint_action` | Search sites, manage drive items |
 
 Configure in **Settings** > **Integrations**.
+
+---
+
+## Infrastructure
+
+Built-in cloud infrastructure tools registered as native agent tools — no MCP subprocess, no external dependency at runtime. The agent can provision cloud resources, manage domains, and make payments directly.
+
+### How It Works
+
+Infrastructure tools are registered in the Tool Registry alongside file, shell, and browser tools. When the agent needs cloud resources, it calls these tools directly — no subprocess overhead, no external server. All credentials are stored encrypted in the OS keychain via SecureSettingsRepository.
+
+### Benefits
+
+- **Zero latency overhead**: Tools execute in-process, no MCP subprocess or network hop
+- **Unified approval flow**: Payment and registration operations use the same approval dialogs as shell commands and file deletions
+- **Encrypted credentials**: API keys and wallet private keys stored via OS keychain (macOS Keychain, Windows DPAPI, Linux libsecret)
+- **Provider-based architecture**: Swap E2B for another sandbox provider, or Namecheap for Cloudflare — each capability is a pluggable provider class
+
+### Cloud Sandboxes (E2B)
+
+Spin up isolated Linux VMs for running code, deploying services, or testing in a clean environment.
+
+| Tool | Description |
+|------|-------------|
+| `cloud_sandbox_create` | Create a new sandbox (name, timeout, env vars) |
+| `cloud_sandbox_exec` | Run a shell command in a sandbox |
+| `cloud_sandbox_write_file` | Write a file into a sandbox |
+| `cloud_sandbox_read_file` | Read a file from a sandbox |
+| `cloud_sandbox_list` | List all active sandboxes |
+| `cloud_sandbox_delete` | Delete a sandbox and free resources |
+| `cloud_sandbox_url` | Get the public URL for an exposed port |
+
+Sandboxes auto-expire per E2B tier (5 min default, configurable up to 60 min on free tier). E2B provides $100 free credits with no credit card required.
+
+### Domain Registration (Namecheap)
+
+Search, register, and manage domains and DNS records.
+
+| Tool | Description |
+|------|-------------|
+| `domain_search` | Search available domains across TLDs (.com, .io, .ai, .dev, etc.) |
+| `domain_register` | Register a domain (requires user approval) |
+| `domain_list` | List all registered domains |
+| `domain_dns_list` | List DNS records for a domain |
+| `domain_dns_add` | Add a DNS record (A, AAAA, CNAME, MX, TXT, NS) |
+| `domain_dns_delete` | Delete a DNS record |
+
+Domain registration requires explicit user approval before any purchase is made.
+
+### Wallet & Payments
+
+Built-in USDC wallet on Base network for infrastructure payments.
+
+| Tool | Description |
+|------|-------------|
+| `wallet_info` | Get wallet address, network, and USDC balance |
+| `wallet_balance` | Get current USDC balance |
+| `x402_check` | Check if a URL requires x402 payment |
+| `x402_fetch` | Fetch a URL with automatic x402 payment (requires approval) |
+
+The wallet is auto-generated on first setup, with the private key encrypted in the OS keychain. The wallet address and balance are displayed in the sidebar. x402 is an HTTP-native payment protocol where the agent signs EIP-712 typed data to authorize USDC payments on Base — useful for paying for API access, premium content, or compute resources.
+
+### Status & Configuration
+
+| Tool | Description |
+|------|-------------|
+| `infra_status` | Get overall status: provider connections, active sandboxes, wallet state |
+
+Configure in **Settings** > **Infrastructure**. The settings UI shows:
+- Provider connection status (E2B, Namecheap, Wallet)
+- API key configuration for each provider
+- Wallet address with copy button and balance display
+- Tool category toggles (enable/disable sandbox, domain, or payment tools independently)
 
 ---
 

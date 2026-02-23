@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, net } from "electron";
 import { exec, spawn } from "child_process";
 import { promisify } from "util";
 import * as path from "path";
@@ -107,7 +107,7 @@ export class UpdateManager {
 
     try {
       // Fetch latest release from GitHub
-      const response = await fetch(
+      const response = await net.fetch(
         `https://api.github.com/repos/${this.repoOwner}/${this.repoName}/releases/latest`,
         {
           headers: {

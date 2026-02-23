@@ -1,8 +1,6 @@
 <p align="center">
-  <img src="screenshots/cowork-oss-logo-new.png" alt="CoWork OS Logo" width="120">
+  <img src="screenshots/cowork-os-logo-text.png" alt="CoWork OS" width="360">
 </p>
-
-<h1 align="center">CoWork OS</h1>
 
 <p align="center">
   <strong>The most complete open-source AI assistant platform</strong><br>

@@ -963,6 +963,7 @@ export function App() {
       collaborativeMode?: boolean;
       multiLlmMode?: boolean;
       multiLlmConfig?: MultiLlmConfig;
+      verificationAgent?: boolean;
     },
     images?: ImageAttachment[],
   ) => {
@@ -989,14 +990,17 @@ export function App() {
       if (!shouldContinue) return;
     }
 
+    const verificationAgent = options?.verificationAgent === true;
+
     const agentConfig =
-      autonomousMode || collaborativeMode || multiLlmMode
+      autonomousMode || collaborativeMode || multiLlmMode || verificationAgent
         ? {
             ...(autonomousMode ? { allowUserInput: false, autonomousMode: true } : {}),
             ...(collaborativeMode ? { collaborativeMode: true } : {}),
             ...(multiLlmMode
               ? { multiLlmMode: true, multiLlmConfig: options?.multiLlmConfig }
               : {}),
+            ...(verificationAgent ? { verificationAgent: true } : {}),
           }
         : undefined;
 

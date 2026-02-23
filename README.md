@@ -5,8 +5,8 @@
 <h1 align="center">CoWork OS</h1>
 
 <p align="center">
-  <strong>The operating system for personal AI assistants</strong><br>
-  Local-first runtime for secure, multi-channel AI agents on macOS
+  <strong>The most complete open-source AI assistant platform</strong><br>
+  Security-hardened, local-first runtime — 30+ LLM providers, 14 channels, 100+ skills
 </p>
 
 <p align="center">
@@ -29,6 +29,21 @@
 </p>
 
 ## Why CoWork OS?
+
+If you're looking for an open-source personal AI assistant, CoWork OS is the most feature-complete and security-tested option available today.
+
+| | CoWork OS | Typical alternatives |
+|---|---|---|
+| **LLM providers** | 30+ (12 built-in + 20+ compatible) | 2-5 |
+| **Messaging channels** | 14 (WhatsApp, Telegram, Discord, Slack, Teams, iMessage, Signal, and more) | 5-10 |
+| **Built-in skills** | 100+ | ~30 |
+| **Enterprise connectors** | 9 MCP connectors (Salesforce, Jira, HubSpot, Zendesk, etc.) | Few or none |
+| **Agent orchestration** | Mission Control dashboard with Kanban board, teams, reviews | Basic task queue |
+| **Execution modes** | Autonomous, Collaborative (multi-agent), Multi-LLM (judge synthesis) | Single mode |
+| **Security testing** | 3200+ tests, [ZeroLeaks top score](https://zeroleaks.ai/), sandbox isolation | Minimal |
+| **Data privacy** | Local-first, BYOK, OS keychain, AES-256, no telemetry | Varies |
+
+### Highlights
 
 - **30+ LLM providers** — Anthropic, OpenAI, Google, Ollama, AWS Bedrock, OpenRouter, and more. Bring your own keys.
 - **14 messaging channels** — WhatsApp, Telegram, Discord, Slack, Teams, iMessage, Signal, and more. Chat with your AI from anywhere.

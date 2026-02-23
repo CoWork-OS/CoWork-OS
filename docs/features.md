@@ -141,6 +141,24 @@ Configure in **Mission Control** > **Teams**.
 
 ---
 
+## Mission Control
+
+Centralized agent orchestration and monitoring dashboard. Access from **Settings** > **Mission Control**.
+
+| Panel | Purpose |
+|-------|---------|
+| **Agents** | Active agents list with status dots (working/idle/offline), heartbeat info, and manual wake controls |
+| **Mission Queue** | 5-column Kanban board (Inbox → Assigned → In Progress → Review → Done) with drag-and-drop |
+| **Feed & Details** | Real-time activity feed with event type and agent filters, plus task detail view with comments and mentions |
+
+**Header controls:** Agent Teams management, Performance Reviews, Standup Report generation, and workspace selector with live stats (active agents, queued tasks, pending mentions).
+
+All panels update in real-time via event subscriptions — no manual refresh needed.
+
+See [Mission Control](mission-control.md) for the full guide.
+
+---
+
 ## Configurable Guardrails
 
 | Guardrail | Default | Range |

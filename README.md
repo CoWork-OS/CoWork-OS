@@ -76,6 +76,10 @@ See the [Development Guide](docs/development.md) for prerequisites and details.
 
 Task-based execution with dynamic re-planning, three per-task modes (Autonomous, Collaborative, Multi-LLM), agent teams, agent comparison, git worktree isolation, and performance reviews. [Learn more](docs/features.md#agent-capabilities)
 
+### Mission Control
+
+Centralized agent orchestration dashboard with a Kanban task board, real-time activity feed, agent heartbeat monitoring, standup reports, and performance reviews. [Learn more](docs/mission-control.md)
+
 ### Live Canvas
 
 Agent-driven visual workspace for interactive HTML/CSS/JS content, data visualization, and iterative image annotation. [Learn more](docs/features.md#live-canvas)
@@ -211,6 +215,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
 | [Self-Hosting](docs/self-hosting.md) | Docker and systemd deployment |
 | [VPS/Linux](docs/vps-linux.md) | Headless server deployment |
 | [Remote Access](docs/remote-access.md) | Tailscale, SSH tunnels, WebSocket API |
+| [Mission Control](docs/mission-control.md) | Agent orchestration dashboard |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
 | [Uninstall](docs/uninstall.md) | Uninstall instructions |
 

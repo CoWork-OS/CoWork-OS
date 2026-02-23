@@ -43,7 +43,7 @@ CoWork OS is a local-first runtime for secure, multi-channel AI agents. It combi
 | **Local-First + BYOK** | Your data and keys stay with you |
 
 <p align="center">
-  <img src="screenshots/cowork-os-main1.png" alt="CoWork OS Interface" width="700">
+  <img src="screenshots/cowork-os-main-1.png" alt="CoWork OS Interface" width="700">
   <br>
   <em>Switch between Modern (default) and Terminal visual themes with a real-time task timeline</em>
 </p>

@@ -149,7 +149,10 @@ cowork-os
 git clone https://github.com/CoWork-OS/CoWork-OS.git
 cd CoWork-OS
 
-# Install dependencies and set up native modules (includes automatic macOS retry handling)
+# Install dependencies
+npm install
+
+# Set up native modules for Electron (includes automatic macOS retry handling)
 npm run setup
 
 # Run in development mode

@@ -3341,6 +3341,7 @@ export function MainContent({
             {uiDensity === "focused" ? (
               <div className="welcome-header-focused modern-only">
                 <img src="./cowork-os-logo.png" alt="CoWork OS" className="modern-logo" />
+                <span className="focused-app-name">CoWork OS</span>
                 <h1 className="focused-greeting">{agentContext.getMessage("welcomeSubtitle")}</h1>
               </div>
             ) : (

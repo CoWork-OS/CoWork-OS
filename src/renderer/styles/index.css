@@ -13985,7 +13985,6 @@ button {
   letter-spacing: -0.5px;
 }
 
-
 .disclaimer-logo-os {
   font-size: 28px;
   font-weight: 700;
@@ -14307,7 +14306,6 @@ button {
 .theme-light .disclaimer-logo-text {
   color: #1a1a1a;
 }
-
 
 .theme-light .disclaimer-subtitle {
   color: #999;
@@ -20122,9 +20120,9 @@ button {
 .density-focused .input-below-actions {
   display: none;
 }
-/* Hide footer disclaimer */
+/* Always show footer disclaimer even in focused mode */
 .density-focused .footer-disclaimer {
-  display: none;
+  display: block;
 }
 /* Hide right panel Context section entirely — noise for most users */
 .density-focused .right-panel .cli-section:last-of-type {
@@ -20569,7 +20567,7 @@ button {
   font-size: 12px;
 }
 /* Hide wallet badge in focused mode — keep footer minimal */
-.density-focused .conway-wallet-badge {
+.density-focused .infra-wallet-badge {
   display: none;
 }
 
@@ -20679,42 +20677,42 @@ button {
   font-size: 13px;
 }
 
-/* ============ Conway Terminal Settings ============ */
+/* ============ Infrastructure Settings ============ */
 
-.conway-settings-panel {
+.infra-settings-panel {
   padding: 0;
 }
 
-.conway-header {
+.infra-header {
   margin-bottom: 20px;
 }
 
-.conway-header h2 {
+.infra-header h2 {
   margin: 0 0 6px 0;
   font-size: 18px;
   font-weight: 600;
 }
 
-.conway-setup-section {
+.infra-setup-section {
   padding: 16px;
   border: 1px solid var(--color-border);
   border-radius: 8px;
   margin-bottom: 16px;
 }
 
-.conway-setup-info h3 {
+.infra-setup-info h3 {
   margin: 0 0 8px 0;
   font-size: 15px;
   font-weight: 600;
 }
 
-.conway-setup-info p {
+.infra-setup-info p {
   margin: 0 0 8px 0;
   color: var(--color-text-secondary);
   font-size: 13px;
 }
 
-.conway-feature-list {
+.infra-feature-list {
   margin: 0 0 16px 0;
   padding-left: 20px;
   font-size: 13px;
@@ -20722,18 +20720,18 @@ button {
   line-height: 1.7;
 }
 
-.conway-feature-list strong {
+.infra-feature-list strong {
   color: var(--color-text-primary);
 }
 
-.conway-setup-progress {
+.infra-setup-progress {
   display: flex;
   flex-direction: column;
   gap: 8px;
   padding: 12px 0;
 }
 
-.conway-setup-step {
+.infra-setup-step {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -20741,12 +20739,12 @@ button {
   color: var(--color-text-tertiary);
 }
 
-.conway-setup-step.active {
+.infra-setup-step.active {
   color: var(--color-text-primary);
   font-weight: 500;
 }
 
-.conway-setup-step.completed {
+.infra-setup-step.completed {
   color: var(--color-success, #22c55e);
 }
 
@@ -20756,7 +20754,7 @@ button {
   font-size: 12px;
 }
 
-.conway-error {
+.infra-error {
   padding: 12px;
   background: rgba(239, 68, 68, 0.1);
   border-radius: 6px;
@@ -20764,60 +20762,60 @@ button {
   font-size: 13px;
 }
 
-.conway-status-section {
+.infra-status-section {
   padding: 12px 16px;
   border: 1px solid var(--color-border);
   border-radius: 8px;
   margin-bottom: 16px;
 }
 
-.conway-status-row {
+.infra-status-row {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.conway-status-dot {
+.infra-status-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
 }
 
-.conway-status-dot.connected {
+.infra-status-dot.connected {
   background: var(--color-success, #22c55e);
 }
 
-.conway-status-dot.connecting {
+.infra-status-dot.connecting {
   background: var(--color-warning, #f59e0b);
   animation: pulse 1.5s infinite;
 }
 
-.conway-status-dot.error {
+.infra-status-dot.error {
   background: var(--color-error, #ef4444);
 }
 
-.conway-status-dot.disconnected {
+.infra-status-dot.disconnected {
   background: var(--color-text-tertiary);
 }
 
-.conway-status-label {
+.infra-status-label {
   font-size: 13px;
   font-weight: 500;
   text-transform: capitalize;
 }
 
-.conway-tool-count {
+.infra-tool-count {
   font-size: 12px;
   color: var(--color-text-tertiary);
   margin-left: 4px;
 }
 
-.conway-status-actions {
+.infra-status-actions {
   margin-left: auto;
 }
 
-.conway-wallet-card {
+.infra-wallet-card {
   background: var(--color-surface-secondary, var(--color-bg-secondary));
   border: 1px solid var(--color-border);
   border-radius: 8px;
@@ -20825,27 +20823,27 @@ button {
   margin-bottom: 16px;
 }
 
-.conway-wallet-card h3 {
+.infra-wallet-card h3 {
   margin: 0 0 12px 0;
   font-size: 14px;
   font-weight: 600;
 }
 
-.conway-wallet-address-row {
+.infra-wallet-address-row {
   display: flex;
   align-items: center;
   gap: 8px;
   margin-bottom: 12px;
 }
 
-.conway-wallet-address {
+.infra-wallet-address {
   font-family: var(--font-mono, "SF Mono", "Fira Code", monospace);
   font-size: 13px;
   color: var(--color-text-secondary);
   user-select: all;
 }
 
-.conway-copy-btn {
+.infra-copy-btn {
   background: transparent;
   border: 1px solid var(--color-border);
   border-radius: 4px;
@@ -20855,12 +20853,12 @@ button {
   color: var(--color-text-tertiary);
 }
 
-.conway-copy-btn:hover {
+.infra-copy-btn:hover {
   color: var(--color-text-primary);
   border-color: var(--color-text-secondary);
 }
 
-.conway-network-badge {
+.infra-network-badge {
   font-size: 11px;
   padding: 1px 6px;
   border-radius: 3px;
@@ -20870,32 +20868,32 @@ button {
   font-weight: 500;
 }
 
-.conway-balance-row {
+.infra-balance-row {
   display: flex;
   align-items: baseline;
   gap: 4px;
   margin-bottom: 8px;
 }
 
-.conway-balance-display {
+.infra-balance-display {
   font-size: 28px;
   font-weight: 600;
   color: var(--color-text-primary);
   line-height: 1;
 }
 
-.conway-balance-currency {
+.infra-balance-currency {
   font-size: 14px;
   color: var(--color-text-tertiary);
 }
 
-.conway-wallet-hint {
+.infra-wallet-hint {
   font-size: 12px;
   color: var(--color-text-tertiary);
   margin: 0;
 }
 
-.conway-wallet-warning {
+.infra-wallet-warning {
   margin-top: 10px;
   padding: 8px 12px;
   font-size: 12px;
@@ -20906,7 +20904,7 @@ button {
   border-radius: 6px;
 }
 
-.conway-wallet-safety {
+.infra-wallet-safety {
   margin-top: 10px;
   padding: 8px 12px;
   font-size: 12px;
@@ -20916,49 +20914,49 @@ button {
   background: var(--color-bg-secondary, #f9fafb);
 }
 
-.conway-wallet-safety strong {
+.infra-wallet-safety strong {
   display: block;
   margin-bottom: 4px;
   font-size: 12px;
   color: var(--color-text-primary);
 }
 
-.conway-wallet-safety p {
+.infra-wallet-safety p {
   margin: 0;
   color: var(--color-text-secondary);
 }
 
-.conway-wallet-safety code {
+.infra-wallet-safety code {
   font-size: 11px;
   padding: 1px 4px;
   background: var(--color-bg-tertiary, #e5e7eb);
   border-radius: 3px;
 }
 
-.conway-history-section {
+.infra-history-section {
   margin-bottom: 16px;
 }
 
-.conway-history-section h3 {
+.infra-history-section h3 {
   margin: 0 0 8px 0;
   font-size: 14px;
   font-weight: 600;
 }
 
-.conway-credit-history {
+.infra-credit-history {
   max-height: 240px;
   overflow-y: auto;
   border: 1px solid var(--color-border);
   border-radius: 6px;
 }
 
-.conway-history-table {
+.infra-history-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 12px;
 }
 
-.conway-history-table th {
+.infra-history-table th {
   text-align: left;
   padding: 6px 10px;
   font-weight: 500;
@@ -20969,57 +20967,57 @@ button {
   background: var(--color-bg-primary);
 }
 
-.conway-history-table td {
+.infra-history-table td {
   padding: 6px 10px;
   border-bottom: 1px solid var(--color-border);
   color: var(--color-text-secondary);
 }
 
-.conway-tx-type.credit {
+.infra-tx-type.credit {
   color: var(--color-success, #22c55e);
 }
 
-.conway-tx-type.debit {
+.infra-tx-type.debit {
   color: var(--color-error, #ef4444);
 }
 
-.conway-tx-amount.credit {
+.infra-tx-amount.credit {
   color: var(--color-success, #22c55e);
 }
 
-.conway-tx-amount.debit {
+.infra-tx-amount.debit {
   color: var(--color-error, #ef4444);
 }
 
-.conway-tx-desc {
+.infra-tx-desc {
   max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.conway-config-section {
+.infra-config-section {
   margin-bottom: 16px;
 }
 
-.conway-config-section h3 {
+.infra-config-section h3 {
   margin: 0 0 12px 0;
   font-size: 14px;
   font-weight: 600;
 }
 
-.conway-config-section h4 {
+.infra-config-section h4 {
   margin: 12px 0 8px 0;
   font-size: 13px;
   font-weight: 500;
   color: var(--color-text-secondary);
 }
 
-.conway-setting-row {
+.infra-setting-row {
   margin-bottom: 8px;
 }
 
-.conway-setting-row label {
+.infra-setting-row label {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -21028,46 +21026,46 @@ button {
   cursor: pointer;
 }
 
-.conway-tool-categories {
+.infra-tool-categories {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 4px;
 }
 
-.conway-danger-section {
+.infra-danger-section {
   padding: 16px;
   border: 1px solid var(--color-error, #ef4444);
   border-radius: 8px;
   opacity: 0.8;
 }
 
-.conway-danger-section h3 {
+.infra-danger-section h3 {
   margin: 0 0 6px 0;
   font-size: 14px;
   font-weight: 600;
   color: var(--color-error, #ef4444);
 }
 
-/* Conway How It Works */
-.conway-how-it-works {
+/* Infrastructure How It Works */
+.infra-how-it-works {
   padding: 16px;
   border: 1px solid var(--color-border);
   border-radius: 8px;
 }
 
-.conway-how-it-works h3 {
+.infra-how-it-works h3 {
   margin: 0 0 12px 0;
   font-size: 14px;
   font-weight: 600;
 }
 
-.conway-info-grid {
+.infra-info-grid {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
-.conway-info-item strong {
+.infra-info-item strong {
   display: block;
   font-size: 13px;
   font-weight: 600;
@@ -21075,44 +21073,44 @@ button {
   color: var(--color-text-primary);
 }
 
-.conway-info-item p {
+.infra-info-item p {
   margin: 0;
   font-size: 12px;
   line-height: 1.5;
   color: var(--color-text-secondary);
 }
 
-/* Conway Tool Category Rows */
-.conway-category-row label {
+/* Infrastructure Tool Category Rows */
+.infra-category-row label {
   display: flex;
   align-items: flex-start;
   gap: 8px;
 }
 
-.conway-category-row input[type="checkbox"] {
+.infra-category-row input[type="checkbox"] {
   margin-top: 2px;
 }
 
-.conway-category-label {
+.infra-category-label {
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
-.conway-category-name {
+.infra-category-name {
   font-size: 13px;
   font-weight: 500;
   color: var(--color-text-primary);
 }
 
-.conway-category-desc {
+.infra-category-desc {
   font-size: 11px;
   color: var(--color-text-tertiary);
   line-height: 1.4;
 }
 
-/* Conway Wallet Badge (Sidebar Footer) */
-.conway-wallet-badge {
+/* Infrastructure Wallet Badge (Sidebar Footer) */
+.infra-wallet-badge {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -21128,16 +21126,16 @@ button {
   text-align: left;
 }
 
-.conway-wallet-badge:hover {
+.infra-wallet-badge:hover {
   color: var(--color-text-primary);
 }
 
-.conway-wallet-badge svg {
+.infra-wallet-badge svg {
   flex-shrink: 0;
   opacity: 0.7;
 }
 
-.conway-wallet-badge .conway-wallet-balance {
+.infra-wallet-badge .infra-wallet-balance {
   font-family: var(--font-mono, "SF Mono", "Fira Code", monospace);
   font-size: 11px;
 }

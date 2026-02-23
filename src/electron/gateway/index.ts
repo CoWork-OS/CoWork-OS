@@ -1319,6 +1319,16 @@ export class ChannelGateway {
     });
   }
 
+  /**
+   * Get distinct chat IDs for a channel, ordered by most recent message.
+   */
+  getDistinctChatIds(
+    channelId: string,
+    limit = 50,
+  ): Array<{ chatId: string; lastTimestamp: number }> {
+    return this.messageRepo.getDistinctChatIds(channelId, limit);
+  }
+
   // Events
 
   /**

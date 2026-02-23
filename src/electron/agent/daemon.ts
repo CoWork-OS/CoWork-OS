@@ -46,6 +46,7 @@ import { TaskExecutor } from "./executor";
 import { TaskQueueManager } from "./queue-manager";
 import { approvalIdempotency, taskIdempotency, IdempotencyManager } from "../security/concurrency";
 import { MemoryService } from "../memory/MemoryService";
+import { PlaybookService } from "../memory/PlaybookService";
 import { UserProfileService } from "../memory/UserProfileService";
 import { RelationshipMemoryService } from "../memory/RelationshipMemoryService";
 import { PersonalityManager } from "../settings/personality-manager";
@@ -60,6 +61,27 @@ import type { ComparisonService } from "../git/ComparisonService";
 // Memory management constants
 const MAX_CACHED_EXECUTORS = 10; // Maximum number of completed task executors to keep in memory
 const EXECUTOR_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes - time before completed executors are cleaned up
+
+// Mid-conversation correction detection patterns.
+// Regex-based (no LLM calls) to detect when a user is correcting the agent during a task.
+const CORRECTION_PATTERNS = [
+  /\bno[,.]?\s+(do it|try|use|make|that'?s not|wrong)\b/i,
+  /\bthat'?s\s+wrong\b/i,
+  /\bactually\s+i\s+meant\b/i,
+  /\bnot\s+like\s+that\b/i,
+  /\binstead\s+of\s+that\b/i,
+  /\byou\s+should\s+have\b/i,
+  /\bthe\s+correct\s+way\s+is\b/i,
+  /\bdon'?t\s+do\s+that\b/i,
+  /\bstop\b.*\binstead\b/i,
+  /\bwrong\s+approach\b/i,
+  /\bi\s+didn'?t\s+(mean|ask|want)\b/i,
+  /\bnot\s+what\s+i\s+(meant|asked|wanted)\b/i,
+];
+
+function detectsCorrection(text: string): boolean {
+  return CORRECTION_PATTERNS.some((pattern) => pattern.test(text));
+}
 
 // Activity throttling constants
 const ACTIVITY_THROTTLE_WINDOW_MS = 2000; // 2 seconds - window for deduping similar activities
@@ -1368,12 +1390,11 @@ export class AgentDaemon extends EventEmitter {
     let content = "";
     switch (eventType) {
       case "assistant_message":
-        content = typeof payload?.message === "string" ? payload.message : String(payload?.content || "");
+        content =
+          typeof payload?.message === "string" ? payload.message : String(payload?.content || "");
         break;
       case "tool_call":
-        content = payload?.tool
-          ? `🔧 Using tool: ${payload.tool}`
-          : "";
+        content = payload?.tool ? `🔧 Using tool: ${payload.tool}` : "";
         break;
       case "step_completed":
         content = payload?.step?.description
@@ -1508,6 +1529,33 @@ export class AgentDaemon extends EventEmitter {
           (typeof payload?.content === "string" ? payload.content : "");
         if (text) {
           UserProfileService.ingestUserMessage(text, taskId);
+
+          // Mid-conversation correction detection: capture when the user corrects the agent.
+          if (taskId && task.workspaceId && detectsCorrection(text)) {
+            try {
+              const correctionContent = [
+                `[CORRECTION] User corrected agent during task "${task.title || taskId}"`,
+                `User said: ${text.slice(0, 300)}`,
+                `Task context: ${(task.prompt || "").slice(0, 200)}`,
+              ].join("\n");
+              MemoryService.capture(task.workspaceId, taskId, "insight", correctionContent).catch(
+                () => {},
+              );
+
+              PlaybookService.captureOutcome(
+                task.workspaceId,
+                taskId,
+                task.title || "unknown",
+                task.prompt || "",
+                "failure",
+                "Agent approach was corrected by user mid-task",
+                [],
+                `[CORRECTION] ${text.slice(0, 200)}`,
+              ).catch(() => {});
+            } catch {
+              // best-effort
+            }
+          }
         }
       } else if (type === "user_feedback") {
         UserProfileService.ingestUserFeedback(

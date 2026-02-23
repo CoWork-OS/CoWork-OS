@@ -98,7 +98,7 @@ import {
   RevokeAccessSchema,
   GeneratePairingSchema,
   GuardrailSettingsSchema,
-  ConwaySettingsSchema,
+  InfraSettingsSchema,
   EmailChannelConfigSchema,
   UUIDSchema,
   StringIdSchema,
@@ -164,9 +164,9 @@ import {
 } from "../hooks";
 import { MemoryService } from "../memory/MemoryService";
 import { UserProfileService } from "../memory/UserProfileService";
-import { ConwayManager } from "../conway/conway-manager";
-import { ConwaySettingsManager } from "../conway/conway-settings";
-import { ConwayWalletManager } from "../conway/conway-wallet";
+import { InfraManager } from "../infra/infra-manager";
+import { InfraSettingsManager } from "../infra/infra-settings";
+import { WalletManager } from "../infra/wallet/wallet-manager";
 import { RelationshipMemoryService } from "../memory/RelationshipMemoryService";
 import type { MemorySettings } from "../database/repositories";
 import { VoiceSettingsManager } from "../voice/voice-settings-manager";
@@ -2734,6 +2734,28 @@ export async function setupIpcHandlers(
     }));
   });
 
+  ipcMain.handle(IPC_CHANNELS.GATEWAY_LIST_CHATS, async (_, channelId: string) => {
+    if (!gateway) return [];
+    return gateway.getDistinctChatIds(channelId);
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.GATEWAY_SEND_TEST_MESSAGE,
+    async (_, data: { channelType: string; channelDbId?: string; chatId: string }) => {
+      if (!gateway) throw new Error("Gateway not initialized");
+      // Resolve channel type from DB ID if provided
+      let resolvedType = data.channelType;
+      if (data.channelDbId) {
+        const ch = gateway.getChannel(data.channelDbId);
+        if (ch) resolvedType = ch.type;
+      }
+      await gateway.sendMessage(resolvedType as any, data.chatId, "Test delivery from CoWork OS", {
+        parseMode: "text",
+      });
+      return { ok: true };
+    },
+  );
+
   ipcMain.handle(IPC_CHANNELS.GATEWAY_GRANT_ACCESS, async (_, data) => {
     if (!gateway) throw new Error("Gateway not initialized");
     const validated = validateInput(GrantAccessSchema, data, "grant access");
@@ -3477,6 +3499,29 @@ export async function setupIpcHandlers(
     return { success };
   });
 
+  // Usage Insights
+  ipcMain.handle(
+    IPC_CHANNELS.USAGE_INSIGHTS_GET,
+    async (_, workspaceId: string, periodDays?: number) => {
+      checkRateLimit(IPC_CHANNELS.USAGE_INSIGHTS_GET);
+      const validatedWorkspaceId = validateInput(UUIDSchema, workspaceId, "workspace ID");
+      // Clamp period to a reasonable range to prevent excessive DB scans
+      const clampedPeriod = Math.min(Math.max(Math.round(periodDays ?? 7), 1), 365);
+      const { UsageInsightsService } = await import("../reports/UsageInsightsService");
+      const service = new UsageInsightsService(db);
+      return service.generate(validatedWorkspaceId, clampedPeriod);
+    },
+  );
+
+  // Daily Briefing
+  ipcMain.handle(IPC_CHANNELS.DAILY_BRIEFING_GENERATE, async (_, workspaceId: string) => {
+    checkRateLimit(IPC_CHANNELS.DAILY_BRIEFING_GENERATE);
+    const validatedWorkspaceId = validateInput(UUIDSchema, workspaceId, "workspace ID");
+    const { DailyBriefingService } = await import("../reports/DailyBriefingService");
+    const service = new DailyBriefingService(db);
+    return service.generate(validatedWorkspaceId);
+  });
+
   // Task Board handlers
   ipcMain.handle(IPC_CHANNELS.TASK_MOVE_COLUMN, async (_, taskId: string, column: string) => {
     checkRateLimit(IPC_CHANNELS.TASK_MOVE_COLUMN);
@@ -3751,8 +3796,11 @@ export async function setupIpcHandlers(
   // MCP handlers
   setupMCPHandlers();
 
-  // Conway Terminal handlers
-  setupConwayHandlers();
+  // Infrastructure handlers
+  setupInfraHandlers();
+
+  // Scraping (Scrapling) handlers
+  setupScrapingHandlers();
 
   // Notification handlers
   setupNotificationHandlers();
@@ -4000,74 +4048,144 @@ function setupMCPHandlers(): void {
 }
 
 /**
- * Set up Conway Terminal IPC handlers
+ * Set up Infrastructure IPC handlers
  */
-function setupConwayHandlers(): void {
-  rateLimiter.configure(IPC_CHANNELS.CONWAY_SAVE_SETTINGS, RATE_LIMIT_CONFIGS.limited);
-  rateLimiter.configure(IPC_CHANNELS.CONWAY_SETUP, RATE_LIMIT_CONFIGS.expensive);
-  rateLimiter.configure(IPC_CHANNELS.CONWAY_CONNECT, RATE_LIMIT_CONFIGS.expensive);
-  rateLimiter.configure(IPC_CHANNELS.CONWAY_DISCONNECT, RATE_LIMIT_CONFIGS.expensive);
-  rateLimiter.configure(IPC_CHANNELS.CONWAY_RESET, RATE_LIMIT_CONFIGS.expensive);
+function setupInfraHandlers(): void {
+  rateLimiter.configure(IPC_CHANNELS.INFRA_SAVE_SETTINGS, RATE_LIMIT_CONFIGS.limited);
+  rateLimiter.configure(IPC_CHANNELS.INFRA_SETUP, RATE_LIMIT_CONFIGS.expensive);
+  rateLimiter.configure(IPC_CHANNELS.INFRA_RESET, RATE_LIMIT_CONFIGS.expensive);
 
-  ipcMain.handle(IPC_CHANNELS.CONWAY_GET_STATUS, async () => {
-    return ConwayManager.getInstance().getStatus();
+  ipcMain.handle(IPC_CHANNELS.INFRA_GET_STATUS, async () => {
+    return InfraManager.getInstance().getStatus();
   });
 
-  ipcMain.handle(IPC_CHANNELS.CONWAY_GET_SETTINGS, async () => {
-    return ConwaySettingsManager.loadSettings();
+  ipcMain.handle(IPC_CHANNELS.INFRA_GET_SETTINGS, async () => {
+    return InfraSettingsManager.loadSettings();
   });
 
-  ipcMain.handle(IPC_CHANNELS.CONWAY_SAVE_SETTINGS, async (_, settings) => {
-    checkRateLimit(IPC_CHANNELS.CONWAY_SAVE_SETTINGS);
-    const validated = validateInput(ConwaySettingsSchema, settings, "Conway settings");
-    ConwaySettingsManager.saveSettings(validated);
-    ConwaySettingsManager.clearCache();
+  ipcMain.handle(IPC_CHANNELS.INFRA_SAVE_SETTINGS, async (_, settings) => {
+    checkRateLimit(IPC_CHANNELS.INFRA_SAVE_SETTINGS);
+    const validated = validateInput(InfraSettingsSchema, settings, "Infrastructure settings");
+    InfraSettingsManager.saveSettings(validated);
+    InfraSettingsManager.clearCache();
+    // Re-apply settings to providers
+    InfraManager.getInstance().applySettings(validated);
     return { success: true };
   });
 
-  ipcMain.handle(IPC_CHANNELS.CONWAY_SETUP, async () => {
-    checkRateLimit(IPC_CHANNELS.CONWAY_SETUP);
-    return ConwayManager.getInstance().setup();
+  ipcMain.handle(IPC_CHANNELS.INFRA_SETUP, async () => {
+    checkRateLimit(IPC_CHANNELS.INFRA_SETUP);
+    return InfraManager.getInstance().setup();
   });
 
-  ipcMain.handle(IPC_CHANNELS.CONWAY_GET_BALANCE, async () => {
-    return ConwayManager.getInstance().getBalance();
+  ipcMain.handle(IPC_CHANNELS.INFRA_GET_WALLET, async () => {
+    return InfraManager.getInstance().getWalletInfo();
   });
 
-  ipcMain.handle(IPC_CHANNELS.CONWAY_GET_WALLET, async () => {
-    return ConwayManager.getInstance().getWalletInfo();
+  ipcMain.handle(IPC_CHANNELS.INFRA_WALLET_RESTORE, async () => {
+    // Attempt to migrate/restore wallet
+    const check = WalletManager.startupCheck();
+    return { success: !!check.address, address: check.address || undefined, status: check.status };
   });
 
-  ipcMain.handle(IPC_CHANNELS.CONWAY_GET_CREDIT_HISTORY, async () => {
-    return ConwayManager.getInstance().getCreditHistory();
+  ipcMain.handle(IPC_CHANNELS.INFRA_WALLET_VERIFY, async () => {
+    const hasWallet = WalletManager.hasWallet();
+    return {
+      status: hasWallet ? "ok" : "no_wallet",
+      address: WalletManager.getAddress() || undefined,
+    };
   });
 
-  ipcMain.handle(IPC_CHANNELS.CONWAY_CONNECT, async () => {
-    checkRateLimit(IPC_CHANNELS.CONWAY_CONNECT);
-    await ConwayManager.getInstance().connect();
+  ipcMain.handle(IPC_CHANNELS.INFRA_RESET, async () => {
+    checkRateLimit(IPC_CHANNELS.INFRA_RESET);
+    await InfraManager.getInstance().reset();
+    return { success: true };
+  });
+}
+
+/**
+ * Set up Scraping (Scrapling integration) IPC handlers
+ */
+function setupScrapingHandlers(): void {
+  const { ScrapingSettingsManager } = require("../scraping/scraping-settings");
+  const { spawn } = require("child_process");
+  const path = require("path");
+
+  ipcMain.handle(IPC_CHANNELS.SCRAPING_GET_SETTINGS, async () => {
+    return ScrapingSettingsManager.loadSettings();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SCRAPING_SAVE_SETTINGS, async (_: any, settings: any) => {
+    ScrapingSettingsManager.saveSettings(settings);
     return { success: true };
   });
 
-  ipcMain.handle(IPC_CHANNELS.CONWAY_DISCONNECT, async () => {
-    checkRateLimit(IPC_CHANNELS.CONWAY_DISCONNECT);
-    await ConwayManager.getInstance().disconnect();
+  ipcMain.handle(IPC_CHANNELS.SCRAPING_GET_STATUS, async () => {
+    const settings = ScrapingSettingsManager.loadSettings();
+    // Check if Python and Scrapling are available
+    return new Promise((resolve) => {
+      const pythonPath = settings.pythonPath || "python3";
+      const child = spawn(pythonPath, [
+        "-c",
+        "import scrapling; print(getattr(scrapling, '__version__', 'unknown'))",
+      ]);
+
+      let stdout = "";
+      let stderr = "";
+
+      child.stdout?.on("data", (data: Buffer) => {
+        stdout += data.toString();
+      });
+      child.stderr?.on("data", (data: Buffer) => {
+        stderr += data.toString();
+      });
+
+      child.on("error", () => {
+        resolve({
+          installed: false,
+          pythonAvailable: false,
+          version: null,
+          error: `Python not found at '${pythonPath}'`,
+        });
+      });
+
+      child.on("close", (code: number | null) => {
+        if (code === 0) {
+          resolve({
+            installed: true,
+            pythonAvailable: true,
+            version: stdout.trim(),
+          });
+        } else {
+          resolve({
+            installed: false,
+            pythonAvailable: true,
+            version: null,
+            error: stderr.trim() || "Scrapling not installed",
+          });
+        }
+      });
+
+      // Timeout after 10 seconds
+      setTimeout(() => {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          // ignore
+        }
+        resolve({
+          installed: false,
+          pythonAvailable: false,
+          version: null,
+          error: "Status check timed out",
+        });
+      }, 10000);
+    });
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SCRAPING_RESET, async () => {
+    ScrapingSettingsManager.resetSettings();
     return { success: true };
-  });
-
-  ipcMain.handle(IPC_CHANNELS.CONWAY_RESET, async () => {
-    checkRateLimit(IPC_CHANNELS.CONWAY_RESET);
-    await ConwayManager.getInstance().reset();
-    return { success: true };
-  });
-
-  ipcMain.handle(IPC_CHANNELS.CONWAY_WALLET_RESTORE, async () => {
-    const success = ConwayWalletManager.restoreWalletFile();
-    return { success, address: ConwayWalletManager.getAddress() || undefined };
-  });
-
-  ipcMain.handle(IPC_CHANNELS.CONWAY_WALLET_VERIFY, async () => {
-    const status = ConwayWalletManager.verifyIntegrity();
-    return { status, address: ConwayWalletManager.getAddress() || undefined };
   });
 }
 

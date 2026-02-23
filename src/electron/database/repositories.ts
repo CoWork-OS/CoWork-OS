@@ -1572,6 +1572,25 @@ export class ChannelMessageRepository {
     stmt.run(channelId);
   }
 
+  /**
+   * Get distinct chat IDs for a channel, ordered by most recent message.
+   */
+  getDistinctChatIds(
+    channelId: string,
+    limit = 50,
+  ): Array<{ chatId: string; lastTimestamp: number }> {
+    const stmt = this.db.prepare(`
+      SELECT chat_id, MAX(timestamp) as last_ts
+      FROM channel_messages
+      WHERE channel_id = ?
+      GROUP BY chat_id
+      ORDER BY last_ts DESC
+      LIMIT ?
+    `);
+    const rows = stmt.all(channelId, limit) as Array<{ chat_id: string; last_ts: number }>;
+    return rows.map((row) => ({ chatId: row.chat_id, lastTimestamp: row.last_ts }));
+  }
+
   private mapRowToMessage(row: Record<string, unknown>): ChannelMessage {
     const directionRaw = String(row.direction ?? "").trim();
     const direction: ChannelMessage["direction"] =

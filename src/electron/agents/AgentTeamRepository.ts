@@ -25,6 +25,8 @@ export class AgentTeamRepository {
       defaultModelPreference: request.defaultModelPreference,
       defaultPersonality: request.defaultPersonality,
       isActive: request.isActive ?? true,
+      persistent: request.persistent ?? false,
+      defaultWorkspaceId: request.defaultWorkspaceId,
       createdAt: now,
       updatedAt: now,
     };
@@ -33,8 +35,8 @@ export class AgentTeamRepository {
       INSERT INTO agent_teams (
         id, workspace_id, name, description, lead_agent_role_id,
         max_parallel_agents, default_model_preference, default_personality,
-        is_active, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        is_active, persistent, default_workspace_id, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -47,6 +49,8 @@ export class AgentTeamRepository {
       team.defaultModelPreference || null,
       team.defaultPersonality || null,
       team.isActive ? 1 : 0,
+      team.persistent ? 1 : 0,
+      team.defaultWorkspaceId || null,
       team.createdAt,
       team.updatedAt,
     );
@@ -123,6 +127,14 @@ export class AgentTeamRepository {
       fields.push("is_active = ?");
       values.push(request.isActive ? 1 : 0);
     }
+    if (request.persistent !== undefined) {
+      fields.push("persistent = ?");
+      values.push(request.persistent ? 1 : 0);
+    }
+    if (request.defaultWorkspaceId !== undefined) {
+      fields.push("default_workspace_id = ?");
+      values.push(request.defaultWorkspaceId);
+    }
 
     if (fields.length === 0) return existing;
 
@@ -170,6 +182,17 @@ export class AgentTeamRepository {
     return deleteTx(id);
   }
 
+  /**
+   * List all persistent teams across all workspaces.
+   */
+  listPersistent(): AgentTeam[] {
+    const stmt = this.db.prepare(
+      "SELECT * FROM agent_teams WHERE persistent = 1 AND is_active = 1 ORDER BY name ASC",
+    );
+    const rows = stmt.all() as any[];
+    return rows.map((row) => this.mapRowToTeam(row));
+  }
+
   private mapRowToTeam(row: any): AgentTeam {
     return {
       id: row.id,
@@ -181,6 +204,8 @@ export class AgentTeamRepository {
       defaultModelPreference: row.default_model_preference || undefined,
       defaultPersonality: row.default_personality || undefined,
       isActive: row.is_active === 1,
+      persistent: row.persistent === 1,
+      defaultWorkspaceId: row.default_workspace_id || undefined,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };

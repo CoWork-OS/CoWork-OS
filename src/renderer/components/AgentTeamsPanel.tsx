@@ -107,6 +107,7 @@ export function AgentTeamsPanel({ workspaceId, agents, tasks, onOpenTask }: Agen
     defaultModelPreference: string;
     defaultPersonality: string;
     isActive: boolean;
+    persistent: boolean;
   } | null>(null);
 
   // New Member form
@@ -231,6 +232,7 @@ export function AgentTeamsPanel({ workspaceId, agents, tasks, onOpenTask }: Agen
       defaultModelPreference: selectedTeam.defaultModelPreference || "same",
       defaultPersonality: selectedTeam.defaultPersonality || "same",
       isActive: selectedTeam.isActive,
+      persistent: selectedTeam.persistent ?? false,
     });
   }, [selectedTeamId]);
 
@@ -408,6 +410,7 @@ export function AgentTeamsPanel({ workspaceId, agents, tasks, onOpenTask }: Agen
         defaultModelPreference: teamDraft.defaultModelPreference,
         defaultPersonality: teamDraft.defaultPersonality,
         isActive: teamDraft.isActive,
+        persistent: teamDraft.persistent,
       });
       if (updated) {
         setTeams((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
@@ -759,6 +762,14 @@ export function AgentTeamsPanel({ workspaceId, agents, tasks, onOpenTask }: Agen
                   <div className="mc-team-row-top">
                     <span className="mc-team-name">{team.name}</span>
                     {!team.isActive && <span className="mc-pill neutral">INACTIVE</span>}
+                    {team.persistent && (
+                      <span
+                        className="mc-pill"
+                        style={{ background: "var(--accent, #6366f1)", color: "#fff" }}
+                      >
+                        PERSISTENT
+                      </span>
+                    )}
                   </div>
                   <div className="mc-team-meta">
                     Lead: {lead?.displayName || "Unknown"} · Max: {team.maxParallelAgents}
@@ -959,6 +970,17 @@ export function AgentTeamsPanel({ workspaceId, agents, tasks, onOpenTask }: Agen
                     type="checkbox"
                     checked={teamDraft.isActive}
                     onChange={(e) => setTeamDraft({ ...teamDraft, isActive: e.target.checked })}
+                  />
+                </label>
+                <label
+                  className="mc-field mc-field-inline"
+                  title="Persistent teams remain available across sessions and can auto-dispatch for matching workspace tasks"
+                >
+                  <span>Persistent</span>
+                  <input
+                    type="checkbox"
+                    checked={teamDraft.persistent}
+                    onChange={(e) => setTeamDraft({ ...teamDraft, persistent: e.target.checked })}
                   />
                 </label>
                 <label className="mc-field mc-field-wide">

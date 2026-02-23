@@ -48,10 +48,11 @@ import { AppearanceManager } from "./settings/appearance-manager";
 import { MemoryFeaturesManager } from "./settings/memory-features-manager";
 import { PersonalityManager } from "./settings/personality-manager";
 import { MCPClientManager } from "./mcp/client/MCPClientManager";
-import { ConwayManager } from "./conway/conway-manager";
+import { InfraManager } from "./infra/infra-manager";
 import { trayManager } from "./tray";
 import { CronService, setCronService, getCronStorePath } from "./cron";
 import { MemoryService } from "./memory/MemoryService";
+import { KnowledgeGraphService } from "./knowledge-graph/KnowledgeGraphService";
 import {
   ControlPlaneSettingsManager,
   setupControlPlaneHandlers,
@@ -359,6 +360,15 @@ if (!gotTheLock) {
       // Don't fail app startup if memory init fails
     }
 
+    // Initialize Knowledge Graph Service for structured entity/relationship memory
+    try {
+      KnowledgeGraphService.initialize(dbManager.getDatabase());
+      console.log("[Main] Knowledge Graph Service initialized");
+    } catch (error) {
+      console.error("[Main] Failed to initialize Knowledge Graph Service:", error);
+      // Don't fail app startup if KG init fails
+    }
+
     // Initialize MCP Client Manager - auto-connects enabled servers on startup
     try {
       const mcpClientManager = MCPClientManager.getInstance();
@@ -369,13 +379,13 @@ if (!gotTheLock) {
       // Don't fail app startup if MCP init fails
     }
 
-    // Initialize Conway Terminal Manager - restores state and auto-connects if enabled
+    // Initialize Infrastructure Manager - restores wallet, configures providers
     try {
-      await ConwayManager.getInstance().initialize();
-      console.log("[Main] Conway Manager initialized");
+      await InfraManager.getInstance().initialize();
+      console.log("[Main] InfraManager initialized");
     } catch (error) {
-      console.error("[Main] Failed to initialize Conway Manager:", error);
-      // Don't fail app startup if Conway init fails
+      console.error("[Main] Failed to initialize InfraManager:", error);
+      // Don't fail app startup if infra init fails
     }
 
     // Initialize Cron Service for scheduled task execution
@@ -489,8 +499,33 @@ if (!gotTheLock) {
           const summary = typeof task?.resultSummary === "string" ? task.resultSummary.trim() : "";
           if (summary) return summary;
 
-          // Fall back to the last assistant message event (best-effort).
+          // Fall back to assistant message events (best-effort).
+          // For agentic tasks, the last message may be a short "Done!" while the
+          // substantive content was emitted earlier. Pick the longest message that
+          // exceeds a minimum threshold; if none qualifies, fall back to the last
+          // non-trivial message.
           const events = taskEventRepo.findByTaskId(taskId);
+          let bestCandidate = "";
+          let lastCandidate = "";
+          const TRIVIAL_PHRASES = new Set([
+            "done.",
+            "done",
+            "task complete.",
+            "task complete",
+            "task completed.",
+            "task completed",
+            "task completed successfully.",
+            "task completed successfully",
+            "complete.",
+            "complete",
+            "completed.",
+            "completed",
+            "all set.",
+            "all set",
+            "finished.",
+            "finished",
+          ]);
+
           for (let i = events.length - 1; i >= 0; i--) {
             const evt = events[i];
             if (evt.type !== "assistant_message") continue;
@@ -499,9 +534,20 @@ if (!gotTheLock) {
               (typeof payload.message === "string" ? payload.message : "") ||
               (typeof payload.content === "string" ? payload.content : "");
             const trimmed = text.trim();
-            if (trimmed) return trimmed;
+            if (!trimmed) continue;
+
+            // Track last non-trivial message as fallback
+            if (!lastCandidate && !TRIVIAL_PHRASES.has(trimmed.toLowerCase())) {
+              lastCandidate = trimmed;
+            }
+
+            // Track the longest substantive message (>100 chars = likely real content)
+            if (trimmed.length > 100 && trimmed.length > bestCandidate.length) {
+              bestCandidate = trimmed;
+            }
           }
-          return undefined;
+
+          return bestCandidate || lastCandidate || undefined;
         },
         // Channel delivery handler - sends job results to messaging platforms
         deliverToChannel: async (params) => {
@@ -515,6 +561,11 @@ if (!gotTheLock) {
             !params.summaryOnly &&
             typeof params.resultText === "string" &&
             params.resultText.trim().length > 0;
+
+          console.log(
+            `[Cron] Delivery for "${params.jobName}": hasResult=${hasResult}, ` +
+              `resultTextLength=${params.resultText?.length ?? 0}, summaryOnly=${params.summaryOnly}`,
+          );
 
           // Build the message
           const statusEmoji =
@@ -544,11 +595,20 @@ if (!gotTheLock) {
               })();
 
           try {
+            // Resolve the actual channel type when a specific channel DB ID is provided
+            let resolvedType = params.channelType as string;
+            if (params.channelDbId) {
+              const ch = channelGateway.getChannel(params.channelDbId);
+              if (ch) {
+                resolvedType = ch.type;
+              }
+            }
+
             // Send the message via the gateway
-            await channelGateway.sendMessage(params.channelType as any, params.channelId, message, {
+            await channelGateway.sendMessage(resolvedType as any, params.channelId, message, {
               parseMode: "markdown",
             });
-            console.log(`[Cron] Delivered to ${params.channelType}:${params.channelId}`);
+            console.log(`[Cron] Delivered to ${resolvedType}:${params.channelId}`);
           } catch (err) {
             console.error(
               `[Cron] Failed to deliver to ${params.channelType}:${params.channelId}:`,

@@ -51,7 +51,8 @@ import { VoiceSettings } from "./VoiceSettings";
 import { MissionControlPanel } from "./MissionControlPanel";
 import { MemoryHubSettings } from "./MemoryHubSettings";
 import { WorktreeSettings } from "./WorktreeSettings";
-import { ConwaySettings } from "./ConwaySettings";
+import { UsageInsightsPanel } from "./UsageInsightsPanel";
+import { InfraSettings } from "./InfraSettings";
 
 type SettingsTab =
   | "appearance"
@@ -74,7 +75,7 @@ type SettingsTab =
   | "skills"
   | "skillhub"
   | "connectors"
-  | "conway"
+  | "infrastructure"
   | "mcp"
   | "tools"
   | "scheduled"
@@ -83,7 +84,8 @@ type SettingsTab =
   | "nodes"
   | "extensions"
   | "memory"
-  | "git";
+  | "git"
+  | "insights";
 
 // Secondary channels shown inside "More Channels" tab
 type SecondaryChannel =
@@ -454,7 +456,7 @@ const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: ReactNode; ma
     },
     {
       tab: "llm",
-      label: "LLM Provider",
+      label: "AI Model",
       icon: (
         <svg
           width="18"
@@ -620,7 +622,7 @@ const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: ReactNode; ma
     },
     {
       tab: "guardrails",
-      label: "Guardrails",
+      label: "Safety Limits",
       icon: (
         <svg
           width="18"
@@ -706,7 +708,7 @@ const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: ReactNode; ma
     },
     {
       tab: "skillhub",
-      label: "SkillHub",
+      label: "Skill Store",
       icon: (
         <svg
           width="18"
@@ -760,8 +762,8 @@ const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: ReactNode; ma
       ),
     },
     {
-      tab: "conway",
-      label: "Conway Terminal",
+      tab: "infrastructure",
+      label: "Infrastructure",
       icon: (
         <svg
           width="18"
@@ -777,7 +779,7 @@ const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: ReactNode; ma
     },
     {
       tab: "mcp",
-      label: "MCP Servers",
+      label: "Connected Tools",
       icon: (
         <svg
           width="18"
@@ -830,7 +832,7 @@ const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: ReactNode; ma
     },
     {
       tab: "controlplane",
-      label: "Control Plane",
+      label: "Remote Access",
       icon: (
         <svg
           width="18"
@@ -876,6 +878,22 @@ const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: ReactNode; ma
           strokeWidth="2"
         >
           <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+        </svg>
+      ),
+    },
+    {
+      tab: "insights",
+      label: "Usage Insights",
+      icon: (
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        >
+          <path d="M18 20V10M12 20V4M6 20v-6" />
         </svg>
       ),
     },
@@ -2380,6 +2398,34 @@ export function Settings({
                 if (item.macOnly && !navigator.platform.toLowerCase().includes("mac")) {
                   return false;
                 }
+                // Adaptive complexity: three-tier visibility
+                // - focused: core settings only
+                // - full (default): standard settings, hides advanced developer tabs
+                // - power: everything visible
+                if (uiDensity === "focused") {
+                  const focusedTabs: SettingsTab[] = [
+                    "appearance",
+                    "personality",
+                    "voice",
+                    "llm",
+                    "search",
+                    "skills",
+                    "memory",
+                    "guardrails",
+                    "scheduled",
+                    "telegram",
+                    "slack",
+                    "whatsapp",
+                    "teams",
+                    "x",
+                    "morechannels",
+                  ];
+                  if (!focusedTabs.includes(item.tab)) return false;
+                } else if (uiDensity !== "power") {
+                  // "full" mode: hide power-only tabs (developer/infra)
+                  const powerOnlyTabs: SettingsTab[] = ["nodes", "extensions", "controlplane"];
+                  if (powerOnlyTabs.includes(item.tab)) return false;
+                }
                 // Filter by search query
                 if (sidebarSearch) {
                   return item.label.toLowerCase().includes(sidebarSearch.toLowerCase());
@@ -2516,8 +2562,8 @@ export function Settings({
               <ScheduledTasksSettings />
             ) : activeTab === "connectors" ? (
               <ConnectorsSettings />
-            ) : activeTab === "conway" ? (
-              <ConwaySettings />
+            ) : activeTab === "infrastructure" ? (
+              <InfraSettings />
             ) : activeTab === "mcp" ? (
               <MCPSettings />
             ) : activeTab === "tools" ? (
@@ -2537,6 +2583,8 @@ export function Settings({
               />
             ) : activeTab === "git" ? (
               <WorktreeSettings />
+            ) : activeTab === "insights" ? (
+              <UsageInsightsPanel workspaceId={workspaceId} />
             ) : loading ? (
               <div className="settings-loading">Loading settings...</div>
             ) : (

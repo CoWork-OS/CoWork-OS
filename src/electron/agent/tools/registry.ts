@@ -69,6 +69,10 @@ import {
 } from "../../../shared/agent-preferences";
 import { isHeadlessMode } from "../../utils/runtime-mode";
 import { HooksSettingsManager } from "../../hooks/settings";
+import { InfraTools } from "../../infra/infra-tools";
+import { InfraSettingsManager } from "../../infra/infra-settings";
+import { KnowledgeGraphTools } from "./knowledge-graph-tools";
+import { ScrapingTools } from "./scraping-tools";
 
 function sanitizeFilename(raw: string, maxLen = 120): string {
   const base = path.basename(String(raw || "").trim() || "artifact");
@@ -180,19 +184,19 @@ export function extractPaymentAmountFromX402Tool(
   return null;
 }
 
-export function getConwayPaymentLimitError(input: unknown, toolSchema?: MCPTool): string | null {
+export function getMcpPaymentLimitError(input: unknown, toolSchema?: MCPTool): string | null {
   const amount = extractPaymentAmountFromX402Tool(input, toolSchema);
   if (amount === null) {
     return null;
   }
 
   if (amount > MCP_PAYMENT_MAX_AMOUNT_USD) {
-    return `Conway payment amount is above safety cap (${MCP_PAYMENT_MAX_AMOUNT_USD} USDC): ${amount}`;
+    return `MCP payment amount is above safety cap (${MCP_PAYMENT_MAX_AMOUNT_USD} USDC): ${amount}`;
   }
 
-  const envCap = Number(process.env.COWORK_CONWAY_PAYMENT_LIMIT_USD);
+  const envCap = Number(process.env.COWORK_PAYMENT_LIMIT_USD);
   if (Number.isFinite(envCap) && envCap > 0 && amount > envCap) {
-    return `Conway payment amount exceeds configured cap of ${envCap} USDC: ${amount}`;
+    return `MCP payment amount exceeds configured cap of ${envCap} USDC: ${amount}`;
   }
 
   return null;
@@ -235,6 +239,9 @@ export class ToolRegistry {
   private channelTools?: ChannelTools;
   private emailImapTools?: EmailImapTools;
   private gitTools: GitTools;
+  private infraTools: InfraTools;
+  private knowledgeGraphTools: KnowledgeGraphTools;
+  private scrapingTools: ScrapingTools;
   private gatewayContext?: GatewayContextType;
   private deniedTools: Set<string> = new Set();
   private deniedGroups: Set<ToolGroupName> = new Set();
@@ -278,6 +285,9 @@ export class ToolRegistry {
     this.sharePointTools = new SharePointTools(workspace, daemon, taskId);
     this.voiceCallTools = new VoiceCallTools(workspace, daemon, taskId);
     this.gitTools = new GitTools(workspace, daemon, taskId);
+    this.infraTools = new InfraTools(workspace, daemon, taskId);
+    this.knowledgeGraphTools = new KnowledgeGraphTools(workspace, daemon, taskId);
+    this.scrapingTools = new ScrapingTools(workspace, daemon, taskId);
     // Some unit tests stub daemon as a plain object. Make channel history tools optional.
     const dbGetter = (daemon as any)?.getDatabase;
     if (typeof dbGetter === "function") {
@@ -357,6 +367,8 @@ export class ToolRegistry {
     this.sharePointTools.setWorkspace(workspace);
     this.voiceCallTools.setWorkspace(workspace);
     this.gitTools.setWorkspace(workspace);
+    this.knowledgeGraphTools.setWorkspace(workspace);
+    this.scrapingTools.setWorkspace(workspace);
   }
 
   /**
@@ -518,10 +530,30 @@ export class ToolRegistry {
     // Always add cron/scheduling tools (enables task scheduling)
     allTools.push(...CronTools.getToolDefinitions());
 
+    // Infrastructure tools (cloud sandboxes, domains, wallet, x402 payments)
+    // Only add when infrastructure is enabled in settings
+    try {
+      const infraSettings = InfraSettingsManager.loadSettings();
+      if (infraSettings.enabled) {
+        allTools.push(...InfraTools.getToolDefinitions());
+      }
+    } catch {
+      // InfraSettingsManager may not be initialized yet
+    }
+
     // Canvas/visual tools require a desktop UI; skip in headless mode (VPS/server).
     if (!headless) {
       allTools.push(...CanvasTools.getToolDefinitions());
       allTools.push(...VisualTools.getToolDefinitions());
+    }
+
+    // Knowledge graph tools (entity/relationship management)
+    allTools.push(...KnowledgeGraphTools.getToolDefinitions());
+
+    // Scraping tools (Scrapling integration - anti-bot, stealth, structured extraction)
+    // Only add when scraping is enabled in settings
+    if (ScrapingTools.isEnabled()) {
+      allTools.push(...ScrapingTools.getToolDefinitions());
     }
 
     // Always add mention tools (enables multi-agent collaboration)
@@ -1298,6 +1330,17 @@ ${skillDescriptions}`;
     // Cron/scheduling tools
     if (name === "schedule_task") return await this.cronTools.executeAction(input);
 
+    // Infrastructure tools (cloud sandboxes, domains, wallet, x402 payments)
+    if (
+      name.startsWith("cloud_sandbox_") ||
+      name.startsWith("domain_") ||
+      name.startsWith("wallet_") ||
+      name.startsWith("x402_") ||
+      name === "infra_status"
+    ) {
+      return await this.infraTools.executeTool(name, input);
+    }
+
     // Canvas tools
     if (name === "canvas_create") return await this.canvasTools.createCanvas(input.title);
     if (name === "canvas_push") {
@@ -1476,6 +1519,11 @@ ${skillDescriptions}`;
       return await this.resumeAgent(input);
     }
 
+    // Knowledge graph tools
+    if (KnowledgeGraphTools.isKnowledgeGraphTool(name)) {
+      return await this.knowledgeGraphTools.executeTool(name, input);
+    }
+
     // MCP tools (prefixed with mcp_ by default)
     const mcpToolResult = await this.tryExecuteMCPTool(name, input);
     if (mcpToolResult !== null) {
@@ -1516,7 +1564,7 @@ ${skillDescriptions}`;
 
     if (mcpToolName === MCP_PAYMENT_TOOL_NAME) {
       const amount = extractPaymentAmountFromX402Tool(input, mcpToolDefinition);
-      const limitError = getConwayPaymentLimitError(input, mcpToolDefinition);
+      const limitError = getMcpPaymentLimitError(input, mcpToolDefinition);
       if (limitError) {
         throw new Error(limitError);
       }
@@ -1531,14 +1579,12 @@ ${skillDescriptions}`;
         this.daemon,
         this.taskId,
         "external_service",
-        `Approve Conway payment request: ${mcpToolName}`,
+        `Approve MCP payment request: ${mcpToolName}`,
         {
           tool: `mcp_${mcpToolName}`,
           params: input ?? null,
           reason:
-            amount !== null
-              ? `Conway payment operation (${amount} USDC)`
-              : "Conway payment operation",
+            amount !== null ? `MCP payment operation (${amount} USDC)` : "MCP payment operation",
         },
       );
       if (approved !== true) {

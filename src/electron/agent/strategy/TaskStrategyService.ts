@@ -8,6 +8,7 @@ export interface DerivedTaskStrategy {
   answerFirst: boolean;
   boundedResearch: boolean;
   timeoutFinalizeBias: boolean;
+  preflightRequired: boolean;
 }
 
 export const STRATEGY_CONTEXT_OPEN = "[AGENT_STRATEGY_CONTEXT_V1]";
@@ -23,6 +24,7 @@ export class TaskStrategyService {
         answerFirst: true,
         boundedResearch: true,
         timeoutFinalizeBias: true,
+        preflightRequired: false,
       },
       advice: {
         conversationMode: "hybrid",
@@ -31,6 +33,7 @@ export class TaskStrategyService {
         answerFirst: true,
         boundedResearch: true,
         timeoutFinalizeBias: true,
+        preflightRequired: false,
       },
       planning: {
         conversationMode: "hybrid",
@@ -39,6 +42,7 @@ export class TaskStrategyService {
         answerFirst: true,
         boundedResearch: true,
         timeoutFinalizeBias: true,
+        preflightRequired: false,
       },
       execution: {
         conversationMode: "task",
@@ -47,6 +51,7 @@ export class TaskStrategyService {
         answerFirst: false,
         boundedResearch: true,
         timeoutFinalizeBias: true,
+        preflightRequired: false,
       },
       mixed: {
         conversationMode: "hybrid",
@@ -55,8 +60,22 @@ export class TaskStrategyService {
         answerFirst: true,
         boundedResearch: true,
         timeoutFinalizeBias: true,
+        preflightRequired: false,
+      },
+      thinking: {
+        conversationMode: "think",
+        maxTurns: 20,
+        qualityPasses: 1,
+        answerFirst: true,
+        boundedResearch: true,
+        timeoutFinalizeBias: true,
+        preflightRequired: false,
       },
     };
+
+    // Enable pre-flight framing for complex execution/mixed tasks
+    const preflightRequired =
+      (route.intent === "execution" || route.intent === "mixed") && route.complexity === "high";
 
     const base = defaults[route.intent];
     return {
@@ -66,6 +85,7 @@ export class TaskStrategyService {
       answerFirst: base.answerFirst,
       boundedResearch: base.boundedResearch,
       timeoutFinalizeBias: base.timeoutFinalizeBias,
+      preflightRequired,
     };
   }
 
@@ -82,6 +102,9 @@ export class TaskStrategyService {
     }
     if (!next.qualityPasses) {
       next.qualityPasses = strategy.qualityPasses;
+    }
+    if (strategy.preflightRequired) {
+      next.preflightRequired = true;
     }
     return next;
   }
@@ -100,15 +123,26 @@ export class TaskStrategyService {
       STRATEGY_CONTEXT_OPEN,
       `intent=${route.intent}`,
       `confidence=${route.confidence.toFixed(2)}`,
+      `complexity=${route.complexity}`,
       `conversation_mode=${strategy.conversationMode}`,
       `answer_first=${strategy.answerFirst ? "true" : "false"}`,
       `bounded_research=${strategy.boundedResearch ? "true" : "false"}`,
       `timeout_finalize_bias=${strategy.timeoutFinalizeBias ? "true" : "false"}`,
-      "execution_contract:",
-      "- Directly answer the user question before any deep expansion.",
-      "- Keep research/tool loops bounded; stop once the answer is supportable.",
-      "- Never end silently. Always return a complete best-effort answer.",
     ];
+
+    if (route.intent === "thinking") {
+      // Behavioural rules live in the system prompt (buildChatOrThinkSystemPrompt).
+      // The decorated prompt only marks the contract type so the executor
+      // can detect think-mode from the prompt metadata.
+      lines.push("thinking_contract: active");
+    } else {
+      lines.push(
+        "execution_contract:",
+        "- Directly answer the user question before any deep expansion.",
+        "- Keep research/tool loops bounded; stop once the answer is supportable.",
+        "- Never end silently. Always return a complete best-effort answer.",
+      );
+    }
 
     if (relationshipContext) {
       lines.push("relationship_memory:");

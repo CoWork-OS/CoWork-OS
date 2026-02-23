@@ -11,11 +11,9 @@ import type {
   AgentThought,
   AgentPerformanceReview,
   AgentReviewGenerateRequest,
-  ConwayCreditHistoryEntry,
-  ConwayCreditsBalance,
-  ConwaySettings,
-  ConwaySetupStatus,
-  ConwayWalletInfo,
+  InfraSettings,
+  InfraStatus,
+  WalletInfo,
   CreateAgentTeamItemRequest,
   CreateAgentTeamMemberRequest,
   CreateAgentTeamRequest,
@@ -290,6 +288,8 @@ const IPC_CHANNELS = {
   GATEWAY_GRANT_ACCESS: "gateway:grantAccess",
   GATEWAY_REVOKE_ACCESS: "gateway:revokeAccess",
   GATEWAY_GENERATE_PAIRING: "gateway:generatePairing",
+  GATEWAY_LIST_CHATS: "gateway:listChats",
+  GATEWAY_SEND_TEST_MESSAGE: "gateway:sendTestMessage",
   // Search Settings
   SEARCH_GET_SETTINGS: "search:getSettings",
   SEARCH_SAVE_SETTINGS: "search:saveSettings",
@@ -411,20 +411,21 @@ const IPC_CHANNELS = {
   MCP_HOST_START: "mcp:hostStart",
   MCP_HOST_STOP: "mcp:hostStop",
   MCP_HOST_GET_STATUS: "mcp:hostGetStatus",
-  // Conway Terminal
-  CONWAY_GET_STATUS: "conway:getStatus",
-  CONWAY_GET_SETTINGS: "conway:getSettings",
-  CONWAY_SAVE_SETTINGS: "conway:saveSettings",
-  CONWAY_SETUP: "conway:setup",
-  CONWAY_GET_BALANCE: "conway:getBalance",
-  CONWAY_GET_WALLET: "conway:getWallet",
-  CONWAY_GET_CREDIT_HISTORY: "conway:getCreditHistory",
-  CONWAY_CONNECT: "conway:connect",
-  CONWAY_DISCONNECT: "conway:disconnect",
-  CONWAY_RESET: "conway:reset",
-  CONWAY_WALLET_RESTORE: "conway:walletRestore",
-  CONWAY_WALLET_VERIFY: "conway:walletVerify",
-  CONWAY_STATUS_CHANGE: "conway:statusChange",
+  // Infrastructure
+  INFRA_GET_STATUS: "infra:getStatus",
+  INFRA_GET_SETTINGS: "infra:getSettings",
+  INFRA_SAVE_SETTINGS: "infra:saveSettings",
+  INFRA_SETUP: "infra:setup",
+  INFRA_GET_WALLET: "infra:getWallet",
+  INFRA_WALLET_RESTORE: "infra:walletRestore",
+  INFRA_WALLET_VERIFY: "infra:walletVerify",
+  INFRA_RESET: "infra:reset",
+  INFRA_STATUS_CHANGE: "infra:statusChange",
+  // Scraping (Scrapling)
+  SCRAPING_GET_SETTINGS: "scraping:getSettings",
+  SCRAPING_SAVE_SETTINGS: "scraping:saveSettings",
+  SCRAPING_GET_STATUS: "scraping:getStatus",
+  SCRAPING_RESET: "scraping:reset",
   // Built-in Tools Settings
   BUILTIN_TOOLS_GET_SETTINGS: "builtinTools:getSettings",
   BUILTIN_TOOLS_SAVE_SETTINGS: "builtinTools:saveSettings",
@@ -711,6 +712,10 @@ const IPC_CHANNELS = {
   COMPARISON_LIST: "comparison:list",
   COMPARISON_CANCEL: "comparison:cancel",
   COMPARISON_GET_RESULT: "comparison:getResult",
+  // Usage Insights
+  USAGE_INSIGHTS_GET: "usageInsights:get",
+  // Daily Briefing
+  DAILY_BRIEFING_GENERATE: "dailyBriefing:generate",
 } as const;
 
 // Mobile Companion Node types (inlined for sandboxed preload)
@@ -2038,6 +2043,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
   testGatewayChannel: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.GATEWAY_TEST_CHANNEL, id),
   getGatewayUsers: (channelId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.GATEWAY_GET_USERS, channelId),
+  getGatewayChats: (channelId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.GATEWAY_LIST_CHATS, channelId) as Promise<
+      Array<{ chatId: string; lastTimestamp: number }>
+    >,
+  sendGatewayTestMessage: (data: { channelType: string; channelDbId?: string; chatId: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.GATEWAY_SEND_TEST_MESSAGE, data) as Promise<{ ok: boolean }>,
   grantGatewayAccess: (channelId: string, userId: string, displayName?: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.GATEWAY_GRANT_ACCESS, { channelId, userId, displayName }),
   revokeGatewayAccess: (channelId: string, userId: string) =>
@@ -2284,25 +2295,28 @@ contextBridge.exposeInMainWorld("electronAPI", {
   stopMCPHost: () => ipcRenderer.invoke(IPC_CHANNELS.MCP_HOST_STOP),
   getMCPHostStatus: () => ipcRenderer.invoke(IPC_CHANNELS.MCP_HOST_GET_STATUS),
 
-  // Conway Terminal APIs
-  conwayGetStatus: () => ipcRenderer.invoke(IPC_CHANNELS.CONWAY_GET_STATUS),
-  conwayGetSettings: () => ipcRenderer.invoke(IPC_CHANNELS.CONWAY_GET_SETTINGS),
-  conwaySaveSettings: (settings: ConwaySettings) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CONWAY_SAVE_SETTINGS, settings),
-  conwaySetup: () => ipcRenderer.invoke(IPC_CHANNELS.CONWAY_SETUP),
-  conwayGetBalance: () => ipcRenderer.invoke(IPC_CHANNELS.CONWAY_GET_BALANCE),
-  conwayGetWallet: () => ipcRenderer.invoke(IPC_CHANNELS.CONWAY_GET_WALLET),
-  conwayGetCreditHistory: () => ipcRenderer.invoke(IPC_CHANNELS.CONWAY_GET_CREDIT_HISTORY),
-  conwayConnect: () => ipcRenderer.invoke(IPC_CHANNELS.CONWAY_CONNECT),
-  conwayDisconnect: () => ipcRenderer.invoke(IPC_CHANNELS.CONWAY_DISCONNECT),
-  conwayReset: () => ipcRenderer.invoke(IPC_CHANNELS.CONWAY_RESET),
-  conwayWalletRestore: () => ipcRenderer.invoke(IPC_CHANNELS.CONWAY_WALLET_RESTORE),
-  conwayWalletVerify: () => ipcRenderer.invoke(IPC_CHANNELS.CONWAY_WALLET_VERIFY),
-  onConwayStatusChange: (callback: (status: ConwaySetupStatus) => void) => {
-    const subscription = (_: unknown, status: ConwaySetupStatus) => callback(status);
-    ipcRenderer.on(IPC_CHANNELS.CONWAY_STATUS_CHANGE, subscription);
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.CONWAY_STATUS_CHANGE, subscription);
+  // Infrastructure APIs
+  infraGetStatus: () => ipcRenderer.invoke(IPC_CHANNELS.INFRA_GET_STATUS),
+  infraGetSettings: () => ipcRenderer.invoke(IPC_CHANNELS.INFRA_GET_SETTINGS),
+  infraSaveSettings: (settings: InfraSettings) =>
+    ipcRenderer.invoke(IPC_CHANNELS.INFRA_SAVE_SETTINGS, settings),
+  infraSetup: () => ipcRenderer.invoke(IPC_CHANNELS.INFRA_SETUP),
+  infraGetWallet: () => ipcRenderer.invoke(IPC_CHANNELS.INFRA_GET_WALLET),
+  infraWalletRestore: () => ipcRenderer.invoke(IPC_CHANNELS.INFRA_WALLET_RESTORE),
+  infraWalletVerify: () => ipcRenderer.invoke(IPC_CHANNELS.INFRA_WALLET_VERIFY),
+  infraReset: () => ipcRenderer.invoke(IPC_CHANNELS.INFRA_RESET),
+  onInfraStatusChange: (callback: (status: InfraStatus) => void) => {
+    const subscription = (_: unknown, status: InfraStatus) => callback(status);
+    ipcRenderer.on(IPC_CHANNELS.INFRA_STATUS_CHANGE, subscription);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.INFRA_STATUS_CHANGE, subscription);
   },
+
+  // Scraping (Scrapling) APIs
+  scrapingGetSettings: () => ipcRenderer.invoke(IPC_CHANNELS.SCRAPING_GET_SETTINGS),
+  scrapingSaveSettings: (settings: any) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SCRAPING_SAVE_SETTINGS, settings),
+  scrapingGetStatus: () => ipcRenderer.invoke(IPC_CHANNELS.SCRAPING_GET_STATUS),
+  scrapingReset: () => ipcRenderer.invoke(IPC_CHANNELS.SCRAPING_RESET),
 
   // Built-in Tools Settings APIs
   getBuiltinToolsSettings: () => ipcRenderer.invoke(IPC_CHANNELS.BUILTIN_TOOLS_GET_SETTINGS),
@@ -2932,6 +2946,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.COMPARISON_CANCEL, sessionId),
   getComparisonResult: (sessionId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.COMPARISON_GET_RESULT, sessionId),
+
+  // Usage Insights
+  getUsageInsights: (workspaceId: string, periodDays?: number) =>
+    ipcRenderer.invoke(IPC_CHANNELS.USAGE_INSIGHTS_GET, workspaceId, periodDays),
+
+  // Daily Briefing
+  generateDailyBriefing: (workspaceId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.DAILY_BRIEFING_GENERATE, workspaceId),
 });
 
 // Type declarations for TypeScript
@@ -3152,6 +3174,12 @@ export interface ElectronAPI {
     id: string,
   ) => Promise<{ success: boolean; error?: string; botUsername?: string }>;
   getGatewayUsers: (channelId: string) => Promise<any[]>;
+  getGatewayChats: (channelId: string) => Promise<Array<{ chatId: string; lastTimestamp: number }>>;
+  sendGatewayTestMessage: (data: {
+    channelType: string;
+    channelDbId?: string;
+    chatId: string;
+  }) => Promise<{ ok: boolean }>;
   grantGatewayAccess: (channelId: string, userId: string, displayName?: string) => Promise<void>;
   revokeGatewayAccess: (channelId: string, userId: string) => Promise<void>;
   generateGatewayPairing: (
@@ -3435,7 +3463,7 @@ export interface ElectronAPI {
       | "green"
       | "teal"
       | "coral";
-    uiDensity?: "focused" | "full";
+    uiDensity?: "focused" | "full" | "power";
     language?: string;
     disclaimerAccepted?: boolean;
     onboardingCompleted?: boolean;
@@ -3455,7 +3483,7 @@ export interface ElectronAPI {
       | "green"
       | "teal"
       | "coral";
-    uiDensity?: "focused" | "full";
+    uiDensity?: "focused" | "full" | "power";
     language?: string;
     disclaimerAccepted?: boolean;
     onboardingCompleted?: boolean;
@@ -3713,20 +3741,26 @@ export interface ElectronAPI {
   startMCPHost: (port?: number) => Promise<{ success: boolean; port?: number }>;
   stopMCPHost: () => Promise<void>;
   getMCPHostStatus: () => Promise<{ running: boolean; port?: number }>;
-  // Conway Terminal
-  conwayGetStatus: () => Promise<ConwaySetupStatus>;
-  conwayGetSettings: () => Promise<ConwaySettings>;
-  conwaySaveSettings: (settings: ConwaySettings) => Promise<{ success: boolean }>;
-  conwaySetup: () => Promise<ConwaySetupStatus>;
-  conwayGetBalance: () => Promise<ConwayCreditsBalance | null>;
-  conwayGetWallet: () => Promise<ConwayWalletInfo | null>;
-  conwayGetCreditHistory: () => Promise<ConwayCreditHistoryEntry[]>;
-  conwayConnect: () => Promise<{ success: boolean }>;
-  conwayDisconnect: () => Promise<{ success: boolean }>;
-  conwayReset: () => Promise<{ success: boolean }>;
-  conwayWalletRestore: () => Promise<{ success: boolean; address?: string }>;
-  conwayWalletVerify: () => Promise<{ status: string; address?: string }>;
-  onConwayStatusChange: (callback: (status: ConwaySetupStatus) => void) => () => void;
+  // Infrastructure
+  infraGetStatus: () => Promise<InfraStatus>;
+  infraGetSettings: () => Promise<InfraSettings>;
+  infraSaveSettings: (settings: InfraSettings) => Promise<{ success: boolean }>;
+  infraSetup: () => Promise<InfraStatus>;
+  infraGetWallet: () => Promise<WalletInfo | null>;
+  infraWalletRestore: () => Promise<{ success: boolean; address?: string; status: string }>;
+  infraWalletVerify: () => Promise<{ status: string; address?: string }>;
+  infraReset: () => Promise<{ success: boolean }>;
+  onInfraStatusChange: (callback: (status: InfraStatus) => void) => () => void;
+  // Scraping (Scrapling)
+  scrapingGetSettings: () => Promise<any>;
+  scrapingSaveSettings: (settings: any) => Promise<{ success: boolean }>;
+  scrapingGetStatus: () => Promise<{
+    installed: boolean;
+    pythonAvailable: boolean;
+    version: string | null;
+    error?: string;
+  }>;
+  scrapingReset: () => Promise<{ success: boolean }>;
   // Built-in Tools Settings
   getBuiltinToolsSettings: () => Promise<BuiltinToolsSettings>;
   saveBuiltinToolsSettings: (settings: BuiltinToolsSettings) => Promise<{ success: boolean }>;
@@ -4215,6 +4249,12 @@ export interface ElectronAPI {
   listComparisons: (workspaceId: string) => Promise<any[]>;
   cancelComparison: (sessionId: string) => Promise<{ success: boolean }>;
   getComparisonResult: (sessionId: string) => Promise<any>;
+
+  // Usage Insights
+  getUsageInsights: (workspaceId: string, periodDays?: number) => Promise<any>;
+
+  // Daily Briefing
+  generateDailyBriefing: (workspaceId: string) => Promise<any>;
 }
 
 // Migration status type (for showing one-time notifications after app rename)

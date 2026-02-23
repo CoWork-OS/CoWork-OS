@@ -1,6 +1,8 @@
 import { ConversationMode } from "../../../shared/types";
 
-export type RoutedIntent = "chat" | "advice" | "planning" | "execution" | "mixed";
+export type RoutedIntent = "chat" | "advice" | "planning" | "execution" | "mixed" | "thinking";
+
+export type TaskComplexity = "low" | "medium" | "high";
 
 export interface IntentRoute {
   intent: RoutedIntent;
@@ -8,6 +10,7 @@ export interface IntentRoute {
   conversationMode: ConversationMode;
   answerFirst: boolean;
   signals: string[];
+  complexity: TaskComplexity;
 }
 
 interface IntentScores {
@@ -15,6 +18,7 @@ interface IntentScores {
   advice: number;
   planning: number;
   execution: number;
+  thinking: number;
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -25,7 +29,7 @@ export class IntentRouter {
   static route(title: string, prompt: string): IntentRoute {
     const text = `${title || ""}\n${prompt || ""}`.trim();
     const lower = text.toLowerCase();
-    const scores: IntentScores = { chat: 0, advice: 0, planning: 0, execution: 0 };
+    const scores: IntentScores = { chat: 0, advice: 0, planning: 0, execution: 0, thinking: 0 };
     const signals: string[] = [];
 
     const add = (
@@ -105,12 +109,33 @@ export class IntentRouter {
       ),
     );
 
+    // "Think with me" mode — Socratic reasoning, not task execution
+    add(
+      "thinking",
+      3,
+      "think-with-me",
+      /\b(think (with|through|about) (me|this|it)|brainstorm|let'?s think|help me (think|decide|figure|reason)|weigh (the |my )?options)\b/.test(
+        lower,
+      ),
+    );
+    add(
+      "thinking",
+      2,
+      "exploratory-reasoning",
+      /\b(pros and cons|trade-?offs|what if|devil'?s advocate|on the other hand|explore (the |my )?(idea|options|angles))\b/.test(
+        lower,
+      ),
+    );
+
     const planningLike = scores.planning + scores.advice;
     const executionLike = scores.execution;
     const chatLike = scores.chat;
+    const thinkingLike = scores.thinking;
 
     let intent: RoutedIntent;
-    if (chatLike >= 3 && planningLike === 0 && executionLike === 0) {
+    if (thinkingLike >= 3 && executionLike < 3) {
+      intent = "thinking";
+    } else if (chatLike >= 3 && planningLike === 0 && executionLike === 0 && thinkingLike === 0) {
       intent = "chat";
     } else if (planningLike >= 3 && executionLike >= 3) {
       intent = "mixed";
@@ -130,14 +155,42 @@ export class IntentRouter {
       intent = "chat";
     }
 
-    const confidenceBase = Math.max(chatLike, planningLike, executionLike);
+    const confidenceBase = Math.max(chatLike, planningLike, executionLike, thinkingLike);
     const confidenceSpread = Math.abs(planningLike + executionLike - chatLike);
     const confidence = clamp(0.55 + confidenceBase * 0.08 + confidenceSpread * 0.02, 0.55, 0.95);
 
     const conversationMode: ConversationMode =
-      intent === "chat" ? "chat" : intent === "execution" ? "task" : "hybrid";
+      intent === "chat"
+        ? "chat"
+        : intent === "thinking"
+          ? "think"
+          : intent === "execution"
+            ? "task"
+            : "hybrid";
 
-    const answerFirst = intent === "advice" || intent === "planning" || intent === "mixed";
+    const answerFirst =
+      intent === "advice" || intent === "planning" || intent === "mixed" || intent === "thinking";
+
+    // Complexity scoring: how multi-faceted or demanding is this prompt?
+    const wordCount = text.split(/\s+/).length;
+    const actionVerbCount = (
+      lower.match(
+        /\b(create|build|edit|write|fix|deploy|run|install|execute|configure|implement|update|modify|delete|remove|test|verify)\b/g,
+      ) || []
+    ).length;
+    const hasMultipleSteps =
+      /\b(then|after that|next|also|additionally|and then|finally|first|second|third)\b/.test(
+        lower,
+      );
+
+    let complexity: TaskComplexity;
+    if (wordCount > 150 || actionVerbCount >= 4 || (hasMultipleSteps && actionVerbCount >= 2)) {
+      complexity = "high";
+    } else if (wordCount > 60 || actionVerbCount >= 2 || hasMultipleSteps) {
+      complexity = "medium";
+    } else {
+      complexity = "low";
+    }
 
     return {
       intent,
@@ -145,6 +198,7 @@ export class IntentRouter {
       conversationMode,
       answerFirst,
       signals,
+      complexity,
     };
   }
 }

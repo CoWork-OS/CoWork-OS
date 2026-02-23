@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useCallback, Fragment } from "react";
-import { Task, Workspace, UiDensity, ConwaySetupStatus } from "../../shared/types";
+import { Task, Workspace, UiDensity, InfraStatus } from "../../shared/types";
 
 interface SidebarProps {
   workspace: Workspace | null;
@@ -877,7 +877,7 @@ export function Sidebar({
 
       {/* Footer */}
       <div className="sidebar-footer cli-sidebar-footer">
-        <ConwayWalletBadge onOpenSettings={onOpenSettings} />
+        <InfraWalletBadge onOpenSettings={onOpenSettings} />
         <div className="cli-footer-actions">
           <button
             className="settings-btn cli-settings-btn"
@@ -908,26 +908,22 @@ export function Sidebar({
   );
 }
 
-function ConwayWalletBadge({ onOpenSettings }: { onOpenSettings: () => void }) {
+function InfraWalletBadge({ onOpenSettings }: { onOpenSettings: () => void }) {
   const [balance, setBalance] = useState<string | null>(null);
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
     const ipcAPI = window.electronAPI;
-    if (!ipcAPI?.conwayGetStatus || !ipcAPI?.conwayGetSettings) return;
+    if (!ipcAPI?.infraGetStatus || !ipcAPI?.infraGetSettings) return;
 
     const load = async () => {
       try {
         const [status, settings] = await Promise.all([
-          ipcAPI.conwayGetStatus(),
-          ipcAPI.conwayGetSettings(),
+          ipcAPI.infraGetStatus(),
+          ipcAPI.infraGetSettings(),
         ]);
-        if (
-          settings?.showWalletInSidebar &&
-          status?.state === "ready" &&
-          status?.balance?.balance
-        ) {
-          setBalance(String(status.balance.balance));
+        if (settings?.showWalletInSidebar && status?.enabled && status?.wallet?.balanceUsdc) {
+          setBalance(status.wallet.balanceUsdc);
           setVisible(true);
         } else {
           setVisible(false);
@@ -939,9 +935,9 @@ function ConwayWalletBadge({ onOpenSettings }: { onOpenSettings: () => void }) {
 
     load();
 
-    const unsubscribe = ipcAPI.onConwayStatusChange?.((status: ConwaySetupStatus) => {
-      if (status?.state === "ready" && status?.balance?.balance) {
-        setBalance(String(status.balance.balance));
+    const unsubscribe = ipcAPI.onInfraStatusChange?.((status: InfraStatus) => {
+      if (status?.enabled && status?.wallet?.balanceUsdc) {
+        setBalance(status.wallet.balanceUsdc);
         setVisible(true);
       }
     });
@@ -953,10 +949,10 @@ function ConwayWalletBadge({ onOpenSettings }: { onOpenSettings: () => void }) {
   return (
     <button
       type="button"
-      className="conway-wallet-badge"
+      className="infra-wallet-badge"
       onClick={onOpenSettings}
-      title="Conway Terminal — click to open settings"
-      aria-label="Open Conway Terminal settings"
+      title="Infrastructure — click to open settings"
+      aria-label="Open Infrastructure settings"
     >
       <svg
         width="12"
@@ -968,7 +964,7 @@ function ConwayWalletBadge({ onOpenSettings }: { onOpenSettings: () => void }) {
       >
         <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
       </svg>
-      <span className="conway-wallet-balance">{balance} USDC</span>
+      <span className="infra-wallet-balance">{balance} USDC</span>
     </button>
   );
 }

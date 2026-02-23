@@ -1,0 +1,26 @@
+{
+  "id": "idea-validation",
+  "name": "Idea Validation",
+  "description": "Validate a business or product idea with market research, competitor analysis, and a go/no-go recommendation",
+  "icon": "💡",
+  "category": "Research",
+  "prompt": "Validate this idea: {{idea}}\n\nRun a structured validation process:\n\n1. **Problem Statement**\n   - Clearly define the problem this idea solves\n   - Who experiences this problem? How often? How painful is it?\n   - What do people currently do to solve it?\n\n2. **Market Size Estimation**\n   - Estimate the Total Addressable Market (TAM)\n   - Serviceable Available Market (SAM)\n   - Serviceable Obtainable Market (SOM)\n   - Use web search to find supporting data points\n\n3. **Competitor Scan**\n   - Find 3-5 existing solutions (direct and indirect)\n   - Rate each on a scale of 1-5 for: feature completeness, UX quality, pricing fairness\n   - Identify the biggest gaps across all competitors\n\n4. **Unique Angle**\n   - What could make this idea 10x better than existing solutions?\n   - What's the unfair advantage or unique insight?\n   - Is there a defensible moat (network effects, data, brand, technology)?\n\n5. **MVP Scope**\n   - Define the minimum viable product (3-5 core features only)\n   - What's the simplest version that tests the core hypothesis?\n   - Suggested tech stack or approach\n\n6. **Customer Discovery Questions**\n   - Write 5 questions to ask potential users to validate demand\n   - Focus on behavior and willingness to pay, not hypotheticals\n\n7. **Go / No-Go Recommendation**\n   - Score the idea on: Problem severity (1-10), Market size (1-10), Competition (1-10), Feasibility (1-10)\n   - Overall recommendation with clear reasoning\n   - Key risks and how to mitigate them\n\nWrite the full validation report to:\n- `{artifactDir}/idea-validation.md`",
+  "parameters": [
+    {
+      "name": "idea",
+      "type": "string",
+      "description": "Description of the business or product idea to validate",
+      "required": true
+    }
+  ],
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when a user wants to validate an idea, assess market viability, or decide whether to pursue a concept.",
+      "dontUseWhen": "Don't use for ideas that are already validated or when the user just wants competitor research (use competitive-research instead).",
+      "outputs": "Structured validation report with market sizing, competitor analysis, MVP definition, and go/no-go recommendation.",
+      "successCriteria": "Provides a clear, data-informed recommendation with specific next steps.",
+      "expectedArtifacts": ["idea-validation.md"]
+    }
+  }
+}

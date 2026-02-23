@@ -4,6 +4,7 @@ import { useVoiceInput } from "../../hooks/useVoiceInput";
 import { AwakeningOrb } from "./AwakeningOrb";
 import { TypewriterText } from "./TypewriterText";
 import type { LLMProviderType, PersonaId } from "../../../shared/types";
+import { STARTER_MISSIONS } from "../../../shared/starter-missions";
 
 interface OnboardingProps {
   onComplete: (dontShowAgain: boolean) => void;
@@ -179,11 +180,8 @@ const clearOnboardingUiDraft = (): void => {
   }
 };
 
-const FINAL_TRY_SUGGESTIONS = [
-  "Plan my next 30 minutes.",
-  "Draft a short follow-up email.",
-  "Summarize what I should focus on today.",
-];
+// Use shared starter missions — pick a subset for the onboarding final step
+const FINAL_TRY_SUGGESTIONS = STARTER_MISSIONS.slice(0, 8);
 
 type RecapEditableField = "name" | "persona" | "style" | "memory" | "voice";
 type RecapDataUpdates = {
@@ -1335,16 +1333,16 @@ export function Onboarding({ onComplete }: OnboardingProps) {
       </p>
 
       <div className="onboarding-final-try-suggestions">
-        {FINAL_TRY_SUGGESTIONS.map((suggestion) => (
+        {FINAL_TRY_SUGGESTIONS.map((mission) => (
           <button
-            key={suggestion}
+            key={mission.title}
             className="onboarding-final-try-suggestion"
             onClick={() => {
-              setInputValue(suggestion);
+              setInputValue(mission.prompt);
               setVoiceError(null);
             }}
           >
-            {suggestion}
+            {mission.title}
           </button>
         ))}
       </div>
@@ -1497,9 +1495,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
             onClick={() => onboarding.selectProvider(provider.id)}
           >
             {provider.name}
-            {provider.badge && (
-              <span className="onboarding-provider-badge">{provider.badge}</span>
-            )}
+            {provider.badge && <span className="onboarding-provider-badge">{provider.badge}</span>}
           </button>
         ))}
       </div>

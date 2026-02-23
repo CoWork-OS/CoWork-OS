@@ -583,6 +583,7 @@ export class DatabaseManager {
     // Initialize FTS5 for memory search (separate exec to handle if not supported)
     this.initializeMemoryFTS();
     this.initializeMarkdownMemoryFTS();
+    this.initializeKnowledgeGraphFTS();
 
     // Run migrations for task-retry tracking columns (SQLite ALTER TABLE ADD COLUMN is safe if column exists)
     this.runMigrations();
@@ -1279,7 +1280,9 @@ export class DatabaseManager {
     }
 
     try {
-      this.db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_comparison_session ON tasks(comparison_session_id)");
+      this.db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_tasks_comparison_session ON tasks(comparison_session_id)",
+      );
     } catch {
       // Index already exists
     }
@@ -1368,6 +1371,241 @@ export class DatabaseManager {
       `);
     } catch {
       // Best-effort reconciliation for older databases
+    }
+
+    // ============ Persistent Teams Migration ============
+    try {
+      this.db.exec("ALTER TABLE agent_teams ADD COLUMN persistent INTEGER DEFAULT 0");
+    } catch {
+      // Column already exists
+    }
+    try {
+      this.db.exec("ALTER TABLE agent_teams ADD COLUMN default_workspace_id TEXT");
+    } catch {
+      // Column already exists
+    }
+
+    // ============ Knowledge Graph Tables ============
+
+    try {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS kg_entity_types (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          description TEXT,
+          color TEXT,
+          icon TEXT,
+          is_builtin INTEGER DEFAULT 0,
+          created_at INTEGER NOT NULL,
+          UNIQUE(workspace_id, name)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_kg_entity_types_workspace ON kg_entity_types(workspace_id);
+        CREATE INDEX IF NOT EXISTS idx_kg_entity_types_name ON kg_entity_types(workspace_id, name);
+      `);
+    } catch {
+      // Table already exists
+    }
+
+    try {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS kg_entities (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          entity_type_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          description TEXT,
+          properties TEXT DEFAULT '{}',
+          confidence REAL DEFAULT 1.0,
+          source TEXT DEFAULT 'manual',
+          source_task_id TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          FOREIGN KEY (entity_type_id) REFERENCES kg_entity_types(id),
+          UNIQUE(workspace_id, entity_type_id, name)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_kg_entities_workspace ON kg_entities(workspace_id);
+        CREATE INDEX IF NOT EXISTS idx_kg_entities_type ON kg_entities(entity_type_id);
+        CREATE INDEX IF NOT EXISTS idx_kg_entities_name ON kg_entities(workspace_id, name);
+        CREATE INDEX IF NOT EXISTS idx_kg_entities_source ON kg_entities(source);
+        CREATE INDEX IF NOT EXISTS idx_kg_entities_confidence ON kg_entities(confidence);
+      `);
+    } catch {
+      // Table already exists
+    }
+
+    try {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS kg_edges (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          source_entity_id TEXT NOT NULL,
+          target_entity_id TEXT NOT NULL,
+          edge_type TEXT NOT NULL,
+          properties TEXT DEFAULT '{}',
+          confidence REAL DEFAULT 1.0,
+          source TEXT DEFAULT 'manual',
+          source_task_id TEXT,
+          created_at INTEGER NOT NULL,
+          FOREIGN KEY (source_entity_id) REFERENCES kg_entities(id) ON DELETE CASCADE,
+          FOREIGN KEY (target_entity_id) REFERENCES kg_entities(id) ON DELETE CASCADE,
+          UNIQUE(workspace_id, source_entity_id, target_entity_id, edge_type)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_kg_edges_workspace ON kg_edges(workspace_id);
+        CREATE INDEX IF NOT EXISTS idx_kg_edges_source ON kg_edges(source_entity_id);
+        CREATE INDEX IF NOT EXISTS idx_kg_edges_target ON kg_edges(target_entity_id);
+        CREATE INDEX IF NOT EXISTS idx_kg_edges_type ON kg_edges(edge_type);
+      `);
+    } catch {
+      // Table already exists
+    }
+
+    try {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS kg_observations (
+          id TEXT PRIMARY KEY,
+          entity_id TEXT NOT NULL,
+          content TEXT NOT NULL,
+          source TEXT DEFAULT 'manual',
+          source_task_id TEXT,
+          created_at INTEGER NOT NULL,
+          FOREIGN KEY (entity_id) REFERENCES kg_entities(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_kg_observations_entity ON kg_observations(entity_id);
+        CREATE INDEX IF NOT EXISTS idx_kg_observations_created ON kg_observations(created_at);
+      `);
+    } catch {
+      // Table already exists
+    }
+
+    // Seed built-in entity types for all workspaces that don't have them yet
+    this.seedKnowledgeGraphTypes();
+  }
+
+  private initializeKnowledgeGraphFTS() {
+    try {
+      this.db.exec(`
+        CREATE VIRTUAL TABLE IF NOT EXISTS kg_entities_fts USING fts5(
+          name,
+          description,
+          content='kg_entities',
+          content_rowid='rowid'
+        );
+
+        -- Trigger to keep FTS in sync on INSERT
+        CREATE TRIGGER IF NOT EXISTS kg_entities_fts_insert AFTER INSERT ON kg_entities BEGIN
+          INSERT INTO kg_entities_fts(rowid, name, description)
+          VALUES (NEW.rowid, NEW.name, NEW.description);
+        END;
+
+        -- Trigger to keep FTS in sync on DELETE
+        CREATE TRIGGER IF NOT EXISTS kg_entities_fts_delete AFTER DELETE ON kg_entities BEGIN
+          INSERT INTO kg_entities_fts(kg_entities_fts, rowid, name, description)
+          VALUES('delete', OLD.rowid, OLD.name, OLD.description);
+        END;
+
+        -- Trigger to keep FTS in sync on UPDATE
+        CREATE TRIGGER IF NOT EXISTS kg_entities_fts_update AFTER UPDATE ON kg_entities BEGIN
+          INSERT INTO kg_entities_fts(kg_entities_fts, rowid, name, description)
+          VALUES('delete', OLD.rowid, OLD.name, OLD.description);
+          INSERT INTO kg_entities_fts(rowid, name, description)
+          VALUES (NEW.rowid, NEW.name, NEW.description);
+        END;
+      `);
+    } catch (error) {
+      console.warn("[DatabaseManager] Knowledge Graph FTS5 initialization failed:", error);
+    }
+  }
+
+  private seedKnowledgeGraphTypes() {
+    try {
+      const workspaces = this.db.prepare("SELECT id FROM workspaces").all() as Array<{
+        id: string;
+      }>;
+      if (workspaces.length === 0) return;
+
+      const builtinTypes: Array<{
+        name: string;
+        description: string;
+        color: string;
+        icon: string;
+      }> = [
+        { name: "person", description: "A person or individual", color: "#3b82f6", icon: "👤" },
+        {
+          name: "organization",
+          description: "A company, team, or organization",
+          color: "#8b5cf6",
+          icon: "🏢",
+        },
+        {
+          name: "project",
+          description: "A project or initiative",
+          color: "#10b981",
+          icon: "📁",
+        },
+        {
+          name: "technology",
+          description: "A programming language, framework, or tool",
+          color: "#f59e0b",
+          icon: "⚙️",
+        },
+        {
+          name: "concept",
+          description: "An abstract idea, pattern, or principle",
+          color: "#6366f1",
+          icon: "💡",
+        },
+        {
+          name: "file",
+          description: "A file or document in the codebase",
+          color: "#64748b",
+          icon: "📄",
+        },
+        {
+          name: "service",
+          description: "A running service, microservice, or daemon",
+          color: "#ef4444",
+          icon: "🔧",
+        },
+        {
+          name: "api_endpoint",
+          description: "An API endpoint or route",
+          color: "#14b8a6",
+          icon: "🔌",
+        },
+        {
+          name: "database_table",
+          description: "A database table or collection",
+          color: "#f97316",
+          icon: "🗃️",
+        },
+        {
+          name: "environment",
+          description: "A deployment environment (dev, staging, production)",
+          color: "#a855f7",
+          icon: "🌐",
+        },
+      ];
+
+      const insertStmt = this.db.prepare(`
+      INSERT OR IGNORE INTO kg_entity_types (id, workspace_id, name, description, color, icon, is_builtin, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+    `);
+
+      const now = Date.now();
+      for (const ws of workspaces) {
+        for (const t of builtinTypes) {
+          // Use deterministic ID: workspace_id + type name
+          const id = `kg-builtin-${ws.id.slice(0, 8)}-${t.name}`;
+          insertStmt.run(id, ws.id, t.name, t.description, t.color, t.icon, now);
+        }
+      }
+    } catch (error) {
+      console.warn("[DatabaseManager] Failed to seed knowledge graph types:", error);
     }
   }
 

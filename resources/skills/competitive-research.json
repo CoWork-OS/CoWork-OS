@@ -1,0 +1,26 @@
+{
+  "id": "competitive-research",
+  "name": "Competitive Research",
+  "description": "Research competitors for a product, market, or idea and identify opportunities to differentiate",
+  "icon": "🔍",
+  "category": "Research",
+  "prompt": "Research the competitive landscape for: {{topic}}\n\nUsing web search, find and analyze:\n\n1. **Top Competitors** (3-5 direct competitors)\n   - Company name, website, and founding year\n   - Core product/service and target audience\n   - Pricing model and tiers (if publicly available)\n\n2. **Feature Comparison**\n   - Key features of each competitor\n   - What they do well (strengths)\n   - What they miss or do poorly (weaknesses)\n\n3. **Market Positioning**\n   - How each competitor positions themselves\n   - Their messaging and value proposition\n   - Target customer profile\n\n4. **Gaps & Opportunities**\n   - Underserved customer segments\n   - Missing features across all competitors\n   - Pricing gaps or positioning whitespace\n   - Emerging trends none of them address\n\n5. **Differentiation Recommendations**\n   - 3 concrete ways to stand out from these competitors\n   - Specific features or positioning angles to pursue\n\nWrite the full analysis as a structured markdown report to:\n- `{artifactDir}/competitive-analysis.md`",
+  "parameters": [
+    {
+      "name": "topic",
+      "type": "string",
+      "description": "The product, market, or idea to research competitors for",
+      "required": true
+    }
+  ],
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when a user asks to research competitors, analyze a market, or find alternatives to a product.",
+      "dontUseWhen": "Don't use for general web research that isn't competitive analysis.",
+      "outputs": "Structured competitive analysis with feature comparison, market positioning, and differentiation recommendations.",
+      "successCriteria": "Identifies at least 3 real competitors with accurate information and provides actionable differentiation advice.",
+      "expectedArtifacts": ["competitive-analysis.md"]
+    }
+  }
+}

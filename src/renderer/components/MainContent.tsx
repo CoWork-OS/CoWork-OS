@@ -2913,10 +2913,9 @@ export function MainContent({
               : autonomousModeEnabled
                 ? { autonomousMode: true }
                 : undefined;
-        const options: CreateTaskOptions | undefined =
-          verificationAgentEnabled
-            ? { ...baseOptions, verificationAgent: true }
-            : baseOptions;
+        const options: CreateTaskOptions | undefined = verificationAgentEnabled
+          ? { ...baseOptions, verificationAgent: true }
+          : baseOptions;
         onCreateTask(title, message, options, imagePayload);
         // Reset task mode state
         setAutonomousModeEnabled(false);
@@ -3387,15 +3386,31 @@ export function MainContent({
             {/* Logo */}
             {uiDensity === "focused" ? (
               <div className="welcome-header-focused modern-only">
-                <img src="./cowork-os-logo-text-dark.png" alt="CoWork OS" className="modern-logo-text logo-for-dark" />
-                <img src="./cowork-os-logo-text.png" alt="CoWork OS" className="modern-logo-text logo-for-light" />
+                <img
+                  src="./cowork-os-logo-text-dark.png"
+                  alt="CoWork OS"
+                  className="modern-logo-text logo-for-dark"
+                />
+                <img
+                  src="./cowork-os-logo-text.png"
+                  alt="CoWork OS"
+                  className="modern-logo-text logo-for-light"
+                />
                 <h1 className="focused-greeting">{agentContext.getMessage("welcomeSubtitle")}</h1>
               </div>
             ) : (
               <div className="welcome-header-modern modern-only">
                 <div className="modern-logo-container">
-                  <img src="./cowork-os-logo-text-dark.png" alt="CoWork OS" className="modern-logo-text logo-for-dark" />
-                  <img src="./cowork-os-logo-text.png" alt="CoWork OS" className="modern-logo-text logo-for-light" />
+                  <img
+                    src="./cowork-os-logo-text-dark.png"
+                    alt="CoWork OS"
+                    className="modern-logo-text logo-for-dark"
+                  />
+                  <img
+                    src="./cowork-os-logo-text.png"
+                    alt="CoWork OS"
+                    className="modern-logo-text logo-for-light"
+                  />
                   <span className="modern-version">{appVersion ? `v${appVersion}` : ""}</span>
                 </div>
                 <p className="modern-subtitle">{agentContext.getMessage("welcomeSubtitle")}</p>
@@ -3583,7 +3598,9 @@ export function MainContent({
                       icon={<SearchIcon size={22} />}
                     />
                     <span className="quick-start-title">Research competitors</span>
-                    <span className="quick-start-desc">Analyze a market and find opportunities</span>
+                    <span className="quick-start-desc">
+                      Analyze a market and find opportunities
+                    </span>
                   </button>
                   <button
                     className="quick-start-card"
@@ -3686,55 +3703,6 @@ export function MainContent({
                 {!inputValue && <span className="cli-cursor" style={{ left: cursorLeft }} />}
               </div>
 
-              {/* Task mode options - hidden in focused mode */}
-              {uiDensity !== "focused" && (
-                <div className="goal-mode-section">
-                  <label className="goal-mode-toggle">
-                    <input
-                      type="checkbox"
-                      checked={autonomousModeEnabled}
-                      onChange={(e) => setAutonomousModeSelection(e.target.checked)}
-                    />
-                    <span className="goal-mode-label">Autonomous mode</span>
-                    <span className="goal-mode-hint">
-                      Skip confirmation prompts and keep working
-                    </span>
-                  </label>
-                  <label className="goal-mode-toggle">
-                    <input
-                      type="checkbox"
-                      checked={collaborativeModeEnabled}
-                      onChange={(e) => setCollaborativeModeSelection(e.target.checked)}
-                    />
-                    <span className="goal-mode-label">Collaborative mode</span>
-                    <span className="goal-mode-hint">
-                      Auto-assemble a team to analyze from multiple perspectives
-                    </span>
-                  </label>
-                  <label className="goal-mode-toggle">
-                    <input
-                      type="checkbox"
-                      checked={multiLlmModeEnabled}
-                      onChange={(e) => setMultiLlmModeSelection(e.target.checked)}
-                    />
-                    <span className="goal-mode-label">Multi-LLM mode</span>
-                    <span className="goal-mode-hint">
-                      Send to multiple LLMs and have a judge synthesize results
-                    </span>
-                  </label>
-                  <label className="goal-mode-toggle">
-                    <input
-                      type="checkbox"
-                      checked={verificationAgentEnabled}
-                      onChange={(e) => setVerificationAgentEnabled(e.target.checked)}
-                    />
-                    <span className="goal-mode-label">Verify after completion</span>
-                    <span className="goal-mode-hint">
-                      Spawn an independent agent to audit deliverables
-                    </span>
-                  </label>
-                </div>
-              )}
               <div className="welcome-input-footer">
                 <div className="input-left-actions">
                   <button
@@ -3758,180 +3726,163 @@ export function MainContent({
                   </button>
                   {uiDensity === "focused" ? (
                     <>
-                    <div className="overflow-menu-container" ref={overflowMenuRef}>
-                      <button
-                        ref={overflowToggleBtnRef}
-                        className={`overflow-menu-btn ${showOverflowMenu ? "active" : ""}`}
-                        onClick={() => setShowOverflowMenu(!showOverflowMenu)}
-                        onKeyDown={handleOverflowButtonKeyDown}
-                        title="More options"
-                        aria-label="More options"
-                        aria-haspopup="menu"
-                        aria-expanded={showOverflowMenu}
-                      >
-                        <svg
-                          width="16"
-                          height="16"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                        >
-                          <circle cx="12" cy="12" r="1" />
-                          <circle cx="19" cy="12" r="1" />
-                          <circle cx="5" cy="12" r="1" />
-                        </svg>
-                      </button>
-                      {showOverflowMenu && (
-                        <div
-                          className="overflow-menu-dropdown"
-                          role="menu"
+                      <div className="overflow-menu-container" ref={overflowMenuRef}>
+                        <button
+                          ref={overflowToggleBtnRef}
+                          className={`overflow-menu-btn ${showOverflowMenu ? "active" : ""}`}
+                          onClick={() => setShowOverflowMenu(!showOverflowMenu)}
+                          onKeyDown={handleOverflowButtonKeyDown}
+                          title="More options"
                           aria-label="More options"
-                          onKeyDown={handleOverflowMenuKeyDown}
+                          aria-haspopup="menu"
+                          aria-expanded={showOverflowMenu}
                         >
-                          <div className="overflow-menu-item" role="none">
-                            <button
-                              className="folder-selector"
-                              onClick={() => {
-                                setShowOverflowMenu(false);
-                                handleWorkspaceDropdownToggle();
-                              }}
-                              role="menuitem"
-                              data-overflow-menu-item
-                            >
-                              <svg
-                                width="14"
-                                height="14"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
+                          <svg
+                            width="16"
+                            height="16"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                          >
+                            <circle cx="12" cy="12" r="1" />
+                            <circle cx="19" cy="12" r="1" />
+                            <circle cx="5" cy="12" r="1" />
+                          </svg>
+                        </button>
+                        {showOverflowMenu && (
+                          <div
+                            className="overflow-menu-dropdown"
+                            role="menu"
+                            aria-label="More options"
+                            onKeyDown={handleOverflowMenuKeyDown}
+                          >
+                            <div className="overflow-menu-item" role="none">
+                              <button
+                                className="folder-selector"
+                                onClick={() => {
+                                  setShowOverflowMenu(false);
+                                  handleWorkspaceDropdownToggle();
+                                }}
+                                role="menuitem"
+                                data-overflow-menu-item
                               >
-                                <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
-                              </svg>
-                              <span>
-                                {workspace?.isTemp || isTempWorkspaceId(workspace?.id)
-                                  ? "Work in a folder"
-                                  : workspace?.name || "Work in a folder"}
-                              </span>
-                            </button>
-                          </div>
-                          <div className="overflow-menu-item" role="none">
-                            <button
-                              className={`shell-toggle ${shellEnabled ? "enabled" : ""}`}
-                              onClick={() => {
-                                handleShellToggle();
-                                setShowOverflowMenu(false);
-                              }}
-                              role="menuitem"
-                              data-overflow-menu-item
-                            >
-                              <svg
-                                width="14"
-                                height="14"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
+                                <svg
+                                  width="14"
+                                  height="14"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                >
+                                  <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+                                </svg>
+                                <span>
+                                  {workspace?.isTemp || isTempWorkspaceId(workspace?.id)
+                                    ? "Work in a folder"
+                                    : workspace?.name || "Work in a folder"}
+                                </span>
+                              </button>
+                            </div>
+                            <div className="overflow-menu-item" role="none">
+                              <button
+                                className={`shell-toggle ${shellEnabled ? "enabled" : ""}`}
+                                onClick={() => {
+                                  handleShellToggle();
+                                  setShowOverflowMenu(false);
+                                }}
+                                role="menuitem"
+                                data-overflow-menu-item
                               >
-                                <path d="M4 17l6-6-6-6M12 19h8" />
-                              </svg>
-                              <span>Shell {shellEnabled ? "ON" : "OFF"}</span>
-                            </button>
-                          </div>
-                          <div className="overflow-menu-item" role="none">
-                            <button
-                              className="skills-menu-btn"
-                              onClick={() => {
-                                setShowOverflowMenu(false);
-                                setShowSkillsMenu(!showSkillsMenu);
-                              }}
-                              role="menuitem"
-                              data-overflow-menu-item
-                            >
-                              <span>/</span>
-                              <span>Custom Skills</span>
-                            </button>
-                          </div>
-                          <div className="overflow-menu-item" role="none">
-                            <button
-                              className="goal-mode-toggle"
-                              style={{ margin: 0 }}
-                              onClick={() => setAutonomousModeSelection(!autonomousModeEnabled)}
-                              role="menuitemcheckbox"
-                              aria-checked={autonomousModeEnabled}
-                              data-overflow-menu-item
-                            >
-                              <span className="goal-mode-label">
-                                Autonomous {autonomousModeEnabled ? "ON" : "OFF"}
-                              </span>
-                            </button>
-                          </div>
-                          <div className="overflow-menu-item" role="none">
-                            <button
-                              className="goal-mode-toggle"
-                              style={{ margin: 0 }}
-                              onClick={() =>
-                                setCollaborativeModeSelection(!collaborativeModeEnabled)
-                              }
-                              role="menuitemcheckbox"
-                              aria-checked={collaborativeModeEnabled}
-                              data-overflow-menu-item
-                            >
-                              <span className="goal-mode-label">
-                                Collab {collaborativeModeEnabled ? "ON" : "OFF"}
-                              </span>
-                            </button>
-                          </div>
-                          {availableProviders.filter((p) => p.configured).length >= 2 && (
+                                <svg
+                                  width="14"
+                                  height="14"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                >
+                                  <path d="M4 17l6-6-6-6M12 19h8" />
+                                </svg>
+                                <span>Shell {shellEnabled ? "ON" : "OFF"}</span>
+                              </button>
+                            </div>
+                            <div className="overflow-menu-item" role="none">
+                              <button
+                                className="skills-menu-btn"
+                                onClick={() => {
+                                  setShowOverflowMenu(false);
+                                  setShowSkillsMenu(!showSkillsMenu);
+                                }}
+                                role="menuitem"
+                                data-overflow-menu-item
+                              >
+                                <span>/</span>
+                                <span>Custom Skills</span>
+                              </button>
+                            </div>
+                            <div className="overflow-menu-item" role="none">
+                              <button
+                                className="goal-mode-toggle"
+                                style={{ margin: 0 }}
+                                onClick={() => setAutonomousModeSelection(!autonomousModeEnabled)}
+                                role="menuitemcheckbox"
+                                aria-checked={autonomousModeEnabled}
+                                data-overflow-menu-item
+                              >
+                                <span className="goal-mode-label">
+                                  Autonomous {autonomousModeEnabled ? "ON" : "OFF"}
+                                </span>
+                              </button>
+                            </div>
                             <div className="overflow-menu-item" role="none">
                               <button
                                 className="goal-mode-toggle"
                                 style={{ margin: 0 }}
                                 onClick={() =>
-                                  setMultiLlmModeSelection(!multiLlmModeEnabled)
+                                  setCollaborativeModeSelection(!collaborativeModeEnabled)
                                 }
                                 role="menuitemcheckbox"
-                                aria-checked={multiLlmModeEnabled}
+                                aria-checked={collaborativeModeEnabled}
                                 data-overflow-menu-item
                               >
                                 <span className="goal-mode-label">
-                                  Multi-LLM {multiLlmModeEnabled ? "ON" : "OFF"}
+                                  Collab {collaborativeModeEnabled ? "ON" : "OFF"}
                                 </span>
                               </button>
                             </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                    <div className="workspace-dropdown-container" ref={workspaceDropdownRef}>
-                      {showWorkspaceDropdown && (
-                        <div className="workspace-dropdown">
-                          {workspacesList.length > 0 && (
-                            <>
-                              <div className="workspace-dropdown-header">Recent Folders</div>
-                              <div className="workspace-dropdown-list">
-                                {workspacesList.slice(0, 10).map((w) => (
-                                  <button
-                                    key={w.id}
-                                    className={`workspace-dropdown-item ${workspace?.id === w.id ? "active" : ""}`}
-                                    onClick={() => handleWorkspaceSelect(w)}
-                                  >
-                                    <svg
-                                      width="14"
-                                      height="14"
-                                      viewBox="0 0 24 24"
-                                      fill="none"
-                                      stroke="currentColor"
-                                      strokeWidth="2"
+                            {availableProviders.filter((p) => p.configured).length >= 2 && (
+                              <div className="overflow-menu-item" role="none">
+                                <button
+                                  className="goal-mode-toggle"
+                                  style={{ margin: 0 }}
+                                  onClick={() => setMultiLlmModeSelection(!multiLlmModeEnabled)}
+                                  role="menuitemcheckbox"
+                                  aria-checked={multiLlmModeEnabled}
+                                  data-overflow-menu-item
+                                >
+                                  <span className="goal-mode-label">
+                                    Multi-LLM {multiLlmModeEnabled ? "ON" : "OFF"}
+                                  </span>
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      <div className="workspace-dropdown-container" ref={workspaceDropdownRef}>
+                        {showWorkspaceDropdown && (
+                          <div className="workspace-dropdown">
+                            {workspacesList.length > 0 && (
+                              <>
+                                <div className="workspace-dropdown-header">Recent Folders</div>
+                                <div className="workspace-dropdown-list">
+                                  {workspacesList.slice(0, 10).map((w) => (
+                                    <button
+                                      key={w.id}
+                                      className={`workspace-dropdown-item ${workspace?.id === w.id ? "active" : ""}`}
+                                      onClick={() => handleWorkspaceSelect(w)}
                                     >
-                                      <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
-                                    </svg>
-                                    <div className="workspace-item-info">
-                                      <span className="workspace-item-name">{w.name}</span>
-                                      <span className="workspace-item-path">{w.path}</span>
-                                    </div>
-                                    {workspace?.id === w.id && (
                                       <svg
                                         width="14"
                                         height="14"
@@ -3939,36 +3890,129 @@ export function MainContent({
                                         fill="none"
                                         stroke="currentColor"
                                         strokeWidth="2"
-                                        className="check-icon"
                                       >
-                                        <path d="M20 6L9 17l-5-5" />
+                                        <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
                                       </svg>
-                                    )}
-                                  </button>
-                                ))}
-                              </div>
-                              <div className="workspace-dropdown-divider" />
-                            </>
-                          )}
-                          <button
-                            className="workspace-dropdown-item new-folder"
-                            onClick={handleSelectNewFolder}
-                          >
-                            <svg
-                              width="14"
-                              height="14"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
+                                      <div className="workspace-item-info">
+                                        <span className="workspace-item-name">{w.name}</span>
+                                        <span className="workspace-item-path">{w.path}</span>
+                                      </div>
+                                      {workspace?.id === w.id && (
+                                        <svg
+                                          width="14"
+                                          height="14"
+                                          viewBox="0 0 24 24"
+                                          fill="none"
+                                          stroke="currentColor"
+                                          strokeWidth="2"
+                                          className="check-icon"
+                                        >
+                                          <path d="M20 6L9 17l-5-5" />
+                                        </svg>
+                                      )}
+                                    </button>
+                                  ))}
+                                </div>
+                                <div className="workspace-dropdown-divider" />
+                              </>
+                            )}
+                            <button
+                              className="workspace-dropdown-item new-folder"
+                              onClick={handleSelectNewFolder}
                             >
-                              <path d="M12 5v14M5 12h14" />
-                            </svg>
-                            <span>Work in another folder...</span>
-                          </button>
-                        </div>
-                      )}
-                    </div>
+                              <svg
+                                width="14"
+                                height="14"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                              >
+                                <path d="M12 5v14M5 12h14" />
+                              </svg>
+                              <span>Work in another folder...</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      <div className="skills-menu-container" ref={skillsMenuRef}>
+                        {showSkillsMenu && (
+                          <div className="skills-dropdown">
+                            <div className="skills-dropdown-header">Custom Skills</div>
+                            <div className="skills-dropdown-search">
+                              <svg
+                                width="14"
+                                height="14"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                              >
+                                <circle cx="11" cy="11" r="8" />
+                                <path d="M21 21l-4.35-4.35" />
+                              </svg>
+                              <input
+                                type="text"
+                                placeholder="Search skills..."
+                                value={skillsSearchQuery}
+                                onChange={(e) => setSkillsSearchQuery(e.target.value)}
+                                autoFocus
+                              />
+                            </div>
+                            {customSkills.length > 0 ? (
+                              filteredSkills.length > 0 ? (
+                                <div className="skills-dropdown-list">
+                                  {filteredSkills.map((skill) => (
+                                    <div
+                                      key={skill.id}
+                                      className="skills-dropdown-item"
+                                      style={{ cursor: "pointer" }}
+                                      onClick={() => handleSkillSelect(skill)}
+                                    >
+                                      <span className="skills-dropdown-icon">{skill.icon}</span>
+                                      <div className="skills-dropdown-info">
+                                        <span className="skills-dropdown-name">{skill.name}</span>
+                                        <span className="skills-dropdown-desc">
+                                          {skill.description}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <div className="skills-dropdown-empty">
+                                  No skills match "{skillsSearchQuery}"
+                                </div>
+                              )
+                            ) : (
+                              <div className="skills-dropdown-empty">No custom skills yet.</div>
+                            )}
+                            <div className="skills-dropdown-footer">
+                              <button
+                                className="skills-dropdown-create"
+                                onClick={() => {
+                                  setShowSkillsMenu(false);
+                                  setSkillsSearchQuery("");
+                                  onOpenSettings?.("skills");
+                                }}
+                              >
+                                <svg
+                                  width="14"
+                                  height="14"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                >
+                                  <line x1="12" y1="5" x2="12" y2="19" />
+                                  <line x1="5" y1="12" x2="19" y2="12" />
+                                </svg>
+                                Create New Skill
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </>
                   ) : (
                     <>
@@ -4065,27 +4109,125 @@ export function MainContent({
                           </div>
                         )}
                       </div>
-                      <button
-                        className={`shell-toggle ${shellEnabled ? "enabled" : ""}`}
-                        onClick={handleShellToggle}
-                        title={
-                          shellEnabled
-                            ? "Shell commands enabled - click to disable"
-                            : "Shell commands disabled - click to enable"
-                        }
-                      >
-                        <svg
-                          width="14"
-                          height="14"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
+                      <div className="overflow-menu-container" ref={overflowMenuRef}>
+                        <button
+                          ref={overflowToggleBtnRef}
+                          className={`overflow-menu-btn ${showOverflowMenu ? "active" : ""}`}
+                          onClick={() => setShowOverflowMenu(!showOverflowMenu)}
+                          onKeyDown={handleOverflowButtonKeyDown}
+                          title="More options"
+                          aria-label="More options"
+                          aria-haspopup="menu"
+                          aria-expanded={showOverflowMenu}
                         >
-                          <path d="M4 17l6-6-6-6M12 19h8" />
-                        </svg>
-                        <span>Shell {shellEnabled ? "ON" : "OFF"}</span>
-                      </button>
+                          <svg
+                            width="16"
+                            height="16"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                          >
+                            <circle cx="12" cy="12" r="1" />
+                            <circle cx="19" cy="12" r="1" />
+                            <circle cx="5" cy="12" r="1" />
+                          </svg>
+                        </button>
+                        {showOverflowMenu && (
+                          <div
+                            className="overflow-menu-dropdown"
+                            role="menu"
+                            aria-label="More options"
+                            onKeyDown={handleOverflowMenuKeyDown}
+                          >
+                            <div className="overflow-menu-item" role="none">
+                              <button
+                                className={`shell-toggle ${shellEnabled ? "enabled" : ""}`}
+                                onClick={() => {
+                                  handleShellToggle();
+                                  setShowOverflowMenu(false);
+                                }}
+                                role="menuitem"
+                                data-overflow-menu-item
+                              >
+                                <svg
+                                  width="14"
+                                  height="14"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                >
+                                  <path d="M4 17l6-6-6-6M12 19h8" />
+                                </svg>
+                                <span>Shell {shellEnabled ? "ON" : "OFF"}</span>
+                              </button>
+                            </div>
+                            <div className="overflow-menu-item" role="none">
+                              <button
+                                className="goal-mode-toggle"
+                                style={{ margin: 0 }}
+                                onClick={() => setAutonomousModeSelection(!autonomousModeEnabled)}
+                                role="menuitemcheckbox"
+                                aria-checked={autonomousModeEnabled}
+                                data-overflow-menu-item
+                              >
+                                <span className="goal-mode-label">
+                                  Autonomous {autonomousModeEnabled ? "ON" : "OFF"}
+                                </span>
+                              </button>
+                            </div>
+                            <div className="overflow-menu-item" role="none">
+                              <button
+                                className="goal-mode-toggle"
+                                style={{ margin: 0 }}
+                                onClick={() =>
+                                  setCollaborativeModeSelection(!collaborativeModeEnabled)
+                                }
+                                role="menuitemcheckbox"
+                                aria-checked={collaborativeModeEnabled}
+                                data-overflow-menu-item
+                              >
+                                <span className="goal-mode-label">
+                                  Collab {collaborativeModeEnabled ? "ON" : "OFF"}
+                                </span>
+                              </button>
+                            </div>
+                            {availableProviders.filter((p) => p.configured).length >= 2 && (
+                              <div className="overflow-menu-item" role="none">
+                                <button
+                                  className="goal-mode-toggle"
+                                  style={{ margin: 0 }}
+                                  onClick={() => setMultiLlmModeSelection(!multiLlmModeEnabled)}
+                                  role="menuitemcheckbox"
+                                  aria-checked={multiLlmModeEnabled}
+                                  data-overflow-menu-item
+                                >
+                                  <span className="goal-mode-label">
+                                    Multi-LLM {multiLlmModeEnabled ? "ON" : "OFF"}
+                                  </span>
+                                </button>
+                              </div>
+                            )}
+                            <div className="overflow-menu-item" role="none">
+                              <button
+                                className="goal-mode-toggle"
+                                style={{ margin: 0 }}
+                                onClick={() =>
+                                  setVerificationAgentEnabled(!verificationAgentEnabled)
+                                }
+                                role="menuitemcheckbox"
+                                aria-checked={verificationAgentEnabled}
+                                data-overflow-menu-item
+                              >
+                                <span className="goal-mode-label">
+                                  Verify {verificationAgentEnabled ? "ON" : "OFF"}
+                                </span>
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                       <ModelDropdown
                         models={availableModels}
                         selectedModel={selectedModel}
@@ -4406,7 +4548,7 @@ export function MainContent({
   const isTitleTruncated = titleMatchesPrompt && trimmedPrompt.length > normalizedTitle.length;
   const headerTitle =
     isTitleTruncated && !TITLE_ELLIPSIS_REGEX.test(baseTitle) ? `${baseTitle}...` : baseTitle;
-  const headerTooltip = isTitleTruncated ? trimmedPrompt : baseTitle;
+  const headerTooltip = trimmedPrompt || baseTitle;
   const latestPauseEvent = [...events].reverse().find((event) => event.type === "task_paused");
   const latestApprovalEvent = [...events]
     .reverse()
@@ -4511,7 +4653,9 @@ export function MainContent({
                     className="verbose-switch"
                     title={verboseSteps ? "Show important steps only" : "Show all steps (verbose)"}
                   >
-                    <span className="verbose-switch-label">Verbose</span>
+                    <span className="verbose-switch-label">
+                      {verboseSteps ? "Verbose" : "Summary"}
+                    </span>
                     <button
                       role="switch"
                       aria-checked={verboseSteps}
@@ -4546,7 +4690,16 @@ export function MainContent({
                 runPhase={collaborativeRun.phase}
                 mode={collaborativeRun.multiLlmMode ? "multi-llm" : "collaborative"}
                 isRunning={collaborativeRun.status === "running"}
-                onWrapUp={onWrapUpTask ? () => { if (!wrappingUp) { setWrappingUp(true); onWrapUpTask(); } } : undefined}
+                onWrapUp={
+                  onWrapUpTask
+                    ? () => {
+                        if (!wrappingUp) {
+                          setWrappingUp(true);
+                          onWrapUpTask();
+                        }
+                      }
+                    : undefined
+                }
                 isWrappingUp={wrappingUp}
               />
             </div>

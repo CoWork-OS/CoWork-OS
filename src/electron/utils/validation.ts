@@ -481,27 +481,34 @@ export const GuardrailSettingsSchema = z.object({
   iterationLimitEnabled: z.boolean().default(true),
 });
 
-// ============ Conway Settings Schema ============
+// ============ Infrastructure Settings Schema ============
 
-export const ConwaySettingsSchema = z
+export const InfraSettingsSchema = z
   .object({
     enabled: z.boolean(),
-    autoConnect: z.boolean(),
     showWalletInSidebar: z.boolean(),
-    balanceRefreshIntervalMs: z
-      .number()
-      .int()
-      .min(10_000)
-      .max(24 * 60 * 60 * 1000),
-    enabledToolCategories: z.object({
+    e2b: z.object({
+      apiKey: z.string().max(500),
+      defaultRegion: z.string().max(100),
+    }),
+    domains: z.object({
+      provider: z.literal("namecheap"),
+      apiKey: z.string().max(500),
+      username: z.string().max(200),
+      clientIp: z.string().max(45),
+    }),
+    wallet: z.object({
+      enabled: z.boolean(),
+    }),
+    payments: z.object({
+      requireApproval: z.boolean(),
+      maxAutoApproveUsd: z.number().min(0).max(1000),
+    }),
+    enabledCategories: z.object({
       sandbox: z.boolean(),
-      inference: z.boolean(),
       domains: z.boolean(),
       payments: z.boolean(),
     }),
-    walletAddressBackup: z.string().max(200).optional(),
-    walletNetworkBackup: z.string().max(100).optional(),
-    walletBackupTimestamp: z.number().int().min(0).optional(),
   })
   .strict();
 

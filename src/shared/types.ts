@@ -13,7 +13,7 @@ export type AccentColor =
   | "green"
   | "teal"
   | "coral";
-export type UiDensity = "focused" | "full";
+export type UiDensity = "focused" | "full" | "power";
 
 export interface AppearanceSettings {
   themeMode: ThemeMode;
@@ -284,6 +284,12 @@ export type ToolType =
   | "dropbox_action"
   // SharePoint
   | "sharepoint_action"
+  // Scraping tools (Scrapling integration)
+  | "scrape_page"
+  | "scrape_multiple"
+  | "scrape_extract"
+  | "scrape_session"
+  | "scraping_status"
   // Meta tools
   | "revise_plan"
   | "task_history"
@@ -386,6 +392,12 @@ export const TOOL_GROUPS = {
     "browser_close",
     // Vision (image understanding via external provider)
     "analyze_image",
+    // Scraping (Scrapling integration)
+    "scrape_page",
+    "scrape_multiple",
+    "scrape_extract",
+    "scrape_session",
+    "scraping_status",
   ],
   // Memory/sensitive tools - restricted in shared contexts
   "group:memory": [
@@ -468,6 +480,12 @@ export const TOOL_RISK_LEVELS: Record<ToolType, ToolRiskLevel> = {
   apple_calendar_action: "network",
   dropbox_action: "network",
   sharepoint_action: "network",
+  // Scraping (Scrapling)
+  scrape_page: "network",
+  scrape_multiple: "network",
+  scrape_extract: "network",
+  scrape_session: "network",
+  scraping_status: "read",
   // Meta
   revise_plan: "read",
   task_history: "read",
@@ -526,7 +544,7 @@ export interface SuccessCriteria {
  * - 'parallel': Independent agent that can run alongside main agents
  */
 export type AgentType = "main" | "sub" | "parallel";
-export type ConversationMode = "task" | "chat" | "hybrid";
+export type ConversationMode = "task" | "chat" | "hybrid" | "think";
 
 /**
  * Per-task agent configuration for customizing LLM and personality
@@ -588,6 +606,8 @@ export interface AgentConfig {
   multiLlmConfig?: MultiLlmConfig;
   /** Spawn an independent verification agent after task completion to audit deliverables */
   verificationAgent?: boolean;
+  /** Whether to emit a pre-flight problem framing before execution (set by strategy service) */
+  preflightRequired?: boolean;
 }
 
 /** Specification for one LLM participant in a multi-LLM run */
@@ -1121,6 +1141,10 @@ export interface AgentTeam {
   defaultModelPreference?: string;
   defaultPersonality?: string;
   isActive: boolean;
+  /** When true, this team persists across sessions and auto-dispatches for matching tasks */
+  persistent?: boolean;
+  /** Default workspace for persistent teams (used for auto-dispatch) */
+  defaultWorkspaceId?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -1134,6 +1158,8 @@ export interface CreateAgentTeamRequest {
   defaultModelPreference?: string;
   defaultPersonality?: string;
   isActive?: boolean;
+  persistent?: boolean;
+  defaultWorkspaceId?: string;
 }
 
 export interface UpdateAgentTeamRequest {
@@ -1145,6 +1171,8 @@ export interface UpdateAgentTeamRequest {
   defaultModelPreference?: string | null;
   defaultPersonality?: string | null;
   isActive?: boolean;
+  persistent?: boolean;
+  defaultWorkspaceId?: string | null;
 }
 
 export interface AgentTeamMember {
@@ -1792,77 +1820,86 @@ export interface MentionListQuery {
   offset?: number;
 }
 
-// ============ Conway Terminal Types ============
+// ============ Infrastructure Types ============
 
-export type ConwaySetupState =
-  | "not_installed"
-  | "installing"
-  | "installed"
-  | "initializing"
-  | "ready"
-  | "error";
-
-export interface ConwayWalletInfo {
+export interface WalletInfo {
   address: string;
-  publicKey: string;
   network: string;
+  balanceUsdc?: string;
 }
 
-export interface ConwayCreditsBalance {
-  balance: string;
-  balanceUsd: number;
-  lastUpdated: number;
-}
-
-export interface ConwayCreditHistoryEntry {
+export interface InfraSandboxInfo {
   id: string;
-  type: "credit" | "debit";
-  amount: string;
-  description: string;
-  service: string;
-  timestamp: number;
+  name?: string;
+  status: "running" | "stopped" | "error";
+  createdAt: number;
+  region?: string;
 }
 
-export interface ConwaySetupStatus {
-  state: ConwaySetupState;
-  walletInfo?: ConwayWalletInfo;
-  balance?: ConwayCreditsBalance;
-  mcpServerId?: string;
-  mcpConnectionStatus?: "disconnected" | "connecting" | "connected" | "error";
-  toolCount?: number;
-  error?: string;
-  version?: string;
-  /** Whether ~/.conway/wallet.json exists on disk */
-  walletFileExists?: boolean;
-}
+export type InfraProviderStatus = "connected" | "disconnected" | "error" | "not_configured";
 
-export interface ConwaySettings {
+export interface InfraStatus {
   enabled: boolean;
-  autoConnect: boolean;
+  wallet?: WalletInfo;
+  walletFileExists?: boolean;
+  providers: {
+    e2b: InfraProviderStatus;
+    domains: InfraProviderStatus;
+    wallet: InfraProviderStatus;
+  };
+  activeSandboxes: number;
+  error?: string;
+}
+
+export interface InfraSettings {
+  enabled: boolean;
   showWalletInSidebar: boolean;
-  balanceRefreshIntervalMs: number;
-  enabledToolCategories: {
+  e2b: {
+    apiKey: string;
+    defaultRegion: string;
+  };
+  domains: {
+    provider: "namecheap";
+    apiKey: string;
+    username: string;
+    clientIp: string;
+  };
+  wallet: {
+    enabled: boolean;
+  };
+  payments: {
+    requireApproval: boolean;
+    maxAutoApproveUsd: number;
+  };
+  enabledCategories: {
     sandbox: boolean;
-    inference: boolean;
     domains: boolean;
     payments: boolean;
   };
-  /** Backed-up wallet address (public only — stored in encrypted db for recovery reference) */
-  walletAddressBackup?: string;
-  /** Wallet network at time of backup */
-  walletNetworkBackup?: string;
-  /** Timestamp when wallet was first seen */
-  walletBackupTimestamp?: number;
 }
 
-export const DEFAULT_CONWAY_SETTINGS: ConwaySettings = {
+export const DEFAULT_INFRA_SETTINGS: InfraSettings = {
   enabled: false,
-  autoConnect: true,
   showWalletInSidebar: true,
-  balanceRefreshIntervalMs: 300000,
-  enabledToolCategories: {
+  e2b: {
+    apiKey: "",
+    defaultRegion: "us-east-1",
+  },
+  domains: {
+    provider: "namecheap",
+    apiKey: "",
+    username: "",
+    clientIp: "",
+  },
+  wallet: {
+    enabled: true,
+  },
+  payments: {
+    requireApproval: true,
+    maxAutoApproveUsd: 1.0,
+  },
+  enabledCategories: {
     sandbox: true,
-    inference: true,
     domains: true,
     payments: true,
   },
@@ -2092,6 +2129,8 @@ export const IPC_CHANNELS = {
   GATEWAY_DISABLE_CHANNEL: "gateway:disableChannel",
   GATEWAY_TEST_CHANNEL: "gateway:testChannel",
   GATEWAY_GET_USERS: "gateway:getUsers",
+  GATEWAY_LIST_CHATS: "gateway:listChats",
+  GATEWAY_SEND_TEST_MESSAGE: "gateway:sendTestMessage",
   GATEWAY_GRANT_ACCESS: "gateway:grantAccess",
   GATEWAY_REVOKE_ACCESS: "gateway:revokeAccess",
   GATEWAY_GENERATE_PAIRING: "gateway:generatePairing",
@@ -2215,20 +2254,22 @@ export const IPC_CHANNELS = {
   // MCP Events
   MCP_SERVER_STATUS_CHANGE: "mcp:serverStatusChange",
 
-  // Conway Terminal
-  CONWAY_GET_STATUS: "conway:getStatus",
-  CONWAY_GET_SETTINGS: "conway:getSettings",
-  CONWAY_SAVE_SETTINGS: "conway:saveSettings",
-  CONWAY_SETUP: "conway:setup",
-  CONWAY_GET_BALANCE: "conway:getBalance",
-  CONWAY_GET_WALLET: "conway:getWallet",
-  CONWAY_GET_CREDIT_HISTORY: "conway:getCreditHistory",
-  CONWAY_CONNECT: "conway:connect",
-  CONWAY_DISCONNECT: "conway:disconnect",
-  CONWAY_RESET: "conway:reset",
-  CONWAY_WALLET_RESTORE: "conway:walletRestore",
-  CONWAY_WALLET_VERIFY: "conway:walletVerify",
-  CONWAY_STATUS_CHANGE: "conway:statusChange",
+  // Infrastructure
+  INFRA_GET_STATUS: "infra:getStatus",
+  INFRA_GET_SETTINGS: "infra:getSettings",
+  INFRA_SAVE_SETTINGS: "infra:saveSettings",
+  INFRA_SETUP: "infra:setup",
+  INFRA_GET_WALLET: "infra:getWallet",
+  INFRA_WALLET_RESTORE: "infra:walletRestore",
+  INFRA_WALLET_VERIFY: "infra:walletVerify",
+  INFRA_RESET: "infra:reset",
+  INFRA_STATUS_CHANGE: "infra:statusChange",
+
+  // Scraping (Scrapling integration)
+  SCRAPING_GET_SETTINGS: "scraping:getSettings",
+  SCRAPING_SAVE_SETTINGS: "scraping:saveSettings",
+  SCRAPING_GET_STATUS: "scraping:getStatus",
+  SCRAPING_RESET: "scraping:reset",
 
   // Artifact Reputation
   REPUTATION_GET_SETTINGS: "reputation:getSettings",
@@ -2424,6 +2465,10 @@ export const IPC_CHANNELS = {
   COMPARISON_LIST: "comparison:list",
   COMPARISON_CANCEL: "comparison:cancel",
   COMPARISON_GET_RESULT: "comparison:getResult",
+  // Usage Insights
+  USAGE_INSIGHTS_GET: "usageInsights:get",
+  // Daily Briefing
+  DAILY_BRIEFING_GENERATE: "dailyBriefing:generate",
 } as const;
 
 // LLM Provider types
@@ -2473,7 +2518,10 @@ export const LLM_PROVIDER_TYPES = [
 export type LLMProviderType = (typeof LLM_PROVIDER_TYPES)[number];
 
 /** Display names for LLM providers (used in multi-LLM mode UI) */
-export const MULTI_LLM_PROVIDER_DISPLAY: Record<string, { name: string; icon: string; color: string }> = {
+export const MULTI_LLM_PROVIDER_DISPLAY: Record<
+  string,
+  { name: string; icon: string; color: string }
+> = {
   anthropic: { name: "Anthropic", icon: "\u{1F9E0}", color: "#d97706" },
   bedrock: { name: "Bedrock", icon: "\u{2601}\uFE0F", color: "#ff9900" },
   ollama: { name: "Ollama", icon: "\u{1F999}", color: "#0ea5e9" },

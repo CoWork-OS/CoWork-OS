@@ -848,7 +848,7 @@ export function useOnboardingFlow({ onComplete }: UseOnboardingOptions) {
       case "ollama":
         return "llama3.2";
       case "openrouter":
-        return "anthropic/claude-3.5-sonnet";
+        return "meta-llama/llama-3.1-8b-instruct:free";
       case "bedrock":
         return "sonnet-4-6";
       case "groq":
@@ -907,7 +907,7 @@ export function useOnboardingFlow({ onComplete }: UseOnboardingOptions) {
       } else if (provider === "gemini") {
         settings.gemini = { apiKey, model: "gemini-2.0-flash" };
       } else if (provider === "openrouter") {
-        settings.openrouter = { apiKey, model: "anthropic/claude-3.5-sonnet" };
+        settings.openrouter = { apiKey, model: "meta-llama/llama-3.1-8b-instruct:free" };
       } else if (provider === "ollama") {
         const model = data.detectedOllamaModel || "llama3.2";
         settings.ollama = { baseUrl: data.ollamaUrl, model };
@@ -1030,10 +1030,24 @@ export function useOnboardingFlow({ onComplete }: UseOnboardingOptions) {
     setShowProviders(true);
   }, []);
 
-  // Skip LLM setup
-  const skipLLMSetup = useCallback(() => {
+  // Skip LLM setup — default to OpenRouter with a free model so the app
+  // has a provider pre-selected and users aren't pointed at paid-only services.
+  const skipLLMSetup = useCallback(async () => {
     setShowProviders(false);
     setShowApiInput(false);
+    setData((d) => ({ ...d, selectedProvider: "openrouter" }));
+
+    const defaultSettings: Record<string, unknown> = {
+      providerType: "openrouter",
+      modelKey: "meta-llama/llama-3.1-8b-instruct:free",
+      openrouter: { apiKey: "", model: "meta-llama/llama-3.1-8b-instruct:free" },
+    };
+    try {
+      await window.electronAPI.saveLLMSettings(defaultSettings);
+    } catch {
+      // Best-effort — proceed to recap regardless
+    }
+
     setState("recap");
     setCurrentText(SCRIPT.recap_intro(data.assistantName));
   }, [data.assistantName]);

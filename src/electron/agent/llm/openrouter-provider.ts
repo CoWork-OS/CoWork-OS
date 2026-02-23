@@ -22,13 +22,13 @@ export class OpenRouterProvider implements LLMProvider {
     const apiKey = config.openrouterApiKey;
     if (!apiKey) {
       throw new Error(
-        "OpenRouter API key is required. Configure it in Settings or get one from https://openrouter.ai/keys",
+        "OpenRouter API key is required (free, no credit card). Get one at https://openrouter.ai/keys then add it in Settings > LLM.",
       );
     }
 
     this.apiKey = apiKey;
     this.baseUrl = config.openrouterBaseUrl || "https://openrouter.ai/api/v1";
-    this.defaultModel = config.model || "anthropic/claude-3.5-sonnet";
+    this.defaultModel = config.model || "meta-llama/llama-3.1-8b-instruct:free";
   }
 
   async createMessage(request: LLMRequest): Promise<LLMResponse> {

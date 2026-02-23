@@ -41,12 +41,13 @@ const PROVIDERS: {
   id: LLMProviderType;
   name: string;
   requiresKey: boolean;
+  badge?: string;
 }[] = [
+  { id: "openrouter", name: "OpenRouter", requiresKey: true, badge: "Free" },
   { id: "anthropic", name: "Claude", requiresKey: true },
   { id: "openai", name: "OpenAI", requiresKey: true },
   { id: "gemini", name: "Gemini", requiresKey: true },
   { id: "ollama", name: "Ollama", requiresKey: false },
-  { id: "openrouter", name: "OpenRouter", requiresKey: true },
   { id: "groq", name: "Groq", requiresKey: true },
   { id: "xai", name: "Grok", requiresKey: true },
   { id: "kimi", name: "Kimi", requiresKey: true },
@@ -1496,6 +1497,9 @@ export function Onboarding({ onComplete }: OnboardingProps) {
             onClick={() => onboarding.selectProvider(provider.id)}
           >
             {provider.name}
+            {provider.badge && (
+              <span className="onboarding-provider-badge">{provider.badge}</span>
+            )}
           </button>
         ))}
       </div>

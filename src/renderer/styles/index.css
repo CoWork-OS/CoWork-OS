@@ -18164,6 +18164,24 @@ button {
   color: var(--onboarding-warm-dark);
 }
 
+.onboarding-provider-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  border-radius: 6px;
+  background: rgba(72, 199, 142, 0.2);
+  color: #48c78e;
+  vertical-align: middle;
+}
+
+.onboarding-provider-pill.selected .onboarding-provider-badge {
+  background: rgba(255, 255, 255, 0.25);
+  color: var(--onboarding-warm-dark);
+}
+
 /* API Key input in conversational style */
 .onboarding-api-input-section {
   margin-top: 24px;
@@ -19820,6 +19838,13 @@ button {
   height: 52px;
   margin-bottom: 4px;
   filter: drop-shadow(0 2px 8px var(--color-accent-subtle));
+}
+.focused-app-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-muted, #6b7280);
+  letter-spacing: 0.04em;
+  margin-bottom: 2px;
 }
 .focused-greeting {
   font-size: 22px;

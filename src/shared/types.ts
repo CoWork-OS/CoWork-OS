@@ -205,7 +205,21 @@ export type EventType =
   // Context management
   | "context_summarized" // Earlier messages were dropped and summarized
   // Conversation persistence
-  | "conversation_snapshot"; // Full conversation history for restoration
+  | "conversation_snapshot" // Full conversation history for restoration
+  // Git Worktree events
+  | "worktree_created" // Worktree was set up for this task
+  | "worktree_committed" // Auto-commit happened in worktree
+  | "worktree_merge_start" // Merge to base branch started
+  | "worktree_merged" // Successfully merged to base branch
+  | "worktree_conflict" // Merge conflict detected
+  | "worktree_cleaned" // Worktree removed after completion
+  // Comparison mode events
+  | "comparison_started" // Comparison session started
+  | "comparison_completed" // Comparison session completed
+  // Collaborative Thoughts events (team multi-agent thinking)
+  | "agent_thought" // Agent sharing analysis/reasoning with team
+  | "synthesis_started" // Leader beginning synthesis of team thoughts
+  | "synthesis_completed"; // Leader completed synthesis
 
 export type ToolType =
   | "read_file"
@@ -566,6 +580,27 @@ export interface AgentConfig {
    * - 3: draft + critique + refine
    */
   qualityPasses?: 1 | 2 | 3;
+  /** Auto-create an ephemeral collaborative team for this task */
+  collaborativeMode?: boolean;
+  /** Send the same task to multiple LLMs and have a judge synthesize results */
+  multiLlmMode?: boolean;
+  /** Configuration for multi-LLM mode: which providers/models to use and which is the judge */
+  multiLlmConfig?: MultiLlmConfig;
+}
+
+/** Specification for one LLM participant in a multi-LLM run */
+export interface MultiLlmParticipant {
+  providerType: LLMProviderType;
+  modelKey: string;
+  displayName: string;
+  isJudge: boolean;
+}
+
+/** Config for multi-LLM mode: participants and judge designation */
+export interface MultiLlmConfig {
+  participants: MultiLlmParticipant[];
+  judgeProviderType: LLMProviderType;
+  judgeModelKey: string;
 }
 
 export interface Task {
@@ -573,6 +608,7 @@ export interface Task {
   title: string;
   prompt: string;
   status: TaskStatus;
+  pinned?: boolean;
   workspaceId: string;
   createdAt: number;
   updatedAt: number;
@@ -600,6 +636,104 @@ export interface Task {
   estimatedMinutes?: number; // Estimated time in minutes
   actualMinutes?: number; // Actual time spent in minutes
   mentionedAgentRoleIds?: string[]; // Agent roles mentioned in this task
+  // Git Worktree isolation fields
+  worktreePath?: string; // Absolute path to the worktree directory
+  worktreeBranch?: string; // Branch name created for this task's worktree
+  worktreeStatus?: WorktreeStatus; // Current worktree lifecycle state
+  // Comparison mode fields
+  comparisonSessionId?: string; // If this task is part of a comparison session
+}
+
+// ============ Git Worktree Types ============
+
+export type WorktreeStatus =
+  | "creating" // Worktree is being set up
+  | "active" // Worktree is ready and in use
+  | "committing" // Auto-commit in progress
+  | "merging" // Merge back to base branch in progress
+  | "merged" // Successfully merged
+  | "conflict" // Merge conflict detected
+  | "cleaned" // Worktree removed after completion
+  | "failed"; // Worktree setup or operation failed
+
+export interface WorktreeInfo {
+  taskId: string;
+  workspaceId: string;
+  repoPath?: string; // Absolute path to the git repository root
+  worktreePath: string; // Absolute path to the worktree directory
+  branchName: string; // e.g., "cowork/fix-login-bug-a1b2c3"
+  baseBranch: string; // Branch the worktree was created from (e.g., "main")
+  baseCommit: string; // SHA of the commit the worktree was created from
+  status: WorktreeStatus;
+  createdAt: number;
+  lastCommitSha?: string; // SHA of the last auto-commit
+  lastCommitMessage?: string;
+  mergeResult?: MergeResult;
+}
+
+export interface MergeResult {
+  success: boolean;
+  mergeSha?: string; // SHA of the merge commit if successful
+  conflictFiles?: string[]; // List of files with conflicts
+  error?: string;
+}
+
+export interface WorktreeSettings {
+  enabled: boolean; // Master toggle (default: false)
+  autoCommitOnComplete: boolean; // Auto-commit when task completes (default: true)
+  autoCleanOnMerge: boolean; // Remove worktree after successful merge (default: true)
+  branchPrefix: string; // Default: "cowork/"
+  commitMessagePrefix: string; // Default: "[cowork] "
+}
+
+export const DEFAULT_WORKTREE_SETTINGS: WorktreeSettings = {
+  enabled: false,
+  autoCommitOnComplete: true,
+  autoCleanOnMerge: true,
+  branchPrefix: "cowork/",
+  commitMessagePrefix: "[cowork] ",
+};
+
+// ============ Agent Comparison Types ============
+
+export interface ComparisonSession {
+  id: string;
+  title: string;
+  prompt: string; // The shared prompt given to all agents
+  workspaceId: string;
+  status: ComparisonSessionStatus;
+  taskIds: string[]; // Array of task IDs (one per agent variant)
+  createdAt: number;
+  completedAt?: number;
+  comparisonResult?: ComparisonResult;
+}
+
+export type ComparisonSessionStatus =
+  | "running"
+  | "completed" // All agents finished
+  | "partial" // Some agents finished, some failed/cancelled
+  | "cancelled";
+
+export interface ComparisonResult {
+  taskResults: Array<{
+    taskId: string;
+    label: string;
+    status: string;
+    branchName?: string;
+    filesChanged: number;
+    linesAdded: number;
+    linesRemoved: number;
+    duration: number; // ms
+    tokenCost?: number;
+    summary?: string;
+  }>;
+  diffSummary?: string; // AI-generated summary comparing the approaches
+}
+
+export interface ComparisonAgentSpec {
+  label?: string; // e.g., "Agent A", "Opus variant"
+  agentConfig?: AgentConfig; // Model, personality, etc.
+  assignedAgentRoleId?: string;
 }
 
 /** Image attachment for sending images with messages */
@@ -652,6 +786,7 @@ export interface TaskExportQuery {
 export interface TaskExportItem {
   taskId: string;
   title: string;
+  pinned?: boolean;
   status: TaskStatus;
   workspaceId: string;
   workspaceName?: string;
@@ -1043,6 +1178,8 @@ export type AgentTeamRunStatus =
   | "failed"
   | "cancelled";
 
+export type AgentTeamRunPhase = "dispatch" | "think" | "synthesize" | "complete";
+
 export interface AgentTeamRun {
   id: string;
   teamId: string;
@@ -1052,6 +1189,9 @@ export interface AgentTeamRun {
   completedAt?: number;
   error?: string;
   summary?: string;
+  phase?: AgentTeamRunPhase;
+  collaborativeMode?: boolean;
+  multiLlmMode?: boolean;
 }
 
 export interface CreateAgentTeamRunRequest {
@@ -1059,6 +1199,8 @@ export interface CreateAgentTeamRunRequest {
   rootTaskId: string;
   status?: AgentTeamRunStatus;
   startedAt?: number;
+  collaborativeMode?: boolean;
+  multiLlmMode?: boolean;
 }
 
 export type AgentTeamItemStatus = "todo" | "in_progress" | "blocked" | "done" | "failed";
@@ -1099,6 +1241,48 @@ export interface UpdateAgentTeamItemRequest {
   status?: AgentTeamItemStatus;
   resultSummary?: string | null;
   sortOrder?: number;
+}
+
+// ============ Collaborative Thoughts (Team Multi-Agent Thinking) ============
+
+export type ThoughtPhase = "dispatch" | "analysis" | "synthesis";
+
+/** A thought shared by an agent during a collaborative team run */
+export interface AgentThought {
+  id: string;
+  teamRunId: string;
+  teamItemId?: string;
+  agentRoleId: string;
+  agentDisplayName: string;
+  agentIcon: string;
+  agentColor: string;
+  phase: ThoughtPhase;
+  content: string;
+  isStreaming: boolean;
+  sourceTaskId?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface CreateAgentThoughtRequest {
+  teamRunId: string;
+  teamItemId?: string;
+  agentRoleId: string;
+  agentDisplayName: string;
+  agentIcon: string;
+  agentColor: string;
+  phase: ThoughtPhase;
+  content: string;
+  isStreaming?: boolean;
+  sourceTaskId?: string;
+}
+
+/** Event payload for team thought IPC events */
+export interface TeamThoughtEvent {
+  type: "team_thought_added" | "team_thought_updated" | "team_thought_streaming";
+  timestamp: number;
+  runId: string;
+  thought: AgentThought;
 }
 
 /**
@@ -1689,7 +1873,9 @@ export const IPC_CHANNELS = {
   TASK_GET: "task:get",
   TASK_LIST: "task:list",
   TASK_EXPORT_JSON: "task:exportJSON",
+  TASK_PIN: "task:pin",
   TASK_CANCEL: "task:cancel",
+  TASK_WRAP_UP: "task:wrapUp",
   TASK_PAUSE: "task:pause",
   TASK_RESUME: "task:resume",
   TASK_RENAME: "task:rename",
@@ -1770,6 +1956,7 @@ export const IPC_CHANNELS = {
   TEAM_RUN_GET: "teamRun:get",
   TEAM_RUN_LIST: "teamRun:list",
   TEAM_RUN_CANCEL: "teamRun:cancel",
+  TEAM_RUN_WRAP_UP: "teamRun:wrapUp",
   TEAM_RUN_PAUSE: "teamRun:pause",
   TEAM_RUN_RESUME: "teamRun:resume",
   TEAM_ITEM_LIST: "teamItem:list",
@@ -1778,6 +1965,11 @@ export const IPC_CHANNELS = {
   TEAM_ITEM_DELETE: "teamItem:delete",
   TEAM_ITEM_MOVE: "teamItem:move",
   TEAM_RUN_EVENT: "teamRun:event",
+
+  // Collaborative Thoughts
+  TEAM_THOUGHT_LIST: "teamThought:list",
+  TEAM_THOUGHT_EVENT: "teamThought:event",
+  TEAM_RUN_FIND_BY_ROOT_TASK: "teamRun:findByRootTask",
 
   // Workspace Kit (.cowork)
   KIT_GET_STATUS: "kit:getStatus",
@@ -1887,6 +2079,7 @@ export const IPC_CHANNELS = {
   LLM_OPENAI_OAUTH_START: "llm:openaiOAuthStart",
   LLM_OPENAI_OAUTH_LOGOUT: "llm:openaiOAuthLogout",
   LLM_GET_BEDROCK_MODELS: "llm:getBedrockModels",
+  LLM_GET_PROVIDER_MODELS: "llm:getProviderModels",
 
   // Gateway / Channels
   GATEWAY_GET_CHANNELS: "gateway:getChannels",
@@ -2213,6 +2406,22 @@ export const IPC_CHANNELS = {
   VOICE_TEST_OPENAI: "voice:testOpenAI",
   VOICE_TEST_AZURE: "voice:testAzure",
   VOICE_EVENT: "voice:event",
+
+  // Git Worktree operations
+  WORKTREE_GET_INFO: "worktree:getInfo",
+  WORKTREE_LIST: "worktree:list",
+  WORKTREE_MERGE: "worktree:merge",
+  WORKTREE_CLEANUP: "worktree:cleanup",
+  WORKTREE_GET_DIFF: "worktree:getDiff",
+  WORKTREE_GET_SETTINGS: "worktree:getSettings",
+  WORKTREE_SAVE_SETTINGS: "worktree:saveSettings",
+
+  // Agent Comparison mode
+  COMPARISON_CREATE: "comparison:create",
+  COMPARISON_GET: "comparison:get",
+  COMPARISON_LIST: "comparison:list",
+  COMPARISON_CANCEL: "comparison:cancel",
+  COMPARISON_GET_RESULT: "comparison:getResult",
 } as const;
 
 // LLM Provider types
@@ -2260,6 +2469,21 @@ export const LLM_PROVIDER_TYPES = [
 ] as const;
 
 export type LLMProviderType = (typeof LLM_PROVIDER_TYPES)[number];
+
+/** Display names for LLM providers (used in multi-LLM mode UI) */
+export const MULTI_LLM_PROVIDER_DISPLAY: Record<string, { name: string; icon: string; color: string }> = {
+  anthropic: { name: "Anthropic", icon: "\u{1F9E0}", color: "#d97706" },
+  bedrock: { name: "Bedrock", icon: "\u{2601}\uFE0F", color: "#ff9900" },
+  ollama: { name: "Ollama", icon: "\u{1F999}", color: "#0ea5e9" },
+  gemini: { name: "Gemini", icon: "\u{2728}", color: "#6366f1" },
+  openrouter: { name: "OpenRouter", icon: "\u{1F310}", color: "#8b5cf6" },
+  openai: { name: "OpenAI", icon: "\u{1F916}", color: "#10b981" },
+  azure: { name: "Azure", icon: "\u{1F7E6}", color: "#0078d4" },
+  groq: { name: "Groq", icon: "\u{26A1}", color: "#f97316" },
+  xai: { name: "xAI", icon: "\u{1F4A0}", color: "#ef4444" },
+  kimi: { name: "Kimi", icon: "\u{1F319}", color: "#a855f7" },
+  pi: { name: "Pi", icon: "\u{1F7E3}", color: "#ec4899" },
+};
 
 export interface CachedModelInfo {
   key: string;

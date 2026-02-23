@@ -45,7 +45,7 @@ CoWork OS is a local-first runtime for secure, multi-channel AI agents. It combi
 <p align="center">
   <img src="screenshots/cowork-os-main-1.png" alt="CoWork OS Interface" width="700">
   <br>
-  <em>Switch between Modern (default) and Terminal visual themes with a real-time task timeline</em>
+  <em>CoWork OS — agentic task automation with a real-time task timeline</em>
 </p>
 
 ### Platform Capability Overview

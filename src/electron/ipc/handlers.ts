@@ -1460,7 +1460,9 @@ export async function setupIpcHandlers(
       await agentDaemon.cancelTask(id);
     } finally {
       // Always update status even if daemon cancel fails
-      taskRepo.update(id, { status: "cancelled" });
+      taskRepo.update(id, { status: "cancelled", completedAt: Date.now() });
+      // Emit explicit task_status event so the renderer updates immediately
+      emitTaskStatusEvent(id, "cancelled");
     }
   });
 

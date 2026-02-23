@@ -56,6 +56,7 @@ import {
 } from "../utils/runtime-mode";
 import { getUserDataDir } from "../utils/user-data-dir";
 import { CanvasManager } from "../canvas/canvas-manager";
+import { TASK_EVENT_BRIDGE_ALLOWLIST } from "./task-event-bridge-contract";
 
 // Server instance
 let controlPlaneServer: ControlPlaneServer | null = null;
@@ -414,36 +415,7 @@ function sanitizeForBroadcast(value: unknown, depth = 0, key?: string): unknown 
 
 function attachAgentDaemonTaskBridge(server: ControlPlaneServer, daemon: AgentDaemon): () => void {
   // Avoid broadcasting tool_result blobs by default; remote clients can fetch details via task.get if needed.
-  const allowlist = [
-    "task_created",
-    "task_queued",
-    "task_dequeued",
-    "task_paused",
-    "task_resumed",
-    "task_cancelled",
-    "task_completed",
-    "plan_created",
-    "plan_revised",
-    "assistant_message",
-    "user_message",
-    "progress_update",
-    "approval_requested",
-    "approval_granted",
-    "approval_denied",
-    "step_started",
-    "step_completed",
-    "step_failed",
-    "tool_call",
-    "tool_error",
-    "verification_passed",
-    "verification_failed",
-    "file_created",
-    "file_modified",
-    "file_deleted",
-    "error",
-    "llm_error",
-    "step_timeout",
-  ] as const;
+  const allowlist = TASK_EVENT_BRIDGE_ALLOWLIST;
 
   const unsubscribes: Array<() => void> = [];
 

@@ -40,6 +40,7 @@
 - **Build Mode** — Go from idea to working prototype with a phased canvas workflow (Concept → Plan → Scaffold → Iterate) and named checkpoints.
 - **AI Playbook** — Auto-captures what worked from successful tasks and injects relevant patterns into future prompts.
 - **Usage Insights** — Dashboard showing task stats, cost/token tracking by model, activity heatmaps, and top skills.
+- **ChatGPT History Import** — Import your full ChatGPT conversation history. CoWork OS instantly knows your preferences, past projects, and context — no cold start. All data stays encrypted on your Mac and never leaves your machine.
 - **Security-first** — Approval workflows, sandboxed execution, configurable guardrails, encrypted storage, and 3200+ tests.
 - **Local-first & BYOK** — Your data and API keys stay on your machine. No telemetry. No middleman.
 
@@ -144,7 +145,7 @@ Built-in structured entity and relationship memory backed by SQLite. The agent b
 
 ### Memory & Context
 
-Persistent memory with privacy protection, FTS5 search, LLM compression, and workspace kit (`.cowork/`) for durable project context. [Learn more](docs/features.md#persistent-memory-system)
+Persistent memory with privacy protection, FTS5 search, LLM compression, and workspace kit (`.cowork/`) for durable project context. **Import your ChatGPT history** to eliminate the cold-start problem — CoWork OS knows you from day one. All imported data is stored locally and encrypted on your Mac. [Learn more](docs/features.md#persistent-memory-system)
 
 <p align="center">
   <img src="screenshots/cowork-os-main3.png" alt="Collaborative Mode" width="700">

@@ -99,11 +99,45 @@ Configure in **Settings** > **Voice**.
 | **FTS5 Search** | Full-text search with relevance ranking |
 | **LLM Compression** | Summarizes observations for ~10x token efficiency |
 | **Progressive Retrieval** | 3-layer approach: snippets → timeline → full details |
+| **ChatGPT History Import** | Import your full ChatGPT conversation history — eliminates cold start. All data stored locally and encrypted. [Details below](#chatgpt-history-import) |
 | **Per-Workspace Settings** | Enable/disable, privacy modes, retention policies |
 
 **Privacy Modes:** Normal (auto-detect sensitive data), Strict (all private), Disabled (no capture).
 
 Configure in **Settings** > **Memory**.
+
+---
+
+## ChatGPT History Import
+
+Import your full ChatGPT conversation history into CoWork OS's memory system. Instead of starting from scratch, the agent immediately understands your preferences, past projects, communication style, and context from hundreds or thousands of previous conversations.
+
+### How It Works
+
+1. **Export from ChatGPT**: Go to [ChatGPT Settings > Data Controls > Export Data](https://chat.openai.com/#settings/DataControls). OpenAI emails you a `.zip` file containing `conversations.json`.
+2. **Import in CoWork OS**: Go to **Settings > Memory > Import ChatGPT History** and select the exported `.zip` or `conversations.json` file.
+3. **Processing**: Conversations are parsed, deduplicated, and stored as memory entries with full-text search indexing. User messages are captured as context; assistant responses are summarized for token efficiency.
+
+### What Gets Imported
+
+| Data | How It's Used |
+|------|---------------|
+| **Your messages** | Stored as observations — reveals your interests, projects, preferences, and communication style |
+| **Assistant responses** | Summarized and stored as insights — captures decisions, recommendations, and solutions you received |
+| **Conversation titles** | Indexed for semantic search — helps match relevant past context to new tasks |
+| **Timestamps** | Preserved for time-based relevance ranking — recent conversations weighted higher |
+
+### Security & Privacy
+
+- **Stored locally only** — All imported data is written to the local SQLite database on your Mac. Nothing is uploaded, synced, or sent anywhere.
+- **Encrypted at rest** — The database is protected by the same AES-256 encryption and OS keychain integration used for all CoWork OS data.
+- **Privacy filtering** — The same auto-detection that filters API keys, passwords, and tokens from regular memories applies to imported history.
+- **No provider access** — Imported memories are injected into prompts locally. Your ChatGPT history is never sent back to OpenAI or any other provider — only the relevant snippets are included in task context.
+- **Deletable** — You can clear all imported memories at any time from Settings > Memory.
+
+### Why This Matters
+
+Most AI assistants start with zero context about you. Every new tool means re-explaining your preferences, projects, and constraints. ChatGPT history import eliminates this cold-start problem — CoWork OS learns from your existing AI conversations so it can be useful from the first task.
 
 ---
 

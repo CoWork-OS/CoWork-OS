@@ -1173,6 +1173,7 @@ interface CreateTaskOptions {
   collaborativeMode?: boolean;
   multiLlmMode?: boolean;
   multiLlmConfig?: import("../../shared/types").MultiLlmConfig;
+  verificationAgent?: boolean;
 }
 
 type SettingsTab =
@@ -1604,6 +1605,7 @@ export function MainContent({
   const [collaborativeModeEnabled, setCollaborativeModeEnabled] = useState(false);
   const [multiLlmModeEnabled, setMultiLlmModeEnabled] = useState(false);
   const [multiLlmConfig, setMultiLlmConfig] = useState<MultiLlmConfig | null>(null);
+  const [verificationAgentEnabled, setVerificationAgentEnabled] = useState(false);
   const setAutonomousModeSelection = useCallback((enabled: boolean) => {
     setAutonomousModeEnabled(enabled);
     if (enabled) {
@@ -2863,7 +2865,7 @@ export function MainContent({
           trimmedInput ||
           (pendingAttachments[0]?.name ? `Review ${pendingAttachments[0].name}` : "New task");
         const title = buildTaskTitle(titleSource);
-        const options: CreateTaskOptions | undefined =
+        const baseOptions: CreateTaskOptions | undefined =
           multiLlmModeEnabled && multiLlmConfig
             ? { multiLlmMode: true, multiLlmConfig }
             : collaborativeModeEnabled
@@ -2871,12 +2873,17 @@ export function MainContent({
               : autonomousModeEnabled
                 ? { autonomousMode: true }
                 : undefined;
+        const options: CreateTaskOptions | undefined =
+          verificationAgentEnabled
+            ? { ...baseOptions, verificationAgent: true }
+            : baseOptions;
         onCreateTask(title, message, options, imagePayload);
         // Reset task mode state
         setAutonomousModeEnabled(false);
         setCollaborativeModeEnabled(false);
         setMultiLlmModeEnabled(false);
         setMultiLlmConfig(null);
+        setVerificationAgentEnabled(false);
       } else {
         // Task is selected (even if not in current list) - send follow-up message
         onSendMessage(message, imagePayload);
@@ -3340,18 +3347,14 @@ export function MainContent({
             {/* Logo */}
             {uiDensity === "focused" ? (
               <div className="welcome-header-focused modern-only">
-                <img src="./cowork-os-logo.png" alt="CoWork OS" className="modern-logo" />
-                <span className="focused-app-name">CoWork OS</span>
+                <img src="./cowork-os-logo-text.png" alt="CoWork OS" className="modern-logo-text" />
                 <h1 className="focused-greeting">{agentContext.getMessage("welcomeSubtitle")}</h1>
               </div>
             ) : (
               <div className="welcome-header-modern modern-only">
                 <div className="modern-logo-container">
-                  <img src="./cowork-os-logo.png" alt="CoWork OS" className="modern-logo" />
-                  <div className="modern-title-container">
-                    <h1 className="modern-title">CoWork OS</h1>
-                    <span className="modern-version">{appVersion ? `v${appVersion}` : ""}</span>
-                  </div>
+                  <img src="./cowork-os-logo-text.png" alt="CoWork OS" className="modern-logo-text" />
+                  <span className="modern-version">{appVersion ? `v${appVersion}` : ""}</span>
                 </div>
                 <p className="modern-subtitle">{agentContext.getMessage("welcomeSubtitle")}</p>
               </div>
@@ -3677,6 +3680,17 @@ export function MainContent({
                       Send to multiple LLMs and have a judge synthesize results
                     </span>
                   </label>
+                  <label className="goal-mode-toggle">
+                    <input
+                      type="checkbox"
+                      checked={verificationAgentEnabled}
+                      onChange={(e) => setVerificationAgentEnabled(e.target.checked)}
+                    />
+                    <span className="goal-mode-label">Verify after completion</span>
+                    <span className="goal-mode-hint">
+                      Spawn an independent agent to audit deliverables
+                    </span>
+                  </label>
                 </div>
               )}
               <div className="welcome-input-footer">
@@ -3701,6 +3715,7 @@ export function MainContent({
                     </svg>
                   </button>
                   {uiDensity === "focused" ? (
+                    <>
                     <div className="overflow-menu-container" ref={overflowMenuRef}>
                       <button
                         ref={overflowToggleBtnRef}
@@ -3847,6 +3862,72 @@ export function MainContent({
                         </div>
                       )}
                     </div>
+                    <div className="workspace-dropdown-container" ref={workspaceDropdownRef}>
+                      {showWorkspaceDropdown && (
+                        <div className="workspace-dropdown">
+                          {workspacesList.length > 0 && (
+                            <>
+                              <div className="workspace-dropdown-header">Recent Folders</div>
+                              <div className="workspace-dropdown-list">
+                                {workspacesList.slice(0, 10).map((w) => (
+                                  <button
+                                    key={w.id}
+                                    className={`workspace-dropdown-item ${workspace?.id === w.id ? "active" : ""}`}
+                                    onClick={() => handleWorkspaceSelect(w)}
+                                  >
+                                    <svg
+                                      width="14"
+                                      height="14"
+                                      viewBox="0 0 24 24"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth="2"
+                                    >
+                                      <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+                                    </svg>
+                                    <div className="workspace-item-info">
+                                      <span className="workspace-item-name">{w.name}</span>
+                                      <span className="workspace-item-path">{w.path}</span>
+                                    </div>
+                                    {workspace?.id === w.id && (
+                                      <svg
+                                        width="14"
+                                        height="14"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="2"
+                                        className="check-icon"
+                                      >
+                                        <path d="M20 6L9 17l-5-5" />
+                                      </svg>
+                                    )}
+                                  </button>
+                                ))}
+                              </div>
+                              <div className="workspace-dropdown-divider" />
+                            </>
+                          )}
+                          <button
+                            className="workspace-dropdown-item new-folder"
+                            onClick={handleSelectNewFolder}
+                          >
+                            <svg
+                              width="14"
+                              height="14"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                            >
+                              <path d="M12 5v14M5 12h14" />
+                            </svg>
+                            <span>Work in another folder...</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    </>
                   ) : (
                     <>
                       <div className="workspace-dropdown-container" ref={workspaceDropdownRef}>

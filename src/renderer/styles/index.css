@@ -273,6 +273,11 @@ button:focus-visible,
   object-fit: contain;
 }
 
+.modern-logo-text {
+  height: 48px;
+  object-fit: contain;
+}
+
 .modern-title-container {
   display: flex;
   flex-direction: column;
@@ -19837,6 +19842,11 @@ button {
   width: 52px;
   height: 52px;
   margin-bottom: 4px;
+  filter: drop-shadow(0 2px 8px var(--color-accent-subtle));
+}
+.welcome-header-focused .modern-logo-text {
+  height: 56px;
+  margin-bottom: 8px;
   filter: drop-shadow(0 2px 8px var(--color-accent-subtle));
 }
 .focused-app-name {

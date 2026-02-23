@@ -278,6 +278,17 @@ button:focus-visible,
   object-fit: contain;
 }
 
+/* Theme-aware logo: dark variant shown by default, light variant in .theme-light */
+.logo-for-light {
+  display: none !important;
+}
+.theme-light .logo-for-dark {
+  display: none !important;
+}
+.theme-light .logo-for-light {
+  display: inline !important;
+}
+
 .modern-title-container {
   display: flex;
   flex-direction: column;

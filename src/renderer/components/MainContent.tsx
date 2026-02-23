@@ -1415,8 +1415,8 @@ const FOCUSED_CARD_POOL: FocusedCard[] = [
     id: "setup-mcp",
     emoji: "🔌",
     iconName: "sliders",
-    title: "Add MCP servers",
-    desc: "Connect to external tools and services",
+    title: "Connect tools",
+    desc: "Add external tools and services",
     action: { type: "settings", tab: "mcp" },
     category: "setup",
   },
@@ -1424,10 +1424,50 @@ const FOCUSED_CARD_POOL: FocusedCard[] = [
     id: "setup-guardrails",
     emoji: "🛡️",
     iconName: "shield",
-    title: "Configure guardrails",
+    title: "Set safety limits",
     desc: "Control what your AI can and cannot do",
     action: { type: "settings", tab: "guardrails" },
     category: "setup",
+  },
+
+  {
+    id: "competitors",
+    emoji: "🏁",
+    iconName: "search",
+    title: "Research competitors",
+    desc: "Analyze a market and find opportunities",
+    action: {
+      type: "prompt",
+      prompt:
+        "Research the top 3-5 competitors in a market I'll describe. For each, find their positioning, key features, pricing, strengths, and weaknesses. Then identify gaps I could exploit.",
+    },
+    category: "task",
+  },
+  {
+    id: "validate-idea",
+    emoji: "💡",
+    iconName: "zap",
+    title: "Validate an idea",
+    desc: "Market size, competitors, and a go/no-go call",
+    action: {
+      type: "prompt",
+      prompt:
+        "Help me validate a business idea. I'll describe the concept, and you'll assess the market size, competitors, unique angle, and give a go/no-go recommendation.",
+    },
+    category: "task",
+  },
+  {
+    id: "weekly-plan",
+    emoji: "📅",
+    iconName: "calendar",
+    title: "Plan my week",
+    desc: "Build a day-by-day schedule with priorities",
+    action: {
+      type: "prompt",
+      prompt:
+        "Help me create a weekly plan. Ask about my goals, deadlines, and priorities, then build a day-by-day schedule with clear deliverables.",
+    },
+    category: "task",
   },
 
   // --- Feature discovery ---
@@ -1536,7 +1576,7 @@ interface MainContentProps {
   availableModels: LLMModelInfo[];
   onModelChange: (model: string) => void;
   availableProviders?: Array<{ type: string; name: string; configured: boolean }>;
-  uiDensity?: "focused" | "full";
+  uiDensity?: "focused" | "full" | "power";
 }
 
 // Track active command execution state
@@ -3347,13 +3387,15 @@ export function MainContent({
             {/* Logo */}
             {uiDensity === "focused" ? (
               <div className="welcome-header-focused modern-only">
-                <img src="./cowork-os-logo-text.png" alt="CoWork OS" className="modern-logo-text" />
+                <img src="./cowork-os-logo-text-dark.png" alt="CoWork OS" className="modern-logo-text logo-for-dark" />
+                <img src="./cowork-os-logo-text.png" alt="CoWork OS" className="modern-logo-text logo-for-light" />
                 <h1 className="focused-greeting">{agentContext.getMessage("welcomeSubtitle")}</h1>
               </div>
             ) : (
               <div className="welcome-header-modern modern-only">
                 <div className="modern-logo-container">
-                  <img src="./cowork-os-logo-text.png" alt="CoWork OS" className="modern-logo-text" />
+                  <img src="./cowork-os-logo-text-dark.png" alt="CoWork OS" className="modern-logo-text logo-for-dark" />
+                  <img src="./cowork-os-logo-text.png" alt="CoWork OS" className="modern-logo-text logo-for-light" />
                   <span className="modern-version">{appVersion ? `v${appVersion}` : ""}</span>
                 </div>
                 <p className="modern-subtitle">{agentContext.getMessage("welcomeSubtitle")}</p>
@@ -3530,36 +3572,36 @@ export function MainContent({
                     className="quick-start-card"
                     onClick={() =>
                       handleQuickAction(
-                        "Let's research and summarize information from the files in this folder together.",
+                        "Research the top 3-5 competitors in a market I'll describe. For each, find their positioning, key features, pricing, strengths, and weaknesses. Then identify gaps I could exploit.",
                       )
                     }
-                    title="Dig through files and find insights"
+                    title="Analyze a market and find opportunities"
                   >
                     <ThemeIcon
                       className="quick-start-icon"
-                      emoji="🔍"
+                      emoji="🏁"
                       icon={<SearchIcon size={22} />}
                     />
-                    <span className="quick-start-title">Research together</span>
-                    <span className="quick-start-desc">Dig through files and find insights</span>
+                    <span className="quick-start-title">Research competitors</span>
+                    <span className="quick-start-desc">Analyze a market and find opportunities</span>
                   </button>
                   <button
                     className="quick-start-card"
                     onClick={() =>
                       handleQuickAction(
-                        "Let's prepare for a meeting together. We'll create an agenda, talking points, and organize materials needed.",
+                        "Help me validate a business idea. I'll describe the concept, and you'll assess the market size, competitors, unique angle, and give a go/no-go recommendation.",
                       )
                     }
-                    title="Get everything ready for a clean meeting"
+                    title="Market size, competitors, and a go/no-go call"
                   >
                     <ThemeIcon
                       className="quick-start-icon"
-                      emoji="📋"
-                      icon={<ClipboardIcon size={22} />}
+                      emoji="💡"
+                      icon={<ZapIcon size={22} />}
                     />
-                    <span className="quick-start-title">Meeting prep</span>
+                    <span className="quick-start-title">Validate an idea</span>
                     <span className="quick-start-desc">
-                      Get everything ready for a clean meeting
+                      Market size, competitors, and a go/no-go call
                     </span>
                   </button>
                 </div>

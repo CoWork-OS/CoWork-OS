@@ -320,6 +320,7 @@ IMAP/SMTP integration — works with any email provider.
 - Reply threading via In-Reply-To headers
 - Subject filtering and sender allowlist
 - Universal: works with any IMAP/SMTP provider
+- **LOOM protocol**: Dual-protocol email system (LOOM for agents, IMAP/SMTP for legacy)
 
 > **Notes:** Gmail/Outlook with 2FA require app passwords. Uses IMAP polling (default 30 seconds).
 

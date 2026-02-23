@@ -38,9 +38,12 @@
 - **Wrap-Up Task**: Gracefully wrap up running tasks instead of hard-cancelling
 - **Capability Matcher**: Auto-select the best agents for a task
 - **Performance Reviews**: Score and review agent-role outcomes with autonomy-level recommendations
-- **Vision**: Analyze workspace images via `analyze_image` tool (OpenAI, Anthropic, or Gemini)
+- **Vision**: Analyze workspace images via `analyze_image` tool (OpenAI, Anthropic, Gemini, or Bedrock)
+- **Image Attachments**: Attach images to tasks and follow-ups for multimodal analysis
 - **Image Generation**: Multi-provider support (Gemini, OpenAI gpt-image-1/1.5/DALL-E, Azure OpenAI)
 - **Visual Annotation**: Iterative image refinement with the Visual Annotator
+- **Context Summarization**: Automatic context compression surfaced in the task timeline
+- **Action-First Planning**: Agent prioritizes direct action over excessive pre-planning
 - **Voice Calls**: Outbound phone calls via ElevenLabs Agents
 
 ---
@@ -150,6 +153,22 @@ Claude Code-style tools for efficient code navigation and editing:
 | **git_commit** | Commit changes in the workspace (or worktree) |
 | **git_diff** | View staged/unstaged changes |
 | **git_branch** | List, create, or switch branches |
+
+---
+
+## Live Canvas
+
+Agent-driven visual workspace for interactive content creation and data visualization.
+
+- **Interactive Preview**: Full browser interaction within the canvas
+- **Snapshot Mode**: Auto-refresh preview every 2 seconds
+- **Canvas Tools**: `canvas_open_session`, `canvas_set_state`, `canvas_eval`, `canvas_close_session`
+- **Visual Annotation**: `visual_open_annotator` and `visual_update_annotator` for iterative image refinement
+- **Export**: HTML, open in browser, or reveal in Finder
+- **Snapshot History**: Browse previous canvas states
+- **Keyboard Shortcuts**: Toolbar controls for common actions
+
+See [Live Canvas](live-canvas.md) for the full guide.
 
 ---
 

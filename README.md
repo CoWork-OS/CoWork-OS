@@ -34,7 +34,7 @@
 - **14 messaging channels** — WhatsApp, Telegram, Discord, Slack, Teams, iMessage, Signal, and more. Chat with your AI from anywhere.
 - **100+ built-in skills** — Documents, code review, web search, image generation, cloud integrations, and more.
 - **Agent teams** — Multi-agent collaboration with shared checklists, collaborative mode, and multi-LLM synthesis.
-- **Security-first** — Approval workflows, sandboxed execution, guardrails, encrypted storage, and 2800+ tests.
+- **Security-first** — Approval workflows, sandboxed execution, guardrails, encrypted storage, and 3200+ tests.
 - **Local-first & BYOK** — Your data and API keys stay on your machine. No telemetry. No middleman.
 
 ## Quick Start
@@ -76,6 +76,10 @@ See the [Development Guide](docs/development.md) for prerequisites and details.
 
 Task-based execution with dynamic re-planning, agent teams, collaborative mode, multi-LLM synthesis, agent comparison, git worktree isolation, and performance reviews. [Learn more](docs/features.md#agent-capabilities)
 
+### Live Canvas
+
+Agent-driven visual workspace for interactive HTML/CSS/JS content, data visualization, and iterative image annotation. [Learn more](docs/features.md#live-canvas)
+
 ### Multichannel Gateway
 
 Unified AI gateway across 14 channels with security modes, rate limiting, ambient mode, scheduled tasks, and chat commands. [Learn more](docs/channels.md)
@@ -90,7 +94,7 @@ Unified AI gateway across 14 channels with security modes, rate limiting, ambien
 
 ### LLM Providers
 
-10 built-in providers + 20 compatible/gateway providers. Use cloud APIs or run fully offline with Ollama. [Learn more](docs/providers.md)
+12 built-in providers + 20+ compatible/gateway providers. Use cloud APIs or run fully offline with Ollama. [Learn more](docs/providers.md)
 
 ### Extensibility
 
@@ -157,7 +161,7 @@ See [Architecture](docs/architecture.md) for the full technical deep-dive.
 - **Approval workflows**: User consent required for destructive operations
 - **Sandbox isolation**: macOS `sandbox-exec` (native) or Docker containers
 - **Encrypted storage**: OS keychain + AES-256 fallback
-- **2800+ tests** including 132+ security unit tests and 259+ WebSocket protocol tests
+- **3200+ tests** including 132+ security unit tests and 259+ WebSocket protocol tests
 
 See [Security Guide](docs/security-guide.md) and [Security Architecture](docs/security/) for details.
 

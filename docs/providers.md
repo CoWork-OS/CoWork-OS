@@ -14,10 +14,12 @@ CoWork OS is **free and open source**. To run tasks, configure your own model cr
 | OpenAI (API Key) | API key in Settings | Pay-per-token |
 | OpenAI (ChatGPT OAuth) | Sign in with ChatGPT account | Uses your ChatGPT subscription |
 | AWS Bedrock | AWS credentials in Settings (auto-resolves inference profiles) | Pay-per-token via AWS |
+| Azure OpenAI | API key + endpoint in Settings | Pay-per-token via Azure |
 | Ollama (Local) | Install Ollama and pull models | **Free** (runs locally) |
 | Groq | API key in Settings | Pay-per-token |
 | xAI (Grok) | API key in Settings | Pay-per-token |
 | Kimi (Moonshot) | API key in Settings | Pay-per-token |
+| Pi (Multi-LLM) | Unified API via pi-ai | Routes to multiple providers |
 
 ## Compatible / Gateway Providers
 
@@ -41,6 +43,7 @@ CoWork OS is **free and open source**. To run tasks, configure your own model cr
 | Venice AI | API key in Settings | Provider billing |
 | Synthetic | API key in Settings | Provider billing |
 | Kimi Code | API key in Settings | Provider billing |
+| Kimi Coding | API key in Settings | Provider billing |
 | OpenAI-Compatible (Custom) | API key + base URL in Settings | Provider billing |
 | Anthropic-Compatible (Custom) | API key + base URL in Settings | Provider billing |
 

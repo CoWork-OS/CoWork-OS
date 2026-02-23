@@ -30,6 +30,8 @@ export interface CronRunHistoryEntry {
   status: CronJobStatus;
   error?: string;
   taskId?: string;
+  deliveryStatus?: "success" | "failed" | "skipped";
+  deliveryError?: string;
 }
 
 /**
@@ -57,6 +59,7 @@ export interface CronJobState {
 export interface CronDeliveryConfig {
   enabled: boolean;
   channelType?: ChannelType;
+  channelDbId?: string; // Database ID of the specific channel instance to deliver through
   channelId?: string; // chatId / conversation ID to deliver to
   deliverOnSuccess?: boolean;
   deliverOnError?: boolean;
@@ -171,6 +174,7 @@ export interface CronServiceDeps {
   // Channel delivery handler for sending results to messaging platforms
   deliverToChannel?: (params: {
     channelType: ChannelType;
+    channelDbId?: string; // Database ID of the specific channel instance
     channelId: string;
     jobName: string;
     status: CronJobStatus;

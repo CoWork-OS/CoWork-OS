@@ -637,7 +637,16 @@ export class CronService {
     this.armTimer();
 
     // Deliver results to channel if configured
-    await this.deliverToChannel(job, status, taskId, errorMsg, resultText);
+    const deliveryResult = await this.deliverToChannel(job, status, taskId, errorMsg, resultText);
+
+    // Update history entry with delivery status
+    if (deliveryResult.attempted && job.state.runHistory?.[0]) {
+      job.state.runHistory[0].deliveryStatus = deliveryResult.success ? "success" : "failed";
+      if (deliveryResult.error) {
+        job.state.runHistory[0].deliveryError = deliveryResult.error;
+      }
+      await this.persist();
+    }
 
     this.emit({
       jobId: job.id,
@@ -666,16 +675,17 @@ export class CronService {
     taskId?: string,
     error?: string,
     resultText?: string,
-  ): Promise<void> {
+  ): Promise<{ attempted: boolean; success?: boolean; error?: string }> {
     const { deps, log } = this.getContext();
 
     // Check if delivery is configured and enabled
     if (!job.delivery?.enabled || !deps.deliverToChannel) {
-      return;
+      return { attempted: false };
     }
 
     const {
       channelType,
+      channelDbId,
       channelId,
       deliverOnSuccess,
       deliverOnError,
@@ -689,17 +699,18 @@ export class CronService {
       (isSuccess && deliverOnSuccess !== false) || (!isSuccess && deliverOnError !== false);
 
     if (!shouldDeliver || !channelType || !channelId) {
-      return;
+      return { attempted: false };
     }
 
     if (status === "ok" && deliverOnlyIfResult) {
       const hasNonEmpty = typeof resultText === "string" && resultText.trim().length > 0;
-      if (!hasNonEmpty) return;
+      if (!hasNonEmpty) return { attempted: false };
     }
 
     try {
       await deps.deliverToChannel({
         channelType,
+        channelDbId,
         channelId,
         jobName: job.name,
         status,
@@ -709,8 +720,11 @@ export class CronService {
         resultText,
       });
       log.info(`Delivered results for job "${job.name}" to ${channelType}:${channelId}`);
+      return { attempted: true, success: true };
     } catch (deliveryError) {
+      const errMsg = deliveryError instanceof Error ? deliveryError.message : String(deliveryError);
       log.error(`Failed to deliver results for job "${job.name}":`, deliveryError);
+      return { attempted: true, success: false, error: errMsg };
     }
   }
 

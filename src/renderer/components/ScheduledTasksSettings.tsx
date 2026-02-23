@@ -7,6 +7,17 @@ type CronSchedule =
   | { kind: "every"; everyMs: number; anchorMs?: number }
   | { kind: "cron"; expr: string; tz?: string };
 
+interface CronDeliveryConfig {
+  enabled: boolean;
+  channelType?: string;
+  channelDbId?: string;
+  channelId?: string;
+  deliverOnSuccess?: boolean;
+  deliverOnError?: boolean;
+  summaryOnly?: boolean;
+  deliverOnlyIfResult?: boolean;
+}
+
 interface CronJobState {
   nextRunAtMs?: number;
   runningAtMs?: number;
@@ -30,6 +41,7 @@ interface CronJob {
   workspaceId: string;
   taskPrompt: string;
   taskTitle?: string;
+  delivery?: CronDeliveryConfig;
   state: CronJobState;
 }
 
@@ -251,6 +263,21 @@ const Icons = {
       <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
     </svg>
   ),
+  send: (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <line x1="22" y1="2" x2="11" y2="13" />
+      <polygon points="22 2 15 22 11 13 2 9 22 2" />
+    </svg>
+  ),
 };
 
 function describeSchedule(schedule: CronSchedule): string {
@@ -421,6 +448,7 @@ const styles = {
     justifyContent: "center",
     width: "32px",
     height: "32px",
+    padding: 0,
     backgroundColor: "transparent",
     border: "1px solid var(--color-border-subtle)",
     borderRadius: "6px",
@@ -888,6 +916,50 @@ export function ScheduledTasksSettings() {
                           </span>
                         </>
                       )}
+
+                      {job.delivery?.enabled && (
+                        <>
+                          <span style={styles.detailLabel}>Delivery</span>
+                          <span style={styles.detailValue}>
+                            <span
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "4px",
+                                padding: "2px 8px",
+                                backgroundColor: "var(--color-success-subtle)",
+                                color: "var(--color-success)",
+                                borderRadius: "4px",
+                                fontSize: "12px",
+                                fontWeight: 500,
+                              }}
+                            >
+                              {Icons.send}
+                              {job.delivery.channelType}
+                            </span>
+                            <span
+                              style={{
+                                marginLeft: "8px",
+                                fontSize: "12px",
+                                color: "var(--color-text-muted)",
+                              }}
+                            >
+                              &rarr; {job.delivery.channelId}
+                            </span>
+                          </span>
+                          <span style={styles.detailLabel}>Deliver When</span>
+                          <span style={styles.detailValue}>
+                            {[
+                              job.delivery.deliverOnSuccess !== false ? "Success" : null,
+                              job.delivery.deliverOnError !== false ? "Error" : null,
+                            ]
+                              .filter(Boolean)
+                              .join(", ")}
+                            {job.delivery.summaryOnly ? " (summary only)" : ""}
+                            {job.delivery.deliverOnlyIfResult ? " (only if result)" : ""}
+                          </span>
+                        </>
+                      )}
                     </div>
                   </div>
                 )}
@@ -936,6 +1008,61 @@ function JobModal({ job, workspaces, onClose, onSave }: JobModalProps) {
   const [enabled, setEnabled] = useState(job?.enabled ?? true);
   const [deleteAfterRun, setDeleteAfterRun] = useState(job?.deleteAfterRun ?? false);
 
+  // Delivery config
+  const [deliveryEnabled, setDeliveryEnabled] = useState(job?.delivery?.enabled ?? false);
+  const [deliveryChannelDbId, setDeliveryChannelDbId] = useState(job?.delivery?.channelDbId || "");
+  const [deliveryChannelType, setDeliveryChannelType] = useState(job?.delivery?.channelType || "");
+  const [deliveryChatId, setDeliveryChatId] = useState(job?.delivery?.channelId || "");
+  const [deliverOnSuccess, setDeliverOnSuccess] = useState(job?.delivery?.deliverOnSuccess ?? true);
+  const [deliverOnError, setDeliverOnError] = useState(job?.delivery?.deliverOnError ?? true);
+  const [summaryOnly, setSummaryOnly] = useState(job?.delivery?.summaryOnly ?? false);
+  const [deliverOnlyIfResult, setDeliverOnlyIfResult] = useState(
+    job?.delivery?.deliverOnlyIfResult ?? false,
+  );
+  const [deliveryExpanded, setDeliveryExpanded] = useState(job?.delivery?.enabled ?? false);
+  const [connectedChannels, setConnectedChannels] = useState<
+    Array<{ id: string; type: string; name: string; enabled: boolean; status: string }>
+  >([]);
+  const [knownChatIds, setKnownChatIds] = useState<
+    Array<{ chatId: string; lastTimestamp: number }>
+  >([]);
+  const [testingDelivery, setTestingDelivery] = useState(false);
+  const [testDeliveryResult, setTestDeliveryResult] = useState<{
+    ok: boolean;
+    message: string;
+  } | null>(null);
+
+  useEffect(() => {
+    const loadChannels = async () => {
+      try {
+        const channels = await window.electronAPI.getGatewayChannels();
+        // Show all enabled channels (including disconnected ones) so editing works
+        // even when a channel is temporarily offline
+        setConnectedChannels(channels.filter((c: { enabled: boolean }) => c.enabled));
+      } catch (err) {
+        console.error("Failed to load gateway channels:", err);
+      }
+    };
+    loadChannels();
+  }, []);
+
+  // Load known chat IDs when selected channel changes
+  useEffect(() => {
+    if (!deliveryChannelDbId) {
+      setKnownChatIds([]);
+      return;
+    }
+    const loadChats = async () => {
+      try {
+        const chats = await window.electronAPI.getGatewayChats(deliveryChannelDbId);
+        setKnownChatIds(chats);
+      } catch {
+        setKnownChatIds([]);
+      }
+    };
+    loadChats();
+  }, [deliveryChannelDbId]);
+
   // Schedule type and values
   const [scheduleType, setScheduleType] = useState<"every" | "cron" | "at">(
     job?.schedule.kind || "every",
@@ -967,6 +1094,17 @@ function JobModal({ job, workspaces, onClose, onSave }: JobModalProps) {
       return;
     }
 
+    if (deliveryEnabled) {
+      if (!deliveryChannelDbId) {
+        setError("Please select a channel for delivery");
+        return;
+      }
+      if (!deliveryChatId.trim()) {
+        setError("Please enter a Chat ID for delivery");
+        return;
+      }
+    }
+
     let schedule: CronSchedule;
     if (scheduleType === "every") {
       schedule = { kind: "every", everyMs, anchorMs: Date.now() };
@@ -980,6 +1118,19 @@ function JobModal({ job, workspaces, onClose, onSave }: JobModalProps) {
       }
       schedule = { kind: "at", atMs };
     }
+
+    const delivery = deliveryEnabled
+      ? {
+          enabled: true as const,
+          channelType: (deliveryChannelType || undefined) as any,
+          channelDbId: deliveryChannelDbId || undefined,
+          channelId: deliveryChatId.trim() || undefined,
+          deliverOnSuccess,
+          deliverOnError,
+          summaryOnly,
+          deliverOnlyIfResult,
+        }
+      : { enabled: false as const };
 
     try {
       setSaving(true);
@@ -995,6 +1146,7 @@ function JobModal({ job, workspaces, onClose, onSave }: JobModalProps) {
           enabled,
           deleteAfterRun,
           schedule,
+          delivery,
         });
         if (!result.ok) {
           setError(result.error);
@@ -1010,6 +1162,7 @@ function JobModal({ job, workspaces, onClose, onSave }: JobModalProps) {
           enabled,
           deleteAfterRun,
           schedule,
+          delivery,
         });
         if (!result.ok) {
           setError(result.error);
@@ -1361,6 +1514,263 @@ function JobModal({ job, workspaces, onClose, onSave }: JobModalProps) {
               />
               Delete after execution (one-shot)
             </label>
+          )}
+        </div>
+
+        {/* Delivery Configuration */}
+        <div
+          style={{
+            marginBottom: "20px",
+            border: "1px solid var(--color-border-subtle)",
+            borderRadius: "var(--radius-sm)",
+            overflow: "hidden",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "12px 14px",
+              backgroundColor: "var(--color-bg-glass)",
+              cursor: "pointer",
+              gap: "10px",
+            }}
+            onClick={() => setDeliveryExpanded(!deliveryExpanded)}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              {Icons.send}
+              <span
+                style={{
+                  fontSize: "14px",
+                  fontWeight: 500,
+                  color: "var(--color-text-primary)",
+                }}
+              >
+                Delivery
+              </span>
+              {deliveryEnabled && (
+                <span
+                  style={{
+                    fontSize: "11px",
+                    padding: "2px 6px",
+                    borderRadius: "4px",
+                    backgroundColor: "var(--color-success-subtle)",
+                    color: "var(--color-success)",
+                    fontWeight: 500,
+                  }}
+                >
+                  ON
+                </span>
+              )}
+            </div>
+            <span
+              style={{
+                color: "var(--color-text-muted)",
+                transform: deliveryExpanded ? "rotate(180deg)" : "rotate(0)",
+                transition: "transform 0.2s ease",
+              }}
+            >
+              {Icons.chevronDown}
+            </span>
+          </div>
+
+          {deliveryExpanded && (
+            <div style={{ padding: "14px", borderTop: "1px solid var(--color-border-subtle)" }}>
+              <label style={modalStyles.checkbox}>
+                <input
+                  type="checkbox"
+                  checked={deliveryEnabled}
+                  onChange={(e) => setDeliveryEnabled(e.target.checked)}
+                />
+                Send results to a messaging channel
+              </label>
+
+              {deliveryEnabled && (
+                <div
+                  style={{
+                    marginTop: "14px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "14px",
+                  }}
+                >
+                  {/* Channel dropdown */}
+                  <div>
+                    <label style={modalStyles.label}>Channel *</label>
+                    {connectedChannels.length > 0 ? (
+                      <select
+                        value={deliveryChannelDbId}
+                        onChange={(e) => {
+                          const selectedId = e.target.value;
+                          setDeliveryChannelDbId(selectedId);
+                          const ch = connectedChannels.find((c) => c.id === selectedId);
+                          setDeliveryChannelType(ch?.type || "");
+                        }}
+                        style={modalStyles.select}
+                      >
+                        <option value="">Select a channel...</option>
+                        {connectedChannels.map((ch) => (
+                          <option key={ch.id} value={ch.id}>
+                            {ch.name} ({ch.type})
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div
+                        style={{
+                          padding: "10px 12px",
+                          backgroundColor: "var(--color-bg-input)",
+                          border: "1px solid var(--color-border)",
+                          borderRadius: "var(--radius-sm)",
+                          fontSize: "13px",
+                          color: "var(--color-text-muted)",
+                        }}
+                      >
+                        No channels configured. Add a channel in Settings &rarr; Channels first.
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Chat ID */}
+                  <div>
+                    <label style={modalStyles.label}>Chat ID / Conversation ID *</label>
+                    <input
+                      type="text"
+                      value={deliveryChatId}
+                      onChange={(e) => setDeliveryChatId(e.target.value)}
+                      placeholder="e.g., -1001234567890 or 14155551234@s.whatsapp.net"
+                      list="delivery-chat-ids"
+                      style={modalStyles.input}
+                    />
+                    {knownChatIds.length > 0 && (
+                      <datalist id="delivery-chat-ids">
+                        {knownChatIds.map((c) => (
+                          <option key={c.chatId} value={c.chatId}>
+                            {c.chatId} (last message:{" "}
+                            {new Date(c.lastTimestamp).toLocaleDateString()})
+                          </option>
+                        ))}
+                      </datalist>
+                    )}
+                    <div
+                      style={{
+                        marginTop: "4px",
+                        fontSize: "12px",
+                        color: "var(--color-text-muted)",
+                      }}
+                    >
+                      {knownChatIds.length > 0
+                        ? "Select from recent conversations or enter a chat ID manually"
+                        : "The target chat/conversation ID on the selected channel"}
+                    </div>
+                  </div>
+
+                  {/* Delivery options */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                    <label style={modalStyles.checkbox}>
+                      <input
+                        type="checkbox"
+                        checked={deliverOnSuccess}
+                        onChange={(e) => setDeliverOnSuccess(e.target.checked)}
+                      />
+                      Deliver on success
+                    </label>
+                    <label style={modalStyles.checkbox}>
+                      <input
+                        type="checkbox"
+                        checked={deliverOnError}
+                        onChange={(e) => setDeliverOnError(e.target.checked)}
+                      />
+                      Deliver on error
+                    </label>
+                    <label style={modalStyles.checkbox}>
+                      <input
+                        type="checkbox"
+                        checked={summaryOnly}
+                        onChange={(e) => setSummaryOnly(e.target.checked)}
+                      />
+                      Summary only (omit full result text)
+                    </label>
+                    <label style={modalStyles.checkbox}>
+                      <input
+                        type="checkbox"
+                        checked={deliverOnlyIfResult}
+                        onChange={(e) => setDeliverOnlyIfResult(e.target.checked)}
+                      />
+                      Only deliver if result is non-empty
+                    </label>
+                  </div>
+
+                  {/* Test Delivery */}
+                  {deliveryChannelDbId && deliveryChatId.trim() && (
+                    <div
+                      style={{
+                        paddingTop: "10px",
+                        borderTop: "1px solid var(--color-border-subtle)",
+                      }}
+                    >
+                      <button
+                        style={{
+                          padding: "8px 14px",
+                          fontSize: "13px",
+                          fontWeight: 500,
+                          color: testingDelivery
+                            ? "var(--color-text-muted)"
+                            : "var(--color-text-primary)",
+                          backgroundColor: "var(--color-bg-input)",
+                          border: "1px solid var(--color-border)",
+                          borderRadius: "var(--radius-sm)",
+                          cursor: testingDelivery ? "not-allowed" : "pointer",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "6px",
+                        }}
+                        disabled={testingDelivery}
+                        onClick={async () => {
+                          setTestingDelivery(true);
+                          setTestDeliveryResult(null);
+                          try {
+                            await window.electronAPI.sendGatewayTestMessage({
+                              channelType: deliveryChannelType,
+                              channelDbId: deliveryChannelDbId,
+                              chatId: deliveryChatId.trim(),
+                            });
+                            setTestDeliveryResult({
+                              ok: true,
+                              message: "Test message sent successfully!",
+                            });
+                          } catch (err: any) {
+                            setTestDeliveryResult({
+                              ok: false,
+                              message: err.message || "Failed to send test message",
+                            });
+                          } finally {
+                            setTestingDelivery(false);
+                          }
+                        }}
+                      >
+                        {Icons.send}
+                        {testingDelivery ? "Sending..." : "Send Test Message"}
+                      </button>
+                      {testDeliveryResult && (
+                        <div
+                          style={{
+                            marginTop: "8px",
+                            fontSize: "12px",
+                            color: testDeliveryResult.ok
+                              ? "var(--color-success)"
+                              : "var(--color-error)",
+                          }}
+                        >
+                          {testDeliveryResult.message}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           )}
         </div>
 

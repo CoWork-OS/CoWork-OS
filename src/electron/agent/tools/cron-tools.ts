@@ -136,6 +136,16 @@ export class CronTools {
     };
     enabled?: boolean;
     deleteAfterRun?: boolean;
+    delivery?: {
+      enabled: boolean;
+      channelType?: string;
+      channelDbId?: string;
+      channelId?: string;
+      deliverOnSuccess?: boolean;
+      deliverOnError?: boolean;
+      summaryOnly?: boolean;
+      deliverOnlyIfResult?: boolean;
+    };
   }): Promise<{ success: boolean; job?: CronJob; error?: string }> {
     this.daemon.logEvent(this.taskId, "tool_call", {
       tool: "schedule_create",
@@ -198,6 +208,18 @@ export class CronTools {
       workspaceId: workspaceForJob.id,
       taskPrompt: params.prompt,
       taskTitle: params.name,
+      delivery: params.delivery
+        ? {
+            enabled: params.delivery.enabled,
+            channelType: params.delivery.channelType as any,
+            channelDbId: params.delivery.channelDbId,
+            channelId: params.delivery.channelId,
+            deliverOnSuccess: params.delivery.deliverOnSuccess,
+            deliverOnError: params.delivery.deliverOnError,
+            summaryOnly: params.delivery.summaryOnly,
+            deliverOnlyIfResult: params.delivery.deliverOnlyIfResult,
+          }
+        : undefined,
     };
 
     const result = await service.add(jobCreate);
@@ -236,6 +258,15 @@ export class CronTools {
         every?: string;
         cron?: string;
         timezone?: string;
+      };
+      delivery?: {
+        enabled: boolean;
+        channelType?: string;
+        channelId?: string;
+        deliverOnSuccess?: boolean;
+        deliverOnError?: boolean;
+        summaryOnly?: boolean;
+        deliverOnlyIfResult?: boolean;
       };
     };
   }): Promise<{ success: boolean; job?: CronJob; error?: string }> {
@@ -282,6 +313,10 @@ export class CronTools {
       } catch (error: any) {
         return { success: false, error: error.message };
       }
+    }
+
+    if (params.updates.delivery !== undefined) {
+      patch.delivery = params.updates.delivery;
     }
 
     const result = await service.update(jobId, patch);
@@ -599,7 +634,8 @@ export class CronTools {
         description:
           "Schedule a task to run at a specific time or on a recurring basis. " +
           "Use this for reminders, recurring reports, automated checks, or any task that should run automatically. " +
-          "Supports one-time scheduling, intervals (every X minutes/hours/days), and cron expressions.",
+          "Supports one-time scheduling, intervals (every X minutes/hours/days), and cron expressions. " +
+          "Optionally configure delivery to send results to a messaging channel (WhatsApp, Telegram, Slack, Discord, etc.).",
         input_schema: {
           type: "object",
           properties: {
@@ -672,6 +708,62 @@ export class CronTools {
               type: "boolean",
               description: 'Delete the task after it runs once (default: true for "once" type)',
             },
+            delivery: {
+              type: "object",
+              description:
+                "Channel delivery configuration — send job results to a messaging channel",
+              properties: {
+                enabled: {
+                  type: "boolean",
+                  description: "Whether delivery is enabled",
+                },
+                channelType: {
+                  type: "string",
+                  enum: [
+                    "telegram",
+                    "discord",
+                    "slack",
+                    "whatsapp",
+                    "imessage",
+                    "signal",
+                    "mattermost",
+                    "matrix",
+                    "email",
+                    "teams",
+                    "googlechat",
+                  ],
+                  description: "Type of messaging channel to deliver to",
+                },
+                channelDbId: {
+                  type: "string",
+                  description:
+                    "Database ID of the specific channel instance (from channel list). Use this when multiple channels of the same type exist.",
+                },
+                channelId: {
+                  type: "string",
+                  description:
+                    "Chat ID / conversation ID on the target channel (e.g., WhatsApp JID, Telegram chat ID)",
+                },
+                deliverOnSuccess: {
+                  type: "boolean",
+                  description: "Deliver results when the task succeeds (default: true)",
+                },
+                deliverOnError: {
+                  type: "boolean",
+                  description: "Deliver notification when the task fails (default: true)",
+                },
+                summaryOnly: {
+                  type: "boolean",
+                  description:
+                    "Send only a status summary, not the full result text (default: false)",
+                },
+                deliverOnlyIfResult: {
+                  type: "boolean",
+                  description:
+                    "Only deliver on success when a non-empty result is available (default: false)",
+                },
+              },
+            },
             // For update/remove/run/history actions
             id: {
               type: "string",
@@ -701,6 +793,20 @@ export class CronTools {
                     timezone: { type: "string" },
                   },
                 },
+                delivery: {
+                  type: "object",
+                  description: "Channel delivery config update",
+                  properties: {
+                    enabled: { type: "boolean" },
+                    channelType: { type: "string" },
+                    channelDbId: { type: "string" },
+                    channelId: { type: "string" },
+                    deliverOnSuccess: { type: "boolean" },
+                    deliverOnError: { type: "boolean" },
+                    summaryOnly: { type: "boolean" },
+                    deliverOnlyIfResult: { type: "boolean" },
+                  },
+                },
               },
             },
           },
@@ -727,6 +833,16 @@ export class CronTools {
     };
     enabled?: boolean;
     deleteAfterRun?: boolean;
+    delivery?: {
+      enabled: boolean;
+      channelType?: string;
+      channelDbId?: string;
+      channelId?: string;
+      deliverOnSuccess?: boolean;
+      deliverOnError?: boolean;
+      summaryOnly?: boolean;
+      deliverOnlyIfResult?: boolean;
+    };
     id?: string;
     includeDisabled?: boolean;
     updates?: {
@@ -740,6 +856,16 @@ export class CronTools {
         every?: string;
         cron?: string;
         timezone?: string;
+      };
+      delivery?: {
+        enabled: boolean;
+        channelType?: string;
+        channelDbId?: string;
+        channelId?: string;
+        deliverOnSuccess?: boolean;
+        deliverOnError?: boolean;
+        summaryOnly?: boolean;
+        deliverOnlyIfResult?: boolean;
       };
     };
   }): Promise<any> {
@@ -761,6 +887,7 @@ export class CronTools {
           schedule: input.schedule,
           enabled: input.enabled,
           deleteAfterRun: input.deleteAfterRun,
+          delivery: input.delivery,
         });
 
       case "update":

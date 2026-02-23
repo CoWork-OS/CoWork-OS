@@ -1,0 +1,86 @@
+{
+  "id": "crypto-trading",
+  "name": "Crypto Trading",
+  "description": "Use ccxt (Python) for crypto prices, balances, and order actions across 100+ exchanges.",
+  "icon": "📈",
+  "category": "Finance",
+  "prompt": "Use this skill when users ask for crypto price data or execution workflows.\n\nRun the helper script from this skill folder to keep exchanges and response formatting consistent.\n\n## Prerequisites\n\n- Python 3 and the `ccxt` package.\n- `CCXT_API_KEY`, `CCXT_API_SECRET`, and `CCXT_PASSWORD` in the environment for private actions.\n- For sandbox mode where supported, set `CCXT_SANDBOX=true`.\n\n## Mode mapping\n\n- `mode=price`: use the price lookup command.\n- `mode=balance`: use the balance lookup command.\n- `mode=order`: use the order command.\n\n## Price Lookup (read-only)\n\n```bash\npython3 {baseDir}/scripts/crypto_trading.py price \\\n  --exchange \"{{exchange}}\" \\\n  --symbol \"{{symbol}}\"\n```\n\n## Account/Balances\n\n```bash\npython3 {baseDir}/scripts/crypto_trading.py balance \\\n  --exchange \"{{exchange}}\"\n```\n\n## Place an Order (requires confirmation)\n\n```bash\npython3 {baseDir}/scripts/crypto_trading.py order \\\n  --exchange \"{{exchange}}\" \\\n  --side \"{{side}}\" \\\n  --order-type \"{{order_type}}\" \\\n  --symbol \"{{symbol}}\" \\\n  --amount \"{{amount}}\" \\\n  [--price \"{{price}}\"] \\\n  --confirm\n```\n\n## Safety\n\n- Default behavior is dry-run when `--confirm` is not supplied.\n- Never proceed with real orders without explicit user approval.\n- Use `--test` for low-risk simulation mode.\n- If `mode=order`, only include `--confirm` when the user explicitly approved live execution.\n\n## Parameters\n\n- `{{exchange}}`: ccxt exchange id (default `binance`)\n- `{{symbol}}`: trading pair (for example `BTC/USDT`)\n- `{{side}}`: `buy` or `sell`\n- `{{order_type}}`: `market` or `limit`\n- `{{amount}}`: base amount to trade (required for order)\n- `{{price}}`: price per unit (required for limit orders)\n\nIf `mode` is `price` or `balance`, skip fields that do not apply.\n",
+  "parameters": [
+    {
+      "name": "mode",
+      "type": "select",
+      "description": "What operation to run (`price`, `balance`, or `order`).",
+      "required": true,
+      "default": "price",
+      "options": [
+        "price",
+        "balance",
+        "order"
+      ]
+    },
+    {
+      "name": "exchange",
+      "type": "string",
+      "description": "ccxt exchange id (for example `binance`, `kraken`, `coinbase`)",
+      "required": true,
+      "default": "binance"
+    },
+    {
+      "name": "symbol",
+      "type": "string",
+      "description": "Trading symbol (for example `BTC/USDT`)",
+      "required": false,
+      "default": "BTC/USDT"
+    },
+    {
+      "name": "side",
+      "type": "select",
+      "description": "Order direction for the order action",
+      "required": false,
+      "options": [
+        "buy",
+        "sell"
+      ]
+    },
+    {
+      "name": "order_type",
+      "type": "select",
+      "description": "Order type for the order action",
+      "required": false,
+      "default": "market",
+      "options": [
+        "market",
+        "limit"
+      ]
+    },
+    {
+      "name": "amount",
+      "type": "number",
+      "description": "Order quantity (base unit, required for order mode)",
+      "required": false
+    },
+    {
+      "name": "price",
+      "type": "number",
+      "description": "Order price per unit (required when order_type is limit)",
+      "required": false
+    }
+  ],
+  "enabled": true,
+  "requires": {
+    "tools": [
+      "run_command"
+    ],
+    "bins": [
+      "python3"
+    ]
+  },
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when users ask for live crypto prices, balances, or order placement across ccxt-supported exchanges.",
+      "dontUseWhen": "Do not use for non-crypto topics, legal/compliance guidance, or high-level strategy discussion without concrete execution.",
+      "outputs": "Returns normalized JSON for price, balance, and order intent/results.",
+      "successCriteria": "Returns explicit mode-specific result plus next steps, with safe handling when order confirmation is missing."
+    }
+  }
+}

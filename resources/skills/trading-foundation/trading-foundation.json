@@ -1,0 +1,423 @@
+{
+  "id": "trading-foundation",
+  "name": "Trading Foundation",
+  "description": "Phase 1/2/3 trading MVP: fetch crypto OHLCV, run adaptive multi-strategy, ML, and sentiment simulations, and place ccxt market/limit orders for execution. On first use, required Python packages are auto-installed into a local skill venv with progress shown in the session log. Supports human-readable prompts for quick runs like `\"primary.csv --initial-cash 10000 --strategy-mode adaptive\"` or other natural language phrasing.",
+  "icon": "\ud83d\ude80",
+  "category": "Finance",
+  "prompt": "Use this skill when users ask for trading foundation workflows.\n\nRun the helper from this skill folder.\n\n## What this tool does\n\n- Fetches historical OHLCV from crypto exchanges (ccxt) and stocks (yfinance).\n- Runs a mean-reversion strategy (Bollinger Bands + RSI).\n- Runs momentum mode (MA cross + RSI).\n- Runs adaptive regime routing and optional ML/sentiment filtering.\n- Adds stat-arbitrage pair mode using a secondary OHLCV stream and rolling spread z-score.\n- Places ccxt market/limit orders in execute mode with guardrails.\n- Returns machine-readable backtest/paper metrics and execution payloads.\n\n## Fetch Crypto OHLCV\n\n```bash\npython3 {baseDir}/scripts/trading_foundation.py fetch \\\n  --exchange \"{{exchange}}\" \\\n  --market crypto \\\n  --symbol \"{{symbol}}\" \\\n  --timeframe \"{{timeframe}}\" \\\n  --days {{days}} \\\n  --output-path \"{{output_path}}\"\n```\n\n## Fetch Stock OHLCV (YFinance)\n\n```bash\npython3 {baseDir}/scripts/trading_foundation.py fetch \\\n  --market stock \\\n  --provider yfinance \\\n  --symbol \"AAPL\" \\\n  --timeframe \"1d\" \\\n  --days 400 \\\n  --output-path \"aapl_1d.csv\"\n```\n\n## Backtest\n\n```bash\npython3 {baseDir}/scripts/trading_foundation.py backtest \\\n  --data-csv {{data_csv}} \\\n  --initial-cash {{initial_cash}} \\\n  --position-size {{position_size}} \\\n  --bb-window {{bb_window}} \\\n  --bb-std {{bb_std}} \\\n  --rsi-period {{rsi_period}} \\\n  --rsi-buy {{rsi_buy}} \\\n  --rsi-sell {{rsi_sell}} \\\n  --strategy-mode {{strategy_mode}}\n```\n\n## Stat-Arbitrage Pair Mode\n\n```bash\npython3 {baseDir}/scripts/trading_foundation.py portfolio-run \\\n  --data-csv {{data_csv}} \\\n  --secondary-data-csv {{secondary_data_csv}} \\\n  --strategy-mode stat-arb \\\n  --pair-symbol {{pair_symbol}} \\\n  --statarb-window 100 \\\n  --statarb-z-entry 2.0 \\\n  --statarb-z-exit 0.2 \\\n  --statarb-z-stop 3.5\n```\n\n## Paper-run\n\n```bash\npython3 {baseDir}/scripts/trading_foundation.py paper-run \\\n  --data-csv {{data_csv}} \\\n  --initial-cash {{initial_cash}} \\\n  --position-size {{position_size}} \\\n  --max-drawdown {{max_drawdown}} \\\n  --timeframe \"{{timeframe}}\"\n```\n\n## Portfolio-run (Phase 2)\n\n```bash\npython3 {baseDir}/scripts/trading_foundation.py portfolio-run \\\n  --data-csv {{data_csv}} \\\n  --initial-cash {{initial_cash}} \\\n  --strategy-mode {{strategy_mode}} \\\n  --momentum-fast {{momentum_fast}} \\\n  --momentum-slow {{momentum_slow}} \\\n  --trend-threshold {{trend_threshold}} \\\n  --max-portfolio-risk {{max_portfolio_risk}} \\\n  --strategy-correlation-cap 0.7 \\\n  --strategy-correlation-window 120 \\\n  --max-drawdown 0.10\n```\n\n## ML-run (Phase 3)\n\n```bash\npython3 {baseDir}/scripts/trading_foundation.py ml-run \\\n  --data-csv {{data_csv}} \\\n  --initial-cash {{initial_cash}} \\\n  --strategy-mode {{strategy_mode}} \\\n  --model-type {{model_type}} \\\n  --ml-horizon {{ml_horizon}} \\\n  --ml-train-ratio {{ml_train_ratio}} \\\n  --ml-confidence {{ml_confidence}} \\\n  --sentiment-csv {{sentiment_csv}} \\\n  --sentiment-threshold {{sentiment_threshold}} \\\n  --sentiment-weight {{sentiment_weight}}\n```\n\n## Execute (paper or live)\n\n```bash\npython3 {baseDir}/scripts/trading_foundation.py execute \\\n  --exchange {{exchange}} \\\n  --symbol \"{{symbol}}\" \\\n  --side {{side}} \\\n  --order-type market \\\n  --amount {{amount}} \\\n  --max-order-notional {{max_order_notional}} \\\n  --max-account-fraction {{max_account_fraction}}\n```\n\n```bash\npython3 {baseDir}/scripts/trading_foundation.py execute \\\n  --exchange {{exchange}} \\\n  --symbol \"{{symbol}}\" \\\n  --side buy \\\n  --order-type market \\\n  --amount 0.001 \\\n  --confirm \\\n  --max-order-notional 100\n```\n\n## Safety\n\n- Single-position-at-a-time long-only strategy.\n- Stop-loss support via ATR-based exit when strategy mode is active.\n- Trading halts in simulation when drawdown threshold is hit.\n- Correlation cap guardblocks new entries when rolling signal overlap exceeds --strategy-correlation-cap.\n- Order execution is dry-run by default; use --confirm for live execution.\n- Default live guardrails: --max-account-fraction and --max-order-notional.\n- For full guardrail bypass set --skip-balance-check (not recommended).\n\n## Execution report output\n\nAll execute responses include a normalized `execution_report`:\n\n```json\n{\n  \"timestamp\": \"2026-02-22T00:00:00+00:00\",\n  \"exchange\": \"binance\",\n  \"symbol\": \"BTC/USDT\",\n  \"requested_order\": {\n    \"type\": \"market\",\n    \"side\": \"buy\",\n    \"symbol\": \"BTC/USDT\",\n    \"amount\": 0.001,\n    \"price\": null,\n    \"test_mode\": true\n  },\n  \"risk_blocks\": [\n    {\"name\": \"order_amount\", \"status\": \"pass\", \"message\": \"Validated amount.\"},\n    {\"name\": \"order_submission\", \"status\": \"pass\", \"message\": \"Exchange accepted order.\"}\n  ],\n  \"risk_summary\": {\n    \"pass\": 2,\n    \"skip\": 3,\n    \"blocked\": 0,\n    \"fail\": 0\n  },\n  \"fill\": {\n    \"order_id\": \"123456\",\n    \"status\": \"closed\",\n    \"requested_amount\": 0.001,\n    \"filled\": 0.001,\n    \"avg_price\": 50000.0,\n    \"cost\": 50.0,\n    \"fee\": {\"cost\": 0.05, \"currency\": \"USDT\"}\n  }\n}\n```\n\nOutputs are JSON for downstream parsing.",
+  "parameters": [
+    {
+      "name": "mode",
+      "type": "select",
+      "description": "Choose workflow",
+      "required": true,
+      "default": "fetch",
+      "options": [
+        "fetch",
+        "backtest",
+        "paper-run",
+        "portfolio-run",
+        "ml-run",
+        "execute"
+      ]
+    },
+    {
+      "name": "exchange",
+      "type": "select",
+      "description": "Exchange id supported by ccxt",
+      "required": false,
+      "default": "binance",
+      "options": [
+        "binance",
+        "bybit",
+        "coinbase"
+      ]
+    },
+    {
+      "name": "symbol",
+      "type": "string",
+      "description": "Trading pair, for example BTC/USDT",
+      "required": false,
+      "default": "BTC/USDT"
+    },
+    {
+      "name": "market",
+      "type": "select",
+      "description": "Data market family for fetch mode",
+      "required": false,
+      "default": "crypto",
+      "options": [
+        "crypto",
+        "stock"
+      ]
+    },
+    {
+      "name": "provider",
+      "type": "select",
+      "description": "Stock data provider (currently supports yfinance)",
+      "required": false,
+      "default": "yfinance",
+      "options": [
+        "yfinance"
+      ]
+    },
+    {
+      "name": "timeframe",
+      "type": "string",
+      "description": "OHLCV timeframe",
+      "required": false,
+      "default": "1h"
+    },
+    {
+      "name": "days",
+      "type": "number",
+      "description": "How many days of data to fetch",
+      "required": false,
+      "default": 400
+    },
+    {
+      "name": "output_path",
+      "type": "string",
+      "description": "Where fetch writes output CSV",
+      "required": false,
+      "default": "ohlcv_btc_usdt_1h.csv"
+    },
+    {
+      "name": "data_csv",
+      "type": "string",
+      "description": "Path to OHLCV CSV data for backtest/paper/portfolio/ml modes",
+      "required": false
+    },
+    {
+      "name": "initial_cash",
+      "type": "number",
+      "description": "Starting paper-cash for simulation",
+      "required": false,
+      "default": 10000
+    },
+    {
+      "name": "position_size",
+      "type": "number",
+      "description": "Long allocation per trade as fraction of equity",
+      "required": false,
+      "default": 0.02
+    },
+    {
+      "name": "bb_window",
+      "type": "number",
+      "description": "Bollinger window",
+      "required": false,
+      "default": 20
+    },
+    {
+      "name": "bb_std",
+      "type": "number",
+      "description": "Bollinger standard deviation",
+      "required": false,
+      "default": 2
+    },
+    {
+      "name": "rsi_period",
+      "type": "number",
+      "description": "RSI period",
+      "required": false,
+      "default": 14
+    },
+    {
+      "name": "rsi_buy",
+      "type": "number",
+      "description": "RSI buy threshold",
+      "required": false,
+      "default": 30
+    },
+    {
+      "name": "rsi_sell",
+      "type": "number",
+      "description": "RSI sell threshold",
+      "required": false,
+      "default": 70
+    },
+    {
+      "name": "atr_window",
+      "type": "number",
+      "description": "ATR smoothing window",
+      "required": false,
+      "default": 14
+    },
+    {
+      "name": "strategy_mode",
+      "type": "select",
+      "description": "Mean reversion, momentum, momentum-only, adaptive routing, or stat-arb",
+      "required": false,
+      "default": "adaptive",
+      "options": [
+        "adaptive",
+        "mean-reversion",
+        "momentum",
+        "momentum-only",
+        "stat-arb"
+      ]
+    },
+    {
+      "name": "strategy-correlation-cap",
+      "type": "number",
+      "description": "Portfolio signal correlation cap; block new entries when abs(correlation) exceeds threshold",
+      "required": false,
+      "default": 0.7
+    },
+    {
+      "name": "strategy-correlation-window",
+      "type": "number",
+      "description": "Rolling correlation window for momentum and mean-reversion signal correlation",
+      "required": false,
+      "default": 120
+    },
+    {
+      "name": "momentum_fast",
+      "type": "number",
+      "description": "Momentum fast MA window",
+      "required": false,
+      "default": 50
+    },
+    {
+      "name": "momentum_slow",
+      "type": "number",
+      "description": "Momentum slow MA window",
+      "required": false,
+      "default": 200
+    },
+    {
+      "name": "trend_threshold",
+      "type": "number",
+      "description": "Trend regime threshold using MA spread",
+      "required": false,
+      "default": 0.0025
+    },
+    {
+      "name": "secondary-data-csv",
+      "type": "string",
+      "description": "Path to secondary OHLCV CSV for stat-arb mode",
+      "required": false
+    },
+    {
+      "name": "pair-symbol",
+      "type": "string",
+      "description": "Optional label for secondary symbol in stat-arb output",
+      "required": false
+    },
+    {
+      "name": "statarb-window",
+      "type": "number",
+      "description": "Stat-arb rolling window for spread ratio and spread mean/variance",
+      "required": false,
+      "default": 100
+    },
+    {
+      "name": "statarb-z-entry",
+      "type": "number",
+      "description": "Absolute z-score threshold to open a stat-arb leg",
+      "required": false,
+      "default": 2
+    },
+    {
+      "name": "statarb-z-exit",
+      "type": "number",
+      "description": "Absolute z-score threshold to exit stat-arb position",
+      "required": false,
+      "default": 0
+    },
+    {
+      "name": "statarb-z-stop",
+      "type": "number",
+      "description": "Absolute z-score hard stop for stat-arb position",
+      "required": false,
+      "default": 3.5
+    },
+    {
+      "name": "max_portfolio_risk",
+      "type": "number",
+      "description": "Maximum allocation per trade (fraction of current cash)",
+      "required": false,
+      "default": 0.05
+    },
+    {
+      "name": "max_drawdown",
+      "type": "number",
+      "description": "Portfolio drawdown stop threshold",
+      "required": false,
+      "default": 0.1
+    },
+    {
+      "name": "stop_atr_mult",
+      "type": "number",
+      "description": "ATR stop multiplier",
+      "required": false,
+      "default": 2
+    },
+    {
+      "name": "fee_rate",
+      "type": "number",
+      "description": "Simulated maker/taker fee rate",
+      "required": false,
+      "default": 0.0004
+    },
+    {
+      "name": "ml_enabled",
+      "type": "boolean",
+      "description": "Enable ML and sentiment signals",
+      "required": false,
+      "default": false
+    },
+    {
+      "name": "model_type",
+      "type": "select",
+      "description": "ML model family",
+      "required": false,
+      "default": "random_forest",
+      "options": [
+        "random_forest",
+        "xgboost",
+        "logistic"
+      ]
+    },
+    {
+      "name": "ml_horizon",
+      "type": "number",
+      "description": "Prediction horizon in candles",
+      "required": false,
+      "default": 4
+    },
+    {
+      "name": "ml_train_ratio",
+      "type": "number",
+      "description": "Train/test split ratio for model",
+      "required": false,
+      "default": 0.7
+    },
+    {
+      "name": "ml_confidence",
+      "type": "number",
+      "description": "Probability threshold for ML long/exit decisions",
+      "required": false,
+      "default": 0.55
+    },
+    {
+      "name": "sentiment_csv",
+      "type": "string",
+      "description": "Optional CSV with timestamp + sentiment/score/headline columns",
+      "required": false
+    },
+    {
+      "name": "sentiment_threshold",
+      "type": "number",
+      "description": "Minimum sentiment score to allow entry",
+      "required": false,
+      "default": 0
+    },
+    {
+      "name": "sentiment_weight",
+      "type": "number",
+      "description": "Weight multiplier for sentiment inputs",
+      "required": false,
+      "default": 1
+    },
+    {
+      "name": "side",
+      "type": "select",
+      "description": "Trade side",
+      "required": false,
+      "options": [
+        "buy",
+        "sell"
+      ]
+    },
+    {
+      "name": "order_type",
+      "type": "select",
+      "description": "Order type",
+      "required": false,
+      "default": "market",
+      "options": [
+        "market",
+        "limit"
+      ]
+    },
+    {
+      "name": "amount",
+      "type": "number",
+      "description": "Order amount in base currency",
+      "required": false
+    },
+    {
+      "name": "price",
+      "type": "number",
+      "description": "Limit order price",
+      "required": false
+    },
+    {
+      "name": "confirm",
+      "type": "boolean",
+      "description": "Send live order. Defaults to dry-run when false.",
+      "required": false,
+      "default": false
+    },
+    {
+      "name": "test",
+      "type": "boolean",
+      "description": "Use exchange order test mode when supported.",
+      "required": false,
+      "default": false
+    },
+    {
+      "name": "max_order_notional",
+      "type": "number",
+      "description": "Live risk cap for notional per order (0 disables)",
+      "required": false,
+      "default": 0
+    },
+    {
+      "name": "max_account_fraction",
+      "type": "number",
+      "description": "Cap order notional by percentage of available quote balance (0-1)",
+      "required": false,
+      "default": 0.2
+    },
+    {
+      "name": "skip_balance_check",
+      "type": "boolean",
+      "description": "Skip balance guardrails (not recommended)",
+      "required": false,
+      "default": false
+    },
+    {
+      "name": "sandbox",
+      "type": "boolean",
+      "description": "Enable sandbox/testnet mode when supported.",
+      "required": false,
+      "default": false
+    },
+    {
+      "name": "trades_csv",
+      "type": "string",
+      "description": "Optional output path for trade logs",
+      "required": false
+    }
+  ],
+  "enabled": true,
+  "requires": {
+    "tools": [
+      "run_command"
+    ],
+    "bins": [
+      "python3"
+    ]
+  },
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when users request crypto trading foundation tasks, including fetch, backtest, paper, portfolio, phase-3 ML runs, and order execution.",
+      "dontUseWhen": "Do not use for legal advice, non-crypto financial guidance, or unsupported exchanges.",
+      "outputs": "Returns OHLCV fetch path, backtest/portfolio/ml metrics, paper trading report, order payloads, and exchange responses.",
+      "successCriteria": "Returns deterministic JSON with metrics, trade logs, and explicit stopping/signal conditions."
+    }
+  }
+}

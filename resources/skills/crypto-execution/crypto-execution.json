@@ -1,0 +1,79 @@
+{
+  "id": "crypto-execution",
+  "name": "Crypto Execution",
+  "description": "Place direct crypto orders on Binance, Bybit, or Coinbase with ccxt (market or limit orders).",
+  "icon": "⚡",
+  "category": "Finance",
+  "prompt": "Use this skill when the user asks to execute a crypto trade.\n\nRun the helper script from this skill folder to keep exchange calls and response formatting consistent.\n\n## Supported exchanges\n\n- `binance`\n- `bybit`\n- `coinbase`\n\n## Place an order\n\n```bash\npython3 {baseDir}/scripts/crypto_trading.py order \\\n  --exchange \"{{exchange}}\" \\\n  --symbol \"{{symbol}}\" \\\n  --side \"{{side}}\" \\\n  --order-type \"{{order_type}}\" \\\n  --amount \"{{amount}}\" \\\n  [--price \"{{price}}\"] \\\n  --confirm\n```\n\n## Order modes\n\n- `market`: immediate execution at current market.\n- `limit`: executes at user-specified price.\n\n## Safety\n\n- This tool defaults to dry-run when `--confirm` is missing.\n- Never send a live order unless the user explicitly approved it.\n- Use `--test` for low-risk exchange-level simulation where supported.\n\n## Environment\n\nSet at least:\n\n- `CCXT_API_KEY`\n- `CCXT_API_SECRET`\n\n`CCXT_PASSWORD` may be required for Coinbase.\n",
+  "parameters": [
+    {
+      "name": "exchange",
+      "type": "select",
+      "description": "Exchange for execution",
+      "required": true,
+      "default": "binance",
+      "options": [
+        "binance",
+        "bybit",
+        "coinbase"
+      ]
+    },
+    {
+      "name": "symbol",
+      "type": "string",
+      "description": "Trading pair, for example BTC/USDT",
+      "required": true,
+      "default": "BTC/USDT"
+    },
+    {
+      "name": "side",
+      "type": "select",
+      "description": "Buy or sell direction",
+      "required": true,
+      "options": [
+        "buy",
+        "sell"
+      ]
+    },
+    {
+      "name": "order_type",
+      "type": "select",
+      "description": "Order type",
+      "required": true,
+      "default": "market",
+      "options": [
+        "market",
+        "limit"
+      ]
+    },
+    {
+      "name": "amount",
+      "type": "number",
+      "description": "Order amount in base currency",
+      "required": true
+    },
+    {
+      "name": "price",
+      "type": "number",
+      "description": "Limit price (required for limit orders)",
+      "required": false
+    }
+  ],
+  "enabled": true,
+  "requires": {
+    "tools": [
+      "run_command"
+    ],
+    "bins": [
+      "python3"
+    ]
+  },
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when users ask for direct crypto order execution, manual trading actions, or placement of market/limit orders on Binance, Bybit, or Coinbase.",
+      "dontUseWhen": "Do not use for generic planning discussion, market analysis, legal advice, or non-trading guidance.",
+      "outputs": "Returns normalized JSON with dry-run intent, order payload, and exchange response.",
+      "successCriteria": "Returns explicit order mode, symbol, side, quantity, and confirms whether the order was dry-run or submitted."
+    }
+  }
+}

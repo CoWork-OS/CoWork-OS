@@ -694,18 +694,21 @@ export class LLMProviderFactory {
   private static migrationCompleted = false;
 
   private static normalizeCustomProviders(settings: LLMSettings): void {
-    if (!settings.customProviders) return;
-
-    const legacyKey = settings.customProviders["kimi-coding"];
-    if (legacyKey && !settings.customProviders["kimi-code"]) {
-      settings.customProviders["kimi-code"] = legacyKey;
+    if (settings.customProviders) {
+      const legacyKey = settings.customProviders["kimi-coding"];
+      if (legacyKey && !settings.customProviders["kimi-code"]) {
+        settings.customProviders["kimi-code"] = legacyKey;
+      }
+      if (settings.customProviders["kimi-coding"]) {
+        delete settings.customProviders["kimi-coding"];
+      }
     }
-    if (settings.customProviders["kimi-coding"]) {
-      delete settings.customProviders["kimi-coding"];
-    }
 
-    if (settings.providerType === "kimi-coding") {
+    const rawProviderType = String((settings as { providerType?: string }).providerType || "");
+    if (rawProviderType === "kimi-coding") {
       settings.providerType = "kimi-code";
+    } else if (rawProviderType === "amazon-bedrock") {
+      settings.providerType = "bedrock";
     }
   }
 
@@ -1226,7 +1229,12 @@ export class LLMProviderFactory {
       {
         type: "bedrock" as LLMProviderType,
         name: "AWS Bedrock",
-        configured: !!(settings.bedrock?.accessKeyId || settings.bedrock?.profile),
+        configured: !!(
+          settings.bedrock?.accessKeyId ||
+          settings.bedrock?.profile ||
+          settings.bedrock?.useDefaultCredentials ||
+          settings.bedrock?.region
+        ),
       },
       {
         type: "ollama" as LLMProviderType,

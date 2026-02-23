@@ -71,7 +71,7 @@ export const WorkspaceCreateSchema = z.object({
 
 // ============ Task Schemas ============
 
-const AgentConfigSchema = z
+export const AgentConfigSchema = z
   .object({
     providerType: z.enum(LLM_PROVIDER_TYPES).optional(),
     modelKey: z.string().max(200).optional(),
@@ -88,11 +88,34 @@ const AgentConfigSchema = z
     conversationMode: z.enum(["task", "chat", "hybrid"]).optional(),
     autonomousMode: z.boolean().optional(),
     qualityPasses: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional(),
+    collaborativeMode: z.boolean().optional(),
+    multiLlmMode: z.boolean().optional(),
+    multiLlmConfig: z
+      .object({
+        participants: z
+          .array(
+            z.object({
+              providerType: z.enum(LLM_PROVIDER_TYPES),
+              modelKey: z.string().max(200),
+              displayName: z.string().max(200),
+              isJudge: z.boolean(),
+            }),
+          )
+          .min(2)
+          .max(10),
+        judgeProviderType: z.enum(LLM_PROVIDER_TYPES),
+        judgeModelKey: z.string().max(200),
+      })
+      .optional(),
   })
   .strict();
 
 const isValidWorkspaceId = (workspaceId: string): boolean =>
   isTempWorkspaceId(workspaceId) || z.string().uuid().safeParse(workspaceId).success;
+
+export const WorkspaceIdSchema = z
+  .string()
+  .refine(isValidWorkspaceId, { message: "Must be a valid UUID or temp workspace ID" });
 
 const ImageAttachmentSchema = z
   .object({
@@ -144,9 +167,7 @@ const ImageAttachmentSchema = z
 export const TaskCreateSchema = z.object({
   title: z.string().min(1).max(MAX_TITLE_LENGTH),
   prompt: z.string().min(1).max(MAX_PROMPT_LENGTH),
-  workspaceId: z
-    .string()
-    .refine(isValidWorkspaceId, { message: "Must be a valid UUID or temp workspace ID" }),
+  workspaceId: WorkspaceIdSchema,
   budgetTokens: z.number().int().positive().optional(),
   budgetCost: z.number().positive().optional(),
   agentConfig: AgentConfigSchema.optional(),
@@ -184,16 +205,12 @@ export const TaskMessageSchema = z
   });
 
 export const FileImportSchema = z.object({
-  workspaceId: z
-    .string()
-    .refine(isValidWorkspaceId, { message: "Must be a valid UUID or temp workspace ID" }),
+  workspaceId: WorkspaceIdSchema,
   files: z.array(z.string().min(1).max(MAX_PATH_LENGTH)).min(1).max(20),
 });
 
 export const FileImportDataSchema = z.object({
-  workspaceId: z
-    .string()
-    .refine(isValidWorkspaceId, { message: "Must be a valid UUID or temp workspace ID" }),
+  workspaceId: WorkspaceIdSchema,
   files: z
     .array(
       z.object({
@@ -873,9 +890,7 @@ export const GeneratePairingSchema = z.object({
 // ============ ChatGPT Import Schema ============
 
 export const ChatGPTImportSchema = z.object({
-  workspaceId: z
-    .string()
-    .refine(isValidWorkspaceId, { message: "Must be a valid UUID or temp workspace ID" }),
+  workspaceId: WorkspaceIdSchema,
   filePath: z
     .string()
     .min(1)
@@ -890,12 +905,39 @@ export const ChatGPTImportSchema = z.object({
 });
 
 export const FindImportedSchema = z.object({
-  workspaceId: z
-    .string()
-    .refine(isValidWorkspaceId, { message: "Must be a valid UUID or temp workspace ID" }),
+  workspaceId: WorkspaceIdSchema,
   limit: z.number().int().min(1).max(500).optional(),
   offset: z.number().int().min(0).optional(),
 });
+
+// ============ Worktree/Comparison Schemas ============
+
+export const WorktreeSettingsSchema = z
+  .object({
+    enabled: z.boolean(),
+    autoCommitOnComplete: z.boolean(),
+    autoCleanOnMerge: z.boolean(),
+    branchPrefix: z.string().trim().min(1).max(100),
+    commitMessagePrefix: z.string().max(200),
+  })
+  .strict();
+
+export const ComparisonAgentSpecSchema = z
+  .object({
+    label: z.string().trim().min(1).max(100).optional(),
+    agentConfig: AgentConfigSchema.optional(),
+    assignedAgentRoleId: z.string().uuid().optional(),
+  })
+  .strict();
+
+export const ComparisonCreateSchema = z
+  .object({
+    title: z.string().trim().min(1).max(MAX_TITLE_LENGTH),
+    prompt: z.string().trim().min(1).max(MAX_PROMPT_LENGTH),
+    workspaceId: WorkspaceIdSchema,
+    agents: z.array(ComparisonAgentSpecSchema).min(2).max(8),
+  })
+  .strict();
 
 // ============ File Operation Schemas ============
 

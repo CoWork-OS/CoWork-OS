@@ -18,7 +18,7 @@ export class TaskStrategyService {
     const defaults: Record<IntentRoute["intent"], DerivedTaskStrategy> = {
       chat: {
         conversationMode: "chat",
-        maxTurns: 8,
+        maxTurns: 16,
         qualityPasses: 1,
         answerFirst: true,
         boundedResearch: true,
@@ -26,7 +26,7 @@ export class TaskStrategyService {
       },
       advice: {
         conversationMode: "hybrid",
-        maxTurns: 14,
+        maxTurns: 30,
         qualityPasses: 2,
         answerFirst: true,
         boundedResearch: true,
@@ -34,7 +34,7 @@ export class TaskStrategyService {
       },
       planning: {
         conversationMode: "hybrid",
-        maxTurns: 16,
+        maxTurns: 36,
         qualityPasses: 2,
         answerFirst: true,
         boundedResearch: true,
@@ -42,7 +42,7 @@ export class TaskStrategyService {
       },
       execution: {
         conversationMode: "task",
-        maxTurns: 24,
+        maxTurns: 60,
         qualityPasses: 2,
         answerFirst: false,
         boundedResearch: true,
@@ -50,7 +50,7 @@ export class TaskStrategyService {
       },
       mixed: {
         conversationMode: "hybrid",
-        maxTurns: 18,
+        maxTurns: 42,
         qualityPasses: 2,
         answerFirst: true,
         boundedResearch: true,

@@ -1,7 +1,7 @@
 {
   "name": "cowork-os",
   "version": "0.3.90",
-  "description": "CoWork OS - The operating system for personal AI assistants",
+  "description": "CoWork OS - The most complete open-source AI assistant platform",
   "overrides": {
     "@whiskeysockets/baileys": {
       "libsignal": "https://codeload.github.com/WhiskeySockets/libsignal-node/tar.gz/1c30d7d7e76a3b0aa120b04dc6a26f5a12dccf67",

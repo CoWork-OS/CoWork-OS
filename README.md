@@ -23,7 +23,7 @@
 </p>
 
 <p align="center">
-  <img src="screenshots/cowork-os-main-1.png" alt="CoWork OS Interface" width="700">
+  <img src="screenshots/cowork-os-main-focus.png" alt="CoWork OS Interface" width="700">
 </p>
 
 ## Looking for an OpenClaw Alternative?

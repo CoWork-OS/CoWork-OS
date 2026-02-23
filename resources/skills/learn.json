@@ -1,0 +1,33 @@
+{
+  "id": "learn",
+  "name": "Learn",
+  "description": "Manually record an insight, correction, preference, or rule that the agent should remember for future tasks.",
+  "icon": "🧠",
+  "category": "Productivity",
+  "prompt": "The user wants to teach you something. Record this learning so it persists across sessions.\n\n## LEARNING\n{{what}}\n\n## CATEGORY\n{{category}}\n\n## INSTRUCTIONS\n\n1. Acknowledge what the user wants you to learn.\n2. Store the learning as a memory using the appropriate method based on category:\n   - If category is \"preference\": Also note it as a user preference for future reference.\n   - If category is \"correction\": Frame it as a mistake to avoid repeating.\n   - If category is \"rule\": Frame it as a constraint to always follow.\n   - If category is \"insight\": Frame it as a useful pattern or knowledge.\n3. Write a one-line summary of the learning to the workspace file `.cowork/MEMORY.md` (create the file if it doesn't exist, append to the appropriate section if it does). Use the format:\n   - `- [{{category}}] {{what}} (recorded {{today}})`\n4. Confirm to the user what was recorded and where.\n\n## RULES\n- Do NOT ask clarifying questions. Record exactly what the user said.\n- Keep the stored text concise (under 200 characters).\n- If the learning contradicts a previous memory, note the update.\n- Never store sensitive data (API keys, passwords, tokens).",
+  "parameters": [
+    {
+      "name": "what",
+      "type": "string",
+      "description": "The insight, correction, preference, or rule to remember",
+      "required": true
+    },
+    {
+      "name": "category",
+      "type": "select",
+      "description": "Type of learning",
+      "required": false,
+      "default": "insight",
+      "options": ["insight", "correction", "preference", "rule"]
+    }
+  ],
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when the user explicitly wants to teach the agent something, record a preference, save a correction, or store a rule for future tasks.",
+      "dontUseWhen": "Don't use for general conversation, one-time instructions that don't need to be remembered, or when the user is just chatting.",
+      "outputs": "Persisted learning in memory system and .cowork/MEMORY.md file.",
+      "successCriteria": "Learning is stored in memory and written to .cowork/MEMORY.md with confirmation to the user."
+    }
+  }
+}

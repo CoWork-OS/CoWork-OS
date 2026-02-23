@@ -57,7 +57,7 @@ export class ScrapingSettingsManager {
             ...DEFAULT_SCRAPING_SETTINGS.rateLimiting,
             ...stored.rateLimiting,
           },
-        };
+        } as ScrapingSettings;
         return { ...this.cachedSettings };
       }
     } catch (error) {

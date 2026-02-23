@@ -258,6 +258,7 @@ export class DatabaseManager {
         budget_tokens INTEGER,
         budget_cost REAL,
         error TEXT,
+        is_pinned INTEGER DEFAULT 0,
         FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
       );
 
@@ -692,6 +693,13 @@ export class DatabaseManager {
       } catch {
         // Column already exists, ignore
       }
+    }
+
+    // Migration: Add pinned marker to tasks table
+    try {
+      this.db.exec("ALTER TABLE tasks ADD COLUMN is_pinned INTEGER DEFAULT 0");
+    } catch {
+      // Column already exists, ignore
     }
 
     // Add index for parent_task_id lookups
@@ -1133,6 +1141,50 @@ export class DatabaseManager {
       // Table already exists, ignore
     }
 
+    // ============ Collaborative Thoughts (Team Multi-Agent Thinking) ============
+
+    try {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_team_thoughts (
+          id TEXT PRIMARY KEY,
+          team_run_id TEXT NOT NULL REFERENCES agent_team_runs(id) ON DELETE CASCADE,
+          team_item_id TEXT REFERENCES agent_team_items(id),
+          agent_role_id TEXT NOT NULL REFERENCES agent_roles(id),
+          agent_display_name TEXT NOT NULL,
+          agent_icon TEXT NOT NULL DEFAULT '🤖',
+          agent_color TEXT NOT NULL DEFAULT '#6366f1',
+          phase TEXT NOT NULL,
+          content TEXT NOT NULL,
+          is_streaming INTEGER NOT NULL DEFAULT 0,
+          source_task_id TEXT REFERENCES tasks(id),
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_team_thoughts_run ON agent_team_thoughts(team_run_id, created_at ASC);
+        CREATE INDEX IF NOT EXISTS idx_team_thoughts_source_task ON agent_team_thoughts(source_task_id);
+      `);
+    } catch {
+      // Table already exists, ignore
+    }
+
+    // Migration: Add phase and collaborative_mode columns to agent_team_runs
+    try {
+      this.db.exec("ALTER TABLE agent_team_runs ADD COLUMN phase TEXT DEFAULT 'dispatch'");
+    } catch {
+      // Column already exists, ignore
+    }
+    try {
+      this.db.exec("ALTER TABLE agent_team_runs ADD COLUMN collaborative_mode INTEGER DEFAULT 0");
+    } catch {
+      // Column already exists, ignore
+    }
+    try {
+      this.db.exec("ALTER TABLE agent_team_runs ADD COLUMN multi_llm_mode INTEGER DEFAULT 0");
+    } catch {
+      // Column already exists, ignore
+    }
+
     // ============ Agent Performance Reviews (Mission Control) ============
 
     try {
@@ -1156,6 +1208,166 @@ export class DatabaseManager {
       `);
     } catch {
       // Table already exists, ignore
+    }
+
+    // ============ Git Worktree Support ============
+
+    // Add worktree columns to tasks table
+    const worktreeColumns = [
+      "ALTER TABLE tasks ADD COLUMN worktree_path TEXT",
+      "ALTER TABLE tasks ADD COLUMN worktree_branch TEXT",
+      "ALTER TABLE tasks ADD COLUMN worktree_status TEXT",
+      "ALTER TABLE tasks ADD COLUMN comparison_session_id TEXT",
+    ];
+    for (const sql of worktreeColumns) {
+      try {
+        this.db.exec(sql);
+      } catch {
+        // Column already exists
+      }
+    }
+
+    try {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS worktree_info (
+          task_id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          repo_path TEXT,
+          worktree_path TEXT NOT NULL,
+          branch_name TEXT NOT NULL,
+          base_branch TEXT NOT NULL,
+          base_commit TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'creating',
+          created_at INTEGER NOT NULL,
+          last_commit_sha TEXT,
+          last_commit_message TEXT,
+          merge_result TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_worktree_info_workspace ON worktree_info(workspace_id);
+      `);
+    } catch {
+      // Table already exists
+    }
+
+    try {
+      this.db.exec("ALTER TABLE worktree_info ADD COLUMN repo_path TEXT");
+    } catch {
+      // Column already exists
+    }
+
+    // ============ Agent Comparison Sessions ============
+
+    try {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS comparison_sessions (
+          id TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          prompt TEXT NOT NULL,
+          workspace_id TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'running',
+          task_ids TEXT NOT NULL DEFAULT '[]',
+          created_at INTEGER NOT NULL,
+          completed_at INTEGER,
+          comparison_result TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_comparison_sessions_workspace ON comparison_sessions(workspace_id);
+      `);
+    } catch {
+      // Table already exists
+    }
+
+    try {
+      this.db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_comparison_session ON tasks(comparison_session_id)");
+    } catch {
+      // Index already exists
+    }
+
+    try {
+      this.db.exec(`
+        CREATE TRIGGER IF NOT EXISTS trg_tasks_comparison_session_insert
+        AFTER INSERT ON tasks
+        WHEN NEW.comparison_session_id IS NOT NULL
+        BEGIN
+          UPDATE comparison_sessions
+          SET task_ids = COALESCE((
+            SELECT json_group_array(id)
+            FROM (
+              SELECT id
+              FROM tasks
+              WHERE comparison_session_id = NEW.comparison_session_id
+              ORDER BY created_at ASC
+            )
+          ), '[]')
+          WHERE id = NEW.comparison_session_id;
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS trg_tasks_comparison_session_update
+        AFTER UPDATE OF comparison_session_id ON tasks
+        WHEN OLD.comparison_session_id IS NOT NEW.comparison_session_id
+        BEGIN
+          UPDATE comparison_sessions
+          SET task_ids = COALESCE((
+            SELECT json_group_array(id)
+            FROM (
+              SELECT id
+              FROM tasks
+              WHERE comparison_session_id = OLD.comparison_session_id
+              ORDER BY created_at ASC
+            )
+          ), '[]')
+          WHERE OLD.comparison_session_id IS NOT NULL AND id = OLD.comparison_session_id;
+
+          UPDATE comparison_sessions
+          SET task_ids = COALESCE((
+            SELECT json_group_array(id)
+            FROM (
+              SELECT id
+              FROM tasks
+              WHERE comparison_session_id = NEW.comparison_session_id
+              ORDER BY created_at ASC
+            )
+          ), '[]')
+          WHERE NEW.comparison_session_id IS NOT NULL AND id = NEW.comparison_session_id;
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS trg_tasks_comparison_session_delete
+        AFTER DELETE ON tasks
+        WHEN OLD.comparison_session_id IS NOT NULL
+        BEGIN
+          UPDATE comparison_sessions
+          SET task_ids = COALESCE((
+            SELECT json_group_array(id)
+            FROM (
+              SELECT id
+              FROM tasks
+              WHERE comparison_session_id = OLD.comparison_session_id
+              ORDER BY created_at ASC
+            )
+          ), '[]')
+          WHERE id = OLD.comparison_session_id;
+        END;
+      `);
+    } catch {
+      // Trigger already exists
+    }
+
+    try {
+      this.db.exec(`
+        UPDATE comparison_sessions
+        SET task_ids = COALESCE((
+          SELECT json_group_array(id)
+          FROM (
+            SELECT id
+            FROM tasks
+            WHERE comparison_session_id = comparison_sessions.id
+            ORDER BY created_at ASC
+          )
+        ), '[]')
+      `);
+    } catch {
+      // Best-effort reconciliation for older databases
     }
   }
 

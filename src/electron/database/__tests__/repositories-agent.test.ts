@@ -37,6 +37,11 @@ class MockTaskRepository {
     "agentConfig",
     "depth",
     "resultSummary",
+    "pinned",
+    "worktreePath",
+    "worktreeBranch",
+    "worktreeStatus",
+    "comparisonSessionId",
   ]);
 
   private static readonly JSON_FIELDS = new Set(["successCriteria", "agentConfig"]);
@@ -52,11 +57,13 @@ class MockTaskRepository {
       updatedAt: now,
       agentType: task.agentType || "main",
       depth: task.depth ?? 0,
+      pinned: task.pinned,
     };
 
     // Simulate DB storage (serialize/deserialize JSON fields)
     const stored = {
       ...newTask,
+      pinned: newTask.pinned ? 1 : 0,
       agentConfig: newTask.agentConfig ? JSON.stringify(newTask.agentConfig) : null,
       successCriteria: newTask.successCriteria ? JSON.stringify(newTask.successCriteria) : null,
     };
@@ -76,7 +83,9 @@ class MockTaskRepository {
       }
 
       // JSON serialize object fields
-      if (MockTaskRepository.JSON_FIELDS.has(key) && value != null) {
+      if (key === "pinned") {
+        stored[key] = value ? 1 : 0;
+      } else if (MockTaskRepository.JSON_FIELDS.has(key) && value != null) {
         stored[key] = JSON.stringify(value);
       } else {
         stored[key] = value;
@@ -91,6 +100,16 @@ class MockTaskRepository {
     const stored = mockTasks.get(id);
     if (!stored) return undefined;
     return this.mapStoredToTask(stored);
+  }
+
+  togglePin(id: string): Task | undefined {
+    const stored = mockTasks.get(id);
+    if (!stored) return undefined;
+
+    stored.pinned = stored.pinned ? 0 : 1;
+    stored.updatedAt = Date.now();
+    mockTasks.set(id, stored);
+    return this.findById(id);
   }
 
   findByParentId(parentTaskId: string): Task[] {
@@ -124,8 +143,13 @@ class MockTaskRepository {
       parentTaskId: stored.parentTaskId || undefined,
       agentType: (stored.agentType as AgentType) || "main",
       agentConfig: stored.agentConfig ? JSON.parse(stored.agentConfig) : undefined,
+      pinned: Number(stored.pinned) === 1,
       depth: stored.depth ?? 0,
       resultSummary: stored.resultSummary || undefined,
+      worktreePath: stored.worktreePath || undefined,
+      worktreeBranch: stored.worktreeBranch || undefined,
+      worktreeStatus: stored.worktreeStatus || undefined,
+      comparisonSessionId: stored.comparisonSessionId || undefined,
     };
   }
 }
@@ -294,6 +318,25 @@ describe("TaskRepository - Agent Fields", () => {
       expect(retrieved?.depth).toBe(2);
     });
 
+    it("should update pinned with numeric persistence", () => {
+      const task = repository.create({
+        title: "Test",
+        prompt: "Test",
+        status: "pending",
+        workspaceId: "workspace-1",
+      });
+
+      repository.update(task.id, { pinned: true });
+      const updated = repository.findById(task.id);
+      expect(updated?.pinned).toBe(true);
+      expect(mockTasks.get(task.id)?.pinned).toBe(1);
+
+      repository.update(task.id, { pinned: false });
+      const toggledBack = repository.findById(task.id);
+      expect(toggledBack?.pinned).toBe(false);
+      expect(mockTasks.get(task.id)?.pinned).toBe(0);
+    });
+
     it("should update resultSummary", () => {
       const task = repository.create({
         title: "Test",
@@ -328,6 +371,30 @@ describe("TaskRepository - Agent Fields", () => {
       expect(retrieved?.agentType).toBe("sub");
       expect(retrieved?.depth).toBe(1);
       expect(retrieved?.resultSummary).toBe("Done");
+    });
+  });
+
+  describe("togglePin", () => {
+    it("should toggle pinned state", () => {
+      const task = repository.create({
+        title: "Pin Test",
+        prompt: "Test",
+        status: "pending",
+        workspaceId: "workspace-1",
+      });
+
+      expect(repository.findById(task.id)?.pinned).toBe(false);
+
+      const afterFirstToggle = repository.togglePin(task.id);
+      expect(afterFirstToggle?.pinned).toBe(true);
+
+      const afterSecondToggle = repository.togglePin(task.id);
+      expect(afterSecondToggle?.pinned).toBe(false);
+    });
+
+    it("should return undefined for missing tasks", () => {
+      const result = repository.togglePin("missing-task");
+      expect(result).toBeUndefined();
     });
   });
 

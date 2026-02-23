@@ -9,6 +9,12 @@ import {
   Skill,
   WorkspacePermissions,
   isTempWorkspaceId,
+  WorktreeInfo,
+  WorktreeStatus,
+  MergeResult,
+  ComparisonSession,
+  ComparisonSessionStatus,
+  ComparisonResult,
 } from "../../shared/types";
 
 /**
@@ -225,6 +231,12 @@ export class TaskRepository {
     "estimatedMinutes",
     "actualMinutes",
     "mentionedAgentRoleIds",
+    "pinned",
+    // Git Worktree fields
+    "worktreePath",
+    "worktreeBranch",
+    "worktreeStatus",
+    "comparisonSessionId",
   ]);
 
   update(id: string, updates: Partial<Task>): void {
@@ -237,8 +249,12 @@ export class TaskRepository {
         console.warn(`Ignoring unknown field in task update: ${key}`);
         return;
       }
-      const snakeKey = key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
-      fields.push(`${snakeKey} = ?`);
+      const dbKey =
+        key === "pinned"
+          ? "is_pinned"
+          : key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
+      fields.push(`${dbKey} = ?`);
+
       // JSON serialize object/array fields
       if (
         (key === "successCriteria" ||
@@ -248,6 +264,8 @@ export class TaskRepository {
         value != null
       ) {
         values.push(JSON.stringify(value));
+      } else if (key === "pinned") {
+        values.push(Number(Boolean(value)));
       } else {
         values.push(value);
       }
@@ -263,6 +281,26 @@ export class TaskRepository {
 
     const stmt = this.db.prepare(`UPDATE tasks SET ${fields.join(", ")} WHERE id = ?`);
     stmt.run(...values);
+  }
+
+  togglePin(id: string): Task | undefined {
+    const result = this.db
+      .prepare(`
+      UPDATE tasks
+      SET is_pinned = CASE
+          WHEN CAST(is_pinned AS INTEGER) = 1 THEN 0
+          ELSE 1
+        END,
+        updated_at = ?
+      WHERE id = ?
+    `)
+      .run(Date.now(), id);
+
+    if (result.changes === 0) {
+      return undefined;
+    }
+
+    return this.findById(id);
   }
 
   findById(id: string): Task | undefined {
@@ -421,6 +459,10 @@ export class TaskRepository {
       );
       clearSessionTaskId.run(taskId);
 
+      // Delete worktree_info record if it exists
+      const deleteWorktreeInfo = this.db.prepare("DELETE FROM worktree_info WHERE task_id = ?");
+      deleteWorktreeInfo.run(taskId);
+
       // Finally delete the task
       const deleteTask = this.db.prepare("DELETE FROM tasks WHERE id = ?");
       deleteTask.run(taskId);
@@ -439,6 +481,7 @@ export class TaskRepository {
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       completedAt: row.completed_at || undefined,
+      pinned: Number(row.is_pinned) === 1,
       budgetTokens: row.budget_tokens || undefined,
       budgetCost: row.budget_cost || undefined,
       error: row.error || undefined,
@@ -468,6 +511,11 @@ export class TaskRepository {
       mentionedAgentRoleIds: row.mentioned_agent_role_ids
         ? safeJsonParse<string[]>(row.mentioned_agent_role_ids, [], "task.mentionedAgentRoleIds")
         : undefined,
+      // Git Worktree fields
+      worktreePath: row.worktree_path || undefined,
+      worktreeBranch: row.worktree_branch || undefined,
+      worktreeStatus: (row.worktree_status as Task["worktreeStatus"]) || undefined,
+      comparisonSessionId: row.comparison_session_id || undefined,
     };
   }
 
@@ -3253,5 +3301,245 @@ export class MemorySettingsRepository {
         "memorySettings.excludedPatterns",
       ),
     };
+  }
+}
+
+// ============ Git Worktree Repository ============
+
+export class WorktreeInfoRepository {
+  constructor(private db: Database.Database) {}
+
+  create(info: WorktreeInfo): WorktreeInfo {
+    const stmt = this.db.prepare(`
+      INSERT INTO worktree_info (task_id, workspace_id, repo_path, worktree_path, branch_name, base_branch, base_commit, status, created_at, last_commit_sha, last_commit_message, merge_result)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run(
+      info.taskId,
+      info.workspaceId,
+      info.repoPath ?? null,
+      info.worktreePath,
+      info.branchName,
+      info.baseBranch,
+      info.baseCommit,
+      info.status,
+      info.createdAt,
+      info.lastCommitSha ?? null,
+      info.lastCommitMessage ?? null,
+      info.mergeResult ? JSON.stringify(info.mergeResult) : null,
+    );
+    return info;
+  }
+
+  findByTaskId(taskId: string): WorktreeInfo | undefined {
+    const stmt = this.db.prepare("SELECT * FROM worktree_info WHERE task_id = ?");
+    const row = stmt.get(taskId) as Record<string, unknown> | undefined;
+    return row ? this.mapRow(row) : undefined;
+  }
+
+  findByWorkspaceId(workspaceId: string): WorktreeInfo[] {
+    const stmt = this.db.prepare(
+      "SELECT * FROM worktree_info WHERE workspace_id = ? ORDER BY created_at DESC",
+    );
+    const rows = stmt.all(workspaceId) as Record<string, unknown>[];
+    return rows.map((row) => this.mapRow(row));
+  }
+
+  update(taskId: string, updates: Partial<WorktreeInfo>): void {
+    const fields: string[] = [];
+    const values: unknown[] = [];
+
+    if (updates.repoPath !== undefined) {
+      fields.push("repo_path = ?");
+      values.push(updates.repoPath);
+    }
+    if (updates.status !== undefined) {
+      fields.push("status = ?");
+      values.push(updates.status);
+    }
+    if (updates.lastCommitSha !== undefined) {
+      fields.push("last_commit_sha = ?");
+      values.push(updates.lastCommitSha);
+    }
+    if (updates.lastCommitMessage !== undefined) {
+      fields.push("last_commit_message = ?");
+      values.push(updates.lastCommitMessage);
+    }
+    if (updates.mergeResult !== undefined) {
+      fields.push("merge_result = ?");
+      values.push(JSON.stringify(updates.mergeResult));
+    }
+
+    if (fields.length === 0) return;
+
+    values.push(taskId);
+    const stmt = this.db.prepare(`UPDATE worktree_info SET ${fields.join(", ")} WHERE task_id = ?`);
+    stmt.run(...values);
+  }
+
+  delete(taskId: string): void {
+    const stmt = this.db.prepare("DELETE FROM worktree_info WHERE task_id = ?");
+    stmt.run(taskId);
+  }
+
+  private mapRow(row: Record<string, unknown>): WorktreeInfo {
+    return {
+      taskId: row.task_id as string,
+      workspaceId: row.workspace_id as string,
+      repoPath: (row.repo_path as string) || undefined,
+      worktreePath: row.worktree_path as string,
+      branchName: row.branch_name as string,
+      baseBranch: row.base_branch as string,
+      baseCommit: row.base_commit as string,
+      status: row.status as WorktreeStatus,
+      createdAt: row.created_at as number,
+      lastCommitSha: (row.last_commit_sha as string) || undefined,
+      lastCommitMessage: (row.last_commit_message as string) || undefined,
+      mergeResult: row.merge_result
+        ? safeJsonParse<MergeResult>(
+            row.merge_result as string,
+            { success: false },
+            "worktreeInfo.mergeResult",
+          )
+        : undefined,
+    };
+  }
+}
+
+// ============ Comparison Session Repository ============
+
+export class ComparisonSessionRepository {
+  constructor(private db: Database.Database) {}
+
+  create(params: Omit<ComparisonSession, "id" | "createdAt">): ComparisonSession {
+    const session: ComparisonSession = {
+      id: uuidv4(),
+      ...params,
+      createdAt: Date.now(),
+    };
+
+    const stmt = this.db.prepare(`
+      INSERT INTO comparison_sessions (id, title, prompt, workspace_id, status, task_ids, created_at, completed_at, comparison_result)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run(
+      session.id,
+      session.title,
+      session.prompt,
+      session.workspaceId,
+      session.status,
+      JSON.stringify(session.taskIds),
+      session.createdAt,
+      session.completedAt ?? null,
+      session.comparisonResult ? JSON.stringify(session.comparisonResult) : null,
+    );
+    return session;
+  }
+
+  findById(id: string): ComparisonSession | undefined {
+    const stmt = this.db.prepare("SELECT * FROM comparison_sessions WHERE id = ?");
+    const row = stmt.get(id) as Record<string, unknown> | undefined;
+    if (!row) return undefined;
+    return this.reconcileTaskIds(this.mapRow(row));
+  }
+
+  findByWorkspaceId(workspaceId: string): ComparisonSession[] {
+    const stmt = this.db.prepare(
+      "SELECT * FROM comparison_sessions WHERE workspace_id = ? ORDER BY created_at DESC",
+    );
+    const rows = stmt.all(workspaceId) as Record<string, unknown>[];
+    return rows.map((row) => this.reconcileTaskIds(this.mapRow(row)));
+  }
+
+  update(id: string, updates: Partial<ComparisonSession>): void {
+    const fields: string[] = [];
+    const values: unknown[] = [];
+
+    if (updates.status !== undefined) {
+      fields.push("status = ?");
+      values.push(updates.status);
+    }
+    if (updates.taskIds !== undefined) {
+      // Keep materialized task_ids aligned with the canonical task linkage source.
+      const canonicalTaskIds = this.getTaskIdsForSession(id);
+      fields.push("task_ids = ?");
+      values.push(JSON.stringify(canonicalTaskIds));
+    }
+    if (updates.completedAt !== undefined) {
+      fields.push("completed_at = ?");
+      values.push(updates.completedAt);
+    }
+    if (updates.comparisonResult !== undefined) {
+      fields.push("comparison_result = ?");
+      values.push(JSON.stringify(updates.comparisonResult));
+    }
+
+    if (fields.length === 0) return;
+
+    values.push(id);
+    const stmt = this.db.prepare(
+      `UPDATE comparison_sessions SET ${fields.join(", ")} WHERE id = ?`,
+    );
+    stmt.run(...values);
+  }
+
+  delete(id: string): void {
+    const stmt = this.db.prepare("DELETE FROM comparison_sessions WHERE id = ?");
+    stmt.run(id);
+  }
+
+  syncTaskIdsFromTasks(sessionId: string): string[] {
+    const taskIds = this.getTaskIdsForSession(sessionId);
+    const stmt = this.db.prepare("UPDATE comparison_sessions SET task_ids = ? WHERE id = ?");
+    stmt.run(JSON.stringify(taskIds), sessionId);
+    return taskIds;
+  }
+
+  private mapRow(row: Record<string, unknown>): ComparisonSession {
+    return {
+      id: row.id as string,
+      title: row.title as string,
+      prompt: row.prompt as string,
+      workspaceId: row.workspace_id as string,
+      status: row.status as ComparisonSessionStatus,
+      taskIds: safeJsonParse<string[]>(row.task_ids as string, [], "comparisonSession.taskIds"),
+      createdAt: row.created_at as number,
+      completedAt: (row.completed_at as number) || undefined,
+      comparisonResult: row.comparison_result
+        ? safeJsonParse<ComparisonResult>(
+            row.comparison_result as string,
+            { taskResults: [] },
+            "comparisonSession.comparisonResult",
+          )
+        : undefined,
+    };
+  }
+
+  private reconcileTaskIds(session: ComparisonSession): ComparisonSession {
+    const canonicalTaskIds = this.getTaskIdsForSession(session.id);
+    if (this.arraysEqual(session.taskIds, canonicalTaskIds)) {
+      return session;
+    }
+    const stmt = this.db.prepare("UPDATE comparison_sessions SET task_ids = ? WHERE id = ?");
+    stmt.run(JSON.stringify(canonicalTaskIds), session.id);
+    return { ...session, taskIds: canonicalTaskIds };
+  }
+
+  private getTaskIdsForSession(sessionId: string): string[] {
+    const stmt = this.db.prepare(
+      "SELECT id FROM tasks WHERE comparison_session_id = ? ORDER BY created_at ASC",
+    );
+    const rows = stmt.all(sessionId) as Array<{ id: string }>;
+    return rows
+      .map((row) => row.id)
+      .filter((id): id is string => typeof id === "string" && id.length > 0);
+  }
+
+  private arraysEqual(a: string[], b: string[]): boolean {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      if (a[i] !== b[i]) return false;
+    }
+    return true;
   }
 }

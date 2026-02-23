@@ -5,10 +5,13 @@ import type {
   AgentTeamItem,
   AgentTeamRun,
   AgentTeamRunStatus,
+  AgentTeamRunPhase,
   AgentTeamItemStatus,
+  AgentThought,
   UpdateAgentTeamItemRequest,
+  MultiLlmParticipant,
 } from "../../shared/types";
-import { IPC_CHANNELS } from "../../shared/types";
+import { IPC_CHANNELS, MULTI_LLM_PROVIDER_DISPLAY } from "../../shared/types";
 import {
   resolveModelPreferenceToModelKey,
   resolvePersonalityPreference,
@@ -16,6 +19,7 @@ import {
 import { AgentTeamRepository } from "./AgentTeamRepository";
 import { AgentTeamRunRepository } from "./AgentTeamRunRepository";
 import { AgentTeamItemRepository } from "./AgentTeamItemRepository";
+import { AgentTeamThoughtRepository } from "./AgentTeamThoughtRepository";
 
 type AgentTeamRepositoryLike =
   | Pick<AgentTeamRepository, "findById">
@@ -31,15 +35,17 @@ type AgentTeamRunRepositoryLike =
           completedAt?: number | null;
           error?: string | null;
           summary?: string | null;
+          phase?: AgentTeamRunPhase;
         },
       ) => AgentTeamRun | undefined;
     };
 type AgentTeamItemRepositoryLike =
-  | Pick<AgentTeamItemRepository, "listByRun" | "listBySourceTaskId" | "update">
+  | Pick<AgentTeamItemRepository, "listByRun" | "listBySourceTaskId" | "update" | "create">
   | {
       listByRun: (teamRunId: string) => AgentTeamItem[];
       listBySourceTaskId: (sourceTaskId: string) => AgentTeamItem[];
       update: (request: UpdateAgentTeamItemRequest) => AgentTeamItem | undefined;
+      create: (request: import("../../shared/types").CreateAgentTeamItemRequest) => AgentTeamItem;
     };
 
 export type AgentTeamOrchestratorDeps = {
@@ -56,6 +62,8 @@ export type AgentTeamOrchestratorDeps = {
     assignedAgentRoleId?: string;
   }) => Promise<Task>;
   cancelTask: (taskId: string) => Promise<void>;
+  wrapUpTask?: (taskId: string) => Promise<void>;
+  completeRootTask?: (taskId: string, status: "completed" | "failed", summary: string) => void;
 };
 
 function getAllElectronWindows(): any[] {
@@ -96,6 +104,7 @@ export class AgentTeamOrchestrator {
   private teamRepo: AgentTeamRepositoryLike;
   private runRepo: AgentTeamRunRepositoryLike;
   private itemRepo: AgentTeamItemRepositoryLike;
+  private thoughtRepo: AgentTeamThoughtRepository;
   private runLocks = new Map<string, boolean>();
 
   constructor(
@@ -106,6 +115,9 @@ export class AgentTeamOrchestrator {
       itemRepo?: AgentTeamItemRepositoryLike;
     },
   ) {
+    const db = deps.getDatabase();
+    this.thoughtRepo = new AgentTeamThoughtRepository(db);
+
     if (repos?.teamRepo && repos?.runRepo && repos?.itemRepo) {
       this.teamRepo = repos.teamRepo;
       this.runRepo = repos.runRepo;
@@ -113,10 +125,16 @@ export class AgentTeamOrchestrator {
       return;
     }
 
-    const db = deps.getDatabase();
     this.teamRepo = new AgentTeamRepository(db);
     this.runRepo = new AgentTeamRunRepository(db);
     this.itemRepo = new AgentTeamItemRepository(db);
+  }
+
+  /**
+   * Get the thought repository (used by daemon for thought capture).
+   */
+  getThoughtRepo(): AgentTeamThoughtRepository {
+    return this.thoughtRepo;
   }
 
   async tickRun(runId: string, reason: string = "tick"): Promise<void> {
@@ -157,13 +175,25 @@ export class AgentTeamOrchestrator {
       const refreshedItems = this.itemRepo.listByRun(run.id);
       const inProgress = refreshedItems.filter((i) => i.status === "in_progress");
 
-      // If everything is terminal, complete the run.
+      // If everything is terminal, complete or transition the run.
       const nonTerminal = refreshedItems.filter((i) => !isTerminalItemStatus(i.status));
       if (nonTerminal.length === 0) {
+        // In collaborative mode, transition to synthesis phase instead of completing
+        const currentPhase = run.phase || "dispatch";
+        if (run.collaborativeMode && (currentPhase === "dispatch" || currentPhase === "think")) {
+          await this.transitionToSynthesizePhase(run, team, rootTask, refreshedItems);
+          return;
+        }
+
         const hasFailures = refreshedItems.some((i) => i.status === "failed");
         const status = hasFailures ? "failed" : "completed";
         const summary = this.buildRunSummary(refreshedItems);
-        const updated = this.runRepo.update(run.id, { status, summary });
+        const completedPhase = run.collaborativeMode ? "complete" : undefined;
+        const updated = this.runRepo.update(run.id, {
+          status,
+          summary,
+          ...(completedPhase ? { phase: completedPhase } : {}),
+        });
         if (updated) {
           emitTeamEvent({
             type: "team_run_updated",
@@ -171,6 +201,14 @@ export class AgentTeamOrchestrator {
             run: updated,
             reason: "all_items_terminal",
           });
+        }
+        // When a collaborative run finishes, mark the root task as completed/failed
+        if (run.collaborativeMode && this.deps.completeRootTask) {
+          this.deps.completeRootTask(
+            run.rootTaskId,
+            status === "failed" ? "failed" : "completed",
+            summary,
+          );
         }
         return;
       }
@@ -183,16 +221,69 @@ export class AgentTeamOrchestrator {
         .filter((i) => i.status === "todo" && !i.sourceTaskId)
         .sort((a, b) => a.sortOrder - b.sortOrder || a.createdAt - b.createdAt);
 
+      // Resolve multi-LLM participants from root task config
+      const multiLlmParticipants: MultiLlmParticipant[] | undefined =
+        run.multiLlmMode && rootTask.agentConfig?.multiLlmConfig?.participants
+          ? rootTask.agentConfig.multiLlmConfig.participants
+          : undefined;
+
       const toSpawn = candidates.slice(0, slots);
-      for (const item of toSpawn) {
-        const childTitle = `Team: ${team.name} - ${item.title}`;
-        const childPrompt = this.buildItemPrompt(team.name, rootTask, item.title, item.description);
-        const assignedRoleId = item.ownerAgentRoleId || team.leadAgentRoleId;
+      for (let spawnIdx = 0; spawnIdx < toSpawn.length; spawnIdx++) {
+        const item = toSpawn[spawnIdx];
         const depth = (typeof rootTask.depth === "number" ? rootTask.depth : 0) + 1;
+
+        // Multi-LLM mode: override provider/model per child task
+        if (run.multiLlmMode && multiLlmParticipants) {
+          const participant = multiLlmParticipants[spawnIdx];
+          if (!participant) continue;
+
+          const childPrompt = this.buildMultiLlmItemPrompt(participant, rootTask);
+          const agentConfig: AgentConfig = {
+            retainMemory: false,
+            bypassQueue: false,
+            providerType: participant.providerType,
+            modelKey: participant.modelKey,
+          };
+
+          const child = await this.deps.createChildTask({
+            title: `${participant.displayName} Analysis`,
+            prompt: childPrompt,
+            workspaceId: rootTask.workspaceId,
+            parentTaskId: rootTask.id,
+            agentType: "sub",
+            agentConfig,
+            depth,
+          });
+
+          this.itemRepo.update({
+            id: item.id,
+            sourceTaskId: child.id,
+            status: "in_progress",
+          });
+
+          emitTeamEvent({
+            type: "team_item_spawned",
+            timestamp: Date.now(),
+            runId: run.id,
+            item: this.itemRepo.listBySourceTaskId(child.id)[0] || item,
+            spawnedTaskId: child.id,
+          });
+          continue;
+        }
+
+        // Standard collaborative/team mode
+        const childTitle = item.title;
+        const childPrompt = this.buildItemPrompt(
+          team.name,
+          rootTask,
+          item.title,
+          item.description,
+          run.collaborativeMode,
+        );
+        const assignedRoleId = item.ownerAgentRoleId || team.leadAgentRoleId;
 
         const agentConfig: AgentConfig = {
           retainMemory: false,
-          // Team runs are UI-driven orchestration; respect the global queue settings by default.
           bypassQueue: false,
         };
         const modelKey = resolveModelPreferenceToModelKey(team.defaultModelPreference);
@@ -225,6 +316,23 @@ export class AgentTeamOrchestrator {
             item: updatedItem,
             spawnedTaskId: child.id,
           });
+        }
+      }
+
+      // In collaborative mode, transition from dispatch to think phase
+      // once we've spawned at least one item
+      if (run.collaborativeMode && toSpawn.length > 0) {
+        const currentPhase = run.phase || "dispatch";
+        if (currentPhase === "dispatch") {
+          const updated = this.runRepo.update(run.id, { phase: "think" });
+          if (updated) {
+            emitTeamEvent({
+              type: "team_run_updated",
+              timestamp: Date.now(),
+              run: updated,
+              reason: "phase_transition_think",
+            });
+          }
         }
       }
     } catch (error: any) {
@@ -318,12 +426,98 @@ export class AgentTeamOrchestrator {
     }
   }
 
+  /**
+   * Wrap up a collaborative run gracefully - skip remaining todo items,
+   * signal in-progress agents to wrap up, and fast-forward to synthesis.
+   */
+  async wrapUpRun(runId: string): Promise<void> {
+    const run = this.runRepo.findById(runId);
+    if (!run || run.status !== "running") return;
+
+    const team = this.teamRepo.findById(run.teamId);
+    if (!team) return;
+
+    const rootTask = await this.deps.getTaskById(run.rootTaskId);
+    if (!rootTask) return;
+
+    const items = this.itemRepo.listByRun(runId);
+
+    // 1. Block all "todo" items so no new tasks are dispatched
+    for (const item of items) {
+      if (item.status === "todo") {
+        const updated = this.itemRepo.update({
+          id: item.id,
+          status: "blocked",
+          resultSummary: "Skipped — user requested wrap-up",
+        });
+        if (updated) {
+          emitTeamEvent({
+            type: "team_item_updated",
+            timestamp: Date.now(),
+            teamRunId: updated.teamRunId,
+            item: updated,
+          });
+        }
+      }
+    }
+
+    // 2. Send wrap-up signal to in-progress child task executors
+    for (const item of items) {
+      if (item.status === "in_progress" && item.sourceTaskId) {
+        try {
+          await this.deps.wrapUpTask?.(item.sourceTaskId);
+        } catch {
+          // Fall through; items will eventually complete on their own
+        }
+      }
+    }
+
+    // 3. Fast-forward to synthesize phase if currently in dispatch/think
+    const currentPhase = run.phase || "dispatch";
+    if (currentPhase === "dispatch" || currentPhase === "think") {
+      const refreshedItems = this.itemRepo.listByRun(runId);
+      const stillInProgress = refreshedItems.filter((i) => i.status === "in_progress");
+
+      if (stillInProgress.length === 0) {
+        // All items terminal — transition immediately
+        await this.transitionToSynthesizePhase(run, team, rootTask, refreshedItems);
+      } else {
+        // Some items still running — update phase; onTaskTerminal will finish transition
+        const updated = this.runRepo.update(run.id, { phase: "synthesize" as AgentTeamRunPhase });
+        if (updated) {
+          emitTeamEvent({
+            type: "team_run_updated",
+            timestamp: Date.now(),
+            run: updated,
+            reason: "wrap_up_requested",
+          });
+        }
+      }
+    }
+  }
+
   private buildItemPrompt(
     teamName: string,
     rootTask: Task,
     itemTitle: string,
     itemDescription?: string,
+    collaborativeMode?: boolean,
   ): string {
+    if (collaborativeMode) {
+      const parts: string[] = [];
+      parts.push(`You are part of the team "${teamName}".`);
+      parts.push("");
+      parts.push("TASK FOR INDEPENDENT ANALYSIS:");
+      parts.push(`Title: ${rootTask.title}`);
+      parts.push(rootTask.prompt);
+      parts.push("");
+      parts.push("Analyze this task from your area of expertise.");
+      parts.push("Provide thorough, independent analysis and recommendations.");
+      parts.push("Focus on aspects matching your specialization.");
+      parts.push("Your thoughts will be shared with the team and synthesized by the leader.");
+      return parts.join("\n");
+    }
+
     const parts: string[] = [];
     parts.push(`You are working as part of the team "${teamName}".`);
     parts.push("");
@@ -352,5 +546,231 @@ export class AgentTeamOrchestrator {
     const total = items.length;
     const lines = [`Items: ${done} done, ${failed} failed, ${blocked} blocked (total: ${total})`];
     return lines.join("\n");
+  }
+
+  /**
+   * Transition a collaborative run to the synthesize phase.
+   * Collects all member thoughts and spawns a synthesis task for the leader.
+   */
+  private async transitionToSynthesizePhase(
+    run: AgentTeamRun,
+    team: AgentTeam,
+    rootTask: Task,
+    items: AgentTeamItem[],
+  ): Promise<void> {
+    // Update phase to synthesize
+    const updated = this.runRepo.update(run.id, { phase: "synthesize" });
+    if (updated) {
+      emitTeamEvent({
+        type: "team_run_updated",
+        timestamp: Date.now(),
+        run: updated,
+        reason: "phase_transition_synthesize",
+      });
+    }
+
+    // Collect all thoughts from the run
+    const thoughts = this.thoughtRepo.listByRun(run.id);
+
+    // Build synthesis prompt with all member thoughts
+    const synthesisPrompt = run.multiLlmMode
+      ? this.buildMultiLlmSynthesisPrompt(rootTask, thoughts, items)
+      : this.buildSynthesisPrompt(team.name, rootTask, thoughts, items);
+
+    // Spawn a synthesis task assigned to the leader (or judge in multi-LLM mode)
+    const depth = (typeof rootTask.depth === "number" ? rootTask.depth : 0) + 1;
+    const agentConfig: AgentConfig = {
+      retainMemory: false,
+      bypassQueue: true,
+      conversationMode: "chat", // Skip planning/steps — single-turn text synthesis
+      qualityPasses: 1,
+    };
+
+    if (run.multiLlmMode && rootTask.agentConfig?.multiLlmConfig) {
+      // Use judge's provider/model for synthesis
+      agentConfig.providerType = rootTask.agentConfig.multiLlmConfig.judgeProviderType;
+      agentConfig.modelKey = rootTask.agentConfig.multiLlmConfig.judgeModelKey;
+    } else {
+      const modelKey = resolveModelPreferenceToModelKey(team.defaultModelPreference);
+      if (modelKey) agentConfig.modelKey = modelKey;
+      const personalityId = resolvePersonalityPreference(team.defaultPersonality);
+      if (personalityId) agentConfig.personalityId = personalityId;
+    }
+
+    const child = await this.deps.createChildTask({
+      title: `Synthesis`,
+      prompt: synthesisPrompt,
+      workspaceId: rootTask.workspaceId,
+      parentTaskId: rootTask.id,
+      agentType: "sub",
+      agentConfig,
+      depth,
+      assignedAgentRoleId: team.leadAgentRoleId,
+    });
+
+    // Create a team item linked to the synthesis task so onTaskTerminal
+    // can find it and transition the run to "complete" when synthesis finishes.
+    this.itemRepo.create({
+      teamRunId: run.id,
+      title: "Synthesis",
+      ownerAgentRoleId: team.leadAgentRoleId,
+      sourceTaskId: child.id,
+      status: "in_progress",
+      sortOrder: 9999,
+    });
+  }
+
+  /**
+   * Build the prompt for the leader's synthesis phase.
+   * Includes all member thoughts grouped by agent.
+   */
+  private buildSynthesisPrompt(
+    teamName: string,
+    rootTask: Task,
+    thoughts: AgentThought[],
+    items: AgentTeamItem[],
+  ): string {
+    const parts: string[] = [];
+    parts.push(`You are the LEADER of team "${teamName}".`);
+    parts.push("Your team members have completed their independent analysis.");
+    parts.push("Your job is to synthesize their findings into a comprehensive final answer.");
+    parts.push("");
+    parts.push("IMPORTANT INSTRUCTIONS:");
+    parts.push(
+      "- ALL team member analyses are provided IN FULL below. Do NOT read external files.",
+    );
+    parts.push(
+      "- Do NOT attempt to use any tools or read any files. Everything you need is in this prompt.",
+    );
+    parts.push("- Respond directly with your synthesized analysis as text.");
+    parts.push("");
+    parts.push("ORIGINAL REQUEST:");
+    parts.push(`Title: ${rootTask.title}`);
+    parts.push(rootTask.prompt);
+    parts.push("");
+
+    // Include item status (without file path references that might trigger read attempts)
+    const terminalItems = items.filter(
+      (i) => i.status === "done" || i.status === "failed" || i.status === "blocked",
+    );
+    if (terminalItems.length > 0) {
+      parts.push("TEAM WORK ITEM STATUS:");
+      for (const item of terminalItems) {
+        const statusIcon =
+          item.status === "done" ? "DONE" : item.status === "failed" ? "FAILED" : "SKIPPED";
+        parts.push(`- [${statusIcon}] ${item.title}`);
+      }
+      parts.push("");
+    }
+
+    // Include thoughts grouped by agent — this is the primary content
+    if (thoughts.length > 0) {
+      parts.push("=== TEAM MEMBER ANALYSES (COMPLETE) ===");
+      parts.push("");
+
+      const byAgent = new Map<string, AgentThought[]>();
+      for (const thought of thoughts) {
+        const existing = byAgent.get(thought.agentRoleId) || [];
+        existing.push(thought);
+        byAgent.set(thought.agentRoleId, existing);
+      }
+
+      for (const [, agentThoughts] of byAgent) {
+        const first = agentThoughts[0];
+        parts.push(`### ${first.agentIcon} ${first.agentDisplayName}`);
+        for (const t of agentThoughts) {
+          parts.push(t.content);
+        }
+        parts.push("");
+      }
+
+      parts.push("=== END OF TEAM MEMBER ANALYSES ===");
+      parts.push("");
+    }
+
+    parts.push("YOUR TASK:");
+    parts.push("Using ONLY the team member analyses provided above:");
+    parts.push("1. Identify agreements, conflicts, and key insights across the analyses.");
+    parts.push("2. Synthesize a comprehensive final answer that addresses the original request.");
+    parts.push("3. Credit specific team members for their key contributions.");
+    parts.push("");
+    parts.push("Respond directly with your synthesized answer. Do NOT use any tools.");
+
+    return parts.join("\n");
+  }
+
+  /**
+   * Build prompt for a multi-LLM participant. Each LLM gets the same task
+   * with a simple instruction to analyze it from their perspective.
+   */
+  private buildMultiLlmItemPrompt(participant: MultiLlmParticipant, rootTask: Task): string {
+    const parts: string[] = [];
+    parts.push("Analyze the following task thoroughly and provide your best response.");
+    parts.push("");
+    parts.push("TASK:");
+    parts.push(`Title: ${rootTask.title}`);
+    parts.push(rootTask.prompt);
+    parts.push("");
+    parts.push("Provide a thorough, well-structured analysis and response.");
+    parts.push("Your output will be compared with other AI models and synthesized by a judge.");
+    return parts.join("\n");
+  }
+
+  /**
+   * Build the synthesis prompt for the judge in multi-LLM mode.
+   * Groups outputs by LLM provider/model.
+   */
+  private buildMultiLlmSynthesisPrompt(
+    rootTask: Task,
+    thoughts: AgentThought[],
+    items: AgentTeamItem[],
+  ): string {
+    const parts: string[] = [];
+    parts.push("You are the JUDGE in a multi-LLM comparison.");
+    parts.push("Multiple AI models have independently analyzed the same task.");
+    parts.push("Your job is to synthesize their outputs into the best possible final answer.");
+    parts.push("");
+    parts.push("IMPORTANT INSTRUCTIONS:");
+    parts.push("- ALL model outputs are provided IN FULL below. Do NOT read external files.");
+    parts.push("- Do NOT attempt to use any tools or read any files. Everything you need is in this prompt.");
+    parts.push("- Respond directly with your synthesized analysis as text.");
+    parts.push("");
+    parts.push("ORIGINAL REQUEST:");
+    parts.push(`Title: ${rootTask.title}`);
+    parts.push(rootTask.prompt);
+    parts.push("");
+
+    if (thoughts.length > 0) {
+      parts.push("=== MODEL OUTPUTS (COMPLETE) ===");
+      parts.push("");
+
+      const byModel = new Map<string, AgentThought[]>();
+      for (const thought of thoughts) {
+        const existing = byModel.get(thought.agentRoleId) || [];
+        existing.push(thought);
+        byModel.set(thought.agentRoleId, existing);
+      }
+
+      for (const [, modelThoughts] of byModel) {
+        const first = modelThoughts[0];
+        parts.push(`### ${first.agentIcon} ${first.agentDisplayName}`);
+        for (const t of modelThoughts) {
+          parts.push(t.content);
+        }
+        parts.push("");
+      }
+
+      parts.push("=== END OF MODEL OUTPUTS ===");
+      parts.push("");
+    }
+
+    parts.push("YOUR TASK:");
+    parts.push("Using ONLY the model outputs provided above:");
+    parts.push("1. Compare and evaluate each model's response for accuracy, completeness, and quality.");
+    parts.push("2. Identify the strongest elements from each response.");
+    parts.push("3. Synthesize the best comprehensive answer combining the strongest elements.");
+    parts.push("4. Note any disagreements between models and explain which view is more accurate.");
+
+    return parts.join("\n");
   }
 }

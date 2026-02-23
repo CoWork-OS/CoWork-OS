@@ -1,6 +1,11 @@
 import Database from "better-sqlite3";
 import { v4 as uuidv4 } from "uuid";
-import { AgentTeamRun, AgentTeamRunStatus, CreateAgentTeamRunRequest } from "../../shared/types";
+import {
+  AgentTeamRun,
+  AgentTeamRunPhase,
+  AgentTeamRunStatus,
+  CreateAgentTeamRunRequest,
+} from "../../shared/types";
 
 /**
  * Repository for managing agent team runs (execution sessions) in the database.
@@ -13,6 +18,7 @@ export class AgentTeamRunRepository {
    */
   create(request: CreateAgentTeamRunRequest): AgentTeamRun {
     const now = Date.now();
+    const isCollabOrMultiLlm = request.collaborativeMode || request.multiLlmMode;
     const run: AgentTeamRun = {
       id: uuidv4(),
       teamId: request.teamId,
@@ -22,15 +28,31 @@ export class AgentTeamRunRepository {
       completedAt: undefined,
       error: undefined,
       summary: undefined,
+      phase: isCollabOrMultiLlm ? "dispatch" : undefined,
+      collaborativeMode: request.collaborativeMode ?? false,
+      multiLlmMode: request.multiLlmMode ?? false,
     };
 
     const stmt = this.db.prepare(`
       INSERT INTO agent_team_runs (
-        id, team_id, root_task_id, status, started_at, completed_at, error, summary
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        id, team_id, root_task_id, status, started_at, completed_at, error, summary,
+        phase, collaborative_mode, multi_llm_mode
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    stmt.run(run.id, run.teamId, run.rootTaskId, run.status, run.startedAt, null, null, null);
+    stmt.run(
+      run.id,
+      run.teamId,
+      run.rootTaskId,
+      run.status,
+      run.startedAt,
+      null,
+      null,
+      null,
+      run.phase || null,
+      run.collaborativeMode ? 1 : 0,
+      run.multiLlmMode ? 1 : 0,
+    );
 
     return run;
   }
@@ -90,6 +112,7 @@ export class AgentTeamRunRepository {
       completedAt?: number | null;
       error?: string | null;
       summary?: string | null;
+      phase?: AgentTeamRunPhase;
     },
   ): AgentTeamRun | undefined {
     const existing = this.findById(id);
@@ -129,6 +152,11 @@ export class AgentTeamRunRepository {
       values.push(updates.summary);
     }
 
+    if (updates.phase !== undefined) {
+      fields.push("phase = ?");
+      values.push(updates.phase);
+    }
+
     if (fields.length === 0) return existing;
 
     values.push(id);
@@ -145,6 +173,7 @@ export class AgentTeamRunRepository {
   delete(id: string): boolean {
     const deleteTx = this.db.transaction((runId: string) => {
       // Manual cascade: foreign keys may not be enforced.
+      this.db.prepare("DELETE FROM agent_team_thoughts WHERE team_run_id = ?").run(runId);
       this.db.prepare("DELETE FROM agent_team_items WHERE team_run_id = ?").run(runId);
       const result = this.db.prepare("DELETE FROM agent_team_runs WHERE id = ?").run(runId);
       return result.changes > 0;
@@ -163,6 +192,9 @@ export class AgentTeamRunRepository {
       completedAt: row.completed_at || undefined,
       error: row.error || undefined,
       summary: row.summary || undefined,
+      phase: (row.phase as AgentTeamRunPhase) || undefined,
+      collaborativeMode: row.collaborative_mode === 1,
+      multiLlmMode: row.multi_llm_mode === 1,
     };
   }
 }

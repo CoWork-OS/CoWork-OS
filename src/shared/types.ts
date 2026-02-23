@@ -629,6 +629,7 @@ export interface Task {
   id: string;
   title: string;
   prompt: string;
+  userPrompt?: string; // Original user prompt (before agent dispatch formatting)
   status: TaskStatus;
   pinned?: boolean;
   workspaceId: string;
@@ -1506,6 +1507,123 @@ export const DEFAULT_AGENT_ROLES: Omit<AgentRole, "id" | "createdAt" | "updatedA
   },
 ];
 
+// ============ Persona Templates (Digital Twins) ============
+
+/**
+ * Cognitive offload category - types of mental work a digital twin absorbs
+ * so the human can stay in flow.
+ */
+export type CognitiveOffloadCategory =
+  | "context-switching" // Keeping track of multiple threads/projects
+  | "status-reporting" // Standup summaries, progress updates, dashboards
+  | "information-triage" // Filtering noise from signal (emails, Slack, PRs)
+  | "decision-preparation" // Assembling data for decisions (not making them)
+  | "documentation" // Maintaining docs, meeting notes, runbooks
+  | "review-preparation" // Pre-screening code, designs, proposals
+  | "dependency-tracking" // Cross-team blockers, library updates, deadlines
+  | "compliance-checks" // Standards adherence, process gates, audit prep
+  | "knowledge-curation" // Organizing learnings, best practices, FAQs
+  | "routine-automation"; // Recurring chores (triage, labels, assignments)
+
+/**
+ * A proactive task the digital twin performs on heartbeat wake-ups
+ */
+export interface ProactiveTaskDefinition {
+  id: string;
+  name: string;
+  description: string;
+  category: CognitiveOffloadCategory;
+  promptTemplate: string;
+  frequencyMinutes: number;
+  priority: number; // Lower = higher priority (1-10)
+  enabled: boolean;
+}
+
+/**
+ * Skill reference within a persona template
+ */
+export interface PersonaTemplateSkillRef {
+  skillId: string;
+  reason: string;
+  required: boolean;
+}
+
+/**
+ * Category for persona template gallery grouping
+ */
+export type PersonaTemplateCategory =
+  | "engineering"
+  | "management"
+  | "product"
+  | "data"
+  | "operations";
+
+/**
+ * A persona template defines a pre-built digital twin configuration.
+ * Templates are instantiated into AgentRoles when activated.
+ */
+export interface PersonaTemplate {
+  id: string;
+  version: string;
+  name: string;
+  description: string;
+  icon: string;
+  color: string;
+  category: PersonaTemplateCategory;
+
+  role: {
+    capabilities: AgentCapability[];
+    autonomyLevel: AgentAutonomyLevel;
+    personalityId: PersonalityId;
+    toolRestrictions?: AgentToolRestrictions;
+    systemPrompt: string;
+    soul: string; // JSON string for role-persona
+  };
+
+  heartbeat: {
+    enabled: boolean;
+    intervalMinutes: number;
+    staggerOffset: number;
+  };
+
+  cognitiveOffload: {
+    primaryCategories: CognitiveOffloadCategory[];
+    proactiveTasks: ProactiveTaskDefinition[];
+  };
+
+  skills: PersonaTemplateSkillRef[];
+
+  tags: string[];
+  seniorityRange: string[];
+  industryAgnostic: boolean;
+}
+
+/**
+ * Result from activating (instantiating) a persona template
+ */
+export interface PersonaTemplateActivationResult {
+  agentRole: AgentRole;
+  installedSkillIds: string[];
+  proactiveTaskCount: number;
+  warnings: string[];
+}
+
+/**
+ * Request to activate a persona template
+ */
+export interface ActivatePersonaTemplateRequest {
+  templateId: string;
+  customization?: {
+    displayName?: string;
+    icon?: string;
+    color?: string;
+    modelKey?: string;
+    providerType?: LLMProviderType;
+    heartbeatIntervalMinutes?: number;
+    enabledProactiveTasks?: string[];
+  };
+}
+
 // ============ Mission Control Types ============
 
 /**
@@ -2009,6 +2127,13 @@ export const IPC_CHANNELS = {
   TEAM_THOUGHT_LIST: "teamThought:list",
   TEAM_THOUGHT_EVENT: "teamThought:event",
   TEAM_RUN_FIND_BY_ROOT_TASK: "teamRun:findByRootTask",
+
+  // Mission Control - Persona Templates (Digital Twins)
+  PERSONA_TEMPLATE_LIST: "personaTemplate:list",
+  PERSONA_TEMPLATE_GET: "personaTemplate:get",
+  PERSONA_TEMPLATE_ACTIVATE: "personaTemplate:activate",
+  PERSONA_TEMPLATE_PREVIEW: "personaTemplate:preview",
+  PERSONA_TEMPLATE_GET_CATEGORIES: "personaTemplate:getCategories",
 
   // Workspace Kit (.cowork)
   KIT_GET_STATUS: "kit:getStatus",

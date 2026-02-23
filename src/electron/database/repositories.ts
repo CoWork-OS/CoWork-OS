@@ -176,14 +176,15 @@ export class TaskRepository {
     };
 
     const stmt = this.db.prepare(`
-      INSERT INTO tasks (id, title, prompt, status, workspace_id, created_at, updated_at, budget_tokens, budget_cost, success_criteria, max_attempts, current_attempt, parent_task_id, agent_type, agent_config, depth, result_summary)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO tasks (id, title, prompt, user_prompt, status, workspace_id, created_at, updated_at, budget_tokens, budget_cost, success_criteria, max_attempts, current_attempt, parent_task_id, agent_type, agent_config, depth, result_summary)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
       newTask.id,
       newTask.title,
       newTask.prompt,
+      newTask.userPrompt || null,
       newTask.status,
       newTask.workspaceId,
       newTask.createdAt,
@@ -231,6 +232,7 @@ export class TaskRepository {
     "estimatedMinutes",
     "actualMinutes",
     "mentionedAgentRoleIds",
+    "userPrompt",
     "pinned",
     // Git Worktree fields
     "worktreePath",
@@ -476,6 +478,7 @@ export class TaskRepository {
       id: row.id,
       title: row.title,
       prompt: row.prompt,
+      userPrompt: row.user_prompt || undefined,
       status: row.status,
       workspaceId: row.workspace_id,
       createdAt: row.created_at,

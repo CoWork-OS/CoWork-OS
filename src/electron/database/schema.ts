@@ -1385,6 +1385,13 @@ export class DatabaseManager {
       // Column already exists
     }
 
+    // ============ User Prompt for Agent-Dispatched Tasks ============
+    try {
+      this.db.exec("ALTER TABLE tasks ADD COLUMN user_prompt TEXT");
+    } catch {
+      // Column already exists
+    }
+
     // ============ Knowledge Graph Tables ============
 
     try {

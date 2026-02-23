@@ -17,6 +17,7 @@ import {
   MultiLlmConfig,
 } from "../../shared/types";
 import { CollaborativeThoughtsPanel } from "./CollaborativeThoughtsPanel";
+import { DispatchedAgentsPanel } from "./DispatchedAgentsPanel";
 import { MultiLlmSelectionPanel } from "./MultiLlmSelectionPanel";
 import { isVerificationStepDescription } from "../../shared/plan-utils";
 import type { AgentRoleData } from "../../electron/preload";
@@ -1559,6 +1560,9 @@ interface MainContentProps {
   selectedTaskId: string | null; // Added to distinguish "no task" from "task not in list"
   workspace: Workspace | null;
   events: TaskEvent[];
+  childTasks?: Task[];
+  childEvents?: TaskEvent[];
+  onSelectChildTask?: (taskId: string) => void;
   onSendMessage: (message: string, images?: ImageAttachment[]) => void;
   onCreateTask?: (
     title: string,
@@ -1593,6 +1597,9 @@ export function MainContent({
   selectedTaskId,
   workspace,
   events,
+  childTasks = [],
+  childEvents = [],
+  onSelectChildTask,
   onSendMessage,
   onCreateTask,
   onChangeWorkspace,
@@ -4540,7 +4547,8 @@ export function MainContent({
     );
   }
 
-  const trimmedPrompt = task.prompt.trim();
+  const displayPrompt = task.userPrompt || task.prompt;
+  const trimmedPrompt = displayPrompt.trim();
   const baseTitle = task.title || buildTaskTitle(trimmedPrompt);
   const normalizedTitle = baseTitle.replace(TITLE_ELLIPSIS_REGEX, "");
   const titleMatchesPrompt =
@@ -4607,11 +4615,11 @@ export function MainContent({
           <div className="chat-message user-message">
             <CollapsibleUserBubble>
               <ReactMarkdown remarkPlugins={userMarkdownPlugins} components={markdownComponents}>
-                {stripPptxBubbleContent(task.prompt)}
+                {stripPptxBubbleContent(displayPrompt)}
               </ReactMarkdown>
-              {extractAttachmentNames(task.prompt).length > 0 && (
+              {extractAttachmentNames(displayPrompt).length > 0 && (
                 <div className="bubble-attachments">
-                  {extractAttachmentNames(task.prompt).map((name, i) => (
+                  {extractAttachmentNames(displayPrompt).map((name, i) => (
                     <span className="bubble-attachment-chip" key={i}>
                       <svg
                         width="12"
@@ -4632,7 +4640,7 @@ export function MainContent({
                 </div>
               )}
             </CollapsibleUserBubble>
-            <MessageCopyButton text={task.prompt} />
+            <MessageCopyButton text={displayPrompt} />
           </div>
 
           {/* View steps toggle - show right after original prompt */}
@@ -4678,6 +4686,18 @@ export function MainContent({
                   </button>
                 </>
               )}
+            </div>
+          )}
+
+          {/* Dispatched Agents Panel - shown when task has @mentioned agent sub-tasks */}
+          {!collaborativeRun && childTasks.length > 0 && (
+            <div className="collaborative-thoughts-main">
+              <DispatchedAgentsPanel
+                parentTaskId={task!.id}
+                childTasks={childTasks}
+                childEvents={childEvents}
+                onSelectChildTask={onSelectChildTask}
+              />
             </div>
           )}
 

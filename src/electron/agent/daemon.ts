@@ -682,6 +682,7 @@ export class AgentDaemon extends EventEmitter {
   async createChildTask(params: {
     title: string;
     prompt: string;
+    userPrompt?: string;
     workspaceId: string;
     parentTaskId: string;
     agentType: AgentType;
@@ -754,6 +755,7 @@ export class AgentDaemon extends EventEmitter {
     const task = this.taskRepo.create({
       title: params.title,
       prompt: params.prompt,
+      userPrompt: params.userPrompt,
       status: "pending",
       workspaceId: params.workspaceId,
       parentTaskId: params.parentTaskId,
@@ -877,6 +879,7 @@ export class AgentDaemon extends EventEmitter {
       const childTask = await this.createChildTask({
         title: `@${role.displayName}: ${task.title}`,
         prompt: childPrompt,
+        userPrompt: task.prompt,
         workspaceId: task.workspaceId,
         parentTaskId: task.id,
         agentType: "sub",
@@ -956,6 +959,17 @@ export class AgentDaemon extends EventEmitter {
       if (this.teamOrchestrator) {
         void this.teamOrchestrator.onTaskTerminal(taskId).catch(() => {});
       }
+      // Cascade cancellation to child tasks even for queued parents
+      const queuedChildren = this.taskRepo.findByParent(taskId);
+      for (const child of queuedChildren) {
+        if (
+          child.status !== "completed" &&
+          child.status !== "failed" &&
+          child.status !== "cancelled"
+        ) {
+          await this.cancelTask(child.id);
+        }
+      }
       return;
     }
 
@@ -982,6 +996,18 @@ export class AgentDaemon extends EventEmitter {
     this.logEvent(taskId, "task_cancelled", {
       message: "Task was stopped by user",
     });
+
+    // Cascade cancellation to all child tasks (agent sub-tasks)
+    const children = this.taskRepo.findByParent(taskId);
+    for (const child of children) {
+      if (
+        child.status !== "completed" &&
+        child.status !== "failed" &&
+        child.status !== "cancelled"
+      ) {
+        await this.cancelTask(child.id);
+      }
+    }
   }
 
   /**

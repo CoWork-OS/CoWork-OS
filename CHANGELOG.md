@@ -36,6 +36,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `docs/relationship-agent-architecture.md`
   - `docs/relationship-agent-uat.md`
 
+- **Dispatched Agents Progress Panel**: when a task mentions agents (e.g. `@Security Analyst`), the parent task's main window now shows a Collab-mode-style progress panel with agent chips, phase indicator (Dispatched → Working → Complete), and a real-time event stream from all child agent tasks. Click any agent chip to navigate to its full task view.
+- **`userPrompt` field on Task**: child tasks dispatched to agents now store the original user prompt separately, so the UI displays the user's actual request instead of the internal agent-dispatch formatting.
+
 ### Changed
 - **Execution strategy orchestration** in daemon lifecycle:
   - strategy derivation at task creation
@@ -45,6 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Soft-deadline behavior** in executor now switches from deep step execution to best-effort finalization before hard timeout.
 
 ### Fixed
+- **Task cancellation now cascades to child tasks**: stopping a parent task also cancels all dispatched agent sub-tasks instead of leaving them running.
 - **Timeout-abort completion gap**: timeout-triggered cancellation paths now attempt best-effort finalization instead of exiting without a user-facing answer.
 - **Cancellation observability**: executor cancellation logs now include cancellation reason (`user`, `timeout`, `shutdown`, etc.) for clearer diagnosis.
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { Sidebar } from "./components/Sidebar";
 import { MainContent } from "./components/MainContent";
 import { RightPanel } from "./components/RightPanel";
@@ -88,6 +88,20 @@ export function App() {
     | "mcp"
   >("appearance");
   const [events, setEvents] = useState<TaskEvent[]>([]);
+  const [childEvents, setChildEvents] = useState<TaskEvent[]>([]);
+
+  // Child tasks dispatched from the selected parent task (for DispatchedAgentsPanel)
+  const childTasks = useMemo(() => {
+    if (!selectedTaskId) return [];
+    return tasks.filter(
+      (t) => t.parentTaskId === selectedTaskId && t.agentType === "sub",
+    );
+  }, [tasks, selectedTaskId]);
+
+  const childTaskIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    childTaskIdsRef.current = new Set(childTasks.map((t) => t.id));
+  }, [childTasks]);
 
   // Model selection state
   const [selectedModel, setSelectedModel] = useState<string>("opus-4-5");
@@ -874,6 +888,13 @@ export function App() {
           setEvents((prev) => capTaskEvents([...prev, event]));
         }
       }
+
+      // Capture events from dispatched child tasks for DispatchedAgentsPanel
+      if (!isSelectedTask && childTaskIdsRef.current.has(event.taskId)) {
+        if (event.type !== "llm_streaming" && event.type !== "llm_usage") {
+          setChildEvents((prev) => [...prev, event]);
+        }
+      }
     });
 
     return typeof unsubscribe === "function" ? unsubscribe : undefined;
@@ -904,6 +925,33 @@ export function App() {
 
     loadHistoricalEvents();
   }, [selectedTaskId]);
+
+  // Load historical events from dispatched child tasks
+  useEffect(() => {
+    if (childTasks.length === 0) {
+      setChildEvents([]);
+      return;
+    }
+    if (!window.electronAPI?.getTaskEvents) return;
+
+    const loadChildHistoricalEvents = async () => {
+      try {
+        const allEvents: TaskEvent[] = [];
+        for (const child of childTasks) {
+          const evts = await window.electronAPI.getTaskEvents(child.id);
+          allEvents.push(...evts);
+        }
+        allEvents.sort((a, b) => a.timestamp - b.timestamp);
+        setChildEvents(allEvents);
+      } catch (error) {
+        console.error("Failed to load child task events:", error);
+      }
+    };
+
+    loadChildHistoricalEvents();
+    // Re-load when child tasks change (new children appear)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [childTasks.map((c) => c.id).join(",")]);
 
   const loadTasks = async () => {
     if (!window.electronAPI?.listTasks) {
@@ -1493,6 +1541,9 @@ export function App() {
               selectedTaskId={selectedTaskId}
               workspace={currentWorkspace}
               events={events}
+              childTasks={childTasks}
+              childEvents={childEvents}
+              onSelectChildTask={setSelectedTaskId}
               onSendMessage={handleSendMessage}
               onCreateTask={handleCreateTask}
               onChangeWorkspace={handleChangeWorkspace}

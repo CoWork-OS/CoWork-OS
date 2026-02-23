@@ -240,6 +240,14 @@ Centralized agent orchestration and monitoring dashboard. Access from **Settings
 
 All panels update in real-time via event subscriptions — no manual refresh needed.
 
+**Dispatched Agents Progress:** When you mention agents in a task prompt (e.g. `@Security Analyst review this codebase`), the parent task's main window shows a live progress panel with:
+- Agent chips showing each dispatched agent's status (working/completed/failed)
+- Phase indicator (Dispatched → Working → Complete)
+- Real-time event stream from all child agent tasks (plans, steps, results)
+- Click any agent chip to jump to that agent's full task view
+
+Cancelling a parent task automatically cascades to all dispatched child tasks.
+
 See [Mission Control](mission-control.md) for the full guide.
 
 ---

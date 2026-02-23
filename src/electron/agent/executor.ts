@@ -3371,6 +3371,145 @@ You are continuing a previous conversation. The context from the previous conver
   }
 
   /**
+   * Spawn an independent verification sub-agent to audit task deliverables.
+   * Best-effort: never throws, logs errors and returns silently.
+   */
+  private async spawnVerificationAgent(): Promise<void> {
+    // Guard: feature must be enabled
+    if (!this.task.agentConfig?.verificationAgent) return;
+
+    // Guard: skip for cancelled/wrapped-up tasks
+    if (this.cancelled || this.wrapUpRequested) return;
+
+    // Guard: prevent recursive verification (sub-agents don't verify themselves)
+    if ((this.task.agentType ?? "main") === "sub") return;
+
+    // Guard: respect max nesting depth (3)
+    const currentDepth = this.task.depth ?? 0;
+    if (currentDepth >= 3) {
+      console.log(
+        `${this.logTag} Skipping verification agent: max nesting depth (3) reached at depth ${currentDepth}`,
+      );
+      return;
+    }
+
+    try {
+      // Build plan steps summary for the verifier
+      const planStepsSummary = this.plan
+        ? this.plan.steps
+            .map((s) => `- [${s.status}] ${s.description}${s.error ? ` (error: ${s.error})` : ""}`)
+            .join("\n")
+        : "(no plan steps)";
+
+      const resultSummary = this.buildResultSummary() || "(no result summary available)";
+
+      const verificationPrompt = [
+        "You are an independent verification agent. Your job is to audit the work done by another agent and determine whether the deliverables match the original requirements.",
+        "",
+        "## Original Task",
+        `**Title:** ${this.task.title}`,
+        `**Prompt:** ${this.task.prompt}`,
+        "",
+        "## Execution Summary",
+        "### Plan Steps",
+        planStepsSummary,
+        "",
+        "### Result Summary",
+        resultSummary,
+        "",
+        "## Your Instructions",
+        "1. Use read_file, search_files, and list_directory to inspect the deliverables.",
+        "2. Compare what was delivered against what the original task requested.",
+        "3. Check for completeness, correctness, and any missing pieces.",
+        "4. Start your response with exactly `VERDICT: PASS` or `VERDICT: FAIL`.",
+        "5. Then list your findings as bullet points.",
+        "6. Be concise. Focus on gaps and issues, not praise.",
+      ].join("\n");
+
+      this.emitEvent("verification_started", {
+        message: "Spawning independent verification agent to audit deliverables",
+      });
+
+      const childTask = await this.daemon.createChildTask({
+        title: `Verify: ${this.task.title}`.slice(0, 200),
+        prompt: verificationPrompt,
+        workspaceId: this.task.workspaceId,
+        parentTaskId: this.task.id,
+        agentType: "sub",
+        depth: currentDepth + 1,
+        agentConfig: {
+          autonomousMode: true,
+          allowUserInput: false,
+          retainMemory: false,
+          maxTurns: 10,
+          conversationMode: "task",
+          toolRestrictions: ["group:write", "group:destructive", "group:image"],
+        },
+      });
+
+      // Poll for completion (same pattern as waitForAgentInternal in tools/registry.ts)
+      const timeoutMs = 120_000;
+      const pollInterval = 1_000;
+      const startTime = Date.now();
+
+      while (Date.now() - startTime < timeoutMs) {
+        if (this.cancelled) {
+          console.log(`${this.logTag} Parent task cancelled during verification agent poll`);
+          return;
+        }
+
+        const task = await this.daemon.getTaskById(childTask.id);
+        if (!task) break;
+
+        if (["completed", "failed", "cancelled"].includes(task.status)) {
+          const verdict = task.resultSummary || "";
+          const passed = /VERDICT:\s*PASS/i.test(verdict);
+
+          if (passed) {
+            this.emitEvent("verification_passed", {
+              message: "Verification agent confirmed deliverables match requirements",
+              verdict: verdict.slice(0, 2000),
+            });
+          } else {
+            this.emitEvent("verification_failed", {
+              message: task.status === "completed"
+                ? "Verification agent found issues with deliverables"
+                : `Verification agent ${task.status}`,
+              verdict: verdict.slice(0, 2000),
+            });
+          }
+
+          // Append verification report to result summary
+          if (verdict) {
+            const tag = passed ? "PASSED" : "ISSUES FOUND";
+            const existing = this.lastNonVerificationOutput || this.lastAssistantOutput || "";
+            this.lastNonVerificationOutput =
+              `${existing}\n\n---\n**Verification Agent [${tag}]:**\n${verdict.slice(0, 2000)}`.trim();
+          }
+
+          return;
+        }
+
+        await sleep(pollInterval);
+      }
+
+      // Timeout
+      this.emitEvent("verification_failed", {
+        message: "Verification agent timed out",
+      });
+      console.log(`${this.logTag} Verification agent timed out after ${timeoutMs}ms`);
+    } catch (error: any) {
+      console.error(
+        `${this.logTag} Verification agent error (non-blocking):`,
+        error?.message || error,
+      );
+      this.emitEvent("log", {
+        message: `Verification agent could not be spawned: ${error?.message || "unknown error"}`,
+      });
+    }
+  }
+
+  /**
    * Reset state for retry attempt
    */
   private resetForRetry(): void {
@@ -5853,6 +5992,9 @@ You are continuing a previous conversation. The context from the previous conver
           `Task required command execution, but execution did not complete: ${blocker}.`,
         );
       }
+
+      // Phase 2.5: Optional verification agent
+      await this.spawnVerificationAgent();
 
       // Phase 3: Completion (single guarded finalizer path)
       this.finalizeTask(this.buildResultSummary());

@@ -8,11 +8,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Git Worktree Isolation**: Tasks can run in isolated git worktrees with automatic branch creation (`cowork/<task-slug>`), auto-commit, merge back to base branch, conflict detection, and worktree cleanup after completion.
+- **Collaborative Mode**: Auto-create ephemeral multi-agent teams for a task. Multiple agents work in parallel, sharing their analysis and reasoning in real-time via the Collaborative Thoughts Panel, with a leader agent synthesizing the final result.
+- **Multi-LLM Mode**: Send the same task to multiple LLM providers/models simultaneously. A judge agent synthesizes the best result from all participants. Configure participants and judge via the Multi-LLM Selection Panel.
+- **Agent Comparison Mode**: Run the same task across different agents or models side by side using the ComparisonService. View results in a dedicated comparison UI with diff viewer.
+- **Task Pinning**: Pin/unpin tasks in the sidebar for quick access. Pinned tasks always appear at the top regardless of sort order. Toggle via context menu or keyboard shortcut.
+- **Wrap-Up Task**: Gracefully wrap up running tasks instead of hard-cancelling. The agent finishes its current thought and produces a summary before stopping. Available for both individual tasks and team runs.
+- **Git Tools**: New agent tools for git operations — `git_commit`, `git_diff`, and `git_branch` — with worktree-aware execution for isolated task environments.
+- **Capability Matcher**: Auto-select the best agents for a task based on capability matching against agent role skills and the task requirements.
+- **Collaborative Thoughts Panel**: Real-time UI component showing agent thinking, analysis, and synthesis during collaborative and multi-LLM mode runs. Includes phase indicators and streaming thought bubbles.
+- **Scroll-to-bottom button**: Floating button in task view for quick navigation to the latest events.
+- **VPS uninstall documentation**: Added uninstall/removal instructions for VPS deployments covering both partial (keep data) and full (irreversible) paths for Docker and systemd setups.
+- **New skill packs**: Crypto Trading, Crypto Execution, Trading Foundation, and Email Marketing Bible skill definitions with scripts and tests.
 - **XLSX file support**: Excel spreadsheets (.xlsx/.xls) can now be read and extracted as tab-separated text in the file viewer, with formula result, rich text, and date support.
 - **Attachment chips in chat bubbles**: user message bubbles render compact file-attachment chips instead of raw file-path listings.
 - **Varied failure loop detection**: executor detects when a tool fails 5+ times with different inputs and nudges the agent to switch strategy.
 
 ### Changed
+- **Executor modular refactoring**: TaskExecutor split into dedicated utility modules — completion logic, canvas rendering, prompt heuristics, tool execution, loop management, LLM turn handling, assistant output processing, and workspace preflight checks. New ExecutorEventEmitter and LifecycleMutex for cleaner concurrency control.
+- **Task event bridge contract**: Inline event type allowlist extracted from control-plane handlers into a shared `task-event-bridge-contract` module, making it reusable and testable.
+- **Task event status map**: Inline status mapping extracted to a shared `task-event-status-map` module used by both renderer and control plane.
+- **Agent team orchestrator**: Extended with collaborative mode phases, thought capture, wrap-up support, multi-LLM synthesis, and run phase tracking.
+- **Database schema**: Added `is_pinned` column to tasks, `agent_team_thoughts` table, `phase`/`collaborative_mode`/`multi_llm_mode` columns to agent_team_runs, worktree and comparison_session tables.
 - **Document creation defaults**: Markdown (.md) is now the preferred output format; `create_document` (DOCX/PDF) only triggers on explicit user request.
 - **Hooks auto-token**: enabled hooks server auto-generates a missing authentication token instead of silently disabling.
 - **Reduced startup log noise**: zero-count messages for plugins, canvas sessions, and legacy settings are suppressed; MCP stderr demoted to debug.

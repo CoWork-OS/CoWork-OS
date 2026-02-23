@@ -22,11 +22,14 @@ CoWork OS is a **security-first personal AI assistant platform** with multi-chan
 - [x] Located: `src/electron/database/`
 
 #### Agent System
-- [x] AgentDaemon - Main orchestrator
-- [x] TaskExecutor - Plan-execute-observe loop
+- [x] AgentDaemon - Main orchestrator with worktree isolation and collaborative mode
+- [x] TaskExecutor - Plan-execute-observe loop (modular architecture with dedicated utility modules)
+- [x] ExecutorEventEmitter - Typed event system for executor lifecycle
+- [x] LifecycleMutex - Concurrency control for executor operations
 - [x] Tool Registry - Manages all available tools
 - [x] Permission system with approval flow
 - [x] Context Manager - Conversation context handling
+- [x] Capability Matcher - Auto-select agents based on task requirements
 - [x] Located: `src/electron/agent/`
 
 #### Multi-Provider LLM Support
@@ -104,6 +107,11 @@ CoWork OS is a **security-first personal AI assistant platform** with multi-chan
 - [x] grep - Regex content search across files
 - [x] edit_file - Surgical file editing with find-and-replace
 
+#### Git Tools (3 tools)
+- [x] git_commit - Commit changes in workspace or worktree
+- [x] git_diff - View staged/unstaged changes
+- [x] git_branch - List, create, or switch branches
+
 #### Web Fetch Tools (2 tools)
 - [x] web_fetch - Fetch and parse web pages
 - [x] http_request - Full HTTP client (curl-like)
@@ -145,14 +153,18 @@ CoWork OS is a **security-first personal AI assistant platform** with multi-chan
 
 #### Main Components
 - [x] Workspace selector with folder picker
-- [x] Task list with status indicators
-- [x] Task detail view with timeline
+- [x] Task list with status indicators and task pinning
+- [x] Task detail view with timeline and scroll-to-bottom button
 - [x] Approval dialog system
 - [x] Real-time event streaming
 - [x] Quick Task FAB (floating action button)
 - [x] Toast notifications for task completion
 - [x] In-app file viewer for artifacts
 - [x] Parallel task queue panel
+- [x] Collaborative Thoughts Panel - Real-time agent thinking display
+- [x] Comparison View - Side-by-side agent/model output comparison
+- [x] Multi-LLM Selection Panel - Configure multi-provider runs
+- [x] Worktree Settings - Git worktree configuration UI
 
 #### Settings UI
 - [x] LLM provider configuration
@@ -227,12 +239,17 @@ cowork-os/
 │   │   │   ├── queue-manager.ts    # Parallel task queue
 │   │   │   ├── context-manager.ts
 │   │   │   ├── custom-skill-loader.ts
+│   │   │   ├── executor-*-utils.ts # Modular executor utilities
+│   │   │   ├── executor-event-emitter.ts
+│   │   │   ├── executor-lifecycle-mutex.ts
 │   │   │   ├── llm/           # 5 providers
 │   │   │   ├── search/        # 4 providers
 │   │   │   ├── browser/       # Playwright service
-│   │   │   ├── tools/         # All tool implementations
+│   │   │   ├── tools/         # All tool implementations + git tools
 │   │   │   ├── skills/        # Document skills
 │   │   │   └── guardrails/    # Safety limits
+│   │   ├── git/               # Git worktree & comparison service
+│   │   ├── agents/            # Agent teams, thoughts, capability matcher
 │   │   ├── gateway/           # WhatsApp, Telegram, Discord & Slack
 │   │   ├── settings/          # Personality manager
 │   │   ├── mcp/               # Model Context Protocol
@@ -314,13 +331,14 @@ Operations Requiring Approval:
   - Workspace mount
   - Network egress controls
 
-### Sub-Agents
-- **Status**: Not started
-- **What's needed**:
-  - Agent pool management
-  - Task splitting logic
-  - Result merging
-  - Resource allocation
+### Sub-Agents / Multi-Agent Collaboration
+- **Status**: Implemented (Collaborative Mode, Multi-LLM Mode, Agent Comparison)
+- **What's built**:
+  - Collaborative Mode: ephemeral multi-agent teams with real-time thought sharing
+  - Multi-LLM Mode: same task dispatched to multiple providers with judge synthesis
+  - Agent Comparison Mode: side-by-side output comparison across agents/models
+  - Capability Matcher: auto-select agents based on task requirements
+  - Git Worktree Isolation: per-task isolated branches with auto-commit/merge/cleanup
 
 ## Ready to Use
 
@@ -343,11 +361,17 @@ Operations Requiring Approval:
 16. Use system tools (screenshots, clipboard, open apps)
 17. View artifacts with the in-app file viewer
 18. Customize agent personality via Settings or conversation prompts
+19. Run tasks in isolated git worktrees with auto-commit and merge
+20. Use collaborative mode for multi-agent team reasoning
+21. Use multi-LLM mode to compare outputs across providers
+22. Compare agent outputs side by side
+23. Pin tasks for quick access
+24. Gracefully wrap up running tasks
+25. Use git tools (commit, diff, branch) within tasks
 
 ### You Cannot (Yet):
 1. Execute arbitrary code in a VM sandbox
-2. Run tasks with coordinated sub-agents
-3. Apply network egress controls
+2. Apply network egress controls
 
 ## Dependencies
 
@@ -426,7 +450,12 @@ Expected behavior:
 ### Feature Highlights
 - Real Office document creation (Excel, Word, PDF, PowerPoint)
 - Web search and browser automation
-- Code tools (glob, grep, edit_file)
+- Code tools (glob, grep, edit_file) and git tools (commit, diff, branch)
+- Collaborative Mode with real-time thought sharing
+- Multi-LLM Mode with judge-based synthesis
+- Agent Comparison Mode for side-by-side output comparison
+- Git Worktree Isolation for per-task branch isolation
+- Task pinning and graceful wrap-up
 - Personality customization (6 styles, 9 personas)
 - Goal Mode with auto-retry
 - Parallel task queue (1-10 concurrent)

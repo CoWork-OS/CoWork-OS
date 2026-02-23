@@ -34,20 +34,25 @@ CoWork OS is a local-first runtime for secure, multi-channel AI agents. It combi
 | **Declarative Plugin System** | Plugins can register skills, agent roles, connectors, and slash commands via manifests |
 | **5 Built-in Plugin Packs** | content-marketing, customer-support, data-analysis, devops, sales-crm |
 | **Agent Teams + Child Control** | Coordinated multi-agent runs with child-task control and telemetry export |
+| **Collaborative Mode** | Ephemeral multi-agent teams with real-time thought sharing and leader synthesis |
+| **Multi-LLM Mode** | Send the same task to multiple providers/models with judge-based synthesis |
+| **Git Worktree Isolation** | Tasks run in isolated git worktrees with auto-commit, merge, and cleanup |
+| **Agent Comparison Mode** | Run the same task across agents/models side by side and compare outputs |
 | **Multimodal Runtime** | Vision/image support across providers, task image attachments, spreadsheet preview/extraction |
 | **Security-First Execution** | Approval workflows, IPC/input validation hardening, redaction, and gateway safety controls |
 | **Local-First + BYOK** | Your data and keys stay with you |
 
 ### Platform Capability Overview
 
-- **Agent runtime and orchestration**: task-based execution, dynamic re-planning, intent-aware behavior, agent teams, and child-task controls.
-- **LLM stack**: broad provider support (built-in + custom provider types), model flexibility, and multimodal execution.
+- **Agent runtime and orchestration**: task-based execution, dynamic re-planning, intent-aware behavior, agent teams, collaborative mode, multi-LLM mode, agent comparison, and child-task controls.
+- **LLM stack**: broad provider support (built-in + custom provider types), model flexibility, multi-LLM synthesis, and multimodal execution.
 - **Multichannel interaction**: unified operations across 14 chat/email channels with desktop + headless runtime support.
 - **Integrations and productivity**: enterprise connectors, cloud-storage integrations, and native document/spreadsheet/presentation workflows.
 - **Extensibility**: built-in skills, custom skills, declarative plugins/plugin packs, and MCP client/host/registry support.
 - **Memory and continuity**: persistent memory, relationship context, and commitment lifecycle management.
 - **Security and governance**: approval workflows, configurable guardrails, per-context restrictions, validation hardening, and sensitive-data redaction.
-- **Operator UX**: live task timelines, talk mode, i18n, file previews (including XLSX), and control-plane telemetry/export surfaces.
+- **Git isolation**: per-task git worktree isolation with auto-commit, merge, conflict detection, and cleanup.
+- **Operator UX**: live task timelines, talk mode, i18n, file previews (including XLSX), task pinning, collaborative thoughts panel, and control-plane telemetry/export surfaces.
 
 For release-by-release history, see `CHANGELOG.md`.
 
@@ -547,6 +552,13 @@ Configure in **Settings** > **Appearance**.
 - **Persistent Memory**: Cross-session context with privacy-aware observation capture
 - **Workspace Kit**: `.cowork/` project kit + markdown indexing with context injection
 - **Agent Teams**: Multi-agent collaboration with shared checklists, coordinated runs, and team management UI
+- **Collaborative Mode**: Auto-create ephemeral teams where multiple agents work on the same task, sharing thoughts in real-time via the Collaborative Thoughts Panel
+- **Multi-LLM Mode**: Send the same task to multiple LLM providers/models simultaneously, with a judge agent synthesizing the best result
+- **Agent Comparison Mode**: Compare agent or model outputs side by side using the ComparisonService and dedicated comparison UI
+- **Git Worktree Isolation**: Tasks can run in isolated git worktrees with automatic branch creation, auto-commit, merge back to base branch, conflict detection, and cleanup
+- **Task Pinning**: Pin important tasks in the sidebar for quick access regardless of sort order
+- **Wrap-Up Task**: Gracefully wrap up running tasks instead of hard-cancelling, allowing the agent to finish its current thought
+- **Capability Matcher**: Auto-select the best agents for a task based on capability matching
 - **Performance Reviews**: Score and review agent-role outcomes, with autonomy-level recommendations
 - **Voice Calls**: Outbound phone calls via ElevenLabs Agents (list agents, list numbers, initiate calls)
 - **Vision**: Analyze workspace images (screenshots, photos, diagrams) via `analyze_image` tool (OpenAI, Anthropic, or Gemini)
@@ -673,6 +685,10 @@ Coordinate multiple agents working together on complex tasks with shared state.
 | **Queue-Friendly** | Team runs respect global concurrency limits by default |
 | **UI Panel** | Full React UI for creating, managing, and monitoring agent teams |
 | **Data Persistence** | SQLite-backed repositories for teams, members, items, and runs |
+| **Collaborative Mode** | Auto-create ephemeral teams where agents share real-time thoughts during execution |
+| **Multi-LLM Mode** | Dispatch the same task to multiple LLM providers with judge-based synthesis |
+| **Collaborative Thoughts** | Real-time thought panel shows agent reasoning, analysis, and synthesis as it happens |
+| **Wrap-Up Support** | Gracefully wrap up team runs instead of hard-cancelling |
 
 Configure in **Mission Control** > **Teams**.
 
@@ -709,6 +725,9 @@ Claude Code-style tools for efficient code navigation and editing:
 | **glob** | Fast pattern-based file search (e.g., `**/*.ts`, `src/**/*.tsx`) |
 | **grep** | Regex content search across files with context lines |
 | **edit_file** | Surgical file editing with find-and-replace |
+| **git_commit** | Commit changes in the workspace (or worktree) with a message |
+| **git_diff** | View staged/unstaged changes in the workspace |
+| **git_branch** | List, create, or switch branches |
 
 ### Browser Automation
 
@@ -2219,6 +2238,8 @@ Configure these in **Settings** > **LLM Provider** by entering API keys/tokens, 
 | **Frontend** | Frontend Design, React Native Best Practices |
 | **Data** | Supabase SDK Patterns |
 | **Search** | Local Web Search (SearXNG), Bird |
+| **Finance** | Crypto Trading, Crypto Execution, Trading Foundation |
+| **Marketing** | Email Marketing Bible |
 | **Use Cases** | Booking Options, Draft Reply, Family Digest, Household Capture, Newsletter Digest, Transaction Scan |
 
 ---
@@ -2396,6 +2417,20 @@ Users must comply with their model provider's terms:
 - [x] Docker and VPS deployment support (Dockerfiles, docker-compose, systemd units)
 - [x] Dedicated workspaces for scheduled cron jobs (auto-created from temp workspace)
 - [x] Hook wake requests for heartbeat processing, including queueing, coalescing, and immediate scheduling
+- [x] Git Worktree Isolation (per-task isolated git worktrees with auto-commit, merge, conflict detection, cleanup)
+- [x] Collaborative Mode (ephemeral multi-agent teams with real-time thought sharing and leader synthesis)
+- [x] Multi-LLM Mode (dispatch same task to multiple LLM providers with judge-based synthesis)
+- [x] Agent Comparison Mode (run same task across agents/models and compare outputs side by side)
+- [x] Task Pinning (pin/unpin tasks in sidebar for quick access)
+- [x] Wrap-Up Task (graceful task completion instead of hard cancel)
+- [x] Git Tools (git_commit, git_diff, git_branch for worktree-aware operations)
+- [x] Capability Matcher (auto-select agents based on task requirements)
+- [x] Executor modular refactoring (event emitter, lifecycle mutex, modular utility files)
+- [x] Task event bridge contract (shared allowlist for control-plane event bridging)
+- [x] Collaborative Thoughts Panel (real-time UI for agent thinking during collaborative mode)
+- [x] Scroll-to-bottom button in task view
+- [x] VPS uninstall/removal documentation
+- [x] New skill packs: Crypto Trading, Crypto Execution, Trading Foundation, Email Marketing Bible
 
 ### Planned
 

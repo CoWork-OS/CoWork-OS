@@ -28,7 +28,7 @@ export class OpenRouterProvider implements LLMProvider {
 
     this.apiKey = apiKey;
     this.baseUrl = config.openrouterBaseUrl || "https://openrouter.ai/api/v1";
-    this.defaultModel = config.model || "meta-llama/llama-3.1-8b-instruct:free";
+    this.defaultModel = config.model || "openrouter/free";
   }
 
   async createMessage(request: LLMRequest): Promise<LLMResponse> {

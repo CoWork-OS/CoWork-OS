@@ -848,7 +848,7 @@ export function useOnboardingFlow({ onComplete }: UseOnboardingOptions) {
       case "ollama":
         return "llama3.2";
       case "openrouter":
-        return "meta-llama/llama-3.1-8b-instruct:free";
+        return "openrouter/free";
       case "bedrock":
         return "sonnet-4-6";
       case "groq":
@@ -907,7 +907,7 @@ export function useOnboardingFlow({ onComplete }: UseOnboardingOptions) {
       } else if (provider === "gemini") {
         settings.gemini = { apiKey, model: "gemini-2.0-flash" };
       } else if (provider === "openrouter") {
-        settings.openrouter = { apiKey, model: "meta-llama/llama-3.1-8b-instruct:free" };
+        settings.openrouter = { apiKey, model: "openrouter/free" };
       } else if (provider === "ollama") {
         const model = data.detectedOllamaModel || "llama3.2";
         settings.ollama = { baseUrl: data.ollamaUrl, model };
@@ -1039,8 +1039,8 @@ export function useOnboardingFlow({ onComplete }: UseOnboardingOptions) {
 
     const defaultSettings: Record<string, unknown> = {
       providerType: "openrouter",
-      modelKey: "meta-llama/llama-3.1-8b-instruct:free",
-      openrouter: { apiKey: "", model: "meta-llama/llama-3.1-8b-instruct:free" },
+      modelKey: "openrouter/free",
+      openrouter: { apiKey: "", model: "openrouter/free" },
     };
     try {
       await window.electronAPI.saveLLMSettings(defaultSettings);

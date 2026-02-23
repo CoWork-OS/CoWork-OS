@@ -1031,6 +1031,42 @@ export class CanvasManager {
     return true;
   }
 
+  /**
+   * Compare two checkpoints and return a file-level diff summary.
+   */
+  diffCheckpoints(
+    sessionId: string,
+    fromCheckpointId: string,
+    toCheckpointId: string,
+  ): { added: string[]; removed: string[]; modified: string[] } | null {
+    const sessionCheckpoints = this.checkpoints.get(sessionId);
+    if (!sessionCheckpoints) return null;
+
+    const fromCp = sessionCheckpoints.find((cp) => cp.id === fromCheckpointId);
+    const toCp = sessionCheckpoints.find((cp) => cp.id === toCheckpointId);
+    if (!fromCp || !toCp) return null;
+
+    const fromFiles = Object.keys(fromCp.files);
+    const toFiles = Object.keys(toCp.files);
+    const fromSet = new Set(fromFiles);
+    const toSet = new Set(toFiles);
+
+    const added = toFiles.filter((f) => !fromSet.has(f));
+    const removed = fromFiles.filter((f) => !toSet.has(f));
+    const modified = toFiles.filter((f) => fromSet.has(f) && fromCp.files[f] !== toCp.files[f]);
+
+    return { added, removed, modified };
+  }
+
+  /**
+   * Find a checkpoint by label (useful for named phase checkpoints).
+   */
+  findCheckpointByLabel(sessionId: string, label: string): CanvasCheckpoint | undefined {
+    const sessionCheckpoints = this.checkpoints.get(sessionId);
+    if (!sessionCheckpoints) return undefined;
+    return sessionCheckpoints.find((cp) => cp.label === label);
+  }
+
   // ===== Cross-device Canvas Access =====
 
   /**

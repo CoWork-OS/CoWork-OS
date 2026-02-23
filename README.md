@@ -43,6 +43,8 @@
 
 Download the latest `.dmg` from [GitHub Releases](https://github.com/CoWork-OS/CoWork-OS/releases/latest) and drag CoWork OS into Applications.
 
+> **First launch:** The app is currently unsigned. On first open, macOS will block it — go to **System Settings > Privacy & Security > Open Anyway**, or run: `xattr -dr com.apple.quarantine "/Applications/CoWork OS.app"`
+
 > Works out of the box — defaults to [OpenRouter's free model router](https://openrouter.ai), no API key needed.
 
 ### Or Install via npm

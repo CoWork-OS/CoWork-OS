@@ -24,6 +24,7 @@
 ## Agent Capabilities
 
 - **Task-Based Workflow**: Multi-step execution with plan-execute-observe loops
+- **Live Terminal**: Shell commands run in a real-time terminal view — see output as it happens, stop execution, or provide interactive input (e.g. `y`/`n` prompts)
 - **Dynamic Re-Planning**: Agent can revise its plan mid-execution
 - **100+ Built-in Skills**: GitHub, Slack, Notion, Spotify, Apple Notes, and more
 - **Document Creation**: Excel, Word, PDF, PowerPoint with professional formatting

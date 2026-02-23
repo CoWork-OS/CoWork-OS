@@ -69,7 +69,7 @@ See the [Development Guide](docs/development.md) for prerequisites and details.
 
 1. **Create a task** — Describe what you want ("organize my Downloads by file type", "create a quarterly report spreadsheet"). No workspace needed — a temp folder is used automatically if you don't select one.
 2. **Choose a mode** — Run normally, or toggle **Autonomous** (auto-approve actions), **Collaborative** (multi-agent perspectives), or **Multi-LLM** (compare providers with a judge) per task.
-3. **Monitor execution** — Watch the real-time task timeline as the agent plans, executes, and produces artifacts.
+3. **Monitor execution** — Watch the real-time task timeline as the agent plans, executes, and produces artifacts. Shell commands run in a live terminal view where you can see output in real-time, stop execution, or provide input (e.g. `y`/`n`) directly.
 4. **Approve when needed** — Destructive operations require your explicit approval (unless Autonomous mode is on).
 
 ## Features

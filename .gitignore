@@ -66,6 +66,7 @@ coverage/
 
 # Claude Code
 .claude/
+CLAUDE.md
 
 # CoWork local state
 .cowork/

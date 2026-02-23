@@ -471,3 +471,47 @@ In headless mode, approval prompts (shell commands, deletions, etc.) can be hand
 - Respond via `approval.respond` with `{ approvalId, approved }`
 
 This enables running a VPS instance without requiring a local UI or messaging channels for approvals.
+
+## Uninstall / Remove (VPS)
+
+Choose one option based on whether you want to keep data.
+
+### Option 1: Stop and uninstall app services only (keep DB/data)
+
+```bash
+# If running via docker-compose in this repo
+cd /path/to/cowork-vps
+docker compose down
+
+# If running via systemd
+sudo systemctl stop cowork-os cowork-os-node
+sudo systemctl disable cowork-os cowork-os-node
+sudo rm -f /etc/systemd/system/cowork-os.service
+sudo rm -f /etc/systemd/system/cowork-os-node.service
+sudo systemctl daemon-reload
+```
+
+Keep data directories/volumes intact to preserve state:
+
+- Docker: named volume `cowork_data` (and workspace volume `cowork_workspace` unless bound to host)
+- systemd example: `/var/lib/cowork-os`
+- Custom env path: value passed in `COWORK_USER_DATA_DIR` or `--user-data-dir`
+
+### Option 2: Full uninstall + data deletion (irreversible)
+
+> ⚠️ **WARNING:** This deletes the full persistent database and all local state. **This will delete everything forever; there is no undo and no recovery if you have no backup.**
+
+```bash
+# Docker (removes anonymous/named volumes used for DB, workspace state, and tasks)
+cd /path/to/cowork-vps
+docker compose down -v
+
+# systemd (remove user-data store)
+sudo rm -rf /var/lib/cowork-os
+```
+
+If you configured a custom user-data directory, also remove it:
+
+```bash
+rm -rf "$COWORK_USER_DATA_DIR"
+```

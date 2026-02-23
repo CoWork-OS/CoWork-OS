@@ -147,7 +147,7 @@ cowork-os
 
 - Node.js 24+ and npm
 - macOS 12 (Monterey) or later
-- One of: any supported LLM provider credentials (API key/token or AWS credentials) or Ollama installed locally
+- LLM provider credentials are optional — the app defaults to OpenRouter's free model router so you can start without any API keys
 - Xcode Command Line Tools (needed to build `better-sqlite3` for Electron): `xcode-select --install`
 
 ```bash
@@ -457,11 +457,13 @@ Configure per-context policies in **Settings > Channels > [Channel] > Context Po
 
 CoWork OS is **free and open source**. To run tasks, configure your own model credentials or use local models.
 
+> **Zero-config start**: CoWork OS ships with [OpenRouter](https://openrouter.ai) selected as the default provider using its free model router (`openrouter/free`), which automatically picks from available free models. This means you can start using the app immediately without setting up any API keys or paid accounts. To unlock the full range of models, create a free OpenRouter account at [openrouter.ai/keys](https://openrouter.ai/keys) (no credit card required) and paste the key in **Settings > LLM**. You can switch to any other provider at any time from the same settings page — OpenRouter is simply the default to get you started, not a requirement.
+
 | Provider | Configuration | Billing |
 |----------|---------------|---------|
 | Anthropic API | API key in Settings | Pay-per-token |
 | Google Gemini | API key in Settings | Pay-per-token (free tier available) |
-| OpenRouter | API key in Settings | Pay-per-token (multi-model access) |
+| OpenRouter | API key in Settings (default provider) | Free tier available, pay-per-token for premium models |
 | OpenAI (API Key) | API key in Settings | Pay-per-token |
 | OpenAI (ChatGPT OAuth) | Sign in with ChatGPT account | Uses your ChatGPT subscription |
 | AWS Bedrock | AWS credentials in Settings (auto-resolves inference profiles) | Pay-per-token via AWS |

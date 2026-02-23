@@ -46,18 +46,23 @@
 - **Context Summarization**: Automatic context compression surfaced in the task timeline
 - **Action-First Planning**: Agent prioritizes direct action over excessive pre-planning
 - **Voice Calls**: Outbound phone calls via ElevenLabs Agents
+- **Think With Me Mode**: Socratic brainstorming mode that helps clarify thinking without executing tools. Activated via toggle or auto-detected from brainstorm/trade-off patterns.
+- **Problem Framing Pre-flight**: Complex tasks show a structured problem restatement, assumptions, risks, and approach before execution begins
+- **Graceful Uncertainty**: Agent expresses uncertainty honestly and rates confidence on recommendations. Low-confidence messages display with an amber indicator.
+- **AI Playbook**: Auto-captures successful patterns (approach, outcome, tools) and lessons from failures. Relevant entries injected into system prompts. View in Settings > AI Playbook.
 
 ### Per-Task Execution Modes
 
-Each task can be launched with one of three mutually exclusive modes:
+Each task can be launched with one of four modes:
 
 | Mode | Toggle | Behavior |
 |------|--------|----------|
 | **Autonomous** | Autonomous ON/OFF | Auto-approves all gated actions (shell commands, file deletions, etc.) so the agent runs without pauses. Disables user input prompts. |
 | **Collaborative** | Collab ON/OFF | Auto-creates an ephemeral team of agents that analyze the task from multiple perspectives, then a leader synthesizes the results. Phases: dispatch → think → synthesize → complete. |
 | **Multi-LLM** | Multi-LLM ON/OFF | Sends the same task to multiple LLM providers/models in parallel. A designated judge model synthesizes the best result. Requires 2+ providers configured. |
+| **Think With Me** | Think toggle | Socratic brainstorming mode — agent asks follow-up questions and explores trade-offs without executing tools. Read-only tools only. |
 
-These modes are mutually exclusive — only one can be active per task. All three are toggled in the task creation UI.
+These modes are mutually exclusive — only one can be active per task. All four are toggled in the task creation UI.
 
 > **Note:** Autonomous mode shows a confirmation dialog before enabling, since it bypasses all approval prompts.
 
@@ -132,6 +137,7 @@ Define per-role personality and operating guidelines in `.cowork/agents/<role-id
 | Feature | Description |
 |---------|-------------|
 | **Team Management** | Create and manage teams with multiple agent members |
+| **Persistent Teams** | Mark teams as persistent so they survive across sessions with a default workspace |
 | **Shared Checklists** | Agents share checklist items for coordinated task execution |
 | **Run Tracking** | Track team runs with status, progress, and history |
 | **Collaborative Mode** | Ephemeral teams with real-time thought sharing |
@@ -157,6 +163,65 @@ Centralized agent orchestration and monitoring dashboard. Access from **Settings
 All panels update in real-time via event subscriptions — no manual refresh needed.
 
 See [Mission Control](mission-control.md) for the full guide.
+
+---
+
+## Build Mode
+
+Dedicated "idea → working prototype" workflow powered by Live Canvas with four phases:
+
+| Phase | Description |
+|-------|-------------|
+| **Concept** | Restate the idea, identify core requirements, choose tech stack |
+| **Plan** | Break down into components, define file structure, outline implementation |
+| **Scaffold** | Generate working code, push to canvas, create checkpoint |
+| **Iterate** | Refine based on feedback, add features, polish UI |
+
+Each phase creates a named checkpoint. You can revert to any phase, diff between phases, and view the full phase timeline. Build Mode is available as a built-in skill (`build-mode`).
+
+See [Live Canvas](live-canvas.md) for the full guide.
+
+---
+
+## Usage Insights
+
+Dashboard showing task activity, cost trends, and productivity patterns.
+
+| Metric | Description |
+|--------|-------------|
+| **Task Metrics** | Created, completed, failed, cancelled counts with average completion time |
+| **Cost & Tokens** | Total cost, input/output tokens, cost breakdown by model |
+| **Activity by Day** | Tasks per day-of-week with peak day indicator |
+| **Activity by Hour** | Hourly task histogram with peak hour indicator |
+| **Top Skills** | Most-used skills ranked by usage count |
+
+Supports 7, 14, and 30-day period selection. Access from **Settings** > **Usage Insights**.
+
+---
+
+## Daily Briefing
+
+Proactive morning briefing combining:
+
+- **Task summary**: Completed in last 24 hours, currently in progress, scheduled for today
+- **Recent highlights**: Key insights and decisions from memory
+- **Suggested priorities**: Based on user profile goals, or sensible defaults
+
+Configurable as a scheduled task in **Settings** > **Scheduled Tasks** with time picker and channel delivery.
+
+---
+
+## Adaptive Complexity
+
+Three-tier UI density controlling which features and settings are visible:
+
+| Tier | Description |
+|------|-------------|
+| **Focused** | Simplified view — hides Connected Tools, Remote Access, Extensions, Remote Terminal. Shows only core settings. |
+| **Standard** | Default view — all settings visible (default) |
+| **Power** | Full power-user view with all settings and advanced options |
+
+Configure in **Settings** > **Appearance**.
 
 ---
 
@@ -196,6 +261,8 @@ Agent-driven visual workspace for interactive content creation and data visualiz
 - **Interactive Preview**: Full browser interaction within the canvas
 - **Snapshot Mode**: Auto-refresh preview every 2 seconds
 - **Canvas Tools**: `canvas_open_session`, `canvas_set_state`, `canvas_eval`, `canvas_close_session`
+- **Named Checkpoints**: Save, restore, diff, and label canvas states for easy navigation
+- **Build Mode**: Phased idea-to-prototype workflow (Concept → Plan → Scaffold → Iterate) with per-phase checkpoints
 - **Visual Annotation**: `visual_open_annotator` and `visual_update_annotator` for iterative image refinement
 - **Export**: HTML, open in browser, or reveal in Finder
 - **Snapshot History**: Browse previous canvas states
@@ -352,6 +419,22 @@ Run multiple tasks concurrently with configurable limits (1-10, default: 3). Tas
 | **Finance** | Crypto Trading, Crypto Execution, Trading Foundation |
 | **Marketing** | Email Marketing Bible |
 | **Use Cases** | Booking Options, Draft Reply, Family Digest, Household Capture, Newsletter Digest, Transaction Scan |
+
+---
+
+## Web Browser Mode (Planned)
+
+Access CoWork OS from any web browser — no Electron desktop app required.
+
+| Aspect | Details |
+|--------|---------|
+| **How** | `cowork-os --serve --port 3000` starts a Node.js server exposing the full React UI over HTTP/WebSocket |
+| **Approach** | Reuses all existing main-process logic (agent, tools, database, gateways). IPC calls are mapped to HTTP/WebSocket endpoints |
+| **Desktop features** | System tray, desktop screenshots, and AppleScript degrade gracefully. File dialogs use browser-native pickers |
+| **Security** | Challenge-response authentication (extends existing control plane auth). HTTPS recommended for production |
+| **Existing foundation** | Control plane already serves a web dashboard at `http://127.0.0.1:18789/`. Web mode extends this to the full React UI |
+
+See [Architecture: Web Browser Mode](architecture.md#web-browser-mode-planned--serve) for the implementation plan.
 
 ---
 

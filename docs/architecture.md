@@ -517,6 +517,124 @@ See also:
 - `docs/vps-linux.md`: VPS/Linux deployment with Docker and systemd
 - `docs/use-cases.md`: use-case skill template documentation
 
+## Web Browser Mode (Planned — `--serve`)
+
+> **Status**: Roadmap. Not yet implemented.
+
+CoWork OS can be extended with a **Web Browser Mode** that exposes the full app UI in any web browser, without requiring the Electron desktop shell. The approach reuses all existing main-process logic and adds a thin HTTP/WebSocket API layer on top.
+
+### Why This Approach
+
+CoWork OS already separates concerns cleanly:
+
+- **Renderer** (React) communicates with the main process exclusively through IPC channels defined in `src/shared/types.ts`.
+- **Main process** (Node.js) handles all business logic, database, agent execution, gateways, etc.
+
+This means the renderer never calls Node.js APIs directly — it always goes through the preload bridge. Replacing that bridge with HTTP/WebSocket calls is the lowest-cost path to browser support.
+
+### High-Level Architecture
+
+```
+┌──────────────────────────────────┐
+│   Browser (React UI)             │
+│   Same components, new transport │
+└────────┬─────────────────────────┘
+         │  HTTP REST + WebSocket
+         │  (replaces Electron IPC)
+┌────────▼─────────────────────────┐
+│   Node.js Server (Express/       │
+│   Fastify + ws)                  │
+│                                  │
+│   Reuses existing:               │
+│   - AgentDaemon                  │
+│   - Database (SQLite)            │
+│   - Gateway channels             │
+│   - Tool registry                │
+│   - Memory system                │
+│   - MCP client/host              │
+│   - Cron scheduler               │
+└──────────────────────────────────┘
+```
+
+### Implementation Phases
+
+#### Phase 1: API Server Layer
+
+1. Create a new entry point (e.g. `src/server/main.ts`) that boots the existing main-process services **without** Electron.
+   - The Node-only daemon (`src/daemon/main.ts`) already does most of this — extend it.
+2. For each IPC channel in `IPC_CHANNELS` (~100 channels), create an equivalent HTTP endpoint or WebSocket message handler.
+   - `ipcMain.handle(channel, handler)` → `router.post('/api/<channel>', handler)`
+   - Event subscriptions (`ipcMain.on`) → WebSocket push messages
+3. Serve the Vite-built React bundle as static files from the same server.
+
+#### Phase 2: Renderer Transport Abstraction
+
+1. Create a transport abstraction that the renderer uses instead of `window.electronAPI`:
+   ```
+   // Pseudo-code
+   interface Transport {
+     invoke(channel: string, ...args: any[]): Promise<any>;
+     on(channel: string, callback: Function): void;
+   }
+
+   // Electron mode: uses contextBridge/ipcRenderer (existing)
+   // Web mode: uses fetch + WebSocket
+   ```
+2. Replace all `window.electronAPI.*` calls in renderer components with the transport abstraction.
+3. Auto-detect environment: if `window.electronAPI` exists → Electron mode, otherwise → Web mode.
+
+#### Phase 3: Handle Desktop-Only Features
+
+Features that have no browser equivalent need graceful degradation:
+
+| Feature | Browser Behavior |
+|---------|-----------------|
+| System tray / quick input | Not available — use the main web UI |
+| Desktop screenshots (`desktopCapturer`) | Omit tool or use server-side screenshot |
+| AppleScript (Calendar/Reminders) | Only works when server runs on macOS |
+| `shell.openExternal` / `shell.showItemInFolder` | Open URL in new tab / download file |
+| File dialogs (`dialog.showOpenDialog`) | Use `<input type="file">` |
+| `safeStorage` encryption | Use server-side encryption (already handled by Node daemon) |
+| Clipboard read/write | Use Clipboard API (requires HTTPS + user gesture) |
+| Native notifications | Use Web Notification API (permission-based) |
+| Live Canvas (separate BrowserWindow) | Render in iframe or panel |
+| Auto-updater | Not applicable for web mode |
+
+#### Phase 4: CLI Integration
+
+Add a `--serve` flag to the existing CLI:
+
+```bash
+# Start in web mode (no Electron window)
+cowork-os --serve --port 3000
+
+# Start with both Electron window and web server
+cowork-os --serve --port 3000 --with-gui
+```
+
+### What Works Unchanged
+
+- All agent execution logic (daemon, executor, tools, guardrails)
+- Database layer (SQLite, repositories)
+- LLM provider integrations
+- Gateway channels (Slack, Discord, Telegram, etc.)
+- MCP client/host
+- Memory system
+- Cron scheduler
+- Control plane (already WebSocket-based)
+- Security model (guardrails, approvals, policies)
+
+### What the Existing Control Plane Already Provides
+
+The control plane (`src/electron/control-plane/`) already serves a built-in web dashboard at `http://127.0.0.1:18789/` with task management, approvals, and LLM configuration. Web Browser Mode would extend this into a **full-featured React UI** rather than the current minimal dashboard.
+
+### Security Considerations
+
+- Web mode must enforce authentication (the control plane already uses challenge-response tokens).
+- HTTPS should be required for production deployments (or use Tailscale Funnel).
+- CORS policies needed when UI and API are on different origins.
+- Session management for multi-user scenarios.
+
 ## Keeping This File Updated (Process)
 
 Update `docs/architecture.md` when you change:

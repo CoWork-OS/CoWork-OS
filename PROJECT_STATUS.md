@@ -125,6 +125,69 @@ CoWork OS is a **security-first personal AI assistant platform** with multi-chan
 - [x] Parameter input modal for skill variables
 - [x] Located: `~/Library/Application Support/cowork-os/skills/`
 
+#### Think With Me Mode
+- [x] Socratic brainstorming mode (`think` conversation mode)
+- [x] Auto-detection from brainstorm/trade-off/pros-and-cons patterns
+- [x] Read-only tool restriction in think mode
+- [x] "Think with me" toggle in task creation UI
+
+#### Problem Framing & Uncertainty
+- [x] Task complexity scoring (`low | medium | high`) on intent routes
+- [x] Pre-flight problem restatement for complex execution tasks
+- [x] Graceful uncertainty system prompt instructions
+- [x] Low-confidence amber indicator in assistant messages
+
+#### AI Playbook
+- [x] Auto-capture successful patterns (approach, outcome, tools used)
+- [x] Lesson capture from task failures
+- [x] Relevant playbook injection into system prompts
+- [x] Playbook viewer in Settings > AI Playbook
+- [x] Located: `src/electron/memory/PlaybookService.ts`
+
+#### Daily Briefing
+- [x] Morning briefing with task stats, memory highlights, goal-based priorities
+- [x] Auto-created disabled cron job on first workspace load
+- [x] Configurable time picker and channel delivery
+- [x] Located: `src/electron/reports/DailyBriefingService.ts`
+
+#### Build Mode
+- [x] Four-phase canvas workflow (Concept → Plan → Scaffold → Iterate)
+- [x] Named phase checkpoints with revert and diff support
+- [x] Build Mode orchestrator with session management
+- [x] Build Mode skill definition (`resources/skills/build-mode.json`)
+- [x] Located: `src/electron/canvas/build-mode-orchestrator.ts`
+
+#### Usage Insights
+- [x] Task metrics (created, completed, failed, avg completion time)
+- [x] Cost/token tracking by model
+- [x] Activity heatmap by day-of-week and hour
+- [x] Top skills usage ranking
+- [x] 7/14/30-day period selector
+- [x] Located: `src/electron/reports/UsageInsightsService.ts`, `src/renderer/components/UsageInsightsPanel.tsx`
+
+#### Persistent Agent Teams
+- [x] Teams survive across sessions with `persistent` flag
+- [x] Default workspace assignment per team
+- [x] `listPersistent()` repository method
+- [x] DB migration for persistent and default_workspace_id columns
+- [x] UI toggle and badge in Agent Teams panel
+
+#### Adaptive Complexity
+- [x] Three-tier UI density (focused, standard, power)
+- [x] Focused mode hides advanced settings
+- [x] Power mode shows all settings and features
+- [x] Configurable in Settings > Appearance
+
+#### Starter Missions & Skills
+- [x] 10 one-click starter mission templates with categories
+- [x] Displayed in onboarding and empty-state welcome screen
+- [x] Competitive research skill (`resources/skills/competitive-research.json`)
+- [x] Idea validation skill (`resources/skills/idea-validation.json`)
+
+#### Plain-Language Settings
+- [x] Renamed jargon labels in Settings sidebar
+- [x] Technical names preserved in tooltips
+
 #### Personality System
 - [x] 6 personality styles (professional, friendly, concise, creative, technical, casual)
 - [x] 9 persona overlays (jarvis, friday, hal, computer, alfred, intern, sensei, pirate, noir)
@@ -234,6 +297,10 @@ cowork-os/
 │   │   │   ├── skills/        # Document skills
 │   │   │   └── guardrails/    # Safety limits
 │   │   ├── gateway/           # WhatsApp, Telegram, Discord & Slack
+│   │   ├── canvas/            # Canvas manager, Build Mode orchestrator
+│   │   ├── reports/           # Usage insights, daily briefing
+│   │   ├── memory/            # Memory, playbook, user profile
+│   │   ├── agents/            # Agent teams, orchestrator
 │   │   ├── settings/          # Personality manager
 │   │   ├── mcp/               # Model Context Protocol
 │   │   │   ├── client/        # Connect to servers
@@ -343,6 +410,13 @@ Operations Requiring Approval:
 16. Use system tools (screenshots, clipboard, open apps)
 17. View artifacts with the in-app file viewer
 18. Customize agent personality via Settings or conversation prompts
+19. Use "Think With Me" mode for brainstorming and decision-making
+20. Build prototypes with Build Mode (idea → working prototype)
+21. View usage insights with cost/token tracking and activity patterns
+22. Auto-capture successful patterns with AI Playbook
+23. Receive proactive daily briefings with task stats and priorities
+24. Create persistent agent teams that survive across sessions
+25. Adjust UI complexity (focused, standard, power) to match your experience level
 
 ### You Cannot (Yet):
 1. Execute arbitrary code in a VM sandbox
@@ -431,11 +505,17 @@ Expected behavior:
 - Goal Mode with auto-retry
 - Parallel task queue (1-10 concurrent)
 - Remote access (Tailscale, SSH, WebSocket API)
+- Think With Me mode for Socratic brainstorming
+- Build Mode for idea-to-prototype canvas workflows
+- Usage Insights dashboard with cost/activity analytics
+- AI Playbook with auto-captured success patterns
+- Persistent agent teams and adaptive UI complexity
 
 ### Planned
 - VM sandbox using macOS Virtualization.framework
 - Network egress controls with proxy
 - Cross-platform support (Windows, Linux)
+- Web Browser Mode (`--serve`) — full app accessible from any browser via HTTP/WebSocket
 
 The architecture is extensible. All future features can be added without refactoring core systems.
 

@@ -465,6 +465,7 @@ Expected behavior:
 - VM sandbox using macOS Virtualization.framework
 - Network egress controls with proxy
 - Cross-platform support (Windows, Linux)
+- Web Browser Mode (`--serve`) — full app accessible from any browser via HTTP/WebSocket
 
 The architecture is extensible. All future features can be added without refactoring core systems.
 

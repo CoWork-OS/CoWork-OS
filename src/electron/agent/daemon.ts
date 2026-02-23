@@ -35,8 +35,12 @@ import {
   Activity,
   AgentMention,
   AgentRole,
+  TeamThoughtEvent,
   isTempWorkspaceId,
   ImageAttachment,
+  MULTI_LLM_PROVIDER_DISPLAY,
+  AgentTeamRun,
+  AgentTeamItem,
 } from "../../shared/types";
 import { TaskExecutor } from "./executor";
 import { TaskQueueManager } from "./queue-manager";
@@ -48,6 +52,10 @@ import { PersonalityManager } from "../settings/personality-manager";
 import { IntentRoute, IntentRouter } from "./strategy/IntentRouter";
 import { DerivedTaskStrategy, TaskStrategyService } from "./strategy/TaskStrategyService";
 import type { AgentTeamOrchestrator } from "../agents/AgentTeamOrchestrator";
+import { AgentTeamItemRepository } from "../agents/AgentTeamItemRepository";
+import { AgentTeamRunRepository } from "../agents/AgentTeamRunRepository";
+import { WorktreeManager } from "../git/WorktreeManager";
+import type { ComparisonService } from "../git/ComparisonService";
 
 // Memory management constants
 const MAX_CACHED_EXECUTORS = 10; // Maximum number of completed task executors to keep in memory
@@ -121,6 +129,10 @@ export class AgentDaemon extends EventEmitter {
   private sessionAutoApproveAll = false;
   /** Transient storage for images attached to task creation (not persisted to DB). */
   private pendingTaskImages: Map<string, ImageAttachment[]> = new Map();
+  /** Git worktree manager for task isolation. */
+  private worktreeManager: WorktreeManager;
+  /** Comparison service for agent comparison mode. */
+  private comparisonService: ComparisonService | null = null;
 
   constructor(private dbManager: DatabaseManager) {
     super();
@@ -144,8 +156,26 @@ export class AgentDaemon extends EventEmitter {
       onTaskTimeout: (taskId: string) => this.handleTaskTimeout(taskId),
     });
 
+    // Initialize worktree manager
+    this.worktreeManager = new WorktreeManager(db);
+
     // Start periodic cleanup of old executors
     this.cleanupIntervalHandle = setInterval(() => this.cleanupOldExecutors(), 5 * 60 * 1000); // Run every 5 minutes
+  }
+
+  /** Get the worktree manager instance. */
+  getWorktreeManager(): WorktreeManager {
+    return this.worktreeManager;
+  }
+
+  /** Set the comparison service (initialized after daemon construction). */
+  setComparisonService(service: ComparisonService): void {
+    this.comparisonService = service;
+  }
+
+  /** Get the comparison service instance. */
+  getComparisonService(): ComparisonService | null {
+    return this.comparisonService;
   }
 
   getDatabase(): Database.Database {
@@ -468,11 +498,61 @@ export class AgentDaemon extends EventEmitter {
     }
     console.log(`[AgentDaemon] Workspace found: ${workspace.name}`);
 
+    // === WORKTREE ISOLATION ===
+    // If worktree isolation is enabled, create an isolated worktree for this task.
+    // The executor gets a "virtual workspace" with the path swapped to the worktree directory.
+    let effectiveWorkspace = workspace;
+    if (await this.worktreeManager.shouldUseWorktree(workspace.path, workspace.isTemp)) {
+      try {
+        const worktreeInfo = await this.worktreeManager.createForTask(
+          executionTask.id,
+          executionTask.title,
+          workspace.id,
+          workspace.path,
+        );
+
+        // Create a virtual workspace pointing to the worktree
+        effectiveWorkspace = {
+          ...workspace,
+          path: worktreeInfo.worktreePath,
+        };
+
+        // Update task record with worktree metadata
+        this.taskRepo.update(executionTask.id, {
+          worktreePath: worktreeInfo.worktreePath,
+          worktreeBranch: worktreeInfo.branchName,
+          worktreeStatus: "active",
+        });
+        executionTask.worktreePath = worktreeInfo.worktreePath;
+        executionTask.worktreeBranch = worktreeInfo.branchName;
+        executionTask.worktreeStatus = "active";
+
+        this.logEvent(executionTask.id, "worktree_created", {
+          branch: worktreeInfo.branchName,
+          path: worktreeInfo.worktreePath,
+          baseBranch: worktreeInfo.baseBranch,
+          message: `Working on branch "${worktreeInfo.branchName}" in isolated worktree.`,
+        });
+        console.log(
+          `[AgentDaemon] Worktree created: branch=${worktreeInfo.branchName}, path=${worktreeInfo.worktreePath}`,
+        );
+      } catch (error: any) {
+        // Non-fatal: fall back to shared workspace
+        console.error(
+          `[AgentDaemon] Worktree creation failed for task ${executionTask.id}:`,
+          error,
+        );
+        this.logEvent(executionTask.id, "log", {
+          message: `Worktree creation failed: ${error.message}. Using shared workspace.`,
+        });
+      }
+    }
+
     // Create task executor - wrapped in try-catch to handle provider initialization errors
     let executor: TaskExecutor;
     try {
       console.log(`[AgentDaemon] Creating TaskExecutor...`);
-      executor = new TaskExecutor(executionTask, workspace, this);
+      executor = new TaskExecutor(executionTask, effectiveWorkspace, this);
       // Attach any images that were provided at task creation time
       const initialImages = this.pendingTaskImages.get(executionTask.id);
       if (initialImages && initialImages.length > 0) {
@@ -883,6 +963,41 @@ export class AgentDaemon extends EventEmitter {
   }
 
   /**
+   * Wrap up a task gracefully - signal the executor to finish with its current progress.
+   * Unlike cancelTask, this produces a "completed" task, not a "cancelled" one.
+   */
+  async wrapUpTask(taskId: string): Promise<void> {
+    const existing = this.taskRepo.findById(taskId);
+    if (!existing) {
+      throw new Error(`Task ${taskId} not found`);
+    }
+
+    // Don't wrap up terminal tasks
+    if (
+      existing.status === "completed" ||
+      existing.status === "failed" ||
+      existing.status === "cancelled"
+    ) {
+      return;
+    }
+
+    const cached = this.activeTasks.get(taskId);
+    if (cached) {
+      await cached.executor.wrapUp();
+    } else if (this.queueManager.cancelQueuedTask(taskId)) {
+      // Task was queued but hadn't started — no work to preserve, just cancel it
+      this.taskRepo.update(taskId, { status: "cancelled", completedAt: Date.now() });
+      this.queueManager.onTaskFinished(taskId);
+      this.logEvent(taskId, "task_cancelled", {
+        message: "Task removed from queue during wrap-up request",
+      });
+      if (this.teamOrchestrator) {
+        void this.teamOrchestrator.onTaskTerminal(taskId).catch(() => {});
+      }
+    }
+  }
+
+  /**
    * Handle transient provider errors by scheduling a retry instead of failing.
    * Returns true if a retry was scheduled, false if retries are exhausted.
    */
@@ -1186,10 +1301,162 @@ export class AgentDaemon extends EventEmitter {
     this.logActivityForEvent(taskId, type, payload);
     this.emitTaskEvent(taskId, type, payload);
 
+    // Capture agent thoughts for collaborative team runs
+    const teamThoughtEventTypes = new Set([
+      "assistant_message",
+      "tool_call",
+      "step_completed",
+      "file_created",
+      "file_modified",
+    ]);
+    if (teamThoughtEventTypes.has(type)) {
+      this.maybeEmitTeamThought(taskId, type, payload);
+    }
+
     // Capture to memory system (async, don't block)
     this.captureToMemory(taskId, type, payload).catch((error) => {
       // Silently log - memory capture is optional enhancement
       console.debug("[AgentDaemon] Memory capture failed:", error);
+    });
+  }
+
+  /**
+   * Check if a task event from a sub-agent task should be captured as a
+   * collaborative thought for its team run.
+   */
+  private maybeEmitTeamThought(taskId: string, eventType: string, payload: any): void {
+    if (!this.teamOrchestrator) return;
+
+    const task = this.taskRepo.findById(taskId);
+    if (!task || !task.parentTaskId) return;
+
+    const thoughtRepo = this.teamOrchestrator.getThoughtRepo();
+    if (!thoughtRepo) return;
+
+    const db = this.dbManager.getDatabase();
+    const itemRepo = new AgentTeamItemRepository(db);
+    const runRepo = new AgentTeamRunRepository(db);
+
+    // Primary path: look up the team item linked to this child task
+    let items = itemRepo.listBySourceTaskId(taskId);
+    let run: AgentTeamRun | undefined;
+    let teamItem: AgentTeamItem | undefined;
+
+    if (items.length > 0) {
+      teamItem = items[0];
+      run = runRepo.findById(teamItem.teamRunId);
+    }
+
+    // Fallback: if no item found yet (race with sourceTaskId assignment),
+    // try to find the run via the parent task (root task of the team run)
+    if (!run && task.parentTaskId) {
+      run = runRepo.findByRootTaskId(task.parentTaskId) || undefined;
+      if (run) {
+        // Find any item in this run to attach the thought to
+        const runItems = itemRepo.listByRun(run.id);
+        teamItem = runItems.find((i) => i.sourceTaskId === taskId) || runItems[0];
+      }
+    }
+
+    if (!run || !run.collaborativeMode) return;
+
+    // Capture thoughts during think, dispatch, and synthesize phases
+    const phase = run.phase || "dispatch";
+    if (phase !== "think" && phase !== "dispatch" && phase !== "synthesize") return;
+
+    // Extract content based on event type
+    let content = "";
+    switch (eventType) {
+      case "assistant_message":
+        content = typeof payload?.message === "string" ? payload.message : String(payload?.content || "");
+        break;
+      case "tool_call":
+        content = payload?.tool
+          ? `🔧 Using tool: ${payload.tool}`
+          : "";
+        break;
+      case "step_completed":
+        content = payload?.step?.description
+          ? `✅ Step completed: ${payload.step.description}`
+          : "";
+        break;
+      case "file_created":
+        content = payload?.path ? `📄 Created: ${payload.path}` : "";
+        break;
+      case "file_modified":
+        content = payload?.path ? `✏️ Modified: ${payload.path}` : "";
+        break;
+      default:
+        content = typeof payload?.message === "string" ? payload.message : "";
+    }
+    if (!content.trim()) return;
+
+    // Determine agent identity based on mode
+    let agentRoleId: string;
+    let agentDisplayName: string;
+    let agentIcon: string;
+    let agentColor: string;
+
+    if (run.multiLlmMode) {
+      // Multi-LLM mode: derive identity from task's provider config
+      const providerType = task.agentConfig?.providerType || "unknown";
+      const modelKey = task.agentConfig?.modelKey || "default";
+      const providerInfo = MULTI_LLM_PROVIDER_DISPLAY[providerType];
+      agentRoleId = `multi-llm-${providerType}-${modelKey}`;
+      agentDisplayName = providerInfo
+        ? `${providerInfo.name} (${modelKey})`
+        : `${providerType} (${modelKey})`;
+      agentIcon = providerInfo?.icon || "\u{1F916}";
+      agentColor = providerInfo?.color || "#6366f1";
+    } else {
+      // Standard collaborative mode: use agent role
+      if (!task.assignedAgentRoleId) return;
+      const role = this.agentRoleRepo.findById(task.assignedAgentRoleId);
+      if (!role) return;
+      agentRoleId = role.id;
+      agentDisplayName = role.displayName;
+      agentIcon = role.icon;
+      agentColor = role.color;
+    }
+
+    try {
+      const thought = thoughtRepo.create({
+        teamRunId: run.id,
+        teamItemId: teamItem?.id,
+        agentRoleId,
+        agentDisplayName,
+        agentIcon,
+        agentColor,
+        phase: phase === "think" ? "analysis" : phase === "synthesize" ? "synthesis" : "dispatch",
+        content: content.trim(),
+        sourceTaskId: taskId,
+      });
+
+      // Emit to UI
+      this.emitTeamThoughtEvent({
+        type: "team_thought_added",
+        timestamp: Date.now(),
+        runId: run.id,
+        thought,
+      });
+    } catch (error: any) {
+      console.error("[AgentDaemon] Team thought capture failed:", error?.message);
+    }
+  }
+
+  /**
+   * Broadcast a team thought event to all renderer windows.
+   */
+  private emitTeamThoughtEvent(event: TeamThoughtEvent): void {
+    const windows = getAllElectronWindows();
+    windows.forEach((window) => {
+      try {
+        if (!window.isDestroyed() && window.webContents && !window.webContents.isDestroyed()) {
+          window.webContents.send(IPC_CHANNELS.TEAM_THOUGHT_EVENT, event);
+        }
+      } catch {
+        // ignore
+      }
     });
   }
 
@@ -2233,6 +2500,10 @@ export class AgentDaemon extends EventEmitter {
    */
   completeTask(taskId: string, resultSummary?: string): void {
     const existingTask = this.taskRepo.findById(taskId);
+    if (!existingTask) {
+      console.warn(`[AgentDaemon] completeTask called for unknown task ${taskId}`);
+      return;
+    }
     const updates: Partial<Task> = {
       status: "completed",
       completedAt: Date.now(),
@@ -2254,6 +2525,51 @@ export class AgentDaemon extends EventEmitter {
       message: "Task completed successfully",
       ...(updates.resultSummary ? { resultSummary: updates.resultSummary } : {}),
     });
+
+    // === WORKTREE AUTO-COMMIT ===
+    // If the task has an active worktree, auto-commit changes on completion.
+    if (existingTask?.worktreeStatus === "active" && existingTask.worktreePath) {
+      const worktreeSettings = this.worktreeManager.getSettings();
+      if (worktreeSettings.autoCommitOnComplete) {
+        void (async () => {
+          try {
+            this.taskRepo.update(taskId, { worktreeStatus: "committing" });
+            const commitResult = await this.worktreeManager.commitTaskChanges(
+              taskId,
+              `${worktreeSettings.commitMessagePrefix}${existingTask.title}`,
+            );
+            if (commitResult) {
+              this.logEvent(taskId, "worktree_committed", {
+                sha: commitResult.sha,
+                filesChanged: commitResult.filesChanged,
+                message: `Auto-committed ${commitResult.filesChanged} changed file(s) (${commitResult.sha.slice(0, 7)}).`,
+              });
+            }
+            this.taskRepo.update(taskId, { worktreeStatus: "active" });
+          } catch (error: any) {
+            console.error(`[AgentDaemon] Auto-commit failed for task ${taskId}:`, error);
+            this.logEvent(taskId, "log", {
+              message: `Auto-commit failed: ${error.message}`,
+            });
+          }
+        })();
+      }
+    }
+
+    // === COMPARISON SESSION CALLBACK ===
+    // Notify the comparison service when a task in a comparison session completes.
+    // This must be outside the auto-commit block so it fires regardless of worktree settings.
+    const comparisonSvc = this.comparisonService;
+    if (existingTask?.comparisonSessionId && comparisonSvc) {
+      void (async () => {
+        try {
+          await comparisonSvc.onTaskCompleted(taskId);
+        } catch (error: any) {
+          console.error(`[AgentDaemon] Comparison callback failed for task ${taskId}:`, error);
+        }
+      })();
+    }
+
     try {
       const isTopLevelTask =
         existingTask && !existingTask.parentTaskId && (existingTask.agentType ?? "main") === "main";

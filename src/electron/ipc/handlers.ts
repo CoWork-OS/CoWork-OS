@@ -29,7 +29,9 @@ import { AgentTeamRepository } from "../agents/AgentTeamRepository";
 import { AgentTeamMemberRepository } from "../agents/AgentTeamMemberRepository";
 import { AgentTeamRunRepository } from "../agents/AgentTeamRunRepository";
 import { AgentTeamItemRepository } from "../agents/AgentTeamItemRepository";
+import { AgentTeamThoughtRepository } from "../agents/AgentTeamThoughtRepository";
 import { AgentTeamOrchestrator } from "../agents/AgentTeamOrchestrator";
+import { selectAgentsForTask } from "../agents/capabilityMatcher";
 import { TaskLabelRepository } from "../database/TaskLabelRepository";
 import { WorkingStateRepository } from "../agents/WorkingStateRepository";
 import { ContextPolicyManager } from "../gateway/context-policy";
@@ -305,6 +307,8 @@ function checkRateLimit(
 // Configure rate limits for sensitive channels
 rateLimiter.configure(IPC_CHANNELS.TASK_CREATE, RATE_LIMIT_CONFIGS.expensive);
 rateLimiter.configure(IPC_CHANNELS.TASK_SEND_MESSAGE, RATE_LIMIT_CONFIGS.expensive);
+rateLimiter.configure(IPC_CHANNELS.TASK_WRAP_UP, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.TASK_PIN, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.TASK_EXPORT_JSON, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.LLM_SAVE_SETTINGS, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.LLM_TEST_PROVIDER, RATE_LIMIT_CONFIGS.expensive);
@@ -333,6 +337,7 @@ rateLimiter.configure(IPC_CHANNELS.TEAM_RUN_CREATE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.TEAM_RUN_RESUME, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.TEAM_RUN_PAUSE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.TEAM_RUN_CANCEL, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.TEAM_RUN_WRAP_UP, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.TEAM_ITEM_CREATE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.TEAM_ITEM_UPDATE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.TEAM_ITEM_DELETE, RATE_LIMIT_CONFIGS.limited);
@@ -372,16 +377,34 @@ export async function setupIpcHandlers(
   const teamMemberRepo = new AgentTeamMemberRepository(db);
   const teamRunRepo = new AgentTeamRunRepository(db);
   const teamItemRepo = new AgentTeamItemRepository(db);
+  const teamThoughtRepo = new AgentTeamThoughtRepository(db);
   const reviewService = new AgentPerformanceReviewService(db);
   const taskLabelRepo = new TaskLabelRepository(db);
   const workingStateRepo = new WorkingStateRepository(db);
   const contextPolicyManager = new ContextPolicyManager(db);
+  const emitTaskStatusEvent = (
+    taskId: string,
+    status: Task["status"],
+    extraPayload?: Record<string, unknown>,
+  ): void => {
+    getMainWindow()?.webContents.send(IPC_CHANNELS.TASK_EVENT, {
+      taskId,
+      type: "task_status",
+      timestamp: Date.now(),
+      payload: { status, ...(extraPayload || {}) },
+    });
+  };
 
   const teamOrchestrator = new AgentTeamOrchestrator({
     getDatabase: () => db,
     getTaskById: (taskId: string) => agentDaemon.getTaskById(taskId),
     createChildTask: (params) => agentDaemon.createChildTask(params as any),
     cancelTask: (taskId: string) => agentDaemon.cancelTask(taskId),
+    wrapUpTask: (taskId: string) => agentDaemon.wrapUpTask(taskId),
+    completeRootTask: (taskId, status, summary) => {
+      taskRepo.update(taskId, { status, resultSummary: summary, completedAt: Date.now() });
+      emitTaskStatusEvent(taskId, status, { resultSummary: summary });
+    },
   });
   agentDaemon.setTeamOrchestrator(teamOrchestrator);
 
@@ -1197,6 +1220,151 @@ export async function setupIpcHandlers(
       });
     }
 
+    // Auto-collaborative mode: return task immediately, set up team in background
+    if (normalizedAgentConfig?.collaborativeMode) {
+      taskRepo.update(task.id, { status: "executing" });
+      task.status = "executing";
+      task.updatedAt = Date.now();
+      emitTaskStatusEvent(task.id, "executing");
+
+      // Run the collaborative setup asynchronously so the UI gets the task instantly
+      void (async () => {
+        try {
+          const activeRoles = agentRoleRepo.findAll(false);
+          const { members, leader } = await selectAgentsForTask(`${title}\n${prompt}`, activeRoles);
+
+          // Create ephemeral team
+          const team = teamRepo.create({
+            workspaceId,
+            name: `Collab-${Date.now()}`,
+            description: `Auto-collaborative team for: ${title}`,
+            leadAgentRoleId: leader.id,
+            maxParallelAgents: members.length,
+          });
+
+          // Add members
+          for (let i = 0; i < members.length; i++) {
+            teamMemberRepo.add({
+              teamId: team.id,
+              agentRoleId: members[i].id,
+              memberOrder: (i + 1) * 10,
+              isRequired: true,
+            });
+          }
+
+          // Create collaborative run
+          const run = teamRunRepo.create({
+            teamId: team.id,
+            rootTaskId: task.id,
+            status: "running",
+            collaborativeMode: true,
+          });
+
+          // One item per agent — each gets the full prompt (Grok model)
+          for (let i = 0; i < members.length; i++) {
+            const m = members[i];
+            teamItemRepo.create({
+              teamRunId: run.id,
+              title: `${m.icon} ${m.displayName}`,
+              description: prompt,
+              ownerAgentRoleId: m.id,
+              status: "todo",
+              sortOrder: (i + 1) * 10,
+            });
+          }
+
+          // Emit for UI — this triggers the collaborative thoughts panel to appear
+          emitTeamEvent({ type: "team_run_created", timestamp: Date.now(), run });
+
+          // Kick off the orchestrator (spawns child tasks for each item)
+          void teamOrchestrator.tickRun(run.id, "auto_collaborative");
+        } catch (error: any) {
+          console.error("[TASK_CREATE] Auto-collaborative setup failed:", error);
+          // Fall back to normal execution
+          try {
+            await agentDaemon.startTask(task, validatedImages);
+          } catch (startError: any) {
+            taskRepo.update(task.id, {
+              status: "failed",
+              error: startError.message || "Failed to start task",
+            });
+            emitTaskStatusEvent(task.id, "failed");
+          }
+        }
+      })();
+
+      return task;
+    }
+
+    // Multi-LLM mode: send same task to multiple LLM providers in parallel
+    if (normalizedAgentConfig?.multiLlmMode && normalizedAgentConfig?.multiLlmConfig) {
+      taskRepo.update(task.id, { status: "executing" });
+      task.status = "executing";
+      task.updatedAt = Date.now();
+      emitTaskStatusEvent(task.id, "executing");
+
+      void (async () => {
+        try {
+          const config = normalizedAgentConfig.multiLlmConfig!;
+          const participants = config.participants;
+
+          // Use the first default agent role as sentinel for FK references
+          const allRoles = agentRoleRepo.findAll(false);
+          const sentinelRoleId = allRoles.length > 0 ? allRoles[0].id : "multi-llm-system";
+
+          // Create ephemeral team
+          const team = teamRepo.create({
+            workspaceId,
+            name: `MultiLLM-${Date.now()}`,
+            description: `Multi-LLM comparison for: ${title}`,
+            leadAgentRoleId: sentinelRoleId,
+            maxParallelAgents: participants.length,
+          });
+
+          // Create multi-LLM run
+          const run = teamRunRepo.create({
+            teamId: team.id,
+            rootTaskId: task.id,
+            status: "running",
+            collaborativeMode: true,
+            multiLlmMode: true,
+          });
+
+          // One item per LLM participant
+          for (let i = 0; i < participants.length; i++) {
+            const p = participants[i];
+            teamItemRepo.create({
+              teamRunId: run.id,
+              title: `${p.displayName}`,
+              description: prompt,
+              ownerAgentRoleId: sentinelRoleId,
+              status: "todo",
+              sortOrder: (i + 1) * 10,
+            });
+          }
+
+          // Emit for UI — triggers the thoughts panel
+          emitTeamEvent({ type: "team_run_created", timestamp: Date.now(), run });
+
+          // Kick off orchestrator
+          void teamOrchestrator.tickRun(run.id, "multi_llm_start");
+        } catch (error: any) {
+          console.error("[TASK_CREATE] Multi-LLM setup failed:", error);
+          try {
+            await agentDaemon.startTask(task, validatedImages);
+          } catch (startError: any) {
+            taskRepo.update(task.id, {
+              status: "failed",
+              error: startError.message || "Failed to start task",
+            });
+            emitTaskStatusEvent(task.id, "failed");
+          }
+        }
+      })();
+
+      return task;
+    }
+
     // Start task execution in agent daemon
     try {
       await agentDaemon.startTask(task, validatedImages);
@@ -1296,6 +1464,12 @@ export async function setupIpcHandlers(
     }
   });
 
+  ipcMain.handle(IPC_CHANNELS.TASK_WRAP_UP, async (_, id: string) => {
+    checkRateLimit(IPC_CHANNELS.TASK_WRAP_UP);
+    const validated = validateInput(UUIDSchema, id, "task ID");
+    await agentDaemon.wrapUpTask(validated);
+  });
+
   ipcMain.handle(IPC_CHANNELS.TASK_PAUSE, async (_, id: string) => {
     // Pause daemon first - if it fails, exception propagates and status won't be updated
     await agentDaemon.pauseTask(id);
@@ -1327,9 +1501,31 @@ export async function setupIpcHandlers(
     taskRepo.update(validated.id, { title: validated.title });
   });
 
+  ipcMain.handle(IPC_CHANNELS.TASK_PIN, async (_, id: string) => {
+    checkRateLimit(IPC_CHANNELS.TASK_PIN);
+    const validated = validateInput(UUIDSchema, id, "task ID");
+    const task = taskRepo.togglePin(validated);
+    if (!task) {
+      throw new Error(`Task not found: ${validated}`);
+    }
+    return task;
+  });
+
   ipcMain.handle(IPC_CHANNELS.TASK_DELETE, async (_, id: string) => {
+    const existingTask = taskRepo.findById(id);
+
     // Cancel the task if it's running
     await agentDaemon.cancelTask(id);
+
+    // Best-effort cleanup of on-disk worktree resources before metadata deletion.
+    if (existingTask?.worktreePath || existingTask?.worktreeBranch) {
+      try {
+        await agentDaemon.getWorktreeManager().cleanup(id, true);
+      } catch (error) {
+        console.warn(`[TASK_DELETE] Worktree cleanup failed for ${id}:`, error);
+      }
+    }
+
     // Delete from database
     taskRepo.delete(id);
   });
@@ -1361,8 +1557,24 @@ export async function setupIpcHandlers(
   });
 
   // Task events handler - get historical events from database
+  // For collaborative root tasks, also include file events from child tasks.
   ipcMain.handle(IPC_CHANNELS.TASK_EVENTS, async (_, taskId: string) => {
     const events = taskEventRepo.findByTaskId(taskId);
+
+    // Include child task file events for collaborative/multi-LLM roots
+    const task = taskRepo.findById(taskId);
+    if (task?.agentConfig?.collaborativeMode || task?.agentConfig?.multiLlmMode) {
+      const childTasks = taskRepo.findByParent(taskId);
+      if (childTasks.length > 0) {
+        const childIds = childTasks.map((c) => c.id);
+        const fileTypes = ["file_created", "file_modified", "file_deleted"];
+        const childFileEvents = taskEventRepo.findByTaskIds(childIds, fileTypes);
+        // Merge and sort by timestamp
+        events.push(...childFileEvents);
+        events.sort((a, b) => a.timestamp - b.timestamp);
+      }
+    }
+
     const maxEvents = 600;
     return events.length > maxEvents ? events.slice(-maxEvents) : events;
   });
@@ -1688,6 +1900,14 @@ export async function setupIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.LLM_GET_CONFIG_STATUS, async () => {
     return LLMProviderFactory.getConfigStatus();
+  });
+
+  // Get models available for a specific provider type (for multi-LLM selection)
+  ipcMain.handle(IPC_CHANNELS.LLM_GET_PROVIDER_MODELS, async (_, providerType: string) => {
+    const settings = LLMProviderFactory.loadSettings();
+    const modifiedSettings = { ...settings, providerType: providerType as any };
+    const modelStatus = LLMProviderFactory.getProviderModelStatus(modifiedSettings);
+    return modelStatus.models;
   });
 
   // Set the current model (persists selection across sessions)
@@ -3064,6 +3284,7 @@ export async function setupIpcHandlers(
       rootTaskId,
       status: request.status,
       startedAt: request.startedAt,
+      collaborativeMode: request.collaborativeMode,
     });
     emitTeamEvent({ type: "team_run_created", timestamp: Date.now(), run: created });
     if (created.status === "running") {
@@ -3097,6 +3318,13 @@ export async function setupIpcHandlers(
     checkRateLimit(IPC_CHANNELS.TEAM_RUN_CANCEL);
     const validated = validateInput(UUIDSchema, runId, "team run ID");
     await teamOrchestrator.cancelRun(validated);
+    return { success: true };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TEAM_RUN_WRAP_UP, async (_, runId: string) => {
+    checkRateLimit(IPC_CHANNELS.TEAM_RUN_WRAP_UP);
+    const validated = validateInput(UUIDSchema, runId, "team run ID");
+    await teamOrchestrator.wrapUpRun(validated);
     return { success: true };
   });
 
@@ -3197,6 +3425,17 @@ export async function setupIpcHandlers(
       }
     }
     return updated;
+  });
+
+  // Collaborative Thoughts
+  ipcMain.handle(IPC_CHANNELS.TEAM_THOUGHT_LIST, async (_, teamRunId: string) => {
+    const validated = validateInput(UUIDSchema, teamRunId, "team run ID");
+    return teamThoughtRepo.listByRun(validated);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TEAM_RUN_FIND_BY_ROOT_TASK, async (_, rootTaskId: string) => {
+    const validated = validateInput(UUIDSchema, rootTaskId, "root task ID");
+    return teamRunRepo.findByRootTaskId(validated) || null;
   });
 
   // Agent Performance Reviews (Mission Control)

@@ -123,6 +123,7 @@ export function buildTaskExportItem(params: {
     taskId: task.id,
     title: task.title,
     status: task.status,
+    ...(task.pinned ? { pinned: task.pinned } : {}),
     workspaceId: task.workspaceId,
     ...(workspaceName ? { workspaceName } : {}),
     ...(task.parentTaskId ? { parentTaskId: task.parentTaskId } : {}),

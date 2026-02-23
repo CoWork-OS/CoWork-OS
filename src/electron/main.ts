@@ -12,6 +12,8 @@ import {
   setHeartbeatWakeSubmitter,
 } from "./ipc/handlers";
 import { setupMissionControlHandlers } from "./ipc/mission-control-handlers";
+import { setupWorktreeHandlers } from "./ipc/worktree-handlers";
+import { ComparisonService } from "./git/ComparisonService";
 import { TaskSubscriptionRepository } from "./agents/TaskSubscriptionRepository";
 import { StandupReportService } from "./reports/StandupReportService";
 import { HeartbeatService, HeartbeatServiceDeps } from "./agents/HeartbeatService";
@@ -857,6 +859,11 @@ if (!gotTheLock) {
       // are registered before the renderer finishes loading and calls them
       setupCanvasHandlers(mainWindow, agentDaemon);
       CanvasManager.getInstance().setMainWindow(mainWindow);
+
+      // Initialize Git Worktree & Comparison handlers
+      const comparisonService = new ComparisonService(dbManager.getDatabase(), agentDaemon);
+      agentDaemon.setComparisonService(comparisonService);
+      setupWorktreeHandlers(agentDaemon);
 
       await channelGateway.initialize(mainWindow);
       // Initialize update manager with main window reference

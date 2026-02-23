@@ -8,6 +8,7 @@ import type {
   AgentTeamItem,
   AgentTeamMember,
   AgentTeamRun,
+  AgentThought,
   AgentPerformanceReview,
   AgentReviewGenerateRequest,
   ConwayCreditHistoryEntry,
@@ -233,7 +234,9 @@ const IPC_CHANNELS = {
   TASK_GET: "task:get",
   TASK_LIST: "task:list",
   TASK_EXPORT_JSON: "task:exportJSON",
+  TASK_PIN: "task:pin",
   TASK_CANCEL: "task:cancel",
+  TASK_WRAP_UP: "task:wrapUp",
   TASK_PAUSE: "task:pause",
   TASK_RESUME: "task:resume",
   TASK_RENAME: "task:rename",
@@ -262,6 +265,7 @@ const IPC_CHANNELS = {
   LLM_GET_MODELS: "llm:getModels",
   LLM_GET_CONFIG_STATUS: "llm:getConfigStatus",
   LLM_SET_MODEL: "llm:setModel",
+  LLM_GET_PROVIDER_MODELS: "llm:getProviderModels",
   LLM_GET_OLLAMA_MODELS: "llm:getOllamaModels",
   LLM_GET_GEMINI_MODELS: "llm:getGeminiModels",
   LLM_GET_OPENROUTER_MODELS: "llm:getOpenRouterModels",
@@ -602,12 +606,17 @@ const IPC_CHANNELS = {
   TEAM_RUN_RESUME: "teamRun:resume",
   TEAM_RUN_PAUSE: "teamRun:pause",
   TEAM_RUN_CANCEL: "teamRun:cancel",
+  TEAM_RUN_WRAP_UP: "teamRun:wrapUp",
   TEAM_ITEM_LIST: "teamItem:list",
   TEAM_ITEM_CREATE: "teamItem:create",
   TEAM_ITEM_UPDATE: "teamItem:update",
   TEAM_ITEM_DELETE: "teamItem:delete",
   TEAM_ITEM_MOVE: "teamItem:move",
   TEAM_RUN_EVENT: "teamRun:event",
+  // Collaborative Thoughts
+  TEAM_THOUGHT_LIST: "teamThought:list",
+  TEAM_THOUGHT_EVENT: "teamThought:event",
+  TEAM_RUN_FIND_BY_ROOT_TASK: "teamRun:findByRootTask",
   // Activity Feed
   ACTIVITY_LIST: "activity:list",
   ACTIVITY_CREATE: "activity:create",
@@ -688,6 +697,20 @@ const IPC_CHANNELS = {
   REVIEW_GET_LATEST: "review:getLatest",
   REVIEW_LIST: "review:list",
   REVIEW_DELETE: "review:delete",
+  // Git Worktree operations
+  WORKTREE_GET_INFO: "worktree:getInfo",
+  WORKTREE_LIST: "worktree:list",
+  WORKTREE_MERGE: "worktree:merge",
+  WORKTREE_CLEANUP: "worktree:cleanup",
+  WORKTREE_GET_DIFF: "worktree:getDiff",
+  WORKTREE_GET_SETTINGS: "worktree:getSettings",
+  WORKTREE_SAVE_SETTINGS: "worktree:saveSettings",
+  // Agent Comparison mode
+  COMPARISON_CREATE: "comparison:create",
+  COMPARISON_GET: "comparison:get",
+  COMPARISON_LIST: "comparison:list",
+  COMPARISON_CANCEL: "comparison:cancel",
+  COMPARISON_GET_RESULT: "comparison:getResult",
 } as const;
 
 // Mobile Companion Node types (inlined for sandboxed preload)
@@ -1910,7 +1933,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getTask: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_GET, id),
   listTasks: () => ipcRenderer.invoke(IPC_CHANNELS.TASK_LIST),
   exportTasksJson: (query?: any) => ipcRenderer.invoke(IPC_CHANNELS.TASK_EXPORT_JSON, query),
+  toggleTaskPin: (taskId: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_PIN, taskId),
   cancelTask: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_CANCEL, id),
+  wrapUpTask: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_WRAP_UP, id),
   pauseTask: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_PAUSE, id),
   resumeTask: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_RESUME, id),
   sendStdin: (taskId: string, input: string) =>
@@ -1972,6 +1997,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getLLMModels: () => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_MODELS),
   getLLMConfigStatus: () => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_CONFIG_STATUS),
   setLLMModel: (modelKey: string) => ipcRenderer.invoke(IPC_CHANNELS.LLM_SET_MODEL, modelKey),
+  getProviderModels: (providerType: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_PROVIDER_MODELS, providerType),
   getOllamaModels: (baseUrl?: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_OLLAMA_MODELS, baseUrl),
   getGeminiModels: (apiKey?: string) =>
@@ -2681,6 +2708,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   resumeTeamRun: (runId: string) => ipcRenderer.invoke(IPC_CHANNELS.TEAM_RUN_RESUME, runId),
   pauseTeamRun: (runId: string) => ipcRenderer.invoke(IPC_CHANNELS.TEAM_RUN_PAUSE, runId),
   cancelTeamRun: (runId: string) => ipcRenderer.invoke(IPC_CHANNELS.TEAM_RUN_CANCEL, runId),
+  wrapUpTeamRun: (runId: string) => ipcRenderer.invoke(IPC_CHANNELS.TEAM_RUN_WRAP_UP, runId),
   listTeamItems: (teamRunId: string) => ipcRenderer.invoke(IPC_CHANNELS.TEAM_ITEM_LIST, teamRunId),
   createTeamItem: (request: CreateAgentTeamItemRequest) =>
     ipcRenderer.invoke(IPC_CHANNELS.TEAM_ITEM_CREATE, request),
@@ -2694,6 +2722,17 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on(IPC_CHANNELS.TEAM_RUN_EVENT, subscription);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.TEAM_RUN_EVENT, subscription);
   },
+
+  // Collaborative Thoughts APIs
+  listTeamThoughts: (teamRunId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TEAM_THOUGHT_LIST, teamRunId),
+  onTeamThoughtEvent: (callback: (event: any) => void) => {
+    const subscription = (_: Electron.IpcRendererEvent, data: any) => callback(data);
+    ipcRenderer.on(IPC_CHANNELS.TEAM_THOUGHT_EVENT, subscription);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.TEAM_THOUGHT_EVENT, subscription);
+  },
+  findTeamRunByRootTask: (rootTaskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TEAM_RUN_FIND_BY_ROOT_TASK, rootTaskId),
 
   // Activity Feed APIs
   listActivities: (query: ActivityListQuery) =>
@@ -2872,6 +2911,27 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on(IPC_CHANNELS.VOICE_EVENT, handler);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.VOICE_EVENT, handler);
   },
+
+  // Git Worktree APIs
+  getWorktreeInfo: (taskId: string) => ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_GET_INFO, taskId),
+  listWorktrees: (workspaceId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_LIST, workspaceId),
+  mergeWorktree: (taskId: string) => ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_MERGE, taskId),
+  cleanupWorktree: (taskId: string) => ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_CLEANUP, taskId),
+  getWorktreeDiff: (taskId: string) => ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_GET_DIFF, taskId),
+  getWorktreeSettings: () => ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_GET_SETTINGS),
+  saveWorktreeSettings: (settings: any) =>
+    ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_SAVE_SETTINGS, settings),
+
+  // Agent Comparison APIs
+  createComparison: (params: any) => ipcRenderer.invoke(IPC_CHANNELS.COMPARISON_CREATE, params),
+  getComparison: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.COMPARISON_GET, sessionId),
+  listComparisons: (workspaceId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPARISON_LIST, workspaceId),
+  cancelComparison: (sessionId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPARISON_CANCEL, sessionId),
+  getComparisonResult: (sessionId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPARISON_GET_RESULT, sessionId),
 });
 
 // Type declarations for TypeScript
@@ -2985,7 +3045,9 @@ export interface ElectronAPI {
   getTask: (id: string) => Promise<any>;
   listTasks: () => Promise<any[]>;
   exportTasksJson: (query?: any) => Promise<any>;
+  toggleTaskPin: (taskId: string) => Promise<any>;
   cancelTask: (id: string) => Promise<void>;
+  wrapUpTask: (id: string) => Promise<void>;
   pauseTask: (id: string) => Promise<void>;
   resumeTask: (id: string) => Promise<void>;
   sendStdin: (taskId: string, input: string) => Promise<boolean>;
@@ -3028,6 +3090,9 @@ export interface ElectronAPI {
     models: Array<{ key: string; displayName: string; description: string }>;
   }>;
   setLLMModel: (modelKey: string) => Promise<{ success: boolean }>;
+  getProviderModels: (
+    providerType: string,
+  ) => Promise<Array<{ key: string; displayName: string; description: string }>>;
   getOllamaModels: (
     baseUrl?: string,
   ) => Promise<Array<{ name: string; size: number; modified: string }>>;
@@ -3969,6 +4034,7 @@ export interface ElectronAPI {
   resumeTeamRun: (runId: string) => Promise<{ success: boolean }>;
   pauseTeamRun: (runId: string) => Promise<{ success: boolean }>;
   cancelTeamRun: (runId: string) => Promise<{ success: boolean }>;
+  wrapUpTeamRun: (runId: string) => Promise<{ success: boolean }>;
   listTeamItems: (teamRunId: string) => Promise<AgentTeamItem[]>;
   createTeamItem: (request: CreateAgentTeamItemRequest) => Promise<AgentTeamItem>;
   updateTeamItem: (request: UpdateAgentTeamItemRequest) => Promise<AgentTeamItem | undefined>;
@@ -3979,6 +4045,11 @@ export interface ElectronAPI {
     sortOrder: number;
   }) => Promise<AgentTeamItem | undefined>;
   onTeamRunEvent: (callback: (event: any) => void) => () => void;
+
+  // Collaborative Thoughts
+  listTeamThoughts: (teamRunId: string) => Promise<AgentThought[]>;
+  onTeamThoughtEvent: (callback: (event: any) => void) => () => void;
+  findTeamRunByRootTask: (rootTaskId: string) => Promise<AgentTeamRun | null>;
 
   // Activity Feed
   listActivities: (query: ActivityListQuery) => Promise<ActivityData[]>;
@@ -4128,6 +4199,22 @@ export interface ElectronAPI {
   testOpenAIVoiceConnection: () => Promise<{ success: boolean; error?: string }>;
   testAzureVoiceConnection: () => Promise<{ success: boolean; error?: string }>;
   onVoiceEvent: (callback: (event: VoiceEventData) => void) => () => void;
+
+  // Git Worktree APIs
+  getWorktreeInfo: (taskId: string) => Promise<any>;
+  listWorktrees: (workspaceId: string) => Promise<any[]>;
+  mergeWorktree: (taskId: string) => Promise<any>;
+  cleanupWorktree: (taskId: string) => Promise<{ success: boolean }>;
+  getWorktreeDiff: (taskId: string) => Promise<any>;
+  getWorktreeSettings: () => Promise<any>;
+  saveWorktreeSettings: (settings: any) => Promise<{ success: boolean; error?: string }>;
+
+  // Agent Comparison APIs
+  createComparison: (params: any) => Promise<any>;
+  getComparison: (sessionId: string) => Promise<any>;
+  listComparisons: (workspaceId: string) => Promise<any[]>;
+  cancelComparison: (sessionId: string) => Promise<{ success: boolean }>;
+  getComparisonResult: (sessionId: string) => Promise<any>;
 }
 
 // Migration status type (for showing one-time notifications after app rename)

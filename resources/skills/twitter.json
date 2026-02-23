@@ -1,0 +1,33 @@
+{
+  "id": "twitter",
+  "name": "Twitter / X Writer",
+  "description": "Write viral, persuasive tweets and threads optimized for X's algorithm. Research viral examples in your niche, then craft content using proven hook formulas and copywriting frameworks.",
+  "icon": "𝕏",
+  "category": "Marketing",
+  "prompt": "Write optimized X/Twitter content for: {{topic}}\n\nGoal: {{goal}}\n\n## Phase 1: Research\n\nBefore writing, use web search to find viral examples in this niche:\n- Search for: \"{{topic}} viral tweet examples\", \"{{topic}} twitter thread went viral\", \"{{topic}} best performing tweets\"\n- Analyze 3-5 successful tweets/threads: what hooks worked, what structure, what tone, what numbers/results were cited\n- Note patterns: engagement drivers, CTAs, content format\n\n## Phase 2: Write Content\n\nApply these principles:\n\n### X Algorithm Optimization\n- Replies > Quote tweets > Bookmarks > Retweets > Likes (engagement hierarchy)\n- First hour is critical for reach\n- Dwell time matters — longer content that holds attention gets boosted\n- Threads get ~3x engagement vs single tweets\n- Native content beats external links (links are penalized)\n- Never ask for engagement (\"Like and RT\" hurts reach)\n\n### Hook Formulas (pick the best fit)\n- **Bold Statement**: \"Nobody talks about this, but...\" / \"Everything you've been told about X is wrong.\"\n- **Specific Result**: \"I [result] in [timeframe]. Here's how:\" / \"From [bad state] to [good state] in [time].\"\n- **Curiosity Gap**: \"The one thing [people] get wrong about [topic]\" / \"I found a [adjective] hack that no one talks about...\"\n- **Story Hook**: \"3 years ago I was [bad state]. Today I [good state].\" / \"I almost quit [X]. Then this happened:\"\n- **Pattern Interrupt**: \"Everyone says [X]. They're wrong.\" / \"Stop doing [practice]. Do this instead:\"\n- **List Promise**: \"[Number] [things] that will [benefit]:\" / \"[Number] lessons from [experience]:\"\n\n### Copywriting Frameworks\n- **PAS** (Problem → Agitate → Solution): State the problem, make it feel urgent, deliver the fix\n- **AIDA** (Attention → Interest → Desire → Action): Hook → expand → create want → CTA\n- **BAB** (Before → After → Bridge): Bad state → good state → how you got there\n\n### Tweet Rules\n- Single tweets: under 110 characters perform best\n- Thread tweets: under 250 characters each\n- Include specific numbers (\"23% increase\" beats \"big increase\")\n- Put links in replies, never in the main tweet\n- Each tweet in a thread must earn the next click\n- End with a CTA: ask a question, quote your first tweet, or direct to profile\n\n### Thread Structure (7-tweet sweet spot)\n1. **Hook** — Most compelling insight/result, include numbers, signal thread\n2. **Context** — Why this matters, create more curiosity\n3-6. **Core Value** — One key insight per tweet, numbered, visual breaks\n7. **Summary** — Key takeaways, connect to broader application\n8. **CTA** — Question (generates replies), or quote first tweet\n\n## Phase 3: Deliver\n\nProvide:\n1. **3 hook variations** — Different angles for the same content\n2. **Single tweet version** — Standalone tweet (under 280 chars)\n3. **Thread version** — 7-10 tweets if the content warrants depth\n4. **Posting advice** — Best time to post, engagement strategy for first hour\n\n## Persuasion Checklist\n- [ ] Hook stops the scroll (bold/specific/curious)\n- [ ] First 7 words earn the rest of the tweet\n- [ ] Specific numbers included\n- [ ] Under character limits\n- [ ] No external links in main tweet\n- [ ] Clear CTA or engagement driver\n- [ ] Modeled after proven examples from research\n\nWrite all output to:\n- `{artifactDir}/twitter-content.md`",
+  "parameters": [
+    {
+      "name": "topic",
+      "type": "string",
+      "description": "The niche, topic, or specific message to write about",
+      "required": true
+    },
+    {
+      "name": "goal",
+      "type": "string",
+      "description": "What you want to achieve: engagement, followers, conversions, brand awareness, etc.",
+      "required": false,
+      "default": "Maximum engagement and reach"
+    }
+  ],
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when a user asks to write tweets, create X/Twitter content, write threads, or develop social media copy for X.",
+      "dontUseWhen": "Don't use for other social media platforms (LinkedIn, Instagram, TikTok) or general copywriting not specific to X/Twitter.",
+      "outputs": "Hook variations, single tweet, thread version, and posting strategy based on real viral examples.",
+      "successCriteria": "Research-backed content with specific hooks, proper character counts, algorithm optimization, and clear CTAs.",
+      "expectedArtifacts": ["twitter-content.md"]
+    }
+  }
+}

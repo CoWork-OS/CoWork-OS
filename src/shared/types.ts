@@ -586,6 +586,8 @@ export interface AgentConfig {
   multiLlmMode?: boolean;
   /** Configuration for multi-LLM mode: which providers/models to use and which is the judge */
   multiLlmConfig?: MultiLlmConfig;
+  /** Spawn an independent verification agent after task completion to audit deliverables */
+  verificationAgent?: boolean;
 }
 
 /** Specification for one LLM participant in a multi-LLM run */

@@ -107,6 +107,7 @@ export const AgentConfigSchema = z
         judgeModelKey: z.string().max(200),
       })
       .optional(),
+    verificationAgent: z.boolean().optional(),
   })
   .strict();
 

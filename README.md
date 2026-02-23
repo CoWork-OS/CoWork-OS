@@ -28,34 +28,31 @@
   <img src="screenshots/cowork-os-main-1.png" alt="CoWork OS Interface" width="700">
 </p>
 
-## The Open-Source OpenClaw Alternative
+## Looking for an OpenClaw Alternative?
 
-OpenClaw's founder has joined OpenAI to lead their personal agent product. This raises real questions: Can an open-source project thrive when its lead is building a competing closed-source product? Will your usage patterns and bug reports train a proprietary system you'll later pay for?
-
-**CoWork OS exists so you don't have to worry about that.** Independent, community-driven, no corporate parent. Your data stays yours — not a training signal for someone else's subscription product.
+OpenClaw is a great project. With its founder's move to OpenAI, many in the community are exploring independent alternatives. CoWork OS is built for that — fully independent, community-driven, and designed to go further.
 
 ### CoWork OS vs OpenClaw
 
 | | CoWork OS | OpenClaw |
 |---|---|---|
-| **Independence** | Community-driven, no corporate affiliation | Founder now leads OpenAI's competing product |
-| **LLM providers** | 30+ (12 built-in + 20+ compatible/gateway) | Limited built-in, "any model" via config |
+| **LLM providers** | 30+ (12 built-in + 20+ compatible/gateway) | Limited built-in |
 | **Messaging channels** | 14 | ~11 |
 | **Built-in skills** | 100+ | ~30 |
-| **Enterprise connectors** | 9 MCP connectors (Salesforce, Jira, HubSpot, Zendesk, etc.) | None |
-| **Agent orchestration** | Mission Control: Kanban board, teams, performance reviews, standup reports | Basic task queue |
-| **Execution modes** | 3 per-task modes (Autonomous, Collaborative, Multi-LLM) | Single |
-| **Security** | 3200+ tests, [ZeroLeaks top score](https://zeroleaks.ai/), sandbox-exec + Docker isolation, AES-256 | Basic pairing + allowlists |
-| **Data privacy** | Local-first, BYOK, OS keychain, zero telemetry | Local-first, but future uncertain under OpenAI |
+| **Enterprise connectors** | 9 MCP connectors (Salesforce, Jira, HubSpot, etc.) | — |
+| **Agent orchestration** | Mission Control: Kanban board, teams, performance reviews | Basic task queue |
+| **Execution modes** | 3 per-task (Autonomous, Collaborative, Multi-LLM) | Single |
+| **Security** | 3200+ tests, [ZeroLeaks top score](https://zeroleaks.ai/), sandbox isolation, AES-256 | Basic pairing + allowlists |
+| **Governance** | Independent, community-driven, no corporate parent | Founder now at OpenAI |
 
-### Why people are switching
+### Why CoWork OS?
 
-- **30+ LLM providers** — Anthropic, OpenAI, Google, Ollama, AWS Bedrock, OpenRouter, and more. Bring your own keys. Not locked into one vendor.
+- **30+ LLM providers** — Anthropic, OpenAI, Google, Ollama, AWS Bedrock, OpenRouter, and more. Bring your own keys.
 - **14 messaging channels** — WhatsApp, Telegram, Discord, Slack, Teams, iMessage, Signal, and more. Chat with your AI from anywhere.
 - **100+ built-in skills** — Documents, code review, web search, image generation, cloud integrations, and more.
 - **Agent teams** — Multi-agent collaboration with shared checklists, collaborative mode, and multi-LLM synthesis.
-- **Security-first** — Approval workflows, sandboxed execution, configurable guardrails, encrypted storage, and 3200+ tests. Not an afterthought.
-- **Truly local, truly yours** — Your data and API keys stay on your machine. No telemetry. No middleman. No corporate roadmap that conflicts with your interests.
+- **Security-first** — Approval workflows, sandboxed execution, configurable guardrails, encrypted storage, and 3200+ tests.
+- **Local-first & BYOK** — Your data and API keys stay on your machine. No telemetry. No middleman.
 
 ## Quick Start
 

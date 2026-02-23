@@ -135,7 +135,7 @@ pkill -f '/cowork-os' || true
 cowork-os
 ```
 
-### From GitHub Source (Development)
+### Build from Source (Recommended)
 
 #### Prerequisites
 
@@ -155,11 +155,14 @@ npm install
 # Set up native modules for Electron (includes automatic macOS retry handling)
 npm run setup
 
-# Run in development mode
-npm run dev
-
-# Configure your API credentials in Settings (gear icon)
+# Build and package the app
+npm run build          # compile TypeScript and bundle the UI
+npm run package        # package into a macOS .app / .dmg
 ```
+
+Once complete, the packaged app will be in the `release/` folder:
+- **`CoWork OS-<version>-arm64.dmg`** — open this, drag CoWork OS to your Applications folder
+- **`mac-arm64/CoWork OS.app`** — the app itself (can also double-click to run directly)
 
 #### Troubleshooting: macOS "Killed: 9" during setup
 
@@ -171,18 +174,13 @@ If you see `Killed: 9` during `npm run setup`, macOS terminated a native build d
 npm run setup
 ```
 
-#### Build for Production
+#### Development Mode
+
+To run the app in development mode (with hot reload) instead of building:
 
 ```bash
-npm install            # install all dependencies
-npm run setup          # build native modules for Electron
-npm run build          # compile TypeScript and bundle the UI
-npm run package        # package into a macOS .app / .dmg
+npm run dev
 ```
-
-Once complete, the packaged app will be in the `release/` folder:
-- **`CoWork OS-<version>-arm64.dmg`** — open this, drag CoWork OS to your Applications folder
-- **`mac-arm64/CoWork OS.app`** — the app itself (can also double-click to run directly)
 
 ### Linux VPS (Headless / Server Mode)
 

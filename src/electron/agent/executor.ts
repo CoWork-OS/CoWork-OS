@@ -5657,14 +5657,17 @@ You are continuing a previous conversation. The context from the previous conver
       .join("\n");
 
     try {
+      // Wrap-up gets a higher token budget since the user explicitly asked to
+      // summarise potentially extensive research; timeout recovery stays lean.
+      const recoveryMaxTokens = isWrapUp ? 3000 : 700;
       const response = await this.createMessageWithTimeout(
         {
           model: this.modelId,
-          maxTokens: 700,
+          maxTokens: recoveryMaxTokens,
           system: "Return a concise, user-facing best-effort final answer.",
           messages: [{ role: "user", content: recoveryPrompt }],
         },
-        35_000,
+        isWrapUp ? 60_000 : 35_000,
         "Timeout recovery answer",
       );
 

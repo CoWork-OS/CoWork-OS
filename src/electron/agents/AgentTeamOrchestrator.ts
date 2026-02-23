@@ -92,6 +92,9 @@ function emitTeamEvent(event: any): void {
   });
 }
 
+/** Sentinel title used to identify the synthesis item created by transitionToSynthesizePhase. */
+const SYNTHESIS_ITEM_TITLE = "Synthesis";
+
 function isTerminalItemStatus(status: AgentTeamItemStatus): boolean {
   return status === "done" || status === "failed" || status === "blocked";
 }
@@ -178,9 +181,14 @@ export class AgentTeamOrchestrator {
       // If everything is terminal, complete or transition the run.
       const nonTerminal = refreshedItems.filter((i) => !isTerminalItemStatus(i.status));
       if (nonTerminal.length === 0) {
-        // In collaborative mode, transition to synthesis phase instead of completing
+        // In collaborative mode, transition to synthesis phase instead of completing.
+        // This also handles the wrap-up path where phase was set to "synthesize"
+        // before the synthesis task was actually spawned.
         const currentPhase = run.phase || "dispatch";
-        if (run.collaborativeMode && (currentPhase === "dispatch" || currentPhase === "think")) {
+        const hasSynthesisItem = refreshedItems.some(
+          (i) => i.title === SYNTHESIS_ITEM_TITLE,
+        );
+        if (run.collaborativeMode && currentPhase !== "complete" && !hasSynthesisItem) {
           await this.transitionToSynthesizePhase(run, team, rootTask, refreshedItems);
           return;
         }
@@ -558,6 +566,10 @@ export class AgentTeamOrchestrator {
     rootTask: Task,
     items: AgentTeamItem[],
   ): Promise<void> {
+    // Guard against double-entry (wrapUpRun and tickRun can race at await boundaries)
+    const existingItems = this.itemRepo.listByRun(run.id);
+    if (existingItems.some((i) => i.title === SYNTHESIS_ITEM_TITLE)) return;
+
     // Update phase to synthesize
     const updated = this.runRepo.update(run.id, { phase: "synthesize" });
     if (updated) {
@@ -598,7 +610,7 @@ export class AgentTeamOrchestrator {
     }
 
     const child = await this.deps.createChildTask({
-      title: `Synthesis`,
+      title: SYNTHESIS_ITEM_TITLE,
       prompt: synthesisPrompt,
       workspaceId: rootTask.workspaceId,
       parentTaskId: rootTask.id,
@@ -612,7 +624,7 @@ export class AgentTeamOrchestrator {
     // can find it and transition the run to "complete" when synthesis finishes.
     this.itemRepo.create({
       teamRunId: run.id,
-      title: "Synthesis",
+      title: SYNTHESIS_ITEM_TITLE,
       ownerAgentRoleId: team.leadAgentRoleId,
       sourceTaskId: child.id,
       status: "in_progress",

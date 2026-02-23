@@ -357,7 +357,7 @@ After the data wipe, also remove remaining app binaries/shell package entries fr
 ---
 
 <p align="center">
-  <img src="screenshots/cowork-os-main.png" alt="CoWork OS Interface" width="700">
+  <img src="screenshots/cowork-os-main1.png" alt="CoWork OS Interface" width="700">
   <br>
   <em>Switch between Modern (default) and Terminal visual themes with a real-time task timeline</em>
 </p>
@@ -695,6 +695,12 @@ Coordinate multiple agents working together on complex tasks with shared state.
 | **Wrap-Up Support** | Gracefully wrap up team runs instead of hard-cancelling |
 
 Configure in **Mission Control** > **Teams**.
+
+<p align="center">
+  <img src="screenshots/cowork-os-main3.png" alt="CoWork OS Collaborative Mode" width="700">
+  <br>
+  <em>Multi-agent collaborative mode with real-time thought sharing and leader synthesis</em>
+</p>
 
 ### Performance Reviews
 

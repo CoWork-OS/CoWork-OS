@@ -1246,8 +1246,8 @@ a,
 }
 
 .app-layout.left-collapsed .main-header {
-  padding-left: 124px;
-  /* Space for macOS window controls (80px) + sidebar toggle button (32px) + gap (12px) */
+  padding-left: 160px;
+  /* Space for macOS window controls (80px) + sidebar toggle (32px) + new session btn (32px) + gaps (16px) */
 }
 
 .app-layout.right-collapsed .main-content {

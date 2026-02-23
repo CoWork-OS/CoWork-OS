@@ -42,6 +42,12 @@ CoWork OS is a local-first runtime for secure, multi-channel AI agents. It combi
 | **Security-First Execution** | Approval workflows, IPC/input validation hardening, redaction, and gateway safety controls |
 | **Local-First + BYOK** | Your data and keys stay with you |
 
+<p align="center">
+  <img src="screenshots/cowork-os-main1.png" alt="CoWork OS Interface" width="700">
+  <br>
+  <em>Switch between Modern (default) and Terminal visual themes with a real-time task timeline</em>
+</p>
+
 ### Platform Capability Overview
 
 - **Agent runtime and orchestration**: task-based execution, dynamic re-planning, intent-aware behavior, agent teams, collaborative mode, multi-LLM mode, agent comparison, and child-task controls.
@@ -352,14 +358,6 @@ After the data wipe, also remove remaining app binaries/shell package entries fr
   <em>CoWork OS achieves one of the highest security scores on <a href="https://zeroleaks.ai/">ZeroLeaks</a> — outperforming many commercial solutions in prompt injection resistance</em>
   <br>
   <a href="ZeroLeaks-Report-jn70f56art03m4rj7fp4b5k9p180aqfd.pdf">View Full Security Assessment Report</a>
-</p>
-
----
-
-<p align="center">
-  <img src="screenshots/cowork-os-main1.png" alt="CoWork OS Interface" width="700">
-  <br>
-  <em>Switch between Modern (default) and Terminal visual themes with a real-time task timeline</em>
 </p>
 
 ---

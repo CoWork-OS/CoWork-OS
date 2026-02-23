@@ -1183,6 +1183,11 @@ export class LLMProviderFactory {
 
     const builtIns = [
       {
+        type: "openrouter" as LLMProviderType,
+        name: "OpenRouter",
+        configured: !!settings.openrouter?.apiKey,
+      },
+      {
         type: "anthropic" as LLMProviderType,
         name: "Anthropic API",
         configured: !!settings.anthropic?.apiKey,
@@ -1191,11 +1196,6 @@ export class LLMProviderFactory {
         type: "gemini" as LLMProviderType,
         name: "Google Gemini",
         configured: !!settings.gemini?.apiKey,
-      },
-      {
-        type: "openrouter" as LLMProviderType,
-        name: "OpenRouter",
-        configured: !!settings.openrouter?.apiKey,
       },
       {
         type: "openai" as LLMProviderType,

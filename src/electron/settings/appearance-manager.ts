@@ -20,7 +20,7 @@ import { getUserDataDir } from "../utils/user-data-dir";
 const LEGACY_SETTINGS_FILE = "appearance-settings.json";
 
 const DEFAULT_SETTINGS: AppearanceSettings = {
-  themeMode: "dark",
+  themeMode: "system",
   visualTheme: "warm",
   accentColor: "cyan",
   uiDensity: "focused",

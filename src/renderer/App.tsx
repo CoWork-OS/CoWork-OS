@@ -1202,21 +1202,21 @@ export function App() {
     );
   }
 
-  // Show disclaimer modal on first launch
+  // Show onboarding on first launch
+  if (!onboardingCompleted) {
+    return (
+      <div className="app">
+        <Onboarding onComplete={handleOnboardingComplete} />
+      </div>
+    );
+  }
+
+  // Show disclaimer after onboarding is completed but before main app
   if (!disclaimerAccepted) {
     return (
       <div className="app">
         <div className="title-bar" />
         <DisclaimerModal onAccept={handleDisclaimerAccept} />
-      </div>
-    );
-  }
-
-  // Show cinematic onboarding after disclaimer is accepted but before main app
-  if (!onboardingCompleted) {
-    return (
-      <div className="app">
-        <Onboarding onComplete={handleOnboardingComplete} />
       </div>
     );
   }

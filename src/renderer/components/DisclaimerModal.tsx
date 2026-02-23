@@ -19,8 +19,7 @@ export function DisclaimerModal({ onAccept }: DisclaimerModalProps) {
       <div className="disclaimer-container">
         {/* Logo */}
         <div className="disclaimer-logo">
-          <span className="disclaimer-logo-text">CoWork</span>
-          <span className="disclaimer-logo-separator">—</span>
+          <span className="disclaimer-logo-text">CoWork </span>
           <span className="disclaimer-logo-os">OS</span>
         </div>
         <div className="disclaimer-subtitle">Agentic Task Automation</div>
@@ -54,7 +53,9 @@ export function DisclaimerModal({ onAccept }: DisclaimerModalProps) {
                 <li>Read, write, and delete files in your workspace</li>
                 <li>Access the network and external services</li>
                 <li>Control browser automation</li>
-                <li>Interact with any tools you enable</li>
+                <li>Send and receive messages on connected channels (WhatsApp, Telegram, Slack, etc.)</li>
+                <li>Access connected enterprise services and cloud storage</li>
+                <li>Run skills, plugins, and any tools you enable</li>
               </ul>
             </div>
 
@@ -63,6 +64,7 @@ export function DisclaimerModal({ onAccept }: DisclaimerModalProps) {
               <ul>
                 <li>AI agents can make mistakes or be manipulated</li>
                 <li>Commands may have unintended side effects</li>
+                <li>Agents may send messages or take actions on your behalf</li>
                 <li>Sensitive data could be exposed if not careful</li>
                 <li>Always review commands before approving them</li>
               </ul>
@@ -73,6 +75,7 @@ export function DisclaimerModal({ onAccept }: DisclaimerModalProps) {
               <ul>
                 <li>Start with restrictive workspace permissions</li>
                 <li>Use Settings → Guardrails to limit agent capabilities</li>
+                <li>Use pairing codes and allowlists for messaging channels</li>
                 <li>Review and understand each approval request</li>
                 <li>Keep sensitive files outside your workspace</li>
               </ul>

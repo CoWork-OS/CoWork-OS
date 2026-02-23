@@ -13969,11 +13969,6 @@ button {
   letter-spacing: -0.5px;
 }
 
-.disclaimer-logo-separator {
-  font-size: 24px;
-  color: var(--color-text-muted, rgba(255, 255, 255, 0.35));
-  font-weight: 300;
-}
 
 .disclaimer-logo-os {
   font-size: 28px;
@@ -14297,9 +14292,6 @@ button {
   color: #1a1a1a;
 }
 
-.theme-light .disclaimer-logo-separator {
-  color: #ccc;
-}
 
 .theme-light .disclaimer-subtitle {
   color: #999;

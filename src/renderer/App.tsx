@@ -26,7 +26,9 @@ import {
   ApprovalRequest,
   isTempWorkspaceId,
   ImageAttachment,
+  MultiLlmConfig,
 } from "../shared/types";
+import { TASK_EVENT_STATUS_MAP } from "../shared/task-event-status-map";
 import { applyPersistedLanguage } from "./i18n";
 
 // Helper to get effective theme based on system preference
@@ -90,7 +92,7 @@ export function App() {
   // Model selection state
   const [selectedModel, setSelectedModel] = useState<string>("opus-4-5");
   const [availableModels, setAvailableModels] = useState<LLMModelInfo[]>([]);
-  const [_availableProviders, setAvailableProviders] = useState<LLMProviderInfo[]>([]);
+  const [availableProviders, setAvailableProviders] = useState<LLMProviderInfo[]>([]);
 
   // Update notification state
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
@@ -638,24 +640,6 @@ export function App() {
 
     const unsubscribe = window.electronAPI.onTaskEvent((event: TaskEvent) => {
       // Update task status based on event type
-      const statusMap: Record<string, Task["status"]> = {
-        task_created: "pending",
-        task_queued: "queued",
-        task_dequeued: "planning",
-        executing: "executing",
-        step_started: "executing",
-        step_completed: "executing",
-        tool_call: "executing",
-        tool_result: "executing",
-        task_completed: "completed",
-        task_paused: "paused",
-        approval_requested: "blocked",
-        approval_granted: "executing",
-        approval_denied: "failed",
-        error: "failed",
-        task_cancelled: "cancelled",
-      };
-
       // Check if this is a new task we don't know about (e.g., sub-agent created)
       const isNewTask = !tasksRef.current.some((t) => t.id === event.taskId);
       if (isNewTask && event.type === "task_created") {
@@ -665,7 +649,7 @@ export function App() {
       }
 
       const newStatus =
-        event.type === "task_status" ? event.payload?.status : statusMap[event.type];
+        event.type === "task_status" ? event.payload?.status : TASK_EVENT_STATUS_MAP[event.type];
       const isAutoApprovalRequested =
         event.type === "approval_requested" && event.payload?.autoApproved === true;
       const isSessionAutoApproval =
@@ -857,7 +841,24 @@ export function App() {
       }
 
       // Add event to events list if it's for the selected task
-      if (event.taskId === selectedTaskId) {
+      const isSelectedTask = event.taskId === selectedTaskId;
+
+      // For collaborative/multi-LLM roots, also capture file events from child tasks
+      const isChildFileEvent =
+        !isSelectedTask &&
+        (event.type === "file_created" ||
+          event.type === "file_modified" ||
+          event.type === "file_deleted") &&
+        (() => {
+          const childTask = tasksRef.current.find((t) => t.id === event.taskId);
+          if (!childTask?.parentTaskId || childTask.parentTaskId !== selectedTaskId) return false;
+          const parentTask = tasksRef.current.find((t) => t.id === selectedTaskId);
+          return !!(
+            parentTask?.agentConfig?.collaborativeMode || parentTask?.agentConfig?.multiLlmMode
+          );
+        })();
+
+      if (isSelectedTask || isChildFileEvent) {
         if (event.type === "llm_streaming") {
           // Replace the previous streaming event to avoid array bloat
           setEvents((prev) => {
@@ -959,20 +960,45 @@ export function App() {
     prompt: string,
     options?: {
       autonomousMode?: boolean;
+      collaborativeMode?: boolean;
+      multiLlmMode?: boolean;
+      multiLlmConfig?: MultiLlmConfig;
     },
     images?: ImageAttachment[],
   ) => {
     if (!currentWorkspace) return;
-    if (options?.autonomousMode) {
+    const requestedAutonomous = options?.autonomousMode === true;
+    const requestedCollaborative = options?.collaborativeMode === true;
+    const requestedMultiLlm = options?.multiLlmMode === true;
+    const autonomousMode = requestedAutonomous && !requestedCollaborative && !requestedMultiLlm;
+    const collaborativeMode = requestedCollaborative && !requestedMultiLlm;
+    const multiLlmMode = requestedMultiLlm;
+
+    if (requestedAutonomous && requestedCollaborative) {
+      addToast({
+        type: "info",
+        title: "Collaborative mode selected",
+        message: "Autonomous mode is disabled when collaborative mode is enabled.",
+      });
+    }
+
+    if (autonomousMode) {
       const shouldContinue = window.confirm(
         "Autonomous mode allows the agent to proceed without manual confirmation on gated actions. Continue?",
       );
       if (!shouldContinue) return;
     }
 
-    const agentConfig = options?.autonomousMode
-      ? { allowUserInput: false, autonomousMode: true }
-      : undefined;
+    const agentConfig =
+      autonomousMode || collaborativeMode || multiLlmMode
+        ? {
+            ...(autonomousMode ? { allowUserInput: false, autonomousMode: true } : {}),
+            ...(collaborativeMode ? { collaborativeMode: true } : {}),
+            ...(multiLlmMode
+              ? { multiLlmMode: true, multiLlmConfig: options?.multiLlmConfig }
+              : {}),
+          }
+        : undefined;
 
     try {
       const task = await window.electronAPI.createTask({
@@ -1050,6 +1076,23 @@ export function App() {
     } catch (error: unknown) {
       console.error("Failed to cancel task:", error);
       const errorMessage = error instanceof Error ? error.message : "Failed to cancel task";
+      addToast({ type: "error", title: "Error", message: errorMessage });
+    }
+  };
+
+  const handleWrapUpTask = async () => {
+    if (!selectedTaskId) return;
+
+    try {
+      const collaborativeRun = await window.electronAPI.findTeamRunByRootTask(selectedTaskId);
+      if (collaborativeRun?.collaborativeMode && collaborativeRun.status === "running") {
+        await window.electronAPI.wrapUpTeamRun(collaborativeRun.id);
+      } else {
+        await window.electronAPI.wrapUpTask(selectedTaskId);
+      }
+    } catch (error: unknown) {
+      console.error("Failed to wrap up task:", error);
+      const errorMessage = error instanceof Error ? error.message : "Failed to wrap up task";
       addToast({ type: "error", title: "Error", message: errorMessage });
     }
   };
@@ -1423,10 +1466,12 @@ export function App() {
                 setCurrentView("settings");
               }}
               onStopTask={handleCancelTask}
+              onWrapUpTask={handleWrapUpTask}
               onOpenBrowserView={handleOpenBrowserView}
               selectedModel={selectedModel}
               availableModels={availableModels}
               onModelChange={handleModelChange}
+              availableProviders={availableProviders}
               uiDensity={uiDensity}
             />
             {!effectiveRightCollapsed && (

@@ -13,7 +13,11 @@ import {
   CanvasSession,
   isTempWorkspaceId,
   ImageAttachment,
+  AgentTeamRun,
+  MultiLlmConfig,
 } from "../../shared/types";
+import { CollaborativeThoughtsPanel } from "./CollaborativeThoughtsPanel";
+import { MultiLlmSelectionPanel } from "./MultiLlmSelectionPanel";
 import { isVerificationStepDescription } from "../../shared/plan-utils";
 import type { AgentRoleData } from "../../electron/preload";
 import { useVoiceInput } from "../hooks/useVoiceInput";
@@ -1166,6 +1170,9 @@ function ClickableFilePath({
 
 interface CreateTaskOptions {
   autonomousMode?: boolean;
+  collaborativeMode?: boolean;
+  multiLlmMode?: boolean;
+  multiLlmConfig?: import("../../shared/types").MultiLlmConfig;
 }
 
 type SettingsTab =
@@ -1522,10 +1529,12 @@ interface MainContentProps {
   onSelectWorkspace?: (workspace: Workspace) => void;
   onOpenSettings?: (tab?: SettingsTab) => void;
   onStopTask?: () => void;
+  onWrapUpTask?: () => void;
   onOpenBrowserView?: (url?: string) => void;
   selectedModel: string;
   availableModels: LLMModelInfo[];
   onModelChange: (model: string) => void;
+  availableProviders?: Array<{ type: string; name: string; configured: boolean }>;
   uiDensity?: "focused" | "full";
 }
 
@@ -1549,10 +1558,12 @@ export function MainContent({
   onSelectWorkspace,
   onOpenSettings,
   onStopTask,
+  onWrapUpTask,
   onOpenBrowserView,
   selectedModel,
   availableModels,
   onModelChange,
+  availableProviders = [],
   uiDensity = "focused",
 }: MainContentProps) {
   // Agent personality context for personalized messages
@@ -1590,6 +1601,35 @@ export function MainContent({
   });
   // Autonomous mode state
   const [autonomousModeEnabled, setAutonomousModeEnabled] = useState(false);
+  const [collaborativeModeEnabled, setCollaborativeModeEnabled] = useState(false);
+  const [multiLlmModeEnabled, setMultiLlmModeEnabled] = useState(false);
+  const [multiLlmConfig, setMultiLlmConfig] = useState<MultiLlmConfig | null>(null);
+  const setAutonomousModeSelection = useCallback((enabled: boolean) => {
+    setAutonomousModeEnabled(enabled);
+    if (enabled) {
+      setCollaborativeModeEnabled(false);
+      setMultiLlmModeEnabled(false);
+    }
+  }, []);
+  const setCollaborativeModeSelection = useCallback((enabled: boolean) => {
+    setCollaborativeModeEnabled(enabled);
+    if (enabled) {
+      setAutonomousModeEnabled(false);
+      setMultiLlmModeEnabled(false);
+    }
+  }, []);
+  const setMultiLlmModeSelection = useCallback((enabled: boolean) => {
+    setMultiLlmModeEnabled(enabled);
+    if (enabled) {
+      setAutonomousModeEnabled(false);
+      setCollaborativeModeEnabled(false);
+    }
+    if (!enabled) {
+      setMultiLlmConfig(null);
+    }
+  }, []);
+  // Collaborative team run detection for current task
+  const [collaborativeRun, setCollaborativeRun] = useState<AgentTeamRun | null>(null);
   const [showSteps, setShowSteps] = useState(true);
   const [autoScroll, setAutoScroll] = useState(true);
   // Track toggled events by ID for stable state across filtering
@@ -1599,6 +1639,34 @@ export function MainContent({
   const [showSkillsMenu, setShowSkillsMenu] = useState(false);
   const [skillsSearchQuery, setSkillsSearchQuery] = useState("");
   const [selectedSkillForParams, setSelectedSkillForParams] = useState<CustomSkill | null>(null);
+  // Track wrap-up requested state for button feedback
+  const [wrappingUp, setWrappingUp] = useState(false);
+
+  // Detect if the current task is a collaborative team run
+  useEffect(() => {
+    if (!task?.id) {
+      setCollaborativeRun(null);
+      return;
+    }
+
+    const unsubRun = window.electronAPI.onTeamRunEvent((event: any) => {
+      if (event.run?.rootTaskId === task.id && event.run?.collaborativeMode) {
+        setCollaborativeRun(event.run as AgentTeamRun);
+      }
+    });
+
+    window.electronAPI
+      .findTeamRunByRootTask(task.id)
+      .then((run: AgentTeamRun | null) => {
+        if (run?.collaborativeMode) setCollaborativeRun(run);
+        else setCollaborativeRun(null);
+      })
+      .catch(() => setCollaborativeRun(null));
+
+    return () => {
+      unsubRun();
+    };
+  }, [task?.id]);
 
   // Voice input hook
   const [showVoiceNotConfigured, setShowVoiceNotConfigured] = useState(false);
@@ -1723,6 +1791,14 @@ export function MainContent({
 
     return false;
   }, [task, events]);
+
+  // Reset wrappingUp state when task stops working or task changes
+  useEffect(() => {
+    if (!isTaskWorking) setWrappingUp(false);
+  }, [isTaskWorking]);
+  useEffect(() => {
+    setWrappingUp(false);
+  }, [task?.id]);
 
   // Extract latest streaming progress for the live token counter
   const streamingProgress = useMemo(() => {
@@ -2787,12 +2863,20 @@ export function MainContent({
           trimmedInput ||
           (pendingAttachments[0]?.name ? `Review ${pendingAttachments[0].name}` : "New task");
         const title = buildTaskTitle(titleSource);
-        const options: CreateTaskOptions | undefined = autonomousModeEnabled
-          ? { autonomousMode: true }
-          : undefined;
+        const options: CreateTaskOptions | undefined =
+          multiLlmModeEnabled && multiLlmConfig
+            ? { multiLlmMode: true, multiLlmConfig }
+            : collaborativeModeEnabled
+              ? { collaborativeMode: true }
+              : autonomousModeEnabled
+                ? { autonomousMode: true }
+                : undefined;
         onCreateTask(title, message, options, imagePayload);
         // Reset task mode state
         setAutonomousModeEnabled(false);
+        setCollaborativeModeEnabled(false);
+        setMultiLlmModeEnabled(false);
+        setMultiLlmConfig(null);
       } else {
         // Task is selected (even if not in current list) - send follow-up message
         onSendMessage(message, imagePayload);
@@ -3563,16 +3647,37 @@ export function MainContent({
                     <input
                       type="checkbox"
                       checked={autonomousModeEnabled}
-                      onChange={(e) => setAutonomousModeEnabled(e.target.checked)}
+                      onChange={(e) => setAutonomousModeSelection(e.target.checked)}
                     />
                     <span className="goal-mode-label">Autonomous mode</span>
                     <span className="goal-mode-hint">
                       Skip confirmation prompts and keep working
                     </span>
                   </label>
+                  <label className="goal-mode-toggle">
+                    <input
+                      type="checkbox"
+                      checked={collaborativeModeEnabled}
+                      onChange={(e) => setCollaborativeModeSelection(e.target.checked)}
+                    />
+                    <span className="goal-mode-label">Collaborative mode</span>
+                    <span className="goal-mode-hint">
+                      Auto-assemble a team to analyze from multiple perspectives
+                    </span>
+                  </label>
+                  <label className="goal-mode-toggle">
+                    <input
+                      type="checkbox"
+                      checked={multiLlmModeEnabled}
+                      onChange={(e) => setMultiLlmModeSelection(e.target.checked)}
+                    />
+                    <span className="goal-mode-label">Multi-LLM mode</span>
+                    <span className="goal-mode-hint">
+                      Send to multiple LLMs and have a judge synthesize results
+                    </span>
+                  </label>
                 </div>
               )}
-
               <div className="welcome-input-footer">
                 <div className="input-left-actions">
                   <button
@@ -3694,7 +3799,7 @@ export function MainContent({
                             <button
                               className="goal-mode-toggle"
                               style={{ margin: 0 }}
-                              onClick={() => setAutonomousModeEnabled((prev) => !prev)}
+                              onClick={() => setAutonomousModeSelection(!autonomousModeEnabled)}
                               role="menuitemcheckbox"
                               aria-checked={autonomousModeEnabled}
                               data-overflow-menu-item
@@ -3704,6 +3809,40 @@ export function MainContent({
                               </span>
                             </button>
                           </div>
+                          <div className="overflow-menu-item" role="none">
+                            <button
+                              className="goal-mode-toggle"
+                              style={{ margin: 0 }}
+                              onClick={() =>
+                                setCollaborativeModeSelection(!collaborativeModeEnabled)
+                              }
+                              role="menuitemcheckbox"
+                              aria-checked={collaborativeModeEnabled}
+                              data-overflow-menu-item
+                            >
+                              <span className="goal-mode-label">
+                                Collab {collaborativeModeEnabled ? "ON" : "OFF"}
+                              </span>
+                            </button>
+                          </div>
+                          {availableProviders.filter((p) => p.configured).length >= 2 && (
+                            <div className="overflow-menu-item" role="none">
+                              <button
+                                className="goal-mode-toggle"
+                                style={{ margin: 0 }}
+                                onClick={() =>
+                                  setMultiLlmModeSelection(!multiLlmModeEnabled)
+                                }
+                                role="menuitemcheckbox"
+                                aria-checked={multiLlmModeEnabled}
+                                data-overflow-menu-item
+                              >
+                                <span className="goal-mode-label">
+                                  Multi-LLM {multiLlmModeEnabled ? "ON" : "OFF"}
+                                </span>
+                              </button>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -4096,6 +4235,12 @@ export function MainContent({
                   )}
                 </div>
               </div>
+              {multiLlmModeEnabled && (
+                <MultiLlmSelectionPanel
+                  availableProviders={availableProviders}
+                  onConfigChange={setMultiLlmConfig}
+                />
+              )}
             </div>
           </div>
         </div>
@@ -4265,6 +4410,21 @@ export function MainContent({
                   </button>
                 </>
               )}
+            </div>
+          )}
+
+          {/* Collaborative / Multi-LLM Thoughts - shown in main area when task has a collaborative run */}
+          {collaborativeRun && (
+            <div className="collaborative-thoughts-main">
+              <CollaborativeThoughtsPanel
+                teamRunId={collaborativeRun.id}
+                teamId={collaborativeRun.teamId}
+                runPhase={collaborativeRun.phase}
+                mode={collaborativeRun.multiLlmMode ? "multi-llm" : "collaborative"}
+                isRunning={collaborativeRun.status === "running"}
+                onWrapUp={onWrapUpTask ? () => { if (!wrappingUp) { setWrappingUp(true); onWrapUpTask(); } } : undefined}
+                isWrappingUp={wrappingUp}
+              />
             </div>
           )}
 
@@ -4527,6 +4687,25 @@ export function MainContent({
         </div>
       </div>
 
+      {/* Scroll to bottom button */}
+      {!autoScroll && task && (
+        <button
+          className="scroll-to-bottom-btn"
+          onClick={() => {
+            if (mainBodyRef.current) {
+              mainBodyRef.current.scrollTo({
+                top: mainBodyRef.current.scrollHeight,
+                behavior: "smooth",
+              });
+              setAutoScroll(true);
+            }
+          }}
+          title="Scroll to bottom"
+        >
+          ↓
+        </button>
+      )}
+
       {/* Footer with Input */}
       <div className="main-footer">
         {renderAttachmentPanel()}
@@ -4784,18 +4963,20 @@ export function MainContent({
                 )}
               </button>
               {isTaskWorking && onStopTask ? (
-                <button className="stop-btn-simple" onClick={onStopTask} title="Stop task">
-                  <svg
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  >
-                    <rect x="3" y="3" width="18" height="18" rx="2" />
-                  </svg>
-                </button>
+                <div className="task-control-buttons">
+                  <button className="stop-btn-simple" onClick={onStopTask} title="Stop task">
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                    >
+                      <rect x="3" y="3" width="18" height="18" rx="2" />
+                    </svg>
+                  </button>
+                </div>
               ) : (
                 <button
                   className="lets-go-btn lets-go-btn-sm"

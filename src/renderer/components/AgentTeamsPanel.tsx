@@ -117,6 +117,7 @@ export function AgentTeamsPanel({ workspaceId, agents, tasks, onOpenTask }: Agen
   // New Run form
   const [newRunRootTaskId, setNewRunRootTaskId] = useState("");
   const [newRunStartNow, setNewRunStartNow] = useState(true);
+  const [newRunCollaborative, setNewRunCollaborative] = useState(false);
 
   // New Item form
   const [newItemTitle, setNewItemTitle] = useState("");
@@ -542,6 +543,7 @@ export function AgentTeamsPanel({ workspaceId, agents, tasks, onOpenTask }: Agen
         teamId: selectedTeamId,
         rootTaskId: newRunRootTaskId,
         status: newRunStartNow ? "running" : "pending",
+        collaborativeMode: newRunCollaborative,
       });
       setRuns((prev) => [run, ...prev]);
       setSelectedRunId(run.id);
@@ -549,7 +551,7 @@ export function AgentTeamsPanel({ workspaceId, agents, tasks, onOpenTask }: Agen
       console.error("Failed to create team run:", err);
       setError(err?.message || "Failed to create team run");
     }
-  }, [selectedTeamId, newRunRootTaskId, newRunStartNow]);
+  }, [selectedTeamId, newRunRootTaskId, newRunStartNow, newRunCollaborative]);
 
   const selectedRun = useMemo(
     () => (selectedRunId ? runs.find((r) => r.id === selectedRunId) : undefined),
@@ -1113,6 +1115,14 @@ export function AgentTeamsPanel({ workspaceId, agents, tasks, onOpenTask }: Agen
                     onChange={(e) => setNewRunStartNow(e.target.checked)}
                   />
                 </label>
+                <label className="mc-field mc-field-inline">
+                  <span>Collaborative</span>
+                  <input
+                    type="checkbox"
+                    checked={newRunCollaborative}
+                    onChange={(e) => setNewRunCollaborative(e.target.checked)}
+                  />
+                </label>
                 <button className="mc-btn primary" onClick={() => void handleCreateRun()}>
                   Create run
                 </button>
@@ -1136,6 +1146,7 @@ export function AgentTeamsPanel({ workspaceId, agents, tasks, onOpenTask }: Agen
                           >
                             {runStatusLabel(r.status)}
                           </span>
+                          {r.collaborativeMode && <span className="mc-pill info">COLLAB</span>}
                           <span className="mc-muted">{formatTime(r.startedAt)}</span>
                         </div>
                         <div className="mc-run-row-title">{root?.title || r.rootTaskId}</div>

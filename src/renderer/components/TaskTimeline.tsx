@@ -110,6 +110,22 @@ export function TaskTimeline({ events, agentContext }: TaskTimelineProps) {
         return <ThemeIcon emoji="✅" icon={<CheckIcon size={16} />} />;
       case "context_summarized":
         return <ThemeIcon emoji="📝" icon={<BookIcon size={16} />} />;
+      case "worktree_created":
+        return <ThemeIcon emoji="🌿" icon={<DotIcon size={8} />} />;
+      case "worktree_committed":
+        return <ThemeIcon emoji="💾" icon={<CheckIcon size={16} />} />;
+      case "worktree_merge_start":
+        return <ThemeIcon emoji="🔀" icon={<DotIcon size={8} />} />;
+      case "worktree_merged":
+        return <ThemeIcon emoji="✅" icon={<CheckIcon size={16} />} />;
+      case "worktree_conflict":
+        return <ThemeIcon emoji="⚠️" icon={<AlertTriangleIcon size={16} />} />;
+      case "worktree_cleaned":
+        return <ThemeIcon emoji="🧹" icon={<DotIcon size={8} />} />;
+      case "comparison_started":
+        return <ThemeIcon emoji="⚔️" icon={<ZapIcon size={16} />} />;
+      case "comparison_completed":
+        return <ThemeIcon emoji="📊" icon={<CheckIcon size={16} />} />;
       default:
         return <ThemeIcon emoji="•" icon={<DotIcon size={8} />} />;
     }
@@ -170,6 +186,22 @@ export function TaskTimeline({ events, agentContext }: TaskTimelineProps) {
       }
       case "log":
         return event.payload.message;
+      case "worktree_created":
+        return event.payload.message || `Created worktree branch: ${event.payload.branch || ""}`;
+      case "worktree_committed":
+        return event.payload.message || "Changes committed";
+      case "worktree_merge_start":
+        return event.payload.message || "Merging to base branch...";
+      case "worktree_merged":
+        return event.payload.message || "Branch merged successfully";
+      case "worktree_conflict":
+        return event.payload.message || "Merge conflict detected";
+      case "worktree_cleaned":
+        return event.payload.message || "Worktree cleaned up";
+      case "comparison_started":
+        return event.payload.message || "Comparison session started";
+      case "comparison_completed":
+        return event.payload.message || "Comparison session completed";
       default:
         return event.type;
     }

@@ -17,6 +17,7 @@ export type OnboardingState =
   | "ask_memory_trust"
   | "confirm_memory_trust"
   | "transition_setup"
+  | "ollama_detected"
   | "llm_setup"
   | "llm_api_key"
   | "llm_testing"
@@ -66,6 +67,8 @@ const SCRIPT = {
   confirm_memory_trust_off:
     "Understood. I'll keep memory fully off with no memory storage for now. You can enable it later in Settings > Memory.",
   transition_setup: "Final setup step: choose the AI model that should power me.",
+  ollama_detected: (modelName: string) =>
+    `I found ${modelName} running locally on your machine via Ollama. Want to use it?`,
   llm_intro: "This engine drives my reasoning and task execution. Pick what fits you best.",
   llm_selected: (provider: string) => {
     const responses: Record<string, string> = {
@@ -105,6 +108,7 @@ interface OnboardingData {
   selectedProvider: LLMProviderType | null;
   apiKey: string;
   ollamaUrl: string;
+  detectedOllamaModel: string | null;
 }
 
 type RecapEditTarget = "name" | "persona" | "voice" | "style" | "memory" | "model";
@@ -121,6 +125,7 @@ interface OnboardingResumeSnapshot {
   showStyleImplications: boolean;
   showPersonaOptions: boolean;
   showVoiceOptions: boolean;
+  showOllamaDetection: boolean;
   styleCountdown: number;
   testResult: {
     success: boolean;
@@ -138,6 +143,7 @@ const INITIAL_ONBOARDING_DATA: OnboardingData = {
   selectedProvider: null,
   apiKey: "",
   ollamaUrl: "http://localhost:11434",
+  detectedOllamaModel: null,
 };
 
 const ONBOARDING_RESUME_KEY = "cowork:onboarding:flow:v1";
@@ -159,6 +165,7 @@ const ONBOARDING_STATES: OnboardingState[] = [
   "ask_memory_trust",
   "confirm_memory_trust",
   "transition_setup",
+  "ollama_detected",
   "llm_setup",
   "llm_api_key",
   "llm_testing",
@@ -208,6 +215,10 @@ const getFallbackTextForState = (
       return data.memoryEnabled ? SCRIPT.confirm_memory_trust_on : SCRIPT.confirm_memory_trust_off;
     case "transition_setup":
       return SCRIPT.transition_setup;
+    case "ollama_detected":
+      return data.detectedOllamaModel
+        ? SCRIPT.ollama_detected(data.detectedOllamaModel)
+        : "I found a local AI model. Want to use it?";
     case "llm_setup":
       return SCRIPT.llm_intro;
     case "llm_api_key":
@@ -233,6 +244,7 @@ const getRequiredUiForState = (state: OnboardingState) => ({
   showApiInput: state === "llm_api_key",
   showPersonaOptions: state === "ask_persona",
   showVoiceOptions: state === "ask_voice",
+  showOllamaDetection: state === "ollama_detected",
 });
 
 const sanitizeOnboardingData = (value: OnboardingData): OnboardingData => ({
@@ -273,6 +285,7 @@ const parseResumeSnapshot = (value: unknown): OnboardingResumeSnapshot | null =>
     showStyleImplications: !!candidate.showStyleImplications,
     showPersonaOptions: requiredUi.showPersonaOptions || !!candidate.showPersonaOptions,
     showVoiceOptions: requiredUi.showVoiceOptions || !!candidate.showVoiceOptions,
+    showOllamaDetection: requiredUi.showOllamaDetection || !!candidate.showOllamaDetection,
     styleCountdown: Number(candidate.styleCountdown || 0),
     testResult:
       candidate.testResult && typeof candidate.testResult === "object"
@@ -341,6 +354,7 @@ export function useOnboardingFlow({ onComplete }: UseOnboardingOptions) {
   const [showStyleImplications, setShowStyleImplications] = useState(false);
   const [showPersonaOptions, setShowPersonaOptions] = useState(false);
   const [showVoiceOptions, setShowVoiceOptions] = useState(false);
+  const [showOllamaDetection, setShowOllamaDetection] = useState(false);
   const [styleCountdown, setStyleCountdown] = useState(0);
   const [testResult, setTestResult] = useState<{
     success: boolean;
@@ -388,6 +402,7 @@ export function useOnboardingFlow({ onComplete }: UseOnboardingOptions) {
     setShowStyleImplications(false);
     setShowPersonaOptions(false);
     setShowVoiceOptions(false);
+    setShowOllamaDetection(false);
     setStyleCountdown(0);
     setTestResult(null);
   }, [clearStyleCountdownInterval]);
@@ -402,6 +417,7 @@ export function useOnboardingFlow({ onComplete }: UseOnboardingOptions) {
     setShowStyleImplications(snapshot.showStyleImplications);
     setShowPersonaOptions(snapshot.showPersonaOptions);
     setShowVoiceOptions(snapshot.showVoiceOptions);
+    setShowOllamaDetection(snapshot.showOllamaDetection);
     setStyleCountdown(snapshot.styleCountdown);
     setTestResult(snapshot.testResult);
     setData(snapshot.data);
@@ -519,10 +535,43 @@ export function useOnboardingFlow({ onComplete }: UseOnboardingOptions) {
 
       case "transition_setup":
         timeoutRef.current = setTimeout(() => {
-          setState("llm_setup");
-          setCurrentText(SCRIPT.llm_intro);
-          setShowProviders(true);
+          // Probe for local Ollama server before showing provider picker
+          let settled = false;
+          const settle = (
+            models: Array<{ name: string; size: number; modified: string }> | null,
+          ) => {
+            if (settled) return;
+            settled = true;
+            if (models && models.length > 0) {
+              // Pick most recently modified model (proxy for last used)
+              const sorted = [...models].sort(
+                (a, b) => new Date(b.modified).getTime() - new Date(a.modified).getTime(),
+              );
+              const recommended = sorted[0].name;
+              setData((d) => ({ ...d, detectedOllamaModel: recommended }));
+              setState("ollama_detected");
+              setCurrentText(SCRIPT.ollama_detected(recommended));
+              setShowOllamaDetection(true);
+            } else {
+              // No Ollama or no models — fall through to normal provider picker
+              setState("llm_setup");
+              setCurrentText(SCRIPT.llm_intro);
+              setShowProviders(true);
+            }
+          };
+
+          window.electronAPI
+            .getOllamaModels()
+            .then((m) => settle(m))
+            .catch(() => settle(null));
+
+          // 3-second timeout fallback
+          setTimeout(() => settle(null), 3000);
         }, 1500);
+        break;
+
+      case "ollama_detected":
+        // User must explicitly accept or decline — no auto-transition
         break;
 
       case "llm_confirmed":
@@ -692,6 +741,7 @@ export function useOnboardingFlow({ onComplete }: UseOnboardingOptions) {
     "ask_work_style",
     "reflect_style",
     "ask_memory_trust",
+    "ollama_detected",
     "llm_setup",
     "llm_api_key",
     "recap",
@@ -750,6 +800,12 @@ export function useOnboardingFlow({ onComplete }: UseOnboardingOptions) {
         setState("ask_work_style");
         setCurrentText(SCRIPT.ask_work_style);
         setShowInput(true);
+        return;
+
+      case "ollama_detected":
+        setShowOllamaDetection(false);
+        setState("transition_setup");
+        setCurrentText(SCRIPT.transition_setup);
         return;
 
       case "llm_setup":
@@ -853,7 +909,8 @@ export function useOnboardingFlow({ onComplete }: UseOnboardingOptions) {
       } else if (provider === "openrouter") {
         settings.openrouter = { apiKey, model: "anthropic/claude-3.5-sonnet" };
       } else if (provider === "ollama") {
-        settings.ollama = { baseUrl: data.ollamaUrl, model: "llama3.2" };
+        const model = data.detectedOllamaModel || "llama3.2";
+        settings.ollama = { baseUrl: data.ollamaUrl, model };
       } else if (provider === "bedrock") {
         settings.bedrock = { region: "us-east-1", useDefaultCredentials: true };
       } else if (provider === "groq") {
@@ -940,6 +997,38 @@ export function useOnboardingFlow({ onComplete }: UseOnboardingOptions) {
     },
     [data.selectedProvider, buildTestConfig, buildSaveSettings],
   );
+
+  // Accept auto-detected Ollama provider
+  const acceptOllamaDetection = useCallback(async () => {
+    setShowOllamaDetection(false);
+    const modelName = data.detectedOllamaModel || "llama3.2";
+    setData((d) => ({ ...d, selectedProvider: "ollama" }));
+    setCurrentText(SCRIPT.llm_selected("ollama"));
+
+    timeoutRef.current = setTimeout(async () => {
+      const settings: Record<string, unknown> = {
+        providerType: "ollama",
+        modelKey: modelName,
+        ollama: { baseUrl: data.ollamaUrl, model: modelName },
+      };
+      try {
+        await window.electronAPI.saveLLMSettings(settings);
+        setState("llm_confirmed");
+        setCurrentText(SCRIPT.llm_success);
+      } catch {
+        setState("recap");
+        setCurrentText(SCRIPT.recap_intro(data.assistantName));
+      }
+    }, 1500);
+  }, [data.detectedOllamaModel, data.ollamaUrl, data.assistantName]);
+
+  // Decline auto-detected Ollama — show normal provider picker
+  const declineOllamaDetection = useCallback(() => {
+    setShowOllamaDetection(false);
+    setState("llm_setup");
+    setCurrentText(SCRIPT.llm_intro);
+    setShowProviders(true);
+  }, []);
 
   // Skip LLM setup
   const skipLLMSetup = useCallback(() => {
@@ -1058,6 +1147,7 @@ export function useOnboardingFlow({ onComplete }: UseOnboardingOptions) {
       showStyleImplications,
       showPersonaOptions,
       showVoiceOptions,
+      showOllamaDetection,
       styleCountdown,
       testResult,
       data: {
@@ -1077,6 +1167,7 @@ export function useOnboardingFlow({ onComplete }: UseOnboardingOptions) {
     showStyleImplications,
     showPersonaOptions,
     showVoiceOptions,
+    showOllamaDetection,
     styleCountdown,
     testResult,
     data,
@@ -1132,6 +1223,9 @@ export function useOnboardingFlow({ onComplete }: UseOnboardingOptions) {
     if (requiredUi.showVoiceOptions && !showVoiceOptions) {
       setShowVoiceOptions(true);
     }
+    if (requiredUi.showOllamaDetection && !showOllamaDetection) {
+      setShowOllamaDetection(true);
+    }
   }, [
     state,
     data,
@@ -1142,6 +1236,7 @@ export function useOnboardingFlow({ onComplete }: UseOnboardingOptions) {
     showApiInput,
     showPersonaOptions,
     showVoiceOptions,
+    showOllamaDetection,
   ]);
 
   return {
@@ -1154,6 +1249,7 @@ export function useOnboardingFlow({ onComplete }: UseOnboardingOptions) {
     showStyleImplications,
     showPersonaOptions,
     showVoiceOptions,
+    showOllamaDetection,
     styleCountdown,
     testResult,
     data,
@@ -1178,6 +1274,8 @@ export function useOnboardingFlow({ onComplete }: UseOnboardingOptions) {
     selectProvider,
     submitApiKey,
     skipLLMSetup,
+    acceptOllamaDetection,
+    declineOllamaDetection,
 
     // Update functions
     setApiKey: (key: string) => setData((d) => ({ ...d, apiKey: key })),

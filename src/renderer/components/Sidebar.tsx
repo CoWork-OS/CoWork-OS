@@ -13,6 +13,69 @@ interface SidebarProps {
   uiDensity?: UiDensity;
 }
 
+const HIDDEN_FOCUSED_STATUSES: ReadonlySet<Task["status"]> = new Set(["failed", "cancelled"]);
+
+export function compareTasksByPinAndRecency(a: Task, b: Task): number {
+  const pinnedDiff = Number(Boolean(b.pinned)) - Number(Boolean(a.pinned));
+  if (pinnedDiff !== 0) return pinnedDiff;
+  return b.createdAt - a.createdAt;
+}
+
+export function shouldShowRootTaskInSidebar(
+  task: Task,
+  uiDensity: UiDensity,
+  showFailedSessions: boolean,
+  hasPinnedDescendant = false,
+): boolean {
+  if (uiDensity !== "focused") return true;
+  if (showFailedSessions) return true;
+  if (task.pinned) return true;
+  if (hasPinnedDescendant) return true;
+  return !HIDDEN_FOCUSED_STATUSES.has(task.status);
+}
+
+export function countHiddenFailedSessions(tasks: Task[], uiDensity: UiDensity): number {
+  const cache = new Map<string, Task[]>();
+  for (const task of tasks) {
+    if (task.parentTaskId) {
+      const siblings = cache.get(task.parentTaskId) || [];
+      siblings.push(task);
+      cache.set(task.parentTaskId, siblings);
+    }
+  }
+
+  const hasPinnedDescendant = (taskId: string): boolean => {
+    const stack = [...(cache.get(taskId) || [])];
+    const seen = new Set<string>();
+
+    while (stack.length > 0) {
+      const task = stack.pop();
+      if (!task || seen.has(task.id)) continue;
+      seen.add(task.id);
+
+      if (task.pinned) return true;
+
+      const children = cache.get(task.id) || [];
+      for (const child of children) {
+        if (!seen.has(child.id)) {
+          stack.push(child);
+        }
+      }
+    }
+
+    return false;
+  };
+
+  if (uiDensity !== "focused") return 0;
+  return tasks.filter(
+    (task) =>
+      !task.parentTaskId &&
+      !task.pinned &&
+      !hasPinnedDescendant(task.id) &&
+      HIDDEN_FOCUSED_STATUSES.has(task.status),
+  ).length;
+}
+
 // Tree node structure for hierarchical display
 interface TaskTreeNode {
   task: Task;
@@ -35,6 +98,8 @@ export function Sidebar({
   const [renameValue, setRenameValue] = useState("");
   const [collapsedTasks, setCollapsedTasks] = useState<Set<string>>(new Set());
   const [showFailedSessions, setShowFailedSessions] = useState(false);
+  const [pinActionError, setPinActionError] = useState<string | null>(null);
+  const pinActionErrorTimeoutRef = useRef<number | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuButtonRef = useRef<Map<string, HTMLButtonElement>>(new Map());
   const renameInputRef = useRef<HTMLInputElement>(null);
@@ -52,12 +117,10 @@ export function Sidebar({
 
   // Build task tree from flat list
   const taskTree = useMemo(() => {
-    const taskMap = new Map<string, Task>();
     const childrenMap = new Map<string, Task[]>();
 
     // Index all tasks
     for (const task of tasks) {
-      taskMap.set(task.id, task);
       if (task.parentTaskId) {
         const siblings = childrenMap.get(task.parentTaskId) || [];
         siblings.push(task);
@@ -65,11 +128,33 @@ export function Sidebar({
       }
     }
 
+    const hasPinnedDescendant = (taskId: string): boolean => {
+      const stack = [...(childrenMap.get(taskId) || [])];
+      const seen = new Set<string>();
+
+      while (stack.length > 0) {
+        const task = stack.pop();
+        if (!task || seen.has(task.id)) continue;
+        seen.add(task.id);
+
+        if (task.pinned) return true;
+
+        const children = childrenMap.get(task.id) || [];
+        for (const child of children) {
+          if (!seen.has(child.id)) {
+            stack.push(child);
+          }
+        }
+      }
+
+      return false;
+    };
+
     // Build tree nodes recursively
     const buildNode = (task: Task): TaskTreeNode => {
       const children = childrenMap.get(task.id) || [];
-      // Sort children by creation time
-      children.sort((a, b) => a.createdAt - b.createdAt);
+      // Sort children: pinned sessions first, then newest first
+      children.sort(compareTasksByPinAndRecency);
       return {
         task,
         children: children.map(buildNode),
@@ -77,23 +162,28 @@ export function Sidebar({
     };
 
     // Get root tasks (no parent) and sort by creation time (newest first)
-    let rootTasks = tasks.filter((t) => !t.parentTaskId).sort((a, b) => b.createdAt - a.createdAt);
-
-    // In focused mode, hide failed/cancelled sessions by default
-    if (uiDensity === "focused" && !showFailedSessions) {
-      rootTasks = rootTasks.filter((t) => t.status !== "failed" && t.status !== "cancelled");
-    }
+    let rootTasks = tasks
+      .filter((t) => !t.parentTaskId)
+      .filter((t) =>
+        shouldShowRootTaskInSidebar(t, uiDensity, showFailedSessions, hasPinnedDescendant(t.id)),
+      )
+      .sort(compareTasksByPinAndRecency);
 
     return rootTasks.map(buildNode);
   }, [tasks, uiDensity, showFailedSessions]);
 
   // Count hidden failed sessions for the toggle label
   const failedSessionCount = useMemo(() => {
-    if (uiDensity !== "focused") return 0;
-    return tasks.filter(
-      (t) => !t.parentTaskId && (t.status === "failed" || t.status === "cancelled"),
-    ).length;
+    return countHiddenFailedSessions(tasks, uiDensity);
   }, [tasks, uiDensity]);
+
+  useEffect(() => {
+    return () => {
+      if (pinActionErrorTimeoutRef.current !== null) {
+        window.clearTimeout(pinActionErrorTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const focusedTaskEntries = useMemo(() => {
     if (uiDensity !== "focused") return [];
@@ -123,16 +213,45 @@ export function Sidebar({
   // Auto-collapse sub-agent trees in focused mode
   const hasInitializedCollapse = useRef(false);
   useEffect(() => {
-    if (uiDensity === "focused" && !hasInitializedCollapse.current) {
-      const parentsWithChildren = new Set<string>();
+    const parentByTaskId = new Map<string, string>();
+    const parentsWithChildren = new Set<string>();
+
+    for (const task of tasks) {
+      if (task.parentTaskId) {
+        parentByTaskId.set(task.id, task.parentTaskId);
+        parentsWithChildren.add(task.parentTaskId);
+      }
+    }
+
+    const expandAncestorsForPinned = (collapsed: Set<string>): void => {
       for (const task of tasks) {
-        if (task.parentTaskId) {
-          parentsWithChildren.add(task.parentTaskId);
+        if (!task.pinned) continue;
+
+        let currentParent = task.parentTaskId;
+        const seen = new Set<string>();
+        while (currentParent && !seen.has(currentParent)) {
+          seen.add(currentParent);
+          collapsed.delete(currentParent);
+          const nextParent = parentByTaskId.get(currentParent);
+          if (!nextParent) break;
+          currentParent = nextParent;
         }
       }
-      if (parentsWithChildren.size > 0) {
-        setCollapsedTasks(parentsWithChildren);
+    };
+
+    if (uiDensity === "focused") {
+      if (!hasInitializedCollapse.current) {
+        expandAncestorsForPinned(parentsWithChildren);
+        if (parentsWithChildren.size > 0) {
+          setCollapsedTasks(parentsWithChildren);
+        }
         hasInitializedCollapse.current = true;
+      } else {
+        setCollapsedTasks((prev) => {
+          const next = new Set(prev);
+          expandAncestorsForPinned(next);
+          return next;
+        });
       }
     }
     if (uiDensity === "full") {
@@ -245,6 +364,27 @@ export function Sidebar({
     }
     setRenameTaskId(null);
     setRenameValue("");
+  };
+
+  const handlePinClick = async (e: React.MouseEvent, task: Task) => {
+    e.stopPropagation();
+    setMenuOpenTaskId(null);
+    setPinActionError(null);
+    try {
+      await window.electronAPI.toggleTaskPin(task.id);
+      onTasksChanged();
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unable to update pin state. Please try again.";
+      console.error("Failed to toggle pin:", error);
+      setPinActionError(message);
+      if (pinActionErrorTimeoutRef.current !== null) {
+        window.clearTimeout(pinActionErrorTimeoutRef.current);
+      }
+      pinActionErrorTimeoutRef.current = window.setTimeout(() => {
+        setPinActionError(null);
+      }, 2500);
+    }
   };
 
   const handleRenameKeyDown = (e: React.KeyboardEvent, taskId: string) => {
@@ -501,8 +641,44 @@ export function Sidebar({
             {getStatusIndicator(task.status)}
           </span>
 
+          {task.pinned && (
+            <span className="cli-task-pinned" title="Pinned">
+              📌
+            </span>
+          )}
+
           {/* Agent type badge for sub-agents */}
           {getAgentTypeIndicator(task)}
+
+          {/* Git branch indicator for worktree-isolated tasks */}
+          {task.worktreeBranch && (
+            <span
+              className="cli-task-branch"
+              title={task.worktreeBranch}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                marginRight: "4px",
+                color: "var(--color-accent)",
+                opacity: 0.7,
+                flexShrink: 0,
+              }}
+            >
+              <svg
+                width="10"
+                height="10"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+              >
+                <line x1="6" y1="3" x2="6" y2="15" />
+                <circle cx="18" cy="6" r="3" />
+                <circle cx="6" cy="18" r="3" />
+                <path d="M18 9a9 9 0 0 1-9 9" />
+              </svg>
+            </span>
+          )}
 
           <div className="task-item-content cli-task-content">
             {renameTaskId === task.id ? (
@@ -562,6 +738,16 @@ export function Sidebar({
                 >
                   <span className="cli-menu-prefix">&gt;</span>
                   rename
+                </button>
+                <button
+                  className="task-item-menu-option cli-menu-option"
+                  role="menuitem"
+                  data-menu-option="pin"
+                  onClick={(e) => handlePinClick(e, task)}
+                  onKeyDown={(e) => handleMenuItemKeyDown(e, task.id)}
+                >
+                  <span className="cli-menu-prefix">&gt;</span>
+                  {task.pinned ? "unpin" : "pin"}
                 </button>
                 <button
                   className="task-item-menu-option task-item-menu-option-danger cli-menu-option cli-menu-danger"
@@ -626,6 +812,11 @@ export function Sidebar({
 
       {/* Sessions List */}
       <div className="task-list cli-task-list">
+        {pinActionError && (
+          <div className="cli-sidebar-error" role="alert">
+            {pinActionError}
+          </div>
+        )}
         <div className="task-list-header cli-list-header">
           <span className="cli-section-prompt">&gt;</span>
           <span className="terminal-only">SESSIONS</span>

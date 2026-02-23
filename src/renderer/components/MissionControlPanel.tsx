@@ -9,6 +9,7 @@ import {
   TaskBoardEvent,
 } from "../../electron/preload";
 import type { Task, Workspace } from "../../shared/types";
+import { TASK_EVENT_STATUS_MAP } from "../../shared/task-event-status-map";
 import { AgentRoleEditor } from "./AgentRoleEditor";
 import { ActivityFeed } from "./ActivityFeed";
 import { MentionInput } from "./MentionInput";
@@ -292,24 +293,6 @@ export function MissionControlPanel({ onClose: _onClose }: MissionControlPanelPr
     // Task events - handle new tasks and status updates
     const unsubscribeTaskEvents = window.electronAPI.onTaskEvent((event: any) => {
       const currentWorkspaceId = workspaceIdRef.current;
-      const statusMap: Record<string, Task["status"]> = {
-        task_created: "pending",
-        task_queued: "queued",
-        task_dequeued: "planning",
-        executing: "executing",
-        step_started: "executing",
-        step_completed: "executing",
-        tool_call: "executing",
-        tool_result: "executing",
-        task_completed: "completed",
-        task_paused: "paused",
-        approval_requested: "blocked",
-        approval_granted: "executing",
-        approval_denied: "failed",
-        error: "failed",
-        task_cancelled: "cancelled",
-      };
-
       const isAutoApprovalRequested =
         event.type === "approval_requested" && event.payload?.autoApproved === true;
 
@@ -335,7 +318,7 @@ export function MissionControlPanel({ onClose: _onClose }: MissionControlPanelPr
       }
 
       const newStatus =
-        event.type === "task_status" ? event.payload?.status : statusMap[event.type];
+        event.type === "task_status" ? event.payload?.status : TASK_EVENT_STATUS_MAP[event.type];
       if (newStatus && !isAutoApprovalRequested) {
         setTasks((prev) =>
           prev.map((task) =>

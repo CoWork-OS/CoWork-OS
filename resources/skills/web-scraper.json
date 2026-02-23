@@ -1,0 +1,33 @@
+{
+  "id": "web-scraper",
+  "name": "Web Scraper",
+  "description": "Scrape web pages with anti-bot bypass and structured data extraction using Scrapling.",
+  "icon": "🕸️",
+  "category": "Data",
+  "prompt": "# Web Scraper (Scrapling)\n\nScrape web pages with advanced anti-bot bypass, stealth browsing, and structured data extraction.\n\n## Available Tools\n\n- `scrape_page`: Scrape a single URL with anti-bot bypass\n- `scrape_multiple`: Batch scrape multiple URLs\n- `scrape_extract`: Extract structured data (tables, lists, headings)\n- `scrape_session`: Multi-step session with persistent state\n- `scraping_status`: Check if Scrapling is installed\n\n## Instructions\n\n1. First check if Scrapling is available using `scraping_status`\n2. Use the URL provided: {{url}}\n3. Choose the appropriate fetcher:\n   - `default`: Fast HTTP with TLS fingerprinting (try first)\n   - `stealth`: Cloudflare/Turnstile bypass (if default fails)\n   - `playwright`: Full browser for JS-heavy sites\n4. If a CSS selector is provided, use it: {{selector}}\n5. Extract the requested content and format it clearly\n6. If scraping fails with default fetcher, automatically retry with stealth\n\n## Output Format\n\nReturn the extracted data in a clean, readable format. For tables, use markdown tables. For lists, use bullet points. Include the page title and URL.",
+  "parameters": [
+    {
+      "name": "url",
+      "type": "string",
+      "description": "URL to scrape",
+      "required": true
+    },
+    {
+      "name": "selector",
+      "type": "string",
+      "description": "CSS selector for specific content (optional)",
+      "required": false
+    }
+  ],
+  "enabled": true,
+  "metadata": {
+    "version": "1.0.0",
+    "author": "cowork-os",
+    "routing": {
+      "useWhen": "Use when the user wants to scrape content from websites, especially sites with anti-bot protection, dynamic content, or structured data that needs extraction.",
+      "dontUseWhen": "Don't use for simple URL fetching where web_fetch works fine. Don't use for internal files or local content.",
+      "outputs": "Extracted web content including text, tables, links, images, and metadata.",
+      "successCriteria": "Successfully extracts the requested content from the target URL with clean formatting."
+    }
+  }
+}

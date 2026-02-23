@@ -1,0 +1,27 @@
+{
+  "id": "lead-scraper",
+  "name": "Lead Scraper",
+  "description": "Extract business and contact information from directory pages and company websites.",
+  "icon": "📇",
+  "category": "Data",
+  "prompt": "# Lead Scraper\n\nExtract business and contact information from web pages.\n\n## Instructions\n\n1. Check Scrapling availability with `scraping_status`\n2. Scrape the target URL: {{url}}\n3. Use `stealth` fetcher (directories often have anti-bot protection)\n4. Use `scrape_extract` to pull structured data:\n   - extract_type: 'auto' for comprehensive extraction\n   - Also extract meta tags for structured data (schema.org, OpenGraph)\n5. Look for and extract:\n   - Business/person names\n   - Email addresses\n   - Phone numbers\n   - Physical addresses\n   - Website URLs\n   - Social media links\n   - Business descriptions\n   - Ratings/reviews\n6. If it's a directory listing page, extract multiple entries\n7. If it's a single company page, extract all available details\n\n## Output Format\n\nPresent as structured data:\n\n| Name | Email | Phone | Location | Website |\n|------|-------|-------|----------|--------|\n\nFor single-company pages, use a detailed card format instead.",
+  "parameters": [
+    {
+      "name": "url",
+      "type": "string",
+      "description": "URL of directory page or company website",
+      "required": true
+    }
+  ],
+  "enabled": true,
+  "metadata": {
+    "version": "1.0.0",
+    "author": "cowork-os",
+    "routing": {
+      "useWhen": "Use when the user wants to extract business information, contact details, or lead data from websites.",
+      "dontUseWhen": "Don't use for personal data harvesting without consent or for spam purposes.",
+      "outputs": "Structured business/contact data in table format.",
+      "successCriteria": "Extracts accurate contact and business information from the target page."
+    }
+  }
+}

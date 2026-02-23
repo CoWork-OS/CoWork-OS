@@ -1,0 +1,33 @@
+{
+  "id": "content-monitor",
+  "name": "Content Monitor",
+  "description": "Monitor web pages for changes and extract updated content with scheduling support.",
+  "icon": "👁️",
+  "category": "Data",
+  "prompt": "# Content Monitor\n\nScrape a web page and extract its current content for monitoring purposes.\n\n## Instructions\n\n1. Check Scrapling availability with `scraping_status`\n2. Scrape the target URL: {{url}}\n3. Use the appropriate fetcher based on the site\n4. Extract the content from the specified section: {{selector}}\n5. If no selector is specified, extract the main content area\n6. Also extract:\n   - Page title\n   - Last modified date (if available from meta tags)\n   - Key headings and structure\n7. Format the content as a snapshot that can be compared over time\n\n## Scheduling\n\nIf the user wants recurring monitoring, use `schedule_task` to create a cron job that:\n- Runs this scrape at the requested interval\n- Compares new content with previous results\n- Reports any changes detected\n\n## Output Format\n\nProvide a content snapshot:\n- URL and timestamp\n- Page title\n- Extracted content (formatted)\n- Key data points that might change\n\nIf comparing with a previous snapshot, highlight what changed.",
+  "parameters": [
+    {
+      "name": "url",
+      "type": "string",
+      "description": "URL to monitor for changes",
+      "required": true
+    },
+    {
+      "name": "selector",
+      "type": "string",
+      "description": "CSS selector for the section to monitor (optional)",
+      "required": false
+    }
+  ],
+  "enabled": true,
+  "metadata": {
+    "version": "1.0.0",
+    "author": "cowork-os",
+    "routing": {
+      "useWhen": "Use when the user wants to monitor a webpage for changes, track content updates, or set up recurring content checks.",
+      "dontUseWhen": "Don't use for one-time scraping where web-scraper skill is more appropriate.",
+      "outputs": "Content snapshot with timestamp for comparison, optionally scheduled for recurring checks.",
+      "successCriteria": "Captures a clean content snapshot that can be compared with future scrapes to detect changes."
+    }
+  }
+}

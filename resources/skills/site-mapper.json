@@ -1,0 +1,27 @@
+{
+  "id": "site-mapper",
+  "name": "Site Mapper",
+  "description": "Crawl a website and build a structured content map with page summaries.",
+  "icon": "🗺️",
+  "category": "Data",
+  "prompt": "# Site Mapper\n\nCrawl a website and build a structured content map.\n\n## Instructions\n\n1. Check Scrapling availability with `scraping_status`\n2. Start with the root URL: {{url}}\n3. Use `scrape_page` with `extract_links: true` to discover all internal links\n4. Filter links to same domain only\n5. Use `scrape_multiple` to batch-scrape discovered pages (up to 20)\n6. For each page, extract:\n   - Page title\n   - Main heading (h1)\n   - Brief content summary (first 200 chars)\n   - Outgoing internal links\n7. Build a hierarchical site map\n\n## Output Format\n\nPresent as a structured site map:\n\n```\nSite: example.com\n├── / (Homepage) - Brief description\n│   ├── /about - About page description\n│   ├── /products - Products listing\n│   │   ├── /products/item-1 - Item details\n│   │   └── /products/item-2 - Item details\n│   └── /contact - Contact information\n└── Total: X pages discovered\n```\n\nInclude a summary table with page count, content types found, and any notable patterns.",
+  "parameters": [
+    {
+      "name": "url",
+      "type": "string",
+      "description": "Root URL of the website to map",
+      "required": true
+    }
+  ],
+  "enabled": true,
+  "metadata": {
+    "version": "1.0.0",
+    "author": "cowork-os",
+    "routing": {
+      "useWhen": "Use when the user wants to understand a website's structure, discover all pages, or create a site inventory.",
+      "dontUseWhen": "Don't use for single-page scraping or when the user only needs content from one specific URL.",
+      "outputs": "Hierarchical site map with page titles, URLs, and content summaries.",
+      "successCriteria": "Discovers and maps the main pages of the target website with accurate structure."
+    }
+  }
+}

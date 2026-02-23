@@ -205,7 +205,8 @@ export function CollaborativeThoughtsPanel({
     if (!scrollParent) return;
 
     const onScroll = () => {
-      const remaining = scrollParent!.scrollHeight - scrollParent!.scrollTop - scrollParent!.clientHeight;
+      const remaining =
+        scrollParent!.scrollHeight - scrollParent!.scrollTop - scrollParent!.clientHeight;
       stickToBottomRef.current = remaining <= 120;
     };
 
@@ -296,19 +297,14 @@ export function CollaborativeThoughtsPanel({
                 <span className="team-member-name" style={{ color: t.agentColor }}>
                   {t.agentDisplayName}
                 </span>
-                {t.agentRoleId === leaderAgentRoleId && (
-                  <span className="leader-badge">Judge</span>
-                )}
+                {t.agentRoleId === leaderAgentRoleId && <span className="leader-badge">Judge</span>}
               </div>
             ))}
           </div>
         </div>
       )}
 
-      <PhaseIndicator
-        phase={phase}
-        labels={isMultiLlm ? MULTI_LLM_PHASE_LABELS : undefined}
-      />
+      <PhaseIndicator phase={phase} labels={isMultiLlm ? MULTI_LLM_PHASE_LABELS : undefined} />
 
       <div className="thoughts-stream">
         {thoughts.length === 0 && (

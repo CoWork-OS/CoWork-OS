@@ -68,16 +68,13 @@ export function MultiLlmSelectionPanel({
     [selectedProviders, providerModels],
   );
 
-  const handleModelChange = useCallback(
-    (providerType: string, modelKey: string) => {
-      setSelectedModels((prev) => {
-        const m = new Map(prev);
-        m.set(providerType, modelKey);
-        return m;
-      });
-    },
-    [],
-  );
+  const handleModelChange = useCallback((providerType: string, modelKey: string) => {
+    setSelectedModels((prev) => {
+      const m = new Map(prev);
+      m.set(providerType, modelKey);
+      return m;
+    });
+  }, []);
 
   // Build and emit config whenever selection changes
   useEffect(() => {
@@ -86,11 +83,14 @@ export function MultiLlmSelectionPanel({
       const modelKey = selectedModels.get(providerType);
       if (!modelKey) continue;
       const providerInfo = MULTI_LLM_PROVIDER_DISPLAY[providerType];
-      const providerName = configuredProviders.find((p) => p.type === providerType)?.name || providerType;
+      const providerName =
+        configuredProviders.find((p) => p.type === providerType)?.name || providerType;
       participants.push({
         providerType: providerType as any,
         modelKey,
-        displayName: providerInfo ? `${providerInfo.name} (${modelKey})` : `${providerName} (${modelKey})`,
+        displayName: providerInfo
+          ? `${providerInfo.name} (${modelKey})`
+          : `${providerName} (${modelKey})`,
         isJudge: false,
       });
     }

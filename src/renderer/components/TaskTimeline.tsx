@@ -260,7 +260,9 @@ export function TaskTimeline({ events, agentContext }: TaskTimelineProps) {
         };
         return (
           <div className="event-details error">
-            <div>{typeof errorMessage === "string" ? renderWithLinks(errorMessage) : errorMessage}</div>
+            <div>
+              {typeof errorMessage === "string" ? renderWithLinks(errorMessage) : errorMessage}
+            </div>
             {actionHint?.type === "open_settings" && (
               <button
                 className="button-primary button-small"

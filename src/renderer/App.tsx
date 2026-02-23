@@ -1077,7 +1077,9 @@ export function App() {
 
     // Optimistic UI update: immediately mark as cancelled so spinner stops
     setTasks((prev) =>
-      prev.map((t) => (t.id === selectedTaskId ? { ...t, status: "cancelled" as Task["status"] } : t)),
+      prev.map((t) =>
+        t.id === selectedTaskId ? { ...t, status: "cancelled" as Task["status"] } : t,
+      ),
     );
 
     try {

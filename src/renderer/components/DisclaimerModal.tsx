@@ -53,7 +53,9 @@ export function DisclaimerModal({ onAccept }: DisclaimerModalProps) {
                 <li>Read, write, and delete files in your workspace</li>
                 <li>Access the network and external services</li>
                 <li>Control browser automation</li>
-                <li>Send and receive messages on connected channels (WhatsApp, Telegram, Slack, etc.)</li>
+                <li>
+                  Send and receive messages on connected channels (WhatsApp, Telegram, Slack, etc.)
+                </li>
                 <li>Access connected enterprise services and cloud storage</li>
                 <li>Run skills, plugins, and any tools you enable</li>
               </ul>

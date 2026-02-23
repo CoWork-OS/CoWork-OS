@@ -185,9 +185,7 @@ export class AgentTeamOrchestrator {
         // This also handles the wrap-up path where phase was set to "synthesize"
         // before the synthesis task was actually spawned.
         const currentPhase = run.phase || "dispatch";
-        const hasSynthesisItem = refreshedItems.some(
-          (i) => i.title === SYNTHESIS_ITEM_TITLE,
-        );
+        const hasSynthesisItem = refreshedItems.some((i) => i.title === SYNTHESIS_ITEM_TITLE);
         if (run.collaborativeMode && currentPhase !== "complete" && !hasSynthesisItem) {
           await this.transitionToSynthesizePhase(run, team, rootTask, refreshedItems);
           return;
@@ -744,7 +742,9 @@ export class AgentTeamOrchestrator {
     parts.push("");
     parts.push("IMPORTANT INSTRUCTIONS:");
     parts.push("- ALL model outputs are provided IN FULL below. Do NOT read external files.");
-    parts.push("- Do NOT attempt to use any tools or read any files. Everything you need is in this prompt.");
+    parts.push(
+      "- Do NOT attempt to use any tools or read any files. Everything you need is in this prompt.",
+    );
     parts.push("- Respond directly with your synthesized analysis as text.");
     parts.push("");
     parts.push("ORIGINAL REQUEST:");
@@ -778,7 +778,9 @@ export class AgentTeamOrchestrator {
 
     parts.push("YOUR TASK:");
     parts.push("Using ONLY the model outputs provided above:");
-    parts.push("1. Compare and evaluate each model's response for accuracy, completeness, and quality.");
+    parts.push(
+      "1. Compare and evaluate each model's response for accuracy, completeness, and quality.",
+    );
     parts.push("2. Identify the strongest elements from each response.");
     parts.push("3. Synthesize the best comprehensive answer combining the strongest elements.");
     parts.push("4. Note any disagreements between models and explain which view is more accurate.");

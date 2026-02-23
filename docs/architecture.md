@@ -71,6 +71,7 @@ CoWork OS exposes "tools" to the agent. Tools include:
 - Apple Calendar: create, update, delete calendar events via `apple_calendar_action` (macOS AppleScript)
 - Apple Reminders: create, complete, update, list reminders via `apple_reminders_action` (macOS AppleScript)
 - Integrations: Google Drive/Gmail/Calendar, Dropbox, Box, OneDrive, SharePoint, Notion
+- Web scraping: advanced scraping via Scrapling (anti-bot bypass, stealth browsers, structured extraction) through Python bridge
 - MCP tools from external MCP servers
 
 Headless mode:
@@ -83,6 +84,9 @@ Key code:
 - Image generation: `src/electron/agent/skills/image-generator.ts`
 - Visual annotation tools: `src/electron/agent/tools/visual-tools.ts`
 - Sandbox runner: `src/electron/agent/sandbox/runner.ts`
+- Scraping tools: `src/electron/agent/tools/scraping-tools.ts`
+- Scraping bridge (Python): `src/electron/scraping/scrapling-bridge.py`
+- Scraping settings: `src/electron/scraping/scraping-settings.ts`
 - Built-in skill definitions (prompted workflows): `resources/skills/`
 - Skill loading precedence: `src/electron/agent/custom-skill-loader.ts`
 

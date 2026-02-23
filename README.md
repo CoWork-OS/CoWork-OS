@@ -65,16 +65,16 @@ See the [Development Guide](docs/development.md) for prerequisites and details.
 
 ## How It Works
 
-1. **Select a workspace** — Choose a folder for the agent to work in
-2. **Create a task** — Describe what you want ("organize my Downloads by file type", "create a quarterly report spreadsheet")
-3. **Monitor execution** — Watch the real-time task timeline as the agent plans, executes, and produces artifacts
-4. **Approve when needed** — Destructive operations require your explicit approval
+1. **Create a task** — Describe what you want ("organize my Downloads by file type", "create a quarterly report spreadsheet"). No workspace needed — a temp folder is used automatically if you don't select one.
+2. **Choose a mode** — Run normally, or toggle **Autonomous** (auto-approve actions), **Collaborative** (multi-agent perspectives), or **Multi-LLM** (compare providers with a judge) per task.
+3. **Monitor execution** — Watch the real-time task timeline as the agent plans, executes, and produces artifacts.
+4. **Approve when needed** — Destructive operations require your explicit approval (unless Autonomous mode is on).
 
 ## Features
 
 ### Agent Runtime
 
-Task-based execution with dynamic re-planning, agent teams, collaborative mode, multi-LLM synthesis, agent comparison, git worktree isolation, and performance reviews. [Learn more](docs/features.md#agent-capabilities)
+Task-based execution with dynamic re-planning, three per-task modes (Autonomous, Collaborative, Multi-LLM), agent teams, agent comparison, git worktree isolation, and performance reviews. [Learn more](docs/features.md#agent-capabilities)
 
 ### Live Canvas
 

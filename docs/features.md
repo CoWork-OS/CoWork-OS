@@ -46,6 +46,20 @@
 - **Action-First Planning**: Agent prioritizes direct action over excessive pre-planning
 - **Voice Calls**: Outbound phone calls via ElevenLabs Agents
 
+### Per-Task Execution Modes
+
+Each task can be launched with one of three mutually exclusive modes:
+
+| Mode | Toggle | Behavior |
+|------|--------|----------|
+| **Autonomous** | Autonomous ON/OFF | Auto-approves all gated actions (shell commands, file deletions, etc.) so the agent runs without pauses. Disables user input prompts. |
+| **Collaborative** | Collab ON/OFF | Auto-creates an ephemeral team of agents that analyze the task from multiple perspectives, then a leader synthesizes the results. Phases: dispatch → think → synthesize → complete. |
+| **Multi-LLM** | Multi-LLM ON/OFF | Sends the same task to multiple LLM providers/models in parallel. A designated judge model synthesizes the best result. Requires 2+ providers configured. |
+
+These modes are mutually exclusive — only one can be active per task. All three are toggled in the task creation UI.
+
+> **Note:** Autonomous mode shows a confirmation dialog before enabling, since it bypasses all approval prompts.
+
 ---
 
 ## Voice Mode

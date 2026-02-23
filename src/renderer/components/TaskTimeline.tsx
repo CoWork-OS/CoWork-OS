@@ -239,9 +239,28 @@ export function TaskTimeline({ events, agentContext }: TaskTimelineProps) {
       case "error": {
         const errorMessage = event.payload.error || event.payload.message;
         const actionHint = event.payload.actionHint;
+        // Turn URLs in the error text into clickable links
+        const renderWithLinks = (text: string) => {
+          const parts = text.split(/(https?:\/\/[^\s)]+)/g);
+          return parts.map((part, i) =>
+            part.startsWith("http://") || part.startsWith("https://") ? (
+              <a
+                key={i}
+                href={part}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ color: "var(--accent-color)", textDecoration: "underline" }}
+              >
+                {part}
+              </a>
+            ) : (
+              part
+            ),
+          );
+        };
         return (
           <div className="event-details error">
-            <div>{errorMessage}</div>
+            <div>{typeof errorMessage === "string" ? renderWithLinks(errorMessage) : errorMessage}</div>
             {actionHint?.type === "open_settings" && (
               <button
                 className="button-primary button-small"

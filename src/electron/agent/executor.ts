@@ -5915,10 +5915,19 @@ You are continuing a previous conversation. The context from the previous conver
         error: error?.message || String(error),
         completedAt: Date.now(),
       });
-      this.emitEvent("error", {
+      const errorPayload: Record<string, unknown> = {
         message: error.message,
         stack: error.stack,
-      });
+      };
+      // Add actionHint for API key / provider config errors so the UI
+      // can show a direct "Open Settings" button.
+      if (/API key is required|Configure it in Settings/i.test(error.message)) {
+        errorPayload.actionHint = {
+          type: "open_settings",
+          label: "Open Settings",
+        };
+      }
+      this.emitEvent("error", errorPayload);
     } finally {
       // Cleanup resources (e.g., close browser)
       await this.toolRegistry.cleanup().catch((e) => {
@@ -9932,10 +9941,17 @@ TASK / CONVERSATION HISTORY:
           error: error?.message || String(error),
           completedAt: Date.now(),
         });
-        this.emitEvent("error", {
+        const errorPayload: Record<string, unknown> = {
           message: error.message,
           stack: error.stack,
-        });
+        };
+        if (/API key is required|Configure it in Settings/i.test(error.message)) {
+          errorPayload.actionHint = {
+            type: "open_settings",
+            label: "Open Settings",
+          };
+        }
+        this.emitEvent("error", errorPayload);
         this.saveConversationSnapshot();
         return;
       }

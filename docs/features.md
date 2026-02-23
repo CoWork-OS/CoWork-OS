@@ -352,12 +352,91 @@ See [Live Canvas](live-canvas.md) for the full guide.
 
 ## Browser Automation
 
-Full Playwright integration:
+Three-tier web interaction stack — from lightweight HTTP fetching to full browser automation to anti-bot scraping — all as native agent tools with no external CLI dependencies.
 
-- Navigate, screenshot, save as PDF
-- Click, fill forms, type text, press keys
-- Extract page content, links, and form data
-- Supports `chromium` (default), `chrome` (system), `brave`
+### Architecture
+
+```
+Tier 1: web_fetch / http_request     (no browser — fastest)
+Tier 2: browser_* tools              (Playwright in-process — full interaction)
+Tier 3: scrape_* tools               (Scrapling — anti-bot bypass)
+```
+
+The agent auto-selects the appropriate tier: `web_fetch` for reading known URLs, `browser_*` when interaction or JS rendering is needed, and `scrape_*` for anti-bot-protected sites.
+
+### Browser Tools (17 tools)
+
+Native Playwright API integration — no CLI subprocess, no process spawning overhead.
+
+| Tool | Description |
+|------|-------------|
+| `browser_navigate` | Navigate to URL with configurable wait states (load, networkidle, domcontentloaded) |
+| `browser_screenshot` | Capture viewport or full-page screenshots |
+| `browser_get_content` | Extract text, links, and form data from current page |
+| `browser_click` | Click elements via CSS selectors |
+| `browser_fill` | Fill form fields (clears existing text) |
+| `browser_type` | Type text character-by-character (triggers autocomplete/key events) |
+| `browser_press` | Press keyboard keys (Enter, Tab, Escape, shortcuts) |
+| `browser_wait` | Wait for element visibility with timeout |
+| `browser_scroll` | Scroll page (up, down, top, bottom) |
+| `browser_select` | Select dropdown options |
+| `browser_get_text` | Extract text from specific elements |
+| `browser_evaluate` | Execute JavaScript in browser context |
+| `browser_back` | Navigate browser history back |
+| `browser_forward` | Navigate browser history forward |
+| `browser_reload` | Reload the current page |
+| `browser_save_pdf` | Save page as PDF file |
+| `browser_close` | Close browser session and free resources |
+
+### Web Fetch Tools (2 tools)
+
+Lightweight HTTP without browser overhead — preferred for reading known URLs.
+
+| Tool | Description |
+|------|-------------|
+| `web_fetch` | Fetch URL → HTML-to-Markdown conversion with optional CSS selector filtering |
+| `http_request` | Raw HTTP requests (GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS) with custom headers/body |
+
+### Browser Features
+
+| Feature | Description |
+|---------|-------------|
+| **Multi-Browser** | Chromium (bundled), Chrome (system), Brave (auto-discovered) |
+| **Persistent Profiles** | Cookies and storage persist across tasks in `.cowork/browser-profiles/` |
+| **Consent Auto-Dismiss** | 40+ pattern detectors for cookie/GDPR consent popups |
+| **Retry Logic** | 2-attempt retry with per-attempt timeout calculation |
+| **Failure Diagnostics** | Screenshot + page content + URL captured on failure |
+| **Domain Guardrails** | Whitelist enforcement via GuardrailManager |
+| **Headless/Headed** | Toggle visible browser window for debugging |
+| **Configurable Timeouts** | Per-tool `timeout_ms` parameter (default: 90s) |
+
+### Comparison with ClawHub Agent Browser
+
+| Capability | ClawHub Agent Browser | CoWork OS Browser |
+|---|---|---|
+| **Architecture** | External Rust CLI, commands via Bash shell | Native Playwright API, in-process (no spawning) |
+| **Performance** | CLI process spawn per command + JSON serialization | Direct API calls, persistent browser instance |
+| **Navigation** | `open`, `back`, `forward`, `reload` | `browser_navigate`, `browser_back`, `browser_forward`, `browser_reload` |
+| **Element interaction** | 12 commands (click, fill, type, hover, drag, check, select, etc.) | 6 tools (click, fill, type, press, scroll, select) |
+| **Page analysis** | Accessibility tree snapshots with `@ref` identifiers | Content extraction (text + links + forms), element text |
+| **Screenshots/PDF** | Screenshot + full-page + PDF export | `browser_screenshot` (viewport/full) + `browser_save_pdf` |
+| **JavaScript** | `eval "expression"` | `browser_evaluate` (full JS execution) |
+| **Wait strategies** | Element, text, URL, network idle, JS condition | Element visibility with timeout |
+| **Tabs/frames** | Tab management, iframe switching | Single-page focus |
+| **State management** | `state save/load` JSON files | Persistent browser profiles (automatic) |
+| **Network interception** | Route, mock, block requests | Not exposed as tools |
+| **Video recording** | `record start/stop` to WebM | Not available |
+| **Device emulation** | Presets ("iPhone 14"), geolocation, viewport | Viewport configurable |
+| **Cookies/storage** | Manual cookie and localStorage management | Automatic via persistent profiles |
+| **Anti-bot bypass** | None | Scrapling integration (TLS fingerprinting, Cloudflare bypass) |
+| **Consent popups** | None | Auto-dismissal with 40+ pattern detectors |
+| **Retry on failure** | None (single attempt) | 2-attempt retry with diagnostics |
+| **Domain guardrails** | None | Whitelist enforcement |
+| **Lightweight fetch** | None (always launches browser) | `web_fetch` for reads without browser overhead |
+| **Multi-browser** | Playwright only | Chromium, Chrome, Brave |
+| **Integration** | Loose (CLI → Bash → agent) | Tight (in-process, daemon logging, artifact registry) |
+
+**Key advantage:** CoWork OS's in-process Playwright approach avoids the overhead of spawning a CLI process per command while providing tighter integration with the agent runtime (retry logic, failure diagnostics, domain guardrails, consent auto-dismiss). The three-tier architecture also means the agent doesn't launch a browser when a simple HTTP fetch suffices.
 
 ---
 

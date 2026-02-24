@@ -78,6 +78,24 @@ export interface PluginManifest {
 
   /** Declarative connector/tool definitions (JSON-based, no code required) */
   connectors?: DeclarativeConnector[];
+
+  /** ID of a persona template this pack is linked to (digital twin) */
+  personaTemplateId?: string;
+
+  /** IDs of MCP connectors this pack recommends */
+  recommendedConnectors?: string[];
+
+  /** Natural language prompt examples for discoverability ("Try asking..") */
+  tryAsking?: string[];
+
+  /** Pack category for marketplace grouping */
+  category?: string;
+
+  /** Pack icon (emoji or URL) */
+  icon?: string;
+
+  /** Whether this is an organization-distributed pack (vs personal) */
+  scope?: "personal" | "organization";
 }
 
 /**

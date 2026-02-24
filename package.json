@@ -164,7 +164,6 @@
     "@vitest/coverage-v8": "^4.0.18",
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
-    "electron": "40.4.1",
     "electron-builder": "^26.7.0",
     "eslint": "^9.39.2",
     "globals": "^17.3.0",

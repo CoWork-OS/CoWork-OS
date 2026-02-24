@@ -525,6 +525,10 @@ export class CronService {
         const deadlineMs = deps.nowMs() + timeoutMs;
         const pollMs = 1500;
 
+        // Track the resultSummary from the last status poll so we can use it
+        // as a fallback if getTaskResultText returns nothing.
+        let pollResultSummary: string | undefined;
+
         while (deps.nowMs() < deadlineMs) {
           const task = await deps.getTaskStatus(taskId);
           if (!task) {
@@ -536,6 +540,9 @@ export class CronService {
           const taskStatus = typeof task.status === "string" ? task.status : "";
           if (taskStatus === "completed") {
             status = "ok";
+            if (typeof task.resultSummary === "string" && task.resultSummary.trim()) {
+              pollResultSummary = task.resultSummary.trim();
+            }
             break;
           }
           if (taskStatus === "failed" || taskStatus === "cancelled") {
@@ -562,6 +569,13 @@ export class CronService {
           const finalStatus = typeof finalTask?.status === "string" ? finalTask.status : "";
           if (finalStatus === "completed") {
             status = "ok";
+            if (
+              !pollResultSummary &&
+              typeof finalTask?.resultSummary === "string" &&
+              finalTask.resultSummary.trim()
+            ) {
+              pollResultSummary = finalTask.resultSummary.trim();
+            }
           } else if (finalStatus === "failed" || finalStatus === "cancelled") {
             status = "error";
             errorMsg = finalTask?.error || `Task ${finalStatus || "failed"}`;
@@ -571,11 +585,18 @@ export class CronService {
           }
         }
 
-        if (status === "ok" && deps.getTaskResultText) {
-          try {
-            resultText = await deps.getTaskResultText(taskId);
-          } catch (e) {
-            log.warn("Failed to load task result text", e);
+        if (status === "ok") {
+          if (deps.getTaskResultText) {
+            try {
+              resultText = await deps.getTaskResultText(taskId);
+            } catch (e) {
+              log.warn("Failed to load task result text", e);
+            }
+          }
+          // Fall back to resultSummary from the status poll if getTaskResultText
+          // returned nothing (e.g. event scan missed the output).
+          if (!resultText && pollResultSummary) {
+            resultText = pollResultSummary;
           }
         }
       }
@@ -704,11 +725,16 @@ export class CronService {
 
     if (status === "ok" && deliverOnlyIfResult) {
       const hasNonEmpty = typeof resultText === "string" && resultText.trim().length > 0;
-      if (!hasNonEmpty) return { attempted: false };
+      if (!hasNonEmpty) {
+        log.info(
+          `Skipping delivery for job "${job.name}": deliverOnlyIfResult is enabled but no result text available`,
+        );
+        return { attempted: false };
+      }
     }
 
-    try {
-      await deps.deliverToChannel({
+    const doDeliver = () =>
+      deps.deliverToChannel!({
         channelType,
         channelDbId,
         channelId,
@@ -719,12 +745,28 @@ export class CronService {
         summaryOnly,
         resultText,
       });
+
+    try {
+      await doDeliver();
       log.info(`Delivered results for job "${job.name}" to ${channelType}:${channelId}`);
       return { attempted: true, success: true };
-    } catch (deliveryError) {
-      const errMsg = deliveryError instanceof Error ? deliveryError.message : String(deliveryError);
-      log.error(`Failed to deliver results for job "${job.name}":`, deliveryError);
-      return { attempted: true, success: false, error: errMsg };
+    } catch (firstError) {
+      // Single retry after a short delay for transient failures
+      // (e.g. momentary WhatsApp disconnect, network blip).
+      log.warn(`First delivery attempt failed for job "${job.name}", retrying in 3s…`);
+      await new Promise((r) => setTimeout(r, 3000));
+      try {
+        await doDeliver();
+        log.info(
+          `Delivered results for job "${job.name}" to ${channelType}:${channelId} (retry succeeded)`,
+        );
+        return { attempted: true, success: true };
+      } catch (retryError) {
+        const errMsg =
+          retryError instanceof Error ? retryError.message : String(retryError);
+        log.error(`Failed to deliver results for job "${job.name}" after retry:`, retryError);
+        return { attempted: true, success: false, error: errMsg };
+      }
     }
   }
 

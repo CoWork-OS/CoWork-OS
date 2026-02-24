@@ -167,7 +167,7 @@ export function PairingCodeDisplay({
         }
 
         .code-value {
-          font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+          font-family: var(--font-mono);
           font-size: 32px;
           font-weight: 600;
           letter-spacing: 8px;

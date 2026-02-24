@@ -417,25 +417,31 @@ export function SignalSettings({ onStatusChange }: SignalSettingsProps) {
           </div>
 
           <div className="settings-field">
-            <label className="settings-checkbox-label">
-              <input
-                type="checkbox"
-                checked={sendReadReceipts}
-                onChange={(e) => setSendReadReceipts(e.target.checked)}
-              />
+            <div className="settings-checkbox-label">
               <span>Send Read Receipts</span>
-            </label>
+              <label className="settings-toggle">
+                <input
+                  type="checkbox"
+                  checked={sendReadReceipts}
+                  onChange={(e) => setSendReadReceipts(e.target.checked)}
+                />
+                <span className="toggle-slider" />
+              </label>
+            </div>
           </div>
 
           <div className="settings-field">
-            <label className="settings-checkbox-label">
-              <input
-                type="checkbox"
-                checked={sendTypingIndicators}
-                onChange={(e) => setSendTypingIndicators(e.target.checked)}
-              />
+            <div className="settings-checkbox-label">
               <span>Send Typing Indicators</span>
-            </label>
+              <label className="settings-toggle">
+                <input
+                  type="checkbox"
+                  checked={sendTypingIndicators}
+                  onChange={(e) => setSendTypingIndicators(e.target.checked)}
+                />
+                <span className="toggle-slider" />
+              </label>
+            </div>
           </div>
 
           <div className="settings-field">
@@ -638,25 +644,31 @@ export function SignalSettings({ onStatusChange }: SignalSettingsProps) {
         </div>
 
         <div className="settings-field">
-          <label className="settings-checkbox-label">
-            <input
-              type="checkbox"
-              checked={sendReadReceipts}
-              onChange={(e) => setSendReadReceipts(e.target.checked)}
-            />
+          <div className="settings-checkbox-label">
             <span>Send Read Receipts</span>
-          </label>
+            <label className="settings-toggle">
+              <input
+                type="checkbox"
+                checked={sendReadReceipts}
+                onChange={(e) => setSendReadReceipts(e.target.checked)}
+              />
+              <span className="toggle-slider" />
+            </label>
+          </div>
         </div>
 
         <div className="settings-field">
-          <label className="settings-checkbox-label">
-            <input
-              type="checkbox"
-              checked={sendTypingIndicators}
-              onChange={(e) => setSendTypingIndicators(e.target.checked)}
-            />
+          <div className="settings-checkbox-label">
             <span>Send Typing Indicators</span>
-          </label>
+            <label className="settings-toggle">
+              <input
+                type="checkbox"
+                checked={sendTypingIndicators}
+                onChange={(e) => setSendTypingIndicators(e.target.checked)}
+              />
+              <span className="toggle-slider" />
+            </label>
+          </div>
         </div>
 
         <button className="settings-button primary" onClick={handleUpdateConfig} disabled={saving}>

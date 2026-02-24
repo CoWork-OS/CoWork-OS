@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { AlertTriangle } from "lucide-react";
 import { ConnectorSetupModal, ConnectorProvider } from "./ConnectorSetupModal";
 import { ConnectorEnvModal, ConnectorEnvField } from "./ConnectorEnvModal";
 
@@ -310,7 +311,7 @@ export function ConnectorsSettings() {
 
               {isInstalled && (status?.error || connectionErrors[config!.id]) && (
                 <div className="mcp-server-error">
-                  <span className="mcp-error-icon">⚠</span>
+                  <span className="mcp-error-icon"><AlertTriangle size={14} strokeWidth={2} /></span>
                   {connectionErrors[config!.id] || status?.error}
                 </div>
               )}

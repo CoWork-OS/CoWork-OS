@@ -211,9 +211,20 @@ export function setupPluginPackHandlers(): void {
     if (!plugin) {
       throw new Error(`Pack "${name}" not found`);
     }
-    // Toggle the plugin state and persist
-    plugin.state = enabled ? "registered" : "disabled";
+
+    const currentlyEnabled = plugin.state !== "disabled";
     registry.setPackEnabled(name, enabled);
+
+    // Reload to apply declarative registration state immediately.
+    // This keeps runtime skills/connectors aligned with persisted pack state.
+    if (currentlyEnabled !== enabled) {
+      await registry.reloadPlugin(name);
+    }
+
+    const updated = registry.getPlugin(name);
+    if (updated) {
+      updated.state = enabled ? "registered" : "disabled";
+    }
     return { success: true, name, enabled };
   });
 

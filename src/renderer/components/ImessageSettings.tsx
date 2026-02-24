@@ -381,14 +381,17 @@ export function ImessageSettings({ onStatusChange }: ImessageSettingsProps) {
           </div>
 
           <div className="settings-field">
-            <label className="settings-checkbox-label">
-              <input
-                type="checkbox"
-                checked={ambientMode}
-                onChange={(e) => setAmbientMode(e.target.checked)}
-              />
+            <div className="settings-checkbox-label">
               <span>Ambient Mode (Log-Only)</span>
-            </label>
+              <label className="settings-toggle">
+                <input
+                  type="checkbox"
+                  checked={ambientMode}
+                  onChange={(e) => setAmbientMode(e.target.checked)}
+                />
+                <span className="toggle-slider" />
+              </label>
+            </div>
             <p className="settings-hint">
               When enabled, iMessage messages are ingested into the local log but only commands
               (messages starting with "/") are processed.
@@ -396,14 +399,17 @@ export function ImessageSettings({ onStatusChange }: ImessageSettingsProps) {
           </div>
 
           <div className="settings-field">
-            <label className="settings-checkbox-label">
-              <input
-                type="checkbox"
-                checked={captureSelfMessages}
-                onChange={(e) => setCaptureSelfMessages(e.target.checked)}
-              />
+            <div className="settings-checkbox-label">
               <span>Capture Self Messages</span>
-            </label>
+              <label className="settings-toggle">
+                <input
+                  type="checkbox"
+                  checked={captureSelfMessages}
+                  onChange={(e) => setCaptureSelfMessages(e.target.checked)}
+                />
+                <span className="toggle-slider" />
+              </label>
+            </div>
             <p className="settings-hint">
               Ingest messages sent by the local Messages account into the log (as outgoing_user) for
               better follow-up extraction.
@@ -411,14 +417,17 @@ export function ImessageSettings({ onStatusChange }: ImessageSettingsProps) {
           </div>
 
           <div className="settings-field">
-            <label className="settings-checkbox-label">
-              <input
-                type="checkbox"
-                checked={silentUnauthorized}
-                onChange={(e) => setSilentUnauthorized(e.target.checked)}
-              />
+            <div className="settings-checkbox-label">
               <span>Silent Unauthorized</span>
-            </label>
+              <label className="settings-toggle">
+                <input
+                  type="checkbox"
+                  checked={silentUnauthorized}
+                  onChange={(e) => setSilentUnauthorized(e.target.checked)}
+                />
+                <span className="toggle-slider" />
+              </label>
+            </div>
             <p className="settings-hint">
               Do not send "pairing required" or "unauthorized" replies (useful for ambient
               ingestion).
@@ -543,17 +552,20 @@ export function ImessageSettings({ onStatusChange }: ImessageSettingsProps) {
         <h4>Ambient Inbox</h4>
 
         <div className="settings-field">
-          <label className="settings-checkbox-label">
-            <input
-              type="checkbox"
-              checked={ambientMode}
-              onChange={(e) => {
-                setAmbientMode(e.target.checked);
-                handleUpdateConfig({ ambientMode: e.target.checked });
-              }}
-            />
+          <div className="settings-checkbox-label">
             <span>Ambient Mode (Log-Only)</span>
-          </label>
+            <label className="settings-toggle">
+              <input
+                type="checkbox"
+                checked={ambientMode}
+                onChange={(e) => {
+                  setAmbientMode(e.target.checked);
+                  handleUpdateConfig({ ambientMode: e.target.checked });
+                }}
+              />
+              <span className="toggle-slider" />
+            </label>
+          </div>
           <p className="settings-hint">
             Ingest messages into the local log, but only process explicit commands (messages
             starting with "/").
@@ -561,17 +573,20 @@ export function ImessageSettings({ onStatusChange }: ImessageSettingsProps) {
         </div>
 
         <div className="settings-field">
-          <label className="settings-checkbox-label">
-            <input
-              type="checkbox"
-              checked={captureSelfMessages}
-              onChange={(e) => {
-                setCaptureSelfMessages(e.target.checked);
-                handleUpdateConfig({ captureSelfMessages: e.target.checked });
-              }}
-            />
+          <div className="settings-checkbox-label">
             <span>Capture Self Messages</span>
-          </label>
+            <label className="settings-toggle">
+              <input
+                type="checkbox"
+                checked={captureSelfMessages}
+                onChange={(e) => {
+                  setCaptureSelfMessages(e.target.checked);
+                  handleUpdateConfig({ captureSelfMessages: e.target.checked });
+                }}
+              />
+              <span className="toggle-slider" />
+            </label>
+          </div>
           <p className="settings-hint">
             Ingest messages sent by the local Messages account (direction=outgoing_user). These are
             log-only to avoid loops.
@@ -579,17 +594,20 @@ export function ImessageSettings({ onStatusChange }: ImessageSettingsProps) {
         </div>
 
         <div className="settings-field">
-          <label className="settings-checkbox-label">
-            <input
-              type="checkbox"
-              checked={silentUnauthorized}
-              onChange={(e) => {
-                setSilentUnauthorized(e.target.checked);
-                handleUpdateConfig({ silentUnauthorized: e.target.checked });
-              }}
-            />
+          <div className="settings-checkbox-label">
             <span>Silent Unauthorized</span>
-          </label>
+            <label className="settings-toggle">
+              <input
+                type="checkbox"
+                checked={silentUnauthorized}
+                onChange={(e) => {
+                  setSilentUnauthorized(e.target.checked);
+                  handleUpdateConfig({ silentUnauthorized: e.target.checked });
+                }}
+              />
+              <span className="toggle-slider" />
+            </label>
+          </div>
           <p className="settings-hint">Do not send "pairing required" / "unauthorized" replies.</p>
         </div>
       </div>

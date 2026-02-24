@@ -1392,6 +1392,13 @@ export class DatabaseManager {
       // Column already exists
     }
 
+    // ============ Task Source (manual, cron, hook, api) ============
+    try {
+      this.db.exec("ALTER TABLE tasks ADD COLUMN source TEXT DEFAULT 'manual'");
+    } catch {
+      // Column already exists
+    }
+
     // ============ Knowledge Graph Tables ============
 
     try {

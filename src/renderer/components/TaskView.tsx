@@ -56,6 +56,7 @@ export function TaskView({ task }: TaskViewProps) {
         return "status-failed";
       case "executing":
       case "planning":
+      case "interrupted":
         return "status-active";
       default:
         return "status-pending";

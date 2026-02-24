@@ -22,11 +22,6 @@ export function setupAdminPolicyHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.ADMIN_POLICIES_UPDATE,
     async (_, updates: Partial<AdminPolicies>) => {
-      const validationError = validatePolicies(updates);
-      if (validationError) {
-        throw new Error(`Invalid policies: ${validationError}`);
-      }
-
       const current = loadPolicies();
 
       // Deep merge updates
@@ -50,6 +45,11 @@ export function setupAdminPolicyHandlers(): void {
           ...(updates.general || {}),
         },
       };
+
+      const validationError = validatePolicies(merged);
+      if (validationError) {
+        throw new Error(`Invalid policies: ${validationError}`);
+      }
 
       savePolicies(merged);
       return merged;

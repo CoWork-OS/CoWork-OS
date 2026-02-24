@@ -56,7 +56,8 @@
       "failed": "Failed",
       "cancelled": "Cancelled",
       "paused": "Paused",
-      "blocked": "Blocked"
+      "blocked": "Blocked",
+      "interrupted": "Resuming..."
     },
     "priority": {
       "label": "Priority",

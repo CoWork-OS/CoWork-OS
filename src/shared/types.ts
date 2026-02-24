@@ -137,7 +137,8 @@ export type TaskStatus =
   | "blocked"
   | "completed"
   | "failed"
-  | "cancelled";
+  | "cancelled"
+  | "interrupted";
 
 /**
  * Reason for command termination - used to signal the agent why a command ended
@@ -177,6 +178,7 @@ export type EventType =
   | "task_cancelled"
   | "task_paused"
   | "task_resumed"
+  | "task_interrupted"
   | "task_status"
   | "task_queued"
   | "task_dequeued"
@@ -2165,6 +2167,28 @@ export const IPC_CHANNELS = {
   PERSONA_TEMPLATE_PREVIEW: "personaTemplate:preview",
   PERSONA_TEMPLATE_GET_CATEGORIES: "personaTemplate:getCategories",
 
+  // Plugin Packs (Customize panel)
+  PLUGIN_PACK_LIST: "pluginPack:list",
+  PLUGIN_PACK_GET: "pluginPack:get",
+  PLUGIN_PACK_TOGGLE: "pluginPack:toggle",
+  PLUGIN_PACK_GET_CONTEXT: "pluginPack:getContext",
+  PLUGIN_PACK_TOGGLE_SKILL: "pluginPack:toggleSkill",
+
+  // Plugin Pack Distribution (scaffold, install, registry)
+  PLUGIN_PACK_SCAFFOLD: "pluginPack:scaffold",
+  PLUGIN_PACK_INSTALL_GIT: "pluginPack:installGit",
+  PLUGIN_PACK_INSTALL_URL: "pluginPack:installUrl",
+  PLUGIN_PACK_UNINSTALL: "pluginPack:uninstall",
+  PLUGIN_PACK_REGISTRY_SEARCH: "pluginPack:registrySearch",
+  PLUGIN_PACK_REGISTRY_DETAILS: "pluginPack:registryDetails",
+  PLUGIN_PACK_REGISTRY_CATEGORIES: "pluginPack:registryCategories",
+  PLUGIN_PACK_CHECK_UPDATES: "pluginPack:checkUpdates",
+
+  // Admin Policies
+  ADMIN_POLICIES_GET: "admin:policiesGet",
+  ADMIN_POLICIES_UPDATE: "admin:policiesUpdate",
+  ADMIN_POLICIES_CHECK_PACK: "admin:checkPack",
+
   // Workspace Kit (.cowork)
   KIT_GET_STATUS: "kit:getStatus",
   KIT_INIT: "kit:init",
@@ -2387,7 +2411,9 @@ export const IPC_CHANNELS = {
   MCP_CONNECT_SERVER: "mcp:connectServer",
   MCP_DISCONNECT_SERVER: "mcp:disconnectServer",
   MCP_GET_STATUS: "mcp:getStatus",
+  MCP_GET_SERVER_STATUS: "mcp:getServerStatus",
   MCP_GET_SERVER_TOOLS: "mcp:getServerTools",
+  MCP_GET_ALL_TOOLS: "mcp:getAllTools",
   MCP_TEST_SERVER: "mcp:testServer",
 
   // MCP Registry
@@ -2445,6 +2471,9 @@ export const IPC_CHANNELS = {
   TRAY_OPEN_SETTINGS: "tray:openSettings",
   TRAY_OPEN_ABOUT: "tray:openAbout",
   TRAY_CHECK_UPDATES: "tray:checkUpdates",
+  TRAY_QUICK_TASK: "tray:quick-task",
+  QUICK_INPUT_SUBMIT: "quick-input:submit",
+  QUICK_INPUT_CLOSE: "quick-input:close",
 
   // Cron (Scheduled Tasks)
   CRON_GET_STATUS: "cron:getStatus",
@@ -3455,8 +3484,8 @@ export interface MigrationStatus {
 
 // Task Queue types
 export interface QueueSettings {
-  maxConcurrentTasks: number; // Default: 5, min: 1, max: 10
-  taskTimeoutMinutes: number; // Default: 30, min: 5, max: 240 (4 hours). Auto-clear stuck tasks after this time.
+  maxConcurrentTasks: number; // Default: 8, min: 1, max: 20
+  taskTimeoutMinutes: number; // Default: 60, min: 5, max: 240 (4 hours). Auto-clear stuck tasks after this time.
 }
 
 export interface QueueStatus {
@@ -3468,8 +3497,8 @@ export interface QueueStatus {
 }
 
 export const DEFAULT_QUEUE_SETTINGS: QueueSettings = {
-  maxConcurrentTasks: 5,
-  taskTimeoutMinutes: 30,
+  maxConcurrentTasks: 8,
+  taskTimeoutMinutes: 60,
 };
 
 // Toast notification types for UI
@@ -4542,7 +4571,7 @@ export const PERSONALITY_DEFINITIONS: PersonalityDefinition[] = [
     id: "professional",
     name: "Professional",
     description: "Formal, precise, and business-oriented communication style",
-    icon: "💼",
+    icon: "briefcase",
     traits: ["formal", "precise", "thorough", "respectful"],
     promptTemplate: `PERSONALITY & COMMUNICATION STYLE:
 - Maintain a professional, business-appropriate tone at all times
@@ -4557,7 +4586,7 @@ export const PERSONALITY_DEFINITIONS: PersonalityDefinition[] = [
     id: "friendly",
     name: "Friendly",
     description: "Warm, approachable, and conversational style",
-    icon: "😊",
+    icon: "smile",
     traits: ["warm", "encouraging", "patient", "supportive"],
     promptTemplate: `PERSONALITY & COMMUNICATION STYLE:
 - Be warm, friendly, and conversational in your responses
@@ -4572,7 +4601,7 @@ export const PERSONALITY_DEFINITIONS: PersonalityDefinition[] = [
     id: "concise",
     name: "Concise",
     description: "Direct, efficient, and to-the-point responses",
-    icon: "⚡",
+    icon: "zap",
     traits: ["brief", "direct", "efficient", "action-oriented"],
     promptTemplate: `PERSONALITY & COMMUNICATION STYLE:
 - Be extremely concise - every word should earn its place
@@ -4587,7 +4616,7 @@ export const PERSONALITY_DEFINITIONS: PersonalityDefinition[] = [
     id: "creative",
     name: "Creative",
     description: "Imaginative, expressive, and thinking outside the box",
-    icon: "🎨",
+    icon: "palette",
     traits: ["imaginative", "expressive", "innovative", "playful"],
     promptTemplate: `PERSONALITY & COMMUNICATION STYLE:
 - Approach problems with creativity and imagination
@@ -4603,7 +4632,7 @@ export const PERSONALITY_DEFINITIONS: PersonalityDefinition[] = [
     id: "technical",
     name: "Technical",
     description: "Detailed, precise, and technically comprehensive",
-    icon: "🔧",
+    icon: "wrench",
     traits: ["detailed", "precise", "systematic", "thorough"],
     promptTemplate: `PERSONALITY & COMMUNICATION STYLE:
 - Provide technically detailed and comprehensive explanations
@@ -4619,7 +4648,7 @@ export const PERSONALITY_DEFINITIONS: PersonalityDefinition[] = [
     id: "casual",
     name: "Casual",
     description: "Relaxed, informal, and laid-back communication",
-    icon: "🌴",
+    icon: "coffee",
     traits: ["relaxed", "informal", "easy-going", "natural"],
     promptTemplate: `PERSONALITY & COMMUNICATION STYLE:
 - Keep things relaxed and informal - no need for corporate speak
@@ -4634,7 +4663,7 @@ export const PERSONALITY_DEFINITIONS: PersonalityDefinition[] = [
     id: "custom",
     name: "Custom",
     description: "Define your own personality and communication style",
-    icon: "✨",
+    icon: "sparkles",
     traits: [],
     promptTemplate: "", // User provides their own
   },

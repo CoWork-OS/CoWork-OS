@@ -1,4 +1,15 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, type ComponentType } from "react";
+import {
+  Briefcase,
+  Smile,
+  Zap,
+  Palette,
+  Wrench,
+  Coffee,
+  Sparkles,
+  CircleCheckBig,
+  type LucideProps,
+} from "lucide-react";
 import {
   PersonalitySettings as PersonalitySettingsType,
   PersonalityDefinition,
@@ -15,6 +26,16 @@ import {
   DEFAULT_RELATIONSHIP,
   ANALOGY_DOMAINS,
 } from "../../shared/types";
+
+const PERSONALITY_ICONS: Record<string, ComponentType<LucideProps>> = {
+  briefcase: Briefcase,
+  smile: Smile,
+  zap: Zap,
+  palette: Palette,
+  wrench: Wrench,
+  coffee: Coffee,
+  sparkles: Sparkles,
+};
 
 interface PersonalitySettingsProps {
   onSettingsChanged?: () => void;
@@ -220,7 +241,12 @@ export function PersonalitySettings({ onSettingsChanged }: PersonalitySettingsPr
                 className={`personality-card ${settings.activePersonality === personality.id ? "selected" : ""}`}
                 onClick={() => handlePersonalitySelect(personality.id)}
               >
-                <div className="personality-card-icon">{personality.icon}</div>
+                <div className="personality-card-icon">
+                  {(() => {
+                    const Icon = PERSONALITY_ICONS[personality.icon];
+                    return Icon ? <Icon size={22} strokeWidth={1.5} /> : personality.icon;
+                  })()}
+                </div>
                 <div className="personality-card-content">
                   <div className="personality-card-name">{personality.name}</div>
                   <div className="personality-card-description">{personality.description}</div>
@@ -236,17 +262,7 @@ export function PersonalitySettings({ onSettingsChanged }: PersonalitySettingsPr
                 </div>
                 {settings.activePersonality === personality.id && (
                   <div className="personality-card-check">
-                    <svg
-                      width="20"
-                      height="20"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                    >
-                      <path d="M22 11.08V12a10 10 0 11-5.93-9.14" />
-                      <path d="M22 4L12 14.01l-3-3" />
-                    </svg>
+                    <CircleCheckBig size={20} strokeWidth={1.5} />
                   </div>
                 )}
               </div>
@@ -330,17 +346,7 @@ export function PersonalitySettings({ onSettingsChanged }: PersonalitySettingsPr
                 </div>
                 {settings.activePersona === persona.id && (
                   <div className="persona-card-check">
-                    <svg
-                      width="20"
-                      height="20"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                    >
-                      <path d="M22 11.08V12a10 10 0 11-5.93-9.14" />
-                      <path d="M22 4L12 14.01l-3-3" />
-                    </svg>
+                    <CircleCheckBig size={20} strokeWidth={1.5} />
                   </div>
                 )}
               </div>

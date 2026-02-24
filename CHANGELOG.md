@@ -8,6 +8,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Polymarket prediction market skill**: query odds, trending markets, price momentum, orderbook depth, open interest, trade history, and resolution timelines across Gamma, CLOB, and Data APIs — no authentication required. Includes formatted output with percentages, volume breakdowns, and multi-outcome event support.
+- **Humanizer writing skill**: rewrite AI-generated text to sound natural and human-written. Detects and removes 50+ LLM tells across 7 layers — vocabulary, sentence mechanics, paragraph structure, emotional register, content depth, document architecture, and tone. Includes flagged word lists, 6 tone presets (casual, professional, academic, journalistic, technical, warm), and a systematic 7-step rewriting process.
+- **YouTube video intelligence skill**: fetch transcripts, metadata, chapters, and captions from YouTube videos via yt-dlp or youtube-transcript-api. Supports auto-generated and manual captions, multi-language, translation, audio extraction, playlists, and timestamp deep links. Includes 6 workflow recipes (summarize, search, compare, extract resources, blog conversion, key quotes).
+- **Stock analysis skill**: comprehensive market intelligence across 3 data sources (Yahoo Finance API, yfinance, Alpha Vantage). Covers real-time quotes, 60+ fundamental metrics, 50+ technical indicators, financial statements, earnings, options chains, analyst ratings, institutional holders, dividends, stock screening, and an 8-dimensional scoring framework. Supports stocks, ETFs, indices, crypto, and forex.
+- **Calendly scheduling skill**: manage Calendly via the v2 API with Personal Access Token auth. Covers event types, scheduled events (upcoming/past/cancelled), invitees with custom Q&A and UTM tracking, availability schedules and busy times, cancellation with reasons, no-show management, one-off booking links, webhooks, and organization members. Includes 8 workflow recipes and timezone-aware agenda formatting.
+- **Moltbook agent social network skill**: interact with Moltbook — the social network for AI agents. Post content, reply to discussions, browse feeds (hot/new/top/rising), upvote/downvote, join submolt communities, follow agents, search semantically, and track engagement via the home dashboard. Includes agent registration, verification challenge solving, rate limit awareness, and formatted feed output.
+- **Marketing Strategist skill**: comprehensive marketing strategy across 25 disciplines — positioning, messaging frameworks (StoryBrand, JTBD, Category Design), buyer psychology (Cialdini's 7 principles, 10 cognitive biases), 5 copywriting frameworks (PAS, AIDA, BAB, 4Ps, FAB), SEO (on-page checklist, technical audit, keyword research, link building), landing page CRO (above-the-fold formula, 10-item checklist, A/B testing methodology), paid ads (Google, Meta, LinkedIn with platform-specific guidance), funnel architecture with lead magnet ranking and nurture sequences, analytics and attribution models, pricing psychology, product launch playbook, growth loops and referral design, competitive intelligence templates, and marketing operations. Includes 8 workflow recipes and integrates with existing channel-specific skills.
+
+### Changed
+- **Task queue limits raised**: default concurrent tasks increased from 5 → 8, max configurable ceiling raised from 10 → 20, default timeout increased from 30 → 60 minutes. Existing users who never changed their settings are automatically upgraded to the new defaults.
+- **Sub-agent safety cap**: sub-agents that bypass the normal concurrency limit are now capped at 40 total running tasks (2× max configurable) to prevent runaway resource consumption.
+- **Resumed tasks respect concurrency**: tasks resuming after app restart now respect the concurrency limit instead of all starting simultaneously. Overflow tasks are re-queued at the front and start as slots open.
+
+### Fixed
+- **Focused mode tabs**: Mission Control now correctly included in focused mode tab list.
+
+## [0.3.91] - 2026-02-24
+
+### Added
 - **Agent-initiated memory (`memory_save` tool)**: agents can now explicitly save observations, decisions, insights, and errors to the workspace memory database during task execution. Memories are persisted across sessions and recalled via hybrid search in future tasks. Respects workspace memory settings, privacy modes, and sensitive data filtering.
 - **Enhanced `search_memories`**: now searches both the memory database AND `.cowork/` workspace markdown files (MEMORY.md, daily logs, project contexts, etc.). Results are merged, deduplicated, and ranked by relevance. Response includes `source` ("db" or "markdown") and file `path` for markdown hits.
 - **Web Scraping (Scrapling integration)**: new scraping subsystem powered by [Scrapling](https://github.com/D4Vinci/Scrapling) with anti-bot bypass, stealth browsing, and structured data extraction. Five new agent tools: `scrape_page` (single URL with TLS fingerprinting, Cloudflare bypass, stealth mode), `scrape_multiple` (batch scrape up to 20 URLs), `scrape_extract` (structured data — tables, lists, headings, metadata), `scrape_session` (multi-step persistent sessions for login→navigate→extract workflows), and `scraping_status` (installation check). Python bridge architecture via stdin/stdout JSON. Configurable fetcher modes (default/stealth/playwright), proxy support, rate limiting, and headless toggle. Settings UI at Settings > Web Scraping. Five new skills: `web-scraper`, `price-tracker`, `site-mapper`, `lead-scraper`, `content-monitor`.
@@ -23,9 +42,84 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Weekly Usage Insights dashboard**: new Settings > Usage Insights panel showing task metrics, cost/token tracking by model, activity heatmap by day-of-week and hour, and top skills usage. Supports 7/14/30-day period selection.
 - **Starter mission templates**: expanded from 3 onboarding suggestions to 10 one-click missions with categories. Displayed in onboarding and on the empty-state welcome screen.
 - **Competitive research skills**: new `competitive-research.json` and `idea-validation.json` skill files for market analysis, competitor scanning, and MVP scoping.
-- **Adaptive complexity (power user toggle)**: three-tier UI density (`focused | standard | power`) controlling which settings tabs and features are visible. Focused mode hides advanced settings; power mode shows everything.
 - **Plain-language settings labels**: renamed jargon in Settings sidebar (MCP Servers → Connected Tools, Guardrails → Safety Limits, LLM Provider → AI Model, Control Plane → Remote Access, SkillHub → Skill Store). Technical names preserved in tooltips.
 - **Native Infrastructure tools**: built-in cloud sandbox (E2B), domain registration (Namecheap), crypto wallet (USDC on Base), and x402 payment protocol support — all registered as native agent tools with no external MCP subprocess. Configurable in Settings > Infrastructure.
+- **Dispatched Agents Progress Panel**: when a task mentions agents (e.g. `@Security Analyst`), the parent task's main window now shows a Collab-mode-style progress panel with agent chips, phase indicator (Dispatched → Working → Complete), and a real-time event stream from all child agent tasks. Click any agent chip to navigate to its full task view.
+- **`userPrompt` field on Task**: child tasks dispatched to agents now store the original user prompt separately, so the UI displays the user's actual request instead of the internal agent-dispatch formatting.
+- **Digital Twin (Persona Templates)**: create role-specific AI digital twins from 10 pre-built templates across 5 categories (Engineering, Management, Product, Data & Analytics, Operations). Each template includes a tailored system prompt, capabilities, proactive heartbeat tasks, cognitive offload categories, and recommended skills. Templates: Software Engineer, Hardware Engineer, QA/Test Engineer, DevOps/SRE, Technical Writer, Engineering Manager, Technical Director, VP Engineering, Product Manager, and Data Scientist. Activation flow: browse gallery → customize name/heartbeat/tasks → create twin as a new AgentRole with background proactive tasks. Accessible via "Add Digital Twin" button in Mission Control agents panel.
+- **Knowledge graph system**: FTS5 search and graph traversal for structured knowledge representation.
+- **Twitter/X content writer skill**.
+- **Proactive suggestions service** with edge case handling.
+
+### Changed
+- **Execution strategy orchestration** in daemon lifecycle: strategy derivation at task creation, runtime strategy re-application for queued/legacy tasks, relationship-memory outcome recording on top-level task completion.
+- **Friendlier error messages, mode hints, and settings grouping** across the UI.
+
+### Fixed
+- **Task cancellation now cascades to child tasks**: stopping a parent task also cancels all dispatched agent sub-tasks instead of leaving them running.
+- **TypeScript errors in scraping tools** resolved.
+- **Wrap-up skips synthesis phase** due to premature phase transition.
+- **Task cancellation spinner** stays active after cancel (fixed).
+- **Collapsed sidebar header padding** adjusted for new session button.
+
+## [0.3.90] - 2026-02-23
+
+### Added
+- **Collaborative mode**: multi-agent collaborative thoughts and capability matching.
+- **Multi-LLM orchestration**: config validation and comparison service for running multiple LLM providers.
+- **Git worktree manager**: worktree isolation for parallel agent branches with comparison service.
+- **Git tools**: new agent tools for git operations.
+- **Task pinning**: pin important tasks for quick access.
+- **Anthropic streaming**: streaming support with progress callbacks for Anthropic provider.
+- **Bedrock as vision provider** for `analyze_image` tool.
+- **Crypto trading and email marketing skill definitions**.
+
+### Changed
+- **Action-first planning**: executor enhanced with resourcefulness and companion identity.
+- **Context summarization events** surfaced in task timeline.
+- **Image attachment support** for task creation and follow-ups.
+- **Bedrock display names**: improved formatting, model ID parsing, and AP region regex fix.
+
+## [0.3.89] - 2026-02-20
+
+### Added
+- **Declarative plugin system**: connectors, skills, and agent roles defined via JSON manifests.
+- **Built-in plugin packs**: pre-configured plugin bundles for common workflows.
+- **Slash command autocomplete** in input areas.
+- **`create_spreadsheet` and `create_presentation` tool support** for agents.
+- **Inline spreadsheet preview** in task view.
+
+### Changed
+- **Sonnet 4.6 model**: added as new model option and updated as Bedrock default.
+- **Oxfmt formatter** and promoted Oxlint rules to errors.
+- **Conway Terminal**: auto-provision API key and inject into MCP server env.
+- **Model selector redesign** and defensive electronAPI guards.
+
+### Fixed
+- **Bedrock transcript mismatches**: repaired and preserved tool-call pairs during compaction.
+- **Follow-up error handling**: prevent pinned message insertion between tool pairs.
+- **Electron sandbox**: disabled for preload and hardened attachment validation.
+
+## [0.3.88] - 2026-02-19
+
+### Added
+- **Vision/image support** across all LLM providers.
+- **LOOM email protocol** support alongside IMAP/SMTP.
+- **Conway Terminal integration** with payment safety caps.
+- **Adaptive complexity (power user toggle)**: three-tier UI density (`focused | standard | power`) controlling which settings tabs and features are visible. Focused mode hides advanced settings; power mode shows everything.
+- **Validation schemas and config sanitization** for security hardening.
+
+### Changed
+- **Executor enhanced** with image attachments and tool approval flow.
+- **Email settings, toast positioning, XLSX viewer, and styling** improvements.
+- **Contextual welcome cards** in the UI.
+
+### Fixed
+- **Electron env variable handling** and strict dev port configuration.
+
+## [0.3.87] - 2026-02-17
+
+### Added
 - **Intent-routed task strategy runtime**: tasks are now classified into `chat`, `advice`, `planning`, `execution`, or `mixed` and receive derived strategy defaults (conversation mode, turns, quality passes, answer-first flags).
 - **Relationship memory lifecycle APIs**: added relationship memory and commitment IPC/preload surfaces:
   - `memory:relationshipList`
@@ -37,23 +131,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Dedicated relationship-agent architecture + UAT docs**:
   - `docs/relationship-agent-architecture.md`
   - `docs/relationship-agent-uat.md`
-
-- **Dispatched Agents Progress Panel**: when a task mentions agents (e.g. `@Security Analyst`), the parent task's main window now shows a Collab-mode-style progress panel with agent chips, phase indicator (Dispatched → Working → Complete), and a real-time event stream from all child agent tasks. Click any agent chip to navigate to its full task view.
-- **`userPrompt` field on Task**: child tasks dispatched to agents now store the original user prompt separately, so the UI displays the user's actual request instead of the internal agent-dispatch formatting.
-- **Digital Twin (Persona Templates)**: create role-specific AI digital twins from 10 pre-built templates across 5 categories (Engineering, Management, Product, Data & Analytics, Operations). Each template includes a tailored system prompt, capabilities, proactive heartbeat tasks, cognitive offload categories, and recommended skills. Templates: Software Engineer, Hardware Engineer, QA/Test Engineer, DevOps/SRE, Technical Writer, Engineering Manager, Technical Director, VP Engineering, Product Manager, and Data Scientist. Activation flow: browse gallery → customize name/heartbeat/tasks → create twin as a new AgentRole with background proactive tasks. Accessible via "Add Digital Twin" button in Mission Control agents panel.
+- **XLSX file extraction** and auto-generate missing hooks token.
+- **Attachment chips** in chat bubbles and collapsible toggle fix.
+- **Use-case skill templates** and Pi finder/librarian skills.
+- **Resend email connector** and expanded gateway router commands.
 
 ### Changed
-- **Execution strategy orchestration** in daemon lifecycle:
-  - strategy derivation at task creation
-  - runtime strategy re-application for queued/legacy tasks
-  - relationship-memory outcome recording on top-level task completion
+- **Execution strategy orchestration** in daemon lifecycle: strategy derivation at task creation, runtime strategy re-application for queued/legacy tasks, relationship-memory outcome recording on top-level task completion.
 - **Memory context composition** now combines `UserProfileService` facts with layered relationship memory context for prompt injection.
 - **Soft-deadline behavior** in executor now switches from deep step execution to best-effort finalization before hard timeout.
+- **Approval modal replaced** with centered notification toasts and session approve-all.
+- **MCP connectors** kept disabled until configured.
 
 ### Fixed
-- **Task cancellation now cascades to child tasks**: stopping a parent task also cancels all dispatched agent sub-tasks instead of leaving them running.
 - **Timeout-abort completion gap**: timeout-triggered cancellation paths now attempt best-effort finalization instead of exiting without a user-facing answer.
 - **Cancellation observability**: executor cancellation logs now include cancellation reason (`user`, `timeout`, `shutdown`, etc.) for clearer diagnosis.
+- **Stuck 'executing' status**: prevented with varied failure loop detection and improved artifact handling.
+- **Slack socket stability** and WhatsApp connection flap detection.
+- **Max iterations** increased for complex agent operations.
+- **User name rules** strengthened to prevent OS username leakage.
 
 ## [0.3.86] - 2026-02-14
 
@@ -655,6 +751,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 0.3.91 | 2026-02-24 | Digital twins, web scraping, AI playbook, build mode, knowledge graph, usage insights, infrastructure tools |
+| 0.3.90 | 2026-02-23 | Collaborative mode, multi-LLM orchestration, git worktree isolation, Anthropic streaming |
+| 0.3.89 | 2026-02-20 | Declarative plugin system, built-in packs, Sonnet 4.6, slash command autocomplete |
+| 0.3.88 | 2026-02-19 | Vision support across all LLM providers, LOOM email, Conway Terminal, density mode |
+| 0.3.87 | 2026-02-17 | Intent-routed strategy, relationship memory, timeout recovery, Resend connector |
+| 0.3.86 | 2026-02-14 | ACP canvas endpoints, i18n, talk mode, skill registry |
 | 0.3.84 | 2026-02-14 | Fixes CI installability check module resolution so release validation passes and desktop packaging can continue |
 | 0.3.83 | 2026-02-14 | Fixes release workflow shell parsing so installability validation and desktop asset publishing complete successfully |
 | 0.3.82 | 2026-02-14 | Removes script-enabled recovery installs that triggered electron-winstaller SIGKILL and hardens runtime repair install flags |
@@ -676,7 +778,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | 0.1.0 | 2025-01-24 | First public release with core features |
 | 0.0.1 | 2025-01-20 | Initial development setup |
 
-[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.3.84...HEAD
+[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.3.91...HEAD
+[0.3.91]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.91
+[0.3.90]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.90
+[0.3.89]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.89
+[0.3.88]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.88
+[0.3.87]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.87
+[0.3.86]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.86
 [0.3.84]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.84
 [0.3.83]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.83
 [0.3.82]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.82

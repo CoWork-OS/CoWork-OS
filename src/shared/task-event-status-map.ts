@@ -27,4 +27,5 @@ export const TASK_EVENT_STATUS_MAP: Readonly<Partial<Record<string, Task["status
   step_timeout: "failed",
   error: "failed",
   task_cancelled: "cancelled",
+  task_interrupted: "interrupted",
 };

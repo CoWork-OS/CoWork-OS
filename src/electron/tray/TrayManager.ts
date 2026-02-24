@@ -32,6 +32,7 @@ import {
   TEMP_WORKSPACE_ID_PREFIX,
   TEMP_WORKSPACE_NAME,
   TEMP_WORKSPACE_ROOT_DIR_NAME,
+  IPC_CHANNELS,
   Workspace,
   isTempWorkspaceId,
 } from "../../shared/types";
@@ -415,7 +416,7 @@ export class TrayManager {
       // Fall back to sending to main window
       console.log("[TrayManager] Agent daemon not available, falling back to main window");
       this.showMainWindow();
-      this.mainWindow?.webContents.send("tray:quick-task", { task: prompt, workspaceId });
+      this.mainWindow?.webContents.send(IPC_CHANNELS.TRAY_QUICK_TASK, { task: prompt, workspaceId });
       return;
     }
 
@@ -552,11 +553,13 @@ export class TrayManager {
    */
   private getTrayIcon(state: "idle" | "active" | "error"): NativeImage {
     // Try to load from file first
-    const iconPath = this.getIconPath(state === "active" ? "trayActiveTemplate" : "trayTemplate");
+    const iconPath = this.getIconPath("trayTemplate");
     const fs = require("fs");
 
     if (fs.existsSync(iconPath)) {
-      const icon = nativeImage.createFromPath(iconPath);
+      let icon = nativeImage.createFromPath(iconPath);
+      // Resize to standard macOS menu bar icon size (~18x18 pt)
+      icon = icon.resize({ width: 18, height: 18 });
       if (process.platform === "darwin") {
         icon.setTemplateImage(true);
       }
@@ -640,7 +643,7 @@ export class TrayManager {
   private getIconPath(name: string): string {
     const isDev = process.env.NODE_ENV === "development";
     const basePath = isDev
-      ? path.join(__dirname, "../../../assets/tray")
+      ? path.join(__dirname, "../../../../assets/tray")
       : path.join(process.resourcesPath, "assets/tray");
 
     // Use PNG for cross-platform compatibility

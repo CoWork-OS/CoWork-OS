@@ -1,5 +1,5 @@
 import { Children, type ReactNode } from "react";
-import { EMOJI_ICON_MAP } from "./emoji-icon-map";
+import { getEmojiIcon } from "./emoji-icon-map";
 
 /**
  * Matches emoji characters anywhere in a string.
@@ -18,7 +18,7 @@ function replaceEmojisInString(text: string, size: number): ReactNode[] {
   let match: RegExpExecArray | null;
   while ((match = INLINE_EMOJI_REGEX.exec(text)) !== null) {
     const emoji = match[1];
-    const Icon = EMOJI_ICON_MAP[emoji];
+    const Icon = getEmojiIcon(emoji);
 
     if (!Icon) continue;
 

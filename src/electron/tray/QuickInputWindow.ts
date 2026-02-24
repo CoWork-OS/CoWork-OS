@@ -294,7 +294,7 @@ export class QuickInputWindow {
   <title>Quick Task</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { height: 100%; background: transparent; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; overflow: hidden; }
+    html, body { height: 100%; background: transparent; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Segoe UI', system-ui, sans-serif; overflow: hidden; }
     #root { height: 100%; display: flex; flex-direction: column; }
 
     .main-container {
@@ -379,7 +379,7 @@ export class QuickInputWindow {
 
     /* Markdown-like styling for response */
     .response-area strong { color: rgba(255, 255, 255, 0.95); font-weight: 600; }
-    .response-area code { background: rgba(255,255,255,0.08); padding: 2px 6px; border-radius: 5px; font-family: 'SF Mono', Monaco, monospace; font-size: 12px; color: rgba(255,255,255,0.85); }
+    .response-area code { background: rgba(255,255,255,0.08); padding: 2px 6px; border-radius: 5px; font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; font-size: 12px; color: rgba(255,255,255,0.85); }
     .response-area pre { background: rgba(0,0,0,0.2); padding: 12px 14px; border-radius: 10px; overflow-x: auto; margin: 10px 0; border: 0.5px solid rgba(255,255,255,0.06); }
     .response-area pre code { background: none; padding: 0; font-size: 12px; }
     .response-area ul, .response-area ol { margin: 8px 0 8px 18px; }

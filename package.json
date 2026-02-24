@@ -117,7 +117,6 @@
     "discord.js": "^14.25.1",
     "docx": "^9.5.2",
     "e2b": "^2.12.1",
-    "electron": "40.4.1",
     "electron-updater": "^6.3.9",
     "ethers": "^6.16.0",
     "eventsource": "^4.1.0",
@@ -125,6 +124,7 @@
     "grammy": "^1.39.3",
     "i18next": "^25.8.7",
     "jszip": "^3.10.1",
+    "lucide-react": "^0.575.0",
     "mammoth": "^1.11.0",
     "mime-types": "^3.0.2",
     "openai": "^6.22.0",
@@ -164,6 +164,7 @@
     "@vitest/coverage-v8": "^4.0.18",
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
+    "electron": "^40.4.1",
     "electron-builder": "^26.7.0",
     "eslint": "^9.39.2",
     "globals": "^17.3.0",
@@ -200,6 +201,13 @@
           "**/dist/**",
           "**/README.md",
           "**/package.json"
+        ]
+      },
+      {
+        "from": "assets/tray",
+        "to": "assets/tray",
+        "filter": [
+          "*.png"
         ]
       }
     ],

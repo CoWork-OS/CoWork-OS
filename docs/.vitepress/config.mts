@@ -36,6 +36,7 @@ export default defineConfig({
           { text: 'Agent Teams', link: '/agent-teams-contract' },
           { text: 'Enterprise Connectors', link: '/enterprise-connectors' },
           { text: 'Node Daemon', link: '/node-daemon' },
+          { text: 'Placeholder Engine', link: '/placeholder-engine' },
         ],
       },
       {

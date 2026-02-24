@@ -893,6 +893,15 @@ button:focus-visible,
   background: rgba(0, 0, 0, 0.02);
 }
 
+.theme-light .cli-active-context-icon {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.theme-light .cli-active-context-badge {
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--color-text-secondary);
+}
+
 .theme-light .cli-task-menu,
 .theme-light .task-item-menu {
   background: rgba(255, 255, 255, 0.95) !important;
@@ -1693,7 +1702,7 @@ a,
 /* Scroll to bottom floating button */
 .scroll-to-bottom-btn {
   position: absolute;
-  bottom: 80px;
+  bottom: calc(100% + 12px);
   left: 50%;
   transform: translateX(-50%);
   z-index: 10;
@@ -2504,7 +2513,8 @@ a,
 }
 
 .dispatched-agent-status.status-executing,
-.dispatched-agent-status.status-planning {
+.dispatched-agent-status.status-planning,
+.dispatched-agent-status.status-interrupted {
   background: color-mix(in srgb, var(--color-accent) 20%, transparent);
   color: var(--color-accent);
 }
@@ -2537,6 +2547,26 @@ a,
 
 .dispatched-agents-panel .step-event.step-failed {
   color: #ef4444;
+}
+
+.dispatched-agents-panel .step-icon {
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 4px;
+  position: relative;
+  top: -1px;
+}
+
+.dispatched-agents-panel .step-icon-completed {
+  color: var(--color-success, #4ade80);
+}
+
+.dispatched-agents-panel .step-icon-failed {
+  color: #ef4444;
+}
+
+.dispatched-agents-panel .step-icon-started {
+  color: var(--color-text-secondary, #999);
 }
 
 /* Conversation Flow - contains all chat messages and events */
@@ -3196,6 +3226,18 @@ a,
   justify-content: center;
   margin-right: 8px;
   transform: translateY(1px);
+}
+
+.inline-emoji-icon {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  margin: 0 2px;
+  line-height: 1;
+}
+
+.inline-emoji-icon svg {
+  display: block;
 }
 
 .markdown-content p {
@@ -5669,6 +5711,70 @@ button {
   -webkit-box-orient: vertical;
 }
 
+/* Try Asking prompts from plugin packs */
+.try-asking-section {
+  margin-top: 16px;
+  margin-bottom: 12px;
+  max-width: 640px;
+}
+
+.try-asking-header {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  margin-bottom: 8px;
+}
+
+.try-asking-chips {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.try-asking-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--color-border-subtle, rgba(255, 255, 255, 0.08));
+  color: var(--color-text-primary);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  transition: color 0.15s;
+}
+
+.try-asking-chip:last-child {
+  border-bottom: none;
+}
+
+.try-asking-chip:hover {
+  color: var(--color-accent, #22d3ee);
+}
+
+.try-asking-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.try-asking-arrow {
+  color: var(--color-text-muted);
+  font-size: 14px;
+  flex-shrink: 0;
+  transition: color 0.15s;
+}
+
+.try-asking-chip:hover .try-asking-arrow {
+  color: var(--color-accent, #22d3ee);
+}
+
 /* CLI Input Styles */
 .cli-input-container {
   background: rgba(0, 0, 0, 0.4);
@@ -6902,6 +7008,217 @@ button {
   line-height: 1.5;
 }
 
+/* Usage Insights panel */
+.insights-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+
+.insights-header h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.insights-header .settings-description {
+  margin: 4px 0 0;
+}
+
+.insights-period-filter {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.insights-period-btn {
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.insights-period-btn:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.insights-period-btn.active {
+  background: var(--color-accent);
+  color: #fff;
+  border-color: var(--color-accent);
+  font-weight: 600;
+}
+
+.insights-stat-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.insights-stat-grid.cols-4 {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.insights-stat-grid.cols-3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.insights-stat-card {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  text-align: center;
+}
+
+.insights-stat-label {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.insights-stat-value {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.insights-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+
+.insights-bar-label {
+  min-width: 32px;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.insights-bar-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--color-bg-tertiary);
+  overflow: hidden;
+  flex: 1;
+}
+
+.insights-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--color-accent);
+  transition: width 0.3s ease;
+}
+
+.insights-bar-value {
+  min-width: 20px;
+  text-align: right;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.insights-hour-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 56px;
+}
+
+.insights-hour-bar {
+  flex: 1;
+  border-radius: 2px 2px 0 0;
+  transition: height 0.3s ease;
+}
+
+.insights-hour-bar.has-data {
+  background: var(--color-accent);
+}
+
+.insights-hour-bar.no-data {
+  background: var(--color-bg-tertiary);
+  opacity: 0.3;
+}
+
+.insights-hour-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--color-text-muted);
+  margin-top: 4px;
+}
+
+.insights-model-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+
+.insights-model-name {
+  min-width: 100px;
+  font-family: var(--font-mono);
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+}
+
+.insights-model-cost {
+  min-width: 60px;
+  text-align: right;
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+}
+
+.insights-model-calls {
+  min-width: 40px;
+  text-align: right;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.insights-section-subtitle {
+  font-weight: 400;
+  color: var(--color-text-muted);
+  margin-left: 8px;
+}
+
+/* Light theme: make stat cards visible against the light page */
+.theme-light .insights-stat-card {
+  background: rgba(0, 0, 0, 0.03);
+  border-color: rgba(0, 0, 0, 0.1);
+}
+
+.theme-light .insights-bar-track {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.theme-light .insights-hour-bar.no-data {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.theme-light .insights-period-btn {
+  border-color: rgba(0, 0, 0, 0.12);
+}
+
+.theme-light .insights-period-btn:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.theme-light .insights-period-btn.active {
+  color: #fff;
+}
+
 /* Onboarding section in Settings */
 .settings-section.onboarding-section {
   padding: 16px;
@@ -7570,20 +7887,10 @@ button {
 .settings-checkbox-label {
   display: flex;
   align-items: center;
-  gap: 10px;
-  cursor: pointer;
+  justify-content: space-between;
+  gap: 12px;
   font-size: 13px;
   color: var(--color-text);
-}
-
-.settings-checkbox-label input[type="checkbox"] {
-  accent-color: var(--color-accent);
-  width: 16px;
-  height: 16px;
-  cursor: pointer;
-}
-
-.settings-checkbox-label span {
   user-select: none;
 }
 
@@ -8064,6 +8371,9 @@ button {
 
 .cli-section-content {
   padding: 0 16px 16px;
+  max-height: 400px;
+  overflow-y: auto;
+  scroll-snap-type: y proximity;
 }
 
 /* CLI Progress List */
@@ -8276,6 +8586,7 @@ button {
   background: rgba(0, 0, 0, 0.15);
   border-radius: var(--radius-sm);
   font-size: 11px;
+  scroll-snap-align: end;
 }
 
 .cli-context-key {
@@ -8304,6 +8615,53 @@ button {
   padding: 8px;
   background: rgba(0, 0, 0, 0.15);
   border-radius: var(--radius-sm);
+}
+
+/* Active Context Section (Connectors + Skills) */
+.cli-active-context-icon {
+  font-size: 14px;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  flex-shrink: 0;
+}
+
+.cli-active-context-status {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.cli-active-context-status.connected {
+  background: var(--color-success, #22c55e);
+}
+
+.cli-active-context-status.disconnected {
+  background: var(--color-text-muted);
+}
+
+.cli-active-context-badge {
+  margin-left: auto;
+  margin-right: 8px;
+  font-size: 10px;
+  padding: 2px 6px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--color-text-muted);
+  border-radius: 10px;
+  font-weight: 500;
+}
+
+.cli-context-overflow {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  padding-left: 30px;
+  padding-top: 2px;
 }
 
 /* CLI Queue Section */
@@ -9490,6 +9848,10 @@ button {
   color: var(--color-accent);
 }
 
+.settings-nav-item:focus-visible {
+  outline: none;
+}
+
 .settings-nav-item svg {
   flex-shrink: 0;
   width: 18px;
@@ -9756,6 +10118,50 @@ button {
 .settings-page .btn-danger {
   position: relative;
   overflow: hidden;
+}
+
+/* Light theme button overrides */
+.theme-light .settings-page .btn-secondary {
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--color-text);
+  border-color: rgba(0, 0, 0, 0.15);
+  box-shadow: none;
+}
+
+.theme-light .settings-page .btn-secondary::before {
+  display: none;
+}
+
+.theme-light .settings-page .btn-secondary:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.1);
+  border-color: rgba(0, 0, 0, 0.2);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.theme-light .settings-page .btn-primary {
+  background: linear-gradient(180deg, var(--color-accent-hover) 0%, var(--color-accent) 100%);
+  color: #1a1a1a;
+  border-color: rgba(0, 0, 0, 0.1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.theme-light .settings-page .btn-primary::before {
+  display: none;
+}
+
+.theme-light .settings-page .btn-primary:hover:not(:disabled) {
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+
+.theme-light .settings-page .btn-danger {
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.25);
+  color: #dc2626;
+}
+
+.theme-light .settings-page .btn-danger:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.4);
 }
 
 .settings-section h2 {
@@ -10337,12 +10743,38 @@ button {
 
 .settings-page .provider-options {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 8px;
 }
 
 .settings-page .provider-option {
-  padding: 14px 16px;
+  flex: 0 1 auto;
+  min-width: 0;
+  padding: 10px 16px;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-page .provider-option .provider-option-content {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.settings-page .provider-option .provider-name {
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.settings-page .provider-option .provider-types,
+.settings-page .provider-option .provider-description {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
 }
 
 /* Responsive adjustments */
@@ -11868,7 +12300,12 @@ button {
 .skill-card-header {
   display: flex;
   gap: 12px;
-  align-items: flex-start;
+  align-items: center;
+}
+
+.skill-card-header .settings-toggle {
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .skill-icon {
@@ -19135,6 +19572,14 @@ button {
 .visual-oblivion .cli-context-empty {
   background: var(--color-bg-input);
   border: 1px solid var(--color-border-subtle);
+}
+
+.visual-oblivion .cli-active-context-icon {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.visual-oblivion .cli-active-context-badge {
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .visual-oblivion .cli-task-item {

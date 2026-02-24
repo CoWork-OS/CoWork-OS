@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { Lightbulb } from "lucide-react";
 import { ChannelData, ChannelUserData, SecurityMode } from "../../shared/types";
 import QRCode from "qrcode";
 
@@ -395,14 +396,17 @@ export function WhatsAppSettings({ onStatusChange }: WhatsAppSettingsProps) {
           )}
 
           <div className="settings-field">
-            <label className="settings-checkbox-label">
-              <input
-                type="checkbox"
-                checked={selfChatMode}
-                onChange={(e) => setSelfChatMode(e.target.checked)}
-              />
+            <div className="settings-checkbox-label">
               <span>Self-Chat Mode</span>
-            </label>
+              <label className="settings-toggle">
+                <input
+                  type="checkbox"
+                  checked={selfChatMode}
+                  onChange={(e) => setSelfChatMode(e.target.checked)}
+                />
+                <span className="toggle-slider" />
+              </label>
+            </div>
             <p className="settings-hint">
               Enable this if you're using your own WhatsApp number (messaging yourself). Bot
               responses will be prefixed to distinguish them from your messages.
@@ -428,14 +432,17 @@ export function WhatsAppSettings({ onStatusChange }: WhatsAppSettingsProps) {
 
           {selfChatMode && (
             <div className="settings-field">
-              <label className="settings-checkbox-label">
-                <input
-                  type="checkbox"
-                  checked={ingestNonSelfChatsInSelfChatMode}
-                  onChange={(e) => setIngestNonSelfChatsInSelfChatMode(e.target.checked)}
-                />
+              <div className="settings-checkbox-label">
                 <span>Ingest Other Chats (Log-Only)</span>
-              </label>
+                <label className="settings-toggle">
+                  <input
+                    type="checkbox"
+                    checked={ingestNonSelfChatsInSelfChatMode}
+                    onChange={(e) => setIngestNonSelfChatsInSelfChatMode(e.target.checked)}
+                  />
+                  <span className="toggle-slider" />
+                </label>
+              </div>
               <p className="settings-hint">
                 When enabled, CoWork OS will ingest messages from your other WhatsApp chats into the
                 local log (for scheduled digests/follow-ups), but will not reply outside the
@@ -445,7 +452,7 @@ export function WhatsAppSettings({ onStatusChange }: WhatsAppSettingsProps) {
           )}
 
           <div className="settings-info-box">
-            <strong>💡 Tip:</strong> For the best experience, use a separate WhatsApp number for the
+            <strong><Lightbulb size={13} strokeWidth={2} style={{ display: "inline", verticalAlign: "text-bottom" }} /> Tip:</strong> For the best experience, use a separate WhatsApp number for the
             bot. This way the bot appears as a separate contact instead of messaging yourself.
           </div>
 
@@ -572,19 +579,22 @@ export function WhatsAppSettings({ onStatusChange }: WhatsAppSettingsProps) {
           </p>
 
           <div className="settings-field">
-            <label className="settings-checkbox-label">
-              <input
-                type="checkbox"
-                checked={selfChatMode}
-                onChange={(e) => {
-                  setSelfChatMode(e.target.checked);
-                  if (channel) {
-                    handleUpdateSelfChatMode(e.target.checked);
-                  }
-                }}
-              />
+            <div className="settings-checkbox-label">
               <span>Self-Chat Mode Enabled</span>
-            </label>
+              <label className="settings-toggle">
+                <input
+                  type="checkbox"
+                  checked={selfChatMode}
+                  onChange={(e) => {
+                    setSelfChatMode(e.target.checked);
+                    if (channel) {
+                      handleUpdateSelfChatMode(e.target.checked);
+                    }
+                  }}
+                />
+                <span className="toggle-slider" />
+              </label>
+            </div>
             <p className="settings-hint">
               Enable this if you're using your own WhatsApp number. Bot responses will be prefixed
               to distinguish them from your messages.
@@ -620,19 +630,22 @@ export function WhatsAppSettings({ onStatusChange }: WhatsAppSettingsProps) {
 
           {selfChatMode && (
             <div className="settings-field">
-              <label className="settings-checkbox-label">
-                <input
-                  type="checkbox"
-                  checked={ingestNonSelfChatsInSelfChatMode}
-                  onChange={(e) => {
-                    setIngestNonSelfChatsInSelfChatMode(e.target.checked);
-                    if (channel) {
-                      handleUpdateIngestNonSelfChats(e.target.checked);
-                    }
-                  }}
-                />
+              <div className="settings-checkbox-label">
                 <span>Ingest Other Chats (Log-Only)</span>
-              </label>
+                <label className="settings-toggle">
+                  <input
+                    type="checkbox"
+                    checked={ingestNonSelfChatsInSelfChatMode}
+                    onChange={(e) => {
+                      setIngestNonSelfChatsInSelfChatMode(e.target.checked);
+                      if (channel) {
+                        handleUpdateIngestNonSelfChats(e.target.checked);
+                      }
+                    }}
+                  />
+                  <span className="toggle-slider" />
+                </label>
+              </div>
               <p className="settings-hint">
                 In self-chat mode, this ingests your other WhatsApp chats into the local log without
                 replying.
@@ -641,7 +654,7 @@ export function WhatsAppSettings({ onStatusChange }: WhatsAppSettingsProps) {
           )}
 
           <div className="settings-info-box">
-            <strong>💡 Tip:</strong> For the best experience, use a separate WhatsApp number for the
+            <strong><Lightbulb size={13} strokeWidth={2} style={{ display: "inline", verticalAlign: "text-bottom" }} /> Tip:</strong> For the best experience, use a separate WhatsApp number for the
             bot. Then disable self-chat mode - your bot will appear as a separate contact.
           </div>
         </div>
@@ -741,14 +754,17 @@ export function WhatsAppSettings({ onStatusChange }: WhatsAppSettingsProps) {
         </p>
 
         <div className="settings-field">
-          <label className="settings-checkbox-label">
-            <input
-              type="checkbox"
-              checked={selfChatMode}
-              onChange={(e) => handleUpdateSelfChatMode(e.target.checked)}
-            />
+          <div className="settings-checkbox-label">
             <span>Self-Chat Mode Enabled</span>
-          </label>
+            <label className="settings-toggle">
+              <input
+                type="checkbox"
+                checked={selfChatMode}
+                onChange={(e) => handleUpdateSelfChatMode(e.target.checked)}
+              />
+              <span className="toggle-slider" />
+            </label>
+          </div>
           <p className="settings-hint">
             Enable this if you're using your own WhatsApp number. Bot responses will be prefixed to
             distinguish them from your messages.
@@ -777,14 +793,17 @@ export function WhatsAppSettings({ onStatusChange }: WhatsAppSettingsProps) {
 
         {selfChatMode && (
           <div className="settings-field">
-            <label className="settings-checkbox-label">
-              <input
-                type="checkbox"
-                checked={ingestNonSelfChatsInSelfChatMode}
-                onChange={(e) => handleUpdateIngestNonSelfChats(e.target.checked)}
-              />
+            <div className="settings-checkbox-label">
               <span>Ingest Other Chats (Log-Only)</span>
-            </label>
+              <label className="settings-toggle">
+                <input
+                  type="checkbox"
+                  checked={ingestNonSelfChatsInSelfChatMode}
+                  onChange={(e) => handleUpdateIngestNonSelfChats(e.target.checked)}
+                />
+                <span className="toggle-slider" />
+              </label>
+            </div>
             <p className="settings-hint">
               In self-chat mode, ingest messages from your other WhatsApp chats into the local log
               without replying.
@@ -793,7 +812,7 @@ export function WhatsAppSettings({ onStatusChange }: WhatsAppSettingsProps) {
         )}
 
         <div className="settings-info-box">
-          <strong>💡 Tip:</strong> For the best experience, use a separate WhatsApp number for the
+          <strong><Lightbulb size={13} strokeWidth={2} style={{ display: "inline", verticalAlign: "text-bottom" }} /> Tip:</strong> For the best experience, use a separate WhatsApp number for the
           bot. Then disable self-chat mode - your bot will appear as a separate contact.
         </div>
       </div>

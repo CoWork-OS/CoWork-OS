@@ -241,6 +241,21 @@ describe("SecureSettingsRepository", () => {
       );
       consoleSpy.mockRestore();
     });
+
+    it("should handle plugin-scoped categories", () => {
+      mockStmt.get.mockReturnValue(undefined);
+
+      repository.save("plugin:my-plugin", { apiKey: "super-secret" });
+
+      expect(mockStmt.run).toHaveBeenCalledWith(
+        "test-uuid-1234",
+        "plugin:my-plugin",
+        expect.stringContaining("os:"),
+        expect.any(String),
+        expect.any(Number),
+        expect.any(Number),
+      );
+    });
   });
 
   describe("load()", () => {

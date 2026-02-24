@@ -1,0 +1,69 @@
+{
+  "name": "product-management-pack",
+  "displayName": "Product Management",
+  "version": "1.0.0",
+  "description": "Feature request triage, sprint goal alignment, customer feedback synthesis, and decision preparation for product managers.",
+  "type": "pack",
+  "author": "CoWork-OSS",
+  "keywords": ["product", "roadmap", "backlog", "prioritization", "user-stories"],
+  "icon": "🎯",
+  "category": "Product",
+  "personaTemplateId": "product-manager",
+  "tryAsking": [
+    "Triage these feature requests and group by theme",
+    "Are we on track for our sprint goals?",
+    "Prepare a decision package: should we build X or Y first?",
+    "Synthesize this week's customer feedback into themes",
+    "Draft user stories for the new onboarding flow"
+  ],
+  "skills": [
+    {
+      "id": "pm-feature-triage",
+      "name": "Feature Request Triage",
+      "description": "Categorize, deduplicate, and prioritize incoming feature requests",
+      "icon": "🏷️",
+      "category": "Product",
+      "prompt": "Triage the following feature requests.\n\nRequests:\n{{requests}}\n\nFor each request:\n1. Category (product area)\n2. User impact (high/medium/low)\n3. Effort estimate (S/M/L/XL)\n4. Priority score\n5. Duplicate detection\n\nThen provide:\n- Grouped themes\n- Top 3 requests by impact\n- Requests that conflict with current roadmap",
+      "parameters": [
+        { "name": "requests", "type": "string", "description": "Feature requests to triage", "required": true }
+      ],
+      "enabled": true
+    },
+    {
+      "id": "pm-user-stories",
+      "name": "User Story Generator",
+      "description": "Generate well-structured user stories with acceptance criteria",
+      "icon": "📝",
+      "category": "Product",
+      "prompt": "Create user stories for the following feature.\n\nFeature: {{feature}}\nContext: {{context}}\n\nFor each story provide:\n- User story format: As a [user], I want [goal] so that [benefit]\n- Acceptance criteria (Given/When/Then)\n- Edge cases to consider\n- Dependencies\n- Suggested story points (1/2/3/5/8/13)",
+      "parameters": [
+        { "name": "feature", "type": "string", "description": "Feature to create stories for", "required": true },
+        { "name": "context", "type": "string", "description": "Additional context or constraints", "required": false }
+      ],
+      "enabled": true
+    },
+    {
+      "id": "pm-roadmap-update",
+      "name": "Roadmap Update",
+      "description": "Draft a roadmap update for stakeholders based on current progress",
+      "icon": "🗺️",
+      "category": "Product",
+      "prompt": "Draft a roadmap update.\n\nCurrent status:\n{{status}}\n\nInclude:\n1. What shipped this period\n2. What's in progress and expected delivery\n3. What's planned next\n4. What changed from previous roadmap (additions, removals, date changes)\n5. Key risks to the timeline\n6. Decisions needed from stakeholders",
+      "parameters": [
+        { "name": "status", "type": "string", "description": "Current project/product status", "required": true }
+      ],
+      "enabled": true
+    }
+  ],
+  "agentRoles": [
+    {
+      "name": "pm-assistant",
+      "displayName": "PM Assistant",
+      "description": "Assists product managers with feature triage, user stories, and roadmap tracking",
+      "icon": "🎯",
+      "color": "#06b6d4",
+      "capabilities": ["plan", "analyze", "research", "write", "communicate"],
+      "systemPrompt": "You are a Product Management Assistant. You help PMs triage features, write user stories, track roadmap progress, and prepare decision packages. You think in terms of user value and business impact."
+    }
+  ]
+}

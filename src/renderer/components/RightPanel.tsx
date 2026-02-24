@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Task, Workspace, TaskEvent, PlanStep, QueueStatus } from "../../shared/types";
 import { isVerificationStepDescription } from "../../shared/plan-utils";
 import { FileViewer } from "./FileViewer";
@@ -96,10 +96,38 @@ export function RightPanel({
     progress: true,
     queue: true,
     folder: true,
+    activeContext: true,
     context: true,
   });
   const [viewerFilePath, setViewerFilePath] = useState<string | null>(null);
   const agentContext = useAgentContext();
+
+  // Active context: connectors + skills
+  const [activeContext, setActiveContext] = useState<{
+    connectors: { id: string; name: string; icon: string; status: string }[];
+    skills: { id: string; name: string; icon: string }[];
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadContext() {
+      try {
+        const data = await window.electronAPI.getActiveContext();
+        if (!cancelled) setActiveContext(data);
+      } catch {
+        // Context load failed silently
+      }
+    }
+
+    loadContext();
+    const interval = setInterval(loadContext, 30000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
 
   // Queue data
   const runningTasks = useMemo(
@@ -548,6 +576,86 @@ export function RightPanel({
           </div>
         )}
       </div>
+
+      {/* Active Context Section (Connectors + Skills) */}
+      {(() => {
+        const connectedServers = activeContext?.connectors.filter((c) => c.status === "connected") || [];
+        const activeSkills = activeContext?.skills || [];
+        const activeCount = connectedServers.length + activeSkills.length;
+        const hasActiveContent = connectedServers.length > 0 || activeSkills.length > 0;
+
+        return (
+          <div className="right-panel-section cli-section">
+            <div className="cli-section-header" onClick={() => toggleSection("activeContext")}>
+              <span className="cli-section-prompt">&gt;</span>
+              <span className="cli-section-title">
+                <span className="terminal-only">ACTIVE</span>
+                <span className="modern-only">Active Context</span>
+              </span>
+              {activeCount > 0 && (
+                <span className="cli-active-context-badge">{activeCount}</span>
+              )}
+              <span className="cli-section-toggle">
+                <span className="terminal-only">{expandedSections.activeContext ? "[-]" : "[+]"}</span>
+                <span className="modern-only">{expandedSections.activeContext ? "−" : "+"}</span>
+              </span>
+            </div>
+            {expandedSections.activeContext && (
+              <div className="cli-section-content">
+                {hasActiveContent ? (
+                  <div className="cli-context-list">
+                    {connectedServers.length > 0 && (
+                      <div className="cli-context-group">
+                        <div className="cli-context-label">
+                          <span className="terminal-only"># connectors:</span>
+                          <span className="modern-only">Connectors</span>
+                        </div>
+                        {connectedServers.map((c) => (
+                          <div key={c.id} className="cli-context-item">
+                            <span className="cli-active-context-icon">{c.icon}</span>
+                            <span className="cli-context-key">{c.name}</span>
+                            <span className="cli-active-context-status connected" />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {activeSkills.length > 0 && (
+                      <div className="cli-context-group">
+                        <div className="cli-context-label">
+                          <span className="terminal-only"># skills:</span>
+                          <span className="modern-only">Skills</span>
+                        </div>
+                        {activeSkills.slice(0, 10).map((s) => (
+                          <div key={s.id} className="cli-context-item">
+                            <span className="cli-active-context-icon">{s.icon}</span>
+                            <span className="cli-context-key">{s.name}</span>
+                          </div>
+                        ))}
+                        {activeSkills.length > 10 && (
+                          <div className="cli-context-item cli-context-overflow">
+                            +{activeSkills.length - 10} more
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="cli-empty-state">
+                    <div className="cli-context-empty">
+                      <span className="terminal-only">connectors: 0 skills: 0</span>
+                      <span className="modern-only">No active integrations</span>
+                    </div>
+                    <p className="cli-hint">
+                      <span className="terminal-only"># configure in settings</span>
+                      <span className="modern-only">Set up connectors or skills in Settings.</span>
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Context Section */}
       <div className="right-panel-section cli-section">

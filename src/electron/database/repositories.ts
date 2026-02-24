@@ -176,8 +176,8 @@ export class TaskRepository {
     };
 
     const stmt = this.db.prepare(`
-      INSERT INTO tasks (id, title, prompt, user_prompt, status, workspace_id, created_at, updated_at, budget_tokens, budget_cost, success_criteria, max_attempts, current_attempt, parent_task_id, agent_type, agent_config, depth, result_summary)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO tasks (id, title, prompt, user_prompt, status, workspace_id, created_at, updated_at, budget_tokens, budget_cost, success_criteria, max_attempts, current_attempt, parent_task_id, agent_type, agent_config, depth, result_summary, source)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -199,6 +199,7 @@ export class TaskRepository {
       newTask.agentConfig ? JSON.stringify(newTask.agentConfig) : null,
       newTask.depth ?? 0,
       newTask.resultSummary || null,
+      newTask.source || "manual",
     );
 
     return newTask;
@@ -239,6 +240,7 @@ export class TaskRepository {
     "worktreeBranch",
     "worktreeStatus",
     "comparisonSessionId",
+    "source",
   ]);
 
   update(id: string, updates: Partial<Task>): void {
@@ -519,6 +521,7 @@ export class TaskRepository {
       worktreeBranch: row.worktree_branch || undefined,
       worktreeStatus: (row.worktree_status as Task["worktreeStatus"]) || undefined,
       comparisonSessionId: row.comparison_session_id || undefined,
+      source: (row.source as Task["source"]) || undefined,
     };
   }
 

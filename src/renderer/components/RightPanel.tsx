@@ -1,8 +1,74 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, type ComponentType } from "react";
 import { Task, Workspace, TaskEvent, PlanStep, QueueStatus } from "../../shared/types";
 import { isVerificationStepDescription } from "../../shared/plan-utils";
 import { FileViewer } from "./FileViewer";
 import { useAgentContext } from "../hooks/useAgentContext";
+import {
+  Cloud, Database, MessageCircle, Wrench, ClipboardList, KeyRound, Mail,
+  Hash, Gamepad2, FileEdit, Github, GitBranch, FolderOpen,
+  CreditCard, Phone, BarChart3, BookOpen, Calendar,
+  Palette, Shield, Zap, Search, Plug, PenLine, Flame, Bell,
+  type LucideProps,
+} from "lucide-react";
+import { EMOJI_ICON_MAP } from "../utils/emoji-icon-map";
+
+/**
+ * Map connector name patterns to Lucide icon components.
+ * Matched against the lowercase connector name/ID.
+ */
+const CONNECTOR_LUCIDE_MAP: Record<string, ComponentType<LucideProps>> = {
+  salesforce: Cloud,
+  jira: ClipboardList,
+  hubspot: MessageCircle,
+  zendesk: MessageCircle,
+  servicenow: Wrench,
+  linear: PenLine,
+  asana: ClipboardList,
+  okta: KeyRound,
+  resend: Mail,
+  slack: Hash,
+  discord: Gamepad2,
+  notion: FileEdit,
+  github: Github,
+  gitlab: GitBranch,
+  "google-drive": FolderOpen,
+  "google drive": FolderOpen,
+  gmail: Mail,
+  bigquery: Database,
+  intercom: MessageCircle,
+  docusign: PenLine,
+  stripe: CreditCard,
+  twilio: Phone,
+  sendgrid: Mail,
+  datadog: BarChart3,
+  pagerduty: Bell,
+  confluence: BookOpen,
+  trello: ClipboardList,
+  monday: Calendar,
+  airtable: Database,
+  figma: Palette,
+  sentry: Shield,
+  supabase: Zap,
+  firebase: Flame,
+  postgres: Database,
+  mongodb: Database,
+  redis: Database,
+  elasticsearch: Search,
+};
+
+/** Resolve a Lucide icon component for a connector by name, falling back to emoji map then Plug. */
+function resolveConnectorLucideIcon(name: string, emoji: string): ComponentType<LucideProps> {
+  const lower = name.toLowerCase();
+  for (const [key, Icon] of Object.entries(CONNECTOR_LUCIDE_MAP)) {
+    if (lower.includes(key)) return Icon;
+  }
+  return EMOJI_ICON_MAP[emoji] || Plug;
+}
+
+/** Resolve a Lucide icon component for a skill from its emoji, falling back to Zap. */
+function resolveSkillLucideIcon(emoji: string): ComponentType<LucideProps> {
+  return EMOJI_ICON_MAP[emoji] || Zap;
+}
 
 // Clickable file path component - opens file viewer on click, shows in Finder on right-click
 function ClickableFilePath({
@@ -610,13 +676,16 @@ export function RightPanel({
                           <span className="terminal-only"># connectors:</span>
                           <span className="modern-only">Connectors</span>
                         </div>
-                        {connectedServers.map((c) => (
-                          <div key={c.id} className="cli-context-item">
-                            <span className="cli-active-context-icon">{c.icon}</span>
-                            <span className="cli-context-key">{c.name}</span>
-                            <span className="cli-active-context-status connected" />
-                          </div>
-                        ))}
+                        {connectedServers.map((c) => {
+                          const ConnIcon = resolveConnectorLucideIcon(c.name, c.icon);
+                          return (
+                            <div key={c.id} className="cli-context-item">
+                              <span className="cli-active-context-icon"><ConnIcon size={14} /></span>
+                              <span className="cli-context-key">{c.name}</span>
+                              <span className="cli-active-context-status connected" />
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                     {activeSkills.length > 0 && (
@@ -625,12 +694,15 @@ export function RightPanel({
                           <span className="terminal-only"># skills:</span>
                           <span className="modern-only">Skills</span>
                         </div>
-                        {activeSkills.slice(0, 10).map((s) => (
-                          <div key={s.id} className="cli-context-item">
-                            <span className="cli-active-context-icon">{s.icon}</span>
-                            <span className="cli-context-key">{s.name}</span>
-                          </div>
-                        ))}
+                        {activeSkills.slice(0, 10).map((s) => {
+                          const SkillIcon = resolveSkillLucideIcon(s.icon);
+                          return (
+                            <div key={s.id} className="cli-context-item">
+                              <span className="cli-active-context-icon"><SkillIcon size={14} /></span>
+                              <span className="cli-context-key">{s.name}</span>
+                            </div>
+                          );
+                        })}
                         {activeSkills.length > 10 && (
                           <div className="cli-context-item cli-context-overflow">
                             +{activeSkills.length - 10} more

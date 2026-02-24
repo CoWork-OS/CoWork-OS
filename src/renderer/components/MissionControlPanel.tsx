@@ -1216,7 +1216,7 @@ const styles = `
     display: flex;
     flex-direction: column;
     background: var(--color-bg-primary);
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: var(--font-ui);
   }
 
   .mc-loading {
@@ -1352,7 +1352,7 @@ const styles = `
     font-size: 14px;
     font-weight: 500;
     color: var(--color-text-primary);
-    font-family: 'SF Mono', Monaco, monospace;
+    font-family: var(--font-mono);
   }
 
   .mc-status-badge {

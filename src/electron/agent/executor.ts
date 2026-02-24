@@ -4826,6 +4826,87 @@ You are continuing a previous conversation. The context from the previous conver
     return desc.includes("verify:") || desc.includes("verification") || desc.includes("verify ");
   }
 
+  /**
+   * Determines if a verification step's LLM response indicates a passing result.
+   * The LLM is instructed to respond with "OK" on success, but often returns
+   * a detailed positive assessment instead. This method detects both the exact
+   * "OK" response and detailed responses that indicate overall success.
+   */
+  private isVerificationPassing(text: string): boolean {
+    if (!text) return false;
+    const normalized = text.trim();
+    const lower = normalized.toLowerCase();
+
+    // Exact or near-exact "OK"
+    if (lower === "ok" || lower === "ok." || lower === "ok!") return true;
+    // Starts with "OK" followed by word boundary (e.g., "OK — looks good")
+    if (/^ok\b/i.test(normalized)) return true;
+
+    // Short affirmative responses (< 80 chars)
+    if (lower.length < 80) {
+      if (
+        /^(looks?\s+good|all\s+(good|clear|set)|verified|confirmed|pass(ed)?|lgtm|no\s+issues?|approved|✓|✅|all\s+checks?\s+pass)/.test(
+          lower,
+        )
+      )
+        return true;
+    }
+
+    // Score-based detection for longer responses (detailed assessments)
+    const successSignals = [
+      "✅",
+      "✓",
+      "looks good",
+      "all good",
+      "no issues",
+      "no problems",
+      "ready to send",
+      "ready to use",
+      "well-written",
+      "well written",
+      "correctly",
+      "accurately",
+      "solid",
+      "the draft is",
+      "tone is",
+      "clear and",
+      "constructive",
+      "appropriately",
+      "complete",
+      "verified",
+      "confirmed",
+    ];
+    const failureSignals = [
+      "❌",
+      "✗",
+      "not found",
+      "not created",
+      "does not exist",
+      "missing required",
+      "syntax error",
+      "broken",
+      "incorrect",
+      "wrong output",
+      "tests? fail",
+      "build fail",
+      "needs fix",
+      "must be fixed",
+      "critical issue",
+      "does not match",
+      "not implemented",
+      "incomplete implementation",
+    ];
+
+    const successCount = successSignals.filter((s) => lower.includes(s)).length;
+    const failureCount = failureSignals.filter((f) => new RegExp(f, "i").test(lower)).length;
+
+    // Passing if success signals outweigh failure signals with at least 2 success signals
+    if (successCount >= 2 && failureCount === 0) return true;
+    if (successCount > failureCount && successCount >= 2) return true;
+
+    return false;
+  }
+
   private isSummaryStep(step: PlanStep): boolean {
     const desc = step.description.toLowerCase();
     return (
@@ -8472,7 +8553,7 @@ TASK / CONVERSATION HISTORY:
       const enforceVerificationOk =
         isVerifyStep &&
         (isPlanVerifyStep || isLastStep || /\bfinal verification\b/i.test(step.description || ""));
-      if (!stepFailed && enforceVerificationOk && finalAssistantText !== "OK") {
+      if (!stepFailed && enforceVerificationOk && !this.isVerificationPassing(finalAssistantText)) {
         stepFailed = true;
         if (!lastFailureReason) {
           lastFailureReason = finalAssistantText

@@ -601,7 +601,7 @@ export function HooksSettings() {
         }
 
         .status-address {
-          font-family: monospace;
+          font-family: var(--font-mono);
           font-size: 12px;
           color: var(--color-text-secondary);
         }
@@ -644,7 +644,7 @@ export function HooksSettings() {
         }
 
         .endpoint-item code {
-          font-family: monospace;
+          font-family: var(--font-mono);
           font-size: 13px;
           color: var(--color-accent);
         }

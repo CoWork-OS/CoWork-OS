@@ -234,6 +234,8 @@ export class TaskExecutor {
 
   /** Follow-up messages queued while the executor is busy (mutex held). */
   private pendingFollowUps: Array<{ message: string; images?: ImageAttachment[] }> = [];
+  /** When true, sendMessageLegacy skips emitting user_message (already emitted by daemon). */
+  private _suppressNextUserMessageEvent = false;
 
   private static readonly MIN_RESULT_SUMMARY_LENGTH = 20;
   private static readonly RESULT_SUMMARY_PLACEHOLDERS = new Set<string>([
@@ -347,6 +349,14 @@ export class TaskExecutor {
 
   private getLifecycleMutex(): LifecycleMutex {
     return this.lifecycleMutex ?? (this.lifecycleMutexFallback ??= new LifecycleMutex());
+  }
+
+  /**
+   * Set the execution plan directly. Used when resuming an interrupted task
+   * where the plan is reconstructed from persisted events.
+   */
+  setPlan(plan: Plan): void {
+    this.plan = plan;
   }
 
   private noteUnifiedCompatMode(entrypoint: "executeStep" | "sendMessage"): void {
@@ -2645,10 +2655,13 @@ ${transcript}
   }
 
   private buildResultSummary(): string | undefined {
+    // Prefer lastAssistantText first — it is the untruncated text from the
+    // most recent assistant response, whereas lastNonVerificationOutput and
+    // lastAssistantOutput are capped by recordAssistantOutput.
     const candidates = [
+      this.lastAssistantText,
       this.lastNonVerificationOutput,
       this.lastAssistantOutput,
-      this.lastAssistantText,
     ];
 
     for (const candidate of candidates) {
@@ -3034,6 +3047,11 @@ ${transcript}
     // This provides full conversation context including tool results, web content, etc.
     if (this.restoreFromSnapshot(events)) {
       console.log(`${this.logTag} Successfully restored conversation from snapshot`);
+      // If the snapshot didn't include usageTotals (older format), reconstruct
+      // from llm_usage events so budget enforcement still works.
+      if (this.totalInputTokens === 0 && this.totalOutputTokens === 0) {
+        this.restoreUsageTotalsFromEvents(events);
+      }
       return;
     }
 
@@ -3190,6 +3208,12 @@ You are continuing a previous conversation. The context from the previous conver
         // Include metadata for debugging
         modelId: this.modelId,
         modelKey: this.modelKey,
+        // Token/cost totals so budget enforcement survives a resume
+        usageTotals: {
+          inputTokens: this.totalInputTokens,
+          outputTokens: this.totalOutputTokens,
+          cost: this.totalCost,
+        },
       };
       const estimatedSize = JSON.stringify(payload).length;
       const sizeMB = (estimatedSize / 1024 / 1024).toFixed(2);
@@ -3367,6 +3391,13 @@ You are continuing a previous conversation. The context from the previous conver
 
       this.updateConversationHistory(restoredHistory);
 
+      // Restore token/cost budget counters so budget enforcement carries over
+      if (payload.usageTotals) {
+        this.totalInputTokens = payload.usageTotals.inputTokens || 0;
+        this.totalOutputTokens = payload.usageTotals.outputTokens || 0;
+        this.totalCost = payload.usageTotals.cost || 0;
+      }
+
       // NOTE: We intentionally do NOT restore systemPrompt from snapshot
       // The system prompt contains time-sensitive data (e.g., "Current time: ...")
       // that would be stale. Let sendMessage() generate a fresh system prompt.
@@ -3378,6 +3409,28 @@ You are continuing a previous conversation. The context from the previous conver
     } catch (error) {
       console.error(`${this.logTag} Failed to restore from snapshot:`, error);
       return false;
+    }
+  }
+
+  /**
+   * Restore token/cost totals from persisted llm_usage events.
+   * Used as a fallback when the snapshot doesn't include usageTotals
+   * (e.g. older snapshots saved before the field was added, or crash recovery).
+   */
+  private restoreUsageTotalsFromEvents(events: TaskEvent[]): void {
+    // llm_usage events store cumulative totals — just grab the last one
+    const usageEvents = events.filter((e) => e.type === "llm_usage");
+    if (usageEvents.length === 0) return;
+
+    const latest = usageEvents[usageEvents.length - 1];
+    const totals = latest.payload?.totals;
+    if (totals) {
+      this.totalInputTokens = totals.inputTokens || 0;
+      this.totalOutputTokens = totals.outputTokens || 0;
+      this.totalCost = totals.cost || 0;
+      console.log(
+        `${this.logTag} Restored usage totals from events: ${this.totalInputTokens + this.totalOutputTokens} tokens, ${this.totalCost.toFixed(4)} cost`,
+      );
     }
   }
 
@@ -5026,7 +5079,9 @@ You are continuing a previous conversation. The context from the previous conver
       .join("\n")
       .trim();
     if (!text) return;
-    const truncated = text.length > 1500 ? `${text.slice(0, 1500)}…` : text;
+    // Cap at 4000 to match buildResultSummary limit – the previous 1500 limit
+    // was too aggressive and caused delivered results to be cut short.
+    const truncated = text.length > 4000 ? `${text.slice(0, 4000)}…` : text;
     if (!this.isVerificationStep(step)) {
       this.lastAssistantOutput = truncated;
       this.lastNonVerificationOutput = truncated;
@@ -5754,14 +5809,12 @@ You are continuing a previous conversation. The context from the previous conver
         { role: "assistant", content: [{ type: "text", text: assistantText }] },
       ]);
       const resultSummary = this.buildResultSummary() || assistantText;
-      // Think mode produces exploratory responses, not direct answers —
-      // skip the direct-answer guard that would reject Socratic replies.
-      if (isThinkMode) {
-        this.finalizeTaskBestEffort(resultSummary);
-        this.capturePlaybookOutcome("success");
-      } else {
-        this.finalizeTask(resultSummary);
-      }
+      // Companion mode (both chat and think) runs with 0 tools and a
+      // minimal token budget, so strict guard checks designed for full
+      // task execution (verification evidence, artifact evidence, etc.)
+      // are impossible to satisfy. Use best-effort finalization.
+      this.finalizeTaskBestEffort(resultSummary);
+      this.capturePlaybookOutcome("success");
     } catch (error: any) {
       const assistantText = isThinkMode
         ? "I wasn't able to process that right now. Could you try rephrasing, or let me know what specific aspect you'd like to think through?"
@@ -5775,11 +5828,7 @@ You are continuing a previous conversation. The context from the previous conver
         { role: "assistant", content: [{ type: "text", text: assistantText }] },
       ]);
       const resultSummary = this.buildResultSummary() || assistantText;
-      if (isThinkMode) {
-        this.finalizeTaskBestEffort(resultSummary);
-      } else {
-        this.finalizeTask(resultSummary);
-      }
+      this.finalizeTaskBestEffort(resultSummary);
       console.error(`${this.logTag} Companion mode failed, using fallback reply:`, error);
     }
   }
@@ -7603,9 +7652,10 @@ TASK / CONVERSATION HISTORY:
           while (pendingMsg) {
             console.log(`${this.logTag} Injecting queued follow-up into step execution`);
             const userUpdate = `USER UPDATE: ${pendingMsg.message}`;
-            messages.push({ role: "user" as const, content: userUpdate });
+            const content = await this.buildUserContent(userUpdate, pendingMsg.images);
+            messages.push({ role: "user" as const, content });
             // Also persist to conversation history for future steps/follow-ups
-            this.appendConversationHistory({ role: "user", content: userUpdate });
+            this.appendConversationHistory({ role: "user", content });
             pendingMsg = this.drainPendingFollowUp();
           }
         }
@@ -8752,6 +8802,136 @@ TASK / CONVERSATION HISTORY:
     }
   }
 
+  /**
+   * Resume execution after the app was restarted.
+   * Called by the daemon when an interrupted task is being resumed.
+   * Acquires the lifecycle mutex, restores context, and continues the plan.
+   */
+  async resumeAfterInterruption(): Promise<void> {
+    await this.getLifecycleMutex().runExclusive(async () => {
+      await this.resumeAfterInterruptionUnlocked();
+    });
+  }
+
+  private async resumeAfterInterruptionUnlocked(): Promise<void> {
+    try {
+      if (!this.plan) {
+        // No plan was restored — fall back to full execution from scratch
+        console.log(
+          `${this.logTag} No plan available for resumption, falling back to full execution`,
+        );
+        await this.executeUnlocked();
+        return;
+      }
+
+      const pendingSteps = this.plan.steps.filter((s) => s.status === "pending");
+      if (pendingSteps.length === 0) {
+        // All steps were already completed before interruption — just finalize
+        console.log(`${this.logTag} All plan steps already completed, finalizing`);
+        this.finalizeTask(this.buildResultSummary());
+        return;
+      }
+
+      const completedSteps = this.plan.steps.filter(
+        (s) => s.status === "completed",
+      );
+      console.log(
+        `${this.logTag} Resuming interrupted task: ${completedSteps.length} completed, ${pendingSteps.length} pending`,
+      );
+
+      // Inject resumption context so the LLM knows it's continuing after a restart
+      const resumptionLines = [
+        "TASK RESUMPTION CONTEXT:",
+        "This task was interrupted by an application restart and is now being resumed.",
+        `Plan: ${this.plan.description}`,
+      ];
+      if (completedSteps.length > 0) {
+        resumptionLines.push(`Completed steps (${completedSteps.length}):`);
+        for (const s of completedSteps) {
+          resumptionLines.push(`  - [DONE] ${s.description}`);
+        }
+      }
+      resumptionLines.push(`Remaining steps (${pendingSteps.length}):`);
+      for (const s of pendingSteps) {
+        resumptionLines.push(`  - [PENDING] ${s.description}`);
+      }
+      resumptionLines.push(
+        "",
+        "Continue execution from where you left off. Do not repeat already-completed steps.",
+      );
+
+      this.appendConversationHistory({
+        role: "user",
+        content: resumptionLines.join("\n"),
+      });
+      this.appendConversationHistory({
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: "Understood. Resuming execution from where I left off.",
+          },
+        ],
+      });
+
+      this.daemon.updateTaskStatus(this.task.id, "executing");
+      this.emitEvent("executing", {
+        message: "Resuming execution after application restart",
+      });
+
+      await this.executePlan();
+
+      if (this.waitingForUserInput || this.cancelled) {
+        return;
+      }
+
+      if (this.task.successCriteria) {
+        const result = await this.verifySuccessCriteria();
+        if (result.success) {
+          this.emitEvent("verification_passed", {
+            attempt: this.task.currentAttempt || 1,
+            message: result.message,
+          });
+        } else {
+          this.emitEvent("verification_failed", {
+            attempt: this.task.currentAttempt || 1,
+            maxAttempts: this.task.maxAttempts || 1,
+            message: result.message,
+            willRetry: false,
+          });
+          throw new Error(
+            `Failed to meet success criteria: ${result.message}`,
+          );
+        }
+      }
+
+      this.finalizeTask(this.buildResultSummary());
+    } catch (error: any) {
+      if (this.cancelled) {
+        console.log(
+          `${this.logTag} Resumed task cancelled (reason: ${this.cancelReason || "unknown"})`,
+        );
+        return;
+      }
+
+      console.error(`${this.logTag} Resumed task execution failed:`, error);
+      this.saveConversationSnapshot();
+      this.daemon.updateTask(this.task.id, {
+        status: "failed",
+        error: error?.message || String(error),
+        completedAt: Date.now(),
+      });
+      this.emitEvent("error", {
+        message: error.message,
+        stack: error.stack,
+      });
+    } finally {
+      await this.toolRegistry.cleanup().catch((e) => {
+        console.error("Cleanup error:", e);
+      });
+    }
+  }
+
   private getQualityPassCount(): 1 | 2 | 3 {
     const configured = this.task.agentConfig?.qualityPasses;
     if (configured === 2 || configured === 3) return configured;
@@ -9099,14 +9279,20 @@ TASK / CONVERSATION HISTORY:
 
   /**
    * Queue a follow-up message to be injected into the currently running execution loop.
-   * The user_message event is emitted immediately so the UI shows the message right away.
+   * Caller is responsible for emitting the user_message event if immediate UI feedback is needed.
    */
   queueFollowUp(message: string, images?: ImageAttachment[]): void {
     this.pendingFollowUps.push({ message, images });
-    this.emitEvent("user_message", { message });
     console.log(
       `${this.logTag} Follow-up queued for injection into running execution (queue size: ${this.pendingFollowUps.length})`,
     );
+  }
+
+  /**
+   * Whether there are follow-up messages waiting to be processed.
+   */
+  get hasPendingFollowUps(): boolean {
+    return this.pendingFollowUps.length > 0;
   }
 
   /**
@@ -9114,6 +9300,24 @@ TASK / CONVERSATION HISTORY:
    */
   private drainPendingFollowUp(): { message: string; images?: ImageAttachment[] } | undefined {
     return this.pendingFollowUps.shift();
+  }
+
+  /**
+   * Drain ALL pending follow-ups. Used by the daemon to re-dispatch orphaned
+   * messages after execution completes.
+   */
+  drainAllPendingFollowUps(): Array<{ message: string; images?: ImageAttachment[] }> {
+    const drained = [...this.pendingFollowUps];
+    this.pendingFollowUps = [];
+    return drained;
+  }
+
+  /**
+   * Tell the executor that the next sendMessage call should NOT re-emit user_message,
+   * because the caller already emitted it (e.g. orphaned follow-up re-dispatch).
+   */
+  suppressNextUserMessageEvent(): void {
+    this._suppressNextUserMessageEvent = true;
   }
 
   /**
@@ -9196,8 +9400,14 @@ TASK / CONVERSATION HISTORY:
       }
     }
 
+    // Consume the suppression flag once; when set the daemon already emitted user_message.
+    const suppressUserMessageEvent = this._suppressNextUserMessageEvent;
+    this._suppressNextUserMessageEvent = false;
+
     if (this.preflightShellExecutionCheck()) {
-      this.emitEvent("user_message", { message });
+      if (!suppressUserMessageEvent) {
+        this.emitEvent("user_message", { message });
+      }
       this.appendConversationHistory({
         role: "user",
         content: await this.buildUserContent(message, images),
@@ -9218,7 +9428,9 @@ TASK / CONVERSATION HISTORY:
     this.toolCallDeduplicator.reset();
     this.daemon.updateTaskStatus(this.task.id, "executing");
     this.emitEvent("executing", { message: "Processing follow-up message" });
-    this.emitEvent("user_message", { message });
+    if (!suppressUserMessageEvent) {
+      this.emitEvent("user_message", { message });
+    }
 
     if (!shouldResumeAfterFollowup && this.resolveConversationMode(message) === "chat") {
       await this.respondInChatMode(message, previousStatus);
@@ -9516,8 +9728,9 @@ TASK / CONVERSATION HISTORY:
           while (pendingMsg) {
             console.log(`${this.logTag} Injecting queued follow-up into sendMessage loop`);
             const userUpdate = `USER UPDATE: ${pendingMsg.message}`;
+            const content = await this.buildUserContent(userUpdate, pendingMsg.images);
             // messages === this.conversationHistory here, so push persists automatically
-            messages.push({ role: "user" as const, content: userUpdate });
+            messages.push({ role: "user" as const, content });
             pendingMsg = this.drainPendingFollowUp();
           }
         }

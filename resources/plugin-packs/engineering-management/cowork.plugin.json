@@ -1,0 +1,69 @@
+{
+  "name": "engineering-management-pack",
+  "displayName": "Engineering Management",
+  "version": "1.0.0",
+  "description": "Sprint health tracking, 1-on-1 preparation, cross-team dependency scanning, and team velocity reporting for engineering managers.",
+  "type": "pack",
+  "author": "CoWork-OSS",
+  "keywords": ["management", "sprint", "team-lead", "1on1", "velocity"],
+  "icon": "👥",
+  "category": "Management",
+  "personaTemplateId": "engineering-manager",
+  "tryAsking": [
+    "Prepare 1-on-1 notes for each of my direct reports",
+    "How's our sprint looking — are we on track?",
+    "What cross-team dependencies are blocking us?",
+    "Generate a sprint retrospective summary",
+    "Which team members might need support this week?"
+  ],
+  "skills": [
+    {
+      "id": "em-sprint-review",
+      "name": "Sprint Health Review",
+      "description": "Analyze sprint progress and flag at-risk items",
+      "icon": "📊",
+      "category": "Management",
+      "prompt": "Review the current sprint status.\n\nSprint data:\n{{sprint_data}}\n\nPlease provide:\n1. Sprint progress percentage\n2. Items completed vs. planned\n3. At-risk items (stalled 3+ days, blocked, failing CI)\n4. Team member workload balance\n5. Predicted sprint outcome (on track/at risk/behind)\n6. Recommended actions for this week",
+      "parameters": [
+        { "name": "sprint_data", "type": "string", "description": "Sprint board status, tasks, or JIRA export", "required": true }
+      ],
+      "enabled": true
+    },
+    {
+      "id": "em-1on1-prep",
+      "name": "1-on-1 Prep",
+      "description": "Prepare discussion points and context for a 1-on-1 meeting",
+      "icon": "💬",
+      "category": "Management",
+      "prompt": "Prepare a 1-on-1 meeting brief.\n\nTeam member: {{person}}\nRecent context: {{context}}\n\nPlease prepare:\n1. Recent accomplishments to recognize\n2. Current work and progress\n3. Potential blockers or concerns\n4. Open action items from previous meetings\n5. Suggested discussion topics (2-3)\n6. Career development talking points",
+      "parameters": [
+        { "name": "person", "type": "string", "description": "Team member name", "required": true },
+        { "name": "context", "type": "string", "description": "Recent activity, PRs, tasks, or notes about this person", "required": false }
+      ],
+      "enabled": true
+    },
+    {
+      "id": "em-team-report",
+      "name": "Team Status Report",
+      "description": "Generate a team status report for leadership or stakeholders",
+      "icon": "📄",
+      "category": "Management",
+      "prompt": "Generate a team status report.\n\nTeam info:\n{{team_info}}\n\nFormat:\n1. Executive summary (3 bullets)\n2. Key achievements this period\n3. In-progress work and timelines\n4. Blockers and risks\n5. Team health indicators\n6. Next period priorities",
+      "parameters": [
+        { "name": "team_info", "type": "string", "description": "Team activity, sprint data, or notes", "required": true }
+      ],
+      "enabled": true
+    }
+  ],
+  "agentRoles": [
+    {
+      "name": "em-assistant",
+      "displayName": "EM Assistant",
+      "description": "Assists engineering managers with sprint tracking, 1-on-1 prep, and team health monitoring",
+      "icon": "👥",
+      "color": "#8b5cf6",
+      "capabilities": ["plan", "analyze", "manage", "communicate", "document"],
+      "systemPrompt": "You are an Engineering Management Assistant. You help EMs track sprint health, prepare for 1-on-1s, identify blockers, and generate team reports. You are organized, empathetic, and action-oriented."
+    }
+  ]
+}

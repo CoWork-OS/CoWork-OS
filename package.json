@@ -117,6 +117,7 @@
     "discord.js": "^14.25.1",
     "docx": "^9.5.2",
     "e2b": "^2.12.1",
+    "electron": "40.4.1",
     "electron-updater": "^6.3.9",
     "ethers": "^6.16.0",
     "eventsource": "^4.1.0",

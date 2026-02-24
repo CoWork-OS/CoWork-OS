@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { FileText, Globe, Search, Monitor, Wrench, Terminal, Image, ChevronDown } from "lucide-react";
 
 interface ToolCategoryConfig {
   enabled: boolean;
@@ -25,131 +26,18 @@ interface BuiltinToolsSettingsData {
 
 type CategoryKey = keyof BuiltinToolsSettingsData["categories"];
 
+const IC = { size: 18, strokeWidth: 1.5 } as const;
 const CATEGORY_INFO: Record<
   CategoryKey,
   { name: string; icon: React.ReactNode; description: string }
 > = {
-  file: {
-    name: "File Operations",
-    icon: (
-      <svg
-        width="18"
-        height="18"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-      >
-        <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
-        <polyline points="13 2 13 9 20 9" />
-      </svg>
-    ),
-    description: "Read, write, copy, delete files and directories",
-  },
-  browser: {
-    name: "Browser Automation",
-    icon: (
-      <svg
-        width="18"
-        height="18"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-      >
-        <circle cx="12" cy="12" r="10" />
-        <line x1="2" y1="12" x2="22" y2="12" />
-        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-      </svg>
-    ),
-    description: "Navigate websites, click, fill forms, take screenshots",
-  },
-  search: {
-    name: "Web Search",
-    icon: (
-      <svg
-        width="18"
-        height="18"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-      >
-        <circle cx="11" cy="11" r="8" />
-        <path d="M21 21l-4.35-4.35" />
-      </svg>
-    ),
-    description: "Search the web using configured providers (Brave, Tavily, etc.)",
-  },
-  system: {
-    name: "System Tools",
-    icon: (
-      <svg
-        width="18"
-        height="18"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-      >
-        <rect x="2" y="3" width="20" height="14" rx="2" />
-        <path d="M8 21h8" />
-        <path d="M12 17v4" />
-      </svg>
-    ),
-    description: "Clipboard, screenshots, open apps and URLs",
-  },
-  skill: {
-    name: "Document Skills",
-    icon: (
-      <svg
-        width="18"
-        height="18"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-      >
-        <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
-      </svg>
-    ),
-    description: "Create spreadsheets, documents, presentations",
-  },
-  shell: {
-    name: "Shell Commands",
-    icon: (
-      <svg
-        width="18"
-        height="18"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-      >
-        <polyline points="4 17 10 11 4 5" />
-        <line x1="12" y1="19" x2="20" y2="19" />
-      </svg>
-    ),
-    description: "Execute terminal commands (requires approval)",
-  },
-  image: {
-    name: "Image Generation",
-    icon: (
-      <svg
-        width="18"
-        height="18"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-      >
-        <rect x="3" y="3" width="18" height="18" rx="2" />
-        <circle cx="8.5" cy="8.5" r="1.5" />
-        <polyline points="21 15 16 10 5 21" />
-      </svg>
-    ),
-    description: "Generate images using AI (requires Gemini API)",
-  },
+  file: { name: "File Operations", icon: <FileText {...IC} />, description: "Read, write, copy, delete files and directories" },
+  browser: { name: "Browser Automation", icon: <Globe {...IC} />, description: "Navigate websites, click, fill forms, take screenshots" },
+  search: { name: "Web Search", icon: <Search {...IC} />, description: "Search the web using configured providers (Brave, Tavily, etc.)" },
+  system: { name: "System Tools", icon: <Monitor {...IC} />, description: "Clipboard, screenshots, open apps and URLs" },
+  skill: { name: "Document Skills", icon: <Wrench {...IC} />, description: "Create spreadsheets, documents, presentations" },
+  shell: { name: "Shell Commands", icon: <Terminal {...IC} />, description: "Execute terminal commands (requires approval)" },
+  image: { name: "Image Generation", icon: <Image {...IC} />, description: "Generate images using AI (requires Gemini API)" },
 };
 
 const PRIORITY_OPTIONS: Array<{
@@ -398,20 +286,14 @@ export function BuiltinToolsSettings() {
                     }
                     title="Show tools in this category"
                   >
-                    <svg
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
+                    <ChevronDown
+                      size={16}
+                      strokeWidth={2}
                       style={{
                         transform: expandedCategory === category ? "rotate(180deg)" : "none",
                         transition: "transform 0.2s",
                       }}
-                    >
-                      <polyline points="6 9 12 15 18 9" />
-                    </svg>
+                    />
                   </button>
                 </div>
               </div>

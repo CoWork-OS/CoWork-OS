@@ -11,6 +11,7 @@ describe("TASK_EVENT_STATUS_MAP", () => {
     expect(TASK_EVENT_STATUS_MAP.task_completed).toBe("completed");
     expect(TASK_EVENT_STATUS_MAP.error).toBe("failed");
     expect(TASK_EVENT_STATUS_MAP.task_cancelled).toBe("cancelled");
+    expect(TASK_EVENT_STATUS_MAP.task_interrupted).toBe("interrupted");
   });
 
   it("keeps approval event semantics stable", () => {

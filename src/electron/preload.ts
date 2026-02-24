@@ -244,6 +244,9 @@ const IPC_CHANNELS = {
   TASK_SEND_MESSAGE: "task:sendMessage",
   TASK_SEND_STDIN: "task:sendStdin",
   TASK_KILL_COMMAND: "task:killCommand",
+  // Sub-agent operations
+  AGENT_GET_CHILDREN: "agent:getChildren",
+  AGENT_GET_STATUS: "agent:getStatus",
   WORKSPACE_SELECT: "workspace:select",
   WORKSPACE_LIST: "workspace:list",
   WORKSPACE_CREATE: "workspace:create",
@@ -393,6 +396,7 @@ const IPC_CHANNELS = {
   MCP_REMOVE_SERVER: "mcp:removeServer",
   MCP_CONNECT_SERVER: "mcp:connectServer",
   MCP_DISCONNECT_SERVER: "mcp:disconnectServer",
+  MCP_GET_SERVERS: "mcp:getServers",
   MCP_GET_STATUS: "mcp:getStatus",
   MCP_GET_SERVER_STATUS: "mcp:getServerStatus",
   MCP_GET_ALL_TOOLS: "mcp:getAllTools",
@@ -523,6 +527,11 @@ const IPC_CHANNELS = {
   CANVAS_CHECKPOINT_RESTORE: "canvas:checkpointRestore",
   CANVAS_CHECKPOINT_DELETE: "canvas:checkpointDelete",
   CANVAS_GET_CONTENT: "canvas:getContent",
+  // Artifact Reputation
+  REPUTATION_GET_SETTINGS: "reputation:getSettings",
+  REPUTATION_SAVE_SETTINGS: "reputation:saveSettings",
+  REPUTATION_LIST_MCP: "reputation:listMcp",
+  REPUTATION_RESCAN_MCP: "reputation:rescanMcp",
   // Mobile Companion Nodes
   NODE_LIST: "node:list",
   NODE_GET: "node:get",
@@ -581,6 +590,8 @@ const IPC_CHANNELS = {
   TUNNEL_GET_STATUS: "tunnel:getStatus",
   TUNNEL_START: "tunnel:start",
   TUNNEL_STOP: "tunnel:stop",
+  TUNNEL_GET_CONFIG: "tunnel:getConfig",
+  TUNNEL_SET_CONFIG: "tunnel:setConfig",
   // Agent Roles (Agent Squad)
   AGENT_ROLE_LIST: "agentRole:list",
   AGENT_ROLE_GET: "agentRole:get",
@@ -594,6 +605,7 @@ const IPC_CHANNELS = {
 
   // Agent Teams
   TEAM_LIST: "team:list",
+  TEAM_GET: "team:get",
   TEAM_CREATE: "team:create",
   TEAM_UPDATE: "team:update",
   TEAM_DELETE: "team:delete",
@@ -603,6 +615,7 @@ const IPC_CHANNELS = {
   TEAM_MEMBER_REMOVE: "teamMember:remove",
   TEAM_MEMBER_REORDER: "teamMember:reorder",
   TEAM_RUN_LIST: "teamRun:list",
+  TEAM_RUN_GET: "teamRun:get",
   TEAM_RUN_CREATE: "teamRun:create",
   TEAM_RUN_RESUME: "teamRun:resume",
   TEAM_RUN_PAUSE: "teamRun:pause",
@@ -624,6 +637,25 @@ const IPC_CHANNELS = {
   PERSONA_TEMPLATE_ACTIVATE: "personaTemplate:activate",
   PERSONA_TEMPLATE_PREVIEW: "personaTemplate:preview",
   PERSONA_TEMPLATE_GET_CATEGORIES: "personaTemplate:getCategories",
+  // Plugin Packs (Customize panel)
+  PLUGIN_PACK_LIST: "pluginPack:list",
+  PLUGIN_PACK_GET: "pluginPack:get",
+  PLUGIN_PACK_TOGGLE: "pluginPack:toggle",
+  PLUGIN_PACK_GET_CONTEXT: "pluginPack:getContext",
+  PLUGIN_PACK_TOGGLE_SKILL: "pluginPack:toggleSkill",
+  // Plugin Pack Distribution (scaffold, install, registry)
+  PLUGIN_PACK_SCAFFOLD: "pluginPack:scaffold",
+  PLUGIN_PACK_INSTALL_GIT: "pluginPack:installGit",
+  PLUGIN_PACK_INSTALL_URL: "pluginPack:installUrl",
+  PLUGIN_PACK_UNINSTALL: "pluginPack:uninstall",
+  PLUGIN_PACK_REGISTRY_SEARCH: "pluginPack:registrySearch",
+  PLUGIN_PACK_REGISTRY_DETAILS: "pluginPack:registryDetails",
+  PLUGIN_PACK_REGISTRY_CATEGORIES: "pluginPack:registryCategories",
+  PLUGIN_PACK_CHECK_UPDATES: "pluginPack:checkUpdates",
+  // Admin Policies
+  ADMIN_POLICIES_GET: "admin:policiesGet",
+  ADMIN_POLICIES_UPDATE: "admin:policiesUpdate",
+  ADMIN_POLICIES_CHECK_PACK: "admin:checkPack",
   // Activity Feed
   ACTIVITY_LIST: "activity:list",
   ACTIVITY_CREATE: "activity:create",
@@ -2729,6 +2761,48 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getPersonaTemplateCategories: () =>
     ipcRenderer.invoke(IPC_CHANNELS.PERSONA_TEMPLATE_GET_CATEGORIES),
 
+  // Plugin Packs (Customize panel) APIs
+  listPluginPacks: () => ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_PACK_LIST),
+  getPluginPack: (name: string) => ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_PACK_GET, name),
+  togglePluginPack: (name: string, enabled: boolean) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_PACK_TOGGLE, name, enabled),
+  getActiveContext: () => ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_PACK_GET_CONTEXT),
+  togglePluginPackSkill: (packName: string, skillId: string, enabled: boolean) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_PACK_TOGGLE_SKILL, packName, skillId, enabled),
+
+  // Plugin Pack Distribution APIs
+  scaffoldPluginPack: (options: {
+    name: string;
+    displayName: string;
+    description?: string;
+    category?: string;
+    icon?: string;
+    author?: string;
+    personaTemplateId?: string;
+  }) => ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_PACK_SCAFFOLD, options),
+  installPluginPackFromGit: (gitUrl: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_PACK_INSTALL_GIT, gitUrl),
+  installPluginPackFromUrl: (url: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_PACK_INSTALL_URL, url),
+  uninstallPluginPack: (packName: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_PACK_UNINSTALL, packName),
+  searchPackRegistry: (query: string, options?: { page?: number; pageSize?: number; category?: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_PACK_REGISTRY_SEARCH, query, options),
+  getPackRegistryDetails: (packId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_PACK_REGISTRY_DETAILS, packId),
+  getPackRegistryCategories: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_PACK_REGISTRY_CATEGORIES),
+  checkPackUpdates: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_PACK_CHECK_UPDATES),
+
+  // Admin Policies APIs
+  getAdminPolicies: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.ADMIN_POLICIES_GET),
+  updateAdminPolicies: (updates: Record<string, unknown>) =>
+    ipcRenderer.invoke(IPC_CHANNELS.ADMIN_POLICIES_UPDATE, updates),
+  checkPackPolicy: (packId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.ADMIN_POLICIES_CHECK_PACK, packId),
+
   // Agent Teams APIs
   listTeams: (workspaceId: string, includeInactive?: boolean) =>
     ipcRenderer.invoke(IPC_CHANNELS.TEAM_LIST, workspaceId, includeInactive),
@@ -4134,6 +4208,141 @@ export interface ElectronAPI {
       count: number;
     }>
   >;
+
+  // Plugin Packs (Customize panel)
+  listPluginPacks: () => Promise<
+    Array<{
+      name: string;
+      displayName: string;
+      version: string;
+      description: string;
+      icon?: string;
+      category?: string;
+      scope?: "personal" | "organization";
+      personaTemplateId?: string;
+      recommendedConnectors?: string[];
+      tryAsking?: string[];
+      skills: Array<{ id: string; name: string; description: string; icon?: string; enabled?: boolean }>;
+      slashCommands: Array<{ name: string; description: string; skillId: string }>;
+      agentRoles: Array<{ name: string; displayName: string; description?: string; icon: string; color: string }>;
+      state: string;
+      enabled: boolean;
+    }>
+  >;
+  getPluginPack: (name: string) => Promise<{
+    name: string;
+    displayName: string;
+    version: string;
+    description: string;
+    icon?: string;
+    category?: string;
+    personaTemplateId?: string;
+    recommendedConnectors?: string[];
+    tryAsking?: string[];
+    skills: Array<{ id: string; name: string; description: string; icon?: string; enabled?: boolean }>;
+    slashCommands: Array<{ name: string; description: string; skillId: string }>;
+    agentRoles: Array<{ name: string; displayName: string; description?: string; icon: string; color: string }>;
+    state: string;
+    enabled: boolean;
+  } | null>;
+  togglePluginPack: (name: string, enabled: boolean) => Promise<{ success: boolean; name: string; enabled: boolean }>;
+  getActiveContext: () => Promise<{
+    connectors: Array<{ id: string; name: string; icon: string; status: string }>;
+    skills: Array<{ id: string; name: string; icon: string }>;
+  }>;
+  togglePluginPackSkill: (packName: string, skillId: string, enabled: boolean) => Promise<{ success: boolean; packName: string; skillId: string; enabled: boolean }>;
+
+  // Plugin Pack Distribution
+  scaffoldPluginPack: (options: {
+    name: string;
+    displayName: string;
+    description?: string;
+    category?: string;
+    icon?: string;
+    author?: string;
+    personaTemplateId?: string;
+  }) => Promise<{ success: boolean; path?: string; error?: string; filesCreated?: string[] }>;
+  installPluginPackFromGit: (gitUrl: string) => Promise<{
+    success: boolean;
+    packName?: string;
+    path?: string;
+    error?: string;
+    skillCount?: number;
+    agentCount?: number;
+  }>;
+  installPluginPackFromUrl: (url: string) => Promise<{
+    success: boolean;
+    packName?: string;
+    path?: string;
+    error?: string;
+    skillCount?: number;
+    agentCount?: number;
+  }>;
+  uninstallPluginPack: (packName: string) => Promise<{ success: boolean; packName?: string; error?: string }>;
+  searchPackRegistry: (query: string, options?: { page?: number; pageSize?: number; category?: string }) => Promise<{
+    query: string;
+    total: number;
+    page: number;
+    pageSize: number;
+    results: Array<{
+      id: string;
+      name: string;
+      displayName: string;
+      description: string;
+      version: string;
+      author: string;
+      icon?: string;
+      category?: string;
+      tags?: string[];
+      downloadUrl?: string;
+      gitUrl?: string;
+      skillCount?: number;
+      agentCount?: number;
+    }>;
+  }>;
+  getPackRegistryDetails: (packId: string) => Promise<{
+    id: string;
+    name: string;
+    displayName: string;
+    description: string;
+    version: string;
+    author: string;
+    icon?: string;
+    category?: string;
+  } | null>;
+  getPackRegistryCategories: () => Promise<string[]>;
+  checkPackUpdates: () => Promise<Array<{ name: string; currentVersion: string; latestVersion: string }>>;
+
+  // Admin Policies
+  getAdminPolicies: () => Promise<{
+    version: number;
+    updatedAt: string;
+    packs: { allowed: string[]; blocked: string[]; required: string[] };
+    connectors: { blocked: string[] };
+    agents: { maxHeartbeatFrequencySec: number; maxConcurrentAgents: number };
+    general: {
+      allowCustomPacks: boolean;
+      allowGitInstall: boolean;
+      allowUrlInstall: boolean;
+      orgName?: string;
+      orgPluginDir?: string;
+    };
+  }>;
+  updateAdminPolicies: (updates: Record<string, unknown>) => Promise<{
+    version: number;
+    updatedAt: string;
+    packs: { allowed: string[]; blocked: string[]; required: string[] };
+    connectors: { blocked: string[] };
+    agents: { maxHeartbeatFrequencySec: number; maxConcurrentAgents: number };
+    general: {
+      allowCustomPacks: boolean;
+      allowGitInstall: boolean;
+      allowUrlInstall: boolean;
+      orgName?: string;
+      orgPluginDir?: string;
+    };
+  }>;
+  checkPackPolicy: (packId: string) => Promise<{ packId: string; allowed: boolean; required: boolean }>;
 
   // Agent Teams
   listTeams: (workspaceId: string, includeInactive?: boolean) => Promise<AgentTeam[]>;

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { Play } from "lucide-react";
 import type {
   ControlPlaneSettingsData,
   ControlPlaneStatus,
@@ -513,7 +514,7 @@ export function ControlPlaneSettings() {
                         : {}
                     }
                   >
-                    {saving ? "Please wait..." : status?.running ? "Stop Server" : "▶ Start Server"}
+                    {saving ? "Please wait..." : status?.running ? "Stop Server" : <><Play size={14} strokeWidth={2} /> Start Server</>}
                   </button>
                 </div>
               </>

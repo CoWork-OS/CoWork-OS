@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import type { Workspace } from "../../shared/types";
 
 interface TaskMetrics {
   totalCreated: number;
@@ -54,40 +55,60 @@ function formatTokens(n: number): string {
   return String(n);
 }
 
-/** Simple horizontal bar (percentage of max) */
-function MiniBar({ value, max, color }: { value: number; max: number; color?: string }) {
+function MiniBar({ value, max }: { value: number; max: number }) {
   const pct = max > 0 ? Math.round((value / max) * 100) : 0;
   return (
-    <div
-      style={{
-        height: 6,
-        borderRadius: 3,
-        background: "var(--bg-tertiary, #333)",
-        overflow: "hidden",
-        flex: 1,
-      }}
-    >
-      <div
-        style={{
-          width: `${pct}%`,
-          height: "100%",
-          borderRadius: 3,
-          background: color || "var(--accent, #6366f1)",
-          transition: "width 0.3s ease",
-        }}
-      />
+    <div className="insights-bar-track">
+      <div className="insights-bar-fill" style={{ width: `${pct}%` }} />
     </div>
   );
 }
 
-export function UsageInsightsPanel({ workspaceId }: UsageInsightsPanelProps) {
+interface PackSkillMap {
+  packName: string;
+  packIcon: string;
+  skills: Array<{ skill: string; count: number }>;
+  totalUsage: number;
+}
+
+function isValidWorkspaceId(id: string | undefined): id is string {
+  return !!id && !id.startsWith("__temp_workspace__");
+}
+
+export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageInsightsPanelProps) {
   const [data, setData] = useState<UsageInsightsData | null>(null);
   const [periodDays, setPeriodDays] = useState(7);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [packAnalytics, setPackAnalytics] = useState<PackSkillMap[]>([]);
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>("");
+  const [workspacesLoading, setWorkspacesLoading] = useState(true);
+
+  const workspaceId = selectedWorkspaceId;
+
+  const loadWorkspaces = useCallback(async () => {
+    try {
+      setWorkspacesLoading(true);
+      const loaded = await window.electronAPI.listWorkspaces();
+      const nonTemp = loaded.filter((w) => !w.id.startsWith("__temp_workspace__"));
+      setWorkspaces(nonTemp);
+      setSelectedWorkspaceId((prev) => {
+        if (prev && nonTemp.some((w) => w.id === prev)) return prev;
+        if (isValidWorkspaceId(initialWorkspaceId) && nonTemp.some((w) => w.id === initialWorkspaceId)) {
+          return initialWorkspaceId;
+        }
+        return nonTemp[0]?.id || "";
+      });
+    } catch {
+      setWorkspaces([]);
+    } finally {
+      setWorkspacesLoading(false);
+    }
+  }, [initialWorkspaceId]);
 
   const load = useCallback(async () => {
-    if (!workspaceId) return;
+    if (!isValidWorkspaceId(workspaceId)) return;
     setLoading(true);
     setError(null);
     try {
@@ -101,10 +122,86 @@ export function UsageInsightsPanel({ workspaceId }: UsageInsightsPanelProps) {
   }, [workspaceId, periodDays]);
 
   useEffect(() => {
+    void loadWorkspaces();
+  }, [loadWorkspaces]);
+
+  useEffect(() => {
+    setData(null);
+    setPackAnalytics([]);
+  }, [workspaceId]);
+
+  useEffect(() => {
     load();
   }, [load]);
 
-  if (!workspaceId) {
+  // Cross-reference skill usage with pack data
+  useEffect(() => {
+    if (!data || data.topSkills.length === 0) {
+      setPackAnalytics([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const packs = await window.electronAPI.listPluginPacks();
+        if (cancelled) return;
+
+        // Build skill-to-pack mapping
+        const skillToPack = new Map<string, { packName: string; packIcon: string }>();
+        for (const p of packs) {
+          for (const s of p.skills) {
+            skillToPack.set(s.id, { packName: p.displayName, packIcon: p.icon || "📦" });
+            skillToPack.set(s.name, { packName: p.displayName, packIcon: p.icon || "📦" });
+          }
+        }
+
+        // Group skills by pack
+        const packMap = new Map<string, PackSkillMap>();
+        for (const s of data.topSkills) {
+          const packInfo = skillToPack.get(s.skill);
+          const key = packInfo?.packName || "Other";
+          if (!packMap.has(key)) {
+            packMap.set(key, {
+              packName: key,
+              packIcon: packInfo?.packIcon || "⚡",
+              skills: [],
+              totalUsage: 0,
+            });
+          }
+          const entry = packMap.get(key)!;
+          entry.skills.push(s);
+          entry.totalUsage += s.count;
+        }
+
+        // Sort by total usage descending
+        const sorted = Array.from(packMap.values()).sort((a, b) => b.totalUsage - a.totalUsage);
+        setPackAnalytics(sorted);
+      } catch {
+        // Pack analytics not available
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [data]);
+
+  if (workspacesLoading) {
+    return (
+      <div className="settings-panel">
+        <h2>Usage Insights</h2>
+        <p className="settings-description">Loading workspaces…</p>
+      </div>
+    );
+  }
+
+  if (workspaces.length === 0) {
+    return (
+      <div className="settings-panel">
+        <h2>Usage Insights</h2>
+        <p className="settings-description">No workspaces found. Create a workspace first.</p>
+      </div>
+    );
+  }
+
+  if (!isValidWorkspaceId(workspaceId)) {
     return (
       <div className="settings-panel">
         <h2>Usage Insights</h2>
@@ -126,10 +223,10 @@ export function UsageInsightsPanel({ workspaceId }: UsageInsightsPanelProps) {
     return (
       <div className="settings-panel">
         <h2>Usage Insights</h2>
-        <p className="settings-description" style={{ color: "var(--error, #ef4444)" }}>
+        <p className="settings-description" style={{ color: "var(--color-error, #ef4444)" }}>
           {error}
         </p>
-        <button type="button" className="settings-btn" onClick={load}>
+        <button type="button" className="button-secondary" onClick={load}>
           Retry
         </button>
       </div>
@@ -144,33 +241,18 @@ export function UsageInsightsPanel({ workspaceId }: UsageInsightsPanelProps) {
 
   return (
     <div className="settings-panel">
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: 16,
-        }}
-      >
+      <div className="insights-header">
         <div>
-          <h2 style={{ margin: 0 }}>Usage Insights</h2>
-          <p className="settings-description" style={{ margin: "4px 0 0" }}>
-            Task activity, cost, and productivity patterns
-          </p>
+          <h2>Usage Insights</h2>
+          <p className="settings-description">Task activity, cost, and productivity patterns</p>
         </div>
-        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        <div className="insights-period-filter">
           {[7, 14, 30].map((d) => (
             <button
               key={d}
               type="button"
-              className={`settings-btn${periodDays === d ? " active" : ""}`}
+              className={`insights-period-btn${periodDays === d ? " active" : ""}`}
               onClick={() => setPeriodDays(d)}
-              style={{
-                padding: "4px 10px",
-                fontSize: 12,
-                fontWeight: periodDays === d ? 600 : 400,
-                opacity: periodDays === d ? 1 : 0.6,
-              }}
             >
               {d}d
             </button>
@@ -178,14 +260,28 @@ export function UsageInsightsPanel({ workspaceId }: UsageInsightsPanelProps) {
         </div>
       </div>
 
+      <div className="settings-form-group" style={{ marginBottom: 16, maxWidth: 260 }}>
+        <label className="settings-label">Workspace</label>
+        <select
+          value={selectedWorkspaceId}
+          onChange={(e) => setSelectedWorkspaceId(e.target.value)}
+          className="settings-select"
+        >
+          {workspaces.map((w) => (
+            <option key={w.id} value={w.id}>
+              {w.name}
+            </option>
+          ))}
+        </select>
+      </div>
       {/* Task metrics */}
       {tm && (
-        <div style={{ marginBottom: 20 }}>
-          <h3 style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Tasks</h3>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
+        <div className="settings-section">
+          <h3>Tasks</h3>
+          <div className="insights-stat-grid cols-4">
             <StatCard label="Created" value={tm.totalCreated} />
-            <StatCard label="Completed" value={tm.completed} color="#22c55e" />
-            <StatCard label="Failed" value={tm.failed} color="#ef4444" />
+            <StatCard label="Completed" value={tm.completed} color="var(--color-success, #22c55e)" />
+            <StatCard label="Failed" value={tm.failed} color="var(--color-error, #ef4444)" />
             <StatCard label="Avg Time" value={formatDuration(tm.avgCompletionTimeMs)} />
           </div>
         </div>
@@ -193,31 +289,21 @@ export function UsageInsightsPanel({ workspaceId }: UsageInsightsPanelProps) {
 
       {/* Cost metrics */}
       {cm && cm.totalCost > 0 && (
-        <div style={{ marginBottom: 20 }}>
-          <h3 style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Cost & Tokens</h3>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(3, 1fr)",
-              gap: 10,
-              marginBottom: 10,
-            }}
-          >
+        <div className="settings-section">
+          <h3>Cost & Tokens</h3>
+          <div className="insights-stat-grid cols-3" style={{ marginBottom: 10 }}>
             <StatCard label="Total Cost" value={`$${cm.totalCost.toFixed(4)}`} />
             <StatCard label="Input" value={formatTokens(cm.totalInputTokens)} />
             <StatCard label="Output" value={formatTokens(cm.totalOutputTokens)} />
           </div>
           {cm.costByModel.length > 0 && (
-            <div style={{ fontSize: 12, color: "var(--text-secondary, #888)" }}>
+            <div>
               {cm.costByModel.slice(0, 5).map((m) => (
-                <div
-                  key={m.model}
-                  style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}
-                >
-                  <span style={{ minWidth: 100, fontFamily: "monospace" }}>{m.model}</span>
+                <div key={m.model} className="insights-model-row">
+                  <span className="insights-model-name">{m.model}</span>
                   <MiniBar value={m.cost} max={cm.costByModel[0].cost} />
-                  <span style={{ minWidth: 60, textAlign: "right" }}>${m.cost.toFixed(4)}</span>
-                  <span style={{ minWidth: 40, textAlign: "right", opacity: 0.6 }}>{m.calls}×</span>
+                  <span className="insights-model-cost">${m.cost.toFixed(4)}</span>
+                  <span className="insights-model-calls">{m.calls}×</span>
                 </div>
               ))}
             </div>
@@ -225,66 +311,45 @@ export function UsageInsightsPanel({ workspaceId }: UsageInsightsPanelProps) {
         </div>
       )}
 
-      {/* Activity heatmap - day of week */}
+      {/* Activity by day of week */}
       {ap && (
-        <div style={{ marginBottom: 20 }}>
-          <h3 style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
+        <div className="settings-section">
+          <h3>
             Activity by Day
-            <span style={{ fontWeight: 400, opacity: 0.6, marginLeft: 8 }}>
-              Peak: {ap.mostActiveDay}
-            </span>
+            <span className="insights-section-subtitle">Peak: {ap.mostActiveDay}</span>
           </h3>
-          <div style={{ fontSize: 12 }}>
+          <div>
             {DAY_NAMES.map((day, i) => (
-              <div
-                key={day}
-                style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}
-              >
-                <span style={{ minWidth: 30, color: "var(--text-secondary, #888)" }}>{day}</span>
+              <div key={day} className="insights-bar-row">
+                <span className="insights-bar-label">{day}</span>
                 <MiniBar value={ap.tasksByDayOfWeek[i]} max={maxDayTasks} />
-                <span style={{ minWidth: 20, textAlign: "right", opacity: 0.6 }}>
-                  {ap.tasksByDayOfWeek[i]}
-                </span>
+                <span className="insights-bar-value">{ap.tasksByDayOfWeek[i]}</span>
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* Activity by hour (simplified: show only non-zero hours) */}
+      {/* Activity by hour */}
       {ap && (
-        <div style={{ marginBottom: 20 }}>
-          <h3 style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
+        <div className="settings-section">
+          <h3>
             Activity by Hour
-            <span style={{ fontWeight: 400, opacity: 0.6, marginLeft: 8 }}>
-              Peak: {ap.mostActiveHour}:00
-            </span>
+            <span className="insights-section-subtitle">Peak: {ap.mostActiveHour}:00</span>
           </h3>
-          <div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: 48 }}>
+          <div className="insights-hour-chart">
             {ap.tasksByHour.map((count, h) => (
               <div
                 key={h}
+                className={`insights-hour-bar ${count > 0 ? "has-data" : "no-data"}`}
                 title={`${h}:00 — ${count} tasks`}
                 style={{
-                  flex: 1,
                   height: `${maxHourTasks > 0 ? Math.max((count / maxHourTasks) * 100, count > 0 ? 8 : 2) : 2}%`,
-                  background: count > 0 ? "var(--accent, #6366f1)" : "var(--bg-tertiary, #333)",
-                  borderRadius: "2px 2px 0 0",
-                  opacity: count > 0 ? 1 : 0.3,
-                  transition: "height 0.3s ease",
                 }}
               />
             ))}
           </div>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              fontSize: 9,
-              color: "var(--text-secondary, #888)",
-              marginTop: 2,
-            }}
-          >
+          <div className="insights-hour-labels">
             <span>0h</span>
             <span>6h</span>
             <span>12h</span>
@@ -296,17 +361,41 @@ export function UsageInsightsPanel({ workspaceId }: UsageInsightsPanelProps) {
 
       {/* Top skills */}
       {data && data.topSkills.length > 0 && (
-        <div style={{ marginBottom: 20 }}>
-          <h3 style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Top Skills</h3>
-          <div style={{ fontSize: 12 }}>
+        <div className="settings-section">
+          <h3>Top Skills</h3>
+          <div>
             {data.topSkills.slice(0, 5).map((s) => (
-              <div
-                key={s.skill}
-                style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}
-              >
-                <span style={{ minWidth: 120 }}>{s.skill}</span>
+              <div key={s.skill} className="insights-bar-row">
+                <span className="insights-bar-label" style={{ minWidth: 120 }}>{s.skill}</span>
                 <MiniBar value={s.count} max={data.topSkills[0].count} />
-                <span style={{ minWidth: 30, textAlign: "right", opacity: 0.6 }}>{s.count}×</span>
+                <span className="insights-bar-value" style={{ minWidth: 30 }}>{s.count}×</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Skill usage by pack */}
+      {packAnalytics.length > 0 && (
+        <div className="settings-section">
+          <h3>Skill Usage by Pack</h3>
+          <div>
+            {packAnalytics.map((pa) => (
+              <div key={pa.packName} style={{ marginBottom: 12 }}>
+                <div className="insights-bar-row" style={{ fontWeight: 500 }}>
+                  <span className="insights-bar-label" style={{ minWidth: 120 }}>
+                    {pa.packIcon} {pa.packName}
+                  </span>
+                  <MiniBar value={pa.totalUsage} max={packAnalytics[0].totalUsage} />
+                  <span className="insights-bar-value" style={{ minWidth: 30 }}>{pa.totalUsage}×</span>
+                </div>
+                {pa.skills.length > 1 && pa.skills.slice(0, 3).map((s) => (
+                  <div key={s.skill} className="insights-bar-row" style={{ paddingLeft: 16, opacity: 0.7 }}>
+                    <span className="insights-bar-label" style={{ minWidth: 104, fontSize: 12 }}>{s.skill}</span>
+                    <MiniBar value={s.count} max={pa.skills[0].count} />
+                    <span className="insights-bar-value" style={{ minWidth: 30, fontSize: 12 }}>{s.count}×</span>
+                  </div>
+                ))}
               </div>
             ))}
           </div>
@@ -326,18 +415,9 @@ function StatCard({
   color?: string;
 }) {
   return (
-    <div
-      style={{
-        background: "var(--bg-secondary, #1a1a2e)",
-        borderRadius: 8,
-        padding: "10px 12px",
-        textAlign: "center",
-      }}
-    >
-      <div style={{ fontSize: 11, color: "var(--text-secondary, #888)", marginBottom: 4 }}>
-        {label}
-      </div>
-      <div style={{ fontSize: 18, fontWeight: 600, color: color || "var(--text-primary, #fff)" }}>
+    <div className="insights-stat-card">
+      <div className="insights-stat-label">{label}</div>
+      <div className="insights-stat-value" style={color ? { color } : undefined}>
         {value}
       </div>
     </div>

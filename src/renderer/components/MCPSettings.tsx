@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { AlertTriangle } from "lucide-react";
 import { MCPRegistryBrowser } from "./MCPRegistryBrowser";
 import { ConnectorSetupModal, ConnectorProvider } from "./ConnectorSetupModal";
 import { useAgentContext } from "../hooks/useAgentContext";
@@ -653,7 +654,7 @@ export function MCPSettings() {
 
                       {(serverStatus.error || connectionErrors[serverStatus.id]) && (
                         <div className="mcp-server-error">
-                          <span className="mcp-error-icon">⚠</span>
+                          <span className="mcp-error-icon"><AlertTriangle size={14} strokeWidth={2} /></span>
                           {connectionErrors[serverStatus.id] || serverStatus.error}
                           {connectionErrors[serverStatus.id] && (
                             <button

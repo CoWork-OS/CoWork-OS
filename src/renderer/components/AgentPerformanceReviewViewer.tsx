@@ -282,7 +282,7 @@ export function AgentPerformanceReviewViewer({
           border: 1px solid var(--color-border);
           border-radius: 10px;
           white-space: pre-wrap;
-          font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+          font-family: var(--font-mono);
           font-size: 12px;
           line-height: 1.35;
         }
@@ -306,7 +306,7 @@ export function AgentPerformanceReviewViewer({
         .review-row-summary {
           margin: 0;
           white-space: pre-wrap;
-          font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+          font-family: var(--font-mono);
           font-size: 12px;
           line-height: 1.35;
         }

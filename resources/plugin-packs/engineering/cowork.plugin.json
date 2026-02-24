@@ -1,0 +1,80 @@
+{
+  "name": "engineering-pack",
+  "displayName": "Engineering",
+  "version": "1.0.0",
+  "description": "Code review, PR triage, test coverage analysis, dependency tracking, and technical documentation for software engineers.",
+  "type": "pack",
+  "author": "CoWork-OSS",
+  "keywords": ["engineering", "code-review", "testing", "development", "IC"],
+  "icon": "👨‍💻",
+  "category": "Engineering",
+  "personaTemplateId": "software-engineer",
+  "tryAsking": [
+    "Triage open PRs and build a prioritized review queue",
+    "Check for outdated or vulnerable dependencies",
+    "Which files changed this week but have no test coverage?",
+    "Summarize the auth module changes for my review",
+    "Scan for TODO/FIXME comments added this sprint"
+  ],
+  "skills": [
+    {
+      "id": "eng-code-review-prep",
+      "name": "Code Review Prep",
+      "description": "Prepare a structured code review summary for a pull request or set of changes",
+      "icon": "🔍",
+      "category": "Engineering",
+      "prompt": "Review the following code changes and prepare a structured review summary.\n\nChanges:\n{{changes}}\n\nPlease provide:\n1. Summary of changes (2-3 sentences)\n2. Risk assessment (low/medium/high) with reasoning\n3. Specific areas of concern\n4. Missing test coverage\n5. Suggested improvements\n6. Approval recommendation",
+      "parameters": [
+        { "name": "changes", "type": "string", "description": "PR description, diff, or file changes to review", "required": true }
+      ],
+      "enabled": true
+    },
+    {
+      "id": "eng-dependency-audit",
+      "name": "Dependency Audit",
+      "description": "Audit project dependencies for security vulnerabilities, outdated versions, and license issues",
+      "icon": "📦",
+      "category": "Engineering",
+      "prompt": "Audit the project dependencies.\n\nDependency info:\n{{deps}}\n\nPlease check:\n1. Known security vulnerabilities (CVEs)\n2. Major version updates available\n3. Deprecated packages\n4. License compatibility issues\n5. Recommended update priority (critical/high/medium/low)\n6. Breaking change warnings for major updates",
+      "parameters": [
+        { "name": "deps", "type": "string", "description": "Package.json contents, lock file excerpt, or dependency list", "required": true }
+      ],
+      "enabled": true
+    },
+    {
+      "id": "eng-test-gap-analysis",
+      "name": "Test Gap Analysis",
+      "description": "Identify code paths and functions that lack test coverage",
+      "icon": "🧪",
+      "category": "Engineering",
+      "prompt": "Analyze the following code for test coverage gaps.\n\nCode or module:\n{{code}}\n\nPlease identify:\n1. Functions/methods with no test coverage\n2. Edge cases not covered by existing tests\n3. Error paths that should be tested\n4. Integration points needing tests\n5. Suggested test cases (with brief descriptions)\n6. Priority order for writing tests",
+      "parameters": [
+        { "name": "code", "type": "string", "description": "Code to analyze for test gaps", "required": true }
+      ],
+      "enabled": true
+    },
+    {
+      "id": "eng-standup-update",
+      "name": "Standup Update",
+      "description": "Generate a standup update from recent git activity and task history",
+      "icon": "📋",
+      "category": "Engineering",
+      "prompt": "Generate a standup update based on recent activity.\n\nRecent activity:\n{{activity}}\n\nFormat as:\n- **Done**: What was completed\n- **In Progress**: What's currently being worked on\n- **Blocked**: Any blockers or dependencies\n- **Next**: What's planned next\n\nKeep each point concise (1 line). Focus on outcomes, not tasks.",
+      "parameters": [
+        { "name": "activity", "type": "string", "description": "Recent commits, PRs, tasks, or notes", "required": true }
+      ],
+      "enabled": true
+    }
+  ],
+  "agentRoles": [
+    {
+      "name": "engineering-assistant",
+      "displayName": "Engineering Assistant",
+      "description": "Assists with code reviews, dependency tracking, test coverage, and engineering workflows",
+      "icon": "👨‍💻",
+      "color": "#3b82f6",
+      "capabilities": ["code", "review", "test", "analyze", "document"],
+      "systemPrompt": "You are an Engineering Assistant. You help software engineers with code reviews, dependency audits, test coverage analysis, and technical documentation. You are precise, thorough, and focus on code quality and security."
+    }
+  ]
+}

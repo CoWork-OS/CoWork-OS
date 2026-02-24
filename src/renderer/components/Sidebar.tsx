@@ -509,6 +509,7 @@ export function Sidebar({
         );
       case "executing":
       case "planning":
+      case "interrupted":
         return (
           <>
             <span className="terminal-only">[~]</span>
@@ -564,6 +565,7 @@ export function Sidebar({
         return "failed";
       case "executing":
       case "planning":
+      case "interrupted":
         return "active";
       default:
         return "";

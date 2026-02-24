@@ -1,0 +1,41 @@
+{
+  "id": "research-last-days",
+  "name": "Last X Days Research",
+  "description": "Research a topic from the past X days using web search. Specify the number of days or let it be inferred from your prompt.",
+  "prompt": "Research \"{{topic}}\" from the past {{days}} days.\n\nIMPORTANT: Use the EXACT search term \"{{topic}}\" as provided. Do NOT interpret, correct, or modify the search term.\n\nDetermine the best dateRange for web_search based on the number of days:\n- If {{days}} is 1: use dateRange: \"day\"\n- If {{days}} is 2-7: use dateRange: \"week\"\n- If {{days}} is 8-30: use dateRange: \"month\"\n- If {{days}} is 31+: use dateRange: \"year\"\n\nINSTRUCTIONS:\n1. Use the web_search tool with the appropriate dateRange determined above\n2. Run multiple targeted searches:\n   - web_search(query: \"{{topic}}\" news, dateRange: <determined>)\n   - web_search(query: \"{{topic}}\" site:reddit.com, dateRange: <determined>)\n   - web_search(query: \"{{topic}}\" discussion, dateRange: <determined>)\n   - web_search(query: \"{{topic}}\" announcement, dateRange: <determined>)\n3. Analyze the results for:\n   - Breaking news and recent announcements\n   - Common themes and patterns\n   - Popular opinions and best practices\n   - Notable developments or changes\n   - Engagement metrics where visible\n\nIMPORTANT:\n- Use web_search as your PRIMARY tool with the determined dateRange\n- Do NOT try to navigate to login-required sites (X/Twitter, LinkedIn)\n- If web_search is not configured, fall back to web_fetch with known URLs\n- Keep the plan simple: search -> analyze -> summarize\n\nTarget tool context: {{tool}}\n\nOUTPUT:\n- Summary of key findings from the past {{days}} days\n- Notable trends or patterns discovered\n- Common themes from community discussions\n- If researching for prompts: 3-5 ready-to-use prompts based on what's working\n- Tips and techniques from real users\n- Links to notable discussions for reference",
+  "icon": "🔬",
+  "category": "Research",
+  "priority": 1,
+  "parameters": [
+    {
+      "name": "topic",
+      "type": "string",
+      "description": "The topic to research (e.g., 'AI agents', 'prompting techniques', 'Apple announcements')",
+      "required": true
+    },
+    {
+      "name": "days",
+      "type": "number",
+      "description": "Number of days to look back (e.g., 1, 7, 14, 30, 90). Defaults to 7.",
+      "required": false,
+      "default": 7
+    },
+    {
+      "name": "tool",
+      "type": "select",
+      "description": "Target AI tool for the prompts (optional context)",
+      "required": false,
+      "default": "Any",
+      "options": ["Any", "ChatGPT", "Claude", "Midjourney", "DALL-E", "Stable Diffusion", "Cursor", "Claude Code"]
+    }
+  ],
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when the user asks to research what happened recently on a topic, look up news from the last N days, or find recent trends and discussions.",
+      "dontUseWhen": "Do not use for planning documents, high-level strategy, or non-executable discussion.",
+      "outputs": "Summary of recent findings with trends, patterns, and actionable insights.",
+      "successCriteria": "Returns concrete findings from the specified time period with sources and no fabricated results."
+    }
+  }
+}

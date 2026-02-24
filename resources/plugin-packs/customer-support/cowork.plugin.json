@@ -6,6 +6,16 @@
   "type": "pack",
   "author": "CoWork-OSS",
   "keywords": ["support", "tickets", "triage", "customer-service"],
+  "icon": "🎧",
+  "category": "Operations",
+  "recommendedConnectors": ["zendesk-mcp"],
+  "tryAsking": [
+    "Triage this support ticket and suggest a response",
+    "Draft a response for a frustrated customer about a billing issue",
+    "Create an escalation summary for the engineering team",
+    "Write a knowledge base article from this resolved case",
+    "Analyze ticket trends from this week"
+  ],
   "skills": [
     {
       "id": "support-ticket-triage",

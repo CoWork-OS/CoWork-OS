@@ -271,6 +271,10 @@ export class PluginRegistry extends EventEmitter {
       const loadedPlugin = result.plugin;
       this.plugins.set(pluginName, loadedPlugin);
 
+      const savedState = this.packStates.get(pluginName);
+      const shouldStartDisabled =
+        loadedPlugin.manifest.type === "pack" && savedState === false;
+
       // Load configuration
       const config = this.loadPluginConfig(pluginName);
       this.configs.set(pluginName, config);
@@ -281,16 +285,12 @@ export class PluginRegistry extends EventEmitter {
       // Register the plugin
       await loadedPlugin.instance.register(api);
 
-      // Handle composite declarative content (skills, agentRoles, connectors)
-      await this.registerDeclarativeContent(loadedPlugin.manifest, pluginName);
-
-      // Apply persisted pack toggle state
-      const savedState = this.packStates.get(pluginName);
-      if (savedState === false) {
-        loadedPlugin.state = "disabled";
-      } else {
-        loadedPlugin.state = "registered";
+      if (!shouldStartDisabled) {
+        // Handle composite declarative content (skills, agentRoles, connectors)
+        await this.registerDeclarativeContent(loadedPlugin.manifest, pluginName);
       }
+
+      loadedPlugin.state = shouldStartDisabled ? "disabled" : "registered";
 
       this.emitPluginEvent("plugin:registered", pluginName);
       console.log(`Plugin ${pluginName} registered successfully`);
@@ -884,9 +884,16 @@ export class PluginRegistry extends EventEmitter {
     const pluginPath = plugin.path;
     await this.unloadPlugin(name);
 
-    // Clear require cache
-    const entryPoint = path.join(pluginPath, plugin.manifest.main || "index.js");
-    delete require.cache[require.resolve(entryPoint)];
+    // Clear require cache for script-based plugins.
+    // Declarative plugins have no main entry point.
+    if (plugin.manifest.main) {
+      const entryPoint = path.join(pluginPath, plugin.manifest.main);
+      try {
+        delete require.cache[require.resolve(entryPoint)];
+      } catch {
+        // If resolution fails, continue with a fresh load attempt.
+      }
+    }
 
     // Reload
     const result = await loadPlugin(pluginPath);

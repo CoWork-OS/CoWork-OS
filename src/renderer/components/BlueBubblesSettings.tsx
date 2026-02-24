@@ -359,14 +359,17 @@ export function BlueBubblesSettings({ onStatusChange }: BlueBubblesSettingsProps
           </div>
 
           <div className="settings-field">
-            <label className="settings-checkbox-label">
-              <input
-                type="checkbox"
-                checked={ambientMode}
-                onChange={(e) => setAmbientMode(e.target.checked)}
-              />
+            <div className="settings-checkbox-label">
               <span>Ambient Mode (Log-Only)</span>
-            </label>
+              <label className="settings-toggle">
+                <input
+                  type="checkbox"
+                  checked={ambientMode}
+                  onChange={(e) => setAmbientMode(e.target.checked)}
+                />
+                <span className="toggle-slider" />
+              </label>
+            </div>
             <p className="settings-hint">
               When enabled, messages are ingested into the local log but only commands (messages
               starting with "/") are processed.
@@ -374,14 +377,17 @@ export function BlueBubblesSettings({ onStatusChange }: BlueBubblesSettingsProps
           </div>
 
           <div className="settings-field">
-            <label className="settings-checkbox-label">
-              <input
-                type="checkbox"
-                checked={captureSelfMessages}
-                onChange={(e) => setCaptureSelfMessages(e.target.checked)}
-              />
+            <div className="settings-checkbox-label">
               <span>Capture Self Messages</span>
-            </label>
+              <label className="settings-toggle">
+                <input
+                  type="checkbox"
+                  checked={captureSelfMessages}
+                  onChange={(e) => setCaptureSelfMessages(e.target.checked)}
+                />
+                <span className="toggle-slider" />
+              </label>
+            </div>
             <p className="settings-hint">
               Ingest messages sent by your iMessage account into the log (as outgoing_user) for
               better follow-up extraction.
@@ -389,14 +395,17 @@ export function BlueBubblesSettings({ onStatusChange }: BlueBubblesSettingsProps
           </div>
 
           <div className="settings-field">
-            <label className="settings-checkbox-label">
-              <input
-                type="checkbox"
-                checked={silentUnauthorized}
-                onChange={(e) => setSilentUnauthorized(e.target.checked)}
-              />
+            <div className="settings-checkbox-label">
               <span>Silent Unauthorized</span>
-            </label>
+              <label className="settings-toggle">
+                <input
+                  type="checkbox"
+                  checked={silentUnauthorized}
+                  onChange={(e) => setSilentUnauthorized(e.target.checked)}
+                />
+                <span className="toggle-slider" />
+              </label>
+            </div>
             <p className="settings-hint">
               Do not send "pairing required" or "unauthorized" replies (useful for ambient
               ingestion).
@@ -532,19 +541,22 @@ export function BlueBubblesSettings({ onStatusChange }: BlueBubblesSettingsProps
       <div className="settings-section">
         <h4>Ambient Inbox</h4>
         <div className="settings-field">
-          <label className="settings-checkbox-label">
-            <input
-              type="checkbox"
-              checked={ambientMode}
-              onChange={async (e) => {
-                const checked = e.target.checked;
-                setAmbientMode(checked);
-                await handleUpdateConfig({ ambientMode: checked });
-              }}
-              disabled={saving}
-            />
+          <div className="settings-checkbox-label">
             <span>Ambient Mode (Log-Only)</span>
-          </label>
+            <label className="settings-toggle">
+              <input
+                type="checkbox"
+                checked={ambientMode}
+                onChange={async (e) => {
+                  const checked = e.target.checked;
+                  setAmbientMode(checked);
+                  await handleUpdateConfig({ ambientMode: checked });
+                }}
+                disabled={saving}
+              />
+              <span className="toggle-slider" />
+            </label>
+          </div>
           <p className="settings-hint">
             When enabled, messages are ingested into the local log but only commands (messages
             starting with "/") are processed.
@@ -552,19 +564,22 @@ export function BlueBubblesSettings({ onStatusChange }: BlueBubblesSettingsProps
         </div>
 
         <div className="settings-field">
-          <label className="settings-checkbox-label">
-            <input
-              type="checkbox"
-              checked={captureSelfMessages}
-              onChange={async (e) => {
-                const checked = e.target.checked;
-                setCaptureSelfMessages(checked);
-                await handleUpdateConfig({ captureSelfMessages: checked });
-              }}
-              disabled={saving}
-            />
+          <div className="settings-checkbox-label">
             <span>Capture Self Messages</span>
-          </label>
+            <label className="settings-toggle">
+              <input
+                type="checkbox"
+                checked={captureSelfMessages}
+                onChange={async (e) => {
+                  const checked = e.target.checked;
+                  setCaptureSelfMessages(checked);
+                  await handleUpdateConfig({ captureSelfMessages: checked });
+                }}
+                disabled={saving}
+              />
+              <span className="toggle-slider" />
+            </label>
+          </div>
           <p className="settings-hint">
             Ingest messages sent by your iMessage account into the log (as outgoing_user) for better
             follow-up extraction.
@@ -572,19 +587,22 @@ export function BlueBubblesSettings({ onStatusChange }: BlueBubblesSettingsProps
         </div>
 
         <div className="settings-field">
-          <label className="settings-checkbox-label">
-            <input
-              type="checkbox"
-              checked={silentUnauthorized}
-              onChange={async (e) => {
-                const checked = e.target.checked;
-                setSilentUnauthorized(checked);
-                await handleUpdateConfig({ silentUnauthorized: checked });
-              }}
-              disabled={saving}
-            />
+          <div className="settings-checkbox-label">
             <span>Silent Unauthorized</span>
-          </label>
+            <label className="settings-toggle">
+              <input
+                type="checkbox"
+                checked={silentUnauthorized}
+                onChange={async (e) => {
+                  const checked = e.target.checked;
+                  setSilentUnauthorized(checked);
+                  await handleUpdateConfig({ silentUnauthorized: checked });
+                }}
+                disabled={saving}
+              />
+              <span className="toggle-slider" />
+            </label>
+          </div>
           <p className="settings-hint">
             Do not send "pairing required" or "unauthorized" replies (useful for ambient ingestion).
           </p>

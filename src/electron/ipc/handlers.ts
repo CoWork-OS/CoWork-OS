@@ -101,6 +101,7 @@ import {
   InfraSettingsSchema,
   EmailChannelConfigSchema,
   UUIDSchema,
+  WorkspaceIdSchema,
   StringIdSchema,
   MCPConnectorOAuthSchema,
   ChatGPTImportSchema,
@@ -1587,9 +1588,19 @@ export async function setupIpcHandlers(
     const validated = validateInput(TaskMessageSchema, data, "task message");
     const validatedImages = validated.images;
     try {
-      await agentDaemon.sendMessage(validated.taskId, validated.message, validatedImages);
-    } finally {
+      const result = await agentDaemon.sendMessage(
+        validated.taskId,
+        validated.message,
+        validatedImages,
+      );
+      // If the message was queued for a running executor, the executor owns
+      // the image data now — skip temp file cleanup so it can read them later.
+      if (!result.queued) {
+        await cleanupTaskImageTempFiles(validatedImages);
+      }
+    } catch (err) {
       await cleanupTaskImageTempFiles(validatedImages);
+      throw err;
     }
   });
 
@@ -3525,7 +3536,7 @@ export async function setupIpcHandlers(
   // Proactive Suggestions
   ipcMain.handle(IPC_CHANNELS.SUGGESTIONS_LIST, async (_, workspaceId: string) => {
     checkRateLimit(IPC_CHANNELS.SUGGESTIONS_LIST);
-    const validatedWorkspaceId = validateInput(UUIDSchema, workspaceId, "workspace ID");
+    const validatedWorkspaceId = validateInput(WorkspaceIdSchema, workspaceId, "workspace ID");
     const { ProactiveSuggestionsService } = await import("../agent/ProactiveSuggestionsService");
     return ProactiveSuggestionsService.listActive(validatedWorkspaceId);
   });
@@ -3534,7 +3545,7 @@ export async function setupIpcHandlers(
     IPC_CHANNELS.SUGGESTIONS_DISMISS,
     async (_, workspaceId: string, suggestionId: string) => {
       checkRateLimit(IPC_CHANNELS.SUGGESTIONS_DISMISS);
-      const validatedWorkspaceId = validateInput(UUIDSchema, workspaceId, "workspace ID");
+      const validatedWorkspaceId = validateInput(WorkspaceIdSchema, workspaceId, "workspace ID");
       const validatedSuggestionId = validateInput(UUIDSchema, suggestionId, "suggestion ID");
       const { ProactiveSuggestionsService } = await import("../agent/ProactiveSuggestionsService");
       const success = ProactiveSuggestionsService.dismiss(
@@ -3549,7 +3560,7 @@ export async function setupIpcHandlers(
     IPC_CHANNELS.SUGGESTIONS_ACT,
     async (_, workspaceId: string, suggestionId: string) => {
       checkRateLimit(IPC_CHANNELS.SUGGESTIONS_ACT);
-      const validatedWorkspaceId = validateInput(UUIDSchema, workspaceId, "workspace ID");
+      const validatedWorkspaceId = validateInput(WorkspaceIdSchema, workspaceId, "workspace ID");
       const validatedSuggestionId = validateInput(UUIDSchema, suggestionId, "suggestion ID");
       const { ProactiveSuggestionsService } = await import("../agent/ProactiveSuggestionsService");
       const actionPrompt = ProactiveSuggestionsService.actOn(
@@ -3940,10 +3951,21 @@ function setupMCPHandlers(): void {
     return MCPClientManager.getInstance().getStatus();
   });
 
+  // Get status of a single server
+  ipcMain.handle(IPC_CHANNELS.MCP_GET_SERVER_STATUS, async (_, serverId: string) => {
+    const validatedId = validateInput(UUIDSchema, serverId, "server ID");
+    return MCPClientManager.getInstance().getServerStatus(validatedId);
+  });
+
   // Get tools from a specific server
   ipcMain.handle(IPC_CHANNELS.MCP_GET_SERVER_TOOLS, async (_, serverId: string) => {
     const validatedId = validateInput(UUIDSchema, serverId, "server ID");
     return MCPClientManager.getInstance().getServerTools(validatedId);
+  });
+
+  // Get tools from all servers
+  ipcMain.handle(IPC_CHANNELS.MCP_GET_ALL_TOOLS, async () => {
+    return MCPClientManager.getInstance().getAllTools();
   });
 
   // Test server connection

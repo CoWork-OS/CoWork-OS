@@ -255,7 +255,7 @@ import {
   UsersIcon,
   ZapIcon,
 } from "./LineIcons";
-import { EMOJI_ICON_MAP } from "../utils/emoji-icon-map";
+import { getEmojiIcon } from "../utils/emoji-icon-map";
 import { replaceEmojisInChildren } from "../utils/emoji-replacer";
 import { CommandOutput } from "./CommandOutput";
 import { CanvasPreview } from "./CanvasPreview";
@@ -596,8 +596,30 @@ const MessageSpeakButton = memo(function MessageSpeakButton({
 
 const HEADING_EMOJI_REGEX = /^([\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}][\uFE0F\uFE0E]?)(\s+)?/u;
 
+const normalizeCommitmentText = (value: unknown): string | null => {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+
+  if (!value || typeof value !== "object") return null;
+  const entry = value as { text?: unknown; title?: unknown; name?: unknown };
+  const textValue =
+    typeof entry.text === "string"
+      ? entry.text
+      : typeof entry.title === "string"
+        ? entry.title
+        : typeof entry.name === "string"
+          ? entry.name
+          : null;
+
+  if (!textValue) return null;
+  const trimmed = textValue.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
 const getHeadingIcon = (emoji: string): React.ReactNode | null => {
-  const Icon = EMOJI_ICON_MAP[emoji];
+  const Icon = getEmojiIcon(emoji);
   if (!Icon) return null;
   return <Icon size={16} strokeWidth={1.8} />;
 };
@@ -1610,31 +1632,168 @@ export function MainContent({
   // Focused mode card pool - pick random 6 on mount
   const focusedCards = useMemo(() => pickFocusedCards(FOCUSED_CARD_POOL, CARDS_TO_SHOW), []);
 
-  // "Try asking" prompts from enabled plugin packs
-  const [tryAskingPrompts, setTryAskingPrompts] = useState<{ prompt: string; packName: string }[]>([]);
+  // ── Rotating placeholder prompts (persona-aware engine) ──────────────
+  const [rotatingPlaceholders, setRotatingPlaceholders] = useState<string[]>([]);
+  const [rotatingIndex, setRotatingIndex] = useState(0);
+  const [placeholderFading, setPlaceholderFading] = useState(false);
+  const placeholderTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const placeholderDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const placeholderPlaylistCacheRef = useRef<Map<string, string[]>>(new Map());
+  const placeholderRequestIdRef = useRef(0);
+
+  // Gather all user signals, run persona detection, and build the playlist
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      try {
-        const packs = await window.electronAPI.listPluginPacks();
-        if (cancelled) return;
-        const prompts: { prompt: string; packName: string }[] = [];
-        for (const p of packs) {
-          if (p.enabled && p.tryAsking && p.tryAsking.length > 0) {
-            for (const prompt of p.tryAsking) {
-              prompts.push({ prompt, packName: p.displayName });
+    const workspaceId = workspace?.id;
+    const cacheKey = workspaceId ?? "global";
+    const requestId = ++placeholderRequestIdRef.current;
+
+    const cachedPlaylist = placeholderPlaylistCacheRef.current.get(cacheKey);
+    if (cachedPlaylist !== undefined) {
+      setRotatingIndex(0);
+      setRotatingPlaceholders(cachedPlaylist);
+      return;
+    }
+
+    setRotatingPlaceholders([]);
+
+    if (placeholderDebounceRef.current !== null) {
+      clearTimeout(placeholderDebounceRef.current);
+    }
+
+    placeholderDebounceRef.current = window.setTimeout(() => {
+      (async () => {
+        const {
+          detectPersonas,
+          buildPlaceholders,
+          buildDynamicPrompts,
+        } = await import("../utils/placeholderEngine");
+        type UserSignals = import("../utils/placeholderEngine").UserSignals;
+
+        const [
+          profileFacts,
+          recentTaskTitles,
+          topSkills,
+          pluginPrompts,
+          openCommitments,
+        ] = await Promise.all([
+          // 1. User profile facts
+          (async () => {
+            try {
+              const p = await window.electronAPI.getUserProfile();
+              return (p?.facts ?? []).map((f) => ({ category: f.category, value: f.value }));
+            } catch {
+              return [];
             }
-          }
-        }
-        // Shuffle and take up to 5
-        const shuffled = prompts.sort(() => Math.random() - 0.5).slice(0, 5);
-        setTryAskingPrompts(shuffled);
-      } catch {
-        // Plugin packs not available
+          })(),
+          // 2. Recent completed task titles
+          (async () => {
+            try {
+              const wsId = workspaceId;
+              if (!wsId || wsId.startsWith("__temp_workspace__")) return [];
+              const acts = await window.electronAPI.listActivities({
+                workspaceId: wsId,
+                activityType: "task_completed",
+                limit: 15,
+              });
+              return Array.isArray(acts)
+                ? acts
+                    .map((a) => (typeof a?.title === "string" ? a.title : ""))
+                    .filter(Boolean)
+                : [];
+            } catch {
+              return [];
+            }
+          })(),
+          // 3. Top skills from usage insights
+          (async () => {
+            try {
+              const wsId = workspaceId;
+              if (!wsId || wsId.startsWith("__temp_workspace__")) return [];
+              const insights = await window.electronAPI.getUsageInsights(wsId, 30);
+              return Array.isArray(insights?.topSkills)
+                ? insights.topSkills.map((s: { skill: string }) => s.skill)
+                : [];
+            } catch {
+              return [];
+            }
+          })(),
+          // 4. Plugin pack "try asking" prompts
+          (async () => {
+            try {
+              const packs = await window.electronAPI.listPluginPacks();
+              if (!Array.isArray(packs)) return [];
+              const out: string[] = [];
+              for (const p of packs) {
+                if (p?.enabled && Array.isArray(p.tryAsking) && p.tryAsking.length > 0) {
+                  for (const prompt of p.tryAsking) {
+                    if (typeof prompt === "string") out.push(prompt);
+                  }
+                }
+              }
+              return out;
+            } catch {
+              return [];
+            }
+          })(),
+          // 5. Open commitments
+          (async () => {
+            try {
+              const items = await window.electronAPI.getOpenCommitments(5);
+              if (!Array.isArray(items)) return [];
+              return items.map(normalizeCommitmentText).filter((c): c is string => c !== null);
+            } catch {
+              return [];
+            }
+          })(),
+        ]);
+
+        if (cancelled || requestId !== placeholderRequestIdRef.current) return;
+
+        const signals: UserSignals = {
+          profileFacts,
+          recentTaskTitles,
+          topSkills,
+          pluginPrompts,
+          openCommitments,
+        };
+
+        const personaResult = detectPersonas(signals);
+        const dynamicPrompts = buildDynamicPrompts(signals);
+        const playlist = buildPlaceholders(personaResult, dynamicPrompts, pluginPrompts);
+        placeholderPlaylistCacheRef.current.set(cacheKey, playlist);
+        setRotatingIndex(0);
+        setRotatingPlaceholders(playlist);
+      })();
+    }, 150);
+
+    return () => {
+      cancelled = true;
+      if (placeholderDebounceRef.current !== null) {
+        clearTimeout(placeholderDebounceRef.current);
+        placeholderDebounceRef.current = null;
       }
-    })();
-    return () => { cancelled = true; };
-  }, []);
+    };
+  }, [workspace?.id]);
+
+  // Cycle placeholder every 4s with fade transition (only when input is empty)
+  useEffect(() => {
+    if (rotatingPlaceholders.length <= 1 || inputValue) return;
+    const interval = setInterval(() => {
+      setPlaceholderFading(true);
+      placeholderTimeoutRef.current = setTimeout(() => {
+        setRotatingIndex((prev) => (prev + 1) % rotatingPlaceholders.length);
+        setPlaceholderFading(false);
+      }, 300);
+    }, 4000);
+    return () => {
+      clearInterval(interval);
+      if (placeholderTimeoutRef.current !== null) {
+        clearTimeout(placeholderTimeoutRef.current);
+        placeholderTimeoutRef.current = null;
+      }
+    };
+  }, [rotatingPlaceholders.length, inputValue]);
 
   // Shell permission state - tracks current workspace's shell permission
   const [shellEnabled, setShellEnabled] = useState(workspace?.permissions?.shell ?? false);
@@ -2479,8 +2638,13 @@ export function MainContent({
     autoResizeTextarea();
   }, [inputValue, autoResizeTextarea]);
 
+  // Active placeholder: rotating prompt when available, personality fallback otherwise
+  const personalityPlaceholder = agentContext.getPlaceholder();
+  const placeholder = rotatingPlaceholders.length > 0
+    ? rotatingPlaceholders[rotatingIndex % rotatingPlaceholders.length]
+    : personalityPlaceholder;
+
   // Calculate cursor position based on placeholder text width
-  const placeholder = agentContext.getPlaceholder();
   useEffect(() => {
     if (placeholderMeasureRef.current) {
       // Measure the placeholder text width
@@ -3634,26 +3798,6 @@ export function MainContent({
               )}
             </div>
 
-            {/* Try asking prompts from plugin packs */}
-            {tryAskingPrompts.length > 0 && (
-              <div className="try-asking-section">
-                <div className="try-asking-header">Try asking ..</div>
-                <div className="try-asking-chips">
-                  {tryAskingPrompts.map((item, i) => (
-                    <button
-                      key={i}
-                      className="try-asking-chip"
-                      onClick={() => handleQuickAction(item.prompt)}
-                      title={`From ${item.packName}`}
-                    >
-                      <span className="try-asking-text">{item.prompt}</span>
-                      <span className="try-asking-arrow">&rarr;</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
             {/* Input Area */}
             {renderAttachmentPanel()}
             <div
@@ -3714,10 +3858,17 @@ export function MainContent({
                   aria-hidden="true"
                 />
                 <div className="mention-autocomplete-wrapper" ref={mentionContainerRef}>
+                  {!inputValue && (
+                    <span
+                      className={`cli-rotating-placeholder${placeholderFading ? " fading" : ""}`}
+                      aria-hidden="true"
+                    >
+                      {placeholder}
+                    </span>
+                  )}
                   <textarea
                     ref={textareaRef}
                     className="welcome-input cli-input input-textarea"
-                    placeholder={placeholder}
                     value={inputValue}
                     onChange={handleInputChange}
                     onKeyDown={handleKeyDown}

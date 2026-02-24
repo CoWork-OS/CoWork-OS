@@ -787,7 +787,7 @@ export function AgentRoleEditor({
         }
 
         .code-textarea {
-          font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+          font-family: var(--font-mono);
           font-size: 12px;
           line-height: 1.5;
         }

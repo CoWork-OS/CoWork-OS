@@ -66,7 +66,7 @@ const DEFAULT_HTML = `<!DOCTYPE html>
   <title>Live Canvas</title>
   <style>
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
       margin: 0;
       padding: 20px;
       background: #0f1220;

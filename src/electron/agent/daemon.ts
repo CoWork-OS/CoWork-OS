@@ -374,24 +374,68 @@ export class AgentDaemon extends EventEmitter {
     // Find queued tasks from database for queue recovery
     const queuedTasks = this.taskRepo.findByStatus("queued");
 
-    // Find "running" tasks from previous session - these are orphaned since we lost their executors
+    // Find tasks that were gracefully interrupted (app shutdown while running).
+    // These have a conversation snapshot saved and can be resumed.
+    const interruptedTasks = this.taskRepo.findByStatus("interrupted");
+
+    // Find orphaned tasks from a crash / force-kill (still in planning/executing
+    // without the explicit "interrupted" marker, e.g. Ctrl+C during npm run dev).
+    // If they have a conversation snapshot saved from normal execution we can still
+    // resume them; otherwise mark as failed.
     const orphanedTasks = this.taskRepo.findByStatus(["planning", "executing"]);
 
-    // Mark orphaned tasks as failed - they can't be resumed since we lost their state
+    const tasksToResume = [...interruptedTasks];
+
     if (orphanedTasks.length > 0) {
       console.log(
-        `[AgentDaemon] Found ${orphanedTasks.length} orphaned tasks from previous session, marking as failed`,
+        `[AgentDaemon] Found ${orphanedTasks.length} orphaned task(s) from previous session`,
       );
       for (const task of orphanedTasks) {
-        this.taskRepo.update(task.id, {
-          status: "failed",
-          error: "Task interrupted - application was restarted while task was running",
-        });
+        const events = this.eventRepo.findByTaskId(task.id);
+        const hasSnapshot = events.some((e) => e.type === "conversation_snapshot");
+        const hasPlan = events.some(
+          (e) => e.type === "plan_created" && e.payload?.plan,
+        );
+
+        if (hasSnapshot || hasPlan) {
+          // Recoverable: mark as interrupted and add to the resume list
+          console.log(
+            `[AgentDaemon] Orphaned task ${task.id} has saved state — scheduling for resume`,
+          );
+          this.taskRepo.update(task.id, {
+            status: "interrupted" as TaskStatus,
+            error: "Application exited unexpectedly while task was running - will resume on restart",
+          });
+          this.logEvent(task.id, "task_interrupted", {
+            message: "Task interrupted by unexpected application exit. Will resume on restart.",
+          });
+          tasksToResume.push({ ...task, status: "interrupted" as TaskStatus });
+        } else {
+          // No saved state — unrecoverable
+          console.log(
+            `[AgentDaemon] Orphaned task ${task.id} has no saved state — marking as failed`,
+          );
+          this.taskRepo.update(task.id, {
+            status: "failed",
+            error: "Task interrupted - application crashed before any progress was saved",
+          });
+        }
       }
     }
 
-    // Only initialize queue with queued tasks (not orphaned "running" tasks)
+    // Initialize queue with queued tasks
     await this.queueManager.initialize(queuedTasks, []);
+
+    // Resume all resumable tasks after a short delay to let the rest of the app
+    // (IPC handlers, tray, cron, UI) finish initializing first.
+    if (tasksToResume.length > 0) {
+      console.log(
+        `[AgentDaemon] ${tasksToResume.length} task(s) scheduled for resume`,
+      );
+      setTimeout(() => {
+        this.resumeInterruptedTasks(tasksToResume);
+      }, 2000);
+    }
   }
 
   /**
@@ -609,19 +653,199 @@ export class AgentDaemon extends EventEmitter {
     console.log(`[AgentDaemon] Task status updated to 'planning', starting execution...`);
 
     // Start execution (non-blocking)
-    executor.execute().catch((error) => {
-      console.error(`[AgentDaemon] Task ${effectiveTask.id} execution failed:`, error);
-      this.taskRepo.update(effectiveTask.id, {
-        status: "failed",
-        error: error.message,
-        completedAt: Date.now(),
+    executor
+      .execute()
+      .then(() => {
+        // After execution completes, process any follow-ups that were queued
+        // while the executor was running but arrived too late for the loop to pick up.
+        this.processOrphanedFollowUps(effectiveTask.id, executor);
+      })
+      .catch((error) => {
+        console.error(`[AgentDaemon] Task ${effectiveTask.id} execution failed:`, error);
+        this.taskRepo.update(effectiveTask.id, {
+          status: "failed",
+          error: error.message,
+          completedAt: Date.now(),
+        });
+        this.clearRetryState(effectiveTask.id);
+        this.logEvent(effectiveTask.id, "error", { error: error.message });
+        this.activeTasks.delete(effectiveTask.id);
+        // Notify queue manager so it can start next task
+        this.queueManager.onTaskFinished(effectiveTask.id);
+        // Even on failure, process orphaned follow-ups so they aren't silently lost
+        this.processOrphanedFollowUps(effectiveTask.id, executor);
       });
-      this.clearRetryState(effectiveTask.id);
-      this.logEvent(effectiveTask.id, "error", { error: error.message });
-      this.activeTasks.delete(effectiveTask.id);
-      // Notify queue manager so it can start next task
-      this.queueManager.onTaskFinished(effectiveTask.id);
+  }
+
+  /**
+   * Resume tasks that were interrupted by a previous graceful app shutdown.
+   * Called from initialize() after a short delay to let the app finish starting.
+   */
+  private async resumeInterruptedTasks(tasks: Task[]): Promise<void> {
+    for (const task of tasks) {
+      try {
+        console.log(
+          `[AgentDaemon] Resuming interrupted task ${task.id}: ${task.title}`,
+        );
+        await this.resumeInterruptedTask(task);
+      } catch (error: any) {
+        console.error(`[AgentDaemon] Failed to resume task ${task.id}:`, error);
+        this.taskRepo.update(task.id, {
+          status: "failed",
+          error: `Failed to resume after interruption: ${error.message}`,
+          completedAt: Date.now(),
+        });
+        this.logEvent(task.id, "error", {
+          message: `Failed to resume interrupted task: ${error.message}`,
+        });
+      }
+    }
+  }
+
+  /**
+   * Resume a single interrupted task by reconstructing the executor from saved
+   * conversation snapshots and plan events, then continuing execution.
+   */
+  private async resumeInterruptedTask(task: Task): Promise<void> {
+    // Guard against double-resume (e.g. rapid restarts)
+    const currentTask = this.taskRepo.findById(task.id);
+    if (!currentTask || currentTask.status !== "interrupted") {
+      console.log(
+        `[AgentDaemon] Task ${task.id} is no longer interrupted (status: ${currentTask?.status}), skipping resume`,
+      );
+      return;
+    }
+
+    const workspace = this.workspaceRepo.findById(task.workspaceId);
+    if (!workspace) {
+      throw new Error(`Workspace ${task.workspaceId} not found - cannot resume task`);
+    }
+
+    // Fetch all events for this task
+    const events = this.eventRepo.findByTaskId(task.id);
+
+    // Check if we have meaningful state to restore from
+    const hasSnapshot = events.some((e) => e.type === "conversation_snapshot");
+    const planEvent = events.filter((e) => e.type === "plan_created").pop();
+    const hasPlan = planEvent && planEvent.payload?.plan;
+
+    if (!hasSnapshot && !hasPlan) {
+      // Task was interrupted very early (during planning, before any meaningful state).
+      // Re-queue it to start from scratch.
+      console.log(
+        `[AgentDaemon] Task ${task.id} has no snapshot or plan - restarting from scratch`,
+      );
+      this.taskRepo.update(task.id, { status: "queued", error: undefined });
+      this.logEvent(task.id, "log", {
+        message:
+          "Task interrupted before meaningful progress. Restarting from scratch.",
+      });
+      await this.queueManager.enqueue(task);
+      return;
+    }
+
+    // Apply agent role overrides (same as startTaskImmediate)
+    const { task: effectiveTask } = this.applyAgentRoleOverrides(task);
+
+    // Handle worktree workspace if applicable
+    let effectiveWorkspace = workspace;
+    if (task.worktreePath && task.worktreeStatus === "active") {
+      if (fs.existsSync(task.worktreePath)) {
+        effectiveWorkspace = { ...workspace, path: task.worktreePath };
+      } else {
+        console.warn(
+          `[AgentDaemon] Worktree path ${task.worktreePath} no longer exists for task ${task.id}`,
+        );
+      }
+    }
+
+    // Create new executor and restore conversation state
+    const executor = new TaskExecutor(effectiveTask, effectiveWorkspace, this);
+    executor.rebuildConversationFromEvents(events);
+
+    // Reconstruct the Plan from events with correct step statuses
+    if (hasPlan) {
+      const rawPlan = planEvent!.payload.plan as Plan;
+      const completedStepIds = new Set<string>();
+      const failedStepIds = new Set<string>();
+      for (const event of events) {
+        if (event.type === "step_completed" && event.payload?.step?.id) {
+          completedStepIds.add(event.payload.step.id);
+        }
+        if (event.type === "step_failed" && event.payload?.step?.id) {
+          failedStepIds.add(event.payload.step.id);
+        }
+      }
+      const restoredPlan: Plan = {
+        description: rawPlan.description,
+        steps: rawPlan.steps.map((step) => ({
+          ...step,
+          status: completedStepIds.has(step.id)
+            ? ("completed" as const)
+            : failedStepIds.has(step.id)
+              ? ("failed" as const)
+              : ("pending" as const),
+        })),
+      };
+      executor.setPlan(restoredPlan);
+    }
+
+    // Register in active tasks map
+    this.activeTasks.set(effectiveTask.id, {
+      executor,
+      lastAccessed: Date.now(),
+      status: "active",
     });
+
+    // Register with queue manager for concurrency limits and timeout tracking.
+    // If the concurrency limit is already reached, the task is re-queued and
+    // will start automatically when a slot opens up.
+    const canRun = this.queueManager.registerResumedTask(effectiveTask.id);
+    if (!canRun) {
+      // Clean up the executor we just created — it will be rebuilt when the
+      // task is dequeued via the normal startTaskImmediate path.
+      this.activeTasks.delete(effectiveTask.id);
+      this.taskRepo.update(effectiveTask.id, { status: "queued" });
+      this.logEvent(effectiveTask.id, "task_queued", {
+        reason: "concurrency",
+        message: "⏳ Queued — concurrency limit reached during resume. Will start when a slot opens.",
+      });
+      return;
+    }
+
+    // Update status and log resumption
+    this.taskRepo.update(effectiveTask.id, {
+      status: "executing",
+      error: undefined,
+    });
+    this.logEvent(effectiveTask.id, "task_resumed", {
+      message: "Resuming task after application restart",
+      hadSnapshot: hasSnapshot,
+      hadPlan: !!hasPlan,
+    });
+
+    // Start execution (non-blocking, same pattern as startTaskImmediate)
+    executor
+      .resumeAfterInterruption()
+      .then(() => {
+        this.processOrphanedFollowUps(effectiveTask.id, executor);
+      })
+      .catch((error) => {
+        console.error(
+          `[AgentDaemon] Resumed task ${effectiveTask.id} failed:`,
+          error,
+        );
+        this.taskRepo.update(effectiveTask.id, {
+          status: "failed",
+          error: error.message,
+          completedAt: Date.now(),
+        });
+        this.clearRetryState(effectiveTask.id);
+        this.logEvent(effectiveTask.id, "error", { error: error.message });
+        this.activeTasks.delete(effectiveTask.id);
+        this.queueManager.onTaskFinished(effectiveTask.id);
+        this.processOrphanedFollowUps(effectiveTask.id, executor);
+      });
   }
 
   /**
@@ -1337,6 +1561,8 @@ export class AgentDaemon extends EventEmitter {
     // Skip DB persistence, activity logging, and memory capture.
     if (type === "llm_streaming") {
       this.emitTaskEvent(taskId, type, payload);
+      // Forward streaming progress to collaborative/multi-LLM thought panel
+      this.maybeEmitTeamStreamingProgress(taskId, payload);
       return;
     }
 
@@ -1504,6 +1730,96 @@ export class AgentDaemon extends EventEmitter {
       } catch {
         // ignore
       }
+    });
+  }
+
+  /**
+   * Forward streaming progress from a child task to the collaborative/multi-LLM
+   * thought panel as an ephemeral streaming indicator (no DB write).
+   */
+  private maybeEmitTeamStreamingProgress(taskId: string, payload: any): void {
+    if (!this.teamOrchestrator) return;
+
+    const task = this.taskRepo.findById(taskId);
+    if (!task || !task.parentTaskId) return;
+
+    const db = this.dbManager.getDatabase();
+    const itemRepo = new AgentTeamItemRepository(db);
+    const runRepo = new AgentTeamRunRepository(db);
+
+    // Find the run this child task belongs to
+    let items = itemRepo.listBySourceTaskId(taskId);
+    let run: AgentTeamRun | undefined;
+
+    if (items.length > 0) {
+      run = runRepo.findById(items[0].teamRunId);
+    }
+
+    // Fallback: look up via parent task
+    if (!run && task.parentTaskId) {
+      run = runRepo.findByRootTaskId(task.parentTaskId) || undefined;
+    }
+
+    if (!run || !run.collaborativeMode) return;
+
+    // Only emit during think/dispatch phases (not synthesis)
+    const phase = run.phase || "dispatch";
+    if (phase !== "think" && phase !== "dispatch") return;
+
+    // Derive agent identity
+    let agentRoleId: string;
+    let agentDisplayName: string;
+    let agentIcon: string;
+    let agentColor: string;
+
+    if (run.multiLlmMode) {
+      const providerType = task.agentConfig?.providerType || "unknown";
+      const modelKey = task.agentConfig?.modelKey || "default";
+      const providerInfo = MULTI_LLM_PROVIDER_DISPLAY[providerType];
+      agentRoleId = `multi-llm-${providerType}-${modelKey}`;
+      agentDisplayName = providerInfo
+        ? `${providerInfo.name} (${modelKey})`
+        : `${providerType} (${modelKey})`;
+      agentIcon = providerInfo?.icon || "\u{1F916}";
+      agentColor = providerInfo?.color || "#6366f1";
+    } else {
+      if (!task.assignedAgentRoleId) return;
+      const role = this.agentRoleRepo.findById(task.assignedAgentRoleId);
+      if (!role) return;
+      agentRoleId = role.id;
+      agentDisplayName = role.displayName;
+      agentIcon = role.icon;
+      agentColor = role.color;
+    }
+
+    const outputTokens = payload?.outputTokens ?? 0;
+    const elapsedMs = payload?.elapsedMs ?? 0;
+    const elapsedSec = (elapsedMs / 1000).toFixed(1);
+    const streaming = payload?.streaming !== false;
+
+    // Build a synthetic (ephemeral) thought — not persisted to DB
+    const syntheticThought = {
+      id: `streaming-${taskId}`,
+      teamRunId: run.id,
+      agentRoleId,
+      agentDisplayName,
+      agentIcon,
+      agentColor,
+      phase: "analysis" as const,
+      content: streaming
+        ? `Generating response... (${outputTokens} tokens, ${elapsedSec}s)`
+        : `Response complete (${outputTokens} tokens, ${elapsedSec}s)`,
+      isStreaming: streaming,
+      sourceTaskId: taskId,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    this.emitTeamThoughtEvent({
+      type: "team_thought_streaming",
+      timestamp: Date.now(),
+      runId: run.id,
+      thought: syntheticThought as any,
     });
   }
 
@@ -2679,7 +2995,11 @@ export class AgentDaemon extends EventEmitter {
    * for injection into the active execution loop and a user_message event is
    * emitted immediately so the UI shows the message right away.
    */
-  async sendMessage(taskId: string, message: string, images?: ImageAttachment[]): Promise<void> {
+  async sendMessage(
+    taskId: string,
+    message: string,
+    images?: ImageAttachment[],
+  ): Promise<{ queued: boolean }> {
     let cached = this.activeTasks.get(taskId);
     let executor: TaskExecutor;
 
@@ -2723,11 +3043,51 @@ export class AgentDaemon extends EventEmitter {
     // loop to pick up and return immediately so the IPC doesn't block.
     if (executor.isRunning) {
       executor.queueFollowUp(message, images);
-      return;
+      // Emit user_message event immediately so the UI shows the message right away.
+      // The executor's sendMessageLegacy won't re-emit because the message is
+      // injected directly into the conversation loop, not through sendMessage.
+      this.logEvent(taskId, "user_message", { message });
+      return { queued: true };
     }
 
     // Send the message (executor is idle, acquire mutex normally)
     await executor.sendMessage(message, images);
+    return { queued: false };
+  }
+
+  /**
+   * After execution completes, process any follow-up messages that were queued
+   * but never picked up by the execution loop (e.g. arrived on the last iteration).
+   */
+  private processOrphanedFollowUps(taskId: string, executor: TaskExecutor): void {
+    const orphaned = executor.drainAllPendingFollowUps();
+    if (orphaned.length === 0) return;
+
+    console.log(
+      `[AgentDaemon] Processing ${orphaned.length} orphaned follow-up(s) for task ${taskId}`,
+    );
+
+    // Process each follow-up sequentially via sendMessage (mutex is now free).
+    // The user_message event was already emitted when the message was queued, so
+    // tell the executor to suppress the duplicate emission.
+    // Fire-and-forget: each follow-up is independent and errors are logged.
+    let chain: Promise<void> = Promise.resolve();
+    for (const followUp of orphaned) {
+      chain = chain
+        .then(() => {
+          executor.suppressNextUserMessageEvent();
+          return this.sendMessage(taskId, followUp.message, followUp.images);
+        })
+        .then(() => {
+          /* result intentionally ignored */
+        })
+        .catch((err) => {
+          console.error(
+            `[AgentDaemon] Failed to process orphaned follow-up for task ${taskId}:`,
+            err,
+          );
+        });
+    }
   }
 
   // ===== Queue Management Methods =====
@@ -2857,13 +3217,30 @@ export class AgentDaemon extends EventEmitter {
     });
     this.pendingApprovals.clear();
 
-    // Persist cancelled status to DB before cancelling executors.
-    // This prevents tasks from being detected as "orphaned" on next startup.
-    this.activeTasks.forEach((_cached, taskId) => {
+    // Save conversation snapshots and mark active tasks as "interrupted" so they
+    // can be automatically resumed on next startup. Snapshots must be saved BEFORE
+    // calling executor.cancel() which aborts in-flight requests.
+    this.activeTasks.forEach((cached, taskId) => {
+      if (cached.status !== "active") return;
+
+      // Best-effort snapshot save
+      try {
+        cached.executor.saveConversationSnapshot();
+      } catch (err) {
+        console.error(
+          `[AgentDaemon] Failed to save snapshot for task ${taskId} on shutdown:`,
+          err,
+        );
+      }
+
+      // Mark as "interrupted" instead of "cancelled" so we can resume on restart
       try {
         this.taskRepo.update(taskId, {
-          status: "cancelled" as TaskStatus,
-          error: "Application shutdown while task was running",
+          status: "interrupted" as TaskStatus,
+          error: "Application shutdown while task was running - will resume on restart",
+        });
+        this.logEvent(taskId, "task_interrupted", {
+          message: "Task interrupted by application shutdown. Will resume on restart.",
         });
       } catch (err) {
         console.error(`[AgentDaemon] Failed to update task ${taskId} status on shutdown:`, err);

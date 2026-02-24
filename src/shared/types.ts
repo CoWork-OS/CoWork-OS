@@ -673,6 +673,8 @@ export interface Task {
   worktreeStatus?: WorktreeStatus; // Current worktree lifecycle state
   // Comparison mode fields
   comparisonSessionId?: string; // If this task is part of a comparison session
+  // Origin source for distinguishing how the task was created
+  source?: "manual" | "cron" | "hook" | "api";
 }
 
 // ============ Git Worktree Types ============

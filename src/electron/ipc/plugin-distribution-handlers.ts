@@ -134,10 +134,11 @@ export function setupPluginDistributionHandlers(): void {
     if (result.success) {
       try {
         const registry = PluginRegistry.getInstance();
+        const canonicalPackName = result.packName || packName;
         try {
-          await registry.unloadPlugin(packName);
+          await registry.unloadPlugin(canonicalPackName);
         } finally {
-          registry.purgePackState(packName);
+          registry.purgePackState(canonicalPackName);
         }
       } catch (error) {
         console.warn("[PluginDistribution] Failed to unload plugin after uninstall:", error);

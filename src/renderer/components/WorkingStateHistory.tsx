@@ -435,7 +435,7 @@ export function WorkingStateHistory({
             background: var(--color-bg-primary);
             padding: 2px 6px;
             border-radius: 3px;
-            font-family: monospace;
+            font-family: var(--font-mono);
           }
 
           .item-actions {

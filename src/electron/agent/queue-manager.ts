@@ -20,6 +20,17 @@ import { getUserDataDir } from "../utils/user-data-dir";
 
 const LEGACY_SETTINGS_FILE = "queue-settings.json";
 
+// Previous default values — used to detect users who never changed the setting
+// so we can transparently upgrade them to the new defaults.
+const PREVIOUS_DEFAULTS = {
+  maxConcurrentTasks: 5,
+  taskTimeoutMinutes: 30,
+};
+
+// Hard ceiling for total running tasks (top-level + sub-agents) to prevent
+// runaway resource consumption. Set to 2× the max configurable concurrency.
+const ABSOLUTE_MAX_RUNNING = 40;
+
 // Forward declaration - will be set by daemon
 type DaemonCallbacks = {
   startTaskImmediate: (task: Task) => Promise<void>;
@@ -88,7 +99,7 @@ export class TaskQueueManager {
       try {
         const data = fs.readFileSync(this.legacySettingsPath, "utf-8");
         const parsed = JSON.parse(data);
-        const merged = { ...DEFAULT_QUEUE_SETTINGS, ...parsed };
+        const merged = this.upgradeLegacyQueueDefaults({ ...DEFAULT_QUEUE_SETTINGS, ...parsed });
 
         repository.save("queue", merged);
         console.log("[TaskQueueManager] Settings migrated to encrypted database");
@@ -106,6 +117,29 @@ export class TaskQueueManager {
     } catch (error) {
       console.error("[TaskQueueManager] Migration failed:", error);
     }
+  }
+
+  /**
+   * Apply a one-time defaults migration only when loading from legacy settings.
+   * This avoids accidentally overriding explicit user-defined values already stored
+   * in the encrypted settings repository.
+   */
+  private upgradeLegacyQueueDefaults(settings: QueueSettings): QueueSettings {
+    let upgraded = false;
+    if (settings.maxConcurrentTasks === PREVIOUS_DEFAULTS.maxConcurrentTasks) {
+      settings.maxConcurrentTasks = DEFAULT_QUEUE_SETTINGS.maxConcurrentTasks;
+      upgraded = true;
+    }
+    if (settings.taskTimeoutMinutes === PREVIOUS_DEFAULTS.taskTimeoutMinutes) {
+      settings.taskTimeoutMinutes = DEFAULT_QUEUE_SETTINGS.taskTimeoutMinutes;
+      upgraded = true;
+    }
+
+    if (upgraded) {
+      console.log("[TaskQueueManager] Upgraded legacy queue settings from old defaults to new defaults", settings);
+    }
+
+    return settings;
   }
 
   /**
@@ -164,6 +198,16 @@ export class TaskQueueManager {
     const shouldBypassQueue = isSubAgent && bypassQueue !== false;
 
     if (shouldBypassQueue) {
+      // Safety cap: even sub-agents are queued if total running tasks hit the absolute ceiling
+      if (this.runningTaskIds.size >= ABSOLUTE_MAX_RUNNING) {
+        console.warn(
+          `[TaskQueueManager] Absolute running cap (${ABSOLUTE_MAX_RUNNING}) reached — queuing sub-agent`,
+        );
+        this.queuedTaskIds.push(task.id);
+        this.callbacks.updateTaskStatus(task.id, "queued");
+        this.emitQueueUpdate();
+        return;
+      }
       console.log(`[TaskQueueManager] Starting sub-agent immediately (bypasses concurrency limit)`);
       await this.startTask(task);
     } else if (this.canStartImmediately()) {
@@ -179,6 +223,29 @@ export class TaskQueueManager {
       this.callbacks.updateTaskStatus(task.id, "queued");
       this.emitQueueUpdate();
     }
+  }
+
+  /**
+   * Register an externally-started task (e.g. resumed after interruption) so it
+   * is tracked for concurrency limits and timeout enforcement.
+   *
+   * Returns `true` if the task was registered as running, or `false` if the
+   * concurrency limit was reached and the task should be re-queued instead.
+   */
+  registerResumedTask(taskId: string): boolean {
+    if (this.runningTaskIds.size >= this.settings.maxConcurrentTasks) {
+      console.log(
+        `[TaskQueueManager] Concurrency limit reached (${this.runningTaskIds.size}/${this.settings.maxConcurrentTasks}), cannot resume task ${taskId} — re-queuing`,
+      );
+      // Place at front of queue so resumed tasks take priority
+      this.queuedTaskIds.unshift(taskId);
+      this.emitQueueUpdate();
+      return false;
+    }
+    this.runningTaskIds.add(taskId);
+    this.taskStartTimes.set(taskId, Date.now());
+    this.emitQueueUpdate();
+    return true;
   }
 
   /**
@@ -279,7 +346,7 @@ export class TaskQueueManager {
   saveSettings(newSettings: Partial<QueueSettings>): void {
     // Validate maxConcurrentTasks
     if (newSettings.maxConcurrentTasks !== undefined) {
-      newSettings.maxConcurrentTasks = Math.max(1, Math.min(10, newSettings.maxConcurrentTasks));
+      newSettings.maxConcurrentTasks = Math.max(1, Math.min(20, newSettings.maxConcurrentTasks));
     }
 
     // Validate taskTimeoutMinutes (5 min to 4 hours)
@@ -404,7 +471,7 @@ export class TaskQueueManager {
   }
 
   /**
-   * Load settings from encrypted database
+   * Load settings from encrypted database.
    */
   private loadSettings(): QueueSettings {
     try {
@@ -412,9 +479,9 @@ export class TaskQueueManager {
         const repository = SecureSettingsRepository.getInstance();
         const stored = repository.load<QueueSettings>("queue");
         if (stored) {
-          // Merge with defaults to handle missing fields
           console.log("[TaskQueueManager] Loaded settings from encrypted database");
-          return { ...DEFAULT_QUEUE_SETTINGS, ...stored };
+          const merged = { ...DEFAULT_QUEUE_SETTINGS, ...stored };
+          return merged;
         }
       }
     } catch (error) {

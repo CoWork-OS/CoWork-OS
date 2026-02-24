@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { Plus } from "lucide-react";
 import { AgentRoleData, AgentCapability } from "../../electron/preload";
 import { AgentRoleCard } from "./AgentRoleCard";
 import { AgentRoleEditor } from "./AgentRoleEditor";
@@ -189,17 +190,7 @@ export function AgentSquadSettings({ onSettingsChanged }: AgentSquadSettingsProp
               Show inactive
             </label>
             <button className="btn-primary btn-sm" onClick={handleCreate}>
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <line x1="12" y1="5" x2="12" y2="19" />
-                <line x1="5" y1="12" x2="19" y2="12" />
-              </svg>
+              <Plus size={14} strokeWidth={2} />
               New Agent Role
             </button>
           </div>

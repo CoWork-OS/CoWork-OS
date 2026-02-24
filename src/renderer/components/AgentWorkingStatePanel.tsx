@@ -369,7 +369,7 @@ export function AgentWorkingStatePanel({
           background: var(--color-bg-primary);
           padding: 2px 8px;
           border-radius: 4px;
-          font-family: monospace;
+          font-family: var(--font-mono);
         }
 
         .empty-state {

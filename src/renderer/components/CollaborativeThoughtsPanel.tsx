@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { Loader2 } from "lucide-react";
 import type { AgentThought, AgentTeamRunPhase, AgentRole } from "../../shared/types";
+import { EMOJI_ICON_MAP } from "../utils/emoji-icon-map";
 
 interface CollaborativeThoughtsPanelProps {
   teamRunId: string;
@@ -116,6 +118,7 @@ export function CollaborativeThoughtsPanel({
 }: CollaborativeThoughtsPanelProps) {
   const isMultiLlm = mode === "multi-llm";
   const [thoughts, setThoughts] = useState<AgentThought[]>([]);
+  const [streamingThoughts, setStreamingThoughts] = useState<Map<string, AgentThought>>(new Map());
   const [phase, setPhase] = useState<string>(runPhase || "dispatch");
   const [leaderAgentRoleId, setLeaderAgentRoleId] = useState<string | null>(null);
   const [teamMembers, setTeamMembers] = useState<TeamMemberInfo[]>([]);
@@ -164,14 +167,29 @@ export function CollaborativeThoughtsPanel({
     const unsubThought = window.electronAPI.onTeamThoughtEvent((event: any) => {
       if (event.runId !== teamRunId) return;
       if (event.type === "team_thought_added" && event.thought) {
-        setThoughts((prev) => [...prev, event.thought as AgentThought]);
         const t = event.thought as AgentThought;
+        setThoughts((prev) => [...prev, t]);
+        // Remove streaming placeholder for this agent now that we have real content
+        setStreamingThoughts((prev) => {
+          if (!prev.has(t.agentRoleId)) return prev;
+          const next = new Map(prev);
+          next.delete(t.agentRoleId);
+          return next;
+        });
         if (t.phase === "dispatch" || t.phase === "synthesis") {
           setLeaderAgentRoleId(t.agentRoleId);
         }
       } else if (event.type === "team_thought_updated" && event.thought) {
         const updated = event.thought as AgentThought;
         setThoughts((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+      } else if (event.type === "team_thought_streaming" && event.thought) {
+        // Ephemeral streaming progress — update per-agent streaming indicator
+        const st = event.thought as AgentThought;
+        setStreamingThoughts((prev) => {
+          const next = new Map(prev);
+          next.set(st.agentRoleId, st);
+          return next;
+        });
       }
     });
 
@@ -231,17 +249,24 @@ export function CollaborativeThoughtsPanel({
     }));
   }, [teamMembers, leaderAgentRoleId]);
 
-  // For multi-LLM mode: derive participant chips from thoughts
+  // For multi-LLM mode: derive participant chips from thoughts AND streaming indicators
   const multiLlmParticipants = useMemo(() => {
-    if (!isMultiLlm || thoughts.length === 0) return [];
+    if (!isMultiLlm) return [];
     const seen = new Map<string, AgentThought>();
+    // Include streaming thoughts first so chips appear immediately
+    for (const [, st] of streamingThoughts) {
+      if (!seen.has(st.agentRoleId)) {
+        seen.set(st.agentRoleId, st);
+      }
+    }
+    // Override with real thoughts when available
     for (const t of thoughts) {
       if (!seen.has(t.agentRoleId)) {
         seen.set(t.agentRoleId, t);
       }
     }
     return Array.from(seen.values());
-  }, [isMultiLlm, thoughts]);
+  }, [isMultiLlm, thoughts, streamingThoughts]);
 
   return (
     <div className="collaborative-thoughts-panel" ref={scrollRef}>
@@ -269,7 +294,12 @@ export function CollaborativeThoughtsPanel({
                 className={`team-member-chip ${m.isLeader ? "team-member-leader" : ""}`}
                 style={{ borderColor: m.role.color }}
               >
-                <span className="team-member-icon">{m.role.icon}</span>
+                <span className="team-member-icon">
+                  {(() => {
+                    const Icon = EMOJI_ICON_MAP[m.role.icon];
+                    return Icon ? <Icon size={16} strokeWidth={1.5} /> : m.role.icon;
+                  })()}
+                </span>
                 <span className="team-member-name" style={{ color: m.role.color }}>
                   {m.role.displayName}
                 </span>
@@ -293,7 +323,12 @@ export function CollaborativeThoughtsPanel({
                 className={`team-member-chip ${t.agentRoleId === leaderAgentRoleId ? "team-member-leader" : ""}`}
                 style={{ borderColor: t.agentColor }}
               >
-                <span className="team-member-icon">{t.agentIcon}</span>
+                <span className="team-member-icon">
+                  {(() => {
+                    const Icon = EMOJI_ICON_MAP[t.agentIcon];
+                    return Icon ? <Icon size={16} strokeWidth={1.5} /> : t.agentIcon;
+                  })()}
+                </span>
                 <span className="team-member-name" style={{ color: t.agentColor }}>
                   {t.agentDisplayName}
                 </span>
@@ -326,7 +361,12 @@ export function CollaborativeThoughtsPanel({
             <div key={thought.id}>
               {showHeader && (
                 <div className="stream-agent-header">
-                  <span className="stream-agent-icon">{thought.agentIcon}</span>
+                  <span className="stream-agent-icon">
+                    {(() => {
+                      const Icon = EMOJI_ICON_MAP[thought.agentIcon];
+                      return Icon ? <Icon size={16} strokeWidth={1.5} /> : thought.agentIcon;
+                    })()}
+                  </span>
                   <span className="stream-agent-name" style={{ color: thought.agentColor }}>
                     {thought.agentDisplayName}
                   </span>
@@ -349,18 +389,7 @@ export function CollaborativeThoughtsPanel({
       {/* Phase status — sticky at bottom-left while running */}
       {isRunning && (
         <div className="collab-phase-status">
-          <svg
-            className="collab-phase-spinner"
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-          >
-            <path d="M12 2a10 10 0 0 1 10 10" />
-          </svg>
+          <Loader2 className="collab-phase-spinner" size={14} strokeWidth={2.5} />
           <span className="collab-phase-label">
             {phase === "dispatch" && "Assembling team..."}
             {phase === "think" && "Agents are working..."}

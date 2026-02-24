@@ -13,6 +13,9 @@ import {
 } from "./ipc/handlers";
 import { setupMissionControlHandlers } from "./ipc/mission-control-handlers";
 import { setupPersonaTemplateHandlers } from "./ipc/persona-template-handlers";
+import { setupPluginPackHandlers } from "./ipc/plugin-pack-handlers";
+import { setupPluginDistributionHandlers } from "./ipc/plugin-distribution-handlers";
+import { setupAdminPolicyHandlers } from "./ipc/admin-policy-handlers";
 import { getPersonaTemplateService } from "./agents/PersonaTemplateService";
 import { setupWorktreeHandlers } from "./ipc/worktree-handlers";
 import { ComparisonService } from "./git/ComparisonService";
@@ -499,9 +502,10 @@ if (!gotTheLock) {
         getTaskResultText: async (taskId) => {
           const task = taskRepo.findById(taskId);
           const summary = typeof task?.resultSummary === "string" ? task.resultSummary.trim() : "";
-          if (summary) return summary;
 
-          // Fall back to assistant message events (best-effort).
+          // Always run the event scan — assistant_message events carry the
+          // full untruncated text, while resultSummary may have been capped.
+          // We return whichever source is longer.
           // For agentic tasks, the last message may be a short "Done!" while the
           // substantive content was emitted earlier. Pick the longest message that
           // exceeds a minimum threshold; if none qualifies, fall back to the last
@@ -528,73 +532,122 @@ if (!gotTheLock) {
             "finished",
           ]);
 
+          // Use task_completed event's resultSummary only as a last resort —
+          // assistant_message events usually carry richer content.
+          let completionEventSummary = "";
+          // Track the best internal-only candidate separately so we can fall
+          // back to it when all user-facing messages were filtered out.
+          let bestInternalCandidate = "";
+
           for (let i = events.length - 1; i >= 0; i--) {
             const evt = events[i];
-            if (evt.type !== "assistant_message") continue;
             const payload = evt.payload || {};
+
+            // Collect resultSummary from task_completed as last-resort fallback
+            if (evt.type === "task_completed") {
+              const rs =
+                typeof payload.resultSummary === "string" ? payload.resultSummary.trim() : "";
+              if (rs && rs.length > completionEventSummary.length) {
+                completionEventSummary = rs;
+              }
+              continue;
+            }
+
+            if (evt.type !== "assistant_message") continue;
             const text =
               (typeof payload.message === "string" ? payload.message : "") ||
               (typeof payload.content === "string" ? payload.content : "");
             const trimmed = text.trim();
             if (!trimmed) continue;
 
+            // Prefer user-facing content; track internal messages as a fallback
+            if (payload.internal === true) {
+              if (
+                trimmed.length > 50 &&
+                trimmed.length > bestInternalCandidate.length &&
+                !TRIVIAL_PHRASES.has(trimmed.toLowerCase())
+              ) {
+                bestInternalCandidate = trimmed;
+              }
+              continue;
+            }
+
             // Track last non-trivial message as fallback
             if (!lastCandidate && !TRIVIAL_PHRASES.has(trimmed.toLowerCase())) {
               lastCandidate = trimmed;
             }
 
-            // Track the longest substantive message (>100 chars = likely real content)
-            if (trimmed.length > 100 && trimmed.length > bestCandidate.length) {
+            // Track the longest substantive message (>50 chars = likely real content)
+            if (trimmed.length > 50 && trimmed.length > bestCandidate.length) {
               bestCandidate = trimmed;
             }
           }
 
-          return bestCandidate || lastCandidate || undefined;
+          const eventResult =
+            bestCandidate ||
+            lastCandidate ||
+            bestInternalCandidate ||
+            completionEventSummary ||
+            "";
+
+          // Return whichever source produced more content — the persisted
+          // resultSummary may have been truncated while event text is full.
+          if (eventResult && eventResult.length > summary.length) {
+            return eventResult;
+          }
+          return summary || eventResult || undefined;
         },
         // Channel delivery handler - sends job results to messaging platforms
         deliverToChannel: async (params) => {
           if (!channelGateway) {
-            console.warn("[Cron] Cannot deliver to channel - gateway not initialized");
-            return;
+            throw new Error("Cannot deliver to channel - gateway not initialized");
           }
 
-          const hasResult =
-            params.status === "ok" &&
-            !params.summaryOnly &&
-            typeof params.resultText === "string" &&
-            params.resultText.trim().length > 0;
+          const resultAvailable =
+            typeof params.resultText === "string" && params.resultText.trim().length > 0;
+          const hasFullResult = params.status === "ok" && !params.summaryOnly && resultAvailable;
 
           console.log(
-            `[Cron] Delivery for "${params.jobName}": hasResult=${hasResult}, ` +
+            `[Cron] Delivery for "${params.jobName}": hasFullResult=${hasFullResult}, ` +
               `resultTextLength=${params.resultText?.length ?? 0}, summaryOnly=${params.summaryOnly}`,
           );
 
           // Build the message
           const statusEmoji =
             params.status === "ok" ? "✅" : params.status === "error" ? "❌" : "⏱️";
-          const message = hasResult
-            ? `**${params.jobName}**\n\n${params.resultText!.trim()}`
-            : (() => {
-                let msg = `${statusEmoji} **Scheduled Task: ${params.jobName}**\n\n`;
+          let message: string;
 
-                if (params.status === "ok") {
-                  msg += `Task completed successfully.\n`;
-                } else if (params.status === "error") {
-                  msg += `Task failed.\n`;
-                } else {
-                  msg += `Task timed out.\n`;
-                }
+          if (hasFullResult) {
+            // Full result mode — send the complete task output
+            message = `**${params.jobName}**\n\n${params.resultText!.trim()}`;
+          } else if (params.summaryOnly && resultAvailable) {
+            // Summary-only mode but result exists — include a truncated preview
+            const preview = params.resultText!.trim();
+            const truncated =
+              preview.length > 500 ? `${preview.slice(0, 500)}…` : preview;
+            message = `${statusEmoji} **${params.jobName}**\n\n${truncated}`;
+          } else {
+            // No result text or error/timeout — generic status message
+            let msg = `${statusEmoji} **Scheduled Task: ${params.jobName}**\n\n`;
 
-                if (params.error) {
-                  msg += `\n**Error:** ${params.error}\n`;
-                }
+            if (params.status === "ok") {
+              msg += `Task completed successfully.\n`;
+            } else if (params.status === "error") {
+              msg += `Task failed.\n`;
+            } else {
+              msg += `Task timed out.\n`;
+            }
 
-                if (params.taskId && !params.summaryOnly) {
-                  msg += `\n_Task ID: ${params.taskId}_`;
-                }
+            if (params.error) {
+              msg += `\n**Error:** ${params.error}\n`;
+            }
 
-                return msg;
-              })();
+            if (params.taskId) {
+              msg += `\n_Task ID: ${params.taskId}_`;
+            }
+
+            message = msg;
+          }
 
           try {
             // Resolve the actual channel type when a specific channel DB ID is provided
@@ -616,6 +669,7 @@ if (!gotTheLock) {
               `[Cron] Failed to deliver to ${params.channelType}:${params.channelId}:`,
               err,
             );
+            throw err;
           }
         },
         onEvent: async (evt) => {
@@ -838,6 +892,30 @@ if (!gotTheLock) {
       console.log("[Main] Persona Template service initialized");
     } catch (error) {
       console.error("[Main] Failed to initialize Persona Templates:", error);
+    }
+
+    // Initialize Plugin Pack handlers (Customize panel)
+    try {
+      setupPluginPackHandlers();
+      console.log("[Main] Plugin Pack handlers initialized");
+    } catch (error) {
+      console.error("[Main] Failed to initialize Plugin Pack handlers:", error);
+    }
+
+    // Initialize Plugin Distribution handlers (scaffold, install, registry)
+    try {
+      setupPluginDistributionHandlers();
+      console.log("[Main] Plugin Distribution handlers initialized");
+    } catch (error) {
+      console.error("[Main] Failed to initialize Plugin Distribution handlers:", error);
+    }
+
+    // Initialize Admin Policy handlers
+    try {
+      setupAdminPolicyHandlers();
+      console.log("[Main] Admin Policy handlers initialized");
+    } catch (error) {
+      console.error("[Main] Failed to initialize Admin Policy handlers:", error);
     }
 
     if (HEADLESS) {

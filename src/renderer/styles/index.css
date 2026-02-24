@@ -2342,6 +2342,36 @@ a,
   border-right: 1px dashed var(--color-border, #333);
 }
 
+.streaming-thoughts-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.streaming-thought-entry {
+  margin-bottom: 4px;
+}
+
+.streaming-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--color-text-secondary, #999);
+  font-style: italic;
+}
+
+.streaming-spinner {
+  animation: spin 1s linear infinite;
+  flex-shrink: 0;
+  color: var(--color-text-secondary, #999);
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 .collaborative-thoughts-panel .thought-content {
   word-break: break-word;
   font-size: 13px;

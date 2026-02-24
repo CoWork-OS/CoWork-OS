@@ -9,6 +9,7 @@
  */
 
 import { BrowserWindow, screen, ipcMain, clipboard } from "electron";
+import { IPC_CHANNELS } from "../../shared/types";
 
 export class QuickInputWindow {
   private window: BrowserWindow | null = null;
@@ -607,7 +608,7 @@ export class QuickInputWindow {
    * Setup IPC handlers for the quick input window
    */
   private setupIpcHandlers(): void {
-    ipcMain.handle("quick-input:submit", (_event, task: string, workspaceId?: string) => {
+    ipcMain.handle(IPC_CHANNELS.QUICK_INPUT_SUBMIT, (_event, task: string, workspaceId?: string) => {
       console.log("[QuickInputWindow] Received submit:", task);
       this.hide();
       if (this.onSubmit && task.trim()) {
@@ -616,7 +617,7 @@ export class QuickInputWindow {
       }
     });
 
-    ipcMain.handle("quick-input:close", () => {
+    ipcMain.handle(IPC_CHANNELS.QUICK_INPUT_CLOSE, () => {
       this.hide();
     });
   }

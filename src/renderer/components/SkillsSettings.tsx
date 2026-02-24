@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
+import { FolderOpen, RefreshCw, Plus } from "lucide-react";
 import { CustomSkill, SkillParameter } from "../../shared/types";
+import { EMOJI_ICON_MAP } from "../utils/emoji-icon-map";
 
 interface SkillsSettingsProps {
   onSkillSelect?: (skill: CustomSkill) => void;
@@ -135,44 +137,15 @@ export function SkillsSettings({ onSkillSelect }: SkillsSettingsProps) {
           <h3>Custom Skills</h3>
           <div className="settings-section-actions">
             <button className="btn-secondary btn-sm" onClick={handleOpenFolder}>
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
-              </svg>
+              <FolderOpen size={14} strokeWidth={2} />
               Open Folder
             </button>
             <button className="btn-secondary btn-sm" onClick={handleReload}>
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <path d="M23 4v6h-6M1 20v-6h6" />
-                <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
-              </svg>
+              <RefreshCw size={14} strokeWidth={2} />
               Reload
             </button>
             <button className="btn-primary btn-sm" onClick={handleCreate}>
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <line x1="12" y1="5" x2="12" y2="19" />
-                <line x1="5" y1="12" x2="19" y2="12" />
-              </svg>
+              <Plus size={14} strokeWidth={2} />
               New Skill
             </button>
           </div>
@@ -205,7 +178,12 @@ export function SkillsSettings({ onSkillSelect }: SkillsSettingsProps) {
                     className={`skill-card ${skill.type === "guideline" ? "skill-card-guideline" : ""}`}
                   >
                     <div className="skill-card-header">
-                      <span className="skill-icon">{skill.icon}</span>
+                      <span className="skill-icon">
+                        {(() => {
+                          const Icon = EMOJI_ICON_MAP[skill.icon];
+                          return Icon ? <Icon size={18} strokeWidth={1.5} /> : skill.icon;
+                        })()}
+                      </span>
                       <div className="skill-info">
                         <span className="skill-name">
                           {skill.name}
@@ -216,7 +194,7 @@ export function SkillsSettings({ onSkillSelect }: SkillsSettingsProps) {
                         <span className="skill-description">{skill.description}</span>
                       </div>
                       {skill.type === "guideline" && (
-                        <label className="skill-toggle">
+                        <label className="settings-toggle">
                           <input
                             type="checkbox"
                             checked={skill.enabled !== false}
@@ -234,7 +212,7 @@ export function SkillsSettings({ onSkillSelect }: SkillsSettingsProps) {
                               }
                             }}
                           />
-                          <span className="skill-toggle-slider"></span>
+                          <span className="toggle-slider"></span>
                         </label>
                       )}
                     </div>

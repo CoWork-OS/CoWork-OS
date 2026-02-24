@@ -80,6 +80,19 @@ button:focus-visible,
   );
   --density-chat-message-intrinsic-size: 80px;
   --density-timeline-event-intrinsic-size: 40px;
+
+  /* Typography - consistent font stacks */
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  --font-content: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "SF Mono", "Fira Code", "Consolas", monospace;
+  --font-sans: var(--font-ui);
+
+  --session-mode-autonomous: 245, 158, 11;
+  --session-mode-collab: 139, 92, 246;
+  --session-mode-multi-llm: 236, 72, 153;
+  --session-mode-scheduled: 14, 165, 233;
+  --session-mode-think: 168, 85, 247;
+  --session-mode-comparison: 20, 184, 166;
 }
 
 /* ============================================
@@ -902,6 +915,18 @@ button:focus-visible,
   color: var(--color-text-secondary);
 }
 
+.theme-light .cli-active-context-scroll {
+  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
+}
+
+.theme-light .cli-active-context-scroll::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.theme-light .cli-active-context-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.25);
+}
+
 .theme-light .cli-task-menu,
 .theme-light .task-item-menu {
   background: rgba(255, 255, 255, 0.95) !important;
@@ -1062,9 +1087,7 @@ body {
 }
 
 body {
-  font-family:
-    -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", system-ui,
-    sans-serif;
+  font-family: var(--font-ui);
   font-size: 14px;
   line-height: 1.5;
   color: var(--color-text);
@@ -2664,7 +2687,7 @@ a,
 }
 
 .verbose-switch-label {
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -2727,7 +2750,7 @@ a,
   border: 1px solid var(--border-color);
   border-radius: 4px;
   color: var(--text-secondary);
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -2926,7 +2949,7 @@ a,
   padding: 12px;
   background: var(--color-bg-secondary);
   border-radius: var(--radius-md);
-  font-family: "SF Mono", "Fira Code", monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   color: var(--color-text-secondary);
   border: 1px solid var(--color-border);
@@ -2938,7 +2961,7 @@ a,
 }
 
 .event-details.assistant-message {
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  font-family: var(--font-ui);
   font-size: 14px;
   line-height: 1.6;
   color: var(--color-text);
@@ -2959,7 +2982,7 @@ a,
 }
 
 .event-details.event-details-file-preview {
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  font-family: var(--font-ui);
   padding: 10px;
 }
 
@@ -3294,7 +3317,7 @@ a,
 }
 
 .markdown-content code {
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   font-size: 0.9em;
   background: var(--color-bg-secondary);
   padding: 2px 6px;
@@ -3477,7 +3500,7 @@ a,
 
 .code-preview-path {
   color: var(--color-text-secondary, #aaa);
-  font-family: "SF Mono", "Fira Code", monospace;
+  font-family: var(--font-mono);
 }
 
 .code-preview-truncated {
@@ -3500,7 +3523,7 @@ a,
 }
 
 .code-preview-content code {
-  font-family: "SF Mono", "Fira Code", monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
 }
 
@@ -3526,7 +3549,7 @@ a,
 }
 
 .diff-line code {
-  font-family: "SF Mono", "Fira Code", monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
 }
 
@@ -3542,7 +3565,7 @@ a,
 
 .diff-marker {
   font-weight: bold;
-  font-family: "SF Mono", "Fira Code", monospace;
+  font-family: var(--font-mono);
   flex-shrink: 0;
   width: 14px;
   text-align: center;
@@ -3569,7 +3592,7 @@ a,
   background: var(--color-bg-secondary);
   border-radius: var(--radius-md);
   margin-bottom: 8px;
-  font-family: "SF Mono", "Fira Code", monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   color: var(--color-pink);
   border: 1px solid var(--color-border-subtle);
@@ -4867,7 +4890,7 @@ a,
 
 .cli-workspace-selector {
   background: var(--color-bg-primary);
-  font-family: "SF Mono", "Fira Code", "Consolas", "Monaco", monospace;
+  font-family: var(--font-mono);
 }
 
 .cli-workspace-content {
@@ -5448,7 +5471,7 @@ button {
 .approval-details pre {
   white-space: pre-wrap;
   word-wrap: break-word;
-  font-family: "SF Mono", monospace;
+  font-family: var(--font-mono);
   color: var(--color-text-secondary);
 }
 
@@ -5535,7 +5558,7 @@ button {
 
 /* CLI Style Welcome */
 .welcome-content.cli-style {
-  font-family: "SF Mono", "Fira Code", "Consolas", "Monaco", monospace;
+  font-family: var(--font-mono);
 }
 
 /* Welcome Logo */
@@ -5741,68 +5764,27 @@ button {
   -webkit-box-orient: vertical;
 }
 
-/* Try Asking prompts from plugin packs */
-.try-asking-section {
-  margin-top: 16px;
-  margin-bottom: 12px;
-  max-width: 640px;
-}
-
-.try-asking-header {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--color-text-muted);
-  margin-bottom: 8px;
-}
-
-.try-asking-chips {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-}
-
-.try-asking-chip {
+/* Rotating placeholder inside the CLI input */
+.cli-rotating-placeholder {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 0;
-  background: none;
-  border: none;
-  border-bottom: 1px solid var(--color-border-subtle, rgba(255, 255, 255, 0.08));
-  color: var(--color-text-primary);
-  font-size: 13px;
-  cursor: pointer;
-  text-align: left;
-  width: 100%;
-  transition: color 0.15s;
-}
-
-.try-asking-chip:last-child {
-  border-bottom: none;
-}
-
-.try-asking-chip:hover {
-  color: var(--color-accent, #22d3ee);
-}
-
-.try-asking-text {
-  flex: 1;
-  min-width: 0;
+  pointer-events: none;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  max-width: calc(100% - 8px);
+  transition: opacity 0.3s ease;
 }
 
-.try-asking-arrow {
-  color: var(--color-text-muted);
-  font-size: 14px;
-  flex-shrink: 0;
-  transition: color 0.15s;
-}
-
-.try-asking-chip:hover .try-asking-arrow {
-  color: var(--color-accent, #22d3ee);
+.cli-rotating-placeholder.fading {
+  opacity: 0;
 }
 
 /* CLI Input Styles */
@@ -5833,7 +5815,7 @@ button {
 
 .cli-input-prompt {
   color: var(--color-accent);
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   font-weight: 600;
   font-size: 14px;
   flex-shrink: 0;
@@ -5842,7 +5824,7 @@ button {
 .cli-input {
   flex: 1;
   padding: 0 !important;
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace !important;
+  font-family: var(--font-mono) !important;
 }
 
 .mention-autocomplete-dropdown {
@@ -5939,7 +5921,7 @@ button {
   height: 0;
   overflow: hidden;
   white-space: pre;
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace !important;
+  font-family: var(--font-mono) !important;
   font-size: 14px;
 }
 
@@ -5966,7 +5948,7 @@ button {
 }
 
 .cli-input-container .folder-selector {
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   background: transparent;
   border-color: var(--color-border-subtle);
 }
@@ -5977,7 +5959,7 @@ button {
 }
 
 .cli-input-container .model-selector {
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   background: transparent;
   border-color: var(--color-border-subtle);
 }
@@ -5988,7 +5970,7 @@ button {
 }
 
 .cli-input-container .lets-go-btn {
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   background: var(--color-accent);
   border: none;
   box-shadow: 0 0 10px var(--color-accent-subtle);
@@ -6404,7 +6386,7 @@ button {
   color: var(--color-text-muted);
   font-size: 16px;
   font-weight: 600;
-  font-family: "SF Mono", "Fira Code", monospace;
+  font-family: var(--font-mono);
   cursor: pointer;
   transition: all 0.2s ease;
 }
@@ -7997,7 +7979,7 @@ button {
 }
 
 .pairing-code {
-  font-family: "SF Mono", "Fira Code", monospace;
+  font-family: var(--font-mono);
   font-size: 24px;
   font-weight: 600;
   color: var(--color-accent);
@@ -8325,7 +8307,7 @@ button {
    ========================================== */
 
 .cli-panel {
-  font-family: "SF Mono", "Fira Code", "Consolas", "Monaco", monospace;
+  font-family: var(--font-mono);
   background: rgba(0, 0, 0, 0.4) !important;
 }
 
@@ -8694,6 +8676,30 @@ button {
   padding-top: 2px;
 }
 
+.cli-active-context-scroll {
+  max-height: 112px; /* ~4 items at 28px each */
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+}
+
+.cli-active-context-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+
+.cli-active-context-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.cli-active-context-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 2px;
+}
+
+.cli-active-context-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
 /* CLI Queue Section */
 .cli-queue-badge {
   margin-left: auto;
@@ -8730,7 +8736,7 @@ button {
 
 .cli-queue-status {
   color: var(--color-text-muted);
-  font-family: "SF Mono", "Fira Code", monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   flex-shrink: 0;
 }
@@ -8798,7 +8804,7 @@ button {
    ========================================== */
 
 .cli-sidebar {
-  font-family: "SF Mono", "Fira Code", "Consolas", "Monaco", monospace;
+  font-family: var(--font-mono);
   background: rgba(0, 0, 0, 0.4) !important;
 }
 
@@ -8834,7 +8840,7 @@ button {
   background: transparent !important;
   border: 1px solid var(--color-border-subtle) !important;
   border-radius: var(--radius-md);
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace !important;
+  font-family: var(--font-mono) !important;
   padding: 8px 12px !important;
   color: var(--color-text-muted) !important;
   font-size: 11px !important;
@@ -9034,7 +9040,7 @@ button {
 }
 
 .cli-more-btn {
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   color: var(--color-text-muted);
   background: transparent;
@@ -9051,7 +9057,7 @@ button {
 
 /* CLI Task Menu */
 .cli-task-menu {
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   background: rgba(0, 0, 0, 0.9) !important;
   border: 1px solid var(--color-border) !important;
 }
@@ -9060,7 +9066,7 @@ button {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace !important;
+  font-family: var(--font-mono) !important;
   font-size: 11px !important;
 }
 
@@ -9088,7 +9094,7 @@ button {
 }
 
 .cli-tree-prefix {
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   color: var(--color-text-muted);
   margin-right: 4px;
@@ -9096,7 +9102,7 @@ button {
 }
 
 .cli-collapse-btn {
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   color: var(--color-text-muted);
   background: transparent;
@@ -9127,7 +9133,7 @@ button {
 
 /* Agent type badges */
 .cli-agent-type {
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   font-size: 8px;
   font-weight: 600;
   padding: 1px 4px;
@@ -9160,6 +9166,218 @@ button {
   color: rgb(22, 163, 74);
 }
 
+/* ---- Session mode: colored left border on task items ---- */
+.cli-task-item.session-mode-autonomous {
+  border-left-color: rgb(var(--session-mode-autonomous));
+}
+.cli-task-item.session-mode-collab {
+  border-left-color: rgb(var(--session-mode-collab));
+}
+.cli-task-item.session-mode-multi-llm {
+  border-left-color: rgb(var(--session-mode-multi-llm));
+}
+.cli-task-item.session-mode-scheduled {
+  border-left-color: rgb(var(--session-mode-scheduled));
+}
+.cli-task-item.session-mode-think {
+  border-left-color: rgb(var(--session-mode-think));
+}
+.cli-task-item.session-mode-comparison {
+  border-left-color: rgb(var(--session-mode-comparison));
+}
+
+/* Keep mode color visible even when selected */
+.cli-task-item.task-item-selected.session-mode-autonomous {
+  border-left-color: rgb(var(--session-mode-autonomous));
+}
+.cli-task-item.task-item-selected.session-mode-collab {
+  border-left-color: rgb(var(--session-mode-collab));
+}
+.cli-task-item.task-item-selected.session-mode-multi-llm {
+  border-left-color: rgb(var(--session-mode-multi-llm));
+}
+.cli-task-item.task-item-selected.session-mode-scheduled {
+  border-left-color: rgb(var(--session-mode-scheduled));
+}
+.cli-task-item.task-item-selected.session-mode-think {
+  border-left-color: rgb(var(--session-mode-think));
+}
+.cli-task-item.task-item-selected.session-mode-comparison {
+  border-left-color: rgb(var(--session-mode-comparison));
+}
+
+/* ---- Session filter toggle button ---- */
+.session-filter-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted, #6b7280);
+  cursor: pointer;
+  padding: 2px 5px;
+  margin-left: auto;
+  border-radius: 3px;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.session-filter-toggle:hover {
+  color: var(--color-accent, #22d3ee);
+  background: rgba(255, 255, 255, 0.04);
+}
+.session-filter-toggle.active {
+  color: var(--color-accent, #22d3ee);
+}
+.session-filter-toggle .filter-count {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  min-width: 14px;
+  height: 14px;
+  line-height: 14px;
+  text-align: center;
+  border-radius: 7px;
+  background: var(--color-accent, #22d3ee);
+  color: var(--color-bg, #0a0a0a);
+}
+
+/* ---- Session filter bar ---- */
+.session-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 12px 8px;
+  align-items: center;
+}
+
+.session-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 500;
+  padding: 2px 7px 2px 5px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--color-text-muted, #6b7280);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  letter-spacing: 0.01em;
+}
+.session-filter-chip:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--color-text-secondary);
+}
+
+/* Colored dot indicator inside filter chip */
+.session-filter-chip .filter-chip-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.session-filter-chip.standard .filter-chip-dot { background: var(--color-text-muted, #6b7280); }
+.session-filter-chip.autonomous .filter-chip-dot { background: rgb(var(--session-mode-autonomous)); }
+.session-filter-chip.collab .filter-chip-dot { background: rgb(var(--session-mode-collab)); }
+.session-filter-chip.multi-llm .filter-chip-dot { background: rgb(var(--session-mode-multi-llm)); }
+.session-filter-chip.scheduled .filter-chip-dot { background: rgb(var(--session-mode-scheduled)); }
+.session-filter-chip.think .filter-chip-dot { background: rgb(var(--session-mode-think)); }
+.session-filter-chip.comparison .filter-chip-dot { background: rgb(var(--session-mode-comparison)); }
+
+.session-filter-chip .filter-chip-count {
+  font-size: 9px;
+  opacity: 0.5;
+  font-weight: 600;
+}
+
+/* Active filter chip states */
+.session-filter-chip.active {
+  border-color: rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--color-text-primary);
+}
+.session-filter-chip.active.autonomous {
+  border-color: rgba(var(--session-mode-autonomous), 0.4);
+  background: rgba(var(--session-mode-autonomous), 0.1);
+}
+.session-filter-chip.active.collab {
+  border-color: rgba(var(--session-mode-collab), 0.4);
+  background: rgba(var(--session-mode-collab), 0.1);
+}
+.session-filter-chip.active.multi-llm {
+  border-color: rgba(var(--session-mode-multi-llm), 0.4);
+  background: rgba(var(--session-mode-multi-llm), 0.1);
+}
+.session-filter-chip.active.scheduled {
+  border-color: rgba(var(--session-mode-scheduled), 0.4);
+  background: rgba(var(--session-mode-scheduled), 0.1);
+}
+.session-filter-chip.active.think {
+  border-color: rgba(var(--session-mode-think), 0.4);
+  background: rgba(var(--session-mode-think), 0.1);
+}
+.session-filter-chip.active.comparison {
+  border-color: rgba(var(--session-mode-comparison), 0.4);
+  background: rgba(var(--session-mode-comparison), 0.1);
+}
+
+/* Light theme adjustments for filter chips */
+.theme-light .session-filter-chip {
+  border-color: rgba(0, 0, 0, 0.08);
+  background: rgba(0, 0, 0, 0.02);
+}
+.theme-light .session-filter-chip:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+.theme-light .session-filter-chip.active.autonomous {
+  background: rgba(var(--session-mode-autonomous), 0.08);
+  border-color: rgba(var(--session-mode-autonomous), 0.25);
+}
+.theme-light .session-filter-chip.active.collab {
+  background: rgba(var(--session-mode-collab), 0.08);
+  border-color: rgba(var(--session-mode-collab), 0.25);
+}
+.theme-light .session-filter-chip.active.multi-llm {
+  background: rgba(var(--session-mode-multi-llm), 0.08);
+  border-color: rgba(var(--session-mode-multi-llm), 0.25);
+}
+.theme-light .session-filter-chip.active.scheduled {
+  background: rgba(var(--session-mode-scheduled), 0.08);
+  border-color: rgba(var(--session-mode-scheduled), 0.25);
+}
+.theme-light .session-filter-chip.active.think {
+  background: rgba(var(--session-mode-think), 0.08);
+  border-color: rgba(var(--session-mode-think), 0.25);
+}
+.theme-light .session-filter-chip.active.comparison {
+  background: rgba(var(--session-mode-comparison), 0.08);
+  border-color: rgba(var(--session-mode-comparison), 0.25);
+}
+
+/* Clear filter button */
+.session-filter-clear {
+  font-size: 10px;
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted, #6b7280);
+  cursor: pointer;
+  padding: 2px 4px;
+  transition: color 0.15s ease;
+}
+.session-filter-clear:hover {
+  color: var(--color-accent, #22d3ee);
+}
+
+/* Empty state for filtered results */
+.sidebar-empty-filtered {
+  padding: 20px 16px;
+  text-align: center;
+}
+.sidebar-empty-filtered .cli-hint {
+  color: var(--color-text-muted, #6b7280);
+  font-size: 12px;
+}
+
 .cli-menu-danger:hover {
   background: rgba(239, 68, 68, 0.2) !important;
 }
@@ -9170,7 +9388,7 @@ button {
 
 /* CLI Rename Input */
 .cli-rename-input {
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace !important;
+  font-family: var(--font-mono) !important;
   background: rgba(0, 0, 0, 0.3) !important;
   border: 1px solid var(--color-accent) !important;
 }
@@ -9229,7 +9447,7 @@ button {
 }
 
 .cli-settings-btn {
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace !important;
+  font-family: var(--font-mono) !important;
   font-size: 11px !important;
   color: var(--color-text-muted) !important;
   background: transparent !important;
@@ -9273,7 +9491,7 @@ button {
 }
 
 .main-header {
-  font-family: "SF Mono", "Fira Code", "Consolas", "Monaco", monospace;
+  font-family: var(--font-mono);
   background: transparent;
   border-bottom: none;
   overflow: hidden;
@@ -9281,7 +9499,7 @@ button {
 
 .main-header-title {
   flex: 1;
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   letter-spacing: 0.3px;
   overflow: hidden;
@@ -9294,11 +9512,11 @@ button {
 
 /* CLI Style for Task View */
 .task-content {
-  font-family: "SF Mono", "Fira Code", "Consolas", "Monaco", monospace;
+  font-family: var(--font-mono);
 }
 
 .task-description {
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.6;
   background: rgba(0, 0, 0, 0.2);
@@ -9309,18 +9527,18 @@ button {
 
 /* Timeline CLI Styles */
 .timeline-section {
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
 }
 
 .view-steps-btn {
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
 
 .timeline-event {
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
 }
 
 .event-title {
@@ -9329,18 +9547,18 @@ button {
 
 .event-time {
   font-size: 10px;
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
 }
 
 .event-details {
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   background: rgba(0, 0, 0, 0.2);
   border: 1px solid var(--color-border-subtle);
 }
 
 .event-details pre {
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
 }
 
@@ -9351,22 +9569,22 @@ button {
 }
 
 .input-container {
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   background: rgba(0, 0, 0, 0.3);
 }
 
 .input-field {
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
 }
 
 .input-disclaimer {
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
 }
 
 /* Send Button CLI Style */
 .send-btn {
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
 }
 
 /* Clickable File Paths - underline on hover only */
@@ -9447,7 +9665,7 @@ button {
   gap: 8px;
   font-size: 13px;
   color: var(--color-text-secondary);
-  font-family: "SF Mono", monospace;
+  font-family: var(--font-mono);
 }
 
 .git-branch {
@@ -9641,7 +9859,7 @@ button {
 
 .manual-update-commands code {
   display: block;
-  font-family: "SF Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   color: var(--color-text-secondary);
   white-space: pre;
@@ -10530,7 +10748,7 @@ button {
 }
 
 .nodes-connection-note code {
-  font-family: "SF Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   color: var(--color-text-secondary);
 }
@@ -10670,7 +10888,7 @@ button {
 }
 
 .nodes-detail-mono {
-  font-family: "SF Mono", monospace;
+  font-family: var(--font-mono);
 }
 
 .nodes-test h5 {
@@ -11037,7 +11255,7 @@ button {
   padding: 4px 10px;
   border-radius: var(--radius-sm);
   font-size: 12px;
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono);
 }
 
 .pattern-tag.builtin {
@@ -12525,7 +12743,7 @@ button {
 .form-group textarea {
   resize: vertical;
   min-height: 120px;
-  font-family: "SF Mono", "Fira Code", monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.5;
 }
@@ -14276,7 +14494,7 @@ button {
 
 /* Code and text content */
 .file-viewer-code {
-  font-family: "SF Mono", "Monaco", "Consolas", monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.6;
   white-space: pre-wrap;
@@ -14493,14 +14711,7 @@ button {
 }
 
 .disclaimer-container {
-  font-family: var(
-    --font-ui,
-    "Avenir Next",
-    "SF Pro Text",
-    -apple-system,
-    BlinkMacSystemFont,
-    sans-serif
-  );
+  font-family: var(--font-ui);
   color: var(--color-text, #ffffff);
   max-width: 560px;
   width: 100%;
@@ -14967,7 +15178,7 @@ button {
 }
 
 .command-output-title .command-text {
-  font-family: "SF Mono", "Menlo", "Monaco", "Consolas", monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   color: var(--color-text);
   white-space: nowrap;
@@ -15020,7 +15231,7 @@ button {
 }
 
 .command-output-content pre {
-  font-family: "SF Mono", "Menlo", "Monaco", "Consolas", monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.5;
   color: var(--color-text);
@@ -15076,7 +15287,7 @@ button {
 
 .command-stdin-prompt {
   color: var(--color-accent);
-  font-family: "SF Mono", "Menlo", "Monaco", "Consolas", monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 600;
   flex-shrink: 0;
@@ -15089,7 +15300,7 @@ button {
   border-radius: 4px;
   padding: 6px 10px;
   color: var(--color-text);
-  font-family: "SF Mono", "Menlo", "Monaco", "Consolas", monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   outline: none;
   transition:
@@ -15529,7 +15740,7 @@ button {
   border-radius: 3px;
   font-size: 10px;
   color: var(--color-text-muted);
-  font-family: "SF Mono", "Menlo", "Monaco", "Consolas", monospace;
+  font-family: var(--font-mono);
 }
 
 .canvas-preview-updating {
@@ -16217,7 +16428,7 @@ button {
   flex: 1;
   overflow-y: auto;
   padding: 4px 0;
-  font-family: "SF Mono", "Menlo", "Monaco", "Consolas", monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
 }
 
@@ -18505,7 +18716,7 @@ button {
 }
 
 .onboarding-typewriter {
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+  font-family: var(--font-ui);
   font-size: 1.5rem;
   font-weight: 300;
   line-height: 1.6;
@@ -20379,7 +20590,7 @@ button {
   background: color-mix(in srgb, var(--color-error, #ef4444) 10%, transparent);
   color: var(--color-error, #ef4444);
   font-size: 11px;
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
 }
 
 /* Focused welcome header */
@@ -21387,7 +21598,7 @@ button {
 }
 
 .infra-wallet-address {
-  font-family: var(--font-mono, "SF Mono", "Fira Code", monospace);
+  font-family: var(--font-mono);
   font-size: 13px;
   color: var(--color-text-secondary);
   user-select: all;
@@ -21686,7 +21897,7 @@ button {
 }
 
 .infra-wallet-badge .infra-wallet-balance {
-  font-family: var(--font-mono, "SF Mono", "Fira Code", monospace);
+  font-family: var(--font-mono);
   font-size: 11px;
 }
 

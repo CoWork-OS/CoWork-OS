@@ -425,6 +425,7 @@ if (!gotTheLock) {
             prompt: params.prompt,
             workspaceId: params.workspaceId,
             agentConfig: mergedAgentConfig,
+            source: "cron",
           });
           return { id: task.id };
         },

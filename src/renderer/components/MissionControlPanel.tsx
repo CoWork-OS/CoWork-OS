@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { Plus, User } from "lucide-react";
 import {
   AgentRoleData,
   HeartbeatEvent,
@@ -857,24 +858,14 @@ export function MissionControlPanel({ onClose: _onClose }: MissionControlPanelPr
               })}
           </div>
           <button className="mc-add-agent-btn" onClick={handleCreateAgent}>
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
+            <Plus size={16} strokeWidth={2} />
             {agentContext.getUiCopy("mcAddAgent")}
           </button>
           <button
             className="mc-add-agent-btn mc-add-twin-btn"
             onClick={() => setTemplateGalleryOpen(true)}
           >
-            <span style={{ fontSize: "14px" }}>{"\ud83d\udc64"}</span>
+            <User size={14} strokeWidth={1.5} />
             Add Digital Twin
           </button>
         </aside>
@@ -1732,8 +1723,10 @@ const styles = `
 
   .mc-task-status-pill.status-executing,
   .mc-task-status-pill.status-planning,
+  .mc-task-status-pill.status-interrupted,
   .mc-task-detail-status.status-executing,
-  .mc-task-detail-status.status-planning {
+  .mc-task-detail-status.status-planning,
+  .mc-task-detail-status.status-interrupted {
     background: color-mix(in srgb, var(--color-accent) 15%, var(--color-bg-tertiary));
     color: var(--color-accent);
   }

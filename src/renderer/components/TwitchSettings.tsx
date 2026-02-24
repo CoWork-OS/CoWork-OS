@@ -330,14 +330,17 @@ export function TwitchSettings({ onStatusChange }: TwitchSettingsProps) {
           </div>
 
           <div className="settings-field">
-            <label className="settings-checkbox-label">
-              <input
-                type="checkbox"
-                checked={allowWhispers}
-                onChange={(e) => setAllowWhispers(e.target.checked)}
-              />
+            <div className="settings-checkbox-label">
               <span>Allow Whispers (DMs)</span>
-            </label>
+              <label className="settings-toggle">
+                <input
+                  type="checkbox"
+                  checked={allowWhispers}
+                  onChange={(e) => setAllowWhispers(e.target.checked)}
+                />
+                <span className="toggle-slider" />
+              </label>
+            </div>
             <p className="settings-hint">Enable receiving and responding to Twitch whispers</p>
           </div>
 

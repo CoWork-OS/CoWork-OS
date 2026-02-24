@@ -233,12 +233,12 @@ export function CollaborativeThoughtsPanel({
     return () => scrollParent!.removeEventListener("scroll", onScroll);
   }, []);
 
-  // Scroll the bottom sentinel into view when new thoughts arrive
+  // Scroll the bottom sentinel into view when new thoughts or streaming updates arrive
   useEffect(() => {
     if (stickToBottomRef.current && bottomRef.current) {
       bottomRef.current.scrollIntoView({ behavior: "smooth", block: "end" });
     }
-  }, [thoughts]);
+  }, [thoughts, streamingThoughts]);
 
   // Resolve leader status on team members
   const resolvedTeamMembers = useMemo(() => {
@@ -342,7 +342,7 @@ export function CollaborativeThoughtsPanel({
       <PhaseIndicator phase={phase} labels={isMultiLlm ? MULTI_LLM_PHASE_LABELS : undefined} />
 
       <div className="thoughts-stream">
-        {thoughts.length === 0 && (
+        {thoughts.length === 0 && streamingThoughts.size === 0 && (
           <div className="thoughts-empty">
             {phase === "dispatch"
               ? isMultiLlm
@@ -353,9 +353,47 @@ export function CollaborativeThoughtsPanel({
                 : "Waiting for agent thoughts..."}
           </div>
         )}
+
+        {/* Live streaming indicators from active models/agents */}
+        {streamingThoughts.size > 0 && thoughts.length === 0 && (
+          <div className="streaming-thoughts-section">
+            {Array.from(streamingThoughts.values()).map((st) => (
+              <div key={st.agentRoleId} className="streaming-thought-entry">
+                <div className="stream-agent-header">
+                  <span className="stream-agent-icon">
+                    {(() => {
+                      const Icon = EMOJI_ICON_MAP[st.agentIcon];
+                      return Icon ? <Icon size={16} strokeWidth={1.5} /> : st.agentIcon;
+                    })()}
+                  </span>
+                  <span className="stream-agent-name" style={{ color: st.agentColor }}>
+                    {st.agentDisplayName}
+                  </span>
+                </div>
+                <div
+                  className="stream-thought thought-streaming"
+                  style={{ borderLeftColor: st.agentColor }}
+                >
+                  <div className="thought-bubble thought-streaming">
+                    <div className="thought-content streaming-progress">
+                      <Loader2 className="streaming-spinner" size={14} strokeWidth={2} />
+                      <span>{st.content}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
         {thoughts.map((thought, i) => {
           const prevThought = i > 0 ? thoughts[i - 1] : null;
           const showHeader = !prevThought || prevThought.agentRoleId !== thought.agentRoleId;
+          // Check if this agent still has an active streaming indicator (show below real thoughts)
+          const isLastForAgent =
+            i === thoughts.length - 1 ||
+            thoughts[i + 1]?.agentRoleId !== thought.agentRoleId;
+          const agentStillStreaming = isLastForAgent && streamingThoughts.has(thought.agentRoleId);
 
           return (
             <div key={thought.id}>
@@ -381,9 +419,57 @@ export function CollaborativeThoughtsPanel({
               >
                 <ThoughtBubble thought={thought} />
               </div>
+              {agentStillStreaming && (
+                <div
+                  className="stream-thought thought-streaming"
+                  style={{ borderLeftColor: thought.agentColor }}
+                >
+                  <div className="thought-bubble thought-streaming">
+                    <div className="thought-content streaming-progress">
+                      <Loader2 className="streaming-spinner" size={14} strokeWidth={2} />
+                      <span>{streamingThoughts.get(thought.agentRoleId)?.content}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           );
         })}
+
+        {/* Streaming indicators for agents that haven't emitted any real thoughts yet */}
+        {thoughts.length > 0 && streamingThoughts.size > 0 && (() => {
+          const agentsWithThoughts = new Set(thoughts.map((t) => t.agentRoleId));
+          const pendingAgents = Array.from(streamingThoughts.values()).filter(
+            (st) => !agentsWithThoughts.has(st.agentRoleId),
+          );
+          if (pendingAgents.length === 0) return null;
+          return pendingAgents.map((st) => (
+            <div key={st.agentRoleId} className="streaming-thought-entry">
+              <div className="stream-agent-header">
+                <span className="stream-agent-icon">
+                  {(() => {
+                    const Icon = EMOJI_ICON_MAP[st.agentIcon];
+                    return Icon ? <Icon size={16} strokeWidth={1.5} /> : st.agentIcon;
+                  })()}
+                </span>
+                <span className="stream-agent-name" style={{ color: st.agentColor }}>
+                  {st.agentDisplayName}
+                </span>
+              </div>
+              <div
+                className="stream-thought thought-streaming"
+                style={{ borderLeftColor: st.agentColor }}
+              >
+                <div className="thought-bubble thought-streaming">
+                  <div className="thought-content streaming-progress">
+                    <Loader2 className="streaming-spinner" size={14} strokeWidth={2} />
+                    <span>{st.content}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ));
+        })()}
       </div>
 
       {/* Phase status — sticky at bottom-left while running */}
@@ -391,11 +477,15 @@ export function CollaborativeThoughtsPanel({
         <div className="collab-phase-status">
           <Loader2 className="collab-phase-spinner" size={14} strokeWidth={2.5} />
           <span className="collab-phase-label">
-            {phase === "dispatch" && "Assembling team..."}
-            {phase === "think" && "Agents are working..."}
-            {phase === "synthesize" && "Synthesizing insights..."}
+            {phase === "dispatch" &&
+              (isMultiLlm ? "Distributing to LLM providers..." : "Assembling team...")}
+            {phase === "think" &&
+              (isMultiLlm ? "Models are analyzing..." : "Agents are working...")}
+            {phase === "synthesize" &&
+              (isMultiLlm ? "Judge is synthesizing..." : "Synthesizing insights...")}
             {phase === "complete" && "Complete"}
-            {!phase && "Starting collaborative run..."}
+            {!phase &&
+              (isMultiLlm ? "Starting multi-LLM run..." : "Starting collaborative run...")}
           </span>
           {(phase === "dispatch" || phase === "think") && onWrapUp && (
             <button

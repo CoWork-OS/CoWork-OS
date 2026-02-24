@@ -2464,6 +2464,7 @@ export function Settings({
                     const focusedTabs: SettingsTab[] = [
                       "appearance",
                       "personality",
+                      "missioncontrol",
                       "voice",
                       "llm",
                       "search",

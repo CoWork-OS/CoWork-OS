@@ -6,6 +6,16 @@
   "type": "pack",
   "author": "CoWork-OSS",
   "keywords": ["data", "analysis", "csv", "visualization", "reporting"],
+  "icon": "📊",
+  "category": "Data",
+  "personaTemplateId": "data-scientist",
+  "tryAsking": [
+    "Analyze this CSV and give me the key insights",
+    "Generate a report on last month's user engagement data",
+    "Write a SQL query to find top customers by revenue",
+    "What patterns do you see in this dataset?",
+    "Create an executive summary from these metrics"
+  ],
   "skills": [
     {
       "id": "data-csv-analysis",

@@ -1043,7 +1043,7 @@ export function ControlPlaneSettings() {
 
         .token-input {
           flex: 1;
-          font-family: monospace;
+          font-family: var(--font-mono);
         }
 
         .code-block {

@@ -3522,6 +3522,44 @@ export async function setupIpcHandlers(
     return service.generate(validatedWorkspaceId);
   });
 
+  // Proactive Suggestions
+  ipcMain.handle(IPC_CHANNELS.SUGGESTIONS_LIST, async (_, workspaceId: string) => {
+    checkRateLimit(IPC_CHANNELS.SUGGESTIONS_LIST);
+    const validatedWorkspaceId = validateInput(UUIDSchema, workspaceId, "workspace ID");
+    const { ProactiveSuggestionsService } = await import("../agent/ProactiveSuggestionsService");
+    return ProactiveSuggestionsService.listActive(validatedWorkspaceId);
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.SUGGESTIONS_DISMISS,
+    async (_, workspaceId: string, suggestionId: string) => {
+      checkRateLimit(IPC_CHANNELS.SUGGESTIONS_DISMISS);
+      const validatedWorkspaceId = validateInput(UUIDSchema, workspaceId, "workspace ID");
+      const validatedSuggestionId = validateInput(UUIDSchema, suggestionId, "suggestion ID");
+      const { ProactiveSuggestionsService } = await import("../agent/ProactiveSuggestionsService");
+      const success = ProactiveSuggestionsService.dismiss(
+        validatedWorkspaceId,
+        validatedSuggestionId,
+      );
+      return { success };
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.SUGGESTIONS_ACT,
+    async (_, workspaceId: string, suggestionId: string) => {
+      checkRateLimit(IPC_CHANNELS.SUGGESTIONS_ACT);
+      const validatedWorkspaceId = validateInput(UUIDSchema, workspaceId, "workspace ID");
+      const validatedSuggestionId = validateInput(UUIDSchema, suggestionId, "suggestion ID");
+      const { ProactiveSuggestionsService } = await import("../agent/ProactiveSuggestionsService");
+      const actionPrompt = ProactiveSuggestionsService.actOn(
+        validatedWorkspaceId,
+        validatedSuggestionId,
+      );
+      return { actionPrompt };
+    },
+  );
+
   // Task Board handlers
   ipcMain.handle(IPC_CHANNELS.TASK_MOVE_COLUMN, async (_, taskId: string, column: string) => {
     checkRateLimit(IPC_CHANNELS.TASK_MOVE_COLUMN);

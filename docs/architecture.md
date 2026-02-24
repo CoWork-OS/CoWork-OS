@@ -76,6 +76,7 @@ CoWork OS exposes "tools" to the agent. Tools include:
 
 Headless mode:
 - When running in headless/daemon mode, `SystemTools.getToolDefinitions({ headless: true })` returns a reduced subset (system_info, get_env, get_app_paths, search_memories) — clipboard, screenshot, open_application, open_url, and other desktop-only tools are excluded.
+- `memory_save` is always available (including headless) for agents to explicitly persist insights, decisions, observations, and errors during task execution.
 
 Key code:
 - Tool registry and execution: `src/electron/agent/tools/registry.ts`
@@ -186,8 +187,9 @@ Enterprise connectors included in this repo (as MCP servers):
 
 CoWork OS can store and retrieve local memories per workspace, with:
 - Auto-capture from task execution
+- **Agent-initiated memory save** via `memory_save` tool — agents can explicitly persist insights, decisions, observations, and errors during task execution for recall in future sessions
 - Privacy protection (sensitive detection, private memories)
-- Search + progressive retrieval
+- Search + progressive retrieval — `search_memories` searches both the memory DB and `.cowork/` workspace markdown files
 - Optional workspace kit (`.cowork/`) initialization + indexing for durable human-edited context
 - Project contexts under `.cowork/projects/<projectId>/` with per-project access rules
 - ChatGPT export import (distilled via LLM, stored locally)
@@ -196,6 +198,7 @@ CoWork OS can store and retrieve local memories per workspace, with:
 
 Key code:
 - Memory service: `src/electron/memory/MemoryService.ts`
+- Memory tools (agent-initiated save): `src/electron/agent/tools/memory-tools.ts`
 - Local embeddings: `src/electron/memory/local-embedding.ts`
 - Workspace kit extraction: `src/electron/memory/WorkspaceKitContext.ts`
 - Markdown indexing + redaction: `src/electron/memory/MarkdownMemoryIndexService.ts`

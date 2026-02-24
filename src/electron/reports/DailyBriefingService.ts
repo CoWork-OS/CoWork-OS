@@ -13,12 +13,13 @@ export interface DailyBriefing {
   };
   highlights: string[];
   suggestedPriorities: string[];
+  proactiveSuggestions: string[];
   formatted: string;
 }
 
 /**
  * Generates a proactive daily briefing combining task stats,
- * recent activity, and goal-based suggestions.
+ * recent activity, goal-based suggestions, and proactive suggestions.
  */
 export class DailyBriefingService {
   constructor(private db: Database.Database) {}
@@ -50,6 +51,17 @@ export class DailyBriefingService {
       goals.length > 0
         ? goals
         : ["Check in-progress tasks", "Review recent completions", "Plan your top 3 priorities"];
+
+    // Proactive suggestions
+    let proactiveSuggestions: string[] = [];
+    try {
+      const { ProactiveSuggestionsService } = await import("../agent/ProactiveSuggestionsService");
+      ProactiveSuggestionsService.generateAll(workspaceId);
+      const topSuggestions = ProactiveSuggestionsService.getTopForBriefing(workspaceId, 3);
+      proactiveSuggestions = topSuggestions.map((s) => s.title);
+    } catch {
+      // best-effort
+    }
 
     // Build greeting
     const userName = profile.facts.find((f) => f.category === "identity")?.value;
@@ -86,6 +98,14 @@ export class DailyBriefingService {
       lines.push(`- ${p}`);
     }
 
+    if (proactiveSuggestions.length > 0) {
+      lines.push("");
+      lines.push("**Suggestions:**");
+      for (const s of proactiveSuggestions) {
+        lines.push(`- ${s}`);
+      }
+    }
+
     const formatted = lines.join("\n");
 
     return {
@@ -95,6 +115,7 @@ export class DailyBriefingService {
       taskSummary: { completedYesterday, inProgress, scheduledToday },
       highlights,
       suggestedPriorities,
+      proactiveSuggestions,
       formatted,
     };
   }

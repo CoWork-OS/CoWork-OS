@@ -93,9 +93,7 @@ export function App() {
   // Child tasks dispatched from the selected parent task (for DispatchedAgentsPanel)
   const childTasks = useMemo(() => {
     if (!selectedTaskId) return [];
-    return tasks.filter(
-      (t) => t.parentTaskId === selectedTaskId && t.agentType === "sub",
-    );
+    return tasks.filter((t) => t.parentTaskId === selectedTaskId && t.agentType === "sub");
   }, [tasks, selectedTaskId]);
 
   const childTaskIdsRef = useRef<Set<string>>(new Set());

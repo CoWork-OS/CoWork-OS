@@ -2861,6 +2861,27 @@ ${transcript}
         } catch {
           /* best-effort */
         }
+
+        // Generate proactive follow-up suggestions for the completed task.
+        try {
+          const resultSummary = this.task.resultSummary || this.buildResultSummary() || "";
+          import("./ProactiveSuggestionsService")
+            .then(({ ProactiveSuggestionsService }) => {
+              ProactiveSuggestionsService.generateFollowUpSuggestions(
+                this.workspace.id,
+                this.task.id,
+                this.task.title,
+                this.task.prompt,
+                toolsUsed,
+                resultSummary,
+              );
+            })
+            .catch(() => {
+              /* best-effort */
+            });
+        } catch {
+          /* best-effort */
+        }
       }
     } catch {
       // Non-critical — don't disrupt task flow

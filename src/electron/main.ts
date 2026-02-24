@@ -12,6 +12,8 @@ import {
   setHeartbeatWakeSubmitter,
 } from "./ipc/handlers";
 import { setupMissionControlHandlers } from "./ipc/mission-control-handlers";
+import { setupPersonaTemplateHandlers } from "./ipc/persona-template-handlers";
+import { getPersonaTemplateService } from "./agents/PersonaTemplateService";
 import { setupWorktreeHandlers } from "./ipc/worktree-handlers";
 import { ComparisonService } from "./git/ComparisonService";
 import { TaskSubscriptionRepository } from "./agents/TaskSubscriptionRepository";
@@ -824,6 +826,18 @@ if (!gotTheLock) {
     } catch (error) {
       console.error("[Main] Failed to initialize Mission Control:", error);
       // Don't fail app startup if Mission Control init fails
+    }
+
+    // Initialize Persona Templates (Digital Twins) service — independent of heartbeat
+    try {
+      const db = dbManager.getDatabase();
+      const agentRoleRepo = new AgentRoleRepository(db);
+      const personaTemplateService = getPersonaTemplateService(agentRoleRepo);
+      await personaTemplateService.initialize();
+      setupPersonaTemplateHandlers({ personaTemplateService });
+      console.log("[Main] Persona Template service initialized");
+    } catch (error) {
+      console.error("[Main] Failed to initialize Persona Templates:", error);
     }
 
     if (HEADLESS) {

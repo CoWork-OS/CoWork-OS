@@ -3,6 +3,7 @@ import { promisify } from "util";
 import * as os from "os";
 import * as path from "path";
 import * as fs from "fs/promises";
+import * as fsSync from "fs";
 import { Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { LLMTool } from "../llm/types";
@@ -605,9 +606,17 @@ export class SystemTools {
 
   /**
    * Search workspace memories (including imported ChatGPT conversations)
+   * and workspace markdown files (.cowork/ kit files).
    */
   async searchMemories(input: { query: string; limit?: number }): Promise<{
-    results: Array<{ id: string; snippet: string; type: string; date: string }>;
+    results: Array<{
+      id: string;
+      snippet: string;
+      type: string;
+      source: "db" | "markdown";
+      date: string;
+      path?: string;
+    }>;
     totalFound: number;
   }> {
     this.daemon.logEvent(this.taskId, "tool_call", {
@@ -617,13 +626,45 @@ export class SystemTools {
 
     try {
       const limit = Math.min(input.limit || 20, 50);
-      const results = MemoryService.search(this.workspace.id, input.query, limit);
 
-      const mapped = results.map((r) => ({
+      // Search the memory database (semantic + BM25 hybrid)
+      const dbResults = MemoryService.search(this.workspace.id, input.query, limit);
+
+      // Also search workspace markdown (.cowork/ kit files)
+      let mdResults: typeof dbResults = [];
+      try {
+        const kitRoot = path.join(this.workspace.path, ".cowork");
+        if (fsSync.existsSync(kitRoot) && fsSync.statSync(kitRoot).isDirectory()) {
+          mdResults = MemoryService.searchWorkspaceMarkdown(
+            this.workspace.id,
+            kitRoot,
+            input.query,
+            Math.max(5, Math.floor(limit / 3)),
+          );
+        }
+      } catch {
+        // Best-effort: markdown index may not be available
+      }
+
+      // Merge and deduplicate by id, sort by relevanceScore descending
+      const seenIds = new Set<string>();
+      const merged: typeof dbResults = [];
+      for (const r of [...dbResults, ...mdResults]) {
+        if (!seenIds.has(r.id)) {
+          seenIds.add(r.id);
+          merged.push(r);
+        }
+      }
+      merged.sort((a, b) => b.relevanceScore - a.relevanceScore);
+      const limited = merged.slice(0, limit);
+
+      const mapped = limited.map((r) => ({
         id: r.id,
         snippet: r.snippet,
         type: r.type,
+        source: r.source,
         date: new Date(r.createdAt).toISOString(),
+        ...(r.source === "markdown" && "path" in r ? { path: r.path } : {}),
       }));
 
       this.daemon.logEvent(this.taskId, "tool_result", {
@@ -862,10 +903,11 @@ export class SystemTools {
       {
         name: "search_memories",
         description:
-          "Search the workspace memory database for past observations, decisions, and insights " +
-          "from previous sessions and imported conversations (e.g. ChatGPT history). " +
-          "Use this tool when the user asks about something discussed previously, " +
-          "or when you need to recall past context. Returns matching memory snippets.",
+          "Search the workspace memory database AND workspace knowledge files (.cowork/) " +
+          "for past observations, decisions, insights, and errors from previous sessions " +
+          "and imported conversations (e.g. ChatGPT history). " +
+          "Use this proactively when starting a task to check for relevant prior context, " +
+          "or when you need to recall past decisions and their rationale.",
         input_schema: {
           type: "object",
           properties: {

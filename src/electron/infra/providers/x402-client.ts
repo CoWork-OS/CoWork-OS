@@ -156,7 +156,7 @@ export class X402Client {
         return { endpoints: [] };
       }
 
-      const data = await response.json();
+      const data = (await response.json()) as Record<string, unknown>;
       return { endpoints: Array.isArray(data.endpoints) ? data.endpoints : [] };
     } catch {
       return { endpoints: [] };

@@ -63,7 +63,8 @@ export type SettingsCategory =
   | "conway"
   | "conway-wallet"
   | "infra"
-  | "infra-wallet";
+  | "infra-wallet"
+  | "proactive-suggestions-state";
 
 interface SecureSettingsRow {
   id: string;

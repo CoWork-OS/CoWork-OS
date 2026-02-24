@@ -618,6 +618,12 @@ const IPC_CHANNELS = {
   TEAM_THOUGHT_LIST: "teamThought:list",
   TEAM_THOUGHT_EVENT: "teamThought:event",
   TEAM_RUN_FIND_BY_ROOT_TASK: "teamRun:findByRootTask",
+  // Persona Templates (Digital Twins)
+  PERSONA_TEMPLATE_LIST: "personaTemplate:list",
+  PERSONA_TEMPLATE_GET: "personaTemplate:get",
+  PERSONA_TEMPLATE_ACTIVATE: "personaTemplate:activate",
+  PERSONA_TEMPLATE_PREVIEW: "personaTemplate:preview",
+  PERSONA_TEMPLATE_GET_CATEGORIES: "personaTemplate:getCategories",
   // Activity Feed
   ACTIVITY_LIST: "activity:list",
   ACTIVITY_CREATE: "activity:create",
@@ -716,6 +722,10 @@ const IPC_CHANNELS = {
   USAGE_INSIGHTS_GET: "usageInsights:get",
   // Daily Briefing
   DAILY_BRIEFING_GENERATE: "dailyBriefing:generate",
+  // Proactive Suggestions
+  SUGGESTIONS_LIST: "suggestions:list",
+  SUGGESTIONS_DISMISS: "suggestions:dismiss",
+  SUGGESTIONS_ACT: "suggestions:act",
 } as const;
 
 // Mobile Companion Node types (inlined for sandboxed preload)
@@ -2698,6 +2708,27 @@ contextBridge.exposeInMainWorld("electronAPI", {
   seedDefaultAgentRoles: () => ipcRenderer.invoke(IPC_CHANNELS.AGENT_ROLE_SEED_DEFAULTS),
   syncDefaultAgentRoles: () => ipcRenderer.invoke(IPC_CHANNELS.AGENT_ROLE_SYNC_DEFAULTS),
 
+  // Persona Templates (Digital Twins) APIs
+  listPersonaTemplates: (filter?: { category?: string; tag?: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PERSONA_TEMPLATE_LIST, filter),
+  getPersonaTemplate: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.PERSONA_TEMPLATE_GET, id),
+  activatePersonaTemplate: (request: {
+    templateId: string;
+    customization?: {
+      displayName?: string;
+      icon?: string;
+      color?: string;
+      modelKey?: string;
+      providerType?: string;
+      heartbeatIntervalMinutes?: number;
+      enabledProactiveTasks?: string[];
+    };
+  }) => ipcRenderer.invoke(IPC_CHANNELS.PERSONA_TEMPLATE_ACTIVATE, request),
+  previewPersonaTemplate: (templateId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PERSONA_TEMPLATE_PREVIEW, templateId),
+  getPersonaTemplateCategories: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.PERSONA_TEMPLATE_GET_CATEGORIES),
+
   // Agent Teams APIs
   listTeams: (workspaceId: string, includeInactive?: boolean) =>
     ipcRenderer.invoke(IPC_CHANNELS.TEAM_LIST, workspaceId, includeInactive),
@@ -2954,6 +2985,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Daily Briefing
   generateDailyBriefing: (workspaceId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.DAILY_BRIEFING_GENERATE, workspaceId),
+
+  // Proactive Suggestions
+  listSuggestions: (workspaceId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SUGGESTIONS_LIST, workspaceId),
+  dismissSuggestion: (workspaceId: string, suggestionId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SUGGESTIONS_DISMISS, workspaceId, suggestionId),
+  actOnSuggestion: (workspaceId: string, suggestionId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SUGGESTIONS_ACT, workspaceId, suggestionId),
 });
 
 // Type declarations for TypeScript
@@ -4053,6 +4092,49 @@ export interface ElectronAPI {
   getDefaultAgentRoles: () => Promise<Omit<AgentRoleData, "id" | "createdAt" | "updatedAt">[]>;
   seedDefaultAgentRoles: () => Promise<AgentRoleData[]>;
 
+  // Persona Templates (Digital Twins)
+  listPersonaTemplates: (filter?: { category?: string; tag?: string }) => Promise<unknown[]>;
+  getPersonaTemplate: (id: string) => Promise<unknown | undefined>;
+  activatePersonaTemplate: (request: {
+    templateId: string;
+    customization?: {
+      displayName?: string;
+      icon?: string;
+      color?: string;
+      modelKey?: string;
+      providerType?: string;
+      heartbeatIntervalMinutes?: number;
+      enabledProactiveTasks?: string[];
+    };
+  }) => Promise<{
+    agentRole: AgentRoleData;
+    installedSkillIds: string[];
+    proactiveTaskCount: number;
+    warnings: string[];
+  }>;
+  previewPersonaTemplate: (templateId: string) => Promise<{
+    roleName: string;
+    displayName: string;
+    skills: Array<{ skillId: string; reason: string; required: boolean }>;
+    proactiveTasks: Array<{
+      id: string;
+      name: string;
+      description: string;
+      category: string;
+      promptTemplate: string;
+      frequencyMinutes: number;
+      priority: number;
+      enabled: boolean;
+    }>;
+  } | null>;
+  getPersonaTemplateCategories: () => Promise<
+    Array<{
+      id: string;
+      label: string;
+      count: number;
+    }>
+  >;
+
   // Agent Teams
   listTeams: (workspaceId: string, includeInactive?: boolean) => Promise<AgentTeam[]>;
   createTeam: (request: CreateAgentTeamRequest) => Promise<AgentTeam>;
@@ -4255,6 +4337,14 @@ export interface ElectronAPI {
 
   // Daily Briefing
   generateDailyBriefing: (workspaceId: string) => Promise<any>;
+
+  // Proactive Suggestions
+  listSuggestions: (workspaceId: string) => Promise<any[]>;
+  dismissSuggestion: (workspaceId: string, suggestionId: string) => Promise<{ success: boolean }>;
+  actOnSuggestion: (
+    workspaceId: string,
+    suggestionId: string,
+  ) => Promise<{ actionPrompt: string | null }>;
 }
 
 // Migration status type (for showing one-time notifications after app rename)

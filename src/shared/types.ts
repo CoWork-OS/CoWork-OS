@@ -290,6 +290,8 @@ export type ToolType =
   | "scrape_extract"
   | "scrape_session"
   | "scraping_status"
+  // Memory tools
+  | "memory_save"
   // Meta tools
   | "revise_plan"
   | "task_history"
@@ -410,6 +412,8 @@ export const TOOL_GROUPS = {
     "channel_history",
     // Privacy-sensitive: can exfiltrate local files/images to a provider
     "analyze_image",
+    // Agent-initiated memory save
+    "memory_save",
   ],
   // Image generation - requires API access
   "group:image": ["generate_image"],
@@ -486,6 +490,8 @@ export const TOOL_RISK_LEVELS: Record<ToolType, ToolRiskLevel> = {
   scrape_extract: "network",
   scrape_session: "network",
   scraping_status: "read",
+  // Memory
+  memory_save: "write",
   // Meta
   revise_plan: "read",
   task_history: "read",
@@ -2023,6 +2029,30 @@ export const DEFAULT_INFRA_SETTINGS: InfraSettings = {
   },
 };
 
+// ─── Proactive Suggestions ──────────────────────────────────────
+
+export type SuggestionType =
+  | "follow_up"
+  | "recurring_pattern"
+  | "goal_aligned"
+  | "insight"
+  | "reverse_prompt";
+
+export interface ProactiveSuggestion {
+  id: string;
+  type: SuggestionType;
+  title: string;
+  description: string;
+  actionPrompt?: string;
+  sourceTaskId?: string;
+  sourceEntity?: string;
+  confidence: number;
+  createdAt: number;
+  expiresAt: number;
+  dismissed: boolean;
+  actedOn: boolean;
+}
+
 // IPC Channel names
 export const IPC_CHANNELS = {
   // Task operations
@@ -2594,6 +2624,10 @@ export const IPC_CHANNELS = {
   USAGE_INSIGHTS_GET: "usageInsights:get",
   // Daily Briefing
   DAILY_BRIEFING_GENERATE: "dailyBriefing:generate",
+  // Proactive Suggestions
+  SUGGESTIONS_LIST: "suggestions:list",
+  SUGGESTIONS_DISMISS: "suggestions:dismiss",
+  SUGGESTIONS_ACT: "suggestions:act",
 } as const;
 
 // LLM Provider types

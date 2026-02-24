@@ -94,14 +94,17 @@ function StreamBubble({ item }: { item: StreamItem }) {
   const time = new Date(item.timestamp);
   const timeStr = time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
-  const isStep = item.type === "step_started" || item.type === "step_completed" || item.type === "step_failed";
+  const isStep =
+    item.type === "step_started" || item.type === "step_completed" || item.type === "step_failed";
   const isMarkdown = item.type === "assistant_message";
 
   return (
     <div className="thought-bubble">
       <div className="thought-content markdown-content">
         {isStep ? (
-          <p className={`step-event ${item.type === "step_completed" ? "step-completed" : ""} ${item.type === "step_failed" ? "step-failed" : ""}`}>
+          <p
+            className={`step-event ${item.type === "step_completed" ? "step-completed" : ""} ${item.type === "step_failed" ? "step-failed" : ""}`}
+          >
             {item.type === "step_completed" && "✓ "}
             {item.type === "step_failed" && "✗ "}
             {item.type === "step_started" && "▸ "}
@@ -131,9 +134,7 @@ function DispatchPhaseIndicator({ childTasks }: { childTasks: Task[] }) {
   const allTerminal = childTasks.every(
     (t) => t.status === "completed" || t.status === "failed" || t.status === "cancelled",
   );
-  const anyWorking = childTasks.some(
-    (t) => t.status === "executing" || t.status === "planning",
-  );
+  const anyWorking = childTasks.some((t) => t.status === "executing" || t.status === "planning");
   const phase = allTerminal ? "complete" : anyWorking ? "working" : "dispatched";
 
   const phases = ["dispatched", "working", "complete"];
@@ -225,9 +226,7 @@ export function DispatchedAgentsPanel({
   // Resolve agent info per child task
   const agentInfos = useMemo(() => {
     return childTasks.map((task) => {
-      const role = task.assignedAgentRoleId
-        ? agentRoles.get(task.assignedAgentRoleId)
-        : undefined;
+      const role = task.assignedAgentRoleId ? agentRoles.get(task.assignedAgentRoleId) : undefined;
       return {
         task,
         role,
@@ -243,9 +242,7 @@ export function DispatchedAgentsPanel({
       if (!DISPLAY_EVENT_TYPES.has(event.type)) continue;
       const task = childTasks.find((t) => t.id === event.taskId);
       if (!task) continue;
-      const role = task.assignedAgentRoleId
-        ? agentRoles.get(task.assignedAgentRoleId)
-        : undefined;
+      const role = task.assignedAgentRoleId ? agentRoles.get(task.assignedAgentRoleId) : undefined;
 
       const content = formatEventContent(event.type, event.payload);
       if (!content) continue;
@@ -272,9 +269,7 @@ export function DispatchedAgentsPanel({
   return (
     <div className="dispatched-agents-panel" ref={scrollRef}>
       <div className="thoughts-header">
-        <span className="thoughts-title">
-          Dispatched Agents ({childTasks.length})
-        </span>
+        <span className="thoughts-title">Dispatched Agents ({childTasks.length})</span>
       </div>
 
       {/* Agent chips */}
@@ -295,10 +290,7 @@ export function DispatchedAgentsPanel({
               title={`Click to view ${info.role?.displayName || "agent"}'s task`}
             >
               <span className="team-member-icon">{info.role?.icon || "🤖"}</span>
-              <span
-                className="team-member-name"
-                style={{ color: info.role?.color || "#6366f1" }}
-              >
+              <span className="team-member-name" style={{ color: info.role?.color || "#6366f1" }}>
                 {info.role?.displayName || "Agent"}
               </span>
               <span className={`dispatched-agent-status status-${info.status}`}>
@@ -318,9 +310,7 @@ export function DispatchedAgentsPanel({
       {/* Event stream */}
       <div className="thoughts-stream">
         {streamItems.length === 0 && (
-          <div className="thoughts-empty">
-            Dispatching agents and waiting for results...
-          </div>
+          <div className="thoughts-empty">Dispatching agents and waiting for results...</div>
         )}
         {streamItems.map((item, i) => {
           const prev = i > 0 ? streamItems[i - 1] : null;
@@ -336,10 +326,7 @@ export function DispatchedAgentsPanel({
                   </span>
                 </div>
               )}
-              <div
-                className="stream-thought"
-                style={{ borderLeftColor: item.agentColor }}
-              >
+              <div className="stream-thought" style={{ borderLeftColor: item.agentColor }}>
                 <StreamBubble item={item} />
               </div>
             </div>

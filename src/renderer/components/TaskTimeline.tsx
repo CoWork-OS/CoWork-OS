@@ -48,7 +48,10 @@ function humanizeError(raw: string): string {
     [/ETIMEDOUT|timed?\s*out/i, "Request timed out. Try again in a moment."],
     [/ENOTFOUND/i, "Could not reach the server. Check your internet connection."],
     [/ECONNREFUSED/i, "Connection refused — the service may be down. Try again shortly."],
-    [/fetch.*failed|network.*error/i, "Network error. Check your internet connection and try again."],
+    [
+      /fetch.*failed|network.*error/i,
+      "Network error. Check your internet connection and try again.",
+    ],
     // Server errors
     [/500|internal server error/i, "The AI provider had an internal error — try again."],
     [/502|bad gateway/i, "The AI provider is temporarily unreachable. Try again shortly."],

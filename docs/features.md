@@ -69,6 +69,21 @@ These modes are mutually exclusive — only one can be active per task. All four
 
 ---
 
+## Digital Twin Personas
+
+Pre-built AI agent templates that create role-specific digital twins for team members. Each twin absorbs cognitively draining work so the human can stay in deep focus.
+
+- **10 built-in templates**: Software Engineer, Hardware Engineer, Engineering Manager, QA/Test Engineer, Technical Director, VP of Engineering, Product Manager, DevOps/SRE, Technical Writer, Data Scientist
+- **Proactive heartbeat tasks**: PR triage, status digests, dependency scans, test coverage checks — run automatically on a configurable interval
+- **10 cognitive offload categories**: context-switching, status-reporting, information-triage, decision-preparation, documentation, review-preparation, dependency-tracking, compliance-checks, knowledge-curation, routine-automation
+- **4 bundled skills**: `twin-status-report`, `twin-pr-triage`, `twin-meeting-prep`, `twin-decision-prep`
+- **One-click activation**: Browse gallery, customize name and heartbeat interval, toggle proactive tasks, create
+- **Enterprise scaling**: Activate one twin per team member across the organization
+
+Access from **Mission Control** > **Add Digital Twin**. See [Digital Twins](digital-twins.md) for full documentation.
+
+---
+
 ## Voice Mode
 
 Talk to your AI assistant with voice input and audio responses.
@@ -95,8 +110,9 @@ Configure in **Settings** > **Voice**.
 | Feature | Description |
 |---------|-------------|
 | **Auto-Capture** | Observations, decisions, and errors captured during task execution |
+| **Agent-Initiated Save** | Agents can explicitly save insights, decisions, observations, and errors via `memory_save` tool for cross-session recall |
 | **Privacy Protection** | Auto-detects sensitive patterns (API keys, passwords, tokens) |
-| **FTS5 Search** | Full-text search with relevance ranking |
+| **Unified Search** | `search_memories` searches both the memory DB and `.cowork/` workspace markdown files with hybrid semantic + BM25 ranking |
 | **LLM Compression** | Summarizes observations for ~10x token efficiency |
 | **Progressive Retrieval** | 3-layer approach: snippets → timeline → full details |
 | **ChatGPT History Import** | Import your full ChatGPT conversation history — eliminates cold start. All data stored locally and encrypted. [Details below](#chatgpt-history-import) |
@@ -190,7 +206,7 @@ Initialize and maintain a `.cowork/` directory inside each workspace for durable
 
 - Kit initialization with standard `.cowork/` structure and templates
 - Project contexts with `ACCESS.md`, `CONTEXT.md`, and `research/`
-- Markdown indexing for durable human-edited context
+- Markdown indexing for durable human-edited context — searchable via `search_memories`
 - Context injection into agent prompts automatically
 - Global and per-workspace memory settings
 
@@ -249,6 +265,42 @@ All panels update in real-time via event subscriptions — no manual refresh nee
 Cancelling a parent task automatically cascades to all dispatched child tasks.
 
 See [Mission Control](mission-control.md) for the full guide.
+
+---
+
+## Digital Twins (Persona Templates)
+
+Create role-specific AI digital twins from pre-built persona templates. Each twin absorbs cognitively draining tasks so the human stays in flow. Accessible via the **"Add Digital Twin"** button in Mission Control's agents panel.
+
+### Templates (10 roles, 5 categories)
+
+| Category | Templates |
+|----------|-----------|
+| **Engineering** | Software Engineer, Hardware Engineer, QA/Test Engineer, DevOps/SRE, Technical Writer |
+| **Management** | Engineering Manager, Technical Director, VP Engineering |
+| **Product** | Product Manager |
+| **Data & Analytics** | Data Scientist / Analyst |
+
+### What Each Template Includes
+
+| Component | Description |
+|-----------|-------------|
+| **System Prompt** | Role-tailored persona with behavior guidelines |
+| **Capabilities** | Skill tags (code, review, test, analyze, document, etc.) |
+| **Proactive Tasks** | Heartbeat-triggered background tasks (PR triage, dependency checks, sprint health, etc.) |
+| **Cognitive Offload** | Categorized by mental burden relieved: context switching, status reporting, review prep, decision prep, documentation, dependency tracking |
+| **Recommended Skills** | Pre-mapped skills with required/optional flags |
+| **Autonomy Level** | `specialist` (IC roles) or `lead` (management roles) |
+
+### Activation Flow
+
+1. Click **"Add Digital Twin"** in Mission Control agents panel
+2. Browse the **template gallery** — filter by category or search by name/tags
+3. Click a template card to open the **activation dialog**
+4. Customize: twin name, heartbeat interval (5min–4hr), toggle proactive tasks
+5. Click **"Create Digital Twin"** — creates a new AgentRole with background heartbeat tasks
+
+The twin appears in the agents panel and begins running proactive tasks on the configured heartbeat interval.
 
 ---
 

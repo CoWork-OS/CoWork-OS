@@ -1,0 +1,29 @@
+{
+  "id": "twin-meeting-prep",
+  "name": "Meeting Preparation Brief",
+  "description": "Prepare a structured brief for an upcoming meeting with relevant context, open items, data points, and talking points. Used by digital twin personas to reduce meeting preparation overhead.",
+  "icon": "\ud83d\udcc5",
+  "category": "Digital Twin",
+  "prompt": "Prepare a meeting brief for: **{{meeting_topic}}**\n\n1. **Context**: Summarize relevant background from recent tasks, documents, conversations, and decisions related to this topic.\n2. **Open items**: List unresolved action items from previous meetings or discussions related to this topic.\n3. **Key questions**: What decisions need to be made in this meeting? What information is still missing?\n4. **Talking points**: 3-5 prepared points based on recent work and current status.\n5. **Data points**: Any relevant metrics, numbers, or evidence that should be referenced.\n6. **Attendee context**: If attendee names are provided, note their recent relevant contributions or concerns.\n\nFormat as a clean, scannable document that can be reviewed in 5 minutes before the meeting.\n\nWrite the brief to `{artifactDir}/meeting-brief.md`.",
+  "parameters": [
+    {
+      "name": "meeting_topic",
+      "type": "string",
+      "description": "What the meeting is about (e.g., 'Sprint planning', 'Architecture review for auth service', '1-on-1 with Sarah')",
+      "required": true
+    }
+  ],
+  "enabled": true,
+  "metadata": {
+    "version": "1.0.0",
+    "author": "CoWork OS",
+    "tags": ["digital-twin", "meeting", "preparation", "brief"],
+    "routing": {
+      "useWhen": "Use when preparing for meetings, 1-on-1s, reviews, planning sessions, or any scheduled discussion.",
+      "dontUseWhen": "Don't use for generating meeting minutes after a meeting has occurred.",
+      "outputs": "Structured meeting brief with context, open items, and talking points",
+      "successCriteria": "Brief provides sufficient context to enter the meeting prepared and confident",
+      "expectedArtifacts": ["meeting-brief.md"]
+    }
+  }
+}

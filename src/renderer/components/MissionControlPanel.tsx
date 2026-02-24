@@ -17,6 +17,7 @@ import { MentionList } from "./MentionList";
 import { StandupReportViewer } from "./StandupReportViewer";
 import { AgentTeamsPanel } from "./AgentTeamsPanel";
 import { AgentPerformanceReviewViewer } from "./AgentPerformanceReviewViewer";
+import { PersonaTemplateGallery } from "./PersonaTemplateGallery";
 import { useAgentContext } from "../hooks/useAgentContext";
 import type { UiCopyKey } from "../utils/agentMessages";
 
@@ -79,6 +80,7 @@ export function MissionControlPanel({ onClose: _onClose }: MissionControlPanelPr
   const [standupOpen, setStandupOpen] = useState(false);
   const [teamsOpen, setTeamsOpen] = useState(false);
   const [reviewsOpen, setReviewsOpen] = useState(false);
+  const [templateGalleryOpen, setTemplateGalleryOpen] = useState(false);
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
   const tasksRef = useRef<Task[]>([]);
   const workspaceIdRef = useRef<string | null>(null);
@@ -868,6 +870,13 @@ export function MissionControlPanel({ onClose: _onClose }: MissionControlPanelPr
             </svg>
             {agentContext.getUiCopy("mcAddAgent")}
           </button>
+          <button
+            className="mc-add-agent-btn mc-add-twin-btn"
+            onClick={() => setTemplateGalleryOpen(true)}
+          >
+            <span style={{ fontSize: "14px" }}>{"\ud83d\udc64"}</span>
+            Add Digital Twin
+          </button>
         </aside>
 
         {/* Center - Mission Queue */}
@@ -1192,6 +1201,16 @@ export function MissionControlPanel({ onClose: _onClose }: MissionControlPanelPr
             />
           </div>
         </div>
+      )}
+
+      {templateGalleryOpen && (
+        <PersonaTemplateGallery
+          onClose={() => setTemplateGalleryOpen(false)}
+          onActivated={(agentRole) => {
+            setAgents((prev) => [...prev, agentRole as AgentRole]);
+            setTemplateGalleryOpen(false);
+          }}
+        />
       )}
 
       <style>{styles}</style>
@@ -1555,6 +1574,19 @@ const styles = `
   .mc-add-agent-btn:hover {
     background: var(--color-bg-hover);
     border-color: var(--color-text-muted);
+  }
+
+  .mc-add-twin-btn {
+    border-style: solid;
+    border-color: color-mix(in srgb, var(--color-accent) 30%, transparent);
+    background: var(--color-accent-subtle);
+    color: var(--color-accent);
+  }
+
+  .mc-add-twin-btn:hover {
+    background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+    border-color: color-mix(in srgb, var(--color-accent) 50%, transparent);
+    color: var(--color-accent-hover);
   }
 
   /* Queue Panel (Kanban) */

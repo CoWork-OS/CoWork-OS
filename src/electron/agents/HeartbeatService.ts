@@ -8,6 +8,7 @@ import {
   AgentMention,
   Task,
   Activity,
+  ProactiveTaskDefinition,
 } from "../../shared/types";
 import { AgentRoleRepository } from "./AgentRoleRepository";
 import { MentionRepository } from "./MentionRepository";
@@ -775,10 +776,28 @@ export class HeartbeatService extends EventEmitter {
       lines.push("");
     }
 
+    // Add proactive tasks from digital twin cognitive offload config
+    const proactiveTasks = this.extractProactiveTasks(agent);
+    if (proactiveTasks.length > 0) {
+      lines.push("## Proactive Tasks");
+      lines.push(
+        "As part of this heartbeat, perform these proactive checks for your human counterpart:",
+      );
+      lines.push("");
+      for (const task of proactiveTasks) {
+        lines.push(`### ${task.name}`);
+        lines.push(task.promptTemplate);
+        lines.push("");
+      }
+    }
+
     // Add instructions
     lines.push("## Instructions");
     const hasWorkOrSignal =
-      work.pendingMentions.length > 0 || work.assignedTasks.length > 0 || wakeRequests.length > 0;
+      work.pendingMentions.length > 0 ||
+      work.assignedTasks.length > 0 ||
+      wakeRequests.length > 0 ||
+      proactiveTasks.length > 0;
 
     if (hasWorkOrSignal) {
       lines.push("Please review the above items and take appropriate action.");
@@ -792,6 +811,26 @@ export class HeartbeatService extends EventEmitter {
     }
 
     return lines.join("\n");
+  }
+
+  /**
+   * Extract enabled proactive tasks from an agent's soul JSON (digital twin config)
+   */
+  private extractProactiveTasks(agent: AgentRole): ProactiveTaskDefinition[] {
+    if (!agent.soul || !agent.soul.trim()) return [];
+    try {
+      const soulData = JSON.parse(agent.soul);
+      const tasks = soulData?.cognitiveOffload?.proactiveTasks;
+      if (!Array.isArray(tasks)) return [];
+      return tasks
+        .filter((t: ProactiveTaskDefinition) => t.enabled && t.promptTemplate)
+        .sort(
+          (a: ProactiveTaskDefinition, b: ProactiveTaskDefinition) =>
+            (a.priority ?? 99) - (b.priority ?? 99),
+        );
+    } catch {
+      return [];
+    }
   }
 
   /**

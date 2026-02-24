@@ -35,6 +35,7 @@
 - **30+ LLM providers** — Anthropic, OpenAI, Google, Ollama, AWS Bedrock, OpenRouter, and more. Bring your own keys.
 - **14 messaging channels** — WhatsApp, Telegram, Discord, Slack, Teams, iMessage, Signal, and more. Chat with your AI from anywhere.
 - **100+ built-in skills** — Documents, code review, web search, image generation, cloud integrations, and more.
+- **Digital Twin Personas** — Pre-built AI twins for every role (engineer, manager, PM, director). Each twin absorbs cognitively draining work — PR triage, meeting prep, status reports, dependency tracking — so the human stays in flow.
 - **Agent teams** — Multi-agent collaboration with shared checklists, collaborative mode, multi-LLM synthesis, and persistent teams.
 - **Think With Me mode** — Socratic brainstorming that helps you clarify thinking without executing actions.
 - **Build Mode** — Go from idea to working prototype with a phased canvas workflow (Concept → Plan → Scaffold → Iterate) and named checkpoints.
@@ -88,6 +89,10 @@ Task-based execution with dynamic re-planning, four per-task modes (Autonomous, 
 ### Mission Control
 
 Centralized agent orchestration dashboard with a Kanban task board, real-time activity feed, agent heartbeat monitoring, standup reports, and performance reviews. [Learn more](docs/mission-control.md)
+
+### Digital Twin Personas
+
+Role-specific AI twins that proactively handle cognitive overhead. Pick a template (Software Engineer, Engineering Manager, Product Manager, VP, etc.), customize it, and activate — the twin runs on a heartbeat, automatically executing tasks like PR triage, status digests, meeting prep, and dependency scans. 10 built-in templates across engineering, management, product, data, and operations. Scale across an organization by activating one twin per team member. [Learn more](docs/digital-twins.md)
 
 ### Live Canvas & Build Mode
 
@@ -250,6 +255,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
 | [Remote Access](docs/remote-access.md) | Tailscale, SSH tunnels, WebSocket API |
 | [Knowledge Graph](docs/knowledge-graph.md) | Structured entity/relationship memory |
 | [Mission Control](docs/mission-control.md) | Agent orchestration dashboard |
+| [Digital Twins](docs/digital-twins.md) | Role-based AI twin personas and cognitive offload |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
 | [Uninstall](docs/uninstall.md) | Uninstall instructions |
 

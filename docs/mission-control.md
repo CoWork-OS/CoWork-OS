@@ -126,6 +126,20 @@ See [Features — Agent Teams](features.md#agent-teams) for more details.
 
 ---
 
+## Digital Twin Personas
+
+Access from the **Add Digital Twin** button in the agents panel (next to Add Agent).
+
+Browse pre-built persona templates — Software Engineer, Engineering Manager, Product Manager, and more — and activate them in one click. Each twin comes pre-configured with:
+
+- **Proactive heartbeat tasks** that run automatically (PR triage, status digests, dependency scans)
+- **Cognitive offload categories** targeting the mental work that fragments focus
+- **Recommended skills** for on-demand use (meeting prep, decision packages, status reports)
+
+See [Digital Twins](digital-twins.md) for full documentation, enterprise scenarios, and template reference.
+
+---
+
 ## Performance Reviews
 
 Access from the **Reviews** button in the header.
@@ -168,6 +182,7 @@ Mission Control subscribes to live event streams — no manual refresh needed:
 |--------|-----|
 | Open Mission Control | Settings > Mission Control |
 | Add a new agent | Click "Add Agent" in the agents panel |
+| Add a digital twin | Click "Add Digital Twin" in the agents panel ([details](digital-twins.md)) |
 | Edit an agent | Double-click the agent card |
 | Wake an idle agent | Click "Wake Agent" on the agent card |
 | Move a task to a new stage | Drag the task card to the target column |

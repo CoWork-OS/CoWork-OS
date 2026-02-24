@@ -44,6 +44,7 @@ import { VoiceCallTools } from "./voice-call-tools";
 import { ChannelTools } from "./channel-tools";
 import { EmailImapTools } from "./email-imap-tools";
 import { GitTools } from "./git-tools";
+import { MemoryTools } from "./memory-tools";
 import { ChannelRepository } from "../../database/repositories";
 import { readFilesByPatterns } from "./read-files";
 import { LLMTool } from "../llm/types";
@@ -242,6 +243,7 @@ export class ToolRegistry {
   private infraTools: InfraTools;
   private knowledgeGraphTools: KnowledgeGraphTools;
   private scrapingTools: ScrapingTools;
+  private memoryTools: MemoryTools;
   private gatewayContext?: GatewayContextType;
   private deniedTools: Set<string> = new Set();
   private deniedGroups: Set<ToolGroupName> = new Set();
@@ -288,6 +290,7 @@ export class ToolRegistry {
     this.infraTools = new InfraTools(workspace, daemon, taskId);
     this.knowledgeGraphTools = new KnowledgeGraphTools(workspace, daemon, taskId);
     this.scrapingTools = new ScrapingTools(workspace, daemon, taskId);
+    this.memoryTools = new MemoryTools(workspace, daemon, taskId);
     // Some unit tests stub daemon as a plain object. Make channel history tools optional.
     const dbGetter = (daemon as any)?.getDatabase;
     if (typeof dbGetter === "function") {
@@ -369,6 +372,7 @@ export class ToolRegistry {
     this.gitTools.setWorkspace(workspace);
     this.knowledgeGraphTools.setWorkspace(workspace);
     this.scrapingTools.setWorkspace(workspace);
+    this.memoryTools.setWorkspace(workspace);
   }
 
   /**
@@ -549,6 +553,9 @@ export class ToolRegistry {
 
     // Knowledge graph tools (entity/relationship management)
     allTools.push(...KnowledgeGraphTools.getToolDefinitions());
+
+    // Memory tools (explicit save during task execution)
+    allTools.push(...MemoryTools.getToolDefinitions());
 
     // Scraping tools (Scrapling integration - anti-bot, stealth, structured extraction)
     // Only add when scraping is enabled in settings
@@ -1063,7 +1070,8 @@ System Tools:
 - get_env: Read environment variable
 - get_app_paths: Get system paths (home, downloads, etc.)
 - run_applescript: Execute AppleScript on macOS (control apps, automate tasks)
-- search_memories: Search workspace memories and imported conversations for past context
+- search_memories: Search workspace memories, .cowork/ knowledge files, and imported conversations for past context
+- memory_save: Save an observation, decision, insight, or error to workspace memory for future recall
 
 Scheduling:
 - schedule_task: Schedule tasks to run at specific times or intervals
@@ -1316,6 +1324,7 @@ ${skillDescriptions}`;
     // System tools
     if (name === "system_info") return await this.systemTools.getSystemInfo();
     if (name === "search_memories") return await this.systemTools.searchMemories(input);
+    if (name === "memory_save") return await this.memoryTools.save(input);
     if (name === "read_clipboard") return await this.systemTools.readClipboard();
     if (name === "write_clipboard") return await this.systemTools.writeClipboard(input.text);
     if (name === "take_screenshot") return await this.systemTools.takeScreenshot(input);

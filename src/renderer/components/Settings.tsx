@@ -52,6 +52,7 @@ import { MissionControlPanel } from "./MissionControlPanel";
 import { MemoryHubSettings } from "./MemoryHubSettings";
 import { WorktreeSettings } from "./WorktreeSettings";
 import { UsageInsightsPanel } from "./UsageInsightsPanel";
+import { SuggestionsPanel } from "./SuggestionsPanel";
 import { InfraSettings } from "./InfraSettings";
 
 type SettingsTab =
@@ -85,7 +86,8 @@ type SettingsTab =
   | "extensions"
   | "memory"
   | "git"
-  | "insights";
+  | "insights"
+  | "suggestions";
 
 // Secondary channels shown inside "More Channels" tab
 type SecondaryChannel =
@@ -368,589 +370,606 @@ const sidebarItems: Array<{
   macOnly?: boolean;
   group: string;
 }> = [
-    {
-      tab: "appearance",
-      label: "Appearance",
-      group: "General",
-      icon: (
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <circle cx="12" cy="12" r="5" />
-          <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
-        </svg>
-      ),
-    },
-    {
-      tab: "personality",
-      label: "Personality",
-      group: "General",
-      icon: (
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <circle cx="12" cy="8" r="5" />
-          <path d="M20 21a8 8 0 0 0-16 0" />
-        </svg>
-      ),
-    },
-    {
-      tab: "missioncontrol",
-      label: "Mission Control",
-      group: "General",
-      icon: (
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <circle cx="9" cy="7" r="4" />
-          <path d="M17 7a4 4 0 0 1 0 8" />
-          <path d="M9 15a7 7 0 0 0-7 7h14a7 7 0 0 0-7-7z" />
-          <rect x="14" y="14" width="8" height="8" rx="1" />
-        </svg>
-      ),
-    },
-    {
-      tab: "tray",
-      label: "Menu Bar",
-      group: "General",
-      icon: (
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <rect x="2" y="3" width="20" height="4" rx="1" />
-          <path d="M12 7v4M8 11h8" />
-          <rect x="4" y="14" width="16" height="7" rx="1" />
-        </svg>
-      ),
-      macOnly: true,
-    },
-    {
-      tab: "voice",
-      label: "Voice Mode",
-      group: "General",
-      icon: (
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-          <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-          <line x1="12" y1="19" x2="12" y2="23" />
-          <line x1="8" y1="23" x2="16" y2="23" />
-        </svg>
-      ),
-    },
-    {
-      tab: "llm",
-      label: "AI Model",
-      group: "AI & Models",
-      icon: (
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
-        </svg>
-      ),
-    },
-    {
-      tab: "search",
-      label: "Web Search",
-      group: "AI & Models",
-      icon: (
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <circle cx="11" cy="11" r="8" />
-          <path d="M21 21l-4.35-4.35" />
-        </svg>
-      ),
-    },
-    {
-      tab: "whatsapp",
-      label: "WhatsApp",
-      group: "Communication",
-      icon: (
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
-        </svg>
-      ),
-    },
-    {
-      tab: "telegram",
-      label: "Telegram",
-      group: "Communication",
-      icon: (
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" />
-        </svg>
-      ),
-    },
-    {
-      tab: "slack",
-      label: "Slack",
-      group: "Communication",
-      icon: (
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <path d="M14.5 10c-.83 0-1.5-.67-1.5-1.5v-5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5v5c0 .83-.67 1.5-1.5 1.5z" />
-          <path d="M20.5 10H19V8.5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z" />
-          <path d="M9.5 14c.83 0 1.5.67 1.5 1.5v5c0 .83-.67 1.5-1.5 1.5S8 21.33 8 20.5v-5c0-.83.67-1.5 1.5-1.5z" />
-          <path d="M3.5 14H5v1.5c0 .83-.67 1.5-1.5 1.5S2 16.33 2 15.5 2.67 14 3.5 14z" />
-          <path d="M14 14.5c0-.83.67-1.5 1.5-1.5h5c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5h-5c-.83 0-1.5-.67-1.5-1.5z" />
-          <path d="M15.5 19H14v1.5c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5-.67-1.5-1.5-1.5z" />
-          <path d="M10 9.5C10 8.67 9.33 8 8.5 8h-5C2.67 8 2 8.67 2 9.5S2.67 11 3.5 11h5c.83 0 1.5-.67 1.5-1.5z" />
-          <path d="M8.5 5H10V3.5C10 2.67 9.33 2 8.5 2S7 2.67 7 3.5 7.67 5 8.5 5z" />
-        </svg>
-      ),
-    },
-    {
-      tab: "teams",
-      label: "Teams",
-      group: "Communication",
-      icon: (
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-          <circle cx="9" cy="7" r="4" />
-          <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-          <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-        </svg>
-      ),
-    },
-    {
-      tab: "x",
-      label: "X (Twitter)",
-      group: "Communication",
-      icon: (
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <path d="M5 4l14 16" />
-          <path d="M19 4L5 20" />
-        </svg>
-      ),
-    },
-    {
-      tab: "morechannels",
-      label: "More Channels",
-      group: "Communication",
-      icon: (
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <circle cx="12" cy="12" r="1" />
-          <circle cx="19" cy="12" r="1" />
-          <circle cx="5" cy="12" r="1" />
-        </svg>
-      ),
-    },
-    {
-      tab: "integrations",
-      label: "Integrations",
-      group: "Integrations",
-      icon: (
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <path d="M12 2v4" />
-          <path d="M12 18v4" />
-          <path d="M4.93 4.93l2.83 2.83" />
-          <path d="M16.24 16.24l2.83 2.83" />
-          <path d="M2 12h4" />
-          <path d="M18 12h4" />
-          <path d="M4.93 19.07l2.83-2.83" />
-          <path d="M16.24 7.76l2.83-2.83" />
-          <circle cx="12" cy="12" r="3" />
-        </svg>
-      ),
-    },
-    {
-      tab: "guardrails",
-      label: "Safety Limits",
-      group: "AI & Models",
-      icon: (
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-        </svg>
-      ),
-    },
-    {
-      tab: "memory",
-      label: "Memory",
-      group: "AI & Models",
-      icon: (
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44A2.5 2.5 0 0 1 5.5 17c0-1 .59-1.85 1.44-2.25A2.5 2.5 0 0 1 5.5 12.5c0-1 .59-1.85 1.44-2.25A2.5 2.5 0 0 1 9.5 2z" />
-          <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44A2.5 2.5 0 0 0 18.5 17c0-1-.59-1.85-1.44-2.25A2.5 2.5 0 0 0 18.5 12.5c0-1-.59-1.85-1.44-2.25A2.5 2.5 0 0 0 14.5 2z" />
-        </svg>
-      ),
-    },
-    {
-      tab: "queue",
-      label: "Task Queue",
-      group: "Automation",
-      icon: (
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <rect x="3" y="4" width="18" height="4" rx="1" />
-          <rect x="3" y="10" width="18" height="4" rx="1" />
-          <rect x="3" y="16" width="18" height="4" rx="1" />
-        </svg>
-      ),
-    },
-    {
-      tab: "git",
-      label: "Git",
-      group: "Integrations",
-      icon: (
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <line x1="6" y1="3" x2="6" y2="15" />
-          <circle cx="18" cy="6" r="3" />
-          <circle cx="6" cy="18" r="3" />
-          <path d="M18 9a9 9 0 0 1-9 9" />
-        </svg>
-      ),
-    },
-    {
-      tab: "skills",
-      label: "Custom Skills",
-      group: "Skills & Tools",
-      icon: (
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
-        </svg>
-      ),
-    },
-    {
-      tab: "skillhub",
-      label: "Skill Store",
-      group: "Skills & Tools",
-      icon: (
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <circle cx="12" cy="12" r="10" />
-          <path d="M12 16v-4" />
-          <path d="M12 8h.01" />
-          <path d="M8 12h8" />
-        </svg>
-      ),
-    },
-    {
-      tab: "scheduled",
-      label: "Scheduled Tasks",
-      group: "Automation",
-      icon: (
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <circle cx="12" cy="12" r="10" />
-          <polyline points="12 6 12 12 16 14" />
-        </svg>
-      ),
-    },
-    {
-      tab: "connectors",
-      label: "Connectors",
-      group: "Integrations",
-      icon: (
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <rect x="3" y="4" width="7" height="7" rx="1" />
-          <rect x="14" y="4" width="7" height="7" rx="1" />
-          <rect x="3" y="13" width="7" height="7" rx="1" />
-          <rect x="14" y="13" width="7" height="7" rx="1" />
-        </svg>
-      ),
-    },
-    {
-      tab: "infrastructure",
-      label: "Infrastructure",
-      group: "Integrations",
-      icon: (
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
-        </svg>
-      ),
-    },
-    {
-      tab: "mcp",
-      label: "Connected Tools",
-      group: "Skills & Tools",
-      icon: (
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <rect x="2" y="3" width="20" height="14" rx="2" />
-          <path d="M8 21h8" />
-          <path d="M12 17v4" />
-          <path d="M7 8h2M15 8h2" />
-          <path d="M9 12h6" />
-        </svg>
-      ),
-    },
-    {
-      tab: "tools",
-      label: "Built-in Tools",
-      group: "Skills & Tools",
-      icon: (
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
-        </svg>
-      ),
-    },
-    {
-      tab: "hooks",
-      label: "Webhooks",
-      group: "Automation",
-      icon: (
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-          <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-        </svg>
-      ),
-    },
-    {
-      tab: "controlplane",
-      label: "Remote Access",
-      group: "Advanced",
-      icon: (
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
-          <line x1="8" y1="21" x2="16" y2="21" />
-          <line x1="12" y1="17" x2="12" y2="21" />
-        </svg>
-      ),
-    },
-    {
-      tab: "nodes",
-      label: "Mobile Companions",
-      group: "Advanced",
-      icon: (
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
-          <line x1="12" y1="18" x2="12.01" y2="18" />
-        </svg>
-      ),
-    },
-    {
-      tab: "extensions",
-      label: "Extensions",
-      group: "Advanced",
-      icon: (
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
-        </svg>
-      ),
-    },
-    {
-      tab: "insights",
-      label: "Usage Insights",
-      group: "Advanced",
-      icon: (
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <path d="M18 20V10M12 20V4M6 20v-6" />
-        </svg>
-      ),
-    },
-    {
-      tab: "updates",
-      label: "Updates",
-      group: "Advanced",
-      icon: (
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <path d="M21 12a9 9 0 11-6.219-8.56" />
-          <polyline points="21 3 21 9 15 9" />
-        </svg>
-      ),
-    },
-  ];
+  {
+    tab: "appearance",
+    label: "Appearance",
+    group: "General",
+    icon: (
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      >
+        <circle cx="12" cy="12" r="5" />
+        <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+      </svg>
+    ),
+  },
+  {
+    tab: "personality",
+    label: "Personality",
+    group: "General",
+    icon: (
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      >
+        <circle cx="12" cy="8" r="5" />
+        <path d="M20 21a8 8 0 0 0-16 0" />
+      </svg>
+    ),
+  },
+  {
+    tab: "missioncontrol",
+    label: "Mission Control",
+    group: "General",
+    icon: (
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      >
+        <circle cx="9" cy="7" r="4" />
+        <path d="M17 7a4 4 0 0 1 0 8" />
+        <path d="M9 15a7 7 0 0 0-7 7h14a7 7 0 0 0-7-7z" />
+        <rect x="14" y="14" width="8" height="8" rx="1" />
+      </svg>
+    ),
+  },
+  {
+    tab: "tray",
+    label: "Menu Bar",
+    group: "General",
+    icon: (
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      >
+        <rect x="2" y="3" width="20" height="4" rx="1" />
+        <path d="M12 7v4M8 11h8" />
+        <rect x="4" y="14" width="16" height="7" rx="1" />
+      </svg>
+    ),
+    macOnly: true,
+  },
+  {
+    tab: "voice",
+    label: "Voice Mode",
+    group: "General",
+    icon: (
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      >
+        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+        <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+        <line x1="12" y1="19" x2="12" y2="23" />
+        <line x1="8" y1="23" x2="16" y2="23" />
+      </svg>
+    ),
+  },
+  {
+    tab: "llm",
+    label: "AI Model",
+    group: "AI & Models",
+    icon: (
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      >
+        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+      </svg>
+    ),
+  },
+  {
+    tab: "search",
+    label: "Web Search",
+    group: "AI & Models",
+    icon: (
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      >
+        <circle cx="11" cy="11" r="8" />
+        <path d="M21 21l-4.35-4.35" />
+      </svg>
+    ),
+  },
+  {
+    tab: "whatsapp",
+    label: "WhatsApp",
+    group: "Communication",
+    icon: (
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      >
+        <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+      </svg>
+    ),
+  },
+  {
+    tab: "telegram",
+    label: "Telegram",
+    group: "Communication",
+    icon: (
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      >
+        <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" />
+      </svg>
+    ),
+  },
+  {
+    tab: "slack",
+    label: "Slack",
+    group: "Communication",
+    icon: (
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      >
+        <path d="M14.5 10c-.83 0-1.5-.67-1.5-1.5v-5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5v5c0 .83-.67 1.5-1.5 1.5z" />
+        <path d="M20.5 10H19V8.5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z" />
+        <path d="M9.5 14c.83 0 1.5.67 1.5 1.5v5c0 .83-.67 1.5-1.5 1.5S8 21.33 8 20.5v-5c0-.83.67-1.5 1.5-1.5z" />
+        <path d="M3.5 14H5v1.5c0 .83-.67 1.5-1.5 1.5S2 16.33 2 15.5 2.67 14 3.5 14z" />
+        <path d="M14 14.5c0-.83.67-1.5 1.5-1.5h5c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5h-5c-.83 0-1.5-.67-1.5-1.5z" />
+        <path d="M15.5 19H14v1.5c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5-.67-1.5-1.5-1.5z" />
+        <path d="M10 9.5C10 8.67 9.33 8 8.5 8h-5C2.67 8 2 8.67 2 9.5S2.67 11 3.5 11h5c.83 0 1.5-.67 1.5-1.5z" />
+        <path d="M8.5 5H10V3.5C10 2.67 9.33 2 8.5 2S7 2.67 7 3.5 7.67 5 8.5 5z" />
+      </svg>
+    ),
+  },
+  {
+    tab: "teams",
+    label: "Teams",
+    group: "Communication",
+    icon: (
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      >
+        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+        <circle cx="9" cy="7" r="4" />
+        <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+        <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+      </svg>
+    ),
+  },
+  {
+    tab: "x",
+    label: "X (Twitter)",
+    group: "Communication",
+    icon: (
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      >
+        <path d="M5 4l14 16" />
+        <path d="M19 4L5 20" />
+      </svg>
+    ),
+  },
+  {
+    tab: "morechannels",
+    label: "More Channels",
+    group: "Communication",
+    icon: (
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      >
+        <circle cx="12" cy="12" r="1" />
+        <circle cx="19" cy="12" r="1" />
+        <circle cx="5" cy="12" r="1" />
+      </svg>
+    ),
+  },
+  {
+    tab: "integrations",
+    label: "Integrations",
+    group: "Integrations",
+    icon: (
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      >
+        <path d="M12 2v4" />
+        <path d="M12 18v4" />
+        <path d="M4.93 4.93l2.83 2.83" />
+        <path d="M16.24 16.24l2.83 2.83" />
+        <path d="M2 12h4" />
+        <path d="M18 12h4" />
+        <path d="M4.93 19.07l2.83-2.83" />
+        <path d="M16.24 7.76l2.83-2.83" />
+        <circle cx="12" cy="12" r="3" />
+      </svg>
+    ),
+  },
+  {
+    tab: "guardrails",
+    label: "Safety Limits",
+    group: "AI & Models",
+    icon: (
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      >
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+      </svg>
+    ),
+  },
+  {
+    tab: "memory",
+    label: "Memory",
+    group: "AI & Models",
+    icon: (
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      >
+        <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44A2.5 2.5 0 0 1 5.5 17c0-1 .59-1.85 1.44-2.25A2.5 2.5 0 0 1 5.5 12.5c0-1 .59-1.85 1.44-2.25A2.5 2.5 0 0 1 9.5 2z" />
+        <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44A2.5 2.5 0 0 0 18.5 17c0-1-.59-1.85-1.44-2.25A2.5 2.5 0 0 0 18.5 12.5c0-1-.59-1.85-1.44-2.25A2.5 2.5 0 0 0 14.5 2z" />
+      </svg>
+    ),
+  },
+  {
+    tab: "queue",
+    label: "Task Queue",
+    group: "Automation",
+    icon: (
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      >
+        <rect x="3" y="4" width="18" height="4" rx="1" />
+        <rect x="3" y="10" width="18" height="4" rx="1" />
+        <rect x="3" y="16" width="18" height="4" rx="1" />
+      </svg>
+    ),
+  },
+  {
+    tab: "git",
+    label: "Git",
+    group: "Integrations",
+    icon: (
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      >
+        <line x1="6" y1="3" x2="6" y2="15" />
+        <circle cx="18" cy="6" r="3" />
+        <circle cx="6" cy="18" r="3" />
+        <path d="M18 9a9 9 0 0 1-9 9" />
+      </svg>
+    ),
+  },
+  {
+    tab: "skills",
+    label: "Custom Skills",
+    group: "Skills & Tools",
+    icon: (
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      >
+        <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+      </svg>
+    ),
+  },
+  {
+    tab: "skillhub",
+    label: "Skill Store",
+    group: "Skills & Tools",
+    icon: (
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      >
+        <circle cx="12" cy="12" r="10" />
+        <path d="M12 16v-4" />
+        <path d="M12 8h.01" />
+        <path d="M8 12h8" />
+      </svg>
+    ),
+  },
+  {
+    tab: "scheduled",
+    label: "Scheduled Tasks",
+    group: "Automation",
+    icon: (
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      >
+        <circle cx="12" cy="12" r="10" />
+        <polyline points="12 6 12 12 16 14" />
+      </svg>
+    ),
+  },
+  {
+    tab: "connectors",
+    label: "Connectors",
+    group: "Integrations",
+    icon: (
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      >
+        <rect x="3" y="4" width="7" height="7" rx="1" />
+        <rect x="14" y="4" width="7" height="7" rx="1" />
+        <rect x="3" y="13" width="7" height="7" rx="1" />
+        <rect x="14" y="13" width="7" height="7" rx="1" />
+      </svg>
+    ),
+  },
+  {
+    tab: "infrastructure",
+    label: "Infrastructure",
+    group: "Integrations",
+    icon: (
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      >
+        <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+      </svg>
+    ),
+  },
+  {
+    tab: "mcp",
+    label: "Connected Tools",
+    group: "Skills & Tools",
+    icon: (
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      >
+        <rect x="2" y="3" width="20" height="14" rx="2" />
+        <path d="M8 21h8" />
+        <path d="M12 17v4" />
+        <path d="M7 8h2M15 8h2" />
+        <path d="M9 12h6" />
+      </svg>
+    ),
+  },
+  {
+    tab: "tools",
+    label: "Built-in Tools",
+    group: "Skills & Tools",
+    icon: (
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      >
+        <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+      </svg>
+    ),
+  },
+  {
+    tab: "hooks",
+    label: "Webhooks",
+    group: "Automation",
+    icon: (
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      >
+        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+      </svg>
+    ),
+  },
+  {
+    tab: "controlplane",
+    label: "Remote Access",
+    group: "Advanced",
+    icon: (
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      >
+        <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+        <line x1="8" y1="21" x2="16" y2="21" />
+        <line x1="12" y1="17" x2="12" y2="21" />
+      </svg>
+    ),
+  },
+  {
+    tab: "nodes",
+    label: "Mobile Companions",
+    group: "Advanced",
+    icon: (
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      >
+        <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
+        <line x1="12" y1="18" x2="12.01" y2="18" />
+      </svg>
+    ),
+  },
+  {
+    tab: "extensions",
+    label: "Extensions",
+    group: "Advanced",
+    icon: (
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      >
+        <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+      </svg>
+    ),
+  },
+  {
+    tab: "insights",
+    label: "Usage Insights",
+    group: "Advanced",
+    icon: (
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      >
+        <path d="M18 20V10M12 20V4M6 20v-6" />
+      </svg>
+    ),
+  },
+  {
+    tab: "suggestions",
+    label: "Suggestions",
+    group: "Advanced",
+    icon: (
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      >
+        <path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 1 1 7.072 0l-.548.547A3.374 3.374 0 0 0 14 18.469V19a2 2 0 1 1-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+      </svg>
+    ),
+  },
+  {
+    tab: "updates",
+    label: "Updates",
+    group: "Advanced",
+    icon: (
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      >
+        <path d="M21 12a9 9 0 11-6.219-8.56" />
+        <polyline points="21 3 21 9 15 9" />
+      </svg>
+    ),
+  },
+];
 
 // Secondary channel configuration for "More Channels" tab
 const secondaryChannelItems: Array<{ key: SecondaryChannel; label: string; icon: ReactNode }> = [
@@ -2428,71 +2447,73 @@ export function Settings({
             )}
           </div>
           <div className="settings-nav-items">
-            {sidebarItems
-              .filter((item) => {
-                // Filter by macOnly if applicable
-                if (item.macOnly && !navigator.platform.toLowerCase().includes("mac")) {
-                  return false;
-                }
-                // Adaptive complexity: three-tier visibility
-                // - focused: core settings only
-                // - full (default): standard settings, hides advanced developer tabs
-                // - power: everything visible
-                if (uiDensity === "focused") {
-                  const focusedTabs: SettingsTab[] = [
-                    "appearance",
-                    "personality",
-                    "voice",
-                    "llm",
-                    "search",
-                    "skills",
-                    "memory",
-                    "guardrails",
-                    "scheduled",
-                    "telegram",
-                    "slack",
-                    "whatsapp",
-                    "teams",
-                    "x",
-                    "morechannels",
-                  ];
-                  if (!focusedTabs.includes(item.tab)) return false;
-                } else if (uiDensity !== "power") {
-                  // "full" mode: hide power-only tabs (developer/infra)
-                  const powerOnlyTabs: SettingsTab[] = ["nodes", "extensions", "controlplane"];
-                  if (powerOnlyTabs.includes(item.tab)) return false;
-                }
-                // Filter by search query
-                if (sidebarSearch) {
-                  return item.label.toLowerCase().includes(sidebarSearch.toLowerCase());
-                }
-                return true;
-              })
-              .reduce<{ lastGroup: string; elements: ReactNode[] }>(
-                (acc, item) => {
-                  if (!sidebarSearch && item.group !== acc.lastGroup) {
-                    acc.elements.push(
-                      <div key={`group-${item.group}`} className="settings-nav-group-header">
-                        {item.group}
-                      </div>,
-                    );
-                    acc.lastGroup = item.group;
+            {
+              sidebarItems
+                .filter((item) => {
+                  // Filter by macOnly if applicable
+                  if (item.macOnly && !navigator.platform.toLowerCase().includes("mac")) {
+                    return false;
                   }
-                  acc.elements.push(
-                    <button
-                      key={item.tab}
-                      className={`settings-nav-item ${activeTab === item.tab ? "active" : ""}`}
-                      data-tab={item.tab}
-                      onClick={() => setActiveTab(item.tab)}
-                    >
-                      {item.icon}
-                      {item.label}
-                    </button>,
-                  );
-                  return acc;
-                },
-                { lastGroup: "", elements: [] },
-              ).elements}
+                  // Adaptive complexity: three-tier visibility
+                  // - focused: core settings only
+                  // - full (default): standard settings, hides advanced developer tabs
+                  // - power: everything visible
+                  if (uiDensity === "focused") {
+                    const focusedTabs: SettingsTab[] = [
+                      "appearance",
+                      "personality",
+                      "voice",
+                      "llm",
+                      "search",
+                      "skills",
+                      "memory",
+                      "guardrails",
+                      "scheduled",
+                      "telegram",
+                      "slack",
+                      "whatsapp",
+                      "teams",
+                      "x",
+                      "morechannels",
+                    ];
+                    if (!focusedTabs.includes(item.tab)) return false;
+                  } else if (uiDensity !== "power") {
+                    // "full" mode: hide power-only tabs (developer/infra)
+                    const powerOnlyTabs: SettingsTab[] = ["nodes", "extensions", "controlplane"];
+                    if (powerOnlyTabs.includes(item.tab)) return false;
+                  }
+                  // Filter by search query
+                  if (sidebarSearch) {
+                    return item.label.toLowerCase().includes(sidebarSearch.toLowerCase());
+                  }
+                  return true;
+                })
+                .reduce<{ seenGroups: Set<string>; elements: ReactNode[] }>(
+                  (acc, item) => {
+                    if (!sidebarSearch && !acc.seenGroups.has(item.group)) {
+                      acc.elements.push(
+                        <div key={`group-${item.group}`} className="settings-nav-group-header">
+                          {item.group}
+                        </div>,
+                      );
+                      acc.seenGroups.add(item.group);
+                    }
+                    acc.elements.push(
+                      <button
+                        key={item.tab}
+                        className={`settings-nav-item ${activeTab === item.tab ? "active" : ""}`}
+                        data-tab={item.tab}
+                        onClick={() => setActiveTab(item.tab)}
+                      >
+                        {item.icon}
+                        {item.label}
+                      </button>,
+                    );
+                    return acc;
+                  },
+                  { seenGroups: new Set<string>(), elements: [] },
+                ).elements
+            }
             {sidebarSearch &&
               sidebarItems.filter((item) => {
                 if (item.macOnly && !navigator.platform.toLowerCase().includes("mac")) return false;
@@ -2635,6 +2656,8 @@ export function Settings({
               <WorktreeSettings />
             ) : activeTab === "insights" ? (
               <UsageInsightsPanel workspaceId={workspaceId} />
+            ) : activeTab === "suggestions" ? (
+              <SuggestionsPanel workspaceId={workspaceId} />
             ) : loading ? (
               <div className="settings-loading">Loading settings...</div>
             ) : (

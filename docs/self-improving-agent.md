@@ -79,6 +79,8 @@ When a task succeeds and similar playbook entries already exist, a `[PLAYBOOK] R
 
 **Memory types:** `observation`, `decision`, `error`, `insight`, `summary`
 
+**Agent-initiated save:** The `memory_save` tool allows agents to explicitly persist memories during task execution (types: `observation`, `decision`, `error`, `insight`). This closes the loop between automatic post-task capture and conscious mid-task learning — agents can now decide in real-time that something is worth remembering.
+
 ## Layer 3: UserProfileService
 
 **Purpose:** Extracts and maintains user facts from conversation.
@@ -150,6 +152,13 @@ When a task succeeds and similar playbook entries already exist, a `[PLAYBOOK] R
 4. `RelationshipMemoryService.ingestUserFeedback()` updates preference/history layers
 5. `.cowork/MISTAKES.md` updated with aggregated pattern
 
+### Agent-Initiated Memory Flow (via `memory_save` tool)
+
+1. During task execution, agent identifies something worth remembering (pattern, decision rationale, error resolution, factual observation)
+2. Agent calls `memory_save` with content and type (`observation`, `decision`, `error`, `insight`)
+3. `MemoryService.capture()` stores the memory with workspace scope, auto-detects sensitive data, and generates local embeddings
+4. Future tasks receive the memory via hybrid search in system prompt injection and via the `search_memories` tool
+
 ### Manual Learning Flow (via `/learn` skill)
 
 1. User invokes `/learn` with an insight, correction, preference, or rule
@@ -185,5 +194,6 @@ ClawHub's `pskoett/self-improving-agent` (v1.0.11) is a Claude Code skill that "
 | **Relationship memory** | None | 5-layer relationship context with commitment tracking and due dates |
 | **Compression** | None | LLM-based memory compression for ~10x token efficiency |
 | **Manual learning** | Skill invocation | `/learn` skill + `.cowork/MEMORY.md` persistence |
+| **Agent-initiated memory** | None | `memory_save` tool for explicit mid-task persistence + `search_memories` for on-demand recall |
 
 The ClawHub skill provides a useful starting pattern for basic learning capture. CoWork OS extends this concept into a full multi-layered learning architecture with offline search, privacy controls, and institutional knowledge management.

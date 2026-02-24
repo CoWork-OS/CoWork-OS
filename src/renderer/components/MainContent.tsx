@@ -239,26 +239,24 @@ import { SkillParameterModal } from "./SkillParameterModal";
 import { FileViewer } from "./FileViewer";
 import { ThemeIcon } from "./ThemeIcon";
 import {
-  AlertTriangleIcon,
   BookIcon,
   CalendarIcon,
   ChartIcon,
-  CheckIcon,
   ClipboardIcon,
   CodeIcon,
   EditIcon,
   FileTextIcon,
   FolderIcon,
   GlobeIcon,
-  InfoIcon,
   MessageIcon,
   SearchIcon,
   ShieldIcon,
   SlidersIcon,
   UsersIcon,
-  XIcon,
   ZapIcon,
 } from "./LineIcons";
+import { EMOJI_ICON_MAP } from "../utils/emoji-icon-map";
+import { replaceEmojisInChildren } from "../utils/emoji-replacer";
 import { CommandOutput } from "./CommandOutput";
 import { CanvasPreview } from "./CanvasPreview";
 import { InlineImagePreview } from "./InlineImagePreview";
@@ -599,55 +597,31 @@ const MessageSpeakButton = memo(function MessageSpeakButton({
 const HEADING_EMOJI_REGEX = /^([\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}][\uFE0F\uFE0E]?)(\s+)?/u;
 
 const getHeadingIcon = (emoji: string): React.ReactNode | null => {
-  switch (emoji) {
-    case "✅":
-      return <CheckIcon size={16} />;
-    case "❌":
-      return <XIcon size={16} />;
-    case "⚠️":
-    case "⚠":
-      return <AlertTriangleIcon size={16} />;
-    case "ℹ️":
-    case "ℹ":
-      return <InfoIcon size={16} />;
-    default:
-      return null;
-  }
+  const Icon = EMOJI_ICON_MAP[emoji];
+  if (!Icon) return null;
+  return <Icon size={16} strokeWidth={1.8} />;
 };
 
 const renderHeading = (Tag: "h1" | "h2" | "h3") => {
   return ({ children, ...props }: any) => {
     const nodes = Children.toArray(children);
-    let emoji: string | null = null;
     if (typeof nodes[0] === "string") {
       const match = (nodes[0] as string).match(HEADING_EMOJI_REGEX);
       if (match) {
-        emoji = match[1];
-        const nextIcon = getHeadingIcon(emoji);
-        if (nextIcon) {
+        const emoji = match[1];
+        const icon = getHeadingIcon(emoji);
+        if (icon) {
           nodes[0] = (nodes[0] as string).slice(match[0].length);
           return (
             <Tag {...props}>
-              <span className="markdown-heading-icon">
-                <ThemeIcon emoji={emoji} icon={nextIcon} />
-              </span>
+              <span className="markdown-heading-icon">{icon}</span>
               {nodes}
             </Tag>
           );
         }
       }
     }
-    const icon = emoji ? getHeadingIcon(emoji) : null;
-    return (
-      <Tag {...props}>
-        {icon && emoji && (
-          <span className="markdown-heading-icon">
-            <ThemeIcon emoji={emoji} icon={icon} />
-          </span>
-        )}
-        {nodes}
-      </Tag>
-    );
+    return <Tag {...props}>{nodes}</Tag>;
   };
 };
 
@@ -894,6 +868,8 @@ const buildMarkdownComponents = (options: {
     h2: renderHeading("h2"),
     h3: renderHeading("h3"),
     a: MarkdownLink,
+    p: ({ children, ...props }: any) => <p {...props}>{replaceEmojisInChildren(children)}</p>,
+    li: ({ children, ...props }: any) => <li {...props}>{replaceEmojisInChildren(children)}</li>,
   };
 };
 
@@ -1634,6 +1610,32 @@ export function MainContent({
   // Focused mode card pool - pick random 6 on mount
   const focusedCards = useMemo(() => pickFocusedCards(FOCUSED_CARD_POOL, CARDS_TO_SHOW), []);
 
+  // "Try asking" prompts from enabled plugin packs
+  const [tryAskingPrompts, setTryAskingPrompts] = useState<{ prompt: string; packName: string }[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const packs = await window.electronAPI.listPluginPacks();
+        if (cancelled) return;
+        const prompts: { prompt: string; packName: string }[] = [];
+        for (const p of packs) {
+          if (p.enabled && p.tryAsking && p.tryAsking.length > 0) {
+            for (const prompt of p.tryAsking) {
+              prompts.push({ prompt, packName: p.displayName });
+            }
+          }
+        }
+        // Shuffle and take up to 5
+        const shuffled = prompts.sort(() => Math.random() - 0.5).slice(0, 5);
+        setTryAskingPrompts(shuffled);
+      } catch {
+        // Plugin packs not available
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   // Shell permission state - tracks current workspace's shell permission
   const [shellEnabled, setShellEnabled] = useState(workspace?.permissions?.shell ?? false);
   // Active command execution state
@@ -1801,7 +1803,7 @@ export function MainContent({
 
   const isTaskWorking = useMemo(() => {
     if (!task) return false;
-    if (task.status === "executing") return true;
+    if (task.status === "executing" || task.status === "interrupted") return true;
     if (
       task.status === "completed" ||
       task.status === "paused" ||
@@ -3632,6 +3634,26 @@ export function MainContent({
               )}
             </div>
 
+            {/* Try asking prompts from plugin packs */}
+            {tryAskingPrompts.length > 0 && (
+              <div className="try-asking-section">
+                <div className="try-asking-header">Try asking ..</div>
+                <div className="try-asking-chips">
+                  {tryAskingPrompts.map((item, i) => (
+                    <button
+                      key={i}
+                      className="try-asking-chip"
+                      onClick={() => handleQuickAction(item.prompt)}
+                      title={`From ${item.packName}`}
+                    >
+                      <span className="try-asking-text">{item.prompt}</span>
+                      <span className="try-asking-arrow">&rarr;</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Input Area */}
             {renderAttachmentPanel()}
             <div
@@ -5005,27 +5027,26 @@ export function MainContent({
         </div>
       </div>
 
-      {/* Scroll to bottom button */}
-      {!autoScroll && task && (
-        <button
-          className="scroll-to-bottom-btn"
-          onClick={() => {
-            if (mainBodyRef.current) {
-              mainBodyRef.current.scrollTo({
-                top: mainBodyRef.current.scrollHeight,
-                behavior: "smooth",
-              });
-              setAutoScroll(true);
-            }
-          }}
-          title="Scroll to bottom"
-        >
-          ↓
-        </button>
-      )}
-
       {/* Footer with Input */}
       <div className="main-footer">
+        {/* Scroll to bottom button */}
+        {!autoScroll && task && (
+          <button
+            className="scroll-to-bottom-btn"
+            onClick={() => {
+              if (mainBodyRef.current) {
+                mainBodyRef.current.scrollTo({
+                  top: mainBodyRef.current.scrollHeight,
+                  behavior: "smooth",
+                });
+                setAutoScroll(true);
+              }
+            }}
+            title="Scroll to bottom"
+          >
+            ↓
+          </button>
+        )}
         {renderAttachmentPanel()}
         <div
           className={`input-container ${isDraggingFiles ? "drag-over" : ""}`}
@@ -5219,64 +5240,6 @@ export function MainContent({
                   <span
                     className="voice-recording-indicator"
                     style={{ width: `${voiceInput.audioLevel}%` }}
-                  />
-                )}
-              </button>
-              <button
-                className={`voice-input-btn talk-mode-btn ${talkMode.isActive ? "active" : ""} ${talkMode.state}`}
-                onClick={talkMode.toggle}
-                title={
-                  talkMode.isActive
-                    ? `Talk Mode ON (${talkMode.inputMode === "push_to_talk" ? "hold Space to talk" : "voice activity"}) — click to stop`
-                    : "Start Talk Mode — continuous voice conversation"
-                }
-              >
-                {talkMode.state === "listening" ? (
-                  <svg
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  >
-                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                    <circle cx="12" cy="12" r="10" strokeDasharray="4 2" />
-                  </svg>
-                ) : talkMode.state === "speaking" ? (
-                  <svg
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  >
-                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                    <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-                    <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
-                  </svg>
-                ) : (
-                  <svg
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  >
-                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                    <path d="M8 21h8" />
-                    <path d="M12 17v4" />
-                    <circle cx="12" cy="12" r="10" strokeDasharray="4 2" />
-                  </svg>
-                )}
-                {talkMode.isActive && talkMode.state === "listening" && (
-                  <span
-                    className="voice-recording-indicator"
-                    style={{ width: `${talkMode.audioLevel}%` }}
                   />
                 )}
               </button>

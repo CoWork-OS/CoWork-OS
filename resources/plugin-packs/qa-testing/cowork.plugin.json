@@ -1,0 +1,68 @@
+{
+  "name": "qa-testing-pack",
+  "displayName": "QA & Testing",
+  "version": "1.0.0",
+  "description": "Test coverage analysis, flaky test detection, release readiness assessment, and test plan generation for QA engineers.",
+  "type": "pack",
+  "author": "CoWork-OSS",
+  "keywords": ["qa", "testing", "quality", "test-automation", "coverage"],
+  "icon": "🧪",
+  "category": "Engineering",
+  "personaTemplateId": "qa-test-engineer",
+  "tryAsking": [
+    "What's our current test coverage and where are the gaps?",
+    "Which tests have been flaky in the last week?",
+    "Are we ready to release — generate a readiness assessment",
+    "Write test cases for this new feature",
+    "What changed recently that doesn't have test updates?"
+  ],
+  "skills": [
+    {
+      "id": "qa-test-plan",
+      "name": "Test Plan Generator",
+      "description": "Generate a comprehensive test plan for a feature or release",
+      "icon": "📋",
+      "category": "QA",
+      "prompt": "Create a test plan for the following feature.\n\nFeature:\n{{feature}}\n\nPlease include:\n1. Test scope and objectives\n2. Test cases (functional, edge cases, negative)\n3. Integration test scenarios\n4. Performance test criteria\n5. Accessibility checks\n6. Environment requirements\n7. Risk areas requiring extra coverage\n8. Estimated effort",
+      "parameters": [
+        { "name": "feature", "type": "string", "description": "Feature or change to create a test plan for", "required": true }
+      ],
+      "enabled": true
+    },
+    {
+      "id": "qa-bug-report",
+      "name": "Bug Report",
+      "description": "Create a well-structured bug report from reproduction details",
+      "icon": "🐛",
+      "category": "QA",
+      "prompt": "Create a structured bug report.\n\nIssue details:\n{{details}}\n\nFormat:\n1. Title (concise, descriptive)\n2. Severity (Critical/High/Medium/Low)\n3. Environment (OS, browser, version)\n4. Steps to reproduce\n5. Expected behavior\n6. Actual behavior\n7. Screenshots/logs (note what to capture)\n8. Possible root cause\n9. Workaround (if any)",
+      "parameters": [
+        { "name": "details", "type": "string", "description": "Bug details and reproduction info", "required": true }
+      ],
+      "enabled": true
+    },
+    {
+      "id": "qa-release-checklist",
+      "name": "Release Readiness Checklist",
+      "description": "Assess release readiness with a structured quality checklist",
+      "icon": "✅",
+      "category": "QA",
+      "prompt": "Assess release readiness.\n\nRelease info:\n{{release_info}}\n\nProvide:\n1. Test pass rate and trends\n2. Open bugs by severity\n3. Untested or partially tested areas\n4. Regression test results\n5. Performance benchmark comparison\n6. Known issues and workarounds\n7. Go/No-Go recommendation with reasoning\n8. Post-release monitoring plan",
+      "parameters": [
+        { "name": "release_info", "type": "string", "description": "Release details, test results, bug counts", "required": true }
+      ],
+      "enabled": true
+    }
+  ],
+  "agentRoles": [
+    {
+      "name": "qa-assistant",
+      "displayName": "QA Assistant",
+      "description": "Assists QA engineers with test planning, bug reporting, and release quality assessment",
+      "icon": "🧪",
+      "color": "#22c55e",
+      "capabilities": ["test", "analyze", "review", "document"],
+      "systemPrompt": "You are a QA Assistant. You help QA engineers create test plans, write bug reports, analyze test coverage, and assess release readiness. You are thorough, methodical, and always reference specific test evidence."
+    }
+  ]
+}

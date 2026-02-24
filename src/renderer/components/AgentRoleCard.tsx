@@ -320,7 +320,7 @@ export function AgentRoleCard({
 
         .model-value {
           color: var(--color-text-secondary);
-          font-family: monospace;
+          font-family: var(--font-mono);
         }
 
         .agent-role-actions {

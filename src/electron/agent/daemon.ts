@@ -2673,7 +2673,11 @@ export class AgentDaemon extends EventEmitter {
   }
 
   /**
-   * Send a follow-up message to a task
+   * Send a follow-up message to a task.
+   *
+   * If the executor is currently running (mutex held), the message is queued
+   * for injection into the active execution loop and a user_message event is
+   * emitted immediately so the UI shows the message right away.
    */
   async sendMessage(taskId: string, message: string, images?: ImageAttachment[]): Promise<void> {
     let cached = this.activeTasks.get(taskId);
@@ -2715,7 +2719,14 @@ export class AgentDaemon extends EventEmitter {
       cached.status = "active";
     }
 
-    // Send the message
+    // If the executor is busy (mutex locked), queue the message for the running
+    // loop to pick up and return immediately so the IPC doesn't block.
+    if (executor.isRunning) {
+      executor.queueFollowUp(message, images);
+      return;
+    }
+
+    // Send the message (executor is idle, acquire mutex normally)
     await executor.sendMessage(message, images);
   }
 

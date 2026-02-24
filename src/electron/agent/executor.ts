@@ -232,6 +232,9 @@ export class TaskExecutor {
   /** Images attached to the initial task creation (not follow-up messages). */
   private initialImages?: ImageAttachment[];
 
+  /** Follow-up messages queued while the executor is busy (mutex held). */
+  private pendingFollowUps: Array<{ message: string; images?: ImageAttachment[] }> = [];
+
   private static readonly MIN_RESULT_SUMMARY_LENGTH = 20;
   private static readonly RESULT_SUMMARY_PLACEHOLDERS = new Set<string>([
     "i understand. let me continue.",
@@ -7594,6 +7597,19 @@ TASK / CONVERSATION HISTORY:
           break;
         }
 
+        // Inject any queued follow-up messages from the user into the conversation
+        {
+          let pendingMsg = this.drainPendingFollowUp();
+          while (pendingMsg) {
+            console.log(`${this.logTag} Injecting queued follow-up into step execution`);
+            const userUpdate = `USER UPDATE: ${pendingMsg.message}`;
+            messages.push({ role: "user" as const, content: userUpdate });
+            // Also persist to conversation history for future steps/follow-ups
+            this.appendConversationHistory({ role: "user", content: userUpdate });
+            pendingMsg = this.drainPendingFollowUp();
+          }
+        }
+
         iterationCount++;
         const iterStartTime = Date.now();
         const stepElapsed = ((iterStartTime - stepStartTime) / 1000).toFixed(1);
@@ -9075,6 +9091,32 @@ TASK / CONVERSATION HISTORY:
   }
 
   /**
+   * Whether the executor's lifecycle mutex is currently held (i.e. execute/sendMessage is running).
+   */
+  get isRunning(): boolean {
+    return this.getLifecycleMutex().isLocked;
+  }
+
+  /**
+   * Queue a follow-up message to be injected into the currently running execution loop.
+   * The user_message event is emitted immediately so the UI shows the message right away.
+   */
+  queueFollowUp(message: string, images?: ImageAttachment[]): void {
+    this.pendingFollowUps.push({ message, images });
+    this.emitEvent("user_message", { message });
+    console.log(
+      `${this.logTag} Follow-up queued for injection into running execution (queue size: ${this.pendingFollowUps.length})`,
+    );
+  }
+
+  /**
+   * Drain the first pending follow-up (if any) for injection into the execution loop.
+   */
+  private drainPendingFollowUp(): { message: string; images?: ImageAttachment[] } | undefined {
+    return this.pendingFollowUps.shift();
+  }
+
+  /**
    * Send a follow-up message to continue the conversation
    */
   async sendMessage(message: string, images?: ImageAttachment[]): Promise<void> {
@@ -9466,6 +9508,18 @@ TASK / CONVERSATION HISTORY:
         if (this.wrapUpRequested) {
           console.log(`${this.logTag} sendMessage wrap-up requested: finalizing`);
           break;
+        }
+
+        // Inject any queued follow-up messages from the user into the conversation
+        {
+          let pendingMsg = this.drainPendingFollowUp();
+          while (pendingMsg) {
+            console.log(`${this.logTag} Injecting queued follow-up into sendMessage loop`);
+            const userUpdate = `USER UPDATE: ${pendingMsg.message}`;
+            // messages === this.conversationHistory here, so push persists automatically
+            messages.push({ role: "user" as const, content: userUpdate });
+            pendingMsg = this.drainPendingFollowUp();
+          }
         }
 
         iterationCount++;

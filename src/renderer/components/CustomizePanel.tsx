@@ -865,7 +865,7 @@ export function CustomizePanel({
         .cp-command-name {
           font-size: 12px;
           color: var(--color-text-muted);
-          font-family: var(--font-mono, monospace);
+          font-family: var(--font-mono);
         }
 
         /* Skill list */

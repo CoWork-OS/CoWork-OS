@@ -6,6 +6,16 @@
   "type": "pack",
   "author": "CoWork-OSS",
   "keywords": ["sales", "crm", "prospecting", "pipeline"],
+  "icon": "💼",
+  "category": "Sales",
+  "recommendedConnectors": ["hubspot-mcp"],
+  "tryAsking": [
+    "Research this prospect and compile a briefing for outreach",
+    "Draft a follow-up email after yesterday's demo call",
+    "Review my pipeline and flag deals at risk this quarter",
+    "Prepare responses to common pricing objections",
+    "Summarize this week's closed-won and closed-lost deals"
+  ],
   "skills": [
     {
       "id": "sales-prospect-research",

@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useCallback, Fragment } from "react";
+import { Filter } from "lucide-react";
 import { Task, Workspace, UiDensity, InfraStatus } from "../../shared/types";
 
 interface SidebarProps {
@@ -11,6 +12,40 @@ interface SidebarProps {
   onOpenMissionControl: () => void;
   onTasksChanged: () => void;
   uiDensity?: UiDensity;
+}
+
+/** Visual session mode derived from task metadata */
+export type SessionMode =
+  | "standard"
+  | "autonomous"
+  | "collab"
+  | "multi-llm"
+  | "scheduled"
+  | "think"
+  | "comparison";
+
+const SESSION_MODE_META: Record<
+  SessionMode,
+  { label: string; shortLabel: string; color: string }
+> = {
+  standard: { label: "Standard", shortLabel: "STD", color: "standard" },
+  autonomous: { label: "Autonomous", shortLabel: "AUTO", color: "autonomous" },
+  collab: { label: "Collaborative", shortLabel: "COLLAB", color: "collab" },
+  "multi-llm": { label: "Multi-LLM", shortLabel: "MULTI", color: "multi-llm" },
+  scheduled: { label: "Scheduled", shortLabel: "SCHED", color: "scheduled" },
+  think: { label: "Think", shortLabel: "THINK", color: "think" },
+  comparison: { label: "Comparison", shortLabel: "CMP", color: "comparison" },
+};
+
+/** Derive the primary session mode from task metadata */
+export function getSessionMode(task: Task): SessionMode {
+  if (task.agentConfig?.collaborativeMode) return "collab";
+  if (task.agentConfig?.multiLlmMode) return "multi-llm";
+  if (task.agentConfig?.autonomousMode) return "autonomous";
+  if (task.agentConfig?.conversationMode === "think") return "think";
+  if (task.comparisonSessionId) return "comparison";
+  if (task.source === "cron" || task.title?.startsWith("Scheduled:")) return "scheduled";
+  return "standard";
 }
 
 const HIDDEN_FOCUSED_STATUSES: ReadonlySet<Task["status"]> = new Set(["failed", "cancelled"]);
@@ -99,6 +134,8 @@ export function Sidebar({
   const [collapsedTasks, setCollapsedTasks] = useState<Set<string>>(new Set());
   const [showFailedSessions, setShowFailedSessions] = useState(false);
   const [pinActionError, setPinActionError] = useState<string | null>(null);
+  const [activeModeFilters, setActiveModeFilters] = useState<Set<SessionMode>>(new Set());
+  const [showFilterBar, setShowFilterBar] = useState(false);
   const pinActionErrorTimeoutRef = useRef<number | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuButtonRef = useRef<Map<string, HTMLButtonElement>>(new Map());
@@ -177,6 +214,55 @@ export function Sidebar({
     return countHiddenFailedSessions(tasks, uiDensity);
   }, [tasks, uiDensity]);
 
+  // Count root tasks per session mode (for filter badge counts)
+  const modeCounts = useMemo(() => {
+    const counts = new Map<SessionMode, number>();
+    for (const node of taskTree) {
+      const mode = getSessionMode(node.task);
+      counts.set(mode, (counts.get(mode) || 0) + 1);
+    }
+    return counts;
+  }, [taskTree]);
+
+  // Which modes are actually present in current sessions
+  const availableModes = useMemo(() => {
+    const modes: SessionMode[] = [];
+    for (const mode of Object.keys(SESSION_MODE_META) as SessionMode[]) {
+      if ((modeCounts.get(mode) || 0) > 0) modes.push(mode);
+    }
+    return modes;
+  }, [modeCounts]);
+
+  // Remove stale filters when workspace/task data changes and previously
+  // selected modes are no longer available.
+  useEffect(() => {
+    const availableModeSet = new Set(availableModes);
+    setActiveModeFilters((prev) => {
+      const next = new Set(
+        Array.from(prev).filter((mode) => availableModeSet.has(mode)),
+      );
+      return next.size === prev.size ? prev : next;
+    });
+  }, [availableModes]);
+
+  // Apply mode filter to the task tree
+  const filteredTaskTree = useMemo(() => {
+    if (activeModeFilters.size === 0) return taskTree;
+    return taskTree.filter((node) => activeModeFilters.has(getSessionMode(node.task)));
+  }, [taskTree, activeModeFilters]);
+
+  const toggleModeFilter = useCallback((mode: SessionMode) => {
+    setActiveModeFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(mode)) {
+        next.delete(mode);
+      } else {
+        next.add(mode);
+      }
+      return next;
+    });
+  }, []);
+
   useEffect(() => {
     return () => {
       if (pinActionErrorTimeoutRef.current !== null) {
@@ -187,7 +273,7 @@ export function Sidebar({
 
   const focusedTaskEntries = useMemo(() => {
     if (uiDensity !== "focused") return [];
-    return taskTree.reduce<
+    return filteredTaskTree.reduce<
       Array<{
         node: TaskTreeNode;
         index: number;
@@ -198,7 +284,7 @@ export function Sidebar({
     >((acc, node, index) => {
       const group = getDateGroup(node.task.createdAt);
       const previousGroup = acc.length > 0 ? acc[acc.length - 1].group : "";
-      const isLast = index === taskTree.length - 1;
+      const isLast = index === filteredTaskTree.length - 1;
       acc.push({
         node,
         index,
@@ -208,7 +294,7 @@ export function Sidebar({
       });
       return acc;
     }, []);
-  }, [getDateGroup, taskTree, uiDensity]);
+  }, [getDateGroup, filteredTaskTree, uiDensity]);
 
   // Auto-collapse sub-agent trees in focused mode
   const hasInitializedCollapse = useRef(false);
@@ -613,13 +699,16 @@ export function Sidebar({
 
     // Tree connector prefix based on depth
     const treePrefix = depth > 0 ? (isLast ? "└─" : "├─") : "";
+    const taskMode = depth === 0 ? getSessionMode(task) : null;
+    const modeClass = taskMode && taskMode !== "standard" ? `session-mode-${taskMode}` : "";
 
     return (
       <div key={task.id} className="task-tree-node">
         <div
-          className={`task-item cli-task-item ${selectedTaskId === task.id ? "task-item-selected" : ""} ${isSubAgent ? "task-item-subagent" : ""}`}
+          className={`task-item cli-task-item ${selectedTaskId === task.id ? "task-item-selected" : ""} ${isSubAgent ? "task-item-subagent" : ""} ${modeClass}`}
           onClick={() => renameTaskId !== task.id && onSelectTask(task.id)}
           style={{ paddingLeft: depth > 0 ? `${8 + depth * 16}px` : undefined }}
+          title={taskMode && taskMode !== "standard" ? SESSION_MODE_META[taskMode].label : undefined}
         >
           {/* Tree connector for sub-agents */}
           {depth > 0 && <span className="cli-tree-prefix">{treePrefix}</span>}
@@ -823,8 +912,22 @@ export function Sidebar({
           <span className="cli-section-prompt">&gt;</span>
           <span className="terminal-only">SESSIONS</span>
           <span className="modern-only">Sessions</span>
+          {(availableModes.length > 1 || activeModeFilters.size > 0) && (
+            <button
+              type="button"
+              className={`session-filter-toggle ${showFilterBar || activeModeFilters.size > 0 ? "active" : ""}`}
+              onClick={() => setShowFilterBar(!showFilterBar)}
+              title="Filter by mode"
+            >
+              <Filter size={12} strokeWidth={2.5} />
+              {activeModeFilters.size > 0 && (
+                <span className="filter-count">{activeModeFilters.size}</span>
+              )}
+            </button>
+          )}
           {uiDensity === "focused" && failedSessionCount > 0 && (
             <button
+              type="button"
               className="show-failed-toggle"
               onClick={() => setShowFailedSessions(!showFailedSessions)}
             >
@@ -832,37 +935,76 @@ export function Sidebar({
             </button>
           )}
         </div>
-        {taskTree.length === 0 ? (
-          <div
-            className={`sidebar-empty cli-empty ${uiDensity === "focused" ? "sidebar-empty-focused" : ""}`}
-          >
-            <pre className="cli-tree terminal-only">{`├── (no sessions yet)
-└── ...`}</pre>
-            {uiDensity === "focused" ? (
-              <div className="sidebar-empty-message">
-                <svg
-                  width="32"
-                  height="32"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  style={{ opacity: 0.3 }}
+        {showFilterBar && (availableModes.length > 1 || activeModeFilters.size > 0) && (
+          <div className="session-filter-bar">
+            {availableModes.map((mode) => {
+              const meta = SESSION_MODE_META[mode];
+              const isActive = activeModeFilters.has(mode);
+              return (
+                <button
+                  type="button"
+                  key={mode}
+                  className={`session-filter-chip ${meta.color} ${isActive ? "active" : ""}`}
+                  onClick={() => toggleModeFilter(mode)}
+                  title={meta.label}
                 >
-                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                </svg>
-                <p>Your conversations will appear here</p>
-                <span>Start a new session to get going</span>
-              </div>
-            ) : (
-              <p className="cli-hint">
-                <span className="terminal-only"># start a new session above</span>
-                <span className="modern-only">Start a new session to begin</span>
-              </p>
+                  <span className="filter-chip-dot" />
+                  {meta.label}
+                  <span className="filter-chip-count">{modeCounts.get(mode) || 0}</span>
+                </button>
+              );
+            })}
+            {activeModeFilters.size > 0 && (
+              <button
+                type="button"
+                className="session-filter-clear"
+                onClick={() => setActiveModeFilters(new Set())}
+                title="Clear filters"
+              >
+                clear
+              </button>
             )}
           </div>
+        )}
+        {filteredTaskTree.length === 0 ? (
+          activeModeFilters.size > 0 ? (
+            <div className="sidebar-empty cli-empty sidebar-empty-filtered">
+              <p className="cli-hint">
+                <span>No sessions match the selected filters</span>
+              </p>
+            </div>
+          ) : (
+            <div
+              className={`sidebar-empty cli-empty ${uiDensity === "focused" ? "sidebar-empty-focused" : ""}`}
+            >
+              <pre className="cli-tree terminal-only">{`├── (no sessions yet)
+└── ...`}</pre>
+              {uiDensity === "focused" ? (
+                <div className="sidebar-empty-message">
+                  <svg
+                    width="32"
+                    height="32"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    style={{ opacity: 0.3 }}
+                  >
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                  </svg>
+                  <p>Your conversations will appear here</p>
+                  <span>Start a new session to get going</span>
+                </div>
+              ) : (
+                <p className="cli-hint">
+                  <span className="terminal-only"># start a new session above</span>
+                  <span className="modern-only">Start a new session to begin</span>
+                </p>
+              )}
+            </div>
+          )
         ) : uiDensity === "focused" ? (
           focusedTaskEntries.map((entry) => (
             <Fragment key={entry.node.task.id}>
@@ -871,8 +1013,8 @@ export function Sidebar({
             </Fragment>
           ))
         ) : (
-          taskTree.map((node, index) =>
-            renderTaskNode(node, index, 0, index === taskTree.length - 1),
+          filteredTaskTree.map((node, index) =>
+            renderTaskNode(node, index, 0, index === filteredTaskTree.length - 1),
           )
         )}
       </div>

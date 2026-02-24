@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, type ReactNode } from "react";
+import { MessageCircle, Wrench, Bot, Plug, Package } from "lucide-react";
 import { ExtensionData, TunnelStatusData } from "../../shared/types";
 
 type ExtensionType = "channel" | "tool" | "provider" | "integration";
@@ -165,18 +166,19 @@ export function ExtensionsSettings() {
     }
   };
 
-  const getTypeIcon = (type: ExtensionType): string => {
+  const getTypeIcon = (type: ExtensionType): ReactNode => {
+    const p = { size: 16, strokeWidth: 1.5 } as const;
     switch (type) {
       case "channel":
-        return "💬";
+        return <MessageCircle {...p} />;
       case "tool":
-        return "🔧";
+        return <Wrench {...p} />;
       case "provider":
-        return "🤖";
+        return <Bot {...p} />;
       case "integration":
-        return "🔌";
+        return <Plug {...p} />;
       default:
-        return "📦";
+        return <Package {...p} />;
     }
   };
 

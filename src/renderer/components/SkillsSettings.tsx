@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { FolderOpen, RefreshCw, Plus } from "lucide-react";
 import { CustomSkill, SkillParameter } from "../../shared/types";
-import { EMOJI_ICON_MAP } from "../utils/emoji-icon-map";
+import { getEmojiIcon } from "../utils/emoji-icon-map";
 
 interface SkillsSettingsProps {
   onSkillSelect?: (skill: CustomSkill) => void;
@@ -180,7 +180,7 @@ export function SkillsSettings({ onSkillSelect }: SkillsSettingsProps) {
                     <div className="skill-card-header">
                       <span className="skill-icon">
                         {(() => {
-                          const Icon = EMOJI_ICON_MAP[skill.icon];
+                          const Icon = getEmojiIcon(skill.icon);
                           return Icon ? <Icon size={18} strokeWidth={1.5} /> : skill.icon;
                         })()}
                       </span>

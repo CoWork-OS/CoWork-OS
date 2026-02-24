@@ -670,7 +670,7 @@ export function PersonaTemplateGallery({ onClose, onActivated }: PersonaTemplate
         }
 
         .pt-skill-id {
-          font-family: monospace;
+          font-family: var(--font-mono);
           color: var(--color-text-primary);
           font-weight: 500;
         }

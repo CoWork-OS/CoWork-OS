@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { Check, X, Play, Loader2 } from "lucide-react";
 import type { Task, TaskEvent, EventType } from "../../shared/types";
+import { EMOJI_ICON_MAP } from "../utils/emoji-icon-map";
 
 interface AgentRoleInfo {
   id: string;
@@ -105,9 +107,9 @@ function StreamBubble({ item }: { item: StreamItem }) {
           <p
             className={`step-event ${item.type === "step_completed" ? "step-completed" : ""} ${item.type === "step_failed" ? "step-failed" : ""}`}
           >
-            {item.type === "step_completed" && "✓ "}
-            {item.type === "step_failed" && "✗ "}
-            {item.type === "step_started" && "▸ "}
+            {item.type === "step_completed" && <Check size={14} strokeWidth={2.5} className="step-icon step-icon-completed" />}
+            {item.type === "step_failed" && <X size={14} strokeWidth={2.5} className="step-icon step-icon-failed" />}
+            {item.type === "step_started" && <Play size={14} strokeWidth={2} className="step-icon step-icon-started" />}
             {displayContent}
           </p>
         ) : isMarkdown ? (
@@ -134,7 +136,7 @@ function DispatchPhaseIndicator({ childTasks }: { childTasks: Task[] }) {
   const allTerminal = childTasks.every(
     (t) => t.status === "completed" || t.status === "failed" || t.status === "cancelled",
   );
-  const anyWorking = childTasks.some((t) => t.status === "executing" || t.status === "planning");
+  const anyWorking = childTasks.some((t) => t.status === "executing" || t.status === "planning" || t.status === "interrupted");
   const phase = allTerminal ? "complete" : anyWorking ? "working" : "dispatched";
 
   const phases = ["dispatched", "working", "complete"];
@@ -263,7 +265,7 @@ export function DispatchedAgentsPanel({
   }, [childEvents, childTasks, agentRoles]);
 
   const workingCount = childTasks.filter(
-    (t) => t.status === "executing" || t.status === "planning",
+    (t) => t.status === "executing" || t.status === "planning" || t.status === "interrupted",
   ).length;
 
   return (
@@ -289,12 +291,18 @@ export function DispatchedAgentsPanel({
               onClick={() => onSelectChildTask?.(info.task.id)}
               title={`Click to view ${info.role?.displayName || "agent"}'s task`}
             >
-              <span className="team-member-icon">{info.role?.icon || "🤖"}</span>
+              <span className="team-member-icon">
+                {(() => {
+                  const emoji = info.role?.icon || "🤖";
+                  const Icon = EMOJI_ICON_MAP[emoji];
+                  return Icon ? <Icon size={16} strokeWidth={1.5} /> : emoji;
+                })()}
+              </span>
               <span className="team-member-name" style={{ color: info.role?.color || "#6366f1" }}>
                 {info.role?.displayName || "Agent"}
               </span>
               <span className={`dispatched-agent-status status-${info.status}`}>
-                {info.status === "executing"
+                {info.status === "executing" || info.status === "interrupted"
                   ? "working"
                   : info.status === "planning"
                     ? "planning"
@@ -320,7 +328,12 @@ export function DispatchedAgentsPanel({
             <div key={item.id}>
               {showHeader && (
                 <div className="stream-agent-header">
-                  <span className="stream-agent-icon">{item.agentIcon}</span>
+                  <span className="stream-agent-icon">
+                    {(() => {
+                      const Icon = EMOJI_ICON_MAP[item.agentIcon];
+                      return Icon ? <Icon size={16} strokeWidth={1.5} /> : item.agentIcon;
+                    })()}
+                  </span>
                   <span className="stream-agent-name" style={{ color: item.agentColor }}>
                     {item.agentName}
                   </span>
@@ -337,18 +350,7 @@ export function DispatchedAgentsPanel({
       {/* Sticky status bar */}
       {workingCount > 0 && (
         <div className="collab-phase-status">
-          <svg
-            className="collab-phase-spinner"
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-          >
-            <path d="M12 2a10 10 0 0 1 10 10" />
-          </svg>
+          <Loader2 className="collab-phase-spinner" size={14} strokeWidth={2.5} />
           <span className="collab-phase-label">
             {workingCount} agent{workingCount !== 1 ? "s" : ""} working...
           </span>

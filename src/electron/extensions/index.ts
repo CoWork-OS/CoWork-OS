@@ -16,3 +16,6 @@
 export * from "./types";
 export * from "./loader";
 export * from "./registry";
+export * from "./scaffold";
+export * from "./pack-installer";
+export * from "./pack-registry";

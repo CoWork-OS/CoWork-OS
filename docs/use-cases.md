@@ -180,7 +180,7 @@ Prompt:
 ```
 Build a dev task queue for repo owner/repo from open high-priority issues.
 For each item include acceptance criteria, dependencies, risk, and suggested owner (agent or human).
-Run up to 3 tasks in parallel and provide progress checkpoints.
+Run up to 8 tasks in parallel and provide progress checkpoints.
 For any code changes, summarize diffs and STOP before merge/deploy unless I approve.
 ```
 

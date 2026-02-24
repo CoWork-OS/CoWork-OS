@@ -314,9 +314,7 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
                   />
                   <div className="provider-option-content">
                     <span className="provider-name">None</span>
-                    <span className="provider-description">
-                      No fallback - fail if primary is unavailable
-                    </span>
+                    <span className="provider-description">No fallback</span>
                   </div>
                 </label>
 

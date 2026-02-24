@@ -19,8 +19,8 @@ export function getControlPlaneWebUIHtml(): string {
         --danger: #ff6b6b;
         --warn: #f6c177;
         --ok: #63e6be;
-        --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-        --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+        --mono: "SF Mono", "Fira Code", "Consolas", monospace;
+        --sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", system-ui, sans-serif;
       }
       html, body { height: 100%; }
       body {

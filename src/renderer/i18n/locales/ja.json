@@ -56,7 +56,8 @@
       "failed": "\u5931\u6557",
       "cancelled": "\u30ad\u30e3\u30f3\u30bb\u30eb\u6e08\u307f",
       "paused": "\u4e00\u6642\u505c\u6b62",
-      "blocked": "\u30d6\u30ed\u30c3\u30af\u4e2d"
+      "blocked": "\u30d6\u30ed\u30c3\u30af\u4e2d",
+      "interrupted": "\u518d\u958b\u4e2d..."
     },
     "priority": {
       "label": "\u512a\u5148\u5ea6",

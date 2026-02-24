@@ -10,6 +10,10 @@ import * as fs from "fs";
 import * as path from "path";
 import { app } from "electron";
 import {
+  SecureSettingsRepository,
+  type SettingsCategory,
+} from "../database/SecureSettingsRepository";
+import {
   Plugin,
   PluginManifest,
   LoadedPlugin,
@@ -26,6 +30,8 @@ import {
 import { createToolFromConnector, validateConnector } from "./declarative-connector-loader";
 import { discoverPlugins, loadPlugin, getPluginDataPath, isPluginCompatible } from "./loader";
 import { ChannelAdapter, ChannelConfig } from "../gateway/channels/types";
+import { getUserDataDir } from "../utils/user-data-dir";
+import { getSafeStorage } from "../utils/safe-storage";
 
 // Package version (will be replaced at build time or read from package.json)
 const COWORK_VERSION = process.env.npm_package_version || "0.3.0";
@@ -48,14 +54,140 @@ export class PluginRegistry extends EventEmitter {
   /** Plugin configurations */
   private configs: Map<string, Record<string, unknown>> = new Map();
 
+  /** Track which plugin registered each skill ID (for conflict detection) */
+  private skillOwnership: Map<string, string> = new Map();
+
   /** Event handlers by plugin */
   private pluginEventHandlers: Map<string, Map<string, Set<(data: unknown) => void>>> = new Map();
 
   /** Whether the registry has been initialized */
   private initialized = false;
 
+  /** Persisted pack toggle states */
+  private packStates: Map<string, boolean> = new Map();
+
+  /** Persisted per-skill toggle states: Map<packName, Map<skillId, enabled>> */
+  private skillStates: Map<string, Map<string, boolean>> = new Map();
+
+  /** Path to the pack states file */
+  private get packStatesPath(): string {
+    return path.join(getUserDataDir(), "pack-states.json");
+  }
+
   private constructor() {
     super();
+    this.loadPackStates();
+  }
+
+  /**
+   * Load persisted pack toggle states from disk
+   */
+  private loadPackStates(): void {
+    try {
+      if (fs.existsSync(this.packStatesPath)) {
+        const data = JSON.parse(fs.readFileSync(this.packStatesPath, "utf-8"));
+        if (data && typeof data === "object") {
+          // Load pack states
+          const packs = data.packs || data;
+          for (const [name, enabled] of Object.entries(packs)) {
+            if (typeof enabled === "boolean") {
+              this.packStates.set(name, enabled);
+            }
+          }
+          // Load skill states
+          if (data.skills && typeof data.skills === "object") {
+            for (const [packName, skills] of Object.entries(data.skills)) {
+              if (skills && typeof skills === "object") {
+                const skillMap = new Map<string, boolean>();
+                for (const [skillId, enabled] of Object.entries(skills as Record<string, boolean>)) {
+                  if (typeof enabled === "boolean") {
+                    skillMap.set(skillId, enabled);
+                  }
+                }
+                if (skillMap.size > 0) {
+                  this.skillStates.set(packName, skillMap);
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch {
+      // Corrupted file, start fresh
+    }
+  }
+
+  /**
+   * Save pack toggle states to disk
+   */
+  savePackStates(): void {
+    try {
+      const dir = path.dirname(this.packStatesPath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      const packs: Record<string, boolean> = {};
+      for (const [name, enabled] of this.packStates) {
+        packs[name] = enabled;
+      }
+      const skills: Record<string, Record<string, boolean>> = {};
+      for (const [packName, skillMap] of this.skillStates) {
+        const entries: Record<string, boolean> = {};
+        for (const [skillId, enabled] of skillMap) {
+          entries[skillId] = enabled;
+        }
+        if (Object.keys(entries).length > 0) {
+          skills[packName] = entries;
+        }
+      }
+      fs.writeFileSync(
+        this.packStatesPath,
+        JSON.stringify({ packs, skills }, null, 2),
+        "utf-8",
+      );
+    } catch (error) {
+      console.warn("[PluginRegistry] Failed to save pack states:", error);
+    }
+  }
+
+  /**
+   * Set and persist a pack's enabled state
+   */
+  setPackEnabled(name: string, enabled: boolean): void {
+    this.packStates.set(name, enabled);
+    this.savePackStates();
+  }
+
+  /**
+   * Get the persisted enabled state for a pack (undefined if not set)
+   */
+  getPackEnabled(name: string): boolean | undefined {
+    return this.packStates.get(name);
+  }
+
+  /**
+   * Set and persist a skill's enabled state within a pack
+   */
+  setSkillEnabled(packName: string, skillId: string, enabled: boolean): void {
+    if (!this.skillStates.has(packName)) {
+      this.skillStates.set(packName, new Map());
+    }
+    this.skillStates.get(packName)!.set(skillId, enabled);
+    this.savePackStates();
+  }
+
+  /**
+   * Get the persisted enabled state for a skill (undefined if not set)
+   */
+  getSkillEnabled(packName: string, skillId: string): boolean | undefined {
+    return this.skillStates.get(packName)?.get(skillId);
+  }
+
+  /** Remove persisted state for a pack (used when a pack is fully uninstalled). */
+  purgePackState(name: string): void {
+    this.packStates.delete(name);
+    this.skillStates.delete(name);
+    this.savePackStates();
   }
 
   /**
@@ -152,7 +284,13 @@ export class PluginRegistry extends EventEmitter {
       // Handle composite declarative content (skills, agentRoles, connectors)
       await this.registerDeclarativeContent(loadedPlugin.manifest, pluginName);
 
-      loadedPlugin.state = "registered";
+      // Apply persisted pack toggle state
+      const savedState = this.packStates.get(pluginName);
+      if (savedState === false) {
+        loadedPlugin.state = "disabled";
+      } else {
+        loadedPlugin.state = "registered";
+      }
 
       this.emitPluginEvent("plugin:registered", pluginName);
       console.log(`Plugin ${pluginName} registered successfully`);
@@ -271,6 +409,20 @@ export class PluginRegistry extends EventEmitter {
         const { getCustomSkillLoader } = await import("../agent/custom-skill-loader");
         const loader = getCustomSkillLoader();
         for (const skill of manifest.skills) {
+          // Check for duplicate skill ID conflicts
+          const existingOwner = this.skillOwnership.get(skill.id);
+          if (existingOwner && existingOwner !== pluginName) {
+            console.warn(
+              `[PluginRegistry] Skill ID conflict: "${skill.id}" is defined by both "${existingOwner}" and "${pluginName}". The later registration will overwrite the earlier one.`,
+            );
+          }
+          this.skillOwnership.set(skill.id, pluginName);
+
+          // Apply persisted per-skill toggle state
+          const savedSkillState = this.skillStates.get(pluginName)?.get(skill.id);
+          if (savedSkillState !== undefined) {
+            skill.enabled = savedSkillState;
+          }
           skill.source = "managed" as const;
           skill.metadata = {
             ...skill.metadata,
@@ -329,23 +481,176 @@ export class PluginRegistry extends EventEmitter {
    * Create secure storage for a plugin
    */
   private createSecureStorage(pluginName: string): SecureStorage {
-    // Use a simple file-based storage for now
-    // In production, this should use the OS keychain
     const storagePath = path.join(getPluginDataPath(pluginName), ".secrets");
+    const safeStorage = getSafeStorage();
+    const repositoryCategory = `plugin:${pluginName}` as SettingsCategory;
 
-    const readSecrets = (): Record<string, string> => {
-      if (!fs.existsSync(storagePath)) {
+    type PluginSecretsMap = Record<string, string>;
+
+    const readFromRepository = (): PluginSecretsMap => {
+      if (!SecureSettingsRepository.isInitialized()) {
         return {};
       }
+
       try {
-        return JSON.parse(fs.readFileSync(storagePath, "utf-8"));
+        const repository = SecureSettingsRepository.getInstance();
+        const raw = repository.load<PluginSecretsMap>(repositoryCategory);
+        if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+          return {};
+        }
+
+        const secrets: PluginSecretsMap = {};
+        for (const [key, value] of Object.entries(raw)) {
+          if (typeof key === "string" && typeof value === "string") {
+            secrets[key] = value;
+          }
+        }
+        return secrets;
       } catch {
         return {};
       }
     };
 
+    interface StoredSecretsPayload {
+      v: 1;
+      encrypted: boolean;
+      data: string;
+    }
+
+    const parseSecretsMap = (value: unknown): Record<string, string> => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return {};
+      }
+
+      const next: Record<string, string> = {};
+      for (const [key, entry] of Object.entries(value)) {
+        if (typeof entry === "string") {
+          next[key] = entry;
+        }
+      }
+      return next;
+    };
+
+    const isRepositoryAvailable = (): boolean => {
+      return SecureSettingsRepository.isInitialized();
+    };
+
+    const readSecrets = (): Record<string, string> => {
+      if (isRepositoryAvailable()) {
+        const repositorySecrets = readFromRepository();
+        if (Object.keys(repositorySecrets).length > 0) {
+          return repositorySecrets;
+        }
+
+        const migrated = readFromFile();
+        if (Object.keys(migrated).length > 0) {
+          // Best-effort migration from legacy file format.
+          writeToRepository(migrated);
+          return migrated;
+        }
+      }
+
+      return readFromFile();
+    };
+
+    const readFromFile = (): Record<string, string> => {
+      if (!fs.existsSync(storagePath)) {
+        return {};
+      }
+
+      try {
+        const raw = fs.readFileSync(storagePath, "utf-8");
+        const parsed = JSON.parse(raw) as unknown;
+
+        if (
+          parsed &&
+          typeof parsed === "object" &&
+          !Array.isArray(parsed) &&
+          (parsed as Record<string, unknown>).v === 1 &&
+          typeof (parsed as Record<string, unknown>).encrypted === "boolean" &&
+          typeof (parsed as Record<string, unknown>).data === "string"
+        ) {
+          const envelope = parsed as StoredSecretsPayload;
+          const decoded = decodePayload(envelope.data, envelope.encrypted);
+          if (!decoded) {
+            return {};
+          }
+
+          const decodedPayload = JSON.parse(decoded) as unknown;
+          return parseSecretsMap(decodedPayload);
+        }
+
+        // Backward-compatible fallback for older plaintext format.
+        return parseSecretsMap(parsed);
+      } catch {
+        return {};
+      }
+    };
+
+    const writeToRepository = (secrets: PluginSecretsMap): boolean => {
+      try {
+        const repository = SecureSettingsRepository.getInstance();
+        repository.save(repositoryCategory, secrets);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    const decodePayload = (payload: string, encrypted: boolean): string | null => {
+      if (!encrypted) {
+        return payload;
+      }
+
+      if (!safeStorage) {
+        return null;
+      }
+
+      try {
+        return safeStorage.decryptString(Buffer.from(payload, "base64"));
+      } catch {
+        return null;
+      }
+    };
+
+    const writeToFile = (secrets: Record<string, string>): void => {
+      const raw = JSON.stringify(secrets);
+      let encrypted = false;
+      let data = raw;
+
+      if (safeStorage) {
+        try {
+          data = safeStorage.encryptString(raw).toString("base64");
+          encrypted = true;
+        } catch {
+          encrypted = false;
+          data = raw;
+        }
+      }
+
+      const dir = path.dirname(storagePath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFileSync(
+        storagePath,
+        JSON.stringify({
+          v: 1,
+          encrypted,
+          data,
+        } as StoredSecretsPayload),
+        { mode: 0o600 },
+      );
+    };
+
     const writeSecrets = (secrets: Record<string, string>): void => {
-      fs.writeFileSync(storagePath, JSON.stringify(secrets), { mode: 0o600 });
+      if (isRepositoryAvailable()) {
+        const persisted = writeToRepository(secrets);
+        if (persisted) {
+          return;
+        }
+      }
+      writeToFile(secrets);
     };
 
     return {
@@ -558,6 +863,13 @@ export class PluginRegistry extends EventEmitter {
         this.tools.delete(key);
       }
     }
+
+    // Remove skill ownership entries for this plugin
+    for (const [skillId, owner] of this.skillOwnership) {
+      if (owner === name) {
+        this.skillOwnership.delete(skillId);
+      }
+    }
   }
 
   /**
@@ -624,6 +936,7 @@ export class PluginRegistry extends EventEmitter {
     this.tools.clear();
     this.configs.clear();
     this.pluginEventHandlers.clear();
+    this.skillOwnership.clear();
     this.initialized = false;
 
     console.log("Plugin registry shutdown complete");

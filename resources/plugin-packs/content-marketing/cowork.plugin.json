@@ -6,6 +6,15 @@
   "type": "pack",
   "author": "CoWork-OSS",
   "keywords": ["content", "marketing", "seo", "social-media", "campaigns"],
+  "icon": "📣",
+  "category": "Marketing",
+  "tryAsking": [
+    "Draft a blog post about our new product launch",
+    "Create social media posts for this announcement across all platforms",
+    "Build a campaign plan for Q3 product awareness",
+    "Optimize this page content for SEO",
+    "What content should we create to target enterprise buyers?"
+  ],
   "skills": [
     {
       "id": "marketing-blog-post",

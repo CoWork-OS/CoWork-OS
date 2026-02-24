@@ -256,6 +256,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
 | [Knowledge Graph](docs/knowledge-graph.md) | Structured entity/relationship memory |
 | [Mission Control](docs/mission-control.md) | Agent orchestration dashboard |
 | [Digital Twins](docs/digital-twins.md) | Role-based AI twin personas and cognitive offload |
+| [Digital Twins Guide](docs/digital-twin-personas-guide.md) | Comprehensive guide with scenarios and expanded job areas |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
 | [Uninstall](docs/uninstall.md) | Uninstall instructions |
 

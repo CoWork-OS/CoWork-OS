@@ -316,6 +316,12 @@ Agent Executor → Skills → Results in Mission Control
 
 ---
 
+## Further Reading
+
+For detailed persona descriptions, day-in-the-life scenarios, and expanded coverage of other job areas (design, security, sales, HR, finance, legal, marketing, R&D, executive leadership, and more), see the [Digital Twin Personas Comprehensive Guide](digital-twin-personas-guide.md).
+
+---
+
 ## Quick Reference
 
 | Action | How |

@@ -160,6 +160,8 @@ export class ProactiveSuggestionsService {
   private static dismissedIds: Set<string> = new Set();
   private static actedOnIds: Set<string> = new Set();
   private static loaded = false;
+  /** Tracks titles generated within the current generateAll() cycle for cross-generator dedup */
+  private static pendingTitles: Set<string> = new Set();
 
   // ─── Persistence Helpers ────────────────────────────────────────
 
@@ -272,27 +274,29 @@ export class ProactiveSuggestionsService {
   /**
    * Run all suggestion generators. Called from DailyBriefingService.
    */
-  static generateAll(workspaceId: string): void {
+  static async generateAll(workspaceId: string): Promise<void> {
+    this.pendingTitles.clear();
     try {
-      this.detectRecurringPatterns(workspaceId);
+      await this.detectRecurringPatterns(workspaceId);
     } catch {
       /* best-effort */
     }
     try {
-      this.generateGoalAlignedSuggestions(workspaceId);
+      await this.generateGoalAlignedSuggestions(workspaceId);
     } catch {
       /* best-effort */
     }
     try {
-      this.generateKnowledgeInsights(workspaceId);
+      await this.generateKnowledgeInsights(workspaceId);
     } catch {
       /* best-effort */
     }
     try {
-      this.generateReversePrompts(workspaceId);
+      await this.generateReversePrompts(workspaceId);
     } catch {
       /* best-effort */
     }
+    this.pendingTitles.clear();
     try {
       this.pruneExpired(workspaceId);
     } catch {
@@ -303,14 +307,14 @@ export class ProactiveSuggestionsService {
   /**
    * Generate follow-up suggestions after a successful task completion.
    */
-  static generateFollowUpSuggestions(
+  static async generateFollowUpSuggestions(
     workspaceId: string,
     taskId: string,
     taskTitle: string,
     taskPrompt: string,
-    toolsUsed: string[],
-    resultSummary: string,
-  ): void {
+    _toolsUsed: string[],
+    _resultSummary: string,
+  ): Promise<void> {
     const category = this.detectTaskCategory(taskTitle, taskPrompt);
     if (!category) return;
 
@@ -321,7 +325,7 @@ export class ProactiveSuggestionsService {
     for (const tmpl of templates) {
       if (this.isDuplicate(workspaceId, tmpl.title)) continue;
 
-      this.storeSuggestion(workspaceId, {
+      await this.storeSuggestion(workspaceId, {
         type: "follow_up",
         title: tmpl.title,
         description: tmpl.description,
@@ -336,7 +340,7 @@ export class ProactiveSuggestionsService {
   /**
    * Detect recurring task patterns from playbook entries.
    */
-  static detectRecurringPatterns(workspaceId: string): void {
+  static async detectRecurringPatterns(workspaceId: string): Promise<void> {
     const results = MemoryService.search(workspaceId, "[PLAYBOOK] Task succeeded", 50);
     const playbookEntries = results
       .filter((r) => r.type === "insight" && r.snippet.includes("[PLAYBOOK]"))
@@ -365,7 +369,7 @@ export class ProactiveSuggestionsService {
       const title = `Automate "${representativeTitle}"`.slice(0, 80);
       if (this.isDuplicate(workspaceId, title)) continue;
 
-      this.storeSuggestion(workspaceId, {
+      await this.storeSuggestion(workspaceId, {
         type: "recurring_pattern",
         title,
         description: `You've done this ${group.count} times. I can create an automated workflow.`,
@@ -378,7 +382,7 @@ export class ProactiveSuggestionsService {
   /**
    * Generate goal-aligned suggestions from user profile.
    */
-  static generateGoalAlignedSuggestions(workspaceId: string): void {
+  static async generateGoalAlignedSuggestions(workspaceId: string): Promise<void> {
     const profile = UserProfileService.getProfile();
     const goals = profile.facts.filter((f) => f.category === "goal").slice(0, 5);
 
@@ -391,7 +395,7 @@ export class ProactiveSuggestionsService {
       const title = matched.title(goalValue).slice(0, 80);
       if (this.isDuplicate(workspaceId, title)) continue;
 
-      this.storeSuggestion(workspaceId, {
+      await this.storeSuggestion(workspaceId, {
         type: "goal_aligned",
         title,
         description: `Your goal: "${goalValue}"`.slice(0, 250),
@@ -405,7 +409,7 @@ export class ProactiveSuggestionsService {
    * Generate insight suggestions from knowledge graph entities
    * that have actionable observations.
    */
-  static generateKnowledgeInsights(workspaceId: string): void {
+  static async generateKnowledgeInsights(workspaceId: string): Promise<void> {
     if (!KnowledgeGraphService.isInitialized()) return;
 
     const problemQueries = ["error performance issue", "latency slow", "security deprecated"];
@@ -428,7 +432,7 @@ export class ProactiveSuggestionsService {
         if (this.isDuplicate(workspaceId, title)) continue;
 
         const obsPreview = actionableObs[0].content?.slice(0, 100) || "";
-        this.storeSuggestion(workspaceId, {
+        await this.storeSuggestion(workspaceId, {
           type: "insight",
           title,
           description: `${actionableObs.length} observation(s) flagged: "${obsPreview}"`.slice(
@@ -446,7 +450,7 @@ export class ProactiveSuggestionsService {
   /**
    * Generate reverse prompts — capability surfacing based on user context.
    */
-  static generateReversePrompts(workspaceId: string): void {
+  static async generateReversePrompts(workspaceId: string): Promise<void> {
     const profile = UserProfileService.getProfile();
     const ctx: ReversePromptContext = {
       hasWorkContext: profile.facts.some((f) => f.category === "work"),
@@ -469,7 +473,7 @@ export class ProactiveSuggestionsService {
       if (!rp.condition(ctx)) continue;
       if (this.isDuplicate(workspaceId, rp.title)) continue;
 
-      this.storeSuggestion(workspaceId, {
+      await this.storeSuggestion(workspaceId, {
         type: "reverse_prompt",
         title: rp.title,
         description: rp.description,
@@ -481,7 +485,7 @@ export class ProactiveSuggestionsService {
 
   // ─── Storage Helpers ────────────────────────────────────────────
 
-  private static storeSuggestion(
+  private static async storeSuggestion(
     workspaceId: string,
     suggestion: {
       type: SuggestionType;
@@ -492,7 +496,7 @@ export class ProactiveSuggestionsService {
       sourceEntity?: string;
       confidence: number;
     },
-  ): void {
+  ): Promise<void> {
     // Enforce max active count
     const active = this.listActive(workspaceId);
     if (active.length >= MAX_ACTIVE_SUGGESTIONS) {
@@ -506,7 +510,6 @@ export class ProactiveSuggestionsService {
     }
 
     const id = uuidv4();
-    const now = Date.now();
     const payload: Record<string, unknown> = {
       id,
       type: suggestion.type,
@@ -520,9 +523,14 @@ export class ProactiveSuggestionsService {
 
     const content = `${SUGGESTION_MARKER} ${JSON.stringify(payload)}`;
 
-    MemoryService.capture(workspaceId, undefined, "insight", content).catch(() => {
+    // Track title as pending so same-cycle generators can dedup
+    this.pendingTitles.add(suggestion.title.toLowerCase().trim().slice(0, 60));
+
+    try {
+      await MemoryService.capture(workspaceId, undefined, "insight", content);
+    } catch {
       /* best-effort */
-    });
+    }
   }
 
   private static parseSuggestion(
@@ -557,6 +565,9 @@ export class ProactiveSuggestionsService {
 
   private static isDuplicate(workspaceId: string, title: string): boolean {
     const normalizedNew = title.toLowerCase().trim().slice(0, 60);
+    // Check in-memory pending titles from current generation cycle
+    if (this.pendingTitles.has(normalizedNew)) return true;
+    // Check already-persisted suggestions
     const active = this.listActive(workspaceId);
     return active.some((s) => s.title.toLowerCase().trim().slice(0, 60) === normalizedNew);
   }

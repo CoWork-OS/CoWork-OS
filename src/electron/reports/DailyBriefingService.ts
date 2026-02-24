@@ -56,7 +56,7 @@ export class DailyBriefingService {
     let proactiveSuggestions: string[] = [];
     try {
       const { ProactiveSuggestionsService } = await import("../agent/ProactiveSuggestionsService");
-      ProactiveSuggestionsService.generateAll(workspaceId);
+      await ProactiveSuggestionsService.generateAll(workspaceId);
       const topSuggestions = ProactiveSuggestionsService.getTopForBriefing(workspaceId, 3);
       proactiveSuggestions = topSuggestions.map((s) => s.title);
     } catch {

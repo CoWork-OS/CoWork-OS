@@ -1599,6 +1599,10 @@ export function App() {
           onShowOnboarding={handleShowOnboarding}
           onboardingCompletedAt={onboardingCompletedAt}
           workspaceId={currentWorkspace?.id}
+          onCreateTask={(title, prompt) => {
+            setCurrentView("main");
+            handleCreateTask(title, prompt);
+          }}
         />
       )}
       {currentView === "browser" && (

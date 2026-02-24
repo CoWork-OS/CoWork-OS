@@ -13,7 +13,7 @@ interface Suggestion {
 
 interface SuggestionsPanelProps {
   workspaceId?: string;
-  onCreateTask?: (prompt: string, title: string) => void;
+  onCreateTask?: (title: string, prompt: string) => void;
 }
 
 const TYPE_LABELS: Record<string, string> = {
@@ -80,7 +80,7 @@ export function SuggestionsPanel({ workspaceId, onCreateTask }: SuggestionsPanel
     try {
       const result = await window.electronAPI.actOnSuggestion(workspaceId, suggestion.id);
       if (result.actionPrompt && onCreateTask) {
-        onCreateTask(result.actionPrompt, suggestion.title);
+        onCreateTask(suggestion.title, result.actionPrompt);
       }
       setSuggestions((prev) => prev.filter((s) => s.id !== suggestion.id));
     } catch {

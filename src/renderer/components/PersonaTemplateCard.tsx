@@ -96,9 +96,7 @@ export function PersonaTemplateCard({ template, onActivate }: PersonaTemplateCar
             {CAPABILITY_LABELS[cap] || cap}
           </span>
         ))}
-        {capabilities.length > 4 && (
-          <span className="pt-tag">+{capabilities.length - 4}</span>
-        )}
+        {capabilities.length > 4 && <span className="pt-tag">+{capabilities.length - 4}</span>}
       </div>
 
       <div className="pt-card-footer">

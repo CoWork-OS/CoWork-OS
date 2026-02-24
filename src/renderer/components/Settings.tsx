@@ -126,6 +126,7 @@ interface SettingsProps {
   onShowOnboarding?: () => void;
   onboardingCompletedAt?: string;
   workspaceId?: string;
+  onCreateTask?: (title: string, prompt: string) => void;
 }
 
 interface ModelOption {
@@ -1434,6 +1435,7 @@ export function Settings({
   onShowOnboarding,
   onboardingCompletedAt,
   workspaceId,
+  onCreateTask,
 }: SettingsProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
   const [activeSecondaryChannel, setActiveSecondaryChannel] = useState<SecondaryChannel>("discord");
@@ -2657,7 +2659,7 @@ export function Settings({
             ) : activeTab === "insights" ? (
               <UsageInsightsPanel workspaceId={workspaceId} />
             ) : activeTab === "suggestions" ? (
-              <SuggestionsPanel workspaceId={workspaceId} />
+              <SuggestionsPanel workspaceId={workspaceId} onCreateTask={onCreateTask} />
             ) : loading ? (
               <div className="settings-loading">Loading settings...</div>
             ) : (

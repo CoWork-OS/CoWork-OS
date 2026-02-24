@@ -84,6 +84,53 @@ Access from **Mission Control** > **Add Digital Twin**. See [Digital Twins](digi
 
 ---
 
+## Plugin Packs & Customize
+
+Role-specific bundles that group skills, agent roles, connectors, and slash commands into installable packs. Each pack targets a job function and can optionally link to a Digital Twin Persona for proactive background work.
+
+- **10 bundled packs**: Engineering, Engineering Management, Product Management, DevOps, Data Analysis, QA & Testing, Sales CRM, Customer Support, Content & Marketing, Technical Writing
+- **35+ built-in skills**: Code review prep, sprint health, feature triage, incident response, prospect research, and more
+- **Unified Customize panel**: Browse, enable/disable packs, view skills/commands/agents, click "Try asking" prompts
+- **Search & filter**: Real-time sidebar search across pack names, descriptions, categories, and skill names
+- **Per-skill toggles**: Enable or disable individual skills within a pack without toggling the entire pack
+- **Persistent state**: Pack and skill toggle states survive app restarts (stored in `pack-states.json`)
+- **Digital Twin integration**: 7 packs link to persona templates for proactive heartbeat-driven automation
+- **Recommended connectors**: Packs display clickable connector chips that navigate to connector settings
+- **Update detection**: Background check against the remote registry with orange dot indicators on packs with newer versions
+- **"Try asking" in chat**: Empty chat state shows randomized prompt suggestions from enabled packs for one-click task creation
+- **Plugin Store**: In-app marketplace for discovering, installing, and creating packs (from Git repos, URLs, or scaffold)
+- **Remote Pack Registry**: Community-contributed packs catalog with search and category filtering
+- **Extensible**: Create custom packs with JSON manifests in `~/.cowork/extensions/`
+- **Context Panel**: See active connectors and skills at a glance
+- **Skill conflict detection**: Warns when multiple packs register the same skill ID, preventing silent overwrites
+- **Admin Policies**: Organization-level controls for allowed/blocked/required packs, installation permissions, and agent limits
+
+Access from **Settings** > **Customize**. See [Plugin Packs](plugin-packs.md) for full documentation.
+
+---
+
+## Admin Policies (Enterprise)
+
+Organization-level policy controls for managing plugin packs, connectors, and agents across teams.
+
+| Policy Area | Capabilities |
+|-------------|-------------|
+| **Pack policies** | Allow, block, or require specific packs by ID. Whitelist mode restricts to approved packs only. |
+| **Connector policies** | Block specific MCP connectors |
+| **Agent policies** | Set max heartbeat frequency (min 60s) and max concurrent agents per workspace |
+| **Installation controls** | Toggle custom pack creation, Git-based install, URL-based install |
+| **Organization directory** | Distribute admin-managed packs from a shared directory to all users |
+
+**Policy enforcement:**
+- Blocked packs appear disabled in the Customize panel and cannot be enabled
+- Required packs cannot be disabled by users
+- Installation policies block scaffold, Git install, and URL install at the handler level
+- Organization packs load from a configurable shared directory
+
+Access from **Settings** > **Admin Policies** (Power density mode). See [Admin Policies](admin-policies.md) for full documentation.
+
+---
+
 ## Voice Mode
 
 Talk to your AI assistant with voice input and audio responses.
@@ -332,8 +379,9 @@ Dashboard showing task activity, cost trends, and productivity patterns.
 | **Activity by Day** | Tasks per day-of-week with peak day indicator |
 | **Activity by Hour** | Hourly task histogram with peak hour indicator |
 | **Top Skills** | Most-used skills ranked by usage count |
+| **Skill Usage by Pack** | Skills grouped by their parent plugin pack with aggregated usage counts and mini bar charts |
 
-Supports 7, 14, and 30-day period selection. Access from **Settings** > **Usage Insights**.
+Supports 7, 14, and 30-day period selection. Per-pack analytics cross-reference skill usage with plugin pack membership, showing which packs drive the most value. Access from **Settings** > **Usage Insights**.
 
 ---
 

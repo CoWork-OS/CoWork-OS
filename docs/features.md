@@ -101,7 +101,7 @@ Role-specific bundles that group skills, agent roles, connectors, and slash comm
 - **Plugin Store**: In-app marketplace for discovering, installing, and creating packs (from Git repos, URLs, or scaffold)
 - **Remote Pack Registry**: Community-contributed packs catalog with search and category filtering
 - **Extensible**: Create custom packs with JSON manifests in `~/.cowork/extensions/`
-- **Context Panel**: See active connectors and skills at a glance
+- **Active Context sidebar**: Always-visible right-panel section showing connected MCP connectors with branded Lucide icons (36 known services mapped) and enabled skills, with scrollable sub-sections and 30-second auto-refresh
 - **Skill conflict detection**: Warns when multiple packs register the same skill ID, preventing silent overwrites
 - **Admin Policies**: Organization-level controls for allowed/blocked/required packs, installation permissions, and agent limits
 

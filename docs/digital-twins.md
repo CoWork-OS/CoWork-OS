@@ -4,7 +4,7 @@ Digital Twin Personas are pre-built AI agent templates that create role-specific
 
 A persona template bundles everything needed: agent role configuration, proactive heartbeat-driven tasks, recommended skills, a deep system prompt, and cognitive offload categories. Activating a template creates a fully configured agent in one click.
 
-Access from **Mission Control** > **Add Digital Twin**.
+Access from **Mission Control** > **Add Digital Twin**. Digital twins can also be activated through [Plugin Packs](plugin-packs.md) — 7 of the 10 bundled packs link directly to a persona template.
 
 ---
 
@@ -313,6 +313,28 @@ Agent Executor → Skills → Results in Mission Control
 - Loads JSON from `resources/persona-templates/` (dev: `process.cwd()`, prod: `process.resourcesPath`)
 - No new database tables — templates instantiate into existing AgentRole records
 - Skills are referenced by ID, not embedded — missing skills produce warnings, not errors
+
+---
+
+## Plugin Pack Integration
+
+Digital twins are deeply integrated with the [Plugin Pack](plugin-packs.md) system. Seven of the ten bundled packs link directly to a persona template, and packs can be installed, managed, and distributed through the Plugin Store.
+
+### Plugin Store
+
+The in-app **Plugin Store** (accessible via the "+" button in the Customize panel) provides:
+- **Browse & install** packs from the remote registry that include linked digital twins
+- **Install from Git** — clone a community pack that bundles a twin configuration
+- **Create new packs** — scaffold a custom pack that links to any existing persona template
+
+### Admin Policies
+
+Organization admins can control twin-related packs via [Admin Policies](admin-policies.md):
+- **Require** specific packs (e.g., ensure all engineers have the Engineering pack with its Software Engineer twin)
+- **Block** packs that aren't approved for the organization
+- **Limit agent resources** — cap heartbeat frequency and concurrent agents
+
+See [Plugin Packs](plugin-packs.md) and [Admin Policies](admin-policies.md) for details.
 
 ---
 

@@ -1,0 +1,68 @@
+{
+  "name": "technical-writing-pack",
+  "displayName": "Technical Writing",
+  "version": "1.0.0",
+  "description": "Documentation freshness auditing, API changelog generation, style guide compliance, and content creation for technical writers.",
+  "type": "pack",
+  "author": "CoWork-OSS",
+  "keywords": ["docs", "documentation", "technical-writing", "api-docs", "changelog"],
+  "icon": "📚",
+  "category": "Operations",
+  "personaTemplateId": "technical-writer",
+  "tryAsking": [
+    "Which docs are stale after this week's code changes?",
+    "Draft a changelog from this sprint's PRs",
+    "Review this doc for style guide compliance",
+    "Write API reference documentation for this endpoint",
+    "Create a getting-started guide for new developers"
+  ],
+  "skills": [
+    {
+      "id": "tw-doc-audit",
+      "name": "Documentation Audit",
+      "description": "Audit documentation for staleness, broken links, and accuracy",
+      "icon": "🔍",
+      "category": "Documentation",
+      "prompt": "Audit the following documentation.\n\nDocs content or file list:\n{{docs}}\n\nCheck for:\n1. Stale content (references to removed features or old APIs)\n2. Broken internal links\n3. Outdated code examples\n4. Missing sections (installation, configuration, troubleshooting)\n5. Inconsistent terminology\n6. Accuracy against current codebase\n\nPrioritize findings by user impact.",
+      "parameters": [
+        { "name": "docs", "type": "string", "description": "Documentation content or file paths to audit", "required": true }
+      ],
+      "enabled": true
+    },
+    {
+      "id": "tw-changelog",
+      "name": "Changelog Generator",
+      "description": "Generate a changelog from recent commits and pull requests",
+      "icon": "📝",
+      "category": "Documentation",
+      "prompt": "Generate a changelog from the following changes.\n\nChanges:\n{{changes}}\n\nFormat using Keep a Changelog (https://keepachangelog.com):\n- Added: new features\n- Changed: modifications to existing features\n- Deprecated: features to be removed\n- Removed: features that were removed\n- Fixed: bug fixes\n- Security: vulnerability fixes\n\nWrite from the user's perspective, not the developer's.",
+      "parameters": [
+        { "name": "changes", "type": "string", "description": "Commits, PRs, or release notes to convert", "required": true }
+      ],
+      "enabled": true
+    },
+    {
+      "id": "tw-api-docs",
+      "name": "API Reference Writer",
+      "description": "Generate API reference documentation from code or endpoint definitions",
+      "icon": "📖",
+      "category": "Documentation",
+      "prompt": "Write API reference documentation.\n\nAPI details:\n{{api}}\n\nFor each endpoint provide:\n1. HTTP method and path\n2. Description\n3. Authentication requirements\n4. Request parameters (path, query, body) with types\n5. Response schema with examples\n6. Error codes and meanings\n7. Rate limits\n8. Code examples (curl, JavaScript, Python)",
+      "parameters": [
+        { "name": "api", "type": "string", "description": "API code, route definitions, or endpoint descriptions", "required": true }
+      ],
+      "enabled": true
+    }
+  ],
+  "agentRoles": [
+    {
+      "name": "tw-assistant",
+      "displayName": "Technical Writer Assistant",
+      "description": "Assists technical writers with documentation auditing, changelog generation, and API reference writing",
+      "icon": "📚",
+      "color": "#f97316",
+      "capabilities": ["document", "analyze", "write", "review"],
+      "systemPrompt": "You are a Technical Writing Assistant. You help technical writers audit documentation, generate changelogs, write API references, and maintain style consistency. You prioritize clarity, accuracy, and user-friendliness."
+    }
+  ]
+}

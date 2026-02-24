@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { Download, CheckCircle, XCircle } from "lucide-react";
 
 interface VersionInfo {
   version: string;
@@ -159,16 +160,7 @@ export function UpdateSettings() {
             {updateInfo.available ? (
               <>
                 <div className="update-header">
-                  <svg
-                    width="20"
-                    height="20"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  >
-                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" />
-                  </svg>
+                  <Download size={20} strokeWidth={2} />
                   <span>Update Available!</span>
                 </div>
                 <div className="update-versions">
@@ -213,17 +205,7 @@ export function UpdateSettings() {
               </>
             ) : (
               <div className="update-header up-to-date">
-                <svg
-                  width="20"
-                  height="20"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <path d="M22 11.08V12a10 10 0 11-5.93-9.14" />
-                  <path d="M22 4L12 14.01l-3-3" />
-                </svg>
+                <CheckCircle size={20} strokeWidth={2} />
                 <span>You're up to date!</span>
               </div>
             )}
@@ -243,18 +225,7 @@ export function UpdateSettings() {
 
         {error && (
           <div className="update-error">
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <circle cx="12" cy="12" r="10" />
-              <line x1="15" y1="9" x2="9" y2="15" />
-              <line x1="9" y1="9" x2="15" y2="15" />
-            </svg>
+            <XCircle size={16} strokeWidth={2} />
             {error}
           </div>
         )}

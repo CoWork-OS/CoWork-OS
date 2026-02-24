@@ -11,7 +11,8 @@ import {
   Microscope, Network, Image, Database, AudioLines, Map, Rocket,
   Hammer, Bike, Bot, Egg, Brain, Puzzle, FlaskConical, Compass,
   Magnet, Layers, Eraser, Receipt, CircleDot, Cherry,
-  XCircle, AlertTriangle, Info,
+  XCircle, AlertTriangle, Info, Target, Shield, Laptop, Key,
+  Flame, Heart, Star, Siren, Bell, Clipboard, Flag,
   type LucideProps,
 } from "lucide-react";
 
@@ -22,25 +23,43 @@ export const EMOJI_ICON_MAP: Record<string, ComponentType<LucideProps>> = {
   "✅": CheckSquare, "✍️": PenLine, "✏️": Pencil, "✨": Sparkles,
   "🌊": Waves, "🌐": Globe, "🌤️": CloudSun, "🎙️": Mic,
   "🎛️": SlidersHorizontal, "🎞️": Film, "🎨": Palette, "🎮": Gamepad2,
-  "🎵": Music, "🏗️": Building2, "🏠": Home, "🏷️": Tag,
+  "🎯": Target, "🎵": Music, "🏗️": Building2, "🏠": Home, "🏷️": Tag,
   "🐙": Github, "🐛": Bug, "🐦": Bird, "🐻": PawPrint,
   "👀": Eye, "👁️": Eye, "👨‍👩‍👧‍👦": Users, "💎": Gem,
   "💡": Lightbulb, "💬": MessageCircle, "💰": DollarSign, "💳": CreditCard,
-  "📄": FileText, "📅": Calendar, "📇": BookUser, "📈": TrendingUp,
+  "💻": Laptop, "📄": FileText, "📅": Calendar, "📇": BookUser, "📈": TrendingUp,
   "📊": BarChart3, "📋": ClipboardList, "📌": Pin, "📍": MapPin,
   "📖": BookOpen, "📚": Library, "📜": ScrollText, "📝": FileEdit,
   "📞": Phone, "📣": Megaphone, "📥": Inbox, "📦": Package,
   "📧": Mail, "📨": Mail, "📰": Newspaper, "📱": Smartphone,
   "📸": Camera, "📺": Tv, "🔄": ArrowLeftRight, "🔊": Volume2,
-  "🔍": Search, "🔎": Search, "🔐": KeyRound, "🔒": Lock,
-  "🔧": Wrench, "🔬": Microscope, "🕸️": Network, "🖼️": Image,
+  "🔍": Search, "🔎": Search, "🔐": KeyRound, "🔑": Key, "🔒": Lock,
+  "🔥": Flame, "🔧": Wrench, "🔬": Microscope, "🕸️": Network, "🖼️": Image,
   "🗄️": Database, "🗣️": AudioLines, "🗺️": Map, "🚀": Rocket,
-  "🛠️": Hammer, "🛵": Bike, "🤖": Bot, "🥡": Egg,
+  "🚨": Siren, "🛠️": Hammer, "🛡️": Shield, "🛵": Bike,
+  "🤖": Bot, "🥡": Egg,
   "🧠": Brain, "🧩": Puzzle, "🧪": FlaskConical, "🧭": Compass,
   "🧲": Magnet, "🧵": Layers, "🧹": Eraser, "🧾": Receipt,
   "🧿": CircleDot, "🫐": Cherry,
-  // Heading-specific additions
-  "❌": XCircle,
+  "❌": XCircle, "❤️": Heart, "⭐": Star,
   "⚠️": AlertTriangle, "⚠": AlertTriangle,
   "ℹ️": Info, "ℹ": Info,
+  "🔔": Bell, "📎": Clipboard, "🏁": Flag,
 };
+
+/**
+ * Variation-selector-tolerant emoji lookup.
+ * Handles mismatches where the map key has a VS16 (U+FE0F) but the input
+ * doesn't, or vice versa, by building a normalized index at module load.
+ */
+const VS_REGEX = /[\uFE0E\uFE0F]/g;
+const NORMALIZED: Record<string, ComponentType<LucideProps>> = {};
+for (const [key, value] of Object.entries(EMOJI_ICON_MAP)) {
+  NORMALIZED[key] = value;
+  const stripped = key.replace(VS_REGEX, "");
+  if (stripped !== key) NORMALIZED[stripped] = value;
+}
+
+export function getEmojiIcon(emoji: string): ComponentType<LucideProps> | undefined {
+  return NORMALIZED[emoji] || NORMALIZED[emoji.replace(VS_REGEX, "")];
+}

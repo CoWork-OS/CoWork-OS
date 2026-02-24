@@ -37,6 +37,7 @@
 - **100+ built-in skills** — Documents, code review, web search, image generation, cloud integrations, and more.
 - **Digital Twin Personas** — Pre-built AI twins for every role (engineer, manager, PM, director). Each twin absorbs cognitively draining work — PR triage, meeting prep, status reports, dependency tracking — so the human stays in flow.
 - **Plugin Platform** — 10 bundled role-specific packs with 35+ skills, in-app Plugin Store for installing community packs, remote registry, and enterprise admin policies for organization-wide control.
+- **Active Context sidebar** — Always-visible panel showing connected MCP connectors with branded Lucide icons and enabled skills, auto-refreshed every 30 seconds.
 - **Agent teams** — Multi-agent collaboration with shared checklists, collaborative mode, multi-LLM synthesis, and persistent teams.
 - **Think With Me mode** — Socratic brainstorming that helps you clarify thinking without executing actions.
 - **Build Mode** — Go from idea to working prototype with a phased canvas workflow (Concept → Plan → Scaffold → Iterate) and named checkpoints.
@@ -125,6 +126,10 @@ Advanced web scraping powered by [Scrapling](https://github.com/D4Vinci/Scraplin
 - **Developer Tools**: Claude Code-style `glob`/`grep`/`edit_file`, Playwright browser automation, MCP client/host/registry
 
 [Learn more](docs/features.md)
+
+### Active Context Sidebar
+
+Real-time overview of your active integrations, always visible in the right panel. Shows connected MCP connectors with branded Lucide icons (HubSpot, Salesforce, Slack, GitHub, Postgres, and 30+ more) and green status dots, plus enabled skills from active packs. Each section shows 4 items with internal scrolling for more. Auto-refreshes every 30 seconds. [Learn more](docs/plugin-packs.md#context-panel)
 
 ### Usage Insights
 

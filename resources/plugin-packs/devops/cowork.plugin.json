@@ -6,6 +6,16 @@
   "type": "pack",
   "author": "CoWork-OSS",
   "keywords": ["devops", "deployment", "monitoring", "incident-response", "infrastructure"],
+  "icon": "⚙️",
+  "category": "Engineering",
+  "personaTemplateId": "devops-sre-engineer",
+  "tryAsking": [
+    "Create an incident response plan for this production issue",
+    "Generate a deployment checklist for the release",
+    "Design monitoring and alerting for the payment service",
+    "Write a blameless post-mortem for yesterday's outage",
+    "What's our SLA compliance looking like this month?"
+  ],
   "skills": [
     {
       "id": "devops-incident-response",

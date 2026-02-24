@@ -43,6 +43,17 @@ const getDefaultExtensionsDirs = (): string[] => {
     dirs.push(pluginPacksDir);
   }
 
+  // Organization plugin packs directory (admin-managed)
+  try {
+    const { getOrgPluginDir } = require("../admin/policies");
+    const orgDir = getOrgPluginDir();
+    if (orgDir && fs.existsSync(orgDir)) {
+      dirs.push(orgDir);
+    }
+  } catch {
+    // Admin policies module not available
+  }
+
   // User extensions directory
   const userDataPath = app?.getPath?.("userData") || path.join(process.env.HOME || "", ".cowork");
   const userExtensionsDir = path.join(userDataPath, "extensions");

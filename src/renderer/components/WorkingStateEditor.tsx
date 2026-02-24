@@ -248,7 +248,7 @@ export function WorkingStateEditor({ state, onSave, onCancel }: WorkingStateEdit
           }
 
           .file-refs-input {
-            font-family: monospace;
+            font-family: var(--font-mono);
             font-size: 12px !important;
           }
 

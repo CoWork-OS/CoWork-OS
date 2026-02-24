@@ -859,6 +859,7 @@ export class AgentDaemon extends EventEmitter {
     agentConfig?: AgentConfig;
     budgetTokens?: number;
     budgetCost?: number;
+    source?: Task["source"];
   }): Promise<Task> {
     const derived = this.deriveTaskStrategy({
       title: params.title,
@@ -873,6 +874,7 @@ export class AgentDaemon extends EventEmitter {
       agentConfig: derived.agentConfig,
       budgetTokens: params.budgetTokens,
       budgetCost: params.budgetCost,
+      ...(params.source ? { source: params.source } : {}),
     });
     this.logEvent(task.id, "log", {
       message: `Intent routed: ${derived.route.intent} (${derived.strategy.conversationMode})`,

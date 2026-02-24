@@ -61,7 +61,7 @@ export function QueueSettings() {
               type="range"
               className="settings-slider"
               min={1}
-              max={10}
+              max={20}
               value={settings.maxConcurrentTasks}
               onChange={(e) =>
                 setSettings({ ...settings, maxConcurrentTasks: parseInt(e.target.value) })
@@ -72,7 +72,7 @@ export function QueueSettings() {
         </div>
 
         <p className="settings-hint">
-          Default: 3. Tasks beyond this limit will be queued and start automatically when a slot
+          Default: 8. Tasks beyond this limit will be queued and start automatically when a slot
           becomes available.
         </p>
       </div>

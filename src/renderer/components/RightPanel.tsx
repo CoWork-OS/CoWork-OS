@@ -10,7 +10,7 @@ import {
   Palette, Shield, Zap, Search, Plug, PenLine, Flame, Bell,
   type LucideProps,
 } from "lucide-react";
-import { EMOJI_ICON_MAP } from "../utils/emoji-icon-map";
+import { getEmojiIcon } from "../utils/emoji-icon-map";
 
 /**
  * Map connector name patterns to Lucide icon components.
@@ -62,12 +62,12 @@ function resolveConnectorLucideIcon(name: string, emoji: string): ComponentType<
   for (const [key, Icon] of Object.entries(CONNECTOR_LUCIDE_MAP)) {
     if (lower.includes(key)) return Icon;
   }
-  return EMOJI_ICON_MAP[emoji] || Plug;
+  return getEmojiIcon(emoji) || Plug;
 }
 
 /** Resolve a Lucide icon component for a skill from its emoji, falling back to Zap. */
 function resolveSkillLucideIcon(emoji: string): ComponentType<LucideProps> {
-  return EMOJI_ICON_MAP[emoji] || Zap;
+  return getEmojiIcon(emoji) || Zap;
 }
 
 // Clickable file path component - opens file viewer on click, shows in Finder on right-click
@@ -580,22 +580,22 @@ export function RightPanel({
         </div>
       )}
 
-      {/* Working Folder Section */}
-      <div className="right-panel-section cli-section">
-        <div className="cli-section-header" onClick={() => toggleSection("folder")}>
-          <span className="cli-section-prompt">&gt;</span>
-          <span className="cli-section-title">
-            <span className="terminal-only">{agentContext.getUiCopy("rightFilesTitle")}</span>
-            <span className="modern-only">Files</span>
-          </span>
-          <span className="cli-section-toggle">
-            <span className="terminal-only">{expandedSections.folder ? "[-]" : "[+]"}</span>
-            <span className="modern-only">{expandedSections.folder ? "−" : "+"}</span>
-          </span>
-        </div>
-        {expandedSections.folder && (
-          <div className="cli-section-content">
-            {files.length > 0 ? (
+      {/* Working Folder Section — only shown when files were touched */}
+      {files.length > 0 && (
+        <div className="right-panel-section cli-section">
+          <div className="cli-section-header" onClick={() => toggleSection("folder")}>
+            <span className="cli-section-prompt">&gt;</span>
+            <span className="cli-section-title">
+              <span className="terminal-only">{agentContext.getUiCopy("rightFilesTitle")}</span>
+              <span className="modern-only">Files</span>
+            </span>
+            <span className="cli-section-toggle">
+              <span className="terminal-only">{expandedSections.folder ? "[-]" : "[+]"}</span>
+              <span className="modern-only">{expandedSections.folder ? "−" : "+"}</span>
+            </span>
+          </div>
+          {expandedSections.folder && (
+            <div className="cli-section-content">
               <div className="cli-file-list">
                 {files.map((file, index) => (
                   <div key={`${file.path}-${index}`} className={`cli-file-item ${file.action}`}>
@@ -614,41 +614,29 @@ export function RightPanel({
                   </div>
                 ))}
               </div>
-            ) : (
-              <div className="cli-empty-state">
-                <pre className="cli-tree">
-                  {`├── (empty)
-└── ...`}
-                </pre>
-                <p className="cli-hint">
-                  <span className="terminal-only">
-                    {agentContext.getUiCopy("rightFilesEmptyHint")}
+              {workspace && (
+                <div className="cli-workspace-path">
+                  <span className="cli-label">
+                    <span className="terminal-only">PWD:</span>
+                    <span className="modern-only">Workspace</span>
                   </span>
-                  <span className="modern-only">No file changes yet.</span>
-                </p>
-              </div>
-            )}
-            {workspace && (
-              <div className="cli-workspace-path">
-                <span className="cli-label">
-                  <span className="terminal-only">PWD:</span>
-                  <span className="modern-only">Workspace</span>
-                </span>
-                <span className="cli-path" title={workspace.path}>
-                  {workspace.name}/
-                </span>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+                  <span className="cli-path" title={workspace.path}>
+                    {workspace.name}/
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
-      {/* Active Context Section (Connectors + Skills) */}
+      {/* Active Context Section (Connectors + Skills) — only shown when integrations are active */}
       {(() => {
         const connectedServers = activeContext?.connectors.filter((c) => c.status === "connected") || [];
         const activeSkills = activeContext?.skills || [];
         const activeCount = connectedServers.length + activeSkills.length;
-        const hasActiveContent = connectedServers.length > 0 || activeSkills.length > 0;
+
+        if (activeCount === 0) return null;
 
         return (
           <div className="right-panel-section cli-section">
@@ -658,9 +646,7 @@ export function RightPanel({
                 <span className="terminal-only">ACTIVE</span>
                 <span className="modern-only">Active Context</span>
               </span>
-              {activeCount > 0 && (
-                <span className="cli-active-context-badge">{activeCount}</span>
-              )}
+              <span className="cli-active-context-badge">{activeCount}</span>
               <span className="cli-section-toggle">
                 <span className="terminal-only">{expandedSections.activeContext ? "[-]" : "[+]"}</span>
                 <span className="modern-only">{expandedSections.activeContext ? "−" : "+"}</span>
@@ -668,14 +654,14 @@ export function RightPanel({
             </div>
             {expandedSections.activeContext && (
               <div className="cli-section-content">
-                {hasActiveContent ? (
-                  <div className="cli-context-list">
-                    {connectedServers.length > 0 && (
-                      <div className="cli-context-group">
-                        <div className="cli-context-label">
-                          <span className="terminal-only"># connectors:</span>
-                          <span className="modern-only">Connectors</span>
-                        </div>
+                <div className="cli-context-list">
+                  {connectedServers.length > 0 && (
+                    <div className="cli-context-group">
+                      <div className="cli-context-label">
+                        <span className="terminal-only"># connectors:</span>
+                        <span className="modern-only">Connectors</span>
+                      </div>
+                      <div className="cli-active-context-scroll">
                         {connectedServers.map((c) => {
                           const ConnIcon = resolveConnectorLucideIcon(c.name, c.icon);
                           return (
@@ -687,14 +673,16 @@ export function RightPanel({
                           );
                         })}
                       </div>
-                    )}
-                    {activeSkills.length > 0 && (
-                      <div className="cli-context-group">
-                        <div className="cli-context-label">
-                          <span className="terminal-only"># skills:</span>
-                          <span className="modern-only">Skills</span>
-                        </div>
-                        {activeSkills.slice(0, 10).map((s) => {
+                    </div>
+                  )}
+                  {activeSkills.length > 0 && (
+                    <div className="cli-context-group">
+                      <div className="cli-context-label">
+                        <span className="terminal-only"># skills:</span>
+                        <span className="modern-only">Skills</span>
+                      </div>
+                      <div className="cli-active-context-scroll">
+                        {activeSkills.map((s) => {
                           const SkillIcon = resolveSkillLucideIcon(s.icon);
                           return (
                             <div key={s.id} className="cli-context-item">
@@ -703,48 +691,32 @@ export function RightPanel({
                             </div>
                           );
                         })}
-                        {activeSkills.length > 10 && (
-                          <div className="cli-context-item cli-context-overflow">
-                            +{activeSkills.length - 10} more
-                          </div>
-                        )}
                       </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="cli-empty-state">
-                    <div className="cli-context-empty">
-                      <span className="terminal-only">connectors: 0 skills: 0</span>
-                      <span className="modern-only">No active integrations</span>
                     </div>
-                    <p className="cli-hint">
-                      <span className="terminal-only"># configure in settings</span>
-                      <span className="modern-only">Set up connectors or skills in Settings.</span>
-                    </p>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
             )}
           </div>
         );
       })()}
 
-      {/* Context Section */}
-      <div className="right-panel-section cli-section">
-        <div className="cli-section-header" onClick={() => toggleSection("context")}>
-          <span className="cli-section-prompt">&gt;</span>
-          <span className="cli-section-title">
-            <span className="terminal-only">{agentContext.getUiCopy("rightContextTitle")}</span>
-            <span className="modern-only">Context</span>
-          </span>
-          <span className="cli-section-toggle">
-            <span className="terminal-only">{expandedSections.context ? "[-]" : "[+]"}</span>
-            <span className="modern-only">{expandedSections.context ? "−" : "+"}</span>
-          </span>
-        </div>
-        {expandedSections.context && (
-          <div className="cli-section-content">
-            {toolUsage.length > 0 || referencedFiles.length > 0 ? (
+      {/* Context Section — only shown when tools or files have been used */}
+      {(toolUsage.length > 0 || referencedFiles.length > 0) && (
+        <div className="right-panel-section cli-section">
+          <div className="cli-section-header" onClick={() => toggleSection("context")}>
+            <span className="cli-section-prompt">&gt;</span>
+            <span className="cli-section-title">
+              <span className="terminal-only">{agentContext.getUiCopy("rightContextTitle")}</span>
+              <span className="modern-only">Context</span>
+            </span>
+            <span className="cli-section-toggle">
+              <span className="terminal-only">{expandedSections.context ? "[-]" : "[+]"}</span>
+              <span className="modern-only">{expandedSections.context ? "−" : "+"}</span>
+            </span>
+          </div>
+          {expandedSections.context && (
+            <div className="cli-section-content">
               <div className="cli-context-list">
                 {toolUsage.length > 0 && (
                   <div className="cli-context-group">
@@ -780,23 +752,10 @@ export function RightPanel({
                   </div>
                 )}
               </div>
-            ) : (
-              <div className="cli-empty-state">
-                <div className="cli-context-empty">
-                  <span className="terminal-only">tools: 0 files: 0</span>
-                  <span className="modern-only">Nothing shared yet.</span>
-                </div>
-                <p className="cli-hint">
-                  <span className="terminal-only">
-                    {agentContext.getUiCopy("rightContextEmptyHint")}
-                  </span>
-                  <span className="modern-only">Share tools or files to populate this panel.</span>
-                </p>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Empty space filler */}
       <div style={{ flex: 1 }} />

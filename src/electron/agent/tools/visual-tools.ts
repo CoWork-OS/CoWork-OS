@@ -104,8 +104,8 @@ export function renderVisualAnnotatorHtml(bootstrap: AnnotatorBootstrap): string
       --danger:#ff5c7a;
       --shadow:0 20px 60px rgba(0,0,0,.35);
       --radius:16px;
-      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+      --mono: "SF Mono", "Fira Code", "Consolas", monospace;
+      --sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", system-ui, sans-serif;
     }
     *{box-sizing:border-box}
     html,body{height:100%}

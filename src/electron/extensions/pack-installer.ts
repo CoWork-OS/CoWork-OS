@@ -99,6 +99,54 @@ function ensureExtensionsDir(): string {
 }
 
 /**
+ * Build a temporary install directory path under extensions.
+ */
+function buildTempInstallDir(extensionsDir: string, hint: string): string {
+  const safeHint = hint.toLowerCase().replace(/[^a-z0-9_-]/g, "-") || "pack";
+  const nonce = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  return path.join(extensionsDir, `.tmp-${safeHint}-${nonce}`);
+}
+
+/**
+ * Find an installed pack directory by manifest name (canonical pack ID).
+ * Supports uninstalling legacy installs where directory name differed from manifest.name.
+ */
+function findInstalledPackDirByManifestName(
+  extensionsDir: string,
+  safeManifestName: string,
+): string | null {
+  if (!fs.existsSync(extensionsDir)) {
+    return null;
+  }
+
+  const directDir = path.join(extensionsDir, safeManifestName);
+  if (fs.existsSync(path.join(directDir, MANIFEST_FILENAME))) {
+    return directDir;
+  }
+
+  const entries = fs.readdirSync(extensionsDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+
+    const packDir = path.join(extensionsDir, entry.name);
+    const manifestPath = path.join(packDir, MANIFEST_FILENAME);
+    if (!fs.existsSync(manifestPath)) continue;
+
+    try {
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8")) as PluginManifest;
+      const manifestId = sanitizePackId(manifest.name);
+      if (manifestId === safeManifestName) {
+        return packDir;
+      }
+    } catch {
+      // Ignore malformed manifest and continue scanning.
+    }
+  }
+
+  return null;
+}
+
+/**
  * Check if git is available on the system
  */
 async function isGitAvailable(): Promise<boolean> {
@@ -179,12 +227,7 @@ export async function installFromGit(
   }
 
   const extensionsDir = ensureExtensionsDir();
-  const targetDir = path.join(extensionsDir, parsed.name);
-
-  // Check if already installed
-  if (fs.existsSync(targetDir)) {
-    return { success: false, error: `Pack "${parsed.name}" is already installed at ${targetDir}` };
-  }
+  let workingDir = buildTempInstallDir(extensionsDir, parsed.name);
 
   notify({ packName: parsed.name, status: "downloading", progress: 10, message: "Cloning repository..." });
 
@@ -192,17 +235,17 @@ export async function installFromGit(
     // Shallow clone (single branch, depth 1) for speed
     await execFileAsync(
       "git",
-      ["clone", "--depth", "1", "--single-branch", parsed.url, targetDir],
+      ["clone", "--depth", "1", "--single-branch", parsed.url, workingDir],
       { timeout: GIT_CLONE_TIMEOUT_MS },
     );
 
     notify({ packName: parsed.name, status: "validating", progress: 60, message: "Validating manifest..." });
 
     // Check for manifest
-    const manifestPath = path.join(targetDir, MANIFEST_FILENAME);
+    const manifestPath = path.join(workingDir, MANIFEST_FILENAME);
     if (!fs.existsSync(manifestPath)) {
       // Clean up
-      fs.rmSync(targetDir, { recursive: true, force: true });
+      fs.rmSync(workingDir, { recursive: true, force: true });
       return { success: false, error: `Repository does not contain ${MANIFEST_FILENAME}` };
     }
 
@@ -215,25 +258,40 @@ export async function installFromGit(
         throw new Error("Invalid manifest");
       }
     } catch (validationError) {
-      fs.rmSync(targetDir, { recursive: true, force: true });
+      fs.rmSync(workingDir, { recursive: true, force: true });
       return {
         success: false,
         error: `Invalid manifest: ${validationError instanceof Error ? validationError.message : String(validationError)}`,
       };
     }
 
+    const safeId = sanitizePackId(manifest.name);
+    if (!safeId) {
+      fs.rmSync(workingDir, { recursive: true, force: true });
+      return { success: false, error: `Invalid pack name: ${manifest.name}` };
+    }
+
+    const targetDir = path.join(extensionsDir, safeId);
+    if (fs.existsSync(targetDir)) {
+      fs.rmSync(workingDir, { recursive: true, force: true });
+      return { success: false, error: `Pack "${safeId}" is already installed` };
+    }
+
+    fs.renameSync(workingDir, targetDir);
+    workingDir = targetDir;
+
     // Remove .git directory to save space (we don't need history)
-    const gitDir = path.join(targetDir, ".git");
+    const gitDir = path.join(workingDir, ".git");
     if (fs.existsSync(gitDir)) {
       fs.rmSync(gitDir, { recursive: true, force: true });
     }
 
-    notify({ packName: manifest.name, status: "completed", progress: 100, message: "Installed successfully" });
+    notify({ packName: safeId, status: "completed", progress: 100, message: "Installed successfully" });
 
     return {
       success: true,
-      packName: manifest.name,
-      path: targetDir,
+      packName: safeId,
+      path: workingDir,
       manifest,
       skillCount: manifest.skills?.length || 0,
       agentCount: manifest.agentRoles?.length || 0,
@@ -241,8 +299,8 @@ export async function installFromGit(
   } catch (error) {
     // Clean up on failure
     try {
-      if (fs.existsSync(targetDir)) {
-        fs.rmSync(targetDir, { recursive: true, force: true });
+      if (fs.existsSync(workingDir)) {
+        fs.rmSync(workingDir, { recursive: true, force: true });
       }
     } catch {
       // Ignore cleanup errors
@@ -347,10 +405,10 @@ export async function uninstallPack(packName: string): Promise<UninstallResult> 
   }
 
   const extensionsDir = getUserExtensionsDir();
-  const packDir = path.join(extensionsDir, safeId);
+  const packDir = findInstalledPackDirByManifestName(extensionsDir, safeId);
 
   // Only allow uninstalling from user extensions directory
-  if (!fs.existsSync(packDir)) {
+  if (!packDir) {
     return { success: false, error: `Pack "${safeId}" is not installed in user extensions` };
   }
 

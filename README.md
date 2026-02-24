@@ -36,11 +36,12 @@
 - **14 messaging channels** — WhatsApp, Telegram, Discord, Slack, Teams, iMessage, Signal, and more. Chat with your AI from anywhere.
 - **100+ built-in skills** — Documents, code review, web search, image generation, cloud integrations, and more.
 - **Digital Twin Personas** — Pre-built AI twins for every role (engineer, manager, PM, director). Each twin absorbs cognitively draining work — PR triage, meeting prep, status reports, dependency tracking — so the human stays in flow.
+- **Plugin Platform** — 10 bundled role-specific packs with 35+ skills, in-app Plugin Store for installing community packs, remote registry, and enterprise admin policies for organization-wide control.
 - **Agent teams** — Multi-agent collaboration with shared checklists, collaborative mode, multi-LLM synthesis, and persistent teams.
 - **Think With Me mode** — Socratic brainstorming that helps you clarify thinking without executing actions.
 - **Build Mode** — Go from idea to working prototype with a phased canvas workflow (Concept → Plan → Scaffold → Iterate) and named checkpoints.
 - **AI Playbook** — Auto-captures what worked from successful tasks and injects relevant patterns into future prompts.
-- **Usage Insights** — Dashboard showing task stats, cost/token tracking by model, activity heatmaps, and top skills.
+- **Usage Insights** — Dashboard showing task stats, cost/token tracking by model, activity heatmaps, top skills, and per-pack analytics.
 - **ChatGPT History Import** — Import your full ChatGPT conversation history. CoWork OS instantly knows your preferences, past projects, and context — no cold start. All data stays encrypted on your Mac and never leaves your machine.
 - **Security-first** — Approval workflows, sandboxed execution, configurable guardrails, encrypted storage, and 3200+ tests.
 - **Local-first & BYOK** — Your data and API keys stay on your machine. No telemetry. No middleman.
@@ -127,17 +128,34 @@ Advanced web scraping powered by [Scrapling](https://github.com/D4Vinci/Scraplin
 
 ### Usage Insights
 
-Dashboard with task metrics, cost/token tracking by model, activity heatmaps (day-of-week and hourly), and top skills usage with 7/14/30-day period selection. Access from **Settings** > **Usage Insights**. [Learn more](docs/features.md#usage-insights)
+Dashboard with task metrics, cost/token tracking by model, activity heatmaps (day-of-week and hourly), top skills usage, and per-pack analytics (skill usage grouped by plugin pack) with 7/14/30-day period selection. Access from **Settings** > **Usage Insights**. [Learn more](docs/features.md#usage-insights)
 
 ### LLM Providers
 
 12 built-in providers + 20+ compatible/gateway providers. Use cloud APIs or run fully offline with Ollama. [Learn more](docs/providers.md)
 
+### Plugin Platform & Customize
+
+Unified plugin platform with 10 bundled role-specific packs (Engineering, DevOps, Product, Sales, QA, and more), each bundling skills, agent roles, connectors, and "Try asking" prompts. Packs can link to Digital Twin personas for proactive background work.
+
+- **Search & filter**: Real-time sidebar search across pack names, descriptions, categories, and skill names
+- **Per-skill control**: Enable or disable individual skills within a pack without toggling the whole pack
+- **Persistent toggles**: Pack and skill states survive app restarts
+- **Update detection**: Background version checks against the registry with visual indicators
+- **"Try asking" in chat**: Empty chat shows randomized prompt suggestions from active packs
+- **Plugin Store**: In-app marketplace for browsing, installing (Git/URL), and scaffolding custom packs
+- **Remote Registry**: Community pack catalog with search and category filtering
+- **Admin Policies**: Organization-level controls — allow/block/require packs, restrict installations, set agent limits, distribute org-managed packs from a shared directory
+- **Per-pack analytics**: Usage Insights dashboard groups skill usage by parent pack
+
+Access from **Settings** > **Customize**. [Learn more](docs/plugin-packs.md)
+
 ### Extensibility
 
 - **100+ built-in skills** across developer, productivity, communication, documents, and more
 - **Custom skills** in `~/Library/Application Support/cowork-os/skills/`
-- **Declarative plugins** with 5 built-in plugin packs
+- **10 bundled plugin packs** with 35+ role-specific skills and Digital Twin integration
+- **Plugin Store** — browse, install from Git/URL, or scaffold custom packs
 - **MCP support** — client, host, and registry
 
 ### Voice Mode
@@ -255,6 +273,8 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
 | [Remote Access](docs/remote-access.md) | Tailscale, SSH tunnels, WebSocket API |
 | [Knowledge Graph](docs/knowledge-graph.md) | Structured entity/relationship memory |
 | [Mission Control](docs/mission-control.md) | Agent orchestration dashboard |
+| [Plugin Packs](docs/plugin-packs.md) | Plugin platform, Customize panel, and Plugin Store |
+| [Admin Policies](docs/admin-policies.md) | Enterprise admin policies and organization pack management |
 | [Digital Twins](docs/digital-twins.md) | Role-based AI twin personas and cognitive offload |
 | [Digital Twins Guide](docs/digital-twin-personas-guide.md) | Comprehensive guide with scenarios and expanded job areas |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |

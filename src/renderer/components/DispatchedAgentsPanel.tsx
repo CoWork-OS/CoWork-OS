@@ -3,7 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Check, X, Play, Loader2 } from "lucide-react";
 import type { Task, TaskEvent, EventType } from "../../shared/types";
-import { EMOJI_ICON_MAP } from "../utils/emoji-icon-map";
+import { getEmojiIcon } from "../utils/emoji-icon-map";
 
 interface AgentRoleInfo {
   id: string;
@@ -294,7 +294,7 @@ export function DispatchedAgentsPanel({
               <span className="team-member-icon">
                 {(() => {
                   const emoji = info.role?.icon || "🤖";
-                  const Icon = EMOJI_ICON_MAP[emoji];
+                  const Icon = getEmojiIcon(emoji);
                   return Icon ? <Icon size={16} strokeWidth={1.5} /> : emoji;
                 })()}
               </span>
@@ -330,7 +330,7 @@ export function DispatchedAgentsPanel({
                 <div className="stream-agent-header">
                   <span className="stream-agent-icon">
                     {(() => {
-                      const Icon = EMOJI_ICON_MAP[item.agentIcon];
+                      const Icon = getEmojiIcon(item.agentIcon);
                       return Icon ? <Icon size={16} strokeWidth={1.5} /> : item.agentIcon;
                     })()}
                   </span>

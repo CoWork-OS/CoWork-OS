@@ -73,11 +73,9 @@ describe("PERSONALITY_DEFINITIONS", () => {
     });
   });
 
-  it("each personality should have an emoji icon", () => {
+  it("each personality should have an icon identifier", () => {
     PERSONALITY_DEFINITIONS.forEach((personality) => {
-      // Emojis are typically 1-4 characters (including emoji modifiers)
       expect(personality.icon.length).toBeGreaterThanOrEqual(1);
-      expect(personality.icon.length).toBeLessThanOrEqual(4);
     });
   });
 });

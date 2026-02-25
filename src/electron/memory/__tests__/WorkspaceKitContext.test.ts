@@ -113,6 +113,79 @@ describe("WorkspaceKitContext", () => {
     expect(out).not.toContain("#### Lessons Learned");
   });
 
+  it("includes VIBES.md content and places it before SOUL.md", () => {
+    writeFile(
+      path.join(tmpDir, ".cowork", "VIBES.md"),
+      [
+        "# Vibes",
+        "",
+        "## Current",
+        "<!-- cowork:auto:vibes:start -->",
+        "- Mode: crunch",
+        "- Energy: high",
+        "- Notes: Shipping deadline Friday",
+        "<!-- cowork:auto:vibes:end -->",
+        "",
+      ].join("\n"),
+    );
+    writeFile(path.join(tmpDir, ".cowork", "SOUL.md"), "# SOUL\n\n## Rules\n- Be blunt\n");
+    const out = buildWorkspaceKitContext(tmpDir, "any");
+    expect(out).toContain("Current Vibes (.cowork/VIBES.md)");
+    expect(out).toContain("Mode: crunch");
+    expect(out).toContain("Energy: high");
+    expect(out).toContain("Shipping deadline Friday");
+    // VIBES should appear before SOUL in the output
+    const vibesIdx = out.indexOf("Current Vibes");
+    const soulIdx = out.indexOf("Assistant Style");
+    expect(vibesIdx).toBeLessThan(soulIdx);
+  });
+
+  it("includes LORE.md with bullet sections", () => {
+    writeFile(
+      path.join(tmpDir, ".cowork", "LORE.md"),
+      [
+        "# Shared Lore",
+        "",
+        "## Milestones",
+        "<!-- cowork:auto:lore:start -->",
+        "- [2025-02-01] First task in this workspace",
+        "- [2025-02-15] Debugged the auth race condition",
+        "<!-- cowork:auto:lore:end -->",
+        "",
+        "## Inside References",
+        "- The spaghetti module = src/legacy/parser.ts",
+        "",
+      ].join("\n"),
+    );
+    const out = buildWorkspaceKitContext(tmpDir, "any");
+    expect(out).toContain("Shared Lore (.cowork/LORE.md)");
+    expect(out).toContain("First task in this workspace");
+    expect(out).toContain("Debugged the auth race condition");
+    expect(out).toContain("spaghetti module");
+  });
+
+  it("places LORE.md after MISTAKES.md and before daily log", () => {
+    const now = new Date("2026-02-06T10:00:00");
+    writeFile(
+      path.join(tmpDir, ".cowork", "MISTAKES.md"),
+      "# Mistakes\n\n## Patterns\n- Don't skip tests\n",
+    );
+    writeFile(
+      path.join(tmpDir, ".cowork", "LORE.md"),
+      "# Shared Lore\n\n## Milestones\n- [2025-01-01] Genesis\n",
+    );
+    writeFile(
+      path.join(tmpDir, ".cowork", "memory", "2026-02-06.md"),
+      "# Daily Log\n\n## Open Loops\n- Check metrics\n",
+    );
+    const out = buildWorkspaceKitContext(tmpDir, "any", now);
+    const mistakesIdx = out.indexOf("Mistakes / Preferences");
+    const loreIdx = out.indexOf("Shared Lore");
+    const dailyIdx = out.indexOf("Daily Log");
+    expect(mistakesIdx).toBeLessThan(loreIdx);
+    expect(loreIdx).toBeLessThan(dailyIdx);
+  });
+
   it("includes SOUL.md as free-form content (not just filled template fields)", () => {
     writeFile(
       path.join(tmpDir, ".cowork", "SOUL.md"),

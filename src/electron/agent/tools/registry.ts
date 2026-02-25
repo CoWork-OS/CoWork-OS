@@ -105,6 +105,98 @@ const MCP_PAYMENT_MAX_AMOUNT_USD = 100;
 
 const MCP_PAYMENT_AMOUNT_TYPES = new Set(["number", "integer", "string"]);
 
+const SUB_AGENT_DEFAULT_DENIED_TOOLS = [
+  "spawn_agent",
+  "wait_for_agent",
+  "get_agent_status",
+  "list_agents",
+  "send_agent_message",
+  "capture_agent_events",
+  "cancel_agent",
+  "pause_agent",
+  "resume_agent",
+];
+
+const EXTRACTION_SUB_AGENT_ALLOWED_TOOLS = [
+  "read_file",
+  "mcp_read_text_file",
+  "grep",
+  "glob",
+  "search_files",
+  "list_directory",
+  "get_file_info",
+  "browser_navigate",
+  "browser_get_content",
+  "browser_evaluate",
+  "write_file",
+];
+
+const DEFAULT_ACTIVE_SUB_AGENT_LIMIT = 3;
+const ACTIVE_CHILD_AGENT_STATUSES = new Set(["pending", "queued", "planning", "executing"]);
+const EXTRACTION_CONTRACT_MARKER = "[EXTRACTION_OUTPUT_CONTRACT_V1]";
+
+function parseBoundedIntEnv(
+  envName: string,
+  fallback: number,
+  minValue: number,
+  maxValue: number,
+): number {
+  const raw = process.env[envName];
+  const parsed = raw ? Number(raw) : NaN;
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(maxValue, Math.max(minValue, Math.round(parsed)));
+}
+
+function parseBooleanEnv(envName: string, fallback = true): boolean {
+  const raw = process.env[envName];
+  if (raw === undefined) return fallback;
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on")
+    return true;
+  if (normalized === "0" || normalized === "false" || normalized === "no" || normalized === "off")
+    return false;
+  return fallback;
+}
+
+function isExtractionLikePrompt(prompt: string): boolean {
+  const normalized = String(prompt || "").toLowerCase();
+  if (!normalized) return false;
+
+  const hasHtmlSignal =
+    /(?:\.html?\b|\.xhtml\b)/i.test(normalized) ||
+    normalized.includes("html page") ||
+    normalized.includes("saved as html") ||
+    normalized.includes("raw html") ||
+    normalized.includes("page source") ||
+    normalized.includes("webpage source") ||
+    normalized.includes("web page source") ||
+    normalized.includes("markup") ||
+    normalized.includes("dom");
+  const hasFileReadSignal =
+    /\bread\b.{0,40}\b(file|document|page|source)\b/i.test(normalized) ||
+    normalized.includes("from the workspace") ||
+    normalized.includes("in the workspace");
+  const hasExtractionSignal =
+    /\bextract|extraction|summari(?:ze|sation)|convert|transform|clean|normalize|meaningful content|knowledge[-\s]?base|markdown\b/i.test(
+      normalized,
+    );
+
+  return hasExtractionSignal && (hasHtmlSignal || hasFileReadSignal);
+}
+
+function applyExtractionOutputContract(prompt: string): string {
+  if (prompt.includes(EXTRACTION_CONTRACT_MARKER)) return prompt;
+
+  return `${prompt.trim()}\n\n${EXTRACTION_CONTRACT_MARKER}
+Execution contract (must follow):
+1) Keep tool usage minimal. Read the source once, then extract.
+2) Do not spawn other agents.
+3) If extraction is blocked, stop probing and report the blocker.
+4) Final response must be strict JSON with this shape:
+{"status":"success|blocked","source_file":"...","output_file":"...","sections_extracted":0,"notes":["..."]}
+5) Keep JSON concise and machine-parseable (no markdown fences).`;
+}
+
 function parsePaymentAmount(rawAmount: unknown): number | null {
   if (typeof rawAmount === "number" && Number.isFinite(rawAmount) && rawAmount >= 0) {
     return rawAmount;
@@ -627,6 +719,9 @@ export class ToolRegistry {
           "set_user_name",
           "set_response_style",
           "set_quirks",
+          "set_vibes",
+          "update_lore",
+          "manage_heartbeat",
           "integration_setup",
           "spawn_agent",
           "wait_for_agent",
@@ -1142,6 +1237,9 @@ Channel Message Log (Local Gateway):
 	- set_persona: Change the assistant's character persona (jarvis, friday, hal, computer, alfred, intern, sensei, pirate, noir, companion, or none).
 	- set_response_style: Adjust response preferences (emoji_usage, response_length, code_comments, explanation_depth).
 	- set_quirks: Set personality quirks (catchphrase, sign_off, analogy_domain).
+- set_vibes: Update the workspace's current energy/mode (crunch, explore, deep-focus, maintenance, playful, low-energy, default). Call when you detect a shift in the user's working energy.
+- update_lore: Record a notable shared moment or reference in the workspace lore. Use after significant accomplishments, breakthroughs, or discoveries.
+- manage_heartbeat: Enable or disable the heartbeat (periodic wake-up) for a digital twin / agent role. Use when asked to start or stop a twin.
 - set_agent_name: Set or change the assistant's name when the user wants to give you a name.
 - set_user_name: Store the user's name when they introduce themselves (e.g., "I'm Alice", "My name is Bob").`;
 
@@ -1497,6 +1595,18 @@ ${skillDescriptions}`;
 
     if (name === "set_quirks") {
       return this.setQuirks(input);
+    }
+
+    if (name === "set_vibes") {
+      return this.setVibes(input);
+    }
+
+    if (name === "update_lore") {
+      return this.updateLore(input);
+    }
+
+    if (name === "manage_heartbeat") {
+      return this.manageHeartbeat(input);
     }
 
     // Sub-Agent / Parallel Agent tools
@@ -4802,6 +4912,257 @@ ${skillDescriptions}`;
     };
   }
 
+  // ============ Vibes & Lore Methods ============
+
+  /**
+   * Update workspace vibes/energy mode
+   */
+  private setVibes(input: { mode: string; energy?: string; notes?: string }): {
+    success: boolean;
+    message: string;
+  } {
+    const validModes = [
+      "crunch",
+      "explore",
+      "deep-focus",
+      "maintenance",
+      "playful",
+      "low-energy",
+      "default",
+    ];
+    if (!validModes.includes(input.mode)) {
+      throw new Error(`Invalid mode: ${input.mode}. Valid options: ${validModes.join(", ")}`);
+    }
+
+    const energy = input.energy || "balanced";
+    const validEnergies = ["high", "balanced", "low"];
+    if (!validEnergies.includes(energy)) {
+      throw new Error(`Invalid energy: ${energy}. Valid options: ${validEnergies.join(", ")}`);
+    }
+
+    const notes = String(input.notes || "")
+      .trim()
+      .slice(0, 120);
+
+    const workspacePath = this.workspace?.path;
+    if (!workspacePath) {
+      throw new Error("No workspace path available");
+    }
+
+    const kitDir = path.join(workspacePath, ".cowork");
+    if (!fs.existsSync(kitDir) || !fs.statSync(kitDir).isDirectory()) {
+      throw new Error("No .cowork/ directory found in workspace. Run the Memory Kit skill first.");
+    }
+
+    const vibesPath = path.join(kitDir, "VIBES.md");
+    const AUTO_VIBES_START = "<!-- cowork:auto:vibes:start -->";
+    const AUTO_VIBES_END = "<!-- cowork:auto:vibes:end -->";
+
+    let current = "";
+    if (fs.existsSync(vibesPath)) {
+      try {
+        current = fs.readFileSync(vibesPath, "utf8");
+      } catch {
+        current = "";
+      }
+    }
+
+    if (!current) {
+      current = [
+        "# Vibes",
+        "",
+        "Current energy and mode for this workspace. Updated by the agent based on cues.",
+        "",
+        "## Current",
+        AUTO_VIBES_START,
+        "- Mode: default",
+        "- Energy: balanced",
+        "- Notes: Ready to work",
+        AUTO_VIBES_END,
+        "",
+        "## User Preferences",
+        "- ",
+        "",
+      ].join("\n");
+    }
+
+    const bodyLines = [
+      `- Mode: ${input.mode}`,
+      `- Energy: ${energy}`,
+      `- Notes: ${notes || "(none)"}`,
+    ];
+    const body = bodyLines.join("\n").trimEnd();
+    const replacement = `${AUTO_VIBES_START}\n${body}\n${AUTO_VIBES_END}`;
+
+    const startIdx = current.indexOf(AUTO_VIBES_START);
+    const endIdx = current.indexOf(AUTO_VIBES_END);
+
+    let next: string;
+    if (startIdx >= 0 && endIdx > startIdx) {
+      const before = current.slice(0, startIdx).trimEnd();
+      const after = current.slice(endIdx + AUTO_VIBES_END.length).trimStart();
+      next = `${before}\n${replacement}\n\n${after}`.trimEnd() + "\n";
+    } else {
+      const heading = "## Current";
+      const headingIdx = current.indexOf(heading);
+      if (headingIdx >= 0) {
+        const insertAt = headingIdx + heading.length;
+        const before = current.slice(0, insertAt).trimEnd();
+        const after = current.slice(insertAt).trimStart();
+        next = `${before}\n\n${replacement}\n\n${after}`.trimEnd() + "\n";
+      } else {
+        next = `${current.trimEnd()}\n\n${heading}\n\n${replacement}\n`.trimEnd() + "\n";
+      }
+    }
+
+    const tmpPath = vibesPath + ".tmp";
+    fs.writeFileSync(tmpPath, next, "utf8");
+    fs.renameSync(tmpPath, vibesPath);
+
+    console.log(`[ToolRegistry] Vibes updated: mode=${input.mode} energy=${energy}`);
+
+    return {
+      success: true,
+      message: `Vibes updated to ${input.mode} (energy: ${energy}). This will influence how I approach tasks in this workspace.`,
+    };
+  }
+
+  /**
+   * Record a notable moment in workspace lore
+   */
+  private updateLore(input: { entry: string; section?: string }): {
+    success: boolean;
+    message: string;
+  } {
+    const entry = String(input.entry || "").trim();
+    if (!entry) {
+      throw new Error("Entry text is required");
+    }
+    if (entry.length > 200) {
+      throw new Error(`Entry too long (max 200 characters, got ${entry.length})`);
+    }
+
+    const section = input.section || "milestones";
+    const validSections = ["milestones", "references", "notes"];
+    if (!validSections.includes(section)) {
+      throw new Error(`Invalid section: ${section}. Valid options: ${validSections.join(", ")}`);
+    }
+
+    const workspacePath = this.workspace?.path;
+    if (!workspacePath) {
+      throw new Error("No workspace path available");
+    }
+
+    const kitDir = path.join(workspacePath, ".cowork");
+    if (!fs.existsSync(kitDir) || !fs.statSync(kitDir).isDirectory()) {
+      throw new Error("No .cowork/ directory found in workspace. Run the Memory Kit skill first.");
+    }
+
+    const lorePath = path.join(kitDir, "LORE.md");
+    const AUTO_LORE_START = "<!-- cowork:auto:lore:start -->";
+    const AUTO_LORE_END = "<!-- cowork:auto:lore:end -->";
+
+    let current = "";
+    if (fs.existsSync(lorePath)) {
+      try {
+        current = fs.readFileSync(lorePath, "utf8");
+      } catch {
+        current = "";
+      }
+    }
+
+    if (!current) {
+      current = [
+        "# Shared Lore",
+        "",
+        "This file is workspace-local and can be auto-updated by the system.",
+        "It captures the shared history between you and the agent in this workspace.",
+        "",
+        "## Milestones",
+        AUTO_LORE_START,
+        "- (none)",
+        AUTO_LORE_END,
+        "",
+        "## Inside References",
+        "- ",
+        "",
+        "## Notes",
+        "- ",
+        "",
+      ].join("\n");
+    }
+
+    // Sanitize the entry text
+    const sanitized = entry
+      .replace(/[\r\n\t]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    const now = new Date();
+    const dateStamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+
+    if (section === "milestones") {
+      // Append within auto markers
+      const startIdx = current.indexOf(AUTO_LORE_START);
+      const endIdx = current.indexOf(AUTO_LORE_END);
+
+      if (startIdx >= 0 && endIdx > startIdx) {
+        const inner = current.slice(startIdx + AUTO_LORE_START.length, endIdx);
+        const existingLines = inner
+          .split("\n")
+          .map((l) => l.trimEnd())
+          .filter((l) => /^\s*-\s+\S/.test(l) && l.trim() !== "- (none)");
+        existingLines.push(`- [${dateStamp}] ${sanitized}`);
+        const capped = existingLines.slice(-40);
+        const body = capped.join("\n").trimEnd();
+        const replacement = `${AUTO_LORE_START}\n${body}\n${AUTO_LORE_END}`;
+
+        const before = current.slice(0, startIdx).trimEnd();
+        const after = current.slice(endIdx + AUTO_LORE_END.length).trimStart();
+        current = `${before}\n${replacement}\n\n${after}`.trimEnd() + "\n";
+      } else {
+        // No markers — append under Milestones heading
+        const heading = "## Milestones";
+        const headingIdx = current.indexOf(heading);
+        if (headingIdx >= 0) {
+          const afterHeading = headingIdx + heading.length;
+          const before = current.slice(0, afterHeading);
+          const after = current.slice(afterHeading);
+          current = `${before}\n- [${dateStamp}] ${sanitized}${after}`;
+        } else {
+          current += `\n## Milestones\n- [${dateStamp}] ${sanitized}\n`;
+        }
+      }
+    } else {
+      // For "references" or "notes", append under the matching heading
+      const headingMap: Record<string, string> = {
+        references: "## Inside References",
+        notes: "## Notes",
+      };
+      const heading = headingMap[section];
+      const headingIdx = current.indexOf(heading);
+      if (headingIdx >= 0) {
+        const afterHeading = headingIdx + heading.length;
+        const before = current.slice(0, afterHeading);
+        const after = current.slice(afterHeading);
+        current = `${before}\n- ${sanitized}${after}`;
+      } else {
+        current += `\n${heading}\n- ${sanitized}\n`;
+      }
+    }
+
+    const tmpPath = lorePath + ".tmp";
+    fs.writeFileSync(tmpPath, current, "utf8");
+    fs.renameSync(tmpPath, lorePath);
+
+    console.log(`[ToolRegistry] Lore updated (${section}): ${sanitized.slice(0, 60)}`);
+
+    return {
+      success: true,
+      message: `Lore recorded in ${section}: "${sanitized}"`,
+    };
+  }
+
   // ============ Sub-Agent / Parallel Agent Methods ============
 
   /**
@@ -4885,6 +5246,41 @@ ${skillDescriptions}`;
       throw new Error("spawn_agent requires a non-empty prompt");
     }
 
+    const normalizedMaxTurns =
+      typeof max_turns === "number" && Number.isFinite(max_turns) ? Math.round(max_turns) : 20;
+    if (normalizedMaxTurns < 1 || normalizedMaxTurns > 100) {
+      throw new Error("max_turns must be between 1 and 100");
+    }
+
+    const phaseCEnabled = parseBooleanEnv("COWORK_GUARDRAIL_PHASE_C", true);
+
+    const activeSubAgentLimit = parseBoundedIntEnv(
+      "COWORK_SUBAGENT_MAX_ACTIVE_PER_PARENT",
+      DEFAULT_ACTIVE_SUB_AGENT_LIMIT,
+      1,
+      20,
+    );
+    const childTasks = await this.daemon.getChildTasks(this.taskId);
+    const activeChildTasks = childTasks.filter((task) =>
+      ACTIVE_CHILD_AGENT_STATUSES.has(task.status),
+    );
+    if (phaseCEnabled && activeChildTasks.length >= activeSubAgentLimit) {
+      const activeIds = activeChildTasks.slice(0, 5).map((task) => task.id);
+      this.daemon.logEvent(this.taskId, "agent_spawn_blocked", {
+        reason: "fanout_limit_reached",
+        activeChildCount: activeChildTasks.length,
+        activeSubAgentLimit,
+        activeChildIds: activeIds,
+      });
+      return {
+        success: false,
+        message:
+          `Cannot spawn agent: active child-agent limit reached (${activeChildTasks.length}/${activeSubAgentLimit}). ` +
+          `Wait for existing child agents to finish before spawning more.`,
+        error: "FANOUT_LIMIT_REACHED",
+      };
+    }
+
     // Check depth limit to prevent runaway spawning
     const currentDepth = await this.getCurrentTaskDepth();
     const maxDepth = 3;
@@ -4912,11 +5308,23 @@ ${skillDescriptions}`;
         ? undefined
         : (resolvePersonalityPreference(personality) ?? "concise");
 
+    const extractionMode = phaseCEnabled && isExtractionLikePrompt(prompt);
+    const contractedPrompt = extractionMode ? applyExtractionOutputContract(prompt) : prompt;
+
     // Build agent config
     const agentConfig: AgentConfig = {
-      maxTurns: max_turns,
+      maxTurns: normalizedMaxTurns,
       retainMemory: false, // Sub-agents don't retain memory
     };
+
+    if (phaseCEnabled) {
+      const scopedRestrictions = new Set<string>(SUB_AGENT_DEFAULT_DENIED_TOOLS);
+      agentConfig.toolRestrictions = Array.from(scopedRestrictions);
+    }
+
+    if (extractionMode) {
+      agentConfig.allowedTools = [...EXTRACTION_SUB_AGENT_ALLOWED_TOOLS];
+    }
 
     if (modelKey) agentConfig.modelKey = modelKey;
     if (personalityId) agentConfig.personalityId = personalityId;
@@ -4930,15 +5338,24 @@ ${skillDescriptions}`;
       childTaskTitle: taskTitle,
       modelPreference: model_preference,
       personality: personality,
-      maxTurns: max_turns,
+      maxTurns: normalizedMaxTurns,
       parentDepth: currentDepth,
+      extractionMode,
+      fanout: {
+        activeBeforeSpawn: activeChildTasks.length,
+        activeLimit: activeSubAgentLimit,
+        phaseCEnabled,
+      },
+      allowedToolsCount: Array.isArray(agentConfig.allowedTools)
+        ? agentConfig.allowedTools.length
+        : 0,
     });
 
     try {
       // Create the child task via daemon
       const childTask = await this.daemon.createChildTask({
         title: taskTitle,
-        prompt: prompt,
+        prompt: contractedPrompt,
         workspaceId: this.workspace.id,
         parentTaskId: this.taskId,
         agentType: "sub",
@@ -5916,6 +6333,67 @@ ${skillDescriptions}`;
           },
         },
       },
+      // Vibes & Lore tools
+      {
+        name: "set_vibes",
+        description:
+          "Update the current workspace vibes/energy mode. Call this when you detect a shift in the user's working " +
+          "energy, pace, or intent. For example, if the user says 'let's ship this' switch to crunch mode, or if they " +
+          "say 'just exploring' switch to explore mode. Only operates when a .cowork/ directory exists.",
+        input_schema: {
+          type: "object",
+          properties: {
+            mode: {
+              type: "string",
+              enum: [
+                "crunch",
+                "explore",
+                "deep-focus",
+                "maintenance",
+                "playful",
+                "low-energy",
+                "default",
+              ],
+              description:
+                "The current energy mode: crunch (fast, ship it), explore (open, speculative), " +
+                "deep-focus (dense, no small talk), maintenance (steady, careful), playful (fun, creative), " +
+                "low-energy (simple, small steps), default (balanced)",
+            },
+            energy: {
+              type: "string",
+              enum: ["high", "balanced", "low"],
+              description: "Overall energy level (default: balanced)",
+            },
+            notes: {
+              type: "string",
+              description: "Brief context for the current vibe (max 120 chars)",
+            },
+          },
+          required: ["mode"],
+        },
+      },
+      {
+        name: "update_lore",
+        description:
+          "Record a notable shared moment or reference in the workspace lore. Use after significant accomplishments, " +
+          "breakthroughs, hard-won debugging sessions, or when the user shares something memorable about the project. " +
+          "Only operates when a .cowork/ directory exists.",
+        input_schema: {
+          type: "object",
+          properties: {
+            entry: {
+              type: "string",
+              description: "The lore entry to record (1 sentence, max 200 chars)",
+            },
+            section: {
+              type: "string",
+              enum: ["milestones", "references", "notes"],
+              description: 'Which section to add to (default: "milestones")',
+            },
+          },
+          required: ["entry"],
+        },
+      },
       // Sub-Agent / Parallel Agent tools
       {
         name: "spawn_agent",
@@ -5923,7 +6401,7 @@ ${skillDescriptions}`;
           "Spawn a new agent (sub-task) to work on a specific task independently. Use this to delegate work, " +
           "perform parallel operations, or use a cheaper/faster model for batch work. Sub-agents do not retain " +
           "memory after completion. Returns immediately with the spawned task ID - use wait_for_agent or " +
-          "get_agent_status to check progress. Maximum nesting depth is 3 levels.",
+          "get_agent_status to check progress. Maximum nesting depth is 3 levels. Active child fanout is capped.",
         input_schema: {
           type: "object",
           properties: {
@@ -5956,7 +6434,8 @@ ${skillDescriptions}`;
             },
             max_turns: {
               type: "number",
-              description: "Maximum number of LLM turns for the sub-agent. Default: 20",
+              description:
+                "Maximum number of LLM turns for the sub-agent. Range: 1-100. Default: 20",
             },
           },
           required: ["prompt"],
@@ -6106,6 +6585,81 @@ ${skillDescriptions}`;
           required: ["task_id"],
         },
       },
+      {
+        name: "manage_heartbeat",
+        description:
+          "Enable or disable the heartbeat (periodic wake-up) for a digital twin / agent role. " +
+          "Use this when the user asks to start or stop a twin. Disabling the heartbeat prevents " +
+          "the agent from waking up on its own schedule.",
+        input_schema: {
+          type: "object",
+          properties: {
+            agent_name: {
+              type: "string",
+              description:
+                "The display name of the agent role / digital twin (e.g. 'Engineering Manager Twin')",
+            },
+            enabled: {
+              type: "boolean",
+              description: "true to enable (start) the heartbeat, false to disable (stop) it",
+            },
+          },
+          required: ["agent_name", "enabled"],
+        },
+      },
     ];
+  }
+
+  /**
+   * Execute the manage_heartbeat tool
+   */
+  private manageHeartbeat(input: {
+    agent_name?: string;
+    enabled?: boolean;
+  }): { success: boolean; message: string } {
+    const { agent_name, enabled } = input;
+    if (!agent_name || typeof agent_name !== "string" || agent_name.trim().length === 0) {
+      return { success: false, message: "agent_name is required" };
+    }
+    if (typeof enabled !== "boolean") {
+      return { success: false, message: "enabled must be a boolean (true or false)" };
+    }
+
+    // Look up the agent role by display name
+    const db = this.daemon.getDatabase();
+    const { AgentRoleRepository } = require("../../agents/AgentRoleRepository");
+    const agentRoleRepo = new AgentRoleRepository(db);
+    const allRoles = agentRoleRepo.findAll(true); // include inactive
+    const role = allRoles.find(
+      (r: any) =>
+        r.displayName.toLowerCase() === agent_name.trim().toLowerCase() ||
+        r.name.toLowerCase() === agent_name.trim().toLowerCase(),
+    );
+
+    if (!role) {
+      const available = allRoles.map((r: any) => r.displayName).join(", ");
+      return {
+        success: false,
+        message: `Agent role "${agent_name}" not found. Available: ${available}`,
+      };
+    }
+
+    // Update heartbeat config in DB
+    const config = { heartbeatEnabled: enabled };
+    agentRoleRepo.updateHeartbeatConfig(role.id, config);
+
+    // Notify the HeartbeatService singleton to cancel or reschedule
+    const { getHeartbeatService } = require("../../agents/HeartbeatService");
+    const heartbeatService = getHeartbeatService();
+    if (heartbeatService) {
+      heartbeatService.updateAgentConfig(role.id, config);
+    }
+
+    const action = enabled ? "enabled" : "disabled";
+    console.log(`[ToolRegistry] manage_heartbeat: ${action} heartbeat for ${role.displayName}`);
+    return {
+      success: true,
+      message: `Heartbeat ${action} for ${role.displayName}`,
+    };
   }
 }

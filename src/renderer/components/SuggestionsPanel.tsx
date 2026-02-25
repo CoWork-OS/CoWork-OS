@@ -47,7 +47,10 @@ function isValidWorkspaceId(id: string | undefined): id is string {
   return !!id && !id.startsWith("__temp_workspace__");
 }
 
-export function SuggestionsPanel({ workspaceId: initialWorkspaceId, onCreateTask }: SuggestionsPanelProps) {
+export function SuggestionsPanel({
+  workspaceId: initialWorkspaceId,
+  onCreateTask,
+}: SuggestionsPanelProps) {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -64,7 +67,10 @@ export function SuggestionsPanel({ workspaceId: initialWorkspaceId, onCreateTask
       setWorkspaces(nonTemp);
       setSelectedWorkspaceId((prev) => {
         if (prev && nonTemp.some((w) => w.id === prev)) return prev;
-        if (isValidWorkspaceId(initialWorkspaceId) && nonTemp.some((w) => w.id === initialWorkspaceId)) {
+        if (
+          isValidWorkspaceId(initialWorkspaceId) &&
+          nonTemp.some((w) => w.id === initialWorkspaceId)
+        ) {
           return initialWorkspaceId;
         }
         return nonTemp[0]?.id || "";
@@ -201,12 +207,16 @@ export function SuggestionsPanel({ workspaceId: initialWorkspaceId, onCreateTask
               <div style={{ fontWeight: 600, color: "var(--text-primary)", marginBottom: 12 }}>
                 No suggestions yet
               </div>
-              <div style={{ lineHeight: 1.6 }}>
-                Suggestions are generated in two ways:
-              </div>
+              <div style={{ lineHeight: 1.6 }}>Suggestions are generated in two ways:</div>
               <ul style={{ margin: "8px 0 0", paddingLeft: 18, lineHeight: 1.8 }}>
-                <li><strong>After completing a task</strong> — follow-up suggestions appear automatically (e.g. "write tests", "add docs")</li>
-                <li><strong>During daily briefings</strong> — batch suggestions are generated based on:</li>
+                <li>
+                  <strong>After completing a task</strong> — follow-up suggestions appear
+                  automatically (e.g. "write tests", "add docs")
+                </li>
+                <li>
+                  <strong>During daily briefings</strong> — batch suggestions are generated based
+                  on:
+                </li>
               </ul>
               <ul style={{ margin: "4px 0 0", paddingLeft: 36, lineHeight: 1.8 }}>
                 <li>Recurring task patterns (3+ similar tasks trigger automation suggestions)</li>

@@ -63,9 +63,7 @@ export function ContextPanel({ collapsed = false, onToggle }: ContextPanelProps)
 
       {loading && <div className="ctx-loading">Loading...</div>}
 
-      {!loading && !hasContent && (
-        <div className="ctx-empty">No active connectors or skills</div>
-      )}
+      {!loading && !hasContent && <div className="ctx-empty">No active connectors or skills</div>}
 
       {connectedServers.length > 0 && (
         <div className="ctx-section">
@@ -89,9 +87,7 @@ export function ContextPanel({ collapsed = false, onToggle }: ContextPanelProps)
             </div>
           ))}
           {context.skills.length > 20 && (
-            <div className="ctx-item ctx-item--more">
-              +{context.skills.length - 20} more
-            </div>
+            <div className="ctx-item ctx-item--more">+{context.skills.length - 20} more</div>
           )}
         </div>
       )}

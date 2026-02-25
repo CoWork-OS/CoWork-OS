@@ -311,7 +311,9 @@ export function ConnectorsSettings() {
 
               {isInstalled && (status?.error || connectionErrors[config!.id]) && (
                 <div className="mcp-server-error">
-                  <span className="mcp-error-icon"><AlertTriangle size={14} strokeWidth={2} /></span>
+                  <span className="mcp-error-icon">
+                    <AlertTriangle size={14} strokeWidth={2} />
+                  </span>
                   {connectionErrors[config!.id] || status?.error}
                 </div>
               )}

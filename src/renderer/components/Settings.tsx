@@ -422,7 +422,12 @@ const sidebarItems: Array<{
   { tab: "slack", label: "Slack", group: "Communication", icon: <Hash {...I} /> },
   { tab: "teams", label: "Teams", group: "Communication", icon: <UsersRound {...I} /> },
   { tab: "x", label: "X (Twitter)", group: "Communication", icon: <AtSign {...I} /> },
-  { tab: "morechannels", label: "More Channels", group: "Communication", icon: <MoreHorizontal {...I} /> },
+  {
+    tab: "morechannels",
+    label: "More Channels",
+    group: "Communication",
+    icon: <MoreHorizontal {...I} />,
+  },
   { tab: "integrations", label: "Integrations", group: "Integrations", icon: <Settings2 {...I} /> },
   { tab: "guardrails", label: "Safety Limits", group: "AI & Models", icon: <Shield {...I} /> },
   { tab: "memory", label: "Memory", group: "AI & Models", icon: <Brain {...I} /> },
@@ -434,7 +439,12 @@ const sidebarItems: Array<{
   { tab: "connectors", label: "Connectors", group: "Integrations", icon: <LayoutGrid {...I} /> },
   { tab: "infrastructure", label: "Infrastructure", group: "Integrations", icon: <Zap {...I} /> },
   { tab: "mcp", label: "Connected Tools", group: "Skills & Tools", icon: <Monitor {...I} /> },
-  { tab: "tools", label: "Built-in Tools", group: "Skills & Tools", icon: <MessageSquare {...I} /> },
+  {
+    tab: "tools",
+    label: "Built-in Tools",
+    group: "Skills & Tools",
+    icon: <MessageSquare {...I} />,
+  },
   { tab: "hooks", label: "Webhooks", group: "Automation", icon: <Link {...I} /> },
   { tab: "controlplane", label: "Remote Access", group: "Advanced", icon: <Monitor {...I} /> },
   { tab: "nodes", label: "Mobile Companions", group: "Advanced", icon: <Smartphone {...I} /> },
@@ -609,6 +619,15 @@ export function Settings({
   >([]);
   const [piProviders, setPiProviders] = useState<Array<{ id: string; name: string }>>([]);
   const [loadingPiModels, setLoadingPiModels] = useState(false);
+
+  // OpenAI-compatible state
+  const [openaiCompatBaseUrl, setOpenaiCompatBaseUrl] = useState("");
+  const [openaiCompatApiKey, setOpenaiCompatApiKey] = useState("");
+  const [openaiCompatModel, setOpenaiCompatModel] = useState("");
+  const [openaiCompatModels, setOpenaiCompatModels] = useState<
+    Array<{ key: string; displayName: string; description: string }>
+  >([]);
+  const [loadingOpenAICompatModels, setLoadingOpenAICompatModels] = useState(false);
 
   // Custom provider state
   const [customProviders, setCustomProviders] = useState<Record<string, CustomProviderConfig>>({});
@@ -869,6 +888,20 @@ export function Settings({
         setPiModel(loadedSettings.pi.model);
       }
 
+      // Set OpenAI-compatible form state
+      if (loadedSettings.openaiCompatible?.baseUrl) {
+        setOpenaiCompatBaseUrl(loadedSettings.openaiCompatible.baseUrl);
+      }
+      if (loadedSettings.openaiCompatible?.apiKey) {
+        setOpenaiCompatApiKey(loadedSettings.openaiCompatible.apiKey);
+      }
+      if (loadedSettings.openaiCompatible?.model) {
+        setOpenaiCompatModel(loadedSettings.openaiCompatible.model);
+      }
+      if (loadedSettings.cachedOpenAICompatibleModels) {
+        setOpenaiCompatModels(loadedSettings.cachedOpenAICompatibleModels);
+      }
+
       // Set Bedrock form state (access key and secret key are set earlier)
       if (loadedSettings.bedrock?.accessKeyId) {
         setAwsAccessKeyId(loadedSettings.bedrock.accessKeyId);
@@ -1112,6 +1145,28 @@ export function Settings({
     }
   };
 
+  const loadOpenAICompatibleModels = async (baseUrl?: string, apiKey?: string) => {
+    try {
+      setLoadingOpenAICompatModels(true);
+      const resolvedBaseUrl = baseUrl || openaiCompatBaseUrl;
+      if (!resolvedBaseUrl) return;
+      const models = await window.electronAPI.getOpenAICompatibleModels(
+        resolvedBaseUrl,
+        apiKey || openaiCompatApiKey || undefined,
+      );
+      setOpenaiCompatModels(models || []);
+      if (models && models.length > 0 && !models.some((m) => m.key === openaiCompatModel)) {
+        setOpenaiCompatModel(models[0].key);
+      }
+      onSettingsChanged?.();
+    } catch (error) {
+      console.error("Failed to load OpenAI-compatible models:", error);
+      setOpenaiCompatModels([]);
+    } finally {
+      setLoadingOpenAICompatModels(false);
+    }
+  };
+
   const handleProviderSelect = (providerType: LLMProviderType) => {
     setSettings((prev) => ({ ...prev, providerType }));
 
@@ -1148,6 +1203,10 @@ export function Settings({
     } else if (providerType === "pi") {
       loadPiProviders();
       loadPiModels();
+    } else if (providerType === "openai-compatible") {
+      if (openaiCompatBaseUrl) {
+        loadOpenAICompatibleModels();
+      }
     }
   };
 
@@ -1331,6 +1390,12 @@ export function Settings({
           apiKey: piApiKey || undefined,
           model: piModel || undefined,
         },
+        // Always include OpenAI-compatible settings
+        openaiCompatible: {
+          baseUrl: openaiCompatBaseUrl || undefined,
+          apiKey: openaiCompatApiKey || undefined,
+          model: openaiCompatModel || undefined,
+        },
         customProviders:
           Object.keys(sanitizedCustomProviders).length > 0 ? sanitizedCustomProviders : undefined,
       };
@@ -1450,6 +1515,14 @@ export function Settings({
                 model: piModel || undefined,
               }
             : undefined,
+        openaiCompatible:
+          settings.providerType === "openai-compatible"
+            ? {
+                baseUrl: openaiCompatBaseUrl || undefined,
+                apiKey: openaiCompatApiKey || undefined,
+                model: openaiCompatModel || undefined,
+              }
+            : undefined,
         customProviders:
           Object.keys(sanitizedCustomProviders).length > 0 ? sanitizedCustomProviders : undefined,
       };
@@ -1559,7 +1632,12 @@ export function Settings({
                     if (!focusedTabs.includes(item.tab)) return false;
                   } else if (uiDensity !== "power") {
                     // "full" mode: hide power-only tabs (developer/infra)
-                    const powerOnlyTabs: SettingsTab[] = ["nodes", "extensions", "controlplane", "policies"];
+                    const powerOnlyTabs: SettingsTab[] = [
+                      "nodes",
+                      "extensions",
+                      "controlplane",
+                      "policies",
+                    ];
                     if (powerOnlyTabs.includes(item.tab)) return false;
                   }
                   // Filter by search query
@@ -2553,6 +2631,77 @@ export function Settings({
                             placeholder="claude-sonnet-4-5-20250514"
                             value={piModel}
                             onChange={(e) => setPiModel(e.target.value)}
+                          />
+                        )}
+                      </div>
+                    </>
+                  )}
+
+                  {settings.providerType === "openai-compatible" && (
+                    <>
+                      <div className="settings-section">
+                        <h3>Base URL</h3>
+                        <p className="settings-description">
+                          Enter the base URL of your OpenAI-compatible API endpoint (e.g. vLLM, LM
+                          Studio, LocalAI, text-generation-webui).
+                        </p>
+                        <div className="settings-input-group">
+                          <input
+                            type="text"
+                            className="settings-input"
+                            placeholder="http://localhost:1234/v1"
+                            value={openaiCompatBaseUrl}
+                            onChange={(e) => setOpenaiCompatBaseUrl(e.target.value)}
+                          />
+                          <button
+                            className="button-small button-secondary"
+                            onClick={() => loadOpenAICompatibleModels()}
+                            disabled={loadingOpenAICompatModels || !openaiCompatBaseUrl}
+                          >
+                            {loadingOpenAICompatModels ? "Loading..." : "Fetch Models"}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="settings-section">
+                        <h3>API Key (Optional)</h3>
+                        <p className="settings-description">
+                          API key is optional for local servers. Required for remote endpoints that
+                          need authentication.
+                        </p>
+                        <input
+                          type="password"
+                          className="settings-input"
+                          placeholder="sk-..."
+                          value={openaiCompatApiKey}
+                          onChange={(e) => setOpenaiCompatApiKey(e.target.value)}
+                        />
+                      </div>
+
+                      <div className="settings-section">
+                        <h3>Model</h3>
+                        <p className="settings-description">
+                          Select a model or enter a model ID. Click "Fetch Models" to load available
+                          models from the endpoint.
+                        </p>
+                        {openaiCompatModels.length > 0 ? (
+                          <SearchableSelect
+                            options={openaiCompatModels.map((model) => ({
+                              value: model.key,
+                              label: model.displayName,
+                              description: model.description,
+                            }))}
+                            value={openaiCompatModel}
+                            onChange={setOpenaiCompatModel}
+                            placeholder="Select a model..."
+                          />
+                        ) : (
+                          <input
+                            type="text"
+                            className="settings-input"
+                            placeholder="model-name"
+                            value={openaiCompatModel}
+                            onChange={(e) => setOpenaiCompatModel(e.target.value)}
                           />
                         )}
                       </div>

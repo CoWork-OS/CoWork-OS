@@ -762,8 +762,7 @@ export class CronService {
         );
         return { attempted: true, success: true };
       } catch (retryError) {
-        const errMsg =
-          retryError instanceof Error ? retryError.message : String(retryError);
+        const errMsg = retryError instanceof Error ? retryError.message : String(retryError);
         log.error(`Failed to deliver results for job "${job.name}" after retry:`, retryError);
         return { attempted: true, success: false, error: errMsg };
       }

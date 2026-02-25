@@ -11,9 +11,15 @@ describe("isGitPluginUrl", () => {
   });
 
   it("does not misclassify manifest URLs that include github path segments", () => {
-    expect(isGitPluginUrl("https://raw.githubusercontent.com/org/repo/main/cowork.plugin.json")).toBe(false);
-    expect(isGitPluginUrl("https://api.github.com/repos/org/repo/contents/cowork.plugin.json")).toBe(false);
-    expect(isGitPluginUrl("https://example.com/api/cowork.github.com/manifest/cowork.plugin.json")).toBe(false);
+    expect(
+      isGitPluginUrl("https://raw.githubusercontent.com/org/repo/main/cowork.plugin.json"),
+    ).toBe(false);
+    expect(
+      isGitPluginUrl("https://api.github.com/repos/org/repo/contents/cowork.plugin.json"),
+    ).toBe(false);
+    expect(
+      isGitPluginUrl("https://example.com/api/cowork.github.com/manifest/cowork.plugin.json"),
+    ).toBe(false);
   });
 
   it("returns false for unsupported strings", () => {

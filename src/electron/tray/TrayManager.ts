@@ -416,7 +416,10 @@ export class TrayManager {
       // Fall back to sending to main window
       console.log("[TrayManager] Agent daemon not available, falling back to main window");
       this.showMainWindow();
-      this.mainWindow?.webContents.send(IPC_CHANNELS.TRAY_QUICK_TASK, { task: prompt, workspaceId });
+      this.mainWindow?.webContents.send(IPC_CHANNELS.TRAY_QUICK_TASK, {
+        task: prompt,
+        workspaceId,
+      });
       return;
     }
 

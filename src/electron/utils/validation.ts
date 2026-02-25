@@ -78,6 +78,7 @@ export const AgentConfigSchema = z
     personalityId: PersonalityIdSchema.optional(),
     gatewayContext: z.enum(["private", "group", "public"]).optional(),
     toolRestrictions: z.array(z.string().min(1).max(200)).max(50).optional(),
+    allowedTools: z.array(z.string().min(1).max(200)).max(120).optional(),
     originChannel: OriginChannelSchema.optional(),
     maxTurns: z.number().int().min(1).max(100).optional(),
     maxTokens: z.number().int().min(1).max(1_000_000).optional(),
@@ -205,6 +206,13 @@ export const TaskMessageSchema = z
     }
   });
 
+export const StepFeedbackSchema = z.object({
+  taskId: z.string().uuid(),
+  stepId: z.string().min(1).max(100),
+  action: z.enum(["retry", "skip", "stop", "drift"]),
+  message: z.string().max(MAX_PROMPT_LENGTH).optional(),
+});
+
 export const FileImportSchema = z.object({
   workspaceId: WorkspaceIdSchema,
   files: z.array(z.string().min(1).max(MAX_PATH_LENGTH)).min(1).max(20),
@@ -322,6 +330,14 @@ export const KimiSettingsSchema = z
   })
   .optional();
 
+export const OpenAICompatibleSettingsSchema = z
+  .object({
+    apiKey: z.string().max(500).optional(),
+    baseUrl: z.string().max(500).optional(),
+    model: z.string().max(200).optional(),
+  })
+  .optional();
+
 export const CustomProviderConfigSchema = z.object({
   apiKey: z.string().max(500).optional(),
   model: z.string().max(200).optional(),
@@ -343,6 +359,7 @@ export const LLMSettingsSchema = z.object({
   groq: GroqSettingsSchema,
   xai: XAISettingsSchema,
   kimi: KimiSettingsSchema,
+  openaiCompatible: OpenAICompatibleSettingsSchema,
   customProviders: CustomProvidersSchema,
 });
 

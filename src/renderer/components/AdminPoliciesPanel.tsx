@@ -126,8 +126,8 @@ export function AdminPoliciesPanel() {
     <div className="settings-panel">
       <h2>Admin Policies</h2>
       <p className="settings-description">
-        Configure organization-level policies for plugin packs, connectors, and agents.
-        These policies apply to all users in the organization.
+        Configure organization-level policies for plugin packs, connectors, and agents. These
+        policies apply to all users in the organization.
       </p>
 
       {error && <div className="ap-message ap-error">{error}</div>}
@@ -156,7 +156,8 @@ export function AdminPoliciesPanel() {
             placeholder="/path/to/org-plugins"
           />
           <span className="ap-hint">
-            Directory containing org-managed plugin packs. Packs here are loaded with scope "organization".
+            Directory containing org-managed plugin packs. Packs here are loaded with scope
+            "organization".
           </span>
         </div>
       </div>
@@ -280,12 +281,7 @@ export function AdminPoliciesPanel() {
 
       {/* Save */}
       <div className="ap-actions">
-        <button
-          type="button"
-          className="button-primary"
-          onClick={handleSave}
-          disabled={saving}
-        >
+        <button type="button" className="button-primary" onClick={handleSave} disabled={saving}>
           {saving ? "Saving..." : "Save Policies"}
         </button>
         <button type="button" className="button-secondary" onClick={load}>

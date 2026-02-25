@@ -21,13 +21,14 @@ import { setupWorktreeHandlers } from "./ipc/worktree-handlers";
 import { ComparisonService } from "./git/ComparisonService";
 import { TaskSubscriptionRepository } from "./agents/TaskSubscriptionRepository";
 import { StandupReportService } from "./reports/StandupReportService";
-import { HeartbeatService, HeartbeatServiceDeps } from "./agents/HeartbeatService";
+import { HeartbeatService, HeartbeatServiceDeps, setHeartbeatService } from "./agents/HeartbeatService";
 import { AgentRoleRepository } from "./agents/AgentRoleRepository";
 import { MentionRepository } from "./agents/MentionRepository";
 import { ActivityRepository } from "./activity/ActivityRepository";
 import { WorkingStateRepository } from "./agents/WorkingStateRepository";
 import { CrossSignalService } from "./agents/CrossSignalService";
 import { FeedbackService } from "./agents/FeedbackService";
+import { LoreService } from "./agents/LoreService";
 import { AgentDaemon } from "./agent/daemon";
 import {
   ChannelMessageRepository,
@@ -86,6 +87,7 @@ let channelGateway: ChannelGateway;
 let cronService: CronService | null = null;
 let crossSignalService: CrossSignalService | null = null;
 let feedbackService: FeedbackService | null = null;
+let loreService: LoreService | null = null;
 let tempWorkspacePruneTimer: NodeJS.Timeout | null = null;
 const TEMP_WORKSPACE_PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
@@ -356,6 +358,15 @@ if (!gotTheLock) {
       console.error("[Main] Failed to initialize FeedbackService:", error);
     }
 
+    // Initialize lore service (best-effort; auto-records workspace history from task completions)
+    try {
+      loreService = new LoreService(dbManager.getDatabase());
+      await loreService.start(agentDaemon);
+      console.log("[Main] LoreService initialized");
+    } catch (error) {
+      console.error("[Main] Failed to initialize LoreService:", error);
+    }
+
     // Initialize Memory Service for cross-session context
     try {
       MemoryService.initialize(dbManager);
@@ -585,11 +596,7 @@ if (!gotTheLock) {
           }
 
           const eventResult =
-            bestCandidate ||
-            lastCandidate ||
-            bestInternalCandidate ||
-            completionEventSummary ||
-            "";
+            bestCandidate || lastCandidate || bestInternalCandidate || completionEventSummary || "";
 
           // Return whichever source produced more content — the persisted
           // resultSummary may have been truncated while event text is full.
@@ -624,8 +631,7 @@ if (!gotTheLock) {
           } else if (params.summaryOnly && resultAvailable) {
             // Summary-only mode but result exists — include a truncated preview
             const preview = params.resultText!.trim();
-            const truncated =
-              preview.length > 500 ? `${preview.slice(0, 500)}…` : preview;
+            const truncated = preview.length > 500 ? `${preview.slice(0, 500)}…` : preview;
             message = `${statusEmoji} **${params.jobName}**\n\n${truncated}`;
           } else {
             // No result text or error/timeout — generic status message
@@ -844,6 +850,7 @@ if (!gotTheLock) {
       };
 
       heartbeatService = new HeartbeatService(heartbeatDeps);
+      setHeartbeatService(heartbeatService);
       await heartbeatService.start();
 
       setHeartbeatWakeSubmitter(async ({ text, mode }) => {
@@ -1102,6 +1109,17 @@ if (!gotTheLock) {
     if (channelGateway) {
       await channelGateway.shutdown();
     }
+
+    // Stop lore service to flush any debounced workspace history updates
+    if (loreService) {
+      try {
+        await loreService.stop();
+      } catch (error) {
+        console.error("[Main] Failed to shutdown LoreService:", error);
+      }
+      loreService = null;
+    }
+
     // Disconnect all MCP servers
     try {
       const mcpClientManager = MCPClientManager.getInstance();

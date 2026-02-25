@@ -134,4 +134,47 @@ describe("role-persona", () => {
     const prompt = buildRolePersonaPrompt({}, tmpDir);
     expect(prompt).toBe("");
   });
+
+  it("includes VIBES.md as a role profile file", () => {
+    writeFile(
+      path.join(tmpDir, ".cowork", "agents", "qa-analyst", "VIBES.md"),
+      "# Vibes\n\n- Mode: crunch\n- Energy: high\n- Notes: Deadline approaching",
+    );
+
+    const prompt = buildRolePersonaPrompt(
+      {
+        name: "qa-analyst",
+      },
+      tmpDir,
+    );
+
+    expect(prompt).toContain("ROLE PROFILE");
+    expect(prompt).toContain("Role Vibes");
+    expect(prompt).toContain(".cowork/agents/qa-analyst/VIBES.md");
+    expect(prompt).toContain("Mode: crunch");
+  });
+
+  it("loads VIBES.md before SOUL.md in role profile output", () => {
+    writeFile(
+      path.join(tmpDir, ".cowork", "agents", "qa-analyst", "VIBES.md"),
+      "# Vibes\n\n- Mode: deep-focus",
+    );
+    writeFile(
+      path.join(tmpDir, ".cowork", "agents", "qa-analyst", "SOUL.md"),
+      "# Soul\n\nBe thorough and precise",
+    );
+
+    const prompt = buildRolePersonaPrompt(
+      {
+        name: "qa-analyst",
+      },
+      tmpDir,
+    );
+
+    const vibesIdx = prompt.indexOf("Role Vibes");
+    const soulIdx = prompt.indexOf("Role Persona");
+    expect(vibesIdx).toBeGreaterThan(-1);
+    expect(soulIdx).toBeGreaterThan(-1);
+    expect(vibesIdx).toBeLessThan(soulIdx);
+  });
 });

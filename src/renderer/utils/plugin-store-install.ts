@@ -15,7 +15,8 @@ export function isGitPluginUrl(rawUrl: string): boolean {
       const pathParts = parsed.pathname.replace(/\/+$/g, "").split("/").filter(Boolean);
       const lastSegment = pathParts[pathParts.length - 1]?.toLowerCase() || "";
       const hasGitExtension = lastSegment.endsWith(".git");
-      const isGitHubRepoPath = (host === "github.com" || host.endsWith(".github.com")) && pathParts.length === 2;
+      const isGitHubRepoPath =
+        (host === "github.com" || host.endsWith(".github.com")) && pathParts.length === 2;
       return hasGitExtension || isGitHubRepoPath;
     } catch {
       return false;

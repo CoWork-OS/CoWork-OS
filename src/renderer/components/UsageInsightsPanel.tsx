@@ -95,7 +95,10 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
       setWorkspaces(nonTemp);
       setSelectedWorkspaceId((prev) => {
         if (prev && nonTemp.some((w) => w.id === prev)) return prev;
-        if (isValidWorkspaceId(initialWorkspaceId) && nonTemp.some((w) => w.id === initialWorkspaceId)) {
+        if (
+          isValidWorkspaceId(initialWorkspaceId) &&
+          nonTemp.some((w) => w.id === initialWorkspaceId)
+        ) {
           return initialWorkspaceId;
         }
         return nonTemp[0]?.id || "";
@@ -180,7 +183,9 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
         // Pack analytics not available
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [data]);
 
   if (workspacesLoading) {
@@ -280,7 +285,11 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
           <h3>Tasks</h3>
           <div className="insights-stat-grid cols-4">
             <StatCard label="Created" value={tm.totalCreated} />
-            <StatCard label="Completed" value={tm.completed} color="var(--color-success, #22c55e)" />
+            <StatCard
+              label="Completed"
+              value={tm.completed}
+              color="var(--color-success, #22c55e)"
+            />
             <StatCard label="Failed" value={tm.failed} color="var(--color-error, #ef4444)" />
             <StatCard label="Avg Time" value={formatDuration(tm.avgCompletionTimeMs)} />
           </div>
@@ -366,9 +375,13 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
           <div>
             {data.topSkills.slice(0, 5).map((s) => (
               <div key={s.skill} className="insights-bar-row">
-                <span className="insights-bar-label" style={{ minWidth: 120 }}>{s.skill}</span>
+                <span className="insights-bar-label" style={{ minWidth: 120 }}>
+                  {s.skill}
+                </span>
                 <MiniBar value={s.count} max={data.topSkills[0].count} />
-                <span className="insights-bar-value" style={{ minWidth: 30 }}>{s.count}×</span>
+                <span className="insights-bar-value" style={{ minWidth: 30 }}>
+                  {s.count}×
+                </span>
               </div>
             ))}
           </div>
@@ -387,15 +400,26 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
                     {pa.packIcon} {pa.packName}
                   </span>
                   <MiniBar value={pa.totalUsage} max={packAnalytics[0].totalUsage} />
-                  <span className="insights-bar-value" style={{ minWidth: 30 }}>{pa.totalUsage}×</span>
+                  <span className="insights-bar-value" style={{ minWidth: 30 }}>
+                    {pa.totalUsage}×
+                  </span>
                 </div>
-                {pa.skills.length > 1 && pa.skills.slice(0, 3).map((s) => (
-                  <div key={s.skill} className="insights-bar-row" style={{ paddingLeft: 16, opacity: 0.7 }}>
-                    <span className="insights-bar-label" style={{ minWidth: 104, fontSize: 12 }}>{s.skill}</span>
-                    <MiniBar value={s.count} max={pa.skills[0].count} />
-                    <span className="insights-bar-value" style={{ minWidth: 30, fontSize: 12 }}>{s.count}×</span>
-                  </div>
-                ))}
+                {pa.skills.length > 1 &&
+                  pa.skills.slice(0, 3).map((s) => (
+                    <div
+                      key={s.skill}
+                      className="insights-bar-row"
+                      style={{ paddingLeft: 16, opacity: 0.7 }}
+                    >
+                      <span className="insights-bar-label" style={{ minWidth: 104, fontSize: 12 }}>
+                        {s.skill}
+                      </span>
+                      <MiniBar value={s.count} max={pa.skills[0].count} />
+                      <span className="insights-bar-value" style={{ minWidth: 30, fontSize: 12 }}>
+                        {s.count}×
+                      </span>
+                    </div>
+                  ))}
               </div>
             ))}
           </div>

@@ -2,6 +2,7 @@ import { ipcMain } from "electron";
 import { IPC_CHANNELS } from "../../shared/types";
 import { PluginRegistry } from "../extensions/registry";
 import { MCPClientManager } from "../mcp/client/MCPClientManager";
+import { MCPSettingsManager } from "../mcp/settings";
 import { getCustomSkillLoader } from "../agent/custom-skill-loader";
 import { isPackAllowed, isPackRequired } from "../admin/policies";
 
@@ -21,7 +22,13 @@ export interface PluginPackData {
   tryAsking?: string[];
   skills: { id: string; name: string; description: string; icon?: string; enabled?: boolean }[];
   slashCommands: { name: string; description: string; skillId: string }[];
-  agentRoles: { name: string; displayName: string; description?: string; icon: string; color: string }[];
+  agentRoles: {
+    name: string;
+    displayName: string;
+    description?: string;
+    icon: string;
+    color: string;
+  }[];
   state: string;
   enabled: boolean;
   /** Whether this pack is blocked by admin policy */
@@ -34,7 +41,7 @@ export interface PluginPackData {
  * Active context data for the context panel
  */
 export interface ActiveContextData {
-  connectors: { id: string; name: string; icon: string; status: string }[];
+  connectors: { id: string; name: string; icon: string; status: string; tools: string[] }[];
   skills: { id: string; name: string; icon: string }[];
 }
 
@@ -265,12 +272,16 @@ export function setupPluginPackHandlers(): void {
     try {
       const mcpManager = MCPClientManager.getInstance();
       const statuses = mcpManager.getStatus();
+      const settings = MCPSettingsManager.loadSettings();
+      const prefix = settings.toolNamePrefix || "mcp_";
       for (const s of statuses) {
+        const serverTools = mcpManager.getServerTools(s.id);
         connectors.push({
           id: s.id,
           name: s.name,
           icon: resolveConnectorIcon(s),
           status: s.status,
+          tools: serverTools.map((t) => `${prefix}${t.name}`),
         });
       }
     } catch {

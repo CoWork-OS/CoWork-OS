@@ -493,4 +493,218 @@ describe("ToolRegistry child task control tools", () => {
     expect(result.success).toBe(false);
     expect(result.error).toBe("TASK_NOT_PAUSED");
   });
+
+  it("spawn_agent enforces active child fanout limit", async () => {
+    const prevLimit = process.env.COWORK_SUBAGENT_MAX_ACTIVE_PER_PARENT;
+    const prevPhaseC = process.env.COWORK_GUARDRAIL_PHASE_C;
+    process.env.COWORK_SUBAGENT_MAX_ACTIVE_PER_PARENT = "1";
+    process.env.COWORK_GUARDRAIL_PHASE_C = "true";
+
+    try {
+      const daemon = {
+        getTaskById: vi.fn().mockResolvedValue({
+          id: "parent-task",
+          title: "Parent",
+          prompt: "x",
+          status: "executing",
+          workspaceId: workspace.id,
+          createdAt: 1,
+          updatedAt: 1,
+          depth: 0,
+        }),
+        getChildTasks: vi.fn().mockResolvedValue([
+          {
+            id: "child-1",
+            title: "Child",
+            prompt: "x",
+            status: "executing",
+            workspaceId: workspace.id,
+            createdAt: 1,
+            updatedAt: 1,
+            parentTaskId: "parent-task",
+            agentType: "sub",
+            depth: 1,
+          },
+        ]),
+        createChildTask: vi.fn(),
+        logEvent: vi.fn(),
+      } as any;
+
+      const registry = new ToolRegistry(workspace, daemon, "parent-task");
+      const result = await registry.executeTool("spawn_agent", {
+        prompt: "Analyze this file",
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("FANOUT_LIMIT_REACHED");
+      expect(daemon.createChildTask).not.toHaveBeenCalled();
+    } finally {
+      process.env.COWORK_SUBAGENT_MAX_ACTIVE_PER_PARENT = prevLimit;
+      process.env.COWORK_GUARDRAIL_PHASE_C = prevPhaseC;
+    }
+  });
+
+  it("spawn_agent ignores paused children when enforcing fanout limit", async () => {
+    const prevLimit = process.env.COWORK_SUBAGENT_MAX_ACTIVE_PER_PARENT;
+    const prevPhaseC = process.env.COWORK_GUARDRAIL_PHASE_C;
+    process.env.COWORK_SUBAGENT_MAX_ACTIVE_PER_PARENT = "1";
+    process.env.COWORK_GUARDRAIL_PHASE_C = "true";
+
+    try {
+      const daemon = {
+        getTaskById: vi.fn().mockResolvedValue({
+          id: "parent-task",
+          title: "Parent",
+          prompt: "x",
+          status: "executing",
+          workspaceId: workspace.id,
+          createdAt: 1,
+          updatedAt: 1,
+          depth: 0,
+        }),
+        getChildTasks: vi.fn().mockResolvedValue([
+          {
+            id: "child-paused",
+            title: "Paused child",
+            prompt: "x",
+            status: "paused",
+            workspaceId: workspace.id,
+            createdAt: 1,
+            updatedAt: 1,
+            parentTaskId: "parent-task",
+            agentType: "sub",
+            depth: 1,
+          },
+        ]),
+        createChildTask: vi.fn().mockResolvedValue({
+          id: "child-1",
+          title: "Spawned Child",
+          prompt: "x",
+          status: "pending",
+          workspaceId: workspace.id,
+          createdAt: 1,
+          updatedAt: 1,
+          parentTaskId: "parent-task",
+          agentType: "sub",
+          depth: 1,
+        }),
+        logEvent: vi.fn(),
+      } as any;
+
+      const registry = new ToolRegistry(workspace, daemon, "parent-task");
+      const result = await registry.executeTool("spawn_agent", {
+        prompt: "Analyze this file",
+      });
+
+      expect(result.success).toBe(true);
+      expect(daemon.createChildTask).toHaveBeenCalledTimes(1);
+    } finally {
+      process.env.COWORK_SUBAGENT_MAX_ACTIVE_PER_PARENT = prevLimit;
+      process.env.COWORK_GUARDRAIL_PHASE_C = prevPhaseC;
+    }
+  });
+
+  it("spawn_agent applies extraction contract and scoped allowed tools for HTML extraction tasks", async () => {
+    const prevLimit = process.env.COWORK_SUBAGENT_MAX_ACTIVE_PER_PARENT;
+    const prevPhaseC = process.env.COWORK_GUARDRAIL_PHASE_C;
+    process.env.COWORK_SUBAGENT_MAX_ACTIVE_PER_PARENT = "3";
+    process.env.COWORK_GUARDRAIL_PHASE_C = "true";
+
+    try {
+      const daemon = {
+        getTaskById: vi.fn().mockResolvedValue({
+          id: "parent-task",
+          title: "Parent",
+          prompt: "x",
+          status: "executing",
+          workspaceId: workspace.id,
+          createdAt: 1,
+          updatedAt: 1,
+          depth: 0,
+        }),
+        getChildTasks: vi.fn().mockResolvedValue([]),
+        createChildTask: vi.fn().mockResolvedValue({
+          id: "child-1",
+          title: "Extract HTML",
+          prompt: "x",
+          status: "pending",
+          workspaceId: workspace.id,
+          createdAt: 1,
+          updatedAt: 1,
+          parentTaskId: "parent-task",
+          agentType: "sub",
+          depth: 1,
+        }),
+        logEvent: vi.fn(),
+      } as any;
+
+      const registry = new ToolRegistry(workspace, daemon, "parent-task");
+      const result = await registry.executeTool("spawn_agent", {
+        prompt:
+          'Read "temp-writing-rules.html" in the workspace and extract meaningful content to markdown.',
+      });
+
+      expect(result.success).toBe(true);
+      expect(daemon.createChildTask).toHaveBeenCalledTimes(1);
+      const call = daemon.createChildTask.mock.calls[0][0];
+      expect(call.prompt).toContain("[EXTRACTION_OUTPUT_CONTRACT_V1]");
+      expect(Array.isArray(call.agentConfig?.allowedTools)).toBe(true);
+      expect(call.agentConfig.allowedTools).toContain("read_file");
+      expect(call.agentConfig.toolRestrictions).toContain("spawn_agent");
+    } finally {
+      process.env.COWORK_SUBAGENT_MAX_ACTIVE_PER_PARENT = prevLimit;
+      process.env.COWORK_GUARDRAIL_PHASE_C = prevPhaseC;
+    }
+  });
+
+  it("spawn_agent applies extraction contract for page-source prompts without explicit .html", async () => {
+    const prevLimit = process.env.COWORK_SUBAGENT_MAX_ACTIVE_PER_PARENT;
+    const prevPhaseC = process.env.COWORK_GUARDRAIL_PHASE_C;
+    process.env.COWORK_SUBAGENT_MAX_ACTIVE_PER_PARENT = "3";
+    process.env.COWORK_GUARDRAIL_PHASE_C = "true";
+
+    try {
+      const daemon = {
+        getTaskById: vi.fn().mockResolvedValue({
+          id: "parent-task",
+          title: "Parent",
+          prompt: "x",
+          status: "executing",
+          workspaceId: workspace.id,
+          createdAt: 1,
+          updatedAt: 1,
+          depth: 0,
+        }),
+        getChildTasks: vi.fn().mockResolvedValue([]),
+        createChildTask: vi.fn().mockResolvedValue({
+          id: "child-2",
+          title: "Extract Page Source",
+          prompt: "x",
+          status: "pending",
+          workspaceId: workspace.id,
+          createdAt: 1,
+          updatedAt: 1,
+          parentTaskId: "parent-task",
+          agentType: "sub",
+          depth: 1,
+        }),
+        logEvent: vi.fn(),
+      } as any;
+
+      const registry = new ToolRegistry(workspace, daemon, "parent-task");
+      const result = await registry.executeTool("spawn_agent", {
+        prompt:
+          "Read the saved page source from the workspace and extract meaningful content into markdown sections.",
+      });
+
+      expect(result.success).toBe(true);
+      const call = daemon.createChildTask.mock.calls[0][0];
+      expect(call.prompt).toContain("[EXTRACTION_OUTPUT_CONTRACT_V1]");
+      expect(Array.isArray(call.agentConfig?.allowedTools)).toBe(true);
+      expect(call.agentConfig.toolRestrictions).toContain("spawn_agent");
+    } finally {
+      process.env.COWORK_SUBAGENT_MAX_ACTIVE_PER_PARENT = prevLimit;
+      process.env.COWORK_GUARDRAIL_PHASE_C = prevPhaseC;
+    }
+  });
 });

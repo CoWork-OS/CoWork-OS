@@ -452,8 +452,16 @@ export function WhatsAppSettings({ onStatusChange }: WhatsAppSettingsProps) {
           )}
 
           <div className="settings-info-box">
-            <strong><Lightbulb size={13} strokeWidth={2} style={{ display: "inline", verticalAlign: "text-bottom" }} /> Tip:</strong> For the best experience, use a separate WhatsApp number for the
-            bot. This way the bot appears as a separate contact instead of messaging yourself.
+            <strong>
+              <Lightbulb
+                size={13}
+                strokeWidth={2}
+                style={{ display: "inline", verticalAlign: "text-bottom" }}
+              />{" "}
+              Tip:
+            </strong>{" "}
+            For the best experience, use a separate WhatsApp number for the bot. This way the bot
+            appears as a separate contact instead of messaging yourself.
           </div>
 
           {testResult && (
@@ -654,8 +662,16 @@ export function WhatsAppSettings({ onStatusChange }: WhatsAppSettingsProps) {
           )}
 
           <div className="settings-info-box">
-            <strong><Lightbulb size={13} strokeWidth={2} style={{ display: "inline", verticalAlign: "text-bottom" }} /> Tip:</strong> For the best experience, use a separate WhatsApp number for the
-            bot. Then disable self-chat mode - your bot will appear as a separate contact.
+            <strong>
+              <Lightbulb
+                size={13}
+                strokeWidth={2}
+                style={{ display: "inline", verticalAlign: "text-bottom" }}
+              />{" "}
+              Tip:
+            </strong>{" "}
+            For the best experience, use a separate WhatsApp number for the bot. Then disable
+            self-chat mode - your bot will appear as a separate contact.
           </div>
         </div>
       </div>
@@ -812,8 +828,16 @@ export function WhatsAppSettings({ onStatusChange }: WhatsAppSettingsProps) {
         )}
 
         <div className="settings-info-box">
-          <strong><Lightbulb size={13} strokeWidth={2} style={{ display: "inline", verticalAlign: "text-bottom" }} /> Tip:</strong> For the best experience, use a separate WhatsApp number for the
-          bot. Then disable self-chat mode - your bot will appear as a separate contact.
+          <strong>
+            <Lightbulb
+              size={13}
+              strokeWidth={2}
+              style={{ display: "inline", verticalAlign: "text-bottom" }}
+            />{" "}
+            Tip:
+          </strong>{" "}
+          For the best experience, use a separate WhatsApp number for the bot. Then disable
+          self-chat mode - your bot will appear as a separate contact.
         </div>
       </div>
 

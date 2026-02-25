@@ -8,6 +8,7 @@ import {
   isTempWorkspaceId,
   ImageAttachment,
   InfraStatus,
+  TASK_ERROR_CODES,
 } from "../../shared/types";
 import { isVerificationStepDescription } from "../../shared/plan-utils";
 import * as fs from "fs";
@@ -94,8 +95,11 @@ import {
   computeToolFailureDecision as computeToolFailureDecisionUtil,
   handleMaxTokensRecovery as handleMaxTokensRecoveryUtil,
   injectToolRecoveryHint as injectToolRecoveryHintUtil,
+  maybeInjectLowProgressNudge as maybeInjectLowProgressNudgeUtil,
+  maybeInjectStopReasonNudge as maybeInjectStopReasonNudgeUtil,
   maybeInjectToolLoopBreak as maybeInjectToolLoopBreakUtil,
   maybeInjectVariedFailureNudge as maybeInjectVariedFailureNudgeUtil,
+  type ToolLoopCall,
 } from "./executor-loop-utils";
 import {
   preflightWorkspaceCheck as preflightWorkspaceCheckUtil,
@@ -153,6 +157,27 @@ export type { CompletionContract } from "./executor-helpers";
 
 const KEEP_LATEST_IMAGE_MESSAGES = 8;
 
+function isFeatureEnabled(envName: string, defaultValue = true): boolean {
+  const raw = process.env[envName];
+  if (raw === undefined) return defaultValue;
+  const normalized = raw.trim().toLowerCase();
+  if (!normalized) return false;
+  if (normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on")
+    return true;
+  if (normalized === "0" || normalized === "false" || normalized === "no" || normalized === "off")
+    return false;
+  return defaultValue;
+}
+
+class TurnLimitExceededError extends Error {
+  readonly code = TASK_ERROR_CODES.TURN_LIMIT_EXCEEDED;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "TurnLimitExceededError";
+  }
+}
+
 interface InfraContextProvider {
   getStatus(): InfraStatus;
 }
@@ -200,6 +225,11 @@ export class TaskExecutor {
   // we should not keep re-pausing on the same gate.
   private workspacePreflightAcknowledged = false;
   private lastPauseReason: string | null = null;
+  private stepFeedbackSignal: {
+    stepId: string;
+    action: "retry" | "skip" | "stop" | "drift";
+    message?: string;
+  } | null = null;
   private plan?: Plan;
   private modelId: string;
   private modelKey: string;
@@ -1059,11 +1089,18 @@ ${transcript}
   private totalInputTokens: number = 0;
   private totalOutputTokens: number = 0;
   private totalCost: number = 0;
+  private usageOffsetInputTokens: number = 0;
+  private usageOffsetOutputTokens: number = 0;
+  private usageOffsetCost: number = 0;
   private iterationCount: number = 0;
 
   // Global turn tracking (across all steps) - similar to Claude Agent SDK's maxTurns
   private globalTurnCount: number = 0;
   private readonly maxGlobalTurns: number; // Configurable via AgentConfig.maxTurns
+  private readonly turnSoftLandingReserve: number = 2;
+  private budgetSoftLandingInjected = false;
+  private readonly guardrailPhaseAEnabled: boolean;
+  private readonly guardrailPhaseBEnabled: boolean;
   private llmCallSequence: number = 0;
   private softDeadlineTriggered: boolean = false;
   private wrapUpRequested: boolean = false;
@@ -1090,6 +1127,8 @@ ${transcript}
       typeof task.agentConfig?.maxTurns === "number" && task.agentConfig.maxTurns > 0
         ? task.agentConfig.maxTurns
         : 100;
+    this.guardrailPhaseAEnabled = isFeatureEnabled("COWORK_GUARDRAIL_PHASE_A", true);
+    this.guardrailPhaseBEnabled = isFeatureEnabled("COWORK_GUARDRAIL_PHASE_B", true);
     this.lastUserMessage = task.prompt;
     this.recoveryRequestActive = this.isRecoveryIntent(this.lastUserMessage);
     this.capabilityUpgradeRequested = this.isCapabilityUpgradeIntent(this.lastUserMessage);
@@ -1814,8 +1853,8 @@ ${transcript}
         outputTokens: progress.outputTokens,
         elapsedMs: progress.elapsedMs,
         streaming: progress.streaming,
-        totalInputTokens: this.totalInputTokens + progress.inputTokens,
-        totalOutputTokens: this.totalOutputTokens + progress.outputTokens,
+        totalInputTokens: this.getCumulativeInputTokens() + progress.inputTokens,
+        totalOutputTokens: this.getCumulativeOutputTokens() + progress.outputTokens,
       });
     };
 
@@ -1948,7 +1987,7 @@ ${transcript}
   private checkBudgets(): void {
     // Check global turn limit (similar to Claude Agent SDK's maxTurns)
     if (this.globalTurnCount >= this.maxGlobalTurns) {
-      throw new Error(
+      throw new TurnLimitExceededError(
         `Global turn limit exceeded: ${this.globalTurnCount}/${this.maxGlobalTurns} turns. ` +
           `Task stopped to prevent infinite loops. Consider breaking this task into smaller parts.`,
       );
@@ -1983,6 +2022,72 @@ ${transcript}
     }
   }
 
+  private getRemainingTurnBudget(): number {
+    return Math.max(0, this.maxGlobalTurns - this.globalTurnCount);
+  }
+
+  private maybeInjectTurnBudgetSoftLanding(
+    messages: LLMMessage[],
+    phase: "step" | "follow-up",
+  ): void {
+    if (!this.guardrailPhaseAEnabled || this.budgetSoftLandingInjected) return;
+    const remainingTurns = this.getRemainingTurnBudget();
+    if (remainingTurns > this.turnSoftLandingReserve) return;
+
+    const softLandingMessage =
+      "[TURN_SOFT_LANDING]\n" +
+      "Turn budget is nearly exhausted. Prioritize finalization now:\n" +
+      "1) Avoid new exploratory tool calls unless strictly required.\n" +
+      "2) Use evidence already gathered.\n" +
+      "3) Return a concise final result and explicit blockers.";
+
+    messages.push({
+      role: "user",
+      content: [{ type: "text", text: softLandingMessage }],
+    });
+    this.budgetSoftLandingInjected = true;
+    this.emitEvent("budget_soft_landing", {
+      phase,
+      remainingTurns,
+      maxTurns: this.maxGlobalTurns,
+      usedTurns: this.globalTurnCount,
+    });
+    console.log(
+      `${this.logTag} Injected turn-budget soft-landing guidance | phase=${phase} | remainingTurns=${remainingTurns}`,
+    );
+  }
+
+  private getCumulativeInputTokens(): number {
+    return this.usageOffsetInputTokens + this.totalInputTokens;
+  }
+
+  private getCumulativeOutputTokens(): number {
+    return this.usageOffsetOutputTokens + this.totalOutputTokens;
+  }
+
+  private getCumulativeCost(): number {
+    return this.usageOffsetCost + this.totalCost;
+  }
+
+  private isTurnLimitExceededError(errorLike: unknown): boolean {
+    if (
+      typeof errorLike === "object" &&
+      errorLike !== null &&
+      (errorLike as any).code === TASK_ERROR_CODES.TURN_LIMIT_EXCEEDED
+    ) {
+      return true;
+    }
+
+    const message =
+      typeof errorLike === "string"
+        ? errorLike
+        : typeof errorLike === "object" && errorLike !== null
+          ? (errorLike as any).message
+          : undefined;
+
+    return /Global turn limit exceeded/i.test(String(message || ""));
+  }
+
   /**
    * Update tracking after an LLM response
    */
@@ -2000,6 +2105,9 @@ ${transcript}
     // Persist usage to task events so it can be exported/audited later.
     // Store totals (not just deltas) so consumers can just take the most recent record.
     if (safeInput > 0 || safeOutput > 0 || deltaCost > 0) {
+      const cumulativeInput = this.getCumulativeInputTokens();
+      const cumulativeOutput = this.getCumulativeOutputTokens();
+      const cumulativeCost = this.getCumulativeCost();
       this.emitEvent("llm_usage", {
         modelId: this.modelId,
         modelKey: this.modelKey,
@@ -2010,10 +2118,10 @@ ${transcript}
           cost: deltaCost,
         },
         totals: {
-          inputTokens: this.totalInputTokens,
-          outputTokens: this.totalOutputTokens,
-          totalTokens: this.totalInputTokens + this.totalOutputTokens,
-          cost: this.totalCost,
+          inputTokens: cumulativeInput,
+          outputTokens: cumulativeOutput,
+          totalTokens: cumulativeInput + cumulativeOutput,
+          cost: cumulativeCost,
         },
         updatedAt: Date.now(),
       });
@@ -2994,9 +3102,36 @@ ${transcript}
     return restrictions;
   }
 
+  private hasTaskToolAllowlistConfigured(): boolean {
+    return Array.isArray(this.task.agentConfig?.allowedTools);
+  }
+
+  private getTaskToolAllowlist(): Set<string> {
+    const raw = this.task.agentConfig?.allowedTools ?? [];
+    const allowlist = new Set<string>();
+
+    for (const toolName of raw) {
+      if (typeof toolName !== "string") continue;
+      const trimmed = toolName.trim();
+      if (!trimmed) continue;
+      allowlist.add(trimmed);
+    }
+
+    return allowlist;
+  }
+
   private isToolRestrictedByPolicy(toolName: string): boolean {
     const restrictions = this.getTaskToolRestrictions();
-    return restrictions.has("*") || restrictions.has(toolName);
+    if (restrictions.has("*") || restrictions.has(toolName)) {
+      return true;
+    }
+
+    const hasAllowlist = this.hasTaskToolAllowlistConfigured();
+    if (!hasAllowlist) return false;
+
+    const allowlist = this.getTaskToolAllowlist();
+    if (allowlist.has("*")) return false;
+    return !allowlist.has(toolName);
   }
 
   /**
@@ -3006,11 +3141,15 @@ ${transcript}
   private getAvailableTools() {
     const allTools = this.toolRegistry.getTools();
     const restrictedTools = this.getTaskToolRestrictions();
+    const hasAllowlist = this.hasTaskToolAllowlistConfigured();
+    const allowedTools = this.getTaskToolAllowlist();
     const restrictedByTask = (name: string) =>
       restrictedTools.has("*") || restrictedTools.has(name);
+    const blockedByAllowlist = (name: string) =>
+      hasAllowlist && !allowedTools.has("*") && !allowedTools.has(name);
     const disabledTools = this.toolFailureTracker.getDisabledTools();
 
-    if (disabledTools.length === 0 && restrictedTools.size === 0) {
+    if (disabledTools.length === 0 && restrictedTools.size === 0 && !hasAllowlist) {
       if (!this.isVisualCanvasTask()) {
         return allTools.filter((tool) => !this.isCanvasTool(tool.name));
       }
@@ -3019,10 +3158,11 @@ ${transcript}
 
     const filtered = allTools
       .filter((tool) => !restrictedByTask(tool.name))
+      .filter((tool) => !blockedByAllowlist(tool.name))
       .filter((tool) => !disabledTools.includes(tool.name));
     if (filtered.length !== allTools.length) {
       console.log(
-        `${this.logTag} Filtered out ${allTools.length - filtered.length} tools by policy/denials`,
+        `${this.logTag} Filtered out ${allTools.length - filtered.length} tools by policy/allowlist/denials`,
       );
     }
 
@@ -3030,6 +3170,10 @@ ${transcript}
       console.log(
         `${this.logTag} Filtered out ${disabledTools.length} disabled tools: ${disabledTools.join(", ")}`,
       );
+    }
+
+    if (hasAllowlist) {
+      console.log(`${this.logTag} Tool allowlist active (${allowedTools.size} tool(s))`);
     }
 
     if (!this.isVisualCanvasTask()) {
@@ -3210,9 +3354,9 @@ You are continuing a previous conversation. The context from the previous conver
         modelKey: this.modelKey,
         // Token/cost totals so budget enforcement survives a resume
         usageTotals: {
-          inputTokens: this.totalInputTokens,
-          outputTokens: this.totalOutputTokens,
-          cost: this.totalCost,
+          inputTokens: this.getCumulativeInputTokens(),
+          outputTokens: this.getCumulativeOutputTokens(),
+          cost: this.getCumulativeCost(),
         },
       };
       const estimatedSize = JSON.stringify(payload).length;
@@ -3393,6 +3537,9 @@ You are continuing a previous conversation. The context from the previous conver
 
       // Restore token/cost budget counters so budget enforcement carries over
       if (payload.usageTotals) {
+        this.usageOffsetInputTokens = 0;
+        this.usageOffsetOutputTokens = 0;
+        this.usageOffsetCost = 0;
         this.totalInputTokens = payload.usageTotals.inputTokens || 0;
         this.totalOutputTokens = payload.usageTotals.outputTokens || 0;
         this.totalCost = payload.usageTotals.cost || 0;
@@ -3425,6 +3572,9 @@ You are continuing a previous conversation. The context from the previous conver
     const latest = usageEvents[usageEvents.length - 1];
     const totals = latest.payload?.totals;
     if (totals) {
+      this.usageOffsetInputTokens = 0;
+      this.usageOffsetOutputTokens = 0;
+      this.usageOffsetCost = 0;
       this.totalInputTokens = totals.inputTokens || 0;
       this.totalOutputTokens = totals.outputTokens || 0;
       this.totalCost = totals.cost || 0;
@@ -4760,6 +4910,21 @@ You are continuing a previous conversation. The context from the previous conver
   }
 
   /**
+   * Extract a coarse-grained target key for progress checks.
+   * Unlike `extractToolSignature`, this intentionally drops read-range qualifiers
+   * so repeated probing of different ranges on the same file can still be detected.
+   */
+  private extractToolBaseTarget(toolName: string, input: any): string {
+    const category = this.normalizeToolCategory(toolName, input);
+    if (category === "read") {
+      const file = this.extractToolTarget(toolName, input);
+      if (file) return file;
+    }
+
+    return this.extractToolSignature(toolName, input);
+  }
+
+  /**
    * Detect degenerate tool call loops: the model calling the same tool on the
    * same target repeatedly without making meaningful progress.
    * Returns true if a loop is detected and a break message should be injected.
@@ -4769,14 +4934,15 @@ You are continuing a previous conversation. The context from the previous conver
    *   (different line ranges = progressive exploration, not a loop)
    */
   private detectToolLoop(
-    recentCalls: Array<{ tool: string; target: string }>,
+    recentCalls: ToolLoopCall[],
     toolName: string,
     input: any,
     threshold: number = 3,
   ): boolean {
     const category = this.normalizeToolCategory(toolName, input);
     const signature = this.extractToolSignature(toolName, input);
-    recentCalls.push({ tool: category, target: signature });
+    const baseTarget = this.extractToolBaseTarget(toolName, input);
+    recentCalls.push({ tool: category, target: signature, baseTarget });
 
     // Keep only the last `threshold + 1` entries for memory efficiency
     if (recentCalls.length > threshold + 1) {
@@ -6173,6 +6339,16 @@ You are continuing a previous conversation. The context from the previous conver
             message:
               "Answer-first short-circuit active. Skipping deep plan execution and finalizing.",
           });
+          // Populate conversation history so follow-up messages retain context
+          const userContent = await this.buildUserContent(this.task.prompt, this.initialImages);
+          const userHistoryContent =
+            typeof userContent === "string"
+              ? [{ type: "text" as const, text: userContent }]
+              : userContent;
+          this.updateConversationHistory([
+            { role: "user", content: userHistoryContent },
+            { role: "assistant", content: [{ type: "text", text: quickAnswer }] },
+          ]);
           try {
             this.finalizeTask(quickAnswer);
           } catch (guardError) {
@@ -6386,6 +6562,14 @@ You are continuing a previous conversation. The context from the previous conver
           type: "open_settings",
           label: "Open Settings",
         };
+      }
+      // Add actionHint only for turn-limit errors so continuation semantics stay predictable.
+      if (this.isTurnLimitExceededError(error)) {
+        errorPayload.actionHint = {
+          type: "continue_task",
+          label: "Continue",
+        };
+        errorPayload.errorCode = TASK_ERROR_CODES.TURN_LIMIT_EXCEEDED;
       }
       this.emitEvent("error", errorPayload);
     } finally {
@@ -6799,7 +6983,7 @@ Format your plan as a JSON object with this structure:
         break;
       }
 
-      if (step.status === "completed") {
+      if (step.status === "completed" || step.status === "skipped") {
         index++;
         continue;
       }
@@ -6809,7 +6993,9 @@ Format your plan as a JSON object with this structure:
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
 
-      const completedSteps = this.plan.steps.filter((s) => s.status === "completed").length;
+      const completedSteps = this.plan.steps.filter(
+        (s) => s.status === "completed" || s.status === "skipped",
+      ).length;
       const totalSteps = this.plan.steps.length;
 
       // Emit step starting progress
@@ -6909,13 +7095,20 @@ Format your plan as a JSON object with this structure:
         throw error;
       }
 
+      // If step was reset to pending (retry feedback), re-execute it
+      if (step.status === "pending") {
+        continue;
+      }
+
       const updatedIndex = this.plan.steps.findIndex((s) => s.id === step.id);
       if (updatedIndex === -1) {
         index = Math.min(index + 1, this.plan.steps.length);
       } else {
         index = updatedIndex + 1;
       }
-      const completedAfterStep = this.plan.steps.filter((s) => s.status === "completed").length;
+      const completedAfterStep = this.plan.steps.filter(
+        (s) => s.status === "completed" || s.status === "skipped",
+      ).length;
       const totalAfterStep = this.plan.steps.length;
 
       const latestStepState = this.plan.steps.find((s) => s.id === step.id) ?? step;
@@ -7558,8 +7751,12 @@ TASK / CONVERSATION HISTORY:
       let lastSharedContextBlock = "";
       let toolRecoveryHintInjected = false;
       // Loop detection: track recent tool calls to detect degenerate loops
-      const recentToolCalls: Array<{ tool: string; target: string }> = [];
+      const recentToolCalls: ToolLoopCall[] = [];
       let loopBreakInjected = false;
+      let lowProgressNudgeInjected = false;
+      let stopReasonNudgeInjected = false;
+      let consecutiveToolUseStops = 0;
+      let consecutiveMaxTokenStops = 0;
       // Varied failure detection: non-resetting per-tool failure counter (not reset on success)
       const persistentToolFailures = new Map<string, number>();
       let variedFailureNudgeInjected = false;
@@ -7646,6 +7843,71 @@ TASK / CONVERSATION HISTORY:
           break;
         }
 
+        // Check for step-level feedback signals (skip, stop, retry, drift)
+        {
+          const feedback = this.consumeStepFeedback(step.id);
+          if (feedback) {
+            this.emitEvent("step_feedback", {
+              step,
+              action: feedback.action,
+              message: feedback.message,
+            });
+
+            switch (feedback.action) {
+              case "skip":
+                step.status = "skipped";
+                step.completedAt = Date.now();
+                this.emitEvent("step_skipped", {
+                  step,
+                  reason: feedback.message || "Skipped by user",
+                });
+                console.log(`${this.logTag} Step "${step.description}" skipped by user feedback`);
+                return;
+
+              case "stop":
+                step.status = "failed";
+                step.error = "Stopped by user";
+                step.completedAt = Date.now();
+                this.paused = true;
+                this.waitingForUserInput = true;
+                this.lastPauseReason = "step_stopped_by_user";
+                this.daemon.updateTaskStatus(this.task.id, "paused");
+                this.emitEvent("step_failed", {
+                  step,
+                  reason: "Stopped by user feedback",
+                });
+                this.emitEvent("task_paused", {
+                  message: "Stopped at user's request",
+                  stepId: step.id,
+                  stepDescription: step.description,
+                });
+                console.log(`${this.logTag} Step "${step.description}" stopped by user feedback`);
+                throw new AwaitingUserInputError("Step stopped by user");
+
+              case "retry":
+                step.status = "pending";
+                step.startedAt = undefined;
+                step.completedAt = undefined;
+                step.error = undefined;
+                if (feedback.message) {
+                  this.pendingFollowUps.unshift({
+                    message: `[RETRY CONTEXT]: ${feedback.message}`,
+                  });
+                }
+                console.log(
+                  `${this.logTag} Step "${step.description}" will retry by user feedback`,
+                );
+                return;
+
+              case "drift":
+                // Message was already queued in setStepFeedback via unshift.
+                // Continue the loop; the follow-up drain below will pick it up.
+                console.log(`${this.logTag} Step "${step.description}" drift feedback received`);
+                break;
+            }
+          }
+        }
+
         // Inject any queued follow-up messages from the user into the conversation
         {
           let pendingMsg = this.drainPendingFollowUp();
@@ -7672,6 +7934,9 @@ TASK / CONVERSATION HISTORY:
         if (emptyResponseCount >= maxEmptyResponses) {
           break;
         }
+
+        // As we approach turn limits, steer toward finalization before hard-stop.
+        this.maybeInjectTurnBudgetSoftLanding(messages, "step");
 
         // Check guardrail budgets before each LLM call
         this.checkBudgets();
@@ -7813,6 +8078,17 @@ TASK / CONVERSATION HISTORY:
         if (responseHasToolUse) {
           stepAttemptedToolUse = true;
         }
+        const remainingTurnsAfterResponse = this.getRemainingTurnBudget();
+        if (response.stopReason === "tool_use") {
+          consecutiveToolUseStops += 1;
+        } else {
+          consecutiveToolUseStops = 0;
+        }
+        if (response.stopReason === "max_tokens") {
+          consecutiveMaxTokenStops += 1;
+        } else {
+          consecutiveMaxTokenStops = 0;
+        }
 
         // ── max_tokens truncation recovery ──
         const maxTokensDecision = handleMaxTokensRecoveryUtil({
@@ -7820,6 +8096,8 @@ TASK / CONVERSATION HISTORY:
           messages,
           recoveryCount: maxTokensRecoveryCount,
           maxRecoveries: maxMaxTokensRecoveries,
+          remainingTurns: remainingTurnsAfterResponse,
+          minTurnsRequiredForRetry: 0,
           eventPayload: {
             stepId: step.id,
             hadToolUse: responseHasToolUse,
@@ -7843,6 +8121,24 @@ TASK / CONVERSATION HISTORY:
           iterationCount--;
           continueLoop = true;
           continue; // Skip tool processing, go directly to next LLM call
+        }
+
+        if (this.guardrailPhaseAEnabled) {
+          stopReasonNudgeInjected = maybeInjectStopReasonNudgeUtil({
+            stopReason: response.stopReason,
+            consecutiveToolUseStops,
+            consecutiveMaxTokenStops,
+            remainingTurns: remainingTurnsAfterResponse,
+            messages,
+            phaseLabel: "step",
+            stopReasonNudgeInjected,
+            log: (message) => console.log(`${this.logTag}${message}`),
+            emitStopReasonEvent: (payload) =>
+              this.emitEvent("stop_reason_nudge", {
+                stepId: step.id,
+                ...payload,
+              }),
+          });
         }
 
         // Optional quality loop for final text-only outputs (no tool calls).
@@ -7933,6 +8229,8 @@ TASK / CONVERSATION HISTORY:
 
         // Handle tool calls
         const toolResults: LLMToolResult[] = [];
+        const forceFinalizeWithoutTools =
+          this.guardrailPhaseAEnabled && responseHasToolUse && remainingTurnsAfterResponse <= 0;
         let hasDisabledToolAttempt = false;
         let hasDuplicateToolAttempt = false;
         let hasUnavailableToolAttempt = false;
@@ -7940,6 +8238,19 @@ TASK / CONVERSATION HISTORY:
 
         for (const content of response.content || []) {
           if (content.type === "tool_use") {
+            if (forceFinalizeWithoutTools) {
+              toolResults.push({
+                type: "tool_result",
+                tool_use_id: content.id,
+                content: JSON.stringify({
+                  error: "Tool call skipped: turn budget reserved for final response.",
+                  blocked: true,
+                  reason: "turn_budget_soft_landing",
+                }),
+                is_error: true,
+              });
+              continue;
+            }
             // Normalize tool names like "functions.web_fetch" -> "web_fetch"
             content.name = normalizeToolUseNameUtil({
               toolName: content.name,
@@ -8431,6 +8742,17 @@ TASK / CONVERSATION HISTORY:
             role: "user",
             content: toolResults,
           });
+          if (forceFinalizeWithoutTools) {
+            messages.push({
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text: "Turn budget exhausted for further tool calls. Provide the best possible final response using existing evidence only.",
+                },
+              ],
+            });
+          }
 
           loopBreakInjected = maybeInjectToolLoopBreakUtil({
             responseContent: response.content,
@@ -8441,6 +8763,21 @@ TASK / CONVERSATION HISTORY:
               this.detectToolLoop(calls, toolName, input, threshold),
             log: (message) => console.log(`${this.logTag}${message}`),
           });
+
+          if (this.guardrailPhaseBEnabled) {
+            lowProgressNudgeInjected = maybeInjectLowProgressNudgeUtil({
+              recentToolCalls,
+              messages,
+              lowProgressNudgeInjected,
+              phaseLabel: "step",
+              log: (message) => console.log(`${this.logTag}${message}`),
+              emitLowProgressEvent: (payload) =>
+                this.emitEvent("low_progress_loop_detected", {
+                  stepId: step.id,
+                  ...payload,
+                }),
+            });
+          }
 
           variedFailureNudgeInjected = maybeInjectVariedFailureNudgeUtil({
             persistentToolFailures,
@@ -8832,9 +9169,7 @@ TASK / CONVERSATION HISTORY:
         return;
       }
 
-      const completedSteps = this.plan.steps.filter(
-        (s) => s.status === "completed",
-      );
+      const completedSteps = this.plan.steps.filter((s) => s.status === "completed");
       console.log(
         `${this.logTag} Resuming interrupted task: ${completedSteps.length} completed, ${pendingSteps.length} pending`,
       );
@@ -8899,9 +9234,7 @@ TASK / CONVERSATION HISTORY:
             message: result.message,
             willRetry: false,
           });
-          throw new Error(
-            `Failed to meet success criteria: ${result.message}`,
-          );
+          throw new Error(`Failed to meet success criteria: ${result.message}`);
         }
       }
 
@@ -8925,6 +9258,167 @@ TASK / CONVERSATION HISTORY:
         message: error.message,
         stack: error.stack,
       });
+    } finally {
+      await this.toolRegistry.cleanup().catch((e) => {
+        console.error("Cleanup error:", e);
+      });
+    }
+  }
+
+  /**
+   * Continue execution after a budget/limit was exhausted.
+   * Called by the daemon when the user clicks "Continue" on a budget-exceeded task.
+   * Resets budget counters and resumes from where the plan left off.
+   */
+  async continueAfterBudgetExhausted(): Promise<void> {
+    await this.getLifecycleMutex().runExclusive(async () => {
+      await this.continueAfterBudgetExhaustedUnlocked();
+    });
+  }
+
+  private async continueAfterBudgetExhaustedUnlocked(): Promise<void> {
+    try {
+      const preResetUsage = {
+        inputTokens: this.getCumulativeInputTokens(),
+        outputTokens: this.getCumulativeOutputTokens(),
+        totalTokens: this.getCumulativeInputTokens() + this.getCumulativeOutputTokens(),
+        cost: this.getCumulativeCost(),
+      };
+      this.emitEvent("budget_reset_for_continuation", {
+        reason: "turn_limit_exhausted",
+        previousUsageTotals: preResetUsage,
+      });
+
+      // Reset ALL budget counters so the task gets a fresh allowance.
+      // Preserve cumulative usage via offsets for audit/export while resetting
+      // budget-enforced counters for this continuation run.
+      this.usageOffsetInputTokens = preResetUsage.inputTokens;
+      this.usageOffsetOutputTokens = preResetUsage.outputTokens;
+      this.usageOffsetCost = preResetUsage.cost;
+      this.globalTurnCount = 0;
+      this.iterationCount = 0;
+      this.totalInputTokens = 0;
+      this.totalOutputTokens = 0;
+      this.totalCost = 0;
+      this.softDeadlineTriggered = false;
+      this.wrapUpRequested = false;
+      this.budgetSoftLandingInjected = false;
+      this.taskCompleted = false;
+      this.cancelled = false;
+      this.cancelReason = null;
+
+      if (!this.plan) {
+        throw new Error(
+          "Cannot continue task after budget exhaustion because no execution plan could be restored.",
+        );
+      }
+
+      const pendingSteps = this.plan.steps.filter((s) => s.status === "pending");
+      if (pendingSteps.length === 0) {
+        // All steps were already completed — just finalize
+        console.log(`${this.logTag} All plan steps already completed, finalizing`);
+        this.finalizeTask(this.buildResultSummary());
+        return;
+      }
+
+      const completedSteps = this.plan.steps.filter((s) => s.status === "completed");
+      console.log(
+        `${this.logTag} Continuing after budget exhaustion: ${completedSteps.length} completed, ${pendingSteps.length} pending`,
+      );
+
+      // Inject continuation context so the LLM knows it's picking up where it left off
+      const continuationLines = [
+        "TASK CONTINUATION CONTEXT:",
+        "This task was stopped because it reached its turn/budget limit. The user has chosen to continue.",
+        `Plan: ${this.plan.description}`,
+      ];
+      if (completedSteps.length > 0) {
+        continuationLines.push(`Completed steps (${completedSteps.length}):`);
+        for (const s of completedSteps) {
+          continuationLines.push(`  - [DONE] ${s.description}`);
+        }
+      }
+      continuationLines.push(`Remaining steps (${pendingSteps.length}):`);
+      for (const s of pendingSteps) {
+        continuationLines.push(`  - [PENDING] ${s.description}`);
+      }
+      continuationLines.push(
+        "",
+        "Continue execution from where you left off. Do not repeat already-completed steps.",
+      );
+
+      this.appendConversationHistory({
+        role: "user",
+        content: continuationLines.join("\n"),
+      });
+      this.appendConversationHistory({
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: "Understood. Continuing execution from where I left off.",
+          },
+        ],
+      });
+
+      this.daemon.updateTaskStatus(this.task.id, "executing");
+      this.emitEvent("executing", {
+        message: "Continuing execution after budget limit",
+      });
+
+      await this.executePlan();
+
+      if (this.waitingForUserInput || this.cancelled) {
+        return;
+      }
+
+      if (this.task.successCriteria) {
+        const result = await this.verifySuccessCriteria();
+        if (result.success) {
+          this.emitEvent("verification_passed", {
+            attempt: this.task.currentAttempt || 1,
+            message: result.message,
+          });
+        } else {
+          this.emitEvent("verification_failed", {
+            attempt: this.task.currentAttempt || 1,
+            maxAttempts: this.task.maxAttempts || 1,
+            message: result.message,
+            willRetry: false,
+          });
+          throw new Error(`Failed to meet success criteria: ${result.message}`);
+        }
+      }
+
+      this.finalizeTask(this.buildResultSummary());
+    } catch (error: any) {
+      if (this.cancelled) {
+        console.log(
+          `${this.logTag} Continued task cancelled (reason: ${this.cancelReason || "unknown"})`,
+        );
+        return;
+      }
+
+      console.error(`${this.logTag} Continued task execution failed:`, error);
+      this.saveConversationSnapshot();
+      const errorPayload: Record<string, unknown> = {
+        message: error?.message || String(error),
+        stack: error?.stack,
+      };
+      // Allow the user to continue again only for turn-limit exhaustion.
+      if (this.isTurnLimitExceededError(error)) {
+        errorPayload.actionHint = {
+          type: "continue_task",
+          label: "Continue",
+        };
+        errorPayload.errorCode = TASK_ERROR_CODES.TURN_LIMIT_EXCEEDED;
+      }
+      this.daemon.updateTask(this.task.id, {
+        status: "failed",
+        error: error?.message || String(error),
+        completedAt: Date.now(),
+      });
+      this.emitEvent("error", errorPayload);
     } finally {
       await this.toolRegistry.cleanup().catch((e) => {
         console.error("Cleanup error:", e);
@@ -9293,6 +9787,53 @@ TASK / CONVERSATION HISTORY:
    */
   get hasPendingFollowUps(): boolean {
     return this.pendingFollowUps.length > 0;
+  }
+
+  /**
+   * Set a step-level feedback signal. The currently running step loop
+   * will pick this up at the next iteration boundary.
+   *
+   * For "drift" actions, the message is also queued as a high-priority follow-up
+   * so it enters the conversation naturally.
+   */
+  setStepFeedback(
+    stepId: string,
+    action: "retry" | "skip" | "stop" | "drift",
+    message?: string,
+  ): void {
+    this.stepFeedbackSignal = { stepId, action, message };
+
+    // For stop, immediately pause the executor so it halts even without a plan step
+    if (action === "stop") {
+      this.paused = true;
+    }
+
+    // For drift, also queue the message as a high-priority follow-up
+    // so the LLM sees it in the conversation context
+    if (action === "drift" && message) {
+      const prefix =
+        stepId === "current" ? "[USER FEEDBACK]" : `[STEP FEEDBACK - Step "${stepId}"]`;
+      this.pendingFollowUps.unshift({
+        message: `${prefix}: ${message}`,
+      });
+    }
+
+    console.log(
+      `${this.logTag} Step feedback set: action=${action}, stepId=${stepId}` +
+        (message ? `, message="${message.slice(0, 80)}"` : ""),
+    );
+  }
+
+  /**
+   * Consume and return the current step feedback signal, if any.
+   * Returns null if no signal is pending or if the signal targets a different step.
+   */
+  private consumeStepFeedback(currentStepId: string): typeof this.stepFeedbackSignal {
+    if (!this.stepFeedbackSignal) return null;
+    if (this.stepFeedbackSignal.stepId !== currentStepId) return null;
+    const signal = this.stepFeedbackSignal;
+    this.stepFeedbackSignal = null;
+    return signal;
   }
 
   /**
@@ -9680,8 +10221,12 @@ TASK / CONVERSATION HISTORY:
     let maxTokensRecoveryCount = 0;
     let toolRecoveryHintInjected = false;
     // Loop detection: track recent tool calls to detect degenerate loops
-    const recentToolCalls: Array<{ tool: string; target: string }> = [];
+    const recentToolCalls: ToolLoopCall[] = [];
     let loopBreakInjected = false;
+    let lowProgressNudgeInjected = false;
+    let stopReasonNudgeInjected = false;
+    let consecutiveToolUseStops = 0;
+    let consecutiveMaxTokenStops = 0;
     // Varied failure detection: non-resetting per-tool failure counter (not reset on success)
     const persistentToolFailures = new Map<string, number>();
     let variedFailureNudgeInjected = false;
@@ -9747,6 +10292,9 @@ TASK / CONVERSATION HISTORY:
         if (emptyResponseCount >= maxEmptyResponses) {
           break;
         }
+
+        // As we approach turn limits, steer toward finalization before hard-stop.
+        this.maybeInjectTurnBudgetSoftLanding(messages, "follow-up");
 
         // Check guardrail budgets before each LLM call
         this.checkBudgets();
@@ -9878,6 +10426,20 @@ TASK / CONVERSATION HISTORY:
         });
         const availableToolNames = new Set(llmResult.availableTools.map((tool: any) => tool.name));
         let response = llmResult.response;
+        const responseHasToolUse = (response.content || []).some(
+          (item: any) => item?.type === "tool_use",
+        );
+        const remainingTurnsAfterResponse = this.getRemainingTurnBudget();
+        if (response.stopReason === "tool_use") {
+          consecutiveToolUseStops += 1;
+        } else {
+          consecutiveToolUseStops = 0;
+        }
+        if (response.stopReason === "max_tokens") {
+          consecutiveMaxTokenStops += 1;
+        } else {
+          consecutiveMaxTokenStops = 0;
+        }
 
         // ── max_tokens truncation recovery (follow-up loop) ──
         const maxTokensDecision = handleMaxTokensRecoveryUtil({
@@ -9885,6 +10447,8 @@ TASK / CONVERSATION HISTORY:
           messages,
           recoveryCount: maxTokensRecoveryCount,
           maxRecoveries: maxMaxTokensRecoveries,
+          remainingTurns: remainingTurnsAfterResponse,
+          minTurnsRequiredForRetry: 0,
           logPrefix: "Follow-up:",
           eventPayload: { context: "follow_up" },
           log: (message) => console.log(`${this.logTag} ${message}`),
@@ -9902,6 +10466,21 @@ TASK / CONVERSATION HISTORY:
           continue;
         }
 
+        if (this.guardrailPhaseAEnabled) {
+          stopReasonNudgeInjected = maybeInjectStopReasonNudgeUtil({
+            stopReason: response.stopReason,
+            consecutiveToolUseStops,
+            consecutiveMaxTokenStops,
+            remainingTurns: remainingTurnsAfterResponse,
+            messages,
+            phaseLabel: "follow-up",
+            stopReasonNudgeInjected,
+            log: (message) => console.log(`${this.logTag}${message}`),
+            emitStopReasonEvent: (payload) =>
+              this.emitEvent("stop_reason_nudge", { followUp: true, ...payload }),
+          });
+        }
+
         // Optional quality loop for final text-only outputs (no tool calls).
         response = await this.maybeApplyQualityPasses({
           response,
@@ -9912,9 +10491,6 @@ TASK / CONVERSATION HISTORY:
 
         // Process response - don't immediately stop, check for text response first
         let wantsToEnd = response.stopReason === "end_turn";
-        const responseHasToolUse = (response.content || []).some(
-          (item: any) => item?.type === "tool_use",
-        );
 
         const assistantProcessing = this.processAssistantResponseText({
           responseContent: response.content,
@@ -9944,6 +10520,8 @@ TASK / CONVERSATION HISTORY:
 
         // Handle tool calls
         const toolResults: LLMToolResult[] = [];
+        const forceFinalizeWithoutTools =
+          this.guardrailPhaseAEnabled && responseHasToolUse && remainingTurnsAfterResponse <= 0;
         let hasDisabledToolAttempt = false;
         let hasDuplicateToolAttempt = false;
         let hasUnavailableToolAttempt = false;
@@ -9951,6 +10529,19 @@ TASK / CONVERSATION HISTORY:
 
         for (const content of response.content || []) {
           if (content.type === "tool_use") {
+            if (forceFinalizeWithoutTools) {
+              toolResults.push({
+                type: "tool_result",
+                tool_use_id: content.id,
+                content: JSON.stringify({
+                  error: "Tool call skipped: turn budget reserved for final response.",
+                  blocked: true,
+                  reason: "turn_budget_soft_landing",
+                }),
+                is_error: true,
+              });
+              continue;
+            }
             // Normalize tool names like "functions.web_fetch" -> "web_fetch"
             content.name = normalizeToolUseNameUtil({
               toolName: content.name,
@@ -10330,6 +10921,17 @@ TASK / CONVERSATION HISTORY:
             role: "user",
             content: toolResults,
           });
+          if (forceFinalizeWithoutTools) {
+            messages.push({
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text: "Turn budget exhausted for further tool calls. Provide a concise final response from current evidence.",
+                },
+              ],
+            });
+          }
 
           loopBreakInjected = maybeInjectToolLoopBreakUtil({
             responseContent: response.content,
@@ -10340,6 +10942,18 @@ TASK / CONVERSATION HISTORY:
               this.detectToolLoop(calls, toolName, input, threshold),
             log: (message) => console.log(`${this.logTag}${message}`),
           });
+
+          if (this.guardrailPhaseBEnabled) {
+            lowProgressNudgeInjected = maybeInjectLowProgressNudgeUtil({
+              recentToolCalls,
+              messages,
+              lowProgressNudgeInjected,
+              phaseLabel: "follow-up",
+              log: (message) => console.log(`${this.logTag}${message}`),
+              emitLowProgressEvent: (payload) =>
+                this.emitEvent("low_progress_loop_detected", { followUp: true, ...payload }),
+            });
+          }
 
           variedFailureNudgeInjected = maybeInjectVariedFailureNudgeUtil({
             persistentToolFailures,

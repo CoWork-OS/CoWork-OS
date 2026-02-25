@@ -229,7 +229,12 @@ export async function installFromGit(
   const extensionsDir = ensureExtensionsDir();
   let workingDir = buildTempInstallDir(extensionsDir, parsed.name);
 
-  notify({ packName: parsed.name, status: "downloading", progress: 10, message: "Cloning repository..." });
+  notify({
+    packName: parsed.name,
+    status: "downloading",
+    progress: 10,
+    message: "Cloning repository...",
+  });
 
   try {
     // Shallow clone (single branch, depth 1) for speed
@@ -239,7 +244,12 @@ export async function installFromGit(
       { timeout: GIT_CLONE_TIMEOUT_MS },
     );
 
-    notify({ packName: parsed.name, status: "validating", progress: 60, message: "Validating manifest..." });
+    notify({
+      packName: parsed.name,
+      status: "validating",
+      progress: 60,
+      message: "Validating manifest...",
+    });
 
     // Check for manifest
     const manifestPath = path.join(workingDir, MANIFEST_FILENAME);
@@ -286,7 +296,12 @@ export async function installFromGit(
       fs.rmSync(gitDir, { recursive: true, force: true });
     }
 
-    notify({ packName: safeId, status: "completed", progress: 100, message: "Installed successfully" });
+    notify({
+      packName: safeId,
+      status: "completed",
+      progress: 100,
+      message: "Installed successfully",
+    });
 
     return {
       success: true,
@@ -374,7 +389,12 @@ export async function installFromUrl(
       "utf-8",
     );
 
-    notify({ packName: safeId, status: "completed", progress: 100, message: "Installed successfully" });
+    notify({
+      packName: safeId,
+      status: "completed",
+      progress: 100,
+      message: "Installed successfully",
+    });
 
     return {
       success: true,

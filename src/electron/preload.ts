@@ -237,11 +237,13 @@ const IPC_CHANNELS = {
   TASK_WRAP_UP: "task:wrapUp",
   TASK_PAUSE: "task:pause",
   TASK_RESUME: "task:resume",
+  TASK_CONTINUE: "task:continue",
   TASK_RENAME: "task:rename",
   TASK_DELETE: "task:delete",
   TASK_EVENT: "task:event",
   TASK_EVENTS: "task:events",
   TASK_SEND_MESSAGE: "task:sendMessage",
+  TASK_STEP_FEEDBACK: "task:stepFeedback",
   TASK_SEND_STDIN: "task:sendStdin",
   TASK_KILL_COMMAND: "task:killCommand",
   // Sub-agent operations
@@ -276,6 +278,7 @@ const IPC_CHANNELS = {
   LLM_GET_KIMI_MODELS: "llm:getKimiModels",
   LLM_GET_PI_MODELS: "llm:getPiModels",
   LLM_GET_PI_PROVIDERS: "llm:getPiProviders",
+  LLM_GET_OPENAI_COMPATIBLE_MODELS: "llm:getOpenAICompatibleModels",
   LLM_OPENAI_OAUTH_START: "llm:openaiOAuthStart",
   LLM_OPENAI_OAUTH_LOGOUT: "llm:openaiOAuthLogout",
   LLM_GET_BEDROCK_MODELS: "llm:getBedrockModels",
@@ -1985,6 +1988,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   wrapUpTask: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_WRAP_UP, id),
   pauseTask: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_PAUSE, id),
   resumeTask: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_RESUME, id),
+  continueTask: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_CONTINUE, id),
   sendStdin: (taskId: string, input: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_SEND_STDIN, { taskId, input }),
   killCommand: (taskId: string, force?: boolean) =>
@@ -2012,6 +2016,20 @@ contextBridge.exposeInMainWorld("electronAPI", {
       images: validatedImages,
     });
   },
+
+  // Send step-level feedback on an in-progress step
+  sendStepFeedback: (
+    taskId: string,
+    stepId: string,
+    action: "retry" | "skip" | "stop" | "drift",
+    message?: string,
+  ) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_STEP_FEEDBACK, {
+      taskId,
+      stepId,
+      action,
+      message,
+    }),
 
   // Workspace APIs
   createWorkspace: (data: any) => ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_CREATE, data),
@@ -2063,6 +2081,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getPiModels: (piProvider?: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_PI_MODELS, piProvider),
   getPiProviders: () => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_PI_PROVIDERS),
+  getOpenAICompatibleModels: (baseUrl: string, apiKey?: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_OPENAI_COMPATIBLE_MODELS, baseUrl, apiKey),
   openaiOAuthStart: () => ipcRenderer.invoke(IPC_CHANNELS.LLM_OPENAI_OAUTH_START),
   openaiOAuthLogout: () => ipcRenderer.invoke(IPC_CHANNELS.LLM_OPENAI_OAUTH_LOGOUT),
   getBedrockModels: (config?: {
@@ -2786,18 +2806,17 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_PACK_INSTALL_URL, url),
   uninstallPluginPack: (packName: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_PACK_UNINSTALL, packName),
-  searchPackRegistry: (query: string, options?: { page?: number; pageSize?: number; category?: string }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_PACK_REGISTRY_SEARCH, query, options),
+  searchPackRegistry: (
+    query: string,
+    options?: { page?: number; pageSize?: number; category?: string },
+  ) => ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_PACK_REGISTRY_SEARCH, query, options),
   getPackRegistryDetails: (packId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_PACK_REGISTRY_DETAILS, packId),
-  getPackRegistryCategories: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_PACK_REGISTRY_CATEGORIES),
-  checkPackUpdates: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_PACK_CHECK_UPDATES),
+  getPackRegistryCategories: () => ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_PACK_REGISTRY_CATEGORIES),
+  checkPackUpdates: () => ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_PACK_CHECK_UPDATES),
 
   // Admin Policies APIs
-  getAdminPolicies: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.ADMIN_POLICIES_GET),
+  getAdminPolicies: () => ipcRenderer.invoke(IPC_CHANNELS.ADMIN_POLICIES_GET),
   updateAdminPolicies: (updates: Record<string, unknown>) =>
     ipcRenderer.invoke(IPC_CHANNELS.ADMIN_POLICIES_UPDATE, updates),
   checkPackPolicy: (packId: string) =>
@@ -3185,6 +3204,7 @@ export interface ElectronAPI {
   wrapUpTask: (id: string) => Promise<void>;
   pauseTask: (id: string) => Promise<void>;
   resumeTask: (id: string) => Promise<void>;
+  continueTask: (id: string) => Promise<void>;
   sendStdin: (taskId: string, input: string) => Promise<boolean>;
   killCommand: (taskId: string, force?: boolean) => Promise<boolean>;
   renameTask: (id: string, title: string) => Promise<void>;
@@ -3192,6 +3212,12 @@ export interface ElectronAPI {
   onTaskEvent: (callback: (event: any) => void) => () => void;
   getTaskEvents: (taskId: string) => Promise<any[]>;
   sendMessage: (taskId: string, message: string, images?: ImageAttachment[]) => Promise<void>;
+  sendStepFeedback: (
+    taskId: string,
+    stepId: string,
+    action: "retry" | "skip" | "stop" | "drift",
+    message?: string,
+  ) => Promise<void>;
   createWorkspace: (data: any) => Promise<Workspace>;
   listWorkspaces: () => Promise<Workspace[]>;
   selectWorkspace: (id: string) => Promise<Workspace>;
@@ -3254,6 +3280,10 @@ export interface ElectronAPI {
     piProvider?: string,
   ) => Promise<Array<{ id: string; name: string; description: string }>>;
   getPiProviders: () => Promise<Array<{ id: string; name: string }>>;
+  getOpenAICompatibleModels: (
+    baseUrl: string,
+    apiKey?: string,
+  ) => Promise<Array<{ key: string; displayName: string; description: string }>>;
   openaiOAuthStart: () => Promise<{ success: boolean; error?: string }>;
   openaiOAuthLogout: () => Promise<{ success: boolean }>;
   getBedrockModels: (config?: {
@@ -4222,9 +4252,21 @@ export interface ElectronAPI {
       personaTemplateId?: string;
       recommendedConnectors?: string[];
       tryAsking?: string[];
-      skills: Array<{ id: string; name: string; description: string; icon?: string; enabled?: boolean }>;
+      skills: Array<{
+        id: string;
+        name: string;
+        description: string;
+        icon?: string;
+        enabled?: boolean;
+      }>;
       slashCommands: Array<{ name: string; description: string; skillId: string }>;
-      agentRoles: Array<{ name: string; displayName: string; description?: string; icon: string; color: string }>;
+      agentRoles: Array<{
+        name: string;
+        displayName: string;
+        description?: string;
+        icon: string;
+        color: string;
+      }>;
       state: string;
       enabled: boolean;
     }>
@@ -4239,18 +4281,37 @@ export interface ElectronAPI {
     personaTemplateId?: string;
     recommendedConnectors?: string[];
     tryAsking?: string[];
-    skills: Array<{ id: string; name: string; description: string; icon?: string; enabled?: boolean }>;
+    skills: Array<{
+      id: string;
+      name: string;
+      description: string;
+      icon?: string;
+      enabled?: boolean;
+    }>;
     slashCommands: Array<{ name: string; description: string; skillId: string }>;
-    agentRoles: Array<{ name: string; displayName: string; description?: string; icon: string; color: string }>;
+    agentRoles: Array<{
+      name: string;
+      displayName: string;
+      description?: string;
+      icon: string;
+      color: string;
+    }>;
     state: string;
     enabled: boolean;
   } | null>;
-  togglePluginPack: (name: string, enabled: boolean) => Promise<{ success: boolean; name: string; enabled: boolean }>;
+  togglePluginPack: (
+    name: string,
+    enabled: boolean,
+  ) => Promise<{ success: boolean; name: string; enabled: boolean }>;
   getActiveContext: () => Promise<{
-    connectors: Array<{ id: string; name: string; icon: string; status: string }>;
+    connectors: Array<{ id: string; name: string; icon: string; status: string; tools: string[] }>;
     skills: Array<{ id: string; name: string; icon: string }>;
   }>;
-  togglePluginPackSkill: (packName: string, skillId: string, enabled: boolean) => Promise<{ success: boolean; packName: string; skillId: string; enabled: boolean }>;
+  togglePluginPackSkill: (
+    packName: string,
+    skillId: string,
+    enabled: boolean,
+  ) => Promise<{ success: boolean; packName: string; skillId: string; enabled: boolean }>;
 
   // Plugin Pack Distribution
   scaffoldPluginPack: (options: {
@@ -4278,8 +4339,13 @@ export interface ElectronAPI {
     skillCount?: number;
     agentCount?: number;
   }>;
-  uninstallPluginPack: (packName: string) => Promise<{ success: boolean; packName?: string; error?: string }>;
-  searchPackRegistry: (query: string, options?: { page?: number; pageSize?: number; category?: string }) => Promise<{
+  uninstallPluginPack: (
+    packName: string,
+  ) => Promise<{ success: boolean; packName?: string; error?: string }>;
+  searchPackRegistry: (
+    query: string,
+    options?: { page?: number; pageSize?: number; category?: string },
+  ) => Promise<{
     query: string;
     total: number;
     page: number;
@@ -4311,7 +4377,9 @@ export interface ElectronAPI {
     category?: string;
   } | null>;
   getPackRegistryCategories: () => Promise<string[]>;
-  checkPackUpdates: () => Promise<Array<{ name: string; currentVersion: string; latestVersion: string }>>;
+  checkPackUpdates: () => Promise<
+    Array<{ name: string; currentVersion: string; latestVersion: string }>
+  >;
 
   // Admin Policies
   getAdminPolicies: () => Promise<{
@@ -4342,7 +4410,9 @@ export interface ElectronAPI {
       orgPluginDir?: string;
     };
   }>;
-  checkPackPolicy: (packId: string) => Promise<{ packId: string; allowed: boolean; required: boolean }>;
+  checkPackPolicy: (
+    packId: string,
+  ) => Promise<{ packId: string; allowed: boolean; required: boolean }>;
 
   // Agent Teams
   listTeams: (workspaceId: string, includeInactive?: boolean) => Promise<AgentTeam[]>;

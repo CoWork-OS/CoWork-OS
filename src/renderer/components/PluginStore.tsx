@@ -33,7 +33,11 @@ export function PluginStore({ onClose, onInstalled }: PluginStoreProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [installing, setInstalling] = useState<string | null>(null);
-  const [installResult, setInstallResult] = useState<{ id: string; success: boolean; message: string } | null>(null);
+  const [installResult, setInstallResult] = useState<{
+    id: string;
+    success: boolean;
+    message: string;
+  } | null>(null);
 
   // Install from git URL or URL
   const [showInstallUrl, setShowInstallUrl] = useState(false);
@@ -109,7 +113,9 @@ export function PluginStore({ onClose, onInstalled }: PluginStoreProps) {
       setInstallResult({
         id: entry.id,
         success: result.success,
-        message: result.success ? `Installed ${result.packName || entry.displayName}` : result.error || "Install failed",
+        message: result.success
+          ? `Installed ${result.packName || entry.displayName}`
+          : result.error || "Install failed",
       });
 
       if (result.success) {
@@ -144,7 +150,9 @@ export function PluginStore({ onClose, onInstalled }: PluginStoreProps) {
       setInstallResult({
         id: "url",
         success: result.success,
-        message: result.success ? `Installed ${result.packName || "pack"}` : result.error || "Install failed",
+        message: result.success
+          ? `Installed ${result.packName || "pack"}`
+          : result.error || "Install failed",
       });
 
       if (result.success) {
@@ -212,17 +220,25 @@ export function PluginStore({ onClose, onInstalled }: PluginStoreProps) {
           <div className="ps-header-actions">
             <button
               className="ps-btn ps-btn--secondary"
-              onClick={() => { setShowScaffold(true); setShowInstallUrl(false); }}
+              onClick={() => {
+                setShowScaffold(true);
+                setShowInstallUrl(false);
+              }}
             >
               + Create Pack
             </button>
             <button
               className="ps-btn ps-btn--secondary"
-              onClick={() => { setShowInstallUrl(true); setShowScaffold(false); }}
+              onClick={() => {
+                setShowInstallUrl(true);
+                setShowScaffold(false);
+              }}
             >
               Install from URL
             </button>
-            <button className="ps-close" onClick={onClose}>&times;</button>
+            <button className="ps-close" onClick={onClose}>
+              &times;
+            </button>
           </div>
         </div>
 
@@ -254,7 +270,9 @@ export function PluginStore({ onClose, onInstalled }: PluginStoreProps) {
               </button>
             </div>
             {installResult?.id === "url" && (
-              <div className={`ps-result ${installResult.success ? "ps-result--success" : "ps-result--error"}`}>
+              <div
+                className={`ps-result ${installResult.success ? "ps-result--success" : "ps-result--error"}`}
+              >
                 {installResult.message}
               </div>
             )}
@@ -291,8 +309,24 @@ export function PluginStore({ onClose, onInstalled }: PluginStoreProps) {
                   value={scaffoldCategory}
                   onChange={(e) => setScaffoldCategory(e.target.value)}
                 >
-                  {["Custom", "Engineering", "Sales", "Finance", "HR", "Design", "Data", "Marketing", "Operations", "Security", "Productivity", "Management", "Product"].map((c) => (
-                    <option key={c} value={c}>{c}</option>
+                  {[
+                    "Custom",
+                    "Engineering",
+                    "Sales",
+                    "Finance",
+                    "HR",
+                    "Design",
+                    "Data",
+                    "Marketing",
+                    "Operations",
+                    "Security",
+                    "Productivity",
+                    "Management",
+                    "Product",
+                  ].map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
                   ))}
                 </select>
                 <input
@@ -306,7 +340,9 @@ export function PluginStore({ onClose, onInstalled }: PluginStoreProps) {
                 <button
                   className="ps-btn ps-btn--primary"
                   onClick={handleScaffold}
-                  disabled={!scaffoldName.trim() || !scaffoldDisplayName.trim() || installing === "scaffold"}
+                  disabled={
+                    !scaffoldName.trim() || !scaffoldDisplayName.trim() || installing === "scaffold"
+                  }
                 >
                   {installing === "scaffold" ? "Creating..." : "Create"}
                 </button>
@@ -316,7 +352,9 @@ export function PluginStore({ onClose, onInstalled }: PluginStoreProps) {
               </div>
             </div>
             {installResult?.id === "scaffold" && (
-              <div className={`ps-result ${installResult.success ? "ps-result--success" : "ps-result--error"}`}>
+              <div
+                className={`ps-result ${installResult.success ? "ps-result--success" : "ps-result--error"}`}
+              >
                 {installResult.message}
               </div>
             )}
@@ -330,13 +368,19 @@ export function PluginStore({ onClose, onInstalled }: PluginStoreProps) {
             className="ps-input ps-search-input"
             placeholder="Search plugin packs..."
             value={query}
-            onChange={(e) => { setQuery(e.target.value); setPage(1); }}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setPage(1);
+            }}
           />
           {categories.length > 0 && (
             <div className="ps-category-chips">
               <button
                 className={`ps-chip ${!category ? "ps-chip--active" : ""}`}
-                onClick={() => { setCategory(null); setPage(1); }}
+                onClick={() => {
+                  setCategory(null);
+                  setPage(1);
+                }}
               >
                 All
               </button>
@@ -344,7 +388,10 @@ export function PluginStore({ onClose, onInstalled }: PluginStoreProps) {
                 <button
                   key={c}
                   className={`ps-chip ${category === c ? "ps-chip--active" : ""}`}
-                  onClick={() => { setCategory(c); setPage(1); }}
+                  onClick={() => {
+                    setCategory(c);
+                    setPage(1);
+                  }}
                 >
                   {c}
                 </button>
@@ -389,7 +436,9 @@ export function PluginStore({ onClose, onInstalled }: PluginStoreProps) {
                   </button>
                 </div>
                 {installResult?.id === entry.id && (
-                  <div className={`ps-result ${installResult.success ? "ps-result--success" : "ps-result--error"}`}>
+                  <div
+                    className={`ps-result ${installResult.success ? "ps-result--success" : "ps-result--error"}`}
+                  >
                     {installResult.message}
                   </div>
                 )}
@@ -400,11 +449,21 @@ export function PluginStore({ onClose, onInstalled }: PluginStoreProps) {
           {/* Pagination */}
           {pageCount > 1 && (
             <div className="ps-pagination">
-              <button className="ps-btn ps-btn--ghost" onClick={() => setPage(Math.max(1, page - 1))} disabled={page <= 1}>
+              <button
+                className="ps-btn ps-btn--ghost"
+                onClick={() => setPage(Math.max(1, page - 1))}
+                disabled={page <= 1}
+              >
                 Previous
               </button>
-              <span className="ps-page-info">Page {page} of {pageCount}</span>
-              <button className="ps-btn ps-btn--ghost" onClick={() => setPage(Math.min(pageCount, page + 1))} disabled={page >= pageCount}>
+              <span className="ps-page-info">
+                Page {page} of {pageCount}
+              </span>
+              <button
+                className="ps-btn ps-btn--ghost"
+                onClick={() => setPage(Math.min(pageCount, page + 1))}
+                disabled={page >= pageCount}
+              >
                 Next
               </button>
             </div>

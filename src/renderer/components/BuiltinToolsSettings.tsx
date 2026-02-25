@@ -1,5 +1,14 @@
 import React, { useState, useEffect } from "react";
-import { FileText, Globe, Search, Monitor, Wrench, Terminal, Image, ChevronDown } from "lucide-react";
+import {
+  FileText,
+  Globe,
+  Search,
+  Monitor,
+  Wrench,
+  Terminal,
+  Image,
+  ChevronDown,
+} from "lucide-react";
 
 interface ToolCategoryConfig {
   enabled: boolean;
@@ -31,13 +40,41 @@ const CATEGORY_INFO: Record<
   CategoryKey,
   { name: string; icon: React.ReactNode; description: string }
 > = {
-  file: { name: "File Operations", icon: <FileText {...IC} />, description: "Read, write, copy, delete files and directories" },
-  browser: { name: "Browser Automation", icon: <Globe {...IC} />, description: "Navigate websites, click, fill forms, take screenshots" },
-  search: { name: "Web Search", icon: <Search {...IC} />, description: "Search the web using configured providers (Brave, Tavily, etc.)" },
-  system: { name: "System Tools", icon: <Monitor {...IC} />, description: "Clipboard, screenshots, open apps and URLs" },
-  skill: { name: "Document Skills", icon: <Wrench {...IC} />, description: "Create spreadsheets, documents, presentations" },
-  shell: { name: "Shell Commands", icon: <Terminal {...IC} />, description: "Execute terminal commands (requires approval)" },
-  image: { name: "Image Generation", icon: <Image {...IC} />, description: "Generate images using AI (requires Gemini API)" },
+  file: {
+    name: "File Operations",
+    icon: <FileText {...IC} />,
+    description: "Read, write, copy, delete files and directories",
+  },
+  browser: {
+    name: "Browser Automation",
+    icon: <Globe {...IC} />,
+    description: "Navigate websites, click, fill forms, take screenshots",
+  },
+  search: {
+    name: "Web Search",
+    icon: <Search {...IC} />,
+    description: "Search the web using configured providers (Brave, Tavily, etc.)",
+  },
+  system: {
+    name: "System Tools",
+    icon: <Monitor {...IC} />,
+    description: "Clipboard, screenshots, open apps and URLs",
+  },
+  skill: {
+    name: "Document Skills",
+    icon: <Wrench {...IC} />,
+    description: "Create spreadsheets, documents, presentations",
+  },
+  shell: {
+    name: "Shell Commands",
+    icon: <Terminal {...IC} />,
+    description: "Execute terminal commands (requires approval)",
+  },
+  image: {
+    name: "Image Generation",
+    icon: <Image {...IC} />,
+    description: "Generate images using AI (requires Gemini API)",
+  },
 };
 
 const PRIORITY_OPTIONS: Array<{

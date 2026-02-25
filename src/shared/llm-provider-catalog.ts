@@ -188,17 +188,6 @@ export const CUSTOM_PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     apiKeyPlaceholder: "sk-...",
   },
   {
-    id: "openai-compatible",
-    name: "OpenAI-Compatible (Custom)",
-    compatibility: "openai",
-    baseUrl: "http://localhost:1234/v1",
-    defaultModel: "gpt-4o-mini",
-    apiKeyLabel: "API Key (Optional)",
-    apiKeyPlaceholder: "sk-...",
-    requiresBaseUrl: true,
-    apiKeyOptional: true,
-  },
-  {
     id: "anthropic-compatible",
     name: "Anthropic-Compatible (Custom)",
     compatibility: "anthropic",

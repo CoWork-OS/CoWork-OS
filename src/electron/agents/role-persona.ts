@@ -7,6 +7,7 @@ import { redactSensitiveMarkdownContent } from "../memory/MarkdownMemoryIndexSer
 const KIT_DIRNAME = ".cowork";
 const ROLE_PROFILE_DIR = "agents";
 const ROLE_PROFILE_FILES: Array<{ file: string; title: string }> = [
+  { file: "VIBES.md", title: "Role Vibes" },
   { file: "SOUL.md", title: "Role Persona" },
   { file: "IDENTITY.md", title: "Role Identity" },
   { file: "RULES.md", title: "Role Rules" },

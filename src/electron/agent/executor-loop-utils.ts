@@ -1,5 +1,11 @@
 import type { LLMMessage, LLMToolResult } from "./llm";
 
+export interface ToolLoopCall {
+  tool: string;
+  target: string;
+  baseTarget?: string;
+}
+
 export function appendRecoveryAssistantMessage(
   messages: LLMMessage[],
   response: any,
@@ -43,6 +49,8 @@ export function handleMaxTokensRecovery(opts: {
   messages: LLMMessage[];
   recoveryCount: number;
   maxRecoveries: number;
+  remainingTurns?: number;
+  minTurnsRequiredForRetry?: number;
   logPrefix?: string;
   eventPayload?: Record<string, unknown>;
   log: (message: string) => void;
@@ -69,6 +77,20 @@ export function handleMaxTokensRecovery(opts: {
 
   if (nextRecoveryCount > opts.maxRecoveries) {
     opts.log(`${messagePrefix}max_tokens recovery exhausted after ${opts.maxRecoveries} attempts`);
+    appendRecoveryAssistantMessage(opts.messages, opts.response, false);
+    return { action: "exhausted", recoveryCount: nextRecoveryCount };
+  }
+
+  const minTurnsRequiredForRetry = opts.minTurnsRequiredForRetry ?? 1;
+  const remainingTurns =
+    typeof opts.remainingTurns === "number" && Number.isFinite(opts.remainingTurns)
+      ? opts.remainingTurns
+      : Number.POSITIVE_INFINITY;
+  if (remainingTurns <= minTurnsRequiredForRetry) {
+    opts.log(
+      `${messagePrefix}max_tokens retry skipped: only ${remainingTurns} turn(s) remaining ` +
+        `(need > ${minTurnsRequiredForRetry})`,
+    );
     appendRecoveryAssistantMessage(opts.messages, opts.response, false);
     return { action: "exhausted", recoveryCount: nextRecoveryCount };
   }
@@ -194,11 +216,11 @@ export function injectToolRecoveryHint(opts: {
 
 export function maybeInjectToolLoopBreak(opts: {
   responseContent: any[] | undefined;
-  recentToolCalls: Array<{ tool: string; target: string }>;
+  recentToolCalls: ToolLoopCall[];
   messages: LLMMessage[];
   loopBreakInjected: boolean;
   detectToolLoop: (
-    recentToolCalls: Array<{ tool: string; target: string }>,
+    recentToolCalls: ToolLoopCall[],
     toolName: string,
     input: any,
     threshold?: number,
@@ -231,6 +253,201 @@ export function maybeInjectToolLoopBreak(opts: {
   }
 
   return false;
+}
+
+export function maybeInjectLowProgressNudge(opts: {
+  recentToolCalls: ToolLoopCall[];
+  messages: LLMMessage[];
+  lowProgressNudgeInjected: boolean;
+  phaseLabel: "step" | "follow-up";
+  windowSize?: number;
+  minCallsOnSameTarget?: number;
+  log: (message: string) => void;
+  emitLowProgressEvent?: (payload: {
+    target: string;
+    callCount: number;
+    windowSize: number;
+    phase: "step" | "follow-up";
+    escalated?: boolean;
+  }) => void;
+}): boolean {
+  const windowSize = opts.windowSize ?? 8;
+  const minCallsOnSameTarget = opts.minCallsOnSameTarget ?? 6;
+  if (opts.recentToolCalls.length < windowSize) return false;
+
+  const recent = opts.recentToolCalls.slice(-windowSize);
+  const byTarget = new Map<
+    string,
+    { count: number; tools: Set<string>; signatures: Set<string>; rawTarget: string }
+  >();
+
+  for (const call of recent) {
+    const targetKey = (call.baseTarget || call.target || "").trim();
+    if (!targetKey) continue;
+
+    const bucket = byTarget.get(targetKey) ?? {
+      count: 0,
+      tools: new Set<string>(),
+      signatures: new Set<string>(),
+      rawTarget: call.baseTarget || call.target,
+    };
+    bucket.count += 1;
+    bucket.tools.add(call.tool);
+    bucket.signatures.add(call.target);
+    byTarget.set(targetKey, bucket);
+  }
+
+  let topTarget = "";
+  let topCount = 0;
+  let topTools = 0;
+  let topSignatures = 0;
+
+  for (const [target, bucket] of byTarget) {
+    if (bucket.count > topCount) {
+      topTarget = target;
+      topCount = bucket.count;
+      topTools = bucket.tools.size;
+      topSignatures = bucket.signatures.size;
+    }
+  }
+
+  const detected =
+    topCount >= minCallsOnSameTarget &&
+    // Mixed-tool probing on the same target is a common low-progress churn pattern.
+    topTools >= 2 &&
+    topSignatures >= 3;
+
+  if (!detected) return false;
+
+  const escalationTag = "[LOW_PROGRESS_ESCALATION]";
+  const escalationAlreadyInjected = opts.messages.some((message) => {
+    if (!Array.isArray(message.content)) return false;
+    return message.content.some(
+      (block: any) =>
+        block?.type === "text" &&
+        typeof block?.text === "string" &&
+        block.text.includes(escalationTag),
+    );
+  });
+
+  if (opts.lowProgressNudgeInjected) {
+    if (escalationAlreadyInjected) return true;
+
+    opts.log(
+      `  │ ⚠ Low-progress loop persists: ${topCount}/${windowSize} recent calls target "${topTarget}"`,
+    );
+    opts.emitLowProgressEvent?.({
+      target: topTarget,
+      callCount: topCount,
+      windowSize,
+      phase: opts.phaseLabel,
+      escalated: true,
+    });
+    opts.messages.push({
+      role: "user",
+      content: [
+        {
+          type: "text",
+          text:
+            `${escalationTag}\n` +
+            `Low-progress looping is still occurring on "${topTarget}". ` +
+            "This is your final warning: stop all additional probing and provide the best final answer now, with a blocker list for anything still unknown.",
+        },
+      ],
+    });
+    return true;
+  }
+
+  opts.log(
+    `  │ ⚠ Low-progress loop: ${topCount}/${windowSize} recent calls target "${topTarget}" ` +
+      `across ${topTools} tool categories`,
+  );
+  opts.emitLowProgressEvent?.({
+    target: topTarget,
+    callCount: topCount,
+    windowSize,
+    phase: opts.phaseLabel,
+  });
+  opts.messages.push({
+    role: "user",
+    content: [
+      {
+        type: "text",
+        text:
+          `You are repeatedly probing the same target ("${topTarget}") without meaningful progress. ` +
+          "Stop additional probing now. Synthesize the best answer from current evidence, and explicitly list any missing data as blockers.",
+      },
+    ],
+  });
+  return true;
+}
+
+export function maybeInjectStopReasonNudge(opts: {
+  stopReason: string | undefined;
+  consecutiveToolUseStops: number;
+  consecutiveMaxTokenStops: number;
+  remainingTurns: number;
+  messages: LLMMessage[];
+  phaseLabel: "step" | "follow-up";
+  stopReasonNudgeInjected: boolean;
+  log: (message: string) => void;
+  emitStopReasonEvent?: (payload: {
+    phase: "step" | "follow-up";
+    stopReason: string;
+    consecutiveCount: number;
+    remainingTurns: number;
+  }) => void;
+}): boolean {
+  if (opts.stopReasonNudgeInjected) return true;
+
+  const stopReason = String(opts.stopReason || "");
+  if (!stopReason) return false;
+
+  const toolUseStreakTriggered =
+    stopReason === "tool_use" && (opts.consecutiveToolUseStops >= 6 || opts.remainingTurns <= 1);
+  const maxTokenStreakTriggered = stopReason === "max_tokens" && opts.consecutiveMaxTokenStops >= 2;
+  if (!toolUseStreakTriggered && !maxTokenStreakTriggered) {
+    return false;
+  }
+
+  const consecutiveCount =
+    stopReason === "tool_use" ? opts.consecutiveToolUseStops : opts.consecutiveMaxTokenStops;
+  opts.log(
+    `  │ ⚠ Stop-reason nudge (${opts.phaseLabel}): ${stopReason} x${consecutiveCount}, ` +
+      `remainingTurns=${opts.remainingTurns}`,
+  );
+  opts.emitStopReasonEvent?.({
+    phase: opts.phaseLabel,
+    stopReason,
+    consecutiveCount,
+    remainingTurns: opts.remainingTurns,
+  });
+
+  if (stopReason === "tool_use") {
+    opts.messages.push({
+      role: "user",
+      content: [
+        {
+          type: "text",
+          text:
+            "You have been in repeated tool-use turns. Stop calling tools unless absolutely required for correctness. " +
+            "Produce a concise, direct answer from gathered evidence, and list unresolved gaps explicitly.",
+        },
+      ],
+    });
+    return true;
+  }
+
+  opts.messages.push({
+    role: "user",
+    content: [
+      {
+        type: "text",
+        text: "Your recent responses keep hitting output limits. Keep the next response compact: no long dumps, no repeated context, and only the essential final result.",
+      },
+    ],
+  });
+  return true;
 }
 
 const FILE_WRITING_TOOLS = new Set([

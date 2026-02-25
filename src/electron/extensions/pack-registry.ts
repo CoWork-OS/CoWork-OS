@@ -57,7 +57,8 @@ function sanitizePackId(packId: string): string | null {
 
   const normalized = packId.trim().toLowerCase();
   if (normalized.length === 0 || normalized.length > 128) return null;
-  if (normalized.includes("..") || normalized.includes("/") || normalized.includes("\\")) return null;
+  if (normalized.includes("..") || normalized.includes("/") || normalized.includes("\\"))
+    return null;
   if (!VALID_PACK_ID.test(normalized)) return null;
 
   return normalized;

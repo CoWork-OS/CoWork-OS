@@ -27,12 +27,7 @@ function replaceEmojisInString(text: string, size: number): ReactNode[] {
     }
 
     parts.push(
-      <span
-        key={`ei-${match.index}`}
-        className="inline-emoji-icon"
-        aria-label={emoji}
-        role="img"
-      >
+      <span key={`ei-${match.index}`} className="inline-emoji-icon" aria-label={emoji} role="img">
         <Icon size={size} strokeWidth={1.8} />
       </span>,
     );

@@ -60,7 +60,10 @@ export function setupPluginDistributionHandlers(): void {
           const registry = PluginRegistry.getInstance();
           await registry.discoverNewPlugins();
         } catch (error) {
-          console.warn("[PluginDistribution] Failed to discover new plugins after scaffold:", error);
+          console.warn(
+            "[PluginDistribution] Failed to discover new plugins after scaffold:",
+            error,
+          );
         }
       }
 
@@ -88,7 +91,10 @@ export function setupPluginDistributionHandlers(): void {
         const registry = PluginRegistry.getInstance();
         await registry.discoverNewPlugins();
       } catch (error) {
-        console.warn("[PluginDistribution] Failed to discover new plugins after git install:", error);
+        console.warn(
+          "[PluginDistribution] Failed to discover new plugins after git install:",
+          error,
+        );
       }
     }
 
@@ -115,7 +121,10 @@ export function setupPluginDistributionHandlers(): void {
         const registry = PluginRegistry.getInstance();
         await registry.discoverNewPlugins();
       } catch (error) {
-        console.warn("[PluginDistribution] Failed to discover new plugins after URL install:", error);
+        console.warn(
+          "[PluginDistribution] Failed to discover new plugins after URL install:",
+          error,
+        );
       }
     }
 

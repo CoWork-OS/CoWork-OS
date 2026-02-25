@@ -4,10 +4,32 @@ import { isVerificationStepDescription } from "../../shared/plan-utils";
 import { FileViewer } from "./FileViewer";
 import { useAgentContext } from "../hooks/useAgentContext";
 import {
-  Cloud, Database, MessageCircle, Wrench, ClipboardList, KeyRound, Mail,
-  Hash, Gamepad2, FileEdit, Github, GitBranch, FolderOpen,
-  CreditCard, Phone, BarChart3, BookOpen, Calendar,
-  Palette, Shield, Zap, Search, Plug, PenLine, Flame, Bell,
+  Cloud,
+  Database,
+  MessageCircle,
+  Wrench,
+  ClipboardList,
+  KeyRound,
+  Mail,
+  Hash,
+  Gamepad2,
+  FileEdit,
+  Github,
+  GitBranch,
+  FolderOpen,
+  CreditCard,
+  Phone,
+  BarChart3,
+  BookOpen,
+  Calendar,
+  Palette,
+  Shield,
+  Zap,
+  Search,
+  Plug,
+  PenLine,
+  Flame,
+  Bell,
   type LucideProps,
 } from "lucide-react";
 import { getEmojiIcon } from "../utils/emoji-icon-map";
@@ -170,7 +192,7 @@ export function RightPanel({
 
   // Active context: connectors + skills
   const [activeContext, setActiveContext] = useState<{
-    connectors: { id: string; name: string; icon: string; status: string }[];
+    connectors: { id: string; name: string; icon: string; status: string; tools: string[] }[];
     skills: { id: string; name: string; icon: string }[];
   } | null>(null);
 
@@ -237,6 +259,10 @@ export function RightPanel({
           step.status = "failed";
           if (event.payload.reason && !step.error) step.error = String(event.payload.reason);
         }
+      }
+      if (event.type === "step_skipped" && event.payload.step) {
+        const step = steps.find((s) => s.id === event.payload.step.id);
+        if (step) step.status = "skipped";
       }
     });
 
@@ -326,6 +352,35 @@ export function RightPanel({
     return Array.from(files).slice(0, 10); // Limit to 10 most recent
   }, [events]);
 
+  // Extract skill IDs used in this task/session from events
+  const usedSkillIds = useMemo((): Set<string> => {
+    const ids = new Set<string>();
+    events.forEach((event) => {
+      if (
+        event.type === "tool_call" &&
+        event.payload.tool === "use_skill" &&
+        event.payload.input?.skill_id
+      ) {
+        ids.add(event.payload.input.skill_id);
+      }
+      if (event.type === "log" && event.payload.skillId) {
+        ids.add(event.payload.skillId);
+      }
+    });
+    return ids;
+  }, [events]);
+
+  // Extract tool names used in this task/session (for connector filtering)
+  const usedToolNames = useMemo((): Set<string> => {
+    const names = new Set<string>();
+    events.forEach((event) => {
+      if (event.type === "tool_call" && event.payload.tool) {
+        names.add(event.payload.tool);
+      }
+    });
+    return names;
+  }, [events]);
+
   // Get status indicator (terminal vs modern)
   const getStatusIndicator = (status: string) => {
     switch (status) {
@@ -386,6 +441,27 @@ export function RightPanel({
               >
                 <line x1="18" y1="6" x2="6" y2="18" />
                 <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </span>
+          </>
+        );
+      case "skipped":
+        return (
+          <>
+            <span className="terminal-only">[→]</span>
+            <span className="modern-only">
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="3"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polyline points="5 4 15 12 5 20" />
+                <line x1="19" y1="4" x2="19" y2="20" />
               </svg>
             </span>
           </>
@@ -615,14 +691,17 @@ export function RightPanel({
                 ))}
               </div>
               {workspace && (
-                <div className="cli-workspace-path">
+                <div
+                  className="cli-workspace-path"
+                  style={{ cursor: "pointer" }}
+                  onClick={() => window.electronAPI.openFile(workspace.path, workspace.path)}
+                  title={workspace.path}
+                >
                   <span className="cli-label">
                     <span className="terminal-only">PWD:</span>
                     <span className="modern-only">Workspace</span>
                   </span>
-                  <span className="cli-path" title={workspace.path}>
-                    {workspace.name}/
-                  </span>
+                  <span className="cli-path">{workspace.name}/</span>
                 </div>
               )}
             </div>
@@ -632,8 +711,11 @@ export function RightPanel({
 
       {/* Active Context Section (Connectors + Skills) — only shown when integrations are active */}
       {(() => {
-        const connectedServers = activeContext?.connectors.filter((c) => c.status === "connected") || [];
-        const activeSkills = activeContext?.skills || [];
+        const connectedServers =
+          activeContext?.connectors.filter(
+            (c) => c.status === "connected" && c.tools.some((t) => usedToolNames.has(t)),
+          ) || [];
+        const activeSkills = (activeContext?.skills || []).filter((s) => usedSkillIds.has(s.id));
         const activeCount = connectedServers.length + activeSkills.length;
 
         if (activeCount === 0) return null;
@@ -648,7 +730,9 @@ export function RightPanel({
               </span>
               <span className="cli-active-context-badge">{activeCount}</span>
               <span className="cli-section-toggle">
-                <span className="terminal-only">{expandedSections.activeContext ? "[-]" : "[+]"}</span>
+                <span className="terminal-only">
+                  {expandedSections.activeContext ? "[-]" : "[+]"}
+                </span>
                 <span className="modern-only">{expandedSections.activeContext ? "−" : "+"}</span>
               </span>
             </div>
@@ -666,7 +750,9 @@ export function RightPanel({
                           const ConnIcon = resolveConnectorLucideIcon(c.name, c.icon);
                           return (
                             <div key={c.id} className="cli-context-item">
-                              <span className="cli-active-context-icon"><ConnIcon size={14} /></span>
+                              <span className="cli-active-context-icon">
+                                <ConnIcon size={14} />
+                              </span>
                               <span className="cli-context-key">{c.name}</span>
                               <span className="cli-active-context-status connected" />
                             </div>
@@ -686,7 +772,9 @@ export function RightPanel({
                           const SkillIcon = resolveSkillLucideIcon(s.icon);
                           return (
                             <div key={s.id} className="cli-context-item">
-                              <span className="cli-active-context-icon"><SkillIcon size={14} /></span>
+                              <span className="cli-active-context-icon">
+                                <SkillIcon size={14} />
+                              </span>
                               <span className="cli-context-key">{s.name}</span>
                             </div>
                           );

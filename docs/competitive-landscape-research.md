@@ -49,11 +49,11 @@
 
 | Player | Focus | Strengths | Weaknesses | Relation to CoWork OS |
 |---|---|---|---|---|
-| **OpenClaw (Clawdbot → Moltbot → OpenClaw)** | Self-hosted personal AI assistant | 60K+ GitHub stars, viral growth, multi-channel support, skills system, MCP support, CLI-first, Ollama/local LLM support | CLI-first experience can be harder for non-technical users, setup complexity (OAuth/webhooks), desktop UX depends on external tooling, governance controls vary by deployment | **#1 direct competitor.** Similar architecture (gateway + agent + channels + skills). CoWork OS differentiates with an integrated desktop control plane, built-in approval/guardrail model, and local-first governance defaults |
+| **OpenClaw (Clawdbot → Moltbot → OpenClaw)** | Self-hosted personal AI assistant | 60K+ GitHub stars, viral growth, multi-channel support, skills system, MCP support, CLI-first, Ollama/local LLM support | CLI-first experience can be harder for non-technical users, setup complexity (OAuth/webhooks), desktop UX depends on external tooling, governance controls vary by deployment | **Closest adjacent product in this category.** Similar architecture (gateway + agent + channels + skills). CoWork OS differentiates with an integrated desktop control plane, built-in approval/guardrail model, and local-first governance defaults |
 | **LettaBot (Letta AI)** | Multi-channel AI with memory | Cross-channel memory, Telegram/Slack/WhatsApp/Discord/Signal | Less agentic (more chat-focused), smaller community | Similar multi-channel approach but less action-oriented |
 | **ChatBotKit** | Multi-platform AI chatbot builder | Easy deployment to Slack/Discord/WhatsApp/Messenger/Telegram | More chatbot than agent, not self-hosted, limited automation | Different category — chatbot builder, not personal AI agent |
 
-**Key Insight**: OpenClaw has significant adoption and meaningful capability overlap, but the category emphasis differs. OpenClaw leans toward framework/operator workflows, while CoWork OS emphasizes governed day-to-day operations via desktop + channel runtime.
+**Key Insight**: OpenClaw has significant adoption and meaningful capability overlap, and its community momentum is real. The category emphasis differs: OpenClaw leans toward framework/operator workflows, while CoWork OS emphasizes governed day-to-day operations via desktop + channel runtime.
 
 ---
 
@@ -150,9 +150,9 @@
 
 ## 6. THREATS & RISKS
 
-1. **OpenClaw's explosive growth** (60K+ stars) creates mindshare dominance in the self-hosted AI agent space. First-mover in viral adoption.
+1. **OpenClaw's strong growth** (60K+ stars) gives it substantial mindshare in the self-hosted AI agent space.
 2. **Claude Cowork adding messaging** would erode CoWork OS's channel advantage (but unlikely given Anthropic's business model).
-3. **OpenClaw could ship a desktop GUI** — though their CLI-first culture and community may resist this.
+3. **OpenClaw could ship a desktop GUI**, which would reduce current differentiation.
 4. **Enterprise players (Microsoft, Google)** could add self-hosting or messaging gateway features.
 5. **MCP ecosystem commoditizes tool integration** — anyone can plug in the same capabilities.
 

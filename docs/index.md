@@ -9,7 +9,7 @@ hero:
       text: Get Started
       link: /getting-started
     - theme: alt
-      text: vs OpenClaw
+      text: OpenClaw Alternative
       link: /openclaw-comparison
     - theme: alt
       text: Features
@@ -20,7 +20,7 @@ hero:
 
 features:
   - title: Production Runtime
-    details: OpenClaw is a toolkit. CoWork OS is an operating system for running agents with approvals, guardrails, and policy controls.
+    details: A respectful OpenClaw alternative for teams that need approvals, guardrails, and local-first governance.
   - title: 30+ LLM Providers
     details: Connect to Claude, GPT, Gemini, Ollama, and more. Bring your own keys, switch models per task.
   - title: 14 Messaging Channels

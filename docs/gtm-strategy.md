@@ -20,7 +20,7 @@ CoWork OS is the production alternative to OpenClaw for users who need:
 
 Short form:
 
-> OpenClaw helps you build agents. CoWork OS helps you run them safely.
+> OpenClaw is excellent for experimentation. CoWork OS is optimized for governed daily operations.
 
 ## Core Buyer Profiles
 
@@ -64,6 +64,7 @@ Do:
 - Contrast category focus (toolkit vs operating system).
 - Emphasize production readiness and security controls.
 - Stay factual and neutral in competitor references.
+- Explicitly respect OpenClaw and its community.
 
 Do not:
 
@@ -71,8 +72,18 @@ Do not:
 - Rely on speculative competitor claims.
 - Use adversarial language.
 
+## SEO Guidance
+
+Use these phrases naturally in docs and landing sections:
+
+- OpenClaw alternative
+- alternative to OpenClaw
+- OpenClaw vs CoWork OS
+
+Keep SEO copy factual and fit-based. Avoid negative or inflammatory wording.
+
 ## GTM Assets in This Repo
 
-- [CoWork OS vs OpenClaw](openclaw-comparison.md)
+- [OpenClaw Alternative Guide](openclaw-comparison.md)
 - [Migration Guide](migration.md#from-openclaw-to-cowork-os)
 - [Competitive Landscape Research](competitive-landscape-research.md)

@@ -8,14 +8,14 @@ CoWork OS is a security-first personal AI assistant that runs on your Mac. If yo
 
 ---
 
-## From OpenClaw to CoWork OS
+## From OpenClaw to CoWork OS (Alternative Path)
 
 If you're currently using OpenClaw, the migration is mostly an operating model shift:
 
 - OpenClaw is commonly used as an agent experimentation toolkit.
 - CoWork OS is designed as a production runtime with built-in approvals, guardrails, and local-first controls.
 
-See also: [CoWork OS vs OpenClaw](openclaw-comparison.md)
+See also: [OpenClaw alternative guide](openclaw-comparison.md)
 
 ### Practical Migration Plan
 

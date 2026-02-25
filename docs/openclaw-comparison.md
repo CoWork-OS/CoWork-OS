@@ -1,11 +1,11 @@
 ---
-title: CoWork OS and OpenClaw Comparison Guide
-description: Fit-based comparison of CoWork OS and OpenClaw for teams evaluating local-first, security-hardened AI agent runtimes.
+title: OpenClaw Alternative: CoWork OS
+description: Looking for an OpenClaw alternative? CoWork OS is a local-first, security-hardened option for teams that need approvals and multi-channel operations.
 ---
 
-# CoWork OS and OpenClaw Comparison Guide
+# OpenClaw Alternative: CoWork OS
 
-This page helps teams evaluate where CoWork OS fits.
+If you are searching for an OpenClaw alternative, this page explains where CoWork OS fits.
 
 We respect OpenClaw and its community. This is a fit-based comparison, not an attack.
 
@@ -33,6 +33,14 @@ We respect OpenClaw and its community. This is a fit-based comparison, not an at
 3. They run workflows across messaging channels, not only CLI surfaces.
 4. They care about repeatable daily operations with governance controls.
 
+## Common Search Terms
+
+People usually find this page when searching:
+
+- OpenClaw alternative
+- alternative to OpenClaw
+- OpenClaw vs CoWork OS
+
 ## Buyer Fit
 
 Choose OpenClaw when you want to experiment quickly with agent architecture and custom framework flows.
@@ -45,4 +53,4 @@ Choose CoWork OS when you need to run agents continuously with security controls
 - [Features](./features.md) for runtime capabilities and channel scope
 - [Security Guide](./security-guide.md) for policy model and controls
 - [Architecture](./architecture.md) for runtime boundaries and gateway design
-- [Migration Guide](./migration.md#from-existing-agent-runtimes) for cutover steps
+- [Migration Guide](./migration.md#from-openclaw-to-cowork-os) for cutover steps

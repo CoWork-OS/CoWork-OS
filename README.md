@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <strong>Security-hardened, local-first AI operating system for production workflows.</strong><br>
+  <strong>Looking for an OpenClaw alternative? CoWork OS is a local-first option for production workflows.</strong><br>
   Security-hardened, local-first AI operating system — 30+ LLM providers, 14 channels, 100+ skills
 </p>
 
@@ -20,7 +20,7 @@
 
 <p align="center">
   <a href="docs/getting-started.md">Getting Started</a> &middot;
-  <a href="docs/openclaw-comparison.md">Comparison Guide</a> &middot;
+  <a href="docs/openclaw-comparison.md">OpenClaw Alternative Guide</a> &middot;
   <a href="docs/">Documentation</a> &middot;
   <a href="CHANGELOG.md">Changelog</a> &middot;
   <a href="SECURITY.md">Security</a> &middot;
@@ -48,9 +48,9 @@
 - **Security-first** — Approval workflows, sandboxed execution, configurable guardrails, encrypted storage, and 3200+ tests.
 - **Local-first & BYOK** — Your data and API keys stay on your machine. No telemetry. No middleman.
 
-### Comparison Snapshot
+### Looking for an OpenClaw Alternative?
 
-CoWork OS is built for teams and builders who want local-first operations with approvals, guardrails, and reliable multi-channel execution.
+OpenClaw has a large and passionate community for agent experimentation. CoWork OS is a respectful alternative for teams and builders who want local-first operations with approvals, guardrails, and reliable multi-channel execution.
 
 | Positioning Lens | OpenClaw | CoWork OS |
 |---|---|---|
@@ -60,7 +60,7 @@ CoWork OS is built for teams and builders who want local-first operations with a
 | Runtime surfaces | CLI-centric control paths | Desktop app + headless daemon + 14-channel gateway |
 | Data ownership model | BYOK/self-hosting workflows | Local-first, BYOK, no telemetry, optional offline Ollama |
 
-See the full guide: [Comparison: CoWork OS and OpenClaw](docs/openclaw-comparison.md)
+See the full guide: [OpenClaw alternative: CoWork OS vs OpenClaw](docs/openclaw-comparison.md)
 
 ## Quick Start
 
@@ -282,10 +282,10 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
 |-------|-------------|
 | [Getting Started](docs/getting-started.md) | First-time setup and usage |
 | [Features](docs/features.md) | Complete feature reference |
-| [Comparison Guide](docs/openclaw-comparison.md) | Fit-based comparison with popular self-hosted agent runtimes |
+| [OpenClaw Alternative Guide](docs/openclaw-comparison.md) | Respectful category framing for users evaluating an OpenClaw alternative |
 | [Channels](docs/channels.md) | Messaging channel setup (14 channels) |
 | [Providers](docs/providers.md) | LLM provider configuration |
-| [Migration Guide](docs/migration.md#from-existing-agent-runtimes) | Practical migration checklist for teams moving from existing runtimes |
+| [Migration from OpenClaw](docs/migration.md#from-openclaw-to-cowork-os) | Practical checklist for teams moving from OpenClaw to CoWork OS |
 | [Development](docs/development.md) | Build from source, project structure |
 | [Architecture](docs/architecture.md) | Technical architecture deep-dive |
 | [Security Guide](docs/security-guide.md) | Security model and best practices |

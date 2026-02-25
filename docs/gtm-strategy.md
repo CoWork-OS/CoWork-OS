@@ -6,12 +6,12 @@
 
 CoWork OS is a **security-hardened, local-first AI operating system**.
 
-- Leading community projects often focus on experimentation-first workflows.
-- CoWork OS focuses on governed day-to-day operations across real workflows.
+- OpenClaw is best positioned as an agent experimentation toolkit.
+- CoWork OS is positioned as the production runtime for running agents safely across real workflows.
 
 ## Primary Positioning Statement
 
-CoWork OS is for users who need:
+CoWork OS is the production alternative to OpenClaw for users who need:
 
 - Guardrails and approval workflows by default
 - Local-first data ownership (BYOK, no telemetry)
@@ -20,7 +20,7 @@ CoWork OS is for users who need:
 
 Short form:
 
-> CoWork OS is optimized for governed daily operations.
+> OpenClaw is excellent for experimentation. CoWork OS is optimized for governed daily operations.
 
 ## Core Buyer Profiles
 
@@ -64,11 +64,11 @@ Do:
 - Contrast category focus (toolkit vs operating system).
 - Emphasize production readiness and security controls.
 - Stay factual and neutral in competitor references.
-- Use respectful, fit-based language.
+- Explicitly respect OpenClaw and its community.
 
 Do not:
 
-- Frame positioning as feature-count competition only.
+- Frame as "more features than OpenClaw" only.
 - Rely on speculative competitor claims.
 - Use adversarial language.
 
@@ -76,12 +76,14 @@ Do not:
 
 Use these phrases naturally in docs and landing sections:
 
-- openclaw alternative (use sparingly in dedicated comparison pages)
+- OpenClaw alternative
+- alternative to OpenClaw
+- OpenClaw vs CoWork OS
 
 Keep SEO copy factual and fit-based. Avoid negative or inflammatory wording.
 
 ## GTM Assets in This Repo
 
-- [Comparison Guide](openclaw-comparison.md)
-- [Migration Guide](migration.md#from-existing-agent-runtimes)
+- [OpenClaw Alternative Guide](openclaw-comparison.md)
+- [Migration Guide](migration.md#from-openclaw-to-cowork-os)
 - [Competitive Landscape Research](competitive-landscape-research.md)

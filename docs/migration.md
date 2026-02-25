@@ -8,18 +8,18 @@ CoWork OS is a security-first personal AI assistant that runs on your Mac. If yo
 
 ---
 
-## From Existing Agent Runtimes
+## From OpenClaw to CoWork OS (Alternative Path)
 
-If you're moving from an existing runtime, the migration is mostly an operating model shift:
+If you're currently using OpenClaw, the migration is mostly an operating model shift:
 
-- OpenClaw and similar tools are often used for experimentation-first workflows.
+- OpenClaw is commonly used as an agent experimentation toolkit.
 - CoWork OS is designed as a production runtime with built-in approvals, guardrails, and local-first controls.
 
-See also: [Comparison guide](openclaw-comparison.md)
+See also: [OpenClaw alternative guide](openclaw-comparison.md)
 
 ### Practical Migration Plan
 
-1. Keep your current runtime running in parallel for a short validation window.
+1. Keep OpenClaw running in parallel for a short validation window.
 2. Start CoWork OS with one low-risk channel (for example, a private Telegram or Slack test channel).
 3. Enable strict security defaults in CoWork OS first: Pairing mode, approval workflows, and guardrail budgets.
 4. Reconnect provider keys and channels one by one.

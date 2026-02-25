@@ -667,6 +667,11 @@ export interface LLMSettings {
     apiKey?: string;
     model?: string;
   };
+  openaiCompatible?: {
+    apiKey?: string;
+    baseUrl?: string;
+    model?: string;
+  };
   customProviders?: Record<string, CustomProviderConfig>;
   // Cached models from API (populated when user refreshes)
   cachedGeminiModels?: CachedModelInfo[];
@@ -678,6 +683,7 @@ export interface LLMSettings {
   cachedXaiModels?: CachedModelInfo[];
   cachedKimiModels?: CachedModelInfo[];
   cachedPiModels?: CachedModelInfo[];
+  cachedOpenAICompatibleModels?: CachedModelInfo[];
 }
 
 const DEFAULT_SETTINGS: LLMSettings = {
@@ -701,6 +707,17 @@ export class LLMProviderFactory {
       }
       if (settings.customProviders["kimi-coding"]) {
         delete settings.customProviders["kimi-coding"];
+      }
+
+      // Migrate openai-compatible from custom providers to built-in
+      const legacyOpenAICompat = settings.customProviders["openai-compatible"];
+      if (legacyOpenAICompat && !settings.openaiCompatible) {
+        settings.openaiCompatible = {
+          apiKey: legacyOpenAICompat.apiKey,
+          baseUrl: legacyOpenAICompat.baseUrl,
+          model: legacyOpenAICompat.model,
+        };
+        delete settings.customProviders["openai-compatible"];
       }
     }
 
@@ -990,6 +1007,12 @@ export class LLMProviderFactory {
       // Pi config - from settings only
       piProvider: overrideConfig?.piProvider || settings.pi?.provider,
       piApiKey: normalizeSecret(overrideConfig?.piApiKey) || settings.pi?.apiKey,
+      // OpenAI-compatible config - from settings only
+      openaiCompatibleApiKey:
+        normalizeSecret(overrideConfig?.openaiCompatibleApiKey) ||
+        settings.openaiCompatible?.apiKey,
+      openaiCompatibleBaseUrl:
+        overrideConfig?.openaiCompatibleBaseUrl || settings.openaiCompatible?.baseUrl,
       // Custom provider config
       providerApiKey: normalizeSecret(overrideConfig?.providerApiKey) || customConfig?.apiKey,
       providerBaseUrl: overrideConfig?.providerBaseUrl || customConfig?.baseUrl,
@@ -1044,6 +1067,15 @@ export class LLMProviderFactory {
         break;
       case "pi":
         provider = new PiProvider(config);
+        break;
+      case "openai-compatible":
+        provider = new OpenAICompatibleProvider({
+          type: "openai-compatible",
+          providerName: "OpenAI-Compatible",
+          apiKey: config.openaiCompatibleApiKey || "",
+          baseUrl: config.openaiCompatibleBaseUrl || "http://localhost:1234/v1",
+          defaultModel: config.model,
+        });
         break;
       default:
         throw new Error(`Unknown provider type: ${config.type}`);
@@ -1119,6 +1151,12 @@ export class LLMProviderFactory {
     if (providerType === "pi") {
       const settings = this.loadSettings();
       return settings.pi?.model || DEFAULT_PI_MODEL;
+    }
+
+    // For OpenAI-compatible, use the specific model from settings
+    if (providerType === "openai-compatible") {
+      const settings = this.loadSettings();
+      return settings.openaiCompatible?.model || "";
     }
 
     // For Bedrock, prefer an explicit Bedrock model ID if configured.
@@ -1245,6 +1283,11 @@ export class LLMProviderFactory {
         type: "pi" as LLMProviderType,
         name: "Pi (Unified)",
         configured: !!(settings.pi?.apiKey && settings.pi?.provider),
+      },
+      {
+        type: "openai-compatible" as LLMProviderType,
+        name: "OpenAI-Compatible",
+        configured: !!(settings.openaiCompatible?.baseUrl && settings.openaiCompatible?.model),
       },
     ];
 
@@ -1543,6 +1586,26 @@ export class LLMProviderFactory {
         };
       }
 
+      case "openai-compatible": {
+        const currentModel = settings.openaiCompatible?.model || "";
+        const modelList =
+          settings.cachedOpenAICompatibleModels && settings.cachedOpenAICompatibleModels.length > 0
+            ? settings.cachedOpenAICompatibleModels
+            : currentModel
+              ? [
+                  {
+                    key: currentModel,
+                    displayName: currentModel,
+                    description: "OpenAI-compatible model",
+                  },
+                ]
+              : [];
+        return {
+          currentModel,
+          models: ensureCurrentModel(modelList, currentModel),
+        };
+      }
+
       default: {
         const currentModel = settings.modelKey;
         const modelList = Object.entries(MODELS).map(([key, value]) => ({
@@ -1613,6 +1676,9 @@ export class LLMProviderFactory {
         break;
       case "pi":
         updated.pi = { ...settings.pi, model: modelKey };
+        break;
+      case "openai-compatible":
+        updated.openaiCompatible = { ...settings.openaiCompatible, model: modelKey };
         break;
       case "anthropic":
         updated.modelKey = modelKey as ModelKey;
@@ -2350,7 +2416,8 @@ export class LLMProviderFactory {
       | "groq"
       | "xai"
       | "kimi"
-      | "pi",
+      | "pi"
+      | "openai-compatible",
     models: CachedModelInfo[],
   ): void {
     const settings = this.loadSettings();
@@ -2383,6 +2450,9 @@ export class LLMProviderFactory {
       case "pi":
         settings.cachedPiModels = models;
         break;
+      case "openai-compatible":
+        settings.cachedOpenAICompatibleModels = models;
+        break;
     }
 
     this.saveSettings(settings);
@@ -2401,7 +2471,8 @@ export class LLMProviderFactory {
       | "groq"
       | "xai"
       | "kimi"
-      | "pi",
+      | "pi"
+      | "openai-compatible",
   ): CachedModelInfo[] | undefined {
     const settings = this.loadSettings();
 
@@ -2424,8 +2495,36 @@ export class LLMProviderFactory {
         return settings.cachedKimiModels;
       case "pi":
         return settings.cachedPiModels;
+      case "openai-compatible":
+        return settings.cachedOpenAICompatibleModels;
       default:
         return undefined;
     }
+  }
+
+  /**
+   * Fetch available models from an OpenAI-compatible endpoint
+   */
+  static async getOpenAICompatibleModels(
+    baseUrl: string,
+    apiKey?: string,
+  ): Promise<CachedModelInfo[]> {
+    const provider = new OpenAICompatibleProvider({
+      type: "openai-compatible",
+      providerName: "OpenAI-Compatible",
+      apiKey: apiKey || "",
+      baseUrl,
+      defaultModel: "",
+    });
+
+    const models = await provider.getAvailableModels();
+    const cachedModels = models.map((m) => ({
+      key: m.id,
+      displayName: m.name || m.id,
+      description: "OpenAI-compatible model",
+    }));
+
+    this.saveCachedModels("openai-compatible", cachedModels);
+    return cachedModels;
   }
 }

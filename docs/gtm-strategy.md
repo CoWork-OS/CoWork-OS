@@ -6,12 +6,12 @@
 
 CoWork OS is a **security-hardened, local-first AI operating system**.
 
-- OpenClaw is best positioned as an agent experimentation toolkit.
-- CoWork OS is positioned as the production runtime for running agents safely across real workflows.
+- Leading community projects often focus on experimentation-first workflows.
+- CoWork OS focuses on governed day-to-day operations across real workflows.
 
 ## Primary Positioning Statement
 
-CoWork OS is the production alternative to OpenClaw for users who need:
+CoWork OS is for users who need:
 
 - Guardrails and approval workflows by default
 - Local-first data ownership (BYOK, no telemetry)
@@ -20,7 +20,7 @@ CoWork OS is the production alternative to OpenClaw for users who need:
 
 Short form:
 
-> OpenClaw is excellent for experimentation. CoWork OS is optimized for governed daily operations.
+> CoWork OS is optimized for governed daily operations.
 
 ## Core Buyer Profiles
 
@@ -64,11 +64,11 @@ Do:
 - Contrast category focus (toolkit vs operating system).
 - Emphasize production readiness and security controls.
 - Stay factual and neutral in competitor references.
-- Explicitly respect OpenClaw and its community.
+- Use respectful, fit-based language.
 
 Do not:
 
-- Frame as "more features than OpenClaw" only.
+- Frame positioning as feature-count competition only.
 - Rely on speculative competitor claims.
 - Use adversarial language.
 
@@ -76,14 +76,12 @@ Do not:
 
 Use these phrases naturally in docs and landing sections:
 
-- OpenClaw alternative
-- alternative to OpenClaw
-- OpenClaw vs CoWork OS
+- openclaw alternative (use sparingly in dedicated comparison pages)
 
 Keep SEO copy factual and fit-based. Avoid negative or inflammatory wording.
 
 ## GTM Assets in This Repo
 
-- [OpenClaw Alternative Guide](openclaw-comparison.md)
-- [Migration Guide](migration.md#from-openclaw-to-cowork-os)
+- [Comparison Guide](openclaw-comparison.md)
+- [Migration Guide](migration.md#from-existing-agent-runtimes)
 - [Competitive Landscape Research](competitive-landscape-research.md)

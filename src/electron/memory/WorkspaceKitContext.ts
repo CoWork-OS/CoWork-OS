@@ -171,6 +171,13 @@ function buildKitSections(
       extractor: (raw) => sanitizeForInjection(extractFilledFieldLines(raw)),
     },
     {
+      relPath: path.join(KIT_DIRNAME, "VIBES.md"),
+      title: "Current Vibes",
+      // VIBES.md is intentionally placed before SOUL.md so that the current energy/mode
+      // influences how the agent interprets its personality and all downstream context.
+      extractor: (raw) => sanitizeForInjection(clampSection(raw, MAX_SECTION_CHARS)),
+    },
+    {
       relPath: path.join(KIT_DIRNAME, "SOUL.md"),
       title: "Assistant Style",
       // SOUL.md is intentionally free-form; inject the (sanitized) document rather than
@@ -207,6 +214,14 @@ function buildKitSections(
       relPath: path.join(KIT_DIRNAME, "MISTAKES.md"),
       title: "Mistakes / Preferences",
       extractor: (raw) => sanitizeForInjection(clampSection(raw, MAX_SECTION_CHARS)),
+    },
+    {
+      relPath: path.join(KIT_DIRNAME, "LORE.md"),
+      title: "Shared Lore",
+      extractor: (raw) =>
+        sanitizeForInjection(
+          extractBulletSections(raw, { maxSections: 6, maxBulletsPerSection: 8 }),
+        ),
     },
     {
       relPath: path.join(KIT_DIRNAME, "memory", `${stamp}.md`),

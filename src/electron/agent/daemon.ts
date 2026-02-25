@@ -41,6 +41,8 @@ import {
   MULTI_LLM_PROVIDER_DISPLAY,
   AgentTeamRun,
   AgentTeamItem,
+  StepFeedbackAction,
+  TASK_ERROR_CODES,
 } from "../../shared/types";
 import { TaskExecutor } from "./executor";
 import { TaskQueueManager } from "./queue-manager";
@@ -151,6 +153,11 @@ export class AgentDaemon extends EventEmitter {
   private sessionAutoApproveAll = false;
   /** Transient storage for images attached to task creation (not persisted to DB). */
   private pendingTaskImages: Map<string, ImageAttachment[]> = new Map();
+  /**
+   * Tasks queued via "Continue" after turn-limit exhaustion.
+   * When dequeued, these must resume via continuation flow, not normal execution.
+   */
+  private pendingContinuationTaskIds: Set<string> = new Set();
   /** Git worktree manager for task isolation. */
   private worktreeManager: WorktreeManager;
   /** Comparison service for agent comparison mode. */
@@ -393,9 +400,7 @@ export class AgentDaemon extends EventEmitter {
       for (const task of orphanedTasks) {
         const events = this.eventRepo.findByTaskId(task.id);
         const hasSnapshot = events.some((e) => e.type === "conversation_snapshot");
-        const hasPlan = events.some(
-          (e) => e.type === "plan_created" && e.payload?.plan,
-        );
+        const hasPlan = events.some((e) => e.type === "plan_created" && e.payload?.plan);
 
         if (hasSnapshot || hasPlan) {
           // Recoverable: mark as interrupted and add to the resume list
@@ -404,7 +409,8 @@ export class AgentDaemon extends EventEmitter {
           );
           this.taskRepo.update(task.id, {
             status: "interrupted" as TaskStatus,
-            error: "Application exited unexpectedly while task was running - will resume on restart",
+            error:
+              "Application exited unexpectedly while task was running - will resume on restart",
           });
           this.logEvent(task.id, "task_interrupted", {
             message: "Task interrupted by unexpected application exit. Will resume on restart.",
@@ -429,9 +435,7 @@ export class AgentDaemon extends EventEmitter {
     // Resume all resumable tasks after a short delay to let the rest of the app
     // (IPC handlers, tray, cron, UI) finish initializing first.
     if (tasksToResume.length > 0) {
-      console.log(
-        `[AgentDaemon] ${tasksToResume.length} task(s) scheduled for resume`,
-      );
+      console.log(`[AgentDaemon] ${tasksToResume.length} task(s) scheduled for resume`);
       setTimeout(() => {
         this.resumeInterruptedTasks(tasksToResume);
       }, 2000);
@@ -520,6 +524,13 @@ export class AgentDaemon extends EventEmitter {
    */
   async startTaskImmediate(task: Task): Promise<void> {
     console.log(`[AgentDaemon] Starting task ${task.id}: ${task.title}`);
+
+    if (this.shouldStartAsQueuedContinuation(task)) {
+      this.pendingContinuationTaskIds.delete(task.id);
+      await this.startQueuedContinuation(task);
+      return;
+    }
+
     const { task: effectiveTask, changed: roleOverridesChanged } =
       this.applyAgentRoleOverrides(task);
     if (roleOverridesChanged) {
@@ -684,9 +695,7 @@ export class AgentDaemon extends EventEmitter {
   private async resumeInterruptedTasks(tasks: Task[]): Promise<void> {
     for (const task of tasks) {
       try {
-        console.log(
-          `[AgentDaemon] Resuming interrupted task ${task.id}: ${task.title}`,
-        );
+        console.log(`[AgentDaemon] Resuming interrupted task ${task.id}: ${task.title}`);
         await this.resumeInterruptedTask(task);
       } catch (error: any) {
         console.error(`[AgentDaemon] Failed to resume task ${task.id}:`, error);
@@ -737,8 +746,7 @@ export class AgentDaemon extends EventEmitter {
       );
       this.taskRepo.update(task.id, { status: "queued", error: undefined });
       this.logEvent(task.id, "log", {
-        message:
-          "Task interrupted before meaningful progress. Restarting from scratch.",
+        message: "Task interrupted before meaningful progress. Restarting from scratch.",
       });
       await this.queueManager.enqueue(task);
       return;
@@ -808,7 +816,8 @@ export class AgentDaemon extends EventEmitter {
       this.taskRepo.update(effectiveTask.id, { status: "queued" });
       this.logEvent(effectiveTask.id, "task_queued", {
         reason: "concurrency",
-        message: "⏳ Queued — concurrency limit reached during resume. Will start when a slot opens.",
+        message:
+          "⏳ Queued — concurrency limit reached during resume. Will start when a slot opens.",
       });
       return;
     }
@@ -831,10 +840,7 @@ export class AgentDaemon extends EventEmitter {
         this.processOrphanedFollowUps(effectiveTask.id, executor);
       })
       .catch((error) => {
-        console.error(
-          `[AgentDaemon] Resumed task ${effectiveTask.id} failed:`,
-          error,
-        );
+        console.error(`[AgentDaemon] Resumed task ${effectiveTask.id} failed:`, error);
         this.taskRepo.update(effectiveTask.id, {
           status: "failed",
           error: error.message,
@@ -846,6 +852,236 @@ export class AgentDaemon extends EventEmitter {
         this.queueManager.onTaskFinished(effectiveTask.id);
         this.processOrphanedFollowUps(effectiveTask.id, executor);
       });
+  }
+
+  /**
+   * Continue a failed task that was stopped due to budget/limit exhaustion.
+   * Reconstructs the executor from persisted events, resets budgets, and
+   * resumes execution from where the plan left off.
+   */
+  private isTurnLimitContinuationEligible(task: Task, events: TaskEvent[]): boolean {
+    const latestErrorEvent = [...events].reverse().find((event) => event.type === "error");
+    if (latestErrorEvent) {
+      const errorCode = latestErrorEvent.payload?.errorCode;
+      const actionHintType = latestErrorEvent.payload?.actionHint?.type;
+      if (
+        errorCode === TASK_ERROR_CODES.TURN_LIMIT_EXCEEDED ||
+        actionHintType === "continue_task"
+      ) {
+        return true;
+      }
+
+      const latestErrorText =
+        latestErrorEvent.payload?.message ||
+        latestErrorEvent.payload?.error ||
+        latestErrorEvent.payload?.detail ||
+        "";
+      return /Global turn limit exceeded/i.test(String(latestErrorText));
+    }
+
+    // Backward compatibility for older tasks that predate structured error metadata.
+    return /Global turn limit exceeded/i.test(String(task.error || ""));
+  }
+
+  private shouldStartAsQueuedContinuation(task: Task): boolean {
+    if (this.pendingContinuationTaskIds.has(task.id)) {
+      return true;
+    }
+    if (task.status !== "queued") {
+      return false;
+    }
+
+    const events = this.eventRepo.findByTaskId(task.id);
+    const latestQueueEvent = [...events].reverse().find((event) => event.type === "task_queued");
+    const wasQueuedForContinuation =
+      latestQueueEvent?.payload?.reason === "continuation_concurrency";
+    if (!wasQueuedForContinuation) {
+      return false;
+    }
+
+    return this.isTurnLimitContinuationEligible(task, events);
+  }
+
+  private buildContinuationPlan(rawPlan: Plan, events: TaskEvent[]): Plan {
+    const terminalStatusByStep = new Map<string, "completed" | "skipped">();
+    for (const event of events) {
+      const stepId = event.payload?.step?.id;
+      if (!stepId) continue;
+      if (event.type === "step_completed") {
+        terminalStatusByStep.set(stepId, "completed");
+      } else if (event.type === "step_skipped") {
+        terminalStatusByStep.set(stepId, "skipped");
+      }
+    }
+
+    return {
+      description: rawPlan.description,
+      steps: rawPlan.steps.map((step) => ({
+        ...step,
+        status: terminalStatusByStep.get(step.id) ?? ("pending" as const),
+      })),
+    };
+  }
+
+  private createContinuationExecutor(
+    task: Task,
+    events: TaskEvent[],
+  ): { effectiveTask: Task; executor: TaskExecutor } {
+    const workspace = this.workspaceRepo.findById(task.workspaceId);
+    if (!workspace) {
+      throw new Error(`Workspace ${task.workspaceId} not found`);
+    }
+
+    const planEvent = events.filter((e) => e.type === "plan_created").pop();
+    if (!planEvent?.payload?.plan) {
+      throw new Error(
+        `Task ${task.id} cannot be continued because no execution plan could be restored`,
+      );
+    }
+
+    const { task: effectiveTask } = this.applyAgentRoleOverrides(task);
+
+    let effectiveWorkspace = workspace;
+    if (task.worktreePath && task.worktreeStatus === "active" && fs.existsSync(task.worktreePath)) {
+      effectiveWorkspace = { ...workspace, path: task.worktreePath };
+    }
+
+    const executor = new TaskExecutor(effectiveTask, effectiveWorkspace, this);
+    executor.rebuildConversationFromEvents(events);
+
+    const rawPlan = planEvent.payload.plan as Plan;
+    executor.setPlan(this.buildContinuationPlan(rawPlan, events));
+
+    return { effectiveTask, executor };
+  }
+
+  private launchContinuationExecution(effectiveTask: Task, executor: TaskExecutor): void {
+    executor
+      .continueAfterBudgetExhausted()
+      .then(() => {
+        this.processOrphanedFollowUps(effectiveTask.id, executor);
+      })
+      .catch((error) => {
+        console.error(`[AgentDaemon] Continued task ${effectiveTask.id} failed:`, error);
+        this.taskRepo.update(effectiveTask.id, {
+          status: "failed",
+          error: error.message,
+          completedAt: Date.now(),
+        });
+        this.clearRetryState(effectiveTask.id);
+        this.logEvent(effectiveTask.id, "error", { error: error.message });
+        this.activeTasks.delete(effectiveTask.id);
+        this.queueManager.onTaskFinished(effectiveTask.id);
+        this.processOrphanedFollowUps(effectiveTask.id, executor);
+      });
+  }
+
+  private async startQueuedContinuation(task: Task): Promise<void> {
+    console.log(`[AgentDaemon] Starting queued continuation for task ${task.id}: ${task.title}`);
+    const events = this.eventRepo.findByTaskId(task.id);
+    if (!this.isTurnLimitContinuationEligible(task, events)) {
+      this.taskRepo.update(task.id, {
+        status: "failed",
+        error: "Task can no longer be continued because latest failure is not turn-limit exhaustion.",
+        completedAt: Date.now(),
+      });
+      this.logEvent(task.id, "error", {
+        error: "Queued continuation was rejected because latest task error is not turn-limit.",
+      });
+      await this.queueManager.onTaskFinished(task.id);
+      return;
+    }
+
+    let effectiveTask: Task;
+    let executor: TaskExecutor;
+    try {
+      ({ effectiveTask, executor } = this.createContinuationExecutor(task, events));
+    } catch (error: any) {
+      const message = error?.message || String(error);
+      this.taskRepo.update(task.id, {
+        status: "failed",
+        error: message,
+        completedAt: Date.now(),
+      });
+      this.logEvent(task.id, "error", { error: message });
+      await this.queueManager.onTaskFinished(task.id);
+      return;
+    }
+
+    this.activeTasks.set(effectiveTask.id, {
+      executor,
+      lastAccessed: Date.now(),
+      status: "active",
+    });
+
+    this.taskRepo.update(effectiveTask.id, {
+      status: "executing",
+      error: undefined,
+      completedAt: undefined,
+    });
+    this.logEvent(effectiveTask.id, "task_resumed", {
+      message: "Continuing task after queue wait (turn-limit continuation)",
+    });
+
+    this.launchContinuationExecution(effectiveTask, executor);
+  }
+
+  async continueTask(taskId: string): Promise<void> {
+    // Guard against double-click: if the task is already running, bail out
+    if (this.activeTasks.has(taskId)) {
+      console.log(`[AgentDaemon] Task ${taskId} is already active, ignoring continue request`);
+      return;
+    }
+
+    const task = this.taskRepo.findById(taskId);
+    if (!task) {
+      throw new Error(`Task ${taskId} not found`);
+    }
+    if (task.status !== "failed") {
+      throw new Error(`Task ${taskId} is not in failed status (current: ${task.status})`);
+    }
+    // Fetch all events for this task
+    const events = this.eventRepo.findByTaskId(taskId);
+    if (!this.isTurnLimitContinuationEligible(task, events)) {
+      throw new Error(
+        `Task ${taskId} cannot be continued because it was not stopped by turn-limit exhaustion`,
+      );
+    }
+
+    const { effectiveTask, executor } = this.createContinuationExecutor(task, events);
+
+    // Register in active tasks map
+    this.activeTasks.set(effectiveTask.id, {
+      executor,
+      lastAccessed: Date.now(),
+      status: "active",
+    });
+
+    // Register with queue manager for concurrency limits and timeout tracking.
+    const canRun = this.queueManager.registerResumedTask(effectiveTask.id);
+    if (!canRun) {
+      this.activeTasks.delete(effectiveTask.id);
+      this.pendingContinuationTaskIds.add(effectiveTask.id);
+      this.taskRepo.update(effectiveTask.id, { status: "queued" });
+      this.logEvent(effectiveTask.id, "task_queued", {
+        reason: "continuation_concurrency",
+        message:
+          "Queued — concurrency limit reached. Continuation will resume automatically when a slot opens.",
+      });
+      return;
+    }
+
+    // Update status and log continuation
+    this.taskRepo.update(effectiveTask.id, {
+      status: "executing",
+      error: undefined,
+      completedAt: undefined,
+    });
+    this.logEvent(effectiveTask.id, "task_resumed", {
+      message: "Continuing task after budget/limit exhaustion",
+    });
+
+    this.launchContinuationExecution(effectiveTask, executor);
   }
 
   /**
@@ -961,6 +1197,103 @@ export class AgentDaemon extends EventEmitter {
       return merged.size > 0 ? Array.from(merged) : undefined;
     })();
 
+    // Prevent privilege escalation for allow-lists:
+    // if both parent and child specify allow-lists, child gets the intersection.
+    // if only one side specifies allow-list, keep that scope.
+    const allowlistMerge = (() => {
+      const normalize = (values: unknown): Set<string> => {
+        const set = new Set<string>();
+        if (!Array.isArray(values)) return set;
+        for (const raw of values) {
+          const value = typeof raw === "string" ? raw.trim() : "";
+          if (!value) continue;
+          set.add(value);
+        }
+        return set;
+      };
+
+      const parentAllowlistRaw = parent?.agentConfig?.allowedTools;
+      const childAllowlistRaw = params.agentConfig?.allowedTools;
+      const parentAllowed = normalize(parentAllowlistRaw);
+      const childAllowed = normalize(childAllowlistRaw);
+      const parentHasAllowlist = Array.isArray(parentAllowlistRaw);
+      const childHasAllowlist = Array.isArray(childAllowlistRaw);
+      const parentAllowsAll = parentAllowed.has("*");
+      const childAllowsAll = childAllowed.has("*");
+
+      if (!parentHasAllowlist && !childHasAllowlist) {
+        return {
+          mergedAllowedTools: undefined as string[] | undefined,
+          parentHasAllowlist,
+          childHasAllowlist,
+          parentAllowsAll,
+          childAllowsAll,
+          parentAllowlistSize: parentAllowed.size,
+          childAllowlistSize: childAllowed.size,
+        };
+      }
+      if (!parentHasAllowlist) {
+        return {
+          mergedAllowedTools: Array.from(childAllowed),
+          parentHasAllowlist,
+          childHasAllowlist,
+          parentAllowsAll,
+          childAllowsAll,
+          parentAllowlistSize: parentAllowed.size,
+          childAllowlistSize: childAllowed.size,
+        };
+      }
+      if (!childHasAllowlist) {
+        return {
+          mergedAllowedTools: Array.from(parentAllowed),
+          parentHasAllowlist,
+          childHasAllowlist,
+          parentAllowsAll,
+          childAllowsAll,
+          parentAllowlistSize: parentAllowed.size,
+          childAllowlistSize: childAllowed.size,
+        };
+      }
+
+      // Handle wildcard semantics before computing concrete intersections.
+      // "*" means "allow all", not a literal tool name.
+      let mergedAllowedTools: string[];
+      if (parentAllowsAll && childAllowsAll) {
+        mergedAllowedTools = ["*"];
+      } else if (parentAllowsAll) {
+        mergedAllowedTools = Array.from(childAllowed).filter((tool) => tool !== "*");
+      } else if (childAllowsAll) {
+        mergedAllowedTools = Array.from(parentAllowed).filter((tool) => tool !== "*");
+      } else {
+        mergedAllowedTools = Array.from(childAllowed).filter((tool) => parentAllowed.has(tool));
+      }
+
+      return {
+        mergedAllowedTools,
+        parentHasAllowlist,
+        childHasAllowlist,
+        parentAllowsAll,
+        childAllowsAll,
+        parentAllowlistSize: parentAllowed.size,
+        childAllowlistSize: childAllowed.size,
+      };
+    })();
+    const mergedAllowedTools = allowlistMerge.mergedAllowedTools;
+    if (
+      allowlistMerge.parentHasAllowlist &&
+      allowlistMerge.childHasAllowlist &&
+      Array.isArray(mergedAllowedTools) &&
+      mergedAllowedTools.length === 0 &&
+      !allowlistMerge.parentAllowsAll &&
+      !allowlistMerge.childAllowsAll &&
+      allowlistMerge.parentAllowlistSize > 0 &&
+      allowlistMerge.childAllowlistSize > 0
+    ) {
+      throw new Error(
+        "Cannot create child task: parent and child tool allow-lists have no overlap.",
+      );
+    }
+
     const mergedAgentConfig: AgentConfig | undefined = (() => {
       const next: AgentConfig = params.agentConfig ? { ...params.agentConfig } : {};
       if (mergedGatewayContext) {
@@ -968,6 +1301,9 @@ export class AgentDaemon extends EventEmitter {
       }
       if (mergedToolRestrictions) {
         next.toolRestrictions = mergedToolRestrictions;
+      }
+      if (mergedAllowedTools) {
+        next.allowedTools = mergedAllowedTools;
       }
       if (mergedAutonomousMode !== undefined) {
         next.autonomousMode = mergedAutonomousMode;
@@ -1173,6 +1509,7 @@ export class AgentDaemon extends EventEmitter {
     ) {
       return;
     }
+    this.pendingContinuationTaskIds.delete(taskId);
 
     // Check if task is queued (not yet started)
     if (this.queueManager.cancelQueuedTask(taskId)) {
@@ -1254,6 +1591,7 @@ export class AgentDaemon extends EventEmitter {
     ) {
       return;
     }
+    this.pendingContinuationTaskIds.delete(taskId);
 
     const cached = this.activeTasks.get(taskId);
     if (cached) {
@@ -3058,6 +3396,39 @@ export class AgentDaemon extends EventEmitter {
   }
 
   /**
+   * Handle step-level feedback from the user.
+   * Routes the feedback signal to the appropriate executor.
+   */
+  async handleStepFeedback(
+    taskId: string,
+    stepId: string,
+    action: StepFeedbackAction,
+    message?: string,
+  ): Promise<void> {
+    const cached = this.activeTasks.get(taskId);
+    if (!cached) {
+      throw new Error(`Task ${taskId} not found or not active`);
+    }
+    cached.lastAccessed = Date.now();
+
+    const executor = cached.executor;
+    if (!executor) {
+      throw new Error(`No executor found for task ${taskId}`);
+    }
+
+    // Log the feedback event for UI
+    this.logEvent(taskId, "step_feedback", {
+      stepId,
+      action,
+      message,
+      timestamp: Date.now(),
+    });
+
+    // Route to executor
+    executor.setStepFeedback(stepId, action, message);
+  }
+
+  /**
    * After execution completes, process any follow-up messages that were queued
    * but never picked up by the execution loop (e.g. arrived on the last iteration).
    */
@@ -3229,10 +3600,7 @@ export class AgentDaemon extends EventEmitter {
       try {
         cached.executor.saveConversationSnapshot();
       } catch (err) {
-        console.error(
-          `[AgentDaemon] Failed to save snapshot for task ${taskId} on shutdown:`,
-          err,
-        );
+        console.error(`[AgentDaemon] Failed to save snapshot for task ${taskId} on shutdown:`, err);
       }
 
       // Mark as "interrupted" instead of "cancelled" so we can resume on restart

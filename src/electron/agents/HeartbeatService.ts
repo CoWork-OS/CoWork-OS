@@ -872,3 +872,14 @@ export class HeartbeatService extends EventEmitter {
     );
   }
 }
+
+// Singleton instance
+let heartbeatServiceInstance: HeartbeatService | null = null;
+
+export function getHeartbeatService(): HeartbeatService | null {
+  return heartbeatServiceInstance;
+}
+
+export function setHeartbeatService(service: HeartbeatService | null): void {
+  heartbeatServiceInstance = service;
+}

@@ -99,7 +99,9 @@ export class PluginRegistry extends EventEmitter {
             for (const [packName, skills] of Object.entries(data.skills)) {
               if (skills && typeof skills === "object") {
                 const skillMap = new Map<string, boolean>();
-                for (const [skillId, enabled] of Object.entries(skills as Record<string, boolean>)) {
+                for (const [skillId, enabled] of Object.entries(
+                  skills as Record<string, boolean>,
+                )) {
                   if (typeof enabled === "boolean") {
                     skillMap.set(skillId, enabled);
                   }
@@ -140,11 +142,7 @@ export class PluginRegistry extends EventEmitter {
           skills[packName] = entries;
         }
       }
-      fs.writeFileSync(
-        this.packStatesPath,
-        JSON.stringify({ packs, skills }, null, 2),
-        "utf-8",
-      );
+      fs.writeFileSync(this.packStatesPath, JSON.stringify({ packs, skills }, null, 2), "utf-8");
     } catch (error) {
       console.warn("[PluginRegistry] Failed to save pack states:", error);
     }
@@ -272,8 +270,7 @@ export class PluginRegistry extends EventEmitter {
       this.plugins.set(pluginName, loadedPlugin);
 
       const savedState = this.packStates.get(pluginName);
-      const shouldStartDisabled =
-        loadedPlugin.manifest.type === "pack" && savedState === false;
+      const shouldStartDisabled = loadedPlugin.manifest.type === "pack" && savedState === false;
 
       // Load configuration
       const config = this.loadPluginConfig(pluginName);

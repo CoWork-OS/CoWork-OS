@@ -15,7 +15,13 @@ interface PluginPackData {
   tryAsking?: string[];
   skills: { id: string; name: string; description: string; icon?: string; enabled?: boolean }[];
   slashCommands: { name: string; description: string; skillId: string }[];
-  agentRoles: { name: string; displayName: string; description?: string; icon: string; color: string }[];
+  agentRoles: {
+    name: string;
+    displayName: string;
+    description?: string;
+    icon: string;
+    color: string;
+  }[];
   state: string;
   enabled: boolean;
 }
@@ -86,7 +92,9 @@ export function CustomizePanel({
         // Update check failed silently
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [loadKey]);
 
   const activePack = packs.find((p) => p.name === selectedPack);
@@ -100,19 +108,25 @@ export function CustomizePanel({
       p.name.toLowerCase().includes(query) ||
       (p.description || "").toLowerCase().includes(query) ||
       (p.category || "").toLowerCase().includes(query) ||
-      p.skills.some((s) => s.name.toLowerCase().includes(query) || s.id.toLowerCase().includes(query))
+      p.skills.some(
+        (s) => s.name.toLowerCase().includes(query) || s.id.toLowerCase().includes(query),
+      )
     );
   };
 
   const personalPacks = packs.filter((p) => p.scope === "personal" && matchesPack(p));
   const orgPacks = packs.filter((p) => p.scope === "organization" && matchesPack(p));
-  const bundledPacks = packs.filter((p) => (!p.scope || (p.scope !== "personal" && p.scope !== "organization")) && matchesPack(p));
+  const bundledPacks = packs.filter(
+    (p) => (!p.scope || (p.scope !== "personal" && p.scope !== "organization")) && matchesPack(p),
+  );
 
   const handleToggle = async (packName: string, enabled: boolean) => {
     try {
       await window.electronAPI.togglePluginPack(packName, enabled);
       setPacks((prev) =>
-        prev.map((p) => (p.name === packName ? { ...p, enabled, state: enabled ? "registered" : "disabled" } : p)),
+        prev.map((p) =>
+          p.name === packName ? { ...p, enabled, state: enabled ? "registered" : "disabled" } : p,
+        ),
       );
     } catch {
       // Toggle failed
@@ -192,18 +206,16 @@ export function CustomizePanel({
 
         {/* Top-level navigation */}
         <div className="cp-sidebar-section">
-          <button
-            className="cp-sidebar-item cp-sidebar-item--nav"
-            onClick={onNavigateToConnectors}
-          >
-            <span className="cp-sidebar-icon"><Plug size={16} strokeWidth={1.5} /></span>
+          <button className="cp-sidebar-item cp-sidebar-item--nav" onClick={onNavigateToConnectors}>
+            <span className="cp-sidebar-icon">
+              <Plug size={16} strokeWidth={1.5} />
+            </span>
             <span>Connectors</span>
           </button>
-          <button
-            className="cp-sidebar-item cp-sidebar-item--nav"
-            onClick={onNavigateToSkills}
-          >
-            <span className="cp-sidebar-icon"><Zap size={16} strokeWidth={1.5} /></span>
+          <button className="cp-sidebar-item cp-sidebar-item--nav" onClick={onNavigateToSkills}>
+            <span className="cp-sidebar-icon">
+              <Zap size={16} strokeWidth={1.5} />
+            </span>
             <span>Skills</span>
           </button>
         </div>
@@ -223,7 +235,9 @@ export function CustomizePanel({
                   setDetailTab("commands");
                 }}
               >
-                <span className="cp-sidebar-icon">{p.icon || <Package size={16} strokeWidth={1.5} />}</span>
+                <span className="cp-sidebar-icon">
+                  {p.icon || <Package size={16} strokeWidth={1.5} />}
+                </span>
                 <span>{p.displayName}</span>
               </button>
             ))}
@@ -245,7 +259,9 @@ export function CustomizePanel({
                   setDetailTab("commands");
                 }}
               >
-                <span className="cp-sidebar-icon">{p.icon || <Package size={16} strokeWidth={1.5} />}</span>
+                <span className="cp-sidebar-icon">
+                  {p.icon || <Package size={16} strokeWidth={1.5} />}
+                </span>
                 <span>{p.displayName}</span>
               </button>
             ))}
@@ -267,9 +283,13 @@ export function CustomizePanel({
                   setDetailTab("commands");
                 }}
               >
-                <span className="cp-sidebar-icon">{p.icon || <Package size={16} strokeWidth={1.5} />}</span>
+                <span className="cp-sidebar-icon">
+                  {p.icon || <Package size={16} strokeWidth={1.5} />}
+                </span>
                 <span>{p.displayName}</span>
-                {packUpdates.has(p.name) && <span className="cp-update-dot" title="Update available" />}
+                {packUpdates.has(p.name) && (
+                  <span className="cp-update-dot" title="Update available" />
+                )}
               </button>
             ))}
           </>
@@ -309,7 +329,9 @@ export function CustomizePanel({
               )}
               {activePack.personaTemplateId && (
                 <div className="cp-detail-twin-badge">
-                  <span><Dna size={14} strokeWidth={1.5} /></span>
+                  <span>
+                    <Dna size={14} strokeWidth={1.5} />
+                  </span>
                   <span>Includes Digital Twin</span>
                 </div>
               )}
@@ -323,7 +345,9 @@ export function CustomizePanel({
                       onClick={onNavigateToConnectors}
                       title={`Set up ${c}`}
                     >
-                      <span><Plug size={12} strokeWidth={1.5} /></span>
+                      <span>
+                        <Plug size={12} strokeWidth={1.5} />
+                      </span>
                       <span>{c}</span>
                     </button>
                   ))}
@@ -358,8 +382,8 @@ export function CustomizePanel({
               {detailTab === "commands" && (
                 <>
                   <p className="cp-tab-hint">
-                    Use these shortcuts to trigger a workflow by name. Search your list of
-                    commands at any time by typing / in the chat window.
+                    Use these shortcuts to trigger a workflow by name. Search your list of commands
+                    at any time by typing / in the chat window.
                   </p>
                   <div className="cp-command-grid">
                     {commandCards.map((c) => (
@@ -378,8 +402,13 @@ export function CustomizePanel({
               {detailTab === "skills" && (
                 <div className="cp-skill-list">
                   {activePack.skills.map((s) => (
-                    <div key={s.id} className={`cp-skill-row ${s.enabled === false ? "cp-skill-row--disabled" : ""}`}>
-                      <span className="cp-skill-icon">{s.icon || <Zap size={16} strokeWidth={1.5} />}</span>
+                    <div
+                      key={s.id}
+                      className={`cp-skill-row ${s.enabled === false ? "cp-skill-row--disabled" : ""}`}
+                    >
+                      <span className="cp-skill-icon">
+                        {s.icon || <Zap size={16} strokeWidth={1.5} />}
+                      </span>
                       <div className="cp-skill-info">
                         <span className="cp-skill-name">{s.name}</span>
                         <span className="cp-skill-desc">{s.description}</span>
@@ -388,7 +417,9 @@ export function CustomizePanel({
                         <input
                           type="checkbox"
                           checked={s.enabled !== false}
-                          onChange={(e) => handleSkillToggle(activePack.name, s.id, e.target.checked)}
+                          onChange={(e) =>
+                            handleSkillToggle(activePack.name, s.id, e.target.checked)
+                          }
                         />
                         <span className="cp-toggle-slider" />
                       </label>
@@ -413,7 +444,9 @@ export function CustomizePanel({
                   ))}
                   {activePack.personaTemplateId && (
                     <div className="cp-agent-twin">
-                      <span className="cp-agent-icon"><Dna size={18} strokeWidth={1.5} /></span>
+                      <span className="cp-agent-icon">
+                        <Dna size={18} strokeWidth={1.5} />
+                      </span>
                       <div className="cp-agent-info">
                         <span className="cp-agent-name">Digital Twin Available</span>
                         <span className="cp-agent-desc">
@@ -436,11 +469,7 @@ export function CustomizePanel({
                 <h4>Try asking ..</h4>
                 <div className="cp-try-list">
                   {activePack.tryAsking.map((prompt, i) => (
-                    <button
-                      key={i}
-                      className="cp-try-item"
-                      onClick={() => handleTryAsking(prompt)}
-                    >
+                    <button key={i} className="cp-try-item" onClick={() => handleTryAsking(prompt)}>
                       <span>{prompt}</span>
                       <span className="cp-try-arrow">&rarr;</span>
                     </button>

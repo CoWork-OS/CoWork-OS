@@ -140,6 +140,12 @@ export type TaskStatus =
   | "cancelled"
   | "interrupted";
 
+export const TASK_ERROR_CODES = {
+  TURN_LIMIT_EXCEEDED: "TURN_LIMIT_EXCEEDED",
+} as const;
+
+export type TaskErrorCode = (typeof TASK_ERROR_CODES)[keyof typeof TASK_ERROR_CODES];
+
 /**
  * Reason for command termination - used to signal the agent why a command ended
  */
@@ -221,7 +227,10 @@ export type EventType =
   // Collaborative Thoughts events (team multi-agent thinking)
   | "agent_thought" // Agent sharing analysis/reasoning with team
   | "synthesis_started" // Leader beginning synthesis of team thoughts
-  | "synthesis_completed"; // Leader completed synthesis
+  | "synthesis_completed" // Leader completed synthesis
+  // Step-level user feedback events
+  | "step_feedback" // User sent feedback on an in-progress step
+  | "step_skipped"; // Step was skipped by user intervention
 
 export type ToolType =
   | "read_file"
@@ -569,6 +578,11 @@ export interface AgentConfig {
   gatewayContext?: GatewayContextType;
   /** Additional tool restrictions for this task (e.g., per-channel DM/group policies) */
   toolRestrictions?: string[];
+  /**
+   * Optional allow-list of tools for this task.
+   * When provided, only tools in this list are exposed to the model.
+   */
+  allowedTools?: string[];
   /** Optional origin channel that created the task (used for channel-aware gating) */
   originChannel?: ChannelType;
   /** Maximum number of LLM turns before forcing completion (for sub-agents) */
@@ -911,7 +925,7 @@ export interface WorkspacePermissions {
 export interface PlanStep {
   id: string;
   description: string;
-  status: "pending" | "in_progress" | "completed" | "failed";
+  status: "pending" | "in_progress" | "completed" | "failed" | "skipped";
   startedAt?: number;
   completedAt?: number;
   error?: string;
@@ -920,6 +934,15 @@ export interface PlanStep {
 export interface Plan {
   steps: PlanStep[];
   description: string;
+}
+
+export type StepFeedbackAction = "retry" | "skip" | "stop" | "drift";
+
+export interface StepFeedbackPayload {
+  taskId: string;
+  stepId: string;
+  action: StepFeedbackAction;
+  message?: string;
 }
 
 export interface ToolCall {
@@ -2069,6 +2092,7 @@ export const IPC_CHANNELS = {
   TASK_WRAP_UP: "task:wrapUp",
   TASK_PAUSE: "task:pause",
   TASK_RESUME: "task:resume",
+  TASK_CONTINUE: "task:continue",
   TASK_RENAME: "task:rename",
   TASK_DELETE: "task:delete",
 
@@ -2233,6 +2257,7 @@ export const IPC_CHANNELS = {
   TASK_EVENT: "task:event",
   TASK_EVENTS: "task:events",
   TASK_SEND_MESSAGE: "task:sendMessage",
+  TASK_STEP_FEEDBACK: "task:stepFeedback", // Send feedback on an in-progress step
   TASK_SEND_STDIN: "task:sendStdin", // Send stdin input to running command
   TASK_KILL_COMMAND: "task:killCommand", // Kill running command (Ctrl+C)
 
@@ -2296,6 +2321,7 @@ export const IPC_CHANNELS = {
   LLM_GET_KIMI_MODELS: "llm:getKimiModels",
   LLM_GET_PI_MODELS: "llm:getPiModels",
   LLM_GET_PI_PROVIDERS: "llm:getPiProviders",
+  LLM_GET_OPENAI_COMPATIBLE_MODELS: "llm:getOpenAICompatibleModels",
   LLM_OPENAI_OAUTH_START: "llm:openaiOAuthStart",
   LLM_OPENAI_OAUTH_LOGOUT: "llm:openaiOAuthLogout",
   LLM_GET_BEDROCK_MODELS: "llm:getBedrockModels",
@@ -2674,6 +2700,7 @@ export const BUILTIN_LLM_PROVIDER_TYPES = [
   "xai",
   "kimi",
   "pi",
+  "openai-compatible",
 ] as const;
 
 export const CUSTOM_LLM_PROVIDER_TYPES = [
@@ -2696,7 +2723,6 @@ export const CUSTOM_LLM_PROVIDER_TYPES = [
   "synthetic",
   "kimi-code",
   "kimi-coding",
-  "openai-compatible",
   "anthropic-compatible",
 ] as const;
 
@@ -2723,6 +2749,7 @@ export const MULTI_LLM_PROVIDER_DISPLAY: Record<
   xai: { name: "xAI", icon: "\u{1F4A0}", color: "#ef4444" },
   kimi: { name: "Kimi", icon: "\u{1F319}", color: "#a855f7" },
   pi: { name: "Pi", icon: "\u{1F7E3}", color: "#ec4899" },
+  "openai-compatible": { name: "OpenAI-Compatible", icon: "\u{1F517}", color: "#64748b" },
 };
 
 export interface CachedModelInfo {
@@ -2804,6 +2831,11 @@ export interface LLMSettingsData {
     apiKey?: string;
     model?: string;
   };
+  openaiCompatible?: {
+    apiKey?: string;
+    baseUrl?: string;
+    model?: string;
+  };
   // Cached models from API (populated when user refreshes)
   cachedGeminiModels?: CachedModelInfo[];
   cachedOpenRouterModels?: CachedModelInfo[];
@@ -2814,6 +2846,7 @@ export interface LLMSettingsData {
   cachedXaiModels?: CachedModelInfo[];
   cachedKimiModels?: CachedModelInfo[];
   cachedPiModels?: CachedModelInfo[];
+  cachedOpenAICompatibleModels?: CachedModelInfo[];
   customProviders?: Record<string, CustomProviderConfig>;
 }
 

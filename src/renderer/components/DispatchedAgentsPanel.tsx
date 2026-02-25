@@ -107,9 +107,15 @@ function StreamBubble({ item }: { item: StreamItem }) {
           <p
             className={`step-event ${item.type === "step_completed" ? "step-completed" : ""} ${item.type === "step_failed" ? "step-failed" : ""}`}
           >
-            {item.type === "step_completed" && <Check size={14} strokeWidth={2.5} className="step-icon step-icon-completed" />}
-            {item.type === "step_failed" && <X size={14} strokeWidth={2.5} className="step-icon step-icon-failed" />}
-            {item.type === "step_started" && <Play size={14} strokeWidth={2} className="step-icon step-icon-started" />}
+            {item.type === "step_completed" && (
+              <Check size={14} strokeWidth={2.5} className="step-icon step-icon-completed" />
+            )}
+            {item.type === "step_failed" && (
+              <X size={14} strokeWidth={2.5} className="step-icon step-icon-failed" />
+            )}
+            {item.type === "step_started" && (
+              <Play size={14} strokeWidth={2} className="step-icon step-icon-started" />
+            )}
             {displayContent}
           </p>
         ) : isMarkdown ? (
@@ -136,7 +142,9 @@ function DispatchPhaseIndicator({ childTasks }: { childTasks: Task[] }) {
   const allTerminal = childTasks.every(
     (t) => t.status === "completed" || t.status === "failed" || t.status === "cancelled",
   );
-  const anyWorking = childTasks.some((t) => t.status === "executing" || t.status === "planning" || t.status === "interrupted");
+  const anyWorking = childTasks.some(
+    (t) => t.status === "executing" || t.status === "planning" || t.status === "interrupted",
+  );
   const phase = allTerminal ? "complete" : anyWorking ? "working" : "dispatched";
 
   const phases = ["dispatched", "working", "complete"];

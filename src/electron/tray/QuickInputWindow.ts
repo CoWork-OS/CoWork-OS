@@ -608,14 +608,17 @@ export class QuickInputWindow {
    * Setup IPC handlers for the quick input window
    */
   private setupIpcHandlers(): void {
-    ipcMain.handle(IPC_CHANNELS.QUICK_INPUT_SUBMIT, (_event, task: string, workspaceId?: string) => {
-      console.log("[QuickInputWindow] Received submit:", task);
-      this.hide();
-      if (this.onSubmit && task.trim()) {
-        console.log("[QuickInputWindow] Calling onSubmit callback");
-        this.onSubmit(task.trim(), workspaceId);
-      }
-    });
+    ipcMain.handle(
+      IPC_CHANNELS.QUICK_INPUT_SUBMIT,
+      (_event, task: string, workspaceId?: string) => {
+        console.log("[QuickInputWindow] Received submit:", task);
+        this.hide();
+        if (this.onSubmit && task.trim()) {
+          console.log("[QuickInputWindow] Calling onSubmit callback");
+          this.onSubmit(task.trim(), workspaceId);
+        }
+      },
+    );
 
     ipcMain.handle(IPC_CHANNELS.QUICK_INPUT_CLOSE, () => {
       this.hide();

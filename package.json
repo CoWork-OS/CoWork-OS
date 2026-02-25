@@ -122,6 +122,7 @@
     "eventsource": "^4.1.0",
     "exceljs": "^4.4.0",
     "grammy": "^1.39.3",
+    "highlight.js": "^11.11.1",
     "i18next": "^25.8.7",
     "jszip": "^3.10.1",
     "lucide-react": "^0.575.0",

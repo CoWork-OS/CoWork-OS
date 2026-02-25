@@ -49,11 +49,11 @@
 
 | Player | Focus | Strengths | Weaknesses | Relation to CoWork OS |
 |---|---|---|---|---|
-| **OpenClaw (Clawdbot → Moltbot → OpenClaw)** | Self-hosted personal AI assistant | 60K+ GitHub stars, viral growth, multi-channel (WhatsApp/Telegram/Discord/Slack/Signal/iMessage), skills system, MCP support, CLI-first, Ollama/local LLM support | CLI-only (no desktop GUI), complex setup (OAuth, webhooks), no native desktop app, Node.js daemon only, security concerns raised widely, rapid/chaotic rebrandings | **#1 direct competitor.** Very similar architecture (gateway + agent + channels + skills). CoWork OS differentiates with Electron desktop app, polished UI, richer tool suite, and more stable branding |
+| **OpenClaw (Clawdbot → Moltbot → OpenClaw)** | Self-hosted personal AI assistant | 60K+ GitHub stars, viral growth, multi-channel support, skills system, MCP support, CLI-first, Ollama/local LLM support | CLI-first experience can be harder for non-technical users, setup complexity (OAuth/webhooks), desktop UX depends on external tooling, governance controls vary by deployment | **#1 direct competitor.** Similar architecture (gateway + agent + channels + skills). CoWork OS differentiates with an integrated desktop control plane, built-in approval/guardrail model, and local-first governance defaults |
 | **LettaBot (Letta AI)** | Multi-channel AI with memory | Cross-channel memory, Telegram/Slack/WhatsApp/Discord/Signal | Less agentic (more chat-focused), smaller community | Similar multi-channel approach but less action-oriented |
 | **ChatBotKit** | Multi-platform AI chatbot builder | Easy deployment to Slack/Discord/WhatsApp/Messenger/Telegram | More chatbot than agent, not self-hosted, limited automation | Different category — chatbot builder, not personal AI agent |
 
-**Key Insight**: OpenClaw is the elephant in the room — viral, fast-growing, very similar feature set. But it's CLI-only, has no desktop GUI, has been through chaotic rebrands, and has well-documented security concerns. CoWork OS's Electron desktop app, approval-gated tool execution, and stability are meaningful differentiators.
+**Key Insight**: OpenClaw has significant adoption and meaningful capability overlap, but the category emphasis differs. OpenClaw leans toward framework/operator workflows, while CoWork OS emphasizes governed day-to-day operations via desktop + channel runtime.
 
 ---
 
@@ -62,15 +62,15 @@
 | Feature | CoWork OS | OpenClaw | Claude Cowork | ChatGPT Desktop | n8n |
 |---|---|---|---|---|---|
 | **Self-hosted / Local-first** | ✅ Electron + headless daemon | ✅ Node.js daemon | ❌ Cloud-only | ❌ Cloud-only | ✅ Self-hostable |
-| **Desktop GUI** | ✅ Electron app (Mac/Win/Linux) | ❌ CLI only | ✅ Native app (Mac/Win) | ✅ Native app | ✅ Web UI |
-| **Multi-channel messaging** | ✅ 14+ channels (WhatsApp, Telegram, Discord, Slack, iMessage, Signal, Teams, Matrix, etc.) | ✅ ~8-10 channels | ❌ None | ❌ None | ❌ None |
+| **Desktop GUI** | ✅ Electron app (macOS today) | ❌ CLI only | ✅ Native app (Mac/Win) | ✅ Native app | ✅ Web UI |
+| **Multi-channel messaging** | ✅ 14+ channels (WhatsApp, Telegram, Discord, Slack, iMessage, Signal, Teams, Matrix, etc.) | ✅ Multi-channel support (varies by release) | ❌ None | ❌ None | ❌ None |
 | **Model agnostic** | ✅ Any provider (OpenAI, Anthropic, Gemini, Ollama, etc.) | ✅ Multiple providers | ❌ Claude only | ❌ GPT only | ✅ Multiple |
 | **MCP support** | ✅ External MCP servers | ✅ MCP support | ✅ MCP support | ❌ Limited | ❌ |
 | **Browser automation** | ✅ Playwright | ✅ Puppeteer | ✅ Built-in | ❌ | ❌ |
 | **File operations** | ✅ Full CRUD + DOCX/PDF/PPTX | ✅ File ops | ✅ File ops | ❌ Limited | ✅ (via nodes) |
 | **Document creation** | ✅ DOCX, PDF, PPTX, Excel | ❌ Limited | ❌ | ❌ | ❌ |
 | **Shell execution** | ✅ Sandboxed + approvals | ✅ Shell access | ✅ Bash/Python | ❌ | ✅ (code nodes) |
-| **Approval gates** | ✅ Built-in for destructive ops | ⚠️ Limited | ✅ Delete protection | N/A | ❌ |
+| **Approval gates** | ✅ Built-in for destructive ops | ⚠️ Depends on workflow/policy setup | ✅ Delete protection | N/A | ❌ |
 | **Scheduled tasks** | ✅ Cron, intervals, one-time | ✅ Via skills | ❌ | ❌ | ✅ Core feature |
 | **Sub-agents / parallel work** | ✅ spawn_agent with nesting | ❌ | ✅ Parallel sub-agents | ❌ | ✅ (parallel branches) |
 | **Memory / knowledge graph** | ✅ Local memory DB + KG | ✅ Context memory | ❌ Session only | ✅ Limited memory | ❌ |
@@ -87,20 +87,20 @@
 
 ## 4. COWORK OS's UNIQUE POSITION (COMPETITIVE MOATS)
 
-### Primary Differentiators (What ONLY CoWork OS offers):
+### Primary Differentiators:
 
 1. **Desktop App + Messaging Gateway in One Package**
-   - No other tool combines a polished Electron desktop GUI with a 14+ channel messaging gateway
+   - Few tools combine an integrated Electron desktop GUI with a 14+ channel messaging gateway
    - OpenClaw has channels but no GUI; Claude Cowork has a GUI but no channels
-   - CoWork OS is the ONLY product that bridges both worlds
+   - CoWork OS currently emphasizes this bridge as a core product identity
 
-2. **Richest Tool Suite of Any Self-Hosted Agent**
+2. **Broad Tool Suite in a Self-Hosted Runtime**
    - Document creation (DOCX/PDF/PPTX/Excel), image generation, vision, phone calls, Apple Calendar/Reminders, browser automation, shell, MCP — all in one runtime
-   - OpenClaw has a fraction of this; Claude Cowork has some but not self-hosted
+   - CoWork OS concentrates these capabilities inside one runtime with local-first controls
 
 3. **Approval-Gated Autonomy (Trust Architecture)**
    - Destructive operations require explicit approval — a middle ground between "fully autonomous" (scary) and "read-only" (useless)
-   - OpenClaw has been widely criticized for security risks; CoWork OS's approval model is a trust advantage
+   - CoWork OS's approval model creates stronger operational confidence for production workflows
 
 4. **Sub-Agent Architecture**
    - spawn_agent with model selection, nesting, and async coordination

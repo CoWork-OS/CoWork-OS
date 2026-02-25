@@ -7,8 +7,8 @@
 </p>
 
 <p align="center">
-  <strong>The most complete open-source AI assistant platform</strong><br>
-  Security-hardened, local-first runtime — 30+ LLM providers, 14 channels, 100+ skills
+  <strong>OpenClaw helps you build agents. CoWork OS helps you run them safely.</strong><br>
+  Security-hardened, local-first AI operating system — 30+ LLM providers, 14 channels, 100+ skills
 </p>
 
 <p align="center">
@@ -20,6 +20,7 @@
 
 <p align="center">
   <a href="docs/getting-started.md">Getting Started</a> &middot;
+  <a href="docs/openclaw-comparison.md">Compare with OpenClaw</a> &middot;
   <a href="docs/">Documentation</a> &middot;
   <a href="CHANGELOG.md">Changelog</a> &middot;
   <a href="SECURITY.md">Security</a> &middot;
@@ -46,6 +47,20 @@
 - **ChatGPT History Import** — Import your full ChatGPT conversation history. CoWork OS instantly knows your preferences, past projects, and context — no cold start. All data stays encrypted on your Mac and never leaves your machine.
 - **Security-first** — Approval workflows, sandboxed execution, configurable guardrails, encrypted storage, and 3200+ tests.
 - **Local-first & BYOK** — Your data and API keys stay on your machine. No telemetry. No middleman.
+
+### Positioning: CoWork OS vs OpenClaw
+
+OpenClaw is a strong agent experimentation environment. CoWork OS is positioned as the production operating layer for teams and individuals who need guardrails, approvals, and reliable multi-channel operations.
+
+| Positioning Lens | OpenClaw | CoWork OS |
+|---|---|---|
+| Category | Agent toolkit / experimentation layer | Security-hardened AI operating system |
+| Primary use case | Build and iterate on agent workflows | Run agent workflows in production |
+| Security posture | Varies by workflow and setup | Built-in approvals, guardrails, sandbox isolation, encrypted local storage |
+| Runtime surfaces | CLI-centric control paths | Desktop app + headless daemon + 14-channel gateway |
+| Data ownership model | BYOK/self-hosting workflows | Local-first, BYOK, no telemetry, optional offline Ollama |
+
+See the full guide: [CoWork OS vs OpenClaw](docs/openclaw-comparison.md)
 
 ## Quick Start
 
@@ -267,8 +282,10 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
 |-------|-------------|
 | [Getting Started](docs/getting-started.md) | First-time setup and usage |
 | [Features](docs/features.md) | Complete feature reference |
+| [CoWork OS vs OpenClaw](docs/openclaw-comparison.md) | Category framing and production-focused comparison |
 | [Channels](docs/channels.md) | Messaging channel setup (14 channels) |
 | [Providers](docs/providers.md) | LLM provider configuration |
+| [Migration from OpenClaw](docs/migration.md#from-openclaw-to-cowork-os) | Practical migration checklist and channel cutover plan |
 | [Development](docs/development.md) | Build from source, project structure |
 | [Architecture](docs/architecture.md) | Technical architecture deep-dive |
 | [Security Guide](docs/security-guide.md) | Security model and best practices |

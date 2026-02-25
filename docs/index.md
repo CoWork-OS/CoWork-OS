@@ -3,11 +3,14 @@ layout: home
 hero:
   name: CoWork OS
   text: The operating system for personal AI assistants
-  tagline: Self-hosted, local-first agentic task automation for macOS
+  tagline: Security-hardened, local-first runtime for operating AI agents in production
   actions:
     - theme: brand
       text: Get Started
       link: /getting-started
+    - theme: alt
+      text: vs OpenClaw
+      link: /openclaw-comparison
     - theme: alt
       text: Features
       link: /features
@@ -16,6 +19,8 @@ hero:
       link: https://github.com/CoWork-OS/CoWork-OS
 
 features:
+  - title: Production Runtime
+    details: OpenClaw is a toolkit. CoWork OS is an operating system for running agents with approvals, guardrails, and policy controls.
   - title: 30+ LLM Providers
     details: Connect to Claude, GPT, Gemini, Ollama, and more. Bring your own keys, switch models per task.
   - title: 14 Messaging Channels
@@ -27,5 +32,5 @@ features:
   - title: Enterprise Connectors
     details: Salesforce, Jira, HubSpot, Zendesk, ServiceNow, Linear, Asana, Okta, and Resend MCP connectors.
   - title: Security First
-    details: Local-first architecture, sandboxed execution, guardrails, approval workflows, encrypted storage, and 2800+ tests.
+    details: Local-first architecture, sandboxed execution, guardrails, approval workflows, encrypted storage, and 3200+ tests.
 ---

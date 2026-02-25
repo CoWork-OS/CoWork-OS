@@ -14,6 +14,7 @@ export default defineConfig({
   themeConfig: {
     nav: [
       { text: 'Guide', link: '/getting-started' },
+      { text: 'vs OpenClaw', link: '/openclaw-comparison' },
       { text: 'Architecture', link: '/architecture' },
       { text: 'Security', link: '/security/' },
       { text: 'GitHub', link: 'https://github.com/CoWork-OS/CoWork-OS' },
@@ -25,6 +26,7 @@ export default defineConfig({
         items: [
           { text: 'Introduction', link: '/' },
           { text: 'Getting Started', link: '/getting-started' },
+          { text: 'CoWork OS vs OpenClaw', link: '/openclaw-comparison' },
           { text: 'Migration Guide', link: '/migration' },
         ],
       },
@@ -61,6 +63,8 @@ export default defineConfig({
         text: 'Reference',
         items: [
           { text: 'Use Cases', link: '/use-cases' },
+          { text: 'GTM Strategy', link: '/gtm-strategy' },
+          { text: 'Competitive Landscape', link: '/competitive-landscape-research' },
           { text: 'Contributing', link: '/contributing' },
           { text: 'Changelog', link: '/changelog' },
           { text: 'Project Status', link: '/project-status' },

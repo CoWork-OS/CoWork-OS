@@ -8,6 +8,35 @@ CoWork OS is a security-first personal AI assistant that runs on your Mac. If yo
 
 ---
 
+## From OpenClaw to CoWork OS
+
+If you're currently using OpenClaw, the migration is mostly an operating model shift:
+
+- OpenClaw is commonly used as an agent experimentation toolkit.
+- CoWork OS is designed as a production runtime with built-in approvals, guardrails, and local-first controls.
+
+See also: [CoWork OS vs OpenClaw](openclaw-comparison.md)
+
+### Practical Migration Plan
+
+1. Keep OpenClaw running in parallel for a short validation window.
+2. Start CoWork OS with one low-risk channel (for example, a private Telegram or Slack test channel).
+3. Enable strict security defaults in CoWork OS first: Pairing mode, approval workflows, and guardrail budgets.
+4. Reconnect provider keys and channels one by one.
+5. Cut over production channels only after task quality and approval behavior match expectations.
+
+### What Improves After Cutover
+
+| Area | What to expect in CoWork OS |
+|---|---|
+| Operations | Desktop control plane plus headless runtime options |
+| Safety | Approval-gated destructive actions and configurable command blocking |
+| Governance | Token/cost/iteration guardrails per task |
+| Reach | Unified 14-channel gateway for multi-surface delivery |
+| Privacy | Local-first storage, BYOK provider model, optional offline Ollama |
+
+---
+
 ## From Other AI Assistants
 
 ### Channel Migration
@@ -59,7 +88,7 @@ Moving to CoWork OS provides several advantages:
 
 | Feature | Benefit |
 |---------|---------|
-| **6 LLM providers** | Claude, GPT-4, Gemini, Bedrock, OpenRouter, Ollama |
+| **30+ LLM providers** | Built-in + compatible gateways with BYOK flexibility |
 | **Local LLM support** | Run completely free and offline with Ollama |
 | **Native desktop app** | Full macOS integration with menu bar and shortcuts |
 | **Real-time timeline** | See exactly what the agent is doing |
@@ -184,7 +213,7 @@ No. Task history, conversations, and artifacts are stored locally per platform. 
 
 ## Getting Help
 
-- **Documentation**: See [README.md](README.md) for full feature documentation
-- **Security**: See [SECURITY_GUIDE.md](SECURITY_GUIDE.md) for security best practices
+- **Documentation**: See [Repository README](https://github.com/CoWork-OS/CoWork-OS/blob/main/README.md) for full feature documentation
+- **Security**: See [Security Guide](security-guide.md) for security best practices
 - **Issues**: Report bugs at [GitHub Issues](https://github.com/CoWork-OS/CoWork-OS/issues)
-- **Contributing**: See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines
+- **Contributing**: See [Contributing](contributing.md) for contribution guidelines

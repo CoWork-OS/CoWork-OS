@@ -1,31 +1,78 @@
 # CoWork OS — Product Positioning & GTM Strategy
 
-> Status: Draft — this document is a placeholder for the full go-to-market strategy.
+> Status: Active draft, aligned to current product docs.
 
-## Positioning
+## Category Definition
 
-CoWork OS is the **local-first operating system for personal AI assistants**. It gives users a secure desktop runtime to run AI agents across 14+ messaging channels, 20+ LLM providers, and 9 enterprise connectors — with full data ownership (BYOK, no cloud dependency).
+CoWork OS is a **security-hardened, local-first AI operating system**.
 
-## Target Audience
+- OpenClaw is best positioned as an agent experimentation toolkit.
+- CoWork OS is positioned as the production runtime for running agents safely across real workflows.
 
-1. **Power users / early adopters** — developers, productivity enthusiasts, and automation builders who want full control over their AI assistant stack.
-2. **Small teams** — teams that need multi-channel AI automation without SaaS lock-in or per-seat pricing.
-3. **Enterprise evaluators** — organizations exploring local-first AI agent deployment with compliance and security requirements.
+## Primary Positioning Statement
 
-## Key Differentiators
+CoWork OS is the production alternative to OpenClaw for users who need:
 
-- **Local-first**: all data stays on your machine, BYOK model.
-- **Multi-channel**: 14 messaging gateways, not limited to a single chat platform.
-- **Extensible**: MCP protocol support, custom skills, enterprise connectors, plugin system.
-- **Security-first**: 2800+ tests, deny-wins policy engine, configurable guardrails, approval workflows.
-- **Open source**: MIT licensed, community-driven.
+- Guardrails and approval workflows by default
+- Local-first data ownership (BYOK, no telemetry)
+- A multi-channel operating layer (14 messaging channels)
+- A desktop + headless runtime that can be governed in daily operations
 
-## Distribution Channels
+Short form:
 
-- GitHub releases + npm (`npm install -g cowork-oss`)
-- Homebrew (planned)
-- Community: Discord, GitHub Discussions
+> OpenClaw helps you build agents. CoWork OS helps you run them safely.
 
-## Competitive Landscape
+## Core Buyer Profiles
 
-See: `docs/competitive-landscape-research.md`
+1. Technical founders running customer-facing or ops-heavy automation.
+2. Security-conscious builders who need local control over data and keys.
+3. Team leads who want agent output in existing messaging channels with approval gates.
+4. Power users who want agent autonomy without cloud lock-in.
+
+## Differentiation Pillars
+
+### 1) Playground to Production
+
+CoWork OS prioritizes execution discipline over experimentation novelty:
+approval workflows, guardrail budgets, policy enforcement, and sandboxed execution.
+
+### 2) Security-First by Design
+
+CoWork OS ships with core controls required for practical use:
+dangerous command blocking, configurable limits, encrypted local settings, and context-aware tool controls.
+
+### 3) Multi-Channel AI Operating Layer
+
+CoWork OS is not just a local runner. It is a messaging-native runtime across 14 channels with shared security modes and governance.
+
+### 4) Local-First + BYOK
+
+Users keep control of data and provider keys with optional offline model execution via Ollama.
+
+## Proof Points to Reuse in Messaging
+
+- 30+ LLM providers
+- 14 messaging channels
+- 100+ built-in skills
+- 3200+ tests
+- ZeroLeaks report published in-repo
+
+## Narrative Guardrails
+
+Do:
+
+- Contrast category focus (toolkit vs operating system).
+- Emphasize production readiness and security controls.
+- Stay factual and neutral in competitor references.
+
+Do not:
+
+- Frame as "more features than OpenClaw" only.
+- Rely on speculative competitor claims.
+- Use adversarial language.
+
+## GTM Assets in This Repo
+
+- [CoWork OS vs OpenClaw](openclaw-comparison.md)
+- [Migration Guide](migration.md#from-openclaw-to-cowork-os)
+- [Competitive Landscape Research](competitive-landscape-research.md)

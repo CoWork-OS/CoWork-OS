@@ -24,18 +24,16 @@ export type SessionMode =
   | "think"
   | "comparison";
 
-const SESSION_MODE_META: Record<
-  SessionMode,
-  { label: string; shortLabel: string; color: string }
-> = {
-  standard: { label: "Standard", shortLabel: "STD", color: "standard" },
-  autonomous: { label: "Autonomous", shortLabel: "AUTO", color: "autonomous" },
-  collab: { label: "Collaborative", shortLabel: "COLLAB", color: "collab" },
-  "multi-llm": { label: "Multi-LLM", shortLabel: "MULTI", color: "multi-llm" },
-  scheduled: { label: "Scheduled", shortLabel: "SCHED", color: "scheduled" },
-  think: { label: "Think", shortLabel: "THINK", color: "think" },
-  comparison: { label: "Comparison", shortLabel: "CMP", color: "comparison" },
-};
+const SESSION_MODE_META: Record<SessionMode, { label: string; shortLabel: string; color: string }> =
+  {
+    standard: { label: "Standard", shortLabel: "STD", color: "standard" },
+    autonomous: { label: "Autonomous", shortLabel: "AUTO", color: "autonomous" },
+    collab: { label: "Collaborative", shortLabel: "COLLAB", color: "collab" },
+    "multi-llm": { label: "Multi-LLM", shortLabel: "MULTI", color: "multi-llm" },
+    scheduled: { label: "Scheduled", shortLabel: "SCHED", color: "scheduled" },
+    think: { label: "Think", shortLabel: "THINK", color: "think" },
+    comparison: { label: "Comparison", shortLabel: "CMP", color: "comparison" },
+  };
 
 /** Derive the primary session mode from task metadata */
 export function getSessionMode(task: Task): SessionMode {
@@ -238,9 +236,7 @@ export function Sidebar({
   useEffect(() => {
     const availableModeSet = new Set(availableModes);
     setActiveModeFilters((prev) => {
-      const next = new Set(
-        Array.from(prev).filter((mode) => availableModeSet.has(mode)),
-      );
+      const next = new Set(Array.from(prev).filter((mode) => availableModeSet.has(mode)));
       return next.size === prev.size ? prev : next;
     });
   }, [availableModes]);
@@ -708,7 +704,9 @@ export function Sidebar({
           className={`task-item cli-task-item ${selectedTaskId === task.id ? "task-item-selected" : ""} ${isSubAgent ? "task-item-subagent" : ""} ${modeClass}`}
           onClick={() => renameTaskId !== task.id && onSelectTask(task.id)}
           style={{ paddingLeft: depth > 0 ? `${8 + depth * 16}px` : undefined }}
-          title={taskMode && taskMode !== "standard" ? SESSION_MODE_META[taskMode].label : undefined}
+          title={
+            taskMode && taskMode !== "standard" ? SESSION_MODE_META[taskMode].label : undefined
+          }
         >
           {/* Tree connector for sub-agents */}
           {depth > 0 && <span className="cli-tree-prefix">{treePrefix}</span>}

@@ -1,3 +1,4 @@
+import { useState, useMemo } from "react";
 import { TaskEvent, DEFAULT_QUIRKS } from "../../shared/types";
 import { isVerificationStepDescription } from "../../shared/plan-utils";
 import { ThemeIcon } from "./ThemeIcon";
@@ -10,6 +11,7 @@ import {
   DotIcon,
   ShieldIcon,
   FileIcon,
+  MessageIcon,
   PackageIcon,
   PauseIcon,
   PlayIcon,
@@ -75,9 +77,11 @@ function humanizeError(raw: string): string {
 interface TaskTimelineProps {
   events: TaskEvent[];
   agentContext?: AgentContext;
+  taskId?: string;
+  taskStatus?: string;
 }
 
-export function TaskTimeline({ events, agentContext }: TaskTimelineProps) {
+export function TaskTimeline({ events, agentContext, taskId, taskStatus }: TaskTimelineProps) {
   const fallbackContext = {
     agentName: "CoWork",
     userName: undefined,
@@ -109,6 +113,45 @@ export function TaskTimeline({ events, agentContext }: TaskTimelineProps) {
   const visibleEvents = events.filter(
     (e) => !internalEventTypes.includes(e.type) && !isVerificationNoiseEvent(e),
   );
+
+  // Determine the currently active step (step_started with no matching completion)
+  const activeStepId = useMemo(() => {
+    let active: string | null = null;
+    for (const e of events) {
+      if (e.type === "step_started" && e.payload.step?.id) {
+        active = e.payload.step.id;
+      } else if (
+        (e.type === "step_completed" || e.type === "step_failed" || e.type === "step_skipped") &&
+        e.payload.step?.id === active
+      ) {
+        active = null;
+      }
+    }
+    return active;
+  }, [events]);
+
+  // Step feedback state
+  const [feedbackOpen, setFeedbackOpen] = useState<string | null>(null);
+  const [feedbackText, setFeedbackText] = useState("");
+  const [feedbackSending, setFeedbackSending] = useState(false);
+
+  const handleStepFeedback = async (
+    stepId: string,
+    action: "retry" | "skip" | "stop" | "drift",
+    message?: string,
+  ) => {
+    if (!taskId || feedbackSending) return;
+    setFeedbackSending(true);
+    try {
+      await window.electronAPI.sendStepFeedback(taskId, stepId, action, message);
+      setFeedbackOpen(null);
+      setFeedbackText("");
+    } catch (err) {
+      console.error("Failed to send step feedback:", err);
+    } finally {
+      setFeedbackSending(false);
+    }
+  };
 
   const formatTime = (timestamp: number) => {
     return new Date(timestamp).toLocaleTimeString(undefined, {
@@ -175,6 +218,10 @@ export function TaskTimeline({ events, agentContext }: TaskTimelineProps) {
         return <ThemeIcon emoji="⚔️" icon={<ZapIcon size={16} />} />;
       case "comparison_completed":
         return <ThemeIcon emoji="📊" icon={<CheckIcon size={16} />} />;
+      case "step_feedback":
+        return <ThemeIcon emoji="💬" icon={<MessageIcon size={16} />} />;
+      case "step_skipped":
+        return <ThemeIcon emoji="⏭️" icon={<ZapIcon size={16} />} />;
       default:
         return <ThemeIcon emoji="•" icon={<DotIcon size={8} />} />;
     }
@@ -251,6 +298,14 @@ export function TaskTimeline({ events, agentContext }: TaskTimelineProps) {
         return event.payload.message || "Comparison session started";
       case "comparison_completed":
         return event.payload.message || "Comparison session completed";
+      case "step_feedback": {
+        const action = event.payload.action || "feedback";
+        const desc = event.payload.step?.description || "step";
+        const msg = event.payload.message ? ` \u2014 ${event.payload.message}` : "";
+        return `Feedback: ${action} on "${desc}"${msg}`;
+      }
+      case "step_skipped":
+        return `Skipped: ${event.payload.step?.description || event.payload.reason || "step"}`;
       default:
         return event.type;
     }
@@ -322,6 +377,14 @@ export function TaskTimeline({ events, agentContext }: TaskTimelineProps) {
                 {actionHint.label || "Open Settings"}
               </button>
             )}
+            {actionHint?.type === "continue_task" && taskId && taskStatus === "failed" && (
+              <button
+                className="button-primary button-small"
+                onClick={() => window.electronAPI.continueTask(taskId)}
+              >
+                {actionHint.label || "Continue"}
+              </button>
+            )}
           </div>
         );
       }
@@ -358,18 +421,109 @@ export function TaskTimeline({ events, agentContext }: TaskTimelineProps) {
     <div className="timeline">
       <h3>{uiCopy("timelineTitle")}</h3>
       <div className="timeline-events">
-        {visibleEvents.map((event) => (
-          <div key={event.id} className="timeline-event">
-            <div className="event-icon">{getEventIcon(event.type)}</div>
-            <div className="event-content">
-              <div className="event-header">
-                <div className="event-title">{getEventTitle(event)}</div>
-                <div className="event-time">{formatTime(event.timestamp)}</div>
+        {visibleEvents.map((event) => {
+          const isActiveStep =
+            event.type === "step_started" && event.payload.step?.id === activeStepId;
+          const stepId = event.payload?.step?.id;
+          return (
+            <div
+              key={event.id}
+              className={`timeline-event${isActiveStep ? " timeline-event-active-step" : ""}`}
+            >
+              <div className="event-icon">{getEventIcon(event.type)}</div>
+              <div className="event-content">
+                <div className="event-header">
+                  <div className="event-title">{getEventTitle(event)}</div>
+                  <div className="event-time">
+                    {formatTime(event.timestamp)}
+                    {isActiveStep && (
+                      <button
+                        className="timeline-step-feedback-toggle"
+                        onClick={() => setFeedbackOpen(feedbackOpen === stepId ? null : stepId)}
+                        title="Give feedback on this step"
+                      >
+                        <svg
+                          width="12"
+                          height="12"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <circle cx="12" cy="12" r="1" />
+                          <circle cx="19" cy="12" r="1" />
+                          <circle cx="5" cy="12" r="1" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {isActiveStep && feedbackOpen === stepId && (
+                  <div className="timeline-step-feedback-panel">
+                    <div className="timeline-step-feedback-actions">
+                      <button
+                        className="timeline-step-feedback-btn skip"
+                        onClick={() => handleStepFeedback(stepId, "skip")}
+                        disabled={feedbackSending}
+                      >
+                        Skip
+                      </button>
+                      <button
+                        className="timeline-step-feedback-btn retry"
+                        onClick={() =>
+                          handleStepFeedback(stepId, "retry", feedbackText || undefined)
+                        }
+                        disabled={feedbackSending}
+                      >
+                        Retry
+                      </button>
+                      <button
+                        className="timeline-step-feedback-btn stop"
+                        onClick={() => handleStepFeedback(stepId, "stop")}
+                        disabled={feedbackSending}
+                      >
+                        Stop
+                      </button>
+                    </div>
+                    <div className="timeline-step-feedback-drift">
+                      <input
+                        className="timeline-step-feedback-input"
+                        type="text"
+                        placeholder="Adjust direction..."
+                        value={feedbackText}
+                        onChange={(e) => setFeedbackText(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && feedbackText.trim()) {
+                            handleStepFeedback(stepId, "drift", feedbackText.trim());
+                          }
+                          if (e.key === "Escape") {
+                            setFeedbackOpen(null);
+                          }
+                        }}
+                        disabled={feedbackSending}
+                        autoFocus
+                      />
+                      <button
+                        className="timeline-step-feedback-btn send"
+                        onClick={() => {
+                          if (feedbackText.trim()) {
+                            handleStepFeedback(stepId, "drift", feedbackText.trim());
+                          }
+                        }}
+                        disabled={feedbackSending || !feedbackText.trim()}
+                      >
+                        Send
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {renderEventDetails(event)}
               </div>
-              {renderEventDetails(event)}
             </div>
-          </div>
-        ))}
+          );
+        })}
         {/* Show summary of blocked events if any - collapsed for cleaner UI */}
         {blockedEvents.length > 0 && (
           <div className="timeline-event timeline-event-muted">

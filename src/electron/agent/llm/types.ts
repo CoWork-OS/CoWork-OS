@@ -49,6 +49,9 @@ export interface LLMProviderConfig {
   // Pi-specific (uses pi-ai unified LLM API)
   piProvider?: string; // pi-ai KnownProvider (e.g. 'anthropic', 'openai', 'google')
   piApiKey?: string;
+  // OpenAI-compatible endpoint
+  openaiCompatibleApiKey?: string;
+  openaiCompatibleBaseUrl?: string;
   // Generic provider support
   providerApiKey?: string;
   providerBaseUrl?: string;

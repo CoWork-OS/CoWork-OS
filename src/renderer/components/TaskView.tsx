@@ -148,7 +148,12 @@ export function TaskView({ task }: TaskViewProps) {
           <p>{task.prompt}</p>
         </div>
 
-        <TaskTimeline events={events} agentContext={agentContext} />
+        <TaskTimeline
+          events={events}
+          agentContext={agentContext}
+          taskId={task.id}
+          taskStatus={task.status}
+        />
 
         {task.status === "paused" && (
           <div className="task-status-banner task-status-banner-paused">

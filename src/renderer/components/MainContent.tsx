@@ -2,6 +2,7 @@ import { memo, useState, useEffect, useRef, useCallback, useMemo, Fragment, Chil
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
+import hljs from "highlight.js";
 import {
   Task,
   TaskEvent,
@@ -15,6 +16,7 @@ import {
   ImageAttachment,
   AgentTeamRun,
   MultiLlmConfig,
+  StepFeedbackAction,
 } from "../../shared/types";
 import { CollaborativeThoughtsPanel } from "./CollaborativeThoughtsPanel";
 import { DispatchedAgentsPanel } from "./DispatchedAgentsPanel";
@@ -306,6 +308,10 @@ function CodeBlock({ children, className, ...props }: CodeBlockProps) {
     );
   }
 
+  // Compute highlighted HTML
+  const codeText = getTextContent(children);
+  const highlightedHtml = useMemo(() => highlightCode(codeText, language), [codeText, language]);
+
   // For code blocks, wrap with copy button
   return (
     <div className="code-block-wrapper">
@@ -343,10 +349,120 @@ function CodeBlock({ children, className, ...props }: CodeBlockProps) {
           <span>{copied ? "Copied!" : "Copy"}</span>
         </button>
       </div>
-      <code className={className} {...props}>
-        {children}
-      </code>
+      {highlightedHtml ? (
+        <code
+          className={`hljs ${className || ""}`}
+          {...props}
+          dangerouslySetInnerHTML={{ __html: highlightedHtml }}
+        />
+      ) : (
+        <code className={className} {...props}>
+          {children}
+        </code>
+      )}
     </div>
+  );
+}
+
+// Utility: highlight a code string with hljs (pure function, no hooks)
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function sanitizeHighlightedHtml(html: string): string {
+  if (!html) return "";
+  if (typeof DOMParser === "undefined") {
+    return escapeHtml(html);
+  }
+
+  const parser = new DOMParser();
+  const parsed = parser.parseFromString(`<div>${html}</div>`, "text/html");
+  const sourceRoot = parsed.body.firstElementChild;
+  if (!sourceRoot) {
+    return "";
+  }
+
+  const outputDoc = parser.parseFromString("<div></div>", "text/html");
+  const outputRoot = outputDoc.body.firstElementChild as HTMLElement;
+
+  const appendSanitized = (node: ChildNode, parent: HTMLElement): void => {
+    if (node.nodeType === 3) {
+      parent.appendChild(outputDoc.createTextNode(node.textContent || ""));
+      return;
+    }
+    if (node.nodeType !== 1) return;
+
+    const element = node as HTMLElement;
+    const tag = element.tagName.toLowerCase();
+
+    if (tag === "span") {
+      const span = outputDoc.createElement("span");
+      const classes = (element.getAttribute("class") || "")
+        .split(/\s+/)
+        .map((name) => name.trim())
+        .filter((name) => /^hljs(?:-[a-z0-9_-]+)?$/i.test(name));
+      if (classes.length > 0) {
+        span.setAttribute("class", classes.join(" "));
+      }
+      for (const child of Array.from(element.childNodes)) {
+        appendSanitized(child, span);
+      }
+      parent.appendChild(span);
+      return;
+    }
+
+    if (tag === "br") {
+      parent.appendChild(outputDoc.createElement("br"));
+      return;
+    }
+
+    for (const child of Array.from(element.childNodes)) {
+      appendSanitized(child, parent);
+    }
+  };
+
+  for (const child of Array.from(sourceRoot.childNodes)) {
+    appendSanitized(child, outputRoot);
+  }
+
+  return outputRoot.innerHTML;
+}
+
+function highlightCode(code: string, language?: string): string | null {
+  if (!code) return null;
+  if (language && hljs.getLanguage(language)) {
+    try {
+      return sanitizeHighlightedHtml(hljs.highlight(code, { language }).value);
+    } catch {
+      // fall through
+    }
+  }
+  try {
+    return sanitizeHighlightedHtml(hljs.highlightAuto(code).value);
+  } catch {
+    return null;
+  }
+}
+
+// Highlighted code preview for file creation/modification events
+function HighlightedCodePreview({ code, language }: { code: string; language?: string }) {
+  const html = useMemo(() => highlightCode(code, language), [code, language]);
+  if (html) {
+    return (
+      <pre className="code-preview-content">
+        <code className="hljs" dangerouslySetInnerHTML={{ __html: html }} />
+      </pre>
+    );
+  }
+  return (
+    <pre className="code-preview-content">
+      <code>{code}</code>
+    </pre>
   );
 }
 
@@ -1636,8 +1752,8 @@ export function MainContent({
   const [rotatingPlaceholders, setRotatingPlaceholders] = useState<string[]>([]);
   const [rotatingIndex, setRotatingIndex] = useState(0);
   const [placeholderFading, setPlaceholderFading] = useState(false);
-  const placeholderTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const placeholderDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const placeholderTimeoutRef = useRef<number | null>(null);
+  const placeholderDebounceRef = useRef<number | null>(null);
   const placeholderPlaylistCacheRef = useRef<Map<string, string[]>>(new Map());
   const placeholderRequestIdRef = useRef(0);
 
@@ -1663,90 +1779,80 @@ export function MainContent({
 
     placeholderDebounceRef.current = window.setTimeout(() => {
       (async () => {
-        const {
-          detectPersonas,
-          buildPlaceholders,
-          buildDynamicPrompts,
-        } = await import("../utils/placeholderEngine");
+        const { detectPersonas, buildPlaceholders, buildDynamicPrompts } =
+          await import("../utils/placeholderEngine");
         type UserSignals = import("../utils/placeholderEngine").UserSignals;
 
-        const [
-          profileFacts,
-          recentTaskTitles,
-          topSkills,
-          pluginPrompts,
-          openCommitments,
-        ] = await Promise.all([
-          // 1. User profile facts
-          (async () => {
-            try {
-              const p = await window.electronAPI.getUserProfile();
-              return (p?.facts ?? []).map((f) => ({ category: f.category, value: f.value }));
-            } catch {
-              return [];
-            }
-          })(),
-          // 2. Recent completed task titles
-          (async () => {
-            try {
-              const wsId = workspaceId;
-              if (!wsId || wsId.startsWith("__temp_workspace__")) return [];
-              const acts = await window.electronAPI.listActivities({
-                workspaceId: wsId,
-                activityType: "task_completed",
-                limit: 15,
-              });
-              return Array.isArray(acts)
-                ? acts
-                    .map((a) => (typeof a?.title === "string" ? a.title : ""))
-                    .filter(Boolean)
-                : [];
-            } catch {
-              return [];
-            }
-          })(),
-          // 3. Top skills from usage insights
-          (async () => {
-            try {
-              const wsId = workspaceId;
-              if (!wsId || wsId.startsWith("__temp_workspace__")) return [];
-              const insights = await window.electronAPI.getUsageInsights(wsId, 30);
-              return Array.isArray(insights?.topSkills)
-                ? insights.topSkills.map((s: { skill: string }) => s.skill)
-                : [];
-            } catch {
-              return [];
-            }
-          })(),
-          // 4. Plugin pack "try asking" prompts
-          (async () => {
-            try {
-              const packs = await window.electronAPI.listPluginPacks();
-              if (!Array.isArray(packs)) return [];
-              const out: string[] = [];
-              for (const p of packs) {
-                if (p?.enabled && Array.isArray(p.tryAsking) && p.tryAsking.length > 0) {
-                  for (const prompt of p.tryAsking) {
-                    if (typeof prompt === "string") out.push(prompt);
+        const [profileFacts, recentTaskTitles, topSkills, pluginPrompts, openCommitments] =
+          await Promise.all([
+            // 1. User profile facts
+            (async () => {
+              try {
+                const p = await window.electronAPI.getUserProfile();
+                return (p?.facts ?? []).map((f) => ({ category: f.category, value: f.value }));
+              } catch {
+                return [];
+              }
+            })(),
+            // 2. Recent completed task titles
+            (async () => {
+              try {
+                const wsId = workspaceId;
+                if (!wsId || wsId.startsWith("__temp_workspace__")) return [];
+                const acts = await window.electronAPI.listActivities({
+                  workspaceId: wsId,
+                  activityType: "task_completed",
+                  limit: 15,
+                });
+                return Array.isArray(acts)
+                  ? acts.map((a) => (typeof a?.title === "string" ? a.title : "")).filter(Boolean)
+                  : [];
+              } catch {
+                return [];
+              }
+            })(),
+            // 3. Top skills from usage insights
+            (async () => {
+              try {
+                const wsId = workspaceId;
+                if (!wsId || wsId.startsWith("__temp_workspace__")) return [];
+                const insights = await window.electronAPI.getUsageInsights(wsId, 30);
+                return Array.isArray(insights?.topSkills)
+                  ? insights.topSkills.map((s: { skill: string }) => s.skill)
+                  : [];
+              } catch {
+                return [];
+              }
+            })(),
+            // 4. Plugin pack "try asking" prompts
+            (async () => {
+              try {
+                const packs = await window.electronAPI.listPluginPacks();
+                if (!Array.isArray(packs)) return [];
+                const out: string[] = [];
+                for (const p of packs) {
+                  if (p?.enabled && Array.isArray(p.tryAsking) && p.tryAsking.length > 0) {
+                    for (const prompt of p.tryAsking) {
+                      if (typeof prompt === "string") out.push(prompt);
+                    }
                   }
                 }
+                return out;
+              } catch {
+                return [];
               }
-              return out;
-            } catch {
-              return [];
-            }
-          })(),
-          // 5. Open commitments
-          (async () => {
-            try {
-              const items = await window.electronAPI.getOpenCommitments(5);
-              if (!Array.isArray(items)) return [];
-              return items.map(normalizeCommitmentText).filter((c): c is string => c !== null);
-            } catch {
-              return [];
-            }
-          })(),
-        ]);
+            })(),
+            // 5. Open commitments
+            (async () => {
+              try {
+                const items = await window.electronAPI.getOpenCommitments(5);
+                if (!Array.isArray(items)) return [];
+                return items.map(normalizeCommitmentText).filter((c): c is string => c !== null);
+              } catch {
+                return [];
+              }
+            })(),
+          ]);
 
         if (cancelled || requestId !== placeholderRequestIdRef.current) return;
 
@@ -1781,7 +1887,7 @@ export function MainContent({
     if (rotatingPlaceholders.length <= 1 || inputValue) return;
     const interval = setInterval(() => {
       setPlaceholderFading(true);
-      placeholderTimeoutRef.current = setTimeout(() => {
+      placeholderTimeoutRef.current = window.setTimeout(() => {
         setRotatingIndex((prev) => (prev + 1) % rotatingPlaceholders.length);
         setPlaceholderFading(false);
       }, 300);
@@ -2010,6 +2116,50 @@ export function MainContent({
     setWrappingUp(false);
   }, [task?.id]);
 
+  // Derive current in-progress step from events (for step feedback)
+  const currentStep = useMemo(() => {
+    if (!task || !isTaskWorking) return null;
+    for (let i = events.length - 1; i >= 0; i--) {
+      const e = events[i];
+      if (e.taskId !== task.id) continue;
+      if (e.type === "step_started" && e.payload?.step) {
+        return e.payload.step as { id: string; description: string };
+      }
+      if (e.type === "step_completed" || e.type === "step_skipped") break;
+    }
+    return null;
+  }, [task, events, isTaskWorking]);
+
+  // Step feedback UI state
+  const [stepFeedbackOpen, setStepFeedbackOpen] = useState(false);
+  const [stepFeedbackText, setStepFeedbackText] = useState("");
+  const [stepFeedbackSending, setStepFeedbackSending] = useState(false);
+
+  // Close feedback panel when step changes
+  useEffect(() => {
+    setStepFeedbackOpen(false);
+    setStepFeedbackText("");
+    setStepFeedbackSending(false);
+  }, [currentStep?.id]);
+
+  const handleStepFeedback = useCallback(
+    async (action: StepFeedbackAction, message?: string) => {
+      if (!task || !currentStep?.id) return;
+      const stepId = currentStep.id;
+      setStepFeedbackSending(true);
+      try {
+        await window.electronAPI.sendStepFeedback(task.id, stepId, action, message);
+        setStepFeedbackOpen(false);
+        setStepFeedbackText("");
+      } catch {
+        // Silently handle — executor may have moved on
+      } finally {
+        setStepFeedbackSending(false);
+      }
+    },
+    [task, currentStep],
+  );
+
   // Extract latest streaming progress for the live token counter
   const streamingProgress = useMemo(() => {
     if (!task || !isTaskWorking) return null;
@@ -2038,7 +2188,22 @@ export function MainContent({
   }, [canvasSessions, latestUserMessageTimestamp]);
 
   const timelineItems = useMemo(() => {
-    const eventItems = filteredEvents.map((event, index) => ({
+    type EventItem = {
+      kind: "event";
+      event: (typeof filteredEvents)[number];
+      eventIndex: number;
+      timestamp: number;
+    };
+    type CanvasItem = {
+      kind: "canvas";
+      session: (typeof canvasSessions)[number];
+      timestamp: number;
+      forceSnapshot: boolean;
+    };
+    type DispatchedItem = { kind: "dispatched-agents"; timestamp: number };
+    type TimelineItem = EventItem | CanvasItem | DispatchedItem;
+
+    const eventItems: EventItem[] = filteredEvents.map((event, index) => ({
       kind: "event" as const,
       event,
       eventIndex: index,
@@ -2046,7 +2211,7 @@ export function MainContent({
     }));
 
     const freezeBefore = latestUserMessageTimestamp;
-    const canvasItems = canvasSessions
+    const canvasItems: CanvasItem[] = canvasSessions
       .map((session) => ({
         kind: "canvas" as const,
         session,
@@ -2058,29 +2223,47 @@ export function MainContent({
       }))
       .sort((a, b) => a.timestamp - b.timestamp);
 
-    if (canvasItems.length === 0) return eventItems;
+    // Build a sorted list of special items (canvas + dispatched agents) to merge in
+    const specialItems: TimelineItem[] = [...canvasItems];
 
-    const merged: Array<(typeof eventItems)[number] | (typeof canvasItems)[number]> = [];
-    let canvasIndex = 0;
+    // Insert dispatched agents panel at the chronological position of the first child task
+    if (!collaborativeRun && childTasks.length > 0) {
+      const firstChildTimestamp = Math.min(...childTasks.map((t) => t.createdAt));
+      specialItems.push({ kind: "dispatched-agents" as const, timestamp: firstChildTimestamp });
+    }
+
+    specialItems.sort((a, b) => a.timestamp - b.timestamp);
+
+    if (specialItems.length === 0) return eventItems;
+
+    const merged: TimelineItem[] = [];
+    let specialIndex = 0;
 
     for (const eventItem of eventItems) {
       while (
-        canvasIndex < canvasItems.length &&
-        canvasItems[canvasIndex].timestamp <= eventItem.timestamp
+        specialIndex < specialItems.length &&
+        specialItems[specialIndex].timestamp <= eventItem.timestamp
       ) {
-        merged.push(canvasItems[canvasIndex]);
-        canvasIndex += 1;
+        merged.push(specialItems[specialIndex]);
+        specialIndex += 1;
       }
       merged.push(eventItem);
     }
 
-    while (canvasIndex < canvasItems.length) {
-      merged.push(canvasItems[canvasIndex]);
-      canvasIndex += 1;
+    while (specialIndex < specialItems.length) {
+      merged.push(specialItems[specialIndex]);
+      specialIndex += 1;
     }
 
     return merged;
-  }, [filteredEvents, canvasSessions, latestCanvasSessionId, latestUserMessageTimestamp]);
+  }, [
+    filteredEvents,
+    canvasSessions,
+    latestCanvasSessionId,
+    latestUserMessageTimestamp,
+    collaborativeRun,
+    childTasks,
+  ]);
 
   // Find the index where command output should be inserted (after the last event before command started)
   const commandOutputInsertIndex = useMemo(() => {
@@ -2640,9 +2823,10 @@ export function MainContent({
 
   // Active placeholder: rotating prompt when available, personality fallback otherwise
   const personalityPlaceholder = agentContext.getPlaceholder();
-  const placeholder = rotatingPlaceholders.length > 0
-    ? rotatingPlaceholders[rotatingIndex % rotatingPlaceholders.length]
-    : personalityPlaceholder;
+  const placeholder =
+    rotatingPlaceholders.length > 0
+      ? rotatingPlaceholders[rotatingIndex % rotatingPlaceholders.length]
+      : personalityPlaceholder;
 
   // Calculate cursor position based on placeholder text width
   useEffect(() => {
@@ -2675,13 +2859,13 @@ export function MainContent({
     setAutoScroll(isNearBottom(container));
   }, [isNearBottom]);
 
-  // Auto-scroll to bottom when new events arrive
+  // Auto-scroll to bottom when new events arrive or dispatched agents change
   useEffect(() => {
     if (autoScroll && timelineRef.current && mainBodyRef.current) {
       // Scroll the main body to show the latest event
       mainBodyRef.current.scrollTop = mainBodyRef.current.scrollHeight;
     }
-  }, [events, autoScroll]);
+  }, [events, autoScroll, childTasks, childEvents]);
 
   // Reset auto-scroll when task changes
   useEffect(() => {
@@ -4883,18 +5067,6 @@ export function MainContent({
             </div>
           )}
 
-          {/* Dispatched Agents Panel - shown when task has @mentioned agent sub-tasks */}
-          {!collaborativeRun && childTasks.length > 0 && (
-            <div className="collaborative-thoughts-main">
-              <DispatchedAgentsPanel
-                parentTaskId={task!.id}
-                childTasks={childTasks}
-                childEvents={childEvents}
-                onSelectChildTask={onSelectChildTask}
-              />
-            </div>
-          )}
-
           {/* Collaborative / Multi-LLM Thoughts - shown in main area when task has a collaborative run */}
           {collaborativeRun && (
             <div className="collaborative-thoughts-main">
@@ -4943,6 +5115,19 @@ export function MainContent({
                       forceSnapshot={item.forceSnapshot}
                       onOpenBrowser={onOpenBrowserView}
                     />
+                  );
+                }
+
+                if (item.kind === "dispatched-agents") {
+                  return (
+                    <div key="dispatched-agents" className="collaborative-thoughts-main">
+                      <DispatchedAgentsPanel
+                        parentTaskId={task!.id}
+                        childTasks={childTasks}
+                        childEvents={childEvents}
+                        onSelectChildTask={onSelectChildTask}
+                      />
+                    </div>
                   );
                 }
 
@@ -5064,7 +5249,87 @@ export function MainContent({
                         <div className="message-actions">
                           <MessageCopyButton text={messageText} />
                           <MessageSpeakButton text={messageText} voiceEnabled={voiceEnabled} />
+                          {isLastAssistant && isTaskWorking && (
+                            <button
+                              className="bubble-feedback-toggle"
+                              onClick={() => setStepFeedbackOpen((o) => !o)}
+                              title="Give feedback"
+                            >
+                              <svg
+                                width="14"
+                                height="14"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              >
+                                <circle cx="12" cy="12" r="1" />
+                                <circle cx="19" cy="12" r="1" />
+                                <circle cx="5" cy="12" r="1" />
+                              </svg>
+                            </button>
+                          )}
                         </div>
+                        {isLastAssistant && stepFeedbackOpen && (
+                          <div className="bubble-feedback-panel">
+                            {currentStep && (
+                              <div className="bubble-feedback-step-label">
+                                {currentStep.description}
+                              </div>
+                            )}
+                            <div className="bubble-feedback-actions">
+                              {currentStep && (
+                                <>
+                                  <button
+                                    className="bubble-feedback-btn skip"
+                                    disabled={stepFeedbackSending}
+                                    onClick={() => handleStepFeedback("skip")}
+                                  >
+                                    Skip
+                                  </button>
+                                  <button
+                                    className="bubble-feedback-btn retry"
+                                    disabled={stepFeedbackSending}
+                                    onClick={() => handleStepFeedback("retry")}
+                                  >
+                                    Retry
+                                  </button>
+                                </>
+                              )}
+                              <button
+                                className="bubble-feedback-btn stop"
+                                disabled={stepFeedbackSending || !currentStep}
+                                onClick={() => handleStepFeedback("stop")}
+                              >
+                                Stop
+                              </button>
+                            </div>
+                            <div className="bubble-feedback-input-row">
+                              <input
+                                className="bubble-feedback-input"
+                                type="text"
+                                placeholder="Adjust direction…"
+                                value={stepFeedbackText}
+                                onChange={(e) => setStepFeedbackText(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" && stepFeedbackText.trim()) {
+                                    handleStepFeedback("drift", stepFeedbackText.trim());
+                                  }
+                                }}
+                                disabled={stepFeedbackSending}
+                              />
+                              <button
+                                className="bubble-feedback-btn drift"
+                                disabled={stepFeedbackSending || !stepFeedbackText.trim()}
+                                onClick={() => handleStepFeedback("drift", stepFeedbackText.trim())}
+                              >
+                                Send
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                       {shouldRenderCommandOutput && (
                         <CommandOutput
@@ -6035,9 +6300,7 @@ function renderEventDetails(
                 </span>
               )}
             </div>
-            <pre className="code-preview-content">
-              <code>{fcPayload.contentPreview}</code>
-            </pre>
+            <HighlightedCodePreview code={fcPayload.contentPreview} language={fcPayload.language} />
           </div>
         );
       }

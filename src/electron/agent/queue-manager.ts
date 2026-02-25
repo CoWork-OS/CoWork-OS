@@ -136,7 +136,10 @@ export class TaskQueueManager {
     }
 
     if (upgraded) {
-      console.log("[TaskQueueManager] Upgraded legacy queue settings from old defaults to new defaults", settings);
+      console.log(
+        "[TaskQueueManager] Upgraded legacy queue settings from old defaults to new defaults",
+        settings,
+      );
     }
 
     return settings;

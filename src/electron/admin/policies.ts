@@ -138,14 +138,8 @@ export function loadPolicies(): AdminPolicies {
         blocked: Array.isArray(parsed.connectors?.blocked) ? parsed.connectors.blocked : [],
       },
       agents: {
-        maxHeartbeatFrequencySec: Math.max(
-          60,
-          parsed.agents?.maxHeartbeatFrequencySec || 60,
-        ),
-        maxConcurrentAgents: Math.max(
-          1,
-          parsed.agents?.maxConcurrentAgents || 10,
-        ),
+        maxHeartbeatFrequencySec: Math.max(60, parsed.agents?.maxHeartbeatFrequencySec || 60),
+        maxConcurrentAgents: Math.max(1, parsed.agents?.maxConcurrentAgents || 10),
       },
       general: {
         allowCustomPacks: parsed.general?.allowCustomPacks !== false,

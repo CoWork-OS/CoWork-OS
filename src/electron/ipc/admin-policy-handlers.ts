@@ -19,42 +19,39 @@ export function setupAdminPolicyHandlers(): void {
   });
 
   // Update admin policies (partial merge)
-  ipcMain.handle(
-    IPC_CHANNELS.ADMIN_POLICIES_UPDATE,
-    async (_, updates: Partial<AdminPolicies>) => {
-      const current = loadPolicies();
+  ipcMain.handle(IPC_CHANNELS.ADMIN_POLICIES_UPDATE, async (_, updates: Partial<AdminPolicies>) => {
+    const current = loadPolicies();
 
-      // Deep merge updates
-      const merged: AdminPolicies = {
-        ...current,
-        ...updates,
-        packs: {
-          ...current.packs,
-          ...(updates.packs || {}),
-        },
-        connectors: {
-          ...current.connectors,
-          ...(updates.connectors || {}),
-        },
-        agents: {
-          ...current.agents,
-          ...(updates.agents || {}),
-        },
-        general: {
-          ...current.general,
-          ...(updates.general || {}),
-        },
-      };
+    // Deep merge updates
+    const merged: AdminPolicies = {
+      ...current,
+      ...updates,
+      packs: {
+        ...current.packs,
+        ...(updates.packs || {}),
+      },
+      connectors: {
+        ...current.connectors,
+        ...(updates.connectors || {}),
+      },
+      agents: {
+        ...current.agents,
+        ...(updates.agents || {}),
+      },
+      general: {
+        ...current.general,
+        ...(updates.general || {}),
+      },
+    };
 
-      const validationError = validatePolicies(merged);
-      if (validationError) {
-        throw new Error(`Invalid policies: ${validationError}`);
-      }
+    const validationError = validatePolicies(merged);
+    if (validationError) {
+      throw new Error(`Invalid policies: ${validationError}`);
+    }
 
-      savePolicies(merged);
-      return merged;
-    },
-  );
+    savePolicies(merged);
+    return merged;
+  });
 
   // Check if a specific pack is allowed/required
   ipcMain.handle(IPC_CHANNELS.ADMIN_POLICIES_CHECK_PACK, async (_, packId: string) => {

@@ -426,7 +426,20 @@ export class BrowserTools {
           url: result.url,
           title: result.title,
         });
-        return result;
+        if (result.isError) {
+          const statusText =
+            typeof result.status === "number" ? `HTTP ${result.status}` : "unknown HTTP status";
+          return {
+            success: false,
+            error: `Navigation failed with ${statusText}`,
+            ...result,
+          };
+        }
+
+        return {
+          success: true,
+          ...result,
+        };
       }
 
       case "browser_screenshot": {

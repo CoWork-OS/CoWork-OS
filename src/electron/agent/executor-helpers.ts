@@ -46,6 +46,12 @@ export const LLM_TIMEOUT_MS = 2 * 60 * 1000;
 // only occur for unusually massive documents (>25K words).
 export const STEP_TIMEOUT_MS = 15 * 60 * 1000;
 
+// Per-step timeout for deep work mode (30 minutes).
+// Deep work tasks are long-running autonomous runs that may involve
+// complex multi-step operations, web research for error recovery,
+// and iterative problem-solving cycles.
+export const DEEP_WORK_STEP_TIMEOUT_MS = 30 * 60 * 1000;
+
 // Default per-tool execution timeout (overrideable per tool)
 export const TOOL_TIMEOUT_MS = 30 * 1000;
 
@@ -136,6 +142,22 @@ export const PRE_COMPACTION_FLUSH_SLACK_TOKENS = 1200;
 export const PRE_COMPACTION_FLUSH_COOLDOWN_MS = 2 * 60 * 1000;
 export const PRE_COMPACTION_FLUSH_MAX_OUTPUT_TOKENS = 220;
 export const PRE_COMPACTION_FLUSH_MIN_TOKEN_DELTA = 250;
+
+// Proactive compaction: trigger at 90% utilization (aligned with Codex CLI's 90%
+// threshold; Claude Code uses ~95%). Compacts down to 50% utilization, freeing ~40%
+// of the context window for a comprehensive structured summary + ongoing conversation.
+// Reference: Codex uses 20 000 tokens for preserved user messages and places no
+// explicit limit on summary output. We cap summary output at 4096 tokens (≈ Claude's
+// default max output) which is enough for a thorough 9-section handoff summary.
+export const PROACTIVE_COMPACTION_THRESHOLD = 0.9;
+export const PROACTIVE_COMPACTION_TARGET = 0.5;
+export const COMPACTION_SUMMARY_MAX_OUTPUT_TOKENS = 4096;
+export const COMPACTION_SUMMARY_MIN_OUTPUT_TOKENS = 500;
+export const COMPACTION_SUMMARY_MAX_INPUT_CHARS = 60000;
+export const COMPACTION_USER_MSG_CLAMP = 3000;
+export const COMPACTION_ASSISTANT_TEXT_CLAMP = 1500;
+export const COMPACTION_TOOL_USE_CLAMP = 800;
+export const COMPACTION_TOOL_RESULT_CLAMP = 1200;
 
 // ===== Error Classification Functions =====
 

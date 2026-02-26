@@ -108,7 +108,11 @@ import { UsageInsightsPanel } from "./UsageInsightsPanel";
 import { SuggestionsPanel } from "./SuggestionsPanel";
 import { CustomizePanel } from "./CustomizePanel";
 import { AdminPoliciesPanel } from "./AdminPoliciesPanel";
+import { EventTriggersPanel } from "./EventTriggersPanel";
+import { BriefingPanel } from "./BriefingPanel";
+import { WebAccessSettingsPanel } from "./WebAccessSettingsPanel";
 import { InfraSettings } from "./InfraSettings";
+import { DigitalTwinsPanel } from "./DigitalTwinsPanel";
 
 type SettingsTab =
   | "appearance"
@@ -144,7 +148,11 @@ type SettingsTab =
   | "insights"
   | "suggestions"
   | "customize"
-  | "policies";
+  | "digitaltwins"
+  | "policies"
+  | "triggers"
+  | "briefing"
+  | "webaccess";
 
 // Secondary channels shown inside "More Channels" tab
 type SecondaryChannel =
@@ -413,6 +421,7 @@ const sidebarItems: Array<{
   { tab: "appearance", label: "Appearance", group: "General", icon: <Sun {...I} /> },
   { tab: "personality", label: "Personality", group: "General", icon: <User {...I} /> },
   { tab: "missioncontrol", label: "Mission Control", group: "General", icon: <Users {...I} /> },
+  { tab: "digitaltwins", label: "Digital Twins", group: "General", icon: <User {...I} /> },
   { tab: "tray", label: "Menu Bar", group: "General", icon: <PanelTop {...I} />, macOnly: true },
   { tab: "voice", label: "Voice Mode", group: "General", icon: <Mic {...I} /> },
   { tab: "llm", label: "AI Model", group: "AI & Models", icon: <Layers {...I} /> },
@@ -446,7 +455,10 @@ const sidebarItems: Array<{
     icon: <MessageSquare {...I} />,
   },
   { tab: "hooks", label: "Webhooks", group: "Automation", icon: <Link {...I} /> },
+  { tab: "triggers", label: "Event Triggers", group: "Automation", icon: <Zap {...I} /> },
+  { tab: "briefing", label: "Daily Briefing", group: "Automation", icon: <Sun {...I} /> },
   { tab: "controlplane", label: "Remote Access", group: "Advanced", icon: <Monitor {...I} /> },
+  { tab: "webaccess", label: "Web Access", group: "Advanced", icon: <Monitor {...I} /> },
   { tab: "nodes", label: "Mobile Companions", group: "Advanced", icon: <Smartphone {...I} /> },
   { tab: "extensions", label: "Extensions", group: "Advanced", icon: <Puzzle {...I} /> },
   { tab: "insights", label: "Usage Insights", group: "Advanced", icon: <BarChart3 {...I} /> },
@@ -1615,6 +1627,7 @@ export function Settings({
                       "appearance",
                       "personality",
                       "missioncontrol",
+                      "digitaltwins",
                       "voice",
                       "llm",
                       "search",
@@ -1701,6 +1714,8 @@ export function Settings({
               <PersonalitySettings onSettingsChanged={onSettingsChanged} />
             ) : activeTab === "missioncontrol" ? (
               <MissionControlPanel />
+            ) : activeTab === "digitaltwins" ? (
+              <DigitalTwinsPanel />
             ) : activeTab === "tray" ? (
               <TraySettings />
             ) : activeTab === "voice" ? (
@@ -1824,6 +1839,12 @@ export function Settings({
               />
             ) : activeTab === "policies" ? (
               <AdminPoliciesPanel />
+            ) : activeTab === "triggers" ? (
+              <EventTriggersPanel workspaceId={workspaceId} />
+            ) : activeTab === "briefing" ? (
+              <BriefingPanel workspaceId={workspaceId} />
+            ) : activeTab === "webaccess" ? (
+              <WebAccessSettingsPanel />
             ) : loading ? (
               <div className="settings-loading">Loading settings...</div>
             ) : (

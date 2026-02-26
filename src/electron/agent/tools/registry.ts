@@ -74,6 +74,9 @@ import { InfraTools } from "../../infra/infra-tools";
 import { InfraSettingsManager } from "../../infra/infra-settings";
 import { KnowledgeGraphTools } from "./knowledge-graph-tools";
 import { ScrapingTools } from "./scraping-tools";
+import { DocumentTools } from "./document-tools";
+import { ScratchpadTools } from "./scratchpad-tools";
+import { CitationTracker } from "../citation/CitationTracker";
 
 function sanitizeFilename(raw: string, maxLen = 120): string {
   const base = path.basename(String(raw || "").trim() || "artifact");
@@ -115,6 +118,7 @@ const SUB_AGENT_DEFAULT_DENIED_TOOLS = [
   "cancel_agent",
   "pause_agent",
   "resume_agent",
+  "orchestrate_agents",
 ];
 
 const EXTRACTION_SUB_AGENT_ALLOWED_TOOLS = [
@@ -336,7 +340,11 @@ export class ToolRegistry {
   private knowledgeGraphTools: KnowledgeGraphTools;
   private scrapingTools: ScrapingTools;
   private memoryTools: MemoryTools;
+  private documentTools: DocumentTools;
+  private scratchpadTools: ScratchpadTools;
+  private citationTracker?: CitationTracker;
   private gatewayContext?: GatewayContextType;
+  private _deepWorkMode = false;
   private deniedTools: Set<string> = new Set();
   private deniedGroups: Set<ToolGroupName> = new Set();
   private denyAllTools = false;
@@ -383,6 +391,10 @@ export class ToolRegistry {
     this.knowledgeGraphTools = new KnowledgeGraphTools(workspace, daemon, taskId);
     this.scrapingTools = new ScrapingTools(workspace, daemon, taskId);
     this.memoryTools = new MemoryTools(workspace, daemon, taskId);
+    this.documentTools = new DocumentTools(workspace.path, taskId, (tid, fp, mime) =>
+      daemon.logEvent(tid, "artifact_created", { path: fp, mimeType: mime }),
+    );
+    this.scratchpadTools = new ScratchpadTools(taskId, workspace.path);
     // Some unit tests stub daemon as a plain object. Make channel history tools optional.
     const dbGetter = (daemon as any)?.getDatabase;
     if (typeof dbGetter === "function") {
@@ -418,6 +430,27 @@ export class ToolRegistry {
         this.deniedTools.add(value);
       }
     }
+  }
+
+  /**
+   * Attach a CitationTracker so web_search/web_fetch results feed citations.
+   */
+  setCitationTracker(tracker: CitationTracker): void {
+    this.citationTracker = tracker;
+  }
+
+  getCitationTracker(): CitationTracker | undefined {
+    return this.citationTracker;
+  }
+
+  /** Enable deep work mode — extends spawn_agent max_turns cap to 250 */
+  setDeepWorkMode(enabled: boolean): void {
+    this._deepWorkMode = enabled;
+  }
+
+  /** Get scratchpad data for report generation and progress journaling */
+  getScratchpadData(): Map<string, { content: string; timestamp: number }> {
+    return this.scratchpadTools.getAll();
   }
 
   /**
@@ -465,6 +498,7 @@ export class ToolRegistry {
     this.knowledgeGraphTools.setWorkspace(workspace);
     this.scrapingTools.setWorkspace(workspace);
     this.memoryTools.setWorkspace(workspace);
+    this.documentTools.setWorkspace(workspace);
   }
 
   /**
@@ -547,10 +581,8 @@ export class ToolRegistry {
       ...BrowserTools.getToolDefinitions(),
     ];
 
-    // Only add search tool if a provider is configured
-    if (SearchProviderFactory.isAnyProviderConfigured()) {
-      allTools.push(...this.getSearchToolDefinitions());
-    }
+    // web_search is always available (DuckDuckGo provides free fallback)
+    allTools.push(...this.getSearchToolDefinitions());
 
     // Only add X/Twitter tool if integration is enabled
     if (XTools.isEnabled()) {
@@ -654,6 +686,12 @@ export class ToolRegistry {
     if (ScrapingTools.isEnabled()) {
       allTools.push(...ScrapingTools.getToolDefinitions());
     }
+
+    // Document generation tools (PDF, PPTX, XLSX)
+    allTools.push(...DocumentTools.getToolDefinitions());
+
+    // Session scratchpad tools (agent self-notes during long runs)
+    allTools.push(...ScratchpadTools.getToolDefinitions());
 
     // Always add mention tools (enables multi-agent collaboration)
     allTools.push(...MentionTools.getToolDefinitions());
@@ -1118,14 +1156,12 @@ Browser Automation (use only when interaction is needed):
 - browser_save_pdf: Save page as PDF
 - browser_close: Close the browser`;
 
-    // Add search if configured
-    if (SearchProviderFactory.isAnyProviderConfigured()) {
-      descriptions += `
+    // Web search is always available (DuckDuckGo provides free fallback)
+    descriptions += `
 
 Web Search (for finding URLs, not reading them):
-- web_search: Search the web for information (web, news, images)
+- web_search: Search the web for information${SearchProviderFactory.isAnyProviderConfigured() ? " (web, news, images)" : " (web)"}
   Use to FIND relevant pages. To READ a specific URL, use web_fetch instead.`;
-    }
 
     // Add shell if permitted
     if (this.workspace.permissions.shell) {
@@ -1148,7 +1184,11 @@ Image Generation:
 Vision (Image Understanding):
 - analyze_image: Analyze an image file from the workspace (screenshots/photos)
   - Extract text, describe items, answer questions, summarize what is shown
-  - Uses a vision-capable provider (OpenAI/Anthropic/Gemini); the tool will prompt setup guidance if missing.`;
+  - Uses a vision-capable provider (OpenAI/Anthropic/Gemini); the tool will prompt setup guidance if missing.
+- read_pdf_visual: Visually analyze a PDF document's layout, design, and content
+  - Converts PDF pages to images and analyzes them in one step (no need for pdftoppm + analyze_image separately)
+  - Use when you need to understand visual layout, design, colors, or formatting — not just text content
+  - For text-only extraction, use read_file instead`;
 
     // System tools are always available
     descriptions += `
@@ -1356,16 +1396,40 @@ ${skillDescriptions}`;
     if (name === "extract_json") return await this.montyTools.extractJson(input);
 
     // Web fetch tools (preferred for reading web content)
-    if (name === "web_fetch") return await this.webFetchTools.webFetch(input);
+    if (name === "web_fetch") {
+      const result = await this.webFetchTools.webFetch(input);
+      if (this.citationTracker) {
+        this.citationTracker.addFromFetch(input.url, input.url);
+      }
+      return result;
+    }
     if (name === "http_request") return await this.webFetchTools.httpRequest(input);
 
     // Browser tools
     if (BrowserTools.isBrowserTool(name)) {
+      // Guard: prevent browser_navigate on file:// PDF URLs (triggers download, not rendering)
+      if (name === "browser_navigate") {
+        const url = String((input as { url?: string })?.url || "");
+        if (url.startsWith("file://") && url.toLowerCase().endsWith(".pdf")) {
+          return {
+            content:
+              "Cannot open PDF files in browser (triggers download instead of rendering). " +
+              "Use read_file to extract text content, or read_pdf_visual to analyze the visual layout and design.",
+            isError: true,
+          };
+        }
+      }
       return await this.browserTools.executeTool(name, input);
     }
 
     // Search tools
-    if (name === "web_search") return await this.searchTools.webSearch(input);
+    if (name === "web_search") {
+      const result = await this.searchTools.webSearch(input);
+      if (this.citationTracker && result && typeof result === "object") {
+        this.citationTracker.addFromSearch((result as any).results || []);
+      }
+      return result;
+    }
 
     // X/Twitter tools
     if (name === "x_action") return await this.xTools.executeAction(input);
@@ -1418,11 +1482,14 @@ ${skillDescriptions}`;
 
     // Vision tools
     if (name === "analyze_image") return await this.visionTools.analyzeImage(input);
+    if (name === "read_pdf_visual") return await this.visionTools.readPdfVisual(input);
 
     // System tools
     if (name === "system_info") return await this.systemTools.getSystemInfo();
     if (name === "search_memories") return await this.systemTools.searchMemories(input);
     if (name === "memory_save") return await this.memoryTools.save(input);
+    if (name === "scratchpad_write") return this.scratchpadTools.write(input);
+    if (name === "scratchpad_read") return this.scratchpadTools.read(input);
     if (name === "read_clipboard") return await this.systemTools.readClipboard();
     if (name === "write_clipboard") return await this.systemTools.writeClipboard(input.text);
     if (name === "take_screenshot") return await this.systemTools.takeScreenshot(input);
@@ -1532,6 +1599,12 @@ ${skillDescriptions}`;
     if (name === "complete_mention")
       return await this.mentionTools.completeMention(input.mentionId);
 
+    // Document generation tools
+    if (name === "generate_document") return await this.documentTools.generateDocument(input);
+    if (name === "generate_presentation")
+      return await this.documentTools.generatePresentation(input);
+    if (name === "generate_spreadsheet") return await this.documentTools.generateSpreadsheet(input);
+
     // Meta tools
     if (name === "task_history") {
       return this.taskHistory(input);
@@ -1615,6 +1688,9 @@ ${skillDescriptions}`;
     }
     if (name === "wait_for_agent") {
       return await this.waitForAgent(input);
+    }
+    if (name === "orchestrate_agents") {
+      return await this.orchestrateAgents(input);
     }
     if (name === "get_agent_status") {
       return await this.getAgentStatus(input);
@@ -3114,7 +3190,13 @@ ${skillDescriptions}`;
   private getSearchToolDefinitions(): LLMTool[] {
     const providers = SearchProviderFactory.getAvailableProviders();
     const configuredProviders = providers.filter((p) => p.configured);
+    const paidProviders = configuredProviders.filter((p) => p.type !== "duckduckgo");
     const allSupportedTypes = [...new Set(configuredProviders.flatMap((p) => p.supportedTypes))];
+
+    const providerDesc =
+      paidProviders.length > 0
+        ? `Configured providers: ${paidProviders.map((p) => p.name).join(", ")} (with DuckDuckGo as fallback)`
+        : `Using DuckDuckGo (free built-in search)`;
 
     return [
       {
@@ -3123,7 +3205,7 @@ ${skillDescriptions}`;
           `Search the web for information. This is the PRIMARY tool for research tasks - finding news, trends, discussions, and information on any topic. ` +
           `Use this FIRST for research, then use web_fetch if you need to read specific URLs from the results. ` +
           `Do NOT use browser_navigate for research - web_search is faster and more efficient. ` +
-          `Configured providers: ${configuredProviders.map((p) => p.name).join(", ")}`,
+          providerDesc,
         input_schema: {
           type: "object",
           properties: {
@@ -5248,8 +5330,9 @@ ${skillDescriptions}`;
 
     const normalizedMaxTurns =
       typeof max_turns === "number" && Number.isFinite(max_turns) ? Math.round(max_turns) : 20;
-    if (normalizedMaxTurns < 1 || normalizedMaxTurns > 100) {
-      throw new Error("max_turns must be between 1 and 100");
+    const maxTurnsCap = this._deepWorkMode ? 250 : 100;
+    if (normalizedMaxTurns < 1 || normalizedMaxTurns > maxTurnsCap) {
+      throw new Error(`max_turns must be between 1 and ${maxTurnsCap}`);
     }
 
     const phaseCEnabled = parseBooleanEnv("COWORK_GUARDRAIL_PHASE_C", true);
@@ -5503,6 +5586,96 @@ ${skillDescriptions}`;
       message: result.message,
       result_summary: result.resultSummary,
       error: result.error,
+    };
+  }
+
+  /**
+   * Orchestrate multiple agents in parallel: spawn all, wait for all, return combined results.
+   */
+  private async orchestrateAgents(input: {
+    tasks: Array<{ prompt: string; title?: string; model_preference?: string }>;
+    timeout_seconds?: number;
+  }): Promise<{
+    success: boolean;
+    results: Array<{
+      task_id: string;
+      title: string;
+      status: string;
+      result_summary?: string;
+      error?: string;
+    }>;
+    completed: number;
+    failed: number;
+    message: string;
+  }> {
+    const { tasks, timeout_seconds = 300 } = input;
+
+    if (!Array.isArray(tasks) || tasks.length < 2) {
+      throw new Error("orchestrate_agents requires at least 2 tasks");
+    }
+    if (tasks.length > 8) {
+      throw new Error("orchestrate_agents supports at most 8 tasks");
+    }
+
+    // Spawn all agents
+    const spawnResults: Array<{ task_id: string; title: string }> = [];
+    for (const task of tasks) {
+      const result = await this.spawnAgent({
+        prompt: task.prompt,
+        title: task.title,
+        model_preference: task.model_preference,
+        wait: false,
+        max_turns: 20,
+      });
+      if (result.success && result.task_id) {
+        spawnResults.push({
+          task_id: result.task_id,
+          title: result.title || task.title || "Sub-task",
+        });
+      }
+    }
+
+    if (spawnResults.length === 0) {
+      return {
+        success: false,
+        results: [],
+        completed: 0,
+        failed: 0,
+        message: "Failed to spawn any agents",
+      };
+    }
+
+    // Wait for all agents with shared deadline
+    const deadline = Date.now() + timeout_seconds * 1000;
+    const results: Array<{
+      task_id: string;
+      title: string;
+      status: string;
+      result_summary?: string;
+      error?: string;
+    }> = [];
+
+    for (const spawn of spawnResults) {
+      const remainingSeconds = Math.max(1, Math.round((deadline - Date.now()) / 1000));
+      const result = await this.waitForAgentInternal(spawn.task_id, remainingSeconds);
+      results.push({
+        task_id: spawn.task_id,
+        title: spawn.title,
+        status: result.status,
+        result_summary: result.resultSummary,
+        error: result.error,
+      });
+    }
+
+    const completed = results.filter((r) => r.status === "completed").length;
+    const failed = results.filter((r) => r.status !== "completed").length;
+
+    return {
+      success: completed > 0,
+      results,
+      completed,
+      failed,
+      message: `Orchestration complete: ${completed}/${results.length} succeeded`,
     };
   }
 
@@ -6435,10 +6608,52 @@ ${skillDescriptions}`;
             max_turns: {
               type: "number",
               description:
-                "Maximum number of LLM turns for the sub-agent. Range: 1-100. Default: 20",
+                "Maximum number of LLM turns for the sub-agent. Range: 1-100 (up to 250 in deep work mode). Default: 20",
             },
           },
           required: ["prompt"],
+        },
+      },
+      {
+        name: "orchestrate_agents",
+        description:
+          "Spawn multiple sub-agents in parallel and wait for all of them to complete. " +
+          "Returns combined results from all agents. Use this for parallel research, batch processing, " +
+          "or when multiple independent tasks can run simultaneously. More efficient than sequential spawn_agent + wait_for_agent calls.",
+        input_schema: {
+          type: "object",
+          properties: {
+            tasks: {
+              type: "array",
+              description: "Array of sub-tasks to execute in parallel (2-8 tasks)",
+              items: {
+                type: "object",
+                properties: {
+                  prompt: {
+                    type: "string",
+                    description: "Task instruction for this sub-agent",
+                  },
+                  title: {
+                    type: "string",
+                    description: "Short title for this sub-task",
+                  },
+                  model_preference: {
+                    type: "string",
+                    enum: ["same", "cheaper", "smarter"],
+                    description: 'Model selection. Default: "cheaper"',
+                  },
+                },
+                required: ["prompt"],
+              },
+              minItems: 2,
+              maxItems: 8,
+            },
+            timeout_seconds: {
+              type: "number",
+              description: "Timeout in seconds for all agents to complete. Default: 300 (5 min)",
+            },
+          },
+          required: ["tasks"],
         },
       },
       {
@@ -6613,10 +6828,10 @@ ${skillDescriptions}`;
   /**
    * Execute the manage_heartbeat tool
    */
-  private manageHeartbeat(input: {
-    agent_name?: string;
-    enabled?: boolean;
-  }): { success: boolean; message: string } {
+  private manageHeartbeat(input: { agent_name?: string; enabled?: boolean }): {
+    success: boolean;
+    message: string;
+  } {
     const { agent_name, enabled } = input;
     if (!agent_name || typeof agent_name !== "string" || agent_name.trim().length === 0) {
       return { success: false, message: "agent_name is required" };

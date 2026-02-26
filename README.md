@@ -16,6 +16,7 @@
   <a href="https://www.npmjs.com/package/cowork-os"><img src="https://img.shields.io/npm/v/cowork-os.svg" alt="npm"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
   <a href="https://www.apple.com/macos/"><img src="https://img.shields.io/badge/platform-macOS-blue.svg" alt="macOS"></a>
+  <a href="https://www.microsoft.com/windows"><img src="https://img.shields.io/badge/platform-Windows-0078D6.svg" alt="Windows"></a>
 </p>
 
 <p align="center">
@@ -45,7 +46,7 @@
 - **Build Mode** — Go from idea to working prototype with a phased canvas workflow (Concept → Plan → Scaffold → Iterate) and named checkpoints.
 - **AI Playbook** — Auto-captures what worked from successful tasks and injects relevant patterns into future prompts.
 - **Usage Insights** — Dashboard showing task stats, cost/token tracking by model, activity heatmaps, top skills, and per-pack analytics.
-- **ChatGPT History Import** — Import your full ChatGPT conversation history. CoWork OS instantly knows your preferences, past projects, and context — no cold start. All data stays encrypted on your Mac and never leaves your machine.
+- **ChatGPT History Import** — Import your full ChatGPT conversation history. CoWork OS instantly knows your preferences, past projects, and context — no cold start. All data stays encrypted on your machine and never leaves it.
 - **Security-first** — Approval workflows, sandboxed execution, configurable guardrails, encrypted storage, and 3200+ tests.
 - **Local-first & BYOK** — Your data and API keys stay on your machine. No telemetry. No middleman.
 
@@ -67,9 +68,16 @@ See the full guide: [OpenClaw alternative: CoWork OS vs OpenClaw](docs/openclaw-
 
 ### Download the App
 
-Download the latest `.dmg` from [GitHub Releases](https://github.com/CoWork-OS/CoWork-OS/releases/latest) and drag CoWork OS into Applications.
+Download the latest release from [GitHub Releases](https://github.com/CoWork-OS/CoWork-OS/releases/latest):
 
-> **First launch:** The app is currently unsigned. On first open, macOS will block it — go to **System Settings > Privacy & Security > Open Anyway**, or run: `xattr -dr com.apple.quarantine "/Applications/CoWork OS.app"`
+| Platform | Download | Install |
+|----------|----------|---------|
+| **macOS** | `.dmg` | Drag CoWork OS into Applications |
+| **Windows** | `.exe` (NSIS installer) | Run the installer and follow the prompts |
+
+> **macOS first launch:** The app is currently unsigned. On first open, macOS will block it — go to **System Settings > Privacy & Security > Open Anyway**, or run: `xattr -dr com.apple.quarantine "/Applications/CoWork OS.app"`
+
+> **Windows first launch:** Windows SmartScreen may show a warning for unrecognized apps. Click **More info** > **Run anyway** to proceed.
 
 > Works out of the box — defaults to [OpenRouter's free model router](https://openrouter.ai), no API key needed.
 
@@ -88,6 +96,8 @@ cd CoWork-OS
 npm install && npm run setup
 npm run build && npm run package
 ```
+
+> **Windows prerequisites:** Native module compilation (better-sqlite3) requires [Visual C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/). The setup script will warn you if they're missing, but prebuilt binaries may work without them.
 
 See the [Development Guide](docs/development.md) for prerequisites and details.
 
@@ -174,7 +184,7 @@ Access from **Settings** > **Customize**. [Learn more](docs/plugin-packs.md)
 ### Extensibility
 
 - **139 built-in skills** across developer, productivity, communication, documents, game development, mobile development, financial analysis, infrastructure-as-code, and more
-- **Custom skills** in `~/Library/Application Support/cowork-os/skills/`
+- **Custom skills** in `~/Library/Application Support/cowork-os/skills/` (macOS) or `%APPDATA%\cowork-os\skills\` (Windows)
 - **17 bundled plugin packs** with 55+ role-specific skills and Digital Twin integration
 - **Plugin Store** — browse, install from Git/URL, or scaffold custom packs
 - **MCP support** — client, host, and registry
@@ -189,7 +199,7 @@ Built-in structured entity and relationship memory backed by SQLite. The agent b
 
 ### Memory & Context
 
-Persistent memory with privacy protection, FTS5 search, LLM compression, and workspace kit (`.cowork/`) for durable project context. **Import your ChatGPT history** to eliminate the cold-start problem — CoWork OS knows you from day one. All imported data is stored locally and encrypted on your Mac. **Proactive session compaction** automatically generates comprehensive structured summaries when context reaches 90% capacity — preserving user messages, decisions, file changes, errors, and pending work so the agent continues seamlessly without losing critical context. [Learn more](docs/features.md#persistent-memory-system) | [Context Compaction](docs/context-compaction.md)
+Persistent memory with privacy protection, FTS5 search, LLM compression, and workspace kit (`.cowork/`) for durable project context. **Import your ChatGPT history** to eliminate the cold-start problem — CoWork OS knows you from day one. All imported data is stored locally and encrypted on your machine. **Proactive session compaction** automatically generates comprehensive structured summaries when context reaches 90% capacity — preserving user messages, decisions, file changes, errors, and pending work so the agent continues seamlessly without losing critical context. [Learn more](docs/features.md#persistent-memory-system) | [Context Compaction](docs/context-compaction.md)
 
 <p align="center">
   <img src="screenshots/cowork-os-main3.png" alt="Collaborative Mode" width="700">
@@ -240,7 +250,7 @@ See [Architecture](docs/architecture.md) for the full technical deep-dive.
 
 - **Configurable guardrails**: Token budgets, cost limits, iteration caps, dangerous command blocking
 - **Approval workflows**: User consent required for destructive operations
-- **Sandbox isolation**: macOS `sandbox-exec` (native) or Docker containers
+- **Sandbox isolation**: macOS `sandbox-exec` (native), Docker containers, or process-level isolation on Windows
 - **Encrypted storage**: OS keychain + AES-256 fallback
 - **3200+ tests** including 132+ security unit tests and 259+ WebSocket protocol tests
 
@@ -250,7 +260,7 @@ See [Security Guide](docs/security-guide.md) and [Security Architecture](docs/se
 
 | Mode | Platform | Guide |
 |------|----------|-------|
-| **Desktop App** | macOS | [Getting Started](docs/getting-started.md) |
+| **Desktop App** | macOS, Windows | [Getting Started](docs/getting-started.md) |
 | **Headless / Server** | Linux VPS | [VPS Guide](docs/vps-linux.md) |
 | **Self-Hosted** | Docker / systemd | [Self-Hosting](docs/self-hosting.md) |
 | **Remote Access** | Tailscale / SSH | [Remote Access](docs/remote-access.md) |
@@ -273,7 +283,7 @@ See [Security Guide](docs/security-guide.md) and [Security Architecture](docs/se
 
 - [ ] VM sandbox using macOS Virtualization.framework
 - [ ] Network egress controls with proxy
-- [ ] Cross-platform UI support (Windows, Linux)
+- [ ] Linux desktop support
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
 

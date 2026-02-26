@@ -246,6 +246,25 @@ function getConnectorCommandArgs(connectorName: string): { command: string; args
   };
 }
 
+function getManualScriptPath(entry: MCPRegistryEntry): string | null {
+  if (entry.installMethod !== "manual") return null;
+  const args = entry.defaultArgs || [];
+  const scriptPath = args.find((arg) => typeof arg === "string" && /\.(c|m)?js$/i.test(arg));
+  return scriptPath || null;
+}
+
+function filterUnavailableConnectorEntries(entries: MCPRegistryEntry[]): MCPRegistryEntry[] {
+  return entries.filter((entry) => {
+    const scriptPath = getManualScriptPath(entry);
+    if (!scriptPath) return true;
+    if (fs.existsSync(scriptPath)) return true;
+    console.warn(
+      `[MCPRegistryManager] Skipping connector "${entry.id}" because script is missing: ${scriptPath}`,
+    );
+    return false;
+  });
+}
+
 function getConnectorEntries(): MCPRegistryEntry[] {
   const salesforceCommand = getConnectorCommandArgs("salesforce-mcp");
   const jiraCommand = getConnectorCommandArgs("jira-mcp");
@@ -256,8 +275,30 @@ function getConnectorEntries(): MCPRegistryEntry[] {
   const asanaCommand = getConnectorCommandArgs("asana-mcp");
   const oktaCommand = getConnectorCommandArgs("okta-mcp");
   const resendCommand = getConnectorCommandArgs("resend-mcp");
+  // Google Workspace
+  const googleCalendarCommand = getConnectorCommandArgs("google-calendar-mcp");
+  const googleDriveCommand = getConnectorCommandArgs("google-drive-mcp");
+  const gmailCommand = getConnectorCommandArgs("gmail-mcp");
+  // OAuth connectors
+  const docusignCommand = getConnectorCommandArgs("docusign-mcp");
+  const outreachCommand = getConnectorCommandArgs("outreach-mcp");
+  const slackCommand = getConnectorCommandArgs("slack-mcp");
+  const discordCommand = getConnectorCommandArgs("discord-mcp");
+  // API-key connectors
+  const apolloCommand = getConnectorCommandArgs("apollo-mcp");
+  const clayCommand = getConnectorCommandArgs("clay-mcp");
+  const similarwebCommand = getConnectorCommandArgs("similarweb-mcp");
+  const msciCommand = getConnectorCommandArgs("msci-mcp");
+  const legalzoomCommand = getConnectorCommandArgs("legalzoom-mcp");
+  const factsetCommand = getConnectorCommandArgs("factset-mcp");
+  const wordpressCommand = getConnectorCommandArgs("wordpress-mcp");
+  const harveyCommand = getConnectorCommandArgs("harvey-mcp");
+  const lsegCommand = getConnectorCommandArgs("lseg-mcp");
+  const spglobalCommand = getConnectorCommandArgs("spglobal-mcp");
+  const commonroomCommand = getConnectorCommandArgs("commonroom-mcp");
+  const tribeaiCommand = getConnectorCommandArgs("tribeai-mcp");
 
-  return [
+  const entries: MCPRegistryEntry[] = [
     {
       id: "salesforce",
       name: "Salesforce",
@@ -540,7 +581,622 @@ function getConnectorEntries(): MCPRegistryEntry[] {
       verified: true,
       featured: true,
     },
+    // --- Google Workspace connectors ---
+    {
+      id: "google-calendar",
+      name: "Google Calendar",
+      description:
+        "Google Calendar connector for CoWork OS. Manage events, scheduling, and availability. Requires Google OAuth credentials.",
+      version: LOCAL_CONNECTOR_VERSION,
+      author: "CoWork OS",
+      homepage: "https://github.com/CoWork-OS/CoWork-OS",
+      repository: "https://github.com/CoWork-OS/CoWork-OS",
+      license: "MIT",
+      installMethod: "manual",
+      transport: "stdio",
+      defaultCommand: googleCalendarCommand.command,
+      defaultArgs: googleCalendarCommand.args,
+      defaultEnv: {
+        GOOGLE_CLIENT_ID: "",
+        GOOGLE_CLIENT_SECRET: "",
+        GOOGLE_ACCESS_TOKEN: "",
+        GOOGLE_REFRESH_TOKEN: "",
+      },
+      tools: [
+        { name: "google-calendar.health", description: "Check connector health and auth status" },
+        { name: "google-calendar.list_calendars", description: "List available calendars" },
+        { name: "google-calendar.list_events", description: "List calendar events" },
+        { name: "google-calendar.get_event", description: "Get a calendar event by ID" },
+        { name: "google-calendar.create_event", description: "Create a calendar event" },
+        { name: "google-calendar.update_event", description: "Update a calendar event" },
+        { name: "google-calendar.delete_event", description: "Delete a calendar event" },
+        { name: "google-calendar.check_availability", description: "Check free/busy availability" },
+      ],
+      tags: ["google", "calendar", "scheduling", "enterprise", "connector"],
+      category: "enterprise",
+      verified: true,
+      featured: true,
+    },
+    {
+      id: "google-drive",
+      name: "Google Drive",
+      description:
+        "Google Drive connector for CoWork OS. File storage, search, and document management. Requires Google OAuth credentials.",
+      version: LOCAL_CONNECTOR_VERSION,
+      author: "CoWork OS",
+      homepage: "https://github.com/CoWork-OS/CoWork-OS",
+      repository: "https://github.com/CoWork-OS/CoWork-OS",
+      license: "MIT",
+      installMethod: "manual",
+      transport: "stdio",
+      defaultCommand: googleDriveCommand.command,
+      defaultArgs: googleDriveCommand.args,
+      defaultEnv: {
+        GOOGLE_CLIENT_ID: "",
+        GOOGLE_CLIENT_SECRET: "",
+        GOOGLE_ACCESS_TOKEN: "",
+        GOOGLE_REFRESH_TOKEN: "",
+      },
+      tools: [
+        { name: "google-drive.health", description: "Check connector health and auth status" },
+        { name: "google-drive.list_files", description: "List files and folders" },
+        { name: "google-drive.search_files", description: "Search files by name or content" },
+        { name: "google-drive.get_file", description: "Get file metadata and content" },
+        { name: "google-drive.upload_file", description: "Upload a file to Drive" },
+        { name: "google-drive.create_folder", description: "Create a new folder" },
+        { name: "google-drive.share_file", description: "Share a file with users" },
+      ],
+      tags: ["google", "drive", "storage", "enterprise", "connector"],
+      category: "enterprise",
+      verified: true,
+      featured: true,
+    },
+    {
+      id: "gmail",
+      name: "Gmail",
+      description:
+        "Gmail connector for CoWork OS. Read, send, and manage email. Requires Google OAuth credentials.",
+      version: LOCAL_CONNECTOR_VERSION,
+      author: "CoWork OS",
+      homepage: "https://github.com/CoWork-OS/CoWork-OS",
+      repository: "https://github.com/CoWork-OS/CoWork-OS",
+      license: "MIT",
+      installMethod: "manual",
+      transport: "stdio",
+      defaultCommand: gmailCommand.command,
+      defaultArgs: gmailCommand.args,
+      defaultEnv: {
+        GOOGLE_CLIENT_ID: "",
+        GOOGLE_CLIENT_SECRET: "",
+        GOOGLE_ACCESS_TOKEN: "",
+        GOOGLE_REFRESH_TOKEN: "",
+      },
+      tools: [
+        { name: "gmail.health", description: "Check connector health and auth status" },
+        { name: "gmail.list_messages", description: "List email messages" },
+        { name: "gmail.get_message", description: "Get an email message by ID" },
+        { name: "gmail.send_message", description: "Send an email" },
+        { name: "gmail.search_messages", description: "Search emails with Gmail query syntax" },
+        { name: "gmail.list_labels", description: "List email labels" },
+        { name: "gmail.modify_labels", description: "Add or remove labels from a message" },
+      ],
+      tags: ["google", "gmail", "email", "enterprise", "connector"],
+      category: "communication",
+      verified: true,
+      featured: true,
+    },
+    // --- OAuth connectors ---
+    {
+      id: "docusign",
+      name: "DocuSign",
+      description:
+        "DocuSign connector for CoWork OS. Manage envelopes and e-signatures. Requires DocuSign OAuth credentials.",
+      version: LOCAL_CONNECTOR_VERSION,
+      author: "CoWork OS",
+      homepage: "https://github.com/CoWork-OS/CoWork-OS",
+      repository: "https://github.com/CoWork-OS/CoWork-OS",
+      license: "MIT",
+      installMethod: "manual",
+      transport: "stdio",
+      defaultCommand: docusignCommand.command,
+      defaultArgs: docusignCommand.args,
+      defaultEnv: {
+        DOCUSIGN_CLIENT_ID: "",
+        DOCUSIGN_CLIENT_SECRET: "",
+        DOCUSIGN_ACCESS_TOKEN: "",
+        DOCUSIGN_REFRESH_TOKEN: "",
+        DOCUSIGN_ACCOUNT_ID: "",
+        DOCUSIGN_BASE_URL: "https://demo.docusign.net/restapi",
+      },
+      tools: [
+        { name: "docusign.health", description: "Check connector health and auth status" },
+        { name: "docusign.list_envelopes", description: "List envelopes" },
+        { name: "docusign.get_envelope", description: "Get envelope details by ID" },
+        { name: "docusign.create_envelope", description: "Create and send an envelope" },
+        { name: "docusign.get_document", description: "Download a document from an envelope" },
+        { name: "docusign.list_templates", description: "List available signing templates" },
+      ],
+      tags: ["docusign", "esign", "legal", "enterprise", "connector"],
+      category: "enterprise",
+      verified: true,
+    },
+    {
+      id: "outreach",
+      name: "Outreach",
+      description:
+        "Outreach connector for CoWork OS. Sales engagement sequences and analytics. Requires Outreach OAuth credentials.",
+      version: LOCAL_CONNECTOR_VERSION,
+      author: "CoWork OS",
+      homepage: "https://github.com/CoWork-OS/CoWork-OS",
+      repository: "https://github.com/CoWork-OS/CoWork-OS",
+      license: "MIT",
+      installMethod: "manual",
+      transport: "stdio",
+      defaultCommand: outreachCommand.command,
+      defaultArgs: outreachCommand.args,
+      defaultEnv: {
+        OUTREACH_CLIENT_ID: "",
+        OUTREACH_CLIENT_SECRET: "",
+        OUTREACH_ACCESS_TOKEN: "",
+        OUTREACH_REFRESH_TOKEN: "",
+      },
+      tools: [
+        { name: "outreach.health", description: "Check connector health and auth status" },
+        { name: "outreach.list_prospects", description: "List prospects" },
+        { name: "outreach.get_prospect", description: "Get prospect details" },
+        { name: "outreach.create_prospect", description: "Create a prospect" },
+        { name: "outreach.list_sequences", description: "List engagement sequences" },
+        { name: "outreach.add_to_sequence", description: "Add a prospect to a sequence" },
+        { name: "outreach.list_tasks", description: "List tasks" },
+      ],
+      tags: ["outreach", "sales-engagement", "enterprise", "connector"],
+      category: "enterprise",
+      verified: true,
+    },
+    {
+      id: "slack",
+      name: "Slack",
+      description:
+        "Slack connector for CoWork OS. Team messaging, channels, and notifications. Requires Slack OAuth credentials.",
+      version: LOCAL_CONNECTOR_VERSION,
+      author: "CoWork OS",
+      homepage: "https://github.com/CoWork-OS/CoWork-OS",
+      repository: "https://github.com/CoWork-OS/CoWork-OS",
+      license: "MIT",
+      installMethod: "manual",
+      transport: "stdio",
+      defaultCommand: slackCommand.command,
+      defaultArgs: slackCommand.args,
+      defaultEnv: {
+        SLACK_BOT_TOKEN: "",
+        SLACK_CLIENT_ID: "",
+        SLACK_CLIENT_SECRET: "",
+        SLACK_ACCESS_TOKEN: "",
+        SLACK_REFRESH_TOKEN: "",
+      },
+      tools: [
+        { name: "slack.health", description: "Check connector health and auth status" },
+        { name: "slack.list_channels", description: "List Slack channels" },
+        { name: "slack.get_channel_history", description: "Get channel message history" },
+        { name: "slack.post_message", description: "Post a message to a channel" },
+        { name: "slack.search_messages", description: "Search messages across channels" },
+        { name: "slack.list_users", description: "List workspace users" },
+        { name: "slack.get_user", description: "Get user profile info" },
+      ],
+      tags: ["slack", "messaging", "enterprise", "connector"],
+      category: "communication",
+      verified: true,
+      featured: true,
+    },
+    {
+      id: "discord",
+      name: "Discord",
+      description:
+        "Discord bot connector for CoWork OS. Guild management, channels, roles, messages, threads, webhooks, and reactions. Requires DISCORD_BOT_TOKEN.",
+      version: LOCAL_CONNECTOR_VERSION,
+      author: "CoWork OS",
+      homepage: "https://github.com/CoWork-OS/CoWork-OS",
+      repository: "https://github.com/CoWork-OS/CoWork-OS",
+      license: "MIT",
+      installMethod: "manual",
+      transport: "stdio",
+      defaultCommand: discordCommand.command,
+      defaultArgs: discordCommand.args,
+      defaultEnv: {
+        DISCORD_BOT_TOKEN: "",
+        DISCORD_APPLICATION_ID: "",
+        DISCORD_GUILD_ID: "",
+      },
+      tools: [
+        { name: "discord.health", description: "Check connector health and auth status" },
+        { name: "discord.list_guilds", description: "List bot's guilds" },
+        { name: "discord.get_guild", description: "Get guild details" },
+        { name: "discord.list_channels", description: "List channels in a guild" },
+        { name: "discord.create_channel", description: "Create a channel" },
+        { name: "discord.edit_channel", description: "Edit a channel" },
+        { name: "discord.delete_channel", description: "Delete a channel" },
+        { name: "discord.send_message", description: "Send a message to a channel" },
+        { name: "discord.get_messages", description: "Get recent messages from a channel" },
+        { name: "discord.create_thread", description: "Create a thread" },
+        { name: "discord.list_roles", description: "List roles in a guild" },
+        { name: "discord.create_role", description: "Create a role" },
+        { name: "discord.add_reaction", description: "Add a reaction to a message" },
+        { name: "discord.create_webhook", description: "Create a webhook" },
+        { name: "discord.list_webhooks", description: "List webhooks for a channel" },
+        { name: "discord.list_members", description: "List guild members" },
+        { name: "discord.get_channel", description: "Get channel details" },
+        { name: "discord.edit_role", description: "Edit an existing role" },
+        { name: "discord.delete_role", description: "Delete a role" },
+      ],
+      tags: ["discord", "messaging", "community", "connector"],
+      category: "communication",
+      verified: true,
+      featured: true,
+    },
+    // --- API-key connectors ---
+    {
+      id: "apollo",
+      name: "Apollo",
+      description:
+        "Apollo.io connector for CoWork OS. Prospecting and data enrichment. Requires APOLLO_API_KEY.",
+      version: LOCAL_CONNECTOR_VERSION,
+      author: "CoWork OS",
+      homepage: "https://github.com/CoWork-OS/CoWork-OS",
+      repository: "https://github.com/CoWork-OS/CoWork-OS",
+      license: "MIT",
+      installMethod: "manual",
+      transport: "stdio",
+      defaultCommand: apolloCommand.command,
+      defaultArgs: apolloCommand.args,
+      defaultEnv: {
+        APOLLO_API_KEY: "",
+      },
+      tools: [
+        { name: "apollo.health", description: "Check connector health and auth status" },
+        { name: "apollo.search_people", description: "Search for contacts by criteria" },
+        { name: "apollo.get_person", description: "Get enriched person data by ID or email" },
+        { name: "apollo.search_organizations", description: "Search for companies" },
+        { name: "apollo.get_organization", description: "Get enriched company data" },
+        { name: "apollo.enrich_contact", description: "Enrich a contact with additional data" },
+      ],
+      tags: ["apollo", "prospecting", "enrichment", "enterprise", "connector"],
+      category: "enterprise",
+      verified: true,
+    },
+    {
+      id: "clay",
+      name: "Clay",
+      description:
+        "Clay connector for CoWork OS. Data enrichment and waterfall workflows. Requires CLAY_API_KEY.",
+      version: LOCAL_CONNECTOR_VERSION,
+      author: "CoWork OS",
+      homepage: "https://github.com/CoWork-OS/CoWork-OS",
+      repository: "https://github.com/CoWork-OS/CoWork-OS",
+      license: "MIT",
+      installMethod: "manual",
+      transport: "stdio",
+      defaultCommand: clayCommand.command,
+      defaultArgs: clayCommand.args,
+      defaultEnv: {
+        CLAY_API_KEY: "",
+      },
+      tools: [
+        { name: "clay.health", description: "Check connector health and auth status" },
+        { name: "clay.list_tables", description: "List Clay tables" },
+        { name: "clay.get_table", description: "Get a table by ID" },
+        { name: "clay.search_rows", description: "Search rows in a table" },
+        { name: "clay.enrich_person", description: "Enrich a person record" },
+        { name: "clay.enrich_company", description: "Enrich a company record" },
+      ],
+      tags: ["clay", "enrichment", "data", "enterprise", "connector"],
+      category: "enterprise",
+      verified: true,
+    },
+    {
+      id: "similarweb",
+      name: "Similarweb",
+      description:
+        "Similarweb connector for CoWork OS. Web traffic analytics and competitive intelligence. Requires SIMILARWEB_API_KEY.",
+      version: LOCAL_CONNECTOR_VERSION,
+      author: "CoWork OS",
+      homepage: "https://github.com/CoWork-OS/CoWork-OS",
+      repository: "https://github.com/CoWork-OS/CoWork-OS",
+      license: "MIT",
+      installMethod: "manual",
+      transport: "stdio",
+      defaultCommand: similarwebCommand.command,
+      defaultArgs: similarwebCommand.args,
+      defaultEnv: {
+        SIMILARWEB_API_KEY: "",
+      },
+      tools: [
+        { name: "similarweb.health", description: "Check connector health and auth status" },
+        { name: "similarweb.get_website_traffic", description: "Get website traffic overview" },
+        { name: "similarweb.get_top_pages", description: "Get top pages for a domain" },
+        { name: "similarweb.get_traffic_sources", description: "Get traffic source breakdown" },
+        { name: "similarweb.get_competitors", description: "Get similar sites and competitors" },
+        { name: "similarweb.get_keyword_analysis", description: "Get organic/paid keyword data" },
+      ],
+      tags: ["similarweb", "analytics", "competitive-intelligence", "enterprise", "connector"],
+      category: "enterprise",
+      verified: true,
+    },
+    {
+      id: "msci",
+      name: "MSCI",
+      description:
+        "MSCI connector for CoWork OS. ESG ratings, risk analytics, and index data. Requires MSCI_API_KEY.",
+      version: LOCAL_CONNECTOR_VERSION,
+      author: "CoWork OS",
+      homepage: "https://github.com/CoWork-OS/CoWork-OS",
+      repository: "https://github.com/CoWork-OS/CoWork-OS",
+      license: "MIT",
+      installMethod: "manual",
+      transport: "stdio",
+      defaultCommand: msciCommand.command,
+      defaultArgs: msciCommand.args,
+      defaultEnv: {
+        MSCI_API_KEY: "",
+        MSCI_BASE_URL: "https://api.msci.com",
+      },
+      tools: [
+        { name: "msci.health", description: "Check connector health and auth status" },
+        { name: "msci.get_esg_rating", description: "Get ESG rating for a company" },
+        { name: "msci.get_esg_history", description: "Get historical ESG rating changes" },
+        { name: "msci.get_index_constituents", description: "List index constituents" },
+        { name: "msci.get_risk_metrics", description: "Get factor risk metrics" },
+        { name: "msci.search_companies", description: "Search companies in MSCI universe" },
+      ],
+      tags: ["msci", "esg", "risk", "index", "finance", "connector"],
+      category: "enterprise",
+      verified: true,
+    },
+    {
+      id: "legalzoom",
+      name: "LegalZoom",
+      description:
+        "LegalZoom connector for CoWork OS. Legal document management and business filings. Requires LEGALZOOM_API_KEY.",
+      version: LOCAL_CONNECTOR_VERSION,
+      author: "CoWork OS",
+      homepage: "https://github.com/CoWork-OS/CoWork-OS",
+      repository: "https://github.com/CoWork-OS/CoWork-OS",
+      license: "MIT",
+      installMethod: "manual",
+      transport: "stdio",
+      defaultCommand: legalzoomCommand.command,
+      defaultArgs: legalzoomCommand.args,
+      defaultEnv: {
+        LEGALZOOM_API_KEY: "",
+      },
+      tools: [
+        { name: "legalzoom.health", description: "Check connector health and auth status" },
+        { name: "legalzoom.list_orders", description: "List document orders" },
+        { name: "legalzoom.get_order", description: "Get order details" },
+        { name: "legalzoom.list_documents", description: "List legal documents" },
+        { name: "legalzoom.get_document", description: "Get a document by ID" },
+        { name: "legalzoom.list_filings", description: "List business filings" },
+      ],
+      tags: ["legalzoom", "legal", "documents", "enterprise", "connector"],
+      category: "enterprise",
+      verified: true,
+    },
+    {
+      id: "factset",
+      name: "FactSet",
+      description:
+        "FactSet connector for CoWork OS. Financial data, analytics, and research. Requires FACTSET_API_KEY.",
+      version: LOCAL_CONNECTOR_VERSION,
+      author: "CoWork OS",
+      homepage: "https://github.com/CoWork-OS/CoWork-OS",
+      repository: "https://github.com/CoWork-OS/CoWork-OS",
+      license: "MIT",
+      installMethod: "manual",
+      transport: "stdio",
+      defaultCommand: factsetCommand.command,
+      defaultArgs: factsetCommand.args,
+      defaultEnv: {
+        FACTSET_USERNAME: "",
+        FACTSET_API_KEY: "",
+      },
+      tools: [
+        { name: "factset.health", description: "Check connector health and auth status" },
+        { name: "factset.get_prices", description: "Get historical price data" },
+        { name: "factset.get_fundamentals", description: "Get company fundamentals" },
+        { name: "factset.get_estimates", description: "Get consensus estimates" },
+        { name: "factset.search_companies", description: "Search for companies" },
+        { name: "factset.get_financials", description: "Get financial statements" },
+        { name: "factset.get_ratios", description: "Get financial ratios" },
+      ],
+      tags: ["factset", "financial-data", "research", "finance", "connector"],
+      category: "enterprise",
+      verified: true,
+      featured: true,
+    },
+    {
+      id: "wordpress",
+      name: "WordPress",
+      description:
+        "WordPress connector for CoWork OS. Manage posts, pages, and media. Requires WordPress application password.",
+      version: LOCAL_CONNECTOR_VERSION,
+      author: "CoWork OS",
+      homepage: "https://github.com/CoWork-OS/CoWork-OS",
+      repository: "https://github.com/CoWork-OS/CoWork-OS",
+      license: "MIT",
+      installMethod: "manual",
+      transport: "stdio",
+      defaultCommand: wordpressCommand.command,
+      defaultArgs: wordpressCommand.args,
+      defaultEnv: {
+        WORDPRESS_SITE_URL: "",
+        WORDPRESS_USERNAME: "",
+        WORDPRESS_APPLICATION_PASSWORD: "",
+      },
+      tools: [
+        { name: "wordpress.health", description: "Check connector health and auth status" },
+        { name: "wordpress.list_posts", description: "List blog posts" },
+        { name: "wordpress.get_post", description: "Get a post by ID" },
+        { name: "wordpress.create_post", description: "Create a new post" },
+        { name: "wordpress.update_post", description: "Update an existing post" },
+        { name: "wordpress.list_pages", description: "List pages" },
+        { name: "wordpress.upload_media", description: "Upload media file" },
+      ],
+      tags: ["wordpress", "cms", "content", "connector"],
+      category: "enterprise",
+      verified: true,
+    },
+    {
+      id: "harvey",
+      name: "Harvey",
+      description:
+        "Harvey AI connector for CoWork OS. AI-powered legal research and document analysis. Requires HARVEY_API_KEY.",
+      version: LOCAL_CONNECTOR_VERSION,
+      author: "CoWork OS",
+      homepage: "https://github.com/CoWork-OS/CoWork-OS",
+      repository: "https://github.com/CoWork-OS/CoWork-OS",
+      license: "MIT",
+      installMethod: "manual",
+      transport: "stdio",
+      defaultCommand: harveyCommand.command,
+      defaultArgs: harveyCommand.args,
+      defaultEnv: {
+        HARVEY_API_KEY: "",
+      },
+      tools: [
+        { name: "harvey.health", description: "Check connector health and auth status" },
+        { name: "harvey.analyze_document", description: "Analyze a legal document" },
+        { name: "harvey.search_case_law", description: "Search case law and precedents" },
+        { name: "harvey.draft_document", description: "Draft a legal document" },
+        { name: "harvey.review_contract", description: "Review and redline a contract" },
+        { name: "harvey.research_question", description: "Research a legal question" },
+      ],
+      tags: ["harvey", "legal", "ai", "enterprise", "connector"],
+      category: "enterprise",
+      verified: true,
+    },
+    {
+      id: "lseg",
+      name: "LSEG (Refinitiv)",
+      description:
+        "LSEG/Refinitiv connector for CoWork OS. Market data, news, and financial analytics. Requires LSEG_API_KEY.",
+      version: LOCAL_CONNECTOR_VERSION,
+      author: "CoWork OS",
+      homepage: "https://github.com/CoWork-OS/CoWork-OS",
+      repository: "https://github.com/CoWork-OS/CoWork-OS",
+      license: "MIT",
+      installMethod: "manual",
+      transport: "stdio",
+      defaultCommand: lsegCommand.command,
+      defaultArgs: lsegCommand.args,
+      defaultEnv: {
+        LSEG_API_KEY: "",
+        LSEG_API_SECRET: "",
+      },
+      tools: [
+        { name: "lseg.health", description: "Check connector health and auth status" },
+        { name: "lseg.get_quote", description: "Get real-time quote for an instrument" },
+        { name: "lseg.get_historical_prices", description: "Get historical price data" },
+        { name: "lseg.search_instruments", description: "Search for instruments" },
+        { name: "lseg.get_news", description: "Get news headlines and stories" },
+        { name: "lseg.get_fundamentals", description: "Get company fundamental data" },
+        { name: "lseg.get_estimates", description: "Get analyst estimates and consensus" },
+      ],
+      tags: ["lseg", "refinitiv", "market-data", "finance", "connector"],
+      category: "enterprise",
+      verified: true,
+      featured: true,
+    },
+    {
+      id: "spglobal",
+      name: "S&P Global",
+      description:
+        "S&P Global connector for CoWork OS. Financial intelligence, credit ratings, and market data. Requires SPGLOBAL_API_KEY.",
+      version: LOCAL_CONNECTOR_VERSION,
+      author: "CoWork OS",
+      homepage: "https://github.com/CoWork-OS/CoWork-OS",
+      repository: "https://github.com/CoWork-OS/CoWork-OS",
+      license: "MIT",
+      installMethod: "manual",
+      transport: "stdio",
+      defaultCommand: spglobalCommand.command,
+      defaultArgs: spglobalCommand.args,
+      defaultEnv: {
+        SPGLOBAL_USERNAME: "",
+        SPGLOBAL_API_KEY: "",
+      },
+      tools: [
+        { name: "spglobal.health", description: "Check connector health and auth status" },
+        { name: "spglobal.get_credit_rating", description: "Get credit rating for an entity" },
+        { name: "spglobal.search_entities", description: "Search entities in S&P universe" },
+        { name: "spglobal.get_financials", description: "Get company financial data" },
+        { name: "spglobal.get_industry_data", description: "Get industry analysis data" },
+        { name: "spglobal.get_market_data", description: "Get market and index data" },
+      ],
+      tags: ["spglobal", "credit-ratings", "financial-data", "finance", "connector"],
+      category: "enterprise",
+      verified: true,
+      featured: true,
+    },
+    {
+      id: "commonroom",
+      name: "Common Room",
+      description:
+        "Common Room connector for CoWork OS. Community intelligence and signal tracking. Requires COMMONROOM_API_KEY.",
+      version: LOCAL_CONNECTOR_VERSION,
+      author: "CoWork OS",
+      homepage: "https://github.com/CoWork-OS/CoWork-OS",
+      repository: "https://github.com/CoWork-OS/CoWork-OS",
+      license: "MIT",
+      installMethod: "manual",
+      transport: "stdio",
+      defaultCommand: commonroomCommand.command,
+      defaultArgs: commonroomCommand.args,
+      defaultEnv: {
+        COMMONROOM_API_KEY: "",
+      },
+      tools: [
+        { name: "commonroom.health", description: "Check connector health and auth status" },
+        { name: "commonroom.list_members", description: "List community members" },
+        { name: "commonroom.get_member", description: "Get member details" },
+        { name: "commonroom.list_activities", description: "List community activities" },
+        { name: "commonroom.search_signals", description: "Search buying signals" },
+        { name: "commonroom.list_segments", description: "List member segments" },
+      ],
+      tags: ["commonroom", "community", "signals", "enterprise", "connector"],
+      category: "enterprise",
+      verified: true,
+    },
+    {
+      id: "tribeai",
+      name: "Tribe AI",
+      description:
+        "Tribe AI connector for CoWork OS. AI workforce management and expert matching. Requires TRIBEAI_API_KEY.",
+      version: LOCAL_CONNECTOR_VERSION,
+      author: "CoWork OS",
+      homepage: "https://github.com/CoWork-OS/CoWork-OS",
+      repository: "https://github.com/CoWork-OS/CoWork-OS",
+      license: "MIT",
+      installMethod: "manual",
+      transport: "stdio",
+      defaultCommand: tribeaiCommand.command,
+      defaultArgs: tribeaiCommand.args,
+      defaultEnv: {
+        TRIBEAI_API_KEY: "",
+      },
+      tools: [
+        { name: "tribeai.health", description: "Check connector health and auth status" },
+        { name: "tribeai.list_experts", description: "List available AI experts" },
+        { name: "tribeai.get_expert", description: "Get expert profile details" },
+        { name: "tribeai.search_experts", description: "Search experts by skill or domain" },
+        { name: "tribeai.create_project", description: "Create a new project" },
+        { name: "tribeai.list_projects", description: "List projects" },
+      ],
+      tags: ["tribeai", "ai", "workforce", "enterprise", "connector"],
+      category: "enterprise",
+      verified: true,
+    },
   ];
+
+  return filterUnavailableConnectorEntries(entries);
 }
 
 function getBuiltinRegistry(): MCPRegistry {

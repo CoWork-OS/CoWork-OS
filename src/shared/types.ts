@@ -230,7 +230,20 @@ export type EventType =
   | "synthesis_completed" // Leader completed synthesis
   // Step-level user feedback events
   | "step_feedback" // User sent feedback on an in-progress step
-  | "step_skipped"; // Step was skipped by user intervention
+  | "step_skipped" // Step was skipped by user intervention
+  // Citation engine events
+  | "citations_collected" // Web research citations gathered
+  // Workflow decomposition events
+  | "workflow_detected" // Multi-phase workflow identified
+  | "workflow_phase_started" // Pipeline phase started
+  | "workflow_phase_completed" // Pipeline phase completed
+  | "workflow_phase_failed" // Pipeline phase failed
+  | "pipeline_completed" // Full workflow pipeline completed
+  // Document generation events
+  | "artifact_created" // Document/file artifact generated
+  // Deep work mode events
+  | "progress_journal" // Periodic human-readable status update for long-running tasks
+  | "research_recovery_started"; // Agent began researching error before retry
 
 export type ToolType =
   | "read_file"
@@ -303,6 +316,11 @@ export type ToolType =
   | "scraping_status"
   // Memory tools
   | "memory_save"
+  // Scratchpad tools (session-scoped agent notes)
+  | "scratchpad_write"
+  | "scratchpad_read"
+  // Orchestration tools
+  | "orchestrate_agents"
   // Meta tools
   | "revise_plan"
   | "task_history"
@@ -344,6 +362,8 @@ export const TOOL_GROUPS = {
     // Local gateway message history
     "channel_list_chats",
     "channel_history",
+    // Session scratchpad (read)
+    "scratchpad_read",
   ],
   // Write operations - medium risk
   "group:write": [
@@ -359,6 +379,8 @@ export const TOOL_GROUPS = {
     "organize_folder",
     // Monty transform library can write transformed outputs
     "monty_transform_file",
+    // Session scratchpad (write)
+    "scratchpad_write",
   ],
   // Destructive operations - high risk, requires approval
   "group:destructive": ["delete_file", "run_command"],
@@ -503,6 +525,11 @@ export const TOOL_RISK_LEVELS: Record<ToolType, ToolRiskLevel> = {
   scraping_status: "read",
   // Memory
   memory_save: "write",
+  // Scratchpad
+  scratchpad_write: "write",
+  scratchpad_read: "read",
+  // Orchestration
+  orchestrate_agents: "write",
   // Meta
   revise_plan: "read",
   task_history: "read",
@@ -630,6 +657,14 @@ export interface AgentConfig {
   verificationAgent?: boolean;
   /** Whether to emit a pre-flight problem framing before execution (set by strategy service) */
   preflightRequired?: boolean;
+  /** Enable deep work mode: long-running autonomous execution with research-retry, journaling, auto-report */
+  deepWorkMode?: boolean;
+  /** Enable auto-report generation on completion (markdown summary of what was done) */
+  autoReportEnabled?: boolean;
+  /** Enable periodic progress journaling for fire-and-forget visibility */
+  progressJournalEnabled?: boolean;
+  /** Detected task intent from IntentRouter (used for intent-based tool filtering) */
+  taskIntent?: string;
 }
 
 /** Specification for one LLM participant in a multi-LLM run */
@@ -2685,6 +2720,32 @@ export const IPC_CHANNELS = {
   SUGGESTIONS_LIST: "suggestions:list",
   SUGGESTIONS_DISMISS: "suggestions:dismiss",
   SUGGESTIONS_ACT: "suggestions:act",
+
+  // Citation Engine
+  CITATION_GET_FOR_TASK: "citation:getForTask",
+
+  // Event Triggers
+  TRIGGER_LIST: "trigger:list",
+  TRIGGER_ADD: "trigger:add",
+  TRIGGER_UPDATE: "trigger:update",
+  TRIGGER_REMOVE: "trigger:remove",
+  TRIGGER_HISTORY: "trigger:history",
+
+  // Daily Briefing (extended)
+  BRIEFING_GET_LATEST: "briefing:getLatest",
+  BRIEFING_GET_CONFIG: "briefing:getConfig",
+  BRIEFING_SAVE_CONFIG: "briefing:saveConfig",
+
+  // File Hub
+  FILEHUB_LIST: "filehub:list",
+  FILEHUB_SEARCH: "filehub:search",
+  FILEHUB_RECENT: "filehub:recent",
+  FILEHUB_SOURCES: "filehub:sources",
+
+  // Web Access
+  WEBACCESS_GET_SETTINGS: "webaccess:getSettings",
+  WEBACCESS_SAVE_SETTINGS: "webaccess:saveSettings",
+  WEBACCESS_GET_STATUS: "webaccess:getStatus",
 } as const;
 
 // LLM Provider types
@@ -3134,7 +3195,7 @@ export interface TunnelStatusData {
 }
 
 // Search Provider types
-export type SearchProviderType = "tavily" | "brave" | "serpapi" | "google";
+export type SearchProviderType = "tavily" | "brave" | "serpapi" | "google" | "duckduckgo";
 export type SearchType = "web" | "news" | "images";
 
 export interface SearchSettingsData {

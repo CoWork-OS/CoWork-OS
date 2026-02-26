@@ -378,6 +378,12 @@ export class ToolCallDeduplicator {
   private getSemanticSignature(toolName: string, input: any): string {
     if (!input) return toolName;
 
+    if (toolName === "browser_navigate") {
+      const rawUrl = String(input.url || "").trim();
+      const normalizedUrl = this.normalizeUrlForSemanticSignature(rawUrl);
+      return `${toolName}:url:${normalizedUrl}`;
+    }
+
     // For file operations, normalize the filename to detect variants
     if (
       toolName === "create_document" ||
@@ -423,6 +429,46 @@ export class ToolCallDeduplicator {
 
     // Default: use tool name only for semantic grouping
     return toolName;
+  }
+
+  private normalizeUrlForSemanticSignature(rawUrl: string): string {
+    const trimmed = (rawUrl || "").trim();
+    if (!trimmed) return "";
+    try {
+      const url = new URL(trimmed);
+      const trackingParams = new Set([
+        "utm_source",
+        "utm_medium",
+        "utm_campaign",
+        "utm_term",
+        "utm_content",
+        "utm_id",
+        "gclid",
+        "fbclid",
+        "mc_cid",
+        "mc_eid",
+        "igshid",
+      ]);
+
+      const keptEntries = Array.from(url.searchParams.entries())
+        .filter(([key]) => !trackingParams.has(key.toLowerCase()))
+        .sort(([aKey, aVal], [bKey, bVal]) => {
+          if (aKey === bKey) return aVal.localeCompare(bVal);
+          return aKey.localeCompare(bKey);
+        });
+
+      const normalizedQuery = keptEntries
+        .map(
+          ([key, value]) =>
+            `${encodeURIComponent(key)}=${encodeURIComponent(value)}`,
+        )
+        .join("&");
+
+      const normalizedPath = url.pathname.replace(/\/+$/, "") || "/";
+      return `${url.protocol}//${url.host}${normalizedPath}${normalizedQuery ? `?${normalizedQuery}` : ""}`.toLowerCase();
+    } catch {
+      return trimmed.toLowerCase();
+    }
   }
 
   /**
@@ -537,6 +583,7 @@ export class ToolCallDeduplicator {
       "create_spreadsheet",
       "create_presentation",
       "web_search",
+      "browser_navigate",
     ];
     if (semanticTools.includes(toolName)) {
       const semanticCheck = this.checkSemanticDuplicate(toolName, input);

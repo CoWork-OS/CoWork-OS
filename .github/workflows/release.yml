@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 90
     strategy:
       matrix:
-        os: [macos-latest]
+        os: [macos-latest, windows-latest]
 
     steps:
       - name: Checkout code
@@ -38,6 +38,7 @@ jobs:
 
       - name: Resolve release metadata
         id: release_metadata
+        shell: bash
         run: |
           npm_version="$(node -p "require('./package.json').version")"
 
@@ -58,6 +59,7 @@ jobs:
         run: npm test
 
       - name: Validate published-package first-install flow
+        if: runner.os != 'Windows'
         env:
           CO_WORK_INSTALL_VERSION: ${{ steps.release_metadata.outputs.npm_version }}
         run: |
@@ -106,6 +108,7 @@ jobs:
         run: npm run build
 
       - name: Generate release notes from changelog
+        shell: bash
         run: |
           node - <<'NODE'
           const fs = require('fs');
@@ -132,6 +135,7 @@ jobs:
           NPM_VERSION: ${{ steps.release_metadata.outputs.npm_version }}
 
       - name: Prepare draft GitHub release for packaging
+        if: runner.os != 'Windows'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -171,6 +175,7 @@ jobs:
           # unsigned macOS build publishing to GitHub releases
 
       - name: Publish draft GitHub release
+        if: runner.os != 'Windows'
         run: |
           release_tag="${{ steps.release_metadata.outputs.release_tag }}"
           gh release edit "${release_tag}" --draft=false --repo "${GITHUB_REPOSITORY}"

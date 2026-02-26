@@ -448,4 +448,94 @@ export class ContextManager {
 
     return currentTokens + newTokens > availableTokens;
   }
+
+  /**
+   * Get current context utilization as a ratio (0-1+).
+   */
+  getContextUtilization(
+    messages: LLMMessage[],
+    systemPromptTokens: number = 0,
+  ): { currentTokens: number; availableTokens: number; utilization: number } {
+    const currentTokens = estimateTotalTokens(messages);
+    const availableTokens = this.getAvailableTokens(systemPromptTokens);
+    return {
+      currentTokens,
+      availableTokens,
+      utilization: availableTokens > 0 ? currentTokens / availableTokens : 0,
+    };
+  }
+
+  /**
+   * Proactive compaction: compact down to a target utilization (e.g. 55%)
+   * rather than only compacting when the context exceeds the hard limit.
+   * This frees ample slack for a comprehensive compaction summary.
+   */
+  proactiveCompactWithMeta(
+    messages: LLMMessage[],
+    systemPromptTokens: number = 0,
+    targetUtilization: number = 0.55,
+  ): CompactionResult {
+    const availableTokens = this.getAvailableTokens(systemPromptTokens);
+    const targetTokens = Math.floor(availableTokens * targetUtilization);
+    let currentTokens = estimateTotalTokens(messages);
+    const originalTokens = currentTokens;
+
+    if (currentTokens <= targetTokens) {
+      return {
+        messages,
+        meta: {
+          availableTokens,
+          originalTokens,
+          truncatedToolResults: { didTruncate: false, count: 0, tokensAfter: currentTokens },
+          removedMessages: { didRemove: false, count: 0, tokensAfter: currentTokens, messages: [] },
+          kind: "none",
+        },
+      };
+    }
+
+    // Strategy 1: Truncate large tool results
+    const truncated = this.truncateLargeResultsWithMeta(messages);
+    currentTokens = estimateTotalTokens(truncated.messages);
+
+    if (currentTokens <= targetTokens) {
+      return {
+        messages: truncated.messages,
+        meta: {
+          availableTokens,
+          originalTokens,
+          truncatedToolResults: {
+            didTruncate: truncated.count > 0,
+            count: truncated.count,
+            tokensAfter: currentTokens,
+          },
+          removedMessages: { didRemove: false, count: 0, tokensAfter: currentTokens, messages: [] },
+          kind: "tool_truncation_only",
+        },
+      };
+    }
+
+    // Strategy 2: Remove older messages down to targetTokens
+    const removed = this.removeOlderMessagesWithMeta(truncated.messages, targetTokens);
+    currentTokens = estimateTotalTokens(removed.messages);
+
+    return {
+      messages: removed.messages,
+      meta: {
+        availableTokens,
+        originalTokens,
+        truncatedToolResults: {
+          didTruncate: truncated.count > 0,
+          count: truncated.count,
+          tokensAfter: estimateTotalTokens(truncated.messages),
+        },
+        removedMessages: {
+          didRemove: removed.removedMessages.length > 0,
+          count: removed.removedMessages.length,
+          tokensAfter: currentTokens,
+          messages: removed.removedMessages,
+        },
+        kind: removed.removedMessages.length > 0 ? "message_removal" : "tool_truncation_only",
+      },
+    };
+  }
 }

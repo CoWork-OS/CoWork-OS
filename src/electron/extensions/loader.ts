@@ -35,10 +35,9 @@ const getDefaultExtensionsDirs = (): string[] => {
   }
 
   // Built-in plugin packs
-  const isDev = process.env.NODE_ENV === "development";
-  const pluginPacksDir = isDev
-    ? path.join(process.cwd(), "resources", "plugin-packs")
-    : path.join(process.resourcesPath || "", "plugin-packs");
+  const pluginPacksDir = app.isPackaged
+    ? path.join(process.resourcesPath || "", "plugin-packs")
+    : path.join(process.cwd(), "resources", "plugin-packs");
   if (fs.existsSync(pluginPacksDir)) {
     dirs.push(pluginPacksDir);
   }

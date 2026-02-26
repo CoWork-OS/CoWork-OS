@@ -34,6 +34,16 @@ export interface SkillLoaderConfig {
   skillsConfig?: SkillsConfig;
 }
 
+function isPackagedElectronApp(): boolean {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const electron = require("electron") as Any;
+    return Boolean(electron?.app?.isPackaged);
+  } catch {
+    return false;
+  }
+}
+
 export class CustomSkillLoader {
   private static readonly LOW_SIGNAL_ROUTING_HINT_PATTERNS = {
     dontUseWhen: [/planning documents,\s*high-level strategy,\s*or non-executable discussion/i],
@@ -59,13 +69,12 @@ export class CustomSkillLoader {
 
   constructor(config?: SkillLoaderConfig) {
     // Bundled skills directory
-    const isDev = process.env.NODE_ENV === "development";
     if (config?.bundledSkillsDir) {
       this.bundledSkillsDir = config.bundledSkillsDir;
-    } else if (isDev) {
-      this.bundledSkillsDir = path.join(process.cwd(), "resources", SKILLS_FOLDER_NAME);
     } else {
-      this.bundledSkillsDir = path.join(process.resourcesPath || "", SKILLS_FOLDER_NAME);
+      this.bundledSkillsDir = isPackagedElectronApp()
+        ? path.join(process.resourcesPath || "", SKILLS_FOLDER_NAME)
+        : path.join(process.cwd(), "resources", SKILLS_FOLDER_NAME);
     }
 
     // Managed skills directory (from registry)

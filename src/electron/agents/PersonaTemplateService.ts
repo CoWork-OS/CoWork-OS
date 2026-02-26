@@ -17,6 +17,16 @@ interface PersonaTemplateServiceConfig {
   bundledTemplatesDir?: string;
 }
 
+function isPackagedElectronApp(): boolean {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const electron = require("electron") as Any;
+    return Boolean(electron?.app?.isPackaged);
+  } catch {
+    return false;
+  }
+}
+
 const CATEGORY_LABELS: Record<PersonaTemplateCategory, string> = {
   engineering: "Engineering",
   management: "Management",
@@ -38,13 +48,12 @@ export class PersonaTemplateService {
     private agentRoleRepo: AgentRoleRepository,
     config?: PersonaTemplateServiceConfig,
   ) {
-    const isDev = process.env.NODE_ENV === "development";
     if (config?.bundledTemplatesDir) {
       this.bundledTemplatesDir = config.bundledTemplatesDir;
-    } else if (isDev) {
-      this.bundledTemplatesDir = path.join(process.cwd(), "resources", TEMPLATES_FOLDER_NAME);
     } else {
-      this.bundledTemplatesDir = path.join(process.resourcesPath || "", TEMPLATES_FOLDER_NAME);
+      this.bundledTemplatesDir = isPackagedElectronApp()
+        ? path.join(process.resourcesPath || "", TEMPLATES_FOLDER_NAME)
+        : path.join(process.cwd(), "resources", TEMPLATES_FOLDER_NAME);
     }
   }
 

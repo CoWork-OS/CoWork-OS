@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-02-26
+
+### Fixed
+- **Windows black-screen startup guard**: app now detects missing renderer entry (`dist/renderer/index.html`) and shows an explicit installation error page instead of opening a blank window.
+- **Unpackaged runtime resource resolution**: bundled skills, persona templates, and plugin packs now resolve from `process.cwd()/resources` when running from npm-installed (non-packaged) Electron runtime, restoring bundled content loading on Windows/Linux npm installs.
+- **Launcher artifact checks**: `cowork-os` CLI now validates both main and renderer build artifacts before launch and surfaces a clearer recovery message if published assets are incomplete.
+
 ## [0.4.4] - 2026-02-26
 
 ### Fixed

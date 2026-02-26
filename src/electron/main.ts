@@ -1,6 +1,7 @@
 import path from "path";
 import os from "os";
 import * as fs from "fs/promises";
+import * as fsSync from "fs";
 import { pathToFileURL } from "url";
 import { app, BrowserWindow, ipcMain, dialog, session, shell, Notification } from "electron";
 import mime from "mime-types";
@@ -182,7 +183,41 @@ if (!gotTheLock) {
       mainWindow.loadURL("http://localhost:5173");
       mainWindow.webContents.openDevTools();
     } else {
-      mainWindow.loadFile(path.join(__dirname, "../../renderer/index.html"));
+      const rendererDir = path.join(__dirname, "../../renderer");
+      const rendererIndex = path.join(rendererDir, "index.html");
+
+      if (!fsSync.existsSync(rendererIndex)) {
+        console.error(
+          `[Main] Renderer entry not found: ${rendererIndex}. ` +
+            "The installed package is missing UI assets."
+        );
+        const html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CoWork OS - Installation Error</title>
+  <style>
+    body { font-family: Segoe UI, Arial, sans-serif; margin: 0; background: #111215; color: #f3f4f6; }
+    .wrap { max-width: 760px; margin: 40px auto; padding: 0 20px; }
+    h1 { font-size: 22px; margin-bottom: 8px; }
+    p { color: #d1d5db; line-height: 1.6; }
+    pre { background: #0a0a0c; border: 1px solid #27272a; padding: 12px; overflow-x: auto; border-radius: 8px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>CoWork OS could not load UI assets</h1>
+    <p>The installed npm package is missing <code>dist/renderer/index.html</code>.</p>
+    <p>Reinstall the latest release, or ask the maintainer to republish with built renderer assets.</p>
+    <pre>${rendererIndex}</pre>
+  </div>
+</body>
+</html>`;
+        mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+      } else {
+        mainWindow.loadFile(rendererIndex);
+      }
     }
 
     mainWindow.on("closed", () => {

@@ -86,6 +86,31 @@ pkill -f '/cowork-os' || true
 cowork-os
 ```
 
+## Windows opens to a black screen (`ERR_FILE_NOT_FOUND dist/renderer/index.html`)
+
+If terminal logs include:
+
+```text
+Failed to load URL .../dist/renderer/index.html with error: ERR_FILE_NOT_FOUND
+```
+
+the published package is missing renderer build assets.
+
+For users:
+
+```powershell
+npm uninstall -g cowork-os
+npm cache clean --force
+npm install -g cowork-os@latest --no-audit --no-fund
+```
+
+For maintainers (before publish), verify tarball contains renderer assets:
+
+```bash
+npm run build
+npm pack --json --dry-run | jq -r '.[0].files[].path' | grep '^dist/renderer/index.html$'
+```
+
 ## VPS: "tsc: not found"
 
 If you see `sh: 1: tsc: not found` right after `npx coworkd-node`, you are on an older broken npm publish. Upgrade and retry:

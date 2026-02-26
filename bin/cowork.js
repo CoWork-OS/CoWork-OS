@@ -7,6 +7,7 @@ const fs = require('fs');
 const packageDir = path.resolve(__dirname, '..');
 const packageJsonPath = path.join(packageDir, 'package.json');
 const mainPath = path.join(packageDir, 'dist', 'electron', 'electron', 'main.js');
+const rendererIndexPath = path.join(packageDir, 'dist', 'renderer', 'index.html');
 const args = process.argv.slice(2);
 const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
@@ -27,16 +28,25 @@ function buildAppAndLaunch() {
 
   build.on('exit', (code) => {
     if (code !== 0) {
-      console.error('[cowork-os] Build failed. Run `npm run build` and retry.');
+      console.error(
+        '[cowork-os] Build failed. The installed package may be incomplete. ' +
+        'Reinstall the latest release or run `npm run build` from source.'
+      );
       process.exit(code || 1);
     }
     launchApp();
   });
 }
 
-if (fs.existsSync(mainPath)) {
+if (fs.existsSync(mainPath) && fs.existsSync(rendererIndexPath)) {
   prepareAndLaunchApp();
 } else {
+  if (!fs.existsSync(mainPath)) {
+    console.log('[cowork-os] Main process build artifacts are missing.');
+  }
+  if (!fs.existsSync(rendererIndexPath)) {
+    console.log('[cowork-os] Renderer build artifacts are missing.');
+  }
   buildAppAndLaunch();
 }
 

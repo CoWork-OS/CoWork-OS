@@ -1,6 +1,6 @@
 {
   "name": "cowork-os",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "description": "CoWork OS - The most complete open-source AI assistant platform",
   "overrides": {
     "@whiskeysockets/baileys": {

@@ -65,11 +65,27 @@ const MACOS_TAILSCALE_PATHS = [
 ];
 
 /**
- * Check if a file exists and is executable
+ * Common Windows paths where Tailscale might be installed
+ */
+const WINDOWS_TAILSCALE_PATHS = [
+  "C:\\Program Files\\Tailscale\\tailscale.exe",
+  "C:\\Program Files (x86)\\Tailscale\\tailscale.exe",
+  path.join(process.env.LOCALAPPDATA || "", "Tailscale", "tailscale.exe"),
+];
+
+/**
+ * Common Linux paths where Tailscale might be installed
+ */
+const LINUX_TAILSCALE_PATHS = ["/usr/bin/tailscale", "/usr/local/bin/tailscale"];
+
+/**
+ * Check if a file exists and is executable.
+ * On Windows, X_OK always succeeds, so we check R_OK instead.
  */
 async function isExecutable(filePath: string): Promise<boolean> {
   try {
-    await fs.promises.access(filePath, fs.constants.X_OK);
+    const mode = process.platform === "win32" ? fs.constants.R_OK : fs.constants.X_OK;
+    await fs.promises.access(filePath, mode);
     return true;
   } catch {
     return false;
@@ -109,8 +125,14 @@ export async function findTailscaleBinary(): Promise<string | null> {
 
   binarySearchAttempted = true;
 
-  // Strategy 1: Check common macOS paths
-  for (const candidatePath of MACOS_TAILSCALE_PATHS) {
+  // Strategy 1: Check common platform-specific paths
+  const platformPaths =
+    process.platform === "darwin"
+      ? MACOS_TAILSCALE_PATHS
+      : process.platform === "win32"
+        ? WINDOWS_TAILSCALE_PATHS
+        : LINUX_TAILSCALE_PATHS;
+  for (const candidatePath of platformPaths) {
     if (await isExecutable(candidatePath)) {
       if (await verifyTailscaleBinary(candidatePath)) {
         cachedBinaryPath = candidatePath;
@@ -122,13 +144,20 @@ export async function findTailscaleBinary(): Promise<string | null> {
 
   // Strategy 2: Try PATH lookup
   try {
-    const { stdout } = await execAsync("which tailscale", { timeout: 3000 });
-    const whichPath = stdout.trim();
-    if (whichPath && (await isExecutable(whichPath))) {
-      if (await verifyTailscaleBinary(whichPath)) {
-        cachedBinaryPath = whichPath;
-        console.log("[Tailscale] Found binary via which:", whichPath);
-        return whichPath;
+    const lookupCmd = process.platform === "win32" ? "where tailscale" : "which tailscale";
+    const { stdout } = await execAsync(lookupCmd, { timeout: 3000 });
+    const lookupCandidates = stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .filter((line) => !line.toLowerCase().startsWith("info:"));
+    for (const candidatePath of lookupCandidates) {
+      if (await isExecutable(candidatePath)) {
+        if (await verifyTailscaleBinary(candidatePath)) {
+          cachedBinaryPath = candidatePath;
+          console.log("[Tailscale] Found binary via PATH lookup:", candidatePath);
+          return candidatePath;
+        }
       }
     }
   } catch {

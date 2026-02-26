@@ -20,6 +20,7 @@ import type {
   CronRunHistoryEntry,
   CronRunHistoryResult,
   CronWebhookConfig,
+  CronWorkspaceContext,
 } from "./types";
 import { loadCronStore, saveCronStore, resolveCronStorePath } from "./store";
 import { computeNextRunAtMs } from "./schedule";
@@ -56,6 +57,7 @@ interface CronServiceState {
       | "getTaskStatus"
       | "getTaskResultText"
       | "resolveTemplateVariables"
+      | "resolveWorkspaceContext"
     >
   > & {
     nowMs: () => number;
@@ -69,6 +71,7 @@ interface CronServiceState {
     getTaskResultText?: CronServiceDeps["getTaskResultText"];
     deliverToChannel?: CronServiceDeps["deliverToChannel"];
     resolveTemplateVariables?: CronServiceDeps["resolveTemplateVariables"];
+    resolveWorkspaceContext?: CronServiceDeps["resolveWorkspaceContext"];
   };
   store: CronStoreFile | null;
   timer: ReturnType<typeof setTimeout> | null;
@@ -95,6 +98,7 @@ export class CronService {
         getTaskResultText: deps.getTaskResultText,
         deliverToChannel: deps.deliverToChannel,
         resolveTemplateVariables: deps.resolveTemplateVariables,
+        resolveWorkspaceContext: deps.resolveWorkspaceContext,
       },
       store: null,
       timer: null,
@@ -311,6 +315,20 @@ export class CronService {
         },
       };
 
+      try {
+        const workspaceContext = await this.resolveWorkspaceContext(job, nowMs, "add");
+        if (workspaceContext?.workspaceId) {
+          job.workspaceId = workspaceContext.workspaceId;
+        }
+      } catch (error) {
+        const errMsg = error instanceof Error ? error.message : String(error);
+        log.error(`Failed to resolve workspace for job "${job.name}"`, error);
+        return {
+          ok: false,
+          error: `Failed to resolve workspace for scheduled job: ${errMsg}`,
+        };
+      }
+
       store.jobs.push(job);
       await this.persist();
       this.armTimer();
@@ -464,6 +482,39 @@ export class CronService {
     this.state.deps.onEvent?.(evt);
   }
 
+  private async resolveWorkspaceContext(
+    job: CronJob,
+    nowMs: number,
+    phase: "add" | "run",
+  ): Promise<CronWorkspaceContext | null> {
+    const resolver = this.state.deps.resolveWorkspaceContext;
+    if (!resolver) return null;
+
+    const context = await resolver({ job, nowMs, phase });
+    if (!context) return null;
+
+    const workspaceId =
+      typeof context.workspaceId === "string" ? context.workspaceId.trim() : "";
+    if (!workspaceId) return null;
+
+    return {
+      workspaceId,
+      workspacePath:
+        typeof context.workspacePath === "string" && context.workspacePath.trim().length > 0
+          ? context.workspacePath
+          : undefined,
+      runWorkspacePath:
+        typeof context.runWorkspacePath === "string" && context.runWorkspacePath.trim().length > 0
+          ? context.runWorkspacePath
+          : undefined,
+      runWorkspaceRelativePath:
+        typeof context.runWorkspaceRelativePath === "string" &&
+        context.runWorkspaceRelativePath.trim().length > 0
+          ? context.runWorkspaceRelativePath
+          : undefined,
+    };
+  }
+
   private async withLock<T>(fn: () => Promise<T>): Promise<T> {
     const prevOp = this.state.opLock;
     let resolve: (value?: unknown) => void;
@@ -501,15 +552,31 @@ export class CronService {
     let status: "ok" | "error" | "timeout" = "ok";
     let errorMsg: string | undefined;
     let resultText: string | undefined;
+    let workspaceContext: CronWorkspaceContext | null = null;
+    let workspaceIdForRun = job.workspaceId;
 
     try {
-      const renderedPrompt = await this.renderTaskPrompt(job, nowMs, prevRunAtMs);
+      workspaceContext = await this.resolveWorkspaceContext(job, nowMs, "run");
+      if (workspaceContext?.workspaceId) {
+        workspaceIdForRun = workspaceContext.workspaceId;
+      }
+      if (workspaceIdForRun !== job.workspaceId) {
+        job.workspaceId = workspaceIdForRun;
+        job.updatedAtMs = nowMs;
+      }
+
+      const renderedPrompt = await this.renderTaskPrompt(
+        job,
+        nowMs,
+        prevRunAtMs,
+        workspaceContext,
+      );
 
       // Create a task with optional model override
       const result = await deps.createTask({
         title: job.taskTitle || `Scheduled: ${job.name}`,
         prompt: renderedPrompt,
-        workspaceId: job.workspaceId,
+        workspaceId: workspaceIdForRun,
         modelKey: job.modelKey,
         allowUserInput: false,
         agentConfig: job.taskAgentConfig,
@@ -629,6 +696,8 @@ export class CronService {
       status,
       error: errorMsg,
       taskId,
+      workspaceId: workspaceIdForRun,
+      runWorkspacePath: workspaceContext?.runWorkspacePath,
     };
     job.state.runHistory = job.state.runHistory ?? [];
     job.state.runHistory.unshift(historyEntry);
@@ -773,6 +842,7 @@ export class CronService {
     job: CronJob,
     runAtMs: number,
     prevRunAtMs?: number,
+    workspaceContext?: CronWorkspaceContext | null,
   ): Promise<string> {
     const { deps, log } = this.getContext();
     const template = job.taskPrompt;
@@ -806,6 +876,15 @@ export class CronService {
     const vars: Record<string, string> = {
       prev_run: prevRunAtMs ? new Date(prevRunAtMs).toISOString() : "",
     };
+    if (workspaceContext?.workspacePath) {
+      vars.workspace_path = workspaceContext.workspacePath;
+      vars.job_workspace_path = workspaceContext.workspacePath;
+    }
+    if (workspaceContext?.runWorkspacePath) {
+      vars.run_workspace_path = workspaceContext.runWorkspacePath;
+      vars.run_workspace = workspaceContext.runWorkspacePath;
+      vars.run_workspace_relpath = workspaceContext.runWorkspaceRelativePath || "";
+    }
 
     if (deps.resolveTemplateVariables) {
       try {
@@ -823,6 +902,23 @@ export class CronService {
 
     for (const [k, v] of Object.entries(vars)) {
       rendered = rendered.split(`{{${k}}}`).join(v);
+    }
+
+    if (workspaceContext?.runWorkspacePath) {
+      const workspacePath = workspaceContext.workspacePath || "";
+      const relativePath = workspaceContext.runWorkspaceRelativePath
+        ? `./${workspaceContext.runWorkspaceRelativePath}`
+        : workspaceContext.runWorkspacePath;
+      rendered = [
+        "Scheduled run context:",
+        `- Workspace root: ${workspacePath || "(unknown)"}`,
+        `- Run folder: ${workspaceContext.runWorkspacePath}`,
+        `- Run folder (relative): ${relativePath}`,
+        "Use the run folder for temporary or intermediate files for this execution.",
+        "Keep durable outputs outside the run folder only when explicitly required.",
+        "",
+        rendered,
+      ].join("\n");
     }
 
     return rendered;

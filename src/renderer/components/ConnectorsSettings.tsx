@@ -127,6 +127,181 @@ const CONNECTORS: ConnectorDefinition[] = [
       { key: "RESEND_BASE_URL", label: "Base URL", placeholder: "https://api.resend.com" },
     ],
   },
+  // --- Google Workspace (OAuth) ---
+  {
+    key: "google-calendar",
+    name: "Google Calendar",
+    registryId: "google-calendar",
+    description: "Calendar events, scheduling, and availability.",
+    supportsOAuth: true,
+    provider: "google-calendar",
+  },
+  {
+    key: "google-drive",
+    name: "Google Drive",
+    registryId: "google-drive",
+    description: "File storage, search, and document management.",
+    supportsOAuth: true,
+    provider: "google-drive",
+  },
+  {
+    key: "gmail",
+    name: "Gmail",
+    registryId: "gmail",
+    description: "Email read, send, and label management.",
+    supportsOAuth: true,
+    provider: "gmail",
+  },
+  // --- OAuth connectors ---
+  {
+    key: "docusign",
+    name: "DocuSign",
+    registryId: "docusign",
+    description: "Envelope management and e-signatures.",
+    supportsOAuth: true,
+    provider: "docusign",
+  },
+  {
+    key: "outreach",
+    name: "Outreach",
+    registryId: "outreach",
+    description: "Sales engagement sequences and analytics.",
+    supportsOAuth: true,
+    provider: "outreach",
+  },
+  {
+    key: "slack",
+    name: "Slack",
+    registryId: "slack",
+    description: "Team messaging, channels, and notifications.",
+    supportsOAuth: true,
+    provider: "slack",
+  },
+  {
+    key: "discord",
+    name: "Discord",
+    registryId: "discord",
+    description: "Guild management, channels, roles, messages, and webhooks.",
+    supportsOAuth: false,
+    envFields: [
+      { key: "DISCORD_BOT_TOKEN", label: "Bot Token", type: "password" },
+      { key: "DISCORD_APPLICATION_ID", label: "Application ID" },
+      { key: "DISCORD_GUILD_ID", label: "Default Guild ID (optional)" },
+    ],
+  },
+  // --- API-key connectors ---
+  {
+    key: "apollo",
+    name: "Apollo",
+    registryId: "apollo",
+    description: "Prospecting and data enrichment.",
+    supportsOAuth: false,
+    envFields: [{ key: "APOLLO_API_KEY", label: "API Key", type: "password" }],
+  },
+  {
+    key: "clay",
+    name: "Clay",
+    registryId: "clay",
+    description: "Data enrichment and waterfall workflows.",
+    supportsOAuth: false,
+    envFields: [{ key: "CLAY_API_KEY", label: "API Key", type: "password" }],
+  },
+  {
+    key: "similarweb",
+    name: "Similarweb",
+    registryId: "similarweb",
+    description: "Web traffic analytics and competitive intelligence.",
+    supportsOAuth: false,
+    envFields: [{ key: "SIMILARWEB_API_KEY", label: "API Key", type: "password" }],
+  },
+  {
+    key: "msci",
+    name: "MSCI",
+    registryId: "msci",
+    description: "ESG ratings, risk analytics, and index data.",
+    supportsOAuth: false,
+    envFields: [
+      { key: "MSCI_API_KEY", label: "API Key", type: "password" },
+      { key: "MSCI_BASE_URL", label: "Base URL", placeholder: "https://api.msci.com" },
+    ],
+  },
+  {
+    key: "legalzoom",
+    name: "LegalZoom",
+    registryId: "legalzoom",
+    description: "Legal document management and business filings.",
+    supportsOAuth: false,
+    envFields: [{ key: "LEGALZOOM_API_KEY", label: "API Key", type: "password" }],
+  },
+  {
+    key: "factset",
+    name: "FactSet",
+    registryId: "factset",
+    description: "Financial data, analytics, and research.",
+    supportsOAuth: false,
+    envFields: [
+      { key: "FACTSET_USERNAME", label: "Username" },
+      { key: "FACTSET_API_KEY", label: "API Key", type: "password" },
+    ],
+  },
+  {
+    key: "wordpress",
+    name: "WordPress",
+    registryId: "wordpress",
+    description: "Content management (posts, pages, media).",
+    supportsOAuth: false,
+    envFields: [
+      { key: "WORDPRESS_SITE_URL", label: "Site URL", placeholder: "https://your-site.com" },
+      { key: "WORDPRESS_USERNAME", label: "Username" },
+      { key: "WORDPRESS_APPLICATION_PASSWORD", label: "Application Password", type: "password" },
+    ],
+  },
+  {
+    key: "harvey",
+    name: "Harvey",
+    registryId: "harvey",
+    description: "AI-powered legal research and document analysis.",
+    supportsOAuth: false,
+    envFields: [{ key: "HARVEY_API_KEY", label: "API Key", type: "password" }],
+  },
+  {
+    key: "lseg",
+    name: "LSEG (Refinitiv)",
+    registryId: "lseg",
+    description: "Market data, news, and financial analytics.",
+    supportsOAuth: false,
+    envFields: [
+      { key: "LSEG_API_KEY", label: "API Key", type: "password" },
+      { key: "LSEG_API_SECRET", label: "API Secret", type: "password" },
+    ],
+  },
+  {
+    key: "spglobal",
+    name: "S&P Global",
+    registryId: "spglobal",
+    description: "Financial intelligence, credit ratings, and market data.",
+    supportsOAuth: false,
+    envFields: [
+      { key: "SPGLOBAL_USERNAME", label: "Username" },
+      { key: "SPGLOBAL_API_KEY", label: "API Key", type: "password" },
+    ],
+  },
+  {
+    key: "commonroom",
+    name: "Common Room",
+    registryId: "commonroom",
+    description: "Community intelligence and signal tracking.",
+    supportsOAuth: false,
+    envFields: [{ key: "COMMONROOM_API_KEY", label: "API Key", type: "password" }],
+  },
+  {
+    key: "tribeai",
+    name: "Tribe AI",
+    registryId: "tribeai",
+    description: "AI workforce management and expert matching.",
+    supportsOAuth: false,
+    envFields: [{ key: "TRIBEAI_API_KEY", label: "API Key", type: "password" }],
+  },
 ];
 
 const getStatusColor = (status: MCPConnectionStatus): string => {
@@ -168,6 +343,7 @@ function matchConnector(config: MCPServerConfig, connector: ConnectorDefinition)
 export function ConnectorsSettings() {
   const [settings, setSettings] = useState<MCPSettingsData | null>(null);
   const [serverStatuses, setServerStatuses] = useState<MCPServerStatus[]>([]);
+  const [registryConnectorIds, setRegistryConnectorIds] = useState<Set<string> | null>(null);
   const [loading, setLoading] = useState(true);
   const [installingId, setInstallingId] = useState<string | null>(null);
   const [connectingServer, setConnectingServer] = useState<string | null>(null);
@@ -200,12 +376,18 @@ export function ConnectorsSettings() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [loadedSettings, statuses] = await Promise.all([
+      const [loadedSettings, statuses, registry] = await Promise.all([
         window.electronAPI.getMCPSettings(),
         window.electronAPI.getMCPStatus(),
+        window.electronAPI.fetchMCPRegistry().catch(() => null),
       ]);
       setSettings(loadedSettings);
       setServerStatuses(statuses);
+      if (registry?.servers) {
+        setRegistryConnectorIds(new Set(registry.servers.map((server: any) => String(server.id))));
+      } else {
+        setRegistryConnectorIds(null);
+      }
     } catch (error) {
       console.error("Failed to load connector settings:", error);
     } finally {
@@ -219,8 +401,15 @@ export function ConnectorsSettings() {
       const config = settings.servers.find((server) => matchConnector(server, connector));
       const status = config ? serverStatuses.find((s) => s.id === config.id) : undefined;
       return { connector, config, status };
+    }).filter(({ connector, config }) => {
+      // Always show already-installed connectors.
+      if (config) return true;
+      // If registry info is unavailable, keep previous behavior.
+      if (!registryConnectorIds) return true;
+      // Only advertise connectors currently available from the registry.
+      return registryConnectorIds.has(connector.registryId);
     });
-  }, [settings, serverStatuses]);
+  }, [settings, serverStatuses, registryConnectorIds]);
 
   const handleInstall = async (connector: ConnectorDefinition) => {
     try {

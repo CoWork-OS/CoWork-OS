@@ -365,7 +365,9 @@ export const LLMSettingsSchema = z.object({
 
 // ============ Search Settings Schemas ============
 
-export const SearchProviderTypeSchema = z.enum(["tavily", "brave", "serpapi", "google"]).nullable();
+export const SearchProviderTypeSchema = z
+  .enum(["tavily", "brave", "serpapi", "google", "duckduckgo"])
+  .nullable();
 
 export const SearchSettingsSchema = z.object({
   primaryProvider: SearchProviderTypeSchema,
@@ -1082,12 +1084,24 @@ export const MCPRegistrySearchSchema = z.object({
 });
 
 export const MCPConnectorOAuthSchema = z.object({
-  provider: z.enum(["salesforce", "jira", "hubspot", "zendesk"]),
+  provider: z.enum([
+    "salesforce",
+    "jira",
+    "hubspot",
+    "zendesk",
+    "google-calendar",
+    "google-drive",
+    "gmail",
+    "docusign",
+    "outreach",
+    "slack",
+  ]),
   clientId: z.string().min(1).max(500),
   clientSecret: z.string().max(500).optional(),
   scopes: z.array(z.string().max(200)).max(50).optional(),
   loginUrl: z.string().url().max(500).optional(),
   subdomain: z.string().max(200).optional(),
+  teamDomain: z.string().max(200).optional(),
 });
 
 // ============ Hooks (Webhooks) Schemas ============

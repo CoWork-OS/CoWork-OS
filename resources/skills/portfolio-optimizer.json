@@ -1,0 +1,56 @@
+{
+  "id": "portfolio-optimizer",
+  "name": "Portfolio Optimizer",
+  "description": "Modern portfolio theory optimization including Markowitz mean-variance, Black-Litterman, risk parity, and efficient frontier construction with constraints.",
+  "icon": "⚖️",
+  "category": "Finance",
+  "prompt": "# Portfolio Optimization Request\n\n**Current Holdings:** {{holdings}}\n**Objective:** {{objective}}\n**Question:** {{question}}\n\n**Constraints (if provided):** {{constraints}}\n**Target Return (if provided):** {{targetReturn}}\n\nUsing the portfolio optimization framework below, analyze the portfolio and recommend an optimal allocation. Apply the specified objective function and any constraints. If historical data is not provided, use reasonable estimates based on asset class benchmarks.\n\n---\n\n# Portfolio Optimization Reference\n\n## Core Concepts\n\n**The fundamental insight of portfolio theory:** Diversification can reduce risk without proportionally reducing return. The risk of a portfolio depends not just on individual asset risks, but on the correlations between assets.\n\n**Portfolio Return:** Rp = Σ wi x Ri (weighted average of asset returns)\n\n**Portfolio Variance:** σp² = Σ Σ wi x wj x σi x σj x ρij = w'Σw\n\nWhere Σ is the variance-covariance matrix.\n\n## Method 1: Markowitz Mean-Variance Optimization\n\n### Optimization Problem\n\n**Minimize portfolio variance:**\nmin w'Σw\nsubject to:\n- w'μ >= target return (return constraint)\n- w'1 = 1 (fully invested)\n- wi >= 0 for all i (long-only, if applicable)\n\n**Or maximize Sharpe Ratio:**\nmax (w'μ - Rf) / sqrt(w'Σw)\nsubject to:\n- w'1 = 1\n- wi >= 0 for all i\n\n### Efficient Frontier Construction\n\n1. Find the Minimum Variance Portfolio (MVP): min w'Σw s.t. w'1 = 1\n2. Find the Maximum Return Portfolio: max w'μ s.t. w'1 = 1\n3. For target returns between MVP and max: solve min w'Σw s.t. w'μ = target, w'1 = 1\n4. Plot risk (σp) vs return (Rp) for each solution\n\n### Sharpe Ratio\n\nSR = (Rp - Rf) / σp\n\n| Sharpe Ratio | Interpretation |\n|-------------|----------------|\n| < 0 | Asset underperforms risk-free rate |\n| 0 - 0.5 | Poor risk-adjusted return |\n| 0.5 - 1.0 | Adequate |\n| 1.0 - 2.0 | Good |\n| 2.0 - 3.0 | Very good |\n| > 3.0 | Exceptional (verify data) |\n\n### Historical Asset Class Returns and Volatility\n\n| Asset Class | Annual Return | Annual Volatility | Sharpe Ratio |\n|------------|---------------|-------------------|-------------|\n| US Large Cap (S&P 500) | 10-12% | 15-17% | 0.4-0.6 |\n| US Small Cap (Russell 2000) | 11-13% | 19-22% | 0.4-0.5 |\n| International Developed (EAFE) | 8-10% | 16-18% | 0.3-0.5 |\n| Emerging Markets | 9-12% | 22-26% | 0.3-0.4 |\n| US Aggregate Bonds | 4-6% | 4-6% | 0.3-0.5 |\n| US Treasury (10Y) | 3-5% | 6-8% | 0.2-0.4 |\n| High Yield Bonds | 6-8% | 8-12% | 0.3-0.5 |\n| REITs | 8-11% | 18-22% | 0.3-0.4 |\n| Commodities | 3-6% | 15-20% | 0.1-0.2 |\n| Gold | 5-8% | 15-18% | 0.1-0.3 |\n\n### Typical Correlation Matrix\n\n| | US LC | US SC | Intl | EM | Bonds | HY | REITs | Cmdty | Gold |\n|---|-------|-------|------|-----|-------|-----|-------|-------|------|\n| US LC | 1.00 | 0.80 | 0.75 | 0.65 | -0.05 | 0.55 | 0.60 | 0.15 | 0.00 |\n| US SC | 0.80 | 1.00 | 0.70 | 0.65 | -0.10 | 0.60 | 0.65 | 0.15 | -0.05 |\n| Intl | 0.75 | 0.70 | 1.00 | 0.75 | 0.05 | 0.50 | 0.55 | 0.25 | 0.10 |\n| EM | 0.65 | 0.65 | 0.75 | 1.00 | 0.00 | 0.55 | 0.50 | 0.30 | 0.10 |\n| Bonds | -0.05 | -0.10 | 0.05 | 0.00 | 1.00 | 0.20 | 0.15 | -0.10 | 0.30 |\n| HY | 0.55 | 0.60 | 0.50 | 0.55 | 0.20 | 1.00 | 0.55 | 0.20 | 0.05 |\n| REITs | 0.60 | 0.65 | 0.55 | 0.50 | 0.15 | 0.55 | 1.00 | 0.15 | 0.10 |\n| Cmdty | 0.15 | 0.15 | 0.25 | 0.30 | -0.10 | 0.20 | 0.15 | 1.00 | 0.35 |\n| Gold | 0.00 | -0.05 | 0.10 | 0.10 | 0.30 | 0.05 | 0.10 | 0.35 | 1.00 |\n\n## Method 2: Black-Litterman Model\n\nBlack-Litterman addresses the extreme sensitivity of Markowitz optimization to expected return inputs by combining market equilibrium returns with investor views.\n\n### Equilibrium Returns (Market Implied)\n\nπ = δ x Σ x w_mkt\n\nWhere:\n- π = Implied equilibrium excess returns\n- δ = Risk aversion coefficient (typically 2.5)\n- Σ = Covariance matrix\n- w_mkt = Market capitalization weights\n\n### Incorporating Views\n\n**View structure:** P x μ = Q + ε, where ε ~ N(0, Ω)\n- P = Pick matrix (identifies assets in the view)\n- Q = Expected returns from views\n- Ω = Uncertainty of views (diagonal matrix)\n\n### Combined Return Estimate\n\nμ_BL = [(τΣ)^(-1) + P'Ω^(-1)P]^(-1) x [(τΣ)^(-1)π + P'Ω^(-1)Q]\n\nWhere:\n- τ = Scalar (typically 0.025 to 0.05, represents uncertainty in equilibrium)\n- All other variables as defined above\n\n### Combined Covariance\n\nΣ_BL = Σ + [(τΣ)^(-1) + P'Ω^(-1)P]^(-1)\n\n**Advantages over Markowitz:**\n1. More stable, intuitive allocations\n2. Starts from equilibrium (market portfolio) as anchor\n3. Views are optional and uncertainty-weighted\n4. Avoids extreme corner solutions\n\n## Method 3: Risk Parity\n\n### Principle\n\nEach asset contributes equally to total portfolio risk.\n\n**Risk contribution of asset i:**\nRC_i = wi x (Σw)_i / σp\n\n**Target:** RC_i = RC_j for all i, j (equal risk contribution)\n\n**Simplified for uncorrelated assets:** wi = (1/σi) / Σ(1/σj)\n\n### Typical Risk Parity Allocation\n\n| Asset Class | Traditional 60/40 | Risk Parity |\n|------------|-------------------|-------------|\n| Equities | 60% | 20-25% |\n| Fixed Income | 40% | 50-60% |\n| Commodities | 0% | 10-15% |\n| TIPS/Real Assets | 0% | 10-15% |\n| **Risk Contribution** | Equity: ~90% | Equal: ~25% each |\n\n**Note:** Risk parity often uses leverage to scale returns to target, since the unlevered portfolio has lower expected returns than traditional allocations.\n\n## Method 4: Maximum Diversification\n\n### Diversification Ratio\n\nDR = (w'σ) / sqrt(w'Σw)\n\nMaximize this ratio to find the most diversified portfolio. Higher DR means more diversification benefit captured.\n\n## Constraint Types\n\n| Constraint | Formulation | Purpose |\n|-----------|-------------|---------|\n| Long-only | wi >= 0 | No short selling |\n| Fully invested | Σwi = 1 | 100% allocation |\n| Max position | wi <= max% | Concentration limit |\n| Min position | wi >= min% or wi = 0 | Avoid trivial positions |\n| Sector limit | Σ wi (sector j) <= limit | Sector diversification |\n| Turnover | Σ |wi_new - wi_old| <= limit | Trading cost control |\n| Tracking error | sqrt((w-wb)'Σ(w-wb)) <= limit | Benchmark deviation |\n| Beta | w'β <= target | Market exposure control |\n\n## Portfolio Performance Metrics\n\n| Metric | Formula | Target |\n|--------|---------|--------|\n| Sharpe Ratio | (Rp - Rf) / σp | > 0.5 |\n| Sortino Ratio | (Rp - Rf) / σ_downside | > 1.0 |\n| Calmar Ratio | Annual Return / Max Drawdown | > 0.5 |\n| Information Ratio | (Rp - Rb) / Tracking Error | > 0.5 |\n| Treynor Ratio | (Rp - Rf) / βp | Compare vs peers |\n| Maximum Drawdown | max peak-to-trough decline | < 20% conservative |\n| Beta | Cov(Rp, Rm) / Var(Rm) | Depends on mandate |\n| Alpha (Jensen's) | Rp - [Rf + β(Rm - Rf)] | > 0 |\n\n## Rebalancing Framework\n\n**Calendar-based:** Quarterly or semi-annual rebalancing\n**Threshold-based:** Rebalance when any position drifts >5% from target\n**Cost-aware:** Rebalance only if expected benefit > transaction costs + tax impact\n\n**Rebalancing Bands:**\n- Tight (2-3%): Higher tracking precision, higher costs\n- Normal (5%): Good balance of precision and cost\n- Wide (10%): Lower costs, more drift tolerance",
+  "parameters": [
+    {
+      "name": "holdings",
+      "type": "string",
+      "description": "Current portfolio holdings and weights (e.g., SPY 40%, AGG 30%, GLD 10%, VWO 20%)",
+      "required": true
+    },
+    {
+      "name": "objective",
+      "type": "select",
+      "description": "Optimization objective",
+      "required": true,
+      "options": [
+        "Maximize Sharpe Ratio",
+        "Minimize Volatility",
+        "Target Return",
+        "Risk Parity",
+        "Maximum Diversification"
+      ]
+    },
+    {
+      "name": "question",
+      "type": "string",
+      "description": "Your specific optimization question",
+      "required": true
+    },
+    {
+      "name": "constraints",
+      "type": "string",
+      "description": "Portfolio constraints (e.g., long-only, max 25% per position, no emerging markets)",
+      "required": false
+    },
+    {
+      "name": "targetReturn",
+      "type": "string",
+      "description": "Target annual return for optimization (e.g., 8%)",
+      "required": false
+    }
+  ],
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when the user asks about portfolio optimization, asset allocation, efficient frontier, Markowitz optimization, Black-Litterman, risk parity, diversification, rebalancing, or optimal portfolio construction.",
+      "dontUseWhen": "Do not use when the request is about individual stock analysis, financial modeling, risk metrics only (use Risk Analyzer), or tax planning.",
+      "outputs": "Outcome from Portfolio Optimizer: optimized asset allocation with weights, expected return, risk metrics, efficient frontier positioning, and rebalancing recommendations.",
+      "successCriteria": "Returns specific allocation weights, portfolio expected return and risk, Sharpe ratio, comparison to current allocation, and actionable rebalancing steps."
+    }
+  }
+}

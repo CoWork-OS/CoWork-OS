@@ -668,7 +668,7 @@ npm run type-check       # Check TypeScript types
 CoWork OS is a production-ready agentic task automation app with:
 
 - **5 LLM providers** (cloud and local)
-- **4 search providers** with fallback
+- **5 search providers** with fallback (including DuckDuckGo free built-in)
 - **12 browser automation tools**
 - **3 code tools** (glob, grep, edit_file)
 - **2 web fetch tools** (web_fetch, http_request)

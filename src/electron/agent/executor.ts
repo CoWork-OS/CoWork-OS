@@ -11924,10 +11924,60 @@ TASK / CONVERSATION HISTORY:
               content: [
                 {
                   type: "text",
-                  text: "Turn budget exhausted for further tool calls. Provide a concise final response from current evidence.",
+                  text: followUpToolCallsLocked
+                    ? "Tool calls are locked for this follow-up. Provide the best final answer from current evidence and explicitly list blockers for anything missing."
+                    : "Turn budget exhausted for further tool calls. Provide a concise final response from current evidence.",
                 },
               ],
             });
+          }
+
+          if (skippedToolCallsByPolicy > 0) {
+            consecutiveSkippedToolOnlyTurns = updateSkippedToolOnlyTurnStreakUtil({
+              skippedToolCalls: skippedToolCallsByPolicy,
+              hasTextInThisResponse,
+              previousStreak: consecutiveSkippedToolOnlyTurns,
+            });
+
+            if (
+              shouldForceStopAfterSkippedToolOnlyTurnsUtil(
+                consecutiveSkippedToolOnlyTurns,
+                2,
+              ) &&
+              !hasTextInThisResponse
+            ) {
+              const forcedStopMessage =
+                "I stopped this follow-up to prevent repeated tool-only looping. " +
+                "No additional reliable evidence could be gathered in this cycle.";
+              this.emitEvent("assistant_message", {
+                message: forcedStopMessage,
+              });
+              messages.push({
+                role: "assistant",
+                content: [{ type: "text", text: forcedStopMessage }],
+              });
+              hasProvidedTextResponse = true;
+              continueLoop = false;
+              continue;
+            }
+
+            if (!hasTextInThisResponse) {
+              messages.push({
+                role: "user",
+                content: [
+                  {
+                    type: "text",
+                    text:
+                      "Do not call tools again in this follow-up. " +
+                      "Respond now with your best direct answer from current evidence.",
+                  },
+                ],
+              });
+              continueLoop = true;
+              continue;
+            }
+          } else {
+            consecutiveSkippedToolOnlyTurns = 0;
           }
 
           loopBreakInjected = maybeInjectToolLoopBreakUtil({

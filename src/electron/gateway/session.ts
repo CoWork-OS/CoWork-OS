@@ -127,8 +127,10 @@ export class SessionManager {
    * Clean up old idle sessions
    */
   cleanupOldSessions(maxAgeMs: number = 24 * 60 * 60 * 1000): void {
-    // This would require a new method in the repository
-    // For now, we'll skip automated cleanup
-    console.log("Session cleanup not yet implemented");
+    const cutoff = Date.now() - Math.max(0, maxAgeMs);
+    const removed = this.sessionRepo.deleteIdleOlderThan(cutoff);
+    if (removed > 0) {
+      console.log(`[SessionManager] Cleaned up ${removed} stale idle sessions`);
+    }
   }
 }

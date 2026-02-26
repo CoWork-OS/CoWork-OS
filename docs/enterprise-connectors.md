@@ -140,6 +140,52 @@ Suggested input schemas:
   - `fields` (object, required)
   - `idempotencyKey` (string, optional)
 
+## Discord Connector (Tool Set)
+
+Tools:
+
+- `discord.health`
+- `discord.list_guilds`
+- `discord.get_guild`
+- `discord.list_channels`
+- `discord.get_channel`
+- `discord.create_channel`
+- `discord.edit_channel`
+- `discord.delete_channel`
+- `discord.send_message` (rich embeds, 2000-char validation)
+- `discord.get_messages`
+- `discord.create_thread`
+- `discord.list_roles`
+- `discord.create_role`
+- `discord.edit_role`
+- `discord.delete_role`
+- `discord.add_reaction`
+- `discord.create_webhook`
+- `discord.list_webhooks`
+- `discord.list_members`
+
+Authentication: Bot token via `DISCORD_BOT_TOKEN`. Uses Discord REST API v10 (`https://discord.com/api/v10`).
+
+Suggested input schemas:
+
+- `discord.send_message`:
+  - `channel_id` (string, required)
+  - `content` (string, optional — up to 2000 characters)
+  - `embeds` (array, optional — max 10, typed embed objects with title, description, color, fields, footer, image, thumbnail, author)
+
+- `discord.create_channel`:
+  - `guild_id` (string, optional — uses `DISCORD_GUILD_ID` default)
+  - `name` (string, required)
+  - `type` (number, optional — 0=text, 2=voice, 4=category, 5=announcement, 13=stage, 15=forum)
+  - `topic` (string, optional)
+  - `parent_id` (string, optional — category to nest under)
+
+Rate limiting: Automatic 429 retry with `retry_after` parsing, capped at 2 retries and 10s max delay. Rate limit headers (`X-RateLimit-*`) are exposed in response `meta.rateLimit`.
+
+Privileged intents: `discord.list_members` requires Server Members Intent; `discord.get_messages` requires Message Content Intent. The connector surfaces intent-specific error hints when these fail with 403/Missing Access.
+
+Note: This REST API connector is separate from the Discord gateway adapter (`src/electron/gateway/channels/discord.ts`) which handles real-time WebSocket messaging for the multichannel gateway.
+
 ## Connector Template
 
 A minimal MCP connector template is provided at:
@@ -164,6 +210,8 @@ These are included in the local MCP registry and appear in **Settings → MCP Se
 - Linear (Product/Issue tracking)
 - Asana (Work management)
 - Okta (Identity)
+- Discord (Community/messaging — 19 tools)
+- Slack (Team messaging)
 
 ## Phase 1 Exit Criteria
 

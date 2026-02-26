@@ -1,6 +1,14 @@
 import { ConversationMode } from "../../../shared/types";
 
-export type RoutedIntent = "chat" | "advice" | "planning" | "execution" | "mixed" | "thinking";
+export type RoutedIntent =
+  | "chat"
+  | "advice"
+  | "planning"
+  | "execution"
+  | "mixed"
+  | "thinking"
+  | "workflow"
+  | "deep_work";
 
 export type TaskComplexity = "low" | "medium" | "high";
 
@@ -81,7 +89,7 @@ export class IntentRouter {
       "execution",
       3,
       "action-verb",
-      /\b(create|build|edit|write|fix|deploy|run|install|execute|open|search|fetch|schedule|configure|implement|check|read|review|find|analyze|examine|inspect|list|show|scan|look|update|modify|delete|remove|rename|move|copy|test|verify|continue|commit|push|pull|merge|raise|raised|cherry-?pick|rebase|revert|publish|release|tag|submit|approve|request|close)\b/.test(
+      /\b(create|build|edit|write|fix|deploy|run|install|execute|open|search|fetch|schedule|configure|implement|check|read|review|find|analyze|examine|inspect|list|show|scan|look|update|modify|delete|remove|rename|move|copy|test|verify|continue|commit|push|pull|merge|raise|raised|cherry-?pick|rebase|revert|publish|release|tag|submit|approve|request|close|research|investigate|summarize|compare|generate|draft|prepare|export)\b/.test(
         lower,
       ),
     );
@@ -89,7 +97,7 @@ export class IntentRouter {
       "execution",
       2,
       "execution-target",
-      /\b(files?|folders?|repos?|projects?|commands?|scripts?|code|apps?|databases?|tests?|workspaces?|docs?|documents?|directories?|packages?|prs?|pull\s*requests?|branches?|commits?|releases?|tags?|issues?|pipelines?|builds?)\b/.test(
+      /\b(files?|folders?|repos?|projects?|commands?|scripts?|code|apps?|databases?|tests?|workspaces?|docs?|documents?|directories?|packages?|prs?|pull\s*requests?|branches?|commits?|releases?|tags?|issues?|pipelines?|builds?|reports?|presentations?|spreadsheets?|data|results|findings|sources|summary|analysis|insights|metrics)\b/.test(
         lower,
       ),
     );
@@ -127,13 +135,62 @@ export class IntentRouter {
       ),
     );
 
+    // Workflow detection — sequential multi-phase prompts ("research X then create Y then email Z")
+    const workflowConnectives =
+      /\b(then|after that|after this|next|and then|finally|once done|once that'?s done|step \d|→|➜|->)\b/i;
+    const hasWorkflowConnectives = workflowConnectives.test(lower);
+    const actionVerbMatches =
+      lower.match(
+        /\b(create|build|edit|write|fix|deploy|run|install|execute|configure|implement|update|modify|delete|remove|test|verify|research|analyze|summarize|generate|send|email|present|export|schedule|review|compile|draft|prepare|deliver|share|upload|publish)\b/g,
+      ) || [];
+    const uniqueActionVerbs = new Set(actionVerbMatches).size;
+
+    add(
+      "execution",
+      0, // don't add score, just detect
+      "workflow-pipeline",
+      hasWorkflowConnectives && uniqueActionVerbs >= 3,
+    );
+
+    // Deep work detection — long-running autonomous tasks
+    const hasDeepWorkSignal =
+      /\b(deep\s+work|fire\s+and\s+forget|long[- ]running|autonomous(?:ly)?|end[- ]to[- ]end|from\s+scratch|comprehensive|production[- ]ready|full[- ]stack|set\s+(?:it\s+)?up\s+(?:everything|all)|build\s+(?:me\s+)?a\s+(?:complete|full|entire)|kick\s+(?:it\s+)?off\s+and)\b/i.test(
+        lower,
+      );
+    if (hasDeepWorkSignal) {
+      signals.push("deep-work-signal");
+    }
+
     const planningLike = scores.planning + scores.advice;
     const executionLike = scores.execution;
     const chatLike = scores.chat;
     const thinkingLike = scores.thinking;
 
+    // Complexity scoring: how multi-faceted or demanding is this prompt?
+    const wordCount = text.split(/\s+/).length;
+    const actionVerbCount = (
+      lower.match(
+        /\b(create|build|edit|write|fix|deploy|run|install|execute|configure|implement|update|modify|delete|remove|test|verify)\b/g,
+      ) || []
+    ).length;
+    const hasMultipleSteps =
+      /\b(then|after that|next|also|additionally|and then|finally|first|second|third)\b/.test(
+        lower,
+      );
+
+    // Deep work: explicit signal + complex prompt, OR very high action density with workflow connectives
+    const isDeepWork =
+      (hasDeepWorkSignal && executionLike >= 3 && (wordCount > 100 || uniqueActionVerbs >= 4)) ||
+      (hasWorkflowConnectives && uniqueActionVerbs >= 5 && wordCount > 200 && executionLike >= 3);
+
     let intent: RoutedIntent;
-    if (thinkingLike >= 3 && executionLike < 3) {
+    // Deep work: highest priority — long-running autonomous execution
+    if (isDeepWork) {
+      intent = "deep_work";
+      // Multi-phase workflow: 3+ distinct action verbs with sequential connectives
+    } else if (hasWorkflowConnectives && uniqueActionVerbs >= 3 && executionLike >= 3) {
+      intent = "workflow";
+    } else if (thinkingLike >= 3 && executionLike < 3) {
       intent = "thinking";
     } else if (chatLike >= 3 && planningLike === 0 && executionLike === 0 && thinkingLike === 0) {
       intent = "chat";
@@ -164,24 +221,12 @@ export class IntentRouter {
         ? "chat"
         : intent === "thinking"
           ? "think"
-          : intent === "execution"
+          : intent === "execution" || intent === "workflow" || intent === "deep_work"
             ? "task"
             : "hybrid";
 
     const answerFirst =
       intent === "advice" || intent === "planning" || intent === "mixed" || intent === "thinking";
-
-    // Complexity scoring: how multi-faceted or demanding is this prompt?
-    const wordCount = text.split(/\s+/).length;
-    const actionVerbCount = (
-      lower.match(
-        /\b(create|build|edit|write|fix|deploy|run|install|execute|configure|implement|update|modify|delete|remove|test|verify)\b/g,
-      ) || []
-    ).length;
-    const hasMultipleSteps =
-      /\b(then|after that|next|also|additionally|and then|finally|first|second|third)\b/.test(
-        lower,
-      );
 
     let complexity: TaskComplexity;
     if (wordCount > 150 || actionVerbCount >= 4 || (hasMultipleSteps && actionVerbCount >= 2)) {

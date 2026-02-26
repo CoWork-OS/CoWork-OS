@@ -141,6 +141,14 @@ export function App() {
   const [onboardingCompletedAt, setOnboardingCompletedAt] = useState<string | undefined>(undefined);
   const hasElectronAPI = typeof window !== "undefined" && !!window.electronAPI;
 
+  // Platform detection for Windows-specific UI (custom window controls, opaque backgrounds)
+  const isWindows = hasElectronAPI && window.electronAPI.getPlatform() === "win32";
+  useEffect(() => {
+    if (isWindows) {
+      document.documentElement.classList.add("platform-win32");
+    }
+  }, [isWindows]);
+
   const handleDisclaimerAccept = (dontShowAgain: boolean) => {
     // Save to main process for persistence
     window.electronAPI
@@ -392,7 +400,7 @@ export function App() {
     // Cache density in localStorage for instant restore on next startup
     try {
       localStorage.setItem("uiDensity", uiDensity);
-    } catch  {
+    } catch {
       /* ignore */
     }
   }, [themeMode, visualTheme, accentColor, uiDensity]);
@@ -1492,6 +1500,42 @@ export function App() {
             </svg>
           </button>
         </div>
+        {/* Windows custom window controls (minimize, maximize, close) */}
+        {isWindows && (
+          <div className="win-controls">
+            <button
+              type="button"
+              className="win-control-btn"
+              onClick={() => window.electronAPI.windowMinimize()}
+              aria-label="Minimize"
+            >
+              <svg viewBox="0 0 10 10" aria-hidden="true">
+                <line x1="0" y1="5" x2="10" y2="5" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              className="win-control-btn"
+              onClick={() => window.electronAPI.windowMaximize()}
+              aria-label="Maximize"
+            >
+              <svg viewBox="0 0 10 10" aria-hidden="true">
+                <rect x="0.5" y="0.5" width="9" height="9" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              className="win-control-btn win-close"
+              onClick={() => window.electronAPI.windowClose()}
+              aria-label="Close"
+            >
+              <svg viewBox="0 0 10 10" aria-hidden="true">
+                <line x1="0" y1="0" x2="10" y2="10" />
+                <line x1="10" y1="0" x2="0" y2="10" />
+              </svg>
+            </button>
+          </div>
+        )}
       </div>
       {/* Update notification banner */}
       {updateInfo?.available && !updateDismissed && (
@@ -1555,7 +1599,6 @@ export function App() {
                   setSettingsTab("missioncontrol");
                   setCurrentView("settings");
                 }}
-
                 onTasksChanged={loadTasks}
                 uiDensity={uiDensity}
               />

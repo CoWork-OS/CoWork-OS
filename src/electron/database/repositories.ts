@@ -1498,6 +1498,14 @@ export class ChannelSessionRepository {
     return rows.map((row) => this.mapRowToSession(row));
   }
 
+  deleteIdleOlderThan(cutoffMs: number): number {
+    const stmt = this.db.prepare(
+      "DELETE FROM channel_sessions WHERE state = 'idle' AND COALESCE(last_activity_at, created_at) < ?",
+    );
+    const result = stmt.run(cutoffMs);
+    return Number(result.changes || 0);
+  }
+
   deleteByChannelId(channelId: string): void {
     const stmt = this.db.prepare("DELETE FROM channel_sessions WHERE channel_id = ?");
     stmt.run(channelId);

@@ -44,11 +44,13 @@ CoWork OS is a **security-first personal AI assistant platform** with multi-chan
 - [x] Located: `src/electron/agent/llm/`
 
 #### Web Search Integration
+- [x] DuckDuckGo (free built-in, no API key — automatic last-resort fallback)
 - [x] Tavily (AI-optimized)
 - [x] Brave Search
 - [x] SerpAPI (Google results)
 - [x] Google Custom Search
 - [x] Primary + fallback provider support
+- [x] web_search tool always available (DuckDuckGo ensures zero-config search)
 - [x] Located: `src/electron/agent/search/`
 
 #### Browser Automation

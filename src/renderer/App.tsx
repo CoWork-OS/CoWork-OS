@@ -427,7 +427,7 @@ export function App() {
     const initWorkspace = async () => {
       if (!currentWorkspace) {
         try {
-          const tempWorkspace = await window.electronAPI.getTempWorkspace({ createNew: true });
+          const tempWorkspace = await window.electronAPI.getTempWorkspace();
           setCurrentWorkspace(tempWorkspace);
         } catch (error) {
           console.error("Failed to initialize temp workspace:", error);
@@ -477,11 +477,22 @@ export function App() {
   // Track recency when the active workspace changes
   useEffect(() => {
     if (!window.electronAPI?.touchWorkspace) return;
-    if (!currentWorkspace || currentWorkspace.isTemp || isTempWorkspaceId(currentWorkspace.id))
-      return;
+    if (!currentWorkspace) return;
     window.electronAPI.touchWorkspace(currentWorkspace.id).catch((error: unknown) => {
       console.error("Failed to update workspace recency:", error);
     });
+  }, [currentWorkspace?.id]);
+
+  // Keep temp workspace lease alive while it is active in the UI.
+  useEffect(() => {
+    if (!window.electronAPI?.touchWorkspace) return;
+    if (!currentWorkspace || !isTempWorkspaceId(currentWorkspace.id)) return;
+    const interval = setInterval(() => {
+      window.electronAPI.touchWorkspace(currentWorkspace.id).catch((error: unknown) => {
+        console.error("Failed to refresh temp workspace lease:", error);
+      });
+    }, 60 * 1000);
+    return () => clearInterval(interval);
   }, [currentWorkspace?.id]);
 
   useEffect(() => {

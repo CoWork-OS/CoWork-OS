@@ -761,6 +761,32 @@ const IPC_CHANNELS = {
   SUGGESTIONS_LIST: "suggestions:list",
   SUGGESTIONS_DISMISS: "suggestions:dismiss",
   SUGGESTIONS_ACT: "suggestions:act",
+
+  // Citation Engine
+  CITATION_GET_FOR_TASK: "citation:getForTask",
+
+  // Event Triggers
+  TRIGGER_LIST: "trigger:list",
+  TRIGGER_ADD: "trigger:add",
+  TRIGGER_UPDATE: "trigger:update",
+  TRIGGER_REMOVE: "trigger:remove",
+  TRIGGER_HISTORY: "trigger:history",
+
+  // Daily Briefing (extended)
+  BRIEFING_GET_LATEST: "briefing:getLatest",
+  BRIEFING_GET_CONFIG: "briefing:getConfig",
+  BRIEFING_SAVE_CONFIG: "briefing:saveConfig",
+
+  // File Hub
+  FILEHUB_LIST: "filehub:list",
+  FILEHUB_SEARCH: "filehub:search",
+  FILEHUB_RECENT: "filehub:recent",
+  FILEHUB_SOURCES: "filehub:sources",
+
+  // Web Access
+  WEBACCESS_GET_SETTINGS: "webaccess:getSettings",
+  WEBACCESS_SAVE_SETTINGS: "webaccess:saveSettings",
+  WEBACCESS_GET_STATUS: "webaccess:getStatus",
 } as const;
 
 // Mobile Companion Node types (inlined for sandboxed preload)
@@ -2325,12 +2351,23 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   // MCP Connector OAuth
   startConnectorOAuth: (payload: {
-    provider: "salesforce" | "jira" | "hubspot" | "zendesk";
+    provider:
+      | "salesforce"
+      | "jira"
+      | "hubspot"
+      | "zendesk"
+      | "google-calendar"
+      | "google-drive"
+      | "gmail"
+      | "docusign"
+      | "outreach"
+      | "slack";
     clientId: string;
     clientSecret?: string;
     scopes?: string[];
     loginUrl?: string;
     subdomain?: string;
+    teamDomain?: string;
   }) => ipcRenderer.invoke(IPC_CHANNELS.MCP_CONNECTOR_OAUTH_START, payload),
 
   // MCP Status change event listener
@@ -3086,6 +3123,40 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.SUGGESTIONS_DISMISS, workspaceId, suggestionId),
   actOnSuggestion: (workspaceId: string, suggestionId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.SUGGESTIONS_ACT, workspaceId, suggestionId),
+
+  // Citation Engine
+  getCitationsForTask: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CITATION_GET_FOR_TASK, taskId),
+
+  // Event Triggers
+  listTriggers: (workspaceId: string) => ipcRenderer.invoke(IPC_CHANNELS.TRIGGER_LIST, workspaceId),
+  addTrigger: (data: any) => ipcRenderer.invoke(IPC_CHANNELS.TRIGGER_ADD, data),
+  updateTrigger: (id: string, updates: any) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TRIGGER_UPDATE, { id, updates }),
+  removeTrigger: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TRIGGER_REMOVE, id),
+  getTriggerHistory: (triggerId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TRIGGER_HISTORY, triggerId),
+
+  // Daily Briefing (extended)
+  getLatestBriefing: (workspaceId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BRIEFING_GET_LATEST, workspaceId),
+  getBriefingConfig: (workspaceId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BRIEFING_GET_CONFIG, workspaceId),
+  saveBriefingConfig: (workspaceId: string, config: any) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BRIEFING_SAVE_CONFIG, { workspaceId, config }),
+
+  // File Hub
+  listHubFiles: (options: any) => ipcRenderer.invoke(IPC_CHANNELS.FILEHUB_LIST, options),
+  searchHubFiles: (query: string, sources?: string[]) =>
+    ipcRenderer.invoke(IPC_CHANNELS.FILEHUB_SEARCH, { query, sources }),
+  getRecentHubFiles: (limit?: number) => ipcRenderer.invoke(IPC_CHANNELS.FILEHUB_RECENT, limit),
+  getHubSources: () => ipcRenderer.invoke(IPC_CHANNELS.FILEHUB_SOURCES),
+
+  // Web Access
+  getWebAccessSettings: () => ipcRenderer.invoke(IPC_CHANNELS.WEBACCESS_GET_SETTINGS),
+  saveWebAccessSettings: (settings: any) =>
+    ipcRenderer.invoke(IPC_CHANNELS.WEBACCESS_SAVE_SETTINGS, settings),
+  getWebAccessStatus: () => ipcRenderer.invoke(IPC_CHANNELS.WEBACCESS_GET_STATUS),
 });
 
 // Type declarations for TypeScript
@@ -3344,15 +3415,15 @@ export interface ElectronAPI {
   ) => void;
   // Search Settings
   getSearchSettings: () => Promise<{
-    primaryProvider: "tavily" | "brave" | "serpapi" | "google" | null;
-    fallbackProvider: "tavily" | "brave" | "serpapi" | "google" | null;
+    primaryProvider: "tavily" | "brave" | "serpapi" | "google" | "duckduckgo" | null;
+    fallbackProvider: "tavily" | "brave" | "serpapi" | "google" | "duckduckgo" | null;
   }>;
   saveSearchSettings: (settings: any) => Promise<{ success: boolean }>;
   getSearchConfigStatus: () => Promise<{
-    primaryProvider: "tavily" | "brave" | "serpapi" | "google" | null;
-    fallbackProvider: "tavily" | "brave" | "serpapi" | "google" | null;
+    primaryProvider: "tavily" | "brave" | "serpapi" | "google" | "duckduckgo" | null;
+    fallbackProvider: "tavily" | "brave" | "serpapi" | "google" | "duckduckgo" | null;
     providers: Array<{
-      type: "tavily" | "brave" | "serpapi" | "google";
+      type: "tavily" | "brave" | "serpapi" | "google" | "duckduckgo";
       name: string;
       description: string;
       configured: boolean;
@@ -3857,14 +3928,35 @@ export interface ElectronAPI {
     serverId: string,
   ) => Promise<{ success: boolean; error?: string; tools?: number }>;
   startConnectorOAuth: (payload: {
-    provider: "salesforce" | "jira" | "hubspot" | "zendesk";
+    provider:
+      | "salesforce"
+      | "jira"
+      | "hubspot"
+      | "zendesk"
+      | "google-calendar"
+      | "google-drive"
+      | "gmail"
+      | "docusign"
+      | "outreach"
+      | "slack";
     clientId: string;
     clientSecret?: string;
     scopes?: string[];
     loginUrl?: string;
     subdomain?: string;
+    teamDomain?: string;
   }) => Promise<{
-    provider: "salesforce" | "jira" | "hubspot" | "zendesk";
+    provider:
+      | "salesforce"
+      | "jira"
+      | "hubspot"
+      | "zendesk"
+      | "google-calendar"
+      | "google-drive"
+      | "gmail"
+      | "docusign"
+      | "outreach"
+      | "slack";
     accessToken: string;
     refreshToken?: string;
     expiresIn?: number;

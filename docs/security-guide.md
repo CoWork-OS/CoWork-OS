@@ -156,14 +156,15 @@ The app connects to these services based on your configuration:
 | OpenRouter | `openrouter.ai` | OpenRouter models |
 | Ollama | `localhost:11434` (default) | Local models |
 
-### Search Providers (Optional)
+### Search Providers (DuckDuckGo built-in; others optional)
 
 | Provider | Endpoint | When Used |
 |----------|----------|-----------|
-| Tavily | `api.tavily.com` | Web search |
-| Brave Search | `api.search.brave.com` | Web search |
-| SerpAPI | `serpapi.com` | Web search |
-| Google Custom Search | `customsearch.googleapis.com` | Web search |
+| DuckDuckGo | `html.duckduckgo.com` | Free built-in web search (no API key) |
+| Tavily | `api.tavily.com` | Web search (API key required) |
+| Brave Search | `api.search.brave.com` | Web search (API key required) |
+| SerpAPI | `serpapi.com` | Web search (API key required) |
+| Google Custom Search | `customsearch.googleapis.com` | Web search (API key required) |
 
 ### Other Connections
 

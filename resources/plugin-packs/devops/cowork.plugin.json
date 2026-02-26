@@ -1,11 +1,11 @@
 {
   "name": "devops-pack",
   "displayName": "DevOps Pack",
-  "version": "1.0.0",
-  "description": "Skills for deployment automation, monitoring, incident response, and infrastructure management",
+  "version": "1.1.0",
+  "description": "Skills for deployment automation, monitoring, incident response, infrastructure-as-code, container orchestration, and cloud migration",
   "type": "pack",
   "author": "CoWork-OSS",
-  "keywords": ["devops", "deployment", "monitoring", "incident-response", "infrastructure"],
+  "keywords": ["devops", "deployment", "monitoring", "incident-response", "infrastructure", "terraform", "kubernetes", "k8s", "docker", "migration", "iac"],
   "icon": "⚙️",
   "category": "Engineering",
   "personaTemplateId": "devops-sre-engineer",
@@ -14,7 +14,11 @@
     "Generate a deployment checklist for the release",
     "Design monitoring and alerting for the payment service",
     "Write a blameless post-mortem for yesterday's outage",
-    "What's our SLA compliance looking like this month?"
+    "What's our SLA compliance looking like this month?",
+    "Generate a Terraform module for our VPC and subnets",
+    "Create Kubernetes manifests for a 3-replica web service with Ingress",
+    "Plan a migration strategy for moving from on-prem to AWS",
+    "Create a docker-compose.yml for a full-stack app with Postgres and Redis"
   ],
   "skills": [
     {
@@ -66,17 +70,66 @@
         { "name": "incident_details", "type": "string", "description": "Full incident details and timeline", "required": true }
       ],
       "enabled": true
+    },
+    {
+      "id": "devops-terraform-plan",
+      "name": "Terraform Plan Review",
+      "description": "Generate or review a Terraform plan, assess infrastructure impact, and suggest improvements",
+      "icon": "🏗️",
+      "category": "DevOps",
+      "prompt": "Analyze the following Terraform configuration or plan output.\n\nConfiguration: {{config}}\n\nPlease provide:\n1. Resource summary (what will be created/modified/destroyed)\n2. Cost impact estimate\n3. Security implications (open ports, public access, IAM permissions)\n4. Dependency analysis\n5. Suggested improvements (best practices, naming, tagging)\n6. Rollback considerations\n7. State management notes",
+      "parameters": [
+        { "name": "config", "type": "string", "description": "Terraform config, plan output, or description of desired infrastructure", "required": true }
+      ],
+      "enabled": true
+    },
+    {
+      "id": "devops-k8s-manifest",
+      "name": "Kubernetes Manifest Generator",
+      "description": "Generate Kubernetes manifests for deployments, services, ingress, and supporting resources",
+      "icon": "☸️",
+      "category": "DevOps",
+      "prompt": "Generate Kubernetes manifests for the following workload.\n\nWorkload description: {{workload}}\n\nPlease provide:\n1. Deployment manifest with resource limits, probes, and labels\n2. Service manifest (ClusterIP or LoadBalancer as appropriate)\n3. Ingress manifest if external access is needed\n4. ConfigMap/Secret for configuration\n5. HPA if auto-scaling is appropriate\n6. Namespace definition\n7. Notes on RBAC requirements\n8. Helm values.yaml if requested",
+      "parameters": [
+        { "name": "workload", "type": "string", "description": "Description of the workload to deploy (app name, replicas, ports, resources)", "required": true }
+      ],
+      "enabled": true
+    },
+    {
+      "id": "devops-migration-assessment",
+      "name": "Cloud Migration Assessment",
+      "description": "Assess workloads for cloud migration readiness using the 6 Rs framework",
+      "icon": "☁️",
+      "category": "DevOps",
+      "prompt": "Assess the following workloads for cloud migration.\n\nWorkload details: {{workloads}}\nTarget cloud: {{target}}\n\nPlease provide:\n1. Per-workload 6 Rs classification (Rehost, Replatform, Refactor, Repurchase, Retain, Retire)\n2. Dependency map between workloads\n3. Recommended migration wave grouping\n4. Risk assessment per workload\n5. Estimated effort (low/medium/high) per workload\n6. Landing zone requirements\n7. Data migration strategy\n8. Cutover plan outline\n9. Cost comparison (current vs projected)",
+      "parameters": [
+        { "name": "workloads", "type": "string", "description": "Description of workloads to migrate (servers, databases, services)", "required": true },
+        { "name": "target", "type": "string", "description": "Target cloud provider (AWS, GCP, Azure)", "required": false }
+      ],
+      "enabled": true
+    },
+    {
+      "id": "devops-docker-compose",
+      "name": "Docker Compose Generator",
+      "description": "Generate Docker Compose configurations for multi-service applications",
+      "icon": "🐳",
+      "category": "DevOps",
+      "prompt": "Generate a Docker Compose configuration for the following application.\n\nApplication description: {{application}}\n\nPlease provide:\n1. docker-compose.yml with all services, networks, and volumes\n2. Health checks for each service\n3. Environment variable configuration (.env file)\n4. Dockerfile for custom services (multi-stage if appropriate)\n5. docker-compose.override.yml for development\n6. docker-compose.prod.yml for production\n7. .dockerignore recommendations\n8. Notes on persistent storage and backup",
+      "parameters": [
+        { "name": "application", "type": "string", "description": "Description of the application stack (services, databases, caches, queues)", "required": true }
+      ],
+      "enabled": true
     }
   ],
   "agentRoles": [
     {
       "name": "devops-engineer",
       "displayName": "DevOps Engineer",
-      "description": "Specializes in deployment automation, monitoring, incident response, and infrastructure management",
+      "description": "Specializes in deployment automation, monitoring, incident response, infrastructure-as-code, container orchestration, and cloud migration",
       "icon": "⚙️",
       "color": "#ef4444",
       "capabilities": ["ops", "code", "analyze", "security"],
-      "systemPrompt": "You are a DevOps Engineer agent. You excel at deployment automation, monitoring setup, incident response, infrastructure-as-code, and reliability engineering. You prioritize system stability, observability, and automation."
+      "systemPrompt": "You are a DevOps Engineer agent. You excel at deployment automation, monitoring setup, incident response, infrastructure-as-code (Terraform, CloudFormation), container orchestration (Kubernetes, Docker Compose), cloud migration, and reliability engineering. You can use shell tools to run terraform, kubectl, helm, docker compose, and cloud CLI commands. You prioritize system stability, observability, and automation."
     }
   ]
 }

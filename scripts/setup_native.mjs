@@ -186,7 +186,7 @@ function fail(res, context) {
   console.error(`\n[cowork] ${context} failed${sig}${code}.`);
   if (isKilledByOS(res)) {
     console.error(
-      "[cowork] macOS terminated the process (usually memory pressure). " +
+      "[cowork] The OS terminated the process (usually memory pressure). " +
         "Setup will retry automatically; if it still fails after retries, " +
         "close other apps and re-run `npm run setup`."
     );
@@ -207,6 +207,30 @@ function checkPrereqs() {
           "  xcode-select --install\n"
       );
       process.exit(1);
+    }
+  } else if (process.platform === "win32") {
+    // Check for Visual C++ build tools (required by node-gyp for native modules)
+    const res = spawnSync("where", ["cl.exe"], { encoding: "utf8" });
+    if (res.status !== 0) {
+      // Also check via npm config for windows-build-tools
+      const npmRes = spawnSync(NPM_CMD, ["config", "get", "msvs_version"], {
+        encoding: "utf8",
+      });
+      const hasMsvs =
+        npmRes.status === 0 &&
+        npmRes.stdout &&
+        npmRes.stdout.trim() !== "undefined";
+      if (!hasMsvs) {
+        console.warn(
+          "\n[cowork] Warning: Visual C++ Build Tools may not be installed.\n" +
+            "Native module compilation (better-sqlite3) requires them.\n" +
+            "Install with:\n" +
+            "  npm install -g windows-build-tools\n" +
+            "Or install Visual Studio Build Tools from:\n" +
+            "  https://visualstudio.microsoft.com/visual-cpp-build-tools/\n"
+        );
+        // Don't exit — prebuilt binaries may work without compilation
+      }
     }
   }
 }

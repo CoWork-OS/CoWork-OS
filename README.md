@@ -8,7 +8,7 @@
 
 <p align="center">
   <strong>Looking for an OpenClaw alternative? CoWork OS is a local-first option for production workflows.</strong><br>
-  Security-hardened, local-first AI operating system — 30+ LLM providers, 14 channels, 130+ skills
+  Security-hardened, local-first AI operating system — 30+ LLM providers, 14 channels, 139 skills
 </p>
 
 <p align="center">
@@ -36,9 +36,9 @@
 
 - **30+ LLM providers** — Anthropic, OpenAI, Google, Ollama, AWS Bedrock, OpenRouter, and more. Bring your own keys.
 - **14 messaging channels** — WhatsApp, Telegram, Discord, Slack, Teams, iMessage, Signal, and more. Chat with your AI from anywhere.
-- **130+ built-in skills** — Documents, code review, web search, image generation, cloud integrations, game development, mobile development, infrastructure-as-code, and more.
+- **139 built-in skills** — Documents, code review, web search, image generation, cloud integrations, game development, mobile development, financial analysis, infrastructure-as-code, and more.
 - **Digital Twin Personas** — Pre-built AI twins for every role (engineer, manager, PM, director). Each twin absorbs cognitively draining work — PR triage, meeting prep, status reports, dependency tracking — so the human stays in flow.
-- **Plugin Platform** — 12 bundled role-specific packs (including Mobile Development and Game Development) with 45+ skills, in-app Plugin Store for installing community packs, remote registry, and enterprise admin policies for organization-wide control.
+- **Plugin Platform** — 17 bundled role-specific packs (including Mobile Development, Game Development, and 5 Financial packs) with 55+ skills, in-app Plugin Store for installing community packs, remote registry, and enterprise admin policies for organization-wide control.
 - **Active Context sidebar** — Always-visible panel showing connected MCP connectors with branded Lucide icons and enabled skills, auto-refreshed every 30 seconds.
 - **Agent teams** — Multi-agent collaboration with shared checklists, collaborative mode, multi-LLM synthesis, and persistent teams.
 - **Think With Me mode** — Socratic brainstorming that helps you clarify thinking without executing actions.
@@ -138,7 +138,7 @@ Advanced web scraping powered by [Scrapling](https://github.com/D4Vinci/Scraplin
 ### Integrations
 
 - **Cloud Storage**: Notion, Box, OneDrive, Google Workspace, Dropbox, SharePoint
-- **Enterprise Connectors**: Salesforce, Jira, HubSpot, Zendesk, ServiceNow, Linear, Asana, Okta, Discord, Slack, Resend
+- **Enterprise Connectors**: Salesforce, Jira, HubSpot, Zendesk, ServiceNow, Linear, Asana, Okta, Discord, Slack, Resend, Google Workspace, DocuSign, Outreach
 - **Developer Tools**: Claude Code-style `glob`/`grep`/`edit_file`, Playwright browser automation, MCP client/host/registry
 
 [Learn more](docs/features.md)
@@ -157,7 +157,7 @@ Dashboard with task metrics, cost/token tracking by model, activity heatmaps (da
 
 ### Plugin Platform & Customize
 
-Unified plugin platform with 10 bundled role-specific packs (Engineering, DevOps, Product, Sales, QA, and more), each bundling skills, agent roles, connectors, and "Try asking" prompts. Packs can link to Digital Twin personas for proactive background work.
+Unified plugin platform with 17 bundled role-specific packs (Engineering, DevOps, Product, Sales, QA, Finance, and more), each bundling skills, agent roles, connectors, and "Try asking" prompts. Packs can link to Digital Twin personas for proactive background work.
 
 - **Search & filter**: Real-time sidebar search across pack names, descriptions, categories, and skill names
 - **Per-skill control**: Enable or disable individual skills within a pack without toggling the whole pack
@@ -173,9 +173,9 @@ Access from **Settings** > **Customize**. [Learn more](docs/plugin-packs.md)
 
 ### Extensibility
 
-- **130+ built-in skills** across developer, productivity, communication, documents, game development, mobile development, infrastructure-as-code, and more
+- **139 built-in skills** across developer, productivity, communication, documents, game development, mobile development, financial analysis, infrastructure-as-code, and more
 - **Custom skills** in `~/Library/Application Support/cowork-os/skills/`
-- **12 bundled plugin packs** with 45+ role-specific skills and Digital Twin integration
+- **17 bundled plugin packs** with 55+ role-specific skills and Digital Twin integration
 - **Plugin Store** — browse, install from Git/URL, or scaffold custom packs
 - **MCP support** — client, host, and registry
 

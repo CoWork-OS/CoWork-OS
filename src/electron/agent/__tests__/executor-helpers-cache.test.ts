@@ -22,6 +22,34 @@ describe("ToolCallDeduplicator read-history invalidation", () => {
       true,
     );
   });
+
+  it("treats browser_navigate URLs that differ only by tracking params as semantic duplicates", () => {
+    const dedupe = new ToolCallDeduplicator(2, 60_000, 2, 20);
+
+    dedupe.recordCall("browser_navigate", {
+      url: "https://example.com/news?utm_source=twitter",
+    });
+    dedupe.recordCall("browser_navigate", {
+      url: "https://example.com/news?utm_source=linkedin&utm_medium=social",
+    });
+
+    const duplicate = dedupe.checkDuplicate("browser_navigate", {
+      url: "https://example.com/news?utm_campaign=test",
+    });
+    expect(duplicate.isDuplicate).toBe(true);
+  });
+
+  it("does not treat distinct browser_navigate business queries as semantic duplicates", () => {
+    const dedupe = new ToolCallDeduplicator(2, 60_000, 2, 20);
+
+    dedupe.recordCall("browser_navigate", { url: "https://example.com/news?page=1" });
+    dedupe.recordCall("browser_navigate", { url: "https://example.com/news?page=2" });
+
+    const duplicate = dedupe.checkDuplicate("browser_navigate", {
+      url: "https://example.com/news?page=3",
+    });
+    expect(duplicate.isDuplicate).toBe(false);
+  });
 });
 
 describe("FileOperationTracker cache invalidation", () => {

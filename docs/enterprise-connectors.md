@@ -186,6 +186,49 @@ Privileged intents: `discord.list_members` requires Server Members Intent; `disc
 
 Note: This REST API connector is separate from the Discord gateway adapter (`src/electron/gateway/channels/discord.ts`) which handles real-time WebSocket messaging for the multichannel gateway.
 
+## Google Workspace Connector (OAuth)
+
+Three Google integrations using shared OAuth with PKCE flow:
+
+- `google_calendar.*` — List calendars, get/create/update/delete events
+- `google_drive.*` — List files, search, read, upload, manage permissions
+- `gmail.*` — List messages, search, read, send, manage labels
+
+Authentication: OAuth 2.0 with PKCE via local callback server (port 18765). Scopes are mapped per service (Calendar, Drive, Gmail).
+
+## DocuSign Connector (OAuth)
+
+Electronic signature integration:
+
+- `docusign.health`
+- `docusign.send_envelope`
+- `docusign.get_envelope`
+- `docusign.list_envelopes`
+
+Authentication: OAuth 2.0 with signature scope.
+
+## Outreach Connector (OAuth)
+
+Sales engagement platform:
+
+- `outreach.health`
+- `outreach.list_prospects`
+- `outreach.get_prospect`
+- `outreach.create_sequence`
+
+Authentication: OAuth 2.0 with sales intelligence scopes.
+
+## Slack Connector (OAuth)
+
+Team messaging with OAuth-based setup (in addition to the gateway Socket Mode integration):
+
+- `slack.health`
+- `slack.list_channels`
+- `slack.send_message`
+- `slack.search_messages`
+
+Authentication: OAuth 2.0 with team-domain support.
+
 ## Connector Template
 
 A minimal MCP connector template is provided at:
@@ -212,6 +255,9 @@ These are included in the local MCP registry and appear in **Settings → MCP Se
 - Okta (Identity)
 - Discord (Community/messaging — 19 tools)
 - Slack (Team messaging)
+- Google Workspace (Calendar, Drive, Gmail — OAuth)
+- DocuSign (E-signatures — OAuth)
+- Outreach (Sales engagement — OAuth)
 
 ## Phase 1 Exit Criteria
 

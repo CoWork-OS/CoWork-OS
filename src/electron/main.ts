@@ -21,7 +21,11 @@ import { setupWorktreeHandlers } from "./ipc/worktree-handlers";
 import { ComparisonService } from "./git/ComparisonService";
 import { TaskSubscriptionRepository } from "./agents/TaskSubscriptionRepository";
 import { StandupReportService } from "./reports/StandupReportService";
-import { HeartbeatService, HeartbeatServiceDeps, setHeartbeatService } from "./agents/HeartbeatService";
+import {
+  HeartbeatService,
+  HeartbeatServiceDeps,
+  setHeartbeatService,
+} from "./agents/HeartbeatService";
 import { AgentRoleRepository } from "./agents/AgentRoleRepository";
 import { MentionRepository } from "./agents/MentionRepository";
 import { ActivityRepository } from "./activity/ActivityRepository";
@@ -79,6 +83,16 @@ import { registerCanvasScheme, registerCanvasProtocol, CanvasManager } from "./c
 import { setupCanvasHandlers, cleanupCanvasHandlers } from "./ipc/canvas-handlers";
 import { pruneTempWorkspaces } from "./utils/temp-workspace";
 import { getPluginRegistry } from "./extensions/registry";
+// Gap features: triggers, briefing, file hub, web access
+import { EventTriggerService } from "./triggers/EventTriggerService";
+import { setupTriggerHandlers } from "./ipc/trigger-handlers";
+import { DailyBriefingService } from "./briefing/DailyBriefingService";
+import { setupBriefingHandlers } from "./ipc/briefing-handlers";
+import { FileHubService } from "./file-hub/FileHubService";
+import { setupFileHubHandlers } from "./ipc/file-hub-handlers";
+import { WebAccessServer } from "./web-server/WebAccessServer";
+import { DEFAULT_WEB_ACCESS_CONFIG, type WebAccessConfig } from "./web-server/types";
+import { setupWebAccessHandlers } from "./ipc/web-access-handlers";
 
 let mainWindow: BrowserWindow | null = null;
 let dbManager: DatabaseManager;
@@ -1036,6 +1050,267 @@ if (!gotTheLock) {
       setupControlPlaneHandlers(mainWindow, { agentDaemon, dbManager, channelGateway });
       // Auto-start control plane if enabled (and register methods/bridge)
       await startControlPlaneFromSettings({ deps: { agentDaemon, dbManager, channelGateway } });
+
+      // ── Gap features: triggers, briefing, file hub, web access ───────
+      const db = dbManager.getDatabase();
+
+      // Event Triggers
+      const triggerService = new EventTriggerService(
+        {
+          createTask: async (params: { title: string; prompt: string; workspaceId: string }) => {
+            const task = await agentDaemon.createTask({
+              title: params.title,
+              prompt: params.prompt,
+              workspaceId: params.workspaceId,
+              source: "hook",
+            });
+            return { id: task.id };
+          },
+          deliverToChannel: async (params: {
+            channelType: string;
+            channelId: string;
+            text: string;
+          }) => {
+            await channelGateway.sendMessage?.(
+              params.channelType as any,
+              params.channelId,
+              params.text,
+            );
+          },
+          getDefaultWorkspaceId: () => "",
+          log: (...args: unknown[]) => console.log("[EventTriggers]", ...args),
+        },
+        db,
+      );
+      triggerService.start();
+      setupTriggerHandlers(triggerService);
+
+      // Daily Briefing
+      const briefingService = new DailyBriefingService(
+        {
+          getRecentTasks: (_workspaceId, _sinceMs) => {
+            try {
+              const taskRepo = new TaskRepository(db);
+              return (taskRepo.findByWorkspace(_workspaceId, 200) || []).filter(
+                (task) => typeof task.createdAt === "number" && task.createdAt >= _sinceMs,
+              );
+            } catch {
+              return [];
+            }
+          },
+          searchMemory: (_workspaceId, _query, _limit) => [],
+          getActiveSuggestions: (_workspaceId) => [],
+          getPriorities: (_workspaceId) => null,
+          getUpcomingJobs: (_limit) => [],
+          getOpenLoops: (_workspaceId) => [],
+          deliverToChannel: async (params) => {
+            console.log("[Briefing] Generated:\n", params.text.slice(0, 200));
+          },
+          log: (...args: unknown[]) => console.log("[Briefing]", ...args),
+        },
+        db,
+      );
+      setupBriefingHandlers(briefingService);
+
+      // File Hub
+      const fileHubService = new FileHubService(
+        {
+          getWorkspacePath: (wsId) => {
+            try {
+              const wsRepo = new WorkspaceRepository(db);
+              const ws =
+                (wsId ? wsRepo.findById(wsId) : null) ||
+                wsRepo
+                  .findAll()
+                  .find((workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id)) ||
+                wsRepo.findAll()[0];
+              return ws?.path || "";
+            } catch {
+              return "";
+            }
+          },
+          getArtifacts: () => [],
+          getConnectedSources: () => [],
+        },
+        db,
+      );
+      setupFileHubHandlers(fileHubService);
+
+      // Web Access
+      const loadWebAccessSettings = (): WebAccessConfig => {
+        try {
+          if (!SecureSettingsRepository.isInitialized()) {
+            return { ...DEFAULT_WEB_ACCESS_CONFIG };
+          }
+          const repository = SecureSettingsRepository.getInstance();
+          const stored = repository.load<Partial<WebAccessConfig>>("webaccess");
+          if (!stored) {
+            return { ...DEFAULT_WEB_ACCESS_CONFIG };
+          }
+          const allowedOrigins = Array.isArray(stored.allowedOrigins)
+            ? stored.allowedOrigins
+                .filter((origin): origin is string => typeof origin === "string")
+                .map((origin) => origin.trim())
+                .filter(Boolean)
+            : DEFAULT_WEB_ACCESS_CONFIG.allowedOrigins;
+          return {
+            ...DEFAULT_WEB_ACCESS_CONFIG,
+            ...stored,
+            enabled: stored.enabled === true,
+            port: Number.isFinite(Number(stored.port))
+              ? Math.min(65535, Math.max(1, Math.floor(Number(stored.port))))
+              : DEFAULT_WEB_ACCESS_CONFIG.port,
+            host:
+              typeof stored.host === "string" && stored.host.trim().length > 0
+                ? stored.host.trim()
+                : DEFAULT_WEB_ACCESS_CONFIG.host,
+            token: typeof stored.token === "string" ? stored.token.trim() : "",
+            allowedOrigins,
+          };
+        } catch (error) {
+          console.warn("[WebAccess] Failed to load settings; using defaults:", error);
+          return { ...DEFAULT_WEB_ACCESS_CONFIG };
+        }
+      };
+
+      const saveWebAccessSettings = (settings: WebAccessConfig): void => {
+        try {
+          if (!SecureSettingsRepository.isInitialized()) return;
+          const repository = SecureSettingsRepository.getInstance();
+          repository.save("webaccess", settings);
+        } catch (error) {
+          console.error("[WebAccess] Failed to persist settings:", error);
+        }
+      };
+
+      const webAccessTaskRepo = new TaskRepository(db);
+      const webAccessWorkspaceRepo = new WorkspaceRepository(db);
+
+      const getDefaultWebWorkspaceId = (): string => {
+        const firstWorkspace = webAccessWorkspaceRepo
+          .findAll()
+          .find((workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id));
+        return firstWorkspace?.id || "";
+      };
+
+      const initialWebAccessSettings = loadWebAccessSettings();
+      const webAccessServer = new WebAccessServer(
+        initialWebAccessSettings,
+        {
+          handleIpcInvoke: async (channel: string, ...args: any[]) => {
+            switch (channel) {
+              case "task:list":
+                return webAccessTaskRepo.findAll();
+              case "task:create": {
+                const payload = args[0] && typeof args[0] === "object" ? args[0] : {};
+                const prompt = typeof payload.prompt === "string" ? payload.prompt.trim() : "";
+                if (!prompt) {
+                  throw new Error("Task prompt is required.");
+                }
+                const workspaceId =
+                  typeof payload.workspaceId === "string" && payload.workspaceId.trim().length > 0
+                    ? payload.workspaceId.trim()
+                    : getDefaultWebWorkspaceId();
+                if (!workspaceId) {
+                  throw new Error("No workspace available for task creation.");
+                }
+                const title =
+                  typeof payload.title === "string" && payload.title.trim().length > 0
+                    ? payload.title.trim()
+                    : "Web Access Task";
+                return agentDaemon.createTask({
+                  title,
+                  prompt,
+                  workspaceId,
+                  source: "api",
+                });
+              }
+              case "task:get": {
+                const taskId = typeof args[0] === "string" ? args[0].trim() : "";
+                if (!taskId) {
+                  throw new Error("Task ID is required.");
+                }
+                return webAccessTaskRepo.findById(taskId) ?? null;
+              }
+              case "task:sendMessage": {
+                const payload = args[0] && typeof args[0] === "object" ? args[0] : {};
+                const taskId = typeof payload.taskId === "string" ? payload.taskId.trim() : "";
+                const message = typeof payload.message === "string" ? payload.message.trim() : "";
+                if (!taskId || !message) {
+                  throw new Error("taskId and message are required.");
+                }
+                return agentDaemon.sendMessage(taskId, message);
+              }
+              case "task:events": {
+                const taskId = typeof args[0] === "string" ? args[0].trim() : "";
+                if (!taskId) {
+                  throw new Error("Task ID is required.");
+                }
+                const events = agentDaemon.getTaskEvents(taskId);
+                const maxEvents = 600;
+                return events.length > maxEvents ? events.slice(-maxEvents) : events;
+              }
+              case "workspace:list":
+                return webAccessWorkspaceRepo
+                  .findAll()
+                  .filter((workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id));
+              case "briefing:generate": {
+                const workspaceId =
+                  typeof args[0] === "string" && args[0].trim().length > 0
+                    ? args[0].trim()
+                    : getDefaultWebWorkspaceId();
+                if (!workspaceId) {
+                  throw new Error("workspaceId is required.");
+                }
+                return briefingService.generateBriefing(workspaceId);
+              }
+              case "suggestions:list": {
+                const workspaceId = typeof args[0] === "string" ? args[0].trim() : "";
+                if (!workspaceId) return [];
+                const { ProactiveSuggestionsService } = await import(
+                  "./agent/ProactiveSuggestionsService"
+                );
+                return ProactiveSuggestionsService.listActive(workspaceId);
+              }
+              default:
+                throw new Error(`Unsupported web access channel: ${channel}`);
+            }
+          },
+          getRendererPath: () => {
+            const { app } = require("electron");
+            return path.join(app.getAppPath(), "dist", "renderer");
+          },
+          log: (...args: unknown[]) => console.log("[WebAccess]", ...args),
+        },
+      );
+      const normalizedWebAccessSettings = webAccessServer.getConfig();
+      if (JSON.stringify(initialWebAccessSettings) !== JSON.stringify(normalizedWebAccessSettings)) {
+        saveWebAccessSettings(normalizedWebAccessSettings);
+      }
+      if (normalizedWebAccessSettings.enabled) {
+        try {
+          await webAccessServer.start();
+        } catch (error) {
+          console.error("[WebAccess] Failed to start enabled server:", error);
+        }
+      }
+      setupWebAccessHandlers(webAccessServer, { saveSettings: saveWebAccessSettings });
+
+      // Hook triggers into gateway message events
+      channelGateway.onEvent((event) => {
+        if (event.type === "message:received" && event.data) {
+          triggerService.evaluateEvent({
+            source: "channel_message",
+            fields: {
+              channelType: event.channel || "",
+              chatId: (event.data.chatId as string) || "",
+              text: (event.data.text as string) || "",
+              senderName: (event.data.senderName as string) || "",
+            },
+            timestamp: Date.now(),
+          });
+        }
+      });
 
       // Initialize menu bar tray (macOS native companion)
       if (process.platform === "darwin") {

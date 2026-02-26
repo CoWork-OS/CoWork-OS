@@ -13,6 +13,7 @@ import { TavilyProvider } from "./tavily-provider";
 import { BraveProvider } from "./brave-provider";
 import { SerpApiProvider } from "./serpapi-provider";
 import { GoogleProvider } from "./google-provider";
+import { DuckDuckGoProvider } from "./duckduckgo-provider";
 import { SecureSettingsRepository } from "../../database/SecureSettingsRepository";
 import { getUserDataDir } from "../../utils/user-data-dir";
 
@@ -208,9 +209,12 @@ export class SearchProviderFactory {
       console.error("[SearchProviderFactory] Failed to load settings from database:", error);
     }
 
-    // Auto-detect and select providers if primaryProvider is not set
+    // Auto-detect and select providers if primaryProvider is not set.
+    // Only auto-select paid providers — DuckDuckGo is an implicit last-resort fallback.
     if (!settings.primaryProvider) {
-      const orderedProviders = this.getProviderExecutionOrder(settings);
+      const orderedProviders = this.getProviderExecutionOrder(settings).filter(
+        (p) => p !== "duckduckgo",
+      );
       if (orderedProviders.length > 0) {
         settings.primaryProvider = orderedProviders[0];
         console.log(
@@ -351,6 +355,8 @@ export class SearchProviderFactory {
         return new SerpApiProvider(config);
       case "google":
         return new GoogleProvider(config);
+      case "duckduckgo":
+        return new DuckDuckGoProvider(config);
       default:
         throw new Error(`Unknown search provider type: ${config.type}`);
     }
@@ -361,21 +367,18 @@ export class SearchProviderFactory {
    */
   static async searchWithFallback(query: SearchQuery): Promise<SearchResponse> {
     const settings = this.loadSettings();
-    const primaryType = query.provider || settings.primaryProvider;
 
-    if (!primaryType) {
-      throw new Error("No search provider configured");
-    }
-
+    // If a specific provider was requested, use it directly
     if (query.provider) {
-      const providerConfig = this.getProviderConfig(primaryType);
+      const providerConfig = this.getProviderConfig(query.provider);
       const provider = this.createProviderFromConfig(providerConfig);
       return await this.searchWithRetry(provider, query);
     }
 
+    // getProviderExecutionOrder always includes DuckDuckGo as a last-resort fallback
     const providersToTry = this.getProviderExecutionOrder(settings);
     if (!providersToTry.length) {
-      throw new Error("No search provider configured");
+      throw new Error("No search provider available");
     }
 
     const providerErrors: Array<{ provider: SearchProviderType; error: string }> = [];
@@ -451,14 +454,21 @@ export class SearchProviderFactory {
         configured: !!(settings.google?.apiKey && settings.google?.searchEngineId),
         supportedTypes: [...SEARCH_PROVIDER_INFO.google.supportedTypes],
       },
+      {
+        type: "duckduckgo",
+        name: SEARCH_PROVIDER_INFO.duckduckgo.displayName,
+        description: SEARCH_PROVIDER_INFO.duckduckgo.description,
+        configured: true, // Always available, no API key needed
+        supportedTypes: [...SEARCH_PROVIDER_INFO.duckduckgo.supportedTypes],
+      },
     ];
   }
 
   /**
-   * Check if any search provider is configured
+   * Check if any paid search provider is configured (excludes free DuckDuckGo fallback).
    */
   static isAnyProviderConfigured(): boolean {
-    return this.getAvailableProviders().some((p) => p.configured);
+    return this.getAvailableProviders().some((p) => p.configured && p.type !== "duckduckgo");
   }
 
   /**
@@ -466,11 +476,18 @@ export class SearchProviderFactory {
    * - If Brave is configured and multiple providers are available, prefer Brave first.
    * - Then preserve explicit primary/fallback ordering when available.
    * - Fill remaining providers from the detected configured list.
+   * - DuckDuckGo is always appended as the last-resort fallback.
    */
   private static getProviderExecutionOrder(settings: SearchSettings): SearchProviderType[] {
     const configuredProviders = this.getConfiguredProvidersFromSettings(settings);
-    if (configuredProviders.length <= 1) {
-      return configuredProviders;
+
+    // No paid providers configured — DuckDuckGo is the only option
+    if (configuredProviders.length === 0) {
+      return ["duckduckgo"];
+    }
+
+    if (configuredProviders.length === 1) {
+      return [...configuredProviders, "duckduckgo"];
     }
 
     const orderedProviders: SearchProviderType[] = [];
@@ -495,10 +512,14 @@ export class SearchProviderFactory {
 
     // Prefer Brave when available and multiple providers are configured.
     if (orderedProviders.length > 1 && orderedProviders.includes("brave")) {
-      return ["brave", ...orderedProviders.filter((provider) => provider !== "brave")];
+      return [
+        "brave",
+        ...orderedProviders.filter((provider) => provider !== "brave"),
+        "duckduckgo",
+      ];
     }
 
-    return orderedProviders;
+    return [...orderedProviders, "duckduckgo"];
   }
 
   /**

@@ -1,0 +1,68 @@
+{
+  "id": "risk-analyzer",
+  "name": "Risk Analyzer",
+  "description": "Portfolio risk analysis including Value at Risk (parametric, historical, Monte Carlo), Conditional VaR, stress testing, drawdown analysis, and factor exposure assessment.",
+  "icon": "🛡️",
+  "category": "Finance",
+  "prompt": "# Risk Analysis Request\n\n**Portfolio:** {{portfolio}}\n**Risk Metric:** {{riskMetric}}\n**Question:** {{question}}\n\n**Confidence Level:** {{confidence}}\n**Time Horizon:** {{horizon}}\n\nUsing the risk analysis framework below, perform a comprehensive risk assessment of this portfolio. Calculate the requested metrics, identify key risk exposures, and provide actionable risk management recommendations.\n\n---\n\n# Portfolio Risk Analysis Reference\n\n## Value at Risk (VaR)\n\nVaR answers: \"What is the maximum loss at a given confidence level over a specified time horizon?\"\n\n### Method 1: Parametric (Variance-Covariance) VaR\n\n**Single Asset:**\nVaR = μ - zα x σ\n\nWhere:\n- μ = Expected return over horizon\n- zα = Z-score for confidence level\n- σ = Standard deviation over horizon\n\n**Z-scores by confidence level:**\n| Confidence | Z-score |\n|-----------|--------|\n| 90% | 1.282 |\n| 95% | 1.645 |\n| 99% | 2.326 |\n\n**Portfolio VaR:**\nVaR_p = zα x sqrt(w'Σw) x Portfolio Value\n\nWhere w'Σw = portfolio variance from covariance matrix Σ.\n\n**Time scaling:** VaR_T = VaR_1day x sqrt(T)\n(Assumes i.i.d. returns; use with caution for horizons > 10 days)\n\n**Assumptions and limitations:**\n- Assumes normal distribution (underestimates tail risk)\n- Linear approximation (poor for options/nonlinear instruments)\n- Works best for short horizons and liquid portfolios\n\n### Method 2: Historical Simulation VaR\n\n**Process:**\n1. Collect historical returns for all portfolio assets (250-1000+ days)\n2. Apply current portfolio weights to historical returns\n3. Sort portfolio returns from worst to best\n4. VaR at α% confidence = the (1-α) x N th worst return\n   - Example: 95% VaR with 1000 days = 50th worst day\n\n**Advantages:** No distributional assumptions, captures fat tails and correlations naturally\n**Disadvantages:** Limited by historical sample, assumes past represents future\n\n### Method 3: Monte Carlo VaR\n\n**Process:**\n1. Estimate return distribution parameters (μ, Σ) or use factor model\n2. Generate 10,000-100,000 random scenarios using Geometric Brownian Motion:\n   S_t = S_0 x exp((μ - σ²/2)t + σ x W_t)\n   Where W_t = standard Brownian motion (random walk)\n3. Calculate portfolio value for each scenario\n4. Sort results and find the (1-α) percentile\n\n**Can incorporate:**\n- Fat tails (Student-t distribution with 4-6 degrees of freedom)\n- Skewness (skewed normal or Johnson distribution)\n- Regime switching (different parameters for bull/bear markets)\n- Non-linear payoffs (options, structured products)\n\n## Conditional VaR (CVaR) / Expected Shortfall\n\nCVaR = E[Loss | Loss > VaR]\n\nThe average loss in the worst (1-α)% of scenarios. More informative than VaR because it describes the severity of tail losses.\n\n**Parametric CVaR (normal distribution):**\nCVaR = μ + σ x φ(zα) / (1 - α)\n\nWhere φ(zα) = standard normal PDF evaluated at the z-score.\n\n| Confidence | VaR (% of σ) | CVaR (% of σ) | CVaR/VaR Ratio |\n|-----------|-------------|---------------|----------------|\n| 90% | 1.28σ | 1.76σ | 1.37x |\n| 95% | 1.65σ | 2.06σ | 1.25x |\n| 99% | 2.33σ | 2.67σ | 1.15x |\n\n**Key insight:** If CVaR is much higher than VaR (ratio > 1.5x), the portfolio has significant tail risk beyond what VaR captures.\n\n## Maximum Drawdown Analysis\n\n**Maximum Drawdown (MDD):**\nMDD = (Trough Value - Peak Value) / Peak Value\n\n**Drawdown Duration:**\n- Drawdown period: Peak to trough\n- Recovery period: Trough to new peak\n- Total underwater period: Peak to next new peak\n\n### Historical Drawdowns (S&P 500)\n\n| Event | Period | Drawdown | Recovery Time |\n|-------|--------|----------|---------------|\n| 2008 Global Financial Crisis | Oct 2007 - Mar 2009 | -56.8% | ~4.5 years |\n| 2000 Dot-Com Bust | Mar 2000 - Oct 2002 | -49.1% | ~7 years |\n| 2020 COVID Crash | Feb 2020 - Mar 2020 | -33.9% | ~5 months |\n| 2022 Rate Shock | Jan 2022 - Oct 2022 | -25.4% | ~2 years |\n| 2018 Q4 Selloff | Sep 2018 - Dec 2018 | -19.8% | ~4 months |\n| 1987 Black Monday | Aug 1987 - Dec 1987 | -33.5% | ~2 years |\n\n### Calmar Ratio\n\nCalmar Ratio = Annualized Return / |Maximum Drawdown|\n\n| Calmar | Interpretation |\n|--------|----------------|\n| < 0.5 | Poor drawdown-adjusted returns |\n| 0.5-1.0 | Acceptable |\n| 1.0-2.0 | Good |\n| > 2.0 | Excellent |\n\n## Stress Testing\n\n### Historical Scenario Replay\n\nApply historical factor shocks to current portfolio:\n\n| Scenario | Equities | Bonds | Credit | Commodities | USD |\n|----------|----------|-------|--------|-------------|-----|\n| 2008 GFC (6 months) | -45% | +10% | -20% | -55% | +15% |\n| 2020 COVID (1 month) | -34% | +5% | -15% | -30% | +8% |\n| 2022 Rate Shock (9 months) | -25% | -15% | -12% | +20% | +12% |\n| 2013 Taper Tantrum | -5% | -8% | -5% | -10% | +5% |\n| Euro Crisis 2011 | -19% | +8% | -15% | -15% | +3% |\n| Oil Crash 2014-15 | -12% | +5% | -8% | -60% | +20% |\n\n### Hypothetical Scenarios\n\n| Scenario | Description | Key Shocks |\n|----------|-------------|------------|\n| Rate Spike +200bps | Rapid tightening | Bonds -10 to -15%, Growth stocks -20%, Value +5% |\n| Recession | GDP contracts 2%+ | Equities -30%, HY -15%, Treasuries +15%, Gold +20% |\n| Stagflation | High inflation + low growth | Equities -20%, Bonds -10%, Commodities +30%, TIPS +10% |\n| USD Crisis | Dollar loses reserve status | USD -30%, Gold +50%, Intl equities +20% |\n| Geopolitical Shock | Major conflict | Equities -15%, Oil +50%, Gold +15%, Treasuries +5% |\n| Tech Bubble Pop | AI/tech reversal | Nasdaq -40%, S&P -20%, Value +5%, Bonds +10% |\n\n## Factor Exposure Analysis\n\n### Fama-French Five-Factor Model\n\nR - Rf = α + β1(MKT-Rf) + β2(SMB) + β3(HML) + β4(RMW) + β5(CMA) + ε\n\nWhere:\n- MKT-Rf = Market excess return (market risk)\n- SMB = Small Minus Big (size factor)\n- HML = High Minus Low (value factor)\n- RMW = Robust Minus Weak (profitability factor)\n- CMA = Conservative Minus Aggressive (investment factor)\n\n### Factor Risk Premiums (Historical Annualized)\n\n| Factor | Premium | Volatility | Sharpe |\n|--------|---------|-----------|--------|\n| Market (MKT) | 5-7% | 15-17% | 0.35-0.45 |\n| Size (SMB) | 2-3% | 10-12% | 0.15-0.25 |\n| Value (HML) | 3-5% | 10-13% | 0.25-0.40 |\n| Profitability (RMW) | 3-4% | 8-10% | 0.30-0.45 |\n| Investment (CMA) | 2-4% | 7-9% | 0.25-0.40 |\n| Momentum (WML) | 5-8% | 14-18% | 0.30-0.50 |\n\n### Interpreting Factor Exposures\n\n| β Value | Exposure Level | Implication |\n|---------|---------------|-------------|\n| > 1.5 | Very High | Concentrated bet on this factor |\n| 1.0-1.5 | High | Significant tilt |\n| 0.5-1.0 | Moderate | Some exposure |\n| 0-0.5 | Low | Minimal exposure |\n| < 0 | Negative | Betting against this factor |\n\n## Additional Risk Metrics\n\n| Metric | Formula | Use |\n|--------|---------|-----|\n| Beta | Cov(Rp, Rm) / Var(Rm) | Systematic risk |\n| Tracking Error | std(Rp - Rb) | Active risk vs benchmark |\n| Information Ratio | (Rp - Rb) / TE | Active return per unit active risk |\n| Downside Deviation | std(min(Ri - T, 0)) | Risk of underperformance |\n| Sortino Ratio | (Rp - T) / Downside Dev | Downside risk-adjusted return |\n| Ulcer Index | sqrt(mean(DD²)) | Depth and duration of drawdowns |\n| Tail Ratio | |P95 return| / |P5 return| | Upside vs downside tail |\n\n## Risk Budgeting Guidelines\n\n| Risk Budget Allocation | Conservative | Moderate | Aggressive |\n|-----------------------|-------------|----------|------------|\n| Max Drawdown Tolerance | 10-15% | 15-25% | 25-40% |\n| Annual Volatility Target | 5-8% | 8-14% | 14-22% |\n| VaR (95%, 1-month) | 2-4% | 4-7% | 7-12% |\n| Max Single Position | 5-10% | 10-20% | 20-30% |\n| Max Sector Exposure | 15-25% | 25-35% | 35-50% |",
+  "parameters": [
+    {
+      "name": "portfolio",
+      "type": "string",
+      "description": "Portfolio holdings with weights and/or dollar amounts (e.g., SPY 50%, TLT 30%, GLD 20%; $500K total)",
+      "required": true
+    },
+    {
+      "name": "riskMetric",
+      "type": "select",
+      "description": "Primary risk metric to analyze",
+      "required": true,
+      "options": [
+        "Value at Risk",
+        "Conditional VaR",
+        "Stress Test",
+        "Drawdown Analysis",
+        "Factor Exposure",
+        "Comprehensive"
+      ]
+    },
+    {
+      "name": "question",
+      "type": "string",
+      "description": "Your specific risk analysis question",
+      "required": true
+    },
+    {
+      "name": "confidence",
+      "type": "select",
+      "description": "Confidence level for VaR calculations",
+      "required": true,
+      "options": [
+        "90%",
+        "95%",
+        "99%"
+      ]
+    },
+    {
+      "name": "horizon",
+      "type": "select",
+      "description": "Time horizon for risk measurement",
+      "required": true,
+      "options": [
+        "1 Day",
+        "1 Week",
+        "1 Month",
+        "1 Year"
+      ]
+    }
+  ],
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when the user asks about portfolio risk, Value at Risk, VaR, CVaR, stress testing, drawdown analysis, factor exposure, risk budgeting, beta, tracking error, or any risk measurement and management question.",
+      "dontUseWhen": "Do not use when the request is about portfolio construction/optimization (use Portfolio Optimizer), company valuation, or financial modeling.",
+      "outputs": "Outcome from Risk Analyzer: comprehensive risk assessment with VaR/CVaR calculations, stress test results, factor exposures, drawdown analysis, and risk management recommendations.",
+      "successCriteria": "Returns quantified risk metrics at the specified confidence level and horizon, identifies key risk concentrations, provides stress test impacts, and recommends actionable risk mitigation steps."
+    }
+  }
+}

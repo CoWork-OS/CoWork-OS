@@ -36,57 +36,9 @@ export class SearchTools {
     dateRange?: "day" | "week" | "month" | "year";
     region?: string;
   }): Promise<SearchResponse> {
-    // Check if any provider is configured
-    if (!SearchProviderFactory.isAnyProviderConfigured()) {
-      // Return a helpful response instead of throwing an error
-      // This allows the LLM to inform the user gracefully
-      const errorMessage =
-        "Web search is not configured. To enable web search, please configure a search provider in Settings > Web Search. Supported providers: Tavily, Brave Search, SerpAPI, or Google Custom Search.";
-      this.daemon.logEvent(this.taskId, "log", {
-        message: "Web search is not available - no search provider configured",
-      });
-      return {
-        success: false,
-        error: errorMessage,
-        query: input.query,
-        searchType: input.searchType || "web",
-        results: [],
-        provider: "none",
-        metadata: {
-          error: errorMessage,
-          notConfigured: true,
-        },
-      };
-    }
-
-    const settings = SearchProviderFactory.loadSettings();
-    if (!settings.primaryProvider && !input.provider) {
-      // This shouldn't happen after the loadSettings auto-detection fix,
-      // but keep as a safety net
-      this.daemon.logEvent(this.taskId, "log", {
-        message: "Web search provider not selected - auto-selecting...",
-      });
-      // Clear cache and reload to trigger auto-detection
-      SearchProviderFactory.clearCache();
-      const reloadedSettings = SearchProviderFactory.loadSettings();
-      if (!reloadedSettings.primaryProvider) {
-        const errorMessage =
-          "No search provider is selected. Please configure one in Settings > Web Search.";
-        return {
-          success: false,
-          error: errorMessage,
-          query: input.query,
-          searchType: input.searchType || "web",
-          results: [],
-          provider: "none",
-          metadata: {
-            error: errorMessage,
-            notConfigured: true,
-          },
-        };
-      }
-    }
-
+    // DuckDuckGo is always available as a free fallback, so web_search never
+    // needs to return "not configured". searchWithFallback handles the full
+    // provider chain including DDG as last resort.
     const searchQuery: SearchQuery = {
       query: input.query,
       searchType: input.searchType || "web",
@@ -96,12 +48,12 @@ export class SearchTools {
       provider: input.provider,
     };
 
-    const providerName = input.provider || settings.primaryProvider || "unknown";
+    const settings = SearchProviderFactory.loadSettings();
+    const providerName = input.provider || settings.primaryProvider || "duckduckgo";
     this.daemon.logEvent(this.taskId, "log", {
       message: `Searching ${searchQuery.searchType}: "${input.query}" via ${providerName}`,
     });
 
-    // Use searchWithFallback for automatic fallback support
     try {
       const response = await SearchProviderFactory.searchWithFallback(searchQuery);
 

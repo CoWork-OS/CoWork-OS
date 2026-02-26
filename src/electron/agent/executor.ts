@@ -9066,7 +9066,9 @@ TASK / CONVERSATION HISTORY:
         // Handle tool calls
         const toolResults: LLMToolResult[] = [];
         const forceFinalizeWithoutTools =
-          this.guardrailPhaseAEnabled && responseHasToolUse && remainingTurnsAfterResponse <= 0;
+          followUpToolCallsLocked ||
+          (this.guardrailPhaseAEnabled && responseHasToolUse && remainingTurnsAfterResponse <= 0);
+        let skippedToolCallsByPolicy = 0;
         let hasDisabledToolAttempt = false;
         let hasDuplicateToolAttempt = false;
         let hasUnavailableToolAttempt = false;
@@ -9075,13 +9077,18 @@ TASK / CONVERSATION HISTORY:
         for (const content of response.content || []) {
           if (content.type === "tool_use") {
             if (forceFinalizeWithoutTools) {
+              skippedToolCallsByPolicy += 1;
               toolResults.push({
                 type: "tool_result",
                 tool_use_id: content.id,
                 content: JSON.stringify({
-                  error: "Tool call skipped: turn budget reserved for final response.",
+                  error: followUpToolCallsLocked
+                    ? "Tool call skipped: follow-up tool calls are locked due to repeated tool-use looping."
+                    : "Tool call skipped: turn budget reserved for final response.",
                   blocked: true,
-                  reason: "turn_budget_soft_landing",
+                  reason: followUpToolCallsLocked
+                    ? "follow_up_tool_use_lock"
+                    : "turn_budget_soft_landing",
                 }),
                 is_error: true,
               });

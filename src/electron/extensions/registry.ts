@@ -311,7 +311,7 @@ export class PluginRegistry extends EventEmitter {
     const runtime: PluginRuntime = {
       version: COWORK_VERSION,
       platform: process.platform,
-      appDataPath: app?.getPath?.("userData") || path.join(process.env.HOME || "", ".cowork"),
+      appDataPath: app?.getPath?.("userData") || path.join(process.env.HOME || process.env.USERPROFILE || "", ".cowork"),
       pluginDataPath: getPluginDataPath(pluginName),
       isDev: process.env.NODE_ENV === "development",
     };

@@ -29,7 +29,6 @@ import { TaskRepository, WorkspaceRepository } from "../database/repositories";
 import { AgentDaemon } from "../agent/daemon";
 import { QuickInputWindow } from "./QuickInputWindow";
 import {
-  TEMP_WORKSPACE_ID_PREFIX,
   TEMP_WORKSPACE_NAME,
   TEMP_WORKSPACE_ROOT_DIR_NAME,
   IPC_CHANNELS,
@@ -39,6 +38,12 @@ import {
 import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
 import { getUserDataDir } from "../utils/user-data-dir";
 import { pruneTempWorkspaces } from "../utils/temp-workspace";
+import {
+  createScopedTempWorkspaceIdentity,
+  isTempWorkspaceInScope,
+  sanitizeTempWorkspaceKey,
+} from "../utils/temp-workspace-scope";
+import { getActiveTempWorkspaceLeases, touchTempWorkspaceLease } from "../utils/temp-workspace-lease";
 
 const LEGACY_SETTINGS_FILE = "tray-settings.json";
 
@@ -384,14 +389,15 @@ export class TrayManager {
 
     const existing = this.workspaceRepo
       .findAll()
-      .find((workspace) => workspace.isTemp || isTempWorkspaceId(workspace.id));
+      .find((workspace) => isTempWorkspaceInScope(workspace.id, "tray"));
     let workspace: Workspace;
     if (existing) {
       workspace = ensureTempWorkspace(existing.id, existing.path, existing);
     } else {
-      const key = `tray-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
-      const workspaceId = `${TEMP_WORKSPACE_ID_PREFIX}${key}`;
-      const tempDir = path.join(os.tmpdir(), TEMP_WORKSPACE_ROOT_DIR_NAME, key);
+      const key = sanitizeTempWorkspaceKey(`session-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`);
+      const identity = createScopedTempWorkspaceIdentity("tray", key);
+      const workspaceId = identity.workspaceId;
+      const tempDir = path.join(os.tmpdir(), TEMP_WORKSPACE_ROOT_DIR_NAME, identity.slug);
       workspace = ensureTempWorkspace(workspaceId, tempDir);
     }
 
@@ -400,10 +406,13 @@ export class TrayManager {
         db,
         tempWorkspaceRoot: path.join(os.tmpdir(), TEMP_WORKSPACE_ROOT_DIR_NAME),
         currentWorkspaceId: workspace.id,
+        protectedWorkspaceIds: getActiveTempWorkspaceLeases(),
       });
     } catch (error) {
       console.warn("[TrayManager] Failed to prune temp workspaces:", error);
     }
+
+    touchTempWorkspaceLease(workspace.id);
 
     return workspace;
   }

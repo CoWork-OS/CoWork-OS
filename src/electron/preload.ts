@@ -3157,6 +3157,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
   saveWebAccessSettings: (settings: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.WEBACCESS_SAVE_SETTINGS, settings),
   getWebAccessStatus: () => ipcRenderer.invoke(IPC_CHANNELS.WEBACCESS_GET_STATUS),
+
+  // Window control APIs (for custom title bar on Windows)
+  windowMinimize: () => ipcRenderer.invoke("window:minimize"),
+  windowMaximize: () => ipcRenderer.invoke("window:maximize"),
+  windowClose: () => ipcRenderer.invoke("window:close"),
+  windowIsMaximized: () => ipcRenderer.invoke("window:isMaximized") as Promise<boolean>,
+  getPlatform: () => process.platform,
 });
 
 // Type declarations for TypeScript
@@ -4716,6 +4723,13 @@ export interface ElectronAPI {
     workspaceId: string,
     suggestionId: string,
   ) => Promise<{ actionPrompt: string | null }>;
+
+  // Window control APIs (for custom title bar on Windows)
+  windowMinimize: () => Promise<void>;
+  windowMaximize: () => Promise<void>;
+  windowClose: () => Promise<void>;
+  windowIsMaximized: () => Promise<boolean>;
+  getPlatform: () => string;
 }
 
 // Migration status type (for showing one-time notifications after app rename)

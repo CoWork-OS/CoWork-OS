@@ -6,7 +6,7 @@ import { ErrorCodes, Events, Methods } from "../electron/control-plane/protocol"
 import type { ControlPlaneServer } from "../electron/control-plane/server";
 import { ControlPlaneSettingsManager } from "../electron/control-plane/settings";
 import type { AgentConfig } from "../shared/types";
-import { TEMP_WORKSPACE_ID } from "../shared/types";
+import { isTempWorkspaceId } from "../shared/types";
 import type { AgentDaemon } from "../electron/agent/daemon";
 import type { DatabaseManager } from "../electron/database/schema";
 import type { ChannelGateway } from "../electron/gateway";
@@ -534,7 +534,7 @@ export function registerControlPlaneMethods(
   server.registerMethod(Methods.WORKSPACE_LIST, async (client) => {
     requireScope(client, "read");
     const all = workspaceRepo.findAll();
-    const workspaces = all.filter((w) => w.id !== TEMP_WORKSPACE_ID);
+    const workspaces = all.filter((w) => !isTempWorkspaceId(w.id));
     return {
       workspaces: isAdminClient(client) ? workspaces : workspaces.map(redactWorkspaceForRead),
     };
@@ -619,7 +619,7 @@ export function registerControlPlaneMethods(
       Object.assign(task, initialUpdates);
     }
 
-    if (validated.workspaceId !== TEMP_WORKSPACE_ID) {
+    if (!isTempWorkspaceId(validated.workspaceId)) {
       try {
         workspaceRepo.updateLastUsedAt(validated.workspaceId);
       } catch (error) {
@@ -1001,7 +1001,7 @@ export function registerControlPlaneMethods(
     requireScope(client, "read");
     const isAdmin = isAdminClient(client);
 
-    const allWorkspaces = workspaceRepo.findAll().filter((w) => w.id !== TEMP_WORKSPACE_ID);
+    const allWorkspaces = workspaceRepo.findAll().filter((w) => !isTempWorkspaceId(w.id));
     const workspacesForClient = isAdmin ? allWorkspaces : allWorkspaces.map(redactWorkspaceForRead);
 
     const taskStatusRows = db

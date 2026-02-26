@@ -164,6 +164,10 @@ function parseMaxTokensLimitFromError(error: any): number | null {
     /lower than\s+(\d+)/i,
     /max(?:imum)?\s+tokens(?:\s+value)?\s+(?:that is\s+)?lower than\s+(\d+)/i,
     /maximum tokens[^0-9]*(\d+)/i,
+    // Bedrock Converse API: "must be less than or equal to N"
+    /less than or equal to\s+(\d+)/i,
+    // Bedrock Converse API: "maxTokens: value (N) ... must be ... N"
+    /maxTokens.*?(?:less than|at most|equal to)\s+(\d+)/i,
   ];
 
   for (const pattern of patterns) {
@@ -233,6 +237,9 @@ function wrapProviderWithDetailedLogging(provider: LLMProvider): LLMProvider {
           adjustedMaxTokens: effectiveRequest.maxTokens,
         });
       }
+
+      // Tag requests so downstream provider logs can correlate with this call ID.
+      effectiveRequest._callId = callId;
 
       try {
         const response = await provider.createMessage(effectiveRequest);

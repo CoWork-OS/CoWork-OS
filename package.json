@@ -87,7 +87,7 @@
     "build:react": "vite build",
     "build:electron": "tsc -p tsconfig.electron.json",
     "build:daemon": "tsc -p tsconfig.daemon.json",
-    "build:connectors": "concurrently -n salesforce,jira,hubspot,zendesk,servicenow,linear,asana,okta,resend \"tsc -p connectors/salesforce-mcp/tsconfig.json\" \"tsc -p connectors/jira-mcp/tsconfig.json\" \"tsc -p connectors/hubspot-mcp/tsconfig.json\" \"tsc -p connectors/zendesk-mcp/tsconfig.json\" \"tsc -p connectors/servicenow-mcp/tsconfig.json\" \"tsc -p connectors/linear-mcp/tsconfig.json\" \"tsc -p connectors/asana-mcp/tsconfig.json\" \"tsc -p connectors/okta-mcp/tsconfig.json\" \"tsc -p connectors/resend-mcp/tsconfig.json\"",
+    "build:connectors": "concurrently -n salesforce,jira,hubspot,zendesk,servicenow,linear,asana,okta,resend,discord \"tsc -p connectors/salesforce-mcp/tsconfig.json\" \"tsc -p connectors/jira-mcp/tsconfig.json\" \"tsc -p connectors/hubspot-mcp/tsconfig.json\" \"tsc -p connectors/zendesk-mcp/tsconfig.json\" \"tsc -p connectors/servicenow-mcp/tsconfig.json\" \"tsc -p connectors/linear-mcp/tsconfig.json\" \"tsc -p connectors/asana-mcp/tsconfig.json\" \"tsc -p connectors/okta-mcp/tsconfig.json\" \"tsc -p connectors/resend-mcp/tsconfig.json\" \"tsc -p connectors/discord-mcp/tsconfig.json\"",
     "prepack": "npm run build",
     "package": "npm run build && electron-builder",
     "fmt": "oxfmt --write src",

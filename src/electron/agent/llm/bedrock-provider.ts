@@ -73,21 +73,24 @@ export class BedrockProvider implements LLMProvider {
     const toolConfig = request.tools ? this.convertTools(request.tools, toolNameMap) : undefined;
 
     const resolvedModelId = await this.resolveModelId(request.model);
+    const clampedMaxTokens = this.clampToKnownOutputLimit(resolvedModelId, request.maxTokens);
     const command = new ConverseCommand({
       modelId: resolvedModelId,
       messages,
       system,
       inferenceConfig: {
-        maxTokens: request.maxTokens,
+        maxTokens: clampedMaxTokens,
       },
       ...(toolConfig && { toolConfig }),
     });
 
+    const logTag = request._callId ? `[Bedrock:#${request._callId}]` : `[Bedrock]`;
+
     try {
       if (resolvedModelId !== request.model) {
-        console.log(`[Bedrock] Resolved model: ${request.model} -> ${resolvedModelId}`);
+        console.log(`${logTag} Resolved model: ${request.model} -> ${resolvedModelId}`);
       }
-      console.log(`[Bedrock] Calling API with model: ${resolvedModelId}`);
+      console.log(`${logTag} Calling API with model: ${resolvedModelId}`);
       const response = await this.client.send(
         command,
         // Pass abort signal to allow cancellation
@@ -97,7 +100,7 @@ export class BedrockProvider implements LLMProvider {
     } catch (error: any) {
       // Handle abort errors gracefully
       if (error.name === "AbortError" || error.message?.includes("aborted")) {
-        console.log(`[Bedrock] Request aborted`);
+        console.log(`${logTag} Request aborted`);
         throw new Error("Request cancelled");
       }
 
@@ -109,7 +112,7 @@ export class BedrockProvider implements LLMProvider {
       if (lower.includes("inference profile") || lower.includes("on-demand throughput")) {
         const fallback = await this.resolveInferenceProfileFallback(request.model);
         if (fallback && fallback !== resolvedModelId) {
-          console.log(`[Bedrock] Retrying with inference profile: ${fallback}`);
+          console.log(`${logTag} Retrying with inference profile: ${fallback}`);
           const retryResponse = await this.client.send(
             new ConverseCommand({
               modelId: fallback,
@@ -131,7 +134,7 @@ export class BedrockProvider implements LLMProvider {
         );
       }
 
-      console.error(`[Bedrock] API error:`, {
+      console.error(`${logTag} API error:`, {
         name: error.name,
         message: error.message,
         code: error.$metadata?.httpStatusCode,
@@ -344,13 +347,13 @@ export class BedrockProvider implements LLMProvider {
     if (s.startsWith("anthropic.")) s = s.slice("anthropic.".length);
 
     // Drop trailing :N.
-    s = s.replace(/:\\d+$/, "");
+    s = s.replace(/:\d+$/, "");
 
     // Drop trailing -vN.
-    s = s.replace(/-v\\d+$/, "");
+    s = s.replace(/-v\d+$/, "");
 
     // Drop trailing -YYYYMMDD (common in Bedrock model IDs).
-    s = s.replace(/-20\\d{6,8}$/, "");
+    s = s.replace(/-20\d{6,8}$/, "");
 
     return s;
   }
@@ -358,6 +361,38 @@ export class BedrockProvider implements LLMProvider {
   private isClaudeModelId(modelId: string): boolean {
     const lower = (modelId || "").toLowerCase();
     return lower.includes("claude") || lower.includes("anthropic");
+  }
+
+  /**
+   * Known output token limits for Bedrock Claude models.
+   * Pre-clamping avoids a wasted first API call that would otherwise fail with
+   * a "must be less than or equal to N" ValidationException.
+   */
+  private static readonly KNOWN_OUTPUT_LIMITS: Array<{ pattern: RegExp; limit: number }> = [
+    // Claude 3.x models: 4096 output tokens
+    { pattern: /claude-3-opus/i, limit: 4096 },
+    { pattern: /claude-3-sonnet/i, limit: 4096 },
+    { pattern: /claude-3-haiku/i, limit: 4096 },
+    // Claude 3.5: 8192 output tokens
+    { pattern: /claude-3-5-sonnet/i, limit: 8192 },
+    { pattern: /claude-3-5-haiku/i, limit: 8192 },
+    // Claude 4+ models: higher limits — don't clamp (128K+ supported)
+  ];
+
+  private clampToKnownOutputLimit(resolvedModel: string, requestedMaxTokens: number): number {
+    for (const entry of BedrockProvider.KNOWN_OUTPUT_LIMITS) {
+      if (entry.pattern.test(resolvedModel)) {
+        if (requestedMaxTokens > entry.limit) {
+          console.log(
+            `[Bedrock] Pre-clamping maxTokens from ${requestedMaxTokens} to ${entry.limit} ` +
+              `(known limit for ${resolvedModel})`,
+          );
+          return entry.limit;
+        }
+        break;
+      }
+    }
+    return requestedMaxTokens;
   }
 
   private convertSystem(system: string): SystemContentBlock[] {

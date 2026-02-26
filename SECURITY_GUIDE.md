@@ -95,7 +95,7 @@ This prevents unintended browsing during automation tasks.
 
 **Technical details**:
 - Path traversal protection prevents accessing files outside the workspace
-- Symlink attacks are mitigated through path normalization
+- **Symlink escape detection**: File tools resolve symlinks via `realpath()` and verify the resolved path remains within the workspace boundary. Symlinks that point outside the workspace are rejected before any read/write operation.
 - Implementation: `src/electron/agent/tools/file-tools.ts`
 
 ### Workspace Kit Project Access Rules
@@ -389,6 +389,7 @@ git diff HEAD..origin/main
 | Threat | Protection |
 |--------|------------|
 | Path traversal | Path normalization and validation |
+| Symlink escape | `realpath()` resolution with workspace boundary check |
 | Command injection | User approval required |
 | API key leakage | Encrypted storage, minimal env |
 | XSS attacks | Content Security Policy |

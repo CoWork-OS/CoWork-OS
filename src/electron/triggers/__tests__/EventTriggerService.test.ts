@@ -69,7 +69,7 @@ describe("EventTriggerService", () => {
   });
 
   it("updateTrigger modifies an existing trigger", () => {
-    const _t = service.addTrigger({
+    const t = service.addTrigger({
       name: "Original",
       enabled: true,
       source: "channel_message",
@@ -88,7 +88,7 @@ describe("EventTriggerService", () => {
   });
 
   it("removeTrigger deletes a trigger", () => {
-    const _t = service.addTrigger({
+    const t = service.addTrigger({
       name: "ToDelete",
       enabled: true,
       source: "channel_message",
@@ -156,7 +156,7 @@ describe("EventTriggerService", () => {
       source: "channel_message",
       conditions: [],
       action: { type: "create_task", config: { prompt: "X" } },
-      work_spaceId: "ws-1",
+      workspaceId: "ws-1",
       cooldownMs: 60_000,
     });
 

@@ -485,14 +485,17 @@ if (!gotTheLock) {
 
           const needsManagedWorkspace =
             !workspace || workspace.isTemp || isTempWorkspaceId(workspace.id);
-          if (needsManagedWorkspace) {
-            workspace = await ensureManagedWorkspaceForCronJob(job, nowMs);
-          } else {
-            workspaceRepo.updateLastUsedAt(workspace.id, nowMs);
-          }
-
           if (!workspace) {
             return null;
+          }
+
+          if (needsManagedWorkspace) {
+            workspace = await ensureManagedWorkspaceForCronJob(job, nowMs);
+            if (!workspace) {
+              return null;
+            }
+          } else {
+            workspaceRepo.updateLastUsedAt(workspace.id, nowMs);
           }
 
           const managedWorkspace = isManagedScheduledWorkspacePath(workspace.path, userDataDir);
@@ -573,7 +576,7 @@ if (!gotTheLock) {
 
           // Fetch a bounded window; formatting further caps message count/size.
           const raw = channelMessageRepo.findByChatId(channel.id, chatId, 500);
-          const userCache = new Map<string, any>();
+          const userCache = new Map<string, Any>();
           const lookupUser = (id: string) => {
             if (!id) return undefined;
             if (userCache.has(id)) return userCache.get(id);
@@ -766,7 +769,7 @@ if (!gotTheLock) {
             }
 
             // Send the message via the gateway
-            await channelGateway.sendMessage(resolvedType as any, params.channelId, message, {
+            await channelGateway.sendMessage(resolvedType as Any, params.channelId, message, {
               parseMode: "markdown",
             });
             console.log(`[Cron] Delivered to ${resolvedType}:${params.channelId}`);
@@ -1157,7 +1160,7 @@ if (!gotTheLock) {
             text: string;
           }) => {
             await channelGateway.sendMessage?.(
-              params.channelType as any,
+              params.channelType as Any,
               params.channelId,
               params.text,
             );
@@ -1282,7 +1285,7 @@ if (!gotTheLock) {
       const webAccessServer = new WebAccessServer(
         initialWebAccessSettings,
         {
-          handleIpcInvoke: async (channel: string, ...args: any[]) => {
+          handleIpcInvoke: async (channel: string, ...args: Any[]) => {
             switch (channel) {
               case "task:list":
                 return webAccessTaskRepo.findAll();
@@ -1362,6 +1365,7 @@ if (!gotTheLock) {
             }
           },
           getRendererPath: () => {
+// oxlint-disable-next-line typescript-eslint(no-require-imports)
             const { app } = require("electron");
             return path.join(app.getAppPath(), "dist", "renderer");
           },

@@ -9,7 +9,7 @@ import { EventEmitter } from "events";
 import type { ControlPlaneServer } from "./server";
 import type { ControlPlaneClient, NodeCapabilityType, NodePlatform } from "./client";
 import type { NodeInfo, NodeInvokeParams, NodeInvokeResult } from "../../shared/types";
-import { Events, Methods, ErrorCodes, createRequestFrame, createResponseFrame } from "./protocol";
+import { Events as _Events, Methods as _Methods, ErrorCodes, createRequestFrame as _createRequestFrame, createResponseFrame as _createResponseFrame } from "./protocol";
 
 /**
  * Node Manager event types
@@ -75,7 +75,7 @@ export class NodeManager extends EventEmitter {
    */
   getNodes(): NodeInfo[] {
     if (!this.server) return [];
-    return (this.server as any).clients.getNodeInfoList();
+    return (this.server as Any).clients.getNodeInfoList();
   }
 
   /**
@@ -83,7 +83,7 @@ export class NodeManager extends EventEmitter {
    */
   get nodeCount(): number {
     if (!this.server) return 0;
-    return (this.server as any).clients.nodeCount;
+    return (this.server as Any).clients.nodeCount;
   }
 
   /**
@@ -91,7 +91,7 @@ export class NodeManager extends EventEmitter {
    */
   getNode(idOrName: string): NodeInfo | null {
     if (!this.server) return null;
-    const client = (this.server as any).clients.getNodeByIdOrName(idOrName);
+    const client = (this.server as Any).clients.getNodeByIdOrName(idOrName);
     return client?.getNodeInfo() || null;
   }
 
@@ -145,7 +145,7 @@ export class NodeManager extends EventEmitter {
     const { nodeId, command, params: commandParams, timeoutMs = 30000 } = params;
 
     // Find the node
-    const client = (this.server as any).clients.getNodeByIdOrName(nodeId) as
+    const client = (this.server as Any).clients.getNodeByIdOrName(nodeId) as
       | ControlPlaneClient
       | undefined;
     if (!client) {
@@ -188,14 +188,14 @@ export class NodeManager extends EventEmitter {
 
     // Forward to the server's internal method
     try {
-      const result = await (this.server as any).invokeNodeCommand(
+      const result = await (this.server as Any).invokeNodeCommand(
         client,
         command,
         commandParams,
         timeoutMs,
       );
       return result;
-    } catch (error: any) {
+    } catch (error: Any) {
       return {
         ok: false,
         error: {

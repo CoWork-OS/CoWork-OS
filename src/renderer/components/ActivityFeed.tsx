@@ -52,7 +52,7 @@ export function ActivityFeed({
   const loadActivities = useCallback(async () => {
     try {
       setLoading(true);
-      const query: any = {
+      const query: Any = {
         workspaceId,
         limit: maxItems,
       };
@@ -76,7 +76,7 @@ export function ActivityFeed({
       const result = await window.electronAPI.listActivities(query);
       setActivities(result);
       setError(null);
-    } catch (err: any) {
+    } catch (err: Any) {
       setError(err.message || "Failed to load activities");
       console.error("Failed to load activities:", err);
     } finally {

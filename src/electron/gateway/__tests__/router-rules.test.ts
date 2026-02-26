@@ -16,17 +16,17 @@ describe("evaluateWorkspaceRouterRules", () => {
     await fs.writeFile(
       path.join(rulesDir, "rules.monty"),
       [
-        'out = {\"action\": \"pass\"}',
-        't = (input.get(\"text\") or \"\").strip().lower()',
-        'if t == \"ping\":',
-        '  out = {\"action\": \"reply\", \"text\": \"pong\"}',
+        'out = {"action": "pass"}',
+        't = (input.get("text") or "").strip().lower()',
+        'if t == "ping":',
+        '  out = {"action": "reply", "text": "pong"}',
         "out",
       ].join("\n"),
       "utf8",
     );
 
-    const workspace: any = { id: "ws1", name: "WS", path: tmpDir };
-    const message: any = {
+    const workspace: Any = { id: "ws1", name: "WS", path: tmpDir };
+    const message: Any = {
       messageId: "m1",
       chatId: "c1",
       userId: "u1",

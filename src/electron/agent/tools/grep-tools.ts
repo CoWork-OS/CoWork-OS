@@ -144,7 +144,7 @@ export class GrepTools {
       let regex: RegExp;
       try {
         regex = new RegExp(pattern, ignoreCase ? "gi" : "g");
-      } catch (e: any) {
+      } catch (e: Any) {
         throw new Error(`Invalid regex pattern: ${e.message}`);
       }
 
@@ -161,7 +161,7 @@ export class GrepTools {
         throw new Error(`Path does not exist: ${searchPath || "."}`);
       }
 
-      const taskGetter = (this.daemon as any)?.getTask;
+      const taskGetter = (this.daemon as Any)?.getTask;
       const task =
         typeof taskGetter === "function" ? taskGetter.call(this.daemon, this.taskId) : null;
       const agentRoleId = task?.assignedAgentRoleId || null;
@@ -280,7 +280,7 @@ export class GrepTools {
         filesSearched: files.length,
         truncated,
       };
-    } catch (error: any) {
+    } catch (error: Any) {
       this.daemon.logEvent(this.taskId, "tool_result", {
         tool: "grep",
         error: error.message,

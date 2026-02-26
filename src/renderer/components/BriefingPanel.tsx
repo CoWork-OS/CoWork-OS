@@ -77,7 +77,7 @@ export const BriefingPanel: React.FC<{ workspaceId?: string }> = ({ workspaceId 
   const loadBriefing = useCallback(async () => {
     if (!workspaceId) return;
     try {
-      const latest = await (window as any).electronAPI.getLatestBriefing(workspaceId);
+      const latest = await (window as Any).electronAPI.getLatestBriefing(workspaceId);
       if (latest) {
         setBriefing(latest);
         // Auto-expand all sections
@@ -97,12 +97,12 @@ export const BriefingPanel: React.FC<{ workspaceId?: string }> = ({ workspaceId 
     setLoading(true);
     setError(null);
     try {
-      const result = await (window as any).electronAPI.generateBriefing?.(workspaceId);
+      const result = await (window as Any).electronAPI.generateBriefing?.(workspaceId);
       if (result) {
         setBriefing(result);
         setExpandedSections(new Set(result.sections.map((s: BriefingSection) => s.type)));
       }
-    } catch (e: any) {
+    } catch (e: Any) {
       setError(e?.message || "Failed to generate briefing");
     } finally {
       setLoading(false);

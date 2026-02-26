@@ -350,7 +350,7 @@ export class PresentationBuilder {
           h: 5.5,
           sizing: { type: "contain", w: 11, h: 5.5 },
         });
-      } catch (error) {
+      } catch  {
         // If image can't be loaded, add placeholder text
         slide.addText(`[Image: ${data.imagePath}]`, {
           x: 1,

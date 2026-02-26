@@ -40,7 +40,7 @@ describe("GlobTools", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    globTools = new GlobTools(mockWorkspace, mockDaemon as any, "test-task-id");
+    globTools = new GlobTools(mockWorkspace, mockDaemon as Any, "test-task-id");
   });
 
   afterEach(() => {

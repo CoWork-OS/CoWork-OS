@@ -35,7 +35,7 @@ function createCodeChallenge(verifier: string): string {
   return base64Url(hash);
 }
 
-function parseJsonSafe(text: string): any | undefined {
+function parseJsonSafe(text: string): Any | undefined {
   const trimmed = text.trim();
   if (!trimmed) return undefined;
   try {

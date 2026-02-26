@@ -11,7 +11,7 @@ type WorkspaceLike = {
   path?: string;
   isTemp?: boolean;
   name?: string;
-  [key: string]: any;
+  [key: string]: Any;
 };
 
 export function preflightWorkspaceCheck<W extends WorkspaceLike>(opts: {

@@ -93,7 +93,7 @@ export function createMontySafeStdlib(): MontyStdlib {
       return JSON.parse(s);
     },
     json_stringify: (value: unknown, options?: unknown) => {
-      const opts = montyValueToJs(options) as any;
+      const opts = montyValueToJs(options) as Any;
       const indent = typeof opts?.indent === "number" ? opts.indent : 0;
       const sortKeys = !!opts?.sort_keys || !!opts?.sortKeys;
       const maxOutputChars =
@@ -214,7 +214,7 @@ export async function runMontyCode(options: RunMontyOptions): Promise<MontyRunRe
   let mod: MontyModule;
   try {
     mod = await loadMontyModule();
-  } catch (err: any) {
+  } catch (err: Any) {
     return {
       ok: false,
       error: {
@@ -232,7 +232,7 @@ export async function runMontyCode(options: RunMontyOptions): Promise<MontyRunRe
   const cache = options.cache;
 
   try {
-    const { Monty, runMontyAsync, MontySyntaxError, MontyTypingError, MontyRuntimeError } = mod;
+    const { Monty, runMontyAsync } = mod;
 
     let dump: Buffer | undefined;
     if (cache && cacheKey) {
@@ -260,7 +260,7 @@ export async function runMontyCode(options: RunMontyOptions): Promise<MontyRunRe
     });
 
     return { ok: true, output: montyValueToJs(out) };
-  } catch (err: any) {
+  } catch (err: Any) {
     try {
       const { MontySyntaxError, MontyTypingError, MontyRuntimeError } = mod;
       if (err instanceof MontySyntaxError) {

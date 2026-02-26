@@ -23,11 +23,11 @@ describe("SystemTools.normalizeAppleScript", () => {
         createdAt: 0,
         permissions: { read: true, write: true, delete: false, network: false, shell: false },
       },
-      { logEvent: vi.fn(), requestApproval: vi.fn() } as any,
+      { logEvent: vi.fn(), requestApproval: vi.fn() } as Any,
       "task-1",
     );
     // Access private method for testing
-    return (instance as any).normalizeAppleScript(input);
+    return (instance as Any).normalizeAppleScript(input);
   }
 
   it("returns unmodified script as-is", () => {
@@ -124,7 +124,7 @@ describe("SystemTools.searchMemories", () => {
         createdAt: 0,
         permissions: { read: true, write: true, delete: false, network: false, shell: false },
       },
-      { logEvent: vi.fn(), requestApproval: vi.fn() } as any,
+      { logEvent: vi.fn(), requestApproval: vi.fn() } as Any,
       "task-1",
     );
 

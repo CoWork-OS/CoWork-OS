@@ -1,6 +1,6 @@
 import {
   GoogleGenerativeAI,
-  GenerativeModel,
+  GenerativeModel as _GenerativeModel,
   Content,
   Part,
   Tool,
@@ -71,7 +71,7 @@ export class GeminiProvider implements LLMProvider {
 
       const response = result.response;
       return this.convertResponse(response);
-    } catch (error: any) {
+    } catch (error: Any) {
       // Handle abort errors gracefully
       if (error.name === "AbortError" || error.message?.includes("aborted")) {
         console.log(`[Gemini] Request aborted`);
@@ -95,7 +95,7 @@ export class GeminiProvider implements LLMProvider {
         generationConfig: { maxOutputTokens: 10 },
       });
       return { success: true };
-    } catch (error: any) {
+    } catch (error: Any) {
       return {
         success: false,
         error: error.message || "Failed to connect to Gemini API",
@@ -126,7 +126,7 @@ export class GeminiProvider implements LLMProvider {
           } else if (item.type === "tool_use") {
             // Gemini uses functionCall for tool invocations
             const thoughtSignature = this.getThoughtSignatureFromId(item.id);
-            const functionCallPart: any = {
+            const functionCallPart: Any = {
               functionCall: {
                 name: item.name,
                 args: item.input,
@@ -173,12 +173,12 @@ export class GeminiProvider implements LLMProvider {
    * Recursively sanitize schema for Gemini API compatibility.
    * Gemini requires all nested objects/arrays to have explicit 'type' fields.
    */
-  private sanitizeSchemaForGemini(schema: any): any {
+  private sanitizeSchemaForGemini(schema: Any): Any {
     if (!schema || typeof schema !== "object") {
       return schema;
     }
 
-    const result: any = { ...schema };
+    const result: Any = { ...schema };
 
     // Ensure type field exists
     if (!result.type) {
@@ -206,7 +206,7 @@ export class GeminiProvider implements LLMProvider {
 
     // Recursively process properties
     if (result.properties) {
-      const sanitizedProperties: any = {};
+      const sanitizedProperties: Any = {};
       for (const [key, value] of Object.entries(result.properties)) {
         sanitizedProperties[key] = this.sanitizeSchemaForGemini(value);
       }
@@ -233,7 +233,7 @@ export class GeminiProvider implements LLMProvider {
   private convertTools(tools: LLMTool[]): Tool[] {
     const functionDeclarations: FunctionDeclaration[] = tools.map((tool) => {
       // Sanitize the entire parameters schema for Gemini compatibility
-      const sanitizedProperties: any = {};
+      const sanitizedProperties: Any = {};
       if (tool.input_schema.properties) {
         for (const [key, value] of Object.entries(tool.input_schema.properties)) {
           sanitizedProperties[key] = this.sanitizeSchemaForGemini(value);
@@ -254,7 +254,7 @@ export class GeminiProvider implements LLMProvider {
     return [{ functionDeclarations }];
   }
 
-  private convertResponse(response: any): LLMResponse {
+  private convertResponse(response: Any): LLMResponse {
     const content: LLMContent[] = [];
     const candidate = response.candidates?.[0];
 
@@ -328,7 +328,7 @@ export class GeminiProvider implements LLMProvider {
   > {
     try {
       // Use the REST API to list models since the SDK doesn't expose listModels well
-      const apiKey = (this.client as any).apiKey;
+      const apiKey = (this.client as Any).apiKey;
       const maskedKey = apiKey
         ? `${apiKey.substring(0, 8)}...${apiKey.substring(apiKey.length - 4)}`
         : "undefined";
@@ -347,7 +347,7 @@ export class GeminiProvider implements LLMProvider {
         return this.getDefaultModels();
       }
 
-      const data = (await response.json()) as { models?: any[] };
+      const data = (await response.json()) as { models?: Any[] };
 
       // Patterns to exclude non-text models
       const excludePatterns = [
@@ -382,20 +382,20 @@ export class GeminiProvider implements LLMProvider {
 
       const models = (data.models || [])
         .filter(
-          (model: any) =>
+          (model: Any) =>
             model.supportedGenerationMethods?.includes("generateContent") &&
             isTextModel(model.name || ""),
         )
-        .map((model: any) => ({
+        .map((model: Any) => ({
           name: model.name?.replace("models/", "") || "",
           displayName: model.displayName || model.name?.replace("models/", "") || "",
           description: model.description || "",
         }))
-        .filter((model: any) => model.name);
+        .filter((model: Any) => model.name);
 
       // Sort models: newer versions first, pro before flash
       // Dynamically extract version numbers (e.g., "3.0", "2.5", "2.0", "1.5")
-      const sortedModels = models.sort((a: any, b: any) => {
+      const sortedModels = models.sort((a: Any, b: Any) => {
         const extractVersion = (name: string): number => {
           // Match patterns like "gemini-3.0", "gemini-2.5", "gemini-1.5-pro"
           const versionMatch = name.match(/gemini-?(\d+\.?\d*)/i);

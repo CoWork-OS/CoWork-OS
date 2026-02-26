@@ -454,7 +454,7 @@ export class AppleCalendarTools {
     return events;
   }
 
-  async executeAction(input: AppleCalendarActionInput): Promise<any> {
+  async executeAction(input: AppleCalendarActionInput): Promise<Any> {
     if (!AppleCalendarTools.isAvailable()) {
       throw new Error("Apple Calendar tools are only available on macOS.");
     }

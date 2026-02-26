@@ -62,15 +62,15 @@ export const DEFAULT_BRIEFING_CONFIG: BriefingConfig = {
 
 export interface DailyBriefingServiceDeps {
   /** Query tasks from the last N hours */
-  getRecentTasks: (workspaceId: string, sinceMs: number) => any[];
+  getRecentTasks: (workspaceId: string, sinceMs: number) => Any[];
   /** Search memory for recent items */
-  searchMemory: (workspaceId: string, query: string, limit: number) => any[];
+  searchMemory: (workspaceId: string, query: string, limit: number) => Any[];
   /** Get active suggestions */
-  getActiveSuggestions: (workspaceId: string) => any[];
+  getActiveSuggestions: (workspaceId: string) => Any[];
   /** Get priorities from .cowork/PRIORITIES.md */
   getPriorities: (workspaceId: string) => string | null;
   /** Get upcoming cron jobs */
-  getUpcomingJobs: (limit: number) => any[];
+  getUpcomingJobs: (limit: number) => Any[];
   /** Get open loops from daily log */
   getOpenLoops: (workspaceId: string) => string[];
   /** Deliver to channel */

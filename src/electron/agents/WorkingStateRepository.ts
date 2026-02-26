@@ -19,7 +19,7 @@ export class WorkingStateRepository {
    */
   findById(id: string): AgentWorkingState | undefined {
     const stmt = this.db.prepare("SELECT * FROM agent_working_state WHERE id = ?");
-    const row = stmt.get(id) as any;
+    const row = stmt.get(id) as Any;
     return row ? this.mapRowToState(row) : undefined;
   }
 
@@ -33,7 +33,7 @@ export class WorkingStateRepository {
         AND workspace_id = ?
         AND is_current = 1
     `;
-    const params: any[] = [query.agentRoleId, query.workspaceId];
+    const params: Any[] = [query.agentRoleId, query.workspaceId];
 
     if (query.taskId) {
       sql += " AND task_id = ?";
@@ -50,7 +50,7 @@ export class WorkingStateRepository {
     sql += " ORDER BY updated_at DESC LIMIT 1";
 
     const stmt = this.db.prepare(sql);
-    const row = stmt.get(...params) as any;
+    const row = stmt.get(...params) as Any;
     return row ? this.mapRowToState(row) : undefined;
   }
 
@@ -63,7 +63,7 @@ export class WorkingStateRepository {
       WHERE agent_role_id = ? AND workspace_id = ? AND is_current = 1
       ORDER BY state_type, updated_at DESC
     `);
-    const rows = stmt.all(agentRoleId, workspaceId) as any[];
+    const rows = stmt.all(agentRoleId, workspaceId) as Any[];
     return rows.map((row) => this.mapRowToState(row));
   }
 
@@ -139,7 +139,7 @@ export class WorkingStateRepository {
       LIMIT ? OFFSET ?
     `);
 
-    const rows = stmt.all(query.agentRoleId, query.workspaceId, limit, offset) as any[];
+    const rows = stmt.all(query.agentRoleId, query.workspaceId, limit, offset) as Any[];
     return rows.map((row) => this.mapRowToState(row));
   }
 
@@ -152,7 +152,7 @@ export class WorkingStateRepository {
       WHERE task_id = ?
       ORDER BY updated_at DESC
     `);
-    const rows = stmt.all(taskId) as any[];
+    const rows = stmt.all(taskId) as Any[];
     return rows.map((row) => this.mapRowToState(row));
   }
 
@@ -233,7 +233,7 @@ export class WorkingStateRepository {
       HAVING total > ?
     `);
 
-    const groups = countStmt.all(keepCount) as any[];
+    const groups = countStmt.all(keepCount) as Any[];
     let totalDeleted = 0;
 
     for (const group of groups) {
@@ -261,7 +261,7 @@ export class WorkingStateRepository {
   /**
    * Map database row to AgentWorkingState object
    */
-  private mapRowToState(row: any): AgentWorkingState {
+  private mapRowToState(row: Any): AgentWorkingState {
     return {
       id: row.id,
       agentRoleId: row.agent_role_id,

@@ -42,8 +42,8 @@ function createMockDb() {
       get: vi.fn(),
       all: vi.fn().mockReturnValue([]),
     }),
-    transaction: vi.fn((fn: any) => fn),
-  } as any;
+    transaction: vi.fn((fn: Any) => fn),
+  } as Any;
 }
 
 describe("ChannelGateway daemon listeners", () => {
@@ -55,9 +55,9 @@ describe("ChannelGateway daemon listeners", () => {
 
   it("prefers task_completed.resultSummary over last streamed assistant message", () => {
     const db = createMockDb();
-    const gateway = new ChannelGateway(db, { agentDaemon: agentDaemon as any });
+    const gateway = new ChannelGateway(db, { agentDaemon: agentDaemon as Any });
 
-    const router = (gateway as any).router;
+    const router = (gateway as Any).router;
     router.sendTaskUpdate = vi.fn();
     router.handleTaskCompletion = vi.fn();
 
@@ -75,9 +75,9 @@ describe("ChannelGateway daemon listeners", () => {
 
   it("falls back to last streamed assistant message when resultSummary is missing", () => {
     const db = createMockDb();
-    const gateway = new ChannelGateway(db, { agentDaemon: agentDaemon as any });
+    const gateway = new ChannelGateway(db, { agentDaemon: agentDaemon as Any });
 
-    const router = (gateway as any).router;
+    const router = (gateway as Any).router;
     router.sendTaskUpdate = vi.fn();
     router.handleTaskCompletion = vi.fn();
 
@@ -93,9 +93,9 @@ describe("ChannelGateway daemon listeners", () => {
 
   it("ignores generic task_completed.message and prefers last streamed assistant message", () => {
     const db = createMockDb();
-    const gateway = new ChannelGateway(db, { agentDaemon: agentDaemon as any });
+    const gateway = new ChannelGateway(db, { agentDaemon: agentDaemon as Any });
 
-    const router = (gateway as any).router;
+    const router = (gateway as Any).router;
     router.sendTaskUpdate = vi.fn();
     router.handleTaskCompletion = vi.fn();
 

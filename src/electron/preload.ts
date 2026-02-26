@@ -943,7 +943,7 @@ interface MCPTool {
   description?: string;
   inputSchema: {
     type: "object";
-    properties?: Record<string, any>;
+    properties?: Record<string, Any>;
     required?: string[];
   };
 }
@@ -2005,10 +2005,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.SYSTEM_OPEN_SETTINGS, target),
 
   // Task APIs
-  createTask: (data: any) => ipcRenderer.invoke(IPC_CHANNELS.TASK_CREATE, data),
+  createTask: (data: Any) => ipcRenderer.invoke(IPC_CHANNELS.TASK_CREATE, data),
   getTask: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_GET, id),
   listTasks: () => ipcRenderer.invoke(IPC_CHANNELS.TASK_LIST),
-  exportTasksJson: (query?: any) => ipcRenderer.invoke(IPC_CHANNELS.TASK_EXPORT_JSON, query),
+  exportTasksJson: (query?: Any) => ipcRenderer.invoke(IPC_CHANNELS.TASK_EXPORT_JSON, query),
   toggleTaskPin: (taskId: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_PIN, taskId),
   cancelTask: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_CANCEL, id),
   wrapUpTask: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_WRAP_UP, id),
@@ -2024,8 +2024,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   deleteTask: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_DELETE, id),
 
   // Task event streaming
-  onTaskEvent: (callback: (event: any) => void) => {
-    const subscription = (_: any, data: any) => callback(data);
+  onTaskEvent: (callback: (event: Any) => void) => {
+    const subscription = (_: Any, data: Any) => callback(data);
     ipcRenderer.on(IPC_CHANNELS.TASK_EVENT, subscription);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.TASK_EVENT, subscription);
   },
@@ -2058,7 +2058,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     }),
 
   // Workspace APIs
-  createWorkspace: (data: any) => ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_CREATE, data),
+  createWorkspace: (data: Any) => ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_CREATE, data),
   listWorkspaces: () => ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_LIST),
   selectWorkspace: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_SELECT, id),
   getTempWorkspace: (options?: { createNew?: boolean }) =>
@@ -2068,7 +2068,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_UPDATE_PERMISSIONS, id, permissions),
 
   // Approval APIs
-  respondToApproval: (data: any) => ipcRenderer.invoke(IPC_CHANNELS.APPROVAL_RESPOND, data),
+  respondToApproval: (data: Any) => ipcRenderer.invoke(IPC_CHANNELS.APPROVAL_RESPOND, data),
   setSessionAutoApprove: (enabled: boolean) =>
     ipcRenderer.invoke(IPC_CHANNELS.APPROVAL_SESSION_AUTO_APPROVE_SET, enabled),
   getSessionAutoApprove: () => ipcRenderer.invoke(IPC_CHANNELS.APPROVAL_SESSION_AUTO_APPROVE_GET),
@@ -2083,8 +2083,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   // LLM Settings APIs
   getLLMSettings: () => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_SETTINGS),
-  saveLLMSettings: (settings: any) => ipcRenderer.invoke(IPC_CHANNELS.LLM_SAVE_SETTINGS, settings),
-  testLLMProvider: (config: any) => ipcRenderer.invoke(IPC_CHANNELS.LLM_TEST_PROVIDER, config),
+  saveLLMSettings: (settings: Any) => ipcRenderer.invoke(IPC_CHANNELS.LLM_SAVE_SETTINGS, settings),
+  testLLMProvider: (config: Any) => ipcRenderer.invoke(IPC_CHANNELS.LLM_TEST_PROVIDER, config),
   getLLMModels: () => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_MODELS),
   getLLMConfigStatus: () => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_CONFIG_STATUS),
   setLLMModel: (modelKey: string) => ipcRenderer.invoke(IPC_CHANNELS.LLM_SET_MODEL, modelKey),
@@ -2122,7 +2122,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getGatewayChannels: () => ipcRenderer.invoke(IPC_CHANNELS.GATEWAY_GET_CHANNELS),
   addGatewayChannel: (data: AddChannelRequest) =>
     ipcRenderer.invoke(IPC_CHANNELS.GATEWAY_ADD_CHANNEL, data),
-  updateGatewayChannel: (data: any) =>
+  updateGatewayChannel: (data: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.GATEWAY_UPDATE_CHANNEL, data),
   removeGatewayChannel: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.GATEWAY_REMOVE_CHANNEL, id),
   enableGatewayChannel: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.GATEWAY_ENABLE_CHANNEL, id),
@@ -2145,13 +2145,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.GATEWAY_GENERATE_PAIRING, { channelId, userId, displayName }),
 
   // Gateway event listener
-  onGatewayMessage: (callback: (data: any) => void) => {
-    const subscription = (_: any, data: any) => callback(data);
+  onGatewayMessage: (callback: (data: Any) => void) => {
+    const subscription = (_: Any, data: Any) => callback(data);
     ipcRenderer.on("gateway:message", subscription);
     return () => ipcRenderer.removeListener("gateway:message", subscription);
   },
   onGatewayUsersUpdated: (callback: (data: { channelId: string; channelType: string }) => void) => {
-    const subscription = (_: any, data: { channelId: string; channelType: string }) =>
+    const subscription = (_: Any, data: { channelId: string; channelType: string }) =>
       callback(data);
     ipcRenderer.on("gateway:users-updated", subscription);
     return () => ipcRenderer.removeListener("gateway:users-updated", subscription);
@@ -2162,19 +2162,19 @@ contextBridge.exposeInMainWorld("electronAPI", {
   whatsAppLogout: () => ipcRenderer.invoke("whatsapp:logout"),
 
   // WhatsApp event listeners
-  onWhatsAppQRCode: (callback: (event: any, qr: string) => void) => {
+  onWhatsAppQRCode: (callback: (event: Any, qr: string) => void) => {
     ipcRenderer.on("whatsapp:qr-code", callback);
   },
   onWhatsAppConnected: (callback: () => void) => {
     ipcRenderer.on("whatsapp:connected", callback);
   },
-  onWhatsAppStatus: (callback: (event: any, data: { status: string; error?: string }) => void) => {
+  onWhatsAppStatus: (callback: (event: Any, data: { status: string; error?: string }) => void) => {
     ipcRenderer.on("whatsapp:status", callback);
   },
 
   // Search Settings APIs
   getSearchSettings: () => ipcRenderer.invoke(IPC_CHANNELS.SEARCH_GET_SETTINGS),
-  saveSearchSettings: (settings: any) =>
+  saveSearchSettings: (settings: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.SEARCH_SAVE_SETTINGS, settings),
   getSearchConfigStatus: () => ipcRenderer.invoke(IPC_CHANNELS.SEARCH_GET_CONFIG_STATUS),
   testSearchProvider: (providerType: string) =>
@@ -2182,33 +2182,33 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   // X/Twitter Settings APIs
   getXSettings: () => ipcRenderer.invoke(IPC_CHANNELS.X_GET_SETTINGS),
-  saveXSettings: (settings: any) => ipcRenderer.invoke(IPC_CHANNELS.X_SAVE_SETTINGS, settings),
+  saveXSettings: (settings: Any) => ipcRenderer.invoke(IPC_CHANNELS.X_SAVE_SETTINGS, settings),
   testXConnection: () => ipcRenderer.invoke(IPC_CHANNELS.X_TEST_CONNECTION),
   getXStatus: () => ipcRenderer.invoke(IPC_CHANNELS.X_GET_STATUS),
 
   // Notion Settings APIs
   getNotionSettings: () => ipcRenderer.invoke(IPC_CHANNELS.NOTION_GET_SETTINGS),
-  saveNotionSettings: (settings: any) =>
+  saveNotionSettings: (settings: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.NOTION_SAVE_SETTINGS, settings),
   testNotionConnection: () => ipcRenderer.invoke(IPC_CHANNELS.NOTION_TEST_CONNECTION),
   getNotionStatus: () => ipcRenderer.invoke(IPC_CHANNELS.NOTION_GET_STATUS),
 
   // Box Settings APIs
   getBoxSettings: () => ipcRenderer.invoke(IPC_CHANNELS.BOX_GET_SETTINGS),
-  saveBoxSettings: (settings: any) => ipcRenderer.invoke(IPC_CHANNELS.BOX_SAVE_SETTINGS, settings),
+  saveBoxSettings: (settings: Any) => ipcRenderer.invoke(IPC_CHANNELS.BOX_SAVE_SETTINGS, settings),
   testBoxConnection: () => ipcRenderer.invoke(IPC_CHANNELS.BOX_TEST_CONNECTION),
   getBoxStatus: () => ipcRenderer.invoke(IPC_CHANNELS.BOX_GET_STATUS),
 
   // OneDrive Settings APIs
   getOneDriveSettings: () => ipcRenderer.invoke(IPC_CHANNELS.ONEDRIVE_GET_SETTINGS),
-  saveOneDriveSettings: (settings: any) =>
+  saveOneDriveSettings: (settings: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.ONEDRIVE_SAVE_SETTINGS, settings),
   testOneDriveConnection: () => ipcRenderer.invoke(IPC_CHANNELS.ONEDRIVE_TEST_CONNECTION),
   getOneDriveStatus: () => ipcRenderer.invoke(IPC_CHANNELS.ONEDRIVE_GET_STATUS),
 
   // Google Workspace Settings APIs
   getGoogleWorkspaceSettings: () => ipcRenderer.invoke(IPC_CHANNELS.GOOGLE_WORKSPACE_GET_SETTINGS),
-  saveGoogleWorkspaceSettings: (settings: any) =>
+  saveGoogleWorkspaceSettings: (settings: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.GOOGLE_WORKSPACE_SAVE_SETTINGS, settings),
   testGoogleWorkspaceConnection: () =>
     ipcRenderer.invoke(IPC_CHANNELS.GOOGLE_WORKSPACE_TEST_CONNECTION),
@@ -2221,14 +2221,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   // Dropbox Settings APIs
   getDropboxSettings: () => ipcRenderer.invoke(IPC_CHANNELS.DROPBOX_GET_SETTINGS),
-  saveDropboxSettings: (settings: any) =>
+  saveDropboxSettings: (settings: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.DROPBOX_SAVE_SETTINGS, settings),
   testDropboxConnection: () => ipcRenderer.invoke(IPC_CHANNELS.DROPBOX_TEST_CONNECTION),
   getDropboxStatus: () => ipcRenderer.invoke(IPC_CHANNELS.DROPBOX_GET_STATUS),
 
   // SharePoint Settings APIs
   getSharePointSettings: () => ipcRenderer.invoke(IPC_CHANNELS.SHAREPOINT_GET_SETTINGS),
-  saveSharePointSettings: (settings: any) =>
+  saveSharePointSettings: (settings: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.SHAREPOINT_SAVE_SETTINGS, settings),
   testSharePointConnection: () => ipcRenderer.invoke(IPC_CHANNELS.SHAREPOINT_TEST_CONNECTION),
   getSharePointStatus: () => ipcRenderer.invoke(IPC_CHANNELS.SHAREPOINT_GET_STATUS),
@@ -2236,41 +2236,41 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // App Update APIs
   getAppVersion: () => ipcRenderer.invoke(IPC_CHANNELS.APP_GET_VERSION),
   checkForUpdates: () => ipcRenderer.invoke(IPC_CHANNELS.APP_CHECK_UPDATES),
-  downloadUpdate: (updateInfo: any) =>
+  downloadUpdate: (updateInfo: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.APP_DOWNLOAD_UPDATE, updateInfo),
   installUpdate: () => ipcRenderer.invoke(IPC_CHANNELS.APP_INSTALL_UPDATE),
 
   // Update event listeners
-  onUpdateProgress: (callback: (progress: any) => void) => {
-    const subscription = (_: any, data: any) => callback(data);
+  onUpdateProgress: (callback: (progress: Any) => void) => {
+    const subscription = (_: Any, data: Any) => callback(data);
     ipcRenderer.on(IPC_CHANNELS.APP_UPDATE_PROGRESS, subscription);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.APP_UPDATE_PROGRESS, subscription);
   },
-  onUpdateDownloaded: (callback: (info: any) => void) => {
-    const subscription = (_: any, data: any) => callback(data);
+  onUpdateDownloaded: (callback: (info: Any) => void) => {
+    const subscription = (_: Any, data: Any) => callback(data);
     ipcRenderer.on(IPC_CHANNELS.APP_UPDATE_DOWNLOADED, subscription);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.APP_UPDATE_DOWNLOADED, subscription);
   },
-  onUpdateError: (callback: (error: any) => void) => {
-    const subscription = (_: any, data: any) => callback(data);
+  onUpdateError: (callback: (error: Any) => void) => {
+    const subscription = (_: Any, data: Any) => callback(data);
     ipcRenderer.on(IPC_CHANNELS.APP_UPDATE_ERROR, subscription);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.APP_UPDATE_ERROR, subscription);
   },
 
   // Guardrail Settings APIs
   getGuardrailSettings: () => ipcRenderer.invoke(IPC_CHANNELS.GUARDRAIL_GET_SETTINGS),
-  saveGuardrailSettings: (settings: any) =>
+  saveGuardrailSettings: (settings: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.GUARDRAIL_SAVE_SETTINGS, settings),
   getGuardrailDefaults: () => ipcRenderer.invoke(IPC_CHANNELS.GUARDRAIL_GET_DEFAULTS),
 
   // Appearance Settings APIs
   getAppearanceSettings: () => ipcRenderer.invoke(IPC_CHANNELS.APPEARANCE_GET_SETTINGS),
-  saveAppearanceSettings: (settings: any) =>
+  saveAppearanceSettings: (settings: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.APPEARANCE_SAVE_SETTINGS, settings),
 
   // Personality Settings APIs
   getPersonalitySettings: () => ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_GET_SETTINGS),
-  savePersonalitySettings: (settings: any) =>
+  savePersonalitySettings: (settings: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_SAVE_SETTINGS, settings),
   getPersonalityDefinitions: () => ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_GET_DEFINITIONS),
   getPersonaDefinitions: () => ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_GET_PERSONAS),
@@ -2281,8 +2281,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_SET_PERSONA, personaId),
   resetPersonalitySettings: (preserveRelationship?: boolean) =>
     ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_RESET, preserveRelationship),
-  onPersonalitySettingsChanged: (callback: (settings: any) => void) => {
-    const subscription = (_: any, data: any) => callback(data);
+  onPersonalitySettingsChanged: (callback: (settings: Any) => void) => {
+    const subscription = (_: Any, data: Any) => callback(data);
     ipcRenderer.on(IPC_CHANNELS.PERSONALITY_SETTINGS_CHANGED, subscription);
     return () =>
       ipcRenderer.removeListener(IPC_CHANNELS.PERSONALITY_SETTINGS_CHANGED, subscription);
@@ -2291,11 +2291,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Queue APIs
   getQueueStatus: () => ipcRenderer.invoke(IPC_CHANNELS.QUEUE_GET_STATUS),
   getQueueSettings: () => ipcRenderer.invoke(IPC_CHANNELS.QUEUE_GET_SETTINGS),
-  saveQueueSettings: (settings: any) =>
+  saveQueueSettings: (settings: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.QUEUE_SAVE_SETTINGS, settings),
   clearQueue: () => ipcRenderer.invoke(IPC_CHANNELS.QUEUE_CLEAR),
-  onQueueUpdate: (callback: (status: any) => void) => {
-    const subscription = (_: any, data: any) => callback(data);
+  onQueueUpdate: (callback: (status: Any) => void) => {
+    const subscription = (_: Any, data: Any) => callback(data);
     ipcRenderer.on(IPC_CHANNELS.QUEUE_UPDATE, subscription);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.QUEUE_UPDATE, subscription);
   },
@@ -2305,8 +2305,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   listTaskSkills: () => ipcRenderer.invoke(IPC_CHANNELS.CUSTOM_SKILL_LIST_TASKS),
   listGuidelineSkills: () => ipcRenderer.invoke(IPC_CHANNELS.CUSTOM_SKILL_LIST_GUIDELINES),
   getCustomSkill: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.CUSTOM_SKILL_GET, id),
-  createCustomSkill: (skill: any) => ipcRenderer.invoke(IPC_CHANNELS.CUSTOM_SKILL_CREATE, skill),
-  updateCustomSkill: (id: string, updates: any) =>
+  createCustomSkill: (skill: Any) => ipcRenderer.invoke(IPC_CHANNELS.CUSTOM_SKILL_CREATE, skill),
+  updateCustomSkill: (id: string, updates: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.CUSTOM_SKILL_UPDATE, id, updates),
   deleteCustomSkill: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.CUSTOM_SKILL_DELETE, id),
   reloadCustomSkills: () => ipcRenderer.invoke(IPC_CHANNELS.CUSTOM_SKILL_RELOAD),
@@ -2332,9 +2332,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   // MCP (Model Context Protocol) APIs
   getMCPSettings: () => ipcRenderer.invoke(IPC_CHANNELS.MCP_GET_SETTINGS),
-  saveMCPSettings: (settings: any) => ipcRenderer.invoke(IPC_CHANNELS.MCP_SAVE_SETTINGS, settings),
-  addMCPServer: (config: any) => ipcRenderer.invoke(IPC_CHANNELS.MCP_ADD_SERVER, config),
-  updateMCPServer: (id: string, updates: any) =>
+  saveMCPSettings: (settings: Any) => ipcRenderer.invoke(IPC_CHANNELS.MCP_SAVE_SETTINGS, settings),
+  addMCPServer: (config: Any) => ipcRenderer.invoke(IPC_CHANNELS.MCP_ADD_SERVER, config),
+  updateMCPServer: (id: string, updates: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.MCP_UPDATE_SERVER, id, updates),
   removeMCPServer: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.MCP_REMOVE_SERVER, id),
   connectMCPServer: (serverId: string) =>
@@ -2371,8 +2371,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   }) => ipcRenderer.invoke(IPC_CHANNELS.MCP_CONNECTOR_OAUTH_START, payload),
 
   // MCP Status change event listener
-  onMCPStatusChange: (callback: (status: any[]) => void) => {
-    const subscription = (_: any, data: any) => callback(data);
+  onMCPStatusChange: (callback: (status: Any[]) => void) => {
+    const subscription = (_: Any, data: Any) => callback(data);
     ipcRenderer.on(IPC_CHANNELS.MCP_SERVER_STATUS_CHANGE, subscription);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.MCP_SERVER_STATUS_CHANGE, subscription);
   },
@@ -2412,7 +2412,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   // Scraping (Scrapling) APIs
   scrapingGetSettings: () => ipcRenderer.invoke(IPC_CHANNELS.SCRAPING_GET_SETTINGS),
-  scrapingSaveSettings: (settings: any) =>
+  scrapingSaveSettings: (settings: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.SCRAPING_SAVE_SETTINGS, settings),
   scrapingGetStatus: () => ipcRenderer.invoke(IPC_CHANNELS.SCRAPING_GET_STATUS),
   scrapingReset: () => ipcRenderer.invoke(IPC_CHANNELS.SCRAPING_RESET),
@@ -2433,7 +2433,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on(IPC_CHANNELS.TRAY_NEW_TASK, callback);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.TRAY_NEW_TASK, callback);
   },
-  onTraySelectWorkspace: (callback: (event: any, workspaceId: string) => void) => {
+  onTraySelectWorkspace: (callback: (event: Any, workspaceId: string) => void) => {
     ipcRenderer.on(IPC_CHANNELS.TRAY_SELECT_WORKSPACE, callback);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.TRAY_SELECT_WORKSPACE, callback);
   },
@@ -2450,7 +2450,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     return () => ipcRenderer.removeListener(IPC_CHANNELS.TRAY_CHECK_UPDATES, callback);
   },
   onTrayQuickTask: (
-    callback: (event: any, data: { task: string; workspaceId?: string }) => void,
+    callback: (event: Any, data: { task: string; workspaceId?: string }) => void,
   ) => {
     ipcRenderer.on(IPC_CHANNELS.TRAY_QUICK_TASK, callback);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.TRAY_QUICK_TASK, callback);
@@ -2473,7 +2473,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   runCronJob: (id: string, mode?: "due" | "force") =>
     ipcRenderer.invoke(IPC_CHANNELS.CRON_RUN_JOB, id, mode),
   onCronEvent: (callback: (event: CronEvent) => void) => {
-    const subscription = (_: any, data: CronEvent) => callback(data);
+    const subscription = (_: Any, data: CronEvent) => callback(data);
     ipcRenderer.on(IPC_CHANNELS.CRON_EVENT, subscription);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.CRON_EVENT, subscription);
   },
@@ -2497,7 +2497,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   deleteNotification: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.NOTIFICATION_DELETE, id),
   deleteAllNotifications: () => ipcRenderer.invoke(IPC_CHANNELS.NOTIFICATION_DELETE_ALL),
   onNotificationEvent: (callback: (event: NotificationEvent) => void) => {
-    const subscription = (_: any, data: NotificationEvent) => callback(data);
+    const subscription = (_: Any, data: NotificationEvent) => callback(data);
     ipcRenderer.on(IPC_CHANNELS.NOTIFICATION_EVENT, subscription);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.NOTIFICATION_EVENT, subscription);
   },
@@ -2629,9 +2629,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
     timeoutMs?: number;
   }) => ipcRenderer.invoke(IPC_CHANNELS.NODE_INVOKE, params),
   onNodeEvent: (
-    callback: (event: { type: string; nodeId: string; node?: any; timestamp: number }) => void,
+    callback: (event: { type: string; nodeId: string; node?: Any; timestamp: number }) => void,
   ) => {
-    const subscription = (_: Electron.IpcRendererEvent, data: any) => callback(data);
+    const subscription = (_: Electron.IpcRendererEvent, data: Any) => callback(data);
     ipcRenderer.on(IPC_CHANNELS.NODE_EVENT, subscription);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.NODE_EVENT, subscription);
   },
@@ -2652,7 +2652,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_GET_STATS, workspaceId),
   clearMemory: (workspaceId: string) => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_CLEAR, workspaceId),
   onMemoryEvent: (callback: (event: { type: string; workspaceId: string }) => void) => {
-    const subscription = (_: Electron.IpcRendererEvent, data: any) => callback(data);
+    const subscription = (_: Electron.IpcRendererEvent, data: Any) => callback(data);
     ipcRenderer.on(IPC_CHANNELS.MEMORY_EVENT, subscription);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.MEMORY_EVENT, subscription);
   },
@@ -2892,8 +2892,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   deleteTeamItem: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TEAM_ITEM_DELETE, id),
   moveTeamItem: (request: { id: string; parentItemId: string | null; sortOrder: number }) =>
     ipcRenderer.invoke(IPC_CHANNELS.TEAM_ITEM_MOVE, request),
-  onTeamRunEvent: (callback: (event: any) => void) => {
-    const subscription = (_: Electron.IpcRendererEvent, data: any) => callback(data);
+  onTeamRunEvent: (callback: (event: Any) => void) => {
+    const subscription = (_: Electron.IpcRendererEvent, data: Any) => callback(data);
     ipcRenderer.on(IPC_CHANNELS.TEAM_RUN_EVENT, subscription);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.TEAM_RUN_EVENT, subscription);
   },
@@ -2901,8 +2901,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Collaborative Thoughts APIs
   listTeamThoughts: (teamRunId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.TEAM_THOUGHT_LIST, teamRunId),
-  onTeamThoughtEvent: (callback: (event: any) => void) => {
-    const subscription = (_: Electron.IpcRendererEvent, data: any) => callback(data);
+  onTeamThoughtEvent: (callback: (event: Any) => void) => {
+    const subscription = (_: Electron.IpcRendererEvent, data: Any) => callback(data);
     ipcRenderer.on(IPC_CHANNELS.TEAM_THOUGHT_EVENT, subscription);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.TEAM_THOUGHT_EVENT, subscription);
   },
@@ -2920,7 +2920,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   pinActivity: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.ACTIVITY_PIN, id),
   deleteActivity: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.ACTIVITY_DELETE, id),
   onActivityEvent: (callback: (event: ActivityEvent) => void) => {
-    const subscription = (_: any, data: ActivityEvent) => callback(data);
+    const subscription = (_: Any, data: ActivityEvent) => callback(data);
     ipcRenderer.on(IPC_CHANNELS.ACTIVITY_EVENT, subscription);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.ACTIVITY_EVENT, subscription);
   },
@@ -2933,7 +2933,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   completeMention: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.MENTION_COMPLETE, id),
   dismissMention: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.MENTION_DISMISS, id),
   onMentionEvent: (callback: (event: MentionEvent) => void) => {
-    const subscription = (_: any, data: MentionEvent) => callback(data);
+    const subscription = (_: Any, data: MentionEvent) => callback(data);
     ipcRenderer.on(IPC_CHANNELS.MENTION_EVENT, subscription);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.MENTION_EVENT, subscription);
   },
@@ -2957,7 +2957,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.HEARTBEAT_GET_STATUS, agentRoleId),
   getAllHeartbeatStatus: () => ipcRenderer.invoke(IPC_CHANNELS.HEARTBEAT_GET_ALL_STATUS),
   onHeartbeatEvent: (callback: (event: HeartbeatEvent) => void) => {
-    const subscription = (_: any, data: HeartbeatEvent) => callback(data);
+    const subscription = (_: Any, data: HeartbeatEvent) => callback(data);
     ipcRenderer.on(IPC_CHANNELS.HEARTBEAT_EVENT, subscription);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.HEARTBEAT_EVENT, subscription);
   },
@@ -2973,7 +2973,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getAgentSubscriptions: (agentRoleId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.SUBSCRIPTION_GET_FOR_AGENT, agentRoleId),
   onSubscriptionEvent: (callback: (event: SubscriptionEvent) => void) => {
-    const subscription = (_: any, data: SubscriptionEvent) => callback(data);
+    const subscription = (_: Any, data: SubscriptionEvent) => callback(data);
     ipcRenderer.on(IPC_CHANNELS.SUBSCRIPTION_EVENT, subscription);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.SUBSCRIPTION_EVENT, subscription);
   },
@@ -3011,7 +3011,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   removeTaskLabel: (taskId: string, labelId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_REMOVE_LABEL, taskId, labelId),
   onTaskBoardEvent: (callback: (event: TaskBoardEvent) => void) => {
-    const subscription = (_: any, data: TaskBoardEvent) => callback(data);
+    const subscription = (_: Any, data: TaskBoardEvent) => callback(data);
     ipcRenderer.on(IPC_CHANNELS.TASK_BOARD_EVENT, subscription);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.TASK_BOARD_EVENT, subscription);
   },
@@ -3095,11 +3095,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
   cleanupWorktree: (taskId: string) => ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_CLEANUP, taskId),
   getWorktreeDiff: (taskId: string) => ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_GET_DIFF, taskId),
   getWorktreeSettings: () => ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_GET_SETTINGS),
-  saveWorktreeSettings: (settings: any) =>
+  saveWorktreeSettings: (settings: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_SAVE_SETTINGS, settings),
 
   // Agent Comparison APIs
-  createComparison: (params: any) => ipcRenderer.invoke(IPC_CHANNELS.COMPARISON_CREATE, params),
+  createComparison: (params: Any) => ipcRenderer.invoke(IPC_CHANNELS.COMPARISON_CREATE, params),
   getComparison: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.COMPARISON_GET, sessionId),
   listComparisons: (workspaceId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.COMPARISON_LIST, workspaceId),
@@ -3130,8 +3130,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   // Event Triggers
   listTriggers: (workspaceId: string) => ipcRenderer.invoke(IPC_CHANNELS.TRIGGER_LIST, workspaceId),
-  addTrigger: (data: any) => ipcRenderer.invoke(IPC_CHANNELS.TRIGGER_ADD, data),
-  updateTrigger: (id: string, updates: any) =>
+  addTrigger: (data: Any) => ipcRenderer.invoke(IPC_CHANNELS.TRIGGER_ADD, data),
+  updateTrigger: (id: string, updates: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.TRIGGER_UPDATE, { id, updates }),
   removeTrigger: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TRIGGER_REMOVE, id),
   getTriggerHistory: (triggerId: string) =>
@@ -3142,11 +3142,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.BRIEFING_GET_LATEST, workspaceId),
   getBriefingConfig: (workspaceId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.BRIEFING_GET_CONFIG, workspaceId),
-  saveBriefingConfig: (workspaceId: string, config: any) =>
+  saveBriefingConfig: (workspaceId: string, config: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.BRIEFING_SAVE_CONFIG, { workspaceId, config }),
 
   // File Hub
-  listHubFiles: (options: any) => ipcRenderer.invoke(IPC_CHANNELS.FILEHUB_LIST, options),
+  listHubFiles: (options: Any) => ipcRenderer.invoke(IPC_CHANNELS.FILEHUB_LIST, options),
   searchHubFiles: (query: string, sources?: string[]) =>
     ipcRenderer.invoke(IPC_CHANNELS.FILEHUB_SEARCH, { query, sources }),
   getRecentHubFiles: (limit?: number) => ipcRenderer.invoke(IPC_CHANNELS.FILEHUB_RECENT, limit),
@@ -3154,7 +3154,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   // Web Access
   getWebAccessSettings: () => ipcRenderer.invoke(IPC_CHANNELS.WEBACCESS_GET_SETTINGS),
-  saveWebAccessSettings: (settings: any) =>
+  saveWebAccessSettings: (settings: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.WEBACCESS_SAVE_SETTINGS, settings),
   getWebAccessStatus: () => ipcRenderer.invoke(IPC_CHANNELS.WEBACCESS_GET_STATUS),
 });
@@ -3266,11 +3266,11 @@ export interface ElectronAPI {
   openSystemSettings: (
     target: "microphone" | "dictation",
   ) => Promise<{ success: boolean; error?: string }>;
-  createTask: (data: any) => Promise<any>;
-  getTask: (id: string) => Promise<any>;
-  listTasks: () => Promise<any[]>;
-  exportTasksJson: (query?: any) => Promise<any>;
-  toggleTaskPin: (taskId: string) => Promise<any>;
+  createTask: (data: Any) => Promise<Any>;
+  getTask: (id: string) => Promise<Any>;
+  listTasks: () => Promise<Any[]>;
+  exportTasksJson: (query?: Any) => Promise<Any>;
+  toggleTaskPin: (taskId: string) => Promise<Any>;
   cancelTask: (id: string) => Promise<void>;
   wrapUpTask: (id: string) => Promise<void>;
   pauseTask: (id: string) => Promise<void>;
@@ -3280,8 +3280,8 @@ export interface ElectronAPI {
   killCommand: (taskId: string, force?: boolean) => Promise<boolean>;
   renameTask: (id: string, title: string) => Promise<void>;
   deleteTask: (id: string) => Promise<void>;
-  onTaskEvent: (callback: (event: any) => void) => () => void;
-  getTaskEvents: (taskId: string) => Promise<any[]>;
+  onTaskEvent: (callback: (event: Any) => void) => () => void;
+  getTaskEvents: (taskId: string) => Promise<Any[]>;
   sendMessage: (taskId: string, message: string, images?: ImageAttachment[]) => Promise<void>;
   sendStepFeedback: (
     taskId: string,
@@ -3289,26 +3289,26 @@ export interface ElectronAPI {
     action: "retry" | "skip" | "stop" | "drift",
     message?: string,
   ) => Promise<void>;
-  createWorkspace: (data: any) => Promise<Workspace>;
+  createWorkspace: (data: Any) => Promise<Workspace>;
   listWorkspaces: () => Promise<Workspace[]>;
   selectWorkspace: (id: string) => Promise<Workspace>;
   getTempWorkspace: (options?: { createNew?: boolean }) => Promise<Workspace | null>;
-  touchWorkspace: (id: string) => Promise<any>;
+  touchWorkspace: (id: string) => Promise<Any>;
   updateWorkspacePermissions: (
     id: string,
     permissions: { shell?: boolean; network?: boolean },
-  ) => Promise<any>;
-  respondToApproval: (data: any) => Promise<void>;
+  ) => Promise<Any>;
+  respondToApproval: (data: Any) => Promise<void>;
   setSessionAutoApprove: (enabled: boolean) => Promise<void>;
   getSessionAutoApprove: () => Promise<boolean>;
-  listArtifacts: (taskId: string) => Promise<any[]>;
-  previewArtifact: (id: string) => Promise<any>;
-  listSkills: () => Promise<any[]>;
-  getSkill: (id: string) => Promise<any>;
+  listArtifacts: (taskId: string) => Promise<Any[]>;
+  previewArtifact: (id: string) => Promise<Any>;
+  listSkills: () => Promise<Any[]>;
+  getSkill: (id: string) => Promise<Any>;
   // LLM Settings
-  getLLMSettings: () => Promise<any>;
-  saveLLMSettings: (settings: any) => Promise<{ success: boolean }>;
-  testLLMProvider: (config: any) => Promise<{ success: boolean; error?: string }>;
+  getLLMSettings: () => Promise<Any>;
+  saveLLMSettings: (settings: Any) => Promise<{ success: boolean }>;
+  testLLMProvider: (config: Any) => Promise<{ success: boolean; error?: string }>;
   getLLMModels: () => Promise<Array<{ key: string; displayName: string; description: string }>>;
   getLLMConfigStatus: () => Promise<{
     currentProvider: LLMProviderType;
@@ -3364,8 +3364,8 @@ export interface ElectronAPI {
     profile?: string;
   }) => Promise<Array<{ id: string; name: string; provider: string; description: string }>>;
   // Gateway / Channel APIs
-  getGatewayChannels: () => Promise<any[]>;
-  addGatewayChannel: (data: AddChannelRequest) => Promise<any>;
+  getGatewayChannels: () => Promise<Any[]>;
+  addGatewayChannel: (data: AddChannelRequest) => Promise<Any>;
   updateGatewayChannel: (data: {
     id: string;
     name?: string;
@@ -3387,7 +3387,7 @@ export interface ElectronAPI {
   testGatewayChannel: (
     id: string,
   ) => Promise<{ success: boolean; error?: string; botUsername?: string }>;
-  getGatewayUsers: (channelId: string) => Promise<any[]>;
+  getGatewayUsers: (channelId: string) => Promise<Any[]>;
   getGatewayChats: (channelId: string) => Promise<Array<{ chatId: string; lastTimestamp: number }>>;
   sendGatewayTestMessage: (data: {
     channelType: string;
@@ -3401,24 +3401,24 @@ export interface ElectronAPI {
     userId: string,
     displayName?: string,
   ) => Promise<string>;
-  onGatewayMessage: (callback: (data: any) => void) => () => void;
+  onGatewayMessage: (callback: (data: Any) => void) => () => void;
   onGatewayUsersUpdated: (
     callback: (data: { channelId: string; channelType: string }) => void,
   ) => () => void;
   // WhatsApp-specific APIs
   getWhatsAppInfo: () => Promise<{ qrCode?: string; phoneNumber?: string; status?: string }>;
   whatsAppLogout: () => Promise<void>;
-  onWhatsAppQRCode: (callback: (event: any, qr: string) => void) => void;
+  onWhatsAppQRCode: (callback: (event: Any, qr: string) => void) => void;
   onWhatsAppConnected: (callback: () => void) => void;
   onWhatsAppStatus: (
-    callback: (event: any, data: { status: string; error?: string }) => void,
+    callback: (event: Any, data: { status: string; error?: string }) => void,
   ) => void;
   // Search Settings
   getSearchSettings: () => Promise<{
     primaryProvider: "tavily" | "brave" | "serpapi" | "google" | "duckduckgo" | null;
     fallbackProvider: "tavily" | "brave" | "serpapi" | "google" | "duckduckgo" | null;
   }>;
-  saveSearchSettings: (settings: any) => Promise<{ success: boolean }>;
+  saveSearchSettings: (settings: Any) => Promise<{ success: boolean }>;
   getSearchConfigStatus: () => Promise<{
     primaryProvider: "tavily" | "brave" | "serpapi" | "google" | "duckduckgo" | null;
     fallbackProvider: "tavily" | "brave" | "serpapi" | "google" | "duckduckgo" | null;
@@ -3446,7 +3446,7 @@ export interface ElectronAPI {
     cookieTimeoutMs?: number;
     quoteDepth?: number;
   }>;
-  saveXSettings: (settings: any) => Promise<{ success: boolean }>;
+  saveXSettings: (settings: Any) => Promise<{ success: boolean }>;
   testXConnection: () => Promise<{
     success: boolean;
     error?: string;
@@ -3466,7 +3466,7 @@ export interface ElectronAPI {
     notionVersion?: string;
     timeoutMs?: number;
   }>;
-  saveNotionSettings: (settings: any) => Promise<{ success: boolean }>;
+  saveNotionSettings: (settings: Any) => Promise<{ success: boolean }>;
   testNotionConnection: () => Promise<{
     success: boolean;
     error?: string;
@@ -3485,7 +3485,7 @@ export interface ElectronAPI {
     accessToken?: string;
     timeoutMs?: number;
   }>;
-  saveBoxSettings: (settings: any) => Promise<{ success: boolean }>;
+  saveBoxSettings: (settings: Any) => Promise<{ success: boolean }>;
   testBoxConnection: () => Promise<{
     success: boolean;
     error?: string;
@@ -3505,7 +3505,7 @@ export interface ElectronAPI {
     driveId?: string;
     timeoutMs?: number;
   }>;
-  saveOneDriveSettings: (settings: any) => Promise<{ success: boolean }>;
+  saveOneDriveSettings: (settings: Any) => Promise<{ success: boolean }>;
   testOneDriveConnection: () => Promise<{
     success: boolean;
     error?: string;
@@ -3530,7 +3530,7 @@ export interface ElectronAPI {
     scopes?: string[];
     timeoutMs?: number;
   }>;
-  saveGoogleWorkspaceSettings: (settings: any) => Promise<{ success: boolean }>;
+  saveGoogleWorkspaceSettings: (settings: Any) => Promise<{ success: boolean }>;
   testGoogleWorkspaceConnection: () => Promise<{
     success: boolean;
     error?: string;
@@ -3561,7 +3561,7 @@ export interface ElectronAPI {
     accessToken?: string;
     timeoutMs?: number;
   }>;
-  saveDropboxSettings: (settings: any) => Promise<{ success: boolean }>;
+  saveDropboxSettings: (settings: Any) => Promise<{ success: boolean }>;
   testDropboxConnection: () => Promise<{
     success: boolean;
     error?: string;
@@ -3583,7 +3583,7 @@ export interface ElectronAPI {
     driveId?: string;
     timeoutMs?: number;
   }>;
-  saveSharePointSettings: (settings: any) => Promise<{ success: boolean }>;
+  saveSharePointSettings: (settings: Any) => Promise<{ success: boolean }>;
   testSharePointConnection: () => Promise<{
     success: boolean;
     error?: string;
@@ -3614,7 +3614,7 @@ export interface ElectronAPI {
     publishedAt?: string;
     updateMode: "git" | "npm" | "electron-updater";
   }>;
-  downloadUpdate: (updateInfo: any) => Promise<{ success: boolean }>;
+  downloadUpdate: (updateInfo: Any) => Promise<{ success: boolean }>;
   installUpdate: () => Promise<{ success: boolean }>;
   onUpdateProgress: (
     callback: (progress: {
@@ -3646,7 +3646,7 @@ export interface ElectronAPI {
     maxIterationsPerTask: number;
     iterationLimitEnabled: boolean;
   }>;
-  saveGuardrailSettings: (settings: any) => Promise<{ success: boolean }>;
+  saveGuardrailSettings: (settings: Any) => Promise<{ success: boolean }>;
   getGuardrailDefaults: () => Promise<{
     maxTokensPerTask: number;
     tokenBudgetEnabled: boolean;
@@ -3853,7 +3853,7 @@ export interface ElectronAPI {
   setActivePersonality: (personalityId: string) => Promise<{ success: boolean }>;
   setActivePersona: (personaId: string) => Promise<{ success: boolean }>;
   resetPersonalitySettings: (preserveRelationship?: boolean) => Promise<{ success: boolean }>;
-  onPersonalitySettingsChanged: (callback: (settings: any) => void) => () => void;
+  onPersonalitySettingsChanged: (callback: (settings: Any) => void) => () => void;
   // Queue APIs
   getQueueStatus: () => Promise<{
     runningCount: number;
@@ -3987,8 +3987,8 @@ export interface ElectronAPI {
   infraReset: () => Promise<{ success: boolean }>;
   onInfraStatusChange: (callback: (status: InfraStatus) => void) => () => void;
   // Scraping (Scrapling)
-  scrapingGetSettings: () => Promise<any>;
-  scrapingSaveSettings: (settings: any) => Promise<{ success: boolean }>;
+  scrapingGetSettings: () => Promise<Any>;
+  scrapingSaveSettings: (settings: Any) => Promise<{ success: boolean }>;
   scrapingGetStatus: () => Promise<{
     installed: boolean;
     pythonAvailable: boolean;
@@ -4004,7 +4004,7 @@ export interface ElectronAPI {
   getTraySettings: () => Promise<TraySettings>;
   saveTraySettings: (settings: Partial<TraySettings>) => Promise<{ success: boolean }>;
   onTrayNewTask: (callback: () => void) => () => void;
-  onTraySelectWorkspace: (callback: (event: any, workspaceId: string) => void) => () => void;
+  onTraySelectWorkspace: (callback: (event: Any, workspaceId: string) => void) => () => void;
   onTrayOpenSettings: (callback: () => void) => () => void;
   onTrayOpenAbout: (callback: () => void) => () => void;
   onTrayCheckUpdates: (callback: () => void) => () => void;
@@ -4087,7 +4087,7 @@ export interface ElectronAPI {
 
   // Tailscale
   checkTailscaleAvailability: () => Promise<TailscaleAvailability>;
-  getTailscaleStatus: () => Promise<{ settings: any; exposure: any }>;
+  getTailscaleStatus: () => Promise<{ settings: Any; exposure: Any }>;
   setTailscaleMode: (mode: TailscaleMode) => Promise<{ ok: boolean; error?: string }>;
 
   // Remote Gateway
@@ -4223,17 +4223,17 @@ export interface ElectronAPI {
     layer?: "identity" | "preferences" | "context" | "history" | "commitments";
     includeDone?: boolean;
     limit?: number;
-  }) => Promise<any[]>;
+  }) => Promise<Any[]>;
   updateRelationshipMemory: (data: {
     id: string;
     text?: string;
     confidence?: number;
     status?: "open" | "done";
     dueAt?: number | null;
-  }) => Promise<any | null>;
+  }) => Promise<Any | null>;
   deleteRelationshipMemory: (id: string) => Promise<{ success: boolean }>;
-  getOpenCommitments: (limit?: number) => Promise<any[]>;
-  getDueSoonCommitments: (windowHours?: number) => Promise<{ items: any[]; reminderText: string }>;
+  getOpenCommitments: (limit?: number) => Promise<Any[]>;
+  getDueSoonCommitments: (windowHours?: number) => Promise<{ items: Any[]; reminderText: string }>;
 
   // Memory Features (global toggles)
   getMemoryFeaturesSettings: () => Promise<MemoryFeaturesSettings>;
@@ -4531,11 +4531,11 @@ export interface ElectronAPI {
     parentItemId: string | null;
     sortOrder: number;
   }) => Promise<AgentTeamItem | undefined>;
-  onTeamRunEvent: (callback: (event: any) => void) => () => void;
+  onTeamRunEvent: (callback: (event: Any) => void) => () => void;
 
   // Collaborative Thoughts
   listTeamThoughts: (teamRunId: string) => Promise<AgentThought[]>;
-  onTeamThoughtEvent: (callback: (event: any) => void) => () => void;
+  onTeamThoughtEvent: (callback: (event: Any) => void) => () => void;
   findTeamRunByRootTask: (rootTaskId: string) => Promise<AgentTeamRun | null>;
 
   // Activity Feed
@@ -4572,7 +4572,7 @@ export interface ElectronAPI {
       heartbeatIntervalMinutes?: number;
       heartbeatStaggerOffset?: number;
     },
-  ) => Promise<any>;
+  ) => Promise<Any>;
   triggerHeartbeat: (agentRoleId: string) => Promise<HeartbeatResult>;
   getHeartbeatStatus: (agentRoleId: string) => Promise<
     | {
@@ -4624,12 +4624,12 @@ export interface ElectronAPI {
   }) => Promise<AgentPerformanceReview[]>;
   deleteAgentReview: (id: string) => Promise<{ success: boolean }>;
   // Task Board APIs
-  moveTaskToColumn: (taskId: string, column: TaskBoardColumn) => Promise<any>;
-  setTaskPriority: (taskId: string, priority: number) => Promise<any>;
-  setTaskDueDate: (taskId: string, dueDate: number | null) => Promise<any>;
-  setTaskEstimate: (taskId: string, estimatedMinutes: number | null) => Promise<any>;
-  addTaskLabel: (taskId: string, labelId: string) => Promise<any>;
-  removeTaskLabel: (taskId: string, labelId: string) => Promise<any>;
+  moveTaskToColumn: (taskId: string, column: TaskBoardColumn) => Promise<Any>;
+  setTaskPriority: (taskId: string, priority: number) => Promise<Any>;
+  setTaskDueDate: (taskId: string, dueDate: number | null) => Promise<Any>;
+  setTaskEstimate: (taskId: string, estimatedMinutes: number | null) => Promise<Any>;
+  addTaskLabel: (taskId: string, labelId: string) => Promise<Any>;
+  removeTaskLabel: (taskId: string, labelId: string) => Promise<Any>;
   onTaskBoardEvent: (callback: (event: TaskBoardEvent) => void) => () => void;
   // Task Label APIs
   listTaskLabels: (query: TaskLabelListQuery) => Promise<TaskLabelData[]>;
@@ -4688,29 +4688,29 @@ export interface ElectronAPI {
   onVoiceEvent: (callback: (event: VoiceEventData) => void) => () => void;
 
   // Git Worktree APIs
-  getWorktreeInfo: (taskId: string) => Promise<any>;
-  listWorktrees: (workspaceId: string) => Promise<any[]>;
-  mergeWorktree: (taskId: string) => Promise<any>;
+  getWorktreeInfo: (taskId: string) => Promise<Any>;
+  listWorktrees: (workspaceId: string) => Promise<Any[]>;
+  mergeWorktree: (taskId: string) => Promise<Any>;
   cleanupWorktree: (taskId: string) => Promise<{ success: boolean }>;
-  getWorktreeDiff: (taskId: string) => Promise<any>;
-  getWorktreeSettings: () => Promise<any>;
-  saveWorktreeSettings: (settings: any) => Promise<{ success: boolean; error?: string }>;
+  getWorktreeDiff: (taskId: string) => Promise<Any>;
+  getWorktreeSettings: () => Promise<Any>;
+  saveWorktreeSettings: (settings: Any) => Promise<{ success: boolean; error?: string }>;
 
   // Agent Comparison APIs
-  createComparison: (params: any) => Promise<any>;
-  getComparison: (sessionId: string) => Promise<any>;
-  listComparisons: (workspaceId: string) => Promise<any[]>;
+  createComparison: (params: Any) => Promise<Any>;
+  getComparison: (sessionId: string) => Promise<Any>;
+  listComparisons: (workspaceId: string) => Promise<Any[]>;
   cancelComparison: (sessionId: string) => Promise<{ success: boolean }>;
-  getComparisonResult: (sessionId: string) => Promise<any>;
+  getComparisonResult: (sessionId: string) => Promise<Any>;
 
   // Usage Insights
-  getUsageInsights: (workspaceId: string, periodDays?: number) => Promise<any>;
+  getUsageInsights: (workspaceId: string, periodDays?: number) => Promise<Any>;
 
   // Daily Briefing
-  generateDailyBriefing: (workspaceId: string) => Promise<any>;
+  generateDailyBriefing: (workspaceId: string) => Promise<Any>;
 
   // Proactive Suggestions
-  listSuggestions: (workspaceId: string) => Promise<any[]>;
+  listSuggestions: (workspaceId: string) => Promise<Any[]>;
   dismissSuggestion: (workspaceId: string, suggestionId: string) => Promise<{ success: boolean }>;
   actOnSuggestion: (
     workspaceId: string,

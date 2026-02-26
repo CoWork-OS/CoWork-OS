@@ -7,7 +7,7 @@ export async function requestLLMResponseWithAdaptiveBudget(opts: {
   llmTimeoutMs: number;
   modelId: string;
   systemPrompt: string;
-  getAvailableTools: () => any[];
+  getAvailableTools: () => Any[];
   resolveLLMMaxTokens: (args: { messages: LLMMessage[]; system: string }) => number;
   applyRetryTokenCap: (
     baseMaxTokens: number,
@@ -22,23 +22,23 @@ export async function requestLLMResponseWithAdaptiveBudget(opts: {
     maxTokensBudget?: number,
   ) => number;
   callLLMWithRetry: (
-    requestFn: (attempt: number) => Promise<any>,
+    requestFn: (attempt: number) => Promise<Any>,
     operation: string,
-  ) => Promise<any>;
+  ) => Promise<Any>;
   createMessageWithTimeout: (
     request: {
       model: string;
       maxTokens: number;
       system: string;
-      tools: any[];
+      tools: Any[];
       messages: LLMMessage[];
     },
     timeoutMs: number,
     operation: string,
-  ) => Promise<any>;
+  ) => Promise<Any>;
   updateTracking: (inputTokens: number, outputTokens: number) => void;
   log: (message: string) => void;
-}): Promise<{ response: any; availableTools: any[] }> {
+}): Promise<{ response: Any; availableTools: Any[] }> {
   const availableTools = opts.getAvailableTools();
   const maxTokens = opts.resolveLLMMaxTokens({
     messages: opts.messages,
@@ -81,10 +81,10 @@ export async function requestLLMResponseWithAdaptiveBudget(opts: {
   }, opts.retryLabel);
 
   const llmCallDuration = ((Date.now() - llmCallStart) / 1000).toFixed(1);
-  const toolUseBlocks = (response.content || []).filter((c: any) => c.type === "tool_use");
-  const textBlocksLog = (response.content || []).filter((c: any) => c.type === "text");
+  const toolUseBlocks = (response.content || []).filter((c: Any) => c.type === "tool_use");
+  const textBlocksLog = (response.content || []).filter((c: Any) => c.type === "text");
   const textLen = textBlocksLog.reduce(
-    (sum: number, block: any) => sum + (block.text?.length || 0),
+    (sum: number, block: Any) => sum + (block.text?.length || 0),
     0,
   );
   opts.log(
@@ -101,19 +101,19 @@ export async function requestLLMResponseWithAdaptiveBudget(opts: {
 }
 
 export async function maybeApplyQualityPasses(opts: {
-  response: any;
+  response: Any;
   enabled: boolean;
   contextLabel: string;
   userIntent: string;
   getQualityPassCount: () => number;
-  extractTextFromLLMContent: (content: any) => string;
+  extractTextFromLLMContent: (content: Any) => string;
   applyQualityPassesToDraft: (args: {
     passes: 2 | 3;
     contextLabel: string;
     userIntent: string;
     draft: string;
   }) => Promise<string>;
-}): Promise<any> {
+}): Promise<Any> {
   if (!opts.enabled) return opts.response;
 
   const qualityPasses = opts.getQualityPassCount();
@@ -121,7 +121,7 @@ export async function maybeApplyQualityPasses(opts: {
     return opts.response;
   }
 
-  const hasToolUse = (opts.response.content || []).some((c: any) => c && c.type === "tool_use");
+  const hasToolUse = (opts.response.content || []).some((c: Any) => c && c.type === "tool_use");
   if (hasToolUse) return opts.response;
 
   const draftText = opts.extractTextFromLLMContent(opts.response.content).trim();

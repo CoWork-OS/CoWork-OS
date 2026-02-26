@@ -336,7 +336,7 @@ class MockMemoryService {
     this.memoryRepo.deleteByWorkspace(workspaceId);
   }
 
-  getContextForInjection(workspaceId: string, taskPrompt: string): string {
+  getContextForInjection(workspaceId: string, _taskPrompt: string): string {
     const settings = this.settingsRepo.getOrCreate(workspaceId);
     if (!settings.enabled) {
       return "";

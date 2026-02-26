@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mockState = vi.hoisted(() => ({
   addServerMock: vi.fn(),
   loadSettingsMock: vi.fn(),
-  mockInstalledServers: [] as any[],
+  mockInstalledServers: [] as Any[],
 }));
 
 vi.mock("electron", () => ({

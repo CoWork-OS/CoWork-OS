@@ -468,7 +468,7 @@ export class AppleRemindersTools {
     return reminders;
   }
 
-  async executeAction(input: AppleRemindersActionInput): Promise<any> {
+  async executeAction(input: AppleRemindersActionInput): Promise<Any> {
     if (!AppleRemindersTools.isAvailable()) {
       throw new Error("Apple Reminders tools are only available on macOS.");
     }

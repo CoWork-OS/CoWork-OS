@@ -36,7 +36,7 @@ describe("MemoryRepository.search", () => {
       prepare: vi.fn(() => ({ all })),
     };
 
-    const repo = new MemoryRepository(mockDb as any);
+    const repo = new MemoryRepository(mockDb as Any);
 
     const query =
       "I need to write an email to the class teacher about PMNL sessions. " +
@@ -73,7 +73,7 @@ describe("MemoryRepository.search", () => {
       prepare: vi.fn(() => ({ all })),
     };
 
-    const repo = new MemoryRepository(mockDb as any);
+    const repo = new MemoryRepository(mockDb as Any);
 
     const results = repo.search("ws-1", "PMNL, Portuguese support, Enes", 20, true);
 
@@ -104,7 +104,7 @@ describe("MemoryRepository.search", () => {
       prepare: vi.fn(() => ({ all })),
     };
 
-    const repo = new MemoryRepository(mockDb as any);
+    const repo = new MemoryRepository(mockDb as Any);
     const results = repo.searchImportedGlobal("PMNL Portuguese support", 10, true);
 
     expect(results).toHaveLength(1);

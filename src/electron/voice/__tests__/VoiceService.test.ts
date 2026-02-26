@@ -15,14 +15,14 @@ global.fetch = mockFetch;
 
 // Mock Blob class for Node.js environment
 class MockBlob {
-  parts: any[];
+  parts: Any[];
   type: string;
   size: number;
-  constructor(parts: any[], options?: { type?: string }) {
+  constructor(parts: Any[], options?: { type?: string }) {
     this.parts = parts;
     this.type = options?.type || "";
     this.size = parts.reduce(
-      (acc: number, part: any) => acc + (part.byteLength || part.length || 0),
+      (acc: number, part: Any) => acc + (part.byteLength || part.length || 0),
       0,
     );
   }
@@ -32,8 +32,8 @@ global.Blob = MockBlob;
 
 // Mock FormData for Node.js environment
 class MockFormData {
-  private data = new Map<string, any>();
-  append(key: string, value: any, _filename?: string) {
+  private data = new Map<string, Any>();
+  append(key: string, value: Any, _filename?: string) {
     this.data.set(key, value);
   }
   get(key: string) {

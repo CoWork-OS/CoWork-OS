@@ -19,7 +19,7 @@ function sanitizeTokenList(values?: string[]): string[] {
     .filter((value) => /^[a-zA-Z0-9._-]+$/.test(value));
 }
 
-function parseJsonSafe(text: string): any | undefined {
+function parseJsonSafe(text: string): Any | undefined {
   const trimmed = text.trim();
   if (!trimmed) return undefined;
   try {
@@ -86,7 +86,7 @@ function buildGlobalArgs(settings: XSettingsData, json: boolean): string[] {
 export interface XCommandResult {
   stdout: string;
   stderr: string;
-  data?: any;
+  data?: Any;
 }
 
 export async function runBirdCommand(
@@ -114,7 +114,7 @@ export async function runBirdCommand(
       stderr: errText,
       data: useJson ? parseJsonSafe(outText) : undefined,
     };
-  } catch (error: any) {
+  } catch (error: Any) {
     const stderr = typeof error?.stderr === "string" ? error.stderr.trim() : "";
     const stdout = typeof error?.stdout === "string" ? error.stdout.trim() : "";
     const baseMessage = error?.message || "bird command failed";
@@ -145,7 +145,7 @@ export async function checkBirdInstalled(): Promise<{ installed: boolean; versio
     const text = typeof stdout === "string" ? stdout.trim() : "";
     const version = text.split("\n")[0] || undefined;
     return { installed: true, version };
-  } catch (error: any) {
+  } catch (error: Any) {
     if (error?.code === "ENOENT") {
       return { installed: false };
     }
@@ -154,7 +154,7 @@ export async function checkBirdInstalled(): Promise<{ installed: boolean; versio
   }
 }
 
-function extractUsername(data: any, stdout?: string): { username?: string; userId?: string } {
+function extractUsername(data: Any, stdout?: string): { username?: string; userId?: string } {
   if (data && typeof data === "object") {
     const username =
       data.username || data.screen_name || data.handle || data.user || data.userName || undefined;
@@ -183,7 +183,7 @@ export async function testXConnection(settings: XSettingsData): Promise<XConnect
       username: extracted.username,
       userId: extracted.userId,
     };
-  } catch (error: any) {
+  } catch (error: Any) {
     return {
       success: false,
       error: error?.message || "Failed to connect to X",

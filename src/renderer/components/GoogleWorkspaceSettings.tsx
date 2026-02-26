@@ -94,7 +94,7 @@ export function GoogleWorkspaceSettings() {
       const result = await window.electronAPI.testGoogleWorkspaceConnection();
       setTestResult(result);
       await refreshStatus();
-    } catch (error: any) {
+    } catch (error: Any) {
       setTestResult({ success: false, error: error.message || "Failed to test connection" });
     } finally {
       setTesting(false);
@@ -135,7 +135,7 @@ export function GoogleWorkspaceSettings() {
       await window.electronAPI.saveGoogleWorkspaceSettings(payload);
       setSettings(payload);
       await refreshStatus();
-    } catch (error: any) {
+    } catch (error: Any) {
       setOauthError(error.message || "Google Workspace OAuth failed");
     } finally {
       setOauthBusy(false);

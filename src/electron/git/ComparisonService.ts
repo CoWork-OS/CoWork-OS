@@ -90,7 +90,7 @@ export class ComparisonService {
       }
 
       return session;
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("[ComparisonService] Session creation failed, rolling back:", error);
 
       for (const taskId of taskIds) {
@@ -166,7 +166,7 @@ export class ComparisonService {
           status: anyFailed ? "partial" : "completed",
           message: `Comparison session completed (${anyFailed ? "some agents failed" : "all agents succeeded"}).`,
         });
-      } catch (error: any) {
+      } catch (error: Any) {
         console.error(`[ComparisonService] Failed to generate comparison result:`, error);
         this.sessionRepo.update(session.id, {
           status: "partial",

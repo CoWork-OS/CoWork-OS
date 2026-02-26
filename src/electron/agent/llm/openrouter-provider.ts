@@ -66,9 +66,9 @@ export class OpenRouterProvider implements LLMProvider {
         );
       }
 
-      const data = (await response.json()) as any;
+      const data = (await response.json()) as Any;
       return this.convertResponse(data);
-    } catch (error: any) {
+    } catch (error: Any) {
       // Handle abort errors gracefully
       if (error.name === "AbortError" || error.message?.includes("aborted")) {
         console.log(`[OpenRouter] Request aborted`);
@@ -111,7 +111,7 @@ export class OpenRouterProvider implements LLMProvider {
       }
 
       return { success: true };
-    } catch (error: any) {
+    } catch (error: Any) {
       return {
         success: false,
         error: error.message || "Failed to connect to OpenRouter API",
@@ -122,8 +122,8 @@ export class OpenRouterProvider implements LLMProvider {
   private convertMessages(
     messages: LLMMessage[],
     system?: string,
-  ): Array<{ role: string; content: any; tool_call_id?: string }> {
-    const result: Array<{ role: string; content: any; tool_call_id?: string }> = [];
+  ): Array<{ role: string; content: Any; tool_call_id?: string }> {
+    const result: Array<{ role: string; content: Any; tool_call_id?: string }> = [];
 
     // Add system message if provided
     if (system) {
@@ -159,7 +159,7 @@ export class OpenRouterProvider implements LLMProvider {
                   },
                 },
               ],
-            } as any);
+            } as Any);
           } else if (item.type === "text") {
             textParts.push(item.text);
           } else if (item.type === "image") {
@@ -169,7 +169,7 @@ export class OpenRouterProvider implements LLMProvider {
 
         // Emit text + images as a single message with content array
         if (imageBlocks.length > 0) {
-          const contentParts: any[] = [];
+          const contentParts: Any[] = [];
           if (textParts.length > 0) {
             contentParts.push({ type: "text", text: textParts.join("\n") });
           }
@@ -194,7 +194,7 @@ export class OpenRouterProvider implements LLMProvider {
     function: {
       name: string;
       description: string;
-      parameters: any;
+      parameters: Any;
     };
   }> {
     return tools.map((tool) => ({
@@ -207,7 +207,7 @@ export class OpenRouterProvider implements LLMProvider {
     }));
   }
 
-  private convertResponse(response: any): LLMResponse {
+  private convertResponse(response: Any): LLMResponse {
     const content: LLMContent[] = [];
     const choice = response.choices?.[0];
 
@@ -289,8 +289,8 @@ export class OpenRouterProvider implements LLMProvider {
         return [];
       }
 
-      const data = (await response.json()) as { data?: any[] };
-      return (data.data || []).map((model: any) => ({
+      const data = (await response.json()) as { data?: Any[] };
+      return (data.data || []).map((model: Any) => ({
         id: model.id,
         name: model.name || model.id,
         context_length: model.context_length || 0,

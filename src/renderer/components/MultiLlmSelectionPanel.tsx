@@ -86,7 +86,7 @@ export function MultiLlmSelectionPanel({
       const providerName =
         configuredProviders.find((p) => p.type === providerType)?.name || providerType;
       participants.push({
-        providerType: providerType as any,
+        providerType: providerType as Any,
         modelKey,
         displayName: providerInfo
           ? `${providerInfo.name} (${modelKey})`
@@ -123,7 +123,7 @@ export function MultiLlmSelectionPanel({
 
     onConfigChangeRef.current({
       participants,
-      judgeProviderType: judgeProvider as any,
+      judgeProviderType: judgeProvider as Any,
       judgeModelKey: judgeModel,
     });
   }, [selectedProviders, selectedModels, judgeKey, configuredProviders]);

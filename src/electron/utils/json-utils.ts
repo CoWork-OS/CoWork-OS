@@ -125,7 +125,7 @@ function scanBalancedJsonCandidates(text: string, maxCandidateChars: number): st
       continue;
     }
 
-    if (ch === '\"' || ch === "'") {
+    if (ch === '"' || ch === "'") {
       inString = true;
       stringDelim = ch;
       continue;

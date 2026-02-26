@@ -118,7 +118,7 @@ export function SignalSettings({ onStatusChange }: SignalSettingsProps) {
       });
 
       await loadChannel();
-    } catch (error: any) {
+    } catch (error: Any) {
       setTestResult({ success: false, error: error.message });
     } finally {
       setSaving(false);
@@ -134,7 +134,7 @@ export function SignalSettings({ onStatusChange }: SignalSettingsProps) {
 
       const result = await window.electronAPI.testGatewayChannel(channel.id);
       setTestResult(result);
-    } catch (error: any) {
+    } catch (error: Any) {
       setTestResult({ success: false, error: error.message });
     } finally {
       setTesting(false);
@@ -152,7 +152,7 @@ export function SignalSettings({ onStatusChange }: SignalSettingsProps) {
         await window.electronAPI.enableGatewayChannel(channel.id);
       }
       await loadChannel();
-    } catch (error: any) {
+    } catch (error: Any) {
       setTestResult({ success: false, error: error.message });
     } finally {
       setSaving(false);
@@ -172,7 +172,7 @@ export function SignalSettings({ onStatusChange }: SignalSettingsProps) {
       setChannel(null);
       setUsers([]);
       onStatusChange?.(false);
-    } catch (error: any) {
+    } catch (error: Any) {
       setTestResult({ success: false, error: error.message });
     } finally {
       setSaving(false);
@@ -189,7 +189,7 @@ export function SignalSettings({ onStatusChange }: SignalSettingsProps) {
       });
       setSecurityMode(newMode);
       setChannel({ ...channel, securityMode: newMode });
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to update security mode:", error);
     }
   };
@@ -216,7 +216,7 @@ export function SignalSettings({ onStatusChange }: SignalSettingsProps) {
       });
       setTestResult({ success: true, error: undefined });
       await loadChannel();
-    } catch (error: any) {
+    } catch (error: Any) {
       setTestResult({ success: false, error: error.message });
     } finally {
       setSaving(false);
@@ -229,7 +229,7 @@ export function SignalSettings({ onStatusChange }: SignalSettingsProps) {
     try {
       const code = await window.electronAPI.generateGatewayPairing(channel.id, "");
       setPairingCode(code);
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to generate pairing code:", error);
     }
   };
@@ -240,7 +240,7 @@ export function SignalSettings({ onStatusChange }: SignalSettingsProps) {
     try {
       await window.electronAPI.revokeGatewayAccess(channel.id, userId);
       await loadChannel();
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to revoke access:", error);
     }
   };

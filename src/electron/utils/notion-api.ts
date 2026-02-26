@@ -12,7 +12,7 @@ function getNotionVersion(settings: NotionSettingsData): string {
   return settings.notionVersion || DEFAULT_NOTION_VERSION;
 }
 
-function parseJsonSafe(text: string): any | undefined {
+function parseJsonSafe(text: string): Any | undefined {
   const trimmed = text.trim();
   if (!trimmed) return undefined;
   try {
@@ -22,7 +22,7 @@ function parseJsonSafe(text: string): any | undefined {
   }
 }
 
-function formatNotionError(status: number, data: any, fallback?: string): string {
+function formatNotionError(status: number, data: Any, fallback?: string): string {
   const message = data?.message || data?.error || data?.details || fallback || "Notion API error";
   return `Notion API error ${status}: ${message}`;
 }
@@ -30,13 +30,13 @@ function formatNotionError(status: number, data: any, fallback?: string): string
 export interface NotionRequestOptions {
   method: "GET" | "POST" | "PATCH" | "DELETE";
   path: string;
-  body?: Record<string, any>;
+  body?: Record<string, Any>;
   timeoutMs?: number;
 }
 
 export interface NotionRequestResult {
   status: number;
-  data?: any;
+  data?: Any;
   raw?: string;
 }
 
@@ -82,7 +82,7 @@ export async function notionRequest(
       data: data ?? undefined,
       raw: rawText || undefined,
     };
-  } catch (error: any) {
+  } catch (error: Any) {
     if (error?.name === "AbortError") {
       throw new Error("Notion API request timed out");
     }
@@ -92,7 +92,7 @@ export async function notionRequest(
   }
 }
 
-function extractUserInfo(data: any): { name?: string; userId?: string } {
+function extractUserInfo(data: Any): { name?: string; userId?: string } {
   if (!data || typeof data !== "object") return {};
   const name = data.name || data?.bot?.owner?.user?.name || data?.person?.name || undefined;
   const userId = data.id || data.user_id || undefined;
@@ -110,7 +110,7 @@ export async function testNotionConnection(
       name: extracted.name,
       userId: extracted.userId,
     };
-  } catch (error: any) {
+  } catch (error: Any) {
     return {
       success: false,
       error: error?.message || "Failed to connect to Notion",

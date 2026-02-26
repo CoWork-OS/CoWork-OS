@@ -263,13 +263,13 @@ export class InfraTools {
   /**
    * Execute a tool by name
    */
-  async executeTool(toolName: string, args: Record<string, any>): Promise<any> {
+  async executeTool(toolName: string, args: Record<string, Any>): Promise<Any> {
     const manager = InfraManager.getInstance();
 
     this.daemon.logEvent(this.taskId, "tool_call", { tool: toolName, args });
 
     try {
-      let result: any;
+      let result: Any;
 
       switch (toolName) {
         // Sandbox tools
@@ -400,7 +400,7 @@ export class InfraTools {
       });
 
       return result;
-    } catch (error: any) {
+    } catch (error: Any) {
       this.daemon.logEvent(this.taskId, "tool_result", {
         tool: toolName,
         success: false,

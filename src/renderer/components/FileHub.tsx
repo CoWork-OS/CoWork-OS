@@ -76,12 +76,12 @@ export const FileHub: React.FC<{ workspaceId?: string }> = ({ workspaceId: _work
   const loadFiles = useCallback(async () => {
     try {
       if (searchQuery.trim()) {
-        const results = await (window as any).electronAPI.searchHubFiles(searchQuery, [
+        const results = await (window as Any).electronAPI.searchHubFiles(searchQuery, [
           activeSource,
         ]);
-        setFiles((results || []).map((r: any) => r.file));
+        setFiles((results || []).map((r: Any) => r.file));
       } else {
-        const result = await (window as any).electronAPI.listHubFiles({ source: activeSource });
+        const result = await (window as Any).electronAPI.listHubFiles({ source: activeSource });
         setFiles(result || []);
       }
     } catch {
@@ -96,9 +96,9 @@ export const FileHub: React.FC<{ workspaceId?: string }> = ({ workspaceId: _work
   useEffect(() => {
     (async () => {
       try {
-        const sources = await (window as any).electronAPI.getHubSources();
+        const sources = await (window as Any).electronAPI.getHubSources();
         setAvailableSources(sources || ["local", "artifacts"]);
-        const recent = await (window as any).electronAPI.getRecentHubFiles(10);
+        const recent = await (window as Any).electronAPI.getRecentHubFiles(10);
         setRecentFiles(recent || []);
       } catch {
         // API not available yet

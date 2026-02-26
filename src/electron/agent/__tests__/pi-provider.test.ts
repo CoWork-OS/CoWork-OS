@@ -22,7 +22,7 @@ vi.mock("@mariozechner/pi-ai", () => ({
 }));
 
 import { PiProvider } from "../llm/pi-provider";
-import { getModels } from "@mariozechner/pi-ai";
+import { getModels as _getModels } from "@mariozechner/pi-ai";
 import type { LLMProviderConfig, LLMMessage, LLMResponse } from "../llm/types";
 
 function createConfig(overrides: Partial<LLMProviderConfig> = {}): LLMProviderConfig {
@@ -36,8 +36,8 @@ function createConfig(overrides: Partial<LLMProviderConfig> = {}): LLMProviderCo
 }
 
 // Access private methods for unit testing
-function getPrivate(provider: PiProvider): any {
-  return provider as any;
+function getPrivate(provider: PiProvider): Any {
+  return provider as Any;
 }
 
 describe("PiProvider", () => {
@@ -100,7 +100,7 @@ describe("PiProvider", () => {
       try {
         getPrivate(provider).resolveModel("missing");
         expect.fail("Should have thrown");
-      } catch (e: any) {
+      } catch (e: Any) {
         expect(e.message).toContain("claude-sonnet-4-5-20250514");
         expect(e.message).toContain("gpt-4o");
       }
@@ -143,7 +143,7 @@ describe("PiProvider", () => {
               id: "call-1",
               name: "read_file",
               input: { path: "/tmp/test" },
-            } as any,
+            } as Any,
           ],
         },
       ];
@@ -164,18 +164,18 @@ describe("PiProvider", () => {
       const messages: LLMMessage[] = [
         {
           role: "assistant",
-          content: [{ type: "tool_use", id: "call-1", name: "read_file", input: {} } as any],
+          content: [{ type: "tool_use", id: "call-1", name: "read_file", input: {} } as Any],
         },
         {
           role: "user",
           content: [
             { type: "tool_result", tool_use_id: "call-1", content: "file contents" },
-          ] as any,
+          ] as Any,
         },
       ];
 
       const result = getPrivate(provider).convertMessagesToPiAi(messages);
-      const toolResult = result.find((m: any) => m.role === "toolResult");
+      const toolResult = result.find((m: Any) => m.role === "toolResult");
       expect(toolResult).toBeDefined();
       expect(toolResult.toolName).toBe("read_file");
     });
@@ -185,12 +185,12 @@ describe("PiProvider", () => {
       const messages: LLMMessage[] = [
         {
           role: "user",
-          content: [{ type: "tool_result", tool_use_id: "orphan-id", content: "data" }] as any,
+          content: [{ type: "tool_result", tool_use_id: "orphan-id", content: "data" }] as Any,
         },
       ];
 
       const result = getPrivate(provider).convertMessagesToPiAi(messages);
-      const toolResult = result.find((m: any) => m.role === "toolResult");
+      const toolResult = result.find((m: Any) => m.role === "toolResult");
       expect(toolResult.toolName).toBe("");
     });
 
@@ -200,8 +200,8 @@ describe("PiProvider", () => {
         {
           role: "user",
           content: [
-            { type: "text", text: "Part 1" } as any,
-            { type: "text", text: "Part 2" } as any,
+            { type: "text", text: "Part 1" } as Any,
+            { type: "text", text: "Part 2" } as Any,
           ],
         },
       ];

@@ -10,7 +10,7 @@ import {
   createResponseFrame,
   createErrorResponse,
   createEventFrame,
-  FrameType,
+  FrameType as _FrameType,
   ErrorCodes,
 } from "../protocol";
 
@@ -211,7 +211,7 @@ describe("parseFrame edge cases", () => {
     });
 
     it("should handle deeply nested objects", () => {
-      let nested: any = { value: "deep" };
+      let nested: Any = { value: "deep" };
       for (let i = 0; i < 50; i++) {
         nested = { level: i, child: nested };
       }

@@ -71,7 +71,7 @@ export class GoogleProvider implements SearchProvider {
     }
 
     const data = (await response.json()) as {
-      items?: any[];
+      items?: Any[];
       searchInformation?: { totalResults?: string };
     };
 
@@ -90,7 +90,7 @@ export class GoogleProvider implements SearchProvider {
     try {
       await this.search({ query: "test", maxResults: 1 });
       return { success: true };
-    } catch (error: any) {
+    } catch (error: Any) {
       return {
         success: false,
         error: error.message || "Failed to connect to Google Custom Search",
@@ -113,7 +113,7 @@ export class GoogleProvider implements SearchProvider {
     }
   }
 
-  private mapResults(items: any[], searchType: SearchType): SearchResult[] {
+  private mapResults(items: Any[], searchType: SearchType): SearchResult[] {
     return items.map((item) => ({
       title: item.title || "",
       url: item.link || "",

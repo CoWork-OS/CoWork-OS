@@ -63,7 +63,7 @@ export class AgentTeamThoughtRepository {
    */
   findById(id: string): AgentThought | undefined {
     const stmt = this.db.prepare("SELECT * FROM agent_team_thoughts WHERE id = ?");
-    const row = stmt.get(id) as any;
+    const row = stmt.get(id) as Any;
     return row ? this.mapRowToThought(row) : undefined;
   }
 
@@ -77,7 +77,7 @@ export class AgentTeamThoughtRepository {
       WHERE team_run_id = ?
       ORDER BY created_at ASC
     `);
-    const rows = stmt.all(teamRunId) as any[];
+    const rows = stmt.all(teamRunId) as Any[];
     return rows.map((row) => this.mapRowToThought(row));
   }
 
@@ -91,7 +91,7 @@ export class AgentTeamThoughtRepository {
       WHERE team_run_id = ? AND agent_role_id = ?
       ORDER BY created_at ASC
     `);
-    const rows = stmt.all(teamRunId, agentRoleId) as any[];
+    const rows = stmt.all(teamRunId, agentRoleId) as Any[];
     return rows.map((row) => this.mapRowToThought(row));
   }
 
@@ -131,11 +131,11 @@ export class AgentTeamThoughtRepository {
       WHERE source_task_id = ?
       ORDER BY created_at ASC
     `);
-    const rows = stmt.all(sourceTaskId) as any[];
+    const rows = stmt.all(sourceTaskId) as Any[];
     return rows.map((row) => this.mapRowToThought(row));
   }
 
-  private mapRowToThought(row: any): AgentThought {
+  private mapRowToThought(row: Any): AgentThought {
     return {
       id: row.id,
       teamRunId: row.team_run_id,

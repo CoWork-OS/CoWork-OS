@@ -198,7 +198,7 @@ export function registerACPMethods(server: ControlPlaneServer, deps: ACPHandlerD
           workspaceId: "", // Will use default workspace
           assignedAgentRoleId: targetAgent.localRoleId,
         });
-        message.data = { ...((message.data as any) || {}), autoTaskId: result.taskId };
+        message.data = { ...(message.data as Any), autoTaskId: result.taskId };
       } catch {
         // Non-fatal: message was still delivered to inbox
       }
@@ -255,7 +255,7 @@ export function registerACPMethods(server: ControlPlaneServer, deps: ACPHandlerD
         });
         acpTask.coworkTaskId = result.taskId;
         acpTask.status = "running";
-      } catch (err: any) {
+      } catch (err: Any) {
         acpTask.status = "failed";
         acpTask.error = err?.message || "Failed to create task";
       }

@@ -235,7 +235,7 @@ export class GitService {
         }
 
         return { success: true, mergeSha };
-      } catch (error: any) {
+      } catch (error: Any) {
         // Merge failed — likely a conflict
         // Abort the merge
         try {
@@ -272,7 +272,7 @@ export class GitService {
           error: error.message || "Merge conflict detected",
         };
       }
-    } catch (error: any) {
+    } catch (error: Any) {
       return {
         success: false,
         error: error.message || "Failed to merge",

@@ -130,7 +130,7 @@ describe("HeartbeatService", () => {
         updateHeartbeatStatus: (id: string, status: string, lastHeartbeatAt?: number) => {
           const agent = mockAgents.get(id);
           if (agent) {
-            agent.heartbeatStatus = status as any;
+            agent.heartbeatStatus = status as Any;
             if (lastHeartbeatAt) {
               agent.lastHeartbeatAt = lastHeartbeatAt;
             }

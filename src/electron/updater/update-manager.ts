@@ -1,8 +1,8 @@
 import { app, BrowserWindow, net } from "electron";
 import { exec, spawn } from "child_process";
 import { promisify } from "util";
-import * as path from "path";
-import * as fs from "fs";
+import * as _path from "path";
+import * as _fs from "fs";
 import { UpdateInfo, UpdateProgress, AppVersionInfo, IPC_CHANNELS } from "../../shared/types";
 
 const execAsync = promisify(exec);
@@ -164,7 +164,7 @@ export class UpdateManager {
         publishedAt: release.published_at,
         updateMode,
       };
-    } catch (error: any) {
+    } catch (error: Any) {
       this.sendError(error.message);
       throw error;
     }
@@ -293,7 +293,7 @@ export class UpdateManager {
           message: "Update complete! Please restart the application to apply changes.",
         });
       }
-    } catch (error: any) {
+    } catch (error: Any) {
       this.sendProgress({ phase: "error", message: `Update failed: ${error.message}` });
       this.sendError(error.message);
       throw error;
@@ -319,7 +319,7 @@ export class UpdateManager {
           message: "Update complete! Please restart the application to apply changes.",
         });
       }
-    } catch (error: any) {
+    } catch (error: Any) {
       this.sendProgress({ phase: "error", message: `Update failed: ${error.message}` });
       this.sendError(error.message);
       throw error;
@@ -451,7 +451,7 @@ export class UpdateManager {
       });
 
       await autoUpdater.downloadUpdate();
-    } catch (error: any) {
+    } catch  {
       // If electron-updater is not available, fall back to manual download
       this.sendProgress({
         phase: "error",

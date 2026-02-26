@@ -4,7 +4,7 @@ import type { LLMRequest } from "../types";
 
 const mockFetch = vi.fn();
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-(global as any).fetch = mockFetch;
+(global as Any).fetch = mockFetch;
 
 const baseConfig = {
   type: "azure" as const,
@@ -19,7 +19,7 @@ beforeEach(() => {
   mockFetch.mockReset();
 });
 
-function createOkResponse(data: any) {
+function createOkResponse(data: Any) {
   return {
     ok: true,
     status: 200,
@@ -28,7 +28,7 @@ function createOkResponse(data: any) {
   };
 }
 
-function createErrorResponse(status: number, statusText: string, data: any) {
+function createErrorResponse(status: number, statusText: string, data: Any) {
   return {
     ok: false,
     status,

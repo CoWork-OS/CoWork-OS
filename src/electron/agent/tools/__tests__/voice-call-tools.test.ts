@@ -59,13 +59,13 @@ beforeEach(() => {
   domainAllowedSpy.mockReturnValue(true);
   guardrailSettingsSpy.mockReturnValue({
     allowedDomains: ["api.elevenlabs.io"],
-  } as any);
+  } as Any);
   voiceSettingsSpy.mockReturnValue({
     // Only fields used by VoiceCallTools
     elevenLabsAgentsApiKey: "xi-test-key",
     elevenLabsAgentId: "agent-123",
     elevenLabsAgentPhoneNumberId: "phone-456",
-  } as any);
+  } as Any);
 });
 
 describe("VoiceCallTools", () => {
@@ -78,7 +78,7 @@ describe("VoiceCallTools", () => {
     });
 
     const daemon = buildDaemon(true);
-    const tools = new VoiceCallTools(workspace, daemon as any, taskId);
+    const tools = new VoiceCallTools(workspace, daemon as Any, taskId);
 
     const out = await tools.executeAction({
       action: "initiate_call",
@@ -121,7 +121,7 @@ describe("VoiceCallTools", () => {
     });
 
     const daemon = buildDaemon(true);
-    const tools = new VoiceCallTools(workspace, daemon as any, taskId);
+    const tools = new VoiceCallTools(workspace, daemon as Any, taskId);
 
     await tools.executeAction({
       action: "initiate_call",
@@ -148,7 +148,7 @@ describe("VoiceCallTools", () => {
     });
 
     const daemon = buildDaemon(true);
-    const tools = new VoiceCallTools(workspace, daemon as any, taskId);
+    const tools = new VoiceCallTools(workspace, daemon as Any, taskId);
 
     const out = await tools.executeAction({ action: "list_agents" });
 
@@ -161,7 +161,7 @@ describe("VoiceCallTools", () => {
 
   it("rejects invalid E.164 to_number", async () => {
     const daemon = buildDaemon(true);
-    const tools = new VoiceCallTools(workspace, daemon as any, taskId);
+    const tools = new VoiceCallTools(workspace, daemon as Any, taskId);
 
     await expect(
       tools.executeAction({
@@ -175,7 +175,7 @@ describe("VoiceCallTools", () => {
 
   it("throws when approval is denied", async () => {
     const daemon = buildDaemon(false);
-    const tools = new VoiceCallTools(workspace, daemon as any, taskId);
+    const tools = new VoiceCallTools(workspace, daemon as Any, taskId);
 
     await expect(
       tools.executeAction({
@@ -191,10 +191,10 @@ describe("VoiceCallTools", () => {
     domainAllowedSpy.mockReturnValue(false);
     guardrailSettingsSpy.mockReturnValue({
       allowedDomains: ["example.com"],
-    } as any);
+    } as Any);
 
     const daemon = buildDaemon(true);
-    const tools = new VoiceCallTools(workspace, daemon as any, taskId);
+    const tools = new VoiceCallTools(workspace, daemon as Any, taskId);
 
     await expect(tools.executeAction({ action: "list_agents" })).rejects.toThrow(
       /Domain not allowed/i,
@@ -216,7 +216,7 @@ describe("VoiceCallTools", () => {
     });
 
     const daemon = buildDaemon(true);
-    const tools = new VoiceCallTools(workspace, daemon as any, taskId);
+    const tools = new VoiceCallTools(workspace, daemon as Any, taskId);
 
     const out = await tools.executeAction({
       action: "initiate_call",

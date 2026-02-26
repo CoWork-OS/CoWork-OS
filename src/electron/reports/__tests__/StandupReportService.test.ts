@@ -13,16 +13,16 @@ vi.mock("electron", () => ({
 }));
 
 // In-memory mock storage
-let mockReports: Map<string, any>;
-let mockTasks: Map<string, any>;
+let mockReports: Map<string, Any>;
+let mockTasks: Map<string, Any>;
 let reportIdCounter: number;
 let timestampCounter: number;
 
 // Mock StandupReportService
 class MockStandupReportService {
-  private deliverToChannel?: (report: StandupReport, config: any) => Promise<void>;
+  private deliverToChannel?: (report: StandupReport, config: Any) => Promise<void>;
 
-  constructor(deliverToChannel?: (report: StandupReport, config: any) => Promise<void>) {
+  constructor(deliverToChannel?: (report: StandupReport, config: Any) => Promise<void>) {
     this.deliverToChannel = deliverToChannel;
   }
 
@@ -247,7 +247,7 @@ class MockStandupReportService {
     return date.toISOString().split("T")[0];
   }
 
-  private mapRowToReport(row: any): StandupReport {
+  private mapRowToReport(row: Any): StandupReport {
     return {
       id: row.id,
       workspaceId: row.workspace_id,
@@ -261,7 +261,7 @@ class MockStandupReportService {
     };
   }
 
-  private mapRowToTask(row: any): Task {
+  private mapRowToTask(row: Any): Task {
     return {
       id: row.id,
       title: row.title,

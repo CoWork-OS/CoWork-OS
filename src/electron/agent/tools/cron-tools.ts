@@ -129,7 +129,7 @@ export class CronTools {
     let schedule: CronSchedule;
     try {
       schedule = this.parseSchedule(params.schedule);
-    } catch (error: any) {
+    } catch (error: Any) {
       this.daemon.logEvent(this.taskId, "tool_error", {
         tool: "schedule_create",
         error: error.message,
@@ -150,7 +150,7 @@ export class CronTools {
       delivery: params.delivery
         ? {
             enabled: params.delivery.enabled,
-            channelType: params.delivery.channelType as any,
+            channelType: params.delivery.channelType as Any,
             channelDbId: params.delivery.channelDbId,
             channelId: params.delivery.channelId,
             deliverOnSuccess: params.delivery.deliverOnSuccess,
@@ -240,7 +240,7 @@ export class CronTools {
     }
 
     // Build patch object
-    const patch: any = {};
+    const patch: Any = {};
     if (params.updates.name) patch.name = params.updates.name;
     if (params.updates.description) patch.description = params.updates.description;
     if (params.updates.prompt) patch.taskPrompt = params.updates.prompt;
@@ -249,7 +249,7 @@ export class CronTools {
     if (params.updates.schedule) {
       try {
         patch.schedule = this.parseSchedule(params.updates.schedule);
-      } catch (error: any) {
+      } catch (error: Any) {
         return { success: false, error: error.message };
       }
     }
@@ -807,7 +807,7 @@ export class CronTools {
         deliverOnlyIfResult?: boolean;
       };
     };
-  }): Promise<any> {
+  }): Promise<Any> {
     switch (input.action) {
       case "status":
         return this.getStatus();

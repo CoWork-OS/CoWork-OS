@@ -6,7 +6,7 @@ import * as path from "path";
 let capturedExecArgs: string[] | null = null;
 
 vi.mock("child_process", () => ({
-  execFile: vi.fn((file: string, args: string[], options: any, callback: any) => {
+  execFile: vi.fn((file: string, args: string[], options: Any, callback: Any) => {
     capturedExecArgs = args;
     callback(null, `cal_1\x1fCalendar\x1ftrue`, "");
   }),
@@ -28,7 +28,7 @@ describe("AppleCalendarTools AppleScript generation", () => {
 
     const { AppleCalendarTools } = await import("../apple-calendar-tools");
 
-    const workspace: any = {
+    const workspace: Any = {
       id: "w",
       name: "w",
       path: tmpDir,
@@ -37,7 +37,7 @@ describe("AppleCalendarTools AppleScript generation", () => {
       permissions: { read: true, write: true, delete: true, network: true, shell: false },
     };
 
-    const daemon: any = {
+    const daemon: Any = {
       logEvent: vi.fn(),
       requestApproval: vi.fn(),
       registerArtifact: vi.fn(),

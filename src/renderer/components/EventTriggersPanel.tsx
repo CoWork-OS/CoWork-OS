@@ -9,7 +9,7 @@ interface TriggerCondition {
 
 interface TriggerAction {
   type: string;
-  config: Record<string, any>;
+  config: Record<string, Any>;
 }
 
 interface EventTrigger {
@@ -80,7 +80,7 @@ export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspa
 
   const loadTriggers = useCallback(async () => {
     try {
-      const result = await (window as any).electronAPI.listTriggers(workspaceId || "");
+      const result = await (window as Any).electronAPI.listTriggers(workspaceId || "");
       setTriggers(result || []);
     } catch {
       // API not available yet
@@ -107,7 +107,7 @@ export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspa
   const handleAdd = async () => {
     if (!name.trim()) return;
     try {
-      await (window as any).electronAPI.addTrigger({
+      await (window as Any).electronAPI.addTrigger({
         name: name.trim(),
         enabled: true,
         source,
@@ -136,7 +136,7 @@ export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspa
 
   const toggleTrigger = async (id: string, enabled: boolean) => {
     try {
-      await (window as any).electronAPI.updateTrigger(id, { enabled });
+      await (window as Any).electronAPI.updateTrigger(id, { enabled });
       loadTriggers();
     } catch {
       // ignore
@@ -145,7 +145,7 @@ export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspa
 
   const deleteTrigger = async (id: string) => {
     try {
-      await (window as any).electronAPI.removeTrigger(id);
+      await (window as Any).electronAPI.removeTrigger(id);
       loadTriggers();
     } catch {
       // ignore
@@ -158,7 +158,7 @@ export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspa
       return;
     }
     try {
-      const result = await (window as any).electronAPI.getTriggerHistory(triggerId);
+      const result = await (window as Any).electronAPI.getTriggerHistory(triggerId);
       setHistory(result || []);
       setExpandedHistory(triggerId);
     } catch {

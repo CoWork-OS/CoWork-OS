@@ -16,7 +16,7 @@ import {
   Menu,
   nativeImage,
   BrowserWindow,
-  shell,
+  shell as _shell,
   NativeImage,
   globalShortcut,
 } from "electron";
@@ -349,7 +349,7 @@ export class TrayManager {
       const createdAt = existing?.createdAt ?? Date.now();
       const lastUsedAt = Date.now();
       const permissions = {
-        ...(existing?.permissions ?? {}),
+        ...existing?.permissions,
         read: true,
         write: true,
         delete: true,
@@ -566,6 +566,7 @@ export class TrayManager {
   private getTrayIcon(state: "idle" | "active" | "error"): NativeImage {
     // Try to load from file first
     const iconPath = this.getIconPath("trayTemplate");
+// oxlint-disable-next-line typescript-eslint(no-require-imports)
     const fs = require("fs");
 
     if (fs.existsSync(iconPath)) {
@@ -1060,6 +1061,7 @@ export class TrayManager {
   showNotification(title: string, body: string): void {
     if (!this.settings.showNotifications) return;
 
+// oxlint-disable-next-line typescript-eslint(no-require-imports)
     const { Notification } = require("electron");
     if (Notification.isSupported()) {
       const notification = new Notification({

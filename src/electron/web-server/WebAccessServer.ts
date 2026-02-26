@@ -14,17 +14,17 @@ import { WebAccessConfig, WebAccessStatus, DEFAULT_WEB_ACCESS_CONFIG } from "./t
 
 interface WebAccessServerDeps {
   /** Handle an IPC-equivalent invoke from the web client */
-  handleIpcInvoke: (channel: string, ...args: any[]) => Promise<any>;
+  handleIpcInvoke: (channel: string, ...args: Any[]) => Promise<Any>;
   /** Get the path to the built renderer files */
   getRendererPath: () => string;
   /** Forward real-time events to connected WebSocket clients */
-  onDaemonEvent?: (callback: (event: any) => void) => void;
+  onDaemonEvent?: (callback: (event: Any) => void) => void;
   log?: (...args: unknown[]) => void;
 }
 
 export class WebAccessServer {
   private server: http.Server | null = null;
-  private wsClients: Set<any> = new Set();
+  private wsClients: Set<Any> = new Set();
   private config: WebAccessConfig;
   private deps: WebAccessServerDeps;
   private startedAt?: number;
@@ -201,7 +201,7 @@ export class WebAccessServer {
 
       // Map REST routes to IPC channels
       let channel: string;
-      let args: any[];
+      let args: Any[];
 
       if (url.pathname === "/api/tasks" && req.method === "GET") {
         channel = "task:list";
@@ -293,7 +293,7 @@ export class WebAccessServer {
 
   // ── WebSocket ───────────────────────────────────────────────────
 
-  private handleWebSocketUpgrade(req: http.IncomingMessage, socket: any, head: Buffer): void {
+  private handleWebSocketUpgrade(req: http.IncomingMessage, socket: Any, _head: Buffer): void {
     // Simplified WebSocket handling using raw socket
     // In production, use the `ws` package (already a dependency)
     try {

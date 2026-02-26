@@ -102,7 +102,7 @@ export class NamedMutexManager {
  */
 interface IdempotencyEntry {
   key: string;
-  result: any;
+  result: Any;
   createdAt: number;
   expiresAt: number;
   status: "pending" | "completed" | "failed";
@@ -143,7 +143,7 @@ export class IdempotencyManager {
   check(key: string): {
     exists: boolean;
     status?: "pending" | "completed" | "failed";
-    result?: any;
+    result?: Any;
   } {
     const entry = this.entries.get(key);
 
@@ -191,7 +191,7 @@ export class IdempotencyManager {
   /**
    * Mark an operation as completed with its result
    */
-  complete(key: string, result: any): void {
+  complete(key: string, result: Any): void {
     const entry = this.entries.get(key);
     if (entry) {
       entry.status = "completed";
@@ -202,7 +202,7 @@ export class IdempotencyManager {
   /**
    * Mark an operation as failed
    */
-  fail(key: string, error?: any): void {
+  fail(key: string, error?: Any): void {
     const entry = this.entries.get(key);
     if (entry) {
       entry.status = "failed";

@@ -73,7 +73,7 @@ export function BoxSettings() {
       const result = await window.electronAPI.testBoxConnection();
       setTestResult(result);
       await refreshStatus();
-    } catch (error: any) {
+    } catch (error: Any) {
       setTestResult({ success: false, error: error.message || "Failed to test connection" });
     } finally {
       setTesting(false);

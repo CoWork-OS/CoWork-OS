@@ -5,7 +5,7 @@
 import { describe, it, expect } from "vitest";
 
 // Test the isTransientProviderError logic directly
-function isTransientProviderError(error: any): boolean {
+function isTransientProviderError(error: Any): boolean {
   if (!error) return false;
   const message = String(error.message || "").toLowerCase();
   const code = error.cause?.code || error.code;

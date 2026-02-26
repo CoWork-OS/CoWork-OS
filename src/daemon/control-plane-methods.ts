@@ -35,7 +35,7 @@ export interface ControlPlaneMethodDeps {
   channelGateway?: ChannelGateway;
 }
 
-function requireScope(client: any, scope: "admin" | "read" | "write" | "operator"): void {
+function requireScope(client: Any, scope: "admin" | "read" | "write" | "operator"): void {
   if (!client?.hasScope?.(scope)) {
     throw { code: ErrorCodes.UNAUTHORIZED, message: `Missing required scope: ${scope}` };
   }
@@ -50,7 +50,7 @@ function sanitizeTaskCreateParams(params: unknown): {
   budgetTokens?: number;
   budgetCost?: number;
 } {
-  const p = (params ?? {}) as any;
+  const p = (params ?? {}) as Any;
   const title = typeof p.title === "string" ? p.title.trim() : "";
   const prompt = typeof p.prompt === "string" ? p.prompt.trim() : "";
   const workspaceId = typeof p.workspaceId === "string" ? p.workspaceId.trim() : "";
@@ -87,14 +87,14 @@ function sanitizeTaskCreateParams(params: unknown): {
 }
 
 function sanitizeTaskIdParams(params: unknown): { taskId: string } {
-  const p = (params ?? {}) as any;
+  const p = (params ?? {}) as Any;
   const taskId = typeof p.taskId === "string" ? p.taskId.trim() : "";
   if (!taskId) throw { code: ErrorCodes.INVALID_PARAMS, message: "taskId is required" };
   return { taskId };
 }
 
 function sanitizeTaskMessageParams(params: unknown): { taskId: string; message: string } {
-  const p = (params ?? {}) as any;
+  const p = (params ?? {}) as Any;
   const taskId = typeof p.taskId === "string" ? p.taskId.trim() : "";
   const message = typeof p.message === "string" ? p.message.trim() : "";
   if (!taskId) throw { code: ErrorCodes.INVALID_PARAMS, message: "taskId is required" };
@@ -103,7 +103,7 @@ function sanitizeTaskMessageParams(params: unknown): { taskId: string; message: 
 }
 
 function sanitizeApprovalRespondParams(params: unknown): { approvalId: string; approved: boolean } {
-  const p = (params ?? {}) as any;
+  const p = (params ?? {}) as Any;
   const approvalId = typeof p.approvalId === "string" ? p.approvalId.trim() : "";
   const approved = p.approved;
   if (!approvalId) throw { code: ErrorCodes.INVALID_PARAMS, message: "approvalId is required" };
@@ -117,7 +117,7 @@ function sanitizeTaskListParams(params: unknown): {
   offset: number;
   workspaceId?: string;
 } {
-  const p = (params ?? {}) as any;
+  const p = (params ?? {}) as Any;
   const rawLimit =
     typeof p.limit === "number" && Number.isFinite(p.limit) ? Math.floor(p.limit) : 100;
   const rawOffset =
@@ -133,7 +133,7 @@ function sanitizeApprovalListParams(params: unknown): {
   offset: number;
   taskId?: string;
 } {
-  const p = (params ?? {}) as any;
+  const p = (params ?? {}) as Any;
   const rawLimit =
     typeof p.limit === "number" && Number.isFinite(p.limit) ? Math.floor(p.limit) : 100;
   const rawOffset =
@@ -145,7 +145,7 @@ function sanitizeApprovalListParams(params: unknown): {
 }
 
 function sanitizeTaskEventsParams(params: unknown): { taskId: string; limit: number } {
-  const p = (params ?? {}) as any;
+  const p = (params ?? {}) as Any;
   const { taskId } = sanitizeTaskIdParams(params);
   const rawLimit =
     typeof p.limit === "number" && Number.isFinite(p.limit) ? Math.floor(p.limit) : 200;
@@ -154,14 +154,14 @@ function sanitizeTaskEventsParams(params: unknown): { taskId: string; limit: num
 }
 
 function sanitizeWorkspaceIdParams(params: unknown): { workspaceId: string } {
-  const p = (params ?? {}) as any;
+  const p = (params ?? {}) as Any;
   const workspaceId = typeof p.workspaceId === "string" ? p.workspaceId.trim() : "";
   if (!workspaceId) throw { code: ErrorCodes.INVALID_PARAMS, message: "workspaceId is required" };
   return { workspaceId };
 }
 
 function sanitizeWorkspaceCreateParams(params: unknown): { name: string; path: string } {
-  const p = (params ?? {}) as any;
+  const p = (params ?? {}) as Any;
   const name = typeof p.name === "string" ? p.name.trim() : "";
   const rawPath = typeof p.path === "string" ? p.path.trim() : "";
   if (!name) throw { code: ErrorCodes.INVALID_PARAMS, message: "name is required" };
@@ -181,7 +181,7 @@ function sanitizeWorkspaceCreateParams(params: unknown): { name: string; path: s
 }
 
 function sanitizeChannelIdParams(params: unknown): { channelId: string } {
-  const p = (params ?? {}) as any;
+  const p = (params ?? {}) as Any;
   const channelId = typeof p.channelId === "string" ? p.channelId.trim() : "";
   if (!channelId) throw { code: ErrorCodes.INVALID_PARAMS, message: "channelId is required" };
   return { channelId };
@@ -194,7 +194,7 @@ function sanitizeChannelCreateParams(params: unknown): {
   config: Record<string, unknown>;
   securityConfig: Record<string, unknown>;
 } {
-  const p = (params ?? {}) as any;
+  const p = (params ?? {}) as Any;
   const type = typeof p.type === "string" ? p.type.trim() : "";
   const name = typeof p.name === "string" ? p.name.trim() : "";
   const enabled = typeof p.enabled === "boolean" ? p.enabled : false;
@@ -241,11 +241,11 @@ function sanitizeChannelUpdateParams(params: unknown): {
     securityConfig?: Record<string, unknown>;
   };
 } {
-  const p = (params ?? {}) as any;
+  const p = (params ?? {}) as Any;
   const channelId = typeof p.channelId === "string" ? p.channelId.trim() : "";
   if (!channelId) throw { code: ErrorCodes.INVALID_PARAMS, message: "channelId is required" };
 
-  const updates: any = {};
+  const updates: Any = {};
   if (p.name !== undefined) {
     if (typeof p.name !== "string" || !p.name.trim())
       throw { code: ErrorCodes.INVALID_PARAMS, message: "name must be a non-empty string" };
@@ -362,7 +362,7 @@ function getCoworkVersionFromNearestPackageJson(): string | undefined {
     const candidate = path.join(dir, "package.json");
     try {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const pkg = require(candidate) as any;
+      const pkg = require(candidate) as Any;
       const version = typeof pkg?.version === "string" ? pkg.version.trim() : "";
       if (version) return version;
     } catch {
@@ -414,7 +414,7 @@ export function attachAgentDaemonTaskBridge(
   const unsubscribes: Array<() => void> = [];
 
   for (const eventType of allowlist) {
-    const handler = (evt: any) => {
+    const handler = (evt: Any) => {
       try {
         const taskId = typeof evt?.taskId === "string" ? evt.taskId : "";
         if (!taskId) return;
@@ -424,7 +424,7 @@ export function attachAgentDaemonTaskBridge(
 
         // Avoid leaking full prompts in broadcast; clients can call task.get if needed.
         if (eventType === "task_created" && payload?.task && typeof payload.task === "object") {
-          const t = payload.task as any;
+          const t = payload.task as Any;
           payload.task = {
             id: t.id,
             title: t.title,
@@ -491,16 +491,16 @@ export function registerControlPlaneMethods(
   const channelRepo = new ChannelRepository(db);
   const agentDaemon = deps.agentDaemon;
   const channelGateway = deps.channelGateway;
-  const isAdminClient = (client: any) => !!client?.hasScope?.("admin");
+  const isAdminClient = (client: Any) => !!client?.hasScope?.("admin");
 
-  const redactWorkspaceForRead = (workspace: any) => ({
+  const redactWorkspaceForRead = (workspace: Any) => ({
     id: workspace.id,
     name: workspace.name,
     createdAt: workspace.createdAt,
     lastUsedAt: workspace.lastUsedAt,
   });
 
-  const redactTaskForRead = (task: any) => ({
+  const redactTaskForRead = (task: Any) => ({
     id: task.id,
     title: task.title,
     status: task.status,
@@ -518,7 +518,7 @@ export function registerControlPlaneMethods(
     dueDate: task.dueDate,
   });
 
-  const redactChannelForRead = (channel: any) => ({
+  const redactChannelForRead = (channel: Any) => ({
     id: channel.id,
     type: channel.type,
     name: channel.name,
@@ -563,7 +563,7 @@ export function registerControlPlaneMethods(
 
     try {
       await fs.mkdir(validated.path, { recursive: true });
-    } catch (error: any) {
+    } catch (error: Any) {
       throw {
         code: ErrorCodes.METHOD_FAILED,
         message: error?.message || `Failed to create workspace directory: ${validated.path}`,
@@ -581,7 +581,7 @@ export function registerControlPlaneMethods(
     const workspace = workspaceRepo.create(
       validated.name,
       validated.path,
-      defaultPermissions as any,
+      defaultPermissions as Any,
     );
     return { workspace };
   });
@@ -609,7 +609,7 @@ export function registerControlPlaneMethods(
       budgetCost: validated.budgetCost,
     });
 
-    const initialUpdates: any = {};
+    const initialUpdates: Any = {};
     if (validated.assignedAgentRoleId) {
       initialUpdates.assignedAgentRoleId = validated.assignedAgentRoleId;
       initialUpdates.boardColumn = "todo";
@@ -629,7 +629,7 @@ export function registerControlPlaneMethods(
 
     try {
       await agentDaemon.startTask(task);
-    } catch (error: any) {
+    } catch (error: Any) {
       taskRepo.update(task.id, {
         status: "failed",
         error: error?.message || "Failed to start task",
@@ -718,7 +718,7 @@ export function registerControlPlaneMethods(
             ORDER BY requested_at ASC
             LIMIT ? OFFSET ?
           `);
-          const rows = stmt.all(limit, offset) as any[];
+          const rows = stmt.all(limit, offset) as Any[];
           return rows.map((row) => ({
             id: String(row.id ?? ""),
             taskId: String(row.task_id ?? ""),
@@ -737,7 +737,7 @@ export function registerControlPlaneMethods(
           }));
         })();
 
-    const enriched = approvals.map((a: any) => {
+    const enriched = approvals.map((a: Any) => {
       const t = a.taskId ? taskRepo.findById(a.taskId) : undefined;
       return {
         ...a,
@@ -759,7 +759,7 @@ export function registerControlPlaneMethods(
   // Channels (gateway)
   server.registerMethod(Methods.CHANNEL_LIST, async (client) => {
     requireScope(client, "read");
-    const rows = db.prepare("SELECT * FROM channels ORDER BY created_at ASC").all() as any[];
+    const rows = db.prepare("SELECT * FROM channels ORDER BY created_at ASC").all() as Any[];
     const channels = rows.map((row) => ({
       id: String(row.id ?? ""),
       type: String(row.type ?? ""),
@@ -808,7 +808,7 @@ export function registerControlPlaneMethods(
   server.registerMethod(Methods.CHANNEL_GET, async (client, params) => {
     requireScope(client, "read");
     const { channelId } = sanitizeChannelIdParams(params);
-    const row = db.prepare("SELECT * FROM channels WHERE id = ?").get(channelId) as any;
+    const row = db.prepare("SELECT * FROM channels WHERE id = ?").get(channelId) as Any;
     if (!row) {
       throw { code: ErrorCodes.INVALID_PARAMS, message: `Channel not found: ${channelId}` };
     }
@@ -862,7 +862,7 @@ export function registerControlPlaneMethods(
     // Enforce one channel per type (router registers by type).
     const existing = db
       .prepare("SELECT id FROM channels WHERE type = ? LIMIT 1")
-      .get(validated.type) as any;
+      .get(validated.type) as Any;
     if (existing?.id) {
       throw {
         code: ErrorCodes.INVALID_PARAMS,
@@ -892,7 +892,7 @@ export function registerControlPlaneMethods(
     if (validated.enabled && channelGateway) {
       try {
         await channelGateway.enableChannel(id);
-      } catch (error: any) {
+      } catch (error: Any) {
         // Keep the channel record but surface the connection error.
         db.prepare("UPDATE channels SET enabled = 0, status = ?, updated_at = ? WHERE id = ?").run(
           "disconnected",
@@ -914,13 +914,13 @@ export function registerControlPlaneMethods(
     const { channelId, updates } = sanitizeChannelUpdateParams(params);
 
     if (channelGateway) {
-      channelGateway.updateChannel(channelId, updates as any);
+      channelGateway.updateChannel(channelId, updates as Any);
       return { ok: true };
     }
 
     // Fallback: update DB only (restart required to take effect).
     const fields: string[] = [];
-    const values: any[] = [];
+    const values: Any[] = [];
     if (updates.name !== undefined) {
       fields.push("name = ?");
       values.push(updates.name);
@@ -1079,7 +1079,7 @@ export function registerControlPlaneMethods(
       .prepare(
         `SELECT id, type, name, enabled, status, bot_username, security_config, created_at, updated_at FROM channels ORDER BY created_at ASC`,
       )
-      .all() as any[];
+      .all() as Any[];
     const channels = channelRows.map((row) => ({
       id: String(row.id ?? ""),
       type: String(row.type ?? ""),

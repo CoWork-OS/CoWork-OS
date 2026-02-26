@@ -1,4 +1,4 @@
-import { ipcMain, shell, BrowserWindow, app } from "electron";
+import { ipcMain, shell, BrowserWindow, app as _app } from "electron";
 import * as path from "path";
 import * as fs from "fs/promises";
 import * as fsSync from "fs";
@@ -42,15 +42,15 @@ import {
   IPC_CHANNELS,
   LLMSettingsData,
   AddChannelRequest,
-  UpdateChannelRequest,
-  SecurityMode,
+  UpdateChannelRequest as _UpdateChannelRequest,
+  SecurityMode as _SecurityMode,
   UpdateInfo,
   TEMP_WORKSPACE_NAME,
   TEMP_WORKSPACE_ROOT_DIR_NAME,
   Workspace,
-  AgentRole,
+  AgentRole as _AgentRole,
   Task,
-  BoardColumn,
+  BoardColumn as _BoardColumn,
   XSettingsData,
   NotionSettingsData,
   BoxSettingsData,
@@ -136,7 +136,7 @@ import { CustomSkill } from "../../shared/types";
 import { MCPSettingsManager } from "../mcp/settings";
 import { MCPClientManager } from "../mcp/client/MCPClientManager";
 import { MCPRegistryManager } from "../mcp/registry/MCPRegistryManager";
-import { getChannelRegistry } from "../gateway/channel-registry";
+import { getChannelRegistry as _getChannelRegistry } from "../gateway/channel-registry";
 import type { MCPSettings, MCPServerConfig } from "../mcp/types";
 import { MCPHostServer } from "../mcp/host/MCPHostServer";
 import { BuiltinToolsSettingsManager } from "../agent/tools/builtin-settings";
@@ -305,7 +305,7 @@ export function getNotificationService(): NotificationService | null {
 // Helper to check rate limit and throw if exceeded
 function checkRateLimit(
   channel: string,
-  config: { maxRequests: number; windowMs: number } = RATE_LIMIT_CONFIGS.standard,
+  _config: { maxRequests: number; windowMs: number } = RATE_LIMIT_CONFIGS.standard,
 ): void {
   if (!rateLimiter.check(channel)) {
     const resetMs = rateLimiter.getResetTime(channel);
@@ -523,14 +523,14 @@ export async function setupIpcHandlers(
       taskId,
       type: "task_status",
       timestamp: Date.now(),
-      payload: { status, ...(extraPayload || {}) },
+      payload: { status, ...extraPayload },
     });
   };
 
   const teamOrchestrator = new AgentTeamOrchestrator({
     getDatabase: () => db,
     getTaskById: (taskId: string) => agentDaemon.getTaskById(taskId),
-    createChildTask: (params) => agentDaemon.createChildTask(params as any),
+    createChildTask: (params) => agentDaemon.createChildTask(params as Any),
     cancelTask: (taskId: string) => agentDaemon.cancelTask(taskId),
     wrapUpTask: (taskId: string) => agentDaemon.wrapUpTask(taskId),
     completeRootTask: (taskId, status, summary) => {
@@ -609,7 +609,7 @@ export async function setupIpcHandlers(
   const tempWorkspaceRoot = path.join(os.tmpdir(), TEMP_WORKSPACE_ROOT_DIR_NAME);
 
   const normalizeTempPermissions = (existing?: Workspace): Workspace["permissions"] => ({
-    ...(existing?.permissions ?? {}),
+    ...existing?.permissions,
     read: true,
     write: true,
     delete: true,
@@ -755,7 +755,7 @@ export async function setupIpcHandlers(
         throw new Error("Only http and https URLs are allowed");
       }
       await shell.openExternal(url);
-    } catch (error: any) {
+    } catch (error: Any) {
       throw new Error(`Failed to open URL: ${error.message}`);
     }
   });
@@ -773,7 +773,7 @@ export async function setupIpcHandlers(
     try {
       await openMacSystemSettings(target);
       return { success: true };
-    } catch (error: any) {
+    } catch (error: Any) {
       return { success: false, error: error?.message || "Failed to open System Settings." };
     }
   });
@@ -993,10 +993,10 @@ export async function setupIpcHandlers(
                     cells.push("");
                   } else if (typeof val === "object" && "result" in val) {
                     // Formula cell — use computed result
-                    cells.push(String((val as any).result ?? ""));
+                    cells.push(String((val as Any).result ?? ""));
                   } else if (typeof val === "object" && "richText" in val) {
                     // Rich text — concatenate text fragments
-                    cells.push((val as any).richText?.map((rt: any) => rt.text).join("") ?? "");
+                    cells.push((val as Any).richText?.map((rt: Any) => rt.text).join("") ?? "");
                   } else if (val instanceof Date) {
                     cells.push(val.toISOString());
                   } else {
@@ -1027,7 +1027,7 @@ export async function setupIpcHandlers(
             ocrText,
           },
         };
-      } catch (error: any) {
+      } catch (error: Any) {
         return { success: false, error: `Failed to read file: ${error.message}` };
       }
     },
@@ -1421,12 +1421,12 @@ export async function setupIpcHandlers(
 
           // Kick off the orchestrator (spawns child tasks for each item)
           void teamOrchestrator.tickRun(run.id, "auto_collaborative");
-        } catch (error: any) {
+        } catch (error: Any) {
           console.error("[TASK_CREATE] Auto-collaborative setup failed:", error);
           // Fall back to normal execution
           try {
             await agentDaemon.startTask(task, validatedImages);
-          } catch (startError: any) {
+          } catch (startError: Any) {
             taskRepo.update(task.id, {
               status: "failed",
               error: startError.message || "Failed to start task",
@@ -1491,11 +1491,11 @@ export async function setupIpcHandlers(
 
           // Kick off orchestrator
           void teamOrchestrator.tickRun(run.id, "multi_llm_start");
-        } catch (error: any) {
+        } catch (error: Any) {
           console.error("[TASK_CREATE] Multi-LLM setup failed:", error);
           try {
             await agentDaemon.startTask(task, validatedImages);
-          } catch (startError: any) {
+          } catch (startError: Any) {
             taskRepo.update(task.id, {
               status: "failed",
               error: startError.message || "Failed to start task",
@@ -1511,7 +1511,7 @@ export async function setupIpcHandlers(
     // Start task execution in agent daemon
     try {
       await agentDaemon.startTask(task, validatedImages);
-    } catch (error: any) {
+    } catch (error: Any) {
       // Update task status to failed if we can't start it
       taskRepo.update(task.id, {
         status: "failed",
@@ -1785,7 +1785,7 @@ export async function setupIpcHandlers(
     return artifactRepo.findByTaskId(taskId);
   });
 
-  ipcMain.handle(IPC_CHANNELS.ARTIFACT_PREVIEW, async (_, id: string) => {
+  ipcMain.handle(IPC_CHANNELS.ARTIFACT_PREVIEW, async (_, _id: string) => {
     // TODO: Implement artifact preview
     return null;
   });
@@ -1964,8 +1964,8 @@ export async function setupIpcHandlers(
         mergedDeployments.unshift(deployment);
       }
       return {
-        ...(existing || {}),
-        ...(incoming || {}),
+        ...existing,
+        ...incoming,
         deployment: deployment || undefined,
         deployments:
           mergedDeployments.length > 0 ? Array.from(new Set(mergedDeployments)) : undefined,
@@ -2003,7 +2003,7 @@ export async function setupIpcHandlers(
     return { success: true };
   });
 
-  ipcMain.handle(IPC_CHANNELS.LLM_TEST_PROVIDER, async (_, config: any) => {
+  ipcMain.handle(IPC_CHANNELS.LLM_TEST_PROVIDER, async (_, config: Any) => {
     checkRateLimit(IPC_CHANNELS.LLM_TEST_PROVIDER);
     // For OpenAI OAuth, get tokens from stored settings if authMethod is 'oauth'
     let openaiAccessToken: string | undefined;
@@ -2083,7 +2083,7 @@ export async function setupIpcHandlers(
   // Get models available for a specific provider type (for multi-LLM selection)
   ipcMain.handle(IPC_CHANNELS.LLM_GET_PROVIDER_MODELS, async (_, providerType: string) => {
     const settings = LLMProviderFactory.loadSettings();
-    const modifiedSettings = { ...settings, providerType: providerType as any };
+    const modifiedSettings = { ...settings, providerType: providerType as Any };
     const modelStatus = LLMProviderFactory.getProviderModelStatus(modifiedSettings);
     return modelStatus.models;
   });
@@ -2247,7 +2247,7 @@ export async function setupIpcHandlers(
       }
 
       return { success: true, email: tokens.email };
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("[IPC] OpenAI OAuth failed:", error.message);
       return { success: false, error: error.message };
     }
@@ -2936,7 +2936,7 @@ export async function setupIpcHandlers(
         const ch = gateway.getChannel(data.channelDbId);
         if (ch) resolvedType = ch.type;
       }
-      await gateway.sendMessage(resolvedType as any, data.chatId, "Test delivery from CoWork OS", {
+      await gateway.sendMessage(resolvedType as Any, data.chatId, "Test delivery from CoWork OS", {
         parseMode: "text",
       });
       return { ok: true };
@@ -3179,12 +3179,12 @@ export async function setupIpcHandlers(
   });
 
   // Activity Feed handlers
-  ipcMain.handle(IPC_CHANNELS.ACTIVITY_LIST, async (_, query: any) => {
+  ipcMain.handle(IPC_CHANNELS.ACTIVITY_LIST, async (_, query: Any) => {
     const validated = validateInput(WorkspaceIdSchema, query.workspaceId, "workspace ID");
     return activityRepo.list({ ...query, workspaceId: validated });
   });
 
-  ipcMain.handle(IPC_CHANNELS.ACTIVITY_CREATE, async (_, request: any) => {
+  ipcMain.handle(IPC_CHANNELS.ACTIVITY_CREATE, async (_, request: Any) => {
     checkRateLimit(IPC_CHANNELS.ACTIVITY_CREATE);
     const validatedWorkspaceId = validateInput(WorkspaceIdSchema, request.workspaceId, "workspace ID");
     const activity = activityRepo.create({ ...request, workspaceId: validatedWorkspaceId });
@@ -3241,11 +3241,11 @@ export async function setupIpcHandlers(
   });
 
   // @Mention handlers
-  ipcMain.handle(IPC_CHANNELS.MENTION_LIST, async (_, query: any) => {
+  ipcMain.handle(IPC_CHANNELS.MENTION_LIST, async (_, query: Any) => {
     return mentionRepo.list(query);
   });
 
-  ipcMain.handle(IPC_CHANNELS.MENTION_CREATE, async (_, request: any) => {
+  ipcMain.handle(IPC_CHANNELS.MENTION_CREATE, async (_, request: Any) => {
     checkRateLimit(IPC_CHANNELS.MENTION_CREATE);
     const validatedWorkspaceId = validateInput(UUIDSchema, request.workspaceId, "workspace ID");
     const mention = mentionRepo.create({ ...request, workspaceId: validatedWorkspaceId });
@@ -3303,7 +3303,7 @@ export async function setupIpcHandlers(
   });
 
   // Agent Teams (Mission Control)
-  const emitTeamEvent = (event: any) => {
+  const emitTeamEvent = (event: Any) => {
     getMainWindow()?.webContents.send(IPC_CHANNELS.TEAM_RUN_EVENT, event);
   };
 
@@ -3320,7 +3320,7 @@ export async function setupIpcHandlers(
     return teamRepo.findById(validated);
   });
 
-  ipcMain.handle(IPC_CHANNELS.TEAM_CREATE, async (_, request: any) => {
+  ipcMain.handle(IPC_CHANNELS.TEAM_CREATE, async (_, request: Any) => {
     checkRateLimit(IPC_CHANNELS.TEAM_CREATE);
     const workspaceId = validateInput(UUIDSchema, request.workspaceId, "workspace ID");
     const leadAgentRoleId = validateInput(
@@ -3352,10 +3352,10 @@ export async function setupIpcHandlers(
     return created;
   });
 
-  ipcMain.handle(IPC_CHANNELS.TEAM_UPDATE, async (_, request: any) => {
+  ipcMain.handle(IPC_CHANNELS.TEAM_UPDATE, async (_, request: Any) => {
     checkRateLimit(IPC_CHANNELS.TEAM_UPDATE);
     const id = validateInput(UUIDSchema, request.id, "team ID");
-    const updates: any = { id };
+    const updates: Any = { id };
     if (request.name !== undefined) {
       const name = typeof request.name === "string" ? request.name.trim() : "";
       if (!name) throw new Error("Team name cannot be empty");
@@ -3403,7 +3403,7 @@ export async function setupIpcHandlers(
     return teamMemberRepo.listByTeam(validated);
   });
 
-  ipcMain.handle(IPC_CHANNELS.TEAM_MEMBER_ADD, async (_, request: any) => {
+  ipcMain.handle(IPC_CHANNELS.TEAM_MEMBER_ADD, async (_, request: Any) => {
     checkRateLimit(IPC_CHANNELS.TEAM_MEMBER_ADD);
     const teamId = validateInput(UUIDSchema, request.teamId, "team ID");
     const agentRoleId = validateInput(UUIDSchema, request.agentRoleId, "agent role ID");
@@ -3419,7 +3419,7 @@ export async function setupIpcHandlers(
     return member;
   });
 
-  ipcMain.handle(IPC_CHANNELS.TEAM_MEMBER_UPDATE, async (_, request: any) => {
+  ipcMain.handle(IPC_CHANNELS.TEAM_MEMBER_UPDATE, async (_, request: Any) => {
     checkRateLimit(IPC_CHANNELS.TEAM_MEMBER_UPDATE);
     const id = validateInput(UUIDSchema, request.id, "team member ID");
     const updated = teamMemberRepo.update({
@@ -3473,7 +3473,7 @@ export async function setupIpcHandlers(
     },
   );
 
-  ipcMain.handle(IPC_CHANNELS.TEAM_RUN_LIST, async (_, query: any) => {
+  ipcMain.handle(IPC_CHANNELS.TEAM_RUN_LIST, async (_, query: Any) => {
     const teamId = validateInput(UUIDSchema, query.teamId, "team ID");
     const limit = typeof query.limit === "number" ? query.limit : undefined;
     return teamRunRepo.listByTeam(teamId, limit);
@@ -3484,7 +3484,7 @@ export async function setupIpcHandlers(
     return teamRunRepo.findById(validated);
   });
 
-  ipcMain.handle(IPC_CHANNELS.TEAM_RUN_CREATE, async (_, request: any) => {
+  ipcMain.handle(IPC_CHANNELS.TEAM_RUN_CREATE, async (_, request: Any) => {
     checkRateLimit(IPC_CHANNELS.TEAM_RUN_CREATE);
     const teamId = validateInput(UUIDSchema, request.teamId, "team ID");
     const rootTaskId = validateInput(UUIDSchema, request.rootTaskId, "root task ID");
@@ -3544,7 +3544,7 @@ export async function setupIpcHandlers(
     return teamItemRepo.listByRun(validated);
   });
 
-  ipcMain.handle(IPC_CHANNELS.TEAM_ITEM_CREATE, async (_, request: any) => {
+  ipcMain.handle(IPC_CHANNELS.TEAM_ITEM_CREATE, async (_, request: Any) => {
     checkRateLimit(IPC_CHANNELS.TEAM_ITEM_CREATE);
     const teamRunId = validateInput(UUIDSchema, request.teamRunId, "team run ID");
     const title = typeof request.title === "string" ? request.title.trim() : "";
@@ -3571,7 +3571,7 @@ export async function setupIpcHandlers(
     return created;
   });
 
-  ipcMain.handle(IPC_CHANNELS.TEAM_ITEM_UPDATE, async (_, request: any) => {
+  ipcMain.handle(IPC_CHANNELS.TEAM_ITEM_UPDATE, async (_, request: Any) => {
     checkRateLimit(IPC_CHANNELS.TEAM_ITEM_UPDATE);
     const id = validateInput(UUIDSchema, request.id, "team item ID");
     const updated = teamItemRepo.update({
@@ -3620,7 +3620,7 @@ export async function setupIpcHandlers(
     return { success };
   });
 
-  ipcMain.handle(IPC_CHANNELS.TEAM_ITEM_MOVE, async (_, request: any) => {
+  ipcMain.handle(IPC_CHANNELS.TEAM_ITEM_MOVE, async (_, request: Any) => {
     checkRateLimit(IPC_CHANNELS.TEAM_ITEM_MOVE);
     const id = validateInput(UUIDSchema, request.id, "team item ID");
     const updated = teamItemRepo.update({
@@ -3650,7 +3650,7 @@ export async function setupIpcHandlers(
   });
 
   // Agent Performance Reviews (Mission Control)
-  ipcMain.handle(IPC_CHANNELS.REVIEW_GENERATE, async (_, request: any) => {
+  ipcMain.handle(IPC_CHANNELS.REVIEW_GENERATE, async (_, request: Any) => {
     checkRateLimit(IPC_CHANNELS.REVIEW_GENERATE);
     const workspaceId = validateInput(UUIDSchema, request.workspaceId, "workspace ID");
     const agentRoleId = validateInput(UUIDSchema, request.agentRoleId, "agent role ID");
@@ -3670,7 +3670,7 @@ export async function setupIpcHandlers(
     },
   );
 
-  ipcMain.handle(IPC_CHANNELS.REVIEW_LIST, async (_, query: any) => {
+  ipcMain.handle(IPC_CHANNELS.REVIEW_LIST, async (_, query: Any) => {
     const validatedWorkspaceId = validateInput(UUIDSchema, query.workspaceId, "workspace ID");
     const agentRoleId = query.agentRoleId
       ? validateInput(UUIDSchema, query.agentRoleId, "agent role ID")
@@ -3860,13 +3860,13 @@ export async function setupIpcHandlers(
     return taskLabelRepo.list({ workspaceId: validated });
   });
 
-  ipcMain.handle(IPC_CHANNELS.TASK_LABEL_CREATE, async (_, request: any) => {
+  ipcMain.handle(IPC_CHANNELS.TASK_LABEL_CREATE, async (_, request: Any) => {
     checkRateLimit(IPC_CHANNELS.TASK_LABEL_CREATE);
     const validatedWorkspaceId = validateInput(UUIDSchema, request.workspaceId, "workspace ID");
     return taskLabelRepo.create({ ...request, workspaceId: validatedWorkspaceId });
   });
 
-  ipcMain.handle(IPC_CHANNELS.TASK_LABEL_UPDATE, async (_, id: string, request: any) => {
+  ipcMain.handle(IPC_CHANNELS.TASK_LABEL_UPDATE, async (_, id: string, request: Any) => {
     checkRateLimit(IPC_CHANNELS.TASK_LABEL_UPDATE);
     const validated = validateInput(UUIDSchema, id, "label ID");
     return taskLabelRepo.update(validated, request);
@@ -3884,7 +3884,7 @@ export async function setupIpcHandlers(
     return workingStateRepo.findById(validated);
   });
 
-  ipcMain.handle(IPC_CHANNELS.WORKING_STATE_GET_CURRENT, async (_, query: any) => {
+  ipcMain.handle(IPC_CHANNELS.WORKING_STATE_GET_CURRENT, async (_, query: Any) => {
     const validatedAgentRoleId = validateInput(UUIDSchema, query.agentRoleId, "agent role ID");
     const validatedWorkspaceId = validateInput(UUIDSchema, query.workspaceId, "workspace ID");
     return workingStateRepo.getCurrent({
@@ -3895,7 +3895,7 @@ export async function setupIpcHandlers(
     });
   });
 
-  ipcMain.handle(IPC_CHANNELS.WORKING_STATE_UPDATE, async (_, request: any) => {
+  ipcMain.handle(IPC_CHANNELS.WORKING_STATE_UPDATE, async (_, request: Any) => {
     checkRateLimit(IPC_CHANNELS.WORKING_STATE_UPDATE);
     const validatedAgentRoleId = validateInput(UUIDSchema, request.agentRoleId, "agent role ID");
     const validatedWorkspaceId = validateInput(UUIDSchema, request.workspaceId, "workspace ID");
@@ -3909,7 +3909,7 @@ export async function setupIpcHandlers(
     });
   });
 
-  ipcMain.handle(IPC_CHANNELS.WORKING_STATE_HISTORY, async (_, query: any) => {
+  ipcMain.handle(IPC_CHANNELS.WORKING_STATE_HISTORY, async (_, query: Any) => {
     const validatedAgentRoleId = validateInput(UUIDSchema, query.agentRoleId, "agent role ID");
     const validatedWorkspaceId = validateInput(UUIDSchema, query.workspaceId, "workspace ID");
     return workingStateRepo.getHistory({
@@ -4217,7 +4217,7 @@ function setupMCPHandlers(): void {
         getTools() {
           return mcpClientManager.getAllTools();
         },
-        async executeTool(name: string, args: Record<string, any>) {
+        async executeTool(name: string, args: Record<string, Any>) {
           return mcpClientManager.callTool(name, args);
         },
       });
@@ -4343,15 +4343,18 @@ function setupInfraHandlers(): void {
  * Set up Scraping (Scrapling integration) IPC handlers
  */
 function setupScrapingHandlers(): void {
+// oxlint-disable-next-line typescript-eslint(no-require-imports)
   const { ScrapingSettingsManager } = require("../scraping/scraping-settings");
+// oxlint-disable-next-line typescript-eslint(no-require-imports)
   const { spawn } = require("child_process");
-  const path = require("path");
+// oxlint-disable-next-line typescript-eslint(no-require-imports)
+  const _path = require("path");
 
   ipcMain.handle(IPC_CHANNELS.SCRAPING_GET_SETTINGS, async () => {
     return ScrapingSettingsManager.loadSettings();
   });
 
-  ipcMain.handle(IPC_CHANNELS.SCRAPING_SAVE_SETTINGS, async (_: any, settings: any) => {
+  ipcMain.handle(IPC_CHANNELS.SCRAPING_SAVE_SETTINGS, async (_: Any, settings: Any) => {
     ScrapingSettingsManager.saveSettings(settings);
     return { success: true };
   });
@@ -4429,6 +4432,7 @@ function setupScrapingHandlers(): void {
  * Set up Cron (Scheduled Tasks) IPC handlers
  */
 function setupCronHandlers(): void {
+// oxlint-disable-next-line typescript-eslint(no-require-imports)
   const { getCronService } = require("../cron");
 
   // Get service status
@@ -4528,6 +4532,7 @@ function setupNotificationHandlers(): void {
     onEvent: (event) => {
       // Forward notification events to renderer
       // We need to import BrowserWindow from electron to send to all windows
+// oxlint-disable-next-line typescript-eslint(no-require-imports)
       const { BrowserWindow } = require("electron");
       const windows = BrowserWindow.getAllWindows();
       for (const win of windows) {
@@ -4749,7 +4754,7 @@ async function setupHooksHandlers(agentDaemon: AgentDaemon): Promise<void> {
         // We only validate that the task exists; execution happens asynchronously.
         const task = agentDaemon.getTask(action.taskId);
         if (!task) {
-          const err: any = new Error(`Task ${action.taskId} not found`);
+          const err: Any = new Error(`Task ${action.taskId} not found`);
           err.statusCode = 404;
           throw err;
         }
@@ -5073,7 +5078,7 @@ async function setupHooksHandlers(agentDaemon: AgentDaemon): Promise<void> {
  * Broadcast personality settings changed event to all renderer windows.
  * This allows the UI to stay in sync when settings are changed via tools.
  */
-function broadcastPersonalitySettingsChanged(settings: any): void {
+function broadcastPersonalitySettingsChanged(settings: Any): void {
   try {
     const windows = BrowserWindow.getAllWindows();
     for (const win of windows) {
@@ -5637,7 +5642,7 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository): void {
         }
 
         // Update kit-managed job prompts/description. Preserve schedule/enabled in "missing" mode.
-        const patch: any = {
+        const patch: Any = {
           name: spec.job.name,
           description: spec.job.description,
           taskPrompt: spec.job.taskPrompt,
@@ -5679,14 +5684,14 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository): void {
   ipcMain.handle(IPC_CHANNELS.KIT_GET_STATUS, async (_event, workspaceId: string) => {
     try {
       return await computeStatus(workspaceId);
-    } catch (error: any) {
+    } catch (error: Any) {
       return {
         workspaceId,
         hasKitDir: false,
         files: [],
         missingCount: 0,
         error: error?.message || "Failed to load kit status",
-      } as any;
+      } as Any;
     }
   });
 
@@ -5818,7 +5823,7 @@ function setupMemoryHandlers(): void {
   });
 
   // Save global memory feature toggles
-  ipcMain.handle(IPC_CHANNELS.MEMORY_FEATURES_SAVE_SETTINGS, async (_event, settings: any) => {
+  ipcMain.handle(IPC_CHANNELS.MEMORY_FEATURES_SAVE_SETTINGS, async (_event, settings: Any) => {
     checkRateLimit(IPC_CHANNELS.MEMORY_FEATURES_SAVE_SETTINGS, RATE_LIMIT_CONFIGS.limited);
     try {
       MemoryFeaturesManager.saveSettings(settings);
@@ -6175,6 +6180,7 @@ function setupMemoryHandlers(): void {
 
   // === Extension / Plugin Handlers ===
   // eslint-disable-next-line @typescript-eslint/no-var-requires
+// oxlint-disable-next-line typescript-eslint(no-require-imports)
   const { getPluginRegistry } = require("../extensions/registry");
 
   // List all extensions
@@ -6182,7 +6188,7 @@ function setupMemoryHandlers(): void {
     try {
       const registry = getPluginRegistry();
       const plugins = registry.getPlugins();
-      return plugins.map((p: any) => ({
+      return plugins.map((p: Any) => ({
         name: p.manifest.name,
         displayName: p.manifest.displayName,
         version: p.manifest.version,
@@ -6234,7 +6240,7 @@ function setupMemoryHandlers(): void {
       const registry = getPluginRegistry();
       await registry.enablePlugin(name);
       return { success: true };
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("[Extensions] Failed to enable:", error);
       return { success: false, error: error.message };
     }
@@ -6246,7 +6252,7 @@ function setupMemoryHandlers(): void {
       const registry = getPluginRegistry();
       await registry.disablePlugin(name);
       return { success: true };
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("[Extensions] Failed to disable:", error);
       return { success: false, error: error.message };
     }
@@ -6258,7 +6264,7 @@ function setupMemoryHandlers(): void {
       const registry = getPluginRegistry();
       await registry.reloadPlugin(name);
       return { success: true };
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("[Extensions] Failed to reload:", error);
       return { success: false, error: error.message };
     }
@@ -6283,7 +6289,7 @@ function setupMemoryHandlers(): void {
         const registry = getPluginRegistry();
         await registry.setPluginConfig(data.name, data.config);
         return { success: true };
-      } catch (error: any) {
+      } catch (error: Any) {
         console.error("[Extensions] Failed to set config:", error);
         return { success: false, error: error.message };
       }
@@ -6297,7 +6303,7 @@ function setupMemoryHandlers(): void {
       await registry.initialize(); // no-op if already initialized at startup
       await registry.discoverNewPlugins(); // scan for newly-added plugins
       const plugins = registry.getPlugins();
-      return plugins.map((p: any) => ({
+      return plugins.map((p: Any) => ({
         name: p.manifest.name,
         displayName: p.manifest.displayName,
         version: p.manifest.version,
@@ -6314,7 +6320,7 @@ function setupMemoryHandlers(): void {
   console.log("[Extensions] Handlers initialized");
 
   // === Webhook Tunnel Handlers ===
-  let tunnelManager: any = null;
+  let tunnelManager: Any = null;
 
   // Get tunnel status
   ipcMain.handle(IPC_CHANNELS.TUNNEL_GET_STATUS, async () => {
@@ -6336,7 +6342,7 @@ function setupMemoryHandlers(): void {
   });
 
   // Start tunnel
-  ipcMain.handle(IPC_CHANNELS.TUNNEL_START, async (_, config: any) => {
+  ipcMain.handle(IPC_CHANNELS.TUNNEL_START, async (_, config: Any) => {
     try {
       const { TunnelManager } = await import("../gateway/tunnel");
       if (tunnelManager) {
@@ -6345,7 +6351,7 @@ function setupMemoryHandlers(): void {
       tunnelManager = new TunnelManager(config);
       const url = await tunnelManager.start();
       return { success: true, url };
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("[Tunnel] Failed to start:", error);
       return { success: false, error: error.message };
     }
@@ -6359,7 +6365,7 @@ function setupMemoryHandlers(): void {
         tunnelManager = null;
       }
       return { success: true };
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("[Tunnel] Failed to stop:", error);
       return { success: false, error: error.message };
     }
@@ -6384,7 +6390,7 @@ function setupMemoryHandlers(): void {
   });
 
   // Save voice settings
-  ipcMain.handle(IPC_CHANNELS.VOICE_SAVE_SETTINGS, async (_, settings: any) => {
+  ipcMain.handle(IPC_CHANNELS.VOICE_SAVE_SETTINGS, async (_, settings: Any) => {
     try {
       const updated = VoiceSettingsManager.updateSettings(settings);
       // Update the voice service with new settings
@@ -6418,7 +6424,7 @@ function setupMemoryHandlers(): void {
         return { success: true, audioData: Array.from(audioBuffer) };
       }
       return { success: true, audioData: null };
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("[Voice] Failed to speak:", error);
       return { success: false, error: error.message, audioData: null };
     }
@@ -6430,7 +6436,7 @@ function setupMemoryHandlers(): void {
       const voiceService = getVoiceService();
       voiceService.stopSpeaking();
       return { success: true };
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("[Voice] Failed to stop speaking:", error);
       return { success: false, error: error.message };
     }
@@ -6444,7 +6450,7 @@ function setupMemoryHandlers(): void {
       const audioBuffer = Buffer.from(audioData);
       const text = await voiceService.transcribe(audioBuffer);
       return { text };
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("[Voice] Failed to transcribe:", error);
       return { text: "", error: error.message };
     }
@@ -6455,7 +6461,7 @@ function setupMemoryHandlers(): void {
     try {
       const voiceService = getVoiceService();
       return await voiceService.getElevenLabsVoices();
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("[Voice] Failed to get ElevenLabs voices:", error);
       return [];
     }
@@ -6466,7 +6472,7 @@ function setupMemoryHandlers(): void {
     try {
       const voiceService = getVoiceService();
       return await voiceService.testElevenLabsConnection();
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("[Voice] Failed to test ElevenLabs:", error);
       return { success: false, error: error.message };
     }
@@ -6477,7 +6483,7 @@ function setupMemoryHandlers(): void {
     try {
       const voiceService = getVoiceService();
       return await voiceService.testOpenAIConnection();
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("[Voice] Failed to test OpenAI voice:", error);
       return { success: false, error: error.message };
     }
@@ -6488,7 +6494,7 @@ function setupMemoryHandlers(): void {
     try {
       const voiceService = getVoiceService();
       return await voiceService.testAzureConnection();
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("[Voice] Failed to test Azure OpenAI voice:", error);
       return { success: false, error: error.message };
     }

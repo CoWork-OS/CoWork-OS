@@ -264,7 +264,7 @@ export class MatrixAdapter implements ChannelAdapter {
   /**
    * Edit a message (Matrix uses redaction + new message)
    */
-  async editMessage(chatId: string, messageId: string, text: string): Promise<void> {
+  async editMessage(_chatId: string, _messageId: string, _text: string): Promise<void> {
     // Matrix doesn't have native edit - we'd need to use m.replace relation
     // For simplicity, we'll throw an error indicating this limitation
     console.warn("Matrix message editing requires m.replace relation - not fully implemented");
@@ -376,7 +376,7 @@ export class MatrixAdapter implements ChannelAdapter {
 
     try {
       await this.client.sendTyping(chatId, true);
-    } catch (error) {
+    } catch  {
       // Ignore typing indicator errors
     }
   }
@@ -391,7 +391,7 @@ export class MatrixAdapter implements ChannelAdapter {
 
     try {
       await this.client.sendTyping(chatId, false);
-    } catch (error) {
+    } catch  {
       // Ignore typing indicator errors
     }
   }
@@ -417,7 +417,7 @@ export class MatrixAdapter implements ChannelAdapter {
 
     try {
       await this.client.sendReadReceipt(roomId, eventId);
-    } catch (error) {
+    } catch  {
       // Ignore read receipt errors
     }
   }

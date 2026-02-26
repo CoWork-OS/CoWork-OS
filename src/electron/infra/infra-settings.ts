@@ -35,13 +35,13 @@ export class InfraSettingsManager {
           this.cachedSettings = {
             ...DEFAULT_INFRA_SETTINGS,
             ...stored,
-            e2b: { ...DEFAULT_INFRA_SETTINGS.e2b, ...(stored.e2b || {}) },
-            domains: { ...DEFAULT_INFRA_SETTINGS.domains, ...(stored.domains || {}) },
-            wallet: { ...DEFAULT_INFRA_SETTINGS.wallet, ...(stored.wallet || {}) },
-            payments: { ...DEFAULT_INFRA_SETTINGS.payments, ...(stored.payments || {}) },
+            e2b: { ...DEFAULT_INFRA_SETTINGS.e2b, ...stored.e2b },
+            domains: { ...DEFAULT_INFRA_SETTINGS.domains, ...stored.domains },
+            wallet: { ...DEFAULT_INFRA_SETTINGS.wallet, ...stored.wallet },
+            payments: { ...DEFAULT_INFRA_SETTINGS.payments, ...stored.payments },
             enabledCategories: {
               ...DEFAULT_INFRA_SETTINGS.enabledCategories,
-              ...(stored.enabledCategories || {}),
+              ...stored.enabledCategories,
             },
           };
           return this.cachedSettings;

@@ -2,7 +2,7 @@
  * Tests for Auto Commenter skill
  */
 
-import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, vi as _vi, afterEach as _afterEach } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import type { CustomSkill } from "../../../shared/types";
@@ -153,7 +153,7 @@ describe("Auto Commenter Skill", () => {
 
   describe("authenticity checklist coverage", () => {
     it("should have all 16 checklist items", () => {
-      const checklistMatches = skillData.prompt.match(/^\d+\./gm);
+      const _checklistMatches = skillData.prompt.match(/^\d+\./gm);
       // Count numbered items in the checklist section
       const checklistSection =
         skillData.prompt.split("16-Point Authenticity Checklist")[1]?.split("## ")[0] || "";

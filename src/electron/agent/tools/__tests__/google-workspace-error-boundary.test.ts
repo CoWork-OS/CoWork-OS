@@ -58,7 +58,7 @@ beforeEach(() => {
 describe("GmailTools error boundary", () => {
   it("maps 401 errors to reconnect guidance", async () => {
     const daemon = buildDaemon();
-    const tools = new GmailTools(workspace, daemon as any, taskId);
+    const tools = new GmailTools(workspace, daemon as Any, taskId);
     const gmailRequestMock = gmailRequest as unknown as ReturnType<typeof vi.fn>;
     gmailRequestMock.mockRejectedValueOnce(
       Object.assign(new Error("Unauthorized"), { status: 401 }),
@@ -82,7 +82,7 @@ describe("GmailTools error boundary", () => {
 
   it("maps token refresh errors to auth guidance", async () => {
     const daemon = buildDaemon();
-    const tools = new GmailTools(workspace, daemon as any, taskId);
+    const tools = new GmailTools(workspace, daemon as Any, taskId);
     const gmailRequestMock = gmailRequest as unknown as ReturnType<typeof vi.fn>;
     gmailRequestMock.mockRejectedValueOnce(
       new Error("Google Workspace token refresh failed: invalid_grant"),
@@ -105,7 +105,7 @@ describe("GmailTools error boundary", () => {
 
   it("logs and rethrows non-auth errors", async () => {
     const daemon = buildDaemon();
-    const tools = new GmailTools(workspace, daemon as any, taskId);
+    const tools = new GmailTools(workspace, daemon as Any, taskId);
     const gmailRequestMock = gmailRequest as unknown as ReturnType<typeof vi.fn>;
     gmailRequestMock.mockRejectedValueOnce(new Error("Gmail API error 500: nope"));
 
@@ -128,7 +128,7 @@ describe("GmailTools error boundary", () => {
 describe("GoogleCalendarTools error boundary", () => {
   it("maps 401 errors to reconnect guidance", async () => {
     const daemon = buildDaemon();
-    const tools = new GoogleCalendarTools(workspace, daemon as any, taskId);
+    const tools = new GoogleCalendarTools(workspace, daemon as Any, taskId);
     const calendarRequestMock = googleCalendarRequest as unknown as ReturnType<typeof vi.fn>;
     calendarRequestMock.mockRejectedValueOnce(
       Object.assign(new Error("Unauthorized"), { status: 401 }),
@@ -152,7 +152,7 @@ describe("GoogleCalendarTools error boundary", () => {
 
   it("logs and rethrows non-auth errors", async () => {
     const daemon = buildDaemon();
-    const tools = new GoogleCalendarTools(workspace, daemon as any, taskId);
+    const tools = new GoogleCalendarTools(workspace, daemon as Any, taskId);
     const calendarRequestMock = googleCalendarRequest as unknown as ReturnType<typeof vi.fn>;
     calendarRequestMock.mockRejectedValueOnce(new Error("Google Calendar API error 500: nope"));
 

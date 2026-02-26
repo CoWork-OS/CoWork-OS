@@ -9,7 +9,6 @@
  */
 
 import * as path from "path";
-import * as fs from "fs";
 import { LLMTool } from "../llm/types";
 import { generatePDF } from "../../utils/document-generators/pdf-generator";
 import { generatePPTX } from "../../utils/document-generators/pptx-generator";
@@ -164,7 +163,7 @@ export class DocumentTools {
 
   // ── Tool execution ──────────────────────────────────────────────
 
-  async generateDocument(input: any): Promise<any> {
+  async generateDocument(input: Any): Promise<Any> {
     const filename = sanitizeFilename(input.filename || "document.pdf");
     const outputPath = path.join(this.workspacePath, filename);
 
@@ -188,7 +187,7 @@ export class DocumentTools {
     };
   }
 
-  async generatePresentation(input: any): Promise<any> {
+  async generatePresentation(input: Any): Promise<Any> {
     const filename = sanitizeFilename(input.filename || "presentation.pptx");
     const outputPath = path.join(this.workspacePath, filename);
 
@@ -215,7 +214,7 @@ export class DocumentTools {
     };
   }
 
-  async generateSpreadsheet(input: any): Promise<any> {
+  async generateSpreadsheet(input: Any): Promise<Any> {
     const filename = sanitizeFilename(input.filename || "data.xlsx");
     const outputPath = path.join(this.workspacePath, filename);
 

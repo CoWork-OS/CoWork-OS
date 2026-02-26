@@ -108,7 +108,7 @@ export class AgentRoleRepository {
    */
   findById(id: string): AgentRole | undefined {
     const stmt = this.db.prepare("SELECT * FROM agent_roles WHERE id = ?");
-    const row = stmt.get(id) as any;
+    const row = stmt.get(id) as Any;
     return row ? this.mapRowToAgentRole(row) : undefined;
   }
 
@@ -117,7 +117,7 @@ export class AgentRoleRepository {
    */
   findByName(name: string): AgentRole | undefined {
     const stmt = this.db.prepare("SELECT * FROM agent_roles WHERE name = ?");
-    const row = stmt.get(name) as any;
+    const row = stmt.get(name) as Any;
     return row ? this.mapRowToAgentRole(row) : undefined;
   }
 
@@ -130,7 +130,7 @@ export class AgentRoleRepository {
       : this.db.prepare(
           "SELECT * FROM agent_roles WHERE is_active = 1 ORDER BY sort_order ASC, created_at ASC",
         );
-    const rows = stmt.all() as any[];
+    const rows = stmt.all() as Any[];
     return rows.map((row) => this.mapRowToAgentRole(row));
   }
 
@@ -156,7 +156,7 @@ export class AgentRoleRepository {
     }
 
     const fields: string[] = [];
-    const values: any[] = [];
+    const values: Any[] = [];
 
     if (request.displayName !== undefined) {
       fields.push("display_name = ?");
@@ -413,7 +413,7 @@ export class AgentRoleRepository {
   /**
    * Map database row to AgentRole object
    */
-  private mapRowToAgentRole(row: any): AgentRole {
+  private mapRowToAgentRole(row: Any): AgentRole {
     return {
       id: row.id,
       name: row.name,
@@ -460,7 +460,7 @@ export class AgentRoleRepository {
     const stmt = this.db.prepare(
       "SELECT * FROM agent_roles WHERE heartbeat_enabled = 1 AND is_active = 1 ORDER BY sort_order ASC",
     );
-    const rows = stmt.all() as any[];
+    const rows = stmt.all() as Any[];
     return rows.map((row) => this.mapRowToAgentRole(row));
   }
 
@@ -474,7 +474,7 @@ export class AgentRoleRepository {
     }
 
     const fields: string[] = [];
-    const values: any[] = [];
+    const values: Any[] = [];
 
     if (config.heartbeatEnabled !== undefined) {
       fields.push("heartbeat_enabled = ?");
@@ -508,7 +508,7 @@ export class AgentRoleRepository {
    */
   updateHeartbeatStatus(id: string, status: HeartbeatStatus, lastHeartbeatAt?: number): void {
     const fields = ["heartbeat_status = ?"];
-    const values: any[] = [status];
+    const values: Any[] = [status];
 
     if (lastHeartbeatAt !== undefined) {
       fields.push("last_heartbeat_at = ?");
@@ -559,7 +559,7 @@ export class AgentRoleRepository {
     const stmt = this.db.prepare(
       "SELECT * FROM agent_roles WHERE autonomy_level = ? AND is_active = 1 ORDER BY sort_order ASC",
     );
-    const rows = stmt.all(level) as any[];
+    const rows = stmt.all(level) as Any[];
     return rows.map((row) => this.mapRowToAgentRole(row));
   }
 }

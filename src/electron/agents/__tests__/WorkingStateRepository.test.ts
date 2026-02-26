@@ -19,7 +19,7 @@ vi.mock("electron", () => ({
 }));
 
 // In-memory mock storage
-let mockStates: Map<string, any>;
+let mockStates: Map<string, Any>;
 let stateIdCounter: number;
 
 // Mock WorkingStateRepository
@@ -72,7 +72,7 @@ class MockWorkingStateRepository {
     const now = Date.now();
 
     // Mark existing current states as not current
-    mockStates.forEach((state, id) => {
+    mockStates.forEach((state, _id) => {
       if (
         state.agentRoleId === request.agentRoleId &&
         state.workspaceId === request.workspaceId &&
@@ -210,7 +210,7 @@ class MockWorkingStateRepository {
     return count;
   }
 
-  private mapRowToState(row: any): AgentWorkingState {
+  private mapRowToState(row: Any): AgentWorkingState {
     return {
       id: row.id,
       agentRoleId: row.agentRoleId,

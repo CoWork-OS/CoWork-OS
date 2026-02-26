@@ -2,8 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Workspace } from "../../../../shared/types";
 
 const mocks = vi.hoisted(() => {
-  const mcpState: { servers: Array<any> } = { servers: [] };
-  const hooksState: any = {
+  const mcpState: { servers: Array<Any> } = { servers: [] };
+  const hooksState: Any = {
     enabled: false,
     token: "",
     path: "/hooks",
@@ -76,7 +76,7 @@ vi.mock("../../../mcp/settings", () => ({
       registryUrl: "https://registry.modelcontextprotocol.io/servers.json",
       hostEnabled: false,
     })),
-    updateServer: vi.fn().mockImplementation((id: string, updates: any) => {
+    updateServer: vi.fn().mockImplementation((id: string, updates: Any) => {
       const idx = mocks.mcpState.servers.findIndex((s) => s.id === id);
       if (idx === -1) return null;
       mocks.mcpState.servers[idx] = { ...mocks.mcpState.servers[idx], ...updates };
@@ -100,7 +100,7 @@ vi.mock("../../../hooks/settings", () => ({
       if (!mocks.hooksState.token) mocks.hooksState.token = "hooks-token";
       return { ...mocks.hooksState };
     }),
-    updateConfig: vi.fn().mockImplementation((updates: any) => {
+    updateConfig: vi.fn().mockImplementation((updates: Any) => {
       Object.assign(mocks.hooksState, updates);
       return { ...mocks.hooksState };
     }),
@@ -184,13 +184,13 @@ describe("integration_setup tool", () => {
   });
 
   it("is exposed in tool list", () => {
-    const registry = new ToolRegistry(createWorkspace(), { logEvent: vi.fn() } as any, "task-1");
+    const registry = new ToolRegistry(createWorkspace(), { logEvent: vi.fn() } as Any, "task-1");
     const tool = registry.getTools().find((t) => t.name === "integration_setup");
     expect(tool).toBeDefined();
   });
 
   it("returns missing api_key guidance when configuring without key", async () => {
-    const registry = new ToolRegistry(createWorkspace(), { logEvent: vi.fn() } as any, "task-1");
+    const registry = new ToolRegistry(createWorkspace(), { logEvent: vi.fn() } as Any, "task-1");
     const result = await registry.executeTool("integration_setup", {
       action: "configure",
       provider: "resend",
@@ -206,7 +206,7 @@ describe("integration_setup tool", () => {
   });
 
   it("inspect mode reports readiness without failing when connector is missing", async () => {
-    const registry = new ToolRegistry(createWorkspace(), { logEvent: vi.fn() } as any, "task-1");
+    const registry = new ToolRegistry(createWorkspace(), { logEvent: vi.fn() } as Any, "task-1");
     const result = await registry.executeTool("integration_setup", {
       action: "inspect",
       provider: "resend",
@@ -220,7 +220,7 @@ describe("integration_setup tool", () => {
   });
 
   it("configures resend sending and inbound setup when key is provided", async () => {
-    const registry = new ToolRegistry(createWorkspace(), { logEvent: vi.fn() } as any, "task-1");
+    const registry = new ToolRegistry(createWorkspace(), { logEvent: vi.fn() } as Any, "task-1");
     const result = await registry.executeTool("integration_setup", {
       action: "configure",
       provider: "resend",
@@ -256,7 +256,7 @@ describe("integration_setup tool", () => {
     });
     mocks.getServerStatus.mockReturnValue({ status: "connected" });
 
-    const registry = new ToolRegistry(createWorkspace(), { logEvent: vi.fn() } as any, "task-1");
+    const registry = new ToolRegistry(createWorkspace(), { logEvent: vi.fn() } as Any, "task-1");
     const result = await registry.executeTool("integration_setup", {
       action: "configure",
       provider: "resend",

@@ -58,7 +58,7 @@ export function ExtensionsSettings() {
       } else {
         setMessage({ type: "error", text: result.error || "Failed to enable extension" });
       }
-    } catch (error: any) {
+    } catch (error: Any) {
       setMessage({ type: "error", text: error.message });
     } finally {
       setSaving(false);
@@ -75,7 +75,7 @@ export function ExtensionsSettings() {
       } else {
         setMessage({ type: "error", text: result.error || "Failed to disable extension" });
       }
-    } catch (error: any) {
+    } catch (error: Any) {
       setMessage({ type: "error", text: error.message });
     } finally {
       setSaving(false);
@@ -92,7 +92,7 @@ export function ExtensionsSettings() {
       } else {
         setMessage({ type: "error", text: result.error || "Failed to reload extension" });
       }
-    } catch (error: any) {
+    } catch (error: Any) {
       setMessage({ type: "error", text: error.message });
     } finally {
       setSaving(false);
@@ -105,7 +105,7 @@ export function ExtensionsSettings() {
       await window.electronAPI.discoverExtensions();
       setMessage({ type: "success", text: "Extensions discovered and loaded" });
       await loadExtensions();
-    } catch (error: any) {
+    } catch (error: Any) {
       setMessage({ type: "error", text: error.message });
     } finally {
       setSaving(false);
@@ -126,7 +126,7 @@ export function ExtensionsSettings() {
       } else {
         setMessage({ type: "error", text: result.error || "Failed to start tunnel" });
       }
-    } catch (error: any) {
+    } catch (error: Any) {
       setMessage({ type: "error", text: error.message });
     } finally {
       setSaving(false);
@@ -143,7 +143,7 @@ export function ExtensionsSettings() {
       } else {
         setMessage({ type: "error", text: result.error || "Failed to stop tunnel" });
       }
-    } catch (error: any) {
+    } catch (error: Any) {
       setMessage({ type: "error", text: error.message });
     } finally {
       setSaving(false);

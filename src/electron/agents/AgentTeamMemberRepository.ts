@@ -55,7 +55,7 @@ export class AgentTeamMemberRepository {
    */
   findById(id: string): AgentTeamMember | undefined {
     const stmt = this.db.prepare("SELECT * FROM agent_team_members WHERE id = ?");
-    const row = stmt.get(id) as any;
+    const row = stmt.get(id) as Any;
     return row ? this.mapRowToMember(row) : undefined;
   }
 
@@ -66,7 +66,7 @@ export class AgentTeamMemberRepository {
     const stmt = this.db.prepare(
       "SELECT * FROM agent_team_members WHERE team_id = ? AND agent_role_id = ?",
     );
-    const row = stmt.get(teamId, agentRoleId) as any;
+    const row = stmt.get(teamId, agentRoleId) as Any;
     return row ? this.mapRowToMember(row) : undefined;
   }
 
@@ -80,7 +80,7 @@ export class AgentTeamMemberRepository {
       WHERE team_id = ?
       ORDER BY member_order ASC, created_at ASC
     `);
-    const rows = stmt.all(teamId) as any[];
+    const rows = stmt.all(teamId) as Any[];
     return rows.map((row) => this.mapRowToMember(row));
   }
 
@@ -92,7 +92,7 @@ export class AgentTeamMemberRepository {
     if (!existing) return undefined;
 
     const fields: string[] = [];
-    const values: any[] = [];
+    const values: Any[] = [];
 
     if (request.memberOrder !== undefined) {
       fields.push("member_order = ?");
@@ -175,7 +175,7 @@ export class AgentTeamMemberRepository {
     return this.listByTeam(teamId);
   }
 
-  private mapRowToMember(row: any): AgentTeamMember {
+  private mapRowToMember(row: Any): AgentTeamMember {
     return {
       id: row.id,
       teamId: row.team_id,

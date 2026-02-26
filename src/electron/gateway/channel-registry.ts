@@ -12,9 +12,9 @@
 import { EventEmitter } from "events";
 import {
   ChannelAdapter,
-  ChannelType,
+  ChannelType as _ChannelType,
   ChannelConfig,
-  ChannelInfo,
+  ChannelInfo as _ChannelInfo,
   ChannelStatus,
   TelegramConfig,
   DiscordConfig,
@@ -1131,7 +1131,7 @@ export class ChannelRegistry extends EventEmitter {
    * Register a channel
    */
   register(entry: RegisteredChannel): void {
-    const { metadata, factory } = entry;
+    const { metadata } = entry;
 
     // Check platform compatibility
     if (metadata.platforms && !metadata.platforms.includes(process.platform)) {

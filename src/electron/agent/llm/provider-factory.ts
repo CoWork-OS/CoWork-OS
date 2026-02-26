@@ -77,7 +77,7 @@ function summarizeLLMRequest(request: LLMRequest): Record<string, unknown> {
     if (message?.role === "user") userMessages++;
     else if (message?.role === "assistant") assistantMessages++;
 
-    const content: any = (message as any)?.content;
+    const content: Any = (message as Any)?.content;
     if (typeof content === "string") {
       textBlocks++;
       textChars += content.length;
@@ -87,9 +87,9 @@ function summarizeLLMRequest(request: LLMRequest): Record<string, unknown> {
     if (!Array.isArray(content)) continue;
     for (const block of content) {
       if (!block || typeof block !== "object") continue;
-      const type = (block as any).type;
+      const type = (block as Any).type;
       if (type === "text") {
-        const text = (block as any).text;
+        const text = (block as Any).text;
         if (typeof text === "string") {
           textBlocks++;
           textChars += text.length;
@@ -98,8 +98,8 @@ function summarizeLLMRequest(request: LLMRequest): Record<string, unknown> {
         toolUseBlocks++;
       } else if (type === "tool_result") {
         toolResultBlocks++;
-        toolResultChars += safeContentLength((block as any).content);
-        if ((block as any).is_error) toolResultErrors++;
+        toolResultChars += safeContentLength((block as Any).content);
+        if ((block as Any).is_error) toolResultErrors++;
       }
     }
   }
@@ -128,7 +128,7 @@ function summarizeLLMResponse(response: LLMResponse): Record<string, unknown> {
   let textChars = 0;
   let toolUseBlocks = 0;
 
-  for (const block of content as any[]) {
+  for (const block of content as Any[]) {
     if (!block || typeof block !== "object") continue;
     if (block.type === "text" && typeof block.text === "string") {
       textBlocks++;
@@ -155,7 +155,7 @@ function summarizeLLMResponse(response: LLMResponse): Record<string, unknown> {
   };
 }
 
-function parseMaxTokensLimitFromError(error: any): number | null {
+function parseMaxTokensLimitFromError(error: Any): number | null {
   const message = String(error?.message || "");
   if (!message) return null;
 
@@ -208,7 +208,7 @@ function clampRequestToObservedModelLimit(request: LLMRequest): {
 }
 
 function wrapProviderWithDetailedLogging(provider: LLMProvider): LLMProvider {
-  const alreadyWrapped = (provider as any).__detailedLLMLoggingWrapped === true;
+  const alreadyWrapped = (provider as Any).__detailedLLMLoggingWrapped === true;
   if (alreadyWrapped) return provider;
 
   const wrapped: LLMProvider = {
@@ -248,7 +248,7 @@ function wrapProviderWithDetailedLogging(provider: LLMProvider): LLMProvider {
           summarizeLLMResponse(response),
         );
         return response;
-      } catch (error: any) {
+      } catch (error: Any) {
         let effectiveError = error;
         const parsedLimit = parseMaxTokensLimitFromError(error);
         if (
@@ -281,7 +281,7 @@ function wrapProviderWithDetailedLogging(provider: LLMProvider): LLMProvider {
                 },
               );
               return response;
-            } catch (retryError: any) {
+            } catch (retryError: Any) {
               effectiveError = retryError;
             }
           }
@@ -310,7 +310,7 @@ function wrapProviderWithDetailedLogging(provider: LLMProvider): LLMProvider {
     },
   };
 
-  (wrapped as any).__detailedLLMLoggingWrapped = true;
+  (wrapped as Any).__detailedLLMLoggingWrapped = true;
   return wrapped;
 }
 
@@ -412,7 +412,7 @@ function createCustomProvider(
  * @deprecated Used only for migration from legacy JSON files
  * Encrypt a secret using OS keychain via safeStorage
  */
-function encryptSecret(value?: string): string | undefined {
+function _encryptSecret(value?: string): string | undefined {
   if (!value || !value.trim()) return undefined;
   const trimmed = value.trim();
   if (trimmed === MASKED_VALUE) return undefined;
@@ -452,7 +452,7 @@ function decryptSecret(value?: string): string | undefined {
         );
         console.error("[LLM Settings] You may need to re-enter your API credentials in Settings");
       }
-    } catch (error: any) {
+    } catch (error: Any) {
       // This can happen after app updates when the code signature changes
       // The macOS Keychain ties encryption to the app's signature
       console.error("[LLM Settings] Failed to decrypt secret - this can happen after app updates");
@@ -1354,7 +1354,7 @@ export class LLMProviderFactory {
     models: CachedModelInfo[];
   } {
     const resolvedProviderType = resolveCustomProviderId(settings.providerType);
-    const customEntry = CUSTOM_PROVIDER_MAP.get(resolvedProviderType as any);
+    const customEntry = CUSTOM_PROVIDER_MAP.get(resolvedProviderType as Any);
     const ensureCurrentModel = (
       modelList: CachedModelInfo[],
       modelKey: string,
@@ -1635,10 +1635,10 @@ export class LLMProviderFactory {
     const updated: LLMSettings = { ...settings };
     const resolvedProviderType = resolveCustomProviderId(settings.providerType);
 
-    if (CUSTOM_PROVIDER_IDS.has(resolvedProviderType as any)) {
+    if (CUSTOM_PROVIDER_IDS.has(resolvedProviderType as Any)) {
       const existing = settings.customProviders?.[resolvedProviderType] || {};
       updated.customProviders = {
-        ...(settings.customProviders || {}),
+        ...settings.customProviders,
         [resolvedProviderType]: {
           ...existing,
           model: modelKey,
@@ -1734,7 +1734,7 @@ export class LLMProviderFactory {
     try {
       const provider = this.createProviderFromConfig(config);
       return await provider.testConnection();
-    } catch (error: any) {
+    } catch (error: Any) {
       return {
         success: false,
         error: error.message || "Failed to create provider",
@@ -1893,7 +1893,7 @@ export class LLMProviderFactory {
         await import("@aws-sdk/client-bedrock");
       const { fromIni } = await import("@aws-sdk/credential-provider-ini");
 
-      const clientConfig: any = { region };
+      const clientConfig: Any = { region };
 
       if (accessKeyId && secretAccessKey) {
         clientConfig.credentials = {
@@ -1927,7 +1927,7 @@ export class LLMProviderFactory {
         );
 
         const profiles = response.inferenceProfileSummaries || [];
-        for (const profileSummary of profiles as any[]) {
+        for (const profileSummary of profiles as Any[]) {
           if (profileSummary?.status && profileSummary.status !== "ACTIVE") continue;
 
           const models = (profileSummary?.models || []) as Array<{ modelArn?: string }>;
@@ -1999,7 +1999,7 @@ export class LLMProviderFactory {
       }
 
       return defaultModels;
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to fetch Bedrock models:", error);
       // Return default models on error
       return defaultModels;
@@ -2026,7 +2026,7 @@ export class LLMProviderFactory {
       const models = await provider.getAvailableModels();
       console.log(`[ProviderFactory] Fetched ${models.length} models from Ollama`);
       return models;
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to fetch Ollama models:", error);
       return [];
     }
@@ -2089,7 +2089,7 @@ export class LLMProviderFactory {
         geminiApiKey: key,
       });
       return await provider.getAvailableModels();
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to fetch Gemini models:", error);
       // Return default models on error instead of empty array
       return defaultModels;
@@ -2132,7 +2132,7 @@ export class LLMProviderFactory {
         openrouterBaseUrl: resolvedBaseUrl,
       });
       return await provider.getAvailableModels();
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to fetch OpenRouter models:", error);
       // Return default models on error instead of empty array
       return defaultModels;
@@ -2226,7 +2226,7 @@ export class LLMProviderFactory {
         openaiApiKey: key,
       });
       return await provider.getAvailableModels();
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to fetch OpenAI models:", error);
       // Return default models on error instead of empty array
       return defaultModels;
@@ -2263,7 +2263,7 @@ export class LLMProviderFactory {
         groqBaseUrl: resolvedBaseUrl,
       });
       return await provider.getAvailableModels();
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to fetch Groq models:", error);
       return defaultModels;
     }
@@ -2300,7 +2300,7 @@ export class LLMProviderFactory {
         xaiBaseUrl: resolvedBaseUrl,
       });
       return await provider.getAvailableModels();
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to fetch xAI models:", error);
       return defaultModels;
     }
@@ -2339,7 +2339,7 @@ export class LLMProviderFactory {
         kimiBaseUrl: resolvedBaseUrl,
       });
       return await provider.getAvailableModels();
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to fetch Kimi models:", error);
       return defaultModels;
     }

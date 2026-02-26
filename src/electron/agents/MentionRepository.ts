@@ -58,7 +58,7 @@ export class MentionRepository {
    */
   findById(id: string): AgentMention | undefined {
     const stmt = this.db.prepare("SELECT * FROM agent_mentions WHERE id = ?");
-    const row = stmt.get(id) as any;
+    const row = stmt.get(id) as Any;
     return row ? this.mapRowToMention(row) : undefined;
   }
 
@@ -67,7 +67,7 @@ export class MentionRepository {
    */
   list(query: MentionListQuery): AgentMention[] {
     const conditions: string[] = [];
-    const params: any[] = [];
+    const params: Any[] = [];
 
     if (query.workspaceId) {
       conditions.push("workspace_id = ?");
@@ -113,7 +113,7 @@ export class MentionRepository {
     }
 
     const stmt = this.db.prepare(sql);
-    const rows = stmt.all(...params) as any[];
+    const rows = stmt.all(...params) as Any[];
     return rows.map((row) => this.mapRowToMention(row));
   }
 
@@ -122,7 +122,7 @@ export class MentionRepository {
    */
   getPendingForAgent(toAgentRoleId: string, workspaceId?: string): AgentMention[] {
     const conditions = ["to_agent_role_id = ?", "status = ?"];
-    const params: any[] = [toAgentRoleId, "pending"];
+    const params: Any[] = [toAgentRoleId, "pending"];
 
     if (workspaceId) {
       conditions.push("workspace_id = ?");
@@ -131,7 +131,7 @@ export class MentionRepository {
 
     const sql = `SELECT * FROM agent_mentions WHERE ${conditions.join(" AND ")} ORDER BY created_at DESC`;
     const stmt = this.db.prepare(sql);
-    const rows = stmt.all(...params) as any[];
+    const rows = stmt.all(...params) as Any[];
     return rows.map((row) => this.mapRowToMention(row));
   }
 
@@ -141,7 +141,7 @@ export class MentionRepository {
   getPendingCount(toAgentRoleId: string, workspaceId?: string): number {
     let sql =
       "SELECT COUNT(*) as count FROM agent_mentions WHERE to_agent_role_id = ? AND status = ?";
-    const params: any[] = [toAgentRoleId, "pending"];
+    const params: Any[] = [toAgentRoleId, "pending"];
 
     if (workspaceId) {
       sql += " AND workspace_id = ?";
@@ -225,7 +225,7 @@ export class MentionRepository {
   /**
    * Map database row to AgentMention object
    */
-  private mapRowToMention(row: any): AgentMention {
+  private mapRowToMention(row: Any): AgentMention {
     return {
       id: row.id,
       workspaceId: row.workspace_id,

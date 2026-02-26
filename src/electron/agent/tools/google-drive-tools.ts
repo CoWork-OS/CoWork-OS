@@ -99,7 +99,7 @@ export class GoogleDriveTools {
     return candidate;
   }
 
-  async executeAction(input: GoogleDriveActionInput): Promise<any> {
+  async executeAction(input: GoogleDriveActionInput): Promise<Any> {
     const settings = GoogleWorkspaceSettingsManager.loadSettings();
     if (!settings.enabled) {
       throw new Error(

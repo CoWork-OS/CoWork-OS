@@ -126,7 +126,7 @@ export class GlobTools {
         totalMatches: matches.length,
         truncated,
       };
-    } catch (error: any) {
+    } catch (error: Any) {
       this.daemon.logEvent(this.taskId, "tool_result", {
         tool: "glob",
         error: error.message,

@@ -9,7 +9,7 @@ import { LLM_PROVIDER_TYPES, isTempWorkspaceId, PersonalityId } from "../../shar
 import { assertSafeLoomMailboxFolder, isSecureOrLocalLoomUrl } from "./loom";
 
 // Common validation patterns
-const MAX_STRING_LENGTH = 10000;
+const _MAX_STRING_LENGTH = 10000;
 const MAX_PATH_LENGTH = 4096;
 const MAX_TITLE_LENGTH = 500;
 const MAX_PROMPT_LENGTH = 500000; // ~125K tokens; fits within 200K-token model context
@@ -87,6 +87,10 @@ export const AgentConfigSchema = z
     allowUserInput: z.boolean().optional(),
     allowSharedContextMemory: z.boolean().optional(),
     conversationMode: z.enum(["task", "chat", "hybrid"]).optional(),
+    executionMode: z.enum(["execute", "propose", "analyze"]).optional(),
+    taskDomain: z
+      .enum(["auto", "code", "research", "operations", "writing", "general"])
+      .optional(),
     autonomousMode: z.boolean().optional(),
     qualityPasses: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional(),
     collaborativeMode: z.boolean().optional(),
@@ -705,7 +709,7 @@ const EMAIL_FIELD_KEY_MAP = {
 } as const;
 
 type EmailSchemaMode = keyof typeof EMAIL_FIELD_KEY_MAP;
-type EmailFieldKeys = (typeof EMAIL_FIELD_KEY_MAP)[EmailSchemaMode];
+type _EmailFieldKeys = (typeof EMAIL_FIELD_KEY_MAP)[EmailSchemaMode];
 
 const EMAIL_TRANSPORT_BASE_SHAPES: Record<EmailSchemaMode, z.ZodRawShape> = {
   add: {

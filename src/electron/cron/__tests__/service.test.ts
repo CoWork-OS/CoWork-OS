@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import type { CronJob, CronJobCreate, CronServiceDeps, CronStoreFile, CronEvent } from "../types";
+import type { CronJob as _CronJob, CronJobCreate, CronServiceDeps, CronStoreFile, CronEvent } from "../types";
 
 // Job ID counter for tests that need unique IDs
 let jobIdCounter = 0;
@@ -21,7 +21,7 @@ vi.mock("electron", () => ({
 }));
 
 // Create mock store module
-const mockStore: CronStoreFile = { version: 1, jobs: [] };
+const _mockStore: CronStoreFile = { version: 1, jobs: [] };
 vi.mock("../store", () => ({
   loadCronStore: vi.fn().mockResolvedValue({ version: 1, jobs: [] }),
   saveCronStore: vi.fn().mockResolvedValue(undefined),
@@ -587,7 +587,7 @@ describe("CronService", () => {
         state: { nextRunAtMs: 900000 },
         delivery: {
           enabled: true,
-          channelType: "telegram" as any,
+          channelType: "telegram" as Any,
           channelId: "chat-1",
           deliverOnlyIfResult: true,
         },
@@ -617,7 +617,7 @@ describe("CronService", () => {
         state: { nextRunAtMs: 900000 },
         delivery: {
           enabled: true,
-          channelType: "telegram" as any,
+          channelType: "telegram" as Any,
           channelId: "chat-1",
           deliverOnlyIfResult: true,
         },

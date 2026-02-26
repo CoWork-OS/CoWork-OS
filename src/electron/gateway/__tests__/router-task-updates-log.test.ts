@@ -41,8 +41,8 @@ function createMockDb() {
       get: vi.fn(),
       all: vi.fn().mockReturnValue([]),
     }),
-    transaction: vi.fn((fn: any) => fn),
-  } as any;
+    transaction: vi.fn((fn: Any) => fn),
+  } as Any;
 }
 
 describe("MessageRouter.sendTaskUpdate logging", () => {
@@ -66,17 +66,17 @@ describe("MessageRouter.sendTaskUpdate logging", () => {
       sendMessage: vi.fn().mockResolvedValue("m1"),
       connect: vi.fn(),
       disconnect: vi.fn(),
-    } as any;
+    } as Any;
 
     // Register adapter by type so router.sendMessage() can resolve it.
-    (router as any).adapters.set("discord", adapter);
+    (router as Any).adapters.set("discord", adapter);
 
     // Stub repos so logging doesn't need a real DB.
-    (router as any).channelRepo.findByType = vi.fn().mockReturnValue({ id: "c1" });
-    (router as any).messageRepo.create = vi.fn();
+    (router as Any).channelRepo.findByType = vi.fn().mockReturnValue({ id: "c1" });
+    (router as Any).messageRepo.create = vi.fn();
 
     // Route a task to our adapter.
-    (router as any).pendingTaskResponses.set("t1", {
+    (router as Any).pendingTaskResponses.set("t1", {
       adapter,
       chatId: "chat1",
       sessionId: "s1",
@@ -94,7 +94,7 @@ describe("MessageRouter.sendTaskUpdate logging", () => {
     await Promise.resolve();
 
     expect(sendMessageSpy).toHaveBeenCalled();
-    expect((router as any).messageRepo.create).toHaveBeenCalledWith(
+    expect((router as Any).messageRepo.create).toHaveBeenCalledWith(
       expect.objectContaining({
         channelId: "c1",
         chatId: "chat1",

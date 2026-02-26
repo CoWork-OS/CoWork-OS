@@ -14,7 +14,7 @@ vi.mock("electron", () => ({
 }));
 
 // In-memory mock storage
-let mockSubscriptions: Map<string, any>;
+let mockSubscriptions: Map<string, Any>;
 let subscriptionIdCounter: number;
 
 // Mock TaskSubscriptionRepository
@@ -165,7 +165,7 @@ class MockTaskSubscriptionRepository {
     return ids;
   }
 
-  private mapRowToSubscription(row: any): TaskSubscription {
+  private mapRowToSubscription(row: Any): TaskSubscription {
     return {
       id: row.id,
       taskId: row.task_id,

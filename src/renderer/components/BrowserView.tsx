@@ -8,7 +8,7 @@ interface BrowserViewProps {
 export function BrowserView({ initialUrl, onBack }: BrowserViewProps) {
   const [url, setUrl] = useState(initialUrl || "");
   const [activeUrl, setActiveUrl] = useState(initialUrl || "");
-  const webviewRef = useRef<any>(null);
+  const webviewRef = useRef<Any>(null);
 
   useEffect(() => {
     if (initialUrl) {
@@ -21,7 +21,7 @@ export function BrowserView({ initialUrl, onBack }: BrowserViewProps) {
   useEffect(() => {
     const wv = webviewRef.current;
     if (!wv) return;
-    const onNavigate = (e: any) => setUrl(e.url);
+    const onNavigate = (e: Any) => setUrl(e.url);
     wv.addEventListener("did-navigate", onNavigate);
     wv.addEventListener("did-navigate-in-page", onNavigate);
     return () => {

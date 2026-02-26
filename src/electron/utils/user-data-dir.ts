@@ -45,7 +45,8 @@ export function getUserDataDir(): string {
 
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const electron = require("electron") as any;
+// oxlint-disable-next-line typescript-eslint(no-require-imports)
+    const electron = require("electron") as Any;
     const app = electron?.app;
     if (app?.getPath) {
       return app.getPath("userData");

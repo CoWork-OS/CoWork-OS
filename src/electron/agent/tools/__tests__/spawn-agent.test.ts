@@ -5,8 +5,8 @@
  * since ToolRegistry requires extensive mocking for all dependencies.
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
-import type { Task, AgentConfig, AgentType, Workspace } from "../../../../shared/types";
+import { describe, it, expect, beforeEach as _beforeEach, vi as _vi } from "vitest";
+import type { Task, AgentConfig, AgentType, Workspace as _Workspace } from "../../../../shared/types";
 
 // Helper functions that mirror the implementation in registry.ts
 function resolveModelPreference(preference: string | undefined, currentModelKey?: string): string {

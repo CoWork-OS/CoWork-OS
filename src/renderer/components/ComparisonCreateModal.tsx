@@ -73,7 +73,7 @@ export function ComparisonCreateModal({
         })),
       });
       onCreated(session.id);
-    } catch (err: any) {
+    } catch (err: Any) {
       setError(err.message || "Failed to create comparison");
     } finally {
       setCreating(false);

@@ -62,7 +62,7 @@ export class AgentTeamRunRepository {
    */
   findById(id: string): AgentTeamRun | undefined {
     const stmt = this.db.prepare("SELECT * FROM agent_team_runs WHERE id = ?");
-    const row = stmt.get(id) as any;
+    const row = stmt.get(id) as Any;
     return row ? this.mapRowToRun(row) : undefined;
   }
 
@@ -77,7 +77,7 @@ export class AgentTeamRunRepository {
       ORDER BY started_at DESC
       LIMIT 1
     `);
-    const row = stmt.get(rootTaskId) as any;
+    const row = stmt.get(rootTaskId) as Any;
     return row ? this.mapRowToRun(row) : undefined;
   }
 
@@ -95,7 +95,7 @@ export class AgentTeamRunRepository {
       sql += ` LIMIT ${limit}`;
     }
     const stmt = this.db.prepare(sql);
-    const rows = stmt.all(teamId) as any[];
+    const rows = stmt.all(teamId) as Any[];
     return rows.map((row) => this.mapRowToRun(row));
   }
 
@@ -119,7 +119,7 @@ export class AgentTeamRunRepository {
     if (!existing) return undefined;
 
     const fields: string[] = [];
-    const values: any[] = [];
+    const values: Any[] = [];
 
     if (updates.status !== undefined) {
       fields.push("status = ?");
@@ -182,7 +182,7 @@ export class AgentTeamRunRepository {
     return deleteTx(id);
   }
 
-  private mapRowToRun(row: any): AgentTeamRun {
+  private mapRowToRun(row: Any): AgentTeamRun {
     return {
       id: row.id,
       teamId: row.team_id,

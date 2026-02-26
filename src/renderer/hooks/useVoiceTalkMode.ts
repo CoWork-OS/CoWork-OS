@@ -138,7 +138,7 @@ export function useVoiceTalkMode(options: UseVoiceTalkModeOptions): UseVoiceTalk
   useEffect(() => {
     if (!isActive) return;
 
-    const unsubscribe = window.electronAPI.onTaskEvent?.((event: any) => {
+    const unsubscribe = window.electronAPI.onTaskEvent?.((event: Any) => {
       if (!isActiveRef.current) return;
       if (event.type !== "completed" && event.type !== "message") return;
 

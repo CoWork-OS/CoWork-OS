@@ -40,7 +40,7 @@ describe("GrepTools", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    grepTools = new GrepTools(mockWorkspace, mockDaemon as any, "test-task-id");
+    grepTools = new GrepTools(mockWorkspace, mockDaemon as Any, "test-task-id");
   });
 
   afterEach(() => {
@@ -154,7 +154,7 @@ describe("GrepTools", () => {
 
   describe("glob pattern conversion", () => {
     it("should handle double-star and extensions", () => {
-      const regex = (grepTools as any).globToRegex("**/*.md");
+      const regex = (grepTools as Any).globToRegex("**/*.md");
 
       expect(regex.test("README.md")).toBe(true);
       expect(regex.test("docs/guide.md")).toBe(true);
@@ -162,7 +162,7 @@ describe("GrepTools", () => {
     });
 
     it("should handle brace expansion", () => {
-      const regex = (grepTools as any).globToRegex("**/*.{md,txt}");
+      const regex = (grepTools as Any).globToRegex("**/*.{md,txt}");
 
       expect(regex.test("docs/readme.md")).toBe(true);
       expect(regex.test("docs/readme.txt")).toBe(true);
@@ -170,7 +170,7 @@ describe("GrepTools", () => {
     });
 
     it("should handle nested directories with double-star", () => {
-      const regex = (grepTools as any).globToRegex("**/src/**/*.ts");
+      const regex = (grepTools as Any).globToRegex("**/src/**/*.ts");
 
       expect(regex.test("src/index.ts")).toBe(true);
       expect(regex.test("packages/core/src/utils/helper.ts")).toBe(true);
@@ -178,14 +178,14 @@ describe("GrepTools", () => {
     });
 
     it("should handle single-star wildcard", () => {
-      const regex = (grepTools as any).globToRegex("*.ts");
+      const regex = (grepTools as Any).globToRegex("*.ts");
 
       expect(regex.test("index.ts")).toBe(true);
       expect(regex.test("src/index.ts")).toBe(false);
     });
 
     it("should handle question mark wildcard", () => {
-      const regex = (grepTools as any).globToRegex("file?.ts");
+      const regex = (grepTools as Any).globToRegex("file?.ts");
 
       expect(regex.test("file1.ts")).toBe(true);
       expect(regex.test("fileA.ts")).toBe(true);
@@ -193,7 +193,7 @@ describe("GrepTools", () => {
     });
 
     it("should escape special regex characters", () => {
-      const regex = (grepTools as any).globToRegex("test[1].ts");
+      const regex = (grepTools as Any).globToRegex("test[1].ts");
 
       expect(regex.test("test[1].ts")).toBe(true);
       expect(regex.test("test1.ts")).toBe(false);
@@ -202,37 +202,37 @@ describe("GrepTools", () => {
 
   describe("globPatternToRegex", () => {
     it("should convert double-star followed by slash correctly", () => {
-      const result = (grepTools as any).globPatternToRegex("**/foo");
+      const result = (grepTools as Any).globPatternToRegex("**/foo");
 
       expect(result).toBe("(?:.*/)?foo");
     });
 
     it("should convert double-star at end correctly", () => {
-      const result = (grepTools as any).globPatternToRegex("src/**");
+      const result = (grepTools as Any).globPatternToRegex("src/**");
 
       expect(result).toBe("src/.*");
     });
 
     it("should convert single-star correctly", () => {
-      const result = (grepTools as any).globPatternToRegex("*.ts");
+      const result = (grepTools as Any).globPatternToRegex("*.ts");
 
       expect(result).toBe("[^/]*\\.ts");
     });
 
     it("should handle double-star alone", () => {
-      const result = (grepTools as any).globPatternToRegex("**");
+      const result = (grepTools as Any).globPatternToRegex("**");
 
       expect(result).toBe(".*");
     });
 
     it("should handle empty pattern", () => {
-      const result = (grepTools as any).globPatternToRegex("");
+      const result = (grepTools as Any).globPatternToRegex("");
 
       expect(result).toBe("");
     });
 
     it("should handle pattern with multiple double-stars", () => {
-      const regex = (grepTools as any).globToRegex("**/src/**/test/**/*.ts");
+      const regex = (grepTools as Any).globToRegex("**/src/**/test/**/*.ts");
 
       expect(regex.test("src/test/file.ts")).toBe(true);
       expect(regex.test("pkg/src/utils/test/unit/spec.ts")).toBe(true);
@@ -249,11 +249,11 @@ describe("GrepTools", () => {
       // and the method should return false
       const testGrepTools = new GrepTools(
         { ...mockWorkspace, path: "/non-existent-path-12345" },
-        mockDaemon as any,
+        mockDaemon as Any,
         "test-task-id",
       );
 
-      const result = await (testGrepTools as any).isDocumentHeavyWorkspace();
+      const result = await (testGrepTools as Any).isDocumentHeavyWorkspace();
 
       expect(result).toBe(false);
     });
@@ -261,7 +261,7 @@ describe("GrepTools", () => {
     it("should check files in the workspace root directory", async () => {
       // This tests that the method runs without throwing
       // The actual test workspace likely has few or no PDF files
-      const result = await (grepTools as any).isDocumentHeavyWorkspace();
+      const result = await (grepTools as Any).isDocumentHeavyWorkspace();
 
       // Since /test/workspace doesn't exist, it should return false
       expect(result).toBe(false);

@@ -350,7 +350,7 @@ export class ImageGenerator {
           }
           const chosen: "gemini-image-fast" | "gemini-image-pro" =
             modelOverride === "gemini-image-fast" || modelOverride === "gemini-image-pro"
-              ? (modelOverride as any)
+              ? (modelOverride as Any)
               : "gemini-image-pro";
           const modelId = GEMINI_MODEL_MAP[chosen];
           return await this.generateWithGemini({
@@ -434,7 +434,7 @@ export class ImageGenerator {
           );
           continue;
         }
-      } catch (error: any) {
+      } catch (error: Any) {
         considerError(provider, error?.message || String(error));
       }
     }
@@ -463,13 +463,13 @@ export class ImageGenerator {
   }> {
     return [
       {
-        id: "gemini-image-fast" as any,
+        id: "gemini-image-fast" as Any,
         name: "Gemini Image (Fast)",
         description: "Fast image generation using Gemini",
         modelId: GEMINI_MODEL_MAP["gemini-image-fast"],
       },
       {
-        id: "gemini-image-pro" as any,
+        id: "gemini-image-pro" as Any,
         name: "Gemini Image (High Quality)",
         description: "High-quality image generation using Gemini",
         modelId: GEMINI_MODEL_MAP["gemini-image-pro"],
@@ -536,7 +536,9 @@ export class ImageGenerator {
           try {
             const errorJson = JSON.parse(errorBody);
             if (errorJson.error?.message) errorMessage = errorJson.error.message;
-          } catch {}
+          } catch {
+            // Preserve fallback message when API error is not JSON.
+          }
 
           if (imageIndex === 0) {
             return {
@@ -602,7 +604,7 @@ export class ImageGenerator {
       }
 
       return { success: true, images, provider: "gemini", model: args.modelId, textResponse };
-    } catch (error: any) {
+    } catch (error: Any) {
       return {
         success: false,
         images: [],
@@ -656,7 +658,9 @@ export class ImageGenerator {
         try {
           const errorJson = JSON.parse(errorBody);
           if (errorJson.error?.message) errorMessage = errorJson.error.message;
-        } catch {}
+        } catch {
+          // Preserve fallback message when API error is not JSON.
+        }
         return {
           success: false,
           images: [],
@@ -667,8 +671,8 @@ export class ImageGenerator {
         };
       }
 
-      const data = (await response.json()) as any;
-      const items: any[] = Array.isArray(data?.data) ? data.data : [];
+      const data = (await response.json()) as Any;
+      const items: Any[] = Array.isArray(data?.data) ? data.data : [];
       for (let i = 0; i < items.length; i++) {
         const b64 = items[i]?.b64_json || items[i]?.b64 || items[i]?.base64;
         const url = items[i]?.url;
@@ -714,7 +718,7 @@ export class ImageGenerator {
       }
 
       return { success: true, images, provider: "openai", model: args.model };
-    } catch (error: any) {
+    } catch (error: Any) {
       return {
         success: false,
         images: [],
@@ -770,7 +774,9 @@ export class ImageGenerator {
         try {
           const errorJson = JSON.parse(errorBody);
           if (errorJson.error?.message) errorMessage = errorJson.error.message;
-        } catch {}
+        } catch {
+          // Preserve fallback message when API error is not JSON.
+        }
         console.error("[ImageGenerator] Azure images/generations error:", {
           status: response.status,
           statusText: response.statusText,
@@ -788,8 +794,8 @@ export class ImageGenerator {
         };
       }
 
-      const data = (await response.json()) as any;
-      const items: any[] = Array.isArray(data?.data) ? data.data : [];
+      const data = (await response.json()) as Any;
+      const items: Any[] = Array.isArray(data?.data) ? data.data : [];
       for (let i = 0; i < items.length; i++) {
         const b64 = items[i]?.b64_json || items[i]?.b64 || items[i]?.base64;
         const url = items[i]?.url;
@@ -835,7 +841,7 @@ export class ImageGenerator {
       }
 
       return { success: true, images, provider: "azure", model: args.deployment };
-    } catch (error: any) {
+    } catch (error: Any) {
       return {
         success: false,
         images: [],

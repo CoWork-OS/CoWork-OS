@@ -5,7 +5,7 @@ import { Workspace } from "../../../shared/types";
 
 export interface SheetData {
   name: string;
-  data: any[][];
+  data: Any[][];
   /** Optional column widths */
   columnWidths?: number[];
   /** If true, first row is treated as header with bold formatting */
@@ -154,9 +154,9 @@ export class SpreadsheetBuilder {
     const sheets: SheetData[] = [];
 
     workbook.eachSheet((worksheet) => {
-      const data: any[][] = [];
-      worksheet.eachRow((row, rowNumber) => {
-        const rowData: any[] = [];
+      const data: Any[][] = [];
+      worksheet.eachRow((row, _rowNumber) => {
+        const rowData: Any[] = [];
         row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
           // Ensure array is long enough
           while (rowData.length < colNumber - 1) {

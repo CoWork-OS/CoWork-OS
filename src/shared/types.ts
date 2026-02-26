@@ -192,6 +192,7 @@ export type EventType =
   | "plan_revision_blocked"
   | "step_timeout"
   | "tool_blocked"
+  | "mode_gate_blocked"
   | "progress_update"
   | "llm_retry"
   | "follow_up_completed"
@@ -589,6 +590,9 @@ export interface SuccessCriteria {
  */
 export type AgentType = "main" | "sub" | "parallel";
 export type ConversationMode = "task" | "chat" | "hybrid" | "think";
+export type ExecutionMode = "execute" | "propose" | "analyze";
+export type TaskDomain = "auto" | "code" | "research" | "operations" | "writing" | "general";
+export type ToolDecision = "allow" | "deny" | "ask";
 
 /**
  * Per-task agent configuration for customizing LLM and personality
@@ -638,6 +642,18 @@ export interface AgentConfig {
    * - hybrid: infer per-turn using prompt intent
    */
   conversationMode?: ConversationMode;
+  /**
+   * Execution mode gate:
+   * - execute: tools may mutate state (default)
+   * - propose: planning/read-only guidance, no mutating tools
+   * - analyze: strict analysis/read-only mode
+   */
+  executionMode?: ExecutionMode;
+  /**
+   * Task domain hint used for orchestration strategy and completion checks.
+   * "auto" means inferred from intent router.
+   */
+  taskDomain?: TaskDomain;
   /** Whether to run with reduced friction in autonomous mode (auto-approve approval-gated tools) */
   autonomousMode?: boolean;
   /**
@@ -839,7 +855,7 @@ export interface TaskEvent {
   taskId: string;
   timestamp: number;
   type: EventType;
-  payload: any;
+  payload: Any;
 }
 
 export interface TaskUsageTotals {
@@ -983,14 +999,14 @@ export interface StepFeedbackPayload {
 export interface ToolCall {
   id: string;
   tool: ToolType;
-  parameters: any;
+  parameters: Any;
   timestamp: number;
 }
 
 export interface ToolResult {
   callId: string;
   success: boolean;
-  result?: any;
+  result?: Any;
   error?: string;
   timestamp: number;
 }
@@ -1014,12 +1030,12 @@ export interface ToolDefinition {
   description: string;
   inputSchema: {
     type: "object";
-    properties: Record<string, any>;
+    properties: Record<string, Any>;
     required: string[];
   };
   riskLevel: "read" | "write";
   groups: readonly string[];
-  handler: (params: any) => Promise<NodeToolResult>;
+  handler: (params: Any) => Promise<NodeToolResult>;
 }
 
 export interface ApprovalRequest {
@@ -1027,7 +1043,7 @@ export interface ApprovalRequest {
   taskId: string;
   type: ApprovalType;
   description: string;
-  details: any;
+  details: Any;
   status: "pending" | "approved" | "denied";
   requestedAt: number;
   resolvedAt?: number;
@@ -1040,7 +1056,7 @@ export interface Skill {
   category: "document" | "spreadsheet" | "presentation" | "organizer" | "custom";
   prompt: string;
   scriptPath?: string;
-  parameters?: Record<string, any>;
+  parameters?: Record<string, Any>;
 }
 
 // ============ Agent Squad / Role Types ============

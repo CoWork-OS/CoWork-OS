@@ -22,9 +22,9 @@ export class DailyBriefingService {
   private deps: DailyBriefingServiceDeps;
   private configs: Map<string, BriefingConfig> = new Map();
   private latestBriefings: Map<string, Briefing> = new Map();
-  private db: any;
+  private db: Any;
 
-  constructor(deps: DailyBriefingServiceDeps, db?: any) {
+  constructor(deps: DailyBriefingServiceDeps, db?: Any) {
     this.deps = deps;
     this.db = db;
     this.ensureSchema();
@@ -102,10 +102,10 @@ export class DailyBriefingService {
     const since = Date.now() - TWENTY_FOUR_HOURS_MS;
     const tasks = this.deps.getRecentTasks(workspaceId, since);
 
-    const completed = tasks.filter((t: any) => t.status === "completed");
-    const failed = tasks.filter((t: any) => t.status === "failed");
-    const pending = tasks.filter((t: any) => t.status === "pending" || t.status === "queued");
-    const running = tasks.filter((t: any) => t.status === "running" || t.status === "executing");
+    const completed = tasks.filter((t: Any) => t.status === "completed");
+    const failed = tasks.filter((t: Any) => t.status === "failed");
+    const pending = tasks.filter((t: Any) => t.status === "pending" || t.status === "queued");
+    const running = tasks.filter((t: Any) => t.status === "running" || t.status === "executing");
 
     const items: BriefingItem[] = [];
     if (completed.length > 0)
@@ -117,7 +117,7 @@ export class DailyBriefingService {
       items.push({
         label: `${failed.length} failed`,
         status: "failed",
-        detail: failed.map((t: any) => t.title).join(", "),
+        detail: failed.map((t: Any) => t.title).join(", "),
       });
 
     // Top 5 recent completions
@@ -130,7 +130,7 @@ export class DailyBriefingService {
 
   private buildMemoryHighlights(workspaceId: string): BriefingSection {
     const memories = this.deps.searchMemory(workspaceId, "recent learning insight", 5);
-    const items: BriefingItem[] = memories.map((m: any) => ({
+    const items: BriefingItem[] = memories.map((m: Any) => ({
       label: m.summary || m.content?.slice(0, 100) || "Memory item",
       status: "info" as const,
     }));
@@ -139,7 +139,7 @@ export class DailyBriefingService {
 
   private buildSuggestions(workspaceId: string): BriefingSection {
     const suggestions = this.deps.getActiveSuggestions(workspaceId);
-    const items: BriefingItem[] = suggestions.slice(0, 5).map((s: any) => ({
+    const items: BriefingItem[] = suggestions.slice(0, 5).map((s: Any) => ({
       label: s.title || s.description,
       detail: s.description,
       status: "info" as const,
@@ -160,7 +160,7 @@ export class DailyBriefingService {
 
   private buildUpcomingJobs(): BriefingSection {
     const jobs = this.deps.getUpcomingJobs(5);
-    const items: BriefingItem[] = jobs.map((j: any) => {
+    const items: BriefingItem[] = jobs.map((j: Any) => {
       const nextRun = j.state?.nextRunAtMs
         ? new Date(j.state.nextRunAtMs).toLocaleTimeString()
         : "—";
@@ -290,7 +290,7 @@ export class DailyBriefingService {
         .prepare(
           "SELECT * FROM briefings WHERE workspace_id = ? ORDER BY generated_at DESC LIMIT 1",
         )
-        .get(workspaceId) as any;
+        .get(workspaceId) as Any;
       if (!row) return undefined;
       return {
         id: row.id,
@@ -332,7 +332,7 @@ export class DailyBriefingService {
     try {
       const row = this.db
         .prepare("SELECT * FROM briefing_config WHERE workspace_id = ?")
-        .get(workspaceId) as any;
+        .get(workspaceId) as Any;
       if (!row) return null;
       return {
         scheduleTime: row.schedule_time || "08:00",

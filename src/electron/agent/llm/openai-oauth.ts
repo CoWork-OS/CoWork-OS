@@ -5,10 +5,11 @@ import {
   OAuthCredentials,
 } from "@mariozechner/pi-ai";
 
-function getElectronShell(): any | null {
+function getElectronShell(): Any | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const electron = require("electron") as any;
+// oxlint-disable-next-line typescript-eslint(no-require-imports)
+    const electron = require("electron") as Any;
     const shell = electron?.shell;
     if (shell) return shell;
   } catch {

@@ -28,19 +28,19 @@ export function setupAdminPolicyHandlers(): void {
       ...updates,
       packs: {
         ...current.packs,
-        ...(updates.packs || {}),
+        ...updates.packs,
       },
       connectors: {
         ...current.connectors,
-        ...(updates.connectors || {}),
+        ...updates.connectors,
       },
       agents: {
         ...current.agents,
-        ...(updates.agents || {}),
+        ...updates.agents,
       },
       general: {
         ...current.general,
-        ...(updates.general || {}),
+        ...updates.general,
       },
     };
 

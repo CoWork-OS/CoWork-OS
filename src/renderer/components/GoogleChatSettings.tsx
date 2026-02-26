@@ -113,7 +113,7 @@ export function GoogleChatSettings({ onStatusChange }: GoogleChatSettingsProps) 
       setServiceAccountKeyPath("");
       setProjectId("");
       await loadChannel();
-    } catch (error: any) {
+    } catch (error: Any) {
       setTestResult({ success: false, error: error.message });
     } finally {
       setSaving(false);
@@ -129,7 +129,7 @@ export function GoogleChatSettings({ onStatusChange }: GoogleChatSettingsProps) 
 
       const result = await window.electronAPI.testGatewayChannel(channel.id);
       setTestResult(result);
-    } catch (error: any) {
+    } catch (error: Any) {
       setTestResult({ success: false, error: error.message });
     } finally {
       setTesting(false);
@@ -147,7 +147,7 @@ export function GoogleChatSettings({ onStatusChange }: GoogleChatSettingsProps) 
         await window.electronAPI.enableGatewayChannel(channel.id);
       }
       await loadChannel();
-    } catch (error: any) {
+    } catch (error: Any) {
       setTestResult({ success: false, error: error.message });
     } finally {
       setSaving(false);
@@ -167,7 +167,7 @@ export function GoogleChatSettings({ onStatusChange }: GoogleChatSettingsProps) 
       setChannel(null);
       setUsers([]);
       onStatusChange?.(false);
-    } catch (error: any) {
+    } catch (error: Any) {
       setTestResult({ success: false, error: error.message });
     } finally {
       setSaving(false);
@@ -184,7 +184,7 @@ export function GoogleChatSettings({ onStatusChange }: GoogleChatSettingsProps) 
       });
       setSecurityMode(mode);
       setChannel({ ...channel, securityMode: mode });
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to update security mode:", error);
     }
   };
@@ -198,7 +198,7 @@ export function GoogleChatSettings({ onStatusChange }: GoogleChatSettingsProps) 
       setPairingCode(code);
       // Default TTL is 5 minutes (300 seconds)
       setPairingExpiresAt(Date.now() + 5 * 60 * 1000);
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to generate pairing code:", error);
     } finally {
       setGeneratingCode(false);
@@ -218,7 +218,7 @@ export function GoogleChatSettings({ onStatusChange }: GoogleChatSettingsProps) 
         ...prev,
         [contextType]: updated,
       }));
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to update context policy:", error);
     } finally {
       setSavingPolicy(false);
@@ -231,7 +231,7 @@ export function GoogleChatSettings({ onStatusChange }: GoogleChatSettingsProps) 
     try {
       await window.electronAPI.revokeGatewayAccess(channel.id, userId);
       await loadChannel();
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to revoke access:", error);
     }
   };

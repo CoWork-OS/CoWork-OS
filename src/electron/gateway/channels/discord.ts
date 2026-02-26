@@ -873,7 +873,7 @@ export class DiscordAdapter implements ChannelAdapter {
     };
 
     const sent = await (channel as TextChannel | DMChannel | ThreadChannel).send({
-      poll: pollData as any,
+      poll: pollData as Any,
     });
 
     return sent.id;
@@ -1023,15 +1023,15 @@ export class DiscordAdapter implements ChannelAdapter {
 
     const out: MessageAttachment[] = [];
     for (const att of message.attachments.values()) {
-      const url = typeof (att as any)?.url === "string" ? String((att as any).url).trim() : "";
+      const url = typeof (att as Any)?.url === "string" ? String((att as Any).url).trim() : "";
       if (!url) continue;
 
-      const fileName = typeof (att as any)?.name === "string" ? (att as any).name : undefined;
+      const fileName = typeof (att as Any)?.name === "string" ? (att as Any).name : undefined;
       const mimeType =
-        typeof (att as any)?.contentType === "string" && (att as any).contentType.trim().length > 0
-          ? (att as any).contentType.trim()
+        typeof (att as Any)?.contentType === "string" && (att as Any).contentType.trim().length > 0
+          ? (att as Any).contentType.trim()
           : undefined;
-      const size = typeof (att as any)?.size === "number" ? (att as any).size : undefined;
+      const size = typeof (att as Any)?.size === "number" ? (att as Any).size : undefined;
 
       out.push({
         type: this.inferAttachmentType(mimeType, fileName),

@@ -64,7 +64,7 @@ export class AgentTeamItemRepository {
    */
   findById(id: string): AgentTeamItem | undefined {
     const stmt = this.db.prepare("SELECT * FROM agent_team_items WHERE id = ?");
-    const row = stmt.get(id) as any;
+    const row = stmt.get(id) as Any;
     return row ? this.mapRowToItem(row) : undefined;
   }
 
@@ -78,7 +78,7 @@ export class AgentTeamItemRepository {
       WHERE team_run_id = ?
       ORDER BY sort_order ASC, created_at ASC
     `);
-    const rows = stmt.all(teamRunId) as any[];
+    const rows = stmt.all(teamRunId) as Any[];
     return rows.map((row) => this.mapRowToItem(row));
   }
 
@@ -90,7 +90,7 @@ export class AgentTeamItemRepository {
     if (!existing) return undefined;
 
     const fields: string[] = [];
-    const values: any[] = [];
+    const values: Any[] = [];
 
     if (request.parentItemId !== undefined) {
       fields.push("parent_item_id = ?");
@@ -180,11 +180,11 @@ export class AgentTeamItemRepository {
       WHERE source_task_id = ?
       ORDER BY created_at ASC
     `);
-    const rows = stmt.all(sourceTaskId) as any[];
+    const rows = stmt.all(sourceTaskId) as Any[];
     return rows.map((row) => this.mapRowToItem(row));
   }
 
-  private mapRowToItem(row: any): AgentTeamItem {
+  private mapRowToItem(row: Any): AgentTeamItem {
     return {
       id: row.id,
       teamRunId: row.team_run_id,

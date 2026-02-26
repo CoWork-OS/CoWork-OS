@@ -172,7 +172,7 @@ export function BuiltinToolsSettings() {
   const handleRunCommandAutoApprove = async (enabled: boolean) => {
     if (!settings) return;
 
-    const nextAutoApprove = { ...(settings.toolAutoApprove || {}) };
+    const nextAutoApprove = { ...settings.toolAutoApprove };
     if (enabled) {
       nextAutoApprove.run_command = true;
     } else {
@@ -220,7 +220,7 @@ export function BuiltinToolsSettings() {
     if (!settings) return;
 
     const parsed = Number(value);
-    const nextTimeouts = { ...(settings.toolTimeouts || {}) };
+    const nextTimeouts = { ...settings.toolTimeouts };
 
     if (!value || !Number.isFinite(parsed) || parsed <= 0) {
       delete nextTimeouts.run_command;

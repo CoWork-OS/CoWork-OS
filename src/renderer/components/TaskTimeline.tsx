@@ -399,8 +399,8 @@ export function TaskTimeline({ events, agentContext, taskId, taskStatus }: TaskT
             {event.payload.plan?.steps && (
               <ul className="plan-steps">
                 {event.payload.plan.steps
-                  .filter((step: any) => !isVerificationStepDescription(step?.description))
-                  .map((step: any, i: number) => (
+                  .filter((step: Any) => !isVerificationStepDescription(step?.description))
+                  .map((step: Any, i: number) => (
                     <li key={i}>{step.description}</li>
                   ))}
               </ul>

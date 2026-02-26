@@ -16,7 +16,7 @@ export const GOOGLE_DRIVE_API_BASE = "https://www.googleapis.com/drive/v3";
 export const GOOGLE_DRIVE_UPLOAD_BASE = "https://www.googleapis.com/upload/drive/v3";
 const DEFAULT_TIMEOUT_MS = 20000;
 
-function parseJsonSafe(text: string): any | undefined {
+function parseJsonSafe(text: string): Any | undefined {
   const trimmed = text.trim();
   if (!trimmed) return undefined;
   try {
@@ -26,7 +26,7 @@ function parseJsonSafe(text: string): any | undefined {
   }
 }
 
-function formatDriveError(status: number, data: any, fallback?: string): string {
+function formatDriveError(status: number, data: Any, fallback?: string): string {
   const message = data?.error?.message || data?.message || fallback || "Google Drive API error";
   return `Google Drive API error ${status}: ${message}`;
 }
@@ -35,13 +35,13 @@ export interface GoogleDriveRequestOptions {
   method: "GET" | "POST" | "PATCH" | "DELETE";
   path: string;
   query?: Record<string, string | number | boolean | undefined>;
-  body?: Record<string, any>;
+  body?: Record<string, Any>;
   timeoutMs?: number;
 }
 
 export interface GoogleDriveRequestResult {
   status: number;
-  data?: any;
+  data?: Any;
   raw?: string;
 }
 
@@ -99,7 +99,7 @@ export async function googleDriveRequest(
         data: data ?? undefined,
         raw: rawText || undefined,
       };
-    } catch (error: any) {
+    } catch (error: Any) {
       if (error?.name === "AbortError") {
         throw new Error("Google Drive API request timed out");
       }
@@ -112,7 +112,7 @@ export async function googleDriveRequest(
   try {
     const accessToken = await getGoogleWorkspaceAccessToken(settings);
     return await requestOnce(accessToken);
-  } catch (error: any) {
+  } catch (error: Any) {
     if (error?.status === 401 && settings.refreshToken) {
       const refreshedToken = await refreshGoogleWorkspaceAccessToken(settings);
       return await requestOnce(refreshedToken);
@@ -166,7 +166,7 @@ export async function googleDriveUpload(
         data: dataJson ?? undefined,
         raw: rawText || undefined,
       };
-    } catch (error: any) {
+    } catch (error: Any) {
       if (error?.name === "AbortError") {
         throw new Error("Google Drive upload request timed out");
       }
@@ -179,7 +179,7 @@ export async function googleDriveUpload(
   try {
     const accessToken = await getGoogleWorkspaceAccessToken(settings);
     return await requestOnce(accessToken);
-  } catch (error: any) {
+  } catch (error: Any) {
     if (error?.status === 401 && settings.refreshToken) {
       const refreshedToken = await refreshGoogleWorkspaceAccessToken(settings);
       return await requestOnce(refreshedToken);
@@ -188,7 +188,7 @@ export async function googleDriveUpload(
   }
 }
 
-function extractUserInfo(data: any): { name?: string; userId?: string; email?: string } {
+function extractUserInfo(data: Any): { name?: string; userId?: string; email?: string } {
   if (!data || typeof data !== "object") return {};
   const user = data.user || data;
   const name = user.displayName || user.name || undefined;
@@ -229,7 +229,7 @@ export async function testGoogleWorkspaceConnection(
       userId: extracted.userId,
       email: extracted.email,
     };
-  } catch (error: any) {
+  } catch (error: Any) {
     return {
       success: false,
       error: error?.message || "Failed to connect to Google Workspace",

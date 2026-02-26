@@ -1,4 +1,4 @@
-import { ConversationMode } from "../../../shared/types";
+import { ConversationMode, TaskDomain } from "../../../shared/types";
 
 export type RoutedIntent =
   | "chat"
@@ -19,6 +19,7 @@ export interface IntentRoute {
   answerFirst: boolean;
   signals: string[];
   complexity: TaskComplexity;
+  domain: TaskDomain;
 }
 
 interface IntentScores {
@@ -34,6 +35,36 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 export class IntentRouter {
+  private static inferDomain(lower: string): TaskDomain {
+    const codeSignal =
+      /\b(code|coding|typescript|javascript|python|rust|java|node|repo|repository|branch|commit|pull request|pr|diff|test|build|compile|lint|debug|bug|stack trace|api|sdk)\b/.test(
+        lower,
+      ) ||
+      /`[^`]+`/.test(lower) ||
+      /\/[a-z0-9_./-]+/.test(lower);
+    if (codeSignal) return "code";
+
+    const operationsSignal =
+      /\b(deploy|deployment|docker|kubernetes|k8s|terraform|infra|infrastructure|server|production|staging|cloud|monitoring|on-call|incident|sre|devops)\b/.test(
+        lower,
+      );
+    if (operationsSignal) return "operations";
+
+    const writingSignal =
+      /\b(write|draft|email|memo|proposal|blog|copywriting|linkedin post|tweet|script|rewrite|edit tone|grammar)\b/.test(
+        lower,
+      );
+    if (writingSignal) return "writing";
+
+    const researchSignal =
+      /\b(research|investigate|look up|find out|analyze|analysis|compare|benchmark|sources?|citations?|market scan|trend)\b/.test(
+        lower,
+      );
+    if (researchSignal) return "research";
+
+    return "general";
+  }
+
   static route(title: string, prompt: string): IntentRoute {
     const text = `${title || ""}\n${prompt || ""}`.trim();
     const lower = text.toLowerCase();
@@ -105,7 +136,7 @@ export class IntentRouter {
       "execution",
       2,
       "path-or-command",
-      /`[^`]+`|\/[a-z0-9_.\-\/]+|\bnpm\b|\byarn\b|\bpnpm\b|\bgit\b/.test(lower),
+      /`[^`]+`|\/[a-z0-9_./-]+|\bnpm\b|\byarn\b|\bpnpm\b|\bgit\b/.test(lower),
     );
     add("advice", 1, "question-form", /\?/.test(text));
     add(
@@ -237,6 +268,8 @@ export class IntentRouter {
       complexity = "low";
     }
 
+    const domain = this.inferDomain(lower);
+
     return {
       intent,
       confidence,
@@ -244,6 +277,7 @@ export class IntentRouter {
       answerFirst,
       signals,
       complexity,
+      domain,
     };
   }
 }

@@ -137,7 +137,7 @@ export function BlueBubblesSettings({ onStatusChange }: BlueBubblesSettingsProps
       });
 
       await loadChannel();
-    } catch (error: any) {
+    } catch (error: Any) {
       setTestResult({ success: false, error: error.message });
     } finally {
       setSaving(false);
@@ -153,7 +153,7 @@ export function BlueBubblesSettings({ onStatusChange }: BlueBubblesSettingsProps
 
       const result = await window.electronAPI.testGatewayChannel(channel.id);
       setTestResult(result);
-    } catch (error: any) {
+    } catch (error: Any) {
       setTestResult({ success: false, error: error.message });
     } finally {
       setTesting(false);
@@ -171,7 +171,7 @@ export function BlueBubblesSettings({ onStatusChange }: BlueBubblesSettingsProps
         await window.electronAPI.enableGatewayChannel(channel.id);
       }
       await loadChannel();
-    } catch (error: any) {
+    } catch (error: Any) {
       setTestResult({ success: false, error: error.message });
     } finally {
       setSaving(false);
@@ -191,7 +191,7 @@ export function BlueBubblesSettings({ onStatusChange }: BlueBubblesSettingsProps
       setChannel(null);
       setUsers([]);
       onStatusChange?.(false);
-    } catch (error: any) {
+    } catch (error: Any) {
       setTestResult({ success: false, error: error.message });
     } finally {
       setSaving(false);
@@ -208,7 +208,7 @@ export function BlueBubblesSettings({ onStatusChange }: BlueBubblesSettingsProps
       });
       setSecurityMode(newMode);
       setChannel({ ...channel, securityMode: newMode });
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to update security mode:", error);
     }
   };
@@ -220,12 +220,12 @@ export function BlueBubblesSettings({ onStatusChange }: BlueBubblesSettingsProps
       await window.electronAPI.updateGatewayChannel({
         id: channel.id,
         config: {
-          ...(channel.config || {}),
+          ...channel.config,
           ...updates,
         },
       });
       await loadChannel();
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to update BlueBubbles config:", error);
       setTestResult({ success: false, error: error.message });
     } finally {
@@ -242,7 +242,7 @@ export function BlueBubblesSettings({ onStatusChange }: BlueBubblesSettingsProps
       setPairingCode(code);
       // Default TTL is 5 minutes (300 seconds)
       setPairingExpiresAt(Date.now() + 5 * 60 * 1000);
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to generate pairing code:", error);
     } finally {
       setGeneratingCode(false);
@@ -262,7 +262,7 @@ export function BlueBubblesSettings({ onStatusChange }: BlueBubblesSettingsProps
         ...prev,
         [contextType]: updated,
       }));
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to update context policy:", error);
     } finally {
       setSavingPolicy(false);
@@ -275,7 +275,7 @@ export function BlueBubblesSettings({ onStatusChange }: BlueBubblesSettingsProps
     try {
       await window.electronAPI.revokeGatewayAccess(channel.id, channelUserId);
       await loadChannel();
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to revoke access:", error);
     }
   };

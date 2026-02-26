@@ -77,7 +77,7 @@ describe("executor-loop-utils guardrails", () => {
 
     expect(injected).toBe(true);
     expect(messages.length).toBe(1);
-    const text = String((messages[0].content as any[])[0]?.text || "");
+    const text = String((messages[0].content as Any[])[0]?.text || "");
     expect(text).toContain("repeatedly probing the same target");
   });
 
@@ -129,7 +129,7 @@ describe("executor-loop-utils guardrails", () => {
 
     expect(injected).toBe(true);
     expect(messages.length).toBe(1);
-    const text = String((messages[0].content as any[])[0]?.text || "");
+    const text = String((messages[0].content as Any[])[0]?.text || "");
     expect(text).toContain("[LOW_PROGRESS_ESCALATION]");
   });
 
@@ -148,7 +148,7 @@ describe("executor-loop-utils guardrails", () => {
 
     expect(injected).toBe(true);
     expect(messages.length).toBe(1);
-    expect(String((messages[0].content as any[])[0]?.text || "")).toContain("repeated tool-use");
+    expect(String((messages[0].content as Any[])[0]?.text || "")).toContain("repeated tool-use");
   });
 
   it("locks follow-up tool calls after persistent tool_use streak", () => {

@@ -65,7 +65,7 @@ describe("TailscaleSettingsManager", () => {
     mockStoredSettings = undefined;
     TailscaleSettingsManager.clearCache();
     // Reset migration flag
-    (TailscaleSettingsManager as any).migrationCompleted = false;
+    (TailscaleSettingsManager as Any).migrationCompleted = false;
   });
 
   describe("loadSettings", () => {
@@ -110,7 +110,7 @@ describe("TailscaleSettingsManager", () => {
       mockStoredSettings = { mode: "serve" };
       mockRepositoryLoad.mockReturnValue(mockStoredSettings);
 
-      const settings1 = TailscaleSettingsManager.loadSettings();
+      const _settings1 = TailscaleSettingsManager.loadSettings();
       mockStoredSettings = { mode: "funnel" }; // Change mock
       mockRepositoryLoad.mockReturnValue(mockStoredSettings);
       const settings2 = TailscaleSettingsManager.loadSettings();

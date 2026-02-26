@@ -115,7 +115,7 @@ describe("ControlPlaneSettingsManager", () => {
     mockStoredSettings = undefined;
     writeCount = 0;
     ControlPlaneSettingsManager.clearCache();
-    (ControlPlaneSettingsManager as any).migrationCompleted = false;
+    (ControlPlaneSettingsManager as Any).migrationCompleted = false;
   });
 
   describe("loadSettings", () => {
@@ -166,7 +166,7 @@ describe("ControlPlaneSettingsManager", () => {
     it("should cache loaded settings", () => {
       mockStoredSettings = { enabled: true };
 
-      const settings1 = ControlPlaneSettingsManager.loadSettings();
+      const _settings1 = ControlPlaneSettingsManager.loadSettings();
       mockStoredSettings = { enabled: false }; // Change mock
       const settings2 = ControlPlaneSettingsManager.loadSettings();
 
@@ -184,8 +184,8 @@ describe("ControlPlaneSettingsManager", () => {
       ControlPlaneSettingsManager.saveSettings(settings);
 
       expect(writeCount).toBe(1);
-      expect((mockStoredSettings as any).enabled).toBe(true);
-      expect((mockStoredSettings as any).port).toBe(8080);
+      expect((mockStoredSettings as Any).enabled).toBe(true);
+      expect((mockStoredSettings as Any).port).toBe(8080);
     });
 
     it("should update cache after save", () => {
@@ -202,8 +202,8 @@ describe("ControlPlaneSettingsManager", () => {
     it("should update and save settings", () => {
       ControlPlaneSettingsManager.updateSettings({ enabled: true, port: 9999 });
 
-      expect((mockStoredSettings as any).enabled).toBe(true);
-      expect((mockStoredSettings as any).port).toBe(9999);
+      expect((mockStoredSettings as Any).enabled).toBe(true);
+      expect((mockStoredSettings as Any).port).toBe(9999);
     });
 
     it("should merge with existing settings", () => {
@@ -212,8 +212,8 @@ describe("ControlPlaneSettingsManager", () => {
 
       ControlPlaneSettingsManager.updateSettings({ enabled: true });
 
-      expect((mockStoredSettings as any).enabled).toBe(true);
-      expect((mockStoredSettings as any).port).toBe(8080); // preserved
+      expect((mockStoredSettings as Any).enabled).toBe(true);
+      expect((mockStoredSettings as Any).port).toBe(8080); // preserved
     });
 
     it("should handle nested tailscale updates", () => {
@@ -226,7 +226,7 @@ describe("ControlPlaneSettingsManager", () => {
         tailscale: { mode: "funnel", resetOnExit: true },
       });
 
-      expect(((mockStoredSettings as any).tailscale as any).mode).toBe("funnel");
+      expect(((mockStoredSettings as Any).tailscale as Any).mode).toBe("funnel");
     });
   });
 
@@ -403,9 +403,9 @@ describe("ControlPlaneSettingsManager", () => {
 
       ControlPlaneSettingsManager.updateSettings({ remote: remoteConfig });
 
-      expect((mockStoredSettings as any).remote).toBeDefined();
-      expect(((mockStoredSettings as any).remote as any).url).toBe("ws://remote-host:18789");
-      expect(((mockStoredSettings as any).remote as any).deviceName).toBe("Test Client");
+      expect((mockStoredSettings as Any).remote).toBeDefined();
+      expect(((mockStoredSettings as Any).remote as Any).url).toBe("ws://remote-host:18789");
+      expect(((mockStoredSettings as Any).remote as Any).deviceName).toBe("Test Client");
     });
 
     it("should load remote config", () => {
@@ -491,8 +491,8 @@ describe("ControlPlaneSettingsManager", () => {
         remote: { url: "ws://new-host:18789", token: "new-token", deviceName: "New Name" },
       });
 
-      expect(((mockStoredSettings as any).remote as any).url).toBe("ws://new-host:18789");
-      expect(((mockStoredSettings as any).remote as any).deviceName).toBe("New Name");
+      expect(((mockStoredSettings as Any).remote as Any).url).toBe("ws://new-host:18789");
+      expect(((mockStoredSettings as Any).remote as Any).deviceName).toBe("New Name");
     });
   });
 });

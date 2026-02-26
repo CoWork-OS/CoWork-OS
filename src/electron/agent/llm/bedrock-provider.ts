@@ -29,7 +29,7 @@ export class BedrockProvider implements LLMProvider {
   private client: BedrockRuntimeClient;
   private model: string;
   private region: string;
-  private credentials?: any;
+  private credentials?: Any;
   private resolvedModelCache = new Map<string, string>();
   private inferenceProfileCache?: { fetchedAt: number; profiles: InferenceProfileCandidate[] };
   private static readonly CONTINUE_PLACEHOLDER_TEXT = "I understand. Let me continue.";
@@ -97,7 +97,7 @@ export class BedrockProvider implements LLMProvider {
         request.signal ? { abortSignal: request.signal } : undefined,
       );
       return this.convertResponse(response, toolNameMap);
-    } catch (error: any) {
+    } catch (error: Any) {
       // Handle abort errors gracefully
       if (error.name === "AbortError" || error.message?.includes("aborted")) {
         console.log(`${logTag} Request aborted`);
@@ -164,7 +164,7 @@ export class BedrockProvider implements LLMProvider {
 
       await this.client.send(command);
       return { success: true };
-    } catch (error: any) {
+    } catch (error: Any) {
       // Provide helpful error message for common issues
       let errorMessage = error.message || "Failed to connect to AWS Bedrock";
 
@@ -191,7 +191,7 @@ export class BedrockProvider implements LLMProvider {
             // Persist within this provider instance for subsequent tests.
             this.model = fallback;
             return { success: true };
-          } catch (fallbackError: any) {
+          } catch (fallbackError: Any) {
             errorMessage = fallbackError?.message || errorMessage;
           }
         }
@@ -306,7 +306,7 @@ export class BedrockProvider implements LLMProvider {
       const client = new BedrockClient({
         region: this.region,
         ...(this.credentials && { credentials: this.credentials }),
-      } as any);
+      } as Any);
 
       const results: InferenceProfileCandidate[] = [];
       let nextToken: string | undefined;
@@ -321,12 +321,12 @@ export class BedrockProvider implements LLMProvider {
           }),
         );
 
-        const profiles = (response.inferenceProfileSummaries || []) as any[];
+        const profiles = (response.inferenceProfileSummaries || []) as Any[];
         for (const p of profiles) {
           if (p?.status && p.status !== "ACTIVE") continue;
 
           const modelArns = Array.isArray(p?.models)
-            ? p.models.map((m: any) => String(m?.modelArn || "")).filter(Boolean)
+            ? p.models.map((m: Any) => String(m?.modelArn || "")).filter(Boolean)
             : [];
           const hasClaude = modelArns.some((arn: string) => {
             const lower = arn.toLowerCase();
@@ -349,7 +349,7 @@ export class BedrockProvider implements LLMProvider {
 
       this.inferenceProfileCache = { fetchedAt: now, profiles: results };
       return results;
-    } catch (err) {
+    } catch  {
       // If the caller doesn't have permissions to list inference profiles, we can't auto-resolve.
       this.inferenceProfileCache = { fetchedAt: now, profiles: [] };
       return [];
@@ -484,7 +484,7 @@ export class BedrockProvider implements LLMProvider {
     messages: LLMMessage[];
     mergedTurns: number;
   } {
-    type Normalized = { role: "user" | "assistant"; blocks: any[] };
+    type Normalized = { role: "user" | "assistant"; blocks: Any[] };
 
     const merged: Normalized[] = [];
     let mergedTurns = 0;
@@ -582,8 +582,8 @@ export class BedrockProvider implements LLMProvider {
       const prev = out.length > 0 ? out[out.length - 1] : null;
       const allowedToolUseIds = this.collectToolUseIds(prev);
       const seenToolUseIds = new Set<string>();
-      const validToolResultBlocks: any[] = [];
-      const trailingUserBlocks: any[] = [];
+      const validToolResultBlocks: Any[] = [];
+      const trailingUserBlocks: Any[] = [];
 
       for (const block of blocks) {
         if (block?.type !== "tool_result") {
@@ -626,7 +626,7 @@ export class BedrockProvider implements LLMProvider {
     return { messages: out, rewrittenBlocks };
   }
 
-  private messageContentToBlocks(content: LLMMessage["content"]): any[] {
+  private messageContentToBlocks(content: LLMMessage["content"]): Any[] {
     if (typeof content === "string") {
       if (!content) return [];
       return [{ type: "text", text: content }];
@@ -635,11 +635,11 @@ export class BedrockProvider implements LLMProvider {
     return content.filter(Boolean);
   }
 
-  private blocksToMessageContent(blocks: any[]): LLMMessage["content"] {
+  private blocksToMessageContent(blocks: Any[]): LLMMessage["content"] {
     if (blocks.length === 1 && blocks[0]?.type === "text") {
       return String(blocks[0].text || "");
     }
-    return blocks as any;
+    return blocks as Any;
   }
 
   private collectToolUseIds(message: LLMMessage | null): Set<string> {
@@ -647,7 +647,7 @@ export class BedrockProvider implements LLMProvider {
       return new Set<string>();
     }
     const ids = new Set<string>();
-    for (const block of message.content as any[]) {
+    for (const block of message.content as Any[]) {
       if (block?.type !== "tool_use") continue;
       const id = String(block.id || "").trim();
       if (id) ids.add(id);
@@ -660,7 +660,7 @@ export class BedrockProvider implements LLMProvider {
       return new Set<string>();
     }
     const ids = new Set<string>();
-    for (const block of message.content as any[]) {
+    for (const block of message.content as Any[]) {
       if (block?.type !== "tool_result") continue;
       const id = String(block.tool_use_id || "").trim();
       if (id) ids.add(id);
@@ -729,7 +729,7 @@ export class BedrockProvider implements LLMProvider {
     };
   }
 
-  private convertResponse(response: any, toolNameMap?: ToolNameMap): LLMResponse {
+  private convertResponse(response: Any, toolNameMap?: ToolNameMap): LLMResponse {
     const content: LLMContent[] = [];
 
     if (response.output?.message?.content) {

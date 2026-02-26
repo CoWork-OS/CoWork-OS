@@ -6,7 +6,7 @@
 
 import { WebSocket } from "ws";
 import { randomUUID } from "crypto";
-import { Frame, EventFrame, serializeFrame, createEventFrame, Events } from "./protocol";
+import { Frame, EventFrame as _EventFrame, serializeFrame, createEventFrame, Events } from "./protocol";
 
 /**
  * Client authentication state

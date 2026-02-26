@@ -77,7 +77,7 @@ export class ImageTools {
         });
       }
     } else {
-      const payload: Record<string, any> = {
+      const payload: Record<string, Any> = {
         action: "generate_image",
         error: result.error,
       };

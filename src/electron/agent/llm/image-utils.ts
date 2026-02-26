@@ -149,7 +149,7 @@ export function stripImagesForUnsupportedProvider(
 
   return messages.map((msg) => {
     if (typeof msg.content === "string") return msg;
-    const newContent = (msg.content as any[]).map((item: any) => {
+    const newContent = (msg.content as Any[]).map((item: Any) => {
       if (item.type === "image") {
         return { type: "text" as const, text: imageToTextFallback(item) };
       }

@@ -40,7 +40,7 @@ const programCache = new MontyProgramCache(24);
 type CachedFile = { mtimeMs: number; code: string; hash: string };
 const fileCache = new Map<string, CachedFile>();
 
-function summarizeAttachments(attachments?: MessageAttachment[]): any[] {
+function summarizeAttachments(attachments?: MessageAttachment[]): Any[] {
   if (!attachments || attachments.length === 0) return [];
   return attachments.slice(0, 20).map((a) => ({
     type: a.type,
@@ -53,7 +53,7 @@ function summarizeAttachments(attachments?: MessageAttachment[]): any[] {
 
 function normalizeRuleResult(raw: unknown): RouterRuleResult | null {
   if (!raw || typeof raw !== "object") return null;
-  const obj = raw as any;
+  const obj = raw as Any;
   const action = typeof obj.action === "string" ? obj.action : "";
 
   if (action === "pass") return { action: "pass" };
@@ -94,10 +94,10 @@ function normalizeRuleResult(raw: unknown): RouterRuleResult | null {
 
 async function loadRulesCode(workspacePath: string): Promise<CachedFile | null> {
   const absPath = path.join(workspacePath, ".cowork", "router", "rules.monty");
-  let stat: any;
+  let stat: Any;
   try {
     stat = await fs.stat(absPath);
-  } catch (err: any) {
+  } catch (err: Any) {
     if (err?.code === "ENOENT") return null;
     throw err;
   }
@@ -133,7 +133,7 @@ export async function evaluateWorkspaceRouterRules(args: {
 
   const stdlib = createMontySafeStdlib();
   const externalFunctions = Object.fromEntries(
-    Object.entries(stdlib).map(([k, fn]) => [k, fn as any]),
+    Object.entries(stdlib).map(([k, fn]) => [k, fn as Any]),
   );
 
   const input = {

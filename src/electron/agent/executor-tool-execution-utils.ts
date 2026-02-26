@@ -1,7 +1,7 @@
 import { truncateToolResult } from "./context-manager";
 import type { LLMToolResult } from "./llm";
 
-export function formatToolInputForLog(input: any, maxLength = 200): string {
+export function formatToolInputForLog(input: Any, maxLength = 200): string {
   try {
     const serialized = JSON.stringify(input);
     return serialized.length > maxLength ? `${serialized.slice(0, maxLength)}...` : serialized;
@@ -10,7 +10,7 @@ export function formatToolInputForLog(input: any, maxLength = 200): string {
   }
 }
 
-function prependRunCommandTerminationContext(sanitizedResult: string, result: any): string {
+function prependRunCommandTerminationContext(sanitizedResult: string, result: Any): string {
   if (!result || !result.terminationReason) return sanitizedResult;
 
   let contextPrefix = "";
@@ -37,10 +37,10 @@ function prependRunCommandTerminationContext(sanitizedResult: string, result: an
 export function buildNormalizedToolResult(opts: {
   toolName: string;
   toolUseId: string;
-  result: any;
+  result: Any;
   rawResult: string;
   sanitizeToolResult: (toolName: string, resultText: string) => string;
-  getToolFailureReason: (result: any, fallback: string) => string;
+  getToolFailureReason: (result: Any, fallback: string) => string;
   includeRunCommandTerminationContext?: boolean;
 }): { toolResult: LLMToolResult; resultIsError: boolean; toolFailureReason: string } {
   const truncatedResult = truncateToolResult(opts.rawResult);
@@ -93,13 +93,13 @@ export function normalizeToolUseName(opts: {
 
 export function inferAndNormalizeToolInput(opts: {
   toolName: string;
-  input: any;
+  input: Any;
   inferMissingParameters: (
     toolName: string,
-    input: any,
-  ) => { modified: boolean; input: any; inference?: string };
+    input: Any,
+  ) => { modified: boolean; input: Any; inference?: string };
   emitParameterInference: (tool: string, inference: string) => void;
-}): any {
+}): Any {
   const inference = opts.inferMissingParameters(opts.toolName, opts.input);
   if (!inference.modified) {
     return opts.input;
@@ -264,10 +264,10 @@ export function buildWatchSkipBlockedArtifactToolResult(opts: {
 export function recordToolFailureOutcome(opts: {
   toolName: string;
   failureReason: string;
-  result: any;
+  result: Any;
   persistentToolFailures: Map<string, number>;
   recordFailure: (toolName: string, error: string) => boolean;
-  isHardToolFailure: (toolName: string, result: any, reason: string) => boolean;
+  isHardToolFailure: (toolName: string, result: Any, reason: string) => boolean;
 }): {
   shouldDisable: boolean;
   isHardFailure: boolean;
@@ -284,7 +284,7 @@ export function recordToolFailureOutcome(opts: {
   };
 }
 
-export function getToolInputValidationError(toolName: string, input: any): string | null {
+export function getToolInputValidationError(toolName: string, input: Any): string | null {
   if (toolName === "create_document") {
     if (!input?.filename) return "create_document requires a filename";
     if (!input?.format) return "create_document requires a format (docx or pdf)";
@@ -313,7 +313,7 @@ export function getToolInputValidationError(toolName: string, input: any): strin
   return null;
 }
 
-export function isHardToolFailure(toolName: string, result: any, failureReason = ""): boolean {
+export function isHardToolFailure(toolName: string, result: Any, failureReason = ""): boolean {
   if (!result || result.success !== false) {
     return false;
   }
@@ -342,7 +342,7 @@ export function isHardToolFailure(toolName: string, result: any, failureReason =
   );
 }
 
-export function getToolFailureReason(result: any, fallback: string): string {
+export function getToolFailureReason(result: Any, fallback: string): string {
   if (typeof result?.error === "string" && result.error.trim()) {
     return result.error;
   }

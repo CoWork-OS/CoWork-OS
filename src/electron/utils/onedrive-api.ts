@@ -7,7 +7,7 @@ import { OneDriveConnectionTestResult, OneDriveSettingsData } from "../../shared
 export const ONEDRIVE_API_BASE = "https://graph.microsoft.com/v1.0";
 const DEFAULT_TIMEOUT_MS = 20000;
 
-function parseJsonSafe(text: string): any | undefined {
+function parseJsonSafe(text: string): Any | undefined {
   const trimmed = text.trim();
   if (!trimmed) return undefined;
   try {
@@ -17,7 +17,7 @@ function parseJsonSafe(text: string): any | undefined {
   }
 }
 
-function formatGraphError(status: number, data: any, fallback?: string): string {
+function formatGraphError(status: number, data: Any, fallback?: string): string {
   const message = data?.error?.message || data?.message || fallback || "Microsoft Graph error";
   return `Microsoft Graph error ${status}: ${message}`;
 }
@@ -26,14 +26,14 @@ export interface OneDriveRequestOptions {
   method: "GET" | "POST" | "PATCH" | "DELETE" | "PUT";
   path: string;
   query?: Record<string, string | number | boolean | undefined>;
-  body?: any;
+  body?: Any;
   headers?: Record<string, string>;
   timeoutMs?: number;
 }
 
 export interface OneDriveRequestResult {
   status: number;
-  data?: any;
+  data?: Any;
   raw?: string;
 }
 
@@ -59,7 +59,7 @@ export async function onedriveRequest(
 
   const headers: Record<string, string> = {
     Authorization: `Bearer ${settings.accessToken}`,
-    ...(options.headers || {}),
+    ...options.headers,
   };
 
   const isBinaryBody =
@@ -94,7 +94,7 @@ export async function onedriveRequest(
       data: data ?? undefined,
       raw: rawText || undefined,
     };
-  } catch (error: any) {
+  } catch (error: Any) {
     if (error?.name === "AbortError") {
       throw new Error("OneDrive API request timed out");
     }
@@ -104,7 +104,7 @@ export async function onedriveRequest(
   }
 }
 
-function extractDriveOwner(data: any): { name?: string; userId?: string; driveId?: string } {
+function extractDriveOwner(data: Any): { name?: string; userId?: string; driveId?: string } {
   if (!data || typeof data !== "object") return {};
   const name = data?.owner?.user?.displayName || data?.owner?.user?.id || undefined;
   const userId = data?.owner?.user?.id || undefined;
@@ -124,7 +124,7 @@ export async function testOneDriveConnection(
       userId: extracted.userId,
       driveId: extracted.driveId,
     };
-  } catch (error: any) {
+  } catch (error: Any) {
     return {
       success: false,
       error: error?.message || "Failed to connect to OneDrive",

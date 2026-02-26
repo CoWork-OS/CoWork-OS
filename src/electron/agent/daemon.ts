@@ -46,7 +46,7 @@ import {
 } from "../../shared/types";
 import { TaskExecutor } from "./executor";
 import { TaskQueueManager } from "./queue-manager";
-import { approvalIdempotency, taskIdempotency, IdempotencyManager } from "../security/concurrency";
+import { approvalIdempotency, taskIdempotency as _taskIdempotency, IdempotencyManager } from "../security/concurrency";
 import { MemoryService } from "../memory/MemoryService";
 import { PlaybookService } from "../memory/PlaybookService";
 import { UserProfileService } from "../memory/UserProfileService";
@@ -100,10 +100,11 @@ interface CachedExecutor {
   status: "active" | "completed";
 }
 
-function getAllElectronWindows(): any[] {
+function getAllElectronWindows(): Any[] {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const electron = require("electron") as any;
+// oxlint-disable-next-line typescript-eslint(no-require-imports)
+    const electron = require("electron") as Any;
     const BrowserWindow = electron?.BrowserWindow;
     if (BrowserWindow?.getAllWindows) {
       return BrowserWindow.getAllWindows();
@@ -240,7 +241,7 @@ export class AgentDaemon extends EventEmitter {
       typeof role.providerType === "string" &&
       role.providerType.trim().length > 0
     ) {
-      nextAgentConfig.providerType = role.providerType.trim() as any;
+      nextAgentConfig.providerType = role.providerType.trim() as Any;
       changed = true;
     }
 
@@ -258,7 +259,7 @@ export class AgentDaemon extends EventEmitter {
       typeof role.personalityId === "string" &&
       role.personalityId.trim().length > 0
     ) {
-      nextAgentConfig.personalityId = role.personalityId.trim() as any;
+      nextAgentConfig.personalityId = role.personalityId.trim() as Any;
       changed = true;
     }
 
@@ -330,6 +331,12 @@ export class AgentDaemon extends EventEmitter {
     const agentConfig = TaskStrategyService.applyToAgentConfig(input.agentConfig, strategy);
     // Store detected intent for intent-based tool filtering
     agentConfig.taskIntent = route.intent;
+    if (!agentConfig.taskDomain || agentConfig.taskDomain === "auto") {
+      agentConfig.taskDomain = route.domain;
+    }
+    if (!agentConfig.executionMode) {
+      agentConfig.executionMode = strategy.executionMode;
+    }
     const relationshipContext = RelationshipMemoryService.buildPromptContext({
       maxPerLayer: 2,
       maxChars: 1200,
@@ -556,7 +563,10 @@ export class AgentDaemon extends EventEmitter {
     }
     if (runtimeStrategy.promptChanged || runtimeStrategy.agentConfigChanged) {
       this.logEvent(effectiveTask.id, "log", {
-        message: `Execution strategy active: intent=${runtimeStrategy.route.intent}, mode=${runtimeStrategy.strategy.conversationMode}, answerFirst=${runtimeStrategy.strategy.answerFirst}`,
+        message:
+          `Execution strategy active: intent=${runtimeStrategy.route.intent}, ` +
+          `domain=${runtimeStrategy.strategy.taskDomain}, convoMode=${runtimeStrategy.strategy.conversationMode}, ` +
+          `execMode=${runtimeStrategy.strategy.executionMode}, answerFirst=${runtimeStrategy.strategy.answerFirst}`,
       });
     }
 
@@ -615,7 +625,7 @@ export class AgentDaemon extends EventEmitter {
         console.log(
           `[AgentDaemon] Worktree created: branch=${worktreeInfo.branchName}, path=${worktreeInfo.worktreePath}`,
         );
-      } catch (error: any) {
+      } catch (error: Any) {
         // Non-fatal: fall back to shared workspace
         console.error(
           `[AgentDaemon] Worktree creation failed for task ${executionTask.id}:`,
@@ -639,7 +649,7 @@ export class AgentDaemon extends EventEmitter {
         this.pendingTaskImages.delete(executionTask.id);
       }
       console.log(`[AgentDaemon] TaskExecutor created successfully`);
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error(`[AgentDaemon] Task ${effectiveTask.id} failed to initialize:`, error);
       this.taskRepo.update(effectiveTask.id, {
         status: "failed",
@@ -706,7 +716,7 @@ export class AgentDaemon extends EventEmitter {
       try {
         console.log(`[AgentDaemon] Resuming interrupted task ${task.id}: ${task.title}`);
         await this.resumeInterruptedTask(task);
-      } catch (error: any) {
+      } catch (error: Any) {
         console.error(`[AgentDaemon] Failed to resume task ${task.id}:`, error);
         this.taskRepo.update(task.id, {
           status: "failed",
@@ -1006,7 +1016,7 @@ export class AgentDaemon extends EventEmitter {
     let executor: TaskExecutor;
     try {
       ({ effectiveTask, executor } = this.createContinuationExecutor(task, events));
-    } catch (error: any) {
+    } catch (error: Any) {
       const message = error?.message || String(error);
       this.taskRepo.update(task.id, {
         status: "failed",
@@ -1123,7 +1133,9 @@ export class AgentDaemon extends EventEmitter {
       ...(params.source ? { source: params.source } : {}),
     });
     this.logEvent(task.id, "log", {
-      message: `Intent routed: ${derived.route.intent} (${derived.strategy.conversationMode})`,
+      message:
+        `Intent routed: ${derived.route.intent} | domain=${derived.route.domain} | ` +
+        `convoMode=${derived.strategy.conversationMode} | execMode=${derived.strategy.executionMode}`,
       confidence: Number(derived.route.confidence.toFixed(2)),
       signals: derived.route.signals,
     });
@@ -1751,13 +1763,13 @@ export class AgentDaemon extends EventEmitter {
     taskId: string,
     type: string,
     description: string,
-    details: any,
+    details: Any,
   ): Promise<boolean> {
     // Session-level auto-approve (set via "Approve all" UI button)
     if (this.sessionAutoApproveAll) {
       const approval = this.approvalRepo.create({
         taskId,
-        type: type as any,
+        type: type as Any,
         description,
         details,
         status: "approved",
@@ -1780,7 +1792,7 @@ export class AgentDaemon extends EventEmitter {
     if (task?.agentConfig?.autonomousMode) {
       const approval = this.approvalRepo.create({
         taskId,
-        type: type as any,
+        type: type as Any,
         description,
         details,
         status: "approved",
@@ -1800,7 +1812,7 @@ export class AgentDaemon extends EventEmitter {
 
     const approval = this.approvalRepo.create({
       taskId,
-      type: type as any,
+      type: type as Any,
       description,
       details,
       status: "pending",
@@ -1906,7 +1918,7 @@ export class AgentDaemon extends EventEmitter {
   /**
    * Log an event for a task
    */
-  logEvent(taskId: string, type: string, payload: any): void {
+  logEvent(taskId: string, type: string, payload: Any): void {
     // Streaming progress events are ephemeral UI state (~3/sec).
     // Skip DB persistence, activity logging, and memory capture.
     if (type === "llm_streaming") {
@@ -1919,7 +1931,7 @@ export class AgentDaemon extends EventEmitter {
     this.eventRepo.create({
       taskId,
       timestamp: Date.now(),
-      type: type as any,
+      type: type as Any,
       payload,
     });
     this.logActivityForEvent(taskId, type, payload);
@@ -1948,7 +1960,7 @@ export class AgentDaemon extends EventEmitter {
    * Check if a task event from a sub-agent task should be captured as a
    * collaborative thought for its team run.
    */
-  private maybeEmitTeamThought(taskId: string, eventType: string, payload: any): void {
+  private maybeEmitTeamThought(taskId: string, eventType: string, payload: Any): void {
     if (!this.teamOrchestrator) return;
 
     const task = this.taskRepo.findById(taskId);
@@ -2062,7 +2074,7 @@ export class AgentDaemon extends EventEmitter {
         runId: run.id,
         thought,
       });
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("[AgentDaemon] Team thought capture failed:", error?.message);
     }
   }
@@ -2087,7 +2099,7 @@ export class AgentDaemon extends EventEmitter {
    * Forward streaming progress from a child task to the collaborative/multi-LLM
    * thought panel as an ephemeral streaming indicator (no DB write).
    */
-  private maybeEmitTeamStreamingProgress(taskId: string, payload: any): void {
+  private maybeEmitTeamStreamingProgress(taskId: string, payload: Any): void {
     if (!this.teamOrchestrator) return;
 
     const task = this.taskRepo.findById(taskId);
@@ -2169,14 +2181,14 @@ export class AgentDaemon extends EventEmitter {
       type: "team_thought_streaming",
       timestamp: Date.now(),
       runId: run.id,
-      thought: syntheticThought as any,
+      thought: syntheticThought as Any,
     });
   }
 
   /**
    * Capture task event to memory system for cross-session context
    */
-  private async captureToMemory(taskId: string, type: string, payload: any): Promise<void> {
+  private async captureToMemory(taskId: string, type: string, payload: Any): Promise<void> {
     // Map event types to memory types
     const memoryTypeMap: Record<string, MemoryType> = {
       tool_call: "observation",
@@ -2307,7 +2319,7 @@ export class AgentDaemon extends EventEmitter {
   /**
    * Log notable task events to the Activity feed
    */
-  private logActivityForEvent(taskId: string, type: string, payload: any): void {
+  private logActivityForEvent(taskId: string, type: string, payload: Any): void {
     const task = this.taskRepo.findById(taskId);
     if (!task) return;
 
@@ -2345,7 +2357,7 @@ export class AgentDaemon extends EventEmitter {
   private buildActivityFromEvent(
     task: Task,
     type: string,
-    payload: any,
+    payload: Any,
   ): CreateActivityRequest | undefined {
     const actorType: ActivityActorType = task.assignedAgentRoleId ? "agent" : "system";
     const agentRoleId = task.assignedAgentRoleId;
@@ -2543,7 +2555,7 @@ export class AgentDaemon extends EventEmitter {
   /**
    * Emit event to renderer process and local listeners
    */
-  private emitTaskEvent(taskId: string, type: string, payload: any): void {
+  private emitTaskEvent(taskId: string, type: string, payload: Any): void {
     // Emit to local EventEmitter listeners (for gateway integration)
     try {
       this.emit(type, { taskId, ...payload });
@@ -2638,7 +2650,7 @@ export class AgentDaemon extends EventEmitter {
         success: true;
         period: string;
         range: { startMs: number; endMs: number; startIso: string; endIso: string };
-        tasks: any[];
+        tasks: Any[];
       }
     | { success: false; error: string } {
     try {
@@ -2751,7 +2763,7 @@ export class AgentDaemon extends EventEmitter {
       const lastAssistant = new Map<string, string>();
       const lastUser = new Map<string, string>();
       for (const evt of messageEvents) {
-        const msg = (evt.payload as any)?.message ?? (evt.payload as any)?.content;
+        const msg = (evt.payload as Any)?.message ?? (evt.payload as Any)?.content;
         const text = typeof msg === "string" ? msg : "";
         if (!text) continue;
         if (evt.type === "assistant_message") lastAssistant.set(evt.taskId, truncate(text, 900));
@@ -2781,7 +2793,7 @@ export class AgentDaemon extends EventEmitter {
         },
         tasks: items,
       };
-    } catch (error: any) {
+    } catch (error: Any) {
       return { success: false, error: error?.message ? String(error.message) : String(error) };
     }
   }
@@ -2803,8 +2815,8 @@ export class AgentDaemon extends EventEmitter {
         success: true;
         period: string;
         range: { startMs: number; endMs: number; startIso: string; endIso: string };
-        stats: any;
-        events: any[];
+        stats: Any;
+        events: Any[];
       }
     | { success: false; error: string } {
     try {
@@ -2923,7 +2935,7 @@ export class AgentDaemon extends EventEmitter {
         WHERE e.timestamp >= ? AND e.timestamp < ?
       `;
 
-      const args: any[] = [startMs, endMs];
+      const args: Any[] = [startMs, endMs];
       if (workspaceFilter) {
         sql += " AND t.workspace_id = ?";
         args.push(workspaceFilter);
@@ -2959,7 +2971,7 @@ export class AgentDaemon extends EventEmitter {
       let filesModified = 0;
       let filesDeleted = 0;
 
-      const parseJson = (raw: unknown): any => {
+      const parseJson = (raw: unknown): Any => {
         if (typeof raw !== "string" || !raw) return {};
         try {
           const obj = JSON.parse(raw);
@@ -2969,12 +2981,12 @@ export class AgentDaemon extends EventEmitter {
         }
       };
 
-      const compactPayloadPreview = (payload: any): string => {
+      const compactPayloadPreview = (payload: Any): string => {
         if (!payload || typeof payload !== "object") return "";
         const keys = Object.keys(payload).slice(0, 12);
-        const preview: Record<string, any> = {};
+        const preview: Record<string, Any> = {};
         for (const k of keys) {
-          const v = (payload as any)[k];
+          const v = (payload as Any)[k];
           if (typeof v === "string") preview[k] = truncate(v, 260);
           else if (typeof v === "number" || typeof v === "boolean") preview[k] = v;
           else if (v && typeof v === "object") preview[k] = "[object]";
@@ -2984,7 +2996,7 @@ export class AgentDaemon extends EventEmitter {
         return truncate(rendered, 520);
       };
 
-      const summarizeEvent = (type: string, payload: any): string => {
+      const summarizeEvent = (type: string, payload: Any): string => {
         switch (type) {
           case "tool_call": {
             const tool = (payload?.tool || payload?.name || "").toString();
@@ -3133,7 +3145,7 @@ export class AgentDaemon extends EventEmitter {
         stats,
         events,
       };
-    } catch (error: any) {
+    } catch (error: Any) {
       return { success: false, error: error?.message ? String(error.message) : String(error) };
     }
   }
@@ -3286,7 +3298,7 @@ export class AgentDaemon extends EventEmitter {
               });
             }
             this.taskRepo.update(taskId, { worktreeStatus: "active" });
-          } catch (error: any) {
+          } catch (error: Any) {
             console.error(`[AgentDaemon] Auto-commit failed for task ${taskId}:`, error);
             this.logEvent(taskId, "log", {
               message: `Auto-commit failed: ${error.message}`,
@@ -3304,7 +3316,7 @@ export class AgentDaemon extends EventEmitter {
       void (async () => {
         try {
           await comparisonSvc.onTaskCompleted(taskId);
-        } catch (error: any) {
+        } catch (error: Any) {
           console.error(`[AgentDaemon] Comparison callback failed for task ${taskId}:`, error);
         }
       })();
@@ -3454,9 +3466,9 @@ export class AgentDaemon extends EventEmitter {
     // The user_message event was already emitted when the message was queued, so
     // tell the executor to suppress the duplicate emission.
     // Fire-and-forget: each follow-up is independent and errors are logged.
-    let chain: Promise<void> = Promise.resolve();
+    let _chain: Promise<void> = Promise.resolve();
     for (const followUp of orphaned) {
-      chain = chain
+      _chain = _chain
         .then(() => {
           executor.suppressNextUserMessageEvent();
           return this.sendMessage(taskId, followUp.message, followUp.images);
@@ -3591,7 +3603,7 @@ export class AgentDaemon extends EventEmitter {
     }
 
     // Clear all pending approval timeouts and reject pending promises
-    this.pendingApprovals.forEach((pending, approvalId) => {
+    this.pendingApprovals.forEach((pending, _approvalId) => {
       clearTimeout(pending.timeoutHandle);
       if (!pending.resolved) {
         pending.resolved = true;

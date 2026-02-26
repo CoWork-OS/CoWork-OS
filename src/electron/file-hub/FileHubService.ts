@@ -5,7 +5,6 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { randomUUID } from "crypto";
 import {
   UnifiedFile,
   FileHubSource,
@@ -39,9 +38,9 @@ const MIME_EXTENSIONS: Record<string, string> = {
 export class FileHubService {
   private deps: FileHubServiceDeps;
   private recentFiles: Map<string, { file: UnifiedFile; accessedAt: number }> = new Map();
-  private db: any;
+  private db: Any;
 
-  constructor(deps: FileHubServiceDeps, db?: any) {
+  constructor(deps: FileHubServiceDeps, db?: Any) {
     this.deps = deps;
     this.db = db;
     this.ensureSchema();
@@ -103,7 +102,7 @@ export class FileHubService {
 
   private listArtifacts(options: FileHubListOptions): UnifiedFile[] {
     const artifacts = this.deps.getArtifacts({ limit: options.limit || 50 });
-    return artifacts.map((a: any) => ({
+    return artifacts.map((a: Any) => ({
       id: `artifact:${a.id}`,
       name: path.basename(a.path || "artifact"),
       path: a.path,
@@ -147,9 +146,9 @@ export class FileHubService {
       try {
         const rows = this.db
           .prepare("SELECT * FROM file_hub_recent ORDER BY accessed_at DESC LIMIT ?")
-          .all(limit) as any[];
+          .all(limit) as Any[];
 
-        return rows.map((r: any) => ({
+        return rows.map((r: Any) => ({
           id: r.id,
           name: r.name,
           path: r.path || "",

@@ -14,7 +14,7 @@ describe("selectImageProviderOrder", () => {
           endpoint: "https://example.openai.azure.com",
           deployments: ["gpt-image-1.5"],
         },
-      } as any,
+      } as Any,
       prompt: "make a poster",
       providerOverride: "auto",
     });
@@ -36,7 +36,7 @@ describe("selectImageProviderOrder", () => {
           endpoint: "https://example.openai.azure.com",
           deployments: ["gpt-image-1.5"],
         },
-      } as any,
+      } as Any,
       prompt: "use gpt-image-1.5 for this",
       providerOverride: "auto",
     });
@@ -56,7 +56,7 @@ describe("selectImageProviderOrder", () => {
           endpoint: "https://example.openai.azure.com",
           deployments: ["img-deploy"],
         },
-      } as any,
+      } as Any,
       prompt: "make a poster",
       providerOverride: "azure",
     });

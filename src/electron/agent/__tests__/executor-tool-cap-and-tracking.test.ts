@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { TaskExecutor } from "../executor";
 
 function createExecutor(intent: string = "execution") {
-  const executor = Object.create(TaskExecutor.prototype) as any;
+  const executor = Object.create(TaskExecutor.prototype) as Any;
   executor.task = {
     id: "task-test-1",
     title: "Research and analyze docs",
@@ -46,7 +46,7 @@ describe("TaskExecutor adaptive tool cap + file tracking", () => {
     const executor = createExecutor("execution");
     const tools = buildTools(10, 160);
 
-    const capped = (executor as any).capToolCount(tools);
+    const capped = (executor as Any).capToolCount(tools);
 
     expect(capped.length).toBeGreaterThan(80);
     expect(capped.length).toBeLessThanOrEqual(120);
@@ -61,11 +61,11 @@ describe("TaskExecutor adaptive tool cap + file tracking", () => {
       description: "generic external tool",
     }));
 
-    const selectedA = ((executorA as any).capToolCount([...builtIn, ...mcp]) as any[])
+    const selectedA = ((executorA as Any).capToolCount([...builtIn, ...mcp]) as Any[])
       .filter((t) => String(t.name).startsWith("mcp_"))
       .map((t) => t.name)
       .sort();
-    const selectedB = ((executorB as any).capToolCount([...builtIn, ...mcp.slice().reverse()]) as any[])
+    const selectedB = ((executorB as Any).capToolCount([...builtIn, ...mcp.slice().reverse()]) as Any[])
       .filter((t) => String(t.name).startsWith("mcp_"))
       .map((t) => t.name)
       .sort();
@@ -77,11 +77,11 @@ describe("TaskExecutor adaptive tool cap + file tracking", () => {
     const executor = createExecutor("execution");
     const tools = buildTools(10, 220);
 
-    const selectedA = ((executor as any).capToolCount(tools) as any[])
+    const selectedA = ((executor as Any).capToolCount(tools) as Any[])
       .filter((t) => String(t.name).startsWith("mcp_"))
       .map((t) => t.name)
       .sort();
-    const selectedB = ((executor as any).capToolCount(tools) as any[])
+    const selectedB = ((executor as Any).capToolCount(tools) as Any[])
       .filter((t) => String(t.name).startsWith("mcp_"))
       .map((t) => t.name)
       .sort();
@@ -93,8 +93,8 @@ describe("TaskExecutor adaptive tool cap + file tracking", () => {
   it("records read_file paths from input when result has no path", () => {
     const executor = createExecutor("execution");
 
-    (executor as any).recordToolResult("read_file", { size: 1234 }, { path: "docs/spec.md" });
-    const summary = (executor as any).getFilesReadSummary();
+    (executor as Any).recordToolResult("read_file", { size: 1234 }, { path: "docs/spec.md" });
+    const summary = (executor as Any).getFilesReadSummary();
 
     expect(summary).toContain("docs/spec.md");
     expect(summary).toContain("1234B");
@@ -102,13 +102,13 @@ describe("TaskExecutor adaptive tool cap + file tracking", () => {
 
   it("decays tool usage counts to avoid permanent early-phase bias", () => {
     const executor = createExecutor("execution");
-    const recordToolUsage = (executor as any).recordToolUsage.bind(executor) as (name: string) => void;
+    const recordToolUsage = (executor as Any).recordToolUsage.bind(executor) as (name: string) => void;
 
     for (let i = 0; i < 40; i++) {
       recordToolUsage("mcp_important_tool");
     }
 
-    const afterDecay = (executor as any).toolUsageCounts.get("mcp_important_tool");
+    const afterDecay = (executor as Any).toolUsageCounts.get("mcp_important_tool");
     expect(afterDecay).toBeLessThan(40);
     expect(afterDecay).toBeGreaterThan(0);
   });
@@ -118,9 +118,9 @@ describe("TaskExecutor adaptive tool cap + file tracking", () => {
     executor.useUnifiedTurnLoop = false;
     executor.executeStepLegacy = vi.fn().mockRejectedValue(new Error("boom"));
 
-    await expect((executor as any).executeStep({ id: "X", description: "x", status: "pending" })).rejects.toThrow(
+    await expect((executor as Any).executeStep({ id: "X", description: "x", status: "pending" })).rejects.toThrow(
       "boom",
     );
-    expect((executor as any).currentStepId).toBeNull();
+    expect((executor as Any).currentStepId).toBeNull();
   });
 });

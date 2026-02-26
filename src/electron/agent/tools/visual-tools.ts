@@ -470,7 +470,7 @@ export function renderVisualAnnotatorHtml(bootstrap: AnnotatorBootstrap): string
     let drawing = false;
     let natural = { w: 0, h: 0 };
 
-    /** @type {Array<any>} */
+    /** @type {Array<Any>} */
     let annotations = [];
     /** @type {any|null} */
     let live = null;

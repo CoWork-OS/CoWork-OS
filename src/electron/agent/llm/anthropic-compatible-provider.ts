@@ -73,9 +73,9 @@ export class AnthropicCompatibleProvider implements LLMProvider {
         );
       }
 
-      const data = (await response.json()) as any;
+      const data = (await response.json()) as Any;
       return this.convertResponse(data);
-    } catch (error: any) {
+    } catch (error: Any) {
       if (error.name === "AbortError" || error.message?.includes("aborted")) {
         console.log(`[${this.providerName}] Request aborted`);
         throw new Error("Request cancelled");
@@ -116,7 +116,7 @@ export class AnthropicCompatibleProvider implements LLMProvider {
       }
 
       return { success: true };
-    } catch (error: any) {
+    } catch (error: Any) {
       return {
         success: false,
         error: error.message || `Failed to connect to ${this.providerName} API`,
@@ -124,7 +124,7 @@ export class AnthropicCompatibleProvider implements LLMProvider {
     }
   }
 
-  private convertMessages(messages: LLMMessage[]): Array<{ role: string; content: any }> {
+  private convertMessages(messages: LLMMessage[]): Array<{ role: string; content: Any }> {
     return messages.map((msg) => {
       if (typeof msg.content === "string") {
         return {
@@ -175,7 +175,7 @@ export class AnthropicCompatibleProvider implements LLMProvider {
 
   private convertTools(
     tools: LLMTool[],
-  ): Array<{ name: string; description: string; input_schema: any }> {
+  ): Array<{ name: string; description: string; input_schema: Any }> {
     return tools.map((tool) => ({
       name: tool.name,
       description: tool.description,
@@ -183,16 +183,16 @@ export class AnthropicCompatibleProvider implements LLMProvider {
     }));
   }
 
-  private convertResponse(response: any): LLMResponse {
+  private convertResponse(response: Any): LLMResponse {
     const content: LLMContent[] = (response.content || [])
-      .filter((block: any) => block.type === "text" || block.type === "tool_use")
-      .map((block: any) => {
+      .filter((block: Any) => block.type === "text" || block.type === "tool_use")
+      .map((block: Any) => {
         if (block.type === "tool_use") {
           return {
             type: "tool_use" as const,
             id: block.id,
             name: block.name,
-            input: block.input as Record<string, any>,
+            input: block.input as Record<string, Any>,
           };
         }
         return {

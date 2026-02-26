@@ -32,7 +32,7 @@ vi.mock("../channels/twitch-client", () => ({
 
 // Import after mocking
 import { TwitchAdapter, createTwitchAdapter, TwitchConfig } from "../channels/twitch";
-import { TwitchClient } from "../channels/twitch-client";
+import { TwitchClient as _TwitchClient } from "../channels/twitch-client";
 
 describe("TwitchAdapter", () => {
   let adapter: TwitchAdapter;
@@ -69,12 +69,12 @@ describe("TwitchAdapter", () => {
     });
 
     it("should enable deduplication by default", () => {
-      const adapterConfig = adapter as any;
+      const adapterConfig = adapter as Any;
       expect(adapterConfig.config.deduplicationEnabled).toBe(true);
     });
 
     it("should disable whispers by default", () => {
-      const adapterConfig = adapter as any;
+      const adapterConfig = adapter as Any;
       expect(adapterConfig.config.allowWhispers).toBe(false);
     });
   });
@@ -129,7 +129,7 @@ describe("TwitchAdapter", () => {
     it("should register message handlers", () => {
       const handler = vi.fn();
       adapter.onMessage(handler);
-      expect((adapter as any).messageHandlers).toContain(handler);
+      expect((adapter as Any).messageHandlers).toContain(handler);
     });
 
     it("should support multiple handlers", () => {
@@ -137,7 +137,7 @@ describe("TwitchAdapter", () => {
       const handler2 = vi.fn();
       adapter.onMessage(handler1);
       adapter.onMessage(handler2);
-      expect((adapter as any).messageHandlers.length).toBe(2);
+      expect((adapter as Any).messageHandlers.length).toBe(2);
     });
   });
 
@@ -145,7 +145,7 @@ describe("TwitchAdapter", () => {
     it("should register error handlers", () => {
       const handler = vi.fn();
       adapter.onError(handler);
-      expect((adapter as any).errorHandlers).toContain(handler);
+      expect((adapter as Any).errorHandlers).toContain(handler);
     });
   });
 
@@ -153,13 +153,13 @@ describe("TwitchAdapter", () => {
     it("should register status handlers", () => {
       const handler = vi.fn();
       adapter.onStatusChange(handler);
-      expect((adapter as any).statusHandlers).toContain(handler);
+      expect((adapter as Any).statusHandlers).toContain(handler);
     });
 
     it("should call status handlers on status change", () => {
       const handler = vi.fn();
       adapter.onStatusChange(handler);
-      (adapter as any).setStatus("connecting");
+      (adapter as Any).setStatus("connecting");
       expect(handler).toHaveBeenCalledWith("connecting", undefined);
     });
   });
@@ -177,8 +177,8 @@ describe("TwitchAdapter", () => {
 
   describe("disconnect", () => {
     it("should clear state on disconnect", async () => {
-      (adapter as any)._status = "connected";
-      (adapter as any)._botUsername = "TestBot";
+      (adapter as Any)._status = "connected";
+      (adapter as Any)._botUsername = "TestBot";
 
       await adapter.disconnect();
 
@@ -187,43 +187,43 @@ describe("TwitchAdapter", () => {
     });
 
     it("should stop deduplication cleanup timer", async () => {
-      (adapter as any).dedupCleanupTimer = setInterval(() => {}, 60000);
+      (adapter as Any).dedupCleanupTimer = setInterval(() => {}, 60000);
 
       await adapter.disconnect();
 
-      expect((adapter as any).dedupCleanupTimer).toBeUndefined();
+      expect((adapter as Any).dedupCleanupTimer).toBeUndefined();
     });
 
     it("should clear processed messages cache", async () => {
-      (adapter as any).processedMessages.set("msg-123", Date.now());
+      (adapter as Any).processedMessages.set("msg-123", Date.now());
 
       await adapter.disconnect();
 
-      expect((adapter as any).processedMessages.size).toBe(0);
+      expect((adapter as Any).processedMessages.size).toBe(0);
     });
   });
 
   describe("message deduplication", () => {
     it("should track processed messages", () => {
-      (adapter as any).markMessageProcessed("msg-123");
-      expect((adapter as any).isMessageProcessed("msg-123")).toBe(true);
+      (adapter as Any).markMessageProcessed("msg-123");
+      expect((adapter as Any).isMessageProcessed("msg-123")).toBe(true);
     });
 
     it("should not mark duplicate messages as unprocessed", () => {
-      (adapter as any).markMessageProcessed("msg-456");
-      (adapter as any).markMessageProcessed("msg-456");
-      expect((adapter as any).processedMessages.size).toBe(1);
+      (adapter as Any).markMessageProcessed("msg-456");
+      (adapter as Any).markMessageProcessed("msg-456");
+      expect((adapter as Any).processedMessages.size).toBe(1);
     });
 
     it("should cleanup old messages from cache", () => {
       const oldTime = Date.now() - 120000;
-      (adapter as any).processedMessages.set("old-msg", oldTime);
-      (adapter as any).processedMessages.set("new-msg", Date.now());
+      (adapter as Any).processedMessages.set("old-msg", oldTime);
+      (adapter as Any).processedMessages.set("new-msg", Date.now());
 
-      (adapter as any).cleanupDedupCache();
+      (adapter as Any).cleanupDedupCache();
 
-      expect((adapter as any).processedMessages.has("old-msg")).toBe(false);
-      expect((adapter as any).processedMessages.has("new-msg")).toBe(true);
+      expect((adapter as Any).processedMessages.has("old-msg")).toBe(false);
+      expect((adapter as Any).processedMessages.has("new-msg")).toBe(true);
     });
   });
 
@@ -272,13 +272,13 @@ describe("TwitchAdapter", () => {
 
   describe("message splitting", () => {
     it("should not split short messages", () => {
-      const splitMessage = (adapter as any).splitMessage.bind(adapter);
+      const splitMessage = (adapter as Any).splitMessage.bind(adapter);
       const chunks = splitMessage("Hello world", 450);
       expect(chunks).toEqual(["Hello world"]);
     });
 
     it("should split long messages", () => {
-      const splitMessage = (adapter as any).splitMessage.bind(adapter);
+      const splitMessage = (adapter as Any).splitMessage.bind(adapter);
       const longMessage = "A".repeat(500);
       const chunks = splitMessage(longMessage, 100);
       expect(chunks.length).toBeGreaterThan(1);
@@ -286,7 +286,7 @@ describe("TwitchAdapter", () => {
     });
 
     it("should break at spaces when possible", () => {
-      const splitMessage = (adapter as any).splitMessage.bind(adapter);
+      const splitMessage = (adapter as Any).splitMessage.bind(adapter);
       const message = "Hello world this is a test message with multiple words";
       const chunks = splitMessage(message, 20);
       expect(chunks.length).toBeGreaterThan(1);

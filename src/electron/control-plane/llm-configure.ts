@@ -36,7 +36,7 @@ function sanitizeOptionalStringField(
 }
 
 function sanitizeLlmConfigureParams(params: unknown): SanitizedLlmConfigureParams {
-  const p = (params ?? {}) as any;
+  const p = (params ?? {}) as Any;
   const providerTypeRaw = typeof p.providerType === "string" ? p.providerType.trim() : "";
   if (!providerTypeRaw) {
     throw createInvalidParamsError("providerType is required");
@@ -84,16 +84,16 @@ function readOptionalSettingBoolean(
 }
 
 function applyProviderApiKeyAndBaseUrl(
-  updatedSettings: any,
+  updatedSettings: Any,
   providerKey: string,
   apiKey: string | undefined,
   baseUrl: string | undefined,
-): any {
+): Any {
   if (!apiKey && !baseUrl) return updatedSettings;
   return {
     ...updatedSettings,
     [providerKey]: {
-      ...(updatedSettings[providerKey] || {}),
+      ...updatedSettings[providerKey],
       ...(apiKey ? { apiKey } : {}),
       ...(baseUrl ? { baseUrl } : {}),
     },
@@ -126,7 +126,7 @@ export function configureLlmFromControlPlaneParams(params: unknown): {
   const useDefaultCredentials = readOptionalSettingBoolean(settingsPatch, "useDefaultCredentials");
   const piProvider = readOptionalSettingString(settingsPatch, "provider", 100);
 
-  let updatedSettings: any = {
+  let updatedSettings: Any = {
     ...LLMProviderFactory.loadSettings(),
     providerType: validated.providerType,
   };
@@ -222,7 +222,7 @@ export function configureLlmFromControlPlaneParams(params: unknown): {
       } else if (validated.apiKey || baseUrl) {
         const currentCustom = updatedSettings.customProviders?.[validated.providerType] || {};
         updatedSettings.customProviders = {
-          ...(updatedSettings.customProviders || {}),
+          ...updatedSettings.customProviders,
           [validated.providerType]: {
             ...currentCustom,
             ...(validated.apiKey ? { apiKey: validated.apiKey } : {}),

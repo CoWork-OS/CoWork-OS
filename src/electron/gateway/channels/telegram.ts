@@ -221,7 +221,7 @@ export class TelegramAdapter implements ChannelAdapter {
       // Set up message handler with deduplication and fragment assembly
       // Note: we listen to all messages so photo/voice/document attachments can be handled.
       this.bot.on("message", async (ctx) => {
-        const msg = ctx.message as any;
+        const msg = ctx.message as Any;
         const from = msg?.from;
         if (!from || from.is_bot) return;
 
@@ -572,7 +572,7 @@ export class TelegramAdapter implements ChannelAdapter {
     const updateId = ctx.update.update_id;
     if (!this.shouldProcessUpdate(updateId)) return;
 
-    const msg = ctx.message as any;
+    const msg = ctx.message as Any;
     if (!msg) return;
 
     const hasMedia =
@@ -850,7 +850,7 @@ export class TelegramAdapter implements ChannelAdapter {
       try {
         const sent = await this.bot.api.sendMessage(message.chatId, processedText, options);
         return sent.message_id.toString();
-      } catch (error: any) {
+      } catch (error: Any) {
         // If markdown parsing fails, retry without parse_mode
         if (error?.error_code === 400 && error?.description?.includes("can't parse entities")) {
           console.log("Markdown parsing failed, retrying without parse_mode");
@@ -983,7 +983,7 @@ export class TelegramAdapter implements ChannelAdapter {
 
       state.currentText = text;
       state.lastUpdateTime = now;
-    } catch (error: any) {
+    } catch (error: Any) {
       // Ignore "message not modified" errors
       if (!error?.description?.includes("message is not modified")) {
         console.error("Draft stream update error:", error);
@@ -1010,7 +1010,7 @@ export class TelegramAdapter implements ChannelAdapter {
       // Edit the draft message to final content (remove typing indicator)
       await this.bot.api.editMessageText(chatId, parseInt(state.messageId, 10), finalText);
       return state.messageId;
-    } catch (error: any) {
+    } catch (error: Any) {
       // If edit fails, send as new message
       console.error("Failed to finalize draft, sending new message:", error);
       const sent = await this.bot.api.sendMessage(chatId, finalText);
@@ -1432,7 +1432,7 @@ export class TelegramAdapter implements ChannelAdapter {
       options.message_thread_id = parseInt(threadId, 10);
     }
 
-    const sent = await this.bot.api.sendMediaGroup(chatId, inputMedia as any, options);
+    const sent = await this.bot.api.sendMediaGroup(chatId, inputMedia as Any, options);
     return sent.map((m) => m.message_id.toString());
   }
 
@@ -1697,7 +1697,7 @@ export class TelegramAdapter implements ChannelAdapter {
       // Set up message handler
       // Note: we listen to all messages so photo/voice/document attachments can be handled.
       this.bot.on("message", async (ctx) => {
-        const msg = ctx.message as any;
+        const msg = ctx.message as Any;
         const from = msg?.from;
         if (!from || from.is_bot) return;
 
@@ -1758,8 +1758,8 @@ export class TelegramAdapter implements ChannelAdapter {
 
     try {
       const fileInfo = await this.bot.api.getFile(opts.fileId);
-      const filePath = (fileInfo as any)?.file_path as string | undefined;
-      const declaredSize = (fileInfo as any)?.file_size as number | undefined;
+      const filePath = (fileInfo as Any)?.file_path as string | undefined;
+      const declaredSize = (fileInfo as Any)?.file_size as number | undefined;
 
       if (!filePath) return null;
       if (typeof declaredSize === "number" && declaredSize > MAX_ATTACHMENT_BYTES) {
@@ -1817,7 +1817,7 @@ export class TelegramAdapter implements ChannelAdapter {
     const threadId = msg.message_thread_id?.toString();
     const isForumTopic = msg.is_topic_message === true || threadId !== undefined;
 
-    const msgAny = msg as any;
+    const msgAny = msg as Any;
     const attachments: MessageAttachment[] = [];
 
     const hadMedia =

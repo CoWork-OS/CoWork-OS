@@ -34,7 +34,7 @@ import { CronService, setCronService, getCronStorePath } from "../electron/cron"
 import {
   TaskEventRepository,
   TaskRepository,
-  WorkspaceRepository,
+  WorkspaceRepository as _WorkspaceRepository,
   ChannelRepository,
   ChannelUserRepository,
   ChannelMessageRepository,
@@ -93,7 +93,7 @@ async function maybeBootstrapWorkspace(agentDaemon: AgentDaemon): Promise<void> 
 async function startControlPlane(options: {
   deps: { agentDaemon: AgentDaemon; dbManager: DatabaseManager; channelGateway: ChannelGateway };
   forceEnable: boolean;
-  onEvent?: (evt: any) => void;
+  onEvent?: (evt: Any) => void;
 }): Promise<{
   ok: boolean;
   skipped?: boolean;
@@ -165,13 +165,17 @@ async function startControlPlane(options: {
     } catch (error) {
       try {
         detach();
-      } catch {}
+      } catch {
+        // Best effort detach on startup failure.
+      }
       try {
         await server.stop();
-      } catch {}
+      } catch {
+        // Best effort server shutdown on startup failure.
+      }
       throw error;
     }
-  } catch (error: any) {
+  } catch (error: Any) {
     console.error("[Daemon] Control Plane start error:", error);
     return { ok: false, error: error?.message || String(error) };
   }
@@ -361,7 +365,7 @@ async function main(): Promise<void> {
         const chatId = chatContext?.channelId;
         if (!channelType || !chatId) return {};
 
-        const channel = channelRepo.findByType(channelType as any);
+        const channel = channelRepo.findByType(channelType as Any);
         if (!channel) return {};
 
         const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
@@ -371,7 +375,7 @@ async function main(): Promise<void> {
         );
 
         const raw = channelMessageRepo.findByChatId(channel.id, chatId, 500);
-        const userCache = new Map<string, any>();
+        const userCache = new Map<string, Any>();
         const lookupUser = (id: string) => {
           if (!id) return undefined;
           if (userCache.has(id)) return userCache.get(id);
@@ -419,8 +423,8 @@ async function main(): Promise<void> {
           if (evt.type !== "assistant_message") continue;
           const payload = evt.payload || {};
           const text =
-            (typeof (payload as any).message === "string" ? (payload as any).message : "") ||
-            (typeof (payload as any).content === "string" ? (payload as any).content : "");
+            (typeof (payload as Any).message === "string" ? (payload as Any).message : "") ||
+            (typeof (payload as Any).content === "string" ? (payload as Any).content : "");
           const trimmed = String(text).trim();
           if (trimmed) return trimmed;
         }
@@ -458,7 +462,7 @@ async function main(): Promise<void> {
             })();
 
         try {
-          await channelGateway.sendMessage(params.channelType as any, params.channelId, message, {
+          await channelGateway.sendMessage(params.channelType as Any, params.channelId, message, {
             parseMode: "markdown",
           });
           console.log(`[Cron] Delivered to ${params.channelType}:${params.channelId}`);

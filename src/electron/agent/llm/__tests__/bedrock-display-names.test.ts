@@ -9,7 +9,7 @@ import { describe, it, expect } from "vitest";
 import { LLMProviderFactory } from "../provider-factory";
 
 // Access private static methods via cast
-const factory = LLMProviderFactory as any;
+const factory = LLMProviderFactory as Any;
 
 describe("formatBedrockProfileName", () => {
   it.each([

@@ -110,7 +110,7 @@ export const rateLimiter = new RateLimiter();
 /**
  * Helper to wrap an IPC handler with rate limiting
  */
-export function withRateLimit<T extends (...args: any[]) => Promise<any>>(
+export function withRateLimit<T extends (...args: Any[]) => Promise<Any>>(
   channel: string,
   handler: T,
   config: RateLimitConfig = RATE_LIMIT_CONFIGS.standard,

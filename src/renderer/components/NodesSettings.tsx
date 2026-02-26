@@ -73,7 +73,7 @@ export function NodesSettings({ compact = false }: NodesSettingsProps) {
         command,
         result: result || { ok: false, error: { code: "UNKNOWN", message: "No response" } },
       });
-    } catch (error: any) {
+    } catch (error: Any) {
       setTestResult({
         nodeId,
         command,

@@ -159,7 +159,7 @@ export class CrossSignalService {
     this.agentDaemon = agentDaemon;
 
     // Live updates
-    agentDaemon.on("assistant_message", (evt: any) => {
+    agentDaemon.on("assistant_message", (evt: Any) => {
       try {
         const taskId = typeof evt?.taskId === "string" ? evt.taskId : "";
         const content =
@@ -341,7 +341,7 @@ export class CrossSignalService {
     for (const row of rows) {
       const payload = row?.payload;
       if (!payload) continue;
-      let parsed: any;
+      let parsed: Any;
       try {
         parsed = JSON.parse(payload);
       } catch {

@@ -39,7 +39,7 @@ export function setupTriggerHandlers(triggerService: EventTriggerService): void 
     triggerService.removeTrigger(triggerId);
   });
 
-  ipcMain.handle(IPC_CHANNELS.TRIGGER_HISTORY, async (_, triggerId: string): Promise<any[]> => {
+  ipcMain.handle(IPC_CHANNELS.TRIGGER_HISTORY, async (_, triggerId: string): Promise<Any[]> => {
     return triggerService.getHistory(triggerId);
   });
 }

@@ -28,7 +28,7 @@ import {
   stopTailscaleExposure,
   getExposureStatus,
   checkTailscaleAvailability,
-  type TailscaleExposureConfig,
+  type TailscaleExposureConfig as _TailscaleExposureConfig,
 } from "../exposure";
 
 import {

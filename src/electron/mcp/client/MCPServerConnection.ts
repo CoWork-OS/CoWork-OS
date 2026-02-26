@@ -128,7 +128,7 @@ export class MCPServerConnection extends EventEmitter {
       this.setStatus("connected");
 
       console.log(`[MCPServerConnection] Connected to ${this.config.name}`);
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error(`[MCPServerConnection] Failed to connect to ${this.config.name}:`, error);
       this.setStatus("error", error.message);
       await this.cleanup();
@@ -168,7 +168,7 @@ export class MCPServerConnection extends EventEmitter {
   /**
    * Call a tool on this server
    */
-  async callTool(name: string, args: Record<string, any> = {}): Promise<MCPCallResult> {
+  async callTool(name: string, args: Record<string, Any> = {}): Promise<MCPCallResult> {
     if (this.status !== "connected" || !this.transport) {
       throw new Error(`Server ${this.config.name} is not connected`);
     }
@@ -188,7 +188,7 @@ export class MCPServerConnection extends EventEmitter {
       });
 
       return result as MCPCallResult;
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error(`[MCPServerConnection] Tool call failed:`, error);
       throw new Error(`Tool ${name} failed: ${error.message}`);
     }

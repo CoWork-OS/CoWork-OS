@@ -48,7 +48,7 @@ vi.mock("../../../hooks/settings", () => ({
       presets: [],
       mappings: [],
     }),
-    updateConfig: vi.fn().mockImplementation((cfg: any) => cfg),
+    updateConfig: vi.fn().mockImplementation((cfg: Any) => cfg),
   },
 }));
 
@@ -145,7 +145,7 @@ describe("ToolRegistry child task control tools", () => {
     const daemon = {
       getTaskById: vi.fn().mockImplementation(async (id: string) => tasks.get(id)),
       logEvent: vi.fn(),
-    } as any;
+    } as Any;
 
     const registry = new ToolRegistry(workspace, daemon, "parent-task");
     const result = await registry.executeTool("wait_for_agent", {
@@ -193,7 +193,7 @@ describe("ToolRegistry child task control tools", () => {
       getTaskById: vi.fn().mockImplementation(async (id: string) => tasks.get(id)),
       sendMessage: vi.fn().mockResolvedValue(undefined),
       logEvent: vi.fn(),
-    } as any;
+    } as Any;
 
     const registry = new ToolRegistry(workspace, daemon, "parent-task");
 
@@ -252,7 +252,7 @@ describe("ToolRegistry child task control tools", () => {
       getTaskById: vi.fn().mockImplementation(async (id: string) => tasks.get(id)),
       getTaskEvents: vi.fn().mockReturnValue(childEvents),
       logEvent: vi.fn(),
-    } as any;
+    } as Any;
 
     const registry = new ToolRegistry(workspace, daemon, "parent-task");
     const result = await registry.executeTool("capture_agent_events", {
@@ -290,7 +290,7 @@ describe("ToolRegistry child task control tools", () => {
       cancelTask: vi.fn().mockResolvedValue(undefined),
       updateTask: vi.fn(),
       logEvent: vi.fn(),
-    } as any;
+    } as Any;
 
     const registry = new ToolRegistry(workspace, daemon, "parent-task");
     const result = await registry.executeTool("cancel_agent", { task_id: "child-task" });
@@ -322,7 +322,7 @@ describe("ToolRegistry child task control tools", () => {
     const daemon = {
       getTaskById: vi.fn().mockImplementation(async (id: string) => tasks.get(id)),
       logEvent: vi.fn(),
-    } as any;
+    } as Any;
 
     const registry = new ToolRegistry(workspace, daemon, "parent-task");
     const result = await registry.executeTool("cancel_agent", { task_id: "child-task" });
@@ -355,7 +355,7 @@ describe("ToolRegistry child task control tools", () => {
       pauseTask: vi.fn().mockResolvedValue(undefined),
       updateTaskStatus: vi.fn(),
       logEvent: vi.fn(),
-    } as any;
+    } as Any;
 
     const registry = new ToolRegistry(workspace, daemon, "parent-task");
     const result = await registry.executeTool("pause_agent", { task_id: "child-task" });
@@ -388,7 +388,7 @@ describe("ToolRegistry child task control tools", () => {
     const daemon = {
       getTaskById: vi.fn().mockImplementation(async (id: string) => tasks.get(id)),
       logEvent: vi.fn(),
-    } as any;
+    } as Any;
 
     const registry = new ToolRegistry(workspace, daemon, "parent-task");
     const result = await registry.executeTool("pause_agent", { task_id: "child-task" });
@@ -421,7 +421,7 @@ describe("ToolRegistry child task control tools", () => {
       resumeTask: vi.fn().mockResolvedValue(true),
       updateTaskStatus: vi.fn(),
       logEvent: vi.fn(),
-    } as any;
+    } as Any;
 
     const registry = new ToolRegistry(workspace, daemon, "parent-task");
     const result = await registry.executeTool("resume_agent", { task_id: "child-task" });
@@ -454,7 +454,7 @@ describe("ToolRegistry child task control tools", () => {
       getTaskById: vi.fn().mockImplementation(async (id: string) => tasks.get(id)),
       resumeTask: vi.fn().mockResolvedValue(false),
       logEvent: vi.fn(),
-    } as any;
+    } as Any;
 
     const registry = new ToolRegistry(workspace, daemon, "parent-task");
     const result = await registry.executeTool("resume_agent", { task_id: "child-task" });
@@ -485,7 +485,7 @@ describe("ToolRegistry child task control tools", () => {
     const daemon = {
       getTaskById: vi.fn().mockImplementation(async (id: string) => tasks.get(id)),
       logEvent: vi.fn(),
-    } as any;
+    } as Any;
 
     const registry = new ToolRegistry(workspace, daemon, "parent-task");
     const result = await registry.executeTool("resume_agent", { task_id: "child-task" });
@@ -528,7 +528,7 @@ describe("ToolRegistry child task control tools", () => {
         ]),
         createChildTask: vi.fn(),
         logEvent: vi.fn(),
-      } as any;
+      } as Any;
 
       const registry = new ToolRegistry(workspace, daemon, "parent-task");
       const result = await registry.executeTool("spawn_agent", {
@@ -589,7 +589,7 @@ describe("ToolRegistry child task control tools", () => {
           depth: 1,
         }),
         logEvent: vi.fn(),
-      } as any;
+      } as Any;
 
       const registry = new ToolRegistry(workspace, daemon, "parent-task");
       const result = await registry.executeTool("spawn_agent", {
@@ -636,7 +636,7 @@ describe("ToolRegistry child task control tools", () => {
           depth: 1,
         }),
         logEvent: vi.fn(),
-      } as any;
+      } as Any;
 
       const registry = new ToolRegistry(workspace, daemon, "parent-task");
       const result = await registry.executeTool("spawn_agent", {
@@ -689,7 +689,7 @@ describe("ToolRegistry child task control tools", () => {
           depth: 1,
         }),
         logEvent: vi.fn(),
-      } as any;
+      } as Any;
 
       const registry = new ToolRegistry(workspace, daemon, "parent-task");
       const result = await registry.executeTool("spawn_agent", {

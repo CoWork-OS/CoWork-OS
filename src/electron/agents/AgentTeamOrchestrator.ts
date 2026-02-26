@@ -11,7 +11,7 @@ import type {
   UpdateAgentTeamItemRequest,
   MultiLlmParticipant,
 } from "../../shared/types";
-import { IPC_CHANNELS, MULTI_LLM_PROVIDER_DISPLAY } from "../../shared/types";
+import { IPC_CHANNELS, MULTI_LLM_PROVIDER_DISPLAY as _MULTI_LLM_PROVIDER_DISPLAY } from "../../shared/types";
 import {
   resolveModelPreferenceToModelKey,
   resolvePersonalityPreference,
@@ -66,10 +66,11 @@ export type AgentTeamOrchestratorDeps = {
   completeRootTask?: (taskId: string, status: "completed" | "failed", summary: string) => void;
 };
 
-function getAllElectronWindows(): any[] {
+function getAllElectronWindows(): Any[] {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const electron = require("electron") as any;
+// oxlint-disable-next-line typescript-eslint(no-require-imports)
+    const electron = require("electron") as Any;
     if (!electron || typeof electron !== "object") return [];
     const BrowserWindow = electron?.BrowserWindow;
     if (BrowserWindow?.getAllWindows) return BrowserWindow.getAllWindows();
@@ -79,7 +80,7 @@ function getAllElectronWindows(): any[] {
   return [];
 }
 
-function emitTeamEvent(event: any): void {
+function emitTeamEvent(event: Any): void {
   const windows = getAllElectronWindows();
   windows.forEach((window) => {
     try {
@@ -341,7 +342,7 @@ export class AgentTeamOrchestrator {
           }
         }
       }
-    } catch (error: any) {
+    } catch (error: Any) {
       emitTeamEvent({
         type: "team_run_event_error",
         timestamp: Date.now(),
@@ -733,7 +734,7 @@ export class AgentTeamOrchestrator {
   private buildMultiLlmSynthesisPrompt(
     rootTask: Task,
     thoughts: AgentThought[],
-    items: AgentTeamItem[],
+    _items: AgentTeamItem[],
   ): string {
     const parts: string[] = [];
     parts.push("You are the JUDGE in a multi-LLM comparison.");

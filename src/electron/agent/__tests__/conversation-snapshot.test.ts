@@ -9,13 +9,13 @@
  * - Upgrades
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { TaskEvent, LLMMessage } from "../../../shared/types";
+import { describe, it, expect, vi as _vi, beforeEach as _beforeEach } from "vitest";
+import type { TaskEvent, LLMMessage as _LLMMessage } from "../../../shared/types";
 
 // Type for conversation message (matches LLMMessage structure)
 interface ConversationMessage {
   role: "user" | "assistant";
-  content: string | Array<{ type: string; text?: string; [key: string]: any }>;
+  content: string | Array<{ type: string; text?: string; [key: string]: Any }>;
 }
 
 // Type for snapshot payload
@@ -50,7 +50,7 @@ function restoreFromSnapshot(events: TaskEvent[]): {
 
   try {
     // Restore the conversation history
-    const conversationHistory = payload.conversationHistory.map((msg: any) => ({
+    const conversationHistory = payload.conversationHistory.map((msg: Any) => ({
       role: msg.role as "user" | "assistant",
       content: msg.content,
     }));
@@ -60,7 +60,7 @@ function restoreFromSnapshot(events: TaskEvent[]): {
       conversationHistory,
       systemPrompt: payload.systemPrompt || "",
     };
-  } catch (error) {
+  } catch  {
     return { restored: false, conversationHistory: [], systemPrompt: "" };
   }
 }
@@ -177,11 +177,11 @@ function rebuildConversationFromEvents(
 }
 
 // Helper to create mock events
-function createMockEvent(type: string, payload: any, timestamp?: number): TaskEvent {
+function createMockEvent(type: string, payload: Any, timestamp?: number): TaskEvent {
   return {
     id: `event-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
     taskId: "test-task-id",
-    type: type as any,
+    type: type as Any,
     payload,
     timestamp: timestamp || Date.now(),
   };
@@ -568,9 +568,9 @@ describe("Snapshot pruning logic", () => {
 describe("FileOperationTracker serialization", () => {
   // Mock the tracker serialization logic
   function serializeTracker(state: {
-    readFiles: Map<string, any>;
+    readFiles: Map<string, Any>;
     createdFiles: Map<string, string>;
-    directories: Map<string, any>;
+    directories: Map<string, Any>;
   }): { readFiles: string[]; createdFiles: string[]; directories: string[] } {
     return {
       readFiles: Array.from(state.readFiles.keys()).slice(0, 50),
@@ -692,7 +692,7 @@ describe("Size-limited serialization", () => {
   const MAX_CONTENT_LENGTH = 50000;
   const MAX_TOOL_RESULT_LENGTH = 10000;
 
-  function serializeWithSizeLimit(history: ConversationMessage[]): any[] {
+  function serializeWithSizeLimit(history: ConversationMessage[]): Any[] {
     return history.map((msg) => {
       if (typeof msg.content === "string") {
         return {
@@ -706,7 +706,7 @@ describe("Size-limited serialization", () => {
       }
 
       if (Array.isArray(msg.content)) {
-        const truncatedContent = msg.content.map((block: any) => {
+        const truncatedContent = msg.content.map((block: Any) => {
           if (block.type === "tool_result" && block.content) {
             const content =
               typeof block.content === "string" ? block.content : JSON.stringify(block.content);

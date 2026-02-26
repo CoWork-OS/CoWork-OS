@@ -7,7 +7,7 @@ import { EventEmitter } from "events";
 
 // Mock the BlueBubblesClient class
 vi.mock("../channels/bluebubbles-client", () => ({
-  BlueBubblesClient: vi.fn().mockImplementation((config) => {
+  BlueBubblesClient: vi.fn().mockImplementation((_config) => {
     const emitter = new EventEmitter();
     return {
       checkConnection: vi.fn().mockResolvedValue({
@@ -39,7 +39,7 @@ import {
   createBlueBubblesAdapter,
   BlueBubblesConfig,
 } from "../channels/bluebubbles";
-import { BlueBubblesClient } from "../channels/bluebubbles-client";
+import { BlueBubblesClient as _BlueBubblesClient } from "../channels/bluebubbles-client";
 
 describe("BlueBubblesAdapter", () => {
   let adapter: BlueBubblesAdapter;
@@ -75,27 +75,27 @@ describe("BlueBubblesAdapter", () => {
     });
 
     it("should enable deduplication by default", () => {
-      const adapterConfig = adapter as any;
+      const adapterConfig = adapter as Any;
       expect(adapterConfig.config.deduplicationEnabled).toBe(true);
     });
 
     it("should use default webhook port if not specified", () => {
-      const config = (adapter as any).config;
+      const config = (adapter as Any).config;
       expect(config.webhookPort).toBe(3101);
     });
 
     it("should use default webhook path if not specified", () => {
-      const config = (adapter as any).config;
+      const config = (adapter as Any).config;
       expect(config.webhookPath).toBe("/bluebubbles/webhook");
     });
 
     it("should use default poll interval if not specified", () => {
-      const config = (adapter as any).config;
+      const config = (adapter as Any).config;
       expect(config.pollInterval).toBe(5000);
     });
 
     it("should enable webhook by default", () => {
-      const config = (adapter as any).config;
+      const config = (adapter as Any).config;
       expect(config.enableWebhook).toBe(true);
     });
   });
@@ -136,7 +136,7 @@ describe("BlueBubblesAdapter", () => {
     it("should register message handlers", () => {
       const handler = vi.fn();
       adapter.onMessage(handler);
-      expect((adapter as any).messageHandlers).toContain(handler);
+      expect((adapter as Any).messageHandlers).toContain(handler);
     });
 
     it("should support multiple handlers", () => {
@@ -144,7 +144,7 @@ describe("BlueBubblesAdapter", () => {
       const handler2 = vi.fn();
       adapter.onMessage(handler1);
       adapter.onMessage(handler2);
-      expect((adapter as any).messageHandlers.length).toBe(2);
+      expect((adapter as Any).messageHandlers.length).toBe(2);
     });
   });
 
@@ -152,7 +152,7 @@ describe("BlueBubblesAdapter", () => {
     it("should register error handlers", () => {
       const handler = vi.fn();
       adapter.onError(handler);
-      expect((adapter as any).errorHandlers).toContain(handler);
+      expect((adapter as Any).errorHandlers).toContain(handler);
     });
   });
 
@@ -160,13 +160,13 @@ describe("BlueBubblesAdapter", () => {
     it("should register status handlers", () => {
       const handler = vi.fn();
       adapter.onStatusChange(handler);
-      expect((adapter as any).statusHandlers).toContain(handler);
+      expect((adapter as Any).statusHandlers).toContain(handler);
     });
 
     it("should call status handlers on status change", () => {
       const handler = vi.fn();
       adapter.onStatusChange(handler);
-      (adapter as any).setStatus("connecting");
+      (adapter as Any).setStatus("connecting");
       expect(handler).toHaveBeenCalledWith("connecting", undefined);
     });
   });
@@ -188,8 +188,8 @@ describe("BlueBubblesAdapter", () => {
 
   describe("disconnect", () => {
     it("should clear state on disconnect", async () => {
-      (adapter as any)._status = "connected";
-      (adapter as any)._botUsername = "BlueBubbles (1.9.0)";
+      (adapter as Any)._status = "connected";
+      (adapter as Any)._botUsername = "BlueBubbles (1.9.0)";
 
       await adapter.disconnect();
 
@@ -198,51 +198,51 @@ describe("BlueBubblesAdapter", () => {
     });
 
     it("should stop deduplication cleanup timer", async () => {
-      (adapter as any).dedupCleanupTimer = setInterval(() => {}, 60000);
+      (adapter as Any).dedupCleanupTimer = setInterval(() => {}, 60000);
 
       await adapter.disconnect();
 
-      expect((adapter as any).dedupCleanupTimer).toBeUndefined();
+      expect((adapter as Any).dedupCleanupTimer).toBeUndefined();
     });
 
     it("should clear processed messages cache", async () => {
-      (adapter as any).processedMessages.set("msg-123", Date.now());
+      (adapter as Any).processedMessages.set("msg-123", Date.now());
 
       await adapter.disconnect();
 
-      expect((adapter as any).processedMessages.size).toBe(0);
+      expect((adapter as Any).processedMessages.size).toBe(0);
     });
 
     it("should clear chat cache", async () => {
-      (adapter as any).chatCache.set("chat-123", { guid: "chat-123" });
+      (adapter as Any).chatCache.set("chat-123", { guid: "chat-123" });
 
       await adapter.disconnect();
 
-      expect((adapter as any).chatCache.size).toBe(0);
+      expect((adapter as Any).chatCache.size).toBe(0);
     });
   });
 
   describe("message deduplication", () => {
     it("should track processed messages", () => {
-      (adapter as any).markMessageProcessed("msg-123");
-      expect((adapter as any).isMessageProcessed("msg-123")).toBe(true);
+      (adapter as Any).markMessageProcessed("msg-123");
+      expect((adapter as Any).isMessageProcessed("msg-123")).toBe(true);
     });
 
     it("should not mark duplicate messages as unprocessed", () => {
-      (adapter as any).markMessageProcessed("msg-456");
-      (adapter as any).markMessageProcessed("msg-456");
-      expect((adapter as any).processedMessages.size).toBe(1);
+      (adapter as Any).markMessageProcessed("msg-456");
+      (adapter as Any).markMessageProcessed("msg-456");
+      expect((adapter as Any).processedMessages.size).toBe(1);
     });
 
     it("should cleanup old messages from cache", () => {
       const oldTime = Date.now() - 120000;
-      (adapter as any).processedMessages.set("old-msg", oldTime);
-      (adapter as any).processedMessages.set("new-msg", Date.now());
+      (adapter as Any).processedMessages.set("old-msg", oldTime);
+      (adapter as Any).processedMessages.set("new-msg", Date.now());
 
-      (adapter as any).cleanupDedupCache();
+      (adapter as Any).cleanupDedupCache();
 
-      expect((adapter as any).processedMessages.has("old-msg")).toBe(false);
-      expect((adapter as any).processedMessages.has("new-msg")).toBe(true);
+      expect((adapter as Any).processedMessages.has("old-msg")).toBe(false);
+      expect((adapter as Any).processedMessages.has("new-msg")).toBe(true);
     });
   });
 
@@ -380,7 +380,7 @@ describe("BlueBubblesAdapter edge cases", () => {
         ...defaultConfig,
         allowedContacts: ["+1234567890", "friend@icloud.com"],
       });
-      const config = (adapterWithFilter as any).config;
+      const config = (adapterWithFilter as Any).config;
       expect(config.allowedContacts).toEqual(["+1234567890", "friend@icloud.com"]);
     });
 
@@ -390,14 +390,14 @@ describe("BlueBubblesAdapter edge cases", () => {
         ...defaultConfig,
         allowedContacts: ["+1-234-567-8900", "(234) 567-8900", "234.567.8900"],
       });
-      const config = (adapterWithPhones as any).config;
+      const config = (adapterWithPhones as Any).config;
       expect(config.allowedContacts).toHaveLength(3);
     });
   });
 
   describe("webhook vs polling mode", () => {
     it("should enable webhook by default", () => {
-      const config = (adapter as any).config;
+      const config = (adapter as Any).config;
       expect(config.enableWebhook).toBe(true);
     });
 
@@ -407,7 +407,7 @@ describe("BlueBubblesAdapter edge cases", () => {
         enableWebhook: false,
         pollInterval: 2000,
       });
-      const config = (pollingAdapter as any).config;
+      const config = (pollingAdapter as Any).config;
       expect(config.enableWebhook).toBe(false);
       expect(config.pollInterval).toBe(2000);
     });
@@ -416,14 +416,14 @@ describe("BlueBubblesAdapter edge cases", () => {
   describe("chat cache", () => {
     it("should cache chat information", () => {
       const chatGuid = "iMessage;-;+1234567890";
-      (adapter as any).chatCache.set(chatGuid, {
+      (adapter as Any).chatCache.set(chatGuid, {
         guid: chatGuid,
         displayName: "John Doe",
         participants: ["+1234567890"],
         isGroup: false,
       });
 
-      const cached = (adapter as any).chatCache.get(chatGuid);
+      const cached = (adapter as Any).chatCache.get(chatGuid);
       expect(cached).toBeDefined();
       expect(cached.displayName).toBe("John Doe");
       expect(cached.isGroup).toBe(false);
@@ -431,14 +431,14 @@ describe("BlueBubblesAdapter edge cases", () => {
 
     it("should handle group chats", () => {
       const groupGuid = "iMessage;+;chat123456";
-      (adapter as any).chatCache.set(groupGuid, {
+      (adapter as Any).chatCache.set(groupGuid, {
         guid: groupGuid,
         displayName: "Family Group",
         participants: ["+1234567890", "+0987654321", "+1122334455"],
         isGroup: true,
       });
 
-      const cached = (adapter as any).chatCache.get(groupGuid);
+      const cached = (adapter as Any).chatCache.get(groupGuid);
       expect(cached.isGroup).toBe(true);
       expect(cached.participants).toHaveLength(3);
     });
@@ -450,7 +450,7 @@ describe("BlueBubblesAdapter edge cases", () => {
         ...defaultConfig,
         serverUrl: "http://192.168.1.100:1234",
       });
-      expect((adapterNoSlash as any).config.serverUrl).toBe("http://192.168.1.100:1234");
+      expect((adapterNoSlash as Any).config.serverUrl).toBe("http://192.168.1.100:1234");
     });
 
     it("should accept URLs with trailing slash", () => {
@@ -458,7 +458,7 @@ describe("BlueBubblesAdapter edge cases", () => {
         ...defaultConfig,
         serverUrl: "http://192.168.1.100:1234/",
       });
-      expect((adapterWithSlash as any).config.serverUrl).toBe("http://192.168.1.100:1234/");
+      expect((adapterWithSlash as Any).config.serverUrl).toBe("http://192.168.1.100:1234/");
     });
 
     it("should accept localhost URLs", () => {
@@ -466,7 +466,7 @@ describe("BlueBubblesAdapter edge cases", () => {
         ...defaultConfig,
         serverUrl: "http://localhost:1234",
       });
-      expect((localAdapter as any).config.serverUrl).toBe("http://localhost:1234");
+      expect((localAdapter as Any).config.serverUrl).toBe("http://localhost:1234");
     });
   });
 });

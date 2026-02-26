@@ -8,7 +8,7 @@ export const DROPBOX_API_BASE = "https://api.dropboxapi.com/2";
 export const DROPBOX_CONTENT_BASE = "https://content.dropboxapi.com/2";
 const DEFAULT_TIMEOUT_MS = 20000;
 
-function parseJsonSafe(text: string): any | undefined {
+function parseJsonSafe(text: string): Any | undefined {
   const trimmed = text.trim();
   if (!trimmed) return undefined;
   try {
@@ -18,7 +18,7 @@ function parseJsonSafe(text: string): any | undefined {
   }
 }
 
-function formatDropboxError(status: number, data: any, fallback?: string): string {
+function formatDropboxError(status: number, data: Any, fallback?: string): string {
   const message =
     data?.error_summary || data?.error?.summary || data?.message || fallback || "Dropbox API error";
   return `Dropbox API error ${status}: ${message}`;
@@ -27,13 +27,13 @@ function formatDropboxError(status: number, data: any, fallback?: string): strin
 export interface DropboxRequestOptions {
   method: "POST";
   path: string;
-  body?: Record<string, any>;
+  body?: Record<string, Any>;
   timeoutMs?: number;
 }
 
 export interface DropboxRequestResult {
   status: number;
-  data?: any;
+  data?: Any;
   raw?: string;
 }
 
@@ -77,7 +77,7 @@ export async function dropboxRequest(
       data: data ?? undefined,
       raw: rawText || undefined,
     };
-  } catch (error: any) {
+  } catch (error: Any) {
     if (error?.name === "AbortError") {
       throw new Error("Dropbox API request timed out");
     }
@@ -134,7 +134,7 @@ export async function dropboxContentUpload(
       data: data ?? undefined,
       raw: rawText || undefined,
     };
-  } catch (error: any) {
+  } catch (error: Any) {
     if (error?.name === "AbortError") {
       throw new Error("Dropbox upload request timed out");
     }
@@ -144,7 +144,7 @@ export async function dropboxContentUpload(
   }
 }
 
-function extractAccountInfo(data: any): { name?: string; userId?: string; email?: string } {
+function extractAccountInfo(data: Any): { name?: string; userId?: string; email?: string } {
   if (!data || typeof data !== "object") return {};
   const name = data?.name?.display_name || data?.name?.abbreviated_name || undefined;
   const userId = data?.account_id || data?.id || undefined;
@@ -167,7 +167,7 @@ export async function testDropboxConnection(
       userId: extracted.userId,
       email: extracted.email,
     };
-  } catch (error: any) {
+  } catch (error: Any) {
     return {
       success: false,
       error: error?.message || "Failed to connect to Dropbox",

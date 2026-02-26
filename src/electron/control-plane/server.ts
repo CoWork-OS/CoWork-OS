@@ -9,11 +9,11 @@ import http from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import crypto from "crypto";
 import {
-  Frame,
+  Frame as _Frame,
   RequestFrame,
   FrameType,
   parseFrame,
-  serializeFrame,
+  serializeFrame as _serializeFrame,
   createResponseFrame,
   createErrorResponse,
   createEventFrame,
@@ -22,10 +22,10 @@ import {
   Methods,
 } from "./protocol";
 import { ControlPlaneClient, ClientRegistry, type ClientScope } from "./client";
-import { ControlPlaneSettingsManager, type ControlPlaneSettings } from "./settings";
+import { ControlPlaneSettingsManager, type ControlPlaneSettings as _ControlPlaneSettings } from "./settings";
 import {
   startTailscaleExposure,
-  stopTailscaleExposure,
+  stopTailscaleExposure as _stopTailscaleExposure,
   getExposureStatus,
   type TailscaleExposureResult,
 } from "../tailscale";
@@ -548,7 +548,7 @@ export class ControlPlaneServer {
     if (isNode) {
       // Authenticate as a node
       const platform = (params?.client?.platform || "ios") as "ios" | "android" | "macos";
-      const capabilities = (params?.capabilities || []) as any[];
+      const capabilities = (params?.capabilities || []) as Any[];
       const commands = params?.commands || [];
       const permissions = params?.permissions || {};
 
@@ -668,12 +668,12 @@ export class ControlPlaneServer {
     try {
       const result = await handler(client, request.params);
       client.send(createResponseFrame(request.id, result));
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error(`[ControlPlane] Method error (${request.method}):`, error);
       const code =
         typeof error?.code === "string" &&
         (Object.values(ErrorCodes) as string[]).includes(error.code)
-          ? (error.code as any)
+          ? (error.code as Any)
           : ErrorCodes.METHOD_FAILED;
       client.send(
         createErrorResponse(
@@ -805,7 +805,7 @@ export class ControlPlaneServer {
 
       // Handle specific node events
       if (event === "foreground_changed") {
-        const isForeground = (payload as any)?.isForeground ?? true;
+        const isForeground = (payload as Any)?.isForeground ?? true;
         client.setForeground(isForeground);
         this.clients.broadcastToOperators(Events.NODE_EVENT, {
           nodeId: client.id,
@@ -813,7 +813,7 @@ export class ControlPlaneServer {
           isForeground,
         });
       } else if (event === "capabilities_changed") {
-        const { capabilities, commands, permissions } = payload as any;
+        const { capabilities, commands, permissions } = payload as Any;
         if (capabilities && commands && permissions) {
           client.updateCapabilities(capabilities, commands, permissions);
           this.clients.broadcastToOperators(Events.NODE_CAPABILITIES_CHANGED, {
@@ -845,10 +845,10 @@ export class ControlPlaneServer {
         try {
           const message = data.toString();
           const frame = parseFrame(message);
-          if (frame && frame.type === FrameType.Response && (frame as any).id === requestId) {
+          if (frame && frame.type === FrameType.Response && (frame as Any).id === requestId) {
             clearTimeout(timeoutHandle);
             node.info.socket.removeListener("message", handleResponse);
-            const response = frame as any;
+            const response = frame as Any;
             if (response.ok) {
               resolve({ ok: true, payload: response.payload });
             } else {

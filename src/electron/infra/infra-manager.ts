@@ -243,7 +243,7 @@ export class InfraManager {
     return this.domainsProvider.getDnsRecords(domain);
   }
 
-  async domainDnsAdd(domain: string, record: any) {
+  async domainDnsAdd(domain: string, record: Any) {
     return this.domainsProvider.addDnsRecord(domain, record);
   }
 

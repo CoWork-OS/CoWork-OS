@@ -75,20 +75,20 @@ describe("ContextManager.compactMessagesWithMeta", () => {
     ];
 
     const targetTokens = 100;
-    const result = (cm as any).removeOlderMessagesWithMeta(messages, targetTokens);
+    const result = (cm as Any).removeOlderMessagesWithMeta(messages, targetTokens);
     const compacted = result.messages as LLMMessage[];
 
     for (let i = 0; i < compacted.length; i++) {
       const current = compacted[i];
       if (!Array.isArray(current.content)) continue;
-      const hasToolResult = current.content.some((block: any) => block?.type === "tool_result");
+      const hasToolResult = current.content.some((block: Any) => block?.type === "tool_result");
       if (!hasToolResult) continue;
 
       const previous = i > 0 ? compacted[i - 1] : null;
       const previousHasToolUse =
         previous?.role === "assistant" &&
         Array.isArray(previous.content) &&
-        previous.content.some((block: any) => block?.type === "tool_use");
+        previous.content.some((block: Any) => block?.type === "tool_use");
       expect(previousHasToolUse).toBe(true);
     }
   });

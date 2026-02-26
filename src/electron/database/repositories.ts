@@ -68,7 +68,7 @@ export class WorkspaceRepository {
 
   findById(id: string): Workspace | undefined {
     const stmt = this.db.prepare("SELECT * FROM workspaces WHERE id = ?");
-    const row = stmt.get(id) as any;
+    const row = stmt.get(id) as Any;
     return row ? this.mapRowToWorkspace(row) : undefined;
   }
 
@@ -78,7 +78,7 @@ export class WorkspaceRepository {
       FROM workspaces
       ORDER BY COALESCE(last_used_at, created_at) DESC
     `);
-    const rows = stmt.all() as any[];
+    const rows = stmt.all() as Any[];
     return rows.map((row) => this.mapRowToWorkspace(row));
   }
 
@@ -96,7 +96,7 @@ export class WorkspaceRepository {
    */
   findByPath(path: string): Workspace | undefined {
     const stmt = this.db.prepare("SELECT * FROM workspaces WHERE path = ?");
-    const row = stmt.get(path) as any;
+    const row = stmt.get(path) as Any;
     return row ? this.mapRowToWorkspace(row) : undefined;
   }
 
@@ -124,7 +124,7 @@ export class WorkspaceRepository {
     stmt.run(id);
   }
 
-  private mapRowToWorkspace(row: any): Workspace {
+  private mapRowToWorkspace(row: Any): Workspace {
     // Note: network is true by default for browser tools (web access)
     const defaultPermissions: WorkspacePermissions = {
       read: true,
@@ -245,7 +245,7 @@ export class TaskRepository {
 
   update(id: string, updates: Partial<Task>): void {
     const fields: string[] = [];
-    const values: any[] = [];
+    const values: Any[] = [];
 
     Object.entries(updates).forEach(([key, value]) => {
       // Validate field name against whitelist
@@ -309,7 +309,7 @@ export class TaskRepository {
 
   findById(id: string): Task | undefined {
     const stmt = this.db.prepare("SELECT * FROM tasks WHERE id = ?");
-    const row = stmt.get(id) as any;
+    const row = stmt.get(id) as Any;
     return row ? this.mapRowToTask(row) : undefined;
   }
 
@@ -319,7 +319,7 @@ export class TaskRepository {
       ORDER BY created_at DESC
       LIMIT ? OFFSET ?
     `);
-    const rows = stmt.all(limit, offset) as any[];
+    const rows = stmt.all(limit, offset) as Any[];
     return rows.map((row) => this.mapRowToTask(row));
   }
 
@@ -334,7 +334,7 @@ export class TaskRepository {
       WHERE status IN (${placeholders})
       ORDER BY created_at ASC
     `);
-    const rows = stmt.all(...statuses) as any[];
+    const rows = stmt.all(...statuses) as Any[];
     return rows.map((row) => this.mapRowToTask(row));
   }
 
@@ -352,7 +352,7 @@ export class TaskRepository {
         ORDER BY created_at DESC
         LIMIT ? OFFSET ?
       `);
-      const rows = stmt.all(workspaceId, safeLimit, safeOffset) as any[];
+      const rows = stmt.all(workspaceId, safeLimit, safeOffset) as Any[];
       return rows.map((row) => this.mapRowToTask(row));
     }
 
@@ -361,13 +361,13 @@ export class TaskRepository {
       WHERE workspace_id = ?
       ORDER BY created_at DESC
     `);
-    const rows = stmt.all(workspaceId) as any[];
+    const rows = stmt.all(workspaceId) as Any[];
     return rows.map((row) => this.mapRowToTask(row));
   }
 
   countByWorkspace(workspaceId: string): number {
     const stmt = this.db.prepare("SELECT COUNT(1) as count FROM tasks WHERE workspace_id = ?");
-    const row = stmt.get(workspaceId) as any;
+    const row = stmt.get(workspaceId) as Any;
     const count = row?.count;
     if (typeof count === "number") return count;
     const parsed = Number(count);
@@ -396,7 +396,7 @@ export class TaskRepository {
         : 50;
 
     const where: string[] = ["created_at >= ?", "created_at < ?"];
-    const args: any[] = [startMs, endMs];
+    const args: Any[] = [startMs, endMs];
 
     const workspaceId = typeof params.workspaceId === "string" ? params.workspaceId.trim() : "";
     if (workspaceId) {
@@ -420,7 +420,7 @@ export class TaskRepository {
       LIMIT ?
     `);
 
-    const rows = stmt.all(...args) as any[];
+    const rows = stmt.all(...args) as Any[];
     return rows.map((row) => this.mapRowToTask(row));
   }
 
@@ -475,7 +475,7 @@ export class TaskRepository {
     deleteTransaction(id);
   }
 
-  private mapRowToTask(row: any): Task {
+  private mapRowToTask(row: Any): Task {
     return {
       id: row.id,
       title: row.title,
@@ -534,7 +534,7 @@ export class TaskRepository {
       WHERE parent_task_id = ?
       ORDER BY created_at ASC
     `);
-    const rows = stmt.all(parentTaskId) as any[];
+    const rows = stmt.all(parentTaskId) as Any[];
     return rows.map((row) => this.mapRowToTask(row));
   }
 
@@ -549,7 +549,7 @@ export class TaskRepository {
       WHERE workspace_id = ? AND board_column = ?
       ORDER BY priority DESC, created_at ASC
     `);
-    const rows = stmt.all(workspaceId, boardColumn) as any[];
+    const rows = stmt.all(workspaceId, boardColumn) as Any[];
     return rows.map((row) => this.mapRowToTask(row));
   }
 
@@ -562,7 +562,7 @@ export class TaskRepository {
       WHERE workspace_id = ? AND parent_task_id IS NULL
       ORDER BY board_column, priority DESC, created_at ASC
     `);
-    const rows = stmt.all(workspaceId) as any[];
+    const rows = stmt.all(workspaceId) as Any[];
     const tasks = rows.map((row) => this.mapRowToTask(row));
 
     // Group tasks by board column
@@ -590,7 +590,7 @@ export class TaskRepository {
    * Move a task to a different board column
    */
   moveToColumn(id: string, boardColumn: string): Task | undefined {
-    this.update(id, { boardColumn: boardColumn as any });
+    this.update(id, { boardColumn: boardColumn as Any });
     return this.findById(id);
   }
 
@@ -606,7 +606,7 @@ export class TaskRepository {
    * Set task due date
    */
   setDueDate(id: string, dueDate: number | null): Task | undefined {
-    this.update(id, { dueDate: dueDate || undefined } as any);
+    this.update(id, { dueDate: dueDate || undefined } as Any);
     return this.findById(id);
   }
 
@@ -614,7 +614,7 @@ export class TaskRepository {
    * Set task time estimate
    */
   setEstimate(id: string, estimatedMinutes: number | null): Task | undefined {
-    this.update(id, { estimatedMinutes: estimatedMinutes || undefined } as any);
+    this.update(id, { estimatedMinutes: estimatedMinutes || undefined } as Any);
     return this.findById(id);
   }
 
@@ -628,7 +628,7 @@ export class TaskRepository {
     const labels = task.labels || [];
     if (!labels.includes(labelId)) {
       labels.push(labelId);
-      this.update(id, { labels } as any);
+      this.update(id, { labels } as Any);
     }
     return this.findById(id);
   }
@@ -642,7 +642,7 @@ export class TaskRepository {
 
     const labels = task.labels || [];
     const newLabels = labels.filter((l) => l !== labelId);
-    this.update(id, { labels: newLabels } as any);
+    this.update(id, { labels: newLabels } as Any);
     return this.findById(id);
   }
 
@@ -650,7 +650,7 @@ export class TaskRepository {
    * Assign an agent role to a task
    */
   assignAgentRole(id: string, agentRoleId: string | null): Task | undefined {
-    this.update(id, { assignedAgentRoleId: agentRoleId || undefined } as any);
+    this.update(id, { assignedAgentRoleId: agentRoleId || undefined } as Any);
     return this.findById(id);
   }
 }
@@ -686,7 +686,7 @@ export class TaskEventRepository {
       WHERE task_id = ?
       ORDER BY timestamp ASC
     `);
-    const rows = stmt.all(taskId) as any[];
+    const rows = stmt.all(taskId) as Any[];
     return rows.map((row) => this.mapRowToEvent(row));
   }
 
@@ -708,12 +708,12 @@ export class TaskEventRepository {
 
     // Chunk task IDs to stay under SQLite's SQLITE_MAX_VARIABLE_NUMBER (999).
     const CHUNK_SIZE = 500;
-    const allRows: any[] = [];
+    const allRows: Any[] = [];
 
     for (let i = 0; i < normalizedTaskIds.length; i += CHUNK_SIZE) {
       const chunk = normalizedTaskIds.slice(i, i + CHUNK_SIZE);
       const taskPlaceholders = chunk.map(() => "?").join(", ");
-      const args: any[] = [...chunk];
+      const args: Any[] = [...chunk];
 
       let sql = `
         SELECT * FROM task_events
@@ -729,13 +729,13 @@ export class TaskEventRepository {
       sql += " ORDER BY task_id ASC, timestamp ASC";
 
       const stmt = this.db.prepare(sql);
-      allRows.push(...(stmt.all(...args) as any[]));
+      allRows.push(...(stmt.all(...args) as Any[]));
     }
 
     return allRows.map((row) => this.mapRowToEvent(row));
   }
 
-  private mapRowToEvent(row: any): TaskEvent {
+  private mapRowToEvent(row: Any): TaskEvent {
     return {
       id: row.id,
       taskId: row.task_id,
@@ -807,11 +807,11 @@ export class ArtifactRepository {
     const stmt = this.db.prepare(
       "SELECT * FROM artifacts WHERE task_id = ? ORDER BY created_at DESC",
     );
-    const rows = stmt.all(taskId) as any[];
+    const rows = stmt.all(taskId) as Any[];
     return rows.map((row) => this.mapRowToArtifact(row));
   }
 
-  private mapRowToArtifact(row: any): Artifact {
+  private mapRowToArtifact(row: Any): Artifact {
     return {
       id: row.id,
       taskId: row.task_id,
@@ -866,11 +866,11 @@ export class ApprovalRepository {
       WHERE task_id = ? AND status = 'pending'
       ORDER BY requested_at ASC
     `);
-    const rows = stmt.all(taskId) as any[];
+    const rows = stmt.all(taskId) as Any[];
     return rows.map((row) => this.mapRowToApproval(row));
   }
 
-  private mapRowToApproval(row: any): ApprovalRequest {
+  private mapRowToApproval(row: Any): ApprovalRequest {
     return {
       id: row.id,
       taskId: row.task_id,
@@ -913,17 +913,17 @@ export class SkillRepository {
 
   findAll(): Skill[] {
     const stmt = this.db.prepare("SELECT * FROM skills ORDER BY name ASC");
-    const rows = stmt.all() as any[];
+    const rows = stmt.all() as Any[];
     return rows.map((row) => this.mapRowToSkill(row));
   }
 
   findById(id: string): Skill | undefined {
     const stmt = this.db.prepare("SELECT * FROM skills WHERE id = ?");
-    const row = stmt.get(id) as any;
+    const row = stmt.get(id) as Any;
     return row ? this.mapRowToSkill(row) : undefined;
   }
 
-  private mapRowToSkill(row: any): Skill {
+  private mapRowToSkill(row: Any): Skill {
     return {
       id: row.id,
       name: row.name,
@@ -960,23 +960,23 @@ export class LLMModelRepository {
       WHERE is_active = 1
       ORDER BY sort_order ASC
     `);
-    const rows = stmt.all() as any[];
+    const rows = stmt.all() as Any[];
     return rows.map((row) => this.mapRowToModel(row));
   }
 
   findByKey(key: string): LLMModel | undefined {
     const stmt = this.db.prepare("SELECT * FROM llm_models WHERE key = ?");
-    const row = stmt.get(key) as any;
+    const row = stmt.get(key) as Any;
     return row ? this.mapRowToModel(row) : undefined;
   }
 
   findById(id: string): LLMModel | undefined {
     const stmt = this.db.prepare("SELECT * FROM llm_models WHERE id = ?");
-    const row = stmt.get(id) as any;
+    const row = stmt.get(id) as Any;
     return row ? this.mapRowToModel(row) : undefined;
   }
 
-  private mapRowToModel(row: any): LLMModel {
+  private mapRowToModel(row: Any): LLMModel {
     return {
       id: row.id,
       key: row.key,
@@ -2510,7 +2510,7 @@ export class MemoryRepository {
       let rows: Record<string, unknown>[] = [];
       try {
         rows = stmt.all(raw, workspaceId, limit) as Record<string, unknown>[];
-      } catch (err) {
+      } catch  {
         // Raw query may be invalid FTS syntax; retry below with tokenized query.
         rows = [];
       }

@@ -282,7 +282,7 @@ export function normalizeWhatsAppNaturalCommand(text: string): string | undefine
   const briefMatch = normalized.match(
     /^brief(?:\s+(morning|today|tomorrow|week|schedule|unschedule|list))?(?:\s+.*)?$/i,
   );
-  if (briefMatch && /^brief/.test(normalized.toLowerCase())) {
+  if (briefMatch && normalized.toLowerCase().startsWith('brief')) {
     const subcommand = (briefMatch[1] || "").trim();
     return subcommand ? `/brief ${subcommand}` : "/brief";
   }

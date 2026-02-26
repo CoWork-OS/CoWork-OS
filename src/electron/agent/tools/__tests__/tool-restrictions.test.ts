@@ -52,7 +52,7 @@ vi.mock("../../../hooks/settings", () => ({
       presets: [],
       mappings: [],
     }),
-    updateConfig: vi.fn().mockImplementation((cfg: any) => cfg),
+    updateConfig: vi.fn().mockImplementation((cfg: Any) => cfg),
   },
 }));
 
@@ -60,7 +60,7 @@ import { ToolRegistry } from "../registry";
 
 describe("ToolRegistry tool restrictions", () => {
   it('denies all tools when restrictions include "*"', () => {
-    const workspace: any = {
+    const workspace: Any = {
       id: "test-workspace",
       name: "Test Workspace",
       path: "/mock/workspace",
@@ -74,7 +74,7 @@ describe("ToolRegistry tool restrictions", () => {
       createdAt: Date.now(),
     };
 
-    const daemon: any = {
+    const daemon: Any = {
       logEvent: vi.fn(),
       registerArtifact: vi.fn(),
     };

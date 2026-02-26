@@ -15,10 +15,10 @@ describe("CronTools.schedule_create workspace behavior", () => {
     return {
       logEvent: vi.fn(),
       createWorkspace: vi.fn(),
-    } as any;
+    } as Any;
   };
 
-  const createService = (resolveWorkspaceContext?: any) =>
+  const createService = (resolveWorkspaceContext?: Any) =>
     new CronService({
       cronEnabled: true,
       storePath: path.join(tmpUserDataDir, "cron", "jobs.json"),

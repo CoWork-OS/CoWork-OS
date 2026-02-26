@@ -18,9 +18,9 @@ export class EventTriggerService {
   private history: Map<string, TriggerHistoryEntry[]> = new Map(); // triggerId → entries
   private running = false;
   private deps: EventTriggerServiceDeps;
-  private db: any; // better-sqlite3 database instance
+  private db: Any; // better-sqlite3 database instance
 
-  constructor(deps: EventTriggerServiceDeps, db?: any) {
+  constructor(deps: EventTriggerServiceDeps, db?: Any) {
     this.deps = deps;
     this.db = db;
     this.ensureSchema();
@@ -241,10 +241,10 @@ export class EventTriggerService {
   private loadFromDB(): void {
     if (!this.db) return;
     try {
-      const rows = this.db.prepare("SELECT * FROM event_triggers").all() as any[];
+      const rows = this.db.prepare("SELECT * FROM event_triggers").all() as Any[];
       for (const row of rows) {
-        let conditions: any[];
-        let action: any;
+        let conditions: Any[];
+        let action: Any;
         try {
           conditions = JSON.parse(row.conditions || "[]");
         } catch {

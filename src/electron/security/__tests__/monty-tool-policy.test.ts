@@ -16,15 +16,15 @@ describe("evaluateMontyToolPolicy", () => {
     await fs.writeFile(
       path.join(policyDir, "tools.monty"),
       [
-        'out = {\"decision\": \"pass\"}',
-        'if input[\"tool\"] == \"run_command\":',
-        '  out = {\"decision\": \"deny\", \"reason\": \"shell disabled\"}',
+        'out = {"decision": "pass"}',
+        'if input["tool"] == "run_command":',
+        '  out = {"decision": "deny", "reason": "shell disabled"}',
         "out",
       ].join("\n"),
       "utf8",
     );
 
-    const workspace: any = {
+    const workspace: Any = {
       id: "ws1",
       name: "WS",
       path: tmpDir,

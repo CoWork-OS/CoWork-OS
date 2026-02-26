@@ -66,8 +66,8 @@ export class SlackAdapter implements ChannelAdapter {
 
       // SocketModeReceiver doesn't expose ping/pong timeout options, so we
       // set them directly on the underlying SocketModeClient before start().
-      (receiver.client as any).clientPingTimeout = 15000; // 15s (default: 5s)
-      (receiver.client as any).serverPingTimeout = 60000; // 60s (default: 30s)
+      (receiver.client as Any).clientPingTimeout = 15000; // 15s (default: 5s)
+      (receiver.client as Any).serverPingTimeout = 60000; // 60s (default: 30s)
 
       this.app = new App({
         token: this.config.botToken,
@@ -81,20 +81,20 @@ export class SlackAdapter implements ChannelAdapter {
       this._botId = authResult.user_id as string;
 
       // Handle direct messages and mentions
-      this.app.message(async ({ message, say, client }) => {
+      this.app.message(async ({ message, client }) => {
         // Ignore bot messages
         if (
           "bot_id" in message ||
-          ("subtype" in message && (message as any).subtype === "bot_message")
+          ("subtype" in message && (message as Any).subtype === "bot_message")
         ) {
           return;
         }
 
         const hasText =
-          typeof (message as any)?.text === "string" &&
-          String((message as any).text).trim().length > 0;
+          typeof (message as Any)?.text === "string" &&
+          String((message as Any).text).trim().length > 0;
         const hasFiles =
-          Array.isArray((message as any)?.files) && (message as any).files.length > 0;
+          Array.isArray((message as Any)?.files) && (message as Any).files.length > 0;
 
         // Only process messages with some content
         if (!hasText && !hasFiles) {
@@ -108,7 +108,7 @@ export class SlackAdapter implements ChannelAdapter {
         const isGroup = isDirect ? false : true;
         const isMentioned =
           hasText && this._botId
-            ? String((message as any).text).includes(`<@${this._botId}>`)
+            ? String((message as Any).text).includes(`<@${this._botId}>`)
             : false;
 
         if (isDirect || isMultiPartyDm || isMentioned) {
@@ -121,7 +121,7 @@ export class SlackAdapter implements ChannelAdapter {
       });
 
       // Handle slash commands
-      this.app.command(/.*/, async ({ command, ack, respond }) => {
+      this.app.command(/.*/, async ({ command, ack }) => {
         await ack();
 
         const isGroup = command.channel_id ? !command.channel_id.startsWith("D") : undefined;
@@ -345,7 +345,7 @@ export class SlackAdapter implements ChannelAdapter {
       filename: fileName,
       title: fileName,
       initial_comment: caption,
-    })) as any;
+    })) as Any;
 
     // Return the file ID if available
     if (result.files && result.files.length > 0) {
@@ -401,7 +401,7 @@ export class SlackAdapter implements ChannelAdapter {
     return "file";
   }
 
-  private async downloadSlackAttachment(file: any): Promise<MessageAttachment | null> {
+  private async downloadSlackAttachment(file: Any): Promise<MessageAttachment | null> {
     const url: string = String(file?.url_private_download || file?.url_private || "").trim();
     if (!url) return null;
 
@@ -461,7 +461,7 @@ export class SlackAdapter implements ChannelAdapter {
     }
   }
 
-  private async buildAttachments(message: any): Promise<MessageAttachment[] | undefined> {
+  private async buildAttachments(message: Any): Promise<MessageAttachment[] | undefined> {
     const files = Array.isArray(message?.files) ? message.files : [];
     if (files.length === 0) return undefined;
 
@@ -475,8 +475,8 @@ export class SlackAdapter implements ChannelAdapter {
   }
 
   private async mapMessageToIncoming(
-    message: any,
-    client: any,
+    message: Any,
+    client: Any,
     isGroup?: boolean,
   ): Promise<IncomingMessage> {
     const hadFiles = Array.isArray(message?.files) && message.files.length > 0;

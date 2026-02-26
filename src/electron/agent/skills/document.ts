@@ -7,7 +7,7 @@ import {
   Paragraph,
   TextRun,
   HeadingLevel,
-  AlignmentType,
+  AlignmentType as _AlignmentType,
   Table,
   TableRow,
   TableCell,
@@ -228,7 +228,7 @@ export class DocumentBuilder {
               ),
             });
             children.push(new Paragraph({ children: [] })); // Spacing before table
-            children.push(table as any);
+            children.push(table as Any);
             children.push(new Paragraph({ children: [] })); // Spacing after table
           }
           break;
@@ -419,7 +419,7 @@ export class DocumentBuilder {
             if (!block.rows || block.rows.length === 0) return "";
             const header = block.rows[0];
             const separator = header.map(() => "---").join(" | ");
-            const rows = block.rows.map((row) => row.join(" | ")).join("\n");
+            const _rows = block.rows.map((row) => row.join(" | ")).join("\n");
             return `${header.join(" | ")}\n${separator}\n${block.rows
               .slice(1)
               .map((row) => row.join(" | "))
@@ -481,7 +481,7 @@ export class DocumentBuilder {
     inputPath: string,
     outputPath: string,
     newContent: ContentBlock[],
-    options: DocumentOptions = {},
+    _options: DocumentOptions = {},
   ): Promise<{ success: boolean; sectionsAdded: number }> {
     console.log(
       `[DocumentBuilder] appendToDocument: ${inputPath} -> ${outputPath}, ${newContent.length} blocks`,
@@ -651,7 +651,7 @@ export class DocumentBuilder {
     // Pattern: <w:p ...>...<w:pStyle w:val="Heading[1-6]"/>...</w:p>
     const paragraphRegex = /<w:p\b[^>]*>[\s\S]*?<\/w:p>/g;
     const headingStyleRegex = /<w:pStyle\s+w:val="Heading([1-6])"\s*\/>/;
-    const textRegex = /<w:t[^>]*>([^<]*)<\/w:t>/g;
+    const _textRegex = /<w:t[^>]*>([^<]*)<\/w:t>/g;
 
     let match;
     const headingPositions: Array<{
@@ -996,17 +996,17 @@ export class DocumentBuilder {
     const paragraphRegex = /<p[^>]*>([\s\S]*?)<\/p>/gi;
     // Match list items
     const listRegex = /<ul[^>]*>([\s\S]*?)<\/ul>/gi;
-    const listItemRegex = /<li[^>]*>([\s\S]*?)<\/li>/gi;
+    const _listItemRegex = /<li[^>]*>([\s\S]*?)<\/li>/gi;
     // Match tables
     const tableRegex = /<table[^>]*>([\s\S]*?)<\/table>/gi;
-    const trRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
-    const tdThRegex = /<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi;
+    const _trRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+    const _tdThRegex = /<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi;
 
     // Helper to strip HTML tags
     const stripTags = (str: string): string => str.replace(/<[^>]*>/g, "").trim();
 
     // Process in order of appearance
-    let lastIndex = 0;
+    let _lastIndex = 0;
     const processedRanges: Array<{ start: number; end: number }> = [];
 
     // Find all headings

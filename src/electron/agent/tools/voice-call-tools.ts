@@ -140,7 +140,7 @@ export class VoiceCallTools {
       out.dynamic_variables = input.dynamic_variables;
     }
 
-    const override: Record<string, any> = input.conversation_config_override
+    const override: Record<string, Any> = input.conversation_config_override
       ? { ...input.conversation_config_override }
       : {};
 
@@ -170,7 +170,7 @@ export class VoiceCallTools {
     path: string;
     query?: Record<string, string | number | boolean | undefined>;
     body?: Record<string, unknown>;
-  }): Promise<any> {
+  }): Promise<Any> {
     const apiKey = this.getApiKey();
     const url = new URL(`${ELEVENLABS_API_BASE}${params.path}`);
 
@@ -195,7 +195,7 @@ export class VoiceCallTools {
     if (!response.ok) {
       let message = raw;
       try {
-        const parsed = JSON.parse(raw) as any;
+        const parsed = JSON.parse(raw) as Any;
         message = parsed?.detail || parsed?.message || parsed?.error || raw;
       } catch {
         // Keep raw text
@@ -213,7 +213,7 @@ export class VoiceCallTools {
     }
   }
 
-  async executeAction(input: VoiceCallActionInput): Promise<any> {
+  async executeAction(input: VoiceCallActionInput): Promise<Any> {
     const action = input.action;
     if (!action) {
       throw new Error('Missing required "action" parameter');
@@ -221,7 +221,7 @@ export class VoiceCallTools {
 
     const settings = VoiceSettingsManager.loadSettings();
 
-    let result: any;
+    let result: Any;
 
     switch (action) {
       case "list_agents": {

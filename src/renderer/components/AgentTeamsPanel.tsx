@@ -22,7 +22,7 @@ interface AgentTeamsPanelProps {
 type TeamRunEvent = {
   type: string;
   timestamp?: number;
-  [key: string]: any;
+  [key: string]: Any;
 };
 
 function formatTime(ts?: number): string {
@@ -153,7 +153,7 @@ export function AgentTeamsPanel({ workspaceId, agents, tasks, onOpenTask }: Agen
         if (prev && loaded.some((t) => t.id === prev)) return prev;
         return loaded[0]?.id ?? null;
       });
-    } catch (err: any) {
+    } catch (err: Any) {
       console.error("Failed to load teams:", err);
       setError(err?.message || "Failed to load teams");
     } finally {
@@ -174,7 +174,7 @@ export function AgentTeamsPanel({ workspaceId, agents, tasks, onOpenTask }: Agen
         if (prev && loadedRuns.some((r) => r.id === prev)) return prev;
         return loadedRuns[0]?.id ?? null;
       });
-    } catch (err: any) {
+    } catch (err: Any) {
       console.error("Failed to load team details:", err);
       setError(err?.message || "Failed to load team details");
     }
@@ -185,7 +185,7 @@ export function AgentTeamsPanel({ workspaceId, agents, tasks, onOpenTask }: Agen
       setError(null);
       const loaded = await window.electronAPI.listTeamItems(runId);
       setItems(loaded);
-    } catch (err: any) {
+    } catch (err: Any) {
       console.error("Failed to load run items:", err);
       setError(err?.message || "Failed to load run items");
     }
@@ -382,7 +382,7 @@ export function AgentTeamsPanel({ workspaceId, agents, tasks, onOpenTask }: Agen
       setNewTeamMaxParallel(4);
       setNewTeamDefaultModelPreference("cheaper");
       setNewTeamDefaultPersonality("concise");
-    } catch (err: any) {
+    } catch (err: Any) {
       console.error("Failed to create team:", err);
       setError(err?.message || "Failed to create team");
     }
@@ -415,7 +415,7 @@ export function AgentTeamsPanel({ workspaceId, agents, tasks, onOpenTask }: Agen
       if (updated) {
         setTeams((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
       }
-    } catch (err: any) {
+    } catch (err: Any) {
       console.error("Failed to update team:", err);
       setError(err?.message || "Failed to update team");
     }
@@ -431,7 +431,7 @@ export function AgentTeamsPanel({ workspaceId, agents, tasks, onOpenTask }: Agen
         setTeams((prev) => prev.filter((t) => t.id !== selectedTeam.id));
         setSelectedTeamId(null);
       }
-    } catch (err: any) {
+    } catch (err: Any) {
       console.error("Failed to delete team:", err);
       setError(err?.message || "Failed to delete team");
     }
@@ -461,7 +461,7 @@ export function AgentTeamsPanel({ workspaceId, agents, tasks, onOpenTask }: Agen
       setNewMemberRoleId("");
       setNewMemberRequired(false);
       setNewMemberGuidance("");
-    } catch (err: any) {
+    } catch (err: Any) {
       console.error("Failed to add team member:", err);
       setError(err?.message || "Failed to add team member");
     }
@@ -476,7 +476,7 @@ export function AgentTeamsPanel({ workspaceId, agents, tasks, onOpenTask }: Agen
         setError(null);
         await window.electronAPI.removeTeamMember(selectedTeamId, member.agentRoleId);
         setTeamMembers((prev) => prev.filter((m) => m.id !== member.id));
-      } catch (err: any) {
+      } catch (err: Any) {
         console.error("Failed to remove team member:", err);
         setError(err?.message || "Failed to remove team member");
       }
@@ -499,7 +499,7 @@ export function AgentTeamsPanel({ workspaceId, agents, tasks, onOpenTask }: Agen
         if (updated) {
           setTeamMembers((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
         }
-      } catch (err: any) {
+      } catch (err: Any) {
         console.error("Failed to update team member:", err);
         setError(err?.message || "Failed to update team member");
       }
@@ -526,7 +526,7 @@ export function AgentTeamsPanel({ workspaceId, agents, tasks, onOpenTask }: Agen
           ordered.map((x) => x.id),
         );
         setTeamMembers(updated);
-      } catch (err: any) {
+      } catch (err: Any) {
         console.error("Failed to reorder team members:", err);
         setError(err?.message || "Failed to reorder team members");
       }
@@ -550,7 +550,7 @@ export function AgentTeamsPanel({ workspaceId, agents, tasks, onOpenTask }: Agen
       });
       setRuns((prev) => [run, ...prev]);
       setSelectedRunId(run.id);
-    } catch (err: any) {
+    } catch (err: Any) {
       console.error("Failed to create team run:", err);
       setError(err?.message || "Failed to create team run");
     }
@@ -573,7 +573,7 @@ export function AgentTeamsPanel({ workspaceId, agents, tasks, onOpenTask }: Agen
         } else {
           await window.electronAPI.cancelTeamRun(selectedRunId);
         }
-      } catch (err: any) {
+      } catch (err: Any) {
         console.error("Failed to update team run:", err);
         setError(err?.message || "Failed to update team run");
       }
@@ -609,7 +609,7 @@ export function AgentTeamsPanel({ workspaceId, agents, tasks, onOpenTask }: Agen
       setNewItemTitle("");
       setNewItemDescription("");
       setNewItemOwnerRoleId("");
-    } catch (err: any) {
+    } catch (err: Any) {
       console.error("Failed to create item:", err);
       setError(err?.message || "Failed to create item");
     }
@@ -637,7 +637,7 @@ export function AgentTeamsPanel({ workspaceId, agents, tasks, onOpenTask }: Agen
       if (updated) {
         setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
       }
-    } catch (err: any) {
+    } catch (err: Any) {
       console.error("Failed to update item:", err);
       setError(err?.message || "Failed to update item");
     }
@@ -649,7 +649,7 @@ export function AgentTeamsPanel({ workspaceId, agents, tasks, onOpenTask }: Agen
       setError(null);
       await window.electronAPI.deleteTeamItem(item.id);
       setItems((prev) => prev.filter((i) => i.id !== item.id));
-    } catch (err: any) {
+    } catch (err: Any) {
       console.error("Failed to delete item:", err);
       setError(err?.message || "Failed to delete item");
     }
@@ -681,7 +681,7 @@ export function AgentTeamsPanel({ workspaceId, agents, tasks, onOpenTask }: Agen
             .map((i) => (i.id === a?.id ? (a as AgentTeamItem) : i))
             .map((i) => (i.id === b?.id ? (b as AgentTeamItem) : i)),
         );
-      } catch (err: any) {
+      } catch (err: Any) {
         console.error("Failed to reorder item:", err);
         setError(err?.message || "Failed to reorder item");
       }

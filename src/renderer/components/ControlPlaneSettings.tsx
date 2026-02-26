@@ -259,7 +259,7 @@ export function ControlPlaneSettings() {
           message: result?.error || "Connection failed",
         });
       }
-    } catch (error: any) {
+    } catch (error: Any) {
       setTestResult({
         success: false,
         message: error.message || "Connection failed",
@@ -285,7 +285,7 @@ export function ControlPlaneSettings() {
         });
       }
       await loadData();
-    } catch (error: any) {
+    } catch (error: Any) {
       setTestResult({
         success: false,
         message: error.message || "Connection failed",
@@ -582,7 +582,7 @@ export function ControlPlaneSettings() {
                     <label>Exposure Mode:</label>
                     <select
                       value={settings.tailscale?.mode || "off"}
-                      onChange={(e) => handleTailscaleModeChange(e.target.value as any)}
+                      onChange={(e) => handleTailscaleModeChange(e.target.value as Any)}
                       disabled={saving}
                     >
                       <option value="off">Off (Local only)</option>

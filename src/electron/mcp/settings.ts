@@ -18,10 +18,11 @@ const MASKED_VALUE = "***configured***";
 const ENCRYPTED_PREFIX = "encrypted:";
 const CONNECTOR_SCRIPT_PATH_REGEX = /(?:^|[\\/])connectors[\\/]([^\\/]+)[\\/]dist[\\/]index\.js$/;
 
-function getElectronApp(): any | null {
+function getElectronApp(): Any | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const electron = require("electron") as any;
+// oxlint-disable-next-line typescript-eslint(no-require-imports)
+    const electron = require("electron") as Any;
     const app = electron?.app;
     if (app && typeof app === "object") return app;
   } catch {
@@ -38,9 +39,9 @@ function arraysEqual(a: string[], b: string[]): boolean {
 function getConnectorScriptPathForCurrentRuntime(connectorName: string): string {
   const electronApp = getElectronApp();
   const isPackaged =
-    Boolean(electronApp?.isPackaged) && typeof (process as any).resourcesPath === "string";
+    Boolean(electronApp?.isPackaged) && typeof (process as Any).resourcesPath === "string";
   const baseDir = isPackaged
-    ? path.join((process as any).resourcesPath, "connectors")
+    ? path.join((process as Any).resourcesPath, "connectors")
     : path.join(process.cwd(), "connectors");
   return path.join(baseDir, connectorName, "dist", "index.js");
 }
@@ -129,7 +130,7 @@ function decryptSecret(value?: string): string | undefined {
           "[MCP Settings] safeStorage encryption not available - cannot decrypt secrets",
         );
       }
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("[MCP Settings] Failed to decrypt secret - this can happen after app updates");
       console.error("[MCP Settings] Error:", error.message || error);
     }
@@ -174,7 +175,7 @@ function decryptServerAuth(auth?: MCPAuthConfig): MCPAuthConfig | undefined {
 /**
  * Encrypt all credentials in settings before saving to disk
  */
-function encryptSettings(settings: MCPSettings): MCPSettings {
+function _encryptSettings(settings: MCPSettings): MCPSettings {
   return {
     ...settings,
     servers: settings.servers.map((server) => ({

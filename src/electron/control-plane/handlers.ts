@@ -80,7 +80,7 @@ export function getControlPlaneServer(): ControlPlaneServer | null {
   return controlPlaneServer;
 }
 
-function requireScope(client: any, scope: "admin" | "read" | "write" | "operator"): void {
+function requireScope(client: Any, scope: "admin" | "read" | "write" | "operator"): void {
   if (!client?.hasScope?.(scope)) {
     throw { code: ErrorCodes.UNAUTHORIZED, message: `Missing required scope: ${scope}` };
   }
@@ -95,7 +95,7 @@ function sanitizeTaskCreateParams(params: unknown): {
   budgetTokens?: number;
   budgetCost?: number;
 } {
-  const p = (params ?? {}) as any;
+  const p = (params ?? {}) as Any;
   const title = typeof p.title === "string" ? p.title.trim() : "";
   const prompt = typeof p.prompt === "string" ? p.prompt.trim() : "";
   const workspaceId = typeof p.workspaceId === "string" ? p.workspaceId.trim() : "";
@@ -132,14 +132,14 @@ function sanitizeTaskCreateParams(params: unknown): {
 }
 
 function sanitizeTaskIdParams(params: unknown): { taskId: string } {
-  const p = (params ?? {}) as any;
+  const p = (params ?? {}) as Any;
   const taskId = typeof p.taskId === "string" ? p.taskId.trim() : "";
   if (!taskId) throw { code: ErrorCodes.INVALID_PARAMS, message: "taskId is required" };
   return { taskId };
 }
 
 function sanitizeTaskMessageParams(params: unknown): { taskId: string; message: string } {
-  const p = (params ?? {}) as any;
+  const p = (params ?? {}) as Any;
   const taskId = typeof p.taskId === "string" ? p.taskId.trim() : "";
   const message = typeof p.message === "string" ? p.message.trim() : "";
   if (!taskId) throw { code: ErrorCodes.INVALID_PARAMS, message: "taskId is required" };
@@ -148,7 +148,7 @@ function sanitizeTaskMessageParams(params: unknown): { taskId: string; message: 
 }
 
 function sanitizeApprovalRespondParams(params: unknown): { approvalId: string; approved: boolean } {
-  const p = (params ?? {}) as any;
+  const p = (params ?? {}) as Any;
   const approvalId = typeof p.approvalId === "string" ? p.approvalId.trim() : "";
   const approved = p.approved;
   if (!approvalId) throw { code: ErrorCodes.INVALID_PARAMS, message: "approvalId is required" };
@@ -162,7 +162,7 @@ function sanitizeTaskListParams(params: unknown): {
   offset: number;
   workspaceId?: string;
 } {
-  const p = (params ?? {}) as any;
+  const p = (params ?? {}) as Any;
   const rawLimit =
     typeof p.limit === "number" && Number.isFinite(p.limit) ? Math.floor(p.limit) : 100;
   const rawOffset =
@@ -178,7 +178,7 @@ function sanitizeApprovalListParams(params: unknown): {
   offset: number;
   taskId?: string;
 } {
-  const p = (params ?? {}) as any;
+  const p = (params ?? {}) as Any;
   const rawLimit =
     typeof p.limit === "number" && Number.isFinite(p.limit) ? Math.floor(p.limit) : 100;
   const rawOffset =
@@ -190,7 +190,7 @@ function sanitizeApprovalListParams(params: unknown): {
 }
 
 function sanitizeTaskEventsParams(params: unknown): { taskId: string; limit: number } {
-  const p = (params ?? {}) as any;
+  const p = (params ?? {}) as Any;
   const { taskId } = sanitizeTaskIdParams(params);
   const rawLimit =
     typeof p.limit === "number" && Number.isFinite(p.limit) ? Math.floor(p.limit) : 200;
@@ -199,14 +199,14 @@ function sanitizeTaskEventsParams(params: unknown): { taskId: string; limit: num
 }
 
 function sanitizeWorkspaceIdParams(params: unknown): { workspaceId: string } {
-  const p = (params ?? {}) as any;
+  const p = (params ?? {}) as Any;
   const workspaceId = typeof p.workspaceId === "string" ? p.workspaceId.trim() : "";
   if (!workspaceId) throw { code: ErrorCodes.INVALID_PARAMS, message: "workspaceId is required" };
   return { workspaceId };
 }
 
 function sanitizeWorkspaceCreateParams(params: unknown): { name: string; path: string } {
-  const p = (params ?? {}) as any;
+  const p = (params ?? {}) as Any;
   const name = typeof p.name === "string" ? p.name.trim() : "";
   const rawPath = typeof p.path === "string" ? p.path.trim() : "";
   if (!name) throw { code: ErrorCodes.INVALID_PARAMS, message: "name is required" };
@@ -227,7 +227,7 @@ function sanitizeWorkspaceCreateParams(params: unknown): { name: string; path: s
 }
 
 function sanitizeChannelIdParams(params: unknown): { channelId: string } {
-  const p = (params ?? {}) as any;
+  const p = (params ?? {}) as Any;
   const channelId = typeof p.channelId === "string" ? p.channelId.trim() : "";
   if (!channelId) throw { code: ErrorCodes.INVALID_PARAMS, message: "channelId is required" };
   return { channelId };
@@ -240,7 +240,7 @@ function sanitizeChannelCreateParams(params: unknown): {
   config: Record<string, unknown>;
   securityConfig: Record<string, unknown>;
 } {
-  const p = (params ?? {}) as any;
+  const p = (params ?? {}) as Any;
   const type = typeof p.type === "string" ? p.type.trim() : "";
   const name = typeof p.name === "string" ? p.name.trim() : "";
   const enabled = typeof p.enabled === "boolean" ? p.enabled : false;
@@ -287,11 +287,11 @@ function sanitizeChannelUpdateParams(params: unknown): {
     securityConfig?: Record<string, unknown>;
   };
 } {
-  const p = (params ?? {}) as any;
+  const p = (params ?? {}) as Any;
   const channelId = typeof p.channelId === "string" ? p.channelId.trim() : "";
   if (!channelId) throw { code: ErrorCodes.INVALID_PARAMS, message: "channelId is required" };
 
-  const updates: any = {};
+  const updates: Any = {};
   if (p.name !== undefined) {
     const name = typeof p.name === "string" ? p.name.trim() : "";
     if (!name)
@@ -420,7 +420,7 @@ function attachAgentDaemonTaskBridge(server: ControlPlaneServer, daemon: AgentDa
   const unsubscribes: Array<() => void> = [];
 
   for (const eventType of allowlist) {
-    const handler = (evt: any) => {
+    const handler = (evt: Any) => {
       try {
         const taskId = typeof evt?.taskId === "string" ? evt.taskId : "";
         if (!taskId) return;
@@ -430,7 +430,7 @@ function attachAgentDaemonTaskBridge(server: ControlPlaneServer, daemon: AgentDa
 
         // Avoid leaking full prompts in broadcast; clients can call task.get if needed.
         if (eventType === "task_created" && payload?.task && typeof payload.task === "object") {
-          const t = payload.task as any;
+          const t = payload.task as Any;
           payload.task = {
             id: t.id,
             title: t.title,
@@ -489,7 +489,7 @@ export async function startControlPlaneFromSettings(
   options: {
     deps?: ControlPlaneMethodDeps;
     forceEnable?: boolean;
-    onEvent?: (event: any) => void;
+    onEvent?: (event: Any) => void;
   } = {},
 ): Promise<{
   ok: boolean;
@@ -620,7 +620,7 @@ export async function startControlPlaneFromSettings(
       }
       throw error;
     }
-  } catch (error: any) {
+  } catch (error: Any) {
     console.error("[ControlPlane] Auto-start error:", error);
     return { ok: false, error: error?.message || String(error) };
   }
@@ -645,7 +645,7 @@ function registerACPMethodsOnServer(
       let workspaceId = params.workspaceId;
       if (!workspaceId) {
         const workspaceRepo = new WorkspaceRepository(db);
-        const workspaces = workspaceRepo.findAll().filter((w: any) => !w.isTemp);
+        const workspaces = workspaceRepo.findAll().filter((w: Any) => !w.isTemp);
         if (workspaces.length > 0) {
           workspaceId = workspaces[0].id;
         } else {
@@ -658,14 +658,14 @@ function registerACPMethodsOnServer(
         status: "pending",
         workspaceId,
         assignedAgentRoleId: params.assignedAgentRoleId,
-      } as any);
+      } as Any);
       await deps.agentDaemon.startTask(task);
       return { taskId: task.id };
     },
     getTask: (taskId) => {
       const task = taskRepo.findById(taskId);
       if (!task) return undefined;
-      return { id: task.id, status: task.status, error: (task as any).error };
+      return { id: task.id, status: task.status, error: (task as Any).error };
     },
     cancelTask: async (taskId) => {
       await deps.agentDaemon.cancelTask(taskId);
@@ -689,7 +689,7 @@ function registerCanvasMethods(server: ControlPlaneServer): void {
     return;
   }
 
-  const requireAuth = (client: any) => {
+  const requireAuth = (client: Any) => {
     if (!client.isAuthenticated) {
       throw { code: ErrorCodes.UNAUTHORIZED, message: "Authentication required" };
     }
@@ -858,16 +858,16 @@ function registerTaskAndWorkspaceMethods(
   const eventRepo = new TaskEventRepository(db);
   const agentDaemon = deps.agentDaemon;
   const channelGateway = deps.channelGateway;
-  const isAdminClient = (client: any) => !!client?.hasScope?.("admin");
+  const isAdminClient = (client: Any) => !!client?.hasScope?.("admin");
 
-  const redactWorkspaceForRead = (workspace: any) => ({
+  const redactWorkspaceForRead = (workspace: Any) => ({
     id: workspace.id,
     name: workspace.name,
     createdAt: workspace.createdAt,
     lastUsedAt: workspace.lastUsedAt,
   });
 
-  const redactTaskForRead = (task: any) => ({
+  const redactTaskForRead = (task: Any) => ({
     id: task.id,
     title: task.title,
     status: task.status,
@@ -885,7 +885,7 @@ function registerTaskAndWorkspaceMethods(
     dueDate: task.dueDate,
   });
 
-  const redactChannelForRead = (channel: any) => ({
+  const redactChannelForRead = (channel: Any) => ({
     id: channel.id,
     type: channel.type,
     name: channel.name,
@@ -930,7 +930,7 @@ function registerTaskAndWorkspaceMethods(
 
     try {
       await fs.mkdir(validated.path, { recursive: true });
-    } catch (error: any) {
+    } catch (error: Any) {
       throw {
         code: ErrorCodes.METHOD_FAILED,
         message: error?.message || `Failed to create workspace directory: ${validated.path}`,
@@ -948,7 +948,7 @@ function registerTaskAndWorkspaceMethods(
     const workspace = workspaceRepo.create(
       validated.name,
       validated.path,
-      defaultPermissions as any,
+      defaultPermissions as Any,
     );
     return { workspace };
   });
@@ -985,7 +985,7 @@ function registerTaskAndWorkspaceMethods(
     });
 
     // Apply assignment metadata (update DB + in-memory object before starting).
-    const initialUpdates: any = {};
+    const initialUpdates: Any = {};
     if (validated.assignedAgentRoleId) {
       initialUpdates.assignedAgentRoleId = validated.assignedAgentRoleId;
       initialUpdates.boardColumn = "todo";
@@ -1005,7 +1005,7 @@ function registerTaskAndWorkspaceMethods(
 
     try {
       await agentDaemon.startTask(task);
-    } catch (error: any) {
+    } catch (error: Any) {
       taskRepo.update(task.id, {
         status: "failed",
         error: error?.message || "Failed to start task",
@@ -1096,7 +1096,7 @@ function registerTaskAndWorkspaceMethods(
             ORDER BY requested_at ASC
             LIMIT ? OFFSET ?
           `);
-          const rows = stmt.all(limit, offset) as any[];
+          const rows = stmt.all(limit, offset) as Any[];
           return rows.map((row) => ({
             id: String(row.id ?? ""),
             taskId: String(row.task_id ?? ""),
@@ -1115,7 +1115,7 @@ function registerTaskAndWorkspaceMethods(
           }));
         })();
 
-    const enriched = approvals.map((a: any) => {
+    const enriched = approvals.map((a: Any) => {
       const t = a.taskId ? taskRepo.findById(a.taskId) : undefined;
       return {
         ...a,
@@ -1137,7 +1137,7 @@ function registerTaskAndWorkspaceMethods(
   // Channels (gateway)
   server.registerMethod(Methods.CHANNEL_LIST, async (client) => {
     requireScope(client, "read");
-    const rows = db.prepare("SELECT * FROM channels ORDER BY created_at ASC").all() as any[];
+    const rows = db.prepare("SELECT * FROM channels ORDER BY created_at ASC").all() as Any[];
     const channels = rows.map((row) => ({
       id: String(row.id ?? ""),
       type: String(row.type ?? ""),
@@ -1186,7 +1186,7 @@ function registerTaskAndWorkspaceMethods(
   server.registerMethod(Methods.CHANNEL_GET, async (client, params) => {
     requireScope(client, "read");
     const { channelId } = sanitizeChannelIdParams(params);
-    const row = db.prepare("SELECT * FROM channels WHERE id = ?").get(channelId) as any;
+    const row = db.prepare("SELECT * FROM channels WHERE id = ?").get(channelId) as Any;
     if (!row) {
       throw { code: ErrorCodes.INVALID_PARAMS, message: `Channel not found: ${channelId}` };
     }
@@ -1241,7 +1241,7 @@ function registerTaskAndWorkspaceMethods(
     // Enforce one channel per type (router registers by type).
     const existing = db
       .prepare("SELECT id FROM channels WHERE type = ? LIMIT 1")
-      .get(validated.type) as any;
+      .get(validated.type) as Any;
     if (existing?.id) {
       throw {
         code: ErrorCodes.INVALID_PARAMS,
@@ -1271,7 +1271,7 @@ function registerTaskAndWorkspaceMethods(
     if (validated.enabled && channelGateway) {
       try {
         await channelGateway.enableChannel(id);
-      } catch (error: any) {
+      } catch (error: Any) {
         // Keep the channel record but surface the connection error.
         db.prepare("UPDATE channels SET enabled = 0, status = ?, updated_at = ? WHERE id = ?").run(
           "disconnected",
@@ -1293,13 +1293,13 @@ function registerTaskAndWorkspaceMethods(
     const { channelId, updates } = sanitizeChannelUpdateParams(params);
 
     if (channelGateway) {
-      channelGateway.updateChannel(channelId, updates as any);
+      channelGateway.updateChannel(channelId, updates as Any);
       return { ok: true };
     }
 
     // Fallback: update DB only (restart required to take effect).
     const fields: string[] = [];
-    const values: any[] = [];
+    const values: Any[] = [];
     if (updates.name !== undefined) {
       fields.push("name = ?");
       values.push(updates.name);
@@ -1461,7 +1461,7 @@ function registerTaskAndWorkspaceMethods(
       .prepare(
         `SELECT id, type, name, enabled, status, bot_username, security_config, created_at, updated_at FROM channels ORDER BY created_at ASC`,
       )
-      .all() as any[];
+      .all() as Any[];
     const channels = channelRows.map((row) => ({
       id: String(row.id ?? ""),
       type: String(row.type ?? ""),
@@ -1532,7 +1532,7 @@ export function setupControlPlaneHandlers(
       try {
         ControlPlaneSettingsManager.updateSettings(settings);
         return { ok: true };
-      } catch (error: any) {
+      } catch (error: Any) {
         return { ok: false, error: error.message || String(error) };
       }
     },
@@ -1549,7 +1549,7 @@ export function setupControlPlaneHandlers(
       try {
         const settings = ControlPlaneSettingsManager.enable();
         return { ok: true, token: settings.token };
-      } catch (error: any) {
+      } catch (error: Any) {
         return { ok: false, error: error.message || String(error) };
       }
     },
@@ -1571,7 +1571,7 @@ export function setupControlPlaneHandlers(
         }
         ControlPlaneSettingsManager.disable();
         return { ok: true };
-      } catch (error: any) {
+      } catch (error: Any) {
         return { ok: false, error: error.message || String(error) };
       }
     },
@@ -1677,7 +1677,7 @@ export function setupControlPlaneHandlers(
           }
           throw error;
         }
-      } catch (error: any) {
+      } catch (error: Any) {
         console.error("[ControlPlane Handlers] Start error:", error);
         return { ok: false, error: error.message || String(error) };
       }
@@ -1698,7 +1698,7 @@ export function setupControlPlaneHandlers(
           controlPlaneServer = null;
         }
         return { ok: true };
-      } catch (error: any) {
+      } catch (error: Any) {
         return { ok: false, error: error.message || String(error) };
       }
     },
@@ -1799,7 +1799,7 @@ export function setupControlPlaneHandlers(
         }
 
         return { ok: true, token: newToken };
-      } catch (error: any) {
+      } catch (error: Any) {
         return { ok: false, error: error.message || String(error) };
       }
     },
@@ -1872,7 +1872,7 @@ export function setupControlPlaneHandlers(
         }
 
         return { ok: true };
-      } catch (error: any) {
+      } catch (error: Any) {
         return { ok: false, error: error.message || String(error) };
       }
     },
@@ -1935,7 +1935,7 @@ export function setupControlPlaneHandlers(
         });
 
         return { ok: true };
-      } catch (error: any) {
+      } catch (error: Any) {
         return { ok: false, error: error.message || String(error) };
       }
     },
@@ -1951,7 +1951,7 @@ export function setupControlPlaneHandlers(
           connectionMode: "local",
         });
         return { ok: true };
-      } catch (error: any) {
+      } catch (error: Any) {
         return { ok: false, error: error.message || String(error) };
       }
     },
@@ -1985,7 +1985,7 @@ export function setupControlPlaneHandlers(
           remote: config,
         });
         return { ok: true };
-      } catch (error: any) {
+      } catch (error: Any) {
         return { ok: false, error: error.message || String(error) };
       }
     },
@@ -2010,7 +2010,7 @@ export function setupControlPlaneHandlers(
           latencyMs: result.latencyMs,
           error: result.error,
         };
-      } catch (error: any) {
+      } catch (error: Any) {
         return { ok: false, error: error.message || String(error) };
       }
     },
@@ -2084,12 +2084,12 @@ export function setupControlPlaneHandlers(
               url: tunnel.getLocalUrl(),
               token: settings.remote?.token || "",
               sshTunnel: config,
-            } as any,
+            } as Any,
           });
         }
 
         return { ok: true };
-      } catch (error: any) {
+      } catch (error: Any) {
         return { ok: false, error: error.message || String(error) };
       }
     },
@@ -2102,7 +2102,7 @@ export function setupControlPlaneHandlers(
       try {
         shutdownSSHTunnelManager();
         return { ok: true };
-      } catch (error: any) {
+      } catch (error: Any) {
         return { ok: false, error: error.message || String(error) };
       }
     },
@@ -2129,10 +2129,10 @@ export function setupControlPlaneHandlers(
             url: settings.remote?.url || "",
             token: settings.remote?.token || "",
             sshTunnel: config,
-          } as any,
+          } as Any,
         });
         return { ok: true };
-      } catch (error: any) {
+      } catch (error: Any) {
         return { ok: false, error: error.message || String(error) };
       }
     },
@@ -2157,7 +2157,7 @@ export function setupControlPlaneHandlers(
           latencyMs: result.latencyMs,
           error: result.error,
         };
-      } catch (error: any) {
+      } catch (error: Any) {
         return { ok: false, error: error.message || String(error) };
       }
     },
@@ -2177,9 +2177,9 @@ export function setupControlPlaneHandlers(
         if (!controlPlaneServer || !controlPlaneServer.isRunning) {
           return { ok: true, nodes: [] };
         }
-        const nodes = (controlPlaneServer as any).clients.getNodeInfoList();
+        const nodes = (controlPlaneServer as Any).clients.getNodeInfoList();
         return { ok: true, nodes };
-      } catch (error: any) {
+      } catch (error: Any) {
         return { ok: false, error: error.message || String(error) };
       }
     },
@@ -2200,12 +2200,12 @@ export function setupControlPlaneHandlers(
         if (!controlPlaneServer || !controlPlaneServer.isRunning) {
           return { ok: false, error: "Control Plane is not running" };
         }
-        const client = (controlPlaneServer as any).clients.getNodeByIdOrName(nodeId);
+        const client = (controlPlaneServer as Any).clients.getNodeByIdOrName(nodeId);
         if (!client) {
           return { ok: false, error: `Node not found: ${nodeId}` };
         }
         return { ok: true, node: client.getNodeInfo() };
-      } catch (error: any) {
+      } catch (error: Any) {
         return { ok: false, error: error.message || String(error) };
       }
     },
@@ -2229,7 +2229,7 @@ export function setupControlPlaneHandlers(
         const { nodeId, command, params: commandParams, timeoutMs = 30000 } = params;
 
         // Find the node
-        const client = (controlPlaneServer as any).clients.getNodeByIdOrName(nodeId);
+        const client = (controlPlaneServer as Any).clients.getNodeByIdOrName(nodeId);
         if (!client) {
           return {
             ok: false,
@@ -2257,14 +2257,14 @@ export function setupControlPlaneHandlers(
         }
 
         // Forward to the server's internal method
-        const result = await (controlPlaneServer as any).invokeNodeCommand(
+        const result = await (controlPlaneServer as Any).invokeNodeCommand(
           client,
           command,
           commandParams,
           timeoutMs,
         );
         return result;
-      } catch (error: any) {
+      } catch (error: Any) {
         return {
           ok: false,
           error: { code: "INVOKE_FAILED", message: error.message || String(error) },

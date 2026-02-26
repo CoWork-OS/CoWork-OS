@@ -666,7 +666,7 @@ export function Settings({
     setCustomProviders((prev) => ({
       ...prev,
       [resolvedType]: {
-        ...(prev[resolvedType] || {}),
+        ...prev[resolvedType],
         ...updates,
       },
     }));
@@ -928,7 +928,7 @@ export function Settings({
       // Populate dropdown arrays from cached models
       if (loadedSettings.cachedGeminiModels && loadedSettings.cachedGeminiModels.length > 0) {
         setGeminiModels(
-          loadedSettings.cachedGeminiModels.map((m: any) => ({
+          loadedSettings.cachedGeminiModels.map((m: Any) => ({
             name: m.key,
             displayName: m.displayName,
             description: m.description,
@@ -940,7 +940,7 @@ export function Settings({
         loadedSettings.cachedOpenRouterModels.length > 0
       ) {
         setOpenrouterModels(
-          loadedSettings.cachedOpenRouterModels.map((m: any) => ({
+          loadedSettings.cachedOpenRouterModels.map((m: Any) => ({
             id: m.key,
             name: m.displayName,
             context_length: m.contextLength || 0,
@@ -949,7 +949,7 @@ export function Settings({
       }
       if (loadedSettings.cachedOpenAIModels && loadedSettings.cachedOpenAIModels.length > 0) {
         setOpenaiModels(
-          loadedSettings.cachedOpenAIModels.map((m: any) => ({
+          loadedSettings.cachedOpenAIModels.map((m: Any) => ({
             id: m.key,
             name: m.displayName,
             description: m.description || "",
@@ -958,7 +958,7 @@ export function Settings({
       }
       if (loadedSettings.cachedOllamaModels && loadedSettings.cachedOllamaModels.length > 0) {
         setOllamaModels(
-          loadedSettings.cachedOllamaModels.map((m: any) => ({
+          loadedSettings.cachedOllamaModels.map((m: Any) => ({
             name: m.key,
             size: m.size || 0,
           })),
@@ -966,7 +966,7 @@ export function Settings({
       }
       if (loadedSettings.cachedBedrockModels && loadedSettings.cachedBedrockModels.length > 0) {
         setBedrockModels(
-          loadedSettings.cachedBedrockModels.map((m: any) => ({
+          loadedSettings.cachedBedrockModels.map((m: Any) => ({
             id: m.key,
             name: m.displayName,
             description: m.description || "",
@@ -975,7 +975,7 @@ export function Settings({
       }
       if (loadedSettings.cachedPiModels && loadedSettings.cachedPiModels.length > 0) {
         setPiModels(
-          loadedSettings.cachedPiModels.map((m: any) => ({
+          loadedSettings.cachedPiModels.map((m: Any) => ({
             id: m.key,
             name: m.displayName,
             description: m.description || "",
@@ -1237,7 +1237,7 @@ export function Settings({
       } else {
         setTestResult({ success: false, error: result.error || "OAuth failed" });
       }
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("OpenAI OAuth error:", error);
       setTestResult({ success: false, error: error.message || "OAuth failed" });
     } finally {
@@ -1252,7 +1252,7 @@ export function Settings({
       setOpenaiOAuthConnected(false);
       setOpenaiAuthMethod("api_key");
       onSettingsChanged?.();
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("OpenAI OAuth logout error:", error);
     } finally {
       setOpenaiOAuthLoading(false);
@@ -1276,7 +1276,7 @@ export function Settings({
       // (for example, custom inference profile ARN/ID). Only auto-select when empty.
       const currentModel = bedrockModel?.trim();
       let nextModels = normalizedModels;
-      if (currentModel && !normalizedModels.some((m: any) => m.id === currentModel)) {
+      if (currentModel && !normalizedModels.some((m: Any) => m.id === currentModel)) {
         nextModels = [
           {
             id: currentModel,
@@ -1541,7 +1541,7 @@ export function Settings({
 
       const result = await window.electronAPI.testLLMProvider(testConfig);
       setTestResult(result);
-    } catch (error: any) {
+    } catch (error: Any) {
       setTestResult({ success: false, error: error.message });
     } finally {
       setTesting(false);

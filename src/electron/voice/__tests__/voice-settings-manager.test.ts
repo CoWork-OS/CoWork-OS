@@ -22,7 +22,7 @@ vi.mock("../../database/SecureSettingsRepository", () => {
       load = mockRepositoryLoad;
       delete = mockRepositoryDelete;
       exists = mockRepositoryExists;
-      constructor(_db: any) {}
+      constructor(_db: Any) {}
     },
   };
 });
@@ -62,7 +62,7 @@ const mockDb = {
     get: vi.fn(),
     all: vi.fn(),
   }),
-} as any;
+} as Any;
 
 describe("VoiceSettingsManager", () => {
   beforeEach(() => {
@@ -71,8 +71,8 @@ describe("VoiceSettingsManager", () => {
     vi.clearAllMocks();
     // Reset cached settings and repository
     VoiceSettingsManager.clearCache();
-    (VoiceSettingsManager as any).repository = null;
-    (VoiceSettingsManager as any).migrationComplete = false;
+    (VoiceSettingsManager as Any).repository = null;
+    (VoiceSettingsManager as Any).migrationComplete = false;
 
     // Default mock behavior - no existing settings
     mockRepositoryExists.mockReturnValue(false);
@@ -91,12 +91,12 @@ describe("VoiceSettingsManager", () => {
   describe("initialize", () => {
     it("should set the user data path", () => {
       VoiceSettingsManager.initialize(mockDb);
-      expect((VoiceSettingsManager as any).userDataPath).toBe("/mock/user/data");
+      expect((VoiceSettingsManager as Any).userDataPath).toBe("/mock/user/data");
     });
 
     it("should create a SecureSettingsRepository", () => {
       VoiceSettingsManager.initialize(mockDb);
-      expect((VoiceSettingsManager as any).repository).toBeDefined();
+      expect((VoiceSettingsManager as Any).repository).toBeDefined();
     });
   });
 
@@ -177,7 +177,7 @@ describe("VoiceSettingsManager", () => {
     });
 
     it("should return defaults when repository not initialized", () => {
-      (VoiceSettingsManager as any).repository = null;
+      (VoiceSettingsManager as Any).repository = null;
       const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
       const settings = VoiceSettingsManager.loadSettings();
@@ -262,7 +262,7 @@ describe("VoiceSettingsManager", () => {
     });
 
     it("should throw when repository not initialized", () => {
-      (VoiceSettingsManager as any).repository = null;
+      (VoiceSettingsManager as Any).repository = null;
       const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
       expect(() => VoiceSettingsManager.saveSettings(DEFAULT_VOICE_SETTINGS)).toThrow(
@@ -425,7 +425,7 @@ describe("VoiceSettingsManager", () => {
     it("should validate ttsProvider", () => {
       const settings = {
         ...DEFAULT_VOICE_SETTINGS,
-        ttsProvider: "invalid" as any,
+        ttsProvider: "invalid" as Any,
       };
 
       VoiceSettingsManager.saveSettings(settings);
@@ -441,7 +441,7 @@ describe("VoiceSettingsManager", () => {
     it("should validate inputMode", () => {
       const settings = {
         ...DEFAULT_VOICE_SETTINGS,
-        inputMode: "invalid" as any,
+        inputMode: "invalid" as Any,
       };
 
       VoiceSettingsManager.saveSettings(settings);

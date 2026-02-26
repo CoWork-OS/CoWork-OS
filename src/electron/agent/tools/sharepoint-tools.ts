@@ -116,7 +116,7 @@ export class SharePointTools {
     return driveId;
   }
 
-  async executeAction(input: SharePointActionInput): Promise<any> {
+  async executeAction(input: SharePointActionInput): Promise<Any> {
     const settings = SharePointSettingsManager.loadSettings();
     if (!settings.enabled) {
       throw new Error(

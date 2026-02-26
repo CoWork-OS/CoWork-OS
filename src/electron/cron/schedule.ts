@@ -52,7 +52,7 @@ export function computeNextRunAtMs(schedule: CronSchedule, nowMs: number): numbe
  * - "0 0 1 * *" - First of every month
  * - "0/15 * * * *" - Every 15 minutes (step syntax)
  */
-function computeNextCronRun(expr: string, now: Date, tz?: string): number | undefined {
+function computeNextCronRun(expr: string, now: Date, _tz?: string): number | undefined {
   const parts = expr.split(/\s+/);
   if (parts.length !== 5) {
     console.warn("[Cron] Invalid cron expression (expected 5 fields):", expr);

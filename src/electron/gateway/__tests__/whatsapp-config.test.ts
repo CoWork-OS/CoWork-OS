@@ -77,7 +77,7 @@ function createMockWhatsAppAdapter() {
       this.shouldReconnect = true;
     },
 
-    handleConnectionUpdate(connection: string): boolean {
+    handleConnectionUpdate(_connection: string): boolean {
       if (!this.shouldReconnect) {
         // If manual disconnect happened, don't reconnect
         return false;

@@ -70,8 +70,8 @@ export class GmailTools {
   }
 
   private formatAuthError(error: unknown): string | null {
-    const message = String((error as any)?.message ?? "");
-    const status = (error as any)?.status;
+    const message = String((error as Any)?.message ?? "");
+    const status = (error as Any)?.status;
     if (status === 401) {
       return "Google Workspace authorization failed (401). Reconnect in Settings > Integrations > Google Workspace.";
     }
@@ -98,7 +98,7 @@ export class GmailTools {
     }
   }
 
-  async executeAction(input: GmailActionInput): Promise<any> {
+  async executeAction(input: GmailActionInput): Promise<Any> {
     const settings = GoogleWorkspaceSettingsManager.loadSettings();
     if (!settings.enabled) {
       throw new Error(
@@ -186,7 +186,7 @@ export class GmailTools {
           });
 
           const raw = input.raw || buildRawEmail(input);
-          const payload: Record<string, any> = { raw };
+          const payload: Record<string, Any> = { raw };
           if (input.thread_id) {
             payload.threadId = input.thread_id;
           }
@@ -221,7 +221,7 @@ export class GmailTools {
         tool: "gmail_action",
         action,
         message: finalMessage,
-        status: (error as any)?.status,
+        status: (error as Any)?.status,
       });
       if (authMessage) {
         throw new Error(authMessage);

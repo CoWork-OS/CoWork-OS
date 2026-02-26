@@ -14,8 +14,8 @@ import {
   ResendHooksConfig,
   HookMappingConfig,
   DEFAULT_HOOKS_CONFIG,
-  DEFAULT_HOOKS_PATH,
-  DEFAULT_HOOKS_MAX_BODY_BYTES,
+  DEFAULT_HOOKS_PATH as _DEFAULT_HOOKS_PATH,
+  DEFAULT_HOOKS_MAX_BODY_BYTES as _DEFAULT_HOOKS_MAX_BODY_BYTES,
   DEFAULT_GMAIL_LABEL,
   DEFAULT_GMAIL_SERVE_BIND,
   DEFAULT_GMAIL_SERVE_PORT,
@@ -80,7 +80,7 @@ function decryptSecret(value?: string): string | undefined {
           "[Hooks Settings] safeStorage encryption not available - cannot decrypt secrets",
         );
       }
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("[Hooks Settings] Failed to decrypt secret:", error.message || error);
     }
   }
@@ -96,7 +96,7 @@ function decryptSecret(value?: string): string | undefined {
 /**
  * Encrypt all credentials in settings before saving to disk
  */
-function encryptSettings(settings: HooksConfig): HooksConfig {
+function _encryptSettings(settings: HooksConfig): HooksConfig {
   return {
     ...settings,
     token: encryptSecret(settings.token) || "",

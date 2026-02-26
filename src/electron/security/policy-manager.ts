@@ -14,7 +14,7 @@
 
 import {
   Workspace,
-  WorkspacePermissions,
+  WorkspacePermissions as _WorkspacePermissions,
   ToolType,
   ToolRiskLevel,
   GatewayContextType,
@@ -61,7 +61,7 @@ export interface PolicyContext {
   workspace: Workspace;
   guardrails: GuardrailSettings;
   gatewayContext?: GatewayContextType;
-  toolInput?: Record<string, any>;
+  toolInput?: Record<string, Any>;
 }
 
 /**
@@ -80,7 +80,7 @@ export class SecurityPolicyManager {
    * Check if a tool is allowed to execute
    * Implements C2: Approval Gate Enforcement
    */
-  checkToolAccess(toolName: string, input?: Record<string, any>): PolicyCheckResult {
+  checkToolAccess(toolName: string, input?: Record<string, Any>): PolicyCheckResult {
     // Check if tool was denied by any layer
     if (this.deniedTools.has(toolName)) {
       const decisions = this.layerDecisions.get(toolName) || [];

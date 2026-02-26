@@ -253,7 +253,6 @@ export class CronService {
    */
   async list(opts?: { includeDisabled?: boolean }): Promise<CronListResult> {
     return this.withLock(async () => {
-      const { deps } = this.getContext();
       const store = this.ensureStore();
 
       let jobs = [...store.jobs];
@@ -428,7 +427,7 @@ export class CronService {
    */
   async run(id: string, mode: "due" | "force" = "due"): Promise<CronRunResult> {
     return this.withLock(async () => {
-      const { deps, log } = this.getContext();
+      const { deps } = this.getContext();
       const store = this.ensureStore();
       const nowMs = deps.nowMs();
 
@@ -819,7 +818,7 @@ export class CronService {
       await doDeliver();
       log.info(`Delivered results for job "${job.name}" to ${channelType}:${channelId}`);
       return { attempted: true, success: true };
-    } catch (firstError) {
+    } catch  {
       // Single retry after a short delay for transient failures
       // (e.g. momentary WhatsApp disconnect, network blip).
       log.warn(`First delivery attempt failed for job "${job.name}", retrying in 3s…`);

@@ -2,7 +2,7 @@
  * Tests for Matrix adapter direct rooms cache and isGroup field
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach as _afterEach } from "vitest";
 
 // Mock electron
 vi.mock("electron", () => ({

@@ -14,7 +14,7 @@ export interface WorkflowPipelineDeps {
     prompt: string;
     workspaceId: string;
     parentTaskId: string;
-    agentConfig?: any;
+    agentConfig?: Any;
   }) => Promise<{ id: string }>;
   getTaskStatus: (taskId: string) => Promise<{ status: string; resultSummary?: string }>;
   log?: (...args: unknown[]) => void;

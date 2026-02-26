@@ -27,6 +27,8 @@ import {
   isTempWorkspaceId,
   ImageAttachment,
   MultiLlmConfig,
+  ExecutionMode,
+  TaskDomain,
 } from "../shared/types";
 import { TASK_EVENT_STATUS_MAP } from "../shared/task-event-status-map";
 import { applyPersistedLanguage } from "./i18n";
@@ -390,7 +392,7 @@ export function App() {
     // Cache density in localStorage for instant restore on next startup
     try {
       localStorage.setItem("uiDensity", uiDensity);
-    } catch (_) {
+    } catch  {
       /* ignore */
     }
   }, [themeMode, visualTheme, accentColor, uiDensity]);
@@ -1022,6 +1024,8 @@ export function App() {
       multiLlmMode?: boolean;
       multiLlmConfig?: MultiLlmConfig;
       verificationAgent?: boolean;
+      executionMode?: ExecutionMode;
+      taskDomain?: TaskDomain;
     },
     images?: ImageAttachment[],
   ) => {
@@ -1049,9 +1053,16 @@ export function App() {
     }
 
     const verificationAgent = options?.verificationAgent === true;
+    const executionMode = options?.executionMode;
+    const taskDomain = options?.taskDomain;
 
     const agentConfig =
-      autonomousMode || collaborativeMode || multiLlmMode || verificationAgent
+      autonomousMode ||
+      collaborativeMode ||
+      multiLlmMode ||
+      verificationAgent ||
+      executionMode ||
+      taskDomain
         ? {
             ...(autonomousMode ? { allowUserInput: false, autonomousMode: true } : {}),
             ...(collaborativeMode ? { collaborativeMode: true } : {}),
@@ -1059,6 +1070,8 @@ export function App() {
               ? { multiLlmMode: true, multiLlmConfig: options?.multiLlmConfig }
               : {}),
             ...(verificationAgent ? { verificationAgent: true } : {}),
+            ...(executionMode ? { executionMode } : {}),
+            ...(taskDomain ? { taskDomain } : {}),
           }
         : undefined;
 

@@ -265,7 +265,7 @@ const parseResumeSnapshot = (value: unknown): OnboardingResumeSnapshot | null =>
 
   const data = sanitizeOnboardingData({
     ...INITIAL_ONBOARDING_DATA,
-    ...(candidate.data || {}),
+    ...candidate.data,
   } as OnboardingData);
   const requiredUi = getRequiredUiForState(candidate.state);
   const normalizedGreetingIndex = Number(candidate.greetingIndex || 0);

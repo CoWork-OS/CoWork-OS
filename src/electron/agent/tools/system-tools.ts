@@ -16,10 +16,11 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_TIMEOUT = 30 * 1000; // 30 seconds
 const APPLESCRIPT_TIMEOUT_MS = 240 * 1000; // 4 minutes
 
-function getElectronApis(): { clipboard?: any; desktopCapturer?: any; shell?: any; app?: any } {
+function getElectronApis(): { clipboard?: Any; desktopCapturer?: Any; shell?: Any; app?: Any } {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const electron = require("electron") as any;
+// oxlint-disable-next-line typescript-eslint(no-require-imports)
+    const electron = require("electron") as Any;
     if (electron && typeof electron === "object") return electron;
   } catch {
     // Not running under Electron.
@@ -220,7 +221,7 @@ export class SystemTools {
         width: size.width,
         height: size.height,
       };
-    } catch (error: any) {
+    } catch (error: Any) {
       this.daemon.logEvent(this.taskId, "tool_error", {
         tool: "take_screenshot",
         error: error.message,
@@ -273,7 +274,7 @@ export class SystemTools {
         success: true,
         message: `Opened ${appName}`,
       };
-    } catch (error: any) {
+    } catch (error: Any) {
       this.daemon.logEvent(this.taskId, "tool_error", {
         tool: "open_application",
         error: error.message,
@@ -487,7 +488,7 @@ export class SystemTools {
       attempts.push({ script: timeoutWrapperFallback, label: "timeout_wrapper_fallback" });
     }
 
-    let lastError: any;
+    let lastError: Any;
     for (const attempt of attempts) {
       try {
         if (!attempt.script || !attempt.script.trim()) {
@@ -513,7 +514,7 @@ export class SystemTools {
           success: true,
           result,
         };
-      } catch (error: any) {
+      } catch (error: Any) {
         lastError = error;
         const errorMessage = this.extractAppleScriptError(error);
         const canRetryWithFallback =
@@ -540,7 +541,7 @@ export class SystemTools {
     throw new Error(`AppleScript execution failed: ${this.extractAppleScriptError(lastError)}`);
   }
 
-  private extractAppleScriptError(error: any): string {
+  private extractAppleScriptError(error: Any): string {
     if (!error) return "Unknown error";
     if (typeof error.stderr === "string" && error.stderr.trim()) {
       return error.stderr.trim();

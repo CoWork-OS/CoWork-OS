@@ -35,7 +35,7 @@ describe("validateInput", () => {
   it("includes field paths in error message", () => {
     try {
       validateInput(simpleSchema, { name: "ok", age: "not a number" });
-    } catch (e: any) {
+    } catch (e: Any) {
       expect(e.message).toContain("age");
     }
   });

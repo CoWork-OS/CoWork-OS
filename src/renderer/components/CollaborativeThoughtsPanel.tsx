@@ -133,17 +133,17 @@ export function CollaborativeThoughtsPanel({
       window.electronAPI.listTeamMembers(teamId),
       window.electronAPI.getAgentRoles(false),
     ])
-      .then(([members, roles]: [any[], any[]]) => {
+      .then(([members, roles]: [Any[], Any[]]) => {
         const roleMap = new Map<string, AgentRole>();
         for (const r of roles) roleMap.set(r.id, r as AgentRole);
 
         const infos: TeamMemberInfo[] = members
-          .sort((a: any, b: any) => a.memberOrder - b.memberOrder)
-          .map((m: any) => ({
+          .sort((a: Any, b: Any) => a.memberOrder - b.memberOrder)
+          .map((m: Any) => ({
             role: roleMap.get(m.agentRoleId),
             isLeader: false,
           }))
-          .filter((info: any) => info.role != null) as TeamMemberInfo[];
+          .filter((info: Any) => info.role != null) as TeamMemberInfo[];
 
         setTeamMembers(infos);
       })
@@ -164,7 +164,7 @@ export function CollaborativeThoughtsPanel({
 
   // Subscribe to real-time thought events
   useEffect(() => {
-    const unsubThought = window.electronAPI.onTeamThoughtEvent((event: any) => {
+    const unsubThought = window.electronAPI.onTeamThoughtEvent((event: Any) => {
       if (event.runId !== teamRunId) return;
       if (event.type === "team_thought_added" && event.thought) {
         const t = event.thought as AgentThought;
@@ -193,7 +193,7 @@ export function CollaborativeThoughtsPanel({
       }
     });
 
-    const unsubRun = window.electronAPI.onTeamRunEvent((event: any) => {
+    const unsubRun = window.electronAPI.onTeamRunEvent((event: Any) => {
       if (event.run?.id === teamRunId && event.run?.phase) {
         setPhase(event.run.phase);
       }

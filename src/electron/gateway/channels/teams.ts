@@ -226,7 +226,7 @@ export class TeamsAdapter implements ChannelAdapter {
         method: req.method,
       };
 
-      await this.adapter.process(fakeReq as any, res as any, async (context: TurnContext) => {
+      await this.adapter.process(fakeReq as Any, res as Any, async (context: TurnContext) => {
         await this.handleActivity(context);
       });
     } catch (error) {
@@ -390,22 +390,22 @@ export class TeamsAdapter implements ChannelAdapter {
       // Teams file attachments often arrive as "application/vnd.microsoft.teams.file.download.info"
       const downloadUrl =
         (contentType === "application/vnd.microsoft.teams.file.download.info" &&
-        typeof (att as any)?.content?.downloadUrl === "string"
-          ? (att as any).content.downloadUrl
+        typeof (att as Any)?.content?.downloadUrl === "string"
+          ? (att as Any).content.downloadUrl
           : undefined) ||
-        (typeof (att as any)?.contentUrl === "string" ? (att as any).contentUrl : undefined) ||
-        (typeof (att as any)?.thumbnailUrl === "string" ? (att as any).thumbnailUrl : undefined);
+        (typeof (att as Any)?.contentUrl === "string" ? (att as Any).contentUrl : undefined) ||
+        (typeof (att as Any)?.thumbnailUrl === "string" ? (att as Any).thumbnailUrl : undefined);
 
       // Best-effort file name inference
       const inferredName = (() => {
         if (name && name.trim()) return name.trim();
         const fileType =
-          typeof (att as any)?.content?.fileType === "string"
-            ? (att as any).content.fileType.trim()
+          typeof (att as Any)?.content?.fileType === "string"
+            ? (att as Any).content.fileType.trim()
             : "";
         const uniqueId =
-          typeof (att as any)?.content?.uniqueId === "string"
-            ? (att as any).content.uniqueId.trim()
+          typeof (att as Any)?.content?.uniqueId === "string"
+            ? (att as Any).content.uniqueId.trim()
             : "";
         if (uniqueId && fileType) return `${uniqueId}.${fileType}`;
         if (downloadUrl) {

@@ -11,7 +11,7 @@ import {
 export const GOOGLE_CALENDAR_API_BASE = "https://www.googleapis.com/calendar/v3";
 const DEFAULT_TIMEOUT_MS = 20000;
 
-function parseJsonSafe(text: string): any | undefined {
+function parseJsonSafe(text: string): Any | undefined {
   const trimmed = text.trim();
   if (!trimmed) return undefined;
   try {
@@ -21,7 +21,7 @@ function parseJsonSafe(text: string): any | undefined {
   }
 }
 
-function formatCalendarError(status: number, data: any, fallback?: string): string {
+function formatCalendarError(status: number, data: Any, fallback?: string): string {
   const message = data?.error?.message || data?.message || fallback || "Google Calendar API error";
   return `Google Calendar API error ${status}: ${message}`;
 }
@@ -30,13 +30,13 @@ export interface GoogleCalendarRequestOptions {
   method: "GET" | "POST" | "PATCH" | "DELETE";
   path: string;
   query?: Record<string, string | number | boolean | undefined>;
-  body?: any;
+  body?: Any;
   timeoutMs?: number;
 }
 
 export interface GoogleCalendarRequestResult {
   status: number;
-  data?: any;
+  data?: Any;
   raw?: string;
 }
 
@@ -94,7 +94,7 @@ export async function googleCalendarRequest(
         data: data ?? undefined,
         raw: rawText || undefined,
       };
-    } catch (error: any) {
+    } catch (error: Any) {
       if (error?.name === "AbortError") {
         throw new Error("Google Calendar API request timed out");
       }
@@ -107,7 +107,7 @@ export async function googleCalendarRequest(
   try {
     const accessToken = await getGoogleWorkspaceAccessToken(settings);
     return await requestOnce(accessToken);
-  } catch (error: any) {
+  } catch (error: Any) {
     if (error?.status === 401 && settings.refreshToken) {
       const refreshedToken = await refreshGoogleWorkspaceAccessToken(settings);
       return await requestOnce(refreshedToken);

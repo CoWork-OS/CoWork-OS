@@ -13,7 +13,7 @@ import {
   MCPTool,
   MCPCallResult,
   MCPClientEvent,
-  MCPSettings,
+  MCPSettings as _MCPSettings,
 } from "../types";
 import { MCPSettingsManager } from "../settings";
 import { MCPServerConnection } from "./MCPServerConnection";
@@ -33,10 +33,11 @@ const KNOWN_CONNECTORS = new Set([
   "resend",
 ]);
 
-function getAllElectronWindows(): any[] {
+function getAllElectronWindows(): Any[] {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const electron = require("electron") as any;
+// oxlint-disable-next-line typescript-eslint(no-require-imports)
+    const electron = require("electron") as Any;
     const BrowserWindow = electron?.BrowserWindow;
     if (BrowserWindow?.getAllWindows) return BrowserWindow.getAllWindows();
   } catch {
@@ -253,7 +254,7 @@ export class MCPClientManager extends EventEmitter {
   /**
    * Call a tool by name
    */
-  async callTool(toolName: string, args: Record<string, any> = {}): Promise<MCPCallResult> {
+  async callTool(toolName: string, args: Record<string, Any> = {}): Promise<MCPCallResult> {
     const serverId = this.toolServerMap.get(toolName);
     if (!serverId) {
       throw new Error(`Tool ${toolName} not found`);
@@ -332,7 +333,7 @@ export class MCPClientManager extends EventEmitter {
       await this.disconnectServer(serverId);
 
       return { success: true, tools: toolCount };
-    } catch (error: any) {
+    } catch (error: Any) {
       return { success: false, error: error.message };
     }
   }

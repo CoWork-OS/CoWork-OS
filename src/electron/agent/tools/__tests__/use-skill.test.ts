@@ -6,13 +6,13 @@ import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import type { CustomSkill } from "../../../../shared/types";
 
 // Mock settings storage for personality manager
-let mockPersonalitySettings: any = {};
+let mockPersonalitySettings: Any = {};
 
 // Mock personality manager
 vi.mock("../../../settings/personality-manager", () => ({
   PersonalityManager: {
     loadSettings: vi.fn().mockImplementation(() => mockPersonalitySettings),
-    saveSettings: vi.fn().mockImplementation((settings: any) => {
+    saveSettings: vi.fn().mockImplementation((settings: Any) => {
       mockPersonalitySettings = { ...mockPersonalitySettings, ...settings };
     }),
     setUserName: vi.fn().mockImplementation((name: string) => {
@@ -26,13 +26,13 @@ vi.mock("../../../settings/personality-manager", () => ({
     setActivePersona: vi.fn().mockImplementation((personaId: string) => {
       mockPersonalitySettings.activePersona = personaId;
     }),
-    setResponseStyle: vi.fn().mockImplementation((style: any) => {
+    setResponseStyle: vi.fn().mockImplementation((style: Any) => {
       mockPersonalitySettings.responseStyle = {
         ...mockPersonalitySettings.responseStyle,
         ...style,
       };
     }),
-    setQuirks: vi.fn().mockImplementation((quirks: any) => {
+    setQuirks: vi.fn().mockImplementation((quirks: Any) => {
       mockPersonalitySettings.quirks = {
         ...mockPersonalitySettings.quirks,
         ...quirks,
@@ -51,7 +51,7 @@ vi.mock("../../custom-skill-loader", () => ({
     getSkill: vi.fn().mockImplementation((id: string) => mockSkills.get(id)),
     listModelInvocableSkills: vi.fn().mockImplementation(() => Array.from(mockSkills.values())),
     getSkillStatusEntry: vi.fn().mockResolvedValue(null),
-    expandPrompt: vi.fn().mockImplementation((skill: CustomSkill, params: Record<string, any>) => {
+    expandPrompt: vi.fn().mockImplementation((skill: CustomSkill, params: Record<string, Any>) => {
       let prompt = skill.prompt;
       if (skill.parameters) {
         for (const param of skill.parameters) {
@@ -145,7 +145,7 @@ vi.mock("../../../hooks/settings", () => ({
       presets: [],
       mappings: [],
     }),
-    updateConfig: vi.fn().mockImplementation((cfg: any) => cfg),
+    updateConfig: vi.fn().mockImplementation((cfg: Any) => cfg),
   },
 }));
 
@@ -229,7 +229,7 @@ function createMockWorkspace(): Workspace {
 
 describe("use_skill tool", () => {
   let registry: ToolRegistry;
-  let mockDaemon: any;
+  let mockDaemon: Any;
   let mockWorkspace: Workspace;
 
   beforeEach(() => {
@@ -442,7 +442,7 @@ describe("use_skill tool", () => {
     it("should reject skill when required tool is unavailable", async () => {
       const skill = createTestSkill({
         id: "cli-skill",
-        requires: { tools: ["run_command"] } as any,
+        requires: { tools: ["run_command"] } as Any,
       });
       mockSkills.set("cli-skill", skill);
 
@@ -506,7 +506,7 @@ describe("use_skill tool", () => {
 
 describe("set_user_name tool", () => {
   let registry: ToolRegistry;
-  let mockDaemon: any;
+  let mockDaemon: Any;
   let mockWorkspace: Workspace;
 
   beforeEach(() => {
@@ -641,7 +641,7 @@ describe("set_user_name tool", () => {
 
 describe("set_persona tool", () => {
   let registry: ToolRegistry;
-  let mockDaemon: any;
+  let mockDaemon: Any;
   let mockWorkspace: Workspace;
 
   beforeEach(() => {
@@ -741,7 +741,7 @@ describe("set_persona tool", () => {
     it("should include valid personas in error message", async () => {
       try {
         await registry.executeTool("set_persona", { persona: "unknown" });
-      } catch (error: any) {
+      } catch (error: Any) {
         expect(error.message).toContain("jarvis");
         expect(error.message).toContain("friday");
         expect(error.message).toContain("none");
@@ -784,7 +784,7 @@ describe("set_persona tool", () => {
 
 describe("set_response_style tool", () => {
   let registry: ToolRegistry;
-  let mockDaemon: any;
+  let mockDaemon: Any;
   let mockWorkspace: Workspace;
 
   beforeEach(() => {
@@ -898,7 +898,7 @@ describe("set_response_style tool", () => {
 
 describe("set_quirks tool", () => {
   let registry: ToolRegistry;
-  let mockDaemon: any;
+  let mockDaemon: Any;
   let mockWorkspace: Workspace;
 
   beforeEach(() => {

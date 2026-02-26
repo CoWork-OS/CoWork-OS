@@ -29,10 +29,11 @@ import type {
 import { loadCanvasStore, saveCanvasStore } from "./canvas-store";
 import { getUserDataDir } from "../utils/user-data-dir";
 
-function getElectronRuntime(): { BrowserWindow: any; screen: any; shell: any } | null {
+function getElectronRuntime(): { BrowserWindow: Any; screen: Any; shell: Any } | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const electron = require("electron") as any;
+// oxlint-disable-next-line typescript-eslint(no-require-imports)
+    const electron = require("electron") as Any;
     // In plain Node.js, `require('electron')` resolves to the Electron binary path (string),
     // not the runtime API object. Only treat it as available when it looks like the API.
     if (!electron || typeof electron !== "object") return null;
@@ -47,7 +48,7 @@ function getElectronRuntime(): { BrowserWindow: any; screen: any; shell: any } |
   }
 }
 
-function requireElectronRuntime(): { BrowserWindow: any; screen: any; shell: any } {
+function requireElectronRuntime(): { BrowserWindow: Any; screen: Any; shell: Any } {
   const rt = getElectronRuntime();
   if (!rt) {
     throw new Error(

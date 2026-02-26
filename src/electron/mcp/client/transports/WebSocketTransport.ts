@@ -17,7 +17,7 @@ import {
 } from "../../types";
 
 interface PendingRequest {
-  resolve: (result: any) => void;
+  resolve: (result: Any) => void;
   reject: (error: Error) => void;
   timeout: ReturnType<typeof setTimeout>;
 }
@@ -146,7 +146,7 @@ export class WebSocketTransport extends EventEmitter implements MCPTransport {
     this.stopPingPong();
 
     // Reject all pending requests
-    for (const [id, pending] of this.pendingRequests) {
+    for (const [_id, pending] of this.pendingRequests) {
       clearTimeout(pending.timeout);
       pending.reject(new Error("Transport disconnected"));
     }
@@ -179,7 +179,7 @@ export class WebSocketTransport extends EventEmitter implements MCPTransport {
   /**
    * Send a JSON-RPC request and wait for response
    */
-  async sendRequest(method: string, params?: Record<string, any>): Promise<any> {
+  async sendRequest(method: string, params?: Record<string, Any>): Promise<Any> {
     if (!this.connected || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error("Not connected");
     }
@@ -278,7 +278,7 @@ export class WebSocketTransport extends EventEmitter implements MCPTransport {
 
       // Otherwise, pass to message handler (notifications)
       this.messageHandler?.(message as JSONRPCResponse | JSONRPCNotification);
-    } catch (error) {
+    } catch  {
       console.error(`[MCP WebSocketTransport] Failed to parse message: ${data}`);
     }
   }

@@ -216,7 +216,7 @@ class GoogleAuthManager {
             } else {
               resolve(parsed);
             }
-          } catch (e) {
+          } catch  {
             reject(new Error(`Failed to parse token response: ${data}`));
           }
         });
@@ -747,7 +747,7 @@ export class GoogleChatAdapter implements ChannelAdapter {
             } else {
               resolve(parsed);
             }
-          } catch (e) {
+          } catch  {
             if (res.statusCode && res.statusCode >= 400) {
               reject(new Error(`API error ${res.statusCode}: ${data}`));
             } else {

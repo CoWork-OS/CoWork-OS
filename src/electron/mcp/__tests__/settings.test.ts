@@ -65,7 +65,7 @@ describe("MCPSettingsManager batch mode", () => {
     writeCount = 0;
     mockStoredSettings = undefined;
     MCPSettingsManager.clearCache();
-    (MCPSettingsManager as any).migrationCompleted = false;
+    (MCPSettingsManager as Any).migrationCompleted = false;
   });
 
   it("should defer saves when in batch mode", () => {

@@ -22,7 +22,8 @@ export function getSafeStorage(): SafeStorageLike | null {
 
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const electron = require("electron") as any;
+// oxlint-disable-next-line typescript-eslint(no-require-imports)
+    const electron = require("electron") as Any;
     const safeStorage = electron?.safeStorage;
 
     if (!safeStorage) return null;

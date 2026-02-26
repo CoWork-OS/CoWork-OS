@@ -206,7 +206,7 @@ export class WebFetchTools {
         content,
         contentLength: content.length,
       };
-    } catch (error: any) {
+    } catch (error: Any) {
       const errorMessage = error.name === "AbortError" ? "Request timed out" : error.message;
 
       this.daemon.logEvent(this.taskId, "tool_result", {
@@ -340,7 +340,7 @@ export class WebFetchTools {
         body: responseBody,
         contentLength: responseBody.length,
       };
-    } catch (error: any) {
+    } catch (error: Any) {
       const errorMessage = error.name === "AbortError" ? "Request timed out" : error.message;
 
       this.daemon.logEvent(this.taskId, "tool_result", {

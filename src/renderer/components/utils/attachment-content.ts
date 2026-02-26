@@ -5,7 +5,7 @@ const ATTACHMENT_CONTENT_END_MARKER = "[[ATTACHMENT_EXTRACTED_CONTENT_END]]";
 
 const OCR_REQUEST_PATTERNS = [
   /\bocr\b/i,
-  /\bextract\s+(?:any|all)?\s*text\s+(?:from|in|on)?\s*(?:the\s+)?(image|photo|screenshot|diagram|chart|presentation)\b/i,
+  /\bextract\s+(?: Any|all)?\s*text\s+(?:from|in|on)?\s*(?:the\s+)?(image|photo|screenshot|diagram|chart|presentation)\b/i,
   /\bread\s+(?:the\s+)?(?:text|content)\s+(?:from|in|on)?\s*(?:the\s+)?(image|photo|screenshot|diagram|chart|figure|slide)\b/i,
   /\bscan(?:ning)?\b.*\b(?:image|photo|screenshot|diagram|chart|figure)\b/i,
   /\bimage\s+(?:contains?|has)\s+(?:text|numbers?|labels?)\b/i,

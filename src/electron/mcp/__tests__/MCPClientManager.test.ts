@@ -21,7 +21,7 @@ const defaultMockServers = [
   { id: "server-4", name: "Server 4", enabled: false },
 ];
 
-let mockServers: any[] = defaultMockServers.map((s) => ({ ...s }));
+let mockServers: Any[] = defaultMockServers.map((s) => ({ ...s }));
 
 // Mock electron
 vi.mock("electron", () => ({
@@ -38,11 +38,11 @@ vi.mock("electron", () => ({
 vi.mock("../client/MCPServerConnection", () => {
   return {
     MCPServerConnection: class MockConnection extends EventEmitter {
-      private cfg: any;
+      private cfg: Any;
       private st = "disconnected";
-      private tls: any[] = [];
+      private tls: Any[] = [];
 
-      constructor(cfg: any) {
+      constructor(cfg: Any) {
         super();
         this.cfg = cfg;
       }

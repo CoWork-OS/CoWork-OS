@@ -43,7 +43,7 @@ const createMockNodeClient = (
     version: "1.0.0",
     deviceId: options.id || "test-device-id",
     modelIdentifier: "iPhone15,3",
-    capabilities: (options.capabilities || ["camera", "location"]) as any,
+    capabilities: (options.capabilities || ["camera", "location"]) as Any,
     commands: options.commands || ["camera.snap", "camera.clip", "location.get"],
     permissions: options.permissions || { camera: true, location: true },
   });
@@ -85,13 +85,13 @@ describe("NodeManager", () => {
 
     it("should be attached after calling attach()", () => {
       const server = createMockServer();
-      nodeManager.attach(server as any);
+      nodeManager.attach(server as Any);
       expect(nodeManager.isAttached).toBe(true);
     });
 
     it("should not be attached after calling detach()", () => {
       const server = createMockServer();
-      nodeManager.attach(server as any);
+      nodeManager.attach(server as Any);
       nodeManager.detach();
       expect(nodeManager.isAttached).toBe(false);
     });
@@ -105,7 +105,7 @@ describe("NodeManager", () => {
 
     it("should return empty array when no nodes connected", () => {
       const server = createMockServer([]);
-      nodeManager.attach(server as any);
+      nodeManager.attach(server as Any);
       const nodes = nodeManager.getNodes();
       expect(nodes).toEqual([]);
     });
@@ -114,7 +114,7 @@ describe("NodeManager", () => {
       const node1 = createMockNodeClient({ displayName: "iPhone 1" });
       const node2 = createMockNodeClient({ displayName: "iPhone 2" });
       const server = createMockServer([node1, node2]);
-      nodeManager.attach(server as any);
+      nodeManager.attach(server as Any);
 
       const nodes = nodeManager.getNodes();
       expect(nodes).toHaveLength(2);
@@ -132,7 +132,7 @@ describe("NodeManager", () => {
       const node1 = createMockNodeClient();
       const node2 = createMockNodeClient();
       const server = createMockServer([node1, node2]);
-      nodeManager.attach(server as any);
+      nodeManager.attach(server as Any);
 
       expect(nodeManager.nodeCount).toBe(2);
     });
@@ -146,7 +146,7 @@ describe("NodeManager", () => {
     it("should find node by ID", () => {
       const node = createMockNodeClient({ displayName: "My iPhone" });
       const server = createMockServer([node]);
-      nodeManager.attach(server as any);
+      nodeManager.attach(server as Any);
 
       const found = nodeManager.getNode(node.id);
       expect(found).not.toBeNull();
@@ -156,7 +156,7 @@ describe("NodeManager", () => {
     it("should find node by display name", () => {
       const node = createMockNodeClient({ displayName: "My iPhone" });
       const server = createMockServer([node]);
-      nodeManager.attach(server as any);
+      nodeManager.attach(server as Any);
 
       const found = nodeManager.getNode("My iPhone");
       expect(found).not.toBeNull();
@@ -166,7 +166,7 @@ describe("NodeManager", () => {
     it("should return null for non-existent node", () => {
       const node = createMockNodeClient({ displayName: "My iPhone" });
       const server = createMockServer([node]);
-      nodeManager.attach(server as any);
+      nodeManager.attach(server as Any);
 
       expect(nodeManager.getNode("Non-existent")).toBeNull();
     });
@@ -180,7 +180,7 @@ describe("NodeManager", () => {
     it("should return true for existing node", () => {
       const node = createMockNodeClient({ displayName: "My iPhone" });
       const server = createMockServer([node]);
-      nodeManager.attach(server as any);
+      nodeManager.attach(server as Any);
 
       expect(nodeManager.hasNode(node.id)).toBe(true);
       expect(nodeManager.hasNode("My iPhone")).toBe(true);
@@ -189,7 +189,7 @@ describe("NodeManager", () => {
     it("should return false for non-existent node", () => {
       const node = createMockNodeClient();
       const server = createMockServer([node]);
-      nodeManager.attach(server as any);
+      nodeManager.attach(server as Any);
 
       expect(nodeManager.hasNode("Non-existent")).toBe(false);
     });
@@ -206,7 +206,7 @@ describe("NodeManager", () => {
         capabilities: ["location"],
       });
       const server = createMockServer([node1, node2]);
-      nodeManager.attach(server as any);
+      nodeManager.attach(server as Any);
 
       const cameraNodes = nodeManager.getNodesByCapability("camera");
       expect(cameraNodes).toHaveLength(1);
@@ -228,7 +228,7 @@ describe("NodeManager", () => {
         platform: "android",
       });
       const server = createMockServer([iPhoneNode, androidNode]);
-      nodeManager.attach(server as any);
+      nodeManager.attach(server as Any);
 
       const iosNodes = nodeManager.getNodesByPlatform("ios");
       expect(iosNodes).toHaveLength(1);
@@ -251,7 +251,7 @@ describe("NodeManager", () => {
         commands: ["camera.snap", "location.get"],
       });
       const server = createMockServer([node1, node2]);
-      nodeManager.attach(server as any);
+      nodeManager.attach(server as Any);
 
       const smsNodes = nodeManager.getNodesByCommand("sms.send");
       expect(smsNodes).toHaveLength(1);
@@ -265,7 +265,7 @@ describe("NodeManager", () => {
   describe("getDefaultNode", () => {
     it("should return null when no nodes", () => {
       const server = createMockServer([]);
-      nodeManager.attach(server as any);
+      nodeManager.attach(server as Any);
       expect(nodeManager.getDefaultNode()).toBeNull();
     });
 
@@ -273,7 +273,7 @@ describe("NodeManager", () => {
       const node1 = createMockNodeClient({ displayName: "First" });
       const node2 = createMockNodeClient({ displayName: "Second" });
       const server = createMockServer([node1, node2]);
-      nodeManager.attach(server as any);
+      nodeManager.attach(server as Any);
 
       const defaultNode = nodeManager.getDefaultNode();
       expect(defaultNode).not.toBeNull();
@@ -293,7 +293,7 @@ describe("NodeManager", () => {
 
     it("should return error when node not found", async () => {
       const server = createMockServer([]);
-      nodeManager.attach(server as any);
+      nodeManager.attach(server as Any);
 
       const result = await nodeManager.invoke({
         nodeId: "non-existent",
@@ -309,7 +309,7 @@ describe("NodeManager", () => {
         commands: ["location.get"],
       });
       const server = createMockServer([node]);
-      nodeManager.attach(server as any);
+      nodeManager.attach(server as Any);
 
       const result = await nodeManager.invoke({
         nodeId: node.id,
@@ -326,7 +326,7 @@ describe("NodeManager", () => {
         isForeground: false,
       });
       const server = createMockServer([node]);
-      nodeManager.attach(server as any);
+      nodeManager.attach(server as Any);
 
       const result = await nodeManager.invoke({
         nodeId: node.id,
@@ -343,7 +343,7 @@ describe("NodeManager", () => {
         isForeground: true,
       });
       const server = createMockServer([node]);
-      nodeManager.attach(server as any);
+      nodeManager.attach(server as Any);
 
       const result = await nodeManager.invoke({
         nodeId: node.id,
@@ -363,7 +363,7 @@ describe("NodeManager", () => {
         isForeground: true,
       });
       const server = createMockServer([node]);
-      nodeManager.attach(server as any);
+      nodeManager.attach(server as Any);
 
       await nodeManager.cameraSnap(node.id, { facing: "front", maxWidth: 640 });
 
@@ -383,7 +383,7 @@ describe("NodeManager", () => {
         isForeground: true,
       });
       const server = createMockServer([node]);
-      nodeManager.attach(server as any);
+      nodeManager.attach(server as Any);
 
       await nodeManager.locationGet(node.id, { accuracy: "precise" });
 
@@ -404,7 +404,7 @@ describe("NodeManager", () => {
         isForeground: true,
       });
       const server = createMockServer([node]);
-      nodeManager.attach(server as any);
+      nodeManager.attach(server as Any);
 
       await nodeManager.screenRecord(node.id, { durationMs: 5000, fps: 15 });
 
@@ -426,7 +426,7 @@ describe("NodeManager", () => {
         isForeground: true,
       });
       const server = createMockServer([node]);
-      nodeManager.attach(server as any);
+      nodeManager.attach(server as Any);
 
       await nodeManager.smsSend(node.id, { to: "+1234567890", message: "Hello!" });
 

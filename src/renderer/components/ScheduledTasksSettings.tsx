@@ -541,7 +541,7 @@ export function ScheduledTasksSettings() {
       setStatus(statusResult);
       setJobs(jobsResult);
       setWorkspaces(workspacesResult);
-    } catch (err: any) {
+    } catch (err: Any) {
       setError(err.message || "Failed to load scheduled tasks");
     } finally {
       setLoading(false);
@@ -569,7 +569,7 @@ export function ScheduledTasksSettings() {
         return;
       }
       await loadData();
-    } catch (err: any) {
+    } catch (err: Any) {
       setError(err.message);
     }
   };
@@ -581,11 +581,11 @@ export function ScheduledTasksSettings() {
     try {
       const result = await window.electronAPI.removeCronJob(job.id);
       if (!result.ok) {
-        setError((result as any).error || "Failed to delete job");
+        setError((result as Any).error || "Failed to delete job");
         return;
       }
       await loadData();
-    } catch (err: any) {
+    } catch (err: Any) {
       setError(err.message);
     }
   };
@@ -602,7 +602,7 @@ export function ScheduledTasksSettings() {
         console.log(`[ScheduledTasks] Created task: ${result.taskId}`);
       }
       await loadData();
-    } catch (err: any) {
+    } catch (err: Any) {
       setError(err.message);
     }
   };
@@ -1122,7 +1122,7 @@ function JobModal({ job, workspaces, onClose, onSave }: JobModalProps) {
     const delivery = deliveryEnabled
       ? {
           enabled: true as const,
-          channelType: (deliveryChannelType || undefined) as any,
+          channelType: (deliveryChannelType || undefined) as Any,
           channelDbId: deliveryChannelDbId || undefined,
           channelId: deliveryChatId.trim() || undefined,
           deliverOnSuccess,
@@ -1171,7 +1171,7 @@ function JobModal({ job, workspaces, onClose, onSave }: JobModalProps) {
       }
 
       onSave();
-    } catch (err: any) {
+    } catch (err: Any) {
       setError(err.message);
     } finally {
       setSaving(false);
@@ -1740,7 +1740,7 @@ function JobModal({ job, workspaces, onClose, onSave }: JobModalProps) {
                               ok: true,
                               message: "Test message sent successfully!",
                             });
-                          } catch (err: any) {
+                          } catch (err: Any) {
                             setTestDeliveryResult({
                               ok: false,
                               message: err.message || "Failed to send test message",

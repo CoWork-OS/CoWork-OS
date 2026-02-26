@@ -39,10 +39,10 @@ const fileCache = new Map<string, CachedPolicyFile>();
 
 async function loadPolicyCode(workspacePath: string): Promise<CachedPolicyFile | null> {
   const absPath = path.join(workspacePath, ".cowork", "policy", "tools.monty");
-  let stat: any;
+  let stat: Any;
   try {
     stat = await fs.stat(absPath);
-  } catch (err: any) {
+  } catch (err: Any) {
     if (err?.code === "ENOENT") return null;
     throw err;
   }
@@ -60,7 +60,7 @@ async function loadPolicyCode(workspacePath: string): Promise<CachedPolicyFile |
 
 function normalizeDecision(raw: unknown): ToolPolicyDecision | null {
   if (!raw || typeof raw !== "object") return null;
-  const obj = raw as any;
+  const obj = raw as Any;
   const decision = typeof obj.decision === "string" ? obj.decision : "";
   const reason = typeof obj.reason === "string" ? obj.reason : undefined;
 
@@ -98,7 +98,7 @@ export async function evaluateMontyToolPolicy(args: {
 
   const stdlib = createMontySafeStdlib();
   const externalFunctions = Object.fromEntries(
-    Object.entries(stdlib).map(([k, fn]) => [k, fn as any]),
+    Object.entries(stdlib).map(([k, fn]) => [k, fn as Any]),
   );
 
   const input = {

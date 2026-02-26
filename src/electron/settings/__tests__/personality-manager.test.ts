@@ -100,7 +100,7 @@ describe("PersonalityManager", () => {
     it("should cache loaded settings", () => {
       mockStoredSettings = { activePersonality: "concise" };
 
-      const settings1 = PersonalityManager.loadSettings();
+      const _settings1 = PersonalityManager.loadSettings();
       mockStoredSettings = { activePersonality: "creative" }; // Change mock
       const settings2 = PersonalityManager.loadSettings();
 
@@ -620,13 +620,13 @@ describe("PersonalityManager - personas", () => {
     it("should apply sample catchphrase when not set", () => {
       PersonalityManager.setActivePersona("jarvis");
 
-      expect((mockStoredSettings.quirks as any)?.catchphrase).toBe("At your service.");
+      expect((mockStoredSettings.quirks as Any)?.catchphrase).toBe("At your service.");
     });
 
     it("should apply sample sign-off when not set", () => {
       PersonalityManager.setActivePersona("jarvis");
 
-      expect((mockStoredSettings.quirks as any)?.signOff).toBe("Will there be anything else?");
+      expect((mockStoredSettings.quirks as Any)?.signOff).toBe("Will there be anything else?");
     });
 
     it("should not apply persona quirks when selecting none persona", () => {
@@ -634,8 +634,8 @@ describe("PersonalityManager - personas", () => {
 
       // When selecting 'none', no persona-specific quirks are applied
       // Default quirks may still exist from the settings merge
-      expect((mockStoredSettings.quirks as any)?.catchphrase).toBeFalsy();
-      expect((mockStoredSettings.quirks as any)?.signOff).toBeFalsy();
+      expect((mockStoredSettings.quirks as Any)?.catchphrase).toBeFalsy();
+      expect((mockStoredSettings.quirks as Any)?.signOff).toBeFalsy();
     });
   });
 
@@ -699,25 +699,25 @@ describe("PersonalityManager - response style", () => {
     it("should set emoji usage preference", () => {
       PersonalityManager.setResponseStyle({ emojiUsage: "expressive" });
 
-      expect((mockStoredSettings.responseStyle as any)?.emojiUsage).toBe("expressive");
+      expect((mockStoredSettings.responseStyle as Any)?.emojiUsage).toBe("expressive");
     });
 
     it("should set response length preference", () => {
       PersonalityManager.setResponseStyle({ responseLength: "detailed" });
 
-      expect((mockStoredSettings.responseStyle as any)?.responseLength).toBe("detailed");
+      expect((mockStoredSettings.responseStyle as Any)?.responseLength).toBe("detailed");
     });
 
     it("should set code comment style preference", () => {
       PersonalityManager.setResponseStyle({ codeCommentStyle: "verbose" });
 
-      expect((mockStoredSettings.responseStyle as any)?.codeCommentStyle).toBe("verbose");
+      expect((mockStoredSettings.responseStyle as Any)?.codeCommentStyle).toBe("verbose");
     });
 
     it("should set explanation depth preference", () => {
       PersonalityManager.setResponseStyle({ explanationDepth: "teaching" });
 
-      expect((mockStoredSettings.responseStyle as any)?.explanationDepth).toBe("teaching");
+      expect((mockStoredSettings.responseStyle as Any)?.explanationDepth).toBe("teaching");
     });
 
     it("should merge with existing response style", () => {
@@ -843,19 +843,19 @@ describe("PersonalityManager - quirks", () => {
     it("should set catchphrase", () => {
       PersonalityManager.setQuirks({ catchphrase: "Let me handle that!" });
 
-      expect((mockStoredSettings.quirks as any)?.catchphrase).toBe("Let me handle that!");
+      expect((mockStoredSettings.quirks as Any)?.catchphrase).toBe("Let me handle that!");
     });
 
     it("should set sign-off", () => {
       PersonalityManager.setQuirks({ signOff: "Happy coding!" });
 
-      expect((mockStoredSettings.quirks as any)?.signOff).toBe("Happy coding!");
+      expect((mockStoredSettings.quirks as Any)?.signOff).toBe("Happy coding!");
     });
 
     it("should set analogy domain", () => {
       PersonalityManager.setQuirks({ analogyDomain: "cooking" });
 
-      expect((mockStoredSettings.quirks as any)?.analogyDomain).toBe("cooking");
+      expect((mockStoredSettings.quirks as Any)?.analogyDomain).toBe("cooking");
     });
 
     it("should merge with existing quirks", () => {
@@ -930,19 +930,19 @@ describe("PersonalityManager - relationship", () => {
     it("should set the user name", () => {
       PersonalityManager.setUserName("Alice");
 
-      expect((mockStoredSettings.relationship as any)?.userName).toBe("Alice");
+      expect((mockStoredSettings.relationship as Any)?.userName).toBe("Alice");
     });
 
     it("should trim whitespace from name", () => {
       PersonalityManager.setUserName("  Bob  ");
 
-      expect((mockStoredSettings.relationship as any)?.userName).toBe("Bob");
+      expect((mockStoredSettings.relationship as Any)?.userName).toBe("Bob");
     });
 
     it("should set undefined for empty name", () => {
       PersonalityManager.setUserName("");
 
-      expect((mockStoredSettings.relationship as any)?.userName).toBeUndefined();
+      expect((mockStoredSettings.relationship as Any)?.userName).toBeUndefined();
     });
   });
 
@@ -964,7 +964,7 @@ describe("PersonalityManager - relationship", () => {
     it("should increment tasks completed", () => {
       PersonalityManager.recordTaskCompleted();
 
-      expect((mockStoredSettings.relationship as any)?.tasksCompleted).toBe(1);
+      expect((mockStoredSettings.relationship as Any)?.tasksCompleted).toBe(1);
     });
 
     it("should increment existing count", () => {
@@ -973,27 +973,27 @@ describe("PersonalityManager - relationship", () => {
 
       PersonalityManager.recordTaskCompleted();
 
-      expect((mockStoredSettings.relationship as any)?.tasksCompleted).toBe(6);
+      expect((mockStoredSettings.relationship as Any)?.tasksCompleted).toBe(6);
     });
 
     it("should set first interaction timestamp on first task", () => {
       PersonalityManager.recordTaskCompleted();
 
-      expect((mockStoredSettings.relationship as any)?.firstInteraction).toBeDefined();
-      expect(typeof (mockStoredSettings.relationship as any)?.firstInteraction).toBe("number");
+      expect((mockStoredSettings.relationship as Any)?.firstInteraction).toBeDefined();
+      expect(typeof (mockStoredSettings.relationship as Any)?.firstInteraction).toBe("number");
     });
 
     it("should add workspace to projects worked on", () => {
       PersonalityManager.recordTaskCompleted("my-project");
 
-      expect((mockStoredSettings.relationship as any)?.projectsWorkedOn).toContain("my-project");
+      expect((mockStoredSettings.relationship as Any)?.projectsWorkedOn).toContain("my-project");
     });
 
     it("should not duplicate workspace names", () => {
       PersonalityManager.recordTaskCompleted("my-project");
       PersonalityManager.recordTaskCompleted("my-project");
 
-      expect((mockStoredSettings.relationship as any)?.projectsWorkedOn).toHaveLength(1);
+      expect((mockStoredSettings.relationship as Any)?.projectsWorkedOn).toHaveLength(1);
     });
 
     it("should update milestone when reached", () => {
@@ -1006,7 +1006,7 @@ describe("PersonalityManager - relationship", () => {
 
       PersonalityManager.recordTaskCompleted();
 
-      expect((mockStoredSettings.relationship as any)?.lastMilestoneCelebrated).toBe(10);
+      expect((mockStoredSettings.relationship as Any)?.lastMilestoneCelebrated).toBe(10);
     });
   });
 
@@ -1224,8 +1224,8 @@ describe("PersonalityManager - resetToDefaults", () => {
     PersonalityManager.resetToDefaults(true);
 
     expect(mockStoredSettings.activePersonality).toBe("professional");
-    expect((mockStoredSettings.relationship as any)?.userName).toBe("Alice");
-    expect((mockStoredSettings.relationship as any)?.tasksCompleted).toBe(100);
+    expect((mockStoredSettings.relationship as Any)?.userName).toBe("Alice");
+    expect((mockStoredSettings.relationship as Any)?.tasksCompleted).toBe(100);
   });
 
   it("should not preserve relationship data when preserveRelationship is false", () => {
@@ -1239,8 +1239,8 @@ describe("PersonalityManager - resetToDefaults", () => {
 
     PersonalityManager.resetToDefaults(false);
 
-    expect((mockStoredSettings.relationship as any)?.userName).toBeFalsy();
-    expect((mockStoredSettings.relationship as any)?.tasksCompleted).toBe(0);
+    expect((mockStoredSettings.relationship as Any)?.userName).toBeFalsy();
+    expect((mockStoredSettings.relationship as Any)?.tasksCompleted).toBe(0);
   });
 
   it("should default to preserving relationship", () => {
@@ -1254,8 +1254,8 @@ describe("PersonalityManager - resetToDefaults", () => {
 
     PersonalityManager.resetToDefaults();
 
-    expect((mockStoredSettings.relationship as any)?.userName).toBe("Bob");
-    expect((mockStoredSettings.relationship as any)?.tasksCompleted).toBe(50);
+    expect((mockStoredSettings.relationship as Any)?.userName).toBe("Bob");
+    expect((mockStoredSettings.relationship as Any)?.tasksCompleted).toBe(50);
   });
 
   it("should increment write count", () => {
@@ -1389,6 +1389,6 @@ describe("PersonalityManager - atomic writes", () => {
     PersonalityManager.saveSettings(settings);
 
     expect(writeCount).toBe(1);
-    expect((mockStoredSettings as any).activePersonality).toBe("creative");
+    expect((mockStoredSettings as Any).activePersonality).toBe("creative");
   });
 });

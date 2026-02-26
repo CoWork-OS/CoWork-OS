@@ -18,8 +18,8 @@ function createVisionTools() {
     },
     isTemp: true,
   };
-  const daemon = { logEvent: vi.fn() } as any;
-  return new VisionTools(workspace, daemon, "task-1") as any;
+  const daemon = { logEvent: vi.fn() } as Any;
+  return new VisionTools(workspace, daemon, "task-1") as Any;
 }
 
 describe("VisionTools cache and page range guards", () => {
@@ -112,7 +112,7 @@ describe("VisionTools cache and page range guards", () => {
     const daemon = vision.daemon;
     const loadSettingsSpy = vi
       .spyOn(LLMProviderFactory, "loadSettings")
-      .mockReturnValue({ providerType: "openai", openai: { apiKey: "" } } as any);
+      .mockReturnValue({ providerType: "openai", openai: { apiKey: "" } } as Any);
 
     try {
       const result = await vision.analyzeBuffer({
@@ -125,7 +125,7 @@ describe("VisionTools cache and page range guards", () => {
         emitToolError: false,
       });
       expect(result.success).toBe(false);
-      const emittedToolError = daemon.logEvent.mock.calls.some((call: any[]) => call[1] === "tool_error");
+      const emittedToolError = daemon.logEvent.mock.calls.some((call: Any[]) => call[1] === "tool_error");
       expect(emittedToolError).toBe(false);
     } finally {
       loadSettingsSpy.mockRestore();

@@ -101,7 +101,7 @@ export class OneDriveTools {
     return driveId ? `/drives/${driveId}` : "/me/drive";
   }
 
-  async executeAction(input: OneDriveActionInput): Promise<any> {
+  async executeAction(input: OneDriveActionInput): Promise<Any> {
     const settings = OneDriveSettingsManager.loadSettings();
     if (!settings.enabled) {
       throw new Error(

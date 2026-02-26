@@ -43,7 +43,7 @@ export class SkillTools {
    */
   async createSpreadsheet(input: {
     filename: string;
-    sheets: Array<{ name: string; data: any[][] }>;
+    sheets: Array<{ name: string; data: Any[][] }>;
   }): Promise<{ success: boolean; path: string }> {
     if (!this.workspace.permissions.write) {
       throw new Error("Write permission not granted");
@@ -335,7 +335,7 @@ export class SkillTools {
   async organizeFolder(input: {
     path: string;
     strategy: "by_type" | "by_date" | "custom";
-    rules?: any;
+    rules?: Any;
   }): Promise<{ success: boolean; changes: number }> {
     if (!this.workspace.permissions.write) {
       throw new Error("Write permission not granted");

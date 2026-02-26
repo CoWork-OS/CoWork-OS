@@ -10,8 +10,8 @@ export function toOpenAICompatibleMessages(
   messages: LLMMessage[],
   system?: string,
   options?: OpenAICompatibleMessageOptions,
-): Array<{ role: string; content: any; tool_call_id?: string; tool_calls?: any[] }> {
-  const result: Array<{ role: string; content: any; tool_call_id?: string; tool_calls?: any[] }> =
+): Array<{ role: string; content: Any; tool_call_id?: string; tool_calls?: Any[] }> {
+  const result: Array<{ role: string; content: Any; tool_call_id?: string; tool_calls?: Any[] }> =
     [];
   const supportsImages = options?.supportsImages === true;
 
@@ -31,7 +31,7 @@ export function toOpenAICompatibleMessages(
 
     const imageBlocks: LLMImageContent[] = [];
     const textParts: string[] = [];
-    const toolCalls: any[] = [];
+    const toolCalls: Any[] = [];
     const shouldInlineImages = supportsImages && msg.role === "user";
 
     for (const item of msg.content) {
@@ -72,7 +72,7 @@ export function toOpenAICompatibleMessages(
     }
 
     if (imageBlocks.length > 0) {
-      const contentParts: any[] = [];
+      const contentParts: Any[] = [];
       if (textParts.length > 0) {
         contentParts.push({ type: "text", text: textParts.join("\n") });
       }
@@ -99,7 +99,7 @@ export function toOpenAICompatibleTools(tools: LLMTool[]): Array<{
   function: {
     name: string;
     description: string;
-    parameters: any;
+    parameters: Any;
   };
 }> {
   return tools.map((tool) => ({
@@ -112,7 +112,7 @@ export function toOpenAICompatibleTools(tools: LLMTool[]): Array<{
   }));
 }
 
-export function fromOpenAICompatibleResponse(response: any): LLMResponse {
+export function fromOpenAICompatibleResponse(response: Any): LLMResponse {
   const content: LLMContent[] = [];
   const choice = response.choices?.[0];
 

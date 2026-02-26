@@ -50,7 +50,7 @@ describe("GoogleChatAdapter", () => {
         enabled: true,
         serviceAccountKey: defaultConfig.serviceAccountKey,
       });
-      const config = (adapterNoPort as any).config;
+      const config = (adapterNoPort as Any).config;
       expect(config.webhookPort).toBeUndefined(); // Will default to 3979 on connect
     });
 
@@ -60,7 +60,7 @@ describe("GoogleChatAdapter", () => {
         serviceAccountKey: defaultConfig.serviceAccountKey,
         webhookPort: 4000,
       });
-      const config = (adapterCustomPort as any).config;
+      const config = (adapterCustomPort as Any).config;
       expect(config.webhookPort).toBe(4000);
     });
 
@@ -70,7 +70,7 @@ describe("GoogleChatAdapter", () => {
         serviceAccountKey: defaultConfig.serviceAccountKey,
         webhookPath: "/custom/webhook",
       });
-      const config = (adapterCustomPath as any).config;
+      const config = (adapterCustomPath as Any).config;
       expect(config.webhookPath).toBe("/custom/webhook");
     });
 
@@ -83,7 +83,7 @@ describe("GoogleChatAdapter", () => {
           project_id: "test-project",
         },
       });
-      const config = (adapterInline as any).config;
+      const config = (adapterInline as Any).config;
       expect(config.serviceAccountKey).toBeDefined();
       expect(config.serviceAccountKey.client_email).toContain("test");
     });
@@ -125,7 +125,7 @@ describe("GoogleChatAdapter", () => {
     it("should register message handlers", () => {
       const handler = vi.fn();
       adapter.onMessage(handler);
-      expect((adapter as any).messageHandlers).toContain(handler);
+      expect((adapter as Any).messageHandlers).toContain(handler);
     });
 
     it("should support multiple handlers", () => {
@@ -133,7 +133,7 @@ describe("GoogleChatAdapter", () => {
       const handler2 = vi.fn();
       adapter.onMessage(handler1);
       adapter.onMessage(handler2);
-      expect((adapter as any).messageHandlers.length).toBe(2);
+      expect((adapter as Any).messageHandlers.length).toBe(2);
     });
   });
 
@@ -141,7 +141,7 @@ describe("GoogleChatAdapter", () => {
     it("should register error handlers", () => {
       const handler = vi.fn();
       adapter.onError(handler);
-      expect((adapter as any).errorHandlers).toContain(handler);
+      expect((adapter as Any).errorHandlers).toContain(handler);
     });
   });
 
@@ -149,13 +149,13 @@ describe("GoogleChatAdapter", () => {
     it("should register status handlers", () => {
       const handler = vi.fn();
       adapter.onStatusChange(handler);
-      expect((adapter as any).statusHandlers).toContain(handler);
+      expect((adapter as Any).statusHandlers).toContain(handler);
     });
 
     it("should call status handlers on status change", () => {
       const handler = vi.fn();
       adapter.onStatusChange(handler);
-      (adapter as any).setStatus("connecting");
+      (adapter as Any).setStatus("connecting");
       expect(handler).toHaveBeenCalledWith("connecting", undefined);
     });
 
@@ -163,7 +163,7 @@ describe("GoogleChatAdapter", () => {
       const handler = vi.fn();
       const error = new Error("Test error");
       adapter.onStatusChange(handler);
-      (adapter as any).setStatus("error", error);
+      (adapter as Any).setStatus("error", error);
       expect(handler).toHaveBeenCalledWith("error", error);
     });
   });
@@ -206,18 +206,18 @@ describe("GoogleChatAdapter", () => {
 
   describe("message deduplication", () => {
     it("should track processed messages", () => {
-      const cache = (adapter as any).deduplicationCache;
+      const cache = (adapter as Any).deduplicationCache;
       cache.add("msg-123");
       expect(cache.has("msg-123")).toBe(true);
     });
 
     it("should return false for unknown messages", () => {
-      const cache = (adapter as any).deduplicationCache;
+      const cache = (adapter as Any).deduplicationCache;
       expect(cache.has("unknown-msg")).toBe(false);
     });
 
     it("should not duplicate message entries", () => {
-      const cache = (adapter as any).deduplicationCache;
+      const cache = (adapter as Any).deduplicationCache;
       cache.add("msg-456");
       cache.add("msg-456");
       // Cache should still work correctly
@@ -231,7 +231,7 @@ describe("GoogleChatAdapter", () => {
         ...defaultConfig,
         autoReconnect: false,
       });
-      expect((adapterWithReconnect as any).config.autoReconnect).toBe(false);
+      expect((adapterWithReconnect as Any).config.autoReconnect).toBe(false);
     });
 
     it("should respect maxReconnectAttempts config", () => {
@@ -239,7 +239,7 @@ describe("GoogleChatAdapter", () => {
         ...defaultConfig,
         maxReconnectAttempts: 3,
       });
-      expect((adapterWithMax as any).config.maxReconnectAttempts).toBe(3);
+      expect((adapterWithMax as Any).config.maxReconnectAttempts).toBe(3);
     });
   });
 });
@@ -327,7 +327,7 @@ describe("GoogleChatAdapter edge cases", () => {
       adapter.onMessage(successHandler);
 
       // Handlers are registered
-      expect((adapter as any).messageHandlers.length).toBe(2);
+      expect((adapter as Any).messageHandlers.length).toBe(2);
     });
   });
 
@@ -341,7 +341,7 @@ describe("GoogleChatAdapter edge cases", () => {
 
       // Should not throw when calling handleError
       expect(() => {
-        (adapter as any).handleError(new Error("Test error"), "test");
+        (adapter as Any).handleError(new Error("Test error"), "test");
       }).not.toThrow();
     });
   });
@@ -356,7 +356,7 @@ describe("GoogleChatAdapter edge cases", () => {
 
       // Should not throw when setting status
       expect(() => {
-        (adapter as any).setStatus("connecting");
+        (adapter as Any).setStatus("connecting");
       }).not.toThrow();
     });
   });
@@ -365,7 +365,7 @@ describe("GoogleChatAdapter edge cases", () => {
     it("should expire old entries", () => {
       vi.useFakeTimers();
 
-      const cache = (adapter as any).deduplicationCache;
+      const cache = (adapter as Any).deduplicationCache;
       cache.add("msg-old");
 
       // Fast-forward past TTL (default 60 seconds)
@@ -378,7 +378,7 @@ describe("GoogleChatAdapter edge cases", () => {
     });
 
     it("should keep fresh entries", () => {
-      const cache = (adapter as any).deduplicationCache;
+      const cache = (adapter as Any).deduplicationCache;
       cache.add("msg-fresh");
 
       // Entry should still be valid
@@ -399,7 +399,7 @@ describe("GoogleChatAdapter edge cases", () => {
       });
 
       // The loadCredentials method should return inline credentials first
-      const credentials = await (adapterWithBoth as any).loadCredentials();
+      const credentials = await (adapterWithBoth as Any).loadCredentials();
       expect(credentials.client_email).toBe("inline@test.iam.gserviceaccount.com");
     });
   });
@@ -424,7 +424,7 @@ describe("MessageDeduplicationCache", () => {
   });
 
   it("should add and check messages", () => {
-    const cache = (adapter as any).deduplicationCache;
+    const cache = (adapter as Any).deduplicationCache;
 
     expect(cache.has("test-1")).toBe(false);
     cache.add("test-1");
@@ -432,7 +432,7 @@ describe("MessageDeduplicationCache", () => {
   });
 
   it("should handle multiple messages", () => {
-    const cache = (adapter as any).deduplicationCache;
+    const cache = (adapter as Any).deduplicationCache;
 
     cache.add("msg-1");
     cache.add("msg-2");
@@ -446,7 +446,7 @@ describe("MessageDeduplicationCache", () => {
 
   it("should cleanup expired entries", () => {
     vi.useFakeTimers();
-    const cache = (adapter as any).deduplicationCache;
+    const cache = (adapter as Any).deduplicationCache;
 
     cache.add("old-msg");
 

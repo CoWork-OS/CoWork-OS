@@ -88,7 +88,7 @@ describe("HooksSettingsManager", () => {
     mockStoredSettings = undefined;
     writeCount = 0;
     HooksSettingsManager.clearCache();
-    (HooksSettingsManager as any).migrationCompleted = false;
+    (HooksSettingsManager as Any).migrationCompleted = false;
   });
 
   describe("loadSettings", () => {
@@ -122,7 +122,7 @@ describe("HooksSettingsManager", () => {
     it("should cache loaded settings", () => {
       mockStoredSettings = { enabled: true };
 
-      const settings1 = HooksSettingsManager.loadSettings();
+      const _settings1 = HooksSettingsManager.loadSettings();
       mockStoredSettings = { enabled: false }; // Change mock
       const settings2 = HooksSettingsManager.loadSettings();
 

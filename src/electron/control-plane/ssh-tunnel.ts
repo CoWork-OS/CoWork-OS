@@ -333,7 +333,7 @@ export class SSHTunnelManager extends EventEmitter {
           .catch(() => {
             // Port check failed, but SSH might still work via stderr
           });
-      } catch (error: any) {
+      } catch (error: Any) {
         this.lastError = error.message;
         this.setState("error");
         reject(error);

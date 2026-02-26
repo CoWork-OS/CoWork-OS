@@ -23,7 +23,7 @@ vi.mock("../../memory/MemoryService", () => ({
 
 describe("TaskExecutor getToolTimeoutMs", () => {
   it("gives orchestrate_agents enough time to wait for child agents", () => {
-    const executor = Object.create(TaskExecutor.prototype) as any;
+    const executor = Object.create(TaskExecutor.prototype) as Any;
     executor.task = { agentConfig: { deepWorkMode: false } };
 
     const timeoutSpy = vi

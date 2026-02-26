@@ -17,6 +17,8 @@ import {
   AgentTeamRun,
   MultiLlmConfig,
   StepFeedbackAction,
+  ExecutionMode,
+  TaskDomain,
 } from "../../shared/types";
 import { CollaborativeThoughtsPanel } from "./CollaborativeThoughtsPanel";
 import { DispatchedAgentsPanel } from "./DispatchedAgentsPanel";
@@ -88,7 +90,7 @@ const isImportantEvent = (event: TaskEvent): boolean => {
   // Keep schedule confirmation visible even in Summary mode so users can see
   // what was created (name/schedule/next run via event title/details).
   if (event.type === "tool_result") {
-    const tool = String((event as any)?.payload?.tool || "");
+    const tool = String((event as Any)?.payload?.tool || "");
     if (tool === "schedule_task") return true;
   }
 
@@ -742,7 +744,7 @@ const getHeadingIcon = (emoji: string): React.ReactNode | null => {
 };
 
 const renderHeading = (Tag: "h1" | "h2" | "h3") => {
-  return ({ children, ...props }: any) => {
+  return ({ children, ...props }: Any) => {
     const nodes = Children.toArray(children);
     if (typeof nodes[0] === "string") {
       const match = (nodes[0] as string).match(HEADING_EMOJI_REGEX);
@@ -945,7 +947,12 @@ const buildMarkdownComponents = (options: {
     (citations || []).map((c) => [c.index, c]),
   );
 
-  const MarkdownLink = ({ href, children, ...props }: any) => {
+  /** Map normalised citation URL → citation for enriched link rendering */
+  const citationUrlMap = new Map(
+    (citations || []).map((c) => [c.url.replace(/\/+$/, "").toLowerCase(), c]),
+  );
+
+  const MarkdownLink = ({ href, children, ...props }: Any) => {
     if (!href) {
       return <a {...props}>{children}</a>;
     }
@@ -1011,6 +1018,85 @@ const buildMarkdownComponents = (options: {
           console.error("Error opening link:", err);
         }
       };
+
+      // Check if this link matches a citation — render an enriched card
+      const normHref = href.replace(/\/+$/, "").toLowerCase();
+      const matchedCitation = citationUrlMap.get(normHref);
+      if (matchedCitation && matchedCitation.title && matchedCitation.title !== matchedCitation.url) {
+        return (
+          <a
+            {...props}
+            href={href}
+            onClick={handleClick}
+            className="citation-source-link"
+            title={matchedCitation.url}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "3px 8px",
+              borderRadius: 6,
+              background: "var(--surface-secondary, #1a1a1a)",
+              border: "1px solid var(--border-color, #333)",
+              textDecoration: "none",
+              color: "inherit",
+              transition: "background 0.15s, border-color 0.15s",
+              maxWidth: "100%",
+            }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLAnchorElement).style.background =
+                "var(--surface-hover, rgba(255,255,255,0.08))";
+              (e.currentTarget as HTMLAnchorElement).style.borderColor =
+                "var(--accent-color, #60a5fa)";
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLAnchorElement).style.background =
+                "var(--surface-secondary, #1a1a1a)";
+              (e.currentTarget as HTMLAnchorElement).style.borderColor =
+                "var(--border-color, #333)";
+            }}
+          >
+            <img
+              src={`https://www.google.com/s2/favicons?domain=${matchedCitation.domain}&sz=16`}
+              alt=""
+              width={14}
+              height={14}
+              style={{ borderRadius: 2, flexShrink: 0 }}
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = "none";
+              }}
+            />
+            <span style={{ minWidth: 0 }}>
+              <span
+                style={{
+                  display: "block",
+                  fontSize: 12,
+                  fontWeight: 500,
+                  color: "var(--text-primary, #e5e5e5)",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {matchedCitation.title}
+              </span>
+              <span
+                style={{
+                  display: "block",
+                  fontSize: 10,
+                  color: "var(--text-tertiary, #666)",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {matchedCitation.domain}
+              </span>
+            </span>
+          </a>
+        );
+      }
+
       return (
         <a {...props} href={href} onClick={handleClick}>
           {children}
@@ -1071,8 +1157,8 @@ const buildMarkdownComponents = (options: {
     h2: renderHeading("h2"),
     h3: renderHeading("h3"),
     a: MarkdownLink,
-    p: ({ children, ...props }: any) => <p {...props}>{replaceCitationsInChildren(children)}</p>,
-    li: ({ children, ...props }: any) => <li {...props}>{replaceCitationsInChildren(children)}</li>,
+    p: ({ children, ...props }: Any) => <p {...props}>{replaceCitationsInChildren(children)}</p>,
+    li: ({ children, ...props }: Any) => <li {...props}>{replaceCitationsInChildren(children)}</li>,
   };
 };
 
@@ -1354,7 +1440,37 @@ interface CreateTaskOptions {
   multiLlmMode?: boolean;
   multiLlmConfig?: import("../../shared/types").MultiLlmConfig;
   verificationAgent?: boolean;
+  executionMode?: ExecutionMode;
+  taskDomain?: TaskDomain;
 }
+
+const EXECUTION_MODE_ORDER: ExecutionMode[] = ["execute", "propose", "analyze"];
+const TASK_DOMAIN_ORDER: TaskDomain[] = [
+  "auto",
+  "code",
+  "research",
+  "operations",
+  "writing",
+  "general",
+];
+const EXECUTION_MODE_LABEL: Record<ExecutionMode, string> = {
+  execute: "Execute",
+  propose: "Propose",
+  analyze: "Analyze",
+};
+const EXECUTION_MODE_HINT: Record<ExecutionMode, string> = {
+  execute: "Allows full tool execution",
+  propose: "Planning mode, no mutating tools",
+  analyze: "Read-only analysis mode",
+};
+const TASK_DOMAIN_LABEL: Record<TaskDomain, string> = {
+  auto: "Auto",
+  code: "Code",
+  research: "Research",
+  operations: "Operations",
+  writing: "Writing",
+  general: "General",
+};
 
 type SettingsTab =
   | "appearance"
@@ -1983,6 +2099,8 @@ export function MainContent({
   const [autonomousModeEnabled, setAutonomousModeEnabled] = useState(false);
   const [collaborativeModeEnabled, setCollaborativeModeEnabled] = useState(false);
   const [multiLlmModeEnabled, setMultiLlmModeEnabled] = useState(false);
+  const [executionMode, setExecutionMode] = useState<ExecutionMode>("execute");
+  const [taskDomain, setTaskDomain] = useState<TaskDomain>("auto");
   const [multiLlmConfig, setMultiLlmConfig] = useState<MultiLlmConfig | null>(null);
   const [verificationAgentEnabled, setVerificationAgentEnabled] = useState(false);
   const setAutonomousModeSelection = useCallback((enabled: boolean) => {
@@ -2009,6 +2127,18 @@ export function MainContent({
       setMultiLlmConfig(null);
     }
   }, []);
+  const cycleExecutionMode = useCallback(() => {
+    setExecutionMode((current) => {
+      const index = EXECUTION_MODE_ORDER.indexOf(current);
+      return EXECUTION_MODE_ORDER[(index + 1) % EXECUTION_MODE_ORDER.length];
+    });
+  }, []);
+  const cycleTaskDomain = useCallback(() => {
+    setTaskDomain((current) => {
+      const index = TASK_DOMAIN_ORDER.indexOf(current);
+      return TASK_DOMAIN_ORDER[(index + 1) % TASK_DOMAIN_ORDER.length];
+    });
+  }, []);
   // Collaborative team run detection for current task
   const [collaborativeRun, setCollaborativeRun] = useState<AgentTeamRun | null>(null);
   const [showSteps, setShowSteps] = useState(true);
@@ -2030,7 +2160,7 @@ export function MainContent({
       return;
     }
 
-    const unsubRun = window.electronAPI.onTeamRunEvent((event: any) => {
+    const unsubRun = window.electronAPI.onTeamRunEvent((event: Any) => {
       if (event.run?.rootTaskId === task.id && event.run?.collaborativeMode) {
         setCollaborativeRun(event.run as AgentTeamRun);
       }
@@ -3333,15 +3463,19 @@ export function MainContent({
           trimmedInput ||
           (pendingAttachments[0]?.name ? `Review ${pendingAttachments[0].name}` : "New task");
         const title = buildTaskTitle(titleSource);
-        const baseOptions: CreateTaskOptions | undefined =
+        const modeOptions: CreateTaskOptions = {
+          executionMode,
+          taskDomain,
+        };
+        const baseOptions: CreateTaskOptions =
           multiLlmModeEnabled && multiLlmConfig
-            ? { multiLlmMode: true, multiLlmConfig }
+            ? { ...modeOptions, multiLlmMode: true, multiLlmConfig }
             : collaborativeModeEnabled
-              ? { collaborativeMode: true }
+              ? { ...modeOptions, collaborativeMode: true }
               : autonomousModeEnabled
-                ? { autonomousMode: true }
-                : undefined;
-        const options: CreateTaskOptions | undefined = verificationAgentEnabled
+                ? { ...modeOptions, autonomousMode: true }
+                : modeOptions;
+        const options: CreateTaskOptions = verificationAgentEnabled
           ? { ...baseOptions, verificationAgent: true }
           : baseOptions;
         onCreateTask(title, message, options, imagePayload);
@@ -4311,6 +4445,44 @@ export function MainContent({
                                 </button>
                               </div>
                             )}
+                            <div className="overflow-menu-item" role="none">
+                              <button
+                                className="goal-mode-toggle"
+                                style={{ margin: 0 }}
+                                onClick={() => {
+                                  cycleExecutionMode();
+                                  setShowOverflowMenu(false);
+                                }}
+                                role="menuitem"
+                                data-overflow-menu-item
+                              >
+                                <span className="goal-mode-label">
+                                  Mode: {EXECUTION_MODE_LABEL[executionMode]}
+                                </span>
+                                <span className="goal-mode-hint">
+                                  {EXECUTION_MODE_HINT[executionMode]}
+                                </span>
+                              </button>
+                            </div>
+                            <div className="overflow-menu-item" role="none">
+                              <button
+                                className="goal-mode-toggle"
+                                style={{ margin: 0 }}
+                                onClick={() => {
+                                  cycleTaskDomain();
+                                  setShowOverflowMenu(false);
+                                }}
+                                role="menuitem"
+                                data-overflow-menu-item
+                              >
+                                <span className="goal-mode-label">
+                                  Domain: {TASK_DOMAIN_LABEL[taskDomain]}
+                                </span>
+                                <span className="goal-mode-hint">
+                                  Guides orchestration and completion checks
+                                </span>
+                              </button>
+                            </div>
                           </div>
                         )}
                       </div>
@@ -4662,6 +4834,44 @@ export function MainContent({
                                 </button>
                               </div>
                             )}
+                            <div className="overflow-menu-item" role="none">
+                              <button
+                                className="goal-mode-toggle"
+                                style={{ margin: 0 }}
+                                onClick={() => {
+                                  cycleExecutionMode();
+                                  setShowOverflowMenu(false);
+                                }}
+                                role="menuitem"
+                                data-overflow-menu-item
+                              >
+                                <span className="goal-mode-label">
+                                  Mode: {EXECUTION_MODE_LABEL[executionMode]}
+                                </span>
+                                <span className="goal-mode-hint">
+                                  {EXECUTION_MODE_HINT[executionMode]}
+                                </span>
+                              </button>
+                            </div>
+                            <div className="overflow-menu-item" role="none">
+                              <button
+                                className="goal-mode-toggle"
+                                style={{ margin: 0 }}
+                                onClick={() => {
+                                  cycleTaskDomain();
+                                  setShowOverflowMenu(false);
+                                }}
+                                role="menuitem"
+                                data-overflow-menu-item
+                              >
+                                <span className="goal-mode-label">
+                                  Domain: {TASK_DOMAIN_LABEL[taskDomain]}
+                                </span>
+                                <span className="goal-mode-hint">
+                                  Guides orchestration and completion checks
+                                </span>
+                              </button>
+                            </div>
                             <div className="overflow-menu-item" role="none">
                               <button
                                 className="goal-mode-toggle"
@@ -6055,7 +6265,7 @@ function renderEventTitle(
           return `Every ${Math.round(ms / 1000)}s`;
         };
 
-        const describeScheduleShort = (schedule: any): string | null => {
+        const describeScheduleShort = (schedule: Any): string | null => {
           if (!schedule || typeof schedule !== "object") return null;
           if (schedule.kind === "every" && typeof schedule.everyMs === "number") {
             return describeEvery(schedule.everyMs);
@@ -6079,9 +6289,9 @@ function renderEventTitle(
         // "create"/"update" responses include { success, job }.
         const job = result?.job;
         if (job && typeof job === "object") {
-          const jobName = String((job as any).name || "").trim() || "Scheduled task";
-          const scheduleDesc = describeScheduleShort((job as any).schedule);
-          const nextRunAtMs = (job as any).state?.nextRunAtMs;
+          const jobName = String((job as Any).name || "").trim() || "Scheduled task";
+          const scheduleDesc = describeScheduleShort((job as Any).schedule);
+          const nextRunAtMs = (job as Any).state?.nextRunAtMs;
           const next =
             typeof nextRunAtMs === "number" ? new Date(nextRunAtMs).toLocaleString() : null;
           const parts = [scheduleDesc, next ? `Next: ${next}` : null].filter(Boolean) as string[];
@@ -6201,7 +6411,7 @@ function renderEventTitle(
 function renderEventDetails(
   event: TaskEvent,
   voiceEnabled: boolean,
-  markdownComponents: any,
+  markdownComponents: Any,
   options?: {
     workspacePath?: string;
     onOpenViewer?: (path: string) => void;
@@ -6216,14 +6426,14 @@ function renderEventDetails(
     case "plan_created": {
       const planSteps = Array.isArray(event.payload.plan?.steps) ? event.payload.plan.steps : [];
       const visiblePlanSteps = options?.hideVerificationSteps
-        ? planSteps.filter((step: any) => !isVerificationStepDescription(step?.description))
+        ? planSteps.filter((step: Any) => !isVerificationStepDescription(step?.description))
         : planSteps;
       return (
         <div className="event-details">
           <div style={{ marginBottom: 8, fontWeight: 500 }}>{event.payload.plan?.description}</div>
           {visiblePlanSteps.length > 0 && (
             <ul style={{ margin: 0, paddingLeft: 18 }}>
-              {visiblePlanSteps.map((step: any, i: number) => (
+              {visiblePlanSteps.map((step: Any, i: number) => (
                 <li key={i} style={{ marginBottom: 4 }}>
                   {step.description}
                 </li>

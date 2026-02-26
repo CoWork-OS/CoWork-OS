@@ -14,7 +14,7 @@ vi.mock("child_process", () => ({
   execFile: vi.fn(),
 }));
 
-import { promisify } from "util";
+import { promisify as _promisify } from "util";
 
 // Re-implement the pure helpers for direct testing (they're not exported)
 function parseEpochSeconds(iso?: string): number | null {

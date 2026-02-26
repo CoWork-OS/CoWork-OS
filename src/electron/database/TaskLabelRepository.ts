@@ -43,7 +43,7 @@ export class TaskLabelRepository {
    */
   findById(id: string): TaskLabel | undefined {
     const stmt = this.db.prepare("SELECT * FROM task_labels WHERE id = ?");
-    const row = stmt.get(id) as any;
+    const row = stmt.get(id) as Any;
     return row ? this.mapRowToLabel(row) : undefined;
   }
 
@@ -52,7 +52,7 @@ export class TaskLabelRepository {
    */
   findByName(workspaceId: string, name: string): TaskLabel | undefined {
     const stmt = this.db.prepare("SELECT * FROM task_labels WHERE workspace_id = ? AND name = ?");
-    const row = stmt.get(workspaceId, name) as any;
+    const row = stmt.get(workspaceId, name) as Any;
     return row ? this.mapRowToLabel(row) : undefined;
   }
 
@@ -63,7 +63,7 @@ export class TaskLabelRepository {
     const stmt = this.db.prepare(
       "SELECT * FROM task_labels WHERE workspace_id = ? ORDER BY name ASC",
     );
-    const rows = stmt.all(query.workspaceId) as any[];
+    const rows = stmt.all(query.workspaceId) as Any[];
     return rows.map((row) => this.mapRowToLabel(row));
   }
 
@@ -75,7 +75,7 @@ export class TaskLabelRepository {
     if (!existing) return undefined;
 
     const updates: string[] = [];
-    const params: any[] = [];
+    const params: Any[] = [];
 
     if (request.name !== undefined) {
       updates.push("name = ?");
@@ -123,14 +123,14 @@ export class TaskLabelRepository {
 
     const placeholders = ids.map(() => "?").join(", ");
     const stmt = this.db.prepare(`SELECT * FROM task_labels WHERE id IN (${placeholders})`);
-    const rows = stmt.all(...ids) as any[];
+    const rows = stmt.all(...ids) as Any[];
     return rows.map((row) => this.mapRowToLabel(row));
   }
 
   /**
    * Map database row to TaskLabel object
    */
-  private mapRowToLabel(row: any): TaskLabel {
+  private mapRowToLabel(row: Any): TaskLabel {
     return {
       id: row.id,
       workspaceId: row.workspace_id,

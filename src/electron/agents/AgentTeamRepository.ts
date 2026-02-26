@@ -63,7 +63,7 @@ export class AgentTeamRepository {
    */
   findById(id: string): AgentTeam | undefined {
     const stmt = this.db.prepare("SELECT * FROM agent_teams WHERE id = ?");
-    const row = stmt.get(id) as any;
+    const row = stmt.get(id) as Any;
     return row ? this.mapRowToTeam(row) : undefined;
   }
 
@@ -72,7 +72,7 @@ export class AgentTeamRepository {
    */
   findByName(workspaceId: string, name: string): AgentTeam | undefined {
     const stmt = this.db.prepare("SELECT * FROM agent_teams WHERE workspace_id = ? AND name = ?");
-    const row = stmt.get(workspaceId, name) as any;
+    const row = stmt.get(workspaceId, name) as Any;
     return row ? this.mapRowToTeam(row) : undefined;
   }
 
@@ -85,7 +85,7 @@ export class AgentTeamRepository {
       : this.db.prepare(
           "SELECT * FROM agent_teams WHERE workspace_id = ? AND is_active = 1 ORDER BY name ASC",
         );
-    const rows = stmt.all(workspaceId) as any[];
+    const rows = stmt.all(workspaceId) as Any[];
     return rows.map((row) => this.mapRowToTeam(row));
   }
 
@@ -97,7 +97,7 @@ export class AgentTeamRepository {
     if (!existing) return undefined;
 
     const fields: string[] = [];
-    const values: any[] = [];
+    const values: Any[] = [];
 
     if (request.name !== undefined) {
       fields.push("name = ?");
@@ -189,11 +189,11 @@ export class AgentTeamRepository {
     const stmt = this.db.prepare(
       "SELECT * FROM agent_teams WHERE persistent = 1 AND is_active = 1 ORDER BY name ASC",
     );
-    const rows = stmt.all() as any[];
+    const rows = stmt.all() as Any[];
     return rows.map((row) => this.mapRowToTeam(row));
   }
 
-  private mapRowToTeam(row: any): AgentTeam {
+  private mapRowToTeam(row: Any): AgentTeam {
     return {
       id: row.id,
       workspaceId: row.workspace_id,

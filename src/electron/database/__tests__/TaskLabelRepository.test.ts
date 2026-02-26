@@ -18,7 +18,7 @@ vi.mock("electron", () => ({
 }));
 
 // In-memory mock storage
-let mockLabels: Map<string, any>;
+let mockLabels: Map<string, Any>;
 let labelIdCounter: number;
 
 const DEFAULT_LABEL_COLOR = "#6366f1";

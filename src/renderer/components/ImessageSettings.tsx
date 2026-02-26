@@ -112,7 +112,7 @@ export function ImessageSettings({ onStatusChange }: ImessageSettingsProps) {
       });
 
       await loadChannel();
-    } catch (error: any) {
+    } catch (error: Any) {
       setTestResult({ success: false, error: error.message });
     } finally {
       setSaving(false);
@@ -128,7 +128,7 @@ export function ImessageSettings({ onStatusChange }: ImessageSettingsProps) {
 
       const result = await window.electronAPI.testGatewayChannel(channel.id);
       setTestResult(result);
-    } catch (error: any) {
+    } catch (error: Any) {
       setTestResult({ success: false, error: error.message });
     } finally {
       setTesting(false);
@@ -146,7 +146,7 @@ export function ImessageSettings({ onStatusChange }: ImessageSettingsProps) {
         await window.electronAPI.enableGatewayChannel(channel.id);
       }
       await loadChannel();
-    } catch (error: any) {
+    } catch (error: Any) {
       setTestResult({ success: false, error: error.message });
     } finally {
       setSaving(false);
@@ -166,7 +166,7 @@ export function ImessageSettings({ onStatusChange }: ImessageSettingsProps) {
       setChannel(null);
       setUsers([]);
       onStatusChange?.(false);
-    } catch (error: any) {
+    } catch (error: Any) {
       setTestResult({ success: false, error: error.message });
     } finally {
       setSaving(false);
@@ -183,7 +183,7 @@ export function ImessageSettings({ onStatusChange }: ImessageSettingsProps) {
       });
       setSecurityMode(mode);
       setChannel({ ...channel, securityMode: mode });
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to update security mode:", error);
     }
   };
@@ -197,7 +197,7 @@ export function ImessageSettings({ onStatusChange }: ImessageSettingsProps) {
         config: { ...channel.config, ...next },
       });
       setChannel({ ...channel, config: { ...channel.config, ...next } });
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to update iMessage config:", error);
     }
   };
@@ -208,7 +208,7 @@ export function ImessageSettings({ onStatusChange }: ImessageSettingsProps) {
     try {
       const code = await window.electronAPI.generateGatewayPairing(channel.id, "");
       setPairingCode(code);
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to generate pairing code:", error);
     }
   };
@@ -219,7 +219,7 @@ export function ImessageSettings({ onStatusChange }: ImessageSettingsProps) {
     try {
       await window.electronAPI.revokeGatewayAccess(channel.id, userId);
       await loadChannel();
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to revoke access:", error);
     }
   };

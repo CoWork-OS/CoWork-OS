@@ -8,7 +8,7 @@ import type {
   CreateMentionRequest,
   MentionListQuery,
   MentionType,
-  MentionStatus,
+  MentionStatus as _MentionStatus,
 } from "../../../shared/types";
 
 // Mock electron to avoid getPath errors
@@ -19,7 +19,7 @@ vi.mock("electron", () => ({
 }));
 
 // In-memory mock storage
-let mockMentions: Map<string, any>;
+let mockMentions: Map<string, Any>;
 let mentionIdCounter: number;
 
 // Mock MentionRepository

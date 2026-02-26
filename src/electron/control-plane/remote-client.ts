@@ -235,7 +235,7 @@ export class RemoteGatewayClient {
                 resolve({ success: false, error: "Invalid response" });
               }
             });
-          } catch (error: any) {
+          } catch (error: Any) {
             clearTimeout(timeout);
             testWs.close();
             resolve({ success: false, error: error.message });
@@ -247,7 +247,7 @@ export class RemoteGatewayClient {
           resolve({ success: false, error: error.message });
         });
       });
-    } catch (error: any) {
+    } catch (error: Any) {
       return { success: false, error: error.message };
     }
   }
@@ -326,7 +326,7 @@ export class RemoteGatewayClient {
           this.setState("error", error.message);
           reject(error);
         });
-      } catch (error: any) {
+      } catch (error: Any) {
         this.setState("error", error.message);
         reject(error);
       }
@@ -436,7 +436,7 @@ export class RemoteGatewayClient {
     }
   }
 
-  private handleDisconnect(code: number, reason: string): void {
+  private handleDisconnect(code: number, _reason: string): void {
     this.clearHeartbeatTimer();
     this.clearPendingRequests();
     this.ws = null;
@@ -494,7 +494,7 @@ export class RemoteGatewayClient {
     }, 30000);
   }
 
-  private send(frame: any): void {
+  private send(frame: Any): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(serializeFrame(frame));
     }
@@ -523,7 +523,7 @@ export class RemoteGatewayClient {
   }
 
   private clearPendingRequests(): void {
-    for (const [id, pending] of this.pendingRequests) {
+    for (const [_id, pending] of this.pendingRequests) {
       clearTimeout(pending.timeout);
       pending.reject(new Error("Connection closed"));
     }

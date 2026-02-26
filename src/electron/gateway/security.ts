@@ -174,7 +174,7 @@ export class SecurityManager {
    */
   generatePairingCode(channel: Channel, _userId?: string, _displayName?: string): string {
     // Use synchronous mutex key for this channel to prevent concurrent generation issues
-    const mutexKey = `pairing:generate:${channel.id}`;
+    const _mutexKey = `pairing:generate:${channel.id}`;
 
     // Clear any stale or existing pending entries so only the newest code remains.
     this.userRepo.deletePendingByChannel(channel.id);

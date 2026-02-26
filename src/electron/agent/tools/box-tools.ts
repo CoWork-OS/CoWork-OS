@@ -105,7 +105,7 @@ export class BoxTools {
     return candidate;
   }
 
-  async executeAction(input: BoxActionInput): Promise<any> {
+  async executeAction(input: BoxActionInput): Promise<Any> {
     const settings = BoxSettingsManager.loadSettings();
     if (!settings.enabled) {
       throw new Error("Box integration is disabled. Enable it in Settings > Integrations > Box.");

@@ -101,7 +101,7 @@ export class DropboxTools {
     return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
   }
 
-  async executeAction(input: DropboxActionInput): Promise<any> {
+  async executeAction(input: DropboxActionInput): Promise<Any> {
     const settings = DropboxSettingsManager.loadSettings();
     if (!settings.enabled) {
       throw new Error(

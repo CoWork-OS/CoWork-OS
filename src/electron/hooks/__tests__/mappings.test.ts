@@ -2,7 +2,7 @@
  * Tests for hooks mappings - path normalization, template rendering, and mapping resolution
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach as _beforeEach, vi } from "vitest";
 
 // Mock electron app for path resolution
 vi.mock("electron", () => ({
@@ -14,7 +14,7 @@ vi.mock("electron", () => ({
 import { normalizeHooksPath, resolveHookMappings, applyHookMappings } from "../mappings";
 import type {
   HooksConfig,
-  HookMappingConfig,
+  HookMappingConfig as _HookMappingConfig,
   HookMappingResolved,
   HookMappingContext,
 } from "../types";

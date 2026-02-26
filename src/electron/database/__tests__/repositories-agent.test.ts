@@ -16,7 +16,7 @@ vi.mock("electron", () => ({
 }));
 
 // In-memory mock storage instead of SQLite
-let mockTasks: Map<string, any>;
+let mockTasks: Map<string, Any>;
 let taskIdCounter: number;
 
 // Simplified mock TaskRepository that mirrors the real implementation's interface
@@ -113,7 +113,7 @@ class MockTaskRepository {
   }
 
   findByParentId(parentTaskId: string): Task[] {
-    const results: any[] = [];
+    const results: Any[] = [];
     mockTasks.forEach((stored) => {
       if (stored.parentTaskId === parentTaskId) {
         results.push(stored);
@@ -124,7 +124,7 @@ class MockTaskRepository {
     return results.map((stored) => this.mapStoredToTask(stored));
   }
 
-  private mapStoredToTask(stored: any): Task {
+  private mapStoredToTask(stored: Any): Task {
     return {
       id: stored.id,
       title: stored.title,

@@ -17,7 +17,7 @@ import {
   LoadedPlugin,
   PluginLoadResult,
   PluginDiscoveryResult,
-  PluginState,
+  PluginState as _PluginState,
   PluginConfigSchema,
 } from "./types";
 
@@ -45,6 +45,7 @@ const getDefaultExtensionsDirs = (): string[] => {
 
   // Organization plugin packs directory (admin-managed)
   try {
+// oxlint-disable-next-line typescript-eslint(no-require-imports)
     const { getOrgPluginDir } = require("../admin/policies");
     const orgDir = getOrgPluginDir();
     if (orgDir && fs.existsSync(orgDir)) {

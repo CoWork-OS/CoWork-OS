@@ -17,18 +17,18 @@ import {
   ChannelAdapter,
   ChannelType,
   ChannelConfig,
-  TelegramConfig,
-  DiscordConfig,
-  SlackConfig,
-  WhatsAppConfig,
-  ImessageConfig,
-  SignalConfig,
-  MattermostConfig,
-  MatrixConfig,
-  TwitchConfig,
-  LineConfig,
-  BlueBubblesConfig,
-  EmailConfig,
+  TelegramConfig as _TelegramConfig,
+  DiscordConfig as _DiscordConfig,
+  SlackConfig as _SlackConfig,
+  WhatsAppConfig as _WhatsAppConfig,
+  ImessageConfig as _ImessageConfig,
+  SignalConfig as _SignalConfig,
+  MattermostConfig as _MattermostConfig,
+  MatrixConfig as _MatrixConfig,
+  TwitchConfig as _TwitchConfig,
+  LineConfig as _LineConfig,
+  BlueBubblesConfig as _BlueBubblesConfig,
+  EmailConfig as _EmailConfig,
   GatewayEventHandler,
 } from "./channels/types";
 import { TelegramAdapter, createTelegramAdapter } from "./channels/telegram";
@@ -88,7 +88,7 @@ export class ChannelGateway {
   private config: GatewayConfig;
   private initialized = false;
   private agentDaemon?: AgentDaemon;
-  private daemonListeners: Array<{ event: string; handler: (...args: any[]) => void }> = [];
+  private daemonListeners: Array<{ event: string; handler: (...args: Any[]) => void }> = [];
   private pendingCleanupInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(db: Database.Database, config: GatewayConfig = {}) {
@@ -349,7 +349,7 @@ export class ChannelGateway {
     this.daemonListeners.push({ event: "task_paused", handler: onTaskPaused });
 
     // Listen for approval requests - forward to Discord/Telegram
-    const onApprovalRequested = (data: { taskId: string; approval: any }) => {
+    const onApprovalRequested = (data: { taskId: string; approval: Any }) => {
       if (data?.approval?.autoApproved) {
         return;
       }

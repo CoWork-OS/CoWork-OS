@@ -30,23 +30,23 @@ interface NotionActionInput {
   property_id?: string;
   block_id?: string;
   block_type?: string;
-  block?: Record<string, any>;
+  block?: Record<string, Any>;
   data_source_id?: string;
   database_id?: string;
   parent_page_id?: string;
-  properties?: Record<string, any>;
-  children?: any[];
-  filter?: any;
-  sort?: any;
-  sorts?: any[];
+  properties?: Record<string, Any>;
+  children?: Any[];
+  filter?: Any;
+  sort?: Any;
+  sorts?: Any[];
   start_cursor?: string;
   page_size?: number;
   archived?: boolean;
-  icon?: any;
-  cover?: any;
+  icon?: Any;
+  cover?: Any;
   title?: string;
   is_inline?: boolean;
-  payload?: Record<string, any>;
+  payload?: Record<string, Any>;
 }
 
 export class NotionTools {
@@ -77,8 +77,8 @@ export class NotionTools {
     }
   }
 
-  private buildPagination(input: NotionActionInput): Record<string, any> {
-    const body: Record<string, any> = {};
+  private buildPagination(input: NotionActionInput): Record<string, Any> {
+    const body: Record<string, Any> = {};
     if (input.start_cursor) body.start_cursor = input.start_cursor;
     if (typeof input.page_size === "number") body.page_size = input.page_size;
     return body;
@@ -101,7 +101,7 @@ export class NotionTools {
     throw new Error("Missing parent identifier (database_id or parent_page_id)");
   }
 
-  async executeAction(input: NotionActionInput): Promise<any> {
+  async executeAction(input: NotionActionInput): Promise<Any> {
     const settings = NotionSettingsManager.loadSettings();
     if (!settings.enabled) {
       throw new Error(

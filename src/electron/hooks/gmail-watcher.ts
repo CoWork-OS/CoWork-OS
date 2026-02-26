@@ -10,7 +10,7 @@
 
 import { type ChildProcess, spawn } from "child_process";
 import { HooksConfig, GmailHookRuntimeConfig } from "./types";
-import { HooksSettingsManager } from "./settings";
+import { HooksSettingsManager as _HooksSettingsManager } from "./settings";
 import { runCommand, checkBinaryExists } from "../utils/process";
 
 const ADDRESS_IN_USE_RE = /address already in use|EADDRINUSE/i;

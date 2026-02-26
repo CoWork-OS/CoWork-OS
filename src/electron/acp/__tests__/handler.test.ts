@@ -6,15 +6,15 @@ import { ACPMethods } from "../types";
  * Mock ControlPlaneServer that captures registered method handlers
  */
 class MockControlPlaneServer {
-  handlers = new Map<string, (client: any, params?: unknown) => Promise<unknown>>();
+  handlers = new Map<string, (client: Any, params?: unknown) => Promise<unknown>>();
 
-  registerMethod(method: string, handler: (client: any, params?: unknown) => Promise<unknown>) {
+  registerMethod(method: string, handler: (client: Any, params?: unknown) => Promise<unknown>) {
     this.handlers.set(method, handler);
   }
 
   broadcast = vi.fn().mockReturnValue(1);
 
-  async invoke(method: string, params?: unknown, client?: any) {
+  async invoke(method: string, params?: unknown, client?: Any) {
     const handler = this.handlers.get(method);
     if (!handler) throw new Error(`No handler for method: ${method}`);
     return handler(client || mockClient, params);
@@ -69,24 +69,24 @@ describe("ACP Handler", () => {
       getTask: vi.fn().mockReturnValue({ id: "task-123", status: "running" }),
       cancelTask: vi.fn().mockResolvedValue(undefined),
     };
-    registerACPMethods(server as any, deps);
+    registerACPMethods(server as Any, deps);
   });
 
   describe("acp.discover", () => {
     it("returns all agents with no filters", async () => {
-      const result = (await server.invoke(ACPMethods.DISCOVER, {})) as any;
+      const result = (await server.invoke(ACPMethods.DISCOVER, {})) as Any;
       expect(result.agents).toHaveLength(2);
       expect(result.agents[0].origin).toBe("local");
     });
 
     it("filters by capability", async () => {
-      const result = (await server.invoke(ACPMethods.DISCOVER, { capability: "review" })) as any;
+      const result = (await server.invoke(ACPMethods.DISCOVER, { capability: "review" })) as Any;
       expect(result.agents).toHaveLength(1);
       expect(result.agents[0].name).toBe("Code Reviewer");
     });
 
     it("filters by query", async () => {
-      const result = (await server.invoke(ACPMethods.DISCOVER, { query: "coder" })) as any;
+      const result = (await server.invoke(ACPMethods.DISCOVER, { query: "coder" })) as Any;
       expect(result.agents).toHaveLength(1);
     });
 
@@ -103,7 +103,7 @@ describe("ACP Handler", () => {
         name: "External Bot",
         description: "Does stuff",
         capabilities: [{ id: "analyze", name: "Analyze" }],
-      })) as any;
+      })) as Any;
 
       expect(result.agent.id).toMatch(/^remote:/);
       expect(result.agent.name).toBe("External Bot");
@@ -119,7 +119,7 @@ describe("ACP Handler", () => {
 
   describe("acp.agent.get", () => {
     it("retrieves local agent by ID", async () => {
-      const result = (await server.invoke(ACPMethods.AGENT_GET, { agentId: "local:coder" })) as any;
+      const result = (await server.invoke(ACPMethods.AGENT_GET, { agentId: "local:coder" })) as Any;
       expect(result.agent.name).toBe("Coder");
     });
 
@@ -127,8 +127,8 @@ describe("ACP Handler", () => {
       const reg = (await server.invoke(ACPMethods.AGENT_REGISTER, {
         name: "Bot",
         description: "Test",
-      })) as any;
-      const result = (await server.invoke(ACPMethods.AGENT_GET, { agentId: reg.agent.id })) as any;
+      })) as Any;
+      const result = (await server.invoke(ACPMethods.AGENT_GET, { agentId: reg.agent.id })) as Any;
       expect(result.agent.name).toBe("Bot");
     });
 
@@ -144,10 +144,10 @@ describe("ACP Handler", () => {
       const reg = (await server.invoke(ACPMethods.AGENT_REGISTER, {
         name: "Bot",
         description: "Test",
-      })) as any;
+      })) as Any;
       const result = (await server.invoke(ACPMethods.AGENT_UNREGISTER, {
         agentId: reg.agent.id,
-      })) as any;
+      })) as Any;
       expect(result.ok).toBe(true);
       expect(server.broadcast).toHaveBeenCalledWith("acp.agent.unregistered", {
         agentId: reg.agent.id,
@@ -166,7 +166,7 @@ describe("ACP Handler", () => {
       const result = (await server.invoke(ACPMethods.MESSAGE_SEND, {
         to: "local:coder",
         body: "Hello agent",
-      })) as any;
+      })) as Any;
       expect(result.messageId).toBeDefined();
       expect(result.delivered).toBe(true);
       expect(server.broadcast).toHaveBeenCalledWith("acp.message.received", expect.any(Object));
@@ -191,7 +191,7 @@ describe("ACP Handler", () => {
       });
       const result = (await server.invoke(ACPMethods.MESSAGE_LIST, {
         agentId: "local:coder",
-      })) as any;
+      })) as Any;
       expect(result.messages).toHaveLength(2);
     });
 
@@ -203,11 +203,11 @@ describe("ACP Handler", () => {
       const result = (await server.invoke(ACPMethods.MESSAGE_LIST, {
         agentId: "local:coder",
         drain: true,
-      })) as any;
+      })) as Any;
       expect(result.messages).toHaveLength(1);
       const after = (await server.invoke(ACPMethods.MESSAGE_LIST, {
         agentId: "local:coder",
-      })) as any;
+      })) as Any;
       expect(after.messages).toHaveLength(0);
     });
   });
@@ -219,7 +219,7 @@ describe("ACP Handler", () => {
         title: "Write tests",
         prompt: "Write unit tests for the ACP module",
         workspaceId: "ws-1",
-      })) as any;
+      })) as Any;
 
       expect(result.task.id).toBeDefined();
       expect(result.task.assigneeId).toBe("local:coder");
@@ -246,11 +246,11 @@ describe("ACP Handler", () => {
         title: "Test task",
         prompt: "Test prompt",
         workspaceId: "ws-1",
-      })) as any;
+      })) as Any;
 
       const result = (await server.invoke(ACPMethods.TASK_GET, {
         taskId: created.task.id,
-      })) as any;
+      })) as Any;
 
       expect(result.task.id).toBe(created.task.id);
     });
@@ -279,7 +279,7 @@ describe("ACP Handler", () => {
 
       const result = (await server.invoke(ACPMethods.TASK_LIST, {
         assigneeId: "local:coder",
-      })) as any;
+      })) as Any;
 
       expect(result.tasks).toHaveLength(1);
       expect(result.tasks[0].assigneeId).toBe("local:coder");
@@ -293,11 +293,11 @@ describe("ACP Handler", () => {
         title: "Cancel me",
         prompt: "Test",
         workspaceId: "ws-1",
-      })) as any;
+      })) as Any;
 
       const result = (await server.invoke(ACPMethods.TASK_CANCEL, {
         taskId: created.task.id,
-      })) as any;
+      })) as Any;
 
       expect(result.task.status).toBe("cancelled");
       expect(deps.cancelTask).toHaveBeenCalledWith("task-123");
@@ -309,12 +309,12 @@ describe("ACP Handler", () => {
         title: "Done task",
         prompt: "Test",
         workspaceId: "ws-1",
-      })) as any;
+      })) as Any;
 
       // Manually mark as completed
-      const reg = getACPRegistry();
+      const _reg = getACPRegistry();
       // Access via task.get to force status sync
-      (deps.getTask as any).mockReturnValue({ id: "task-123", status: "completed" });
+      (deps.getTask as Any).mockReturnValue({ id: "task-123", status: "completed" });
       await server.invoke(ACPMethods.TASK_GET, { taskId: created.task.id });
 
       await expect(

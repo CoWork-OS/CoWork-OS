@@ -41,8 +41,8 @@ describe("Personality tool sanitization patterns", () => {
     });
 
     it("should return empty string for null/undefined", () => {
-      expect(sanitizeQuirkInput(null as any)).toBe("");
-      expect(sanitizeQuirkInput(undefined as any)).toBe("");
+      expect(sanitizeQuirkInput(null as Any)).toBe("");
+      expect(sanitizeQuirkInput(undefined as Any)).toBe("");
     });
 
     it("should pass through normal text unchanged", () => {

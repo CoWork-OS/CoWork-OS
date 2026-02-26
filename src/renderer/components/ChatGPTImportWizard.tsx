@@ -133,7 +133,7 @@ export function ChatGPTImportWizard({
         setError(null);
         setStep("options");
       }
-    } catch (err) {
+    } catch  {
       setError("Failed to select file. Please try again.");
     }
   };

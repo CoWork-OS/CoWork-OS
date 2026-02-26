@@ -240,7 +240,7 @@ export class SignalClient extends EventEmitter {
       });
       const version = result.trim().split("\n")[0];
       return { installed: true, version };
-    } catch (error) {
+    } catch  {
       return {
         installed: false,
         error: `signal-cli not found at ${this.options.cliPath}. Install with: brew install signal-cli (macOS) or download from GitHub.`,
@@ -344,7 +344,7 @@ export class SignalClient extends EventEmitter {
     }
 
     // Handle process exit
-    this.receiveProcess.on("exit", (code, signal) => {
+    this.receiveProcess.on("exit", (code, _signal) => {
       this.connected = false;
       this.emit("disconnected");
 

@@ -77,7 +77,7 @@ export function WhatsAppSettings({ onStatusChange }: WhatsAppSettingsProps) {
     loadChannel();
 
     // Listen for QR code updates
-    const handleQrCode = (_event: any, qr: string) => {
+    const handleQrCode = (_event: Any, qr: string) => {
       setQrCode(qr);
       setQrLoading(false);
     };
@@ -150,7 +150,7 @@ export function WhatsAppSettings({ onStatusChange }: WhatsAppSettingsProps) {
       });
 
       await loadChannel();
-    } catch (error: any) {
+    } catch (error: Any) {
       setTestResult({ success: false, error: error.message });
       setQrLoading(false);
     } finally {
@@ -167,7 +167,7 @@ export function WhatsAppSettings({ onStatusChange }: WhatsAppSettingsProps) {
 
       const result = await window.electronAPI.testGatewayChannel(channel.id);
       setTestResult(result);
-    } catch (error: any) {
+    } catch (error: Any) {
       setTestResult({ success: false, error: error.message });
     } finally {
       setTesting(false);
@@ -185,7 +185,7 @@ export function WhatsAppSettings({ onStatusChange }: WhatsAppSettingsProps) {
         await window.electronAPI.enableGatewayChannel(channel.id);
       }
       await loadChannel();
-    } catch (error: any) {
+    } catch (error: Any) {
       setTestResult({ success: false, error: error.message });
     } finally {
       setSaving(false);
@@ -210,7 +210,7 @@ export function WhatsAppSettings({ onStatusChange }: WhatsAppSettingsProps) {
       setUsers([]);
       setQrCode(null);
       onStatusChange?.(false);
-    } catch (error: any) {
+    } catch (error: Any) {
       setTestResult({ success: false, error: error.message });
     } finally {
       setSaving(false);
@@ -233,7 +233,7 @@ export function WhatsAppSettings({ onStatusChange }: WhatsAppSettingsProps) {
       await window.electronAPI.whatsAppLogout?.();
       setQrCode(null);
       await loadChannel();
-    } catch (error: any) {
+    } catch (error: Any) {
       setTestResult({ success: false, error: error.message });
     } finally {
       setSaving(false);
@@ -250,7 +250,7 @@ export function WhatsAppSettings({ onStatusChange }: WhatsAppSettingsProps) {
       });
       setSecurityMode(mode);
       setChannel({ ...channel, securityMode: mode });
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to update security mode:", error);
     }
   };
@@ -271,7 +271,7 @@ export function WhatsAppSettings({ onStatusChange }: WhatsAppSettingsProps) {
         ...channel,
         config: { ...channel.config, selfChatMode: enabled },
       });
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to update self-chat mode:", error);
     }
   };
@@ -291,7 +291,7 @@ export function WhatsAppSettings({ onStatusChange }: WhatsAppSettingsProps) {
         ...channel,
         config: { ...channel.config, responsePrefix },
       });
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to update response prefix:", error);
     }
   };
@@ -312,7 +312,7 @@ export function WhatsAppSettings({ onStatusChange }: WhatsAppSettingsProps) {
         ...channel,
         config: { ...channel.config, ingestNonSelfChatsInSelfChatMode: enabled },
       });
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to update ingest setting:", error);
     }
   };
@@ -323,7 +323,7 @@ export function WhatsAppSettings({ onStatusChange }: WhatsAppSettingsProps) {
     try {
       const code = await window.electronAPI.generateGatewayPairing(channel.id, "");
       setPairingCode(code);
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to generate pairing code:", error);
     }
   };
@@ -334,7 +334,7 @@ export function WhatsAppSettings({ onStatusChange }: WhatsAppSettingsProps) {
     try {
       await window.electronAPI.revokeGatewayAccess(channel.id, userId);
       await loadChannel();
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to revoke access:", error);
     }
   };

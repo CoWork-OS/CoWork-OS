@@ -40,8 +40,8 @@ describe("CitationTracker", () => {
   });
 
   it("handles non-array input gracefully", () => {
-    tracker.addFromSearch(null as any);
-    tracker.addFromSearch(undefined as any);
+    tracker.addFromSearch(null as Any);
+    tracker.addFromSearch(undefined as Any);
     expect(tracker.count).toBe(0);
   });
 
@@ -102,7 +102,7 @@ describe("CitationTracker", () => {
   it("getCitations returns a defensive copy", () => {
     tracker.addFromFetch("https://example.com", "E");
     const citations = tracker.getCitations();
-    citations.push({} as any);
+    citations.push({} as Any);
     expect(tracker.count).toBe(1);
   });
 

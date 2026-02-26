@@ -1,8 +1,10 @@
-import { AgentConfig, ConversationMode } from "../../../shared/types";
+import { AgentConfig, ConversationMode, ExecutionMode, TaskDomain } from "../../../shared/types";
 import { IntentRoute } from "./IntentRouter";
 
 export interface DerivedTaskStrategy {
   conversationMode: ConversationMode;
+  executionMode: ExecutionMode;
+  taskDomain: TaskDomain;
   maxTurns: number;
   qualityPasses: 1 | 2 | 3;
   answerFirst: boolean;
@@ -24,7 +26,14 @@ export class TaskStrategyService {
   static derive(route: IntentRoute, existing?: AgentConfig): DerivedTaskStrategy {
     const defaults: Record<
       IntentRoute["intent"],
-      Omit<DerivedTaskStrategy, "deepWorkMode" | "autoReportEnabled" | "progressJournalEnabled">
+      Omit<
+        DerivedTaskStrategy,
+        | "executionMode"
+        | "taskDomain"
+        | "deepWorkMode"
+        | "autoReportEnabled"
+        | "progressJournalEnabled"
+      >
     > = {
       chat: {
         conversationMode: "chat",
@@ -110,6 +119,19 @@ export class TaskStrategyService {
     const isWorkflowOrDeepWork = isDeepWork || route.intent === "workflow";
 
     const base = defaults[route.intent];
+    const inferredExecutionMode: ExecutionMode =
+      route.intent === "execution" ||
+      route.intent === "workflow" ||
+      route.intent === "deep_work" ||
+      route.intent === "mixed"
+        ? "execute"
+        : route.intent === "chat"
+          ? "analyze"
+          : "propose";
+    const executionMode = existing?.executionMode ?? inferredExecutionMode;
+    const taskDomain =
+      existing?.taskDomain && existing.taskDomain !== "auto" ? existing.taskDomain : route.domain;
+
     return {
       // Preserve explicit user-set modes (chat/task/think) but let intent-derived
       // strategy override the default "hybrid" so the daemon's IntentRouter decision
@@ -118,6 +140,8 @@ export class TaskStrategyService {
         existing?.conversationMode && existing.conversationMode !== "hybrid"
           ? existing.conversationMode
           : base.conversationMode,
+      executionMode,
+      taskDomain,
       maxTurns: typeof existing?.maxTurns === "number" ? existing.maxTurns : base.maxTurns,
       qualityPasses: existing?.qualityPasses ?? base.qualityPasses,
       answerFirst: base.answerFirst,
@@ -137,6 +161,12 @@ export class TaskStrategyService {
     const next: AgentConfig = existing ? { ...existing } : {};
     if (!next.conversationMode || next.conversationMode === "hybrid") {
       next.conversationMode = strategy.conversationMode;
+    }
+    if (!next.executionMode) {
+      next.executionMode = strategy.executionMode;
+    }
+    if (!next.taskDomain || next.taskDomain === "auto") {
+      next.taskDomain = strategy.taskDomain;
     }
     if (typeof next.maxTurns !== "number") {
       next.maxTurns = strategy.maxTurns;
@@ -176,6 +206,8 @@ export class TaskStrategyService {
       `confidence=${route.confidence.toFixed(2)}`,
       `complexity=${route.complexity}`,
       `conversation_mode=${strategy.conversationMode}`,
+      `execution_mode=${strategy.executionMode}`,
+      `task_domain=${strategy.taskDomain}`,
       `answer_first=${strategy.answerFirst ? "true" : "false"}`,
       `bounded_research=${strategy.boundedResearch ? "true" : "false"}`,
       `timeout_finalize_bias=${strategy.timeoutFinalizeBias ? "true" : "false"}`,
@@ -187,22 +219,27 @@ export class TaskStrategyService {
       // can detect think-mode from the prompt metadata.
       lines.push("thinking_contract: active");
     } else if (route.intent === "deep_work") {
-      lines.push(
-        "deep_work_contract:",
+      const deepWorkHeader = ["deep_work_contract:"];
+      const universal = [
         "- This is a long-running autonomous task. You have a large turn budget (250 turns).",
-        "- When you encounter errors, research solutions online using web_search before retrying.",
-        "- Use scratchpad_write to record progress, discovered issues, and approach decisions.",
-        "- Use scratchpad_read to review your notes and maintain context during long runs.",
-        "- Decompose the work into sub-tasks and use spawn_agent or orchestrate_agents for parallel work.",
-        "- VERIFY YOUR WORK: After making changes, run tests, linters, or build commands to confirm correctness.",
-        "  If tests fail, read the error output carefully, diagnose the root cause, fix it, and re-run.",
-        "  Repeat this debug loop until tests pass. Do not move on with known failures.",
-        "- Use cheaper sub-agents (model_preference='cheaper') for routine tasks like formatting, data gathering, or boilerplate.",
-        "- At completion, a markdown report will be auto-generated summarizing what was done.",
+        "- When you encounter errors, research alternatives using available tools before retrying.",
+        "- Use scratchpad_write to record progress, blockers, and decisions.",
+        "- Use scratchpad_read to preserve continuity across long runs.",
+        "- Decompose work into sub-tasks and parallelize only when it improves delivery.",
         "- Emit clear progress messages so status is visible during the run.",
-        "- Be tenacious: when something fails, try alternative approaches rather than giving up.",
-        "  Debug systematically: reproduce the error, form a hypothesis, test the fix, confirm resolution.",
-      );
+        "- At completion, include a concrete outcome summary and explicit blockers.",
+      ];
+      const technical =
+        strategy.taskDomain === "code" || strategy.taskDomain === "operations"
+          ? [
+              "- VERIFY YOUR WORK: run tests/lint/build checks before claiming completion.",
+              "  If checks fail, diagnose root cause, fix, and re-run until resolved.",
+            ]
+          : [
+              "- Validate deliverables against the request before finishing.",
+              "- Prefer concise user-facing outputs over implementation detail unless requested.",
+            ];
+      lines.push(...deepWorkHeader, ...universal, ...technical);
     } else if (route.intent === "workflow") {
       lines.push(
         "workflow_contract:",
@@ -217,6 +254,15 @@ export class TaskStrategyService {
         "- Directly answer the user question before any deep expansion.",
         "- Keep research/tool loops bounded; stop once the answer is supportable.",
         "- Never end silently. Always return a complete best-effort answer.",
+      );
+    }
+
+    if (strategy.executionMode !== "execute") {
+      lines.push(
+        "mode_contract:",
+        strategy.executionMode === "propose"
+          ? "- You are in propose mode: provide plans/options and avoid mutating tool calls."
+          : "- You are in analyze mode: stay read-only and provide analysis from available evidence.",
       );
     }
 
@@ -236,7 +282,7 @@ export class TaskStrategyService {
    * For lighter intents (chat, advice, planning, thinking), a reduced set is returned
    * to cut input tokens and reduce latency.
    */
-  static getRelevantToolSet(intent: string): Set<string> {
+  static getRelevantToolSet(intent: string, domain: TaskDomain = "auto"): Set<string> {
     // Core tools always available regardless of intent
     const CORE_TOOLS = [
       // File operations
@@ -298,7 +344,7 @@ export class TaskStrategyService {
 
     // Advice and planning: core + web + documents
     if (intent === "advice" || intent === "planning") {
-      return new Set([
+      const tools = [
         ...CORE_TOOLS,
         "web_search",
         "web_fetch",
@@ -307,7 +353,11 @@ export class TaskStrategyService {
         "use_skill",
         "skill_list",
         "skill_get",
-      ]);
+      ];
+      if (domain === "writing") {
+        tools.push("create_document");
+      }
+      return new Set(tools);
     }
 
     // Unknown intent — return all tools as safe default

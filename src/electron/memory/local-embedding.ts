@@ -84,7 +84,7 @@ function hashToken(token: string, seed: number): number {
 
 export function createLocalEmbedding(text: string): number[] {
   const tokens = tokenizeForLocalEmbedding(text);
-  if (tokens.length === 0) return new Array(VECTOR_DIMS).fill(0);
+  if (tokens.length === 0) return Array(VECTOR_DIMS).fill(0);
 
   const vec = new Float32Array(VECTOR_DIMS);
   const tokenCounts = new Map<string, number>();
@@ -114,7 +114,7 @@ export function createLocalEmbedding(text: string): number[] {
   for (let i = 0; i < vec.length; i++) {
     norm += vec[i] * vec[i];
   }
-  if (norm <= 0) return new Array(VECTOR_DIMS).fill(0);
+  if (norm <= 0) return Array(VECTOR_DIMS).fill(0);
 
   const invNorm = 1 / Math.sqrt(norm);
   for (let i = 0; i < vec.length; i++) {

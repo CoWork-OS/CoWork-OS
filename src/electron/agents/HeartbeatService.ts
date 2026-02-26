@@ -115,7 +115,7 @@ export class HeartbeatService extends EventEmitter {
   async stop(): Promise<void> {
     this.started = false;
 
-    for (const [agentId, timer] of this.timers) {
+    for (const [_agentId, timer] of this.timers) {
       clearTimeout(timer);
     }
 

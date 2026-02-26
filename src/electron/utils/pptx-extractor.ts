@@ -350,11 +350,11 @@ function extractPptxTableSpan(cellXml: string, spanType: "gridSpan" | "rowSpan")
   if (!tcPr) return 1;
 
   const tagMatch = tcPr.match(
-    new RegExp(`(?:\\w+:)?${spanType}\\b[^>]*?(?:\\b(?:w:)?val|\\bval)=([\"'])(\\d+)\\1`, "i"),
+    new RegExp(`(?:\\w+:)?${spanType}\\b[^>]*?(?:\\b(?:w:)?val|\\bval)=(["'])(\\d+)\\1`, "i"),
   );
   const legacyTagMatch = !tagMatch
     ? tcPr.match(
-        new RegExp(`(?:\\w+:)?${spanType}\\b[^>]*?(?:\\b(?:w:)?val|\\bval)=\"(\\d+)\"`, "i"),
+        new RegExp(`(?:\\w+:)?${spanType}\\b[^>]*?(?:\\b(?:w:)?val|\\bval)="(\\d+)"`, "i"),
       )
     : null;
   const unquotedTagMatch =

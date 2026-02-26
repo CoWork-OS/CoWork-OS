@@ -74,7 +74,7 @@ export async function loadCronStore(storePath: string): Promise<CronStoreFile> {
       version: 1,
       jobs: validJobs,
     };
-  } catch (error) {
+  } catch  {
     // File doesn't exist or is invalid - return empty store
     return { version: 1, jobs: [] };
   }

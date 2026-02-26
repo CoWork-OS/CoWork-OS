@@ -430,7 +430,7 @@ export class EmailClient extends EventEmitter {
           }
         }
       }
-    } catch (error) {
+    } catch  {
       // Reconnect if needed
       if (!this.imapSocket || this.imapSocket.destroyed) {
         try {

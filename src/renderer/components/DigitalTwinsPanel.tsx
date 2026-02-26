@@ -130,7 +130,7 @@ export function DigitalTwinsPanel() {
         });
         return next;
       });
-    } catch (err) {
+    } catch  {
       setError("Failed to start twin");
     }
   };
@@ -149,7 +149,7 @@ export function DigitalTwinsPanel() {
         });
         return next;
       });
-    } catch (err) {
+    } catch  {
       setError("Failed to stop twin");
     }
   };
@@ -158,7 +158,7 @@ export function DigitalTwinsPanel() {
     try {
       setTriggeringIds((prev) => new Set(prev).add(role.id));
       await window.electronAPI.triggerHeartbeat(role.id);
-    } catch (err) {
+    } catch  {
       setTriggeringIds((prev) => {
         const next = new Set(prev);
         next.delete(role.id);
@@ -231,7 +231,7 @@ export function DigitalTwinsPanel() {
       setEditingRole(null);
       setIsCreating(false);
       setError(null);
-    } catch (err: any) {
+    } catch (err: Any) {
       setError(err.message || "Failed to save twin");
     }
   };
@@ -245,7 +245,7 @@ export function DigitalTwinsPanel() {
       } else {
         setError("Cannot delete system agent roles");
       }
-    } catch (err) {
+    } catch  {
       setError("Failed to delete twin");
     }
   };
@@ -259,7 +259,7 @@ export function DigitalTwinsPanel() {
       if (updated) {
         setRoles((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
       }
-    } catch (err) {
+    } catch  {
       setError("Failed to update twin status");
     }
   };

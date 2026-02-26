@@ -67,7 +67,7 @@ function createMockSecurityManager() {
       channel: { id: string },
       message: { userId: string; userName: string },
       code: string,
-    ): Promise<{ success: boolean; error?: string; user?: any }> {
+    ): Promise<{ success: boolean; error?: string; user?: Any }> {
       const codeOwner = mockUserRepo.findByPairingCode(channel.id, code);
 
       if (!codeOwner) {

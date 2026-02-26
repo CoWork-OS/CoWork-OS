@@ -3,7 +3,7 @@ import { TaskExecutor } from "../executor";
 
 describe("TaskExecutor workspace preflight classification", () => {
   const classify = (prompt: string) =>
-    (TaskExecutor as any).prototype.classifyWorkspaceNeed.call({}, prompt) as
+    (TaskExecutor as Any).prototype.classifyWorkspaceNeed.call({}, prompt) as
       | "none"
       | "new_ok"
       | "ambiguous"
@@ -24,13 +24,13 @@ describe("TaskExecutor workspace preflight classification", () => {
 
 describe("TaskExecutor intent detection", () => {
   const capabilityIntent = (prompt: string) =>
-    (TaskExecutor as any).prototype.isCapabilityUpgradeIntent.call({}, prompt) as boolean;
+    (TaskExecutor as Any).prototype.isCapabilityUpgradeIntent.call({}, prompt) as boolean;
 
   const internalAppIntent = (prompt: string) =>
-    (TaskExecutor as any).prototype.isInternalAppOrToolChangeIntent.call({}, prompt) as boolean;
+    (TaskExecutor as Any).prototype.isInternalAppOrToolChangeIntent.call({}, prompt) as boolean;
 
   const capabilityRefusal = (prompt: string) =>
-    (TaskExecutor as any).prototype.isCapabilityRefusal.call({}, prompt) as boolean;
+    (TaskExecutor as Any).prototype.isCapabilityRefusal.call({}, prompt) as boolean;
 
   it("detects browser preference shifts as capability upgrade requests", () => {
     expect(capabilityIntent("open the browser on brave browser instead of chrome")).toBe(true);

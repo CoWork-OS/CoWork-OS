@@ -222,7 +222,7 @@ export class ScrapingTools {
   /**
    * Execute a scraping tool by name
    */
-  async executeTool(name: string, input: any): Promise<any> {
+  async executeTool(name: string, input: Any): Promise<Any> {
     if (name === "scraping_status") return await this.getStatus();
     if (name === "scrape_page") return await this.scrapePage(input);
     if (name === "scrape_multiple") return await this.scrapeMultiple(input);
@@ -246,7 +246,7 @@ export class ScrapingTools {
 
   // ─── Private Implementation ──────────────────────────
 
-  private async getStatus(): Promise<any> {
+  private async getStatus(): Promise<Any> {
     return await this.callBridge("status", {});
   }
 
@@ -260,14 +260,14 @@ export class ScrapingTools {
     extract_tables?: boolean;
     headless?: boolean;
     max_content_length?: number;
-  }): Promise<any> {
+  }): Promise<Any> {
     const settings = ScrapingSettingsManager.loadSettings();
 
     this.daemon.logEvent(this.taskId, "log", {
       message: `Scraping: ${input.url} (fetcher: ${input.fetcher || settings.defaultFetcher})`,
     });
 
-    const params: Record<string, any> = {
+    const params: Record<string, Any> = {
       ...input,
       fetcher: input.fetcher || settings.defaultFetcher,
       headless: input.headless ?? settings.headless,
@@ -299,14 +299,14 @@ export class ScrapingTools {
     fetcher?: string;
     selector?: string;
     max_content_length?: number;
-  }): Promise<any> {
+  }): Promise<Any> {
     const settings = ScrapingSettingsManager.loadSettings();
 
     this.daemon.logEvent(this.taskId, "log", {
       message: `Batch scraping ${input.urls.length} URLs`,
     });
 
-    const params: Record<string, any> = {
+    const params: Record<string, Any> = {
       ...input,
       fetcher: input.fetcher || settings.defaultFetcher,
       max_content_length: input.max_content_length || 50000,
@@ -330,14 +330,14 @@ export class ScrapingTools {
     extract_type?: string;
     selectors?: Record<string, string>;
     fetcher?: string;
-  }): Promise<any> {
+  }): Promise<Any> {
     const settings = ScrapingSettingsManager.loadSettings();
 
     this.daemon.logEvent(this.taskId, "log", {
       message: `Extracting structured data from: ${input.url}`,
     });
 
-    const params: Record<string, any> = {
+    const params: Record<string, Any> = {
       ...input,
       fetcher: input.fetcher || settings.defaultFetcher,
     };
@@ -365,14 +365,14 @@ export class ScrapingTools {
       wait_for?: string;
     }>;
     headless?: boolean;
-  }): Promise<any> {
+  }): Promise<Any> {
     const settings = ScrapingSettingsManager.loadSettings();
 
     this.daemon.logEvent(this.taskId, "log", {
       message: `Running scraping session with ${input.steps.length} steps`,
     });
 
-    const params: Record<string, any> = {
+    const params: Record<string, Any> = {
       ...input,
       headless: input.headless ?? settings.headless,
     };
@@ -393,7 +393,7 @@ export class ScrapingTools {
   /**
    * Call the Python bridge script with a command
    */
-  private callBridge(action: string, params: Record<string, any>): Promise<any> {
+  private callBridge(action: string, params: Record<string, Any>): Promise<Any> {
     return new Promise((resolve) => {
       const settings = ScrapingSettingsManager.loadSettings();
       const pythonPath = settings.pythonPath || "python3";
@@ -417,7 +417,7 @@ export class ScrapingTools {
       });
 
       child.on("error", (error: Error) => {
-        if ((error as any).code === "ENOENT") {
+        if ((error as Any).code === "ENOENT") {
           resolve({
             success: false,
             error: `Python not found at '${pythonPath}'. Install Python 3 or update the Python path in Scraping settings.`,

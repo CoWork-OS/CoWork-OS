@@ -3,10 +3,11 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from "vitest";
-import { EventEmitter } from "events";
+import { EventEmitter as _EventEmitter } from "events";
 
 // Create mock WebSocket class inside the factory - avoid using vi inside factory
 vi.mock("ws", () => {
+// oxlint-disable-next-line typescript-eslint(no-require-imports)
   const { EventEmitter } = require("events");
 
   class MockWebSocket extends EventEmitter {
@@ -17,9 +18,9 @@ vi.mock("ws", () => {
 
     readyState: number = 0; // CONNECTING
     url: string;
-    options: any;
+    options: Any;
 
-    constructor(url: string, options?: any) {
+    constructor(url: string, options?: Any) {
       super();
       this.url = url;
       this.options = options;
@@ -65,8 +66,8 @@ import {
 describe("RemoteGatewayClient", () => {
   let client: RemoteGatewayClient;
   let onStateChange: Mock;
-  let onEvent: Mock;
-  let onResponse: Mock;
+  let _onEvent: Mock;
+  let _onResponse: Mock;
 
   const defaultOptions: RemoteGatewayClientOptions = {
     url: "ws://127.0.0.1:18789",
@@ -81,8 +82,8 @@ describe("RemoteGatewayClient", () => {
     vi.clearAllMocks();
     vi.useFakeTimers();
     onStateChange = vi.fn();
-    onEvent = vi.fn();
-    onResponse = vi.fn();
+    _onEvent = vi.fn();
+    _onResponse = vi.fn();
   });
 
   afterEach(() => {

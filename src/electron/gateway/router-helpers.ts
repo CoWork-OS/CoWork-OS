@@ -13,7 +13,8 @@ import * as path from "path";
 export function getCoworkVersion(): string {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const electron = require("electron") as any;
+// oxlint-disable-next-line typescript-eslint(no-require-imports)
+    const electron = require("electron") as Any;
     const app = electron?.app;
     if (typeof app?.getVersion === "function") {
       const v = String(app.getVersion() || "").trim();
@@ -28,7 +29,7 @@ export function getCoworkVersion(): string {
 
   try {
     const raw = fs.readFileSync(path.join(process.cwd(), "package.json"), "utf-8");
-    const parsed = JSON.parse(raw) as any;
+    const parsed = JSON.parse(raw) as Any;
     const v = typeof parsed?.version === "string" ? parsed.version.trim() : "";
     if (v) return v;
   } catch {
@@ -134,7 +135,7 @@ import { getVoiceService } from "../voice/VoiceService";
 
 export async function transcribeAudioAttachments(
   message: IncomingMessage,
-  workspacePath?: string,
+  _workspacePath?: string,
 ): Promise<void> {
   if (!message.attachments || message.attachments.length === 0) {
     return;

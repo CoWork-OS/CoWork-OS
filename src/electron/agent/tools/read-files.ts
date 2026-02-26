@@ -164,7 +164,7 @@ export async function readFilesByPatterns(
         truncated = true;
         break;
       }
-    } catch (error: any) {
+    } catch (error: Any) {
       skippedFiles.push({
         path: filePath,
         reason: error?.message ? String(error.message) : "Failed to read file",

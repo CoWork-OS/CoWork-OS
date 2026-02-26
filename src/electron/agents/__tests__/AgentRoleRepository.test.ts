@@ -17,7 +17,7 @@ vi.mock("electron", () => ({
 }));
 
 // In-memory mock storage
-let mockRoles: Map<string, any>;
+let mockRoles: Map<string, Any>;
 let roleIdCounter: number;
 
 // Mock AgentRoleRepository
@@ -111,7 +111,7 @@ class MockAgentRoleRepository {
     return mockRoles.delete(id);
   }
 
-  private mapRowToRole(row: any): AgentRole {
+  private mapRowToRole(row: Any): AgentRole {
     return {
       id: row.id,
       name: row.name,

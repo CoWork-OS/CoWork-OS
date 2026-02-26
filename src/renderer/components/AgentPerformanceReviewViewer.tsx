@@ -42,7 +42,7 @@ export function AgentPerformanceReviewViewer({
       ]);
       setReviews(list);
       setLatest(lat || null);
-    } catch (e: any) {
+    } catch (e: Any) {
       setError(e?.message || "Failed to load reviews");
     } finally {
       setLoading(false);
@@ -66,7 +66,7 @@ export function AgentPerformanceReviewViewer({
       const created = await window.electronAPI.generateAgentReview(req);
       setLatest(created);
       setReviews((prev) => [created, ...prev]);
-    } catch (e: any) {
+    } catch (e: Any) {
       setError(e?.message || "Failed to generate review");
     } finally {
       setGenerating(false);
@@ -81,7 +81,7 @@ export function AgentPerformanceReviewViewer({
         id: selectedAgent.id,
         autonomyLevel: latest.recommendedAutonomyLevel,
       });
-    } catch (e: any) {
+    } catch (e: Any) {
       setError(e?.message || "Failed to apply update");
     }
   }, [selectedAgent, latest?.recommendedAutonomyLevel]);

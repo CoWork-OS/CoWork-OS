@@ -7,7 +7,7 @@ import { EventEmitter } from "events";
 
 // Mock the LineClient class
 vi.mock("../channels/line-client", () => ({
-  LineClient: vi.fn().mockImplementation((config) => {
+  LineClient: vi.fn().mockImplementation((_config) => {
     const emitter = new EventEmitter();
     return {
       checkConnection: vi.fn().mockResolvedValue({
@@ -40,7 +40,7 @@ vi.mock("../channels/line-client", () => ({
 
 // Import after mocking
 import { LineAdapter, createLineAdapter, LineConfig } from "../channels/line";
-import { LineClient } from "../channels/line-client";
+import { LineClient as _LineClient } from "../channels/line-client";
 
 describe("LineAdapter", () => {
   let adapter: LineAdapter;
@@ -78,7 +78,7 @@ describe("LineAdapter", () => {
     });
 
     it("should enable deduplication by default", () => {
-      const adapterConfig = adapter as any;
+      const adapterConfig = adapter as Any;
       expect(adapterConfig.config.deduplicationEnabled).toBe(true);
     });
 
@@ -88,7 +88,7 @@ describe("LineAdapter", () => {
         channelAccessToken: "token",
         channelSecret: "secret",
       });
-      const config = (adapterNoPort as any).config;
+      const config = (adapterNoPort as Any).config;
       expect(config.webhookPort).toBe(3100);
     });
 
@@ -98,7 +98,7 @@ describe("LineAdapter", () => {
         channelAccessToken: "token",
         channelSecret: "secret",
       });
-      const config = (adapterNoPath as any).config;
+      const config = (adapterNoPath as Any).config;
       expect(config.webhookPath).toBe("/line/webhook");
     });
 
@@ -108,7 +108,7 @@ describe("LineAdapter", () => {
         channelAccessToken: "token",
         channelSecret: "secret",
       });
-      const config = (adapterDefault as any).config;
+      const config = (adapterDefault as Any).config;
       expect(config.useReplyTokens).toBe(true);
     });
   });
@@ -149,7 +149,7 @@ describe("LineAdapter", () => {
     it("should register message handlers", () => {
       const handler = vi.fn();
       adapter.onMessage(handler);
-      expect((adapter as any).messageHandlers).toContain(handler);
+      expect((adapter as Any).messageHandlers).toContain(handler);
     });
 
     it("should support multiple handlers", () => {
@@ -157,7 +157,7 @@ describe("LineAdapter", () => {
       const handler2 = vi.fn();
       adapter.onMessage(handler1);
       adapter.onMessage(handler2);
-      expect((adapter as any).messageHandlers.length).toBe(2);
+      expect((adapter as Any).messageHandlers.length).toBe(2);
     });
   });
 
@@ -165,7 +165,7 @@ describe("LineAdapter", () => {
     it("should register error handlers", () => {
       const handler = vi.fn();
       adapter.onError(handler);
-      expect((adapter as any).errorHandlers).toContain(handler);
+      expect((adapter as Any).errorHandlers).toContain(handler);
     });
   });
 
@@ -173,13 +173,13 @@ describe("LineAdapter", () => {
     it("should register status handlers", () => {
       const handler = vi.fn();
       adapter.onStatusChange(handler);
-      expect((adapter as any).statusHandlers).toContain(handler);
+      expect((adapter as Any).statusHandlers).toContain(handler);
     });
 
     it("should call status handlers on status change", () => {
       const handler = vi.fn();
       adapter.onStatusChange(handler);
-      (adapter as any).setStatus("connecting");
+      (adapter as Any).setStatus("connecting");
       expect(handler).toHaveBeenCalledWith("connecting", undefined);
     });
   });
@@ -201,9 +201,9 @@ describe("LineAdapter", () => {
 
   describe("disconnect", () => {
     it("should clear state on disconnect", async () => {
-      (adapter as any)._status = "connected";
-      (adapter as any)._botUsername = "TestBot";
-      (adapter as any)._botId = "U1234567890";
+      (adapter as Any)._status = "connected";
+      (adapter as Any)._botUsername = "TestBot";
+      (adapter as Any)._botId = "U1234567890";
 
       await adapter.disconnect();
 
@@ -212,82 +212,82 @@ describe("LineAdapter", () => {
     });
 
     it("should stop deduplication cleanup timer", async () => {
-      (adapter as any).dedupCleanupTimer = setInterval(() => {}, 60000);
+      (adapter as Any).dedupCleanupTimer = setInterval(() => {}, 60000);
 
       await adapter.disconnect();
 
-      expect((adapter as any).dedupCleanupTimer).toBeUndefined();
+      expect((adapter as Any).dedupCleanupTimer).toBeUndefined();
     });
 
     it("should clear processed messages cache", async () => {
-      (adapter as any).processedMessages.set("msg-123", Date.now());
+      (adapter as Any).processedMessages.set("msg-123", Date.now());
 
       await adapter.disconnect();
 
-      expect((adapter as any).processedMessages.size).toBe(0);
+      expect((adapter as Any).processedMessages.size).toBe(0);
     });
 
     it("should clear reply token cache", async () => {
-      (adapter as any).replyTokenCache.set("user-123", { token: "rt-123", expires: Date.now() });
+      (adapter as Any).replyTokenCache.set("user-123", { token: "rt-123", expires: Date.now() });
 
       await adapter.disconnect();
 
-      expect((adapter as any).replyTokenCache.size).toBe(0);
+      expect((adapter as Any).replyTokenCache.size).toBe(0);
     });
   });
 
   describe("message deduplication", () => {
     it("should track processed messages", () => {
-      (adapter as any).markMessageProcessed("msg-123");
-      expect((adapter as any).isMessageProcessed("msg-123")).toBe(true);
+      (adapter as Any).markMessageProcessed("msg-123");
+      expect((adapter as Any).isMessageProcessed("msg-123")).toBe(true);
     });
 
     it("should not mark duplicate messages as unprocessed", () => {
-      (adapter as any).markMessageProcessed("msg-456");
-      (adapter as any).markMessageProcessed("msg-456");
-      expect((adapter as any).processedMessages.size).toBe(1);
+      (adapter as Any).markMessageProcessed("msg-456");
+      (adapter as Any).markMessageProcessed("msg-456");
+      expect((adapter as Any).processedMessages.size).toBe(1);
     });
 
     it("should cleanup old messages from cache", () => {
       const oldTime = Date.now() - 120000;
-      (adapter as any).processedMessages.set("old-msg", oldTime);
-      (adapter as any).processedMessages.set("new-msg", Date.now());
+      (adapter as Any).processedMessages.set("old-msg", oldTime);
+      (adapter as Any).processedMessages.set("new-msg", Date.now());
 
-      (adapter as any).cleanupDedupCache();
+      (adapter as Any).cleanupDedupCache();
 
-      expect((adapter as any).processedMessages.has("old-msg")).toBe(false);
-      expect((adapter as any).processedMessages.has("new-msg")).toBe(true);
+      expect((adapter as Any).processedMessages.has("old-msg")).toBe(false);
+      expect((adapter as Any).processedMessages.has("new-msg")).toBe(true);
     });
   });
 
   describe("reply token cache", () => {
     it("should cache reply tokens", () => {
-      (adapter as any).replyTokenCache.set("user-123", {
+      (adapter as Any).replyTokenCache.set("user-123", {
         token: "rt-token-123",
         expires: Date.now() + 55000,
       });
-      const cached = (adapter as any).replyTokenCache.get("user-123");
+      const cached = (adapter as Any).replyTokenCache.get("user-123");
       expect(cached).toBeDefined();
       expect(cached.token).toBe("rt-token-123");
     });
 
     it("should retrieve cached reply token if not expired", () => {
       const token = "rt-fresh-token";
-      (adapter as any).replyTokenCache.set("user-123", {
+      (adapter as Any).replyTokenCache.set("user-123", {
         token,
         expires: Date.now() + 55000,
       });
-      const cached = (adapter as any).replyTokenCache.get("user-123");
+      const cached = (adapter as Any).replyTokenCache.get("user-123");
       expect(cached.token).toBe(token);
       expect(cached.expires).toBeGreaterThan(Date.now());
     });
 
     it("should not use expired reply tokens", () => {
-      (adapter as any).replyTokenCache.set("user-123", {
+      (adapter as Any).replyTokenCache.set("user-123", {
         token: "rt-old-token",
         expires: Date.now() - 1000, // Already expired
       });
-      const cached = (adapter as any).replyTokenCache.get("user-123");
+      const cached = (adapter as Any).replyTokenCache.get("user-123");
       expect(cached.expires).toBeLessThan(Date.now());
     });
   });
@@ -409,24 +409,24 @@ describe("LineAdapter edge cases", () => {
   describe("expired reply token handling", () => {
     it("should detect expired reply tokens", () => {
       const expiredTime = Date.now() - 1000; // Already expired
-      (adapter as any).replyTokenCache.set("user-123", {
+      (adapter as Any).replyTokenCache.set("user-123", {
         token: "expired-token",
         expires: expiredTime,
       });
 
-      const cached = (adapter as any).replyTokenCache.get("user-123");
+      const cached = (adapter as Any).replyTokenCache.get("user-123");
       expect(cached.expires).toBeLessThan(Date.now());
     });
 
     it("should not use reply tokens that will expire soon", () => {
       // Token expiring in 5 seconds (too short for safe use)
       const nearExpiry = Date.now() + 5000;
-      (adapter as any).replyTokenCache.set("user-456", {
+      (adapter as Any).replyTokenCache.set("user-456", {
         token: "near-expiry-token",
         expires: nearExpiry,
       });
 
-      const cached = (adapter as any).replyTokenCache.get("user-456");
+      const cached = (adapter as Any).replyTokenCache.get("user-456");
       // Token exists but is near expiry - caller should check
       expect(cached.expires - Date.now()).toBeLessThan(10000);
     });
@@ -434,14 +434,14 @@ describe("LineAdapter edge cases", () => {
 
   describe("deduplication cache size limits", () => {
     it("should respect maximum cache size", () => {
-      const maxSize = (adapter as any).DEDUP_CACHE_MAX_SIZE;
+      const maxSize = (adapter as Any).DEDUP_CACHE_MAX_SIZE;
       expect(maxSize).toBe(1000);
 
       // Fill cache to max
       for (let i = 0; i < maxSize; i++) {
-        (adapter as any).processedMessages.set(`msg-${i}`, Date.now());
+        (adapter as Any).processedMessages.set(`msg-${i}`, Date.now());
       }
-      expect((adapter as any).processedMessages.size).toBe(maxSize);
+      expect((adapter as Any).processedMessages.size).toBe(maxSize);
     });
   });
 
@@ -456,7 +456,7 @@ describe("LineAdapter edge cases", () => {
       adapter.onMessage(successHandler);
 
       // Handlers are registered
-      expect((adapter as any).messageHandlers.length).toBe(2);
+      expect((adapter as Any).messageHandlers.length).toBe(2);
     });
   });
 });

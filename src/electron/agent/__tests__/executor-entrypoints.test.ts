@@ -3,7 +3,7 @@ import { TaskExecutor } from "../executor";
 
 describe("TaskExecutor entrypoint guards", () => {
   it("serializes execute/sendMessage via lifecycle mutex wrappers", async () => {
-    const executor = Object.create(TaskExecutor.prototype) as any;
+    const executor = Object.create(TaskExecutor.prototype) as Any;
     const runExclusive = vi.fn(async (fn: () => Promise<void>) => fn());
 
     executor.lifecycleMutex = { runExclusive };
@@ -19,7 +19,7 @@ describe("TaskExecutor entrypoint guards", () => {
   });
 
   it("routes executeStep through the feature-flagged unified branch", async () => {
-    const executor = Object.create(TaskExecutor.prototype) as any;
+    const executor = Object.create(TaskExecutor.prototype) as Any;
     const step = { id: "s1", description: "do work", status: "pending" };
 
     executor.useUnifiedTurnLoop = true;
@@ -38,7 +38,7 @@ describe("TaskExecutor entrypoint guards", () => {
   });
 
   it("routes sendMessageUnlocked through the feature-flagged unified branch", async () => {
-    const executor = Object.create(TaskExecutor.prototype) as any;
+    const executor = Object.create(TaskExecutor.prototype) as Any;
 
     executor.useUnifiedTurnLoop = true;
     executor.sendMessageUnified = vi.fn(async () => undefined);

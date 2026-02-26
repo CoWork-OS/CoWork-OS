@@ -523,7 +523,7 @@ describe("listModelInvocableSkills", () => {
   it("should include skills without invocation policy", async () => {
     const skill = createTestSkill({ id: "no-policy-skill" });
     // Ensure no invocation property
-    delete (skill as any).invocation;
+    delete (skill as Any).invocation;
 
     mockFiles.set("no-policy-skill.json", JSON.stringify(skill));
 
@@ -537,7 +537,7 @@ describe("listModelInvocableSkills", () => {
   it("should filter out skills requiring unavailable tools", async () => {
     const shellDependentSkill = createTestSkill({
       id: "shell-dependent",
-      requires: { tools: ["run_command"] } as any,
+      requires: { tools: ["run_command"] } as Any,
     });
     const safeSkill = createTestSkill({ id: "safe-skill" });
 
@@ -619,7 +619,7 @@ describe("getSkillDescriptionsForModel", () => {
       id: "no-category",
       description: "A skill without category",
     });
-    delete (skill as any).category;
+    delete (skill as Any).category;
 
     mockFiles.set("no-category.json", JSON.stringify(skill));
 

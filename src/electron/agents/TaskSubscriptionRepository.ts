@@ -87,7 +87,7 @@ export class TaskSubscriptionRepository {
     const stmt = this.db.prepare(
       "SELECT * FROM task_subscriptions WHERE task_id = ? AND agent_role_id = ?",
     );
-    const row = stmt.get(taskId, agentRoleId) as any;
+    const row = stmt.get(taskId, agentRoleId) as Any;
     return row ? this.mapRowToSubscription(row) : undefined;
   }
 
@@ -96,7 +96,7 @@ export class TaskSubscriptionRepository {
    */
   findById(id: string): TaskSubscription | undefined {
     const stmt = this.db.prepare("SELECT * FROM task_subscriptions WHERE id = ?");
-    const row = stmt.get(id) as any;
+    const row = stmt.get(id) as Any;
     return row ? this.mapRowToSubscription(row) : undefined;
   }
 
@@ -107,7 +107,7 @@ export class TaskSubscriptionRepository {
     const stmt = this.db.prepare(
       "SELECT * FROM task_subscriptions WHERE task_id = ? ORDER BY subscribed_at ASC",
     );
-    const rows = stmt.all(taskId) as any[];
+    const rows = stmt.all(taskId) as Any[];
     return rows.map((row) => this.mapRowToSubscription(row));
   }
 
@@ -129,7 +129,7 @@ export class TaskSubscriptionRepository {
     const stmt = this.db.prepare(
       "SELECT * FROM task_subscriptions WHERE agent_role_id = ? ORDER BY subscribed_at DESC",
     );
-    const rows = stmt.all(agentRoleId) as any[];
+    const rows = stmt.all(agentRoleId) as Any[];
     return rows.map((row) => this.mapRowToSubscription(row));
   }
 
@@ -138,7 +138,7 @@ export class TaskSubscriptionRepository {
    */
   list(query: SubscriptionListQuery): TaskSubscription[] {
     const conditions: string[] = [];
-    const params: any[] = [];
+    const params: Any[] = [];
 
     if (query.taskId) {
       conditions.push("task_id = ?");
@@ -164,7 +164,7 @@ export class TaskSubscriptionRepository {
     }
 
     const stmt = this.db.prepare(sql);
-    const rows = stmt.all(...params) as any[];
+    const rows = stmt.all(...params) as Any[];
     return rows.map((row) => this.mapRowToSubscription(row));
   }
 
@@ -209,7 +209,7 @@ export class TaskSubscriptionRepository {
   /**
    * Map database row to TaskSubscription object
    */
-  private mapRowToSubscription(row: any): TaskSubscription {
+  private mapRowToSubscription(row: Any): TaskSubscription {
     return {
       id: row.id,
       taskId: row.task_id,

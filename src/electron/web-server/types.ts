@@ -22,7 +22,7 @@ export interface WebAccessRoute {
   method: "GET" | "POST" | "PUT" | "DELETE";
   path: string;
   ipcChannel: string;
-  extractParams?: (req: any) => any;
+  extractParams?: (req: Any) => Any;
 }
 
 export interface WebAccessStatus {

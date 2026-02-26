@@ -244,16 +244,16 @@ export class MontyTools {
     ];
   }
 
-  async montyRun(input: MontyRunInput): Promise<any> {
+  async montyRun(input: MontyRunInput): Promise<Any> {
     const code = String(input?.code ?? "");
-    const inputs = (input as any)?.inputs ?? null;
+    const inputs = (input as Any)?.inputs ?? null;
 
     const clamped = clampMontyLimits(input?.limits, MAX_LIMITS) || {};
     const limits: MontyResourceLimits = { ...DEFAULT_LIMITS, ...clamped };
 
     const stdlib = createMontySafeStdlib();
     const externalFunctions = Object.fromEntries(
-      Object.entries(stdlib).map(([k, fn]) => [k, fn as any]),
+      Object.entries(stdlib).map(([k, fn]) => [k, fn as Any]),
     );
 
     this.daemon.logEvent(this.taskId, "log", { message: "monty_run: executing code" });
@@ -273,17 +273,17 @@ export class MontyTools {
     return { success: true, output: res.output };
   }
 
-  async listTransforms(_input?: MontyListTransformsInput): Promise<any> {
+  async listTransforms(_input?: MontyListTransformsInput): Promise<Any> {
     const dir = path.join(this.workspace.path, ".cowork", "transforms");
     try {
       const entries = await fs.readdir(dir, { withFileTypes: true });
-      const out: any[] = [];
+      const out: Any[] = [];
       for (const ent of entries) {
         if (!ent.isFile()) continue;
         if (!ent.name.toLowerCase().endsWith(".monty")) continue;
 
         const absPath = path.join(dir, ent.name);
-        let stat: any;
+        let stat: Any;
         try {
           stat = await fs.stat(absPath);
         } catch {
@@ -312,7 +312,7 @@ export class MontyTools {
 
       out.sort((a, b) => String(a.id).localeCompare(String(b.id)));
       return { success: true, transforms: out };
-    } catch (error: any) {
+    } catch (error: Any) {
       if (error?.code === "ENOENT") {
         return { success: true, transforms: [] };
       }
@@ -331,7 +331,7 @@ export class MontyTools {
     return { id, absPath, code };
   }
 
-  async runTransform(input: MontyTransformRunInput): Promise<any> {
+  async runTransform(input: MontyTransformRunInput): Promise<Any> {
     const { id, absPath, code } = await this.loadTransformCode(input?.name);
 
     const clamped = clampMontyLimits(input?.limits, MAX_LIMITS) || {};
@@ -339,13 +339,13 @@ export class MontyTools {
 
     const stdlib = createMontySafeStdlib();
     const externalFunctions = Object.fromEntries(
-      Object.entries(stdlib).map(([k, fn]) => [k, fn as any]),
+      Object.entries(stdlib).map(([k, fn]) => [k, fn as Any]),
     );
 
     const cacheKey = `transform:${absPath}:${sha256Hex(code)}`;
     const res = await runMontyCode({
       code,
-      input: (input as any)?.inputs ?? null,
+      input: (input as Any)?.inputs ?? null,
       scriptName: path.basename(absPath),
       limits,
       externalFunctions,
@@ -360,9 +360,9 @@ export class MontyTools {
     return { success: true, transform: id, output: res.output };
   }
 
-  async transformFile(input: MontyTransformFileInput): Promise<any> {
-    const transformName = String((input as any)?.transform ?? "");
-    const inputPath = String((input as any)?.inputPath ?? "");
+  async transformFile(input: MontyTransformFileInput): Promise<Any> {
+    const transformName = String((input as Any)?.transform ?? "");
+    const inputPath = String((input as Any)?.inputPath ?? "");
     if (!transformName.trim()) throw new Error("transform is required");
     if (!inputPath.trim()) throw new Error("inputPath is required");
 
@@ -381,7 +381,7 @@ export class MontyTools {
 
     const stdlib = createMontySafeStdlib();
     const externalFunctions = Object.fromEntries(
-      Object.entries(stdlib).map(([k, fn]) => [k, fn as any]),
+      Object.entries(stdlib).map(([k, fn]) => [k, fn as Any]),
     );
 
     const cacheKey = `transform:${absPath}:${sha256Hex(code)}`;
@@ -438,8 +438,8 @@ export class MontyTools {
     };
   }
 
-  async extractJson(input: ExtractJsonInput): Promise<any> {
-    const text = String((input as any)?.text ?? "");
+  async extractJson(input: ExtractJsonInput): Promise<Any> {
+    const text = String((input as Any)?.text ?? "");
     const allowRepair = input.allowRepair !== false;
     const maxResults =
       typeof input.maxResults === "number" && Number.isFinite(input.maxResults)

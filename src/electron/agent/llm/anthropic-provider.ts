@@ -53,7 +53,7 @@ export class AnthropicProvider implements LLMProvider {
       );
 
       return this.convertResponse(response);
-    } catch (error: any) {
+    } catch (error: Any) {
       // Handle abort errors gracefully
       if (error.name === "AbortError" || error.message?.includes("aborted")) {
         console.log(`[Anthropic] Request aborted`);
@@ -141,7 +141,7 @@ export class AnthropicProvider implements LLMProvider {
       emitProgress(false);
 
       return this.convertResponse(finalMessage as Anthropic.Message);
-    } catch (error: any) {
+    } catch (error: Any) {
       // Always signal streaming ended so the UI clears the indicator
       emitProgress(false);
 
@@ -169,7 +169,7 @@ export class AnthropicProvider implements LLMProvider {
         messages: [{ role: "user", content: "Hi" }],
       });
       return { success: true };
-    } catch (error: any) {
+    } catch (error: Any) {
       return {
         success: false,
         error: error.message || "Failed to connect to Anthropic API",
@@ -244,7 +244,7 @@ export class AnthropicProvider implements LLMProvider {
             type: "tool_use" as const,
             id: block.id,
             name: block.name,
-            input: block.input as Record<string, any>,
+            input: block.input as Record<string, Any>,
           };
         }
         // Type guard: at this point block must be a TextBlock

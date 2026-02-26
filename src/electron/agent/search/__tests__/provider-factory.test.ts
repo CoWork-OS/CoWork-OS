@@ -47,8 +47,8 @@ describe("SearchProviderFactory", () => {
 
   describe("isTransientSearchError", () => {
     // Access the private method through any cast
-    const isTransient = (error: any) =>
-      (SearchProviderFactory as any).isTransientSearchError(error);
+    const isTransient = (error: Any) =>
+      (SearchProviderFactory as Any).isTransientSearchError(error);
 
     it("should detect rate limit errors", () => {
       expect(isTransient({ message: "Rate limit exceeded" })).toBe(true);
@@ -90,7 +90,7 @@ describe("SearchProviderFactory", () => {
   describe("sleep", () => {
     it("should delay for specified milliseconds", async () => {
       const start = Date.now();
-      await (SearchProviderFactory as any).sleep(100);
+      await (SearchProviderFactory as Any).sleep(100);
       const elapsed = Date.now() - start;
 
       // Allow some tolerance for timing
@@ -110,7 +110,7 @@ describe("SearchProviderFactory", () => {
         }),
       };
 
-      const result = await (SearchProviderFactory as any).searchWithRetry(mockProvider, {
+      const result = await (SearchProviderFactory as Any).searchWithRetry(mockProvider, {
         query: "test",
         searchType: "web",
       });
@@ -132,7 +132,7 @@ describe("SearchProviderFactory", () => {
           }),
       };
 
-      const result = await (SearchProviderFactory as any).searchWithRetry(mockProvider, {
+      const result = await (SearchProviderFactory as Any).searchWithRetry(mockProvider, {
         query: "test",
         searchType: "web",
       });
@@ -147,7 +147,7 @@ describe("SearchProviderFactory", () => {
       };
 
       await expect(
-        (SearchProviderFactory as any).searchWithRetry(mockProvider, {
+        (SearchProviderFactory as Any).searchWithRetry(mockProvider, {
           query: "test",
           searchType: "web",
         }),
@@ -162,7 +162,7 @@ describe("SearchProviderFactory", () => {
       };
 
       await expect(
-        (SearchProviderFactory as any).searchWithRetry(
+        (SearchProviderFactory as Any).searchWithRetry(
           mockProvider,
           { query: "test", searchType: "web" },
           2,
@@ -173,7 +173,7 @@ describe("SearchProviderFactory", () => {
     });
 
     it("should use exponential backoff delay", async () => {
-      const sleepSpy = vi.spyOn(SearchProviderFactory as any, "sleep").mockResolvedValue(undefined);
+      const sleepSpy = vi.spyOn(SearchProviderFactory as Any, "sleep").mockResolvedValue(undefined);
       const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0);
 
       const mockProvider = {
@@ -188,7 +188,7 @@ describe("SearchProviderFactory", () => {
           }),
       };
 
-      await (SearchProviderFactory as any).searchWithRetry(mockProvider, {
+      await (SearchProviderFactory as Any).searchWithRetry(mockProvider, {
         query: "test",
         searchType: "web",
       });
@@ -204,7 +204,7 @@ describe("SearchProviderFactory", () => {
       };
 
       await expect(
-        (SearchProviderFactory as any).searchWithRetry(
+        (SearchProviderFactory as Any).searchWithRetry(
           mockProvider,
           { query: "test", searchType: "web" },
           1,
@@ -216,7 +216,7 @@ describe("SearchProviderFactory", () => {
     });
 
     it("should increase delay on subsequent retries", async () => {
-      const sleepSpy = vi.spyOn(SearchProviderFactory as any, "sleep").mockResolvedValue(undefined);
+      const sleepSpy = vi.spyOn(SearchProviderFactory as Any, "sleep").mockResolvedValue(undefined);
       const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0);
 
       const mockProvider = {
@@ -232,7 +232,7 @@ describe("SearchProviderFactory", () => {
           }),
       };
 
-      await (SearchProviderFactory as any).searchWithRetry(
+      await (SearchProviderFactory as Any).searchWithRetry(
         mockProvider,
         { query: "test", searchType: "web" },
         3,
@@ -250,7 +250,7 @@ describe("SearchProviderFactory", () => {
       };
 
       await expect(
-        (SearchProviderFactory as any).searchWithRetry(
+        (SearchProviderFactory as Any).searchWithRetry(
           mockProvider,
           { query: "test", searchType: "web" },
           1,
@@ -262,11 +262,11 @@ describe("SearchProviderFactory", () => {
   describe("clearCache", () => {
     it("should clear cached settings", () => {
       // Access private cachedSettings
-      (SearchProviderFactory as any).cachedSettings = { primaryProvider: "tavily" };
+      (SearchProviderFactory as Any).cachedSettings = { primaryProvider: "tavily" };
 
       SearchProviderFactory.clearCache();
 
-      expect((SearchProviderFactory as any).cachedSettings).toBeNull();
+      expect((SearchProviderFactory as Any).cachedSettings).toBeNull();
     });
   });
 
@@ -279,9 +279,9 @@ describe("SearchProviderFactory", () => {
         brave: { apiKey: "brave" },
         serpapi: { apiKey: "serpapi" },
         google: { apiKey: "google", searchEngineId: "id" },
-      } as any;
+      } as Any;
 
-      const order = (SearchProviderFactory as any).getProviderExecutionOrder(settings);
+      const order = (SearchProviderFactory as Any).getProviderExecutionOrder(settings);
 
       expect(order).toEqual(["brave", "tavily", "google", "serpapi"]);
     });
@@ -292,9 +292,9 @@ describe("SearchProviderFactory", () => {
         fallbackProvider: "google",
         tavily: { apiKey: "tavily" },
         google: { apiKey: "google", searchEngineId: "id" },
-      } as any;
+      } as Any;
 
-      const order = (SearchProviderFactory as any).getProviderExecutionOrder(settings);
+      const order = (SearchProviderFactory as Any).getProviderExecutionOrder(settings);
 
       expect(order).toEqual(["tavily", "google"]);
     });
@@ -310,24 +310,24 @@ describe("SearchProviderFactory", () => {
         fallbackProvider: "google",
         tavily: { apiKey: "tavily" },
         brave: { apiKey: "brave" },
-      } as any);
+      } as Any);
 
-      vi.spyOn(SearchProviderFactory as any, "getProviderExecutionOrder").mockReturnValue([
+      vi.spyOn(SearchProviderFactory as Any, "getProviderExecutionOrder").mockReturnValue([
         "brave",
         "tavily",
       ]);
 
-      const getConfigSpy = vi.spyOn(SearchProviderFactory as any, "getProviderConfig");
+      const getConfigSpy = vi.spyOn(SearchProviderFactory as Any, "getProviderConfig");
       getConfigSpy.mockImplementation((providerType: string) => ({ type: providerType }));
 
-      const createProviderSpy = vi.spyOn(SearchProviderFactory as any, "createProviderFromConfig");
-      createProviderSpy.mockImplementation((config: any) => {
+      const createProviderSpy = vi.spyOn(SearchProviderFactory as Any, "createProviderFromConfig");
+      createProviderSpy.mockImplementation((config: Any) => {
         if (config.type === "brave") return braveProvider;
         return tavilyProvider;
       });
 
-      const searchRetrySpy = vi.spyOn(SearchProviderFactory as any, "searchWithRetry");
-      searchRetrySpy.mockImplementation(async (provider: any) => provider.search());
+      const searchRetrySpy = vi.spyOn(SearchProviderFactory as Any, "searchWithRetry");
+      searchRetrySpy.mockImplementation(async (provider: Any) => provider.search());
 
       const response = await SearchProviderFactory.searchWithFallback({
         query: "f1 latest",
@@ -349,28 +349,28 @@ describe("SearchProviderFactory", () => {
         fallbackProvider: "google",
         tavily: { apiKey: "tavily" },
         brave: { apiKey: "brave" },
-      } as any);
+      } as Any);
 
-      vi.spyOn(SearchProviderFactory as any, "getProviderExecutionOrder").mockReturnValue([
+      vi.spyOn(SearchProviderFactory as Any, "getProviderExecutionOrder").mockReturnValue([
         "brave",
         "tavily",
       ]);
 
-      vi.spyOn(SearchProviderFactory as any, "getProviderConfig").mockImplementation(
+      vi.spyOn(SearchProviderFactory as Any, "getProviderConfig").mockImplementation(
         (providerType: string) => ({
           type: providerType,
         }),
       );
 
-      vi.spyOn(SearchProviderFactory as any, "createProviderFromConfig").mockImplementation(
-        (config: any) => {
+      vi.spyOn(SearchProviderFactory as Any, "createProviderFromConfig").mockImplementation(
+        (config: Any) => {
           if (config.type === "brave") return braveProvider;
           return tavilyProvider;
         },
       );
 
-      vi.spyOn(SearchProviderFactory as any, "searchWithRetry").mockImplementation(
-        async (provider: any) => {
+      vi.spyOn(SearchProviderFactory as Any, "searchWithRetry").mockImplementation(
+        async (provider: Any) => {
           return provider.search();
         },
       );
@@ -394,24 +394,24 @@ describe("SearchProviderFactory", () => {
         fallbackProvider: "google",
         tavily: { apiKey: "tavily" },
         brave: { apiKey: "brave" },
-      } as any);
+      } as Any);
 
-      vi.spyOn(SearchProviderFactory as any, "getProviderExecutionOrder").mockReturnValue([
+      vi.spyOn(SearchProviderFactory as Any, "getProviderExecutionOrder").mockReturnValue([
         "brave",
         "tavily",
       ]);
 
-      const getConfigSpy = vi.spyOn(SearchProviderFactory as any, "getProviderConfig");
+      const getConfigSpy = vi.spyOn(SearchProviderFactory as Any, "getProviderConfig");
       getConfigSpy.mockImplementation((providerType: string) => ({ type: providerType }));
 
-      const createProviderSpy = vi.spyOn(SearchProviderFactory as any, "createProviderFromConfig");
-      createProviderSpy.mockImplementation((config: any) => {
+      const createProviderSpy = vi.spyOn(SearchProviderFactory as Any, "createProviderFromConfig");
+      createProviderSpy.mockImplementation((config: Any) => {
         if (config.type === "brave") return braveProvider;
         return tavilyProvider;
       });
 
-      const searchRetrySpy = vi.spyOn(SearchProviderFactory as any, "searchWithRetry");
-      searchRetrySpy.mockImplementation(async (provider: any) => provider.search());
+      const searchRetrySpy = vi.spyOn(SearchProviderFactory as Any, "searchWithRetry");
+      searchRetrySpy.mockImplementation(async (provider: Any) => provider.search());
 
       const response = await SearchProviderFactory.searchWithFallback({
         query: "f1 latest",

@@ -29,7 +29,7 @@ interface GoogleCalendarActionInput {
   end?: string | { dateTime?: string; date?: string; timeZone?: string };
   attendees?: Array<string | { email: string }>;
   time_zone?: string;
-  payload?: Record<string, any>;
+  payload?: Record<string, Any>;
 }
 
 function buildAttendees(
@@ -46,7 +46,7 @@ function buildAttendees(
     .filter((attendee) => attendee.email);
 }
 
-function buildEventPayload(input: GoogleCalendarActionInput): Record<string, any> {
+function buildEventPayload(input: GoogleCalendarActionInput): Record<string, Any> {
   if (input.payload) {
     return input.payload;
   }
@@ -55,7 +55,7 @@ function buildEventPayload(input: GoogleCalendarActionInput): Record<string, any
     throw new Error("Missing summary/start/end for calendar event");
   }
 
-  const event: Record<string, any> = {
+  const event: Record<string, Any> = {
     summary: input.summary,
   };
 
@@ -106,8 +106,8 @@ export class GoogleCalendarTools {
   }
 
   private formatAuthError(error: unknown): string | null {
-    const message = String((error as any)?.message ?? "");
-    const status = (error as any)?.status;
+    const message = String((error as Any)?.message ?? "");
+    const status = (error as Any)?.status;
     if (status === 401) {
       return "Google Workspace authorization failed (401). Reconnect in Settings > Integrations > Google Workspace.";
     }
@@ -134,7 +134,7 @@ export class GoogleCalendarTools {
     }
   }
 
-  async executeAction(input: GoogleCalendarActionInput): Promise<any> {
+  async executeAction(input: GoogleCalendarActionInput): Promise<Any> {
     const settings = GoogleWorkspaceSettingsManager.loadSettings();
     if (!settings.enabled) {
       throw new Error(
@@ -241,7 +241,7 @@ export class GoogleCalendarTools {
         tool: "calendar_action",
         action,
         message: finalMessage,
-        status: (error as any)?.status,
+        status: (error as Any)?.status,
       });
       if (authMessage) {
         throw new Error(authMessage);

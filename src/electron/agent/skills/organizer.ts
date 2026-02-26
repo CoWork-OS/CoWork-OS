@@ -40,7 +40,7 @@ export class FolderOrganizer {
     const projectId = getProjectIdFromWorkspaceRelPath(relPosix);
     if (!projectId) return;
 
-    const taskGetter = (this.daemon as any)?.getTask;
+    const taskGetter = (this.daemon as Any)?.getTask;
     const task =
       typeof taskGetter === "function" ? taskGetter.call(this.daemon, this.taskId) : null;
     const agentRoleId = task?.assignedAgentRoleId || null;
@@ -57,7 +57,7 @@ export class FolderOrganizer {
   async organize(
     relativePath: string,
     strategy: "by_type" | "by_date" | "custom",
-    rules?: any,
+    rules?: Any,
   ): Promise<number> {
     const fullPath = this.validatePath(relativePath);
     await this.enforceProjectAccess(fullPath);
@@ -150,7 +150,7 @@ export class FolderOrganizer {
     return changes;
   }
 
-  private async organizeCustom(folderPath: string, rules: any): Promise<number> {
+  private async organizeCustom(_folderPath: string, _rules: Any): Promise<number> {
     // TODO: Implement custom organization rules
     // For MVP, just return 0
     return 0;

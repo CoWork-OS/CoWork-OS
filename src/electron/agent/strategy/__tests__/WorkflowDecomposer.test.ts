@@ -4,11 +4,13 @@ import { IntentRoute } from "../IntentRouter";
 
 // Minimal route stub for decomposition
 const defaultRoute: IntentRoute = {
-  intent: "workflow" as any,
+  intent: "workflow",
   confidence: 0.9,
-  conversationMode: "task" as any,
-  reasoning: "workflow detected",
-  scores: {} as any,
+  conversationMode: "task",
+  answerFirst: false,
+  signals: ["workflow-pipeline"],
+  complexity: "high",
+  domain: "general",
 };
 
 describe("WorkflowDecomposer", () => {
@@ -131,8 +133,8 @@ describe("WorkflowDecomposer", () => {
   });
 
   it("returns null for null/undefined prompt", () => {
-    expect(WorkflowDecomposer.decompose(null as any, defaultRoute)).toBeNull();
-    expect(WorkflowDecomposer.decompose(undefined as any, defaultRoute)).toBeNull();
+    expect(WorkflowDecomposer.decompose(null as unknown as string, defaultRoute)).toBeNull();
+    expect(WorkflowDecomposer.decompose(undefined as unknown as string, defaultRoute)).toBeNull();
   });
 
   // ── Dependency chain ───────────────────────────────────────────

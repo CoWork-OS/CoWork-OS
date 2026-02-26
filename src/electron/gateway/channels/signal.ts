@@ -28,10 +28,10 @@ import {
   ChannelInfo,
   SignalConfig,
   MessageAttachment,
-  CallbackQuery,
+  CallbackQuery as _CallbackQuery,
   CallbackQueryHandler,
 } from "./types";
-import { SignalClient, SignalMessage, SignalDataMessage, SignalAttachment } from "./signal-client";
+import { SignalClient, SignalMessage, SignalDataMessage as _SignalDataMessage, SignalAttachment } from "./signal-client";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -248,14 +248,14 @@ export class SignalAdapter implements ChannelAdapter {
   /**
    * Edit a message (not supported by Signal)
    */
-  async editMessage(chatId: string, messageId: string, text: string): Promise<void> {
+  async editMessage(_chatId: string, _messageId: string, _text: string): Promise<void> {
     throw new Error("Signal does not support message editing");
   }
 
   /**
    * Delete a message
    */
-  async deleteMessage(chatId: string, messageId: string): Promise<void> {
+  async deleteMessage(_chatId: string, _messageId: string): Promise<void> {
     // Signal supports remote delete but it's complex
     // For now, just log a warning
     console.warn("Signal message deletion not fully implemented");
@@ -301,7 +301,7 @@ export class SignalAdapter implements ChannelAdapter {
   /**
    * Answer callback query (not supported by Signal)
    */
-  async answerCallbackQuery(queryId: string, text?: string, showAlert?: boolean): Promise<void> {
+  async answerCallbackQuery(_queryId: string, _text?: string, _showAlert?: boolean): Promise<void> {
     // Signal doesn't have inline keyboards
     console.warn("Signal does not support callback queries");
   }
@@ -351,7 +351,7 @@ export class SignalAdapter implements ChannelAdapter {
 
     try {
       await this.client.sendTyping(chatId);
-    } catch (error) {
+    } catch  {
       // Ignore typing indicator errors
     }
   }
@@ -366,7 +366,7 @@ export class SignalAdapter implements ChannelAdapter {
 
     try {
       await this.client.sendTyping(chatId, true);
-    } catch (error) {
+    } catch  {
       // Ignore typing indicator errors
     }
   }
@@ -414,7 +414,7 @@ export class SignalAdapter implements ChannelAdapter {
 
     try {
       await this.client.sendReadReceipt(sender, [messageTimestamp]);
-    } catch (error) {
+    } catch  {
       // Ignore read receipt errors
     }
   }

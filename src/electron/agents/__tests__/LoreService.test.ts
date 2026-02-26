@@ -29,16 +29,16 @@ function readFile(p: string): string {
 }
 
 /** Minimal mock that satisfies the Database parameter LoreService expects. */
-function createMockDb(rows: any[] = []) {
+function createMockDb(rows: Any[] = []) {
   return {
     prepare: () => ({
       all: () => rows,
     }),
-  } as any;
+  } as Any;
 }
 
 /** Minimal task row used by TaskRepository.findById */
-function makeTaskRow(overrides: Record<string, any> = {}) {
+function makeTaskRow(overrides: Record<string, Any> = {}) {
   return {
     id: overrides.id ?? "task-1",
     title: overrides.title ?? "Implemented the auth flow",
@@ -84,22 +84,22 @@ describe("LoreService", () => {
       const service = new LoreService(db);
 
       // Patch repos to return our test data.
-      (service as any).taskRepo = {
+      (service as Any).taskRepo = {
         findById: () => makeTaskRow({ workspaceId: "ws-1" }),
       };
-      (service as any).workspaceRepo = {
+      (service as Any).workspaceRepo = {
         findById: () => makeWorkspaceRow("ws-1", tmpDir),
       };
 
       // Simulate a task_completed event via the internal method.
-      (service as any).ingestTaskCompleted(
+      (service as Any).ingestTaskCompleted(
         "task-1",
         { resultSummary: "Auth flow done" },
         Date.now(),
       );
 
       // Flush immediately (bypass debounce).
-      await (service as any).flushWorkspace("ws-1");
+      await (service as Any).flushWorkspace("ws-1");
 
       const lorePath = path.join(tmpDir, ".cowork", "LORE.md");
       expect(fs.existsSync(lorePath)).toBe(true);
@@ -131,19 +131,19 @@ describe("LoreService", () => {
 
       const db = createMockDb();
       const service = new LoreService(db);
-      (service as any).taskRepo = {
+      (service as Any).taskRepo = {
         findById: () => makeTaskRow({ workspaceId: "ws-1", title: "Fixed the deploy pipeline" }),
       };
-      (service as any).workspaceRepo = {
+      (service as Any).workspaceRepo = {
         findById: () => makeWorkspaceRow("ws-1", tmpDir),
       };
 
-      (service as any).ingestTaskCompleted(
+      (service as Any).ingestTaskCompleted(
         "task-2",
         { resultSummary: "Pipeline green" },
         Date.now(),
       );
-      await (service as any).flushWorkspace("ws-1");
+      await (service as Any).flushWorkspace("ws-1");
 
       const content = readFile(lorePath);
       // Old entry preserved
@@ -173,15 +173,15 @@ describe("LoreService", () => {
 
       const db = createMockDb();
       const service = new LoreService(db);
-      (service as any).taskRepo = {
+      (service as Any).taskRepo = {
         findById: () => makeTaskRow({ workspaceId: "ws-1" }),
       };
-      (service as any).workspaceRepo = {
+      (service as Any).workspaceRepo = {
         findById: () => makeWorkspaceRow("ws-1", tmpDir),
       };
 
-      (service as any).ingestTaskCompleted("task-1", {}, Date.now());
-      await (service as any).flushWorkspace("ws-1");
+      (service as Any).ingestTaskCompleted("task-1", {}, Date.now());
+      await (service as Any).flushWorkspace("ws-1");
 
       const content = readFile(lorePath);
       expect(content).not.toContain("- (none)");
@@ -197,22 +197,22 @@ describe("LoreService", () => {
     it("skips tasks with short titles (< 10 chars)", async () => {
       const db = createMockDb();
       const service = new LoreService(db);
-      (service as any).taskRepo = {
+      (service as Any).taskRepo = {
         findById: () => makeTaskRow({ workspaceId: "ws-1", title: "Fix bug" }),
       };
-      (service as any).workspaceRepo = {
+      (service as Any).workspaceRepo = {
         findById: () => makeWorkspaceRow("ws-1", tmpDir),
       };
 
-      (service as any).ingestTaskCompleted("task-short", {}, Date.now());
-      const state = (service as any).stateByWorkspace.get("ws-1");
+      (service as Any).ingestTaskCompleted("task-short", {}, Date.now());
+      const state = (service as Any).stateByWorkspace.get("ws-1");
       expect(state).toBeUndefined();
     });
 
     it("skips sub-tasks (tasks with parentTaskId)", async () => {
       const db = createMockDb();
       const service = new LoreService(db);
-      (service as any).taskRepo = {
+      (service as Any).taskRepo = {
         findById: () =>
           makeTaskRow({
             workspaceId: "ws-1",
@@ -220,19 +220,19 @@ describe("LoreService", () => {
             title: "A sub-task that is long enough",
           }),
       };
-      (service as any).workspaceRepo = {
+      (service as Any).workspaceRepo = {
         findById: () => makeWorkspaceRow("ws-1", tmpDir),
       };
 
-      (service as any).ingestTaskCompleted("task-sub", {}, Date.now());
-      const state = (service as any).stateByWorkspace.get("ws-1");
+      (service as Any).ingestTaskCompleted("task-sub", {}, Date.now());
+      const state = (service as Any).stateByWorkspace.get("ws-1");
       expect(state).toBeUndefined();
     });
 
     it("skips public/group gateway tasks", async () => {
       const db = createMockDb();
       const service = new LoreService(db);
-      (service as any).taskRepo = {
+      (service as Any).taskRepo = {
         findById: () =>
           makeTaskRow({
             workspaceId: "ws-1",
@@ -240,29 +240,29 @@ describe("LoreService", () => {
             title: "A public task that is long enough",
           }),
       };
-      (service as any).workspaceRepo = {
+      (service as Any).workspaceRepo = {
         findById: () => makeWorkspaceRow("ws-1", tmpDir),
       };
 
-      (service as any).ingestTaskCompleted("task-pub", {}, Date.now());
-      const state = (service as any).stateByWorkspace.get("ws-1");
+      (service as Any).ingestTaskCompleted("task-pub", {}, Date.now());
+      const state = (service as Any).stateByWorkspace.get("ws-1");
       expect(state).toBeUndefined();
     });
 
     it("deduplicates entries by taskId", async () => {
       const db = createMockDb();
       const service = new LoreService(db);
-      (service as any).taskRepo = {
+      (service as Any).taskRepo = {
         findById: () => makeTaskRow({ workspaceId: "ws-1" }),
       };
-      (service as any).workspaceRepo = {
+      (service as Any).workspaceRepo = {
         findById: () => makeWorkspaceRow("ws-1", tmpDir),
       };
 
-      (service as any).ingestTaskCompleted("task-dup", {}, Date.now());
-      (service as any).ingestTaskCompleted("task-dup", {}, Date.now());
+      (service as Any).ingestTaskCompleted("task-dup", {}, Date.now());
+      (service as Any).ingestTaskCompleted("task-dup", {}, Date.now());
 
-      const state = (service as any).stateByWorkspace.get("ws-1");
+      const state = (service as Any).stateByWorkspace.get("ws-1");
       expect(state.entries).toHaveLength(1);
     });
 
@@ -272,15 +272,15 @@ describe("LoreService", () => {
 
       const db = createMockDb();
       const service = new LoreService(db);
-      (service as any).taskRepo = {
+      (service as Any).taskRepo = {
         findById: () => makeTaskRow({ workspaceId: "ws-1" }),
       };
-      (service as any).workspaceRepo = {
+      (service as Any).workspaceRepo = {
         findById: () => makeWorkspaceRow("ws-1", tmpDir),
       };
 
-      (service as any).ingestTaskCompleted("task-nokit", {}, Date.now());
-      const state = (service as any).stateByWorkspace.get("ws-1");
+      (service as Any).ingestTaskCompleted("task-nokit", {}, Date.now());
+      const state = (service as Any).stateByWorkspace.get("ws-1");
       expect(state).toBeUndefined();
     });
   });
@@ -311,18 +311,18 @@ describe("LoreService", () => {
       const service = new LoreService(db);
 
       // Add 3 new entries (39 + 3 = 42, should be capped to 40)
-      (service as any).taskRepo = {
+      (service as Any).taskRepo = {
         findById: (id: string) =>
           makeTaskRow({ id, workspaceId: "ws-1", title: `New task entry ${id}` }),
       };
-      (service as any).workspaceRepo = {
+      (service as Any).workspaceRepo = {
         findById: () => makeWorkspaceRow("ws-1", tmpDir),
       };
 
-      (service as any).ingestTaskCompleted("new-1", {}, Date.now());
-      (service as any).ingestTaskCompleted("new-2", {}, Date.now());
-      (service as any).ingestTaskCompleted("new-3", {}, Date.now());
-      await (service as any).flushWorkspace("ws-1");
+      (service as Any).ingestTaskCompleted("new-1", {}, Date.now());
+      (service as Any).ingestTaskCompleted("new-2", {}, Date.now());
+      (service as Any).ingestTaskCompleted("new-3", {}, Date.now());
+      await (service as Any).flushWorkspace("ws-1");
 
       const content = readFile(lorePath);
       const entryLines = content.split("\n").filter((l: string) => l.startsWith("- ["));
@@ -350,15 +350,15 @@ describe("LoreService", () => {
 
       const db = createMockDb();
       const service = new LoreService(db);
-      (service as any).taskRepo = {
+      (service as Any).taskRepo = {
         findById: () => makeTaskRow({ workspaceId: "ws-1", title: "Implemented the auth flow" }),
       };
-      (service as any).workspaceRepo = {
+      (service as Any).workspaceRepo = {
         findById: () => makeWorkspaceRow("ws-1", tmpDir),
       };
 
-      (service as any).ingestTaskCompleted("task-1", {}, Date.now());
-      await (service as any).flushWorkspace("ws-1");
+      (service as Any).ingestTaskCompleted("task-1", {}, Date.now());
+      await (service as Any).flushWorkspace("ws-1");
 
       const content = readFile(lorePath);
       const matches = content.match(/- \[2026-03-01\] Implemented the auth flow/g) || [];
@@ -374,14 +374,14 @@ describe("LoreService", () => {
     it("debounces writes with 12s interval", async () => {
       const db = createMockDb();
       const service = new LoreService(db);
-      (service as any).taskRepo = {
+      (service as Any).taskRepo = {
         findById: () => makeTaskRow({ workspaceId: "ws-1" }),
       };
-      (service as any).workspaceRepo = {
+      (service as Any).workspaceRepo = {
         findById: () => makeWorkspaceRow("ws-1", tmpDir),
       };
 
-      (service as any).ingestTaskCompleted("task-debounce", {}, Date.now());
+      (service as Any).ingestTaskCompleted("task-debounce", {}, Date.now());
 
       // File should NOT exist yet (flush hasn't fired).
       const lorePath = path.join(tmpDir, ".cowork", "LORE.md");
@@ -407,23 +407,23 @@ describe("LoreService", () => {
 
       const db = createMockDb();
       const service = new LoreService(db);
-      (service as any).taskRepo = {
+      (service as Any).taskRepo = {
         findById: () =>
           makeTaskRow({
             workspaceId: "ws-1",
             title: "Refactored the payment module",
           }),
       };
-      (service as any).workspaceRepo = {
+      (service as Any).workspaceRepo = {
         findById: () => makeWorkspaceRow("ws-1", tmpDir),
       };
 
-      (service as any).ingestTaskCompleted(
+      (service as Any).ingestTaskCompleted(
         "task-fmt",
         { resultSummary: "Clean separation of concerns" },
         Date.now(),
       );
-      await (service as any).flushWorkspace("ws-1");
+      await (service as Any).flushWorkspace("ws-1");
 
       const lorePath = path.join(tmpDir, ".cowork", "LORE.md");
       const content = readFile(lorePath);
@@ -435,19 +435,19 @@ describe("LoreService", () => {
     it("formats entries without summary when resultSummary is empty", async () => {
       const db = createMockDb();
       const service = new LoreService(db);
-      (service as any).taskRepo = {
+      (service as Any).taskRepo = {
         findById: () =>
           makeTaskRow({
             workspaceId: "ws-1",
             title: "Updated the README file",
           }),
       };
-      (service as any).workspaceRepo = {
+      (service as Any).workspaceRepo = {
         findById: () => makeWorkspaceRow("ws-1", tmpDir),
       };
 
-      (service as any).ingestTaskCompleted("task-nosummary", {}, Date.now());
-      await (service as any).flushWorkspace("ws-1");
+      (service as Any).ingestTaskCompleted("task-nosummary", {}, Date.now());
+      await (service as Any).flushWorkspace("ws-1");
 
       const lorePath = path.join(tmpDir, ".cowork", "LORE.md");
       const content = readFile(lorePath);

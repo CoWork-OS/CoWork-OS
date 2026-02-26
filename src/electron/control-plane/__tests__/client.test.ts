@@ -200,7 +200,7 @@ describe("ControlPlaneClient", () => {
       client.sendEvent("event2");
       client.sendEvent("event3");
 
-      const calls = (mockSocket.send as any).mock.calls;
+      const calls = (mockSocket.send as Any).mock.calls;
       expect(calls[0][0]).toContain('"seq":0');
       expect(calls[1][0]).toContain('"seq":1');
       expect(calls[2][0]).toContain('"seq":2');
@@ -462,7 +462,7 @@ describe("ClientRegistry", () => {
         version: "1.0.0",
         deviceId: "test-device-id",
         modelIdentifier: "iPhone15,3",
-        capabilities: (options.capabilities || ["camera", "location"]) as any,
+        capabilities: (options.capabilities || ["camera", "location"]) as Any,
         commands: options.commands || ["camera.snap", "location.get"],
         permissions: { camera: true, location: true },
       });
@@ -582,7 +582,7 @@ describe("ClientRegistry", () => {
         registry.add(node);
 
         // Reset operator socket calls first to clear any previous sends
-        (operatorSocket.send as any).mockClear();
+        (operatorSocket.send as Any).mockClear();
 
         const sent = registry.broadcastToOperators("status.update", { test: true });
 

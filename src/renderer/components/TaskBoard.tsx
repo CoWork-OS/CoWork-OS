@@ -61,7 +61,7 @@ export function TaskBoard({ workspaceId, onTaskSelect }: TaskBoardProps) {
       ]);
 
       // Filter tasks by workspace
-      const workspaceTasks = tasksResult.filter((t: any) => t.workspaceId === workspaceId);
+      const workspaceTasks = tasksResult.filter((t: Any) => t.workspaceId === workspaceId);
       setTasks(workspaceTasks);
       setLabels(labelsResult);
 
@@ -122,7 +122,7 @@ export function TaskBoard({ workspaceId, onTaskSelect }: TaskBoardProps) {
 
   // Subscribe to task events for new tasks and status changes
   useEffect(() => {
-    const unsubscribe = window.electronAPI.onTaskEvent((event: any) => {
+    const unsubscribe = window.electronAPI.onTaskEvent((event: Any) => {
       if (event.type === "created" && event.task?.workspaceId === workspaceId) {
         setTasks((prev) => [event.task, ...prev]);
       } else if (event.type === "updated" && event.task) {

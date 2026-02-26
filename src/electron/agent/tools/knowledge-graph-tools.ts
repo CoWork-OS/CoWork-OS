@@ -217,7 +217,7 @@ export class KnowledgeGraphTools {
     return name.startsWith("kg_");
   }
 
-  async executeTool(name: string, input: any): Promise<any> {
+  async executeTool(name: string, input: Any): Promise<Any> {
     if (!KnowledgeGraphService.isInitialized()) {
       return { error: "Knowledge graph not initialized" };
     }
@@ -246,7 +246,7 @@ export class KnowledgeGraphTools {
     }
   }
 
-  private createEntity(input: any): any {
+  private createEntity(input: Any): Any {
     const entity = KnowledgeGraphService.createEntity(
       this.workspace.id,
       {
@@ -270,7 +270,7 @@ export class KnowledgeGraphTools {
     };
   }
 
-  private updateEntity(input: any): any {
+  private updateEntity(input: Any): Any {
     const entity = KnowledgeGraphService.updateEntity({
       entityId: input.entity_id,
       description: input.description,
@@ -291,12 +291,12 @@ export class KnowledgeGraphTools {
     };
   }
 
-  private deleteEntity(input: any): any {
+  private deleteEntity(input: Any): Any {
     const deleted = KnowledgeGraphService.deleteEntity(input.entity_id);
     return { success: deleted, message: deleted ? "Entity deleted" : "Entity not found" };
   }
 
-  private createEdge(input: any): any {
+  private createEdge(input: Any): Any {
     try {
       const edge = KnowledgeGraphService.createEdge(
         this.workspace.id,
@@ -318,17 +318,17 @@ export class KnowledgeGraphTools {
           target: edge.targetEntityId,
         },
       };
-    } catch (error: any) {
+    } catch (error: Any) {
       return { error: error.message || "Failed to create edge" };
     }
   }
 
-  private deleteEdge(input: any): any {
+  private deleteEdge(input: Any): Any {
     const deleted = KnowledgeGraphService.deleteEdge(input.edge_id);
     return { success: deleted, message: deleted ? "Edge deleted" : "Edge not found" };
   }
 
-  private addObservation(input: any): any {
+  private addObservation(input: Any): Any {
     try {
       const observation = KnowledgeGraphService.addObservation(
         { entityId: input.entity_id, content: input.content },
@@ -344,12 +344,12 @@ export class KnowledgeGraphTools {
           createdAt: observation.createdAt,
         },
       };
-    } catch (error: any) {
+    } catch (error: Any) {
       return { error: error.message || "Failed to add observation" };
     }
   }
 
-  private searchEntities(input: any): any {
+  private searchEntities(input: Any): Any {
     const limit = Math.min(Math.max(1, input.limit || 10), 50);
     let results = KnowledgeGraphService.search(this.workspace.id, input.query, limit);
 
@@ -372,7 +372,7 @@ export class KnowledgeGraphTools {
     };
   }
 
-  private getNeighbors(input: any): any {
+  private getNeighbors(input: Any): Any {
     const depth = Math.min(Math.max(1, input.depth || 1), 3);
     const neighbors = KnowledgeGraphService.getNeighbors(input.entity_id, depth, input.edge_types);
 
@@ -395,7 +395,7 @@ export class KnowledgeGraphTools {
     };
   }
 
-  private getSubgraph(input: any): any {
+  private getSubgraph(input: Any): Any {
     const subgraph = KnowledgeGraphService.getSubgraph(input.entity_ids || []);
 
     return {

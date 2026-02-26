@@ -38,7 +38,7 @@ describe("readFilesByPatterns", () => {
     const daemon = {
       logEvent: vi.fn(),
       requestApproval: vi.fn(),
-    } as any;
+    } as Any;
 
     fileTools = new FileTools(workspace, daemon, "task-1");
     globTools = new GlobTools(workspace, daemon, "task-1");
@@ -118,12 +118,12 @@ describe("readFilesByPatterns", () => {
       permissions: {
         ...workspace.permissions,
         unrestrictedFileAccess: false,
-      } as any,
+      } as Any,
     };
     const daemon = {
       logEvent: vi.fn(),
       requestApproval: vi.fn(),
-    } as any;
+    } as Any;
     const scopedFileTools = new FileTools(workspaceScoped, daemon, "task-2");
 
     const filename = "research_step1_crypto_imperfections.md";
@@ -164,12 +164,12 @@ describe("readFilesByPatterns", () => {
       permissions: {
         ...workspace.permissions,
         unrestrictedFileAccess: false,
-      } as any,
+      } as Any,
     };
     const daemon = {
       logEvent: vi.fn(),
       requestApproval: vi.fn(),
-    } as any;
+    } as Any;
     const scopedFileTools = new FileTools(workspaceScoped, daemon, "task-3");
 
     const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-outside-read-"));
@@ -199,12 +199,12 @@ describe("readFilesByPatterns", () => {
       permissions: {
         ...workspace.permissions,
         unrestrictedFileAccess: false,
-      } as any,
+      } as Any,
     };
     const daemon = {
       logEvent: vi.fn(),
       requestApproval: vi.fn(),
-    } as any;
+    } as Any;
     const scopedFileTools = new FileTools(workspaceScoped, daemon, "task-4");
 
     const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-outside-write-"));

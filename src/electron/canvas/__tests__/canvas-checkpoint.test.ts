@@ -7,7 +7,7 @@
  * the file system and Electron runtime.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi as _vi } from "vitest";
 import * as path from "path";
 import * as fs from "fs/promises";
 import { existsSync, readdirSync, mkdirSync, writeFileSync, rmSync } from "fs";
@@ -175,7 +175,7 @@ describe("Canvas Checkpoint System", () => {
       const smallStore = new (class extends CheckpointStore {
         constructor() {
           super();
-          (this as any).maxPerSession = 3;
+          (this as Any).maxPerSession = 3;
         }
       })();
 

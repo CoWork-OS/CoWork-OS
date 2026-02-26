@@ -54,7 +54,7 @@ export function InlineImagePreview({
           return;
         }
         setResult(response.data);
-      } catch (e: any) {
+      } catch (e: Any) {
         if (cancelled) return;
         setError(e?.message || "Failed to load image preview");
       } finally {

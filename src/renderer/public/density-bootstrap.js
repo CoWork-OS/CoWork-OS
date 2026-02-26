@@ -6,7 +6,7 @@
       root.classList.remove("density-focused", "density-full");
       root.classList.add(`density-${savedDensity}`);
     }
-  } catch (error) {
+  } catch  {
     // Intentionally ignore bootstrap errors to avoid blocking app load.
   }
 })();

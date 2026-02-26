@@ -30,7 +30,7 @@ const mockLogEvent = vi.fn();
 function createMockDaemon() {
   const pendingRetries = new Map<string, ReturnType<typeof setTimeout>>();
   const retryCounts = new Map<string, number>();
-  const activeTasks = new Map<string, any>();
+  const activeTasks = new Map<string, Any>();
   const maxTaskRetries = 2;
   const retryDelayMs = 30 * 1000;
 

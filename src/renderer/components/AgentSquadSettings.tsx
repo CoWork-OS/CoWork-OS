@@ -101,7 +101,7 @@ export function AgentSquadSettings({ onSettingsChanged }: AgentSquadSettingsProp
       setIsCreating(false);
       setError(null);
       onSettingsChanged?.();
-    } catch (err: any) {
+    } catch (err: Any) {
       setError(err.message || "Failed to save agent role");
     }
   };
@@ -117,7 +117,7 @@ export function AgentSquadSettings({ onSettingsChanged }: AgentSquadSettingsProp
       } else {
         setError("Cannot delete system agent roles");
       }
-    } catch (err) {
+    } catch  {
       setError("Failed to delete agent role");
     }
   };
@@ -132,7 +132,7 @@ export function AgentSquadSettings({ onSettingsChanged }: AgentSquadSettingsProp
         setRoles((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
         onSettingsChanged?.();
       }
-    } catch (err) {
+    } catch  {
       setError("Failed to update agent role");
     }
   };
@@ -149,7 +149,7 @@ export function AgentSquadSettings({ onSettingsChanged }: AgentSquadSettingsProp
         setRoles(seeded);
         onSettingsChanged?.();
       }
-    } catch (err) {
+    } catch  {
       setError("Failed to seed default agent roles");
     }
   };

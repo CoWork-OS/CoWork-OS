@@ -84,7 +84,7 @@ export interface MCPToolProperty {
   type: string;
   description?: string;
   enum?: string[];
-  default?: any;
+  default?: Any;
   items?: MCPToolProperty; // For array types
   properties?: Record<string, MCPToolProperty>; // For nested objects
   required?: string[];
@@ -213,26 +213,26 @@ export interface JSONRPCRequest {
   jsonrpc: "2.0";
   id: string | number;
   method: string;
-  params?: Record<string, any>;
+  params?: Record<string, Any>;
 }
 
 export interface JSONRPCResponse {
   jsonrpc: "2.0";
   id: string | number;
-  result?: any;
+  result?: Any;
   error?: JSONRPCError;
 }
 
 export interface JSONRPCError {
   code: number;
   message: string;
-  data?: any;
+  data?: Any;
 }
 
 export interface JSONRPCNotification {
   jsonrpc: "2.0";
   method: string;
-  params?: Record<string, any>;
+  params?: Record<string, Any>;
 }
 
 // MCP Protocol Methods
@@ -286,7 +286,7 @@ export interface MCPTransport {
   connect(): Promise<void>;
   disconnect(): Promise<void>;
   send(message: JSONRPCRequest | JSONRPCNotification): Promise<void>;
-  sendRequest(method: string, params?: Record<string, any>): Promise<any>;
+  sendRequest(method: string, params?: Record<string, Any>): Promise<Any>;
   onMessage(handler: (message: JSONRPCResponse | JSONRPCNotification) => void): void;
   onClose(handler: (error?: Error) => void): void;
   onError(handler: (error: Error) => void): void;

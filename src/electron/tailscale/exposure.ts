@@ -130,7 +130,7 @@ export async function startTailscaleExposure(
     } else if (config.mode === "serve") {
       enabled = await enableTailscaleServe(config.port, config.pathPrefix || "/");
     }
-  } catch (error: any) {
+  } catch (error: Any) {
     const message = error.message || String(error);
     warn(`[Tailscale Exposure] Failed to enable ${config.mode}: ${message}`);
     return { success: false, error: message };
@@ -191,7 +191,7 @@ export async function startTailscaleExposure(
         }
         log(`[Tailscale Exposure] ${config.mode} disabled`);
       }
-    } catch (error: any) {
+    } catch (error: Any) {
       warn(`[Tailscale Exposure] Cleanup error: ${error.message || error}`);
     } finally {
       activeExposure = null;
@@ -223,7 +223,7 @@ export async function stopTailscaleExposure(): Promise<void> {
       await disableTailscaleServe();
     }
     console.log(`[Tailscale Exposure] ${activeExposure.mode} disabled`);
-  } catch (error: any) {
+  } catch (error: Any) {
     console.error("[Tailscale Exposure] Stop error:", error.message || error);
   } finally {
     activeExposure = null;

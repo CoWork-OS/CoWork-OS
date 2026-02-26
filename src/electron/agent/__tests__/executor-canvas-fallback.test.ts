@@ -8,7 +8,7 @@ import { TaskExecutor } from "../executor";
 import type { LLMToolUse } from "../llm";
 
 function createExecutorWithStubs() {
-  const executor = Object.create(TaskExecutor.prototype) as any;
+  const executor = Object.create(TaskExecutor.prototype) as Any;
 
   executor.task = {
     id: "task-1",
@@ -30,7 +30,7 @@ function createExecutorWithStubs() {
   };
 }
 
-function createToolUse(input: Record<string, any>): LLMToolUse {
+function createToolUse(input: Record<string, Any>): LLMToolUse {
   return {
     type: "tool_use",
     id: "tool-1",
@@ -53,7 +53,7 @@ describe("TaskExecutor canvas_push fallback", () => {
       content: "<html><body>Existing</body></html>",
     });
 
-    await (executor as any).handleCanvasPushFallback(content, "assistant text");
+    await (executor as Any).handleCanvasPushFallback(content, "assistant text");
 
     expect(executor.extractHtmlFromText).not.toHaveBeenCalled();
     expect(executor.generateCanvasHtml).not.toHaveBeenCalled();
@@ -66,7 +66,7 @@ describe("TaskExecutor canvas_push fallback", () => {
     executor.extractHtmlFromText.mockReturnValue("<html><body>Extracted</body></html>");
     executor.generateCanvasHtml.mockResolvedValue("<html><body>Generated</body></html>");
 
-    await (executor as any).handleCanvasPushFallback(content, "assistant text");
+    await (executor as Any).handleCanvasPushFallback(content, "assistant text");
 
     expect(executor.extractHtmlFromText).toHaveBeenCalledWith("assistant text");
     expect(executor.generateCanvasHtml).not.toHaveBeenCalled();
@@ -82,7 +82,7 @@ describe("TaskExecutor canvas_push fallback", () => {
     executor.extractHtmlFromText.mockReturnValue(null);
     executor.generateCanvasHtml.mockResolvedValue("<html><body>Generated</body></html>");
 
-    await (executor as any).handleCanvasPushFallback(content, "assistant text");
+    await (executor as Any).handleCanvasPushFallback(content, "assistant text");
 
     expect(executor.extractHtmlFromText).toHaveBeenCalledWith("assistant text");
     expect(executor.generateCanvasHtml).toHaveBeenCalledWith("Please build a dashboard");
@@ -101,7 +101,7 @@ describe("TaskExecutor canvas_push fallback", () => {
     executor.extractHtmlFromText.mockReturnValue("<html><body>Extracted</body></html>");
     executor.generateCanvasHtml.mockResolvedValue("<html><body>Generated</body></html>");
 
-    await (executor as any).handleCanvasPushFallback(content, "assistant text");
+    await (executor as Any).handleCanvasPushFallback(content, "assistant text");
 
     expect(executor.extractHtmlFromText).not.toHaveBeenCalled();
     expect(executor.generateCanvasHtml).not.toHaveBeenCalled();

@@ -61,7 +61,7 @@ export class TavilyProvider implements SearchProvider {
       throw new Error(`Tavily API error: ${response.status} - ${error}`);
     }
 
-    const data = (await response.json()) as { results?: any[] };
+    const data = (await response.json()) as { results?: Any[] };
 
     return {
       results: this.mapResults(data.results || []),
@@ -75,7 +75,7 @@ export class TavilyProvider implements SearchProvider {
     try {
       await this.search({ query: "test", maxResults: 1 });
       return { success: true };
-    } catch (error: any) {
+    } catch (error: Any) {
       return {
         success: false,
         error: error.message || "Failed to connect to Tavily API",
@@ -83,7 +83,7 @@ export class TavilyProvider implements SearchProvider {
     }
   }
 
-  private mapResults(results: any[]): SearchResult[] {
+  private mapResults(results: Any[]): SearchResult[] {
     return results.map((r) => ({
       title: r.title || "",
       url: r.url || "",

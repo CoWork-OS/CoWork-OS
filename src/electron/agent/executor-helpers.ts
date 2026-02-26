@@ -280,11 +280,11 @@ export function isAskingQuestion(text: string): boolean {
 
   const questionWordPatterns = [/^(?:who|what|where|when|why|how|which)\b/i];
 
-  const imperativePatterns = [
+  const _imperativePatterns = [
     /^(?:please\s+)?(?:provide|share|send|upload|enter|paste|specify|clarify|confirm|choose|pick|select|list|tell|give)\b/i,
   ];
 
-  const decisionPatterns = [
+  const _decisionPatterns = [
     /^(?:do\s+you\s+want|do\s+you\s+prefer|would\s+you\s+like|would\s+you\s+prefer|should\s+i|is\s+it\s+(?:ok|okay|alright)\s+if\s+i)\b/i,
   ];
 
@@ -346,7 +346,7 @@ export class ToolCallDeduplicator {
   private recentCalls: Map<string, { count: number; lastCallTime: number; lastResult?: string }> =
     new Map();
   // Track semantic patterns (tool name -> list of recent inputs for pattern detection)
-  private semanticPatterns: Map<string, Array<{ input: any; time: number }>> = new Map();
+  private semanticPatterns: Map<string, Array<{ input: Any; time: number }>> = new Map();
   // Rate limiting: track calls per tool per minute
   private rateLimitCounters: Map<string, { count: number; windowStart: number }> = new Map();
 
@@ -365,7 +365,7 @@ export class ToolCallDeduplicator {
   /**
    * Generate a hash key for a tool call based on name and input
    */
-  private getCallKey(toolName: string, input: any): string {
+  private getCallKey(toolName: string, input: Any): string {
     // Normalize input by sorting keys for consistent hashing
     const normalizedInput = JSON.stringify(input, Object.keys(input || {}).sort());
     return `${toolName}:${normalizedInput}`;
@@ -375,7 +375,7 @@ export class ToolCallDeduplicator {
    * Extract semantic signature from input for pattern matching
    * This normalizes filenames, paths, etc. to detect "same operation, different target"
    */
-  private getSemanticSignature(toolName: string, input: any): string {
+  private getSemanticSignature(toolName: string, input: Any): string {
     if (!input) return toolName;
 
     if (toolName === "browser_navigate") {
@@ -498,7 +498,7 @@ export class ToolCallDeduplicator {
    */
   private checkSemanticDuplicate(
     toolName: string,
-    input: any,
+    input: Any,
   ): { isDuplicate: boolean; reason?: string } {
     const now = Date.now();
     const signature = this.getSemanticSignature(toolName, input);
@@ -530,7 +530,7 @@ export class ToolCallDeduplicator {
    */
   checkDuplicate(
     toolName: string,
-    input: any,
+    input: Any,
   ): { isDuplicate: boolean; reason?: string; cachedResult?: string } {
     const now = Date.now();
 
@@ -598,7 +598,7 @@ export class ToolCallDeduplicator {
   /**
    * Record a tool call (call this after checking for duplicates)
    */
-  recordCall(toolName: string, input: any, result?: string): void {
+  recordCall(toolName: string, input: Any, result?: string): void {
     const now = Date.now();
 
     // Record exact call

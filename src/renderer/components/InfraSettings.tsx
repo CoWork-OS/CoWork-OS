@@ -50,7 +50,7 @@ export function InfraSettings() {
         setSetupStep("done");
         await loadData();
       }
-    } catch (error: any) {
+    } catch (error: Any) {
       setSetupStep("error");
       setSetupError(error.message || String(error));
     }
@@ -70,7 +70,7 @@ export function InfraSettings() {
       await ipcAPI.infraReset();
       setSetupStep("idle");
       await loadData();
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Reset failed:", error);
     }
   };
@@ -92,13 +92,13 @@ export function InfraSettings() {
   const handleNestedChange = async (
     section: "e2b" | "domains" | "wallet" | "payments" | "enabledCategories",
     key: string,
-    value: any,
+    value: Any,
   ) => {
     if (!settings) return;
     const updated: InfraSettingsType = {
       ...settings,
       [section]: {
-        ...(settings[section] as any),
+        ...(settings[section] as Any),
         [key]: value,
       },
     };

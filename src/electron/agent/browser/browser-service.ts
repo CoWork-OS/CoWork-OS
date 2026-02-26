@@ -75,7 +75,7 @@ export interface FillResult {
 
 export interface EvaluateResult {
   success: boolean;
-  result: any;
+  result: Any;
 }
 
 function normalizeEvaluateScript(script: string): string {
@@ -200,7 +200,7 @@ export class BrowserService {
       context.url = this.page.url();
       context.content = await this.page.evaluate(`
         () => {
-          const body = (globalThis as any).document?.body;
+          const body = (globalThis as Any).document?.body;
           if (!body || !body.innerText) return '';
           return String(body.innerText).replace(/\\s+/g, ' ').trim().slice(0, 2000);
         }
@@ -634,7 +634,7 @@ export class BrowserService {
     const actionTimeout = this.getActionTimeout(timeoutMs);
 
     try {
-      const locator = await this.runLocatorActionWithRetry(
+      const _locator = await this.runLocatorActionWithRetry(
         selector,
         actionTimeout,
         async (candidate, actionTimeoutForAttempt) => {
@@ -673,7 +673,7 @@ export class BrowserService {
     const actionTimeout = this.getActionTimeout(timeoutMs);
 
     try {
-      const locator = await this.runLocatorActionWithRetry(
+      const _locator = await this.runLocatorActionWithRetry(
         selector,
         actionTimeout,
         async (candidate, actionTimeoutForAttempt) => {
@@ -831,7 +831,7 @@ export class BrowserService {
         await this.page!.uncheck(selector);
       }
       return { success: true, selector, checked };
-    } catch (error) {
+    } catch  {
       return { success: false, selector, checked: false };
     }
   }
@@ -866,7 +866,7 @@ export class BrowserService {
 
       await this.page!.evaluate(script);
       return { success: true };
-    } catch (error) {
+    } catch  {
       return { success: false };
     }
   }

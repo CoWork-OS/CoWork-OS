@@ -78,7 +78,7 @@ export class ActivityRepository {
    */
   findById(id: string): Activity | undefined {
     const stmt = this.db.prepare("SELECT * FROM activity_feed WHERE id = ?");
-    const row = stmt.get(id) as any;
+    const row = stmt.get(id) as Any;
     return row ? this.mapRowToActivity(row) : undefined;
   }
 
@@ -87,7 +87,7 @@ export class ActivityRepository {
    */
   list(query: ActivityListQuery): Activity[] {
     const conditions: string[] = ["workspace_id = ?"];
-    const params: any[] = [query.workspaceId];
+    const params: Any[] = [query.workspaceId];
 
     if (query.taskId) {
       conditions.push("task_id = ?");
@@ -134,7 +134,7 @@ export class ActivityRepository {
     }
 
     const stmt = this.db.prepare(sql);
-    const rows = stmt.all(...params) as any[];
+    const rows = stmt.all(...params) as Any[];
     return rows.map((row) => this.mapRowToActivity(row));
   }
 
@@ -215,7 +215,7 @@ export class ActivityRepository {
   /**
    * Map database row to Activity object
    */
-  private mapRowToActivity(row: any): Activity {
+  private mapRowToActivity(row: Any): Activity {
     return {
       id: row.id,
       workspaceId: row.workspace_id,

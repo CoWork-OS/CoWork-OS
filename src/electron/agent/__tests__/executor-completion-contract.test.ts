@@ -10,7 +10,7 @@ type HarnessOptions = {
 };
 
 function createExecuteHarness(options: HarnessOptions) {
-  const executor = Object.create(TaskExecutor.prototype) as any;
+  const executor = Object.create(TaskExecutor.prototype) as Any;
   const stepDescription = options.planStepDescription || "Do the task";
 
   executor.task = {
@@ -45,7 +45,7 @@ function createExecuteHarness(options: HarnessOptions) {
   };
   executor.contextManager = {
     getAvailableTokens: vi.fn().mockReturnValue(1000000),
-    compactMessagesWithMeta: vi.fn((messages: any) => ({ messages, meta: { kind: "none" } })),
+    compactMessagesWithMeta: vi.fn((messages: Any) => ({ messages, meta: { kind: "none" } })),
   };
   executor.provider = { createMessage: vi.fn() };
   executor.abortController = new AbortController();
@@ -64,14 +64,14 @@ function createExecuteHarness(options: HarnessOptions) {
   executor.dispatchMentionedAgentsAfterPlanning = vi.fn(async () => undefined);
   executor.verifySuccessCriteria = vi.fn(async () => ({ success: true, message: "ok" }));
   executor.isTransientProviderError = vi.fn().mockReturnValue(false);
-  executor.executePlan = vi.fn(async function executePlanStub(this: any) {
+  executor.executePlan = vi.fn(async function executePlanStub(this: Any) {
     const current = this.plan?.steps?.[0];
     if (current) {
       current.status = "completed";
       current.completedAt = Date.now();
     }
   });
-  executor.createPlan = vi.fn(async function createPlanStub(this: any) {
+  executor.createPlan = vi.fn(async function createPlanStub(this: Any) {
     this.plan = {
       description: "Plan",
       steps: [
@@ -109,7 +109,7 @@ describe("TaskExecutor completion contract integration", () => {
       planStepDescription: "Transcribe the video",
     });
 
-    await (executor as any).execute();
+    await (executor as Any).execute();
 
     expect(executor.daemon.completeTask).not.toHaveBeenCalled();
     expect(executor.daemon.updateTask).toHaveBeenCalledWith(
@@ -130,7 +130,7 @@ describe("TaskExecutor completion contract integration", () => {
       planStepDescription: "Generate the report",
     });
 
-    await (executor as any).execute();
+    await (executor as Any).execute();
 
     expect(executor.daemon.completeTask).not.toHaveBeenCalled();
     expect(executor.daemon.updateTask).toHaveBeenCalledWith(
@@ -151,7 +151,7 @@ describe("TaskExecutor completion contract integration", () => {
       planStepDescription: "Transcribe the video",
     });
 
-    await (executor as any).execute();
+    await (executor as Any).execute();
 
     expect(executor.daemon.completeTask).not.toHaveBeenCalled();
     expect(executor.daemon.updateTask).toHaveBeenCalledWith(
@@ -171,11 +171,11 @@ describe("TaskExecutor completion contract integration", () => {
       lastOutput: "You should skip it because it repeats beginner concepts.",
       planStepDescription: "Transcribe the video",
     });
-    (executor as any).toolResultMemory = [
+    (executor as Any).toolResultMemory = [
       { tool: "web_fetch", summary: "https://example.com/transcript", timestamp: Date.now() },
     ];
 
-    await (executor as any).execute();
+    await (executor as Any).execute();
 
     expect(executor.daemon.completeTask).toHaveBeenCalledTimes(1);
     expect(executor.daemon.updateTask).not.toHaveBeenCalledWith(
@@ -198,7 +198,7 @@ describe("TaskExecutor completion contract integration", () => {
       planStepDescription: "Verify: review transcript and provide recommendation",
     });
 
-    await (executor as any).execute();
+    await (executor as Any).execute();
 
     expect(executor.daemon.completeTask).toHaveBeenCalledTimes(1);
     expect(executor.daemon.updateTask).not.toHaveBeenCalledWith(
@@ -218,7 +218,7 @@ describe("TaskExecutor completion contract integration", () => {
       planStepDescription: "Review transcript and recommend",
     });
 
-    await (executor as any).execute();
+    await (executor as Any).execute();
 
     expect(executor.daemon.completeTask).toHaveBeenCalledTimes(1);
     expect(executor.daemon.updateTask).not.toHaveBeenCalledWith(
@@ -236,12 +236,12 @@ describe("TaskExecutor completion contract integration", () => {
     });
     const recoverySpy = vi.fn(async () => true);
 
-    (executor as any).executePlan = vi.fn(async () => {
+    (executor as Any).executePlan = vi.fn(async () => {
       throw new Error("Request cancelled");
     });
-    (executor as any).finalizeWithTimeoutRecovery = recoverySpy;
+    (executor as Any).finalizeWithTimeoutRecovery = recoverySpy;
 
-    await (executor as any).execute();
+    await (executor as Any).execute();
 
     expect(recoverySpy).toHaveBeenCalledTimes(1);
     expect(executor.daemon.updateTask).not.toHaveBeenCalledWith(

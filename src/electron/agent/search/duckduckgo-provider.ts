@@ -74,7 +74,7 @@ export class DuckDuckGoProvider implements SearchProvider {
         searchType: "web",
         provider: "duckduckgo",
       };
-    } catch (error: any) {
+    } catch (error: Any) {
       clearTimeout(timeout);
       if (error.name === "AbortError") {
         throw new Error("DuckDuckGo request timed out");
@@ -90,7 +90,7 @@ export class DuckDuckGoProvider implements SearchProvider {
         return { success: false, error: "No results returned from DuckDuckGo" };
       }
       return { success: true };
-    } catch (error: any) {
+    } catch (error: Any) {
       return {
         success: false,
         error: error.message || "Failed to connect to DuckDuckGo",

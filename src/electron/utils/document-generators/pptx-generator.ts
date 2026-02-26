@@ -37,7 +37,7 @@ export async function generatePPTX(
   const pptx = new PptxGenJS();
 
   const primaryColor = (options.theme?.primaryColor || "#2563eb").replace("#", "");
-  const secondaryColor = (options.theme?.secondaryColor || "#1e40af").replace("#", "");
+  const _secondaryColor = (options.theme?.secondaryColor || "#1e40af").replace("#", "");
   const fontFace = options.theme?.fontFace || "Helvetica Neue";
 
   // Metadata
@@ -134,7 +134,7 @@ export async function generatePPTX(
       }
 
       if (slideDef.image) {
-        const imgOpts: any = {
+        const imgOpts: Any = {
           x: 5.5,
           y: 1.5,
           w: slideDef.image.width || 4,

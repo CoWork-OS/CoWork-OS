@@ -412,7 +412,7 @@ export class BrowserTools {
   /**
    * Execute a browser tool
    */
-  async executeTool(toolName: string, input: any): Promise<any> {
+  async executeTool(toolName: string, input: Any): Promise<Any> {
     switch (toolName) {
       case "browser_navigate": {
         await this.ensureBrowserConfigured({

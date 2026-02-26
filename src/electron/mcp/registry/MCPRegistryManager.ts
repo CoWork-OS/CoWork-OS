@@ -1300,7 +1300,7 @@ export class MCPRegistryManager {
         `[MCPRegistryManager] Fetched ${mergedRegistry.servers.length} servers from registry (with local connectors)`,
       );
       return mergedRegistry;
-    } catch (error: any) {
+    } catch (error: Any) {
       // Only log on first failure or after cache expires
       if (!this.registryCache) {
         console.warn(
@@ -1382,7 +1382,7 @@ export class MCPRegistryManager {
       const version = stdout.trim();
       console.log(`[MCPRegistryManager] Package ${packageName} exists, version: ${version}`);
       return { exists: true, version };
-    } catch (error: any) {
+    } catch (error: Any) {
       // Check if it's a 404 (package not found)
       if (
         error.message?.includes("404") ||

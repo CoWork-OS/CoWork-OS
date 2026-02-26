@@ -11,7 +11,7 @@ import {
 export const GMAIL_API_BASE = "https://gmail.googleapis.com/gmail/v1";
 const DEFAULT_TIMEOUT_MS = 20000;
 
-function parseJsonSafe(text: string): any | undefined {
+function parseJsonSafe(text: string): Any | undefined {
   const trimmed = text.trim();
   if (!trimmed) return undefined;
   try {
@@ -21,7 +21,7 @@ function parseJsonSafe(text: string): any | undefined {
   }
 }
 
-function formatGmailError(status: number, data: any, fallback?: string): string {
+function formatGmailError(status: number, data: Any, fallback?: string): string {
   const message = data?.error?.message || data?.message || fallback || "Gmail API error";
   return `Gmail API error ${status}: ${message}`;
 }
@@ -30,13 +30,13 @@ export interface GmailRequestOptions {
   method: "GET" | "POST" | "PATCH" | "DELETE";
   path: string;
   query?: Record<string, string | number | boolean | string[] | undefined>;
-  body?: any;
+  body?: Any;
   timeoutMs?: number;
 }
 
 export interface GmailRequestResult {
   status: number;
-  data?: any;
+  data?: Any;
   raw?: string;
 }
 
@@ -100,7 +100,7 @@ export async function gmailRequest(
         data: data ?? undefined,
         raw: rawText || undefined,
       };
-    } catch (error: any) {
+    } catch (error: Any) {
       if (error?.name === "AbortError") {
         throw new Error("Gmail API request timed out");
       }
@@ -113,7 +113,7 @@ export async function gmailRequest(
   try {
     const accessToken = await getGoogleWorkspaceAccessToken(settings);
     return await requestOnce(accessToken);
-  } catch (error: any) {
+  } catch (error: Any) {
     if (error?.status === 401 && settings.refreshToken) {
       const refreshedToken = await refreshGoogleWorkspaceAccessToken(settings);
       return await requestOnce(refreshedToken);

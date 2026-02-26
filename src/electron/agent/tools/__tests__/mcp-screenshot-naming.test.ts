@@ -24,7 +24,7 @@ describe("ToolRegistry MCP screenshot naming", () => {
 
     const { ToolRegistry } = await import("../registry");
 
-    const workspace: any = {
+    const workspace: Any = {
       id: "test-workspace",
       name: "Test Workspace",
       path: workspacePath,
@@ -33,7 +33,7 @@ describe("ToolRegistry MCP screenshot naming", () => {
       permissions: { read: true, write: true, delete: true, network: true, shell: false },
     };
 
-    const daemon: any = {
+    const daemon: Any = {
       logEvent: vi.fn(),
       registerArtifact: vi.fn(),
     };
@@ -53,7 +53,7 @@ describe("ToolRegistry MCP screenshot naming", () => {
       ],
     };
 
-    const out = await (registry as any).formatMCPResult(result, "puppeteer_screenshot", {
+    const out = await (registry as Any).formatMCPResult(result, "puppeteer_screenshot", {
       name: "opentable_initial",
       width: 1280,
       height: 900,

@@ -88,7 +88,7 @@ export function generateControlPlaneToken(bytes = 32): string {
 /**
  * Encrypt a secret using OS keychain via safeStorage
  */
-function encryptSecret(value?: string): string | undefined {
+function _encryptSecret(value?: string): string | undefined {
   if (!value || !value.trim()) return undefined;
   const trimmed = value.trim();
   if (trimmed === MASKED_VALUE) return undefined;
@@ -119,7 +119,7 @@ function decryptSecret(value?: string): string | undefined {
         const encrypted = Buffer.from(value.slice(ENCRYPTED_PREFIX.length), "base64");
         return safeStorage.decryptString(encrypted);
       }
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("[ControlPlane Settings] Failed to decrypt:", error.message || error);
     }
   }

@@ -284,7 +284,7 @@ export function VoiceSettings({ onStateChange }: VoiceSettingsProps) {
           ? `Connected! Found ${result.voiceCount} voices.`
           : result.error || "Connection failed",
       });
-    } catch (error: any) {
+    } catch (error: Any) {
       setElevenLabsTestResult({
         success: false,
         message: error.message || "Connection failed",
@@ -303,7 +303,7 @@ export function VoiceSettings({ onStateChange }: VoiceSettingsProps) {
         success: result.success,
         message: result.success ? "Connected!" : result.error || "Connection failed",
       });
-    } catch (error: any) {
+    } catch (error: Any) {
       setOpenAITestResult({
         success: false,
         message: error.message || "Connection failed",
@@ -322,7 +322,7 @@ export function VoiceSettings({ onStateChange }: VoiceSettingsProps) {
         success: result.success,
         message: result.success ? "Connected!" : result.error || "Connection failed",
       });
-    } catch (error: any) {
+    } catch (error: Any) {
       setAzureTestResult({
         success: false,
         message: error.message || "Connection failed",

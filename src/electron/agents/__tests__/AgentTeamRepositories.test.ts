@@ -28,10 +28,10 @@ vi.mock("electron", () => ({
   },
 }));
 
-let mockTeams: Map<string, any>;
-let mockMembers: Map<string, any>;
-let mockRuns: Map<string, any>;
-let mockItems: Map<string, any>;
+let mockTeams: Map<string, Any>;
+let mockMembers: Map<string, Any>;
+let mockRuns: Map<string, Any>;
+let mockItems: Map<string, Any>;
 
 let teamIdCounter: number;
 let memberIdCounter: number;
@@ -164,7 +164,7 @@ class MockAgentTeamRepository {
     return mockTeams.delete(id);
   }
 
-  private mapRowToTeam(row: any): AgentTeam {
+  private mapRowToTeam(row: Any): AgentTeam {
     return {
       id: row.id,
       workspaceId: row.workspace_id,
@@ -251,7 +251,7 @@ class MockAgentTeamMemberRepository {
     return mockMembers.delete(id);
   }
 
-  private mapRowToMember(row: any): AgentTeamMember {
+  private mapRowToMember(row: Any): AgentTeamMember {
     return {
       id: row.id,
       teamId: row.team_id,
@@ -337,7 +337,7 @@ class MockAgentTeamRunRepository {
     return this.findById(id);
   }
 
-  private mapRowToRun(row: any): AgentTeamRun {
+  private mapRowToRun(row: Any): AgentTeamRun {
     return {
       id: row.id,
       teamId: row.team_id,
@@ -437,7 +437,7 @@ class MockAgentTeamItemRepository {
     return changes;
   }
 
-  private mapRowToItem(row: any): AgentTeamItem {
+  private mapRowToItem(row: Any): AgentTeamItem {
     return {
       id: row.id,
       teamRunId: row.team_run_id,

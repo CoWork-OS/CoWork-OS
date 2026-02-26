@@ -14,7 +14,7 @@ function isTokenValid(cache: CopilotTokenCache, now = Date.now()): boolean {
   return cache.expiresAt - now > 5 * 60 * 1000;
 }
 
-function parseCopilotTokenResponse(payload: any): { token: string; expiresAt: number } {
+function parseCopilotTokenResponse(payload: Any): { token: string; expiresAt: number } {
   if (!payload || typeof payload !== "object") {
     throw new Error("Unexpected response from Copilot token endpoint");
   }
@@ -71,7 +71,7 @@ export class GitHubCopilotProvider implements LLMProvider {
     try {
       const client = await this.getClient(this.model);
       return await client.testConnection();
-    } catch (error: any) {
+    } catch (error: Any) {
       return { success: false, error: error.message || "Failed to connect to Copilot" };
     }
   }

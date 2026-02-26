@@ -11,8 +11,8 @@ vi.mock("child_process", () => ({
 }));
 
 // Import after mocking
-import { TunnelManager, TunnelConfig, TunnelStatus } from "../tunnel";
-import { spawn, execSync } from "child_process";
+import { TunnelManager, TunnelConfig, TunnelStatus as _TunnelStatus } from "../tunnel";
+import { spawn as _spawn, execSync as _execSync } from "child_process";
 
 describe("TunnelManager", () => {
   beforeEach(() => {
@@ -104,8 +104,8 @@ describe("TunnelManager", () => {
       const manager = new TunnelManager({ provider: "ngrok", port: 3000 });
 
       // Mock internal state to simulate running tunnel
-      (manager as any)._status = "running";
-      (manager as any)._url = "https://test.ngrok.io";
+      (manager as Any)._status = "running";
+      (manager as Any)._url = "https://test.ngrok.io";
 
       const url = await manager.start();
       expect(url).toBe("https://test.ngrok.io");
@@ -113,12 +113,12 @@ describe("TunnelManager", () => {
 
     it("should throw error for unsupported provider", async () => {
       const manager = new TunnelManager({
-        provider: "invalid" as any,
+        provider: "invalid" as Any,
         port: 3000,
       });
 
       // Mock the provider check to pass
-      (manager as any).checkProviderInstalled = vi.fn().mockResolvedValue(true);
+      (manager as Any).checkProviderInstalled = vi.fn().mockResolvedValue(true);
 
       await expect(manager.start()).rejects.toThrow("Unsupported tunnel provider");
     });
@@ -127,7 +127,7 @@ describe("TunnelManager", () => {
       const manager = new TunnelManager({ provider: "ngrok", port: 3000 });
 
       // Mock the provider check to fail immediately
-      (manager as any).checkProviderInstalled = vi
+      (manager as Any).checkProviderInstalled = vi
         .fn()
         .mockRejectedValue(new Error("Not installed"));
 
@@ -147,7 +147,7 @@ describe("TunnelManager", () => {
       const manager = new TunnelManager({ provider: "ngrok", port: 3000 });
 
       // Mock the provider check to fail
-      (manager as any).checkProviderInstalled = vi
+      (manager as Any).checkProviderInstalled = vi
         .fn()
         .mockRejectedValue(new Error("ngrok not found"));
 
@@ -165,7 +165,7 @@ describe("TunnelManager", () => {
       const manager = new TunnelManager({ provider: "ngrok", port: 3000 });
 
       // Mock the provider check to fail
-      (manager as any).checkProviderInstalled = vi
+      (manager as Any).checkProviderInstalled = vi
         .fn()
         .mockRejectedValue(new Error("Provider error"));
 
@@ -187,8 +187,8 @@ describe("TunnelManager", () => {
       const manager = new TunnelManager({ provider: "ngrok", port: 3000 });
 
       // Mock internal state to simulate running tunnel
-      (manager as any)._status = "running";
-      (manager as any)._url = "https://test.ngrok.io";
+      (manager as Any)._status = "running";
+      (manager as Any)._url = "https://test.ngrok.io";
 
       await manager.stop();
 
@@ -212,7 +212,7 @@ describe("TunnelManager", () => {
       manager.on("stopped", stoppedHandler);
 
       // Mock internal state
-      (manager as any)._status = "running";
+      (manager as Any)._status = "running";
 
       await manager.stop();
 
@@ -227,11 +227,11 @@ describe("TunnelManager", () => {
       });
 
       // Mock a restart timer
-      (manager as any).restartTimer = setTimeout(() => {}, 10000);
+      (manager as Any).restartTimer = setTimeout(() => {}, 10000);
 
       await manager.stop();
 
-      expect((manager as any).restartTimer).toBeUndefined();
+      expect((manager as Any).restartTimer).toBeUndefined();
     });
   });
 

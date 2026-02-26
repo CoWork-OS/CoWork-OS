@@ -80,7 +80,7 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
       setGoogleApiKey("");
       setGoogleSearchEngineId("");
       await loadConfig();
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to save search settings:", error);
     } finally {
       setSaving(false);
@@ -93,7 +93,7 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
       setTestResult(null);
       const result = await window.electronAPI.testSearchProvider(providerType);
       setTestResult({ provider: providerType, ...result });
-    } catch (error: any) {
+    } catch (error: Any) {
       setTestResult({ provider: providerType, success: false, error: error.message });
     } finally {
       setTestingProvider(null);

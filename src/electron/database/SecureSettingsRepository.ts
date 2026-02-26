@@ -536,6 +536,7 @@ export class SecureSettingsRepository {
 
     // Fallback: Combine system properties (less stable, for backwards compatibility)
     // This path is only taken if machine ID file operations failed
+// oxlint-disable-next-line typescript-eslint(no-require-imports)
     const os = require("os");
     const factors = [
       os.hostname(),

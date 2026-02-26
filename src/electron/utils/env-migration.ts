@@ -31,7 +31,8 @@ export interface ImportProcessEnvOptions {
 function getElectronAppPath(): string | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const electron = require("electron") as any;
+// oxlint-disable-next-line typescript-eslint(no-require-imports)
+    const electron = require("electron") as Any;
     const app = electron?.app;
     if (app && typeof app.getAppPath === "function") {
       return app.getAppPath();
@@ -59,7 +60,7 @@ function shouldWriteValue(
   return !existingNorm;
 }
 
-function isProviderConfigured(providerType: LLMProviderType, settings: any): boolean {
+function isProviderConfigured(providerType: LLMProviderType, settings: Any): boolean {
   switch (providerType) {
     case "anthropic":
       return !!normalizeEnvValue(settings?.anthropic?.apiKey);
@@ -104,7 +105,7 @@ function isProviderConfigured(providerType: LLMProviderType, settings: any): boo
   }
 }
 
-function pickProviderFromSettings(settings: any): LLMProviderType | null {
+function pickProviderFromSettings(settings: Any): LLMProviderType | null {
   if (
     normalizeEnvValue(settings?.openai?.apiKey) ||
     normalizeEnvValue(settings?.openai?.accessToken)
@@ -352,7 +353,7 @@ export async function migrateEnvToSettings(): Promise<MigrationResult> {
       migrated: migratedKeys.length > 0,
       migratedKeys,
     };
-  } catch (error: any) {
+  } catch (error: Any) {
     return {
       migrated: false,
       migratedKeys: [],
@@ -381,8 +382,8 @@ export async function importProcessEnvToSettings(
 
   try {
     // Load current settings
-    const llmSettings = LLMProviderFactory.loadSettings() as any;
-    const searchSettings = SearchProviderFactory.loadSettings() as any;
+    const llmSettings = LLMProviderFactory.loadSettings() as Any;
+    const searchSettings = SearchProviderFactory.loadSettings() as Any;
     const originalProviderType: LLMProviderType | undefined = llmSettings?.providerType;
     let llmChanged = false;
     let searchChanged = false;
@@ -587,7 +588,7 @@ export async function importProcessEnvToSettings(
       migrated: migratedKeys.length > 0,
       migratedKeys,
     };
-  } catch (error: any) {
+  } catch (error: Any) {
     return {
       migrated: false,
       migratedKeys: [],

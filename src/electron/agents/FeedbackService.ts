@@ -119,7 +119,7 @@ export class FeedbackService {
   async start(agentDaemon: AgentDaemon): Promise<void> {
     this.agentDaemon = agentDaemon;
 
-    agentDaemon.on("user_feedback", (evt: any) => {
+    agentDaemon.on("user_feedback", (evt: Any) => {
       try {
         const taskId = typeof evt?.taskId === "string" ? evt.taskId : "";
         if (!taskId) return;
@@ -164,7 +164,7 @@ export class FeedbackService {
 
   private ingestFeedbackEvent(
     taskId: string,
-    payload: any,
+    payload: Any,
     timestampMs: number,
     opts?: { queueWeekly?: boolean },
   ): void {
@@ -284,7 +284,7 @@ export class FeedbackService {
         }
 
         for (const group of groups.values()) {
-          let current: any = { entries: [] as FeedbackEntry[] };
+          let current: Any = { entries: [] as FeedbackEntry[] };
           if (fs.existsSync(group.absPath)) {
             try {
               const raw = fs.readFileSync(group.absPath, "utf8");
@@ -366,7 +366,7 @@ export class FeedbackService {
     for (const row of rows) {
       const payload = row?.payload;
       if (!payload) continue;
-      let parsed: any;
+      let parsed: Any;
       try {
         parsed = JSON.parse(payload);
       } catch {

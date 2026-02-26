@@ -36,7 +36,7 @@ const SERVER_INFO: MCPServerInfo = {
 // Tool adapter interface - will be injected with ToolRegistry
 export interface ToolProvider {
   getTools(): MCPTool[];
-  executeTool(name: string, args: Record<string, any>): Promise<any>;
+  executeTool(name: string, args: Record<string, Any>): Promise<Any>;
 }
 
 export class MCPHostServer extends EventEmitter {
@@ -161,7 +161,7 @@ export class MCPHostServer extends EventEmitter {
   /**
    * Handle a parsed JSON-RPC message
    */
-  private async handleMessage(message: any): Promise<void> {
+  private async handleMessage(message: Any): Promise<void> {
     // Check if it's a request (has id) or notification (no id)
     if ("id" in message && message.id !== null) {
       await this.handleRequest(message as JSONRPCRequest);
@@ -177,7 +177,7 @@ export class MCPHostServer extends EventEmitter {
     const { id, method, params } = request;
 
     try {
-      let result: any;
+      let result: Any;
 
       switch (method) {
         case MCP_METHODS.INITIALIZE:
@@ -203,7 +203,7 @@ export class MCPHostServer extends EventEmitter {
       }
 
       this.sendResult(id, result);
-    } catch (error: any) {
+    } catch (error: Any) {
       if (error.code !== undefined) {
         this.sendError(id, error.code, error.message, error.data);
       } else {
@@ -216,7 +216,7 @@ export class MCPHostServer extends EventEmitter {
    * Handle a JSON-RPC notification
    */
   private async handleNotification(notification: JSONRPCNotification): Promise<void> {
-    const { method, params } = notification;
+    const { method } = notification;
 
     switch (method) {
       case MCP_METHODS.INITIALIZED:
@@ -231,7 +231,7 @@ export class MCPHostServer extends EventEmitter {
   /**
    * Handle the initialize request
    */
-  private handleInitialize(params: any): {
+  private handleInitialize(params: Any): {
     protocolVersion: string;
     capabilities: MCPServerCapabilities;
     serverInfo: MCPServerInfo;
@@ -275,7 +275,7 @@ export class MCPHostServer extends EventEmitter {
   /**
    * Handle tools/call request
    */
-  private async handleToolsCall(params: any): Promise<any> {
+  private async handleToolsCall(params: Any): Promise<Any> {
     if (!this.toolProvider) {
       throw this.createError(MCP_ERROR_CODES.INTERNAL_ERROR, "Tool provider not available");
     }
@@ -310,7 +310,7 @@ export class MCPHostServer extends EventEmitter {
           content: [{ type: "text", text: String(result) }],
         };
       }
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error(`[MCPHostServer] Tool call failed:`, error);
       return {
         content: [{ type: "text", text: `Error: ${error.message}` }],
@@ -332,7 +332,7 @@ export class MCPHostServer extends EventEmitter {
   /**
    * Send a successful result
    */
-  private sendResult(id: string | number, result: any): void {
+  private sendResult(id: string | number, result: Any): void {
     const response: JSONRPCResponse = {
       jsonrpc: "2.0",
       id,
@@ -344,7 +344,7 @@ export class MCPHostServer extends EventEmitter {
   /**
    * Send an error response
    */
-  private sendError(id: string | number | null, code: number, message: string, data?: any): void {
+  private sendError(id: string | number | null, code: number, message: string, data?: Any): void {
     const response: JSONRPCResponse = {
       jsonrpc: "2.0",
       id: id ?? 0,
@@ -380,8 +380,8 @@ export class MCPHostServer extends EventEmitter {
   private createError(
     code: number,
     message: string,
-    data?: any,
-  ): { code: number; message: string; data?: any } {
+    data?: Any,
+  ): { code: number; message: string; data?: Any } {
     return { code, message, data };
   }
 }

@@ -69,7 +69,7 @@ export function WorkingStateEditor({ state, onSave, onCancel }: WorkingStateEdit
       });
 
       onSave(updatedState);
-    } catch (err: any) {
+    } catch (err: Any) {
       console.error("Failed to save working state:", err);
       setError(err.message || "Failed to save");
     } finally {

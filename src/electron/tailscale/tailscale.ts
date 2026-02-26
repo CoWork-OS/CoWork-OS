@@ -205,7 +205,7 @@ export async function getTailscaleStatus(): Promise<TailscaleStatusJson | null> 
       timestamp: Date.now(),
     };
     return status;
-  } catch (error: any) {
+  } catch (error: Any) {
     console.error("[Tailscale] Failed to get status:", error.message || error);
     cachedStatus = {
       data: null,
@@ -250,7 +250,7 @@ async function execTailscaleCommand(
 
   try {
     return await execFileAsync(binary, args, { timeout });
-  } catch (error: any) {
+  } catch (error: Any) {
     // Check if it's a permission error
     const stderr = error.stderr || "";
     const message = error.message || "";
@@ -291,7 +291,7 @@ export async function enableTailscaleServe(port: number, urlPath = "/"): Promise
     // Clear status cache to reflect new state
     cachedStatus = null;
     return true;
-  } catch (error: any) {
+  } catch (error: Any) {
     console.error("[Tailscale] Failed to enable Serve:", error.message || error);
     return false;
   }
@@ -308,7 +308,7 @@ export async function disableTailscaleServe(): Promise<boolean> {
     console.log("[Tailscale] Serve disabled");
     cachedStatus = null;
     return true;
-  } catch (error: any) {
+  } catch (error: Any) {
     console.error("[Tailscale] Failed to disable Serve:", error.message || error);
     return false;
   }
@@ -331,7 +331,7 @@ export async function enableTailscaleFunnel(port: number, urlPath = "/"): Promis
     console.log(`[Tailscale] Funnel enabled for ${target}`);
     cachedStatus = null;
     return true;
-  } catch (error: any) {
+  } catch (error: Any) {
     console.error("[Tailscale] Failed to enable Funnel:", error.message || error);
     return false;
   }
@@ -348,7 +348,7 @@ export async function disableTailscaleFunnel(): Promise<boolean> {
     console.log("[Tailscale] Funnel disabled");
     cachedStatus = null;
     return true;
-  } catch (error: any) {
+  } catch (error: Any) {
     console.error("[Tailscale] Failed to disable Funnel:", error.message || error);
     return false;
   }

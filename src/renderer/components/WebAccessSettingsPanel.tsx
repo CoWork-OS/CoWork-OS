@@ -36,7 +36,7 @@ export const WebAccessSettingsPanel: React.FC = () => {
 
   const loadSettings = async () => {
     try {
-      const settings = await (window as any).electronAPI.getWebAccessSettings();
+      const settings = await (window as Any).electronAPI.getWebAccessSettings();
       if (settings) setConfig(settings);
       await loadStatus();
     } catch {
@@ -46,7 +46,7 @@ export const WebAccessSettingsPanel: React.FC = () => {
 
   const loadStatus = async () => {
     try {
-      const s = await (window as any).electronAPI.getWebAccessStatus();
+      const s = await (window as Any).electronAPI.getWebAccessStatus();
       if (s) setStatus(s);
     } catch {
       // Not available
@@ -57,7 +57,7 @@ export const WebAccessSettingsPanel: React.FC = () => {
     const newConfig = { ...config, ...updates };
     setConfig(newConfig);
     try {
-      await (window as any).electronAPI.saveWebAccessSettings(updates);
+      await (window as Any).electronAPI.saveWebAccessSettings(updates);
       await loadStatus();
     } catch {
       // Save failed

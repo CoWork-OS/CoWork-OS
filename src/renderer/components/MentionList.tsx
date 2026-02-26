@@ -75,7 +75,7 @@ export function MentionList({
   const loadMentions = useCallback(async () => {
     try {
       setLoading(true);
-      const query: any = {};
+      const query: Any = {};
       if (workspaceId) query.workspaceId = workspaceId;
       if (taskId) query.taskId = taskId;
       if (toAgentRoleId) query.toAgentRoleId = toAgentRoleId;

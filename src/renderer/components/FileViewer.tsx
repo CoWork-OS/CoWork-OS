@@ -39,7 +39,7 @@ export function FileViewer({ filePath, workspacePath, onClose }: FileViewerProps
         } else {
           setError(result.error || "Failed to load file");
         }
-      } catch (err: any) {
+      } catch (err: Any) {
         setError(err.message || "Failed to load file");
       } finally {
         setLoading(false);

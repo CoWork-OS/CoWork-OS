@@ -65,7 +65,7 @@ export function TaskLabelManager({ workspaceId, onClose }: TaskLabelManagerProps
       setLabels((prev) => [...prev, created]);
       setNewLabelName("");
       setNewLabelColor(DEFAULT_COLORS[Math.floor(Math.random() * DEFAULT_COLORS.length)]);
-    } catch (err: any) {
+    } catch (err: Any) {
       console.error("Failed to create label:", err);
       setError(err.message || "Failed to create label");
     }
@@ -82,7 +82,7 @@ export function TaskLabelManager({ workspaceId, onClose }: TaskLabelManagerProps
       });
       setLabels((prev) => prev.map((l) => (l.id === updated.id ? updated : l)));
       setEditingLabel(null);
-    } catch (err: any) {
+    } catch (err: Any) {
       console.error("Failed to update label:", err);
       setError(err.message || "Failed to update label");
     }
@@ -95,7 +95,7 @@ export function TaskLabelManager({ workspaceId, onClose }: TaskLabelManagerProps
       setError(null);
       await window.electronAPI.deleteTaskLabel(id);
       setLabels((prev) => prev.filter((l) => l.id !== id));
-    } catch (err: any) {
+    } catch (err: Any) {
       console.error("Failed to delete label:", err);
       setError(err.message || "Failed to delete label");
     }

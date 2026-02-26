@@ -428,8 +428,8 @@ export class XTools {
 
         const extractArticleUrl = (root) => {
           const links = [
-            'a[href*=\"/status/\"]',
-            'a[href*=\"/i/web/status/\"]',
+            'a[href*="/status/"]',
+            'a[href*="/i/web/status/"]',
           ];
           const statusCandidate = links
             .map((selector) => root.querySelector(selector))
@@ -474,28 +474,28 @@ export class XTools {
             }
 
             const authorNode = getFirst(tweet, [
-              '[data-testid=\"User-Name\"]',
-              '[data-testid=\"UserNames\"]',
-              'div[data-testid=\"User-Name\"]',
-              '[data-testid=\"UserName\"]',
+              '[data-testid="User-Name"]',
+              '[data-testid="UserNames"]',
+              'div[data-testid="User-Name"]',
+              '[data-testid="UserName"]',
             ]);
             const fallbackHandleNode = getFirst(tweet, [
-              '[role=\"link\"] [dir=\"ltr\"] span',
-              'a[href*=\"/status/\"] + div [dir=\"ltr\"]',
-              'a[href*=\"/i/web/status/\"] + div [dir=\"ltr\"]',
-              '[role=\"link\"] span',
+              '[role="link"] [dir="ltr"] span',
+              'a[href*="/status/"] + div [dir="ltr"]',
+              'a[href*="/i/web/status/"] + div [dir="ltr"]',
+              '[role="link"] span',
             ]);
             const bodyNode = getFirst(tweet, [
-              '[data-testid=\"tweetText\"]',
-              '[data-testid=\"tweetText\"][lang]',
-              'div[data-testid=\"tweetText\"][lang]',
-              '[lang][dir] [dir=\"ltr\"]',
+              '[data-testid="tweetText"]',
+              '[data-testid="tweetText"][lang]',
+              'div[data-testid="tweetText"][lang]',
+              '[lang][dir] [dir="ltr"]',
               '[lang]',
             ]);
             const timeNode = getFirst(tweet, [
               'time',
               'a time',
-              'a[href*=\"/status/\"] time',
+              'a[href*="/status/"] time',
             ]);
 
             const author = normalizeText(
@@ -584,7 +584,7 @@ export class XTools {
 
   private async runBrowserScript(
     script: string,
-  ): Promise<{ success: boolean; result?: any; error?: string }> {
+  ): Promise<{ success: boolean; result?: Any; error?: string }> {
     const result = await this.browserTools.executeTool("browser_evaluate", {
       script,
     });
@@ -616,7 +616,7 @@ export class XTools {
 
   private async openBrowserFallbackPage(
     url: string,
-  ): Promise<{ navResult?: any; browserChannel: "chromium" | "chrome" | "brave"; error?: string }> {
+  ): Promise<{ navResult?: Any; browserChannel: "chromium" | "chrome" | "brave"; error?: string }> {
     const attempts: Array<{ browser_channel?: "chromium" | "chrome" | "brave" }> = [
       {},
       { browser_channel: "brave" },
@@ -637,7 +637,7 @@ export class XTools {
           navResult,
           browserChannel: attempt.browser_channel || "chromium",
         };
-      } catch (error: any) {
+      } catch (error: Any) {
         lastError = error?.message || "Browser fallback navigation failed";
       }
     }
@@ -801,7 +801,7 @@ export class XTools {
     action: XWriteAction,
     input: XActionInput,
     reason: string,
-  ): Promise<any> {
+  ): Promise<Any> {
     const fallbackUrl = this.getBrowserFallbackUrl(action, input);
 
     const openResult = await this.openBrowserFallbackPage(fallbackUrl);
@@ -831,7 +831,7 @@ export class XTools {
         typeof writePageContent?.text === "string" ? writePageContent.text : undefined;
       writePageText = this.trimTextForPrompt(contentText);
       writePageLikelyBlocked = this.isLikelyBrowserBlocked(writePageText);
-    } catch (error: any) {
+    } catch  {
       writePageText = undefined;
       writePageLikelyBlocked = false;
     }
@@ -1000,14 +1000,14 @@ export class XTools {
     action: XAction,
     input: XActionInput,
     reason: string,
-  ): Promise<any> {
+  ): Promise<Any> {
     if (this.isWriteAction(action)) {
       return await this.runBrowserWriteFallback(action, input, reason);
     }
 
     const fallbackUrl = this.getBrowserFallbackUrl(action, input);
-    let navResult: any;
-    let content: any;
+    let navResult: Any;
+    let content: Any;
     let extractedItems: BrowserFallbackTweetItem[] = [];
 
     const openResult = await this.openBrowserFallbackPage(fallbackUrl);
@@ -1049,7 +1049,7 @@ export class XTools {
     try {
       content = await this.browserTools.executeTool("browser_get_content", {});
       extractedItems = await this.extractBrowserReadableContent(action);
-    } catch (error: any) {
+    } catch (error: Any) {
       const fallbackError = error?.message || "Browser fallback failed";
       return {
         success: false,
@@ -1258,7 +1258,7 @@ export class XTools {
     }
   }
 
-  async executeAction(input: XActionInput): Promise<any> {
+  async executeAction(input: XActionInput): Promise<Any> {
     const settings = XSettingsManager.loadSettings();
     if (!settings.enabled) {
       throw new Error("X integration is disabled. Enable it in Settings > X (Twitter).");
@@ -1408,7 +1408,7 @@ export class XTools {
           data: result.data,
           stderr: result.stderr || undefined,
         };
-      } catch (error: any) {
+      } catch (error: Any) {
         lastError = error;
         const errorMessage = error?.message || "Failed to execute X action";
 

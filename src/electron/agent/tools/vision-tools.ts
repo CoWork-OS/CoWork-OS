@@ -78,7 +78,7 @@ export class VisionTools {
    * Prevents redundant (expensive) LLM vision calls for the same file
    * across different steps within one task execution.
    */
-  private visionCache = new Map<string, { result: any; cachedAt: number }>();
+  private visionCache = new Map<string, { result: Any; cachedAt: number }>();
 
   constructor(
     private workspace: Workspace,
@@ -96,12 +96,12 @@ export class VisionTools {
     return digest;
   }
 
-  private getCachedResult(cacheKey: string): any | null {
+  private getCachedResult(cacheKey: string): Any | null {
     const cached = this.visionCache.get(cacheKey);
     return cached ? cached.result : null;
   }
 
-  private setCachedResult(cacheKey: string, result: any): void {
+  private setCachedResult(cacheKey: string, result: Any): void {
     this.visionCache.set(cacheKey, { result, cachedAt: Date.now() });
 
     if (this.visionCache.size <= VISION_CACHE_MAX_ENTRIES) return;
@@ -113,7 +113,7 @@ export class VisionTools {
   }
 
   private shouldRetryVisionError(error: unknown): boolean {
-    const asAny = (error ?? {}) as any;
+    const asAny = (error ?? {}) as Any;
     const statusRaw =
       asAny?.status ??
       asAny?.statusCode ??
@@ -579,7 +579,7 @@ export class VisionTools {
           });
           return { success: true, provider, model, text };
         }
-      } catch (error: any) {
+      } catch (error: Any) {
         lastErrorRaw = error;
         lastError = error?.message || String(error);
       }
@@ -814,7 +814,7 @@ export class VisionTools {
       // Cache the successful PDF analysis result.
       this.setCachedResult(cacheKey, pdfResult);
       return pdfResult;
-    } catch (error: any) {
+    } catch (error: Any) {
       const errorMessage = error?.message || String(error);
       this.logReadPdfVisualFailure(errorMessage);
       return {

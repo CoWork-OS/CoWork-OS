@@ -60,9 +60,9 @@ export class SerpApiProvider implements SearchProvider {
     const data = (await response.json()) as {
       error?: string;
       search_information?: { total_results?: number };
-      organic_results?: any[];
-      news_results?: any[];
-      images_results?: any[];
+      organic_results?: Any[];
+      news_results?: Any[];
+      images_results?: Any[];
     };
 
     if (data.error) {
@@ -82,7 +82,7 @@ export class SerpApiProvider implements SearchProvider {
     try {
       await this.search({ query: "test", maxResults: 1 });
       return { success: true };
-    } catch (error: any) {
+    } catch (error: Any) {
       return {
         success: false,
         error: error.message || "Failed to connect to SerpAPI",
@@ -105,9 +105,9 @@ export class SerpApiProvider implements SearchProvider {
     }
   }
 
-  private mapResults(data: any, searchType: SearchType): SearchResult[] {
+  private mapResults(data: Any, searchType: SearchType): SearchResult[] {
     if (searchType === "images") {
-      return (data.images_results || []).map((r: any) => ({
+      return (data.images_results || []).map((r: Any) => ({
         title: r.title || "",
         url: r.link || r.original || "",
         snippet: r.snippet || "",
@@ -120,7 +120,7 @@ export class SerpApiProvider implements SearchProvider {
     }
 
     if (searchType === "news") {
-      return (data.news_results || []).map((r: any) => ({
+      return (data.news_results || []).map((r: Any) => ({
         title: r.title || "",
         url: r.link || "",
         snippet: r.snippet || "",
@@ -130,7 +130,7 @@ export class SerpApiProvider implements SearchProvider {
     }
 
     // Web (organic) results
-    return (data.organic_results || []).map((r: any) => ({
+    return (data.organic_results || []).map((r: Any) => ({
       title: r.title || "",
       url: r.link || "",
       snippet: r.snippet || "",

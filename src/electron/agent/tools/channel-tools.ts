@@ -161,7 +161,7 @@ export class ChannelTools {
     ];
   }
 
-  async listChats(input: { channel: unknown; limit?: unknown; since?: unknown }): Promise<any> {
+  async listChats(input: { channel: unknown; limit?: unknown; since?: unknown }): Promise<Any> {
     const channelType = typeof input?.channel === "string" ? input.channel.trim() : "";
     const limitRaw = typeof input?.limit === "number" ? input.limit : undefined;
     const limit = Math.min(Math.max(limitRaw ?? 20, 1), 50);
@@ -203,7 +203,7 @@ export class ChannelTools {
 
     // Get most recent message per chat, plus count within window.
     const whereParts: string[] = ["channel_id = ?"];
-    const params: any[] = [channel.id];
+    const params: Any[] = [channel.id];
     if (typeof sinceMs === "number") {
       whereParts.push("timestamp >= ?");
       params.push(sinceMs);
@@ -297,7 +297,7 @@ export class ChannelTools {
     limit?: unknown;
     since?: unknown;
     direction?: unknown;
-  }): Promise<any> {
+  }): Promise<Any> {
     const channelType = typeof input?.channel === "string" ? input.channel.trim() : "";
     const chatId = typeof input?.chat_id === "string" ? input.chat_id.trim() : "";
     const limitRaw = typeof input?.limit === "number" ? input.limit : undefined;
@@ -347,7 +347,7 @@ export class ChannelTools {
     }
 
     const whereParts: string[] = ["m.channel_id = ?", "m.chat_id = ?"];
-    const params: any[] = [channel.id, chatId];
+    const params: Any[] = [channel.id, chatId];
     if (typeof sinceMs === "number") {
       whereParts.push("m.timestamp >= ?");
       params.push(sinceMs);

@@ -111,7 +111,7 @@ describe("env-migration helpers", () => {
   });
 
   describe("pickProviderFromSettings", () => {
-    function isProviderConfigured(providerType: string, settings: Record<string, any>): boolean {
+    function isProviderConfigured(providerType: string, settings: Record<string, Any>): boolean {
       const config = settings[providerType];
       if (!config || typeof config !== "object") return false;
 
@@ -148,7 +148,7 @@ describe("env-migration helpers", () => {
       "ollama",
     ];
 
-    function pickProviderFromSettings(settings: Record<string, any>): string | null {
+    function pickProviderFromSettings(settings: Record<string, Any>): string | null {
       for (const p of PRIORITY) {
         if (isProviderConfigured(p, settings)) return p;
       }

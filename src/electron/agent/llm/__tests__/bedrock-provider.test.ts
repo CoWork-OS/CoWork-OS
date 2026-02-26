@@ -4,11 +4,11 @@ import { BedrockProvider } from "../bedrock-provider";
 
 // Keep provider initialization predictable; no profile creds needed
 
-let capturedConverseInput: any = null;
+let capturedConverseInput: Any = null;
 
 vi.mock("@aws-sdk/client-bedrock-runtime", () => ({
-  BedrockRuntimeClient: vi.fn().mockImplementation(function (this: any) {
-    this.send = vi.fn(async (command: any) => {
+  BedrockRuntimeClient: vi.fn().mockImplementation(function (this: Any) {
+    this.send = vi.fn(async (command: Any) => {
       capturedConverseInput = command?.input ?? null;
       return {
         output: {
@@ -24,7 +24,7 @@ vi.mock("@aws-sdk/client-bedrock-runtime", () => ({
       };
     });
   }),
-  ConverseCommand: vi.fn().mockImplementation(function (input: any) {
+  ConverseCommand: vi.fn().mockImplementation(function (input: Any) {
     return { input };
   }),
 }));
@@ -141,7 +141,7 @@ describe("BedrockProvider", () => {
         }),
       ]),
     );
-    expect(capturedConverseInput.messages[1].content.some((block: any) => !!block.text)).toBe(
+    expect(capturedConverseInput.messages[1].content.some((block: Any) => !!block.text)).toBe(
       false,
     );
     expect(capturedConverseInput.messages[2].role).toBe("user");
@@ -189,7 +189,7 @@ describe("BedrockProvider", () => {
         }),
       ]),
     );
-    expect(lastContent.some((block: any) => !!block.toolResult)).toBe(false);
+    expect(lastContent.some((block: Any) => !!block.toolResult)).toBe(false);
   });
 
   it("rewrites assistant tool_use blocks when next user turn does not provide immediate tool_result", async () => {
@@ -227,11 +227,11 @@ describe("BedrockProvider", () => {
         }),
       ]),
     );
-    expect(assistantContent.some((block: any) => !!block.toolUse)).toBe(false);
+    expect(assistantContent.some((block: Any) => !!block.toolUse)).toBe(false);
   });
 
   it("normalizes Bedrock model tokens by stripping date/version suffixes", () => {
-    const provider = new BedrockProvider(config) as any;
+    const provider = new BedrockProvider(config) as Any;
 
     expect(provider.extractModelToken("anthropic.claude-haiku-4-5-20250514")).toBe(
       "claude-haiku-4-5",
@@ -244,7 +244,7 @@ describe("BedrockProvider", () => {
   });
 
   it("prefers the matching inference profile family instead of the first available profile", async () => {
-    const provider = new BedrockProvider(config) as any;
+    const provider = new BedrockProvider(config) as Any;
 
     provider.getClaudeInferenceProfiles = vi.fn().mockResolvedValue([
       {
@@ -271,7 +271,7 @@ describe("BedrockProvider", () => {
   });
 
   it("does not silently downgrade to a different family when no compatible profile exists", async () => {
-    const provider = new BedrockProvider(config) as any;
+    const provider = new BedrockProvider(config) as Any;
 
     provider.getClaudeInferenceProfiles = vi.fn().mockResolvedValue([
       {
@@ -291,7 +291,7 @@ describe("BedrockProvider", () => {
   });
 
   it("clamps maxTokens on inference-profile retry path", async () => {
-    const provider = new BedrockProvider(config) as any;
+    const provider = new BedrockProvider(config) as Any;
     vi.spyOn(provider, "resolveModelId").mockResolvedValue("anthropic.claude-haiku-4-5-20250514");
     vi.spyOn(provider, "resolveInferenceProfileFallback").mockResolvedValue(
       "us.anthropic.claude-3-sonnet-20240229-v1:0",

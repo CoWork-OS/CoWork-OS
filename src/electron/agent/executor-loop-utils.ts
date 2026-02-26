@@ -8,10 +8,10 @@ export interface ToolLoopCall {
 
 export function appendRecoveryAssistantMessage(
   messages: LLMMessage[],
-  response: any,
+  response: Any,
   allowPlaceholder = true,
 ): void {
-  const textBlocks = (response.content || []).filter((c: any) => c.type === "text");
+  const textBlocks = (response.content || []).filter((c: Any) => c.type === "text");
   if (textBlocks.length > 0) {
     messages.push({ role: "assistant", content: textBlocks });
     return;
@@ -45,7 +45,7 @@ export function appendMaxTokensRecoveryUserMessage(messages: LLMMessage[]): void
 }
 
 export function handleMaxTokensRecovery(opts: {
-  response: any;
+  response: Any;
   messages: LLMMessage[];
   recoveryCount: number;
   maxRecoveries: number;
@@ -72,7 +72,7 @@ export function handleMaxTokensRecovery(opts: {
   opts.emitMaxTokensRecovery({
     attempt: nextRecoveryCount,
     maxAttempts: opts.maxRecoveries,
-    ...(opts.eventPayload || {}),
+    ...opts.eventPayload,
   });
 
   if (nextRecoveryCount > opts.maxRecoveries) {
@@ -102,7 +102,7 @@ export function handleMaxTokensRecovery(opts: {
 
 export function appendAssistantResponseToConversation(
   messages: LLMMessage[],
-  response: any,
+  response: Any,
   emptyResponseCount: number,
 ): number {
   if (response.content && response.content.length > 0) {
@@ -205,7 +205,7 @@ export function injectToolRecoveryHint(opts: {
     duplicate: opts.hasDuplicateToolAttempt,
     unavailable: opts.hasUnavailableToolAttempt,
     hardFailure: opts.hasHardToolFailureAttempt,
-    ...(opts.eventPayload || {}),
+    ...opts.eventPayload,
   });
 
   opts.messages.push({
@@ -215,14 +215,14 @@ export function injectToolRecoveryHint(opts: {
 }
 
 export function maybeInjectToolLoopBreak(opts: {
-  responseContent: any[] | undefined;
+  responseContent: Any[] | undefined;
   recentToolCalls: ToolLoopCall[];
   messages: LLMMessage[];
   loopBreakInjected: boolean;
   detectToolLoop: (
     recentToolCalls: ToolLoopCall[],
     toolName: string,
-    input: any,
+    input: Any,
     threshold?: number,
   ) => boolean;
   log: (message: string) => void;
@@ -323,7 +323,7 @@ export function maybeInjectLowProgressNudge(opts: {
   const escalationAlreadyInjected = opts.messages.some((message) => {
     if (!Array.isArray(message.content)) return false;
     return message.content.some(
-      (block: any) =>
+      (block: Any) =>
         block?.type === "text" &&
         typeof block?.text === "string" &&
         block.text.includes(escalationTag),
@@ -390,6 +390,8 @@ export function maybeInjectStopReasonNudge(opts: {
   messages: LLMMessage[];
   phaseLabel: "step" | "follow-up";
   stopReasonNudgeInjected: boolean;
+  minToolUseStreak?: number;
+  minMaxTokenStreak?: number;
   log: (message: string) => void;
   emitStopReasonEvent?: (payload: {
     phase: "step" | "follow-up";
@@ -403,9 +405,13 @@ export function maybeInjectStopReasonNudge(opts: {
   const stopReason = String(opts.stopReason || "");
   if (!stopReason) return false;
 
+  const minToolUseStreak = opts.minToolUseStreak ?? 6;
+  const minMaxTokenStreak = opts.minMaxTokenStreak ?? 2;
   const toolUseStreakTriggered =
-    stopReason === "tool_use" && (opts.consecutiveToolUseStops >= 6 || opts.remainingTurns <= 1);
-  const maxTokenStreakTriggered = stopReason === "max_tokens" && opts.consecutiveMaxTokenStops >= 2;
+    stopReason === "tool_use" &&
+    (opts.consecutiveToolUseStops >= minToolUseStreak || opts.remainingTurns <= 1);
+  const maxTokenStreakTriggered =
+    stopReason === "max_tokens" && opts.consecutiveMaxTokenStops >= minMaxTokenStreak;
   if (!toolUseStreakTriggered && !maxTokenStreakTriggered) {
     return false;
   }

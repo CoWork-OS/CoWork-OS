@@ -201,7 +201,7 @@ export class AgentPerformanceReviewService {
       ORDER BY created_at DESC
       LIMIT 1
     `)
-      .get(workspaceId, agentRoleId) as any;
+      .get(workspaceId, agentRoleId) as Any;
     return row ? this.mapRow(row) : undefined;
   }
 
@@ -216,7 +216,7 @@ export class AgentPerformanceReviewService {
         ORDER BY created_at DESC
         LIMIT ?
       `)
-        .all(workspaceId, agentRoleId, lim) as any[];
+        .all(workspaceId, agentRoleId, lim) as Any[];
       return rows.map((r) => this.mapRow(r));
     }
 
@@ -228,7 +228,7 @@ export class AgentPerformanceReviewService {
       ORDER BY created_at DESC
       LIMIT ?
     `)
-      .all(workspaceId, lim) as any[];
+      .all(workspaceId, lim) as Any[];
     return rows.map((r) => this.mapRow(r));
   }
 
@@ -239,7 +239,7 @@ export class AgentPerformanceReviewService {
     return result.changes > 0;
   }
 
-  private mapRow(row: any): AgentPerformanceReview {
+  private mapRow(row: Any): AgentPerformanceReview {
     return {
       id: row.id,
       workspaceId: row.workspace_id,

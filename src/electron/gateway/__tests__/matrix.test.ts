@@ -43,7 +43,7 @@ vi.mock("../channels/matrix-client", () => ({
 
 // Import after mocking
 import { MatrixAdapter, createMatrixAdapter, MatrixConfig } from "../channels/matrix";
-import { MatrixClient } from "../channels/matrix-client";
+import { MatrixClient as _MatrixClient } from "../channels/matrix-client";
 
 describe("MatrixAdapter", () => {
   let adapter: MatrixAdapter;
@@ -80,17 +80,17 @@ describe("MatrixAdapter", () => {
     });
 
     it("should enable deduplication by default", () => {
-      const adapterConfig = adapter as any;
+      const adapterConfig = adapter as Any;
       expect(adapterConfig.config.deduplicationEnabled).toBe(true);
     });
 
     it("should enable typing indicators by default", () => {
-      const adapterConfig = adapter as any;
+      const adapterConfig = adapter as Any;
       expect(adapterConfig.config.sendTypingIndicators).toBe(true);
     });
 
     it("should enable read receipts by default", () => {
-      const adapterConfig = adapter as any;
+      const adapterConfig = adapter as Any;
       expect(adapterConfig.config.sendReadReceipts).toBe(true);
     });
   });
@@ -145,7 +145,7 @@ describe("MatrixAdapter", () => {
     it("should register message handlers", () => {
       const handler = vi.fn();
       adapter.onMessage(handler);
-      expect((adapter as any).messageHandlers).toContain(handler);
+      expect((adapter as Any).messageHandlers).toContain(handler);
     });
 
     it("should support multiple handlers", () => {
@@ -153,7 +153,7 @@ describe("MatrixAdapter", () => {
       const handler2 = vi.fn();
       adapter.onMessage(handler1);
       adapter.onMessage(handler2);
-      expect((adapter as any).messageHandlers.length).toBe(2);
+      expect((adapter as Any).messageHandlers.length).toBe(2);
     });
   });
 
@@ -161,7 +161,7 @@ describe("MatrixAdapter", () => {
     it("should register error handlers", () => {
       const handler = vi.fn();
       adapter.onError(handler);
-      expect((adapter as any).errorHandlers).toContain(handler);
+      expect((adapter as Any).errorHandlers).toContain(handler);
     });
   });
 
@@ -169,13 +169,13 @@ describe("MatrixAdapter", () => {
     it("should register status handlers", () => {
       const handler = vi.fn();
       adapter.onStatusChange(handler);
-      expect((adapter as any).statusHandlers).toContain(handler);
+      expect((adapter as Any).statusHandlers).toContain(handler);
     });
 
     it("should call status handlers on status change", () => {
       const handler = vi.fn();
       adapter.onStatusChange(handler);
-      (adapter as any).setStatus("connecting");
+      (adapter as Any).setStatus("connecting");
       expect(handler).toHaveBeenCalledWith("connecting", undefined);
     });
   });
@@ -193,8 +193,8 @@ describe("MatrixAdapter", () => {
 
   describe("disconnect", () => {
     it("should clear state on disconnect", async () => {
-      (adapter as any)._status = "connected";
-      (adapter as any)._botUsername = "Test Bot";
+      (adapter as Any)._status = "connected";
+      (adapter as Any)._botUsername = "Test Bot";
 
       await adapter.disconnect();
 
@@ -203,43 +203,43 @@ describe("MatrixAdapter", () => {
     });
 
     it("should stop deduplication cleanup timer", async () => {
-      (adapter as any).dedupCleanupTimer = setInterval(() => {}, 60000);
+      (adapter as Any).dedupCleanupTimer = setInterval(() => {}, 60000);
 
       await adapter.disconnect();
 
-      expect((adapter as any).dedupCleanupTimer).toBeUndefined();
+      expect((adapter as Any).dedupCleanupTimer).toBeUndefined();
     });
 
     it("should clear user cache", async () => {
-      (adapter as any).userCache.set("@user:matrix.org", { user_id: "@user:matrix.org" });
+      (adapter as Any).userCache.set("@user:matrix.org", { user_id: "@user:matrix.org" });
 
       await adapter.disconnect();
 
-      expect((adapter as any).userCache.size).toBe(0);
+      expect((adapter as Any).userCache.size).toBe(0);
     });
   });
 
   describe("message deduplication", () => {
     it("should track processed messages", () => {
-      (adapter as any).markMessageProcessed("$event123");
-      expect((adapter as any).isMessageProcessed("$event123")).toBe(true);
+      (adapter as Any).markMessageProcessed("$event123");
+      expect((adapter as Any).isMessageProcessed("$event123")).toBe(true);
     });
 
     it("should not mark duplicate messages as unprocessed", () => {
-      (adapter as any).markMessageProcessed("$event456");
-      (adapter as any).markMessageProcessed("$event456");
-      expect((adapter as any).processedMessages.size).toBe(1);
+      (adapter as Any).markMessageProcessed("$event456");
+      (adapter as Any).markMessageProcessed("$event456");
+      expect((adapter as Any).processedMessages.size).toBe(1);
     });
 
     it("should cleanup old messages from cache", () => {
       const oldTime = Date.now() - 120000;
-      (adapter as any).processedMessages.set("$old-event", oldTime);
-      (adapter as any).processedMessages.set("$new-event", Date.now());
+      (adapter as Any).processedMessages.set("$old-event", oldTime);
+      (adapter as Any).processedMessages.set("$new-event", Date.now());
 
-      (adapter as any).cleanupDedupCache();
+      (adapter as Any).cleanupDedupCache();
 
-      expect((adapter as any).processedMessages.has("$old-event")).toBe(false);
-      expect((adapter as any).processedMessages.has("$new-event")).toBe(true);
+      expect((adapter as Any).processedMessages.has("$old-event")).toBe(false);
+      expect((adapter as Any).processedMessages.has("$new-event")).toBe(true);
     });
   });
 

@@ -6,7 +6,6 @@
  */
 
 import * as fs from "fs";
-import * as path from "path";
 
 interface PDFSection {
   heading?: string;
@@ -35,7 +34,7 @@ export async function generatePDF(
   // Try Puppeteer first (available if browser tools are installed)
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const puppeteer = require("puppeteer-core") as any;
+    const puppeteer = require("puppeteer-core") as Any;
     // Attempt to find an available Chromium executable
     const execPaths = [
       "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -62,7 +61,7 @@ export async function generatePDF(
         await page.setContent(html, { waitUntil: "networkidle0" });
         await page.pdf({
           path: outputPath,
-          format: (options.format || "A4") as any,
+          format: (options.format || "A4") as Any,
           landscape: options.landscape || false,
           printBackground: true,
           margin: { top: "1cm", right: "1.5cm", bottom: "1cm", left: "1.5cm" },

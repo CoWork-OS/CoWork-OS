@@ -94,7 +94,7 @@ export class LoreService {
   private stateByWorkspace = new Map<string, WorkspaceState>();
   private agentDaemon: AgentDaemon | null = null;
   private started = false;
-  private readonly onTaskCompleted = (evt: any) => {
+  private readonly onTaskCompleted = (evt: Any) => {
     try {
       const taskId = typeof evt?.taskId === "string" ? evt.taskId : "";
       if (!taskId) return;
@@ -160,7 +160,7 @@ export class LoreService {
     }
   }
 
-  private ingestTaskCompleted(taskId: string, payload: any, timestampMs: number): void {
+  private ingestTaskCompleted(taskId: string, payload: Any, timestampMs: number): void {
     const task = this.taskRepo.findById(taskId);
     if (!task) return;
 
@@ -298,7 +298,7 @@ export class LoreService {
     for (const row of rows) {
       const payload = row?.payload;
       if (!payload) continue;
-      let parsed: any;
+      let parsed: Any;
       try {
         parsed = JSON.parse(payload);
       } catch {

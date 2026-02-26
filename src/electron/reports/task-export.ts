@@ -24,7 +24,7 @@ function asNumber(value: unknown): number | undefined {
   return undefined;
 }
 
-function getFileEventPath(payload: any): string | undefined {
+function getFileEventPath(payload: Any): string | undefined {
   return (
     asTrimmedString(payload?.path) ||
     asTrimmedString(payload?.workspaceRelativePath) ||

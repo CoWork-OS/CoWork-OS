@@ -73,7 +73,7 @@ export class BraveProvider implements SearchProvider {
     try {
       await this.search({ query: "test", maxResults: 1 });
       return { success: true };
-    } catch (error: any) {
+    } catch (error: Any) {
       return {
         success: false,
         error: error.message || "Failed to connect to Brave Search API",
@@ -107,9 +107,9 @@ export class BraveProvider implements SearchProvider {
     }
   }
 
-  private mapResults(data: any, searchType: SearchType): SearchResult[] {
+  private mapResults(data: Any, searchType: SearchType): SearchResult[] {
     if (searchType === "images") {
-      return (data.results || []).map((r: any) => ({
+      return (data.results || []).map((r: Any) => ({
         title: r.title || "",
         url: r.url || r.page_url || "",
         snippet: r.description || "",
@@ -121,7 +121,7 @@ export class BraveProvider implements SearchProvider {
     }
 
     if (searchType === "news") {
-      return (data.results || []).map((r: any) => ({
+      return (data.results || []).map((r: Any) => ({
         title: r.title || "",
         url: r.url || "",
         snippet: r.description || "",
@@ -131,7 +131,7 @@ export class BraveProvider implements SearchProvider {
     }
 
     // Web results
-    return (data.web?.results || []).map((r: any) => ({
+    return (data.web?.results || []).map((r: Any) => ({
       title: r.title || "",
       url: r.url || "",
       snippet: r.description || "",

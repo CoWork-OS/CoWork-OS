@@ -1,4 +1,4 @@
-import { LLMMessage, LLMContent, LLMToolResult } from "./llm";
+import { LLMMessage, LLMContent as _LLMContent, LLMToolResult as _LLMToolResult } from "./llm";
 import { estimateImageTokens } from "./llm/image-utils";
 
 /**
@@ -72,7 +72,7 @@ function messageTextForPinnedCheck(message: LLMMessage): string {
   if (!Array.isArray(message.content)) return "";
 
   // Prefer the first text block if present.
-  for (const block of message.content as any[]) {
+  for (const block of message.content as Any[]) {
     if (block && block.type === "text" && typeof block.text === "string") {
       return block.text;
     }
@@ -88,12 +88,12 @@ function isPinnedMessage(message: LLMMessage): boolean {
 
 function messageHasToolUse(message: LLMMessage): boolean {
   if (!Array.isArray(message.content)) return false;
-  return message.content.some((block: any) => block?.type === "tool_use");
+  return message.content.some((block: Any) => block?.type === "tool_use");
 }
 
 function messageHasToolResult(message: LLMMessage): boolean {
   if (!Array.isArray(message.content)) return false;
-  return message.content.some((block: any) => block?.type === "tool_result");
+  return message.content.some((block: Any) => block?.type === "tool_result");
 }
 
 /**
@@ -153,7 +153,7 @@ export function truncateToTokens(text: string, maxTokens: number): string {
 /**
  * Safely parse JSON, returning null if parsing fails
  */
-function safeJsonParse(jsonString: string): any | null {
+function safeJsonParse(jsonString: string): Any | null {
   try {
     return JSON.parse(jsonString);
   } catch {

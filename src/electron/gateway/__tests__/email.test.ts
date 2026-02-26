@@ -7,7 +7,7 @@ import { EventEmitter } from "events";
 
 // Mock the EmailClient class
 vi.mock("../channels/email-client", () => ({
-  EmailClient: vi.fn().mockImplementation((config) => {
+  EmailClient: vi.fn().mockImplementation((_config) => {
     const emitter = new EventEmitter();
     return {
       checkConnection: vi.fn().mockResolvedValue({
@@ -29,7 +29,7 @@ vi.mock("../channels/email-client", () => ({
 
 // Import after mocking
 import { EmailAdapter, createEmailAdapter, EmailConfig } from "../channels/email";
-import { EmailClient } from "../channels/email-client";
+import { EmailClient as _EmailClient } from "../channels/email-client";
 
 describe("EmailAdapter", () => {
   let adapter: EmailAdapter;
@@ -69,7 +69,7 @@ describe("EmailAdapter", () => {
     });
 
     it("should enable deduplication by default", () => {
-      const adapterConfig = adapter as any;
+      const adapterConfig = adapter as Any;
       expect(adapterConfig.config.deduplicationEnabled).toBe(true);
     });
 
@@ -81,7 +81,7 @@ describe("EmailAdapter", () => {
         imapHost: "imap.example.com",
         smtpHost: "smtp.example.com",
       });
-      const config = (adapterNoPort as any).config;
+      const config = (adapterNoPort as Any).config;
       expect(config.imapPort).toBe(993);
     });
 
@@ -93,12 +93,12 @@ describe("EmailAdapter", () => {
         imapHost: "imap.example.com",
         smtpHost: "smtp.example.com",
       });
-      const config = (adapterNoPort as any).config;
+      const config = (adapterNoPort as Any).config;
       expect(config.smtpPort).toBe(587);
     });
 
     it("should use default poll interval if not specified", () => {
-      const config = (adapter as any).config;
+      const config = (adapter as Any).config;
       expect(config.pollInterval).toBe(30000);
     });
 
@@ -110,7 +110,7 @@ describe("EmailAdapter", () => {
         imapHost: "imap.example.com",
         smtpHost: "smtp.example.com",
       });
-      const config = (adapterDefault as any).config;
+      const config = (adapterDefault as Any).config;
       expect(config.mailbox).toBe("INBOX");
     });
 
@@ -122,12 +122,12 @@ describe("EmailAdapter", () => {
         imapHost: "imap.example.com",
         smtpHost: "smtp.example.com",
       });
-      const config = (adapterDefault as any).config;
+      const config = (adapterDefault as Any).config;
       expect(config.markAsRead).toBe(true);
     });
 
     it("should default protocol to imap-smtp", () => {
-      const config = (adapter as any).config;
+      const config = (adapter as Any).config;
       expect(config.protocol).toBe("imap-smtp");
     });
   });
@@ -201,7 +201,7 @@ describe("EmailAdapter", () => {
         loomAccessToken: "token_123",
       });
       expect(newAdapter).toBeInstanceOf(EmailAdapter);
-      expect((newAdapter as any).config.protocol).toBe("loom");
+      expect((newAdapter as Any).config.protocol).toBe("loom");
     });
 
     it("should reject insecure non-localhost loom base URL", () => {
@@ -252,7 +252,7 @@ describe("EmailAdapter", () => {
     it("should register message handlers", () => {
       const handler = vi.fn();
       adapter.onMessage(handler);
-      expect((adapter as any).messageHandlers).toContain(handler);
+      expect((adapter as Any).messageHandlers).toContain(handler);
     });
 
     it("should support multiple handlers", () => {
@@ -260,7 +260,7 @@ describe("EmailAdapter", () => {
       const handler2 = vi.fn();
       adapter.onMessage(handler1);
       adapter.onMessage(handler2);
-      expect((adapter as any).messageHandlers.length).toBe(2);
+      expect((adapter as Any).messageHandlers.length).toBe(2);
     });
   });
 
@@ -268,7 +268,7 @@ describe("EmailAdapter", () => {
     it("should register error handlers", () => {
       const handler = vi.fn();
       adapter.onError(handler);
-      expect((adapter as any).errorHandlers).toContain(handler);
+      expect((adapter as Any).errorHandlers).toContain(handler);
     });
   });
 
@@ -276,13 +276,13 @@ describe("EmailAdapter", () => {
     it("should register status handlers", () => {
       const handler = vi.fn();
       adapter.onStatusChange(handler);
-      expect((adapter as any).statusHandlers).toContain(handler);
+      expect((adapter as Any).statusHandlers).toContain(handler);
     });
 
     it("should call status handlers on status change", () => {
       const handler = vi.fn();
       adapter.onStatusChange(handler);
-      (adapter as any).setStatus("connecting");
+      (adapter as Any).setStatus("connecting");
       expect(handler).toHaveBeenCalledWith("connecting", undefined);
     });
   });
@@ -305,8 +305,8 @@ describe("EmailAdapter", () => {
 
   describe("disconnect", () => {
     it("should clear state on disconnect", async () => {
-      (adapter as any)._status = "connected";
-      (adapter as any)._botUsername = "bot@example.com";
+      (adapter as Any)._status = "connected";
+      (adapter as Any)._botUsername = "bot@example.com";
 
       await adapter.disconnect();
 
@@ -315,55 +315,55 @@ describe("EmailAdapter", () => {
     });
 
     it("should stop deduplication cleanup timer", async () => {
-      (adapter as any).dedupCleanupTimer = setInterval(() => {}, 60000);
+      (adapter as Any).dedupCleanupTimer = setInterval(() => {}, 60000);
 
       await adapter.disconnect();
 
-      expect((adapter as any).dedupCleanupTimer).toBeUndefined();
+      expect((adapter as Any).dedupCleanupTimer).toBeUndefined();
     });
 
     it("should clear processed messages cache", async () => {
-      (adapter as any).processedMessages.set("msg-123", Date.now());
+      (adapter as Any).processedMessages.set("msg-123", Date.now());
 
       await adapter.disconnect();
 
-      expect((adapter as any).processedMessages.size).toBe(0);
+      expect((adapter as Any).processedMessages.size).toBe(0);
     });
 
     it("should clear reply context cache", async () => {
-      (adapter as any).replyContext.set("user@example.com|Subject", {
+      (adapter as Any).replyContext.set("user@example.com|Subject", {
         messageId: "<msg-123@example.com>",
         references: [],
       });
 
       await adapter.disconnect();
 
-      expect((adapter as any).replyContext.size).toBe(0);
+      expect((adapter as Any).replyContext.size).toBe(0);
     });
   });
 
   describe("message deduplication", () => {
     it("should track processed messages", () => {
-      (adapter as any).markMessageProcessed("msg-123");
-      expect((adapter as any).isMessageProcessed("msg-123")).toBe(true);
+      (adapter as Any).markMessageProcessed("msg-123");
+      expect((adapter as Any).isMessageProcessed("msg-123")).toBe(true);
     });
 
     it("should not mark duplicate messages as unprocessed", () => {
-      (adapter as any).markMessageProcessed("msg-456");
-      (adapter as any).markMessageProcessed("msg-456");
-      expect((adapter as any).processedMessages.size).toBe(1);
+      (adapter as Any).markMessageProcessed("msg-456");
+      (adapter as Any).markMessageProcessed("msg-456");
+      expect((adapter as Any).processedMessages.size).toBe(1);
     });
 
     it("should cleanup old messages from cache", () => {
       // Email uses 5 minute TTL (300000ms)
       const oldTime = Date.now() - 310000; // Over 5 minutes ago
-      (adapter as any).processedMessages.set("old-msg", oldTime);
-      (adapter as any).processedMessages.set("new-msg", Date.now());
+      (adapter as Any).processedMessages.set("old-msg", oldTime);
+      (adapter as Any).processedMessages.set("new-msg", Date.now());
 
-      (adapter as any).cleanupDedupCache();
+      (adapter as Any).cleanupDedupCache();
 
-      expect((adapter as any).processedMessages.has("old-msg")).toBe(false);
-      expect((adapter as any).processedMessages.has("new-msg")).toBe(true);
+      expect((adapter as Any).processedMessages.has("old-msg")).toBe(false);
+      expect((adapter as Any).processedMessages.has("new-msg")).toBe(true);
     });
   });
 
@@ -412,23 +412,23 @@ describe("EmailAdapter", () => {
 
   describe("reply context caching", () => {
     it("should cache reply context", () => {
-      (adapter as any).replyContext.set("user@example.com|Test Subject", {
+      (adapter as Any).replyContext.set("user@example.com|Test Subject", {
         messageId: "<msg-123@example.com>",
         references: [],
       });
 
-      const cached = (adapter as any).replyContext.get("user@example.com|Test Subject");
+      const cached = (adapter as Any).replyContext.get("user@example.com|Test Subject");
       expect(cached).toBeDefined();
       expect(cached.messageId).toBe("<msg-123@example.com>");
     });
 
     it("should retrieve cached reply context", () => {
-      (adapter as any).replyContext.set("user@example.com|Test Subject", {
+      (adapter as Any).replyContext.set("user@example.com|Test Subject", {
         messageId: "<msg-123@example.com>",
         references: ["<msg-001@example.com>"],
       });
 
-      const context = (adapter as any).replyContext.get("user@example.com|Test Subject");
+      const context = (adapter as Any).replyContext.get("user@example.com|Test Subject");
       expect(context).toBeDefined();
       expect(context.messageId).toBe("<msg-123@example.com>");
       expect(context.references).toHaveLength(1);
@@ -511,7 +511,7 @@ describe("EmailAdapter edge cases", () => {
         ...defaultConfig,
         allowedSenders: ["allowed@example.com", "vip@company.com"],
       });
-      const config = (adapterWithFilter as any).config;
+      const config = (adapterWithFilter as Any).config;
       expect(config.allowedSenders).toEqual(["allowed@example.com", "vip@company.com"]);
     });
 
@@ -520,7 +520,7 @@ describe("EmailAdapter edge cases", () => {
         ...defaultConfig,
         allowedSenders: [],
       });
-      const config = (adapterNoFilter as any).config;
+      const config = (adapterNoFilter as Any).config;
       expect(config.allowedSenders).toEqual([]);
     });
   });
@@ -531,12 +531,12 @@ describe("EmailAdapter edge cases", () => {
         ...defaultConfig,
         subjectFilter: "[CoWork]",
       });
-      const config = (adapterWithSubject as any).config;
+      const config = (adapterWithSubject as Any).config;
       expect(config.subjectFilter).toBe("[CoWork]");
     });
 
     it("should handle empty subject filter", () => {
-      const config = (adapter as any).config;
+      const config = (adapter as Any).config;
       expect(config.subjectFilter).toBeUndefined();
     });
   });
@@ -546,12 +546,12 @@ describe("EmailAdapter edge cases", () => {
       const chatId = "user@example.com|Test Subject";
 
       // Set up initial context
-      (adapter as any).replyContext.set(chatId, {
+      (adapter as Any).replyContext.set(chatId, {
         messageId: "<msg-001@example.com>",
         references: [],
       });
 
-      const context = (adapter as any).replyContext.get(chatId);
+      const context = (adapter as Any).replyContext.get(chatId);
       expect(context.messageId).toBe("<msg-001@example.com>");
       expect(context.references).toEqual([]);
     });
@@ -560,7 +560,7 @@ describe("EmailAdapter edge cases", () => {
       const chatId = "user@example.com|Long Thread";
 
       // Simulate a deep thread
-      (adapter as any).replyContext.set(chatId, {
+      (adapter as Any).replyContext.set(chatId, {
         messageId: "<msg-005@example.com>",
         references: [
           "<msg-001@example.com>",
@@ -570,19 +570,19 @@ describe("EmailAdapter edge cases", () => {
         ],
       });
 
-      const context = (adapter as any).replyContext.get(chatId);
+      const context = (adapter as Any).replyContext.get(chatId);
       expect(context.references).toHaveLength(4);
     });
   });
 
   describe("deduplication cache TTL", () => {
     it("should use longer TTL for email (5 minutes)", () => {
-      const ttl = (adapter as any).DEDUP_CACHE_TTL;
+      const ttl = (adapter as Any).DEDUP_CACHE_TTL;
       expect(ttl).toBe(300000); // 5 minutes in ms
     });
 
     it("should have smaller max cache size for email", () => {
-      const maxSize = (adapter as any).DEDUP_CACHE_MAX_SIZE;
+      const maxSize = (adapter as Any).DEDUP_CACHE_MAX_SIZE;
       expect(maxSize).toBe(500);
     });
   });

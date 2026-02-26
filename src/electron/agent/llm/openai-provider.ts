@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import {
-  getModel,
+  getModel as _getModel,
   getModels,
   complete as piAiComplete,
   type Model,
@@ -98,7 +98,7 @@ export class OpenAIProvider implements LLMProvider {
       );
 
       return this.convertResponse(response);
-    } catch (error: any) {
+    } catch (error: Any) {
       // Handle abort errors gracefully
       if (error.name === "AbortError" || error.message?.includes("aborted")) {
         console.log(`[OpenAI] Request aborted`);
@@ -152,7 +152,7 @@ export class OpenAIProvider implements LLMProvider {
       );
 
       // Get the model object from pi-ai SDK
-      let model: Model<any>;
+      let model: Model<Any>;
       try {
         // Get available models and find one that matches
         const availableModels = getModels("openai-codex");
@@ -210,7 +210,7 @@ export class OpenAIProvider implements LLMProvider {
 
       // Convert pi-ai response to our format
       return this.convertPiAiResponse(response);
-    } catch (error: any) {
+    } catch (error: Any) {
       // Handle abort errors gracefully
       if (error.name === "AbortError" || error.message?.includes("aborted")) {
         console.log(`[OpenAI] Request aborted`);
@@ -268,7 +268,7 @@ export class OpenAIProvider implements LLMProvider {
         });
         return { success: true };
       }
-    } catch (error: any) {
+    } catch (error: Any) {
       return {
         success: false,
         error: error.message || "Failed to connect to OpenAI API",
@@ -342,7 +342,7 @@ export class OpenAIProvider implements LLMProvider {
             return priority(a.id) - priority(b.id);
           });
         return models;
-      } catch (error: any) {
+      } catch (error: Any) {
         console.error("Failed to fetch OpenAI models:", error);
       }
     }
@@ -487,7 +487,7 @@ export class OpenAIProvider implements LLMProvider {
             const textContent: Array<{ type: "text"; text: string }> = [];
             for (const item of msg.content) {
               if (item.type === "text") {
-                textContent.push({ type: "text" as const, text: (item as any).text });
+                textContent.push({ type: "text" as const, text: (item as Any).text });
               } else if (item.type === "image") {
                 // pi-ai SDK doesn't support inline images; use text fallback
                 textContent.push({ type: "text" as const, text: imageToTextFallback(item) });
@@ -503,17 +503,17 @@ export class OpenAIProvider implements LLMProvider {
             }
           } else {
             // Assistant message with tool calls
-            const content: any[] = [];
+            const content: Any[] = [];
 
             for (const item of msg.content) {
               if (item.type === "text") {
-                content.push({ type: "text", text: (item as any).text });
+                content.push({ type: "text", text: (item as Any).text });
               } else if (item.type === "tool_use") {
                 content.push({
                   type: "toolCall",
-                  id: (item as any).id,
-                  name: (item as any).name,
-                  arguments: (item as any).input,
+                  id: (item as Any).id,
+                  name: (item as Any).name,
+                  arguments: (item as Any).input,
                 });
               }
             }
@@ -552,14 +552,14 @@ export class OpenAIProvider implements LLMProvider {
     return tools.map((tool) => ({
       name: tool.name,
       description: tool.description,
-      parameters: tool.input_schema as any,
+      parameters: tool.input_schema as Any,
     }));
   }
 
   /**
    * Convert pi-ai response to our format
    */
-  private convertPiAiResponse(response: any): LLMResponse {
+  private convertPiAiResponse(response: Any): LLMResponse {
     const content: LLMContent[] = [];
 
     if (response.content) {
@@ -656,7 +656,7 @@ export class OpenAIProvider implements LLMProvider {
               }
             }
             if (contentParts.length > 0) {
-              result.push({ role: "user", content: contentParts } as any);
+              result.push({ role: "user", content: contentParts } as Any);
             }
           }
         } else {
@@ -677,11 +677,11 @@ export class OpenAIProvider implements LLMProvider {
 
             if (toolUses.length > 0) {
               assistantMsg.tool_calls = toolUses.map((tool) => ({
-                id: (tool as any).id,
+                id: (tool as Any).id,
                 type: "function" as const,
                 function: {
-                  name: (tool as any).name,
-                  arguments: JSON.stringify((tool as any).input),
+                  name: (tool as Any).name,
+                  arguments: JSON.stringify((tool as Any).input),
                 },
               }));
             }
@@ -702,7 +702,7 @@ export class OpenAIProvider implements LLMProvider {
                 });
               }
             }
-            result.push({ role: "user", content: contentParts } as any);
+            result.push({ role: "user", content: contentParts } as Any);
           } else {
             result.push({
               role: msg.role,

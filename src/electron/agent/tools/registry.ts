@@ -5,7 +5,7 @@ import {
   Workspace,
   GatewayContextType,
   AgentConfig,
-  AgentType,
+  AgentType as _AgentType,
   Task,
   TaskEvent,
   TOOL_GROUPS,
@@ -396,7 +396,7 @@ export class ToolRegistry {
     );
     this.scratchpadTools = new ScratchpadTools(taskId, workspace.path);
     // Some unit tests stub daemon as a plain object. Make channel history tools optional.
-    const dbGetter = (daemon as any)?.getDatabase;
+    const dbGetter = (daemon as Any)?.getDatabase;
     if (typeof dbGetter === "function") {
       const db = dbGetter.call(daemon);
       this.channelTools = new ChannelTools(db, daemon, taskId);
@@ -831,12 +831,12 @@ export class ToolRegistry {
       const settings = MCPSettingsManager.loadSettings();
       const prefix = settings.toolNamePrefix || "mcp_";
 
-      return mcpTools.map((tool: { name: string; description?: string; inputSchema: any }) => ({
+      return mcpTools.map((tool: { name: string; description?: string; inputSchema: Any }) => ({
         name: `${prefix}${tool.name}`,
         description: tool.description || `MCP tool: ${tool.name}`,
         input_schema: tool.inputSchema,
       }));
-    } catch (error) {
+    } catch  {
       // MCP not initialized yet, return empty array
       return [];
     }
@@ -963,7 +963,7 @@ export class ToolRegistry {
           path: newWorkspace.path,
         },
       };
-    } catch (error: any) {
+    } catch (error: Any) {
       return {
         success: false,
         error: error.message || "Failed to switch workspace",
@@ -983,7 +983,7 @@ export class ToolRegistry {
     workspace_id?: string;
     query?: string;
     include_messages?: boolean;
-  }): any {
+  }): Any {
     const period = input?.period;
     const allowed: Array<typeof period> = [
       "today",
@@ -1019,7 +1019,7 @@ export class ToolRegistry {
     workspace_id?: string;
     types?: string[];
     include_payload?: boolean;
-  }): any {
+  }): Any {
     const period = input?.period;
     const allowed: Array<typeof period> = [
       "today",
@@ -1061,7 +1061,7 @@ export class ToolRegistry {
     let emailChannelStatus = "unknown";
     try {
       // Some unit tests stub daemon as a plain object. Keep this best-effort.
-      const dbGetter = (this.daemon as any)?.getDatabase;
+      const dbGetter = (this.daemon as Any)?.getDatabase;
       if (typeof dbGetter === "function") {
         const channelRepo = new ChannelRepository(dbGetter.call(this.daemon));
         const emailChannel = channelRepo.findByType("email");
@@ -1300,7 +1300,7 @@ ${skillDescriptions}`;
   /**
    * Execute a tool by name
    */
-  async executeTool(name: string, input: any): Promise<any> {
+  async executeTool(name: string, input: Any): Promise<Any> {
     // Optional workspace-local policy hook (.cowork/policy/tools.monty).
     // Fail-open on policy script errors to avoid bricking tool execution.
     try {
@@ -1319,7 +1319,7 @@ ${skillDescriptions}`;
       // Avoid double-prompts for tools that already enforce approvals internally.
       const selfGated = name === "run_command" || name === "delete_file";
       if (policy.decision === "require_approval" && !selfGated) {
-        const requester = (this.daemon as any)?.requestApproval;
+        const requester = (this.daemon as Any)?.requestApproval;
         if (typeof requester !== "function") {
           throw new Error(
             `Tool "${name}" requires approval, but approval system is unavailable in this context`,
@@ -1343,7 +1343,7 @@ ${skillDescriptions}`;
       }
     } catch (err) {
       // Only block if the policy explicitly denied or required approval and was not approved.
-      const msg = String((err as any)?.message || "");
+      const msg = String((err as Any)?.message || "");
       if (/blocked by workspace policy|approval denied|requires approval/i.test(msg)) {
         throw err;
       }
@@ -1426,7 +1426,7 @@ ${skillDescriptions}`;
     if (name === "web_search") {
       const result = await this.searchTools.webSearch(input);
       if (this.citationTracker && result && typeof result === "object") {
-        this.citationTracker.addFromSearch((result as any).results || []);
+        this.citationTracker.addFromSearch((result as Any).results || []);
       }
       return result;
     }
@@ -1731,7 +1731,7 @@ ${skillDescriptions}`;
   /**
    * Try to execute an MCP tool if the name matches
    */
-  private async tryExecuteMCPTool(name: string, input: any): Promise<any | null> {
+  private async tryExecuteMCPTool(name: string, input: Any): Promise<Any | null> {
     const settings = MCPSettingsManager.loadSettings();
     const prefix = settings.toolNamePrefix || "mcp_";
 
@@ -1746,7 +1746,7 @@ ${skillDescriptions}`;
     let mcpManager: MCPClientManager;
     try {
       mcpManager = MCPClientManager.getInstance();
-    } catch (error) {
+    } catch  {
       // MCP not initialized
       return null;
     }
@@ -1764,7 +1764,7 @@ ${skillDescriptions}`;
         throw new Error(limitError);
       }
 
-      const requester = (this.daemon as any)?.requestApproval;
+      const requester = (this.daemon as Any)?.requestApproval;
       if (typeof requester !== "function") {
         throw new Error(
           `Tool "${mcpToolName}" requires approval, but approval system is unavailable in this context`,
@@ -1805,7 +1805,7 @@ ${skillDescriptions}`;
       const result = await mcpManager.callTool(mcpToolName, input);
       // Format MCP result and process any generated files
       return await this.formatMCPResult(result, mcpToolName, input);
-    } catch (error: any) {
+    } catch (error: Any) {
       const message = String(error?.message || "");
       if (/access denied\s*-\s*path outside allowed directories/i.test(message)) {
         return {
@@ -1826,14 +1826,14 @@ ${skillDescriptions}`;
    * Format MCP call result for agent consumption
    * Also handles file artifacts (screenshots, etc.) from MCP tools
    */
-  private async formatMCPResult(result: any, toolName?: string, input?: any): Promise<any> {
+  private async formatMCPResult(result: Any, toolName?: string, input?: Any): Promise<Any> {
     if (!result) return { success: true };
 
     // Check if it's an MCP CallResult format
     if (result.content && Array.isArray(result.content)) {
       if (result.isError) {
         throw new Error(
-          result.content.map((c: any) => c.text || "").join("\n") || "MCP tool execution failed",
+          result.content.map((c: Any) => c.text || "").join("\n") || "MCP tool execution failed",
         );
       }
 
@@ -1890,8 +1890,8 @@ ${skillDescriptions}`;
 
       // Combine text content
       const textParts = result.content
-        .filter((c: any) => c.type === "text")
-        .map((c: any) => c.text);
+        .filter((c: Any) => c.type === "text")
+        .map((c: Any) => c.text);
 
       if (textParts.length > 0) {
         const baseText = textParts.join("\n");
@@ -1965,7 +1965,7 @@ ${skillDescriptions}`;
 
             break;
           }
-        } catch (error) {
+        } catch  {
           // Continue checking other paths
         }
       }
@@ -1987,8 +1987,8 @@ ${skillDescriptions}`;
    */
   private async executeUseSkill(input: {
     skill_id: string;
-    parameters?: Record<string, any>;
-  }): Promise<any> {
+    parameters?: Record<string, Any>;
+  }): Promise<Any> {
     const { skill_id, parameters = {} } = input;
 
     const skillLoader = getCustomSkillLoader();
@@ -2058,8 +2058,8 @@ ${skillDescriptions}`;
     // Enforce tool-level requirements at invocation time.
     // This prevents selecting CLI-oriented skills when run_command/shell access is unavailable.
     const toolNames = new Set(this.getTools().map((tool) => tool.name));
-    const requiredToolsFromSkill = Array.isArray((skill.requires as any)?.tools)
-      ? ((skill.requires as any).tools as unknown[]).filter(
+    const requiredToolsFromSkill = Array.isArray((skill.requires as Any)?.tools)
+      ? ((skill.requires as Any).tools as unknown[]).filter(
           (tool): tool is string => typeof tool === "string" && tool.trim().length > 0,
         )
       : [];
@@ -2154,7 +2154,7 @@ ${skillDescriptions}`;
   private async executeSkillList(input: {
     source?: "all" | "bundled" | "managed" | "workspace";
     include_disabled?: boolean;
-  }): Promise<any> {
+  }): Promise<Any> {
     const { source = "all", include_disabled = true } = input;
     const skillLoader = getCustomSkillLoader();
 
@@ -2199,7 +2199,7 @@ ${skillDescriptions}`;
   /**
    * Get full details of a specific skill
    */
-  private async executeSkillGet(input: { skill_id: string }): Promise<any> {
+  private async executeSkillGet(input: { skill_id: string }): Promise<Any> {
     const { skill_id } = input;
     const skillLoader = getCustomSkillLoader();
     const skill = skillLoader.getSkill(skill_id);
@@ -2256,7 +2256,7 @@ ${skillDescriptions}`;
       options?: string[];
     }>;
     enabled?: boolean;
-  }): Promise<any> {
+  }): Promise<Any> {
     const skillLoader = getCustomSkillLoader();
 
     // Check if skill with this ID already exists
@@ -2310,7 +2310,7 @@ ${skillDescriptions}`;
           filePath: newSkill.filePath,
         },
       };
-    } catch (error: any) {
+    } catch (error: Any) {
       return {
         success: false,
         error: `Failed to create skill: ${error.message}`,
@@ -2330,9 +2330,9 @@ ${skillDescriptions}`;
       prompt?: string;
       icon?: string;
       category?: string;
-      parameters?: any[];
+      parameters?: Any[];
     };
-  }): Promise<any> {
+  }): Promise<Any> {
     const { source_skill_id, new_id, modifications = {} } = input;
     const skillLoader = getCustomSkillLoader();
 
@@ -2400,7 +2400,7 @@ ${skillDescriptions}`;
         },
         modifications_applied: Object.keys(modifications),
       };
-    } catch (error: any) {
+    } catch (error: Any) {
       return {
         success: false,
         error: `Failed to duplicate skill: ${error.message}`,
@@ -2419,10 +2419,10 @@ ${skillDescriptions}`;
       prompt?: string;
       icon?: string;
       category?: string;
-      parameters?: any[];
+      parameters?: Any[];
       enabled?: boolean;
     };
-  }): Promise<any> {
+  }): Promise<Any> {
     const { skill_id, updates } = input;
     const skillLoader = getCustomSkillLoader();
 
@@ -2471,7 +2471,7 @@ ${skillDescriptions}`;
           filePath: updatedSkill.filePath,
         },
       };
-    } catch (error: any) {
+    } catch (error: Any) {
       return {
         success: false,
         error: `Failed to update skill: ${error.message}`,
@@ -2482,7 +2482,7 @@ ${skillDescriptions}`;
   /**
    * Delete a skill
    */
-  private async executeSkillDelete(input: { skill_id: string }): Promise<any> {
+  private async executeSkillDelete(input: { skill_id: string }): Promise<Any> {
     const { skill_id } = input;
     const skillLoader = getCustomSkillLoader();
 
@@ -2528,7 +2528,7 @@ ${skillDescriptions}`;
           source: skill.source,
         },
       };
-    } catch (error: any) {
+    } catch (error: Any) {
       return {
         success: false,
         error: `Failed to delete skill: ${error.message}`,
@@ -4344,7 +4344,7 @@ ${skillDescriptions}`;
       try {
         await MCPRegistryManager.installServer("resend");
         installedNow = true;
-      } catch (error: any) {
+      } catch (error: Any) {
         const message = error?.message || String(error);
         if (!/already installed/i.test(message)) {
           installError = message;
@@ -4447,7 +4447,7 @@ ${skillDescriptions}`;
     }
 
     const env: Record<string, string> = {
-      ...(server.env || {}),
+      ...server.env,
       RESEND_BASE_URL: resolvedBaseUrl,
     };
     if (resolvedApiKey) {
@@ -4474,7 +4474,7 @@ ${skillDescriptions}`;
       try {
         await mcpClient.connectServer(server.id);
         connected = true;
-      } catch (error: any) {
+      } catch (error: Any) {
         connectionError = error?.message || String(error);
         try {
           connected = mcpClient.getServerStatus(server.id)?.status === "connected";
@@ -4496,7 +4496,7 @@ ${skillDescriptions}`;
         if (health?.isError) {
           healthError = healthText || "Connector health call returned an error";
         }
-      } catch (error: any) {
+      } catch (error: Any) {
         healthError = error?.message || String(error);
       }
     }
@@ -4628,11 +4628,11 @@ ${skillDescriptions}`;
     });
   }
 
-  private extractMcpTextContent(result: any): string {
+  private extractMcpTextContent(result: Any): string {
     const content = Array.isArray(result?.content) ? result.content : [];
     const texts = content
-      .filter((item: any) => item && item.type === "text" && typeof item.text === "string")
-      .map((item: any) => item.text);
+      .filter((item: Any) => item && item.type === "text" && typeof item.text === "string")
+      .map((item: Any) => item.text);
     return texts.join("\n").trim();
   }
 
@@ -4810,7 +4810,7 @@ ${skillDescriptions}`;
     message: string;
   } {
     const changes: string[] = [];
-    const style: any = {};
+    const style: Any = {};
 
     // Validate and apply emoji usage
     if (input.emoji_usage) {
@@ -4916,7 +4916,7 @@ ${skillDescriptions}`;
     message: string;
   } {
     const changes: string[] = [];
-    const quirks: any = {};
+    const quirks: Any = {};
 
     // Maximum lengths for quirk fields
     const MAX_CATCHPHRASE_LENGTH = 100;
@@ -5318,7 +5318,7 @@ ${skillDescriptions}`;
     task_id?: string;
     title?: string;
     message: string;
-    result?: any;
+    result?: Any;
     error?: string;
   }> {
     const { prompt, title, model_preference, personality, wait = false, max_turns = 20 } = input;
@@ -5469,7 +5469,7 @@ ${skillDescriptions}`;
         title: taskTitle,
         message: `Sub-agent spawned successfully. Task ID: ${childTask.id}. Use wait_for_agent or get_agent_status to check progress.`,
       };
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error(`[ToolRegistry] Failed to spawn agent:`, error);
       this.daemon.logEvent(this.taskId, "error", {
         tool: "spawn_agent",
@@ -6842,17 +6842,18 @@ ${skillDescriptions}`;
 
     // Look up the agent role by display name
     const db = this.daemon.getDatabase();
+// oxlint-disable-next-line typescript-eslint(no-require-imports)
     const { AgentRoleRepository } = require("../../agents/AgentRoleRepository");
     const agentRoleRepo = new AgentRoleRepository(db);
     const allRoles = agentRoleRepo.findAll(true); // include inactive
     const role = allRoles.find(
-      (r: any) =>
+      (r: Any) =>
         r.displayName.toLowerCase() === agent_name.trim().toLowerCase() ||
         r.name.toLowerCase() === agent_name.trim().toLowerCase(),
     );
 
     if (!role) {
-      const available = allRoles.map((r: any) => r.displayName).join(", ");
+      const available = allRoles.map((r: Any) => r.displayName).join(", ");
       return {
         success: false,
         message: `Agent role "${agent_name}" not found. Available: ${available}`,
@@ -6864,6 +6865,7 @@ ${skillDescriptions}`;
     agentRoleRepo.updateHeartbeatConfig(role.id, config);
 
     // Notify the HeartbeatService singleton to cancel or reschedule
+// oxlint-disable-next-line typescript-eslint(no-require-imports)
     const { getHeartbeatService } = require("../../agents/HeartbeatService");
     const heartbeatService = getHeartbeatService();
     if (heartbeatService) {

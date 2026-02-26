@@ -10,9 +10,9 @@ import crypto from "crypto";
 import {
   HooksConfig,
   HooksConfigResolved,
-  HookMappingResolved,
+  HookMappingResolved as _HookMappingResolved,
   HookMappingContext,
-  HookAction,
+  HookAction as _HookAction,
   WakeHookPayload,
   AgentHookPayload,
   TaskMessageHookPayload,
@@ -20,9 +20,9 @@ import {
   HookServerEvent,
   DEFAULT_HOOKS_PATH,
   DEFAULT_HOOKS_MAX_BODY_BYTES,
-  DEFAULT_HOOKS_PORT,
+  DEFAULT_HOOKS_PORT as _DEFAULT_HOOKS_PORT,
 } from "./types";
-import { resolveHookMappings, applyHookMappings, normalizeHooksPath } from "./mappings";
+import { resolveHookMappings, applyHookMappings, normalizeHooksPath as _normalizeHooksPath } from "./mappings";
 
 const RESEND_SIGNATURE_ALLOWED_DRIFT_SECONDS = 300;
 const RESEND_REPLAY_CACHE_MAX_ENTRIES = 10_000;
@@ -415,7 +415,7 @@ export class HooksServer {
       await this.handlers.onTaskMessage({ taskId, message });
       // Return 202 Accepted for async operation
       this.sendJsonResponse(res, 202, { success: true });
-    } catch (error: any) {
+    } catch (error: Any) {
       const statusCode =
         typeof error?.statusCode === "number" && Number.isFinite(error.statusCode)
           ? error.statusCode

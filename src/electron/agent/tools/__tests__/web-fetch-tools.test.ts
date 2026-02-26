@@ -44,7 +44,7 @@ describe("WebFetchTools", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    webFetchTools = new WebFetchTools(mockWorkspace, mockDaemon as any, "test-task-id");
+    webFetchTools = new WebFetchTools(mockWorkspace, mockDaemon as Any, "test-task-id");
   });
 
   afterEach(() => {

@@ -16,7 +16,7 @@ import {
 } from "../../types";
 
 interface PendingRequest {
-  resolve: (result: any) => void;
+  resolve: (result: Any) => void;
   reject: (error: Error) => void;
   timeout: ReturnType<typeof setTimeout>;
 }
@@ -172,7 +172,7 @@ export class StdioTransport extends EventEmitter implements MCPTransport {
     console.log(`[MCP StdioTransport] Disconnecting...`);
 
     // Reject all pending requests
-    for (const [id, pending] of this.pendingRequests) {
+    for (const [_id, pending] of this.pendingRequests) {
       clearTimeout(pending.timeout);
       pending.reject(new Error("Transport disconnected"));
     }
@@ -217,7 +217,7 @@ export class StdioTransport extends EventEmitter implements MCPTransport {
   /**
    * Send a JSON-RPC request and wait for response
    */
-  async sendRequest(method: string, params?: Record<string, any>): Promise<any> {
+  async sendRequest(method: string, params?: Record<string, Any>): Promise<Any> {
     if (!this.connected || !this.process?.stdin?.writable) {
       throw new Error("Not connected");
     }
@@ -309,7 +309,7 @@ export class StdioTransport extends EventEmitter implements MCPTransport {
         try {
           const message = JSON.parse(line);
           this.handleMessage(message);
-        } catch (error) {
+        } catch  {
           console.error(`[MCP StdioTransport] Failed to parse message: ${line}`);
         }
       }
@@ -319,7 +319,7 @@ export class StdioTransport extends EventEmitter implements MCPTransport {
   /**
    * Handle a parsed JSON-RPC message
    */
-  private handleMessage(message: any): void {
+  private handleMessage(message: Any): void {
     // Check if this is a response to a pending request
     if ("id" in message && message.id !== null) {
       const pending = this.pendingRequests.get(message.id);

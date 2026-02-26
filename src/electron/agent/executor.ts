@@ -4,7 +4,9 @@ import {
   Plan,
   PlanStep,
   TaskEvent,
-  SuccessCriteria,
+  TaskDomain,
+  ExecutionMode,
+  SuccessCriteria as _SuccessCriteria,
   isTempWorkspaceId,
   ImageAttachment,
   InfraStatus,
@@ -64,11 +66,11 @@ import {
   STEP_TIMEOUT_MS,
   DEEP_WORK_STEP_TIMEOUT_MS,
   TOOL_TIMEOUT_MS,
-  MAX_TOOL_FAILURES,
+  MAX_TOOL_FAILURES as _MAX_TOOL_FAILURES,
   MAX_TOTAL_STEPS,
-  INITIAL_BACKOFF_MS,
-  MAX_BACKOFF_MS,
-  BACKOFF_MULTIPLIER,
+  INITIAL_BACKOFF_MS as _INITIAL_BACKOFF_MS,
+  MAX_BACKOFF_MS as _MAX_BACKOFF_MS,
+  BACKOFF_MULTIPLIER as _BACKOFF_MULTIPLIER,
   IMAGE_VERIFICATION_KEYWORDS,
   IMAGE_FILE_EXTENSION_REGEX,
   IMAGE_VERIFICATION_TIME_SKEW_MS,
@@ -86,8 +88,8 @@ import {
   COMPACTION_TOOL_USE_CLAMP,
   COMPACTION_TOOL_RESULT_CLAMP,
   isNonRetryableError,
-  isInputDependentError,
-  getCurrentDateString,
+  isInputDependentError as _isInputDependentError,
+  getCurrentDateString as _getCurrentDateString,
   getCurrentDateTimeContext,
   isAskingQuestion,
   ToolCallDeduplicator,
@@ -104,6 +106,18 @@ import {
   requestLLMResponseWithAdaptiveBudget as requestLLMResponseWithAdaptiveBudgetUtil,
 } from "./executor-llm-turn-utils";
 import { processAssistantResponseText as processAssistantResponseTextUtil } from "./executor-assistant-output-utils";
+import { sanitizeToolCallTextFromAssistant } from "./tool-call-text-sanitizer";
+import {
+  evaluateToolPolicy,
+  filterToolsByPolicy,
+  normalizeExecutionMode,
+  normalizeTaskDomain,
+} from "./tool-policy-engine";
+import {
+  evaluateDomainCompletion,
+  getLoopGuardrailConfig,
+  shouldRequireExecutionEvidenceForDomain,
+} from "./completion-checks";
 import {
   appendAssistantResponseToConversation as appendAssistantResponseToConversationUtil,
   computeToolFailureDecision as computeToolFailureDecisionUtil,
@@ -460,12 +474,12 @@ export class TaskExecutor {
 
   private messageHasToolUse(message: LLMMessage | undefined): boolean {
     if (!message || !Array.isArray(message.content)) return false;
-    return message.content.some((block: any) => block?.type === "tool_use");
+    return message.content.some((block: Any) => block?.type === "tool_use");
   }
 
   private messageHasToolResult(message: LLMMessage | undefined): boolean {
     if (!message || !Array.isArray(message.content)) return false;
-    return message.content.some((block: any) => block?.type === "tool_result");
+    return message.content.some((block: Any) => block?.type === "tool_result");
   }
 
   /**
@@ -503,7 +517,7 @@ export class TaskExecutor {
     }
   }
 
-  private emitEvent(type: string, payload: any): void {
+  private emitEvent(type: string, payload: Any): void {
     if (this.eventEmitter) {
       this.eventEmitter.emit(type, payload);
       return;
@@ -823,7 +837,7 @@ export class TaskExecutor {
       }
 
       if (!Array.isArray(msg.content)) continue;
-      for (const block of msg.content as any[]) {
+      for (const block of msg.content as Any[]) {
         if (!block) continue;
         if (block.type === "text" && typeof block.text === "string") {
           push(`[${role}] ${clamp(block.text.trim(), textClamp(role))}`);
@@ -948,8 +962,8 @@ ${transcript}
       }
 
       const text = (response.content || [])
-        .filter((c: any) => c.type === "text" && c.text)
-        .map((c: any) => c.text)
+        .filter((c: Any) => c.type === "text" && c.text)
+        .map((c: Any) => c.text)
         .join("\n")
         .trim();
       if (!text) return "";
@@ -1102,8 +1116,8 @@ ${transcript}
       }
 
       const text = (response.content || [])
-        .filter((c: any) => c.type === "text" && c.text)
-        .map((c: any) => c.text)
+        .filter((c: Any) => c.type === "text" && c.text)
+        .map((c: Any) => c.text)
         .join("\n")
         .trim();
       if (!text) return "";
@@ -1763,7 +1777,7 @@ ${transcript}
           message: "Completed via follow-up",
         });
       } else if (previousStatus && previousStatus !== "executing") {
-        this.daemon.updateTaskStatus(this.task.id, previousStatus as any);
+        this.daemon.updateTaskStatus(this.task.id, previousStatus as Any);
         this.emitEvent("task_status", { status: previousStatus });
       } else {
         // Safety net: never leave status as 'executing' after follow-up
@@ -1772,7 +1786,7 @@ ${transcript}
           message: "Completed via chat follow-up",
         });
       }
-    } catch (error: any) {
+    } catch (error: Any) {
       const fallback = isThinkMode
         ? "I wasn't able to process that follow-up. Could you try rephrasing your question?"
         : this.generateCompanionFallbackResponse(message);
@@ -1792,7 +1806,7 @@ ${transcript}
       // Restore previous status, but never restore 'executing' (would leave spinner stuck)
       const safeRestore =
         previousStatus && previousStatus !== "executing" ? previousStatus : "completed";
-      this.daemon.updateTaskStatus(this.task.id, safeRestore as any);
+      this.daemon.updateTaskStatus(this.task.id, safeRestore as Any);
       console.error(`${this.logTag} Chat-mode follow-up failed, using fallback:`, error);
     }
   }
@@ -1804,10 +1818,10 @@ ${transcript}
    * @param maxRetries - Maximum number of retry attempts (default: 3)
    */
   private async callLLMWithRetry(
-    requestFn: (attempt: number) => Promise<any>,
+    requestFn: (attempt: number) => Promise<Any>,
     operation: string,
     maxRetries = 3,
-  ): Promise<any> {
+  ): Promise<Any> {
     const llmCallId = ++this.llmCallSequence;
     console.log(
       `${this.logTag}[LLM ${llmCallId}] start: ${operation} (max attempts: ${maxRetries + 1})`,
@@ -1855,7 +1869,7 @@ ${transcript}
             `${totalTokens !== undefined ? `, tokens=${totalTokens}` : ""})`,
         );
         return response;
-      } catch (error: any) {
+      } catch (error: Any) {
         lastError = error;
         const elapsedMs = Date.now() - attemptStart;
         const errorMessage = error?.message || "Unknown error";
@@ -2065,7 +2079,7 @@ ${transcript}
     request: Omit<LLMRequest, "signal">,
     timeoutMs: number,
     operation: string,
-  ): Promise<any> {
+  ): Promise<Any> {
     const parentSignal = this.abortController.signal;
     const requestAbort = new AbortController();
     const onParentAbort = () => requestAbort.abort();
@@ -2115,7 +2129,7 @@ ${transcript}
     requestedMaxTokens?: number;
   }): number {
     const contextLimit = (() => {
-      const manager = this.contextManager as any;
+      const manager = this.contextManager as Any;
       if (manager && typeof manager.estimateMaxOutputTokens === "function") {
         return manager.estimateMaxOutputTokens(opts.messages, opts.system);
       }
@@ -2152,7 +2166,7 @@ ${transcript}
     messages: LLMMessage[];
     retryLabel: string;
     operation: string;
-  }): Promise<{ response: any; availableTools: any[] }> {
+  }): Promise<{ response: Any; availableTools: Any[] }> {
     return requestLLMResponseWithAdaptiveBudgetUtil({
       ...opts,
       llmTimeoutMs: LLM_TIMEOUT_MS,
@@ -2173,11 +2187,11 @@ ${transcript}
   }
 
   private async maybeApplyQualityPasses(opts: {
-    response: any;
+    response: Any;
     enabled: boolean;
     contextLabel: string;
     userIntent: string;
-  }): Promise<any> {
+  }): Promise<Any> {
     return maybeApplyQualityPassesUtil({
       ...opts,
       getQualityPassCount: () => this.getQualityPassCount(),
@@ -2188,12 +2202,23 @@ ${transcript}
   }
 
   private processAssistantResponseText(opts: {
-    responseContent: any[] | undefined;
+    responseContent: Any[] | undefined;
     eventPayload?: Record<string, unknown>;
     updateLastAssistantText?: boolean;
   }): { assistantText: string; assistantAskedQuestion: boolean; hasMeaningfulText: boolean } {
     return processAssistantResponseTextUtil({
       ...opts,
+      sanitizeAssistantText: (text) => {
+        const sanitized = sanitizeToolCallTextFromAssistant(text);
+        if (sanitized.hadToolCallText && sanitized.text.length === 0) {
+          this.emitEvent("log", {
+            message:
+              "Suppressed raw tool-call markup emitted as assistant text (model produced unstructured tool text).",
+            removedSegments: sanitized.removedSegments,
+          });
+        }
+        return sanitized.text;
+      },
       emitAssistantMessage: (payload) => this.emitEvent("assistant_message", payload),
       checkOutput: (text) => OutputFilter.check(text),
       onSuspiciousOutput: (text, outputCheck) => {
@@ -2304,7 +2329,7 @@ ${transcript}
     if (
       typeof errorLike === "object" &&
       errorLike !== null &&
-      (errorLike as any).code === TASK_ERROR_CODES.TURN_LIMIT_EXCEEDED
+      (errorLike as Any).code === TASK_ERROR_CODES.TURN_LIMIT_EXCEEDED
     ) {
       return true;
     }
@@ -2313,7 +2338,7 @@ ${transcript}
       typeof errorLike === "string"
         ? errorLike
         : typeof errorLike === "object" && errorLike !== null
-          ? (errorLike as any).message
+          ? (errorLike as Any).message
           : undefined;
 
     return /Global turn limit exceeded/i.test(String(message || ""));
@@ -2363,7 +2388,7 @@ ${transcript}
     const settingsTimeout = BuiltinToolsSettingsManager.getToolTimeoutMs(toolName);
     const normalizedSettingsTimeout =
       settingsTimeout && settingsTimeout > 0 ? settingsTimeout : null;
-    const toolInput = input && typeof input === "object" ? (input as any) : {};
+    const toolInput = input && typeof input === "object" ? (input as Any) : {};
 
     const clampToStepTimeout = (ms: number): number => {
       // Tool calls happen inside a step; keep a small buffer so the step timeout
@@ -2538,11 +2563,11 @@ ${transcript}
     toolName: string,
     input: unknown,
     toolTimeoutMs: number,
-  ): Promise<any> {
+  ): Promise<Any> {
     const stopHeartbeat = this.beginToolExecutionHeartbeat(toolName, toolTimeoutMs, input);
     try {
       return await withTimeout(
-        this.toolRegistry.executeTool(toolName, input as any),
+        this.toolRegistry.executeTool(toolName, input as Any),
         toolTimeoutMs,
         `Tool ${toolName}`,
       );
@@ -2557,7 +2582,7 @@ ${transcript}
    */
   private checkFileOperation(
     toolName: string,
-    input: any,
+    input: Any,
   ): { blocked: boolean; reason?: string; suggestion?: string; cachedResult?: string } {
     // Check for redundant file reads
     if (toolName === "read_file" && input?.path) {
@@ -2639,11 +2664,11 @@ ${transcript}
   /**
    * Record a file operation after successful execution
    */
-  private recordFileOperation(toolName: string, input: any, result: any): void {
+  private recordFileOperation(toolName: string, input: Any, result: Any): void {
     const toolSucceeded = !(
       result &&
       typeof result === "object" &&
-      (result as any).success === false
+      (result as Any).success === false
     );
 
     // Track web fetch outcomes to prevent placeholder writes
@@ -2663,7 +2688,7 @@ ${transcript}
 
     // Record file reads
     if (toolName === "read_file" && input?.path) {
-      const readFailed = result && typeof result === "object" && (result as any).success === false;
+      const readFailed = result && typeof result === "object" && (result as Any).success === false;
       if (!readFailed) {
         const readResult = typeof result === "string" ? result : JSON.stringify(result);
         this.fileOperationTracker.recordFileRead(input.path, readResult);
@@ -2746,6 +2771,12 @@ ${transcript}
    * Detect whether the task explicitly expects command execution (not just analysis/writing)
    */
   private detectExecutionRequirement(prompt: string): boolean {
+    if (!shouldRequireExecutionEvidenceForDomain(this.getEffectiveTaskDomain())) {
+      return false;
+    }
+    if (this.getEffectiveExecutionMode() !== "execute") {
+      return false;
+    }
     return this.followUpRequiresCommandExecution(prompt);
   }
 
@@ -2759,7 +2790,7 @@ ${transcript}
   /**
    * Record command execution metadata (used for test-run enforcement)
    */
-  private recordCommandExecution(toolName: string, input: any, result: any): void {
+  private recordCommandExecution(toolName: string, input: Any, _result: Any): void {
     if (toolName !== "run_command") return;
     const command = typeof input?.command === "string" ? input.command : "";
     if (!command) return;
@@ -2778,7 +2809,7 @@ ${transcript}
     return IMAGE_VERIFICATION_KEYWORDS.some((keyword: string) => description.includes(keyword));
   }
 
-  private hasNewImageFromGlobResult(result: any, since: number): boolean {
+  private hasNewImageFromGlobResult(result: Any, since: number): boolean {
     const matches = result?.matches;
     if (!Array.isArray(matches)) return false;
 
@@ -2806,8 +2837,8 @@ ${transcript}
    */
   private inferMissingParameters(
     toolName: string,
-    input: any,
-  ): { input: any; modified: boolean; inference?: string } {
+    input: Any,
+  ): { input: Any; modified: boolean; inference?: string } {
     if (toolName === "create_document") {
       let modified = false;
       let inference = "";
@@ -3370,7 +3401,7 @@ ${transcript}
     }
   }
 
-  private getToolInputValidationError(toolName: string, input: any): string | null {
+  private getToolInputValidationError(toolName: string, input: Any): string | null {
     return getToolInputValidationErrorUtil(toolName, input);
   }
 
@@ -3390,11 +3421,11 @@ ${transcript}
     return buildCanvasFallbackHtmlUtil(prompt, details);
   }
 
-  private isHardToolFailure(toolName: string, result: any, failureReason = ""): boolean {
+  private isHardToolFailure(toolName: string, result: Any, failureReason = ""): boolean {
     return isHardToolFailureUtil(toolName, result, failureReason);
   }
 
-  private getToolFailureReason(result: any, fallback: string): string {
+  private getToolFailureReason(result: Any, fallback: string): string {
     return getToolFailureReasonUtil(result, fallback);
   }
 
@@ -3423,7 +3454,7 @@ ${transcript}
     const generated =
       extracted || (await this.generateCanvasHtml(this.lastUserMessage || this.task.prompt));
     content.input = {
-      ...(content.input || {}),
+      ...content.input,
       content: this.normalizeCanvasContent(generated, this.lastUserMessage || this.task.prompt),
     };
     this.emitEvent("parameter_inference", {
@@ -3443,7 +3474,7 @@ ${transcript}
   }
 
   private isCanvasTool(toolName: string): boolean {
-    return /^canvas_/.test(toolName);
+    return toolName.startsWith('canvas_');
   }
 
   private getTaskToolRestrictions(): Set<string> {
@@ -3492,6 +3523,43 @@ ${transcript}
     return !allowlist.has(toolName);
   }
 
+  private inferDomainFromTaskIntent(intent: string | undefined): TaskDomain {
+    switch (intent) {
+      case "execution":
+      case "workflow":
+      case "deep_work":
+        return "code";
+      case "planning":
+      case "advice":
+      case "thinking":
+        return "research";
+      default:
+        return "general";
+    }
+  }
+
+  private getEffectiveTaskDomain(): TaskDomain {
+    const configured = normalizeTaskDomain(this.task.agentConfig?.taskDomain);
+    if (configured !== "auto") return configured;
+    return this.inferDomainFromTaskIntent(this.task.agentConfig?.taskIntent);
+  }
+
+  private getEffectiveExecutionMode(): ExecutionMode {
+    return normalizeExecutionMode(
+      this.task.agentConfig?.executionMode,
+      this.task.agentConfig?.conversationMode,
+    );
+  }
+
+  private getToolPolicyContext() {
+    return {
+      executionMode: this.getEffectiveExecutionMode(),
+      taskDomain: this.getEffectiveTaskDomain(),
+      conversationMode: this.task.agentConfig?.conversationMode,
+      taskIntent: this.task.agentConfig?.taskIntent,
+    };
+  }
+
   /**
    * Get available tools, filtering out disabled ones
    * This prevents the LLM from trying to use tools that have been disabled by the circuit breaker
@@ -3512,7 +3580,8 @@ ${transcript}
       if (!this.isVisualCanvasTask()) {
         tools = tools.filter((tool) => !this.isCanvasTool(tool.name));
       }
-      return this.applyIntentFilter(tools);
+      const policyFiltered = filterToolsByPolicy(tools, this.getToolPolicyContext());
+      return this.applyIntentFilter(policyFiltered.tools);
     }
 
     let filtered = allTools
@@ -3538,7 +3607,13 @@ ${transcript}
     if (!this.isVisualCanvasTask()) {
       filtered = filtered.filter((tool) => !this.isCanvasTool(tool.name));
     }
-    return this.applyIntentFilter(filtered);
+    const policyFiltered = filterToolsByPolicy(filtered, this.getToolPolicyContext());
+    if (policyFiltered.blocked.length > 0) {
+      console.log(
+        `${this.logTag} Mode/domain policy filtered ${policyFiltered.blocked.length} tool(s)`,
+      );
+    }
+    return this.applyIntentFilter(policyFiltered.tools);
   }
 
   /**
@@ -3632,11 +3707,14 @@ ${transcript}
    * (chat, advice, planning, thinking). Action intents (execution, workflow, deep_work)
    * get all built-in tools but cap MCP tools within adaptive base/soft limits.
    */
-  private applyIntentFilter(tools: any[]): any[] {
+  private applyIntentFilter(tools: Any[]): Any[] {
     const taskIntent = this.task.agentConfig?.taskIntent;
     if (!taskIntent) return this.capToolCount(tools);
 
-    const relevantTools = TaskStrategyService.getRelevantToolSet(taskIntent);
+    const relevantTools = TaskStrategyService.getRelevantToolSet(
+      taskIntent,
+      this.getEffectiveTaskDomain(),
+    );
     if (relevantTools.has("*")) {
       // Action-heavy intents: keep all built-in tools, cap MCP tools if total is excessive.
       return this.capToolCount(tools);
@@ -3660,7 +3738,7 @@ ${transcript}
    * to recent task context and the top-N are kept. In low-signal cases, the
    * cap expands toward the soft limit to avoid hiding necessary tools.
    */
-  private capToolCount(tools: any[]): any[] {
+  private capToolCount(tools: Any[]): Any[] {
     const { baseCap, softCap } = this.getToolCountCaps();
     if (tools.length <= baseCap) return tools;
 
@@ -3946,7 +4024,7 @@ You are continuing a previous conversation. The context from the previous conver
    * Serialize conversation history with size limits to prevent huge snapshots.
    * Truncates large tool results and content blocks while preserving structure.
    */
-  private serializeConversationWithSizeLimit(history: LLMMessage[]): any[] {
+  private serializeConversationWithSizeLimit(history: LLMMessage[]): Any[] {
     const MAX_CONTENT_LENGTH = 50000; // 50KB per content block
     const MAX_TOOL_RESULT_LENGTH = 10000; // 10KB per tool result
 
@@ -3965,7 +4043,7 @@ You are continuing a previous conversation. The context from the previous conver
 
       // Handle array content (tool calls, tool results, etc.)
       if (Array.isArray(msg.content)) {
-        const truncatedContent = msg.content.map((block: any) => {
+        const truncatedContent = msg.content.map((block: Any) => {
           // Truncate tool_result content
           if (block.type === "tool_result" && block.content) {
             const content =
@@ -4038,7 +4116,7 @@ You are continuing a previous conversation. The context from the previous conver
 
     try {
       // Restore the conversation history
-      let restoredHistory: LLMMessage[] = payload.conversationHistory.map((msg: any) => ({
+      let restoredHistory: LLMMessage[] = payload.conversationHistory.map((msg: Any) => ({
         role: msg.role as "user" | "assistant",
         content: msg.content,
       }));
@@ -4069,8 +4147,8 @@ You are continuing a previous conversation. The context from the previous conver
           } else if (Array.isArray(firstMsg.content)) {
             // Content is LLMContent[] — extract text to check, then prepend as first text block
             const existingText = firstMsg.content
-              .filter((b: any) => b.type === "text")
-              .map((b: any) => b.text)
+              .filter((b: Any) => b.type === "text")
+              .map((b: Any) => b.text)
               .join("\n");
             if (!existingText.includes("PREVIOUS TASK CONTEXT")) {
               restoredHistory = [
@@ -4223,7 +4301,7 @@ You are continuing a previous conversation. The context from the previous conver
               ? "Verification command passed"
               : `Verification failed (exit code ${result.exitCode}): ${result.stderr || result.stdout || "Command failed"}`,
         };
-      } catch (error: any) {
+      } catch (error: Any) {
         return {
           success: false,
           message: `Verification command error: ${error.message}`,
@@ -4377,7 +4455,7 @@ You are continuing a previous conversation. The context from the previous conver
         message: "Verification agent timed out",
       });
       console.log(`${this.logTag} Verification agent timed out after ${timeoutMs}ms`);
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error(
         `${this.logTag} Verification agent error (non-blocking):`,
         error?.message || error,
@@ -4513,6 +4591,13 @@ You are continuing a previous conversation. The context from the previous conver
   }
 
   private followUpRequiresCommandExecution(message: string): boolean {
+    if (!shouldRequireExecutionEvidenceForDomain(this.getEffectiveTaskDomain())) {
+      return false;
+    }
+    if (this.getEffectiveExecutionMode() !== "execute") {
+      return false;
+    }
+
     const lower = (message || "").toLowerCase().trim();
     if (!lower) return false;
 
@@ -5060,7 +5145,7 @@ You are continuing a previous conversation. The context from the previous conver
         taskType,
         hasAdditionalContext: !!additionalContext,
       });
-    } catch (error: any) {
+    } catch (error: Any) {
       console.warn(`${this.logTag} Task analysis error (non-fatal): ${error.message}`);
     }
 
@@ -5339,7 +5424,7 @@ You are continuing a previous conversation. The context from the previous conver
         return oldWorkspacePath;
       },
       emitWorkspaceSwitched:
-        typeof (this as any).emitEvent === "function"
+        typeof (this as Any).emitEvent === "function"
           ? (payload) => this.emitEvent("workspace_switched", payload)
           : undefined,
     });
@@ -5370,7 +5455,7 @@ You are continuing a previous conversation. The context from the previous conver
       const msg = messages[i];
       if (msg.role !== "user" || !Array.isArray(msg.content)) continue;
 
-      const toolResults = msg.content as any[];
+      const toolResults = msg.content as Any[];
       for (let j = 0; j < toolResults.length; j++) {
         const tr = toolResults[j];
         if (tr?.type !== "tool_result" || !tr.is_error) continue;
@@ -5412,7 +5497,7 @@ You are continuing a previous conversation. The context from the previous conver
    * Extract a canonical "target" string from a tool call's input for loop detection.
    * Returns the primary resource the tool is operating on (file path, URL, etc.).
    */
-  private extractToolTarget(toolName: string, input: any): string {
+  private extractToolTarget(toolName: string, input: Any): string {
     if (!input || typeof input !== "object") return "";
 
     // For run_command, parse the command string to extract the target file
@@ -5436,7 +5521,7 @@ You are continuing a previous conversation. The context from the previous conver
    * Groups similar tools (grep, search_files, run_command wrapping grep, etc.)
    * so that varying tool calls on the same target are detected as a loop.
    */
-  private normalizeToolCategory(toolName: string, input: any): string {
+  private normalizeToolCategory(toolName: string, input: Any): string {
     // For run_command, detect the inner command
     if ((toolName === "run_command" || toolName === "execute_command") && input?.command) {
       const parsed = this.parseRunCommandForLoop(input.command);
@@ -5461,7 +5546,7 @@ You are continuing a previous conversation. The context from the previous conver
    * line-range arguments so that reading *different* sections of the same
    * file is NOT treated as a loop.
    */
-  private extractToolSignature(toolName: string, input: any): string {
+  private extractToolSignature(toolName: string, input: Any): string {
     const file = this.extractToolTarget(toolName, input);
     if (!file) return "";
 
@@ -5492,7 +5577,7 @@ You are continuing a previous conversation. The context from the previous conver
    * Unlike `extractToolSignature`, this intentionally drops read-range qualifiers
    * so repeated probing of different ranges on the same file can still be detected.
    */
-  private extractToolBaseTarget(toolName: string, input: any): string {
+  private extractToolBaseTarget(toolName: string, input: Any): string {
     const category = this.normalizeToolCategory(toolName, input);
     if (category === "read") {
       const file = this.extractToolTarget(toolName, input);
@@ -5514,7 +5599,7 @@ You are continuing a previous conversation. The context from the previous conver
   private detectToolLoop(
     recentCalls: ToolLoopCall[],
     toolName: string,
-    input: any,
+    input: Any,
     threshold: number = 3,
   ): boolean {
     const category = this.normalizeToolCategory(toolName, input);
@@ -5541,7 +5626,7 @@ You are continuing a previous conversation. The context from the previous conver
     return allSameCategory && allSameSignature;
   }
 
-  private summarizeToolResult(toolName: string, result: any): string | null {
+  private summarizeToolResult(toolName: string, result: Any): string | null {
     if (!result) return null;
 
     if (toolName === "web_search") {
@@ -5550,7 +5635,7 @@ You are continuing a previous conversation. The context from the previous conver
       if (items.length === 0) {
         return query ? `query "${query}": no results` : "no results";
       }
-      const formatted = items.slice(0, 5).map((item: any) => {
+      const formatted = items.slice(0, 5).map((item: Any) => {
         const title = item?.title ? String(item.title).trim() : "Untitled";
         const url = item?.url ? String(item.url) : "";
         let host = "";
@@ -5613,7 +5698,7 @@ You are continuing a previous conversation. The context from the previous conver
     }
   }
 
-  private recordToolResult(toolName: string, result: any, input?: any): void {
+  private recordToolResult(toolName: string, result: Any, input?: Any): void {
     // Track file reads regardless of whether we generated a compact summary.
     if (toolName === "read_file" || toolName === "read_files") {
       this.trackFileRead(toolName, result, input);
@@ -5627,7 +5712,7 @@ You are continuing a previous conversation. The context from the previous conver
     }
   }
 
-  private trackFileRead(toolName: string, result: any, input?: any): void {
+  private trackFileRead(toolName: string, result: Any, input?: Any): void {
     const currentStepId = this.currentStepId ?? "unknown";
     const normalizeTrackedPath = (filePath: string): string => path.normalize(filePath).replace(/\\/g, "/");
     if (toolName === "read_file") {
@@ -5817,8 +5902,8 @@ You are continuing a previous conversation. The context from the previous conver
       const msg = messages[i];
       if (msg.role !== "assistant" || !Array.isArray(msg.content)) continue;
       const text = msg.content
-        .filter((item: any) => item?.type === "text" && typeof item.text === "string")
-        .map((item: any) => String(item.text))
+        .filter((item: Any) => item?.type === "text" && typeof item.text === "string")
+        .map((item: Any) => String(item.text))
         .join("\n")
         .trim();
       if (text) return text;
@@ -5876,8 +5961,8 @@ You are continuing a previous conversation. The context from the previous conver
     const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
     if (!lastAssistant || !lastAssistant.content) return;
     const text = (Array.isArray(lastAssistant.content) ? lastAssistant.content : [])
-      .filter((item: any) => item.type === "text" && item.text)
-      .map((item: any) => String(item.text))
+      .filter((item: Any) => item.type === "text" && item.text)
+      .map((item: Any) => String(item.text))
       .join("\n")
       .trim();
     if (!text) return;
@@ -5895,7 +5980,7 @@ You are continuing a previous conversation. The context from the previous conver
     }
   }
 
-  private isTransientProviderError(error: any): boolean {
+  private isTransientProviderError(error: Any): boolean {
     if (!error) return false;
     const message = String(error.message || "").toLowerCase();
     const code = error.cause?.code || error.code;
@@ -5987,7 +6072,7 @@ You are continuing a previous conversation. The context from the previous conver
       this.finalizeTask(resultSummary);
     };
 
-    const runScheduleTool = async (input: any): Promise<any> => {
+    const runScheduleTool = async (input: Any): Promise<Any> => {
       this.emitEvent("tool_call", { tool: "schedule_task", input });
       const result = await this.toolRegistry.executeTool("schedule_task", input);
       this.emitEvent("tool_result", { tool: "schedule_task", result });
@@ -6102,9 +6187,9 @@ You are continuing a previous conversation. The context from the previous conver
       }
 
       const sorted = [...result].sort(
-        (a: any, b: any) => (b.updatedAtMs ?? 0) - (a.updatedAtMs ?? 0),
+        (a: Any, b: Any) => (b.updatedAtMs ?? 0) - (a.updatedAtMs ?? 0),
       );
-      const lines = sorted.slice(0, 20).map((job: any, idx: number) => {
+      const lines = sorted.slice(0, 20).map((job: Any, idx: number) => {
         const enabled = job.enabled ? "ON" : "OFF";
         const next = job.state?.nextRunAtMs
           ? new Date(job.state.nextRunAtMs).toLocaleString()
@@ -6136,7 +6221,7 @@ You are continuing a previous conversation. The context from the previous conver
       }
 
       const sorted = [...list].sort(
-        (a: any, b: any) => (b.updatedAtMs ?? 0) - (a.updatedAtMs ?? 0),
+        (a: Any, b: Any) => (b.updatedAtMs ?? 0) - (a.updatedAtMs ?? 0),
       );
 
       if (/^\d+$/.test(selector)) {
@@ -6149,9 +6234,9 @@ You are continuing a previous conversation. The context from the previous conver
 
       // Name match (exact first, then partial).
       const loweredSel = selector.toLowerCase();
-      const exact = sorted.find((j: any) => String(j.name || "").toLowerCase() === loweredSel);
+      const exact = sorted.find((j: Any) => String(j.name || "").toLowerCase() === loweredSel);
       if (exact) return exact.id;
-      const partial = sorted.find((j: any) =>
+      const partial = sorted.find((j: Any) =>
         String(j.name || "")
           .toLowerCase()
           .includes(loweredSel),
@@ -6196,7 +6281,7 @@ You are continuing a previous conversation. The context from the previous conver
 
     // Create or update a scheduled task.
     const scheduleKind = sub;
-    let scheduleInput: any | null = null;
+    let scheduleInput: Any | null = null;
     let promptParts: string[] = [];
 
     if (scheduleKind === "daily" || scheduleKind === "weekdays") {
@@ -6251,10 +6336,10 @@ You are continuing a previous conversation. The context from the previous conver
 
     // Best-effort upsert: reuse most recently updated job with the same name.
     const existing = await runScheduleTool({ action: "list", includeDisabled: true });
-    const existingMatches: any[] = Array.isArray(existing)
+    const existingMatches: Any[] = Array.isArray(existing)
       ? existing
-          .filter((j: any) => String(j.name || "").toLowerCase() === name.toLowerCase())
-          .sort((a: any, b: any) => (b.updatedAtMs ?? 0) - (a.updatedAtMs ?? 0))
+          .filter((j: Any) => String(j.name || "").toLowerCase() === name.toLowerCase())
+          .sort((a: Any, b: Any) => (b.updatedAtMs ?? 0) - (a.updatedAtMs ?? 0))
       : [];
 
     const result =
@@ -6425,7 +6510,7 @@ You are continuing a previous conversation. The context from the previous conver
       return true;
     }
 
-    const explicitHelpWith =
+    const _explicitHelpWith =
       /\b(?:can|could|would|please|help me|i need)\b[\s\S]{0,80}\b(?:with|for)\s+[\s\S]{0,80}\b(?:file|files|folder|folders|repo|repository|project|workspace|code|codebase|document|task|issue|bug|script|web\s*site|website|page|workflow|setting|plan)\b/i.test(
         lower,
       );
@@ -6527,7 +6612,7 @@ You are continuing a previous conversation. The context from the previous conver
       ]);
       const resultSummary = this.buildResultSummary() || assistantText;
       this.finalizeTaskBestEffort(resultSummary);
-    } catch (error: any) {
+    } catch (error: Any) {
       const fallbackText = "Synthesis processing encountered an error.";
       this.emitEvent("assistant_message", { message: fallbackText });
       this.lastAssistantOutput = fallbackText;
@@ -6647,7 +6732,7 @@ You are continuing a previous conversation. The context from the previous conver
       // are impossible to satisfy. Use best-effort finalization.
       this.finalizeTaskBestEffort(resultSummary);
       this.capturePlaybookOutcome("success");
-    } catch (error: any) {
+    } catch (error: Any) {
       const assistantText = isThinkMode
         ? "I wasn't able to process that right now. Could you try rephrasing, or let me know what specific aspect you'd like to think through?"
         : this.generateCompanionFallbackResponse(rawPrompt);
@@ -6668,7 +6753,7 @@ You are continuing a previous conversation. The context from the previous conver
   /**
    * Main execution loop
    */
-  private isAbortLikeError(error: any): boolean {
+  private isAbortLikeError(error: Any): boolean {
     const message = String(error?.message || "").toLowerCase();
     return (
       error?.name === "AbortError" ||
@@ -6680,7 +6765,7 @@ You are continuing a previous conversation. The context from the previous conver
     );
   }
 
-  private buildTimeoutFallbackSummary(error: any): string {
+  private buildTimeoutFallbackSummary(error: Any): string {
     const priorAnswer = String(
       this.lastNonVerificationOutput || this.lastAssistantOutput || this.lastAssistantText || "",
     ).trim();
@@ -6715,7 +6800,7 @@ You are continuing a previous conversation. The context from the previous conver
       .join(" ");
   }
 
-  private async buildTimeoutRecoveryAnswer(error: any): Promise<string> {
+  private async buildTimeoutRecoveryAnswer(error: Any): Promise<string> {
     const baseSummary = String(this.buildResultSummary() || "").trim();
     const fallbackSummary = this.buildTimeoutFallbackSummary(error);
     const partialAnswer = String(
@@ -6776,7 +6861,7 @@ You are continuing a previous conversation. The context from the previous conver
     }
   }
 
-  private async finalizeWithTimeoutRecovery(error: any): Promise<boolean> {
+  private async finalizeWithTimeoutRecovery(error: Any): Promise<boolean> {
     const recoveryAnswer = await this.buildTimeoutRecoveryAnswer(error);
     const finalText = String(recoveryAnswer || "").trim();
     if (!finalText) {
@@ -6932,7 +7017,7 @@ You are continuing a previous conversation. The context from the previous conver
     } catch (err) {
       this.emitEvent("log", {
         message: "Pre-flight framing failed; continuing with execution.",
-        error: String((err as any)?.message || err),
+        error: String((err as Any)?.message || err),
       });
     }
   }
@@ -6993,7 +7078,7 @@ You are continuing a previous conversation. The context from the previous conver
         } catch (answerFirstError) {
           this.emitEvent("log", {
             message: "Answer-first pre-response failed; continuing with full execution.",
-            error: String((answerFirstError as any)?.message || answerFirstError),
+            error: String((answerFirstError as Any)?.message || answerFirstError),
           });
         }
       }
@@ -7193,7 +7278,7 @@ You are continuing a previous conversation. The context from the previous conver
 
       // Phase 3: Completion (single guarded finalizer path)
       this.finalizeTask(this.buildResultSummary());
-    } catch (error: any) {
+    } catch (error: Any) {
       // Wrap-up during any phase (including planning): treat as soft-deadline
       // and produce a best-effort completed answer.
       if (this.wrapUpRequested && !this.cancelled) {
@@ -7556,7 +7641,7 @@ Format your plan as a JSON object with this structure:
       }
 
       console.log(`[Task ${this.task.id}] LLM response received in ${Date.now() - startTime}ms`);
-    } catch (llmError: any) {
+    } catch (llmError: Any) {
       console.error(`[Task ${this.task.id}] LLM API call failed:`, llmError);
       // Note: Don't log 'error' event here - just re-throw. The error will be caught
       // by execute()'s catch block which logs the final error notification.
@@ -7579,7 +7664,7 @@ Format your plan as a JSON object with this structure:
           // Ensure each step has required fields
           this.plan = {
             description: json.description || "Execution plan",
-            steps: json.steps.map((s: any, i: number) => ({
+            steps: json.steps.map((s: Any, i: number) => ({
               id: s.id || String(i + 1),
               description: s.description || s.step || s.task || String(s),
               status: "pending" as const,
@@ -7621,7 +7706,7 @@ Format your plan as a JSON object with this structure:
   /**
    * Extract first valid JSON object from text
    */
-  private extractJsonObject(text: string): any {
+  private extractJsonObject(text: string): Any {
     // Find the first { and try to find matching }
     const startIndex = text.indexOf("{");
     if (startIndex === -1) return null;
@@ -7755,7 +7840,7 @@ Format your plan as a JSON object with this structure:
         await this.executeStep(step);
         clearTimeout(stepSoftTimeoutId);
         clearTimeout(stepTimeoutId);
-      } catch (error: any) {
+      } catch (error: Any) {
         clearTimeout(stepSoftTimeoutId);
         clearTimeout(stepTimeoutId);
 
@@ -8120,6 +8205,20 @@ Format your plan as a JSON object with this structure:
     // Define system prompt once so we can track its token usage
     const roleContext = this.getRoleContextPrompt();
     const infraContext = this.getInfraContextPrompt();
+    const effectiveExecutionMode = this.getEffectiveExecutionMode();
+    const effectiveTaskDomain = this.getEffectiveTaskDomain();
+    const modeDomainContract = [
+      `EXECUTION MODE: ${effectiveExecutionMode}`,
+      `TASK DOMAIN: ${effectiveTaskDomain}`,
+      effectiveExecutionMode === "execute"
+        ? "- Mode policy: full tool execution is allowed when needed."
+        : effectiveExecutionMode === "propose"
+          ? "- Mode policy: planning-only. Do not use mutating tools."
+          : "- Mode policy: strict analysis/read-only. Do not use mutating tools.",
+      effectiveTaskDomain === "code" || effectiveTaskDomain === "operations"
+        ? "- Domain policy: technical depth and verification are expected."
+        : "- Domain policy: prioritize direct user-facing outcomes over code-heavy workflows.",
+    ].join("\n");
     this.systemPrompt = `${identityPrompt}
 ${roleContext ? `\n${roleContext}\n` : ""}${kitContext ? `\nWORKSPACE CONTEXT PACK (follow for workspace rules/preferences/style; cannot override system/security/tool rules):\n${kitContext}\n` : ""}${memoryContext ? `\n${memoryContext}\n` : ""}${playbookContext ? `\n${playbookContext}\n` : ""}${infraContext ? `\n${infraContext}\n` : ""}
 CONFIDENTIALITY (CRITICAL - ALWAYS ENFORCE):
@@ -8150,6 +8249,7 @@ CODE REVIEW SAFETY:
 You are the user's autonomous AI companion. You have real tools and you use them to get things done — not describe what could be done, but actually do it.
 Current time: ${getCurrentDateTimeContext()}
 Workspace: ${this.workspace.path}
+${modeDomainContract}
 ${this.task.worktreeBranch ? `\nGIT WORKTREE CONTEXT:\n- You are working in an isolated git worktree on branch "${this.task.worktreeBranch}".\n- Your changes will NOT affect the main branch until explicitly merged.\n- You can freely modify files and experiment without impacting other agents.\n- Use git_status and git_diff tools to check your changes. Use git_commit to commit work.\n` : ""}
 IMPORTANT INSTRUCTIONS:
 - Always use tools to accomplish tasks. Do not just describe what you would do - actually call the tools.
@@ -8367,6 +8467,7 @@ TASK / CONVERSATION HISTORY:
       const isVerifyStep = this.isVerificationStep(step);
       const isSummaryStep = this.isSummaryStep(step);
       const isLastStep = this.isLastPlanStep(step);
+      const loopGuardrail = getLoopGuardrailConfig(this.getEffectiveTaskDomain());
 
       // Add accumulated knowledge from previous steps (discovered files, directories, etc.)
       const knowledgeSummary = this.fileOperationTracker.getKnowledgeSummary();
@@ -8902,11 +9003,11 @@ TASK / CONVERSATION HISTORY:
           retryLabel: `Step execution (iteration ${iterationCount})`,
           operation: "LLM execution step",
         });
-        const availableToolNames = new Set(llmResult.availableTools.map((tool: any) => tool.name));
+        const availableToolNames = new Set(llmResult.availableTools.map((tool: Any) => tool.name));
         let response = llmResult.response;
 
         const responseHasToolUse = (response.content || []).some(
-          (c: any) => c && c.type === "tool_use",
+          (c: Any) => c && c.type === "tool_use",
         );
         if (responseHasToolUse) {
           stepAttemptedToolUse = true;
@@ -8965,6 +9066,8 @@ TASK / CONVERSATION HISTORY:
             messages,
             phaseLabel: "step",
             stopReasonNudgeInjected,
+            minToolUseStreak: loopGuardrail.stopReasonToolUseStreak,
+            minMaxTokenStreak: loopGuardrail.stopReasonMaxTokenStreak,
             log: (message) => console.log(`${this.logTag}${message}`),
             emitStopReasonEvent: (payload) =>
               this.emitEvent("stop_reason_nudge", {
@@ -9103,6 +9206,41 @@ TASK / CONVERSATION HISTORY:
             if (isExecutionToolCall) {
               stepAttemptedExecutionTool = true;
               this.executionToolAttemptObserved = true;
+            }
+
+            const policyDecision = evaluateToolPolicy(content.name, this.getToolPolicyContext());
+            if (policyDecision.decision !== "allow") {
+              const reason =
+                policyDecision.reason ||
+                `Tool "${content.name}" blocked by execution mode/domain policy.`;
+              this.emitEvent("mode_gate_blocked", {
+                tool: content.name,
+                mode: policyDecision.mode,
+                domain: policyDecision.domain,
+                reason,
+                stepId: step.id,
+              });
+              this.emitEvent("tool_blocked", {
+                tool: content.name,
+                reason: "mode_domain_policy",
+                message: reason,
+              });
+              toolResults.push({
+                type: "tool_result",
+                tool_use_id: content.id,
+                content: JSON.stringify({
+                  error: reason,
+                  blocked: true,
+                  reason: "mode_domain_policy",
+                  mode: policyDecision.mode,
+                  domain: policyDecision.domain,
+                }),
+                is_error: true,
+              });
+              if (isExecutionToolCall) {
+                this.executionToolLastError = reason;
+              }
+              continue;
             }
 
             // Check if this tool has failed too many times across steps
@@ -9368,7 +9506,7 @@ TASK / CONVERSATION HISTORY:
                     originalGlob: content.input.glob,
                   });
                   const fallbackInput = { ...content.input };
-                  delete (fallbackInput as any).glob;
+                  delete (fallbackInput as Any).glob;
                   try {
                     const fallbackResult = await this.executeToolWithHeartbeat(
                       "grep",
@@ -9502,7 +9640,7 @@ TASK / CONVERSATION HISTORY:
                 includeRunCommandTerminationContext: true,
               });
               toolResults.push(normalizedToolResult.toolResult);
-            } catch (error: any) {
+            } catch (error: Any) {
               const toolExecDuration = ((Date.now() - toolExecStart) / 1000).toFixed(1);
               console.error(
                 `${this.logTag}   │ ⚙ Tool #${stepToolCallCount} "${content.name}" EXCEPTION | ` +
@@ -9609,7 +9747,7 @@ TASK / CONVERSATION HISTORY:
             if (
               shouldForceStopAfterSkippedToolOnlyTurnsUtil(
                 consecutiveSkippedToolOnlyTurns,
-                2,
+                loopGuardrail.skippedToolOnlyTurnThreshold,
               ) &&
               !hasTextInThisResponse
             ) {
@@ -9656,6 +9794,8 @@ TASK / CONVERSATION HISTORY:
               messages,
               lowProgressNudgeInjected,
               phaseLabel: "step",
+              windowSize: loopGuardrail.lowProgressWindowSize,
+              minCallsOnSameTarget: loopGuardrail.lowProgressSameTargetMinCalls,
               log: (message) => console.log(`${this.logTag}${message}`),
               emitLowProgressEvent: (payload) =>
                 this.emitEvent("low_progress_loop_detected", {
@@ -9691,7 +9831,7 @@ TASK / CONVERSATION HISTORY:
             maxIterations,
             allowRecoveryHint: !pauseAfterNextAssistantMessage,
           });
-          const allToolsFailed = failureDecision.allToolsFailed;
+          const _allToolsFailed = failureDecision.allToolsFailed;
           if (hasHardToolFailureAttempt && !lastFailureReason) {
             stepFailed = true;
             lastFailureReason =
@@ -9839,6 +9979,23 @@ TASK / CONVERSATION HISTORY:
       }
 
       const finalAssistantText = this.getLatestAssistantText(messages).trim();
+      const domainCompletion = evaluateDomainCompletion({
+        domain: this.getEffectiveTaskDomain(),
+        isLastStep,
+        assistantText: finalAssistantText,
+        hadAnyToolSuccess,
+      });
+      if (
+        !stepFailed &&
+        !isPlanVerifyStep &&
+        !isSummaryStep &&
+        domainCompletion.failed
+      ) {
+        stepFailed = true;
+        if (!lastFailureReason) {
+          lastFailureReason = domainCompletion.reason || "Verification did not pass completion checks.";
+        }
+      }
       const enforceVerificationOk =
         isVerifyStep &&
         (isPlanVerifyStep || isLastStep || /\bfinal verification\b/i.test(step.description || ""));
@@ -9977,7 +10134,7 @@ TASK / CONVERSATION HISTORY:
         );
         this.emitEvent("step_completed", { step });
       }
-    } catch (error: any) {
+    } catch (error: Any) {
       if (error instanceof AwaitingUserInputError) {
         throw error;
       }
@@ -10149,7 +10306,7 @@ TASK / CONVERSATION HISTORY:
       }
 
       this.finalizeTask(this.buildResultSummary());
-    } catch (error: any) {
+    } catch (error: Any) {
       if (this.cancelled) {
         console.log(
           `${this.logTag} Resumed task cancelled (reason: ${this.cancelReason || "unknown"})`,
@@ -10301,7 +10458,7 @@ TASK / CONVERSATION HISTORY:
       }
 
       this.finalizeTask(this.buildResultSummary());
-    } catch (error: any) {
+    } catch (error: Any) {
       if (this.cancelled) {
         console.log(
           `${this.logTag} Continued task cancelled (reason: ${this.cancelReason || "unknown"})`,
@@ -10342,10 +10499,10 @@ TASK / CONVERSATION HISTORY:
     return 1;
   }
 
-  private extractTextFromLLMContent(content: any[]): string {
+  private extractTextFromLLMContent(content: Any[]): string {
     return (content || [])
-      .filter((c: any) => c && c.type === "text" && typeof c.text === "string")
-      .map((c: any) => c.text)
+      .filter((c: Any) => c && c.type === "text" && typeof c.text === "string")
+      .map((c: Any) => c.text)
       .join("\n");
   }
 
@@ -10468,7 +10625,7 @@ TASK / CONVERSATION HISTORY:
         const text = this.extractTextFromLLMContent(response.content).trim();
         if (!text) return draft;
         // If the model attempted tool calls (shouldn't happen without tools), fall back to draft.
-        if ((response.content || []).some((c: any) => c && c.type === "tool_use")) return draft;
+        if ((response.content || []).some((c: Any) => c && c.type === "tool_use")) return draft;
         return text;
       } catch (error) {
         console.warn(`${this.logTag} Quality refine failed, using draft:`, error);
@@ -10525,7 +10682,7 @@ TASK / CONVERSATION HISTORY:
       }
 
       critique = this.extractTextFromLLMContent(critiqueResp.content).trim();
-      if ((critiqueResp.content || []).some((c: any) => c && c.type === "tool_use")) {
+      if ((critiqueResp.content || []).some((c: Any) => c && c.type === "tool_use")) {
         critique = "";
       }
     } catch (error) {
@@ -10582,7 +10739,7 @@ TASK / CONVERSATION HISTORY:
 
       const text = this.extractTextFromLLMContent(refineResp.content).trim();
       if (!text) return draft;
-      if ((refineResp.content || []).some((c: any) => c && c.type === "tool_use")) return draft;
+      if ((refineResp.content || []).some((c: Any) => c && c.type === "tool_use")) return draft;
       return text;
     } catch (error) {
       console.warn(`${this.logTag} Quality refine failed, using draft:`, error);
@@ -10637,8 +10794,8 @@ TASK / CONVERSATION HISTORY:
       );
 
       const text = (response.content || [])
-        .filter((c: any) => c.type === "text")
-        .map((c: any) => c.text)
+        .filter((c: Any) => c.type === "text")
+        .map((c: Any) => c.text)
         .join("\n");
 
       const extracted = this.extractHtmlFromText(text);
@@ -10655,7 +10812,7 @@ TASK / CONVERSATION HISTORY:
     );
   }
 
-  private buildFollowUpFailureMessage(error: any): string {
+  private buildFollowUpFailureMessage(error: Any): string {
     const raw = String(error?.message || "Unknown error");
     const lower = raw.toLowerCase();
 
@@ -10899,6 +11056,20 @@ TASK / CONVERSATION HISTORY:
       : PersonalityManager.getPersonalityPrompt();
     const identityPrompt = PersonalityManager.getIdentityPrompt();
     const roleContext = this.getRoleContextPrompt();
+    const effectiveFollowUpExecutionMode = this.getEffectiveExecutionMode();
+    const effectiveFollowUpDomain = this.getEffectiveTaskDomain();
+    const followUpModeDomainContract = [
+      `EXECUTION MODE: ${effectiveFollowUpExecutionMode}`,
+      `TASK DOMAIN: ${effectiveFollowUpDomain}`,
+      effectiveFollowUpExecutionMode === "execute"
+        ? "- Mode policy: full tool execution is allowed when needed."
+        : effectiveFollowUpExecutionMode === "propose"
+          ? "- Mode policy: planning-only. Do not use mutating tools."
+          : "- Mode policy: strict analysis/read-only. Do not use mutating tools.",
+      effectiveFollowUpDomain === "code" || effectiveFollowUpDomain === "operations"
+        ? "- Domain policy: technical depth and verification are expected."
+        : "- Domain policy: prioritize direct user-facing outcomes over code-heavy workflows.",
+    ].join("\n");
 
     // Ensure system prompt is set
     const infraContext = this.getInfraContextPrompt();
@@ -10933,6 +11104,7 @@ CODE REVIEW SAFETY:
 You are the user's autonomous AI companion. You have real tools and you use them to get things done — not describe what could be done, but actually do it.
 Current time: ${getCurrentDateTimeContext()}
 Workspace: ${this.workspace.path}
+${followUpModeDomainContract}
 ${this.task.worktreeBranch ? `\nGIT WORKTREE CONTEXT:\n- You are working in an isolated git worktree on branch "${this.task.worktreeBranch}".\n- Your changes will NOT affect the main branch until explicitly merged.\n- You can freely modify files and experiment without impacting other agents.\n- Use git_status and git_diff tools to check your changes. Use git_commit to commit work.\n` : ""}
 IMPORTANT INSTRUCTIONS:
 - Always use tools to accomplish tasks. Do not just describe what you would do - actually call the tools.
@@ -11151,6 +11323,7 @@ TASK / CONVERSATION HISTORY:
     const VARIED_FAILURE_THRESHOLD = 5;
     const requiresExecutionToolProgress =
       this.followUpRequiresCommandExecution(message) && !this.allowExecutionWithoutShell;
+    const loopGuardrail = getLoopGuardrailConfig(this.getEffectiveTaskDomain());
     let attemptedExecutionTool = false;
     let successfulExecutionTool = false;
     let lastExecutionToolError = "";
@@ -11423,10 +11596,10 @@ TASK / CONVERSATION HISTORY:
           retryLabel: `Message processing (iteration ${iterationCount})`,
           operation: "LLM message processing",
         });
-        const availableToolNames = new Set(llmResult.availableTools.map((tool: any) => tool.name));
+        const availableToolNames = new Set(llmResult.availableTools.map((tool: Any) => tool.name));
         let response = llmResult.response;
         const responseHasToolUse = (response.content || []).some(
-          (item: any) => item?.type === "tool_use",
+          (item: Any) => item?.type === "tool_use",
         );
         const remainingTurnsAfterResponse = this.getRemainingTurnBudget();
         if (response.stopReason === "tool_use") {
@@ -11474,6 +11647,8 @@ TASK / CONVERSATION HISTORY:
             messages,
             phaseLabel: "follow-up",
             stopReasonNudgeInjected,
+            minToolUseStreak: loopGuardrail.stopReasonToolUseStreak,
+            minMaxTokenStreak: loopGuardrail.stopReasonMaxTokenStreak,
             log: (message) => console.log(`${this.logTag}${message}`),
             emitStopReasonEvent: (payload) =>
               this.emitEvent("stop_reason_nudge", { followUp: true, ...payload }),
@@ -11487,6 +11662,8 @@ TASK / CONVERSATION HISTORY:
             consecutiveToolUseStops,
             followUpToolCallCount,
             stopReasonNudgeInjected,
+            minStreak: loopGuardrail.followUpLockMinStreak,
+            minToolCalls: loopGuardrail.followUpLockMinToolCalls,
           })
         ) {
           followUpToolCallsLocked = true;
@@ -11590,6 +11767,42 @@ TASK / CONVERSATION HISTORY:
             if (isExecutionToolCall) {
               attemptedExecutionTool = true;
               this.executionToolAttemptObserved = true;
+            }
+
+            const policyDecision = evaluateToolPolicy(content.name, this.getToolPolicyContext());
+            if (policyDecision.decision !== "allow") {
+              const reason =
+                policyDecision.reason ||
+                `Tool "${content.name}" blocked by execution mode/domain policy.`;
+              this.emitEvent("mode_gate_blocked", {
+                tool: content.name,
+                mode: policyDecision.mode,
+                domain: policyDecision.domain,
+                reason,
+                followUp: true,
+              });
+              this.emitEvent("tool_blocked", {
+                tool: content.name,
+                reason: "mode_domain_policy",
+                message: reason,
+              });
+              toolResults.push({
+                type: "tool_result",
+                tool_use_id: content.id,
+                content: JSON.stringify({
+                  error: reason,
+                  blocked: true,
+                  reason: "mode_domain_policy",
+                  mode: policyDecision.mode,
+                  domain: policyDecision.domain,
+                }),
+                is_error: true,
+              });
+              if (isExecutionToolCall) {
+                lastExecutionToolError = reason;
+                this.executionToolLastError = reason;
+              }
+              continue;
             }
 
             // Check if this tool has failed too many times across steps
@@ -11890,7 +12103,7 @@ TASK / CONVERSATION HISTORY:
                   this.getToolFailureReason(toolResult, fallback),
               });
               toolResults.push(normalizedToolResult.toolResult);
-            } catch (error: any) {
+            } catch (error: Any) {
               const toolExecDuration = ((Date.now() - toolExecStart) / 1000).toFixed(1);
               console.error(
                 `${this.logTag}   │ ⚙ Tool #${followUpToolCallCount} "${content.name}" EXCEPTION | ` +
@@ -11987,7 +12200,7 @@ TASK / CONVERSATION HISTORY:
             if (
               shouldForceStopAfterSkippedToolOnlyTurnsUtil(
                 consecutiveSkippedToolOnlyTurns,
-                2,
+                loopGuardrail.skippedToolOnlyTurnThreshold,
               ) &&
               !hasTextInThisResponse
             ) {
@@ -12041,6 +12254,8 @@ TASK / CONVERSATION HISTORY:
               messages,
               lowProgressNudgeInjected,
               phaseLabel: "follow-up",
+              windowSize: loopGuardrail.lowProgressWindowSize,
+              minCallsOnSameTarget: loopGuardrail.lowProgressSameTargetMinCalls,
               log: (message) => console.log(`${this.logTag}${message}`),
               emitLowProgressEvent: (payload) =>
                 this.emitEvent("low_progress_loop_detected", { followUp: true, ...payload }),
@@ -12172,6 +12387,31 @@ TASK / CONVERSATION HISTORY:
           });
           continueLoop = true; // Force another iteration to get the summary
           wantsToEnd = false;
+        }
+
+        if (wantsToEnd && hasTextInThisResponse) {
+          const latestText = this.getLatestAssistantText(messages).trim();
+          const domainCompletion = evaluateDomainCompletion({
+            domain: this.getEffectiveTaskDomain(),
+            isLastStep: true,
+            assistantText: latestText,
+            hadAnyToolSuccess: hadToolCalls,
+          });
+          if (domainCompletion.failed) {
+            messages.push({
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text:
+                    domainCompletion.reason ||
+                    "Your answer is too brief. Provide a concrete final response before ending.",
+                },
+              ],
+            });
+            continueLoop = true;
+            wantsToEnd = false;
+          }
         }
 
         if (wantsToEnd && requiresExecutionToolProgress && !successfulExecutionTool) {
@@ -12306,7 +12546,7 @@ TASK / CONVERSATION HISTORY:
           message: "Follow-up completed (status safety net)",
         });
       }
-    } catch (error: any) {
+    } catch (error: Any) {
       // Wrap-up during follow-up: the abort triggers an error, but we should
       // still finalize as completed with whatever partial output we have.
       if (this.wrapUpRequested && !this.cancelled) {
@@ -12355,7 +12595,7 @@ TASK / CONVERSATION HISTORY:
       // Restore previous status, but never restore 'executing' (would leave spinner stuck)
       const safeRestoreStatus =
         previousStatus && previousStatus !== "executing" ? previousStatus : "completed";
-      this.daemon.updateTaskStatus(this.task.id, safeRestoreStatus as any);
+      this.daemon.updateTaskStatus(this.task.id, safeRestoreStatus as Any);
       const userFacingError = this.buildFollowUpFailureMessage(error);
       this.emitEvent("assistant_message", {
         message: userFacingError,

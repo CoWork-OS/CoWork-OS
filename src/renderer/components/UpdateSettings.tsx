@@ -70,7 +70,7 @@ export function UpdateSettings() {
       setLoading(true);
       const info = await window.electronAPI.getAppVersion();
       setVersionInfo(info);
-    } catch (err: any) {
+    } catch (err: Any) {
       setError(err.message);
     } finally {
       setLoading(false);
@@ -84,7 +84,7 @@ export function UpdateSettings() {
       setUpdateInfo(null);
       const info = await window.electronAPI.checkForUpdates();
       setUpdateInfo(info);
-    } catch (err: any) {
+    } catch (err: Any) {
       setError(err.message);
     } finally {
       setChecking(false);
@@ -98,7 +98,7 @@ export function UpdateSettings() {
       setUpdating(true);
       setError(null);
       await window.electronAPI.downloadUpdate(updateInfo);
-    } catch (err: any) {
+    } catch (err: Any) {
       setError(err.message);
       setUpdating(false);
     }
@@ -107,7 +107,7 @@ export function UpdateSettings() {
   const handleInstallUpdate = async () => {
     try {
       await window.electronAPI.installUpdate();
-    } catch (err: any) {
+    } catch (err: Any) {
       setError(err.message);
     }
   };

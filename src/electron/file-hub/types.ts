@@ -41,7 +41,7 @@ export interface FileHubListOptions {
 
 export interface FileHubServiceDeps {
   getWorkspacePath: (workspaceId: string) => string;
-  getArtifacts: (query?: { taskId?: string; limit?: number }) => any[];
+  getArtifacts: (query?: { taskId?: string; limit?: number }) => Any[];
   /** Check which cloud connectors are configured */
   getConnectedSources: () => FileHubSource[];
   log?: (...args: unknown[]) => void;

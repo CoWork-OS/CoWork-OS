@@ -5,7 +5,7 @@
 import { describe, it, expect, vi } from "vitest";
 
 vi.mock("../channels/signal-client", () => {
-  type Handler = (...args: any[]) => void;
+  type Handler = (...args: Any[]) => void;
 
   class MockSignalClient {
     private handlers = new Map<string, Set<Handler>>();
@@ -22,8 +22,8 @@ vi.mock("../channels/signal-client", () => {
     sendTyping = vi.fn().mockResolvedValue(undefined);
     sendReaction = vi.fn().mockResolvedValue(undefined);
 
-    constructor(_options: any) {
-      (globalThis as any).__signalClientLastInstance = this;
+    constructor(_options: Any) {
+      (globalThis as Any).__signalClientLastInstance = this;
     }
 
     on(event: string, handler: Handler): this {
@@ -34,7 +34,7 @@ vi.mock("../channels/signal-client", () => {
       return this;
     }
 
-    emit(event: string, ...args: any[]): boolean {
+    emit(event: string, ...args: Any[]): boolean {
       const handlers = this.handlers.get(event);
       if (!handlers) {
         return false;
@@ -53,11 +53,11 @@ vi.mock("../channels/signal-client", () => {
 
 import { createSignalAdapter } from "../channels/signal";
 
-const getLastClient = (): any => (globalThis as any).__signalClientLastInstance;
+const getLastClient = (): Any => (globalThis as Any).__signalClientLastInstance;
 
 describe("SignalAdapter", () => {
   it("should throw if phoneNumber is missing", () => {
-    expect(() => createSignalAdapter({ enabled: true } as any)).toThrow(
+    expect(() => createSignalAdapter({ enabled: true } as Any)).toThrow(
       "Signal phone number is required",
     );
   });
@@ -109,7 +109,7 @@ describe("SignalAdapter", () => {
       account: "+10000000000",
     };
 
-    await (adapter as any).handleIncomingMessage(signalMessage);
+    await (adapter as Any).handleIncomingMessage(signalMessage);
 
     expect(onMessage).toHaveBeenCalledTimes(1);
     expect(client.sendReadReceipt).toHaveBeenCalledWith("+12223334444", [ts]);
@@ -141,8 +141,8 @@ describe("SignalAdapter", () => {
       account: "+10000000000",
     };
 
-    await (adapter as any).handleIncomingMessage(signalMessage);
-    await (adapter as any).handleIncomingMessage(signalMessage);
+    await (adapter as Any).handleIncomingMessage(signalMessage);
+    await (adapter as Any).handleIncomingMessage(signalMessage);
 
     expect(onMessage).toHaveBeenCalledTimes(1);
 
@@ -173,7 +173,7 @@ describe("SignalAdapter", () => {
       account: "+10000000000",
     };
 
-    await (adapter as any).handleIncomingMessage(signalMessage);
+    await (adapter as Any).handleIncomingMessage(signalMessage);
 
     expect(onMessage).not.toHaveBeenCalled();
 

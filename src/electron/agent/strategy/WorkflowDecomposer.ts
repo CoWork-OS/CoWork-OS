@@ -56,7 +56,7 @@ export class WorkflowDecomposer {
    * Attempt to decompose a prompt into ordered workflow phases.
    * Returns null if the prompt doesn't contain multi-phase patterns.
    */
-  static decompose(prompt: string, route: IntentRoute): WorkflowPhase[] | null {
+  static decompose(prompt: string, _route: IntentRoute): WorkflowPhase[] | null {
     if (!prompt || prompt.length < 30) return null;
 
     // Only decompose execution-heavy prompts with multiple action verbs
@@ -117,8 +117,8 @@ export class WorkflowDecomposer {
 
       // Extract text from response
       const text = (response.content || [])
-        .filter((b: any) => b.type === "text")
-        .map((b: any) => b.text)
+        .filter((b: Any) => b.type === "text")
+        .map((b: Any) => b.text)
         .join("");
 
       // Parse JSON — try to extract array from response

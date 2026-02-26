@@ -80,12 +80,12 @@ const GOAL_TEMPLATES: GoalTemplate[] = [
   },
   {
     pattern: /\b(automat|streamline|optimize)\b/i,
-    title: (g) => "Identify automation opportunities",
+    title: (_g) => "Identify automation opportunities",
     prompt: (g) =>
       `Identify the top 3 most repetitive tasks that could be automated, related to: ${g}`,
   },
   {
-    pattern: /\b(grow|scale|expand)\b/i,
+    pattern: /\b(grow|scale|e_xpand)\b/i,
     title: (g) => `Create a growth plan for "${g}"`,
     prompt: (g) => `Create a growth metrics dashboard and plan for: ${g}`,
   },

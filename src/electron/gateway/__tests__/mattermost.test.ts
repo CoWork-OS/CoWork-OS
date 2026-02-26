@@ -47,7 +47,7 @@ import {
   createMattermostAdapter,
   MattermostConfig,
 } from "../channels/mattermost";
-import { MattermostClient } from "../channels/mattermost-client";
+import { MattermostClient as _MattermostClient } from "../channels/mattermost-client";
 
 describe("MattermostAdapter", () => {
   let adapter: MattermostAdapter;
@@ -129,7 +129,7 @@ describe("MattermostAdapter", () => {
       const handler = vi.fn();
       adapter.onMessage(handler);
       // Handler should be registered (internal state)
-      expect((adapter as any).messageHandlers).toContain(handler);
+      expect((adapter as Any).messageHandlers).toContain(handler);
     });
 
     it("should support multiple handlers", () => {
@@ -137,7 +137,7 @@ describe("MattermostAdapter", () => {
       const handler2 = vi.fn();
       adapter.onMessage(handler1);
       adapter.onMessage(handler2);
-      expect((adapter as any).messageHandlers.length).toBe(2);
+      expect((adapter as Any).messageHandlers.length).toBe(2);
     });
   });
 
@@ -145,7 +145,7 @@ describe("MattermostAdapter", () => {
     it("should register error handlers", () => {
       const handler = vi.fn();
       adapter.onError(handler);
-      expect((adapter as any).errorHandlers).toContain(handler);
+      expect((adapter as Any).errorHandlers).toContain(handler);
     });
   });
 
@@ -153,7 +153,7 @@ describe("MattermostAdapter", () => {
     it("should register status handlers", () => {
       const handler = vi.fn();
       adapter.onStatusChange(handler);
-      expect((adapter as any).statusHandlers).toContain(handler);
+      expect((adapter as Any).statusHandlers).toContain(handler);
     });
 
     it("should call status handlers on status change", () => {
@@ -161,7 +161,7 @@ describe("MattermostAdapter", () => {
       adapter.onStatusChange(handler);
 
       // Trigger internal status change
-      (adapter as any).setStatus("connecting");
+      (adapter as Any).setStatus("connecting");
 
       expect(handler).toHaveBeenCalledWith("connecting", undefined);
     });
@@ -180,8 +180,8 @@ describe("MattermostAdapter", () => {
   describe("disconnect", () => {
     it("should clear state on disconnect", async () => {
       // Set some internal state
-      (adapter as any)._status = "connected";
-      (adapter as any)._botUsername = "testbot";
+      (adapter as Any)._status = "connected";
+      (adapter as Any)._botUsername = "testbot";
 
       await adapter.disconnect();
 
@@ -191,35 +191,35 @@ describe("MattermostAdapter", () => {
 
     it("should stop deduplication cleanup timer", async () => {
       // Create a timer
-      (adapter as any).dedupCleanupTimer = setInterval(() => {}, 60000);
+      (adapter as Any).dedupCleanupTimer = setInterval(() => {}, 60000);
 
       await adapter.disconnect();
 
-      expect((adapter as any).dedupCleanupTimer).toBeUndefined();
+      expect((adapter as Any).dedupCleanupTimer).toBeUndefined();
     });
   });
 
   describe("message deduplication", () => {
     it("should track processed messages", () => {
-      (adapter as any).markMessageProcessed("msg-123");
-      expect((adapter as any).isMessageProcessed("msg-123")).toBe(true);
+      (adapter as Any).markMessageProcessed("msg-123");
+      expect((adapter as Any).isMessageProcessed("msg-123")).toBe(true);
     });
 
     it("should not mark duplicate messages as unprocessed", () => {
-      (adapter as any).markMessageProcessed("msg-456");
-      (adapter as any).markMessageProcessed("msg-456");
-      expect((adapter as any).processedMessages.size).toBe(1);
+      (adapter as Any).markMessageProcessed("msg-456");
+      (adapter as Any).markMessageProcessed("msg-456");
+      expect((adapter as Any).processedMessages.size).toBe(1);
     });
 
     it("should cleanup old messages from cache", () => {
       const oldTime = Date.now() - 120000; // 2 minutes ago
-      (adapter as any).processedMessages.set("old-msg", oldTime);
-      (adapter as any).processedMessages.set("new-msg", Date.now());
+      (adapter as Any).processedMessages.set("old-msg", oldTime);
+      (adapter as Any).processedMessages.set("new-msg", Date.now());
 
-      (adapter as any).cleanupDedupCache();
+      (adapter as Any).cleanupDedupCache();
 
-      expect((adapter as any).processedMessages.has("old-msg")).toBe(false);
-      expect((adapter as any).processedMessages.has("new-msg")).toBe(true);
+      expect((adapter as Any).processedMessages.has("old-msg")).toBe(false);
+      expect((adapter as Any).processedMessages.has("new-msg")).toBe(true);
     });
   });
 

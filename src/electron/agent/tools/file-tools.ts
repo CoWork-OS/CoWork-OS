@@ -19,10 +19,11 @@ const MAX_DIR_ENTRIES = 100; // Max files to list per directory
 const MAX_SEARCH_RESULTS = 50; // Max search results
 const MAX_NAME_PAD = 48; // Cap for aligned directory listings
 
-function getElectronShell(): any | null {
+function getElectronShell(): Any | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const electron = require("electron") as any;
+// oxlint-disable-next-line typescript-eslint(no-require-imports)
+    const electron = require("electron") as Any;
     const shell = electron?.shell;
     if (shell) return shell;
   } catch {
@@ -230,7 +231,7 @@ export class FileTools {
     const projectId = getProjectIdFromWorkspaceRelPath(relPosix);
     if (!projectId) return;
 
-    const taskGetter = (this.daemon as any)?.getTask;
+    const taskGetter = (this.daemon as Any)?.getTask;
     const task =
       typeof taskGetter === "function" ? taskGetter.call(this.daemon, this.taskId) : null;
     const agentRoleId = task?.assignedAgentRoleId || null;
@@ -298,7 +299,7 @@ export class FileTools {
   private async realpathIfExists(p: string): Promise<string | null> {
     try {
       return await fs.realpath(p);
-    } catch (error: any) {
+    } catch (error: Any) {
       if (this.isNotFoundError(error)) return null;
       throw error;
     }
@@ -384,10 +385,10 @@ export class FileTools {
 
     try {
       await this.enforceProjectAccess(fullPath);
-      let stats: any;
+      let stats: Any;
       try {
         stats = await fs.stat(fullPath);
-      } catch (error: any) {
+      } catch (error: Any) {
         if (this.isNotFoundError(error) && !path.isAbsolute(relativePath)) {
           const fallbackPath = await this.resolveCaseInsensitivePath(relativePath);
           if (fallbackPath && fallbackPath !== fullPath) {
@@ -427,7 +428,7 @@ export class FileTools {
       } finally {
         await fileHandle.close();
       }
-    } catch (error: any) {
+    } catch (error: Any) {
       throw new Error(`Failed to read file: ${error.message}`);
     }
   }
@@ -453,7 +454,7 @@ export class FileTools {
       let stats: { size: number };
       try {
         stats = await fs.stat(fullPath);
-      } catch (error: any) {
+      } catch (error: Any) {
         if (this.isNotFoundError(error) && !path.isAbsolute(relativePath)) {
           const fallbackPath = await this.resolveCaseInsensitivePath(relativePath);
           if (fallbackPath && fallbackPath !== fullPath) {
@@ -549,12 +550,12 @@ export class FileTools {
         size: stats.size,
         path: outputPath,
       };
-    } catch (error: any) {
+    } catch (error: Any) {
       throw new Error(`Failed to read file: ${error.message}`);
     }
   }
 
-  private isNotFoundError(error: any): boolean {
+  private isNotFoundError(error: Any): boolean {
     const code = error?.code;
     if (code === "ENOENT" || code === "ENOTDIR") return true;
     const message = String(error?.message || "");
@@ -632,7 +633,7 @@ export class FileTools {
         truncated,
         format: "docx",
       };
-    } catch (error: any) {
+    } catch (error: Any) {
       throw new Error(`Failed to read DOCX file: ${error.message}`);
     }
   }
@@ -674,7 +675,7 @@ export class FileTools {
         truncated,
         format: "pdf",
       };
-    } catch (error: any) {
+    } catch (error: Any) {
       throw new Error(`Failed to read PDF file: ${error.message}`);
     }
   }
@@ -698,7 +699,7 @@ export class FileTools {
         truncated,
         format: "pptx",
       };
-    } catch (error: any) {
+    } catch (error: Any) {
       throw new Error(`Failed to read PPTX file: ${error.message}`);
     }
   }
@@ -798,7 +799,7 @@ export class FileTools {
         success: true,
         path: relativePath,
       };
-    } catch (error: any) {
+    } catch (error: Any) {
       throw new Error(`Failed to write file: ${error.message}`);
     }
   }
@@ -851,7 +852,7 @@ export class FileTools {
         totalCount,
         truncated: totalCount > MAX_DIR_ENTRIES,
       };
-    } catch (error: any) {
+    } catch (error: Any) {
       throw new Error(`Failed to list directory: ${error.message}`);
     }
   }
@@ -912,7 +913,7 @@ export class FileTools {
         truncated: totalCount > MAX_DIR_ENTRIES,
         combinedSize,
       };
-    } catch (error: any) {
+    } catch (error: Any) {
       throw new Error(`Failed to list directory: ${error.message}`);
     }
   }
@@ -950,7 +951,7 @@ export class FileTools {
         isFile: stats.isFile(),
         permissions,
       };
-    } catch (error: any) {
+    } catch (error: Any) {
       throw new Error(`Failed to get file info: ${error.message}`);
     }
   }
@@ -988,7 +989,7 @@ export class FileTools {
       });
 
       return { success: true };
-    } catch (error: any) {
+    } catch (error: Any) {
       throw new Error(`Failed to rename file: ${error.message}`);
     }
   }
@@ -1033,7 +1034,7 @@ export class FileTools {
         success: true,
         path: destPath,
       };
-    } catch (error: any) {
+    } catch (error: Any) {
       throw new Error(`Failed to copy file: ${error.message}`);
     }
   }
@@ -1097,7 +1098,7 @@ export class FileTools {
       });
 
       return { success: true };
-    } catch (error: any) {
+    } catch (error: Any) {
       // If deletion fails, try moving to Trash as fallback
       // This handles EPERM, EACCES, ENOTEMPTY and other filesystem errors
       if (
@@ -1119,7 +1120,7 @@ export class FileTools {
           });
 
           return { success: true, movedToTrash: true };
-        } catch (trashError: any) {
+        } catch (trashError: Any) {
           throw new Error(
             `Failed to delete file: ${error.code}. Could not move to Trash: ${trashError.message}`,
           );
@@ -1152,7 +1153,7 @@ export class FileTools {
       });
 
       return { success: true };
-    } catch (error: any) {
+    } catch (error: Any) {
       throw new Error(`Failed to create directory: ${error.message}`);
     }
   }
@@ -1254,7 +1255,7 @@ export class FileTools {
         totalFound: matches.length,
         truncated: matches.length >= MAX_SEARCH_RESULTS,
       };
-    } catch (error: any) {
+    } catch (error: Any) {
       throw new Error(`Search failed: ${error.message}`);
     }
   }

@@ -234,28 +234,28 @@ export class BlueBubblesAdapter implements ChannelAdapter {
   /**
    * Edit a message (not supported by iMessage)
    */
-  async editMessage(chatId: string, messageId: string, text: string): Promise<void> {
+  async editMessage(_chatId: string, _messageId: string, _text: string): Promise<void> {
     throw new Error("iMessage does not support message editing");
   }
 
   /**
    * Delete a message (not supported - iMessage unsend is time-limited)
    */
-  async deleteMessage(chatId: string, messageId: string): Promise<void> {
+  async deleteMessage(_chatId: string, _messageId: string): Promise<void> {
     throw new Error("iMessage message deletion not supported via BlueBubbles");
   }
 
   /**
    * Send a document/file
    */
-  async sendDocument(chatId: string, filePath: string, caption?: string): Promise<string> {
+  async sendDocument(_chatId: string, _filePath: string, _caption?: string): Promise<string> {
     throw new Error("BlueBubbles file sending not implemented");
   }
 
   /**
    * Send a photo/image
    */
-  async sendPhoto(chatId: string, filePath: string, caption?: string): Promise<string> {
+  async sendPhoto(_chatId: string, _filePath: string, _caption?: string): Promise<string> {
     throw new Error("BlueBubbles image sending not implemented");
   }
 

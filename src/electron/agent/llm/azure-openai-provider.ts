@@ -66,12 +66,12 @@ export class AzureOpenAIProvider implements LLMProvider {
     return `${this.endpoint}/openai/v1/responses`;
   }
 
-  private isMaxTokensUnsupported(errorData: any): boolean {
+  private isMaxTokensUnsupported(errorData: Any): boolean {
     const message = errorData?.error?.message || "";
     return /max_tokens/i.test(message) && /max_completion_tokens/i.test(message);
   }
 
-  private isChatCompletionUnsupported(errorData: any): boolean {
+  private isChatCompletionUnsupported(errorData: Any): boolean {
     const message = errorData?.error?.message || "";
     return (
       /chatcompletion/i.test(message) && /(does not work|not supported|unsupported)/i.test(message)
@@ -81,7 +81,7 @@ export class AzureOpenAIProvider implements LLMProvider {
   private buildChatCompletionsBody(
     request: LLMRequest,
     useMaxCompletionTokens: boolean,
-  ): Record<string, any> {
+  ): Record<string, Any> {
     const messages = toOpenAICompatibleMessages(request.messages, request.system, {
       supportsImages: true,
     });
@@ -96,8 +96,8 @@ export class AzureOpenAIProvider implements LLMProvider {
     };
   }
 
-  private buildResponsesInput(messages: LLMMessage[]): any[] {
-    const input: any[] = [];
+  private buildResponsesInput(messages: LLMMessage[]): Any[] {
+    const input: Any[] = [];
 
     for (const msg of messages) {
       if (typeof msg.content === "string") {
@@ -132,7 +132,7 @@ export class AzureOpenAIProvider implements LLMProvider {
       const textBlocks = msg.content.filter(isTextContent);
       const imageBlocks = msg.content.filter(isImageContent);
       if (textBlocks.length > 0 || imageBlocks.length > 0) {
-        const contentParts: any[] = textBlocks.map((block) => ({
+        const contentParts: Any[] = textBlocks.map((block) => ({
           type: msg.role === "assistant" ? "output_text" : "input_text",
           text: block.text,
         }));
@@ -167,7 +167,7 @@ export class AzureOpenAIProvider implements LLMProvider {
 
   private toResponsesTools(
     tools: LLMTool[],
-  ): Array<{ type: "function"; name: string; description: string; parameters: any }> {
+  ): Array<{ type: "function"; name: string; description: string; parameters: Any }> {
     return tools.map((tool) => ({
       type: "function" as const,
       name: tool.name,
@@ -176,15 +176,15 @@ export class AzureOpenAIProvider implements LLMProvider {
     }));
   }
 
-  private sanitizeSchemaForResponses(schema: any): any {
+  private sanitizeSchemaForResponses(schema: Any): Any {
     if (!schema || typeof schema !== "object") {
       return schema;
     }
 
-    const result: any = Array.isArray(schema) ? [...schema] : { ...schema };
+    const result: Any = Array.isArray(schema) ? [...schema] : { ...schema };
 
     if (result.properties && typeof result.properties === "object") {
-      const sanitizedProperties: Record<string, any> = {};
+      const sanitizedProperties: Record<string, Any> = {};
       for (const [key, value] of Object.entries(result.properties)) {
         sanitizedProperties[key] = this.sanitizeSchemaForResponses(value);
       }
@@ -202,7 +202,7 @@ export class AzureOpenAIProvider implements LLMProvider {
     return result;
   }
 
-  private buildResponsesBody(request: LLMRequest): Record<string, any> {
+  private buildResponsesBody(request: LLMRequest): Record<string, Any> {
     const input = this.buildResponsesInput(request.messages);
     const tools = request.tools ? this.toResponsesTools(request.tools) : undefined;
     return {
@@ -216,7 +216,7 @@ export class AzureOpenAIProvider implements LLMProvider {
 
   private async sendRequest(
     url: string,
-    body: Record<string, any>,
+    body: Record<string, Any>,
     signal?: AbortSignal,
   ): Promise<Response> {
     return fetch(url, {
@@ -230,7 +230,7 @@ export class AzureOpenAIProvider implements LLMProvider {
     });
   }
 
-  private parseFunctionCallArguments(value: any): Record<string, any> {
+  private parseFunctionCallArguments(value: Any): Record<string, Any> {
     if (!value) return {};
     if (typeof value === "object") return value;
     if (typeof value !== "string") return {};
@@ -241,12 +241,12 @@ export class AzureOpenAIProvider implements LLMProvider {
     }
   }
 
-  private fromResponsesApiResponse(response: any): LLMResponse {
+  private fromResponsesApiResponse(response: Any): LLMResponse {
     const content: LLMContent[] = [];
     let sawToolCall = false;
 
     if (Array.isArray(response?.output)) {
-      response.output.forEach((item: any, index: number) => {
+      response.output.forEach((item: Any, index: number) => {
         if (item.type === "message") {
           const blocks = Array.isArray(item.content) ? item.content : [];
           for (const block of blocks) {
@@ -307,7 +307,7 @@ export class AzureOpenAIProvider implements LLMProvider {
               (errorData.error?.message ? ` - ${errorData.error.message}` : ""),
           );
         }
-        const data = (await response.json()) as any;
+        const data = (await response.json()) as Any;
         return this.fromResponsesApiResponse(data);
       };
 
@@ -330,7 +330,7 @@ export class AzureOpenAIProvider implements LLMProvider {
             request.signal,
           );
           if (response.ok) {
-            const data = (await response.json()) as any;
+            const data = (await response.json()) as Any;
             return fromOpenAICompatibleResponse(data);
           }
           errorData = (await response.json().catch(() => ({}))) as { error?: { message?: string } };
@@ -344,9 +344,9 @@ export class AzureOpenAIProvider implements LLMProvider {
         );
       }
 
-      const data = (await response.json()) as any;
+      const data = (await response.json()) as Any;
       return fromOpenAICompatibleResponse(data);
-    } catch (error: any) {
+    } catch (error: Any) {
       if (error.name === "AbortError" || error.message?.includes("aborted")) {
         console.log("[Azure OpenAI] Request aborted");
         throw new Error("Request cancelled");
@@ -423,7 +423,7 @@ export class AzureOpenAIProvider implements LLMProvider {
       }
 
       return { success: true };
-    } catch (error: any) {
+    } catch (error: Any) {
       return {
         success: false,
         error: error.message || "Failed to connect to Azure OpenAI",

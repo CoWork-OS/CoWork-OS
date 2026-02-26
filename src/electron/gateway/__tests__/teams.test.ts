@@ -12,7 +12,7 @@ vi.mock("botbuilder", () => {
     process = vi.fn().mockResolvedValue(undefined);
     continueConversationAsync = vi
       .fn()
-      .mockImplementation(async (appId: string, ref: any, callback: any) => {
+      .mockImplementation(async (appId: string, ref: Any, callback: Any) => {
         const mockContext = {
           activity: { conversation: { id: "conv-123" } },
           sendActivity: vi.fn().mockResolvedValue({ id: "msg-123" }),
@@ -21,11 +21,11 @@ vi.mock("botbuilder", () => {
         };
         await callback(mockContext);
       });
-    onTurnError: any = null;
+    onTurnError: Any = null;
   };
 
   const MockConfigurationBotFrameworkAuthentication = class {
-    constructor(_config: any) {}
+    constructor(_config: Any) {}
   };
 
   return {
@@ -44,7 +44,7 @@ vi.mock("botbuilder", () => {
     },
     MessageFactory: {
       text: vi.fn().mockImplementation((text: string) => ({ type: "message", text })),
-      attachment: vi.fn().mockImplementation((attachment: any, text?: string) => ({
+      attachment: vi.fn().mockImplementation((attachment: Any, text?: string) => ({
         type: "message",
         attachments: [attachment],
         text,
@@ -55,7 +55,7 @@ vi.mock("botbuilder", () => {
 
 // Mock http module to avoid actual server creation
 vi.mock("http", () => ({
-  createServer: vi.fn().mockImplementation((handler) => {
+  createServer: vi.fn().mockImplementation((_handler) => {
     const emitter = new EventEmitter();
     return {
       listen: vi.fn().mockImplementation((port, callback) => {
@@ -114,7 +114,7 @@ describe("TeamsAdapter", () => {
         appId: "app-id",
         appPassword: "password",
       });
-      const config = (adapterNoPort as any).config;
+      const config = (adapterNoPort as Any).config;
       expect(config.webhookPort).toBeUndefined(); // Will default to 3978 on connect
     });
 
@@ -125,7 +125,7 @@ describe("TeamsAdapter", () => {
         appPassword: "password",
         webhookPort: 4000,
       });
-      const config = (adapterCustomPort as any).config;
+      const config = (adapterCustomPort as Any).config;
       expect(config.webhookPort).toBe(4000);
     });
 
@@ -136,7 +136,7 @@ describe("TeamsAdapter", () => {
         appPassword: "password",
         tenantId: "tenant-123",
       });
-      const config = (adapterSingleTenant as any).config;
+      const config = (adapterSingleTenant as Any).config;
       expect(config.tenantId).toBe("tenant-123");
     });
   });
@@ -218,7 +218,7 @@ describe("TeamsAdapter", () => {
     });
 
     it("should not reconnect if currently connecting", async () => {
-      (adapter as any)._status = "connecting";
+      (adapter as Any)._status = "connecting";
 
       await adapter.connect();
 
@@ -240,28 +240,28 @@ describe("TeamsAdapter", () => {
 
     it("should clear conversation references", async () => {
       await adapter.connect();
-      (adapter as any).conversationReferences.set("conv-123", { id: "ref-123" });
+      (adapter as Any).conversationReferences.set("conv-123", { id: "ref-123" });
 
       await adapter.disconnect();
 
-      expect((adapter as any).conversationReferences.size).toBe(0);
+      expect((adapter as Any).conversationReferences.size).toBe(0);
     });
 
     it("should clear reconnect timer if set", async () => {
-      (adapter as any).reconnectTimer = setTimeout(() => {}, 10000);
+      (adapter as Any).reconnectTimer = setTimeout(() => {}, 10000);
 
       await adapter.disconnect();
 
-      expect((adapter as any).reconnectTimer).toBeNull();
+      expect((adapter as Any).reconnectTimer).toBeNull();
     });
 
     it("should close the HTTP server", async () => {
       await adapter.connect();
-      const server = (adapter as any).server;
+      const _server = (adapter as Any).server;
 
       await adapter.disconnect();
 
-      expect((adapter as any).server).toBeNull();
+      expect((adapter as Any).server).toBeNull();
     });
   });
 
@@ -269,7 +269,7 @@ describe("TeamsAdapter", () => {
     it("should register message handlers", () => {
       const handler = vi.fn();
       adapter.onMessage(handler);
-      expect((adapter as any).messageHandlers).toContain(handler);
+      expect((adapter as Any).messageHandlers).toContain(handler);
     });
 
     it("should support multiple handlers", () => {
@@ -277,7 +277,7 @@ describe("TeamsAdapter", () => {
       const handler2 = vi.fn();
       adapter.onMessage(handler1);
       adapter.onMessage(handler2);
-      expect((adapter as any).messageHandlers.length).toBe(2);
+      expect((adapter as Any).messageHandlers.length).toBe(2);
     });
   });
 
@@ -285,7 +285,7 @@ describe("TeamsAdapter", () => {
     it("should register error handlers", () => {
       const handler = vi.fn();
       adapter.onError(handler);
-      expect((adapter as any).errorHandlers).toContain(handler);
+      expect((adapter as Any).errorHandlers).toContain(handler);
     });
   });
 
@@ -293,13 +293,13 @@ describe("TeamsAdapter", () => {
     it("should register status handlers", () => {
       const handler = vi.fn();
       adapter.onStatusChange(handler);
-      expect((adapter as any).statusHandlers).toContain(handler);
+      expect((adapter as Any).statusHandlers).toContain(handler);
     });
 
     it("should call status handlers on status change", () => {
       const handler = vi.fn();
       adapter.onStatusChange(handler);
-      (adapter as any).setStatus("connecting");
+      (adapter as Any).setStatus("connecting");
       expect(handler).toHaveBeenCalledWith("connecting", undefined);
     });
 
@@ -307,7 +307,7 @@ describe("TeamsAdapter", () => {
       const handler = vi.fn();
       const error = new Error("Test error");
       adapter.onStatusChange(handler);
-      (adapter as any).setStatus("error", error);
+      (adapter as Any).setStatus("error", error);
       expect(handler).toHaveBeenCalledWith("error", error);
     });
   });
@@ -364,7 +364,7 @@ describe("TeamsAdapter", () => {
       await adapter.connect();
 
       // Add a conversation reference
-      (adapter as any).conversationReferences.set("conv-123", {
+      (adapter as Any).conversationReferences.set("conv-123", {
         conversation: { id: "conv-123" },
       });
 
@@ -424,7 +424,7 @@ describe("TeamsAdapter", () => {
 
     it("should throw error when file does not exist", async () => {
       await adapter.connect();
-      (adapter as any).conversationReferences.set("conv-123", {
+      (adapter as Any).conversationReferences.set("conv-123", {
         conversation: { id: "conv-123" },
       });
 
@@ -438,18 +438,18 @@ describe("TeamsAdapter", () => {
 
   describe("message deduplication", () => {
     it("should track processed messages", () => {
-      const cache = (adapter as any).deduplicationCache;
+      const cache = (adapter as Any).deduplicationCache;
       cache.add("msg-123");
       expect(cache.has("msg-123")).toBe(true);
     });
 
     it("should return false for unknown messages", () => {
-      const cache = (adapter as any).deduplicationCache;
+      const cache = (adapter as Any).deduplicationCache;
       expect(cache.has("unknown-msg")).toBe(false);
     });
 
     it("should not duplicate message entries", () => {
-      const cache = (adapter as any).deduplicationCache;
+      const cache = (adapter as Any).deduplicationCache;
       cache.add("msg-456");
       cache.add("msg-456");
       // Cache should still work correctly
@@ -463,7 +463,7 @@ describe("TeamsAdapter", () => {
         ...defaultConfig,
         autoReconnect: false,
       });
-      expect((adapterWithReconnect as any).config.autoReconnect).toBe(false);
+      expect((adapterWithReconnect as Any).config.autoReconnect).toBe(false);
     });
 
     it("should respect maxReconnectAttempts config", () => {
@@ -471,15 +471,15 @@ describe("TeamsAdapter", () => {
         ...defaultConfig,
         maxReconnectAttempts: 3,
       });
-      expect((adapterWithMax as any).config.maxReconnectAttempts).toBe(3);
+      expect((adapterWithMax as Any).config.maxReconnectAttempts).toBe(3);
     });
 
     it("should reset reconnect attempts on successful connect", async () => {
-      (adapter as any).reconnectAttempts = 3;
+      (adapter as Any).reconnectAttempts = 3;
 
       await adapter.connect();
 
-      expect((adapter as any).reconnectAttempts).toBe(0);
+      expect((adapter as Any).reconnectAttempts).toBe(0);
 
       await adapter.disconnect();
     });
@@ -488,14 +488,14 @@ describe("TeamsAdapter", () => {
   describe("markdown conversion", () => {
     it("should convert horizontal rules", () => {
       const text = "Before\n---\nAfter";
-      const converted = (adapter as any).convertMarkdownForTeams(text);
+      const converted = (adapter as Any).convertMarkdownForTeams(text);
       expect(converted).toContain("───────────────────");
       expect(converted).not.toContain("---");
     });
 
     it("should preserve basic markdown", () => {
       const text = "**bold** and *italic* and `code`";
-      const converted = (adapter as any).convertMarkdownForTeams(text);
+      const converted = (adapter as Any).convertMarkdownForTeams(text);
       expect(converted).toBe(text); // Teams supports these natively
     });
   });
@@ -503,20 +503,20 @@ describe("TeamsAdapter", () => {
   describe("message splitting", () => {
     it("should not split short messages", () => {
       const text = "Short message";
-      const chunks = (adapter as any).splitMessage(text, 4000);
+      const chunks = (adapter as Any).splitMessage(text, 4000);
       expect(chunks.length).toBe(1);
       expect(chunks[0]).toBe(text);
     });
 
     it("should split long messages", () => {
       const text = "A".repeat(5000);
-      const chunks = (adapter as any).splitMessage(text, 4000);
+      const chunks = (adapter as Any).splitMessage(text, 4000);
       expect(chunks.length).toBe(2);
     });
 
     it("should prefer splitting at newlines", () => {
       const text = "Line 1\n".repeat(500) + "Final line";
-      const chunks = (adapter as any).splitMessage(text, 100);
+      const chunks = (adapter as Any).splitMessage(text, 100);
 
       // Chunks should end at line boundaries where possible
       chunks.forEach((chunk: string, i: number) => {
@@ -528,7 +528,7 @@ describe("TeamsAdapter", () => {
 
     it("should prefer splitting at spaces if no newlines", () => {
       const text = "word ".repeat(1000);
-      const chunks = (adapter as any).splitMessage(text, 100);
+      const chunks = (adapter as Any).splitMessage(text, 100);
 
       chunks.forEach((chunk: string) => {
         expect(chunk.length).toBeLessThanOrEqual(100);
@@ -538,34 +538,34 @@ describe("TeamsAdapter", () => {
 
   describe("content type detection", () => {
     it("should detect PDF files", () => {
-      const contentType = (adapter as any).getContentType("document.pdf");
+      const contentType = (adapter as Any).getContentType("document.pdf");
       expect(contentType).toBe("application/pdf");
     });
 
     it("should detect PNG images", () => {
-      const contentType = (adapter as any).getContentType("image.png");
+      const contentType = (adapter as Any).getContentType("image.png");
       expect(contentType).toBe("image/png");
     });
 
     it("should detect JPEG images", () => {
-      const contentType = (adapter as any).getContentType("photo.jpg");
+      const contentType = (adapter as Any).getContentType("photo.jpg");
       expect(contentType).toBe("image/jpeg");
     });
 
     it("should detect Word documents", () => {
-      const contentType = (adapter as any).getContentType("report.docx");
+      const contentType = (adapter as Any).getContentType("report.docx");
       expect(contentType).toBe(
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       );
     });
 
     it("should detect Excel spreadsheets", () => {
-      const contentType = (adapter as any).getContentType("data.xlsx");
+      const contentType = (adapter as Any).getContentType("data.xlsx");
       expect(contentType).toBe("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     });
 
     it("should default to octet-stream for unknown types", () => {
-      const contentType = (adapter as any).getContentType("unknown.xyz");
+      const contentType = (adapter as Any).getContentType("unknown.xyz");
       expect(contentType).toBe("application/octet-stream");
     });
   });
@@ -637,7 +637,7 @@ describe("TeamsAdapter edge cases", () => {
       adapter.onMessage(successHandler);
 
       // Handlers are registered
-      expect((adapter as any).messageHandlers.length).toBe(2);
+      expect((adapter as Any).messageHandlers.length).toBe(2);
     });
   });
 
@@ -651,7 +651,7 @@ describe("TeamsAdapter edge cases", () => {
 
       // Should not throw when calling handleError
       expect(() => {
-        (adapter as any).handleError(new Error("Test error"), "test");
+        (adapter as Any).handleError(new Error("Test error"), "test");
       }).not.toThrow();
     });
   });
@@ -666,7 +666,7 @@ describe("TeamsAdapter edge cases", () => {
 
       // Should not throw when setting status
       expect(() => {
-        (adapter as any).setStatus("connecting");
+        (adapter as Any).setStatus("connecting");
       }).not.toThrow();
     });
   });
@@ -675,7 +675,7 @@ describe("TeamsAdapter edge cases", () => {
     it("should store conversation references", async () => {
       await adapter.connect();
 
-      const refs = (adapter as any).conversationReferences;
+      const refs = (adapter as Any).conversationReferences;
       refs.set("conv-456", {
         conversation: { id: "conv-456" },
         bot: { id: "bot-123" },
@@ -690,7 +690,7 @@ describe("TeamsAdapter edge cases", () => {
     it("should clear all references on disconnect", async () => {
       await adapter.connect();
 
-      const refs = (adapter as any).conversationReferences;
+      const refs = (adapter as Any).conversationReferences;
       refs.set("conv-1", { conversation: { id: "conv-1" } });
       refs.set("conv-2", { conversation: { id: "conv-2" } });
       refs.set("conv-3", { conversation: { id: "conv-3" } });
@@ -707,7 +707,7 @@ describe("TeamsAdapter edge cases", () => {
     it("should expire old entries", () => {
       vi.useFakeTimers();
 
-      const cache = (adapter as any).deduplicationCache;
+      const cache = (adapter as Any).deduplicationCache;
       cache.add("msg-old");
 
       // Fast-forward past TTL (default 60 seconds)
@@ -720,7 +720,7 @@ describe("TeamsAdapter edge cases", () => {
     });
 
     it("should keep fresh entries", () => {
-      const cache = (adapter as any).deduplicationCache;
+      const cache = (adapter as Any).deduplicationCache;
       cache.add("msg-fresh");
 
       // Entry should still be valid

@@ -16,7 +16,7 @@
 
 import { spawn, ChildProcess, execSync } from "child_process";
 import { EventEmitter } from "events";
-import * as net from "net";
+import * as _net from "net";
 import * as http from "http";
 import * as https from "https";
 

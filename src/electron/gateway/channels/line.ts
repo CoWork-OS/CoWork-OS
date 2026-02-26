@@ -306,28 +306,28 @@ export class LineAdapter implements ChannelAdapter {
   /**
    * Edit a message (not supported by LINE)
    */
-  async editMessage(chatId: string, messageId: string, text: string): Promise<void> {
+  async editMessage(_chatId: string, _messageId: string, _text: string): Promise<void> {
     throw new Error("LINE does not support message editing");
   }
 
   /**
    * Delete a message (limited support - can only unsend own messages)
    */
-  async deleteMessage(chatId: string, messageId: string): Promise<void> {
+  async deleteMessage(_chatId: string, _messageId: string): Promise<void> {
     throw new Error("LINE message deletion not implemented");
   }
 
   /**
    * Send a document/file
    */
-  async sendDocument(chatId: string, filePath: string, caption?: string): Promise<string> {
+  async sendDocument(_chatId: string, _filePath: string, _caption?: string): Promise<string> {
     throw new Error("LINE file sending requires hosting - not implemented");
   }
 
   /**
    * Send a photo/image
    */
-  async sendPhoto(chatId: string, filePath: string, caption?: string): Promise<string> {
+  async sendPhoto(_chatId: string, _filePath: string, _caption?: string): Promise<string> {
     throw new Error("LINE image sending requires hosting - not implemented");
   }
 

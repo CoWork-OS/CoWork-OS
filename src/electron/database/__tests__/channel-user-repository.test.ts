@@ -12,7 +12,7 @@ vi.mock("electron", () => ({
 }));
 
 // In-memory mock storage
-let mockUsers: Map<string, any>;
+let mockUsers: Map<string, Any>;
 let userId = 0;
 
 interface MockChannelUser {

@@ -7,7 +7,7 @@
 
 import { ipcMain } from "electron";
 import { IPC_CHANNELS } from "../../shared/types";
-import { scaffoldPluginPack, getAvailableCategories } from "../extensions/scaffold";
+import { scaffoldPluginPack, getAvailableCategories as _getAvailableCategories } from "../extensions/scaffold";
 import { installFromGit, installFromUrl, uninstallPack } from "../extensions/pack-installer";
 import { getPackRegistry } from "../extensions/pack-registry";
 import { PluginRegistry } from "../extensions/registry";

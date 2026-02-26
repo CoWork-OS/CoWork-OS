@@ -109,7 +109,7 @@ export type QrCodeHandler = (qr: string) => void;
 /**
  * WhatsApp inbound message
  */
-interface WhatsAppInboundMessage {
+interface _WhatsAppInboundMessage {
   id?: string;
   from: string;
   to: string;
@@ -280,10 +280,10 @@ export class WhatsAppAdapter implements ChannelAdapter {
       this.sock = makeWASocket({
         auth: {
           creds: state.creds,
-          keys: makeCacheableSignalKeyStore(state.keys, logger as any),
+          keys: makeCacheableSignalKeyStore(state.keys, logger as Any),
         },
         version,
-        logger: logger as any,
+        logger: logger as Any,
         // Note: printQRInTerminal is deprecated - QR codes are handled via connection.update event
         browser: ["CoWork-OS", "Desktop", "1.0.0"],
         syncFullHistory: false,
@@ -525,10 +525,10 @@ export class WhatsAppAdapter implements ChannelAdapter {
     }
 
     // Get group metadata if applicable
-    let groupSubject: string | undefined;
+    let _groupSubject: string | undefined;
     if (isGroup && this.sock) {
       const meta = await this.getGroupMeta(remoteJid);
-      groupSubject = meta.subject;
+      _groupSubject = meta.subject;
     }
 
     // Extract message text
@@ -570,8 +570,8 @@ export class WhatsAppAdapter implements ChannelAdapter {
         media: msg.message.imageMessage as DownloadableMessage,
         mediaType: "image",
         attachmentType: "image",
-        mimeType: (msg.message.imageMessage as any)?.mimetype,
-        fileName: this.extractWaFilename(msg.message.imageMessage as any),
+        mimeType: (msg.message.imageMessage as Any)?.mimetype,
+        fileName: this.extractWaFilename(msg.message.imageMessage as Any),
         defaultBaseName: `image${mediaIdSuffix}`,
       });
       if (imageAttachment) {
@@ -584,8 +584,8 @@ export class WhatsAppAdapter implements ChannelAdapter {
         media: msg.message.videoMessage as DownloadableMessage,
         mediaType: "video",
         attachmentType: "video",
-        mimeType: (msg.message.videoMessage as any)?.mimetype,
-        fileName: this.extractWaFilename(msg.message.videoMessage as any),
+        mimeType: (msg.message.videoMessage as Any)?.mimetype,
+        fileName: this.extractWaFilename(msg.message.videoMessage as Any),
         defaultBaseName: `video${mediaIdSuffix}`,
       });
       if (videoAttachment) {
@@ -598,8 +598,8 @@ export class WhatsAppAdapter implements ChannelAdapter {
         media: msg.message.documentMessage as DownloadableMessage,
         mediaType: "document",
         attachmentType: "document",
-        mimeType: (msg.message.documentMessage as any)?.mimetype,
-        fileName: this.extractWaFilename(msg.message.documentMessage as any),
+        mimeType: (msg.message.documentMessage as Any)?.mimetype,
+        fileName: this.extractWaFilename(msg.message.documentMessage as Any),
         defaultBaseName: `document${mediaIdSuffix}`,
       });
       if (documentAttachment) {
@@ -612,8 +612,8 @@ export class WhatsAppAdapter implements ChannelAdapter {
         media: msg.message.stickerMessage as DownloadableMessage,
         mediaType: "sticker",
         attachmentType: "image",
-        mimeType: (msg.message.stickerMessage as any)?.mimetype,
-        fileName: this.extractWaFilename(msg.message.stickerMessage as any),
+        mimeType: (msg.message.stickerMessage as Any)?.mimetype,
+        fileName: this.extractWaFilename(msg.message.stickerMessage as Any),
         defaultBaseName: `sticker${mediaIdSuffix}`,
       });
       if (stickerAttachment) {
@@ -624,9 +624,9 @@ export class WhatsAppAdapter implements ChannelAdapter {
     if (msg.message?.audioMessage) {
       const audioAttachment = await this.downloadAudioAttachment({
         audioMessage: msg.message.audioMessage as DownloadableMessage,
-        mimeType: (msg.message.audioMessage as any)?.mimetype,
-        isVoiceNote: (msg.message.audioMessage as any)?.ptt === true,
-        fileName: this.extractWaFilename(msg.message.audioMessage as any),
+        mimeType: (msg.message.audioMessage as Any)?.mimetype,
+        isVoiceNote: (msg.message.audioMessage as Any)?.ptt === true,
+        fileName: this.extractWaFilename(msg.message.audioMessage as Any),
         defaultBaseName: `audio${mediaIdSuffix}`,
       });
       if (audioAttachment) {
@@ -1492,12 +1492,12 @@ export class WhatsAppAdapter implements ChannelAdapter {
     body?: string;
   } {
     const contextInfo =
-      (message as any)?.extendedTextMessage?.contextInfo ??
-      (message as any)?.imageMessage?.contextInfo ??
-      (message as any)?.videoMessage?.contextInfo ??
-      (message as any)?.documentMessage?.contextInfo ??
-      (message as any)?.audioMessage?.contextInfo ??
-      (message as any)?.stickerMessage?.contextInfo;
+      (message as Any)?.extendedTextMessage?.contextInfo ??
+      (message as Any)?.imageMessage?.contextInfo ??
+      (message as Any)?.videoMessage?.contextInfo ??
+      (message as Any)?.documentMessage?.contextInfo ??
+      (message as Any)?.audioMessage?.contextInfo ??
+      (message as Any)?.stickerMessage?.contextInfo;
 
     if (!contextInfo) {
       return {};
@@ -1744,7 +1744,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
   private extractMentionTokensFromText(text: string): string[] {
     return (
       text
-        .match(/@[^\s@.,!?;:\)\]]+/g)
+        .match(/@[^\s@.,!?;:)\]]+/g)
         ?.map((token) => token.trim())
         ?.filter((token) => token.length > 1) ?? []
     );
@@ -1781,10 +1781,10 @@ export class WhatsAppAdapter implements ChannelAdapter {
     }
 
     const contextInfo =
-      (message as any)?.extendedTextMessage?.contextInfo ??
-      (message as any)?.imageMessage?.contextInfo ??
-      (message as any)?.videoMessage?.contextInfo ??
-      (message as any)?.documentMessage?.contextInfo;
+      (message as Any)?.extendedTextMessage?.contextInfo ??
+      (message as Any)?.imageMessage?.contextInfo ??
+      (message as Any)?.videoMessage?.contextInfo ??
+      (message as Any)?.documentMessage?.contextInfo;
 
     const mentionedJids = Array.isArray(contextInfo?.mentionedJid) ? contextInfo.mentionedJid : [];
 
@@ -1875,7 +1875,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
   private getStatusCode(err: unknown): number | undefined {
     if (!err) return undefined;
 
-    const asAny = err as any;
+    const asAny = err as Any;
     return asAny?.output?.statusCode || asAny?.status || undefined;
   }
 

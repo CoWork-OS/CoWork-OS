@@ -65,7 +65,7 @@ describe("SecureSettingsRepository", () => {
     get: ReturnType<typeof vi.fn>;
     all: ReturnType<typeof vi.fn>;
   };
-  let repository: any;
+  let repository: Any;
 
   beforeEach(async () => {
     // Ensure getUserDataDir() resolves to our mock path in non-Electron unit tests.
@@ -111,7 +111,7 @@ describe("SecureSettingsRepository", () => {
     SecureSettingsRepositoryClass = mod.SecureSettingsRepository;
 
     // Reset singleton
-    (SecureSettingsRepositoryClass as any).instance = null;
+    (SecureSettingsRepositoryClass as Any).instance = null;
   });
 
   afterEach(() => {
@@ -122,7 +122,7 @@ describe("SecureSettingsRepository", () => {
     }
 
     // Clean up singleton
-    (SecureSettingsRepositoryClass as any).instance = null;
+    (SecureSettingsRepositoryClass as Any).instance = null;
   });
 
   describe("constructor and singleton", () => {
@@ -210,7 +210,7 @@ describe("SecureSettingsRepository", () => {
 
     it("should use app-level encryption when OS keychain unavailable", () => {
       mockIsEncryptionAvailable.mockReturnValue(false);
-      (SecureSettingsRepositoryClass as any).instance = null;
+      (SecureSettingsRepositoryClass as Any).instance = null;
       repository = new SecureSettingsRepositoryClass(mockDb);
       mockStmt.get.mockReturnValue(undefined);
 
@@ -274,6 +274,7 @@ describe("SecureSettingsRepository", () => {
     it("should decrypt and return settings with valid checksum", () => {
       const testData = { provider: "azure", endpoint: "https://test.api" };
       const jsonData = JSON.stringify(testData);
+// oxlint-disable-next-line typescript-eslint(no-require-imports)
       const crypto = require("crypto");
       const checksum = crypto.createHash("sha256").update(jsonData).digest("hex");
 
@@ -471,7 +472,7 @@ describe("SecureSettingsRepository", () => {
 
     it("should handle app-encrypted data on load (round-trip)", () => {
       mockIsEncryptionAvailable.mockReturnValue(false);
-      (SecureSettingsRepositoryClass as any).instance = null;
+      (SecureSettingsRepositoryClass as Any).instance = null;
       repository = new SecureSettingsRepositoryClass(mockDb);
 
       const testData = { provider: "test" };
@@ -637,7 +638,7 @@ describe("SecureSettingsRepository", () => {
       mockIsEncryptionAvailable.mockReturnValue(false);
       mockFsExistsSync.mockReturnValue(true);
       mockFsReadFileSync.mockReturnValue("stable-machine-id");
-      (SecureSettingsRepositoryClass as any).instance = null;
+      (SecureSettingsRepositoryClass as Any).instance = null;
 
       repository = new SecureSettingsRepositoryClass(mockDb);
       mockStmt.get.mockReturnValue(undefined);
@@ -667,6 +668,7 @@ describe("SecureSettingsRepository", () => {
     it("should return success status with data on successful load", () => {
       const testData = { provider: "azure" };
       const jsonData = JSON.stringify(testData);
+// oxlint-disable-next-line typescript-eslint(no-require-imports)
       const crypto = require("crypto");
       const checksum = crypto.createHash("sha256").update(jsonData).digest("hex");
 
@@ -710,7 +712,7 @@ describe("SecureSettingsRepository", () => {
 
     it("should return os_encryption_unavailable status when OS encryption lost", () => {
       mockIsEncryptionAvailable.mockReturnValue(false);
-      (SecureSettingsRepositoryClass as any).instance = null;
+      (SecureSettingsRepositoryClass as Any).instance = null;
       repository = new SecureSettingsRepositoryClass(mockDb);
 
       mockStmt.get.mockReturnValue({

@@ -101,7 +101,7 @@ export function MCPRegistryBrowser({
       onInstall?.(entry.id);
       // Refresh the list
       await loadRegistry();
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to install server:", error);
       alert(`Failed to install ${entry.name}: ${error.message}`);
     } finally {

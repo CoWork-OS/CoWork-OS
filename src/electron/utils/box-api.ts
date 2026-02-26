@@ -8,7 +8,7 @@ export const BOX_API_BASE = "https://api.box.com/2.0";
 export const BOX_UPLOAD_BASE = "https://upload.box.com/api/2.0";
 const DEFAULT_TIMEOUT_MS = 20000;
 
-function parseJsonSafe(text: string): any | undefined {
+function parseJsonSafe(text: string): Any | undefined {
   const trimmed = text.trim();
   if (!trimmed) return undefined;
   try {
@@ -18,7 +18,7 @@ function parseJsonSafe(text: string): any | undefined {
   }
 }
 
-function formatBoxError(status: number, data: any, fallback?: string): string {
+function formatBoxError(status: number, data: Any, fallback?: string): string {
   const message =
     data?.message || data?.error?.message || data?.error_description || fallback || "Box API error";
   return `Box API error ${status}: ${message}`;
@@ -28,13 +28,13 @@ export interface BoxRequestOptions {
   method: "GET" | "POST" | "PUT" | "DELETE";
   path: string;
   query?: Record<string, string | number | boolean | undefined>;
-  body?: Record<string, any>;
+  body?: Record<string, Any>;
   timeoutMs?: number;
 }
 
 export interface BoxRequestResult {
   status: number;
-  data?: any;
+  data?: Any;
   raw?: string;
 }
 
@@ -88,7 +88,7 @@ export async function boxRequest(
       data: data ?? undefined,
       raw: rawText || undefined,
     };
-  } catch (error: any) {
+  } catch (error: Any) {
     if (error?.name === "AbortError") {
       throw new Error("Box API request timed out");
     }
@@ -145,7 +145,7 @@ export async function boxUploadFile(
       data: data ?? undefined,
       raw: rawText || undefined,
     };
-  } catch (error: any) {
+  } catch (error: Any) {
     if (error?.name === "AbortError") {
       throw new Error("Box upload request timed out");
     }
@@ -155,7 +155,7 @@ export async function boxUploadFile(
   }
 }
 
-function extractUserInfo(data: any): { name?: string; userId?: string } {
+function extractUserInfo(data: Any): { name?: string; userId?: string } {
   if (!data || typeof data !== "object") return {};
   const name = data.name || data.login || undefined;
   const userId = data.id || data.user_id || undefined;
@@ -173,7 +173,7 @@ export async function testBoxConnection(
       name: extracted.name,
       userId: extracted.userId,
     };
-  } catch (error: any) {
+  } catch (error: Any) {
     return {
       success: false,
       error: error?.message || "Failed to connect to Box",

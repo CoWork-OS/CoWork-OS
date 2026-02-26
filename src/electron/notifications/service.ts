@@ -6,7 +6,7 @@
 import { randomUUID } from "node:crypto";
 import type { AppNotification, NotificationType, NotificationStoreFile } from "../../shared/types";
 import {
-  loadNotificationStore,
+  loadNotificationStore as _loadNotificationStore,
   loadNotificationStoreSync,
   saveNotificationStore,
   getNotificationStorePath,

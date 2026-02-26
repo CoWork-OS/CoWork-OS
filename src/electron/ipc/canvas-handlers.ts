@@ -10,7 +10,7 @@ import {
   IPC_CHANNELS,
   CanvasSession,
   CanvasA2UIAction,
-  CanvasCheckpoint,
+  CanvasCheckpoint as _CanvasCheckpoint,
 } from "../../shared/types";
 import { CanvasManager } from "../canvas/canvas-manager";
 import { AgentDaemon } from "../agent/daemon";

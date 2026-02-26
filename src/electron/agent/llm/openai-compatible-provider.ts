@@ -51,7 +51,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
 
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
-        ...(this.extraHeaders || {}),
+        ...this.extraHeaders,
       };
       if (this.apiKey) {
         headers.Authorization = `Bearer ${this.apiKey}`;
@@ -79,9 +79,9 @@ export class OpenAICompatibleProvider implements LLMProvider {
         );
       }
 
-      const data = (await response.json()) as any;
+      const data = (await response.json()) as Any;
       return fromOpenAICompatibleResponse(data);
-    } catch (error: any) {
+    } catch (error: Any) {
       if (error.name === "AbortError" || error.message?.includes("aborted")) {
         console.log(`[${this.providerName}] Request aborted`);
         throw new Error("Request cancelled");
@@ -99,7 +99,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
     try {
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
-        ...(this.extraHeaders || {}),
+        ...this.extraHeaders,
       };
       if (this.apiKey) {
         headers.Authorization = `Bearer ${this.apiKey}`;
@@ -126,7 +126,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
       }
 
       return { success: true };
-    } catch (error: any) {
+    } catch (error: Any) {
       return {
         success: false,
         error: error.message || `Failed to connect to ${this.providerName} API`,
@@ -149,8 +149,8 @@ export class OpenAICompatibleProvider implements LLMProvider {
         return [];
       }
 
-      const data = (await response.json()) as { data?: any[] };
-      return (data.data || []).map((model: any) => ({
+      const data = (await response.json()) as { data?: Any[] };
+      return (data.data || []).map((model: Any) => ({
         id: model.id,
         name: model.id,
       }));

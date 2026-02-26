@@ -14,7 +14,7 @@ interface LLMTool {
   description: string;
   input_schema: {
     type: "object";
-    properties?: Record<string, any>;
+    properties?: Record<string, Any>;
     required?: string[];
   };
 }
@@ -22,7 +22,7 @@ interface LLMTool {
 // ToolRegistry interface
 export interface ToolRegistry {
   getTools(): LLMTool[];
-  executeTool(name: string, input: Record<string, any>): Promise<any>;
+  executeTool(name: string, input: Record<string, Any>): Promise<Any>;
 }
 
 /**
@@ -69,7 +69,7 @@ export class ToolAdapter implements ToolProvider {
   /**
    * Execute a tool and return MCP-formatted result
    */
-  async executeTool(name: string, args: Record<string, any>): Promise<any> {
+  async executeTool(name: string, args: Record<string, Any>): Promise<Any> {
     // Verify tool is exposed
     if (!this.shouldExposePlugin(name)) {
       throw new Error(`Tool ${name} is not available`);

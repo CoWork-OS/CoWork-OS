@@ -51,13 +51,13 @@ describe("SearchTools", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    searchTools = new SearchTools(mockWorkspace, mockDaemon as any, "test-task-id");
+    searchTools = new SearchTools(mockWorkspace, mockDaemon as Any, "test-task-id");
 
     // Reset to default mock behavior
     vi.mocked(SearchProviderFactory.isAnyProviderConfigured).mockReturnValue(true);
     vi.mocked(SearchProviderFactory.loadSettings).mockReturnValue({
       primaryProvider: "tavily",
-    } as any);
+    } as Any);
   });
 
   afterEach(() => {
@@ -195,7 +195,7 @@ describe("SearchTools", () => {
     it("should preserve provider in error response", async () => {
       vi.mocked(SearchProviderFactory.loadSettings).mockReturnValue({
         primaryProvider: "serpapi",
-      } as any);
+      } as Any);
       vi.mocked(SearchProviderFactory.searchWithFallback).mockRejectedValue(new Error("API error"));
 
       const result = await searchTools.webSearch({ query: "test query" });
@@ -216,8 +216,8 @@ describe("SearchTools", () => {
 
     it("should trigger auto-detection when primaryProvider is null", async () => {
       vi.mocked(SearchProviderFactory.loadSettings)
-        .mockReturnValueOnce({ primaryProvider: null } as any)
-        .mockReturnValueOnce({ primaryProvider: "tavily" } as any);
+        .mockReturnValueOnce({ primaryProvider: null } as Any)
+        .mockReturnValueOnce({ primaryProvider: "tavily" } as Any);
       vi.mocked(SearchProviderFactory.searchWithFallback).mockResolvedValue({
         query: "test query",
         searchType: "web",
@@ -242,7 +242,7 @@ describe("SearchTools", () => {
       searchTools.setWorkspace(newWorkspace);
 
       // The workspace should be updated (internal state)
-      expect((searchTools as any).workspace).toBe(newWorkspace);
+      expect((searchTools as Any).workspace).toBe(newWorkspace);
     });
   });
 });

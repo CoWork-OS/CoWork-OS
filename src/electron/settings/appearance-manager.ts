@@ -165,7 +165,7 @@ export class AppearanceManager {
         const repository = SecureSettingsRepository.getInstance();
         repository.save("appearance", settings);
         console.log("[AppearanceManager] Persisted default uiDensity:", settings.uiDensity);
-      } catch (e) {
+      } catch  {
         // Non-fatal: cache is correct, DB will catch up on next save
       }
     }

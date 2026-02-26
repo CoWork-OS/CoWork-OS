@@ -71,7 +71,7 @@ export class SearchTools {
         ...response,
         success: true,
       };
-    } catch (error: any) {
+    } catch (error: Any) {
       const message = error?.message || "Web search failed";
       this.daemon.logEvent(this.taskId, "tool_result", {
         tool: "web_search",

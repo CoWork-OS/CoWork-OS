@@ -63,7 +63,7 @@ export function ConnectorEnvModal({
       await reconnectServer();
       onSaved();
       onClose();
-    } catch (err: any) {
+    } catch (err: Any) {
       setError(err.message || "Failed to save credentials");
     } finally {
       setSaving(false);

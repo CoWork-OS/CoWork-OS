@@ -146,7 +146,7 @@ export class SkillEligibilityChecker {
   /**
    * Check if config path is truthy (placeholder for future config system)
    */
-  checkConfigPath(configPath: string): boolean {
+  checkConfigPath(_configPath: string): boolean {
     // TODO: Implement config path checking when config system is available
     // For now, always return false (missing)
     return false;

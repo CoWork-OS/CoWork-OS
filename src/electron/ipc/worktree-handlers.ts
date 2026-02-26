@@ -56,7 +56,7 @@ export function setupWorktreeHandlers(agentDaemon: AgentDaemon): void {
     const validatedTaskId = validateInput(UUIDSchema, taskId, "task ID");
     try {
       return await worktreeManager.mergeToBase(validatedTaskId);
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error(`[Worktree] Merge failed for task ${validatedTaskId}:`, error);
       return { success: false, error: error.message || "Merge failed" };
     }
@@ -68,7 +68,7 @@ export function setupWorktreeHandlers(agentDaemon: AgentDaemon): void {
     try {
       await worktreeManager.cleanup(validatedTaskId, true);
       return { success: true };
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error(`[Worktree] Cleanup failed for task ${validatedTaskId}:`, error);
       return { success: false, error: error.message || "Cleanup failed" };
     }

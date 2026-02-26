@@ -43,7 +43,7 @@ function mkWorkspace(tmpDir: string) {
     },
     createdAt: new Date().toISOString(),
     lastAccessed: new Date().toISOString(),
-  } as any;
+  } as Any;
 }
 
 describe("MontyTools", () => {
@@ -54,13 +54,13 @@ describe("MontyTools", () => {
     vi.clearAllMocks();
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-monty-"));
     const workspace = mkWorkspace(tmpDir);
-    const fileTools = new FileTools(workspace, mockDaemon as any, "task-1");
-    tools = new MontyTools(workspace, mockDaemon as any, "task-1", fileTools);
+    const fileTools = new FileTools(workspace, mockDaemon as Any, "task-1");
+    tools = new MontyTools(workspace, mockDaemon as Any, "task-1", fileTools);
   });
 
   it("monty_run executes code with input", async () => {
     const res = await tools.montyRun({
-      code: 'input[\"a\"] + 1',
+      code: 'input["a"] + 1',
       inputs: { a: 41 },
     });
 
@@ -72,9 +72,9 @@ describe("MontyTools", () => {
     const res = await tools.montyRun({
       code: [
         "a = json_parse('{\"x\": 1}')",
-        's = json_stringify({\"b\": 1, \"a\": 2}, {\"sort_keys\": True, \"indent\": 2})',
+        's = json_stringify({"b": 1, "a": 2}, {"sort_keys": True, "indent": 2})',
         "vals = json_extract('prefix {\"k\": 3} suffix')",
-        '{\"x\": a[\"x\"], \"s\": s, \"k\": vals[0][\"k\"]}',
+        '{"x": a["x"], "s": s, "k": vals[0]["k"]}',
       ].join("\n"),
       inputs: {},
     });
@@ -97,9 +97,9 @@ describe("MontyTools", () => {
     const text = [
       "Here you go:",
       "```json",
-      '{\"a\": 1, \"b\": 2}',
+      '{"a": 1, "b": 2}',
       "```",
-      'and also: prefix {\"c\": 3} suffix',
+      'and also: prefix {"c": 3} suffix',
     ].join("\\n");
 
     const first = await tools.extractJson({ text, mode: "first" });
@@ -116,7 +116,7 @@ describe("MontyTools", () => {
     await fs.mkdir(transformsDir, { recursive: true });
     await fs.writeFile(
       path.join(transformsDir, "double.monty"),
-      ["# name: Double", '# description: Multiply input[\"n\"] by 2', "", 'input[\"n\"] * 2'].join(
+      ["# name: Double", '# description: Multiply input["n"] by 2', "", 'input["n"] * 2'].join(
         "\n",
       ),
       "utf8",
@@ -124,7 +124,7 @@ describe("MontyTools", () => {
 
     const listed = await tools.listTransforms({});
     expect(listed.success).toBe(true);
-    expect(listed.transforms.map((t: any) => t.id)).toContain("double");
+    expect(listed.transforms.map((t: Any) => t.id)).toContain("double");
 
     const ran = await tools.runTransform({ name: "double", inputs: { n: 21 } });
     // eslint-disable-next-line no-console
@@ -140,9 +140,9 @@ describe("MontyTools", () => {
       path.join(transformsDir, "upper.monty"),
       [
         "# name: Upper",
-        '# description: Uppercase input[\"text\"]',
+        '# description: Uppercase input["text"]',
         "",
-        'input[\"text\"].upper()',
+        'input["text"].upper()',
       ].join("\n"),
       "utf8",
     );

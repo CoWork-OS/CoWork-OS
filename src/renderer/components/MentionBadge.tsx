@@ -13,7 +13,7 @@ export function MentionBadge({ agentRoleId, workspaceId, onClick }: MentionBadge
   useEffect(() => {
     const loadCount = async () => {
       try {
-        const query: any = { status: "pending" };
+        const query: Any = { status: "pending" };
         if (agentRoleId) {
           query.toAgentRoleId = agentRoleId;
         }

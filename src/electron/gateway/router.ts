@@ -36,7 +36,6 @@ import Database from "better-sqlite3";
 import { AgentDaemon } from "../agent/daemon";
 import {
   Task,
-  IPC_CHANNELS,
   TEMP_WORKSPACE_NAME,
   TEMP_WORKSPACE_ROOT_DIR_NAME,
   AgentRole,
@@ -145,7 +144,7 @@ export class MessageRouter {
     string,
     {
       taskId: string;
-      approval: any;
+      approval: Any;
       sessionId: string;
       chatId: string;
       channelType: ChannelType;
@@ -496,7 +495,7 @@ export class MessageRouter {
     const createdAt = existing?.createdAt ?? Date.now();
     const lastUsedAt = Date.now();
     const permissions = {
-      ...(existing?.permissions ?? {}),
+      ...existing?.permissions,
       read: true,
       write: true,
       delete: true,
@@ -731,7 +730,7 @@ export class MessageRouter {
         continue;
       }
 
-      const context = session.context as any;
+      const context = session.context as Any;
       const requestingUserId =
         typeof context?.taskRequesterUserId === "string"
           ? context.taskRequesterUserId
@@ -875,7 +874,7 @@ export class MessageRouter {
     requestingUserName?: string;
     lastChannelMessageId?: string;
   } {
-    const ctx = session?.context as any;
+    const ctx = session?.context as Any;
     const requestingUserId =
       typeof ctx?.taskRequesterUserId === "string"
         ? ctx.taskRequesterUserId
@@ -896,7 +895,7 @@ export class MessageRouter {
   private getSessionPreferredAgentRoleId(
     session: { context?: unknown } | undefined,
   ): string | undefined {
-    const context = session?.context as any;
+    const context = session?.context as Any;
     return typeof context?.preferredAgentRoleId === "string"
       ? context.preferredAgentRoleId
       : undefined;
@@ -1315,24 +1314,24 @@ export class MessageRouter {
       }
 
       const text = (resp.content || [])
-        .filter((c: any) => c.type === "text" && c.text)
-        .map((c: any) => c.text)
+        .filter((c: Any) => c.type === "text" && c.text)
+        .map((c: Any) => c.text)
         .join("\n");
 
       const values = extractJsonValues(text, { maxResults: 1, allowRepair: true });
-      const obj = values[0] as any;
+      const obj = values[0] as Any;
       if (obj && typeof obj === "object") {
         if (Array.isArray(obj.priorities)) {
-          extractedPriorities = obj.priorities.filter((p: any) => typeof p === "string");
+          extractedPriorities = obj.priorities.filter((p: Any) => typeof p === "string");
         }
         if (Array.isArray(obj.decisions)) {
-          extractedDecisions = obj.decisions.filter((p: any) => typeof p === "string");
+          extractedDecisions = obj.decisions.filter((p: Any) => typeof p === "string");
         }
         if (Array.isArray(obj.action_items)) {
-          extractedActionItems = obj.action_items.filter((p: any) => typeof p === "string");
+          extractedActionItems = obj.action_items.filter((p: Any) => typeof p === "string");
         }
         if (Array.isArray(obj.context_shifts)) {
-          extractedContextShifts = obj.context_shifts.filter((p: any) => typeof p === "string");
+          extractedContextShifts = obj.context_shifts.filter((p: Any) => typeof p === "string");
         }
       }
     } catch (error) {
@@ -1384,7 +1383,7 @@ export class MessageRouter {
       return;
     }
 
-    const channelConfig = (channel.config || {}) as any;
+    const channelConfig = (channel.config || {}) as Any;
     const ambientMode = channelConfig.ambientMode === true;
     const silentUnauthorized = channelConfig.silentUnauthorized === true || ambientMode;
     message.text = this.normalizeIncomingTextForRouting(adapter.type, message.text);
@@ -1555,8 +1554,8 @@ export class MessageRouter {
     }
 
     const session = this.sessionRepo.findById(sessionId);
-    const ctx = session?.context as any;
-    const pendingFeedback = ctx?.pendingFeedback as any;
+    const ctx = session?.context as Any;
+    const pendingFeedback = ctx?.pendingFeedback as Any;
 
     if (pendingFeedback && typeof pendingFeedback === "object") {
       const kind = typeof pendingFeedback.kind === "string" ? pendingFeedback.kind : "";
@@ -1629,7 +1628,7 @@ export class MessageRouter {
         ].join("\n");
       }
     }
-    const pendingSelection = ctx?.pendingSelection as any;
+    const pendingSelection = ctx?.pendingSelection as Any;
     const PENDING_SELECTION_TTL_MS = 2 * 60 * 1000;
 
     if (
@@ -2486,7 +2485,7 @@ export class MessageRouter {
     }
 
     const nextConfig = {
-      ...(channel.config || {}),
+      ...channel.config,
       groupRoutingMode: mode,
     };
     this.channelRepo.update(channel.id, { config: nextConfig });
@@ -3848,8 +3847,8 @@ export class MessageRouter {
     let rest = [...args];
 
     const maybeMode = (rest[0] || "").trim().toLowerCase();
-    if (allowedModes.has(maybeMode as any)) {
-      mode = maybeMode as any;
+    if (allowedModes.has(maybeMode as Any)) {
+      mode = maybeMode as Any;
       rest = rest.slice(1);
     }
 
@@ -4418,7 +4417,7 @@ export class MessageRouter {
             ...(chatContext ? { chatContext } : {}),
             delivery,
             taskAgentConfig,
-          } as any)
+          } as Any)
         : await cronService.add({
             name,
             description,
@@ -4431,7 +4430,7 @@ export class MessageRouter {
             ...(chatContext ? { chatContext } : {}),
             delivery,
             taskAgentConfig,
-          } as any);
+          } as Any);
 
     if (!result.ok) {
       await adapter.sendMessage({
@@ -4506,7 +4505,7 @@ export class MessageRouter {
     adapter: ChannelAdapter,
     message: IncomingMessage,
     selectorRaw: string,
-  ): Promise<{ jobs: any[]; job: any | null; error?: string }> {
+  ): Promise<{ jobs: Any[]; job: Any | null; error?: string }> {
     const jobs = await this.listScheduledJobsForChat(adapter, message.chatId);
     if (jobs.length === 0)
       return { jobs, job: null, error: "No scheduled tasks found for this chat." };
@@ -5751,8 +5750,8 @@ export class MessageRouter {
 
     // Apply agent role assignment when routing determines one.
     if (resolvedAgentRoleId) {
-      this.taskRepo.update(task.id, { assignedAgentRoleId: resolvedAgentRoleId } as any);
-      (task as any).assignedAgentRoleId = resolvedAgentRoleId;
+      this.taskRepo.update(task.id, { assignedAgentRoleId: resolvedAgentRoleId } as Any);
+      (task as Any).assignedAgentRoleId = resolvedAgentRoleId;
     }
 
     // Link session to task
@@ -6394,7 +6393,7 @@ export class MessageRouter {
   /**
    * Send approval request to Discord/Telegram
    */
-  async sendApprovalRequest(taskId: string, approval: any): Promise<void> {
+  async sendApprovalRequest(taskId: string, approval: Any): Promise<void> {
     // Approvals can be requested by sub-agent tasks that do not have their own
     // channel/session mapping. Route these approvals back to the originating
     // session (usually the root task that spawned them).
@@ -6711,7 +6710,7 @@ export class MessageRouter {
     });
   }
 
-  private formatPendingApprovalChoices(approvals: Array<[string, { approval: any }]>): string {
+  private formatPendingApprovalChoices(approvals: Array<[string, { approval: Any }]>): string {
     return approvals
       .map(([id, data], index) => {
         const shortId = id.slice(0, 8);
@@ -6760,7 +6759,7 @@ export class MessageRouter {
 
     if (!selector) {
       if (candidates.length > 1) {
-        const list = this.formatPendingApprovalChoices(candidates as any);
+        const list = this.formatPendingApprovalChoices(candidates as Any);
         await adapter.sendMessage({
           chatId: message.chatId,
           text: `Multiple approvals are pending. Reply with:\n\n- \`/approve <id>\` or \`/deny <id>\` (recommended)\n- Or use \`/approve <number>\` (example: \`/approve 1\`)\n\n${list}`,
@@ -6781,7 +6780,7 @@ export class MessageRouter {
         if (matches.length === 1) {
           selected = matches[0];
         } else if (matches.length === 0) {
-          const list = this.formatPendingApprovalChoices(candidates as any);
+          const list = this.formatPendingApprovalChoices(candidates as Any);
           await adapter.sendMessage({
             chatId: message.chatId,
             text: `No pending approval found for \`${selector}\`.\n\n${list}`,
@@ -6790,7 +6789,7 @@ export class MessageRouter {
           });
           return;
         } else {
-          const list = this.formatPendingApprovalChoices(matches as any);
+          const list = this.formatPendingApprovalChoices(matches as Any);
           await adapter.sendMessage({
             chatId: message.chatId,
             text: `That ID prefix is ambiguous. Please paste more characters.\n\n${list}`,
@@ -7263,7 +7262,7 @@ ${status.queuedCount > 0 ? `Queued task IDs: ${status.queuedTaskIds.join(", ")}`
         text,
         parseMode: "markdown",
       });
-    } catch (error) {
+    } catch  {
       await adapter.sendMessage({
         chatId: message.chatId,
         text: this.getUiCopy("skillsLoadFailed"),
@@ -7317,7 +7316,7 @@ ${status.queuedCount > 0 ? `Queued task IDs: ${status.queuedTaskIds.join(", ")}`
         }),
         parseMode: "markdown",
       });
-    } catch (error) {
+    } catch  {
       await adapter.sendMessage({
         chatId: message.chatId,
         text: this.getUiCopy("skillsLoadFailed"),
@@ -7448,7 +7447,7 @@ ${status.queuedCount > 0 ? `Queued task IDs: ${status.queuedTaskIds.join(", ")}`
 
     const provider = LLMProviderFactory.getSelectedProvider();
     const model = LLMProviderFactory.getSelectedModel();
-    const settings = LLMProviderFactory.getSettings();
+    const _settings = LLMProviderFactory.getSettings();
 
     let text = "⚙️ *Current Settings*\n\n";
 
@@ -7503,7 +7502,7 @@ ${status.queuedCount > 0 ? `Queued task IDs: ${status.queuedTaskIds.join(", ")}`
 
       const allowedNumbers = this.getWhatsAppAllowedNumbers(channelConfig);
       if (allowedNumbers.length === 0) {
-        text += "📞 Allowed numbers: any\n";
+        text += "📞 Allowed numbers: Any\n";
       } else {
         const preview =
           allowedNumbers.length <= 5

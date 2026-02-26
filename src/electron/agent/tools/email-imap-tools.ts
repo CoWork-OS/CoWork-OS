@@ -36,7 +36,7 @@ export class EmailImapTools {
     if (!channel) return false;
     if (!channel.enabled) return false;
 
-    const cfg = channel.config as any;
+    const cfg = channel.config as Any;
     const protocol = asNonEmptyString(cfg?.protocol) === "loom" ? "loom" : "imap-smtp";
     if (protocol === "loom") {
       return (
@@ -92,7 +92,7 @@ export class EmailImapTools {
     limit?: unknown;
     mailbox?: unknown;
     max_body_chars?: unknown;
-  }): Promise<any> {
+  }): Promise<Any> {
     const limitRaw = asNumber(input?.limit);
     const limit = Math.min(Math.max(limitRaw ?? 20, 1), 50);
     const mailboxOverride = asNonEmptyString(input?.mailbox);
@@ -122,7 +122,7 @@ export class EmailImapTools {
       };
     }
 
-    const cfg = channel.config as any;
+    const cfg = channel.config as Any;
     const protocol = asNonEmptyString(cfg?.protocol) === "loom" ? "loom" : "imap-smtp";
 
     if (protocol === "loom") {

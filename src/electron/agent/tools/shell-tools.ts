@@ -56,7 +56,7 @@ function isProcessOwnedByCurrentUser(pid: number): boolean {
     // This will throw ESRCH if process doesn't exist
     process.kill(pid, 0);
     return true;
-  } catch (error: any) {
+  } catch (error: Any) {
     // ESRCH = no such process (that's fine, process exited)
     // EPERM = permission denied (process exists but owned by another user - DON'T KILL)
     if (error.code === "EPERM") {

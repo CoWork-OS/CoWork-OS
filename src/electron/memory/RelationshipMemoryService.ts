@@ -118,7 +118,7 @@ export class RelationshipMemoryService {
     if (!text) return;
 
     const candidates: Array<Omit<RelationshipMemoryItem, "id" | "createdAt" | "updatedAt">> = [];
-    const lower = text.toLowerCase();
+    const _lower = text.toLowerCase();
 
     const nameMatch = text.match(/\b(?:my name is|call me|i am|i'm)\s+([a-z][a-z' -]{1,40})/i);
     if (nameMatch) {

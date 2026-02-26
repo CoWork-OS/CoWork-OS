@@ -177,7 +177,7 @@ describe("ControlPlaneClient edge cases", () => {
         client.sendEvent("test");
       }
 
-      const calls = (mockSocket.send as any).mock.calls;
+      const calls = (mockSocket.send as Any).mock.calls;
       expect(calls).toHaveLength(100);
 
       // Check first and last sequence numbers
@@ -209,7 +209,7 @@ describe("ControlPlaneClient edge cases", () => {
       const client = new ControlPlaneClient(mockSocket, "127.0.0.1");
       client.sendEvent("test", { data: 1 }, "v1.2.3");
 
-      const call = JSON.parse((mockSocket.send as any).mock.calls[0][0]);
+      const call = JSON.parse((mockSocket.send as Any).mock.calls[0][0]);
       expect(call.stateVersion).toBe("v1.2.3");
     });
   });
@@ -240,7 +240,7 @@ describe("ControlPlaneClient edge cases", () => {
     it("should handle multiple close calls", () => {
       const client = new ControlPlaneClient(mockSocket, "127.0.0.1");
       client.close();
-      (mockSocket as any).readyState = WebSocket.CLOSED;
+      (mockSocket as Any).readyState = WebSocket.CLOSED;
       client.close();
 
       expect(mockSocket.close).toHaveBeenCalledTimes(1);

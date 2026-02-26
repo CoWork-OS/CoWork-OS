@@ -14,10 +14,10 @@ import {
   type SettingsCategory,
 } from "../database/SecureSettingsRepository";
 import {
-  Plugin,
+  Plugin as _Plugin,
   PluginManifest,
   LoadedPlugin,
-  PluginState,
+  PluginState as _PluginState,
   PluginAPI,
   PluginRuntime,
   PluginEvent,
@@ -307,7 +307,7 @@ export class PluginRegistry extends EventEmitter {
   /**
    * Create the Plugin API for a specific plugin
    */
-  private createPluginAPI(pluginName: string, loadedPlugin: LoadedPlugin): PluginAPI {
+  private createPluginAPI(pluginName: string, _loadedPlugin: LoadedPlugin): PluginAPI {
     const runtime: PluginRuntime = {
       version: COWORK_VERSION,
       platform: process.platform,

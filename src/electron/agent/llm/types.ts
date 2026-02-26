@@ -62,7 +62,7 @@ export interface LLMTool {
   description: string;
   input_schema: {
     type: "object";
-    properties: Record<string, any>;
+    properties: Record<string, Any>;
     required?: string[];
   };
 }
@@ -71,7 +71,7 @@ export interface LLMToolUse {
   type: "tool_use";
   id: string;
   name: string;
-  input: Record<string, any>;
+  input: Record<string, Any>;
 }
 
 export interface LLMTextContent {

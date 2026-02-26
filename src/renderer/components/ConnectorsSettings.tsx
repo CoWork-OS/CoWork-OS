@@ -384,7 +384,7 @@ export function ConnectorsSettings() {
       setSettings(loadedSettings);
       setServerStatuses(statuses);
       if (registry?.servers) {
-        setRegistryConnectorIds(new Set(registry.servers.map((server: any) => String(server.id))));
+        setRegistryConnectorIds(new Set(registry.servers.map((server: Any) => String(server.id))));
       } else {
         setRegistryConnectorIds(null);
       }
@@ -416,7 +416,7 @@ export function ConnectorsSettings() {
       setInstallingId(connector.registryId);
       await window.electronAPI.installMCPServer(connector.registryId);
       await loadData();
-    } catch (error: any) {
+    } catch (error: Any) {
       alert(`Failed to install ${connector.name}: ${error.message}`);
     } finally {
       setInstallingId(null);
@@ -431,7 +431,7 @@ export function ConnectorsSettings() {
         return rest;
       });
       await window.electronAPI.connectMCPServer(serverId);
-    } catch (error: any) {
+    } catch (error: Any) {
       setConnectionErrors((prev) => ({
         ...prev,
         [serverId]: error.message || "Connection failed",
@@ -449,7 +449,7 @@ export function ConnectorsSettings() {
         return rest;
       });
       await window.electronAPI.disconnectMCPServer(serverId);
-    } catch (error: any) {
+    } catch (error: Any) {
       setConnectionErrors((prev) => ({
         ...prev,
         [serverId]: error.message || "Disconnect failed",

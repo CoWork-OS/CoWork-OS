@@ -29,7 +29,7 @@ interface MCPTool {
   description?: string;
   inputSchema: {
     type: "object";
-    properties?: Record<string, any>;
+    properties?: Record<string, Any>;
     required?: string[];
   };
 }
@@ -176,7 +176,7 @@ export function MCPSettings() {
 
       // Reload data
       await loadData();
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to add server:", error);
       alert(`Failed to add server: ${error.message}`);
     } finally {
@@ -190,7 +190,7 @@ export function MCPSettings() {
     try {
       await window.electronAPI.removeMCPServer(serverId);
       await loadData();
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to remove server:", error);
       alert(`Failed to remove server: ${error.message}`);
     }
@@ -205,7 +205,7 @@ export function MCPSettings() {
         return rest;
       });
       await window.electronAPI.connectMCPServer(serverId);
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to connect server:", error);
       // Store error in state for inline display
       setConnectionErrors((prev) => ({
@@ -226,7 +226,7 @@ export function MCPSettings() {
         return rest;
       });
       await window.electronAPI.disconnectMCPServer(serverId);
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to disconnect server:", error);
       setConnectionErrors((prev) => ({
         ...prev,
@@ -243,7 +243,7 @@ export function MCPSettings() {
       setTestResult(null);
       const result = await window.electronAPI.testMCPServer(serverId);
       setTestResult({ serverId, ...result });
-    } catch (error: any) {
+    } catch (error: Any) {
       setTestResult({ serverId, success: false, error: error.message });
     } finally {
       setTestingServer(null);
@@ -264,7 +264,7 @@ export function MCPSettings() {
     try {
       await window.electronAPI.updateMCPServer(serverId, { enabled });
       await loadData();
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to update server:", error);
     }
   };
@@ -362,7 +362,7 @@ export function MCPSettings() {
 
       setEditingServer(null);
       await loadData();
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to update server:", error);
       alert(`Failed to update server: ${error.message}`);
     }
@@ -389,7 +389,7 @@ export function MCPSettings() {
     try {
       setSaving(true);
       await window.electronAPI.saveMCPSettings(settings);
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to save settings:", error);
       alert(`Failed to save settings: ${error.message}`);
     } finally {
@@ -424,7 +424,7 @@ export function MCPSettings() {
       if (updates.length === 0) {
         alert("All MCP servers are up to date!");
       }
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to check for updates:", error);
       alert(`Failed to check for updates: ${error.message}`);
     } finally {
@@ -441,7 +441,7 @@ export function MCPSettings() {
       // Reload data
       await loadData();
       alert("Server updated successfully!");
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to update server:", error);
       alert(`Failed to update server: ${error.message}`);
     } finally {

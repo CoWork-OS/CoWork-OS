@@ -8,7 +8,7 @@
  * compilation which doesn't work well in vitest without Electron context.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach as _afterEach, vi } from "vitest";
 import { ChannelAdapter, ChannelStatus, OutgoingMessage, ChannelInfo } from "./channels/types";
 
 // Mock better-sqlite3 before importing anything that uses it
@@ -27,7 +27,7 @@ vi.mock("better-sqlite3", () => {
 });
 
 // Create mock database that tracks state
-function createMockDatabase() {
+function _createMockDatabase() {
   const tables: Map<string, Map<string, Record<string, unknown>>> = new Map();
 
   const db = {
@@ -37,8 +37,8 @@ function createMockDatabase() {
         run: vi.fn((...args: unknown[]) => {
           // Extract table name from SQL
           const insertMatch = sql.match(/INSERT INTO (\w+)/i);
-          const updateMatch = sql.match(/UPDATE (\w+)/i);
-          const deleteMatch = sql.match(/DELETE FROM (\w+)/i);
+          const _updateMatch = sql.match(/UPDATE (\w+)/i);
+          const _deleteMatch = sql.match(/DELETE FROM (\w+)/i);
 
           if (insertMatch) {
             const tableName = insertMatch[1];
@@ -381,7 +381,7 @@ describe("Gateway Infrastructure - Mock Adapter Integration", () => {
           text: "Broadcast",
         });
         results.push({ chatId, success: true, messageId });
-      } catch (error) {
+      } catch  {
         results.push({
           chatId,
           success: false,

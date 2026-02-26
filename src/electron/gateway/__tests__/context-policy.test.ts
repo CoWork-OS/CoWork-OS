@@ -13,7 +13,7 @@ vi.mock("electron", () => ({
 }));
 
 // In-memory mock storage
-let mockPolicies: Map<string, any>;
+let mockPolicies: Map<string, Any>;
 let policyIdCounter: number;
 
 // Default tool restrictions for group contexts
@@ -191,7 +191,7 @@ class MockContextPolicyManager {
     });
   }
 
-  private mapRowToPolicy(row: any): ContextPolicy {
+  private mapRowToPolicy(row: Any): ContextPolicy {
     return {
       id: row.id,
       channelId: row.channelId,

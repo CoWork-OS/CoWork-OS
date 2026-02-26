@@ -38,7 +38,7 @@ export function SkillsSettings({ onSkillSelect }: SkillsSettingsProps) {
       const reloadedSkills = await window.electronAPI.reloadCustomSkills();
       setSkills(reloadedSkills);
       setError(null);
-    } catch (err) {
+    } catch  {
       setError("Failed to reload skills");
     }
   };
@@ -53,7 +53,7 @@ export function SkillsSettings({ onSkillSelect }: SkillsSettingsProps) {
     try {
       await window.electronAPI.deleteCustomSkill(id);
       setSkills((prev) => prev.filter((s) => s.id !== id));
-    } catch (err) {
+    } catch  {
       setError("Failed to delete skill");
     }
   };
@@ -91,7 +91,7 @@ export function SkillsSettings({ onSkillSelect }: SkillsSettingsProps) {
       setEditingSkill(null);
       setIsCreating(false);
       setError(null);
-    } catch (err: any) {
+    } catch (err: Any) {
       setError(err.message || "Failed to save skill");
     }
   };

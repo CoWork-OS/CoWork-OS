@@ -33,7 +33,7 @@ export class KnowledgeGraphRepository {
     const stmt = this.db.prepare(
       "SELECT * FROM kg_entity_types WHERE workspace_id = ? ORDER BY is_builtin DESC, name ASC",
     );
-    const rows = stmt.all(workspaceId) as any[];
+    const rows = stmt.all(workspaceId) as Any[];
     return rows.map((r) => this.mapEntityType(r));
   }
 
@@ -41,7 +41,7 @@ export class KnowledgeGraphRepository {
     const stmt = this.db.prepare(
       "SELECT * FROM kg_entity_types WHERE workspace_id = ? AND name = ?",
     );
-    const row = stmt.get(workspaceId, name.toLowerCase().trim()) as any;
+    const row = stmt.get(workspaceId, name.toLowerCase().trim()) as Any;
     return row ? this.mapEntityType(row) : undefined;
   }
 
@@ -126,7 +126,7 @@ export class KnowledgeGraphRepository {
       LEFT JOIN kg_entity_types t ON e.entity_type_id = t.id
       WHERE e.id = ?
     `);
-    const row = stmt.get(entityId) as any;
+    const row = stmt.get(entityId) as Any;
     return row ? this.mapEntity(row) : undefined;
   }
 
@@ -137,7 +137,7 @@ export class KnowledgeGraphRepository {
       LEFT JOIN kg_entity_types t ON e.entity_type_id = t.id
       WHERE e.workspace_id = ? AND e.entity_type_id = ? AND e.name = ?
     `);
-    const row = stmt.get(workspaceId, entityTypeId, name.trim()) as any;
+    const row = stmt.get(workspaceId, entityTypeId, name.trim()) as Any;
     return row ? this.mapEntity(row) : undefined;
   }
 
@@ -154,7 +154,7 @@ export class KnowledgeGraphRepository {
 
     const now = Date.now();
     const updates: string[] = ["updated_at = ?"];
-    const params: any[] = [now];
+    const params: Any[] = [now];
 
     if (patch.description !== undefined) {
       updates.push("description = ?");
@@ -244,7 +244,7 @@ export class KnowledgeGraphRepository {
 
   getEdge(edgeId: string): KGEdge | undefined {
     const stmt = this.db.prepare("SELECT * FROM kg_edges WHERE id = ?");
-    const row = stmt.get(edgeId) as any;
+    const row = stmt.get(edgeId) as Any;
     return row ? this.mapEdge(row) : undefined;
   }
 
@@ -259,7 +259,7 @@ export class KnowledgeGraphRepository {
       WHERE (source_entity_id = ? AND target_entity_id = ?)
          OR (source_entity_id = ? AND target_entity_id = ?)
     `);
-    const rows = stmt.all(entityId1, entityId2, entityId2, entityId1) as any[];
+    const rows = stmt.all(entityId1, entityId2, entityId2, entityId1) as Any[];
     return rows.map((r) => this.mapEdge(r));
   }
 
@@ -295,7 +295,7 @@ export class KnowledgeGraphRepository {
     const stmt = this.db.prepare(
       "SELECT * FROM kg_observations WHERE entity_id = ? ORDER BY created_at DESC LIMIT ?",
     );
-    const rows = stmt.all(entityId, limit) as any[];
+    const rows = stmt.all(entityId, limit) as Any[];
     return rows.map((r) => this.mapObservation(r));
   }
 
@@ -325,7 +325,7 @@ export class KnowledgeGraphRepository {
           ORDER BY rank
           LIMIT ?
         `);
-        const rows = stmt.all(ftsQuery, workspaceId, limit) as any[];
+        const rows = stmt.all(ftsQuery, workspaceId, limit) as Any[];
         if (rows.length > 0) {
           return rows.map((r) => ({
             entity: this.mapEntity(r),
@@ -347,7 +347,7 @@ export class KnowledgeGraphRepository {
       ORDER BY e.confidence DESC, e.updated_at DESC
       LIMIT ?
     `);
-    const rows = stmt.all(workspaceId, likePattern, likePattern, limit) as any[];
+    const rows = stmt.all(workspaceId, likePattern, likePattern, limit) as Any[];
     return rows.map((r, i) => ({
       entity: this.mapEntity(r),
       score: 1.0 / (i + 1), // simple rank-based score
@@ -370,7 +370,7 @@ export class KnowledgeGraphRepository {
       const placeholders = currentLevel.map(() => "?").join(",");
 
       let edgeFilter = "";
-      const params: any[] = [...currentLevel, ...currentLevel];
+      const params: Any[] = [...currentLevel, ...currentLevel];
 
       if (edgeTypes && edgeTypes.length > 0) {
         const edgePlaceholders = edgeTypes.map(() => "?").join(",");
@@ -383,7 +383,7 @@ export class KnowledgeGraphRepository {
         WHERE (source_entity_id IN (${placeholders}) OR target_entity_id IN (${placeholders}))
         ${edgeFilter}
       `);
-      const edges = stmt.all(...params) as any[];
+      const edges = stmt.all(...params) as Any[];
 
       const nextLevel: string[] = [];
 
@@ -438,7 +438,7 @@ export class KnowledgeGraphRepository {
       WHERE source_entity_id IN (${placeholders})
         AND target_entity_id IN (${placeholders})
     `);
-    const edgeRows = stmt.all(...entities.map((e) => e.id), ...entities.map((e) => e.id)) as any[];
+    const edgeRows = stmt.all(...entities.map((e) => e.id), ...entities.map((e) => e.id)) as Any[];
 
     const edges = edgeRows
       .map((r) => this.mapEdge(r))
@@ -475,14 +475,14 @@ export class KnowledgeGraphRepository {
       (
         this.db
           .prepare("SELECT COUNT(*) as count FROM kg_entities WHERE workspace_id = ?")
-          .get(workspaceId) as any
+          .get(workspaceId) as Any
       )?.count || 0;
 
     const edgeCount =
       (
         this.db
           .prepare("SELECT COUNT(*) as count FROM kg_edges WHERE workspace_id = ?")
-          .get(workspaceId) as any
+          .get(workspaceId) as Any
       )?.count || 0;
 
     const observationCount =
@@ -493,7 +493,7 @@ export class KnowledgeGraphRepository {
            JOIN kg_entities e ON o.entity_id = e.id
            WHERE e.workspace_id = ?`,
           )
-          .get(workspaceId) as any
+          .get(workspaceId) as Any
       )?.count || 0;
 
     const typeDistRows = this.db
@@ -506,7 +506,7 @@ export class KnowledgeGraphRepository {
        HAVING count > 0
        ORDER BY count DESC`,
       )
-      .all(workspaceId) as any[];
+      .all(workspaceId) as Any[];
 
     return {
       entityCount,
@@ -521,7 +521,7 @@ export class KnowledgeGraphRepository {
 
   // ─── Row Mappers ──────────────────────────────────────────────────
 
-  private mapEntityType(row: any): KGEntityType {
+  private mapEntityType(row: Any): KGEntityType {
     return {
       id: row.id,
       workspaceId: row.workspace_id,
@@ -534,7 +534,7 @@ export class KnowledgeGraphRepository {
     };
   }
 
-  private mapEntity(row: any): KGEntity {
+  private mapEntity(row: Any): KGEntity {
     return {
       id: row.id,
       workspaceId: row.workspace_id,
@@ -551,7 +551,7 @@ export class KnowledgeGraphRepository {
     };
   }
 
-  private mapEdge(row: any): KGEdge {
+  private mapEdge(row: Any): KGEdge {
     return {
       id: row.id,
       workspaceId: row.workspace_id,
@@ -566,7 +566,7 @@ export class KnowledgeGraphRepository {
     };
   }
 
-  private mapObservation(row: any): KGObservation {
+  private mapObservation(row: Any): KGObservation {
     return {
       id: row.id,
       entityId: row.entity_id,

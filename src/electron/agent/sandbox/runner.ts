@@ -330,7 +330,7 @@ export class SandboxRunner {
     const workspacePath = this.workspace.path;
     const permissions = this.workspace.permissions;
     const tempDir = os.tmpdir();
-    const homeDir = os.homedir();
+    const _homeDir = os.homedir();
 
     let profile = `(version 1)
 (deny default)

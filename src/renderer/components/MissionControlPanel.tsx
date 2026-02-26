@@ -292,7 +292,7 @@ export function MissionControlPanel({ onClose: _onClose }: MissionControlPanelPr
     });
 
     // Task events - handle new tasks and status updates
-    const unsubscribeTaskEvents = window.electronAPI.onTaskEvent((event: any) => {
+    const unsubscribeTaskEvents = window.electronAPI.onTaskEvent((event: Any) => {
       const currentWorkspaceId = workspaceIdRef.current;
       const isAutoApprovalRequested =
         event.type === "approval_requested" && event.payload?.autoApproved === true;
@@ -447,7 +447,7 @@ export function MissionControlPanel({ onClose: _onClose }: MissionControlPanelPr
       // Refresh heartbeat statuses
       const statuses = await window.electronAPI.getAllHeartbeatStatus();
       setHeartbeatStatuses(statuses);
-    } catch (err: any) {
+    } catch (err: Any) {
       setAgentError(err.message || "Failed to save agent");
     }
   };

@@ -114,7 +114,7 @@ export async function runShellCommand(
       timeout: timeoutMs,
     });
     return { code: 0, stdout, stderr };
-  } catch (error: any) {
+  } catch (error: Any) {
     return {
       code: error.code ?? -1,
       stdout: error.stdout ?? "",

@@ -8,7 +8,7 @@ import { GoogleWorkspaceSettingsManager } from "../settings/google-workspace-man
 const GOOGLE_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const TOKEN_REFRESH_BUFFER_MS = 2 * 60 * 1000;
 
-function parseJsonSafe(text: string): any | undefined {
+function parseJsonSafe(text: string): Any | undefined {
   const trimmed = text.trim();
   if (!trimmed) return undefined;
   try {

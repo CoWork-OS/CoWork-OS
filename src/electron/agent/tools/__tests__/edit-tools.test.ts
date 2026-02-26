@@ -40,7 +40,7 @@ describe("EditTools", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    editTools = new EditTools(mockWorkspace, mockDaemon as any, "test-task-id");
+    editTools = new EditTools(mockWorkspace, mockDaemon as Any, "test-task-id");
   });
 
   afterEach(() => {

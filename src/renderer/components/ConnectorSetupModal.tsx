@@ -178,7 +178,7 @@ export function ConnectorSetupModal({
       await reconnectServer();
       onSaved();
       onClose();
-    } catch (error: any) {
+    } catch (error: Any) {
       setOauthError(error.message || "Failed to save credentials");
     } finally {
       setSaving(false);
@@ -205,7 +205,7 @@ export function ConnectorSetupModal({
         SALESFORCE_CLIENT_SECRET: sfClientSecret,
         SALESFORCE_LOGIN_URL: sfLoginUrl,
       });
-    } catch (error: any) {
+    } catch (error: Any) {
       setOauthError(error.message || "Salesforce OAuth failed");
     } finally {
       setOauthBusy(false);
@@ -233,7 +233,7 @@ export function ConnectorSetupModal({
         setSelectedJiraResourceId(resources[0].id);
       }
       setJiraOauthTokens({ accessToken: result.accessToken, refreshToken: result.refreshToken });
-    } catch (error: any) {
+    } catch (error: Any) {
       setOauthError(error.message || "Jira OAuth failed");
     } finally {
       setOauthBusy(false);
@@ -257,7 +257,7 @@ export function ConnectorSetupModal({
         HUBSPOT_CLIENT_ID: hubspotClientId,
         HUBSPOT_CLIENT_SECRET: hubspotClientSecret,
       });
-    } catch (error: any) {
+    } catch (error: Any) {
       setOauthError(error.message || "HubSpot OAuth failed");
     } finally {
       setOauthBusy(false);
@@ -285,7 +285,7 @@ export function ConnectorSetupModal({
         ZENDESK_EMAIL: "",
         ZENDESK_API_TOKEN: "",
       });
-    } catch (error: any) {
+    } catch (error: Any) {
       setOauthError(error.message || "Zendesk OAuth failed");
     } finally {
       setOauthBusy(false);
@@ -307,7 +307,7 @@ export function ConnectorSetupModal({
         GOOGLE_CLIENT_ID: googleClientId,
         GOOGLE_CLIENT_SECRET: googleClientSecret,
       });
-    } catch (error: any) {
+    } catch (error: Any) {
       setOauthError(error.message || "Google OAuth failed");
     } finally {
       setOauthBusy(false);
@@ -331,7 +331,7 @@ export function ConnectorSetupModal({
         DOCUSIGN_CLIENT_SECRET: docusignClientSecret,
         DOCUSIGN_BASE_URL: docusignBaseUrl,
       });
-    } catch (error: any) {
+    } catch (error: Any) {
       setOauthError(error.message || "DocuSign OAuth failed");
     } finally {
       setOauthBusy(false);
@@ -353,7 +353,7 @@ export function ConnectorSetupModal({
         OUTREACH_CLIENT_ID: outreachClientId,
         OUTREACH_CLIENT_SECRET: outreachClientSecret,
       });
-    } catch (error: any) {
+    } catch (error: Any) {
       setOauthError(error.message || "Outreach OAuth failed");
     } finally {
       setOauthBusy(false);
@@ -376,7 +376,7 @@ export function ConnectorSetupModal({
         SLACK_CLIENT_ID: slackClientId,
         SLACK_CLIENT_SECRET: slackClientSecret,
       });
-    } catch (error: any) {
+    } catch (error: Any) {
       setOauthError(error.message || "Slack OAuth failed");
     } finally {
       setOauthBusy(false);

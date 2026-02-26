@@ -12,13 +12,13 @@ describe("BrowserTools browser_navigate", () => {
       network: true,
       shell: true,
     },
-  } as any;
+  } as Any;
 
   const makeTools = () => {
     const daemon = {
       logEvent: vi.fn(),
       registerArtifact: vi.fn(),
-    } as any;
+    } as Any;
 
     return {
       tools: new BrowserTools(workspace, daemon, "task-1"),
@@ -29,7 +29,7 @@ describe("BrowserTools browser_navigate", () => {
   it("returns success=false when navigation receives HTTP 4xx/5xx", async () => {
     const { tools } = makeTools();
 
-    (tools as any).browserService = {
+    (tools as Any).browserService = {
       navigate: vi.fn().mockResolvedValue({
         url: "https://example.com/paywall",
         title: "Forbidden",
@@ -50,7 +50,7 @@ describe("BrowserTools browser_navigate", () => {
   it("returns success=true for successful navigation", async () => {
     const { tools } = makeTools();
 
-    (tools as any).browserService = {
+    (tools as Any).browserService = {
       navigate: vi.fn().mockResolvedValue({
         url: "https://example.com",
         title: "Example Domain",

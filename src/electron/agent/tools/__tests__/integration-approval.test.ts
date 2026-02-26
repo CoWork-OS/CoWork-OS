@@ -115,7 +115,7 @@ beforeEach(() => {
 describe("External integration approval workflows", () => {
   it("requests approval for Notion update_block", async () => {
     const daemon = buildDaemon();
-    const tools = new NotionTools(workspace, daemon as any, taskId);
+    const tools = new NotionTools(workspace, daemon as Any, taskId);
 
     await tools.executeAction({
       action: "update_block",
@@ -133,7 +133,7 @@ describe("External integration approval workflows", () => {
 
   it("requests approval for Box create_folder", async () => {
     const daemon = buildDaemon();
-    const tools = new BoxTools(workspace, daemon as any, taskId);
+    const tools = new BoxTools(workspace, daemon as Any, taskId);
 
     await tools.executeAction({
       action: "create_folder",
@@ -151,7 +151,7 @@ describe("External integration approval workflows", () => {
 
   it("requests approval for OneDrive create_folder", async () => {
     const daemon = buildDaemon();
-    const tools = new OneDriveTools(workspace, daemon as any, taskId);
+    const tools = new OneDriveTools(workspace, daemon as Any, taskId);
 
     await tools.executeAction({
       action: "create_folder",
@@ -168,7 +168,7 @@ describe("External integration approval workflows", () => {
 
   it("requests approval for Google Drive create_folder", async () => {
     const daemon = buildDaemon();
-    const tools = new GoogleDriveTools(workspace, daemon as any, taskId);
+    const tools = new GoogleDriveTools(workspace, daemon as Any, taskId);
 
     await tools.executeAction({
       action: "create_folder",
@@ -185,7 +185,7 @@ describe("External integration approval workflows", () => {
 
   it("requests approval for Gmail send_message", async () => {
     const daemon = buildDaemon();
-    const tools = new GmailTools(workspace, daemon as any, taskId);
+    const tools = new GmailTools(workspace, daemon as Any, taskId);
 
     await tools.executeAction({
       action: "send_message",
@@ -204,7 +204,7 @@ describe("External integration approval workflows", () => {
 
   it("requests approval for Google Calendar create_event", async () => {
     const daemon = buildDaemon();
-    const tools = new GoogleCalendarTools(workspace, daemon as any, taskId);
+    const tools = new GoogleCalendarTools(workspace, daemon as Any, taskId);
 
     await tools.executeAction({
       action: "create_event",
@@ -223,7 +223,7 @@ describe("External integration approval workflows", () => {
 
   it("requests approval for Dropbox create_folder", async () => {
     const daemon = buildDaemon();
-    const tools = new DropboxTools(workspace, daemon as any, taskId);
+    const tools = new DropboxTools(workspace, daemon as Any, taskId);
 
     await tools.executeAction({
       action: "create_folder",
@@ -240,7 +240,7 @@ describe("External integration approval workflows", () => {
 
   it("requests approval for SharePoint create_folder", async () => {
     const daemon = buildDaemon();
-    const tools = new SharePointTools(workspace, daemon as any, taskId);
+    const tools = new SharePointTools(workspace, daemon as Any, taskId);
 
     await tools.executeAction({
       action: "create_folder",
@@ -257,7 +257,7 @@ describe("External integration approval workflows", () => {
 
   it("throws when approval is denied", async () => {
     const daemon = buildDaemon(false);
-    const tools = new BoxTools(workspace, daemon as any, taskId);
+    const tools = new BoxTools(workspace, daemon as Any, taskId);
 
     await expect(
       tools.executeAction({

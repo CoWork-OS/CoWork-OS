@@ -43,8 +43,8 @@ function createMockDb() {
       get: vi.fn(),
       all: vi.fn().mockReturnValue([]),
     }),
-    transaction: vi.fn((fn: any) => fn),
-  } as any;
+    transaction: vi.fn((fn: Any) => fn),
+  } as Any;
 }
 
 const tick = () => new Promise<void>((resolve) => setImmediate(() => resolve()));
@@ -58,9 +58,9 @@ describe("ChannelGateway follow-up listeners", () => {
 
   it("flushes + finalizes when a follow-up produced assistant output", async () => {
     const db = createMockDb();
-    const gateway = new ChannelGateway(db, { agentDaemon: agentDaemon as any });
+    const gateway = new ChannelGateway(db, { agentDaemon: agentDaemon as Any });
 
-    const router = (gateway as any).router;
+    const router = (gateway as Any).router;
     router.sendTaskUpdate = vi.fn().mockResolvedValue(undefined);
     router.flushStreamingUpdateForTask = vi.fn().mockResolvedValue(undefined);
     router.finalizeDraftStreamForTask = vi.fn().mockResolvedValue(undefined);
@@ -82,9 +82,9 @@ describe("ChannelGateway follow-up listeners", () => {
 
   it("sends a confirmation when a follow-up produced no assistant output", async () => {
     const db = createMockDb();
-    const gateway = new ChannelGateway(db, { agentDaemon: agentDaemon as any });
+    const gateway = new ChannelGateway(db, { agentDaemon: agentDaemon as Any });
 
-    const router = (gateway as any).router;
+    const router = (gateway as Any).router;
     router.sendTaskUpdate = vi.fn().mockResolvedValue(undefined);
     router.flushStreamingUpdateForTask = vi.fn().mockResolvedValue(undefined);
     router.finalizeDraftStreamForTask = vi.fn().mockResolvedValue(undefined);
@@ -104,9 +104,9 @@ describe("ChannelGateway follow-up listeners", () => {
 
   it("flushes + finalizes partial output on follow-up failure, then sends a failure message", async () => {
     const db = createMockDb();
-    const gateway = new ChannelGateway(db, { agentDaemon: agentDaemon as any });
+    const gateway = new ChannelGateway(db, { agentDaemon: agentDaemon as Any });
 
-    const router = (gateway as any).router;
+    const router = (gateway as Any).router;
     router.sendTaskUpdate = vi.fn().mockResolvedValue(undefined);
     router.flushStreamingUpdateForTask = vi.fn().mockResolvedValue(undefined);
     router.finalizeDraftStreamForTask = vi.fn().mockResolvedValue(undefined);
@@ -126,9 +126,9 @@ describe("ChannelGateway follow-up listeners", () => {
 
   it("finalizes paused task output so draft streaming does not leave a dangling cursor", async () => {
     const db = createMockDb();
-    const gateway = new ChannelGateway(db, { agentDaemon: agentDaemon as any });
+    const gateway = new ChannelGateway(db, { agentDaemon: agentDaemon as Any });
 
-    const router = (gateway as any).router;
+    const router = (gateway as Any).router;
     router.flushStreamingUpdateForTask = vi.fn().mockResolvedValue(undefined);
     router.finalizeDraftStreamForTask = vi.fn().mockResolvedValue(undefined);
 

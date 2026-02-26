@@ -19,7 +19,7 @@ import {
   SkillsConfig,
 } from "../../shared/types";
 import { SkillEligibilityChecker, getSkillEligibilityChecker } from "./skill-eligibility";
-import { getSkillRegistry } from "./skill-registry";
+import { getSkillRegistry as _getSkillRegistry } from "./skill-registry";
 import { InputSanitizer } from "./security";
 import { getUserDataDir } from "../utils/user-data-dir";
 
@@ -375,7 +375,7 @@ export class CustomSkillLoader {
 
       // If tool availability is provided, filter out skills that cannot run in this context.
       if (availableToolNames) {
-        const skillRequires = (skill.requires || {}) as any;
+        const skillRequires = (skill.requires || {}) as Any;
         const requiredTools: string[] = Array.isArray(skillRequires.tools)
           ? skillRequires.tools.filter(
               (tool: unknown): tool is string => typeof tool === "string" && tool.trim().length > 0,

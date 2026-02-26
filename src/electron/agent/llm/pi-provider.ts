@@ -1,5 +1,5 @@
 import {
-  getModel,
+  getModel as _getModel,
   getModels,
   getProviders,
   complete as piAiComplete,
@@ -20,7 +20,7 @@ import {
   LLMTool,
   LLMToolResult,
   PI_PROVIDERS,
-  PiProviderKey,
+  PiProviderKey as _PiProviderKey,
 } from "./types";
 import { imageToTextFallback } from "./image-utils";
 
@@ -101,7 +101,7 @@ export class PiProvider implements LLMProvider {
 
       // Convert pi-ai response to CoWork OS format
       return this.convertPiAiResponse(response);
-    } catch (error: any) {
+    } catch (error: Any) {
       if (error.name === "AbortError" || error.message?.includes("aborted")) {
         console.log(`[Pi] Request aborted`);
         throw new Error("Request cancelled");
@@ -134,7 +134,7 @@ export class PiProvider implements LLMProvider {
       );
 
       return { success: true };
-    } catch (error: any) {
+    } catch (error: Any) {
       return {
         success: false,
         error: error.message || `Failed to connect to ${this.piProvider} via Pi`,
@@ -156,7 +156,7 @@ export class PiProvider implements LLMProvider {
         name: m.name || m.id,
         description: `${PI_PROVIDERS[provider as keyof typeof PI_PROVIDERS]?.displayName || provider} - ${m.reasoning ? "Reasoning model" : "Standard model"} (${m.contextWindow.toLocaleString()} ctx)`,
       }));
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error(`[Pi] Failed to get models for ${provider}:`, error);
       return [];
     }
@@ -175,7 +175,7 @@ export class PiProvider implements LLMProvider {
         id: p,
         name: PI_PROVIDERS[p as keyof typeof PI_PROVIDERS]?.displayName || p,
       }));
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("[Pi] Failed to get providers:", error);
       // Return fallback list
       return Object.entries(PI_PROVIDERS).map(([id, info]) => ({
@@ -190,7 +190,7 @@ export class PiProvider implements LLMProvider {
    * Requires an exact match — no partial or fallback matching to avoid
    * silently routing to an unintended (and potentially costly) model.
    */
-  private resolveModel(modelId: string): Model<any> {
+  private resolveModel(modelId: string): Model<Any> {
     const availableModels = getModels(this.piProvider);
     const found = availableModels.find((m) => m.id === modelId);
     if (found) {
@@ -262,7 +262,7 @@ export class PiProvider implements LLMProvider {
             const textContent: Array<{ type: "text"; text: string }> = [];
             for (const item of msg.content) {
               if (item.type === "text") {
-                textContent.push({ type: "text" as const, text: (item as any).text });
+                textContent.push({ type: "text" as const, text: (item as Any).text });
               } else if (item.type === "image") {
                 // pi-ai SDK doesn't support inline images; use text fallback
                 textContent.push({ type: "text" as const, text: imageToTextFallback(item) });
@@ -278,13 +278,13 @@ export class PiProvider implements LLMProvider {
             }
           } else {
             // Assistant message with tool calls
-            const content: any[] = [];
+            const content: Any[] = [];
 
             for (const item of msg.content) {
               if (item.type === "text") {
-                content.push({ type: "text", text: (item as any).text });
+                content.push({ type: "text", text: (item as Any).text });
               } else if (item.type === "tool_use") {
-                const toolUse = item as any;
+                const toolUse = item as Any;
                 toolCallNames.set(toolUse.id, toolUse.name);
                 content.push({
                   type: "toolCall",
@@ -323,7 +323,7 @@ export class PiProvider implements LLMProvider {
     return tools.map((tool) => ({
       name: tool.name,
       description: tool.description,
-      parameters: tool.input_schema as any,
+      parameters: tool.input_schema as Any,
     }));
   }
 

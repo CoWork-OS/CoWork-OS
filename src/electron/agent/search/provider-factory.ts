@@ -53,7 +53,7 @@ export class SearchProviderFactory {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  private static isTransientSearchError(error: any): boolean {
+  private static isTransientSearchError(error: Any): boolean {
     const message = String(error?.message || "");
     return (
       /rate limit/i.test(message) ||
@@ -75,12 +75,12 @@ export class SearchProviderFactory {
     query: SearchQuery,
     maxAttempts = 3,
   ): Promise<SearchResponse> {
-    let lastError: any;
+    let lastError: Any;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
         return await provider.search(query);
-      } catch (error: any) {
+      } catch (error: Any) {
         lastError = error;
         if (!this.isTransientSearchError(error) || attempt === maxAttempts) {
           throw error;
@@ -390,7 +390,7 @@ export class SearchProviderFactory {
         const providerConfig = this.getProviderConfig(providerType);
         const provider = this.createProviderFromConfig(providerConfig);
         return await this.searchWithRetry(provider, query);
-      } catch (error: any) {
+      } catch (error: Any) {
         const message = error?.message || "Search provider request failed";
         providerErrors.push({ provider: providerType, error: message });
         console.error(`Search provider (${providerType}) failed:`, message);
@@ -556,7 +556,7 @@ export class SearchProviderFactory {
       const config = this.getProviderConfig(providerType);
       const provider = this.createProviderFromConfig(config);
       return await provider.testConnection();
-    } catch (error: any) {
+    } catch (error: Any) {
       return {
         success: false,
         error: error.message || "Failed to create provider",

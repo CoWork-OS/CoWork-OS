@@ -91,7 +91,7 @@ export class OllamaProvider implements LLMProvider {
 
       const data = (await response.json()) as OllamaChatResponse;
       return this.convertResponse(data);
-    } catch (error: any) {
+    } catch (error: Any) {
       clearTimeout(timeoutId);
       console.error(`[Ollama] API error:`, {
         name: error.name,
@@ -133,7 +133,7 @@ export class OllamaProvider implements LLMProvider {
       }
 
       return { success: true };
-    } catch (error: any) {
+    } catch (error: Any) {
       return {
         success: false,
         error: error.message || "Failed to connect to Ollama server",
@@ -165,7 +165,7 @@ export class OllamaProvider implements LLMProvider {
         size: m.size,
         modified: m.modified_at,
       }));
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to fetch Ollama models:", error);
       return [];
     }
@@ -266,13 +266,13 @@ export class OllamaProvider implements LLMProvider {
     // Handle tool calls
     if (message.tool_calls && message.tool_calls.length > 0) {
       for (const toolCall of message.tool_calls) {
-        let args: Record<string, any>;
+        let args: Record<string, Any>;
         try {
           args =
             typeof toolCall.function.arguments === "string"
               ? JSON.parse(toolCall.function.arguments)
               : toolCall.function.arguments || {};
-        } catch (e) {
+        } catch  {
           console.error("Failed to parse tool arguments:", toolCall.function.arguments);
           args = {};
         }
@@ -317,7 +317,7 @@ interface OllamaMessage {
 interface OllamaToolCall {
   function: {
     name: string;
-    arguments: Record<string, any> | string;
+    arguments: Record<string, Any> | string;
   };
 }
 
@@ -328,7 +328,7 @@ interface OllamaTool {
     description: string;
     parameters: {
       type: "object";
-      properties: Record<string, any>;
+      properties: Record<string, Any>;
       required?: string[];
     };
   };

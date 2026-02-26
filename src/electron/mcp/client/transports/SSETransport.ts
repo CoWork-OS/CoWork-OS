@@ -17,7 +17,7 @@ import {
 } from "../../types";
 
 interface PendingRequest {
-  resolve: (result: any) => void;
+  resolve: (result: Any) => void;
   reject: (error: Error) => void;
   timeout: ReturnType<typeof setTimeout>;
 }
@@ -123,7 +123,7 @@ export class SSETransport extends EventEmitter implements MCPTransport {
     this.abortController?.abort();
 
     // Reject all pending requests
-    for (const [id, pending] of this.pendingRequests) {
+    for (const [_id, pending] of this.pendingRequests) {
       clearTimeout(pending.timeout);
       pending.reject(new Error("Transport disconnected"));
     }
@@ -135,7 +135,7 @@ export class SSETransport extends EventEmitter implements MCPTransport {
   /**
    * Send a JSON-RPC request via HTTP POST and wait for response
    */
-  async sendRequest(method: string, params?: Record<string, any>): Promise<any> {
+  async sendRequest(method: string, params?: Record<string, Any>): Promise<Any> {
     if (!this.connected) {
       throw new Error("Not connected");
     }
@@ -216,7 +216,7 @@ export class SSETransport extends EventEmitter implements MCPTransport {
           this.handleJsonRpcResponse(responseData);
         }
       }
-    } catch (error: any) {
+    } catch (error: Any) {
       if (error.name === "AbortError") {
         throw new Error("Request aborted");
       }
@@ -260,7 +260,7 @@ export class SSETransport extends EventEmitter implements MCPTransport {
     try {
       const message = JSON.parse(data);
       this.handleJsonRpcResponse(message);
-    } catch (error) {
+    } catch  {
       console.error(`[MCP SSETransport] Failed to parse message: ${data}`);
     }
   }
@@ -268,7 +268,7 @@ export class SSETransport extends EventEmitter implements MCPTransport {
   /**
    * Handle a parsed JSON-RPC message
    */
-  private handleJsonRpcResponse(message: any): void {
+  private handleJsonRpcResponse(message: Any): void {
     // Check if this is a response to a pending request
     if ("id" in message && message.id !== null) {
       const pending = this.pendingRequests.get(message.id);

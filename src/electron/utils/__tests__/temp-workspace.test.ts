@@ -33,9 +33,9 @@ class MockDb {
   sessions: SessionRow[] = [];
 
   prepare(sql: string): {
-    all?: (...args: any[]) => any[];
-    get?: (...args: any[]) => any;
-    run?: (...args: any[]) => any;
+    all?: (...args: Any[]) => Any[];
+    get?: (...args: Any[]) => Any;
+    run?: (...args: Any[]) => Any;
   } {
     if (
       sql.includes("FROM workspaces") &&
@@ -208,7 +208,7 @@ describe("pruneTempWorkspaces", () => {
     db.tasks.push({ id: "t1", workspace_id: activeOld.id, status: "executing" });
 
     const result = pruneTempWorkspaces({
-      db: db as any,
+      db: db as Any,
       tempWorkspaceRoot: root,
       currentWorkspaceId: recent.id,
       nowMs,
@@ -236,7 +236,7 @@ describe("pruneTempWorkspaces", () => {
     );
 
     const result = pruneTempWorkspaces({
-      db: db as any,
+      db: db as Any,
       tempWorkspaceRoot: root,
       nowMs,
       keepRecent: 0,
@@ -270,7 +270,7 @@ describe("pruneTempWorkspaces", () => {
     });
 
     const result = pruneTempWorkspaces({
-      db: db as any,
+      db: db as Any,
       tempWorkspaceRoot: root,
       nowMs,
       keepRecent: 0,
@@ -299,7 +299,7 @@ describe("pruneTempWorkspaces", () => {
     fs.mkdirSync(freshOrphanDir, { recursive: true });
 
     const result = pruneTempWorkspaces({
-      db: db as any,
+      db: db as Any,
       tempWorkspaceRoot: root,
       nowMs,
       keepRecent: 0,
@@ -334,7 +334,7 @@ describe("pruneTempWorkspaces", () => {
     const oldTemp = insertTempWorkspace(db, root, "real-temp", nowMs - 100_000);
 
     const result = pruneTempWorkspaces({
-      db: db as any,
+      db: db as Any,
       tempWorkspaceRoot: root,
       nowMs,
       keepRecent: 0,
@@ -368,7 +368,7 @@ describe("pruneTempWorkspaces", () => {
     });
 
     const result = pruneTempWorkspaces({
-      db: db as any,
+      db: db as Any,
       tempWorkspaceRoot: missingRoot,
       nowMs,
       keepRecent: 0,

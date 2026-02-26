@@ -83,7 +83,7 @@ export function HooksSettings() {
       }
       await loadSettings();
       await loadStatus();
-    } catch (err: any) {
+    } catch (err: Any) {
       setError(err.message || "Failed to enable webhooks");
     } finally {
       setSaving(false);
@@ -99,7 +99,7 @@ export function HooksSettings() {
       await loadSettings();
       await loadStatus();
       await loadGmailStatus();
-    } catch (err: any) {
+    } catch (err: Any) {
       setError(err.message || "Failed to disable webhooks");
     } finally {
       setSaving(false);
@@ -120,7 +120,7 @@ export function HooksSettings() {
       );
       setSuccess("Token regenerated successfully.");
       await loadSettings();
-    } catch (err: any) {
+    } catch (err: Any) {
       setError(err.message || "Failed to regenerate token");
     } finally {
       setSaving(false);
@@ -148,7 +148,7 @@ export function HooksSettings() {
       setSuccess("Gmail hooks configured");
       await loadSettings();
       await loadGmailStatus();
-    } catch (err: any) {
+    } catch (err: Any) {
       setError(err.message || "Failed to configure Gmail hooks");
     } finally {
       setSaving(false);
@@ -184,7 +184,7 @@ export function HooksSettings() {
       setSuccess("Resend inbound webhook preset configured");
       await loadSettings();
       await loadStatus();
-    } catch (err: any) {
+    } catch (err: Any) {
       setError(err.message || "Failed to configure Resend webhook preset");
     } finally {
       setSaving(false);
@@ -202,7 +202,7 @@ export function HooksSettings() {
         setError(result.error || "Failed to start Gmail watcher");
       }
       await loadGmailStatus();
-    } catch (err: any) {
+    } catch (err: Any) {
       setError(err.message || "Failed to start Gmail watcher");
     } finally {
       setSaving(false);
@@ -216,7 +216,7 @@ export function HooksSettings() {
       await window.electronAPI.stopGmailWatcher();
       setSuccess("Gmail watcher stopped");
       await loadGmailStatus();
-    } catch (err: any) {
+    } catch (err: Any) {
       setError(err.message || "Failed to stop Gmail watcher");
     } finally {
       setSaving(false);

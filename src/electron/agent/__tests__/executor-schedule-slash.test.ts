@@ -2,8 +2,8 @@ import { describe, it, expect, vi } from "vitest";
 import { TaskExecutor } from "../executor";
 
 describe("TaskExecutor /schedule slash command handling", () => {
-  function createExecutor(prompt: string, toolImpl: (input: any) => any) {
-    const executor = Object.create(TaskExecutor.prototype) as any;
+  function createExecutor(prompt: string, toolImpl: (input: Any) => Any) {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
 
     executor.task = {
       id: "task-1",
@@ -26,7 +26,7 @@ describe("TaskExecutor /schedule slash command handling", () => {
     };
 
     executor.toolRegistry = {
-      executeTool: vi.fn(async (name: string, input: any) => {
+      executeTool: vi.fn(async (name: string, input: Any) => {
         expect(name).toBe("schedule_task");
         return toolImpl(input);
       }),
@@ -52,7 +52,7 @@ describe("TaskExecutor /schedule slash command handling", () => {
   }
 
   it("creates a scheduled task for `/schedule every <interval> <prompt>`", async () => {
-    const calls: any[] = [];
+    const calls: Any[] = [];
     const executor = createExecutor("/schedule every 6h Check price.", (input) => {
       calls.push(input);
       if (input.action === "list") return [];
@@ -71,7 +71,7 @@ describe("TaskExecutor /schedule slash command handling", () => {
       throw new Error(`Unexpected action: ${input.action}`);
     });
 
-    const handled = await (TaskExecutor as any).prototype.maybeHandleScheduleSlashCommand.call(
+    const handled = await (TaskExecutor as Any).prototype.maybeHandleScheduleSlashCommand.call(
       executor,
     );
     expect(handled).toBe(true);
@@ -109,7 +109,7 @@ describe("TaskExecutor /schedule slash command handling", () => {
       throw new Error(`Unexpected action: ${input.action}`);
     });
 
-    const handled = await (TaskExecutor as any).prototype.maybeHandleScheduleSlashCommand.call(
+    const handled = await (TaskExecutor as Any).prototype.maybeHandleScheduleSlashCommand.call(
       executor,
     );
     expect(handled).toBe(true);
@@ -126,7 +126,7 @@ describe("TaskExecutor /schedule slash command handling", () => {
     });
 
     await expect(
-      (TaskExecutor as any).prototype.maybeHandleScheduleSlashCommand.call(executor),
+      (TaskExecutor as Any).prototype.maybeHandleScheduleSlashCommand.call(executor),
     ).rejects.toThrow(/Invalid interval/i);
   });
 });

@@ -100,7 +100,7 @@ export class StandupReportService {
       ORDER BY created_at DESC
       LIMIT 1
     `);
-    const row = stmt.get(workspaceId) as any;
+    const row = stmt.get(workspaceId) as Any;
     return row ? this.mapRowToReport(row) : undefined;
   }
 
@@ -112,7 +112,7 @@ export class StandupReportService {
       SELECT * FROM standup_reports
       WHERE workspace_id = ? AND report_date = ?
     `);
-    const row = stmt.get(workspaceId, reportDate) as any;
+    const row = stmt.get(workspaceId, reportDate) as Any;
     return row ? this.mapRowToReport(row) : undefined;
   }
 
@@ -121,7 +121,7 @@ export class StandupReportService {
    */
   list(query: StandupListQuery): StandupReport[] {
     const conditions: string[] = ["workspace_id = ?"];
-    const params: any[] = [query.workspaceId];
+    const params: Any[] = [query.workspaceId];
 
     if (query.startDate) {
       conditions.push("report_date >= ?");
@@ -140,7 +140,7 @@ export class StandupReportService {
     }
 
     const stmt = this.db.prepare(sql);
-    const rows = stmt.all(...params) as any[];
+    const rows = stmt.all(...params) as Any[];
     return rows.map((row) => this.mapRowToReport(row));
   }
 
@@ -149,7 +149,7 @@ export class StandupReportService {
    */
   findById(id: string): StandupReport | undefined {
     const stmt = this.db.prepare("SELECT * FROM standup_reports WHERE id = ?");
-    const row = stmt.get(id) as any;
+    const row = stmt.get(id) as Any;
     return row ? this.mapRowToReport(row) : undefined;
   }
 
@@ -254,7 +254,7 @@ export class StandupReportService {
       SELECT * FROM tasks
       WHERE workspace_id = ? AND board_column = ?
     `;
-    const params: any[] = [workspaceId, column];
+    const params: Any[] = [workspaceId, column];
 
     if (updatedAfter) {
       sql += " AND updated_at >= ?";
@@ -264,7 +264,7 @@ export class StandupReportService {
     sql += " ORDER BY updated_at DESC";
 
     const stmt = this.db.prepare(sql);
-    const rows = stmt.all(...params) as any[];
+    const rows = stmt.all(...params) as Any[];
     return rows.map((row) => this.mapRowToTask(row));
   }
 
@@ -277,7 +277,7 @@ export class StandupReportService {
       WHERE workspace_id = ? AND status IN ('blocked', 'failed')
       ORDER BY updated_at DESC
     `);
-    const rows = stmt.all(workspaceId) as any[];
+    const rows = stmt.all(workspaceId) as Any[];
     return rows.map((row) => this.mapRowToTask(row));
   }
 
@@ -316,7 +316,7 @@ export class StandupReportService {
   /**
    * Map database row to StandupReport
    */
-  private mapRowToReport(row: any): StandupReport {
+  private mapRowToReport(row: Any): StandupReport {
     return {
       id: row.id,
       workspaceId: row.workspace_id,
@@ -333,7 +333,7 @@ export class StandupReportService {
   /**
    * Map database row to Task (minimal mapping for standup)
    */
-  private mapRowToTask(row: any): Task {
+  private mapRowToTask(row: Any): Task {
     return {
       id: row.id,
       title: row.title,

@@ -22,7 +22,7 @@ function makeRepos(seed: { team: AgentTeam; run: AgentTeamRun; items: AgentTeamI
   teamRepo: { findById: (id: string) => AgentTeam | undefined };
   runRepo: {
     findById: (id: string) => AgentTeamRun | undefined;
-    update: (id: string, updates: any) => AgentTeamRun | undefined;
+    update: (id: string, updates: Any) => AgentTeamRun | undefined;
   };
   itemRepo: {
     listByRun: (runId: string) => AgentTeamItem[];
@@ -66,23 +66,23 @@ function makeRepos(seed: { team: AgentTeam; run: AgentTeamRun; items: AgentTeamI
         const next: AgentTeamItem = {
           ...existing,
           ...(req.parentItemId !== undefined
-            ? { parentItemId: (req.parentItemId as any) ?? undefined }
+            ? { parentItemId: (req.parentItemId as Any) ?? undefined }
             : {}),
           ...(req.title !== undefined ? { title: req.title } : {}),
           ...(req.description !== undefined
-            ? { description: (req.description as any) ?? undefined }
+            ? { description: (req.description as Any) ?? undefined }
             : {}),
           ...(req.ownerAgentRoleId !== undefined
-            ? { ownerAgentRoleId: (req.ownerAgentRoleId as any) ?? undefined }
+            ? { ownerAgentRoleId: (req.ownerAgentRoleId as Any) ?? undefined }
             : {}),
           ...(req.sourceTaskId !== undefined
-            ? { sourceTaskId: (req.sourceTaskId as any) ?? undefined }
+            ? { sourceTaskId: (req.sourceTaskId as Any) ?? undefined }
             : {}),
-          ...(req.status !== undefined ? { status: req.status as any } : {}),
+          ...(req.status !== undefined ? { status: req.status as Any } : {}),
           ...(req.resultSummary !== undefined
-            ? { resultSummary: (req.resultSummary as any) ?? undefined }
+            ? { resultSummary: (req.resultSummary as Any) ?? undefined }
             : {}),
-          ...(req.sortOrder !== undefined ? { sortOrder: req.sortOrder as any } : {}),
+          ...(req.sortOrder !== undefined ? { sortOrder: req.sortOrder as Any } : {}),
           updatedAt: Date.now(),
         };
         items.set(req.id, next);
@@ -150,7 +150,7 @@ describe("AgentTeamOrchestrator", () => {
 
     const tasksById = new Map<string, Task>([[rootTask.id, rootTask]]);
 
-    const createChildTask = vi.fn(async (params: any) => {
+    const createChildTask = vi.fn(async (params: Any) => {
       const child: Task = {
         id: `task-child-${Math.random().toString(16).slice(2)}`,
         title: params.title,
@@ -174,7 +174,7 @@ describe("AgentTeamOrchestrator", () => {
     const { AgentTeamOrchestrator } = await import("../AgentTeamOrchestrator");
     const orch = new AgentTeamOrchestrator(
       {
-        getDatabase: () => ({}) as any,
+        getDatabase: () => ({}) as Any,
         getTaskById: async (taskId: string) => tasksById.get(taskId),
         createChildTask,
         cancelTask: async () => {},
@@ -257,7 +257,7 @@ describe("AgentTeamOrchestrator", () => {
 
     const tasksById = new Map<string, Task>([[rootTask.id, rootTask]]);
 
-    const createChildTask = vi.fn(async (params: any) => {
+    const createChildTask = vi.fn(async (params: Any) => {
       const child: Task = {
         id: `task-child-${Math.random().toString(16).slice(2)}`,
         title: params.title,
@@ -281,7 +281,7 @@ describe("AgentTeamOrchestrator", () => {
     const { AgentTeamOrchestrator } = await import("../AgentTeamOrchestrator");
     const orch = new AgentTeamOrchestrator(
       {
-        getDatabase: () => ({}) as any,
+        getDatabase: () => ({}) as Any,
         getTaskById: async (taskId: string) => tasksById.get(taskId),
         createChildTask,
         cancelTask: async () => {},

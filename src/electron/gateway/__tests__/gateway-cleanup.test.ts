@@ -107,8 +107,8 @@ function createMockGateway() {
     clearWhatsAppAuthDir(channel?: { config?: { authDir?: string } }) {
       try {
         const authDir = this.resolveWhatsAppAuthDir(channel);
-        if ((fs.existsSync as any)(authDir)) {
-          (fs.rmSync as any)(authDir, { recursive: true, force: true });
+        if ((fs.existsSync as Any)(authDir)) {
+          (fs.rmSync as Any)(authDir, { recursive: true, force: true });
         }
       } catch (error) {
         console.error("Failed to clear WhatsApp auth directory:", error);
@@ -292,7 +292,7 @@ describe("ChannelGateway Cleanup", () => {
 
   describe("clearWhatsAppAuthDir", () => {
     it("should remove auth directory if it exists", () => {
-      (fs.existsSync as any).mockReturnValue(true);
+      (fs.existsSync as Any).mockReturnValue(true);
 
       gateway.clearWhatsAppAuthDir();
 
@@ -304,7 +304,7 @@ describe("ChannelGateway Cleanup", () => {
     });
 
     it("should not attempt removal if directory does not exist", () => {
-      (fs.existsSync as any).mockReturnValue(false);
+      (fs.existsSync as Any).mockReturnValue(false);
 
       gateway.clearWhatsAppAuthDir();
 
@@ -313,7 +313,7 @@ describe("ChannelGateway Cleanup", () => {
     });
 
     it("should use custom authDir from channel config", () => {
-      (fs.existsSync as any).mockReturnValue(true);
+      (fs.existsSync as Any).mockReturnValue(true);
       const channel = { config: { authDir: "/custom/whatsapp" } };
 
       gateway.clearWhatsAppAuthDir(channel);
@@ -326,8 +326,8 @@ describe("ChannelGateway Cleanup", () => {
     });
 
     it("should handle errors gracefully", () => {
-      (fs.existsSync as any).mockReturnValue(true);
-      (fs.rmSync as any).mockImplementation(() => {
+      (fs.existsSync as Any).mockReturnValue(true);
+      (fs.rmSync as Any).mockImplementation(() => {
         throw new Error("Permission denied");
       });
 

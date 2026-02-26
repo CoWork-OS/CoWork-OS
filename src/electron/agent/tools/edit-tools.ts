@@ -112,7 +112,7 @@ export class EditTools {
       if (relPosix !== null) {
         const projectId = getProjectIdFromWorkspaceRelPath(relPosix);
         if (projectId) {
-          const taskGetter = (this.daemon as any)?.getTask;
+          const taskGetter = (this.daemon as Any)?.getTask;
           const task =
             typeof taskGetter === "function" ? taskGetter.call(this.daemon, this.taskId) : null;
           const agentRoleId = task?.assignedAgentRoleId || null;
@@ -200,7 +200,7 @@ export class EditTools {
         file_path,
         replacements,
       };
-    } catch (error: any) {
+    } catch (error: Any) {
       this.daemon.logEvent(this.taskId, "tool_result", {
         tool: "edit_file",
         error: error.message,

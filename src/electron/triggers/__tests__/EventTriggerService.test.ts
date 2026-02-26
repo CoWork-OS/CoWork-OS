@@ -69,7 +69,7 @@ describe("EventTriggerService", () => {
   });
 
   it("updateTrigger modifies an existing trigger", () => {
-    const t = service.addTrigger({
+    const _t = service.addTrigger({
       name: "Original",
       enabled: true,
       source: "channel_message",
@@ -88,7 +88,7 @@ describe("EventTriggerService", () => {
   });
 
   it("removeTrigger deletes a trigger", () => {
-    const t = service.addTrigger({
+    const _t = service.addTrigger({
       name: "ToDelete",
       enabled: true,
       source: "channel_message",
@@ -150,13 +150,13 @@ describe("EventTriggerService", () => {
   });
 
   it("respects cooldown period", async () => {
-    const t = service.addTrigger({
+    const _t = service.addTrigger({
       name: "Cooldown Test",
       enabled: true,
       source: "channel_message",
       conditions: [],
       action: { type: "create_task", config: { prompt: "X" } },
-      workspaceId: "ws-1",
+      work_spaceId: "ws-1",
       cooldownMs: 60_000,
     });
 

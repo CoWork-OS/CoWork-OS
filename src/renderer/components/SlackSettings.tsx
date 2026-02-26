@@ -85,7 +85,7 @@ export function SlackSettings({ onStatusChange }: SlackSettingsProps) {
       setAppToken("");
       setSigningSecret("");
       await loadChannel();
-    } catch (error: any) {
+    } catch (error: Any) {
       setTestResult({ success: false, error: error.message });
     } finally {
       setSaving(false);
@@ -101,7 +101,7 @@ export function SlackSettings({ onStatusChange }: SlackSettingsProps) {
 
       const result = await window.electronAPI.testGatewayChannel(channel.id);
       setTestResult(result);
-    } catch (error: any) {
+    } catch (error: Any) {
       setTestResult({ success: false, error: error.message });
     } finally {
       setTesting(false);
@@ -119,7 +119,7 @@ export function SlackSettings({ onStatusChange }: SlackSettingsProps) {
         await window.electronAPI.enableGatewayChannel(channel.id);
       }
       await loadChannel();
-    } catch (error: any) {
+    } catch (error: Any) {
       setTestResult({ success: false, error: error.message });
     } finally {
       setSaving(false);
@@ -139,7 +139,7 @@ export function SlackSettings({ onStatusChange }: SlackSettingsProps) {
       setChannel(null);
       setUsers([]);
       onStatusChange?.(false);
-    } catch (error: any) {
+    } catch (error: Any) {
       setTestResult({ success: false, error: error.message });
     } finally {
       setSaving(false);
@@ -156,7 +156,7 @@ export function SlackSettings({ onStatusChange }: SlackSettingsProps) {
       });
       setSecurityMode(mode);
       setChannel({ ...channel, securityMode: mode });
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to update security mode:", error);
     }
   };
@@ -167,7 +167,7 @@ export function SlackSettings({ onStatusChange }: SlackSettingsProps) {
     try {
       const code = await window.electronAPI.generateGatewayPairing(channel.id, "");
       setPairingCode(code);
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to generate pairing code:", error);
     }
   };
@@ -178,7 +178,7 @@ export function SlackSettings({ onStatusChange }: SlackSettingsProps) {
     try {
       await window.electronAPI.revokeGatewayAccess(channel.id, userId);
       await loadChannel();
-    } catch (error: any) {
+    } catch (error: Any) {
       console.error("Failed to revoke access:", error);
     }
   };

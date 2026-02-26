@@ -743,8 +743,12 @@ export class ToolFailureTracker {
    * @returns true if the tool should be disabled (circuit broken)
    */
   recordFailure(toolName: string, errorMessage: string): boolean {
+    const browserHttpStatusFailure =
+      toolName.startsWith("browser_") &&
+      /http\s*[45]\d{2}|client error\s*\(\d{3}\)|server error\s*\(\d{3}\)/i.test(errorMessage);
+
     // If it's a non-retryable error (quota, rate limit), disable immediately
-    if (isNonRetryableError(errorMessage)) {
+    if (isNonRetryableError(errorMessage) && !browserHttpStatusFailure) {
       this.disabledTools.set(toolName, { disabledAt: Date.now(), reason: errorMessage });
       console.log(
         `[ToolFailureTracker] Tool ${toolName} disabled due to non-retryable error: ${errorMessage.substring(0, 100)}`,
@@ -754,7 +758,7 @@ export class ToolFailureTracker {
 
     // Input-dependent errors (missing params, file not found, etc.)
     // These are tracked separately with a higher threshold
-    if (isInputDependentError(errorMessage)) {
+    if (browserHttpStatusFailure || isInputDependentError(errorMessage)) {
       const existing = this.inputDependentFailures.get(toolName) || { count: 0, lastError: "" };
       existing.count++;
       existing.lastError = errorMessage;

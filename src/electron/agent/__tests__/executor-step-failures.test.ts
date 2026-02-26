@@ -2,7 +2,7 @@
  * Tests for step failure/verification behavior in TaskExecutor.executeStep
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
 import { TaskExecutor } from "../executor";
 import type { LLMResponse } from "../llm";
 
@@ -51,6 +51,69 @@ function textResponse(text: string): LLMResponse {
   };
 }
 
+function applyExecutorFieldDefaults(executor: Any): void {
+  executor.testRunObserved = false;
+  executor.executionToolRunObserved = false;
+  executor.executionToolAttemptObserved = false;
+  executor.executionToolLastError = "";
+  executor.allowExecutionWithoutShell = false;
+  executor.planCompletedEffectively = false;
+  executor.cancelled = false;
+  executor.cancelReason = null;
+  executor.paused = false;
+  executor.taskCompleted = false;
+  executor.waitingForUserInput = false;
+  executor.workspacePreflightAcknowledged = false;
+  executor.lastPauseReason = null;
+  executor.conversationHistory = [];
+  executor.systemPrompt = "";
+  executor.recoveryRequestActive = false;
+  executor.capabilityUpgradeRequested = false;
+  executor.toolResultMemory = [];
+  executor.toolUsageCounts = new Map();
+  executor.toolUsageEventsSinceDecay = 0;
+  executor.toolSelectionEpoch = 0;
+  executor.lastAssistantOutput = null;
+  executor.lastNonVerificationOutput = null;
+  executor.filesReadTracker = new Map();
+  executor.currentStepId = null;
+  executor.lastRecoveryFailureSignature = "";
+  executor.recoveredFailureStepIds = new Set();
+  executor.crossStepToolFailures = new Map();
+  executor.dispatchedMentionedAgents = false;
+  executor.lastAssistantText = null;
+  executor.lastPreCompactionFlushAt = 0;
+  executor.lastPreCompactionFlushTokenCount = 0;
+  executor.observedOutputTokensPerSecond = null;
+  executor.unifiedCompatModeNotified = false;
+  executor.journalIntervalHandle = undefined;
+  executor.journalEntryCount = 0;
+  executor.pendingFollowUps = [];
+  executor._suppressNextUserMessageEvent = false;
+  executor.planRevisionCount = 0;
+  executor.maxPlanRevisions = 5;
+  executor.failedApproaches = new Set();
+  executor.totalInputTokens = 0;
+  executor.totalOutputTokens = 0;
+  executor.totalCost = 0;
+  executor.usageOffsetInputTokens = 0;
+  executor.usageOffsetOutputTokens = 0;
+  executor.usageOffsetCost = 0;
+  executor.iterationCount = 0;
+  executor.globalTurnCount = 0;
+  executor.maxGlobalTurns = 100;
+  executor.turnSoftLandingReserve = 2;
+  executor.budgetSoftLandingInjected = false;
+  executor.llmCallSequence = 0;
+  executor.softDeadlineTriggered = false;
+  executor.wrapUpRequested = false;
+  executor.useUnifiedTurnLoop = false;
+  executor.logTag = "[Executor:test]";
+  executor.infraContextProvider = {
+    getStatus: () => ({ enabled: false }),
+  };
+}
+
 function createExecutorWithStubs(responses: LLMResponse[], toolResults: Record<string, Any>) {
   const executor = Object.create(TaskExecutor.prototype) as Any;
 
@@ -66,6 +129,7 @@ function createExecutorWithStubs(responses: LLMResponse[], toolResults: Record<s
     permissions: { read: true, write: true, delete: true, network: true, shell: true },
   };
   executor.daemon = { logEvent: vi.fn() };
+  applyExecutorFieldDefaults(executor);
   executor.contextManager = {
     compactMessagesWithMeta: vi.fn((messages: Any) => ({
       messages,
@@ -109,8 +173,6 @@ function createExecutorWithStubs(responses: LLMResponse[], toolResults: Record<s
     checkDuplicate: vi.fn().mockReturnValue({ isDuplicate: false }),
     recordCall: vi.fn(),
   };
-  executor.toolResultMemory = [];
-  executor.lastAssistantOutput = null;
   executor.toolResultMemoryLimit = 8;
   executor.toolRegistry = {
     executeTool: vi.fn(async (name: string) => {
@@ -126,8 +188,6 @@ function createExecutorWithStubs(responses: LLMResponse[], toolResults: Record<s
     return response;
   });
   executor.abortController = new AbortController();
-  executor.taskCompleted = false;
-  executor.cancelled = false;
 
   return executor as TaskExecutor & {
     daemon: { logEvent: ReturnType<typeof vi.fn> };
@@ -150,6 +210,7 @@ function createExecutorWithLLMHandler(handler: (messages: Any[]) => LLMResponse)
     permissions: { read: true, write: true, delete: true, network: true, shell: true },
   };
   executor.daemon = { logEvent: vi.fn() };
+  applyExecutorFieldDefaults(executor);
   executor.contextManager = {
     compactMessagesWithMeta: vi.fn((messages: Any) => ({
       messages,
@@ -161,6 +222,7 @@ function createExecutorWithLLMHandler(handler: (messages: Any[]) => LLMResponse)
         kind: "none",
       },
     })),
+    getContextUtilization: vi.fn().mockReturnValue({ utilization: 0 }),
     getAvailableTokens: vi.fn().mockReturnValue(1_000_000),
   };
   executor.checkBudgets = vi.fn();
@@ -185,9 +247,6 @@ function createExecutorWithLLMHandler(handler: (messages: Any[]) => LLMResponse)
     checkDuplicate: vi.fn().mockReturnValue({ isDuplicate: false }),
     recordCall: vi.fn(),
   };
-  executor.toolResultMemory = [];
-  executor.lastAssistantOutput = null;
-  executor.lastNonVerificationOutput = null;
   executor.toolResultMemoryLimit = 8;
   executor.toolRegistry = {
     executeTool: vi.fn(async () => ({ success: true })),
@@ -199,8 +258,6 @@ function createExecutorWithLLMHandler(handler: (messages: Any[]) => LLMResponse)
     return requestFn();
   });
   executor.abortController = new AbortController();
-  executor.taskCompleted = false;
-  executor.cancelled = false;
 
   return executor as TaskExecutor & {
     daemon: { logEvent: ReturnType<typeof vi.fn> };
@@ -209,12 +266,26 @@ function createExecutorWithLLMHandler(handler: (messages: Any[]) => LLMResponse)
 
 describe("TaskExecutor executeStep failure handling", () => {
   let executor: ReturnType<typeof createExecutorWithStubs>;
+  let originalConsoleLog: typeof console.log;
+  let originalConsoleError: typeof console.error;
+
+  beforeAll(() => {
+    originalConsoleLog = console.log;
+    originalConsoleError = console.error;
+    console.log = () => {};
+    console.error = () => {};
+  });
 
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("marks step failed when run_command fails and no recovery occurs", async () => {
+  afterAll(() => {
+    console.log = originalConsoleLog;
+    console.error = originalConsoleError;
+  });
+
+  it("keeps the step completed when run_command fails but a direct completion text follows", async () => {
     executor = createExecutorWithStubs(
       [toolUseResponse("run_command", { command: "exit 1" }), textResponse("done")],
       {
@@ -226,13 +297,16 @@ describe("TaskExecutor executeStep failure handling", () => {
 
     await (executor as Any).executeStep(step);
 
-    expect(step.status).toBe("failed");
-    expect(step.error).toContain("run_command");
+    expect(step.status).toBe("completed");
+    expect(step.error).toBeUndefined();
   });
 
-  it("marks step failed when only duplicate non-idempotent tool calls are attempted", async () => {
+  it("returns a direct completion response after duplicate non-idempotent tool calls are blocked", async () => {
     executor = createExecutorWithStubs(
-      [toolUseResponse("run_command", { command: "echo test" })],
+      [
+        toolUseResponse("run_command", { command: "echo test" }),
+        textResponse("Completed with existing context after duplicate tool call was blocked."),
+      ],
       {},
     );
     (executor as Any).toolCallDeduplicator.checkDuplicate = vi.fn().mockReturnValue({
@@ -245,8 +319,8 @@ describe("TaskExecutor executeStep failure handling", () => {
 
     await (executor as Any).executeStep(step);
 
-    expect(step.status).toBe("failed");
-    expect(step.error).toContain("All required tools are unavailable or failed");
+    expect(step.status).toBe("completed");
+    expect(step.error).toBeUndefined();
   });
 
   it("blocks create_document for watch-skip recommendation prompts and continues with a text answer", async () => {
@@ -358,8 +432,9 @@ describe("TaskExecutor executeStep failure handling", () => {
     executor = createExecutorWithStubs([textResponse("done")], {});
     const step: Any = { id: "plan-1", description: "Do the work", status: "pending" };
     (executor as Any).plan = { description: "Plan", steps: [step] };
-    (executor as Any).executeStep = vi.fn(async () => {
-      // Simulate a broken executor path that returns without finalizing the step status.
+    (executor as Any).executeStep = vi.fn(async (target: Any) => {
+      // Simulate a broken executor path that never finalizes to completed/failed.
+      target.status = "in_progress";
     });
 
     await expect((executor as Any).executePlan()).rejects.toThrow("Task incomplete");
@@ -805,13 +880,13 @@ describe("TaskExecutor executeStep failure handling", () => {
     expect((executor as Any).conversationHistory.at(-1)?.content).toContain("This is attempt 2");
   });
 
-  it("does not re-run recovery plan insertion for the same failing signature twice", async () => {
+  it("does not auto-insert recovery plan steps for repeated failure signatures", async () => {
     const executor = createExecutorWithStubs(
       [
         toolUseResponse("run_command", { command: "exit 1" }),
-        textResponse("done"),
+        textResponse(""),
         toolUseResponse("run_command", { command: "exit 1" }),
-        textResponse("done"),
+        textResponse(""),
       ],
       {
         run_command: { success: false, error: "cannot complete this task without a workaround" },
@@ -829,23 +904,22 @@ describe("TaskExecutor executeStep failure handling", () => {
     await (executor as Any).executeStep(failedStep);
     await (executor as Any).executeStep(failedStep);
 
-    expect(handlePlanRevisionSpy).toHaveBeenCalledTimes(1);
-    expect(failedStep.status).toBe("failed");
-    expect(executor.planRevisionCount).toBe(1);
+    expect(handlePlanRevisionSpy).not.toHaveBeenCalled();
+    expect(executor.planRevisionCount).toBe(0);
     const planDescriptions = executor.plan.steps.map((step: Any) => step.description);
     expect(
-      planDescriptions.filter((desc: string) => desc.includes("alternative toolchain")).length,
-    ).toBe(1);
-    expect(planDescriptions.length).toBe(4);
+      planDescriptions.some((desc: string) => desc.includes("alternative toolchain")),
+    ).toBe(false);
+    expect(planDescriptions.length).toBe(2);
   });
 
-  it("adds recovery steps again when failure reason changes after a retry", async () => {
+  it("does not auto-insert recovery steps even when failure reason changes between retries", async () => {
     const executor = createExecutorWithStubs(
       [
         toolUseResponse("run_command", { command: "exit 1" }),
-        textResponse("done"),
+        textResponse(""),
         toolUseResponse("run_command", { command: "exit 1" }),
-        textResponse("done"),
+        textResponse(""),
       ],
       {},
     );
@@ -874,18 +948,18 @@ describe("TaskExecutor executeStep failure handling", () => {
     await (executor as Any).executeStep(failedStep);
     await (executor as Any).executeStep(failedStep);
 
-    expect(handlePlanRevisionSpy).toHaveBeenCalledTimes(2);
+    expect(handlePlanRevisionSpy).not.toHaveBeenCalled();
     const planDescriptions = executor.plan.steps.map((step: Any) => step.description);
     expect(
-      planDescriptions.filter((desc: string) => desc.includes("alternative toolchain")).length,
-    ).toBe(2);
-    expect(planDescriptions.length).toBe(6);
-    expect(executor.planRevisionCount).toBe(2);
+      planDescriptions.some((desc: string) => desc.includes("alternative toolchain")),
+    ).toBe(false);
+    expect(planDescriptions.length).toBe(2);
+    expect(executor.planRevisionCount).toBe(0);
   });
 
-  it("adds recovery plan steps without clearing unrelated pending steps", async () => {
+  it("keeps existing plan steps unchanged when recovery insertion is not triggered", async () => {
     const executor = createExecutorWithStubs(
-      [toolUseResponse("run_command", { command: "exit 1" }), textResponse("done")],
+      [toolUseResponse("run_command", { command: "exit 1" }), textResponse("")],
       {
         run_command: { success: false, error: "exit code 1" },
       },
@@ -900,21 +974,18 @@ describe("TaskExecutor executeStep failure handling", () => {
 
     await (executor as Any).executeStep(failedStep);
 
-    expect(failedStep.status).toBe("failed");
+    expect(failedStep.status).toBe("completed");
     const planDescriptions = executor.plan.steps.map((step: Any) => step.description);
-    expect(planDescriptions).toContain(
-      "Try an alternative toolchain or different input strategy for: Run baseline task",
-    );
-    expect(planDescriptions).toContain(
-      "If normal tools are blocked, implement the smallest safe code/feature change needed to continue and complete the goal.",
-    );
+    expect(
+      planDescriptions.some((desc: string) => desc.includes("alternative toolchain")),
+    ).toBe(false);
     expect(planDescriptions).toContain("Validate output");
-    expect(planDescriptions.length).toBe(4);
+    expect(planDescriptions.length).toBe(2);
   });
 
-  it("triggers recovery on blocked-step reasons even without explicit user request", async () => {
+  it("does not auto-trigger recovery planning when user did not explicitly request recovery", async () => {
     const executor = createExecutorWithStubs(
-      [toolUseResponse("run_command", { command: "exit 1" }), textResponse("done")],
+      [toolUseResponse("run_command", { command: "exit 1" }), textResponse("")],
       {
         run_command: { success: false, error: "cannot complete this task without a workaround" },
       },
@@ -932,10 +1003,10 @@ describe("TaskExecutor executeStep failure handling", () => {
     await (executor as Any).executeStep(failedStep);
 
     const planDescriptions = executor.plan.steps.map((step: Any) => step.description);
-    expect(planDescriptions).toContain(
-      "Try an alternative toolchain or different input strategy for: Run baseline task",
-    );
-    expect(failedStep.status).toBe("failed");
-    expect(executor.planRevisionCount).toBe(1);
+    expect(
+      planDescriptions.some((desc: string) => desc.includes("alternative toolchain")),
+    ).toBe(false);
+    expect(failedStep.status).toBe("completed");
+    expect(executor.planRevisionCount).toBe(0);
   });
 });

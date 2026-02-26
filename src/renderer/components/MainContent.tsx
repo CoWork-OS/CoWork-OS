@@ -259,6 +259,7 @@ import {
 } from "./LineIcons";
 import { getEmojiIcon } from "../utils/emoji-icon-map";
 import { replaceEmojisInChildren } from "../utils/emoji-replacer";
+import { CitationBadge } from "./CitationPanel";
 import { CommandOutput } from "./CommandOutput";
 import { CanvasPreview } from "./CanvasPreview";
 import { InlineImagePreview } from "./InlineImagePreview";
@@ -913,11 +914,36 @@ const resolveFileLinkTarget = (href: string, linkText: string): string | null =>
   return null;
 };
 
+const CITATION_REF_REGEX = /\[(\d+)\]/g;
+
+/**
+ * Matches bare domain URLs (e.g. "example.com/path") that are NOT already
+ * inside a markdown link. Only targets strings that look like domain.tld/...
+ */
+const BARE_URL_REGEX =
+  /(?<!\(|\[)(?:^|(?<=\s))((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}\/[^\s)\]]+)/gi;
+
+/**
+ * Pre-process assistant message text to convert bare domain URLs into markdown links.
+ * e.g. "spectrum.ieee.org/quantum" → "[spectrum.ieee.org/quantum](https://spectrum.ieee.org/quantum)"
+ */
+function autolinkBareUrls(text: string): string {
+  return text.replace(BARE_URL_REGEX, (_match, url) => {
+    return `[${url}](https://${url})`;
+  });
+}
+
 const buildMarkdownComponents = (options: {
   workspacePath?: string;
   onOpenViewer?: (path: string) => void;
+  citations?: Array<{ index: number; url: string; title: string; snippet: string; domain: string; accessedAt: number; sourceTool: string }>;
 }) => {
-  const { workspacePath, onOpenViewer } = options;
+  const { workspacePath, onOpenViewer, citations } = options;
+
+  /** Map citation index → citation for O(1) lookup */
+  const citationMap = new Map(
+    (citations || []).map((c) => [c.index, c]),
+  );
 
   const MarkdownLink = ({ href, children, ...props }: any) => {
     if (!href) {
@@ -999,6 +1025,45 @@ const buildMarkdownComponents = (options: {
     );
   };
 
+  /**
+   * Replace citation references like [1], [2] in text children with
+   * interactive CitationBadge components.
+   */
+  const replaceCitationsInChildren = (children: React.ReactNode): React.ReactNode => {
+    if (citationMap.size === 0) return replaceEmojisInChildren(children);
+
+    return Children.map(children, (child) => {
+      if (typeof child === "string") {
+        const parts: React.ReactNode[] = [];
+        let lastIndex = 0;
+
+        CITATION_REF_REGEX.lastIndex = 0;
+        let match: RegExpExecArray | null;
+        while ((match = CITATION_REF_REGEX.exec(child)) !== null) {
+          const idx = parseInt(match[1], 10);
+          const citation = citationMap.get(idx);
+          if (!citation) continue;
+
+          if (match.index > lastIndex) {
+            parts.push(child.slice(lastIndex, match.index));
+          }
+          parts.push(
+            <CitationBadge key={`cite-${idx}-${match.index}`} index={idx} citation={citation} />,
+          );
+          lastIndex = match.index + match[0].length;
+        }
+
+        if (parts.length === 0) return replaceEmojisInChildren(child);
+
+        if (lastIndex < child.length) {
+          parts.push(child.slice(lastIndex));
+        }
+        return <>{parts.map((p) => (typeof p === "string" ? replaceEmojisInChildren(p) : p))}</>;
+      }
+      return child;
+    });
+  };
+
   // Custom components for ReactMarkdown
   return {
     code: CodeBlock,
@@ -1006,8 +1071,8 @@ const buildMarkdownComponents = (options: {
     h2: renderHeading("h2"),
     h3: renderHeading("h3"),
     a: MarkdownLink,
-    p: ({ children, ...props }: any) => <p {...props}>{replaceEmojisInChildren(children)}</p>,
-    li: ({ children, ...props }: any) => <li {...props}>{replaceEmojisInChildren(children)}</li>,
+    p: ({ children, ...props }: any) => <p {...props}>{replaceCitationsInChildren(children)}</p>,
+    li: ({ children, ...props }: any) => <li {...props}>{replaceCitationsInChildren(children)}</li>,
   };
 };
 
@@ -2015,10 +2080,16 @@ export function MainContent({
     },
   });
   const [viewerFilePath, setViewerFilePath] = useState<string | null>(null);
+  // Extract citations from task events for inline badge rendering
+  const citations = useMemo(() => {
+    const citEvent = [...events].reverse().find((e) => e.type === "citations_collected");
+    return citEvent?.payload?.citations || [];
+  }, [events]);
+
   const markdownComponents = useMemo(
     () =>
-      buildMarkdownComponents({ workspacePath: workspace?.path, onOpenViewer: setViewerFilePath }),
-    [workspace?.path, setViewerFilePath],
+      buildMarkdownComponents({ workspacePath: workspace?.path, onOpenViewer: setViewerFilePath, citations }),
+    [workspace?.path, setViewerFilePath, citations],
   );
   // Canvas sessions state - track active canvas sessions for current task
   const [canvasSessions, setCanvasSessions] = useState<CanvasSession[]>([]);
@@ -5239,10 +5310,11 @@ export function MainContent({
                               remarkPlugins={[remarkGfm]}
                               components={markdownComponents}
                             >
-                              {messageText.replace(
-                                /\[\[speak\]\]([\s\S]*?)\[\[\/speak\]\]/gi,
-                                "$1",
-                              )}
+                              {messageText
+                                .replace(/\[\[speak\]\]([\s\S]*?)\[\[\/speak\]\]/gi, "$1")
+                                .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, "")
+                                .replace(/<tool_result>[\s\S]*?<\/tool_result>/gi, "")
+                                .trim()}
                             </ReactMarkdown>
                           </div>
                         </div>
@@ -6228,12 +6300,18 @@ function renderEventDetails(
           <pre>{truncateForDisplay(JSON.stringify(event.payload.result, null, 2))}</pre>
         </div>
       );
-    case "assistant_message":
+    case "assistant_message": {
+      const cleanedMessage = event.payload.message
+        .replace(/\[\[speak\]\]([\s\S]*?)\[\[\/speak\]\]/gi, "$1")
+        .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, "")
+        .replace(/<tool_result>[\s\S]*?<\/tool_result>/gi, "")
+        .trim();
+      const linkedMessage = autolinkBareUrls(cleanedMessage);
       return (
         <div className="event-details assistant-message event-details-scrollable">
           <div className="markdown-content">
             <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-              {event.payload.message.replace(/\[\[speak\]\]([\s\S]*?)\[\[\/speak\]\]/gi, "$1")}
+              {linkedMessage}
             </ReactMarkdown>
           </div>
           <div className="message-actions">
@@ -6242,6 +6320,7 @@ function renderEventDetails(
           </div>
         </div>
       );
+    }
     case "step_failed":
       return (
         <div

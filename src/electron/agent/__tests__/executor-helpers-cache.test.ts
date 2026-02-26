@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FileOperationTracker, ToolCallDeduplicator } from "../executor-helpers";
+import { FileOperationTracker, ToolCallDeduplicator, ToolFailureTracker } from "../executor-helpers";
 
 describe("ToolCallDeduplicator read-history invalidation", () => {
   it("clears read/list duplicate history while preserving write history", () => {
@@ -77,5 +77,30 @@ describe("FileOperationTracker cache invalidation", () => {
     tracker.invalidateDirectoryListing("research");
 
     expect(tracker.checkDirectoryListing("research").blocked).toBe(false);
+  });
+});
+
+describe("ToolFailureTracker browser HTTP status handling", () => {
+  it("treats browser HTTP status failures as input-dependent (no immediate disable)", () => {
+    const tracker = new ToolFailureTracker();
+
+    for (let i = 0; i < 5; i++) {
+      expect(tracker.recordFailure("browser_navigate", "Navigation failed with HTTP 403")).toBe(
+        false,
+      );
+    }
+    expect(tracker.isDisabled("browser_navigate")).toBe(false);
+
+    expect(tracker.recordFailure("browser_navigate", "Navigation failed with HTTP 403")).toBe(
+      true,
+    );
+    expect(tracker.isDisabled("browser_navigate")).toBe(true);
+  });
+
+  it("still immediately disables non-browser non-retryable failures", () => {
+    const tracker = new ToolFailureTracker();
+
+    expect(tracker.recordFailure("web_fetch", "HTTP 429 rate limit exceeded")).toBe(true);
+    expect(tracker.isDisabled("web_fetch")).toBe(true);
   });
 });

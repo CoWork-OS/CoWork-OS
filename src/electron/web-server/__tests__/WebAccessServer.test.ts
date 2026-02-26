@@ -25,6 +25,7 @@ function request(
         path: opts.path,
         method: opts.method || "GET",
         headers: opts.headers || {},
+        agent: false,
       },
       (res) => {
         const chunks: Buffer[] = [];
@@ -48,13 +49,13 @@ describe("WebAccessServer", () => {
   let server: WebAccessServer;
   let deps: ReturnType<typeof makeDeps>;
   const TEST_TOKEN = "test-token-abc123";
-  // Use dynamic port to avoid conflicts
-  const TEST_PORT = 18900 + Math.floor(Math.random() * 1000);
+  let testPort = 0;
 
   beforeEach(async () => {
+    testPort = 18900 + Math.floor(Math.random() * 5000);
     deps = makeDeps();
     server = new WebAccessServer(
-      { port: TEST_PORT, host: "127.0.0.1", token: TEST_TOKEN, enabled: true, allowedOrigins: [] },
+      { port: testPort, host: "127.0.0.1", token: TEST_TOKEN, enabled: true, allowedOrigins: [] },
       deps,
     );
     await server.start();
@@ -69,7 +70,7 @@ describe("WebAccessServer", () => {
   it("reports running status after start", () => {
     const status = server.getStatus();
     expect(status.running).toBe(true);
-    expect(status.url).toContain(String(TEST_PORT));
+    expect(status.url).toContain(String(testPort));
     expect(status.startedAt).toBeGreaterThan(0);
   });
 
@@ -83,13 +84,13 @@ describe("WebAccessServer", () => {
   it("returns config with token", () => {
     const config = server.getConfig();
     expect(config.token).toBe(TEST_TOKEN);
-    expect(config.port).toBe(TEST_PORT);
+    expect(config.port).toBe(testPort);
   });
 
   // ── Health check (no auth) ────────────────────────────────────
 
   it("GET /api/health returns 200 without auth", async () => {
-    const res = await request(TEST_PORT, { path: "/api/health" });
+    const res = await request(testPort, { path: "/api/health" });
     expect(res.status).toBe(200);
     const body = JSON.parse(res.body);
     expect(body.status).toBe("ok");
@@ -99,13 +100,13 @@ describe("WebAccessServer", () => {
   // ── Authentication ────────────────────────────────────────────
 
   it("rejects API requests without auth token", async () => {
-    const res = await request(TEST_PORT, { path: "/api/tasks" });
+    const res = await request(testPort, { path: "/api/tasks" });
     expect(res.status).toBe(401);
     expect(JSON.parse(res.body).error).toBe("Unauthorized");
   });
 
   it("rejects API requests with wrong token", async () => {
-    const res = await request(TEST_PORT, {
+    const res = await request(testPort, {
       path: "/api/tasks",
       headers: { Authorization: "Bearer wrong-token" },
     });
@@ -113,7 +114,7 @@ describe("WebAccessServer", () => {
   });
 
   it("accepts API requests with correct token", async () => {
-    const res = await request(TEST_PORT, {
+    const res = await request(testPort, {
       path: "/api/tasks",
       headers: { Authorization: `Bearer ${TEST_TOKEN}` },
     });
@@ -121,7 +122,7 @@ describe("WebAccessServer", () => {
   });
 
   it("rejects tokens of different length (timingSafeEqual guard)", async () => {
-    const res = await request(TEST_PORT, {
+    const res = await request(testPort, {
       path: "/api/tasks",
       headers: { Authorization: "Bearer x" },
     });
@@ -130,7 +131,7 @@ describe("WebAccessServer", () => {
   });
 
   it("rejects empty Bearer token", async () => {
-    const res = await request(TEST_PORT, {
+    const res = await request(testPort, {
       path: "/api/tasks",
       headers: { Authorization: "Bearer " },
     });
@@ -140,7 +141,7 @@ describe("WebAccessServer", () => {
   // ── CORS ──────────────────────────────────────────────────────
 
   it("responds to OPTIONS with 204", async () => {
-    const res = await request(TEST_PORT, { path: "/api/tasks", method: "OPTIONS" });
+    const res = await request(testPort, { path: "/api/tasks", method: "OPTIONS" });
     expect(res.status).toBe(204);
     expect(res.headers["access-control-allow-methods"]).toContain("GET");
   });
@@ -150,7 +151,7 @@ describe("WebAccessServer", () => {
   it("GET /api/tasks routes to task:list IPC channel", async () => {
     deps.handleIpcInvoke.mockResolvedValue([{ id: "t1", title: "Test" }]);
 
-    const res = await request(TEST_PORT, {
+    const res = await request(testPort, {
       path: "/api/tasks",
       headers: { Authorization: `Bearer ${TEST_TOKEN}` },
     });
@@ -162,7 +163,7 @@ describe("WebAccessServer", () => {
   it("POST /api/tasks routes to task:create", async () => {
     deps.handleIpcInvoke.mockResolvedValue({ id: "new-task" });
 
-    const res = await request(TEST_PORT, {
+    const res = await request(testPort, {
       path: "/api/tasks",
       method: "POST",
       headers: {
@@ -182,7 +183,7 @@ describe("WebAccessServer", () => {
   it("GET /api/tasks/:id routes to task:get", async () => {
     deps.handleIpcInvoke.mockResolvedValue({ id: "abc", title: "Test" });
 
-    const res = await request(TEST_PORT, {
+    const res = await request(testPort, {
       path: "/api/tasks/abc",
       headers: { Authorization: `Bearer ${TEST_TOKEN}` },
     });
@@ -194,7 +195,7 @@ describe("WebAccessServer", () => {
   it("GET /api/workspaces routes to workspace:list", async () => {
     deps.handleIpcInvoke.mockResolvedValue([]);
 
-    const res = await request(TEST_PORT, {
+    const res = await request(testPort, {
       path: "/api/workspaces",
       headers: { Authorization: `Bearer ${TEST_TOKEN}` },
     });
@@ -204,7 +205,7 @@ describe("WebAccessServer", () => {
   });
 
   it("returns 404 for unknown API routes", async () => {
-    const res = await request(TEST_PORT, {
+    const res = await request(testPort, {
       path: "/api/nonexistent",
       headers: { Authorization: `Bearer ${TEST_TOKEN}` },
     });
@@ -218,7 +219,7 @@ describe("WebAccessServer", () => {
   it("returns 500 when IPC handler throws", async () => {
     deps.handleIpcInvoke.mockRejectedValue(new Error("DB connection failed"));
 
-    const res = await request(TEST_PORT, {
+    const res = await request(testPort, {
       path: "/api/tasks",
       headers: { Authorization: `Bearer ${TEST_TOKEN}` },
     });

@@ -65,10 +65,11 @@ install native build prerequisites, then retry:
 py -3 --version
 ```
 
-3. Configure npm to use VS 2022, then retry:
+3. Set node-gyp MSVC env vars, then retry from a new terminal:
 
 ```powershell
-npm config set msvs_version 2022
+setx GYP_MSVS_VERSION 2022
+setx npm_config_msvs_version 2022
 cowork-os
 ```
 

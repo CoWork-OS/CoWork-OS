@@ -135,6 +135,15 @@ function makeElectronTargetEnv(env, electronVersion, arch = process.arch) {
   };
 }
 
+function resolveElectronRebuildCli() {
+  return resolvePackageFile("@electron/rebuild", "cli.js")
+    || (() => {
+      // Fallback: try resolving the main entry and deriving cli.js
+      const entry = resolveFromCwd("@electron/rebuild");
+      return entry ? path.join(path.dirname(entry), "cli.js") : null;
+    })();
+}
+
 function getElectronVersion() {
   try {
     const pkgPath = resolveFromCwd("electron/package.json");
@@ -187,7 +196,8 @@ function tryWindowsArm64X64Fallback(
   env,
   installRootDir,
   electronInstallScript,
-  electronVersion
+  electronVersion,
+  electronRebuildCli
 ) {
   if (!shouldTryWindowsArm64X64Fallback()) return null;
   if (!electronInstallScript || !electronVersion) return null;
@@ -209,14 +219,56 @@ function tryWindowsArm64X64Fallback(
     ["rebuild", "--ignore-scripts=false", "better-sqlite3"],
     { env: x64ElectronEnv, cwd: installRootDir }
   );
-  if (rebuildRes.status !== 0) return rebuildRes;
+  if (rebuildRes.status !== 0) {
+    console.log(
+      "[cowork] x64 npm rebuild failed; trying electron-rebuild x64 fallback."
+    );
+  } else {
+    const testRes = testBetterSqlite3InElectron(x64ElectronEnv);
+    if (testRes.status === 0) {
+      console.log("[cowork] better-sqlite3 loads in Electron (x64 emulation mode).");
+      return testRes;
+    }
+
+    console.log(
+      "[cowork] x64 npm rebuild completed, but better-sqlite3 still did not load in Electron."
+    );
+  }
+
+  if (!electronRebuildCli || !fs.existsSync(electronRebuildCli)) {
+    console.log(
+      "[cowork] @electron/rebuild is not installed; cannot run x64 fallback rebuild."
+    );
+    return { status: 1, signal: null };
+  }
+
+  const rebuildX64Res = run(
+    process.execPath,
+    [
+      electronRebuildCli,
+      "-f",
+      "--only",
+      "better-sqlite3",
+      "--sequential",
+      "--arch",
+      "x64",
+      "--version",
+      electronVersion,
+      "--module-dir",
+      installRootDir,
+    ],
+    { env, cwd: installRootDir }
+  );
+  if (rebuildX64Res.status !== 0) return rebuildX64Res;
 
   const testRes = testBetterSqlite3InElectron(x64ElectronEnv);
   if (testRes.status === 0) {
-    console.log("[cowork] better-sqlite3 loads in Electron (x64 emulation mode).");
+    console.log(
+      "[cowork] better-sqlite3 loads in Electron after x64 electron-rebuild fallback."
+    );
   } else {
     console.log(
-      "[cowork] x64 fallback completed, but better-sqlite3 still did not load in Electron."
+      "[cowork] x64 electron-rebuild fallback completed, but better-sqlite3 still did not load."
     );
   }
 
@@ -308,8 +360,9 @@ function checkPrereqs() {
             "  - Desktop development with C++\n" +
             "  - MSVC v143 build tools\n" +
             "  - Windows 10/11 SDK\n" +
-            "Then run:\n" +
-            "  npm config set msvs_version 2022\n" +
+            "Then set node-gyp MSVC env vars (in cmd):\n" +
+            "  setx GYP_MSVS_VERSION 2022\n" +
+            "  setx npm_config_msvs_version 2022\n" +
             "Download: https://visualstudio.microsoft.com/visual-cpp-build-tools/\n"
         );
         // Don't exit — prebuilt binaries may work without compilation
@@ -356,6 +409,7 @@ function main() {
     const env = baseEnvWithJobs(attemptJobs);
     const installRootDir = getInstallRootDir();
     const electronInstallScript = resolvePackageFile("electron", "install.js");
+    const electronRebuildCli = resolveElectronRebuildCli();
     const electronBinary = getElectronBinaryPath();
 
     if (!electronInstallScript) {
@@ -416,11 +470,14 @@ function main() {
         env,
         installRootDir,
         electronInstallScript,
-        electronVersion
+        electronVersion,
+        electronRebuildCli
       );
       if (winArmFallbackRes) {
         if (winArmFallbackRes.status === 0) return winArmFallbackRes;
-        return winArmFallbackRes;
+        console.log(
+          "[cowork] Windows ARM64 x64 fallback did not fully recover; trying current-arch electron-rebuild fallback."
+        );
       }
     } else {
       console.log(
@@ -429,12 +486,6 @@ function main() {
     }
 
     // 3) Fallback: electron-rebuild.
-    const electronRebuildCli = resolvePackageFile("@electron/rebuild", "cli.js")
-      || (() => {
-        // Fallback: try resolving the main entry and deriving cli.js
-        const entry = resolveFromCwd("@electron/rebuild");
-        return entry ? path.join(path.dirname(entry), "cli.js") : null;
-      })();
     if (!electronRebuildCli || !fs.existsSync(electronRebuildCli)) {
       console.log(
         "[cowork] @electron/rebuild is not installed; skipping fallback rebuild."

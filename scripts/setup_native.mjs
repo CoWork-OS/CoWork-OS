@@ -24,20 +24,32 @@ import process from "node:process";
 
 const BETTER_SQLITE3_VERSION = "12.6.2";
 const NPM_CMD = process.platform === "win32" ? "npm.cmd" : "npm";
-const cwdRequire = (() => {
-  try {
-    return createRequire(path.join(process.cwd(), "package.json"));
-  } catch {
-    return createRequire(import.meta.url);
-  }
-})();
+const cwdRequire = createRequire(path.join(process.cwd(), "package.json"));
+const scriptRequire = createRequire(import.meta.url);
 
 function resolveFromCwd(specifier) {
+  // Try CWD first (dev/source builds), then script location (global npm install)
   try {
     return cwdRequire.resolve(specifier);
   } catch {
-    return null;
+    try {
+      return scriptRequire.resolve(specifier);
+    } catch {
+      return null;
+    }
   }
+}
+
+/**
+ * Find a file inside an npm package directory by resolving the package's
+ * package.json first (which is always resolvable regardless of exports maps),
+ * then constructing the file path directly.
+ */
+function resolvePackageFile(packageName, filePath) {
+  const pkgJson = resolveFromCwd(`${packageName}/package.json`);
+  if (!pkgJson) return null;
+  const candidate = path.join(path.dirname(pkgJson), filePath);
+  return fs.existsSync(candidate) ? candidate : null;
 }
 
 function getElectronBinaryPath() {
@@ -254,7 +266,7 @@ function main() {
   const attempt = (attemptJobs) => {
     const env = baseEnvWithJobs(attemptJobs);
     const installRootDir = getInstallRootDir();
-    const electronInstallScript = resolveFromCwd("electron/install.js");
+    const electronInstallScript = resolvePackageFile("electron", "install.js");
     const electronBinary = getElectronBinaryPath();
 
     if (!electronInstallScript) {
@@ -319,10 +331,12 @@ function main() {
     }
 
     // 3) Fallback: electron-rebuild.
-    const electronRebuildEntry = resolveFromCwd("@electron/rebuild");
-    const electronRebuildCli = electronRebuildEntry
-      ? path.join(path.dirname(electronRebuildEntry), "cli.js")
-      : null;
+    const electronRebuildCli = resolvePackageFile("@electron/rebuild", "cli.js")
+      || (() => {
+        // Fallback: try resolving the main entry and deriving cli.js
+        const entry = resolveFromCwd("@electron/rebuild");
+        return entry ? path.join(path.dirname(entry), "cli.js") : null;
+      })();
     if (!electronRebuildCli || !fs.existsSync(electronRebuildCli)) {
       console.log(
         "[cowork] @electron/rebuild is not installed; skipping fallback rebuild."

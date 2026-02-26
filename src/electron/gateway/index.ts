@@ -71,6 +71,7 @@ export interface GatewayConfig {
 const DEFAULT_CONFIG: GatewayConfig = {
   autoConnect: true,
 };
+const IDLE_SESSION_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
  * Channel Gateway - Main class for managing multi-channel messaging
@@ -411,10 +412,12 @@ export class ChannelGateway {
     if (this.pendingCleanupInterval) return;
     // Run once at startup to clear any stale entries.
     this.cleanupPendingUsers();
+    this.cleanupIdleSessions();
     // Then run every 10 minutes.
     this.pendingCleanupInterval = setInterval(
       () => {
         this.cleanupPendingUsers();
+        this.cleanupIdleSessions();
       },
       10 * 60 * 1000,
     );
@@ -435,6 +438,10 @@ export class ChannelGateway {
         this.emitUsersUpdated(channel);
       }
     }
+  }
+
+  private cleanupIdleSessions(): void {
+    this.sessionManager.cleanupOldSessions(IDLE_SESSION_RETENTION_MS);
   }
 
   private emitUsersUpdated(channel: Channel): void {

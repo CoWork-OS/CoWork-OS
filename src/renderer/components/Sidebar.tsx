@@ -10,6 +10,7 @@ interface SidebarProps {
   onNewSession?: () => void;
   onOpenSettings: () => void;
   onOpenMissionControl: () => void;
+
   onTasksChanged: () => void;
   uiDensity?: UiDensity;
 }
@@ -123,6 +124,7 @@ export function Sidebar({
   onNewSession,
   onOpenSettings,
   onOpenMissionControl,
+
   onTasksChanged,
   uiDensity = "focused",
 }: SidebarProps) {

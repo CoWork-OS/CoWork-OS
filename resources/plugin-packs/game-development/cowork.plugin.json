@@ -1,0 +1,81 @@
+{
+  "name": "game-development-pack",
+  "displayName": "Game Development",
+  "version": "1.0.0",
+  "description": "Skills for Unity, Unreal Engine, and Godot game development including scripting, performance optimization, shader development, and build pipelines",
+  "type": "pack",
+  "author": "CoWork-OSS",
+  "keywords": ["gamedev", "unity", "unreal", "godot", "shaders", "performance", "game-engine", "c-sharp", "cpp", "gdscript"],
+  "icon": "🎮",
+  "category": "Engineering",
+  "personaTemplateId": "game-developer",
+  "tryAsking": [
+    "Set up a Unity project with a third-person character controller",
+    "Create an Unreal Blueprint for an inventory system with drag-and-drop",
+    "Write a GDScript for procedural terrain generation in Godot 4",
+    "Optimize draw calls and batching for mobile game performance",
+    "Design a shader for toon-style cel shading in Unity URP"
+  ],
+  "skills": [
+    {
+      "id": "gamedev-unity",
+      "name": "Unity Development",
+      "description": "Unity/C# scripting patterns, MonoBehaviour lifecycle, ScriptableObjects, URP/HDRP, and Unity CLI builds",
+      "icon": "🔲",
+      "category": "GameDev",
+      "prompt": "Help with the following Unity development task.\n\nTask: {{task}}\n\nConsider:\n1. C# scripting best practices (MonoBehaviour lifecycle, coroutines vs async)\n2. ScriptableObjects for data-driven design\n3. URP or HDRP rendering pipeline as appropriate\n4. Physics (Rigidbody, Collider, Raycasting, layers)\n5. UI Toolkit or uGUI for user interface\n6. Addressables for asset management\n7. Unity Test Framework for testing\n8. Editor scripting for custom tools\n9. Performance: object pooling, batching, LOD\n10. Build command: Unity -batchmode -projectPath . -buildTarget <target> -executeMethod BuildScript.Build -quit",
+      "parameters": [
+        { "name": "task", "type": "string", "description": "Unity development task or question", "required": true }
+      ],
+      "enabled": true
+    },
+    {
+      "id": "gamedev-unreal",
+      "name": "Unreal Engine Development",
+      "description": "Unreal Engine C++/Blueprint patterns, Gameplay Framework, Niagara, Lumen/Nanite, and packaging",
+      "icon": "🔷",
+      "category": "GameDev",
+      "prompt": "Help with the following Unreal Engine development task.\n\nTask: {{task}}\n\nConsider:\n1. C++ and Blueprint interop (UCLASS, UPROPERTY, UFUNCTION macros)\n2. Gameplay Framework (GameMode, PlayerController, Character, PlayerState)\n3. Actor lifecycle (BeginPlay, Tick, EndPlay)\n4. Enhanced Input System for player controls\n5. Niagara for particle effects\n6. Lumen (dynamic GI) and Nanite (virtualized geometry)\n7. UMG for UI widgets\n8. Replication for multiplayer\n9. UnrealBuildTool and packaging\n10. Automation testing framework",
+      "parameters": [
+        { "name": "task", "type": "string", "description": "Unreal Engine development task or question", "required": true }
+      ],
+      "enabled": true
+    },
+    {
+      "id": "gamedev-godot",
+      "name": "Godot Development",
+      "description": "Godot 4 GDScript patterns, node tree architecture, signals, rendering, and export presets",
+      "icon": "🔵",
+      "category": "GameDev",
+      "prompt": "Help with the following Godot development task.\n\nTask: {{task}}\n\nConsider:\n1. GDScript patterns (typed variables, signals, @export, @onready)\n2. Node tree architecture (scene composition, node inheritance)\n3. Signals for decoupled communication\n4. Physics (CharacterBody2D/3D, RigidBody, Area, raycasting)\n5. Godot 4 rendering (Vulkan, Forward+, compatibility)\n6. AnimationPlayer and AnimationTree\n7. TileMap for 2D levels\n8. Resource (.tres) and scene (.tscn) files\n9. GDExtension for C++ performance\n10. Export presets for platform targeting\n11. Godot CLI: godot --headless --export-release <preset> <path>",
+      "parameters": [
+        { "name": "task", "type": "string", "description": "Godot development task or question", "required": true }
+      ],
+      "enabled": true
+    },
+    {
+      "id": "gamedev-performance",
+      "name": "Game Performance Optimization",
+      "description": "Cross-engine performance optimization: draw calls, LOD, object pooling, GPU profiling, and memory management",
+      "icon": "⚡",
+      "category": "GameDev",
+      "prompt": "Analyze and optimize game performance for the following scenario.\n\nScenario: {{scenario}}\nEngine: {{engine}}\n\nPlease provide:\n1. Draw call reduction strategies (batching, instancing, atlasing)\n2. LOD (Level of Detail) configuration\n3. Occlusion culling setup\n4. Object pooling implementation\n5. Memory budget analysis\n6. GPU vs CPU bottleneck identification\n7. Texture optimization (compression, mipmaps, streaming)\n8. Shader optimization (reduce ALU, minimize branching)\n9. Physics optimization (layer masks, simplified colliders)\n10. Platform-specific recommendations (mobile vs PC vs console)\n11. Profiling tool usage (Unity Profiler, Unreal Insights, Godot debugger)",
+      "parameters": [
+        { "name": "scenario", "type": "string", "description": "Performance issue description (FPS target, bottleneck symptoms, scene complexity)", "required": true },
+        { "name": "engine", "type": "string", "description": "Game engine (Unity, Unreal, Godot)", "required": false }
+      ],
+      "enabled": true
+    }
+  ],
+  "agentRoles": [
+    {
+      "name": "game-developer",
+      "displayName": "Game Developer",
+      "description": "Specializes in game engine development, scripting, performance optimization, and build pipelines for Unity, Unreal, and Godot",
+      "icon": "🎮",
+      "color": "#f59e0b",
+      "capabilities": ["code", "build", "debug", "analyze", "design"],
+      "systemPrompt": "You are a Game Developer agent. You excel at Unity (C#), Unreal Engine (C++/Blueprints), and Godot (GDScript/C#) development. You understand game-specific concerns: game loop architecture, physics systems, rendering pipelines, shader programming, asset management, build optimization, platform-specific deployment, multiplayer networking, and performance profiling. You use shell tools for build commands and engine CLI operations. You prioritize runtime performance and player experience."
+    }
+  ]
+}

@@ -58,6 +58,12 @@ describe("SearchTools", () => {
     vi.mocked(SearchProviderFactory.loadSettings).mockReturnValue({
       primaryProvider: "tavily",
     } as Any);
+    vi.mocked(SearchProviderFactory.searchWithFallback).mockResolvedValue({
+      query: "test query",
+      searchType: "web",
+      results: [],
+      provider: "tavily",
+    } as Any);
   });
 
   afterEach(() => {
@@ -85,16 +91,22 @@ describe("SearchTools", () => {
       );
     });
 
-    it("should return error response when no provider is configured", async () => {
-      vi.mocked(SearchProviderFactory.isAnyProviderConfigured).mockReturnValue(false);
+    it("should fallback to DuckDuckGo when no paid provider is configured", async () => {
+      vi.mocked(SearchProviderFactory.loadSettings).mockReturnValue({
+        primaryProvider: null,
+      } as Any);
+      vi.mocked(SearchProviderFactory.searchWithFallback).mockResolvedValue({
+        query: "test query",
+        searchType: "web",
+        results: [{ title: "DDG Result", url: "https://duckduckgo.com", snippet: "Fallback result" }],
+        provider: "duckduckgo",
+      } as Any);
 
       const result = await searchTools.webSearch({ query: "test query" });
 
-      expect(result.results).toHaveLength(0);
-      expect(result.provider).toBe("none");
-      expect(result.success).toBe(false);
-      expect(result.error).toBeDefined();
-      expect(result.metadata?.notConfigured).toBe(true);
+      expect(result.results).toHaveLength(1);
+      expect(result.provider).toBe("duckduckgo");
+      expect(result.success).toBe(true);
     });
 
     it("should handle search errors gracefully", async () => {
@@ -214,10 +226,8 @@ describe("SearchTools", () => {
       expect(result.metadata?.error).toEqual({ code: "ERR_NETWORK" });
     });
 
-    it("should trigger auto-detection when primaryProvider is null", async () => {
-      vi.mocked(SearchProviderFactory.loadSettings)
-        .mockReturnValueOnce({ primaryProvider: null } as Any)
-        .mockReturnValueOnce({ primaryProvider: "tavily" } as Any);
+    it("should still execute search when primaryProvider is null", async () => {
+      vi.mocked(SearchProviderFactory.loadSettings).mockReturnValue({ primaryProvider: null } as Any);
       vi.mocked(SearchProviderFactory.searchWithFallback).mockResolvedValue({
         query: "test query",
         searchType: "web",
@@ -227,7 +237,13 @@ describe("SearchTools", () => {
 
       await searchTools.webSearch({ query: "test query" });
 
-      expect(SearchProviderFactory.clearCache).toHaveBeenCalled();
+      expect(SearchProviderFactory.searchWithFallback).toHaveBeenCalledWith(
+        expect.objectContaining({ query: "test query" }),
+      );
+      expect(SearchProviderFactory.clearCache).not.toHaveBeenCalled();
+      expect(mockDaemon.logEvent).toHaveBeenCalledWith("test-task-id", "log", {
+        message: expect.stringContaining("via duckduckgo"),
+      });
     });
   });
 

@@ -229,4 +229,44 @@ describe("BedrockProvider", () => {
     );
     expect(assistantContent.some((block: any) => !!block.toolUse)).toBe(false);
   });
+
+  it("normalizes Bedrock model tokens by stripping date/version suffixes", () => {
+    const provider = new BedrockProvider(config) as any;
+
+    expect(provider.extractModelToken("anthropic.claude-haiku-4-5-20250514")).toBe(
+      "claude-haiku-4-5",
+    );
+    expect(
+      provider.extractModelToken(
+        "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-5-sonnet-20241022-v2:0",
+      ),
+    ).toBe("claude-3-5-sonnet");
+  });
+
+  it("prefers the matching inference profile family instead of the first available profile", async () => {
+    const provider = new BedrockProvider(config) as any;
+
+    provider.getClaudeInferenceProfiles = vi.fn().mockResolvedValue([
+      {
+        id: "us.anthropic.claude-3-sonnet-v1:0",
+        type: "SYSTEM_DEFINED",
+        modelArns: [
+          "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0",
+        ],
+      },
+      {
+        id: "us.anthropic.claude-haiku-4-5-v1:0",
+        type: "SYSTEM_DEFINED",
+        modelArns: [
+          "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-haiku-4-5-20250514-v1:0",
+        ],
+      },
+    ]);
+
+    const resolved = await provider.resolveInferenceProfileFallback(
+      "anthropic.claude-haiku-4-5-20250514",
+    );
+
+    expect(resolved).toBe("us.anthropic.claude-haiku-4-5-v1:0");
+  });
 });

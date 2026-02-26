@@ -1,0 +1,66 @@
+{
+  "id": "dcf-valuation",
+  "name": "DCF Valuation",
+  "description": "Discounted cash flow valuation with WACC calculation, free cash flow projection, terminal value estimation, sensitivity analysis, and enterprise-to-equity value bridge.",
+  "icon": "🧮",
+  "category": "Finance",
+  "prompt": "# DCF Valuation Request\n\n**Company:** {{company}}\n**Projection Period:** {{projectionYears}} years\n**Question:** {{question}}\n\n**Assumptions (if provided):**\n- Revenue Growth: {{revenueGrowth}}\n- EBITDA Margin: {{ebitdaMargin}}\n- WACC: {{wacc}}\n- Terminal Growth Rate: {{terminalGrowthRate}}\n\nUsing the DCF valuation framework below, build a complete discounted cash flow analysis for this company. If assumptions are provided, incorporate them into the model. Otherwise, derive reasonable assumptions from industry benchmarks.\n\n---\n\n# Discounted Cash Flow Valuation Reference\n\n## Core Principle\n\nThe intrinsic value of any asset is the present value of its expected future cash flows, discounted at a rate that reflects the riskiness of those cash flows.\n\n**Enterprise Value = PV(Free Cash Flows) + PV(Terminal Value)**\n\n## Step 1: Free Cash Flow Projection\n\n### Unlevered Free Cash Flow (UFCF) Formula\n\nUFCF = EBIT x (1 - Tax Rate) + D&A - CapEx - Change in Net Working Capital\n\nAlternatively:\nUFCF = EBITDA x (1 - Tax Rate) + D&A x Tax Rate - CapEx - Change in NWC\n\n### Revenue Build Methodology\n\n**Top-Down Approach:**\n1. Total Addressable Market (TAM) sizing\n2. Serviceable Addressable Market (SAM) = TAM x geographic/segment filters\n3. Market share trajectory over projection period\n4. Revenue = SAM x Market Share x Average Selling Price\n\n**Bottom-Up Approach:**\n1. Existing customer base x retention rate x ARPU growth\n2. Plus: New customer additions x ramp ARPU\n3. Less: Churned customer revenue\n4. Total = Retained Revenue + Expansion + New Revenue - Churned Revenue\n\n### Operating Model Drivers\n\n| Line Item | Typical Driver | Benchmark Range |\n|-----------|---------------|----------------|\n| COGS | % of revenue | 20-60% (varies by industry) |\n| Gross Margin | 1 - COGS% | 40-80% (SaaS: 70-85%) |\n| R&D | % of revenue | 10-25% (tech: 15-25%) |\n| S&M | % of revenue | 15-40% (SaaS: 20-50%) |\n| G&A | % of revenue | 8-15% |\n| EBITDA Margin | derived | 15-35% at maturity |\n| D&A | % of revenue or PP&E | 2-8% of revenue |\n| CapEx | % of revenue | 3-10% (asset-light: 2-5%) |\n| NWC Change | % of revenue change | 5-15% of incremental revenue |\n\n### Projection Table Format\n\n| Year | Revenue | Growth % | EBITDA | EBITDA % | EBIT | Tax | NOPAT | D&A | CapEx | ΔNWC | UFCF |\n|------|---------|----------|--------|----------|------|-----|-------|-----|-------|------|------|\n| 1 | | | | | | | | | | | |\n| 2 | | | | | | | | | | | |\n| ... | | | | | | | | | | | |\n| N | | | | | | | | | | | |\n\n## Step 2: Weighted Average Cost of Capital (WACC)\n\n### WACC Formula\n\nWACC = (E / (E + D)) x Re + (D / (E + D)) x Rd x (1 - T)\n\nWhere:\n- E = Market value of equity\n- D = Market value of debt\n- Re = Cost of equity\n- Rd = Cost of debt (pre-tax)\n- T = Corporate tax rate\n\n### Cost of Equity via CAPM\n\nRe = Rf + β x (Rm - Rf) + Size Premium + Country Risk Premium\n\nWhere:\n- Rf = Risk-free rate (10Y Treasury yield; typically 3.5-5.0%)\n- β = Levered beta (regression vs market index)\n- Rm - Rf = Equity risk premium (typically 4.5-6.0%, Damodaran estimate)\n- Size premium = 0-3% for smaller companies (Duff & Phelps data)\n\n**Beta Adjustments:**\n- Unlevered Beta: βu = βl / (1 + (1 - T) x (D/E))\n- Re-levered Beta: βl = βu x (1 + (1 - T) x (D/E))\n- Bloomberg adjustment: Adjusted β = 0.67 x Raw β + 0.33 x 1.0\n\n### Cost of Debt\n\nRd = Risk-free rate + Credit spread\n\n| Credit Rating | Spread (bps) | Implied Rd |\n|--------------|-------------|------------|\n| AAA | 40-60 | 4.0-4.6% |\n| AA | 60-100 | 4.1-5.0% |\n| A | 100-150 | 4.5-5.5% |\n| BBB | 150-250 | 5.0-6.5% |\n| BB | 250-400 | 6.0-8.0% |\n| B | 400-600 | 7.5-10.0% |\n\n### WACC Benchmarks by Sector\n\n| Sector | Typical WACC Range |\n|--------|-------------------|\n| Technology | 8-12% |\n| Healthcare | 7-10% |\n| Consumer Staples | 6-8% |\n| Financials | 8-11% |\n| Industrials | 7-10% |\n| Energy | 8-12% |\n| Utilities | 5-7% |\n| Real Estate | 6-9% |\n\n## Step 3: Terminal Value\n\n### Method 1: Gordon Growth Model (Perpetuity Growth)\n\nTV = FCF_n x (1 + g) / (WACC - g)\n\nWhere:\n- FCF_n = Free cash flow in the last projection year\n- g = Perpetual growth rate (typically 2-3%, should not exceed long-term GDP growth)\n- WACC = Weighted average cost of capital\n\n**Sanity check:** Terminal value typically represents 60-80% of total enterprise value. If >85%, consider extending projection period or questioning assumptions.\n\n### Method 2: Exit Multiple\n\nTV = EBITDA_n x Exit Multiple\n\nOr: TV = Revenue_n x Exit Multiple\n\n| Sector | EV/EBITDA Range | EV/Revenue Range |\n|--------|----------------|------------------|\n| SaaS (high growth) | 20-40x | 8-15x |\n| SaaS (mature) | 12-20x | 4-8x |\n| Technology | 12-25x | 3-8x |\n| Healthcare | 10-18x | 2-5x |\n| Consumer | 8-14x | 1-3x |\n| Industrials | 7-12x | 1-2x |\n| Financial Services | 8-14x | 2-5x |\n\n**Best practice:** Use both methods and cross-check. Implied perpetuity growth from exit multiple: g = WACC - (FCF_n / TV)\n\n## Step 4: Enterprise Value Calculation\n\n### Discount Factor\n\nDiscount Factor_n = 1 / (1 + WACC)^n\n\n**Mid-year convention:** Discount Factor_n = 1 / (1 + WACC)^(n - 0.5)\nUse mid-year convention to reflect that cash flows are received throughout the year, not at year-end.\n\n### Enterprise Value\n\nEV = Σ (UFCF_n x DF_n) + (TV x DF_terminal)\n\n## Step 5: Enterprise Value to Equity Value Bridge\n\nEquity Value = Enterprise Value\n  - Net Debt (Total Debt - Cash & Equivalents)\n  - Preferred Stock (at liquidation value)\n  - Minority / Non-Controlling Interests\n  + Equity Method Investments / Associates\n  - Pension & Lease Obligations (if not in debt)\n  - Contingent Liabilities (if material)\n\n**Per Share Value** = Equity Value / Fully Diluted Shares Outstanding\n\nFully diluted shares = Basic shares + In-the-money options (Treasury Stock Method) + Convertible securities (if-converted method) + RSU/PSU shares\n\n## Step 6: Sensitivity Analysis\n\n### WACC vs Terminal Growth Rate\n\n| WACC \\ g | 1.5% | 2.0% | 2.5% | 3.0% | 3.5% |\n|----------|------|------|------|------|------|\n| 7.0% | $XX | $XX | $XX | $XX | $XX |\n| 8.0% | $XX | $XX | $XX | $XX | $XX |\n| 9.0% | $XX | $XX | $XX | $XX | $XX |\n| 10.0% | $XX | $XX | $XX | $XX | $XX |\n| 11.0% | $XX | $XX | $XX | $XX | $XX |\n\n### WACC vs Exit Multiple\n\n| WACC \\ Multiple | 8x | 10x | 12x | 14x | 16x |\n|-----------------|-----|------|------|------|------|\n| 7.0% | $XX | $XX | $XX | $XX | $XX |\n| 8.0% | $XX | $XX | $XX | $XX | $XX |\n| 9.0% | $XX | $XX | $XX | $XX | $XX |\n| 10.0% | $XX | $XX | $XX | $XX | $XX |\n| 11.0% | $XX | $XX | $XX | $XX | $XX |\n\n### Revenue Growth vs EBITDA Margin\n\n| Growth \\ Margin | 15% | 20% | 25% | 30% | 35% |\n|-----------------|------|------|------|------|------|\n| 5% | $XX | $XX | $XX | $XX | $XX |\n| 10% | $XX | $XX | $XX | $XX | $XX |\n| 15% | $XX | $XX | $XX | $XX | $XX |\n| 20% | $XX | $XX | $XX | $XX | $XX |\n| 25% | $XX | $XX | $XX | $XX | $XX |\n\n## Common Pitfalls\n\n1. **Terminal value dominance:** If TV > 80% of EV, extend projection period\n2. **Growth > WACC:** Model breaks; terminal growth must be < WACC\n3. **Negative FCF extrapolation:** Ensure company reaches positive FCF before terminal year\n4. **Ignoring reinvestment:** Mature growth requires ROIC > WACC; g = Reinvestment Rate x ROIC\n5. **Stale beta:** Use 2-5 year weekly returns; consider peer group median\n6. **Double counting:** Don't subtract operating leases from both UFCF and equity bridge\n7. **Currency mismatch:** Match cash flow currency with discount rate currency",
+  "parameters": [
+    {
+      "name": "company",
+      "type": "string",
+      "description": "Company name or ticker symbol",
+      "required": true
+    },
+    {
+      "name": "projectionYears",
+      "type": "select",
+      "description": "Number of projection years",
+      "required": true,
+      "options": [
+        "5",
+        "7",
+        "10"
+      ]
+    },
+    {
+      "name": "question",
+      "type": "string",
+      "description": "Your specific valuation question",
+      "required": true
+    },
+    {
+      "name": "revenueGrowth",
+      "type": "string",
+      "description": "Expected revenue growth rate (e.g., 15%)",
+      "required": false
+    },
+    {
+      "name": "ebitdaMargin",
+      "type": "string",
+      "description": "Target EBITDA margin (e.g., 25%)",
+      "required": false
+    },
+    {
+      "name": "wacc",
+      "type": "string",
+      "description": "Weighted average cost of capital (e.g., 9.5%)",
+      "required": false
+    },
+    {
+      "name": "terminalGrowthRate",
+      "type": "string",
+      "description": "Perpetual growth rate for terminal value (e.g., 2.5%)",
+      "required": false
+    }
+  ],
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when the user asks about discounted cash flow valuation, intrinsic value estimation, WACC calculation, terminal value, enterprise value, equity value bridge, or company valuation using projected cash flows.",
+      "dontUseWhen": "Do not use when the request is about relative valuation only (comparable companies/transactions), portfolio optimization, or non-valuation financial analysis.",
+      "outputs": "Outcome from DCF Valuation: complete DCF model with FCF projections, WACC derivation, terminal value, sensitivity tables, and per-share equity value.",
+      "successCriteria": "Returns a fully built DCF with all intermediate calculations, clearly stated assumptions, sensitivity analysis, and an enterprise-to-equity bridge with per-share value."
+    }
+  }
+}

@@ -310,17 +310,15 @@ function checkRateLimit(
 }
 
 const OpenAICompatibleBaseUrlSchema = z.string().url().max(500);
-const BLOCKED_OPENAI_COMPATIBLE_HOSTNAMES = new Set([
-  "0.0.0.0",
-  "::",
-  "metadata.google.internal",
-]);
+const BLOCKED_OPENAI_COMPATIBLE_HOSTNAMES = new Set(["0.0.0.0", "::", "metadata.google.internal"]);
 const BLOCKED_OPENAI_COMPATIBLE_IPS = new Set([
   "169.254.169.254", // AWS/GCP/Azure instance metadata pattern
 ]);
 
 function normalizeHostname(hostname: string): string {
-  const trimmed = String(hostname || "").trim().toLowerCase();
+  const trimmed = String(hostname || "")
+    .trim()
+    .toLowerCase();
   const unwrapped =
     trimmed.startsWith("[") && trimmed.endsWith("]") ? trimmed.slice(1, -1) : trimmed;
   return unwrapped.endsWith(".") ? unwrapped.slice(0, -1) : unwrapped;
@@ -397,10 +395,7 @@ async function validateOpenAICompatibleBaseUrl(
     throw new Error("OpenAI-compatible base URL must include a valid hostname.");
   }
   const allowLoopback = options.allowLoopback === true;
-  if (
-    BLOCKED_OPENAI_COMPATIBLE_HOSTNAMES.has(hostname) ||
-    hostname.endsWith(".local")
-  ) {
+  if (BLOCKED_OPENAI_COMPATIBLE_HOSTNAMES.has(hostname) || hostname.endsWith(".local")) {
     throw new Error("OpenAI-compatible base URL cannot target blocked hosts.");
   }
   if (isPrivateOrLoopbackAddress(hostname) && !(allowLoopback && isLoopbackAddress(hostname))) {
@@ -419,9 +414,7 @@ async function validateOpenAICompatibleBaseUrl(
         return !(allowLoopback && isLoopbackAddress(normalizedAddress));
       })
     ) {
-      throw new Error(
-        "OpenAI-compatible base URL resolved to a blocked private/metadata address.",
-      );
+      throw new Error("OpenAI-compatible base URL resolved to a blocked private/metadata address.");
     }
   } catch (error) {
     const code = (error as NodeJS.ErrnoException)?.code;
@@ -3171,13 +3164,13 @@ export async function setupIpcHandlers(
 
   // Activity Feed handlers
   ipcMain.handle(IPC_CHANNELS.ACTIVITY_LIST, async (_, query: any) => {
-    const validated = validateInput(UUIDSchema, query.workspaceId, "workspace ID");
+    const validated = validateInput(WorkspaceIdSchema, query.workspaceId, "workspace ID");
     return activityRepo.list({ ...query, workspaceId: validated });
   });
 
   ipcMain.handle(IPC_CHANNELS.ACTIVITY_CREATE, async (_, request: any) => {
     checkRateLimit(IPC_CHANNELS.ACTIVITY_CREATE);
-    const validatedWorkspaceId = validateInput(UUIDSchema, request.workspaceId, "workspace ID");
+    const validatedWorkspaceId = validateInput(WorkspaceIdSchema, request.workspaceId, "workspace ID");
     const activity = activityRepo.create({ ...request, workspaceId: validatedWorkspaceId });
     // Emit activity event for real-time updates
     getMainWindow()?.webContents.send(IPC_CHANNELS.ACTIVITY_EVENT, { type: "created", activity });
@@ -3199,7 +3192,7 @@ export async function setupIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.ACTIVITY_MARK_ALL_READ, async (_, workspaceId: string) => {
     checkRateLimit(IPC_CHANNELS.ACTIVITY_MARK_ALL_READ);
-    const validated = validateInput(UUIDSchema, workspaceId, "workspace ID");
+    const validated = validateInput(WorkspaceIdSchema, workspaceId, "workspace ID");
     const count = activityRepo.markAllRead(validated);
     getMainWindow()?.webContents.send(IPC_CHANNELS.ACTIVITY_EVENT, {
       type: "all_read",

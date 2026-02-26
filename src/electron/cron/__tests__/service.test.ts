@@ -148,6 +148,27 @@ describe("CronService", () => {
       expect(saveCronStore).toHaveBeenCalled();
     });
 
+    it("applies workspace resolution during add when resolver is provided", async () => {
+      service = createService({
+        resolveWorkspaceContext: async ({ phase }) =>
+          phase === "add" ? { workspaceId: "ws-managed" } : null,
+      });
+      await service.start();
+
+      const result = await service.add({
+        name: "Resolved Job",
+        enabled: true,
+        workspaceId: "ws-temp",
+        taskPrompt: "Test",
+        schedule: { kind: "every", everyMs: 60000 },
+      });
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.job.workspaceId).toBe("ws-managed");
+      }
+    });
+
     it("should emit added event", async () => {
       service = createService();
       await service.start();
@@ -499,6 +520,53 @@ describe("CronService", () => {
         expect.objectContaining({
           prompt: "Hello bar",
         }),
+      );
+    });
+
+    it("applies run workspace context and injects scheduled run paths", async () => {
+      service = createService({
+        nowMs: () => 1000000,
+        resolveWorkspaceContext: async ({ phase }) =>
+          phase === "run"
+            ? {
+                workspaceId: "ws-managed",
+                workspacePath: "/managed/workspace",
+                runWorkspacePath: "/managed/workspace/.cowork/scheduled-runs/run-1",
+                runWorkspaceRelativePath: ".cowork/scheduled-runs/run-1",
+              }
+            : null,
+      });
+      await service.start();
+
+      await service.add({
+        name: "Run Context",
+        enabled: true,
+        workspaceId: "ws-temp",
+        taskPrompt: "Write output into {{run_workspace_path}}",
+        schedule: { kind: "at", atMs: 900000 },
+        state: { nextRunAtMs: 900000 },
+      });
+
+      await service.run("job-1", "force");
+
+      expect(mockCreateTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workspaceId: "ws-managed",
+        }),
+      );
+      expect(mockCreateTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          prompt: expect.stringContaining("/managed/workspace/.cowork/scheduled-runs/run-1"),
+        }),
+      );
+
+      const job = await service.get("job-1");
+      expect(job?.workspaceId).toBe("ws-managed");
+
+      const history = await service.getRunHistory("job-1");
+      expect(history?.entries[0].workspaceId).toBe("ws-managed");
+      expect(history?.entries[0].runWorkspacePath).toBe(
+        "/managed/workspace/.cowork/scheduled-runs/run-1",
       );
     });
 

@@ -26,7 +26,7 @@
 - **Task-Based Workflow**: Multi-step execution with plan-execute-observe loops
 - **Live Terminal**: Shell commands run in a real-time terminal view — see output as it happens, stop execution, or provide interactive input (e.g. `y`/`n` prompts)
 - **Dynamic Re-Planning**: Agent can revise its plan mid-execution
-- **130+ Built-in Skills**: GitHub, Slack, Notion, Spotify, Apple Notes, Unity, Unreal, Terraform, Kubernetes, and more
+- **139 Built-in Skills**: GitHub, Slack, Notion, Spotify, Apple Notes, Unity, Unreal, Terraform, Kubernetes, financial analysis, and more
 - **Document Creation**: Excel, Word, PDF, PowerPoint with professional formatting
 - **Persistent Memory**: Cross-session context with privacy-aware observation capture
 - **Knowledge Graph**: SQLite-backed entity/relationship memory with FTS5 search, graph traversal, and auto-extraction
@@ -88,8 +88,8 @@ Access from **Mission Control** > **Add Digital Twin**. See [Digital Twins](digi
 
 Role-specific bundles that group skills, agent roles, connectors, and slash commands into installable packs. Each pack targets a job function and can optionally link to a Digital Twin Persona for proactive background work.
 
-- **10 bundled packs**: Engineering, Engineering Management, Product Management, DevOps, Data Analysis, QA & Testing, Sales CRM, Customer Support, Content & Marketing, Technical Writing
-- **35+ built-in skills**: Code review prep, sprint health, feature triage, incident response, prospect research, and more
+- **17 bundled packs**: Engineering, Engineering Management, Product Management, DevOps, Mobile Development, Game Development, Data Analysis, QA & Testing, Sales CRM, Customer Support, Content & Marketing, Technical Writing, Equity Research, Financial Analysis, Investment Banking, Private Equity, Wealth Management
+- **55+ built-in skills**: Code review prep, sprint health, feature triage, incident response, prospect research, DCF modeling, LBO analysis, and more
 - **Unified Customize panel**: Browse, enable/disable packs, view skills/commands/agents, click "Try asking" prompts
 - **Search & filter**: Real-time sidebar search across pack names, descriptions, categories, and skill names
 - **Per-skill toggles**: Enable or disable individual skills within a pack without toggling the entire pack
@@ -397,6 +397,140 @@ Configurable as a scheduled task in **Settings** > **Scheduled Tasks** with time
 
 ---
 
+## Citation Engine
+
+Automatic source attribution for web research. When agents use `web_search` or `web_fetch`, the Citation Engine tracks and deduplicates all referenced URLs, assigning sequential citation indices.
+
+| Feature | Description |
+|---------|-------------|
+| **Auto-tracking** | Intercepts results from `web_search` and `web_fetch` tools |
+| **Deduplication** | Same URL referenced multiple times gets a single [N] index |
+| **System prompt injection** | Formatted citation list injected into LLM context so the agent can reference sources |
+| **Citation panel** | UI panel showing all sources with URL, title, domain, snippet, and access timestamp |
+
+Citations appear inline in agent responses as `[1]`, `[2]`, etc. and link to the source in the Citation Panel.
+
+---
+
+## Scratchpad Tools
+
+Session-scoped note-taking system for agents during long-running tasks.
+
+| Tool | Description |
+|------|-------------|
+| `scratchpad_write` | Write or update notes with key-value pairs (max 100-char keys, 10,000-char values) |
+| `scratchpad_read` | Retrieve all notes or a specific note by key |
+
+Notes persist to `.cowork/scratchpad-{taskId}.json` for crash recovery. The scratchpad is ephemeral per task — useful for agents to track intermediate findings, partial results, and working state during complex multi-step tasks.
+
+---
+
+## Workflow Pipeline & Deep Work Mode
+
+### Workflow Pipeline
+
+Multi-phase task execution for complex workflows. The Workflow Decomposer detects multi-step prompts (using connectives like "then", "after that", "next", "finally") and splits them into sequential phases.
+
+| Feature | Description |
+|---------|-------------|
+| **Auto-detection** | Regex-based decomposition of multi-phase prompts |
+| **5 phase types** | research, create, deliver, analyze, general |
+| **Sequential execution** | Each phase creates a child task; output pipes into the next phase |
+| **LLM fallback** | Complex prompts that resist regex decomposition use LLM-powered splitting |
+| **Pipeline events** | `pipeline_started`, `phase_started`, `phase_completed`, `pipeline_completed` |
+
+### Deep Work Mode
+
+Extended execution mode for complex tasks that need sustained focus:
+
+- **Extended timeouts** — Deep work tasks get longer execution budgets
+- **Progress journaling** — Agent records progress notes during execution, visible in the task timeline
+- **Memory compression pause** — Memory service pauses background compression during active deep work to avoid context disruption
+
+---
+
+## Document Generation Tools
+
+Three dedicated agent tools for generating formatted documents from task context:
+
+| Tool | Output | Description |
+|------|--------|-------------|
+| `generate_document` | PDF | Generate PDF documents with markdown content and structured sections |
+| `generate_presentation` | PPTX | Generate PowerPoint presentations with multiple slides |
+| `generate_spreadsheet` | XLSX | Generate Excel spreadsheets with multiple sheets and data |
+
+These tools complement the existing document skills (spreadsheet.ts, document.ts, presentation.ts) by providing direct LLM-callable tool interfaces. Generated files are registered as task artifacts with proper MIME types.
+
+---
+
+## Event Triggers
+
+Condition-based automation engine that fires actions in response to events.
+
+| Feature | Description |
+|---------|-------------|
+| **Trigger sources** | Channel gateway messages, cron service, webhooks |
+| **Action types** | `create_task`, `send_message`, `wake_agent` |
+| **Condition logic** | "all" (AND) evaluation of multiple conditions |
+| **Cooldown** | Configurable cooldown period (default 1 min) to prevent rapid re-firing |
+| **Variable substitution** | Event data can be injected into action prompts/titles |
+| **History** | Last 50 fires per trigger stored for audit |
+
+Configure in **Settings** > **Event Triggers**.
+
+---
+
+## File Hub
+
+Unified file aggregation service combining local workspace files, task artifacts, and cloud storage into a single searchable interface.
+
+| Feature | Description |
+|---------|-------------|
+| **Multi-source** | Local workspace files, task artifacts, connected cloud storage |
+| **Search** | Filename-based search across all connected sources |
+| **Recent files** | Tracks recently accessed files with timestamps |
+| **MIME detection** | 20+ common formats (PDF, images, docs, sheets, code, etc.) |
+
+Access from the **File Hub** panel in the sidebar.
+
+---
+
+## Web Access
+
+Serve CoWork OS as a web application accessible from any browser on the network.
+
+| Feature | Description |
+|---------|-------------|
+| **HTTP server** | Configurable host/port with static file serving |
+| **Authentication** | Bearer token with timing-safe comparison |
+| **CORS** | Origin whitelisting for cross-origin access |
+| **REST API** | Maps endpoints to IPC channels (tasks, workspaces, briefings, suggestions) |
+| **WebSocket** | Real-time event streaming for connected clients |
+| **Health check** | Unauthenticated `/health` endpoint for monitoring |
+
+Configure in **Settings** > **Web Access**.
+
+---
+
+## Vision Tools
+
+Multi-provider image and PDF analysis with caching and optimization.
+
+| Tool | Description |
+|------|-------------|
+| `analyze_image` | Analyze any image with vision LLM (OpenAI, Anthropic, Gemini, Bedrock) |
+| `read_pdf_visual` | Convert PDF pages to images and analyze layout/design |
+
+| Feature | Description |
+|---------|-------------|
+| **Result caching** | SHA1-keyed cache (128 entries) prevents redundant vision API calls |
+| **Auto-downscaling** | Images >2MB automatically downscaled to 1600×1200 at 80% quality |
+| **Multi-provider fallback** | OpenAI → Anthropic → Gemini → Bedrock fallback chain |
+| **Retry logic** | Transient errors (429, 5xx, timeouts) trigger single retry |
+| **PDF conversion** | Uses `pdftoppm` to convert PDF pages to PNG at 72 DPI (5-page max) |
+
+---
+
 ## Adaptive Complexity
 
 Three-tier UI density controlling which features and settings are visible:
@@ -487,7 +621,7 @@ Tier 3: scrape_* tools               (Scrapling — anti-bot bypass)
 
 The agent auto-selects the appropriate tier: `web_search` for discovering information, `web_fetch` for reading known URLs, `browser_*` when interaction or JS rendering is needed, and `scrape_*` for anti-bot-protected sites.
 
-### Browser Tools (17 tools)
+### Browser Tools (17 tools — native Playwright)
 
 Native Playwright API integration — no CLI subprocess, no process spawning overhead.
 
@@ -656,6 +790,11 @@ Pre-built connectors for enterprise integrations. Install from **Settings > MCP 
 | **Asana** | Work Management | health, list, get, search, create, update tasks |
 | **Okta** | Identity | health, list, get, search, create, update users |
 | **Resend** | Email | health, send, list/create/delete webhooks |
+| **Discord** | Community | 19 tools: guilds, channels, messages, threads, roles, reactions, webhooks, members |
+| **Google Workspace** | Productivity (OAuth) | Calendar, Drive, Gmail with shared OAuth and PKCE flow |
+| **DocuSign** | E-signatures (OAuth) | health, send/get/list envelopes |
+| **Outreach** | Sales (OAuth) | health, list/get prospects, create sequences |
+| **Slack** | Messaging (OAuth) | health, list channels, send/search messages |
 
 See [Enterprise Connectors](enterprise-connectors.md) for the full contract.
 
@@ -804,7 +943,7 @@ Run multiple tasks concurrently with configurable limits (1-10, default: 3). Tas
 
 ---
 
-## Built-in Skills (100+)
+## Built-in Skills (139)
 
 | Category | Skills |
 |----------|--------|
@@ -815,9 +954,12 @@ Run multiple tasks concurrently with configurable limits (1-10, default: 3). Tas
 | **Image** | Image Generation (Gemini/OpenAI/Azure), Agentic Image Loop |
 | **Documents** | Excel, Word, PDF, PowerPoint |
 | **Frontend** | Frontend Design, React Native Best Practices |
+| **Mobile** | iOS Development, Android Development |
+| **Game Dev** | Unity Development, Unreal Engine Development, Game Performance Optimization |
+| **IaC / DevOps** | Terraform Operations, Kubernetes Operations, Cloud Migration, Docker Compose Operations |
 | **Data** | Supabase SDK Patterns |
 | **Search** | Local Web Search (SearXNG), Bird |
-| **Finance** | Crypto Trading, Crypto Execution, Trading Foundation |
+| **Finance** | Crypto Trading, Crypto Execution, Trading Foundation, DCF Valuation, Earnings Analyzer, ESG Scorer, Financial Modeling, Market Screener, Portfolio Optimizer, Risk Analyzer, Tax Optimizer |
 | **Marketing** | Email Marketing Bible |
 | **Use Cases** | Booking Options, Draft Reply, Family Digest, Household Capture, Newsletter Digest, Transaction Scan |
 

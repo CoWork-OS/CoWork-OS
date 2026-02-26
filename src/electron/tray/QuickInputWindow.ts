@@ -254,13 +254,15 @@ export class QuickInputWindow {
     // Reset expanded state
     this.isExpanded = false;
 
+    const isMac = process.platform === "darwin";
+
     this.window = new BrowserWindow({
       width,
       height,
       x,
       y,
       frame: false,
-      transparent: true,
+      transparent: isMac,
       resizable: false,
       movable: true,
       minimizable: false,
@@ -269,9 +271,15 @@ export class QuickInputWindow {
       alwaysOnTop: true,
       skipTaskbar: true,
       hasShadow: true,
-      vibrancy: "under-window",
-      visualEffectState: "active",
-      backgroundColor: "#00000000",
+      ...(isMac
+        ? {
+            vibrancy: "under-window" as const,
+            visualEffectState: "active" as const,
+            backgroundColor: "#00000000",
+          }
+        : {
+            backgroundColor: "#1a1a1c",
+          }),
       show: false,
       fullscreenable: false,
       webPreferences: {
@@ -282,7 +290,9 @@ export class QuickInputWindow {
     });
 
     // Follow user across all macOS Spaces/desktops
-    this.window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    if (isMac) {
+      this.window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    }
 
     // Load the quick input HTML using inline data URL
     // Note: We handle key events via before-input-event since data URLs don't load preload scripts

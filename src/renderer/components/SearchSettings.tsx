@@ -100,7 +100,9 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
     }
   };
 
-  const configuredProviders = configStatus?.providers.filter((p) => p.configured) || [];
+  // Exclude DuckDuckGo from primary/fallback selection — it's an automatic last-resort fallback
+  const configuredProviders =
+    configStatus?.providers.filter((p) => p.configured && p.type !== "duckduckgo") || [];
   const hasMultipleProviders = configuredProviders.length > 1;
   const activeProviderConfig =
     configStatus?.providers.find((p) => p.type === activeProvider) || null;
@@ -238,6 +240,28 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
                     </p>
                   </div>
                 </>
+              )}
+
+              {activeProviderConfig.type === "duckduckgo" && (
+                <div className="ddg-free-badge" style={{ margin: "8px 0" }}>
+                  <span
+                    style={{
+                      display: "inline-block",
+                      padding: "2px 8px",
+                      borderRadius: "4px",
+                      background: "var(--color-success, #22c55e)",
+                      color: "#fff",
+                      fontSize: "12px",
+                      fontWeight: 600,
+                    }}
+                  >
+                    Built-in (Free)
+                  </span>
+                  <p className="settings-hint" style={{ marginTop: "6px" }}>
+                    DuckDuckGo search works out of the box with no configuration needed. It is used
+                    as an automatic fallback when no other provider is available.
+                  </p>
+                </div>
               )}
 
               {activeProviderConfig.configured && (

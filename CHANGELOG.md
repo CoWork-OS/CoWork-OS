@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-02-26
+
+### Fixed
+- **Windows ARM64 startup crash after native setup**: moved `pdf-parse` loading to runtime in `parsePdfBuffer` so Electron startup no longer crashes when `@napi-rs/canvas` bindings are unavailable (`DOMMatrix is not defined` on app boot).
+- **PDF parser failure isolation**: PDF parsing backend load errors are now surfaced only when a PDF is actually parsed, allowing normal app startup and non-PDF workflows to proceed.
+
 ## [0.4.3] - 2026-02-26
 
 ### Fixed

@@ -1,4 +1,5 @@
 import { spawn, ChildProcess, execSync } from "child_process";
+import * as path from "path";
 import { existsSync } from "fs";
 import { Workspace, CommandTerminationReason } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
@@ -80,6 +81,22 @@ function isValidUsername(username: string | undefined): username is string {
 }
 
 function resolveShellForCommandExecution(): string {
+  if (process.platform === "win32") {
+    // Prefer PowerShell 7+ (pwsh), then Windows PowerShell, then cmd.exe
+    const pwshPath = "C:\\Program Files\\PowerShell\\7\\pwsh.exe";
+    if (existsSync(pwshPath)) return pwshPath;
+    const systemRoot = process.env.SystemRoot || "C:\\Windows";
+    const powershellPath = path.join(
+      systemRoot,
+      "System32",
+      "WindowsPowerShell",
+      "v1.0",
+      "powershell.exe",
+    );
+    if (existsSync(powershellPath)) return powershellPath;
+    return process.env.COMSPEC || "cmd.exe";
+  }
+
   const envShell = process.env.SHELL;
   if (envShell && existsSync(envShell)) return envShell;
 
@@ -92,14 +109,34 @@ function resolveShellForCommandExecution(): string {
 }
 
 /**
- * Get all descendant process IDs for a given parent PID
- * Uses pgrep to find child processes recursively
- * Only returns processes owned by the current user for security
+ * Get the shell arguments for running a command string.
+ * Unix shells use -c, PowerShell uses -Command, cmd.exe uses /c.
+ */
+function getShellArgs(shell: string, command: string): string[] {
+  if (process.platform === "win32") {
+    const lowerShell = shell.toLowerCase();
+    if (lowerShell.includes("powershell") || lowerShell.includes("pwsh")) {
+      return ["-NoProfile", "-Command", command];
+    }
+    // cmd.exe
+    return ["/c", command];
+  }
+  return ["-c", command];
+}
+
+/**
+ * Get all descendant process IDs for a given parent PID.
+ * Uses pgrep on Unix, wmic on Windows.
+ * Only returns processes owned by the current user for security.
  */
 function getDescendantPids(parentPid: number): number[] {
   if (!isValidPid(parentPid)) {
     console.error(`[ShellTools] Invalid parent PID: ${parentPid}`);
     return [];
+  }
+
+  if (process.platform === "win32") {
+    return getDescendantPidsWindows(parentPid);
   }
 
   const currentUser = process.env.USER;
@@ -148,6 +185,59 @@ function getDescendantPids(parentPid: number): number[] {
 }
 
 /**
+ * Windows-specific: get descendant PIDs using wmic.
+ */
+function getDescendantPidsWindows(parentPid: number): number[] {
+  const descendants: number[] = [];
+  const toProcess: number[] = [parentPid];
+  const seen = new Set<number>();
+
+  while (toProcess.length > 0) {
+    const pid = toProcess.pop()!;
+    if (seen.has(pid)) continue;
+    seen.add(pid);
+
+    try {
+      // Use PowerShell Get-CimInstance (works on Windows 10+/11) with wmic as fallback
+      let output: string;
+      try {
+        output = execSync(
+          `powershell.exe -NoProfile -Command "Get-CimInstance Win32_Process -Filter 'ParentProcessId=${pid}' | Select-Object -ExpandProperty ProcessId"`,
+          { encoding: "utf-8", timeout: 5000 },
+        );
+      } catch {
+        // Fallback to wmic for older Windows versions
+        output = execSync(
+          `wmic process where (ParentProcessId=${pid}) get ProcessId /format:csv`,
+          { encoding: "utf-8", timeout: 3000 },
+        );
+      }
+      const childPids = output
+        .split("\n")
+        .map((line) => {
+          const trimmed = line.trim();
+          // Handle both PowerShell output (plain numbers) and wmic CSV (Node,PID)
+          if (trimmed.includes(",")) {
+            const parts = trimmed.split(",");
+            return parts[parts.length - 1];
+          }
+          return trimmed;
+        })
+        .filter(Boolean)
+        .map((s) => parseInt(s!, 10))
+        .filter((p) => isValidPid(p) && !seen.has(p));
+
+      descendants.push(...childPids);
+      toProcess.push(...childPids);
+    } catch {
+      // No children found or process enumeration failed
+    }
+  }
+
+  return descendants;
+}
+
+/**
  * Kill a process and all its descendants
  * Sends the signal to children first, then to the parent (bottom-up killing)
  * Only kills processes owned by the current user for security
@@ -155,6 +245,16 @@ function getDescendantPids(parentPid: number): number[] {
 function killProcessTree(pid: number, signal: NodeJS.Signals): void {
   if (!isValidPid(pid)) {
     console.error(`[ShellTools] Refusing to kill invalid PID: ${pid}`);
+    return;
+  }
+
+  // On Windows, use taskkill for tree kill (POSIX signals don't apply)
+  if (process.platform === "win32") {
+    try {
+      execSync(`taskkill /PID ${pid} /T /F`, { timeout: 5000 });
+    } catch {
+      // Process may have already exited
+    }
     return;
   }
 
@@ -513,18 +613,31 @@ export class ShellTools {
 
     // Create a minimal, safe environment (don't leak sensitive process.env vars like API keys)
     const resolvedShell = resolveShellForCommandExecution();
-    const safeEnv: Record<string, string> = {
-      // Essential system variables only
-      PATH: process.env.PATH || "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
-      HOME: process.env.HOME || "",
-      USER: process.env.USER || "",
-      SHELL: resolvedShell,
-      LANG: process.env.LANG || "en_US.UTF-8",
-      TERM: process.env.TERM || "xterm-256color",
-      TMPDIR: process.env.TMPDIR || "/tmp",
-      // Add any user-provided env vars (explicitly passed by caller)
-      ...options?.env,
-    };
+    const safeEnv: Record<string, string> =
+      process.platform === "win32"
+        ? {
+            PATH: process.env.PATH || "",
+            USERPROFILE: process.env.USERPROFILE || "",
+            USERNAME: process.env.USERNAME || "",
+            HOMEDRIVE: process.env.HOMEDRIVE || "C:",
+            HOMEPATH: process.env.HOMEPATH || "\\Users\\" + (process.env.USERNAME || ""),
+            TEMP: process.env.TEMP || process.env.TMP || "C:\\Windows\\Temp",
+            TMP: process.env.TMP || process.env.TEMP || "C:\\Windows\\Temp",
+            SystemRoot: process.env.SystemRoot || "C:\\Windows",
+            COMSPEC: process.env.COMSPEC || "C:\\Windows\\System32\\cmd.exe",
+            ...options?.env,
+          }
+        : {
+            // Essential system variables only (Unix/macOS)
+            PATH: process.env.PATH || "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+            HOME: process.env.HOME || "",
+            USER: process.env.USER || "",
+            SHELL: resolvedShell,
+            LANG: process.env.LANG || "en_US.UTF-8",
+            TERM: process.env.TERM || "xterm-256color",
+            TMPDIR: process.env.TMPDIR || "/tmp",
+            ...options?.env,
+          };
 
     const cwd = options?.cwd || this.workspace.path;
 
@@ -547,7 +660,7 @@ export class ShellTools {
       this.clearEscalationTimeouts();
 
       // Use a shell to handle complex commands with pipes, redirects, etc.
-      const child = spawn(resolvedShell, ["-c", command], {
+      const child = spawn(resolvedShell, getShellArgs(resolvedShell, command), {
         cwd,
         env: safeEnv,
         stdio: ["pipe", "pipe", "pipe"], // Enable stdin for interactive commands

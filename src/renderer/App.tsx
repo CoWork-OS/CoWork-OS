@@ -85,6 +85,7 @@ export function App() {
     | "scheduled"
     | "voice"
     | "missioncontrol"
+    | "digitaltwins"
     | "mcp"
   >("appearance");
   const [events, setEvents] = useState<TaskEvent[]>([]);
@@ -1530,6 +1531,7 @@ export function App() {
                   setSettingsTab("missioncontrol");
                   setCurrentView("settings");
                 }}
+
                 onTasksChanged={loadTasks}
                 uiDensity={uiDensity}
               />

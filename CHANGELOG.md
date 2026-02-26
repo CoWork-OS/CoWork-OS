@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.7] - 2026-02-26
+
+### Fixed
+- **Release/CI test stability**: removed hard import-time dependency on Electron in `MCPRegistryManager` by using a safe runtime check for `app.isPackaged`, so test runs no longer fail when Electron binary install scripts are skipped.
+
 ## [0.4.6] - 2026-02-26
 
 This release is the first recommended Windows install baseline for normal users following the documented GitHub/npm installation steps.

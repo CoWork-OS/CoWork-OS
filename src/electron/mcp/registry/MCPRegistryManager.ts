@@ -11,7 +11,6 @@
 import { v4 as uuidv4 } from "uuid";
 import { exec } from "child_process";
 import { promisify } from "util";
-import { app } from "electron";
 import * as path from "path";
 import * as fs from "fs";
 import {
@@ -230,8 +229,18 @@ const BASE_BUILTIN_SERVERS: MCPRegistryEntry[] = [
 
 const LOCAL_CONNECTOR_VERSION = "0.1.0";
 
+function isPackagedElectronApp(): boolean {
+  try {
+    // Avoid hard import-time dependency on Electron binary in Node-only test environments.
+    const electron = require("electron") as { app?: { isPackaged?: boolean } };
+    return Boolean(electron.app?.isPackaged);
+  } catch {
+    return false;
+  }
+}
+
 function getConnectorScriptPath(connectorName: string): string {
-  const baseDir = app.isPackaged
+  const baseDir = isPackagedElectronApp()
     ? path.join(process.resourcesPath, "connectors")
     : path.join(process.cwd(), "connectors");
   return path.join(baseDir, connectorName, "dist", "index.js");

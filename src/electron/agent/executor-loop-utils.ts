@@ -450,6 +450,42 @@ export function maybeInjectStopReasonNudge(opts: {
   return true;
 }
 
+export function shouldLockFollowUpToolCalls(opts: {
+  stopReason: string | undefined;
+  consecutiveToolUseStops: number;
+  followUpToolCallCount: number;
+  stopReasonNudgeInjected: boolean;
+  minStreak?: number;
+  minToolCalls?: number;
+}): boolean {
+  const minStreak = opts.minStreak ?? 10;
+  const minToolCalls = opts.minToolCalls ?? 10;
+  return (
+    opts.stopReason === "tool_use" &&
+    opts.stopReasonNudgeInjected &&
+    opts.consecutiveToolUseStops >= minStreak &&
+    opts.followUpToolCallCount >= minToolCalls
+  );
+}
+
+export function updateSkippedToolOnlyTurnStreak(opts: {
+  skippedToolCalls: number;
+  hasTextInThisResponse: boolean;
+  previousStreak: number;
+}): number {
+  if (opts.skippedToolCalls <= 0 || opts.hasTextInThisResponse) {
+    return 0;
+  }
+  return opts.previousStreak + 1;
+}
+
+export function shouldForceStopAfterSkippedToolOnlyTurns(
+  skippedToolOnlyTurnStreak: number,
+  threshold = 2,
+): boolean {
+  return skippedToolOnlyTurnStreak >= threshold;
+}
+
 const FILE_WRITING_TOOLS = new Set([
   "write_file",
   "create_document",

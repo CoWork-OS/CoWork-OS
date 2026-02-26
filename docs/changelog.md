@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **DuckDuckGo free search fallback**: built-in web search provider that requires no API key. Works out of the box by scraping DuckDuckGo's HTML endpoint. Automatically used as a last-resort fallback when paid providers fail or are not configured. The `web_search` tool is now always available — users no longer need to configure a search provider to use web search.
 - **Polymarket prediction market skill**: query odds, trending markets, price momentum, orderbook depth, open interest, trade history, and resolution timelines across Gamma, CLOB, and Data APIs — no authentication required. Includes formatted output with percentages, volume breakdowns, and multi-outcome event support.
 - **Humanizer writing skill**: rewrite AI-generated text to sound natural and human-written. Detects and removes 50+ LLM tells across 7 layers — vocabulary, sentence mechanics, paragraph structure, emotional register, content depth, document architecture, and tone. Includes flagged word lists, 6 tone presets, and a systematic 7-step rewriting process.
 - **YouTube video intelligence skill**: fetch transcripts, metadata, chapters, and captions from YouTube videos via yt-dlp or youtube-transcript-api. Supports auto-generated and manual captions, multi-language, translation, audio extraction, playlists, and timestamp deep links. Includes 6 workflow recipes.

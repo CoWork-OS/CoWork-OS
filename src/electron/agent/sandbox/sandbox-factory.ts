@@ -114,11 +114,26 @@ export class NoSandbox implements ISandbox {
       let killed = false;
       let timedOut = false;
 
-      const proc = spawn("/bin/sh", ["-c", `${command} ${args.join(" ")}`], {
-        cwd,
-        shell: true,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
+      const shell =
+        process.platform === "win32"
+          ? process.env.COMSPEC || "cmd.exe"
+          : "/bin/sh";
+      const proc =
+        args.length > 0
+          ? spawn(command, args, {
+              cwd,
+              shell: false,
+              stdio: ["ignore", "pipe", "pipe"],
+            })
+          : spawn(
+              shell,
+              process.platform === "win32" ? ["/d", "/s", "/c", command] : ["-c", command],
+              {
+                cwd,
+                shell: false,
+                stdio: ["ignore", "pipe", "pipe"],
+              },
+            );
 
       const timeoutHandle = setTimeout(() => {
         timedOut = true;

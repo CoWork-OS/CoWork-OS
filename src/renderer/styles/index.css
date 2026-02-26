@@ -22863,22 +22863,50 @@ button {
 /* ============================================
    Windows Platform Overrides
    On Windows, vibrancy/transparency is not available.
-   Use opaque backgrounds instead of see-through RGBA values.
+   Use fully opaque backgrounds — no alpha channels.
    ============================================ */
 html.platform-win32 {
   --color-bg: #1a1a1c;
-  --color-bg-primary: rgba(30, 30, 30, 0.95);
-  --color-bg-darker: rgba(15, 15, 15, 0.95);
-  --color-bg-sidebar: rgba(20, 20, 22, 0.98);
-  --color-bg-elevated: rgba(45, 45, 48, 0.98);
+  --color-bg-primary: #1e1e1e;
+  --color-bg-darker: #0f0f0f;
+  --color-bg-sidebar: #141416;
+  --color-bg-elevated: #2d2d30;
+  --color-bg-secondary: #3c3c41;
+  --color-bg-tertiary: #46464b;
+  --color-bg-hover: rgba(255, 255, 255, 0.08);
+  --color-bg-input: #0a0a0a;
+  --color-bg-glass: #1f1f1f;
+  --color-bg-glass-hover: #2a2a2a;
 }
 
-html.platform-win32 .theme-light {
+html.platform-win32.theme-light {
   --color-bg: #f0f0f2;
-  --color-bg-primary: rgba(255, 255, 255, 0.98);
-  --color-bg-darker: rgba(245, 245, 247, 0.98);
-  --color-bg-sidebar: rgba(248, 248, 250, 0.99);
-  --color-bg-elevated: rgba(255, 255, 255, 0.99);
+  --color-bg-primary: #ffffff;
+  --color-bg-darker: #f5f5f7;
+  --color-bg-sidebar: #f8f8fa;
+  --color-bg-elevated: #ffffff;
+  --color-bg-secondary: #ebebed;
+  --color-bg-tertiary: #e0e0e2;
+  --color-bg-input: #e8e8ea;
+  --color-bg-glass: #f5f5f5;
+  --color-bg-glass-hover: #eeeeee;
+}
+
+/* Windows: body and app container must be opaque (no vibrancy) */
+html.platform-win32 body {
+  background-color: var(--color-bg);
+}
+
+html.platform-win32 .app {
+  background: var(--color-bg);
+}
+
+/* Windows: disable backdrop-filter (nothing to blur without vibrancy) */
+html.platform-win32 .sidebar,
+html.platform-win32 .main-content,
+html.platform-win32 .right-panel {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 /* Windows: reduce left padding (no macOS traffic lights) */

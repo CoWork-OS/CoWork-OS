@@ -3,7 +3,16 @@ import os from "os";
 import * as fs from "fs/promises";
 import * as fsSync from "fs";
 import { pathToFileURL } from "url";
-import { app, BrowserWindow, ipcMain, dialog, session, shell, Notification } from "electron";
+import {
+  app,
+  BrowserWindow,
+  ipcMain,
+  dialog,
+  session,
+  shell,
+  Notification,
+  nativeTheme,
+} from "electron";
 import mime from "mime-types";
 import { DatabaseManager } from "./database/schema";
 import { SecureSettingsRepository } from "./database/SecureSettingsRepository";
@@ -151,6 +160,20 @@ if (!gotTheLock) {
   function createWindow() {
     const isMac = process.platform === "darwin";
 
+    // Determine initial background color for Windows based on saved theme
+    let winBgColor = "#1a1a1c";
+    if (!isMac) {
+      try {
+        const saved = AppearanceManager.loadSettings();
+        const mode = saved.themeMode || "dark";
+        const isLight =
+          mode === "light" || (mode === "system" && nativeTheme.shouldUseDarkColors === false);
+        if (isLight) winBgColor = "#f0f0f2";
+      } catch {
+        // Fallback to dark if settings aren't available yet
+      }
+    }
+
     mainWindow = new BrowserWindow({
       width: 1600,
       height: 1000,
@@ -167,7 +190,7 @@ if (!gotTheLock) {
           }
         : {
             transparent: false,
-            backgroundColor: "#1a1a1c",
+            backgroundColor: winBgColor,
           }),
       webPreferences: {
         nodeIntegration: false,

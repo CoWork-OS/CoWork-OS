@@ -6,7 +6,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 // Track writes manually since mocking fs can be complex
 let writeCount = 0;
-let _savedSettings: Any = null;
+let savedSettings: Any = null;
 
 // Mock fs module entirely
 vi.mock("fs", () => ({
@@ -23,7 +23,7 @@ vi.mock("fs", () => ({
   readFileSync: vi.fn().mockReturnValue("{}"),
   writeFileSync: vi.fn().mockImplementation((_path: string, content: string) => {
     writeCount++;
-    _savedSettings = JSON.parse(content);
+    savedSettings = JSON.parse(content);
   }),
   mkdirSync: vi.fn(),
 }));

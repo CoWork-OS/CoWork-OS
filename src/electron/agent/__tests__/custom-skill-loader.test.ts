@@ -4,10 +4,12 @@
 
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import type { CustomSkill } from "../../../shared/types";
+import * as path from "path";
 
 // Track file system operations
 let mockFiles: Map<string, string> = new Map();
 let mockDirExists = true;
+const getFilename = (p: string): string => path.basename(p);
 
 // Mock electron app
 vi.mock("electron", () => ({
@@ -22,7 +24,7 @@ vi.mock("fs", () => ({
     existsSync: vi.fn().mockImplementation((p: string) => {
       if (p.endsWith("skills")) return mockDirExists;
       // Check if any mock file ends with the same filename
-      const filename = p.split("/").pop() || "";
+      const filename = getFilename(p);
       for (const [key] of mockFiles) {
         if (key.endsWith(filename)) return true;
       }
@@ -30,7 +32,7 @@ vi.mock("fs", () => ({
     }),
     readFileSync: vi.fn().mockImplementation((p: string) => {
       // Find mock file by filename
-      const filename = p.split("/").pop() || "";
+      const filename = getFilename(p);
       for (const [key, value] of mockFiles) {
         if (key.endsWith(filename)) return value;
       }
@@ -39,19 +41,19 @@ vi.mock("fs", () => ({
     readdirSync: vi.fn().mockImplementation(() => {
       return Array.from(mockFiles.keys())
         .filter((k) => k.endsWith(".json"))
-        .map((k) => k.split("/").pop());
+        .map((k) => getFilename(k));
     }),
   },
   existsSync: vi.fn().mockImplementation((p: string) => {
     if (p.endsWith("skills")) return mockDirExists;
-    const filename = p.split("/").pop() || "";
+    const filename = getFilename(p);
     for (const [key] of mockFiles) {
       if (key.endsWith(filename)) return true;
     }
     return false;
   }),
   readFileSync: vi.fn().mockImplementation((p: string) => {
-    const filename = p.split("/").pop() || "";
+    const filename = getFilename(p);
     for (const [key, value] of mockFiles) {
       if (key.endsWith(filename)) return value;
     }
@@ -60,7 +62,7 @@ vi.mock("fs", () => ({
   readdirSync: vi.fn().mockImplementation(() => {
     return Array.from(mockFiles.keys())
       .filter((k) => k.endsWith(".json"))
-      .map((k) => k.split("/").pop());
+      .map((k) => getFilename(k));
   }),
 }));
 

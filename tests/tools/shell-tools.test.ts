@@ -27,6 +27,9 @@ const mockWorkspace = {
   },
 } as Workspace;
 
+const SAFE_CMD_1 = `"${process.execPath}" -e "process.stdout.write('ok1')"`;
+const SAFE_CMD_2 = `"${process.execPath}" -v`;
+
 describe('ShellTools auto-approval', () => {
   let shellTools: ShellTools;
 
@@ -87,8 +90,8 @@ describe('ShellTools auto-approval', () => {
     vi.spyOn(BuiltinToolsSettingsManager, 'getRunCommandApprovalMode').mockReturnValue('single_bundle');
     (mockDaemon.requestApproval as any).mockResolvedValue(true);
 
-    const first = await shellTools.runCommand('pwd', { cwd: process.cwd() });
-    const second = await shellTools.runCommand('whoami', { cwd: process.cwd() });
+    const first = await shellTools.runCommand(SAFE_CMD_1, { cwd: process.cwd() });
+    const second = await shellTools.runCommand(SAFE_CMD_2, { cwd: process.cwd() });
 
     expect(first.success).toBe(true);
     expect(second.success).toBe(true);
@@ -102,7 +105,7 @@ describe('ShellTools auto-approval', () => {
       .mockResolvedValueOnce(true)
       .mockResolvedValueOnce(false);
 
-    const first = await shellTools.runCommand('pwd', { cwd: process.cwd() });
+    const first = await shellTools.runCommand(SAFE_CMD_1, { cwd: process.cwd() });
     expect(first.success).toBe(true);
 
     await expect(shellTools.runCommand('sudo -n true')).rejects.toThrow('User denied command execution');
@@ -114,8 +117,8 @@ describe('ShellTools auto-approval', () => {
     vi.spyOn(BuiltinToolsSettingsManager, 'getRunCommandApprovalMode').mockReturnValue('per_command');
     (mockDaemon.requestApproval as any).mockResolvedValue(true);
 
-    const first = await shellTools.runCommand('pwd', { cwd: process.cwd() });
-    const second = await shellTools.runCommand('whoami', { cwd: process.cwd() });
+    const first = await shellTools.runCommand(SAFE_CMD_1, { cwd: process.cwd() });
+    const second = await shellTools.runCommand(SAFE_CMD_2, { cwd: process.cwd() });
 
     expect(first.success).toBe(true);
     expect(second.success).toBe(true);

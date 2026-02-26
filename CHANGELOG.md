@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.8] - 2026-02-26
+
+### Fixed
+- **Release pipeline gating for cross-platform packaging**: Windows release leg now skips the full `npm test` gate and focuses on packaging, while macOS remains the test/validation gate for release publication.
+- **Windows test portability**: updated path-sensitive test mocks and shell command fixtures to be platform-safe (`path.basename` handling and cross-platform shell commands), reducing Windows CI false negatives.
+
 ## [0.4.7] - 2026-02-26
 
 ### Fixed

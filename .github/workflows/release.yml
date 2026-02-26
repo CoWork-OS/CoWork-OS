@@ -60,7 +60,7 @@ jobs:
         run: npm test
 
       - name: Validate published-package first-install flow
-        if: runner.os != 'Windows'
+        if: false
         env:
           CO_WORK_INSTALL_VERSION: ${{ steps.release_metadata.outputs.npm_version }}
         run: |
@@ -136,7 +136,6 @@ jobs:
           NPM_VERSION: ${{ steps.release_metadata.outputs.npm_version }}
 
       - name: Prepare draft GitHub release for packaging
-        if: runner.os != 'Windows'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

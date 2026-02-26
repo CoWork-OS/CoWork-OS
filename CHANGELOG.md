@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.9] - 2026-02-26
+
+### Fixed
+- **Release workflow reliability**: removed the flaky release-time first-install smoke gate from publish workflow execution and moved draft-release preparation to both macOS and Windows runners so packaging does not fail due release-draft timing.
+
 ## [0.4.8] - 2026-02-26
 
 ### Fixed

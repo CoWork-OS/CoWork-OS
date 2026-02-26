@@ -283,7 +283,7 @@ describe("SearchProviderFactory", () => {
 
       const order = (SearchProviderFactory as Any).getProviderExecutionOrder(settings);
 
-      expect(order).toEqual(["brave", "tavily", "google", "serpapi"]);
+      expect(order).toEqual(["brave", "tavily", "google", "serpapi", "duckduckgo"]);
     });
 
     it("should not change order when Brave is not configured", () => {
@@ -296,7 +296,7 @@ describe("SearchProviderFactory", () => {
 
       const order = (SearchProviderFactory as Any).getProviderExecutionOrder(settings);
 
-      expect(order).toEqual(["tavily", "google"]);
+      expect(order).toEqual(["tavily", "google", "duckduckgo"]);
     });
   });
 

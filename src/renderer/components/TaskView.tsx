@@ -1,7 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Task, TaskEvent } from "../../shared/types";
 import { TaskTimeline } from "./TaskTimeline";
+import { CitationPanel } from "./CitationPanel";
 import { useAgentContext } from "../hooks/useAgentContext";
+import { useTaskDuration } from "../hooks/useTaskDuration";
 
 interface TaskViewProps {
   task: Task | undefined;
@@ -14,9 +16,13 @@ function capTaskViewEvents(events: TaskEvent[]): TaskEvent[] {
   return events.slice(-MAX_TASK_VIEW_EVENTS);
 }
 
+const ACTIVE_STATUSES = new Set(["executing", "planning", "interrupted"]);
+
 export function TaskView({ task }: TaskViewProps) {
   const [events, setEvents] = useState<TaskEvent[]>([]);
   const agentContext = useAgentContext();
+  const isActive = task ? ACTIVE_STATUSES.has(task.status) : false;
+  const duration = useTaskDuration(task?.createdAt ?? 0, task?.completedAt, isActive);
 
   useEffect(() => {
     if (!task) {
@@ -89,6 +95,12 @@ export function TaskView({ task }: TaskViewProps) {
     );
   }
 
+  // Extract citations from task events
+  const citations = useMemo(() => {
+    const citEvent = [...events].reverse().find((e) => e.type === "citations_collected");
+    return citEvent?.payload?.citations || [];
+  }, [events]);
+
   return (
     <div className="task-view">
       <div className="task-view-inner">
@@ -140,6 +152,23 @@ export function TaskView({ task }: TaskViewProps) {
                 minute: "2-digit",
               })}
             </span>
+            <span className="task-meta-divider" />
+            <span className="task-duration">
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <polyline points="12 6 12 12 16 14" />
+              </svg>
+              {duration}
+            </span>
           </div>
         </div>
 
@@ -154,6 +183,8 @@ export function TaskView({ task }: TaskViewProps) {
           taskId={task.id}
           taskStatus={task.status}
         />
+
+        {citations.length > 0 && <CitationPanel citations={citations} />}
 
         {task.status === "paused" && (
           <div className="task-status-banner task-status-banner-paused">

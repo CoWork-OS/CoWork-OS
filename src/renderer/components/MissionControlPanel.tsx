@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { Plus, User } from "lucide-react";
+import { Plus } from "lucide-react";
 import {
   AgentRoleData,
   HeartbeatEvent,
@@ -18,7 +18,6 @@ import { MentionList } from "./MentionList";
 import { StandupReportViewer } from "./StandupReportViewer";
 import { AgentTeamsPanel } from "./AgentTeamsPanel";
 import { AgentPerformanceReviewViewer } from "./AgentPerformanceReviewViewer";
-import { PersonaTemplateGallery } from "./PersonaTemplateGallery";
 import { useAgentContext } from "../hooks/useAgentContext";
 import type { UiCopyKey } from "../utils/agentMessages";
 
@@ -81,7 +80,6 @@ export function MissionControlPanel({ onClose: _onClose }: MissionControlPanelPr
   const [standupOpen, setStandupOpen] = useState(false);
   const [teamsOpen, setTeamsOpen] = useState(false);
   const [reviewsOpen, setReviewsOpen] = useState(false);
-  const [templateGalleryOpen, setTemplateGalleryOpen] = useState(false);
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
   const tasksRef = useRef<Task[]>([]);
   const workspaceIdRef = useRef<string | null>(null);
@@ -861,13 +859,6 @@ export function MissionControlPanel({ onClose: _onClose }: MissionControlPanelPr
             <Plus size={16} strokeWidth={2} />
             {agentContext.getUiCopy("mcAddAgent")}
           </button>
-          <button
-            className="mc-add-agent-btn mc-add-twin-btn"
-            onClick={() => setTemplateGalleryOpen(true)}
-          >
-            <User size={14} strokeWidth={1.5} />
-            Add Digital Twin
-          </button>
         </aside>
 
         {/* Center - Mission Queue */}
@@ -1194,15 +1185,6 @@ export function MissionControlPanel({ onClose: _onClose }: MissionControlPanelPr
         </div>
       )}
 
-      {templateGalleryOpen && (
-        <PersonaTemplateGallery
-          onClose={() => setTemplateGalleryOpen(false)}
-          onActivated={(agentRole) => {
-            setAgents((prev) => [...prev, agentRole as AgentRole]);
-            setTemplateGalleryOpen(false);
-          }}
-        />
-      )}
 
       <style>{styles}</style>
     </div>

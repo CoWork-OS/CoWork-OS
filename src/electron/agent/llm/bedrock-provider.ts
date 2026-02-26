@@ -113,12 +113,13 @@ export class BedrockProvider implements LLMProvider {
         const fallback = await this.resolveInferenceProfileFallback(request.model);
         if (fallback && fallback !== resolvedModelId) {
           console.log(`${logTag} Retrying with inference profile: ${fallback}`);
+          const retryMaxTokens = this.clampToKnownOutputLimit(fallback, request.maxTokens);
           const retryResponse = await this.client.send(
             new ConverseCommand({
               modelId: fallback,
               messages,
               system,
-              inferenceConfig: { maxTokens: request.maxTokens },
+              inferenceConfig: { maxTokens: retryMaxTokens },
               ...(toolConfig && { toolConfig }),
             }),
             request.signal ? { abortSignal: request.signal } : undefined,
@@ -241,10 +242,12 @@ export class BedrockProvider implements LLMProvider {
     if (profiles.length === 0) return null;
 
     const token = this.extractModelToken(requestedModel);
-    let best: { id: string; score: number } | null = null;
+    let best: { id: string; score: number; tokenMatchRank: number } | null = null;
+    let sawTokenCompatibleProfile = false;
 
     for (const profile of profiles) {
       let score = 0;
+      let tokenMatchRank = 0; // 0 = none, 1 = partial family match, 2 = exact family match
       if (profile.id.startsWith("us.")) score += 5;
       if (profile.type === "SYSTEM_DEFINED") score += 2;
 
@@ -252,18 +255,39 @@ export class BedrockProvider implements LLMProvider {
         for (const modelArn of profile.modelArns) {
           const arnToken = this.extractModelToken(modelArn);
           if (!arnToken) continue;
-          if (arnToken === token) score += 100;
-          else if (arnToken.includes(token) || token.includes(arnToken)) score += 30;
+          if (arnToken === token) {
+            tokenMatchRank = Math.max(tokenMatchRank, 2);
+            score += 100;
+          } else if (arnToken.includes(token) || token.includes(arnToken)) {
+            tokenMatchRank = Math.max(tokenMatchRank, 1);
+            score += 30;
+          }
+        }
+        if (tokenMatchRank > 0) {
+          sawTokenCompatibleProfile = true;
         }
       }
 
-      if (!best || score > best.score) {
-        best = { id: profile.id, score };
+      if (
+        !best ||
+        tokenMatchRank > best.tokenMatchRank ||
+        (tokenMatchRank === best.tokenMatchRank && score > best.score)
+      ) {
+        best = { id: profile.id, score, tokenMatchRank };
       }
     }
 
-    // If we couldn't match by token, pick the first usable profile (stable order from AWS).
-    if (!best || best.score === 0) {
+    if (!best) return null;
+
+    // Do not silently downgrade model families when a specific family was requested.
+    // If no compatible profile exists for the requested token, let callers surface a
+    // clear configuration error instead of routing to a different family.
+    if (token && !sawTokenCompatibleProfile) {
+      return null;
+    }
+
+    // Tokenless requests can still use the best available profile.
+    if (!token && best.score === 0) {
       return profiles[0].id;
     }
 

@@ -20,6 +20,7 @@ import { spawn, ChildProcess, execSync, exec } from "child_process";
 import { EventEmitter } from "events";
 import * as fs from "fs";
 import * as path from "path";
+import * as os from "os";
 import * as net from "net";
 import * as readline from "readline";
 
@@ -222,9 +223,16 @@ export class SignalClient extends EventEmitter {
       phoneNumber: options.phoneNumber,
       cliPath: options.cliPath || "signal-cli",
       dataDir:
-        options.dataDir || path.join(process.env.HOME || "", ".local", "share", "signal-cli"),
+        options.dataDir ||
+        (process.platform === "win32"
+          ? path.join(process.env.LOCALAPPDATA || process.env.USERPROFILE || "", "signal-cli")
+          : path.join(process.env.HOME || "", ".local", "share", "signal-cli")),
       mode: options.mode || "native",
-      socketPath: options.socketPath || "/tmp/signal-cli.socket",
+      socketPath:
+        options.socketPath ||
+        (process.platform === "win32"
+          ? path.join(os.tmpdir(), "signal-cli.socket")
+          : "/tmp/signal-cli.socket"),
       verbose: options.verbose || false,
     };
   }

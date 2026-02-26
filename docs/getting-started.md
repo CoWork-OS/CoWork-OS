@@ -97,7 +97,7 @@ Title: Create quarterly report
 Description: Create a PowerPoint presentation with 5 slides covering Q1 2024 highlights. Include: Title slide, Overview, Key Metrics, Challenges, and Next Steps.
 ```
 
-### 5. Web Research (requires search provider)
+### 5. Web Research (works out of the box; optional paid providers for richer results)
 
 ```
 Title: Research AI trends
@@ -195,12 +195,13 @@ Configure these in **Settings** > **LLM Provider** by entering API keys/tokens, 
 | OpenAI-Compatible (Custom) | API key + base URL in Settings |
 | Anthropic-Compatible (Custom) | API key + base URL in Settings |
 
-### Search Providers (Optional)
+### Search Providers (Optional — DuckDuckGo works out of the box)
 
-Open **Settings** > **Web Search** tab:
+Web search works immediately via the built-in DuckDuckGo provider (free, no API key). For richer results (news, images, AI-optimized ranking), configure a paid provider in **Settings** > **Web Search**:
 
 | Provider | Setup |
 |----------|-------|
+| DuckDuckGo | Built-in — no setup needed (automatic fallback) |
 | Tavily | Enter API key from [tavily.com](https://tavily.com) |
 | Brave | Enter API key from [brave.com/search/api](https://brave.com/search/api) |
 | SerpAPI | Enter API key from [serpapi.com](https://serpapi.com) |

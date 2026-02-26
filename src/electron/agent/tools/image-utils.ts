@@ -20,7 +20,7 @@ export interface DownscaleOptions {
 
 /**
  * Downscale an image buffer if it exceeds the given size threshold.
- * Uses macOS `sips` command (built-in, no dependencies required).
+ * Uses macOS `sips` command, ImageMagick `convert`, or Electron nativeImage.
  * Falls back to returning the original buffer if downscaling fails.
  */
 export async function downscaleImage(
@@ -43,8 +43,12 @@ export async function downscaleImage(
       return await downscaleWithSips(inputPath, outputPath, maxDim);
     }
 
-    // On non-macOS, try ImageMagick convert
-    return await downscaleWithConvert(inputPath, outputPath, maxDim);
+    // On Windows/Linux, try ImageMagick convert first, then fall back to Electron nativeImage
+    try {
+      return await downscaleWithConvert(inputPath, outputPath, maxDim);
+    } catch {
+      return await downscaleWithNativeImage(inputPath, outputPath, maxDim);
+    }
   } catch {
     // If downscaling fails for any reason, return the original
     return { buffer, mimeType };
@@ -109,5 +113,30 @@ async function downscaleWithConvert(
   ]);
 
   const resultBuffer = await fs.readFile(outputPath);
+  return { buffer: resultBuffer, mimeType: "image/jpeg" };
+}
+
+async function downscaleWithNativeImage(
+  inputPath: string,
+  outputPath: string,
+  maxDim: number,
+): Promise<DownscaleResult> {
+  // Use Electron's built-in nativeImage (works on all platforms, no external tools needed)
+  const { nativeImage } = require("electron");
+  const img = nativeImage.createFromPath(inputPath);
+  const { width, height } = img.getSize();
+
+  if (width <= maxDim && height <= maxDim) {
+    const resultBuffer = img.toJPEG(80);
+    await fs.writeFile(outputPath, resultBuffer);
+    return { buffer: resultBuffer, mimeType: "image/jpeg" };
+  }
+
+  const scale = maxDim / Math.max(width, height);
+  const newWidth = Math.round(width * scale);
+  const newHeight = Math.round(height * scale);
+  const resized = img.resize({ width: newWidth, height: newHeight, quality: "better" });
+  const resultBuffer = resized.toJPEG(80);
+  await fs.writeFile(outputPath, resultBuffer);
   return { buffer: resultBuffer, mimeType: "image/jpeg" };
 }

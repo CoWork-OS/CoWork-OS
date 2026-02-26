@@ -8,7 +8,7 @@
 
 <p align="center">
   <strong>Looking for an OpenClaw alternative? CoWork OS is a local-first option for production workflows.</strong><br>
-  Security-hardened, local-first AI operating system — 30+ LLM providers, 14 channels, 100+ skills
+  Security-hardened, local-first AI operating system — 30+ LLM providers, 14 channels, 130+ skills
 </p>
 
 <p align="center">
@@ -20,6 +20,7 @@
 
 <p align="center">
   <a href="docs/getting-started.md">Getting Started</a> &middot;
+  <a href="docs/showcase.md">Use Cases</a> &middot;
   <a href="docs/openclaw-comparison.md">OpenClaw Alternative Guide</a> &middot;
   <a href="docs/">Documentation</a> &middot;
   <a href="CHANGELOG.md">Changelog</a> &middot;
@@ -35,9 +36,9 @@
 
 - **30+ LLM providers** — Anthropic, OpenAI, Google, Ollama, AWS Bedrock, OpenRouter, and more. Bring your own keys.
 - **14 messaging channels** — WhatsApp, Telegram, Discord, Slack, Teams, iMessage, Signal, and more. Chat with your AI from anywhere.
-- **100+ built-in skills** — Documents, code review, web search, image generation, cloud integrations, and more.
+- **130+ built-in skills** — Documents, code review, web search, image generation, cloud integrations, game development, mobile development, infrastructure-as-code, and more.
 - **Digital Twin Personas** — Pre-built AI twins for every role (engineer, manager, PM, director). Each twin absorbs cognitively draining work — PR triage, meeting prep, status reports, dependency tracking — so the human stays in flow.
-- **Plugin Platform** — 10 bundled role-specific packs with 35+ skills, in-app Plugin Store for installing community packs, remote registry, and enterprise admin policies for organization-wide control.
+- **Plugin Platform** — 12 bundled role-specific packs (including Mobile Development and Game Development) with 45+ skills, in-app Plugin Store for installing community packs, remote registry, and enterprise admin policies for organization-wide control.
 - **Active Context sidebar** — Always-visible panel showing connected MCP connectors with branded Lucide icons and enabled skills, auto-refreshed every 30 seconds.
 - **Agent teams** — Multi-agent collaboration with shared checklists, collaborative mode, multi-LLM synthesis, and persistent teams.
 - **Think With Me mode** — Socratic brainstorming that helps you clarify thinking without executing actions.
@@ -137,7 +138,7 @@ Advanced web scraping powered by [Scrapling](https://github.com/D4Vinci/Scraplin
 ### Integrations
 
 - **Cloud Storage**: Notion, Box, OneDrive, Google Workspace, Dropbox, SharePoint
-- **Enterprise Connectors**: Salesforce, Jira, HubSpot, Zendesk, ServiceNow, Linear, Asana, Okta, Resend
+- **Enterprise Connectors**: Salesforce, Jira, HubSpot, Zendesk, ServiceNow, Linear, Asana, Okta, Discord, Slack, Resend
 - **Developer Tools**: Claude Code-style `glob`/`grep`/`edit_file`, Playwright browser automation, MCP client/host/registry
 
 [Learn more](docs/features.md)
@@ -172,9 +173,9 @@ Access from **Settings** > **Customize**. [Learn more](docs/plugin-packs.md)
 
 ### Extensibility
 
-- **100+ built-in skills** across developer, productivity, communication, documents, and more
+- **130+ built-in skills** across developer, productivity, communication, documents, game development, mobile development, infrastructure-as-code, and more
 - **Custom skills** in `~/Library/Application Support/cowork-os/skills/`
-- **10 bundled plugin packs** with 35+ role-specific skills and Digital Twin integration
+- **12 bundled plugin packs** with 45+ role-specific skills and Digital Twin integration
 - **Plugin Store** — browse, install from Git/URL, or scaffold custom packs
 - **MCP support** — client, host, and registry
 
@@ -188,7 +189,7 @@ Built-in structured entity and relationship memory backed by SQLite. The agent b
 
 ### Memory & Context
 
-Persistent memory with privacy protection, FTS5 search, LLM compression, and workspace kit (`.cowork/`) for durable project context. **Import your ChatGPT history** to eliminate the cold-start problem — CoWork OS knows you from day one. All imported data is stored locally and encrypted on your Mac. [Learn more](docs/features.md#persistent-memory-system)
+Persistent memory with privacy protection, FTS5 search, LLM compression, and workspace kit (`.cowork/`) for durable project context. **Import your ChatGPT history** to eliminate the cold-start problem — CoWork OS knows you from day one. All imported data is stored locally and encrypted on your Mac. **Proactive session compaction** automatically generates comprehensive structured summaries when context reaches 90% capacity — preserving user messages, decisions, file changes, errors, and pending work so the agent continues seamlessly without losing critical context. [Learn more](docs/features.md#persistent-memory-system) | [Context Compaction](docs/context-compaction.md)
 
 <p align="center">
   <img src="screenshots/cowork-os-main3.png" alt="Collaborative Mode" width="700">
@@ -281,6 +282,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
 | Guide | Description |
 |-------|-------------|
 | [Getting Started](docs/getting-started.md) | First-time setup and usage |
+| [Use Case Showcase](docs/showcase.md) | Comprehensive guide to what you can build and automate |
 | [Features](docs/features.md) | Complete feature reference |
 | [OpenClaw Alternative Guide](docs/openclaw-comparison.md) | Respectful category framing for users evaluating an OpenClaw alternative |
 | [Channels](docs/channels.md) | Messaging channel setup (14 channels) |
@@ -294,6 +296,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
 | [VPS/Linux](docs/vps-linux.md) | Headless server deployment |
 | [Remote Access](docs/remote-access.md) | Tailscale, SSH tunnels, WebSocket API |
 | [Knowledge Graph](docs/knowledge-graph.md) | Structured entity/relationship memory |
+| [Context Compaction](docs/context-compaction.md) | Proactive session compaction with structured summaries |
 | [Mission Control](docs/mission-control.md) | Agent orchestration dashboard |
 | [Plugin Packs](docs/plugin-packs.md) | Plugin platform, Customize panel, and Plugin Store |
 | [Admin Policies](docs/admin-policies.md) | Enterprise admin policies and organization pack management |

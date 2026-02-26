@@ -1,0 +1,55 @@
+{
+  "id": "financial-modeling",
+  "name": "Financial Modeling",
+  "description": "Build and analyze three-statement financial models with integrated income statement, balance sheet, and cash flow projections, scenario analysis, and key driver assumptions.",
+  "icon": "📐",
+  "category": "Finance",
+  "prompt": "# Financial Modeling Request\n\n**Model Type:** {{modelType}}\n**Company:** {{company}}\n**Question:** {{question}}\n\n**Additional Context (if provided):**\n- Historical Data: {{historicalData}}\n- Assumptions: {{assumptions}}\n\nUsing the financial modeling framework below, build or analyze the requested model. Incorporate any provided data and assumptions. Where data is missing, use industry benchmarks and clearly state all assumptions.\n\n---\n\n# Three-Statement Financial Modeling Reference\n\n## Core Architecture\n\nA three-statement model links the income statement, balance sheet, and cash flow statement so that a change in any driver cascades through all three statements automatically.\n\n**Flow of Logic:**\n1. Revenue drivers feed the Income Statement\n2. Income Statement flows into Retained Earnings on the Balance Sheet\n3. Balance Sheet changes drive the Cash Flow Statement\n4. Cash Flow Statement feeds back into the Balance Sheet (cash balance)\n5. Debt balances feed interest expense back into the Income Statement (circular reference)\n\n## Income Statement Build\n\n### Revenue Build Approaches\n\n**Volume x Price:**\n- Units sold x Average Selling Price\n- Segment by product line, geography, or customer type\n\n**Cohort-Based (SaaS/subscription):**\n- Beginning customers + New - Churned = Ending customers\n- Revenue = Ending Customers x ARPU\n- Include expansion revenue from upsells\n\n**Same-Store + New:**\n- Existing locations x SSS growth %\n- Plus: New location count x Average Unit Volume x Ramp factor\n\n**Backlog/Pipeline:**\n- Beginning backlog + New orders - Deliveries = Ending backlog\n- Revenue recognized from deliveries\n\n### Income Statement Structure\n\n| Line Item | Driver | Notes |\n|-----------|--------|-------|\n| Revenue | Model-specific build | See approaches above |\n| COGS | % of revenue or unit cost | Split fixed/variable when possible |\n| **Gross Profit** | Revenue - COGS | Target: 40-80% depending on industry |\n| R&D | % of revenue | Tech: 15-25%, Pharma: 15-20% |\n| Sales & Marketing | % of revenue | SaaS: 20-50%, Consumer: 10-20% |\n| G&A | % of revenue, partially fixed | 8-15% of revenue |\n| **EBITDA** | GP - OpEx | |\n| D&A | % of PP&E or revenue | Linked to CapEx schedule |\n| **EBIT** | EBITDA - D&A | |\n| Interest Expense | Avg Debt x Interest Rate | Circular with debt schedule |\n| Interest Income | Avg Cash x Yield | |\n| **EBT** | EBIT - Net Interest | |\n| Taxes | EBT x Effective Tax Rate | 21% US federal + state |\n| **Net Income** | EBT - Taxes | |\n| EPS | Net Income / Diluted Shares | Treasury stock method for options |\n\n## Balance Sheet Build\n\n### Working Capital Drivers\n\n| Item | Driver | Formula | Benchmark |\n|------|--------|---------|----------|\n| Accounts Receivable | Days Sales Outstanding (DSO) | Revenue / 365 x DSO | 30-60 days |\n| Inventory | Days Inventory Outstanding (DIO) | COGS / 365 x DIO | 30-90 days |\n| Prepaid Expenses | % of OpEx | | 1-3% |\n| Accounts Payable | Days Payable Outstanding (DPO) | COGS / 365 x DPO | 30-60 days |\n| Accrued Expenses | % of OpEx | | 5-10% |\n| Deferred Revenue | % of revenue | Common in SaaS | 5-20% |\n\n**Net Working Capital = Current Assets (ex-cash) - Current Liabilities (ex-debt)**\n**Change in NWC = NWC_current - NWC_prior** (increase = cash outflow)\n\n### Fixed Asset Schedule\n\n| Item | Formula |\n|------|--------|\n| Beginning PP&E | Prior year ending PP&E |\n| + Capital Expenditures | % of revenue (maintenance + growth) |\n| - Depreciation | Straight-line over useful life |\n| - Asset Disposals | If applicable |\n| = Ending PP&E | |\n\n**CapEx benchmarks:**\n- Maintenance CapEx: ~D&A (keeps asset base steady)\n- Growth CapEx: Additional investment for expansion\n- Asset-light (SaaS): 2-5% of revenue\n- Asset-heavy (manufacturing): 8-15% of revenue\n\n### Debt Schedule\n\n| Item | Formula |\n|------|--------|\n| Beginning Debt | Prior year ending debt |\n| + New Borrowings | From financing assumptions |\n| - Mandatory Repayments | Amortization schedule |\n| - Optional Prepayments | Cash sweep or strategic |\n| = Ending Debt | |\n| Interest Expense | Average Debt x Interest Rate |\n\n### Balance Sheet Structure\n\n**Assets = Liabilities + Equity** (must always balance)\n\nCash is typically the plug: if the model generates excess cash, it accumulates; if cash goes negative, a revolver draws.\n\n## Cash Flow Statement Build\n\n### Operating Activities (Indirect Method)\n\nNet Income\n+ D&A (add back non-cash)\n+ Stock-Based Compensation (add back non-cash)\n- Gains on asset sales\n+/- Changes in Working Capital\n  - (Increase) / Decrease in AR\n  - (Increase) / Decrease in Inventory\n  - (Increase) / Decrease in Prepaid\n  + Increase / (Decrease) in AP\n  + Increase / (Decrease) in Accrued\n  + Increase / (Decrease) in Deferred Revenue\n= **Cash from Operations (CFO)**\n\n### Investing Activities\n\n- Capital Expenditures\n- Acquisitions\n+ Proceeds from asset sales\n+ Proceeds from investment maturities\n= **Cash from Investing (CFI)**\n\n### Financing Activities\n\n+ Debt Issuance\n- Debt Repayment\n+ Equity Issuance\n- Share Repurchases\n- Dividends Paid\n= **Cash from Financing (CFF)**\n\n**Net Change in Cash = CFO + CFI + CFF**\n**Ending Cash = Beginning Cash + Net Change in Cash**\n\n## Circular Reference Handling\n\nThe classic circularity: Interest Expense depends on Debt Balance, which depends on Cash, which depends on Net Income, which depends on Interest Expense.\n\n**Resolution Methods:**\n1. **Iterative calculation:** Enable iterative calculations (Excel: File > Options > Formulas > Enable iterative calculation; max iterations 100, max change 0.001)\n2. **Copy-paste macro:** Calculate interest on beginning balance, then iterate\n3. **Average balance method:** Interest = (Beginning Debt + Ending Debt) / 2 x Rate (most common)\n4. **Prior period balance:** Use beginning-of-period debt (simplest, slightly less accurate)\n\n## Scenario Analysis Framework\n\n### Three-Scenario Model\n\n| Driver | Bear Case | Base Case | Bull Case |\n|--------|-----------|-----------|----------|\n| Revenue Growth | -1 to +5% | +5 to +15% | +15 to +30% |\n| Gross Margin | -200bps vs base | Industry median | +200bps vs base |\n| OpEx Leverage | Flat margins | 50-100bps/yr improvement | 150-200bps/yr improvement |\n| CapEx Intensity | +20% vs base | Management guidance | -10% vs base |\n| Working Capital | +5 days DSO | Stable | -5 days DSO |\n| Tax Rate | +2% vs base | Statutory rate | -2% vs base |\n\n### Probability-Weighted Valuation\n\nExpected Value = P(Bear) x Value_Bear + P(Base) x Value_Base + P(Bull) x Value_Bull\n\nTypical weights: Bear 25%, Base 50%, Bull 25%\n\n## Model Integrity Checks\n\n1. **Balance sheet balances:** Assets = Liabilities + Equity (every period)\n2. **Cash flow reconciliation:** Ending cash on CFS = Cash on BS\n3. **Retained earnings:** Beginning RE + Net Income - Dividends = Ending RE\n4. **Debt schedule ties:** Ending debt on schedule = Debt on BS\n5. **Interest coverage:** EBIT / Interest Expense > 2x (solvency check)\n6. **Revenue reasonableness:** Implied market share should be credible\n7. **Margin trajectory:** Should converge to industry long-term averages\n\n## Key Ratios to Output\n\n| Category | Ratios |\n|----------|--------|\n| Profitability | Gross Margin, EBITDA Margin, Net Margin, ROE, ROA, ROIC |\n| Liquidity | Current Ratio, Quick Ratio, Cash Ratio |\n| Leverage | Debt/Equity, Debt/EBITDA, Interest Coverage |\n| Efficiency | Asset Turnover, Inventory Turnover, DSO, DPO, CCC |\n| Returns | ROIC = NOPAT / Invested Capital, ROE = NI / Equity |\n| Growth | Revenue CAGR, EPS CAGR, FCF CAGR |",
+  "parameters": [
+    {
+      "name": "modelType",
+      "type": "select",
+      "description": "Type of financial model to build",
+      "required": true,
+      "options": [
+        "Three-Statement",
+        "Revenue Build",
+        "Operating Model",
+        "Scenario Analysis"
+      ]
+    },
+    {
+      "name": "company",
+      "type": "string",
+      "description": "Company name or ticker symbol",
+      "required": true
+    },
+    {
+      "name": "question",
+      "type": "string",
+      "description": "Your specific modeling question",
+      "required": true
+    },
+    {
+      "name": "historicalData",
+      "type": "string",
+      "description": "Historical financial data or key metrics (e.g., last 3 years revenue, margins)",
+      "required": false
+    },
+    {
+      "name": "assumptions",
+      "type": "string",
+      "description": "Key assumptions to use (e.g., 15% revenue growth, 30% EBITDA margin target)",
+      "required": false
+    }
+  ],
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when the user asks about building a financial model, three-statement model, income statement projection, balance sheet forecasting, cash flow modeling, scenario analysis, or linking financial statements together.",
+      "dontUseWhen": "Do not use when the request is purely about valuation (use DCF Valuation), portfolio management, or non-financial-model analysis like earnings reviews.",
+      "outputs": "Outcome from Financial Modeling: integrated three-statement model with driver assumptions, projected financials, scenario analysis, and model integrity checks.",
+      "successCriteria": "Returns a complete linked financial model with clearly stated assumptions, all three statements, working capital and debt schedules, scenario outputs, and balance checks."
+    }
+  }
+}

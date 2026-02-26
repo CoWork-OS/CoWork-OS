@@ -92,7 +92,8 @@ export class UpdateManager {
       "node_modules/cowork-os",
       ".nvm/versions/node",
       ".npm-global",
-      "AppData/Roaming/npm/node_modules", // Windows
+      "AppData/Roaming/npm/node_modules", // Windows (user-level)
+      "Program Files/nodejs/node_modules", // Windows (system-level)
     ];
 
     const normalizedPath = appPath.replace(/\\/g, "/");

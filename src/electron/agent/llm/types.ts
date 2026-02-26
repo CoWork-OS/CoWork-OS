@@ -191,6 +191,8 @@ export interface LLMRequest {
   signal?: AbortSignal;
   /** Optional callback for streaming progress (token counts, elapsed time). */
   onStreamProgress?: StreamProgressCallback;
+  /** Opaque call ID injected by the logging wrapper for log correlation. */
+  _callId?: number;
 }
 
 export interface LLMResponse {

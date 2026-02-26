@@ -2,7 +2,6 @@ import * as fs from "node:fs";
 import os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { v4 as uuidv4 } from "uuid";
 
 import { CronService, setCronService } from "../../../cron";
 import { CronTools } from "../cron-tools";
@@ -10,59 +9,53 @@ import { TEMP_WORKSPACE_ID, type Workspace } from "../../../../shared/types";
 
 describe("CronTools.schedule_create workspace behavior", () => {
   let tmpUserDataDir: string;
-  let prevUserDataDirOverride: string | undefined;
   let service: CronService;
 
   const makeDaemonStub = () => {
     return {
       logEvent: vi.fn(),
-      createWorkspace: vi.fn((name: string, p: string) => {
-        const now = Date.now();
-        const ws: Workspace = {
-          id: uuidv4(),
-          name,
-          path: p,
-          createdAt: now,
-          lastUsedAt: now,
-          permissions: { read: true, write: true, delete: false, network: true, shell: false },
-        };
-        return ws;
-      }),
+      createWorkspace: vi.fn(),
     } as any;
   };
 
-  beforeEach(() => {
-    prevUserDataDirOverride = process.env.COWORK_USER_DATA_DIR;
-    tmpUserDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-cron-tools-test-"));
-    process.env.COWORK_USER_DATA_DIR = tmpUserDataDir;
-
-    service = new CronService({
+  const createService = (resolveWorkspaceContext?: any) =>
+    new CronService({
       cronEnabled: true,
       storePath: path.join(tmpUserDataDir, "cron", "jobs.json"),
       createTask: async () => ({ id: "task-123" }),
+      resolveWorkspaceContext,
       log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
       nowMs: () => 1000,
     });
+
+  beforeEach(async () => {
+    tmpUserDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-cron-tools-test-"));
+    service = createService();
     setCronService(service);
+    await service.start();
   });
 
   afterEach(async () => {
     setCronService(null);
     await service.stop();
-
-    // Best-effort cleanup
     try {
       fs.rmSync(tmpUserDataDir, { recursive: true, force: true });
-    } catch {}
-
-    if (prevUserDataDirOverride === undefined) {
-      delete process.env.COWORK_USER_DATA_DIR;
-    } else {
-      process.env.COWORK_USER_DATA_DIR = prevUserDataDirOverride;
+    } catch {
+      // Best-effort cleanup
     }
   });
 
-  it("auto-creates a dedicated workspace when scheduling from the global temp workspace", async () => {
+  it("delegates temp-workspace normalization to CronService", async () => {
+    await service.stop();
+    service = createService(async ({ phase }: { phase: "add" | "run" }) => {
+      if (phase === "add") {
+        return { workspaceId: "managed-scheduled-workspace" };
+      }
+      return null;
+    });
+    setCronService(service);
+    await service.start();
+
     const daemon = makeDaemonStub();
     const tempWorkspace: Workspace = {
       id: TEMP_WORKSPACE_ID,
@@ -88,21 +81,13 @@ describe("CronTools.schedule_create workspace behavior", () => {
     });
 
     expect(result.success).toBe(true);
-    expect(result.job?.workspaceId).not.toBe(TEMP_WORKSPACE_ID);
-    expect(daemon.createWorkspace).toHaveBeenCalledTimes(1);
-
-    const createdWs = daemon.createWorkspace.mock.results[0].value as Workspace;
-    expect(result.job?.workspaceId).toBe(createdWs.id);
-    expect(createdWs.name).toBe("Scheduled: Daily Briefing");
-    expect(fs.existsSync(createdWs.path)).toBe(true);
-    expect(
-      createdWs.path.startsWith(path.join(tmpUserDataDir, "scheduled-workspaces") + path.sep),
-    ).toBe(true);
+    expect(result.job?.workspaceId).toBe("managed-scheduled-workspace");
+    expect(daemon.createWorkspace).not.toHaveBeenCalled();
   });
 
-  it("uses the existing workspace when scheduling from a normal workspace", async () => {
+  it("uses the active workspace ID when no resolver override is returned", async () => {
     const daemon = makeDaemonStub();
-    const workspaceId = uuidv4();
+    const workspaceId = "ws-1234";
     const normalWorkspace: Workspace = {
       id: workspaceId,
       name: "My Workspace",
@@ -120,6 +105,5 @@ describe("CronTools.schedule_create workspace behavior", () => {
 
     expect(result.success).toBe(true);
     expect(result.job?.workspaceId).toBe(workspaceId);
-    expect(daemon.createWorkspace).not.toHaveBeenCalled();
   });
 });

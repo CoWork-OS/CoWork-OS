@@ -212,9 +212,10 @@ function sanitizeWorkspaceCreateParams(params: unknown): { name: string; path: s
   if (!name) throw { code: ErrorCodes.INVALID_PARAMS, message: "name is required" };
   if (!rawPath) throw { code: ErrorCodes.INVALID_PARAMS, message: "path is required" };
 
+  const homeDir = process.env.HOME || process.env.USERPROFILE;
   const expanded =
-    rawPath.startsWith("~/") && process.env.HOME
-      ? path.join(process.env.HOME, rawPath.slice(2))
+    rawPath.startsWith("~/") && homeDir
+      ? path.join(homeDir, rawPath.slice(2))
       : rawPath;
   if (!path.isAbsolute(expanded)) {
     throw {

@@ -4,7 +4,10 @@ import {
   handleMaxTokensRecovery,
   maybeInjectLowProgressNudge,
   maybeInjectStopReasonNudge,
+  shouldForceStopAfterSkippedToolOnlyTurns,
+  shouldLockFollowUpToolCalls,
   type ToolLoopCall,
+  updateSkippedToolOnlyTurnStreak,
 } from "../executor-loop-utils";
 
 describe("executor-loop-utils guardrails", () => {
@@ -146,5 +149,50 @@ describe("executor-loop-utils guardrails", () => {
     expect(injected).toBe(true);
     expect(messages.length).toBe(1);
     expect(String((messages[0].content as any[])[0]?.text || "")).toContain("repeated tool-use");
+  });
+
+  it("locks follow-up tool calls after persistent tool_use streak", () => {
+    const shouldLock = shouldLockFollowUpToolCalls({
+      stopReason: "tool_use",
+      consecutiveToolUseStops: 10,
+      followUpToolCallCount: 12,
+      stopReasonNudgeInjected: true,
+    });
+    expect(shouldLock).toBe(true);
+  });
+
+  it("does not lock follow-up tool calls before nudge/streak threshold", () => {
+    const shouldLock = shouldLockFollowUpToolCalls({
+      stopReason: "tool_use",
+      consecutiveToolUseStops: 7,
+      followUpToolCallCount: 12,
+      stopReasonNudgeInjected: false,
+    });
+    expect(shouldLock).toBe(false);
+  });
+
+  it("tracks skipped-tool-only streak and forces stop after threshold", () => {
+    let streak = updateSkippedToolOnlyTurnStreak({
+      skippedToolCalls: 2,
+      hasTextInThisResponse: false,
+      previousStreak: 0,
+    });
+    expect(streak).toBe(1);
+    expect(shouldForceStopAfterSkippedToolOnlyTurns(streak, 2)).toBe(false);
+
+    streak = updateSkippedToolOnlyTurnStreak({
+      skippedToolCalls: 1,
+      hasTextInThisResponse: false,
+      previousStreak: streak,
+    });
+    expect(streak).toBe(2);
+    expect(shouldForceStopAfterSkippedToolOnlyTurns(streak, 2)).toBe(true);
+
+    streak = updateSkippedToolOnlyTurnStreak({
+      skippedToolCalls: 1,
+      hasTextInThisResponse: true,
+      previousStreak: streak,
+    });
+    expect(streak).toBe(0);
   });
 });

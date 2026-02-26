@@ -61,6 +61,11 @@ import { MCPClientManager } from "./mcp/client/MCPClientManager";
 import { InfraManager } from "./infra/infra-manager";
 import { trayManager } from "./tray";
 import { CronService, setCronService, getCronStorePath } from "./cron";
+import {
+  buildManagedScheduledWorkspacePath,
+  createScheduledRunDirectory,
+  isManagedScheduledWorkspacePath,
+} from "./cron/workspace-context";
 import { MemoryService } from "./memory/MemoryService";
 import { KnowledgeGraphService } from "./knowledge-graph/KnowledgeGraphService";
 import {
@@ -82,7 +87,9 @@ import { getUserDataDir } from "./utils/user-data-dir";
 import { registerCanvasScheme, registerCanvasProtocol, CanvasManager } from "./canvas";
 import { setupCanvasHandlers, cleanupCanvasHandlers } from "./ipc/canvas-handlers";
 import { pruneTempWorkspaces } from "./utils/temp-workspace";
+import { getActiveTempWorkspaceLeases } from "./utils/temp-workspace-lease";
 import { getPluginRegistry } from "./extensions/registry";
+import { pruneTempSandboxProfiles } from "./utils/temp-sandbox-profiles";
 // Gap features: triggers, briefing, file hub, web access
 import { EventTriggerService } from "./triggers/EventTriggerService";
 import { setupTriggerHandlers } from "./ipc/trigger-handlers";
@@ -103,7 +110,9 @@ let crossSignalService: CrossSignalService | null = null;
 let feedbackService: FeedbackService | null = null;
 let loreService: LoreService | null = null;
 let tempWorkspacePruneTimer: NodeJS.Timeout | null = null;
+let tempSandboxProfilePruneTimer: NodeJS.Timeout | null = null;
 const TEMP_WORKSPACE_PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const TEMP_SANDBOX_PROFILE_PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 const HEADLESS = isHeadlessMode();
 const FORCE_ENABLE_CONTROL_PLANE = shouldEnableControlPlaneFromArgsOrEnv();
@@ -245,6 +254,7 @@ if (!gotTheLock) {
         pruneTempWorkspaces({
           db: dbManager.getDatabase(),
           tempWorkspaceRoot,
+          protectedWorkspaceIds: getActiveTempWorkspaceLeases(),
         });
       } catch (error) {
         console.warn("[Main] Failed to prune temp workspaces:", error);
@@ -253,6 +263,19 @@ if (!gotTheLock) {
     runTempWorkspacePrune();
     tempWorkspacePruneTimer = setInterval(runTempWorkspacePrune, TEMP_WORKSPACE_PRUNE_INTERVAL_MS);
     tempWorkspacePruneTimer.unref();
+    const runTempSandboxProfilePrune = () => {
+      try {
+        pruneTempSandboxProfiles();
+      } catch (error) {
+        console.warn("[Main] Failed to prune temp sandbox profiles:", error);
+      }
+    };
+    runTempSandboxProfilePrune();
+    tempSandboxProfilePruneTimer = setInterval(
+      runTempSandboxProfilePrune,
+      TEMP_SANDBOX_PROFILE_PRUNE_INTERVAL_MS,
+    );
+    tempSandboxProfilePruneTimer.unref();
 
     // Initialize secure settings repository for encrypted settings storage
     // This MUST be done before provider factories so they can migrate legacy settings
@@ -426,6 +449,25 @@ if (!gotTheLock) {
       const channelRepo = new ChannelRepository(db);
       const channelUserRepo = new ChannelUserRepository(db);
       const channelMessageRepo = new ChannelMessageRepository(db);
+      const workspaceRepo = new WorkspaceRepository(db);
+      const userDataDir = getUserDataDir();
+
+      const ensureManagedWorkspaceForCronJob = async (
+        job: { id: string; name: string },
+        nowMs: number,
+      ) => {
+        const managedPath = buildManagedScheduledWorkspacePath(userDataDir, job.name, job.id);
+        await fs.mkdir(managedPath, { recursive: true });
+
+        let workspace = workspaceRepo.findByPath(managedPath);
+        if (!workspace) {
+          workspace = agentDaemon.createWorkspace(`Scheduled: ${job.name}`.trim(), managedPath);
+        } else {
+          workspaceRepo.updateLastUsedAt(workspace.id, nowMs);
+        }
+
+        return workspace;
+      };
 
       cronService = new CronService({
         cronEnabled: true,
@@ -437,6 +479,49 @@ if (!gotTheLock) {
           port: 9876,
           host: "127.0.0.1",
           // secret: 'your-secret-here', // Uncomment and set for secure webhooks
+        },
+        resolveWorkspaceContext: async ({ job, nowMs, phase }) => {
+          let workspace = workspaceRepo.findById(job.workspaceId);
+
+          const needsManagedWorkspace =
+            !workspace || workspace.isTemp || isTempWorkspaceId(workspace.id);
+          if (needsManagedWorkspace) {
+            workspace = await ensureManagedWorkspaceForCronJob(job, nowMs);
+          } else {
+            workspaceRepo.updateLastUsedAt(workspace.id, nowMs);
+          }
+
+          if (!workspace) {
+            return null;
+          }
+
+          const managedWorkspace = isManagedScheduledWorkspacePath(workspace.path, userDataDir);
+          if (phase === "run" && managedWorkspace) {
+            let runDirectory:
+              | ReturnType<typeof createScheduledRunDirectory>
+              | null = null;
+            try {
+              runDirectory = createScheduledRunDirectory(workspace.path, { nowMs });
+            } catch (error) {
+              console.warn(
+                `[Cron] Failed to prepare run directory for job "${job.name}" (${job.id})`,
+                error,
+              );
+            }
+            if (runDirectory) {
+              return {
+                workspaceId: workspace.id,
+                workspacePath: workspace.path,
+                runWorkspacePath: runDirectory.path,
+                runWorkspaceRelativePath: runDirectory.relativePath,
+              };
+            }
+          }
+
+          return {
+            workspaceId: workspace.id,
+            workspacePath: workspace.path,
+          };
         },
         createTask: async (params) => {
           const allowUserInput = params.allowUserInput ?? false;
@@ -1364,6 +1449,10 @@ if (!gotTheLock) {
     if (tempWorkspacePruneTimer) {
       clearInterval(tempWorkspacePruneTimer);
       tempWorkspacePruneTimer = null;
+    }
+    if (tempSandboxProfilePruneTimer) {
+      clearInterval(tempSandboxProfilePruneTimer);
+      tempSandboxProfilePruneTimer = null;
     }
 
     // Destroy tray

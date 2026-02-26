@@ -148,17 +148,26 @@ if (!gotTheLock) {
   });
 
   function createWindow() {
+    const isMac = process.platform === "darwin";
+
     mainWindow = new BrowserWindow({
       width: 1600,
       height: 1000,
       minWidth: 1200,
       minHeight: 800,
       center: true,
-      titleBarStyle: "hiddenInset",
-      vibrancy: "under-window",
-      visualEffectState: "active",
-      transparent: true,
-      backgroundColor: "#00000000",
+      titleBarStyle: isMac ? "hiddenInset" : "hidden",
+      ...(isMac
+        ? {
+            vibrancy: "under-window" as const,
+            visualEffectState: "active" as const,
+            transparent: true,
+            backgroundColor: "#00000000",
+          }
+        : {
+            transparent: false,
+            backgroundColor: "#1a1a1c",
+          }),
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,
@@ -348,9 +357,10 @@ if (!gotTheLock) {
         bootstrapPathRaw.trim().length > 0
       ) {
         const raw = bootstrapPathRaw.trim();
+        const homeDir = process.env.HOME || process.env.USERPROFILE;
         const expanded =
-          raw.startsWith("~/") && process.env.HOME
-            ? path.join(process.env.HOME, raw.slice(2))
+          raw.startsWith("~/") && homeDir
+            ? path.join(homeDir, raw.slice(2))
             : raw;
         const workspacePath = path.resolve(expanded);
         await fs.mkdir(workspacePath, { recursive: true });
@@ -500,9 +510,7 @@ if (!gotTheLock) {
 
           const managedWorkspace = isManagedScheduledWorkspacePath(workspace.path, userDataDir);
           if (phase === "run" && managedWorkspace) {
-            let runDirectory:
-              | ReturnType<typeof createScheduledRunDirectory>
-              | null = null;
+            let runDirectory: ReturnType<typeof createScheduledRunDirectory> | null = null;
             try {
               runDirectory = createScheduledRunDirectory(workspace.path, { nowMs });
             } catch (error) {
@@ -1282,98 +1290,96 @@ if (!gotTheLock) {
       };
 
       const initialWebAccessSettings = loadWebAccessSettings();
-      const webAccessServer = new WebAccessServer(
-        initialWebAccessSettings,
-        {
-          handleIpcInvoke: async (channel: string, ...args: Any[]) => {
-            switch (channel) {
-              case "task:list":
-                return webAccessTaskRepo.findAll();
-              case "task:create": {
-                const payload = args[0] && typeof args[0] === "object" ? args[0] : {};
-                const prompt = typeof payload.prompt === "string" ? payload.prompt.trim() : "";
-                if (!prompt) {
-                  throw new Error("Task prompt is required.");
-                }
-                const workspaceId =
-                  typeof payload.workspaceId === "string" && payload.workspaceId.trim().length > 0
-                    ? payload.workspaceId.trim()
-                    : getDefaultWebWorkspaceId();
-                if (!workspaceId) {
-                  throw new Error("No workspace available for task creation.");
-                }
-                const title =
-                  typeof payload.title === "string" && payload.title.trim().length > 0
-                    ? payload.title.trim()
-                    : "Web Access Task";
-                return agentDaemon.createTask({
-                  title,
-                  prompt,
-                  workspaceId,
-                  source: "api",
-                });
+      const webAccessServer = new WebAccessServer(initialWebAccessSettings, {
+        handleIpcInvoke: async (channel: string, ...args: Any[]) => {
+          switch (channel) {
+            case "task:list":
+              return webAccessTaskRepo.findAll();
+            case "task:create": {
+              const payload = args[0] && typeof args[0] === "object" ? args[0] : {};
+              const prompt = typeof payload.prompt === "string" ? payload.prompt.trim() : "";
+              if (!prompt) {
+                throw new Error("Task prompt is required.");
               }
-              case "task:get": {
-                const taskId = typeof args[0] === "string" ? args[0].trim() : "";
-                if (!taskId) {
-                  throw new Error("Task ID is required.");
-                }
-                return webAccessTaskRepo.findById(taskId) ?? null;
+              const workspaceId =
+                typeof payload.workspaceId === "string" && payload.workspaceId.trim().length > 0
+                  ? payload.workspaceId.trim()
+                  : getDefaultWebWorkspaceId();
+              if (!workspaceId) {
+                throw new Error("No workspace available for task creation.");
               }
-              case "task:sendMessage": {
-                const payload = args[0] && typeof args[0] === "object" ? args[0] : {};
-                const taskId = typeof payload.taskId === "string" ? payload.taskId.trim() : "";
-                const message = typeof payload.message === "string" ? payload.message.trim() : "";
-                if (!taskId || !message) {
-                  throw new Error("taskId and message are required.");
-                }
-                return agentDaemon.sendMessage(taskId, message);
-              }
-              case "task:events": {
-                const taskId = typeof args[0] === "string" ? args[0].trim() : "";
-                if (!taskId) {
-                  throw new Error("Task ID is required.");
-                }
-                const events = agentDaemon.getTaskEvents(taskId);
-                const maxEvents = 600;
-                return events.length > maxEvents ? events.slice(-maxEvents) : events;
-              }
-              case "workspace:list":
-                return webAccessWorkspaceRepo
-                  .findAll()
-                  .filter((workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id));
-              case "briefing:generate": {
-                const workspaceId =
-                  typeof args[0] === "string" && args[0].trim().length > 0
-                    ? args[0].trim()
-                    : getDefaultWebWorkspaceId();
-                if (!workspaceId) {
-                  throw new Error("workspaceId is required.");
-                }
-                return briefingService.generateBriefing(workspaceId);
-              }
-              case "suggestions:list": {
-                const workspaceId = typeof args[0] === "string" ? args[0].trim() : "";
-                if (!workspaceId) return [];
-                const { ProactiveSuggestionsService } = await import(
-                  "./agent/ProactiveSuggestionsService"
-                );
-                return ProactiveSuggestionsService.listActive(workspaceId);
-              }
-              default:
-                throw new Error(`Unsupported web access channel: ${channel}`);
+              const title =
+                typeof payload.title === "string" && payload.title.trim().length > 0
+                  ? payload.title.trim()
+                  : "Web Access Task";
+              return agentDaemon.createTask({
+                title,
+                prompt,
+                workspaceId,
+                source: "api",
+              });
             }
-          },
-          getRendererPath: () => {
-// oxlint-disable-next-line typescript-eslint(no-require-imports)
-            const { app } = require("electron");
-            return path.join(app.getAppPath(), "dist", "renderer");
-          },
-          log: (...args: unknown[]) => console.log("[WebAccess]", ...args),
+            case "task:get": {
+              const taskId = typeof args[0] === "string" ? args[0].trim() : "";
+              if (!taskId) {
+                throw new Error("Task ID is required.");
+              }
+              return webAccessTaskRepo.findById(taskId) ?? null;
+            }
+            case "task:sendMessage": {
+              const payload = args[0] && typeof args[0] === "object" ? args[0] : {};
+              const taskId = typeof payload.taskId === "string" ? payload.taskId.trim() : "";
+              const message = typeof payload.message === "string" ? payload.message.trim() : "";
+              if (!taskId || !message) {
+                throw new Error("taskId and message are required.");
+              }
+              return agentDaemon.sendMessage(taskId, message);
+            }
+            case "task:events": {
+              const taskId = typeof args[0] === "string" ? args[0].trim() : "";
+              if (!taskId) {
+                throw new Error("Task ID is required.");
+              }
+              const events = agentDaemon.getTaskEvents(taskId);
+              const maxEvents = 600;
+              return events.length > maxEvents ? events.slice(-maxEvents) : events;
+            }
+            case "workspace:list":
+              return webAccessWorkspaceRepo
+                .findAll()
+                .filter((workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id));
+            case "briefing:generate": {
+              const workspaceId =
+                typeof args[0] === "string" && args[0].trim().length > 0
+                  ? args[0].trim()
+                  : getDefaultWebWorkspaceId();
+              if (!workspaceId) {
+                throw new Error("workspaceId is required.");
+              }
+              return briefingService.generateBriefing(workspaceId);
+            }
+            case "suggestions:list": {
+              const workspaceId = typeof args[0] === "string" ? args[0].trim() : "";
+              if (!workspaceId) return [];
+              const { ProactiveSuggestionsService } =
+                await import("./agent/ProactiveSuggestionsService");
+              return ProactiveSuggestionsService.listActive(workspaceId);
+            }
+            default:
+              throw new Error(`Unsupported web access channel: ${channel}`);
+          }
         },
-      );
+        getRendererPath: () => {
+          // oxlint-disable-next-line typescript-eslint(no-require-imports)
+          const { app } = require("electron");
+          return path.join(app.getAppPath(), "dist", "renderer");
+        },
+        log: (...args: unknown[]) => console.log("[WebAccess]", ...args),
+      });
       const normalizedWebAccessSettings = webAccessServer.getConfig();
-      if (JSON.stringify(initialWebAccessSettings) !== JSON.stringify(normalizedWebAccessSettings)) {
+      if (
+        JSON.stringify(initialWebAccessSettings) !== JSON.stringify(normalizedWebAccessSettings)
+      ) {
         saveWebAccessSettings(normalizedWebAccessSettings);
       }
       if (normalizedWebAccessSettings.enabled) {
@@ -1401,8 +1407,8 @@ if (!gotTheLock) {
         }
       });
 
-      // Initialize menu bar tray (macOS native companion)
-      if (process.platform === "darwin") {
+      // Initialize system tray (macOS menu bar / Windows system tray)
+      if (process.platform === "darwin" || process.platform === "win32") {
         await trayManager.initialize(mainWindow, channelGateway, dbManager, agentDaemon);
       }
 
@@ -1508,6 +1514,25 @@ if (!gotTheLock) {
     if (agentDaemon) {
       agentDaemon.shutdown();
     }
+  });
+
+  // Window control handlers (used by custom title bar buttons on Windows)
+  ipcMain.handle("window:minimize", () => {
+    BrowserWindow.getFocusedWindow()?.minimize();
+  });
+  ipcMain.handle("window:maximize", () => {
+    const win = BrowserWindow.getFocusedWindow();
+    if (win?.isMaximized()) {
+      win.unmaximize();
+    } else {
+      win?.maximize();
+    }
+  });
+  ipcMain.handle("window:close", () => {
+    BrowserWindow.getFocusedWindow()?.close();
+  });
+  ipcMain.handle("window:isMaximized", () => {
+    return BrowserWindow.getFocusedWindow()?.isMaximized() ?? false;
   });
 
   // Handle folder selection

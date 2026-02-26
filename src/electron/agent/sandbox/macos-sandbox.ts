@@ -91,12 +91,14 @@ export class MacOSSandbox implements ISandbox {
 
     if (this.sandboxProfile) {
       // Use sandbox-exec on macOS
-      const profilePath = this.writeTempProfile();
+      const { profilePath, cleanup } = this.writeTempProfile();
       proc = spawn(
         "sandbox-exec",
         ["-f", profilePath, "/bin/sh", "-c", `${command} ${args.join(" ")}`],
         spawnOptions,
       );
+      proc.on("close", cleanup);
+      proc.on("error", cleanup);
     } else {
       // Fallback without sandbox profile
       proc = spawn("/bin/sh", ["-c", `${command} ${args.join(" ")}`], spawnOptions);
@@ -406,19 +408,20 @@ export class MacOSSandbox implements ISandbox {
    * Write sandbox profile to temp file
    * Uses secure temp file creation to prevent TOCTOU attacks
    */
-  private writeTempProfile(): string {
+  private writeTempProfile(): { profilePath: string; cleanup: () => void } {
     const { filePath, cleanup } = createSecureTempFile(".sb", this.sandboxProfile!);
 
-    // Store cleanup function for later use
-    // Schedule cleanup after a longer delay to ensure process completes
-    // Note: The profile is needed for the entire duration of the sandbox process
-    setTimeout(
-      () => {
-        cleanup();
-      },
-      5 * 60 * 1000,
-    ); // 5 minutes - longer than typical execution
+    let cleaned = false;
+    const cleanupOnce = () => {
+      if (cleaned) return;
+      cleaned = true;
+      cleanup();
+    };
 
-    return filePath;
+    // Fallback cleanup for abrupt exits where process handlers don't fire.
+    const cleanupTimer = setTimeout(cleanupOnce, 5 * 60 * 1000);
+    cleanupTimer.unref();
+
+    return { profilePath: filePath, cleanup: cleanupOnce };
   }
 }

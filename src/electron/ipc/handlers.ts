@@ -45,7 +45,6 @@ import {
   UpdateChannelRequest,
   SecurityMode,
   UpdateInfo,
-  TEMP_WORKSPACE_ID_PREFIX,
   TEMP_WORKSPACE_NAME,
   TEMP_WORKSPACE_ROOT_DIR_NAME,
   Workspace,
@@ -180,6 +179,12 @@ import { AgentPerformanceReviewService } from "../reports/AgentPerformanceReview
 import { getCronService } from "../cron";
 import type { CronJobCreate } from "../cron/types";
 import { pruneTempWorkspaces } from "../utils/temp-workspace";
+import {
+  createScopedTempWorkspaceIdentity,
+  isTempWorkspaceInScope,
+  sanitizeTempWorkspaceKey,
+} from "../utils/temp-workspace-scope";
+import { getActiveTempWorkspaceLeases, touchTempWorkspaceLease } from "../utils/temp-workspace-lease";
 
 type FileViewerRequestOptions = {
   workspacePath?: string;
@@ -653,7 +658,7 @@ export async function setupIpcHandlers(
   };
 
   const buildTempWorkspaceKey = (): string =>
-    `session-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+    sanitizeTempWorkspaceKey(`session-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`);
 
   // Temp workspace management
   // Creates isolated temp workspaces so each new session can use its own folder.
@@ -666,29 +671,34 @@ export async function setupIpcHandlers(
     if (!createNew) {
       const existingTemp = workspaceRepo
         .findAll()
-        .find((workspace) => isTempWorkspaceId(workspace.id));
+        .find((workspace) => isTempWorkspaceInScope(workspace.id, "ui"));
       if (existingTemp) {
         workspace = await ensureTempWorkspace(existingTemp.id, existingTemp.path, existingTemp);
       } else {
         await fs.mkdir(tempWorkspaceRoot, { recursive: true });
         const key = buildTempWorkspaceKey();
-        const workspaceId = `${TEMP_WORKSPACE_ID_PREFIX}${key}`;
-        const workspacePath = path.join(tempWorkspaceRoot, key);
+        const identity = createScopedTempWorkspaceIdentity("ui", key);
+        const workspaceId = identity.workspaceId;
+        const workspacePath = path.join(tempWorkspaceRoot, identity.slug);
         workspace = await ensureTempWorkspace(workspaceId, workspacePath);
       }
     } else {
       await fs.mkdir(tempWorkspaceRoot, { recursive: true });
       const key = buildTempWorkspaceKey();
-      const workspaceId = `${TEMP_WORKSPACE_ID_PREFIX}${key}`;
-      const workspacePath = path.join(tempWorkspaceRoot, key);
+      const identity = createScopedTempWorkspaceIdentity("ui", key);
+      const workspaceId = identity.workspaceId;
+      const workspacePath = path.join(tempWorkspaceRoot, identity.slug);
       workspace = await ensureTempWorkspace(workspaceId, workspacePath);
     }
+
+    touchTempWorkspaceLease(workspace.id);
 
     try {
       pruneTempWorkspaces({
         db,
         tempWorkspaceRoot,
         currentWorkspaceId: workspace.id,
+        protectedWorkspaceIds: getActiveTempWorkspaceLeases(),
       });
     } catch (error) {
       console.warn("Failed to prune temp workspaces:", error);
@@ -1242,9 +1252,12 @@ export async function setupIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.WORKSPACE_SELECT, async (_, id: string) => {
     const workspace = workspaceRepo.findById(id);
-    if (workspace && !workspace.isTemp && !isTempWorkspaceId(workspace.id)) {
+    if (workspace) {
       try {
         workspaceRepo.updateLastUsedAt(workspace.id);
+        if (isTempWorkspaceId(workspace.id)) {
+          touchTempWorkspaceLease(workspace.id);
+        }
       } catch (error) {
         console.warn("Failed to update workspace last used time:", error);
       }
@@ -1281,6 +1294,9 @@ export async function setupIpcHandlers(
       throw new Error(`Workspace not found: ${id}`);
     }
     workspaceRepo.updateLastUsedAt(id);
+    if (isTempWorkspaceId(id)) {
+      touchTempWorkspaceLease(id);
+    }
     return workspaceRepo.findById(id);
   });
 
@@ -4617,9 +4633,9 @@ async function setupHooksHandlers(agentDaemon: AgentDaemon): Promise<void> {
   const createTempWorkspaceForHooks = async (): Promise<Workspace> => {
     await fs.mkdir(tempWorkspaceRoot, { recursive: true });
 
-    const key = `hooks-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
-    const workspaceId = `${TEMP_WORKSPACE_ID_PREFIX}${key}`;
-    const workspacePath = path.join(tempWorkspaceRoot, key);
+    const identity = createScopedTempWorkspaceIdentity("hooks", "default");
+    const workspaceId = identity.workspaceId;
+    const workspacePath = path.join(tempWorkspaceRoot, identity.slug);
     await fs.mkdir(workspacePath, { recursive: true });
 
     const now = Date.now();
@@ -4657,10 +4673,13 @@ async function setupHooksHandlers(agentDaemon: AgentDaemon): Promise<void> {
         db,
         tempWorkspaceRoot,
         currentWorkspaceId: workspace.id,
+        protectedWorkspaceIds: getActiveTempWorkspaceLeases(),
       });
     } catch (error) {
       console.warn("[Hooks] Failed to prune temp workspaces:", error);
     }
+
+    touchTempWorkspaceLease(workspace.id);
 
     return workspace;
   };
@@ -4712,11 +4731,11 @@ async function setupHooksHandlers(agentDaemon: AgentDaemon): Promise<void> {
         console.log("[Hooks] Agent action:", action.message.substring(0, 100));
 
         // Create a task for the agent action
-        const fallbackWorkspace = await createTempWorkspaceForHooks();
+        const workspaceId = action.workspaceId || (await createTempWorkspaceForHooks()).id;
         const task = await agentDaemon.createTask({
           title: action.name || "Webhook Task",
           prompt: action.message,
-          workspaceId: action.workspaceId || fallbackWorkspace.id,
+          workspaceId,
           agentConfig: {
             allowUserInput: false,
           },

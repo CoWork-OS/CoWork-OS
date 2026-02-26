@@ -5,20 +5,36 @@ interface TraySettingsProps {
   onStatusChange?: (enabled: boolean) => void;
 }
 
+function detectPlatform(): string {
+  if (window.electronAPI?.getPlatform) {
+    return window.electronAPI.getPlatform();
+  }
+  if (typeof navigator === "undefined") {
+    return "unknown";
+  }
+  const platform = navigator.platform.toLowerCase();
+  if (platform.includes("win")) return "win32";
+  if (platform.includes("mac")) return "darwin";
+  return "linux";
+}
+
 export function TraySettings({ onStatusChange }: TraySettingsProps) {
   const [settings, setSettings] = useState<TraySettingsType | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  // Check if we're on macOS
-  const [isMacOS, setIsMacOS] = useState(true);
+  const [platform, setPlatform] = useState<string>(() => detectPlatform());
+  const isMacOS = platform === "darwin";
+  const supportsTraySettings = platform === "darwin" || platform === "win32";
 
   useEffect(() => {
-    // Check platform
-    const platform = navigator.platform.toLowerCase();
-    setIsMacOS(platform.includes("mac"));
-
-    loadSettings();
+    const detectedPlatform = detectPlatform();
+    setPlatform(detectedPlatform);
+    if (detectedPlatform === "darwin" || detectedPlatform === "win32") {
+      loadSettings();
+    } else {
+      setLoading(false);
+    }
   }, []);
 
   const loadSettings = async () => {
@@ -49,35 +65,41 @@ export function TraySettings({ onStatusChange }: TraySettingsProps) {
     }
   };
 
-  if (!isMacOS) {
+  const trayLabel = isMacOS ? "Menu Bar" : "System Tray";
+
+  if (!supportsTraySettings) {
     return (
       <div className="tray-settings">
         <div className="settings-section">
-          <h3>Menu Bar</h3>
-          <div className="settings-warning">Menu bar integration is only available on macOS.</div>
+          <h3>Tray</h3>
+          <div className="settings-warning">
+            Tray settings are not available on this platform yet.
+          </div>
         </div>
       </div>
     );
   }
 
   if (loading) {
-    return <div className="settings-loading">Loading menu bar settings...</div>;
+    return <div className="settings-loading">Loading {trayLabel.toLowerCase()} settings...</div>;
   }
 
   return (
     <div className="tray-settings">
       <div className="settings-section">
-        <h3>Menu Bar</h3>
+        <h3>{trayLabel}</h3>
         <p className="settings-description">
-          Configure the menu bar icon and behavior. The menu bar provides quick access to workspaces
-          and tasks.
+          Configure the {trayLabel.toLowerCase()} icon and behavior. The {trayLabel.toLowerCase()}{" "}
+          provides quick access to workspaces and tasks.
         </p>
 
         <div className="settings-toggle-group">
           <div className="settings-toggle-item">
             <div className="toggle-info">
-              <span className="toggle-label">Enable Menu Bar Icon</span>
-              <span className="toggle-description">Show CoWork OS icon in the macOS menu bar</span>
+              <span className="toggle-label">Enable {trayLabel} Icon</span>
+              <span className="toggle-description">
+                Show CoWork OS icon in the {trayLabel.toLowerCase()}
+              </span>
             </div>
             <label className="toggle-switch">
               <input
@@ -90,29 +112,32 @@ export function TraySettings({ onStatusChange }: TraySettingsProps) {
             </label>
           </div>
 
-          <div className="settings-toggle-item">
-            <div className="toggle-info">
-              <span className="toggle-label">Show Dock Icon</span>
-              <span className="toggle-description">
-                Show CoWork OS in the macOS Dock when running
-              </span>
+          {/* Dock icon toggle is macOS-only */}
+          {isMacOS && (
+            <div className="settings-toggle-item">
+              <div className="toggle-info">
+                <span className="toggle-label">Show Dock Icon</span>
+                <span className="toggle-description">
+                  Show CoWork OS in the macOS Dock when running
+                </span>
+              </div>
+              <label className="toggle-switch">
+                <input
+                  type="checkbox"
+                  checked={settings?.showDockIcon ?? true}
+                  onChange={(e) => handleSave({ showDockIcon: e.target.checked })}
+                  disabled={saving}
+                />
+                <span className="toggle-slider"></span>
+              </label>
             </div>
-            <label className="toggle-switch">
-              <input
-                type="checkbox"
-                checked={settings?.showDockIcon ?? true}
-                onChange={(e) => handleSave({ showDockIcon: e.target.checked })}
-                disabled={saving}
-              />
-              <span className="toggle-slider"></span>
-            </label>
-          </div>
+          )}
 
           <div className="settings-toggle-item">
             <div className="toggle-info">
               <span className="toggle-label">Start Minimized</span>
               <span className="toggle-description">
-                Start with the main window hidden (menu bar only)
+                Start with the main window hidden ({trayLabel.toLowerCase()} only)
               </span>
             </div>
             <label className="toggle-switch">
@@ -128,9 +153,9 @@ export function TraySettings({ onStatusChange }: TraySettingsProps) {
 
           <div className="settings-toggle-item">
             <div className="toggle-info">
-              <span className="toggle-label">Close to Menu Bar</span>
+              <span className="toggle-label">Close to {trayLabel}</span>
               <span className="toggle-description">
-                Closing the window minimizes to menu bar instead of quitting
+                Closing the window minimizes to {trayLabel.toLowerCase()} instead of quitting
               </span>
             </div>
             <label className="toggle-switch">
@@ -165,11 +190,11 @@ export function TraySettings({ onStatusChange }: TraySettingsProps) {
       </div>
 
       <div className="settings-section">
-        <h4>Menu Bar Features</h4>
+        <h4>{trayLabel} Features</h4>
         <div className="settings-callout info">
           <strong>Quick Access:</strong>
           <ul style={{ margin: "8px 0 0 0", paddingLeft: "20px" }}>
-            <li>Click the menu bar icon to show/hide the main window</li>
+            <li>Click the {trayLabel.toLowerCase()} icon to show/hide the main window</li>
             <li>
               Right-click (or click) to see the quick menu with:
               <ul style={{ paddingLeft: "20px", marginTop: "4px" }}>

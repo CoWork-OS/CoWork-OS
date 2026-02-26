@@ -136,12 +136,14 @@ export class SandboxRunner {
 
     if (useSandboxExec && this.sandboxProfile) {
       // Use sandbox-exec on macOS
-      const profilePath = this.writeTempProfile();
+      const { profilePath, cleanup } = this.writeTempProfile();
       proc = spawn(
         "sandbox-exec",
         ["-f", profilePath, "/bin/sh", "-c", `${command} ${args.join(" ")}`],
         spawnOptions,
       );
+      proc.on("close", cleanup);
+      proc.on("error", cleanup);
     } else {
       // Fallback: execute without OS-level sandboxing (still has resource limits)
       proc = spawn("/bin/sh", ["-c", `${command} ${args.join(" ")}`], spawnOptions);
@@ -424,20 +426,26 @@ export class SandboxRunner {
   /**
    * Write sandbox profile to temp file
    */
-  private writeTempProfile(): string {
+  private writeTempProfile(): { profilePath: string; cleanup: () => void } {
     const profilePath = path.join(os.tmpdir(), `cowork_sandbox_${Date.now()}.sb`);
     fs.writeFileSync(profilePath, this.sandboxProfile!, "utf8");
 
-    // Schedule cleanup
-    setTimeout(() => {
+    let cleaned = false;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
       try {
         fs.unlinkSync(profilePath);
       } catch {
         // Ignore cleanup errors
       }
-    }, 60 * 1000); // Clean up after 1 minute
+    };
 
-    return profilePath;
+    // Fallback cleanup for abrupt exits where close/error handlers don't run.
+    const cleanupTimer = setTimeout(cleanup, 60 * 1000);
+    cleanupTimer.unref();
+
+    return { profilePath, cleanup };
   }
 }
 

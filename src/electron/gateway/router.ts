@@ -37,7 +37,6 @@ import { AgentDaemon } from "../agent/daemon";
 import {
   Task,
   IPC_CHANNELS,
-  TEMP_WORKSPACE_ID_PREFIX,
   TEMP_WORKSPACE_NAME,
   TEMP_WORKSPACE_ROOT_DIR_NAME,
   AgentRole,
@@ -66,6 +65,12 @@ import { evaluateWorkspaceRouterRules } from "./router-rules";
 import { extractJsonValues } from "../utils/json-utils";
 import { pruneTempWorkspaces } from "../utils/temp-workspace";
 import {
+  createScopedTempWorkspaceIdentity,
+  isTempWorkspaceInScope,
+  sanitizeTempWorkspaceKey,
+} from "../utils/temp-workspace-scope";
+import { getActiveTempWorkspaceLeases } from "../utils/temp-workspace-lease";
+import {
   getCoworkVersion,
   type RouterConfig,
   DEFAULT_CONFIG,
@@ -75,7 +80,6 @@ import {
   PENDING_FEEDBACK_TTL_MS,
   BRIEF_CRON_TAG,
   SCHEDULE_CRON_TAG,
-  sanitizeTempKey,
   slugify,
   sanitizePathSegment,
   sanitizeFilename,
@@ -543,19 +547,20 @@ export class MessageRouter {
   private getOrCreateTempWorkspace(sessionId?: string): Workspace {
     let workspace: Workspace;
     if (sessionId) {
-      const key = sanitizeTempKey(sessionId);
-      const workspaceId = `${TEMP_WORKSPACE_ID_PREFIX}${key}`;
+      const key = sanitizeTempWorkspaceKey(sessionId);
+      const identity = createScopedTempWorkspaceIdentity("gateway", key);
+      const workspaceId = identity.workspaceId;
       const existing = this.workspaceRepo.findById(workspaceId);
       if (existing) {
         workspace = this.ensureTempWorkspaceRecord(workspaceId, existing.path, existing);
       } else {
-        const workspacePath = path.join(os.tmpdir(), TEMP_WORKSPACE_ROOT_DIR_NAME, key);
+        const workspacePath = path.join(os.tmpdir(), TEMP_WORKSPACE_ROOT_DIR_NAME, identity.slug);
         workspace = this.ensureTempWorkspaceRecord(workspaceId, workspacePath);
       }
     } else {
       const existingTemp = this.workspaceRepo
         .findAll()
-        .find((candidate) => candidate.isTemp || isTempWorkspaceId(candidate.id));
+        .find((candidate) => isTempWorkspaceInScope(candidate.id, "gateway"));
       if (existingTemp) {
         workspace = this.ensureTempWorkspaceRecord(
           existingTemp.id,
@@ -563,11 +568,12 @@ export class MessageRouter {
           existingTemp,
         );
       } else {
-        const key = sanitizeTempKey(
+        const key = sanitizeTempWorkspaceKey(
           `session-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`,
         );
-        const workspaceId = `${TEMP_WORKSPACE_ID_PREFIX}${key}`;
-        const workspacePath = path.join(os.tmpdir(), TEMP_WORKSPACE_ROOT_DIR_NAME, key);
+        const identity = createScopedTempWorkspaceIdentity("gateway", key);
+        const workspaceId = identity.workspaceId;
+        const workspacePath = path.join(os.tmpdir(), TEMP_WORKSPACE_ROOT_DIR_NAME, identity.slug);
         workspace = this.ensureTempWorkspaceRecord(workspaceId, workspacePath);
       }
     }
@@ -577,6 +583,7 @@ export class MessageRouter {
         db: this.db,
         tempWorkspaceRoot: path.join(os.tmpdir(), TEMP_WORKSPACE_ROOT_DIR_NAME),
         currentWorkspaceId: workspace.id,
+        protectedWorkspaceIds: getActiveTempWorkspaceLeases(),
       });
     } catch (error) {
       console.warn("Failed to prune temp workspaces:", error);

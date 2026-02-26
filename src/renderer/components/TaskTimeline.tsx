@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { TaskEvent, DEFAULT_QUIRKS } from "../../shared/types";
 import { isVerificationStepDescription } from "../../shared/plan-utils";
 import { ThemeIcon } from "./ThemeIcon";
@@ -24,6 +24,7 @@ import {
 } from "./LineIcons";
 import type { AgentContext } from "../hooks/useAgentContext";
 import { getUiCopy, type UiCopyKey } from "../utils/agentMessages";
+import { formatDuration } from "../hooks/useTaskDuration";
 
 /**
  * Maps raw system/API errors to human-readable messages.
@@ -81,7 +82,18 @@ interface TaskTimelineProps {
   taskStatus?: string;
 }
 
+const ACTIVE_TASK_STATUSES = new Set(["executing", "planning", "interrupted"]);
+
 export function TaskTimeline({ events, agentContext, taskId, taskStatus }: TaskTimelineProps) {
+  const isTaskActive = taskStatus ? ACTIVE_TASK_STATUSES.has(taskStatus) : false;
+  const [now, setNow] = useState(Date.now());
+
+  useEffect(() => {
+    if (!isTaskActive) return;
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, [isTaskActive]);
+
   const fallbackContext = {
     agentName: "CoWork",
     userName: undefined,
@@ -222,6 +234,10 @@ export function TaskTimeline({ events, agentContext, taskId, taskStatus }: TaskT
         return <ThemeIcon emoji="💬" icon={<MessageIcon size={16} />} />;
       case "step_skipped":
         return <ThemeIcon emoji="⏭️" icon={<ZapIcon size={16} />} />;
+      case "progress_journal":
+        return <ThemeIcon emoji="📓" icon={<ClipboardIcon size={16} />} />;
+      case "research_recovery_started":
+        return <ThemeIcon emoji="🔍" icon={<ZapIcon size={16} />} />;
       default:
         return <ThemeIcon emoji="•" icon={<DotIcon size={8} />} />;
     }
@@ -278,7 +294,12 @@ export function TaskTimeline({ events, agentContext, taskId, taskStatus }: TaskT
         return "All done!";
       case "context_summarized": {
         const count = event.payload.removedCount || 0;
-        return `Earlier context summarized \u2014 ${count} message${count !== 1 ? "s" : ""} compacted`;
+        const freed =
+          event.payload.tokensBefore && event.payload.tokensAfter
+            ? event.payload.tokensBefore - event.payload.tokensAfter
+            : 0;
+        const freedLabel = freed > 0 ? ` \u2014 ${freed.toLocaleString()} tokens freed` : "";
+        return `Session context compacted \u2014 ${count} message${count !== 1 ? "s" : ""} summarized${freedLabel}`;
       }
       case "log":
         return event.payload.message;
@@ -306,9 +327,67 @@ export function TaskTimeline({ events, agentContext, taskId, taskStatus }: TaskT
       }
       case "step_skipped":
         return `Skipped: ${event.payload.step?.description || event.payload.reason || "step"}`;
+      case "progress_journal":
+        return event.payload.message || "Progress update";
+      case "research_recovery_started":
+        return event.payload.message || "Researching solution...";
       default:
         return event.type;
     }
+  };
+
+  /**
+   * Parse a structured compaction summary into collapsible sections.
+   * Sections are identified by numbered headings like "1. **Title**" or "**1. Title**".
+   * Falls back to plain pre-wrap rendering if no sections are found.
+   */
+  const renderCompactionSummary = (summary: string) => {
+    // Try to split on numbered section headings
+    const sectionPattern = /^(\d+)\.\s+\*\*(.+?)\*\*/gm;
+    const matches: { index: number; num: string; title: string }[] = [];
+    let match;
+    while ((match = sectionPattern.exec(summary)) !== null) {
+      matches.push({ index: match.index, num: match[1], title: match[2] });
+    }
+
+    if (matches.length < 3) {
+      // Not enough structure detected; fall back to plain text
+      return <div className="context-summary-body">{summary}</div>;
+    }
+
+    // Auto-expand these section numbers for quick scanning
+    const autoExpand = new Set(["1", "7", "8", "9"]);
+
+    const sections = matches.map((m, i) => {
+      const start = m.index;
+      const end = i + 1 < matches.length ? matches[i + 1].index : summary.length;
+      // Extract section body (everything after the heading line)
+      const fullText = summary.slice(start, end).trim();
+      const headingEnd = fullText.indexOf("\n");
+      const body = headingEnd >= 0 ? fullText.slice(headingEnd + 1).trim() : "";
+      return { num: m.num, title: m.title, body };
+    });
+
+    // Include any preamble text before the first section
+    const preamble = summary.slice(0, matches[0].index).trim();
+
+    return (
+      <div className="context-summary-body">
+        {preamble && <div className="context-summary-preamble">{preamble}</div>}
+        {sections.map((s) => (
+          <details
+            key={s.num}
+            className="context-summary-section"
+            open={autoExpand.has(s.num) || undefined}
+          >
+            <summary>
+              {s.num}. {s.title}
+            </summary>
+            <div className="context-summary-section-content">{s.body}</div>
+          </details>
+        ))}
+      </div>
+    );
   };
 
   const renderEventDetails = (event: TaskEvent) => {
@@ -398,10 +477,17 @@ export function TaskTimeline({ events, agentContext, taskId, taskStatus }: TaskT
         return event.payload.summary ? (
           <div className="event-details context-summary">
             <div className="context-summary-header">
-              This session is being continued with a summarized context. The summary below covers
-              the earlier portion of the conversation.
+              Session context compacted. The summary below captures all prior work so the agent
+              can continue seamlessly.
             </div>
-            <div className="context-summary-body">{event.payload.summary}</div>
+            {renderCompactionSummary(event.payload.summary)}
+            {event.payload.tokensBefore > 0 && (
+              <div className="context-summary-stats">
+                {(event.payload.tokensBefore - (event.payload.tokensAfter || 0)).toLocaleString()}{" "}
+                tokens freed &middot; {event.payload.removedCount || 0} messages compacted
+                {event.payload.proactive ? " (proactive)" : ""}
+              </div>
+            )}
           </div>
         ) : null;
       default:
@@ -541,6 +627,23 @@ export function TaskTimeline({ events, agentContext, taskId, taskStatus }: TaskT
           </div>
         )}
       </div>
+      {/* Duration summary divider */}
+      {visibleEvents.length > 0 && (() => {
+        const firstTs = visibleEvents[0].timestamp;
+        const lastTs = isTaskActive ? now : visibleEvents[visibleEvents.length - 1].timestamp;
+        const elapsed = lastTs - firstTs;
+        // Only show if at least 1 second has passed
+        if (elapsed < 1000) return null;
+        return (
+          <div className="timeline-duration-divider">
+            <span className="timeline-duration-line" />
+            <span className="timeline-duration-label">
+              Worked for {formatDuration(elapsed)}
+            </span>
+            <span className="timeline-duration-line" />
+          </div>
+        );
+      })()}
     </div>
   );
 }

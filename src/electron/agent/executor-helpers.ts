@@ -12,6 +12,8 @@
  * - Utility functions (timeout, backoff, sleep, date formatting, question detection)
  */
 
+import * as path from "path";
+
 // ===== Custom Error =====
 
 export class AwaitingUserInputError extends Error {
@@ -1124,7 +1126,7 @@ export class FileOperationTracker {
    * Record a file creation
    */
   recordFileCreation(filePath: string): void {
-    const filename = filePath.split("/").pop() || filePath;
+    const filename = path.basename(filePath) || filePath;
     const normalized = this.normalizeFilename(filename);
     this.createdFiles.set(normalized, filePath);
     this.incrementOperation("create_file");
@@ -1295,7 +1297,7 @@ export class FileOperationTracker {
     // Restore created files
     if (state.createdFiles) {
       for (const filePath of state.createdFiles) {
-        const normalized = this.normalizeFilename(filePath.split("/").pop() || filePath);
+        const normalized = this.normalizeFilename(path.basename(filePath) || filePath);
         this.createdFiles.set(normalized, filePath);
       }
     }

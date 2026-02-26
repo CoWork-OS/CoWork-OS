@@ -17,11 +17,27 @@ export function BrowserView({ initialUrl, onBack }: BrowserViewProps) {
     }
   }, [initialUrl]);
 
+  // Track webview navigation so the URL bar stays in sync
+  useEffect(() => {
+    const wv = webviewRef.current;
+    if (!wv) return;
+    const onNavigate = (e: any) => setUrl(e.url);
+    wv.addEventListener("did-navigate", onNavigate);
+    wv.addEventListener("did-navigate-in-page", onNavigate);
+    return () => {
+      wv.removeEventListener("did-navigate", onNavigate);
+      wv.removeEventListener("did-navigate-in-page", onNavigate);
+    };
+  });
+
   const navigate = (nextUrl?: string) => {
     const target = (nextUrl || url).trim();
     if (!target) return;
-    const normalized = /^https?:\/\//i.test(target) ? target : `https://${target}`;
+    // Preserve canvas:// and other known schemes; only add https:// for bare domains
+    const hasScheme = /^[a-z][a-z0-9+\-.]*:\/\//i.test(target);
+    const normalized = hasScheme ? target : `https://${target}`;
     setActiveUrl(normalized);
+    setUrl(normalized);
   };
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
@@ -118,7 +134,7 @@ export function BrowserView({ initialUrl, onBack }: BrowserViewProps) {
             value={url}
             onChange={(event) => setUrl(event.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="https://example.com"
+            placeholder="Enter a URL..."
           />
           <button
             type="button"

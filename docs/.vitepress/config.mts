@@ -41,6 +41,7 @@ export default defineConfig({
           { text: 'Enterprise Connectors', link: '/enterprise-connectors' },
           { text: 'Node Daemon', link: '/node-daemon' },
           { text: 'Placeholder Engine', link: '/placeholder-engine' },
+          { text: 'Context Compaction', link: '/context-compaction' },
         ],
       },
       {

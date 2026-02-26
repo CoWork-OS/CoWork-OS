@@ -30,8 +30,17 @@ export interface CronRunHistoryEntry {
   status: CronJobStatus;
   error?: string;
   taskId?: string;
+  workspaceId?: string;
+  runWorkspacePath?: string;
   deliveryStatus?: "success" | "failed" | "skipped";
   deliveryError?: string;
+}
+
+export interface CronWorkspaceContext {
+  workspaceId: string;
+  workspacePath?: string;
+  runWorkspacePath?: string;
+  runWorkspaceRelativePath?: string;
 }
 
 /**
@@ -158,6 +167,15 @@ export interface CronServiceDeps {
     runAtMs: number;
     prevRunAtMs?: number;
   }) => Promise<Record<string, string>>;
+  /**
+   * Optional workspace resolver for cron jobs.
+   * Enables runtime migration away from temp/missing workspaces and per-run folders.
+   */
+  resolveWorkspaceContext?: (params: {
+    job: CronJob;
+    nowMs: number;
+    phase: "add" | "run";
+  }) => Promise<CronWorkspaceContext | null | undefined>;
   createTask: (params: {
     title: string;
     prompt: string;

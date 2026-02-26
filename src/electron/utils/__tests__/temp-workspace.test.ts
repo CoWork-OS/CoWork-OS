@@ -24,6 +24,7 @@ type SessionRow = {
   id: string;
   workspace_id: string | null;
   state: string;
+  last_activity_at?: number;
 };
 
 class MockDb {
@@ -61,12 +62,19 @@ class MockDb {
       sql.includes("workspace_id = ? OR substr(workspace_id, 1, ?) = ?")
     ) {
       return {
-        all: (legacyId: string, _prefixLength: number, prefixValue: string) => {
+        all: (
+          legacyId: string,
+          _prefixLength: number,
+          prefixValue: string,
+          ...statuses: string[]
+        ) => {
           const prefix = String(prefixValue || "");
+          const allowed = new Set(statuses.map((status) => String(status || "")));
           const seen = new Set<string>();
           const rows: Array<{ workspace_id: string }> = [];
           for (const task of this.tasks) {
             if (!(task.workspace_id === legacyId || task.workspace_id.startsWith(prefix))) continue;
+            if (allowed.size > 0 && !allowed.has(task.status)) continue;
             if (!task.workspace_id || seen.has(task.workspace_id)) continue;
             seen.add(task.workspace_id);
             rows.push({ workspace_id: task.workspace_id });
@@ -81,13 +89,16 @@ class MockDb {
       sql.includes("workspace_id = ? OR substr(workspace_id, 1, ?) = ?")
     ) {
       return {
-        all: (legacyId: string, _prefixLength: number, prefixValue: string) => {
+        all: (legacyId: string, _prefixLength: number, prefixValue: string, cutoffMs: number) => {
           const prefix = String(prefixValue || "");
           const seen = new Set<string>();
           const rows: Array<{ workspace_id: string }> = [];
           for (const session of this.sessions) {
             if (!session.workspace_id) continue;
             if (!(session.workspace_id === legacyId || session.workspace_id.startsWith(prefix)))
+              continue;
+            const lastActivity = Number(session.last_activity_at ?? 0);
+            if (session.state === "idle" && !(Number.isFinite(lastActivity) && lastActivity >= cutoffMs))
               continue;
             if (seen.has(session.workspace_id)) continue;
             seen.add(session.workspace_id);
@@ -98,16 +109,29 @@ class MockDb {
       };
     }
 
-    if (sql.includes("SELECT 1 FROM tasks WHERE workspace_id = ? LIMIT 1")) {
+    if (sql.includes("SELECT 1 FROM tasks WHERE workspace_id = ? AND status IN")) {
       return {
-        get: (workspaceId: string) => this.tasks.find((task) => task.workspace_id === workspaceId),
+        get: (workspaceId: string, ...statuses: string[]) => {
+          const allowed = new Set(statuses.map((status) => String(status || "")));
+          return this.tasks.find(
+            (task) => task.workspace_id === workspaceId && (allowed.size === 0 || allowed.has(task.status)),
+          );
+        },
       };
     }
 
-    if (sql.includes("SELECT 1 FROM channel_sessions WHERE workspace_id = ? LIMIT 1")) {
+    if (
+      sql.includes("SELECT 1 FROM channel_sessions WHERE workspace_id = ?") &&
+      sql.includes("COALESCE(last_activity_at, created_at)")
+    ) {
       return {
-        get: (workspaceId: string) =>
-          this.sessions.find((session) => session.workspace_id === workspaceId),
+        get: (workspaceId: string, cutoffMs: number) =>
+          this.sessions.find((session) => {
+            if (session.workspace_id !== workspaceId) return false;
+            if (session.state !== "idle") return true;
+            const lastActivity = Number(session.last_activity_at ?? 0);
+            return Number.isFinite(lastActivity) && lastActivity >= cutoffMs;
+          }),
       };
     }
 
@@ -219,6 +243,7 @@ describe("pruneTempWorkspaces", () => {
       maxAgeMs: 10_000_000,
       hardLimit: 4,
       targetAfterPrune: 3,
+      minAgeForHardPruneMs: 0,
     });
 
     expect(result.removedDirs).toBe(3);
@@ -237,7 +262,12 @@ describe("pruneTempWorkspaces", () => {
     const nowMs = 4_000_000;
 
     const idleReferenced = insertTempWorkspace(db, root, "idle-ref", nowMs - 50_000);
-    db.sessions.push({ id: "s1", workspace_id: idleReferenced.id, state: "idle" });
+    db.sessions.push({
+      id: "s1",
+      workspace_id: idleReferenced.id,
+      state: "idle",
+      last_activity_at: nowMs - 100,
+    });
 
     const result = pruneTempWorkspaces({
       db: db as any,

@@ -8500,6 +8500,7 @@ TASK / CONVERSATION HISTORY:
       let lastSharedContextKey = "";
       let lastSharedContextBlock = "";
       let toolRecoveryHintInjected = false;
+      let consecutiveSkippedToolOnlyTurns = 0;
       // Loop detection: track recent tool calls to detect degenerate loops
       const recentToolCalls: ToolLoopCall[] = [];
       let loopBreakInjected = false;
@@ -9001,6 +9002,7 @@ TASK / CONVERSATION HISTORY:
           updateLastAssistantText: true,
         });
         const assistantAskedQuestion = assistantProcessing.assistantAskedQuestion;
+        const hasTextInThisResponse = assistantProcessing.hasMeaningfulText;
         const assistantText = assistantProcessing.assistantText;
         if (
           assistantText &&
@@ -9066,8 +9068,7 @@ TASK / CONVERSATION HISTORY:
         // Handle tool calls
         const toolResults: LLMToolResult[] = [];
         const forceFinalizeWithoutTools =
-          followUpToolCallsLocked ||
-          (this.guardrailPhaseAEnabled && responseHasToolUse && remainingTurnsAfterResponse <= 0);
+          this.guardrailPhaseAEnabled && responseHasToolUse && remainingTurnsAfterResponse <= 0;
         let skippedToolCallsByPolicy = 0;
         let hasDisabledToolAttempt = false;
         let hasDuplicateToolAttempt = false;
@@ -9082,13 +9083,9 @@ TASK / CONVERSATION HISTORY:
                 type: "tool_result",
                 tool_use_id: content.id,
                 content: JSON.stringify({
-                  error: followUpToolCallsLocked
-                    ? "Tool call skipped: follow-up tool calls are locked due to repeated tool-use looping."
-                    : "Tool call skipped: turn budget reserved for final response.",
+                  error: "Tool call skipped: turn budget reserved for final response.",
                   blocked: true,
-                  reason: followUpToolCallsLocked
-                    ? "follow_up_tool_use_lock"
-                    : "turn_budget_soft_landing",
+                  reason: "turn_budget_soft_landing",
                 }),
                 is_error: true,
               });
@@ -9600,6 +9597,47 @@ TASK / CONVERSATION HISTORY:
                 },
               ],
             });
+          }
+
+          if (skippedToolCallsByPolicy > 0) {
+            consecutiveSkippedToolOnlyTurns = updateSkippedToolOnlyTurnStreakUtil({
+              skippedToolCalls: skippedToolCallsByPolicy,
+              hasTextInThisResponse,
+              previousStreak: consecutiveSkippedToolOnlyTurns,
+            });
+
+            if (
+              shouldForceStopAfterSkippedToolOnlyTurnsUtil(
+                consecutiveSkippedToolOnlyTurns,
+                2,
+              ) &&
+              !hasTextInThisResponse
+            ) {
+              stepFailed = true;
+              lastFailureReason =
+                lastFailureReason ||
+                "Stopped step after repeated tool-only turns with policy-blocked tool calls and no direct text output.";
+              continueLoop = false;
+              continue;
+            }
+
+            if (!hasTextInThisResponse) {
+              messages.push({
+                role: "user",
+                content: [
+                  {
+                    type: "text",
+                    text:
+                      "Do not call tools again in this step. " +
+                      "Respond now with your best direct answer from current evidence.",
+                  },
+                ],
+              });
+              continueLoop = true;
+              continue;
+            }
+          } else {
+            consecutiveSkippedToolOnlyTurns = 0;
           }
 
           loopBreakInjected = maybeInjectToolLoopBreakUtil({
@@ -11512,7 +11550,9 @@ TASK / CONVERSATION HISTORY:
         // Handle tool calls
         const toolResults: LLMToolResult[] = [];
         const forceFinalizeWithoutTools =
-          this.guardrailPhaseAEnabled && responseHasToolUse && remainingTurnsAfterResponse <= 0;
+          followUpToolCallsLocked ||
+          (this.guardrailPhaseAEnabled && responseHasToolUse && remainingTurnsAfterResponse <= 0);
+        let skippedToolCallsByPolicy = 0;
         let hasDisabledToolAttempt = false;
         let hasDuplicateToolAttempt = false;
         let hasUnavailableToolAttempt = false;
@@ -11521,13 +11561,18 @@ TASK / CONVERSATION HISTORY:
         for (const content of response.content || []) {
           if (content.type === "tool_use") {
             if (forceFinalizeWithoutTools) {
+              skippedToolCallsByPolicy += 1;
               toolResults.push({
                 type: "tool_result",
                 tool_use_id: content.id,
                 content: JSON.stringify({
-                  error: "Tool call skipped: turn budget reserved for final response.",
+                  error: followUpToolCallsLocked
+                    ? "Tool call skipped: follow-up tool calls are locked due to repeated tool-use looping."
+                    : "Tool call skipped: turn budget reserved for final response.",
                   blocked: true,
-                  reason: "turn_budget_soft_landing",
+                  reason: followUpToolCallsLocked
+                    ? "follow_up_tool_use_lock"
+                    : "turn_budget_soft_landing",
                 }),
                 is_error: true,
               });

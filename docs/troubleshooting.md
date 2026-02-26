@@ -44,6 +44,38 @@ If you see `Killed: 9` during `npm run setup`, macOS terminated a native build d
 npm run setup
 ```
 
+## Windows native setup fails (`better-sqlite3`)
+
+If first launch exits after:
+
+```text
+[cowork] $ npm.cmd rebuild --ignore-scripts=false better-sqlite3
+[cowork] Native setup failed.
+```
+
+install native build prerequisites, then retry:
+
+1. Install [Visual Studio Build Tools 2022](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with:
+   - Desktop development with C++
+   - MSVC v143 build tools
+   - Windows 10/11 SDK
+2. Install Python 3 and verify:
+
+```powershell
+py -3 --version
+```
+
+3. Configure npm to use VS 2022, then retry:
+
+```powershell
+npm config set msvs_version 2022
+cowork-os
+```
+
+Windows ARM64 note:
+- Setup now auto-tries x64 Electron emulation if ARM64 native rebuild fails.
+- To disable that fallback and force native ARM64 only, set `COWORK_SETUP_SKIP_X64_FALLBACK=1`.
+
 ## App shows "vUnknown" or remote method error
 
 If the app opens but shows `vUnknown` or `Error invoking remote method 'app:getVersion'`, you likely connected to an older already-running instance.

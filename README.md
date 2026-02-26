@@ -97,7 +97,7 @@ npm install && npm run setup
 npm run build && npm run package
 ```
 
-> **Windows prerequisites:** Native module compilation (better-sqlite3) requires [Visual C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/). The setup script will warn you if they're missing, but prebuilt binaries may work without them.
+> **Windows prerequisites:** Native module setup may require [Visual Studio Build Tools 2022 (C++)](https://visualstudio.microsoft.com/visual-cpp-build-tools/) and Python 3. On Windows ARM64, setup automatically falls back to x64 Electron emulation when ARM64 native prebuilds are unavailable.
 
 See the [Development Guide](docs/development.md) for prerequisites and details.
 

@@ -102,6 +102,11 @@ function computeJobs() {
   return Math.min(2, cpuCount);
 }
 
+function nodeMajorVersion() {
+  const major = Number.parseInt(String(process.versions.node || "").split(".")[0], 10);
+  return Number.isFinite(major) ? major : null;
+}
+
 function baseEnvWithJobs(jobs) {
   // These influence node-gyp/make parallelism on macOS/Linux.
   // Always set safe values so global MAKEFLAGS doesn't accidentally cause OOM.
@@ -118,6 +123,16 @@ function isKilledByOS(res) {
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
+}
+
+function makeElectronTargetEnv(env, electronVersion, arch = process.arch) {
+  return {
+    ...env,
+    npm_config_runtime: "electron",
+    npm_config_target: electronVersion,
+    npm_config_disturl: "https://electronjs.org/headers",
+    npm_config_arch: arch,
+  };
 }
 
 function getElectronVersion() {
@@ -158,6 +173,54 @@ function testBetterSqlite3InElectron(env) {
     { env: { ...env, ELECTRON_RUN_AS_NODE: "1" }, encoding: "utf8" }
   );
   return res;
+}
+
+function shouldTryWindowsArm64X64Fallback() {
+  if (!(process.platform === "win32" && process.arch === "arm64")) return false;
+  const raw = String(process.env.COWORK_SETUP_SKIP_X64_FALLBACK || "")
+    .trim()
+    .toLowerCase();
+  return raw !== "1" && raw !== "true" && raw !== "yes";
+}
+
+function tryWindowsArm64X64Fallback(
+  env,
+  installRootDir,
+  electronInstallScript,
+  electronVersion
+) {
+  if (!shouldTryWindowsArm64X64Fallback()) return null;
+  if (!electronInstallScript || !electronVersion) return null;
+
+  console.log(
+    "[cowork] Windows ARM64 detected; trying x64 Electron + native module fallback (emulation mode)."
+  );
+
+  // Force Electron's installer to fetch x64 binaries, then rebuild better-sqlite3 for x64 Electron ABI.
+  const installRes = run(process.execPath, [electronInstallScript], {
+    env: { ...env, npm_config_arch: "x64" },
+    cwd: installRootDir,
+  });
+  if (installRes.status !== 0) return installRes;
+
+  const x64ElectronEnv = makeElectronTargetEnv(env, electronVersion, "x64");
+  const rebuildRes = run(
+    NPM_CMD,
+    ["rebuild", "--ignore-scripts=false", "better-sqlite3"],
+    { env: x64ElectronEnv, cwd: installRootDir }
+  );
+  if (rebuildRes.status !== 0) return rebuildRes;
+
+  const testRes = testBetterSqlite3InElectron(x64ElectronEnv);
+  if (testRes.status === 0) {
+    console.log("[cowork] better-sqlite3 loads in Electron (x64 emulation mode).");
+  } else {
+    console.log(
+      "[cowork] x64 fallback completed, but better-sqlite3 still did not load in Electron."
+    );
+  }
+
+  return testRes;
 }
 
 function ensureBetterSqlite3(env, installRootDir) {
@@ -203,6 +266,11 @@ function fail(res, context) {
         "close other apps and re-run `npm run setup`."
     );
   }
+  if (process.platform === "win32") {
+    console.error(
+      "[cowork] On Windows, inspect npm logs in %LocalAppData%\\npm-cache\\_logs\\ for detailed native build errors."
+    );
+  }
   // If a child process was SIGKILL'd, `spawnSync` will surface it as `signal`
   // with `status === null`. Exit 137 (128 + 9) so shell-level retries can
   // reliably detect and retry.
@@ -224,7 +292,7 @@ function checkPrereqs() {
     // Check for Visual C++ build tools (required by node-gyp for native modules)
     const res = spawnSync("where", ["cl.exe"], { encoding: "utf8" });
     if (res.status !== 0) {
-      // Also check via npm config for windows-build-tools
+      // Also check via npm config for an explicit MSVC version.
       const npmRes = spawnSync(NPM_CMD, ["config", "get", "msvs_version"], {
         encoding: "utf8",
       });
@@ -234,15 +302,36 @@ function checkPrereqs() {
         npmRes.stdout.trim() !== "undefined";
       if (!hasMsvs) {
         console.warn(
-          "\n[cowork] Warning: Visual C++ Build Tools may not be installed.\n" +
-            "Native module compilation (better-sqlite3) requires them.\n" +
-            "Install with:\n" +
-            "  npm install -g windows-build-tools\n" +
-            "Or install Visual Studio Build Tools from:\n" +
-            "  https://visualstudio.microsoft.com/visual-cpp-build-tools/\n"
+          "\n[cowork] Warning: Visual Studio C++ Build Tools were not detected.\n" +
+            "Native module compilation (better-sqlite3) may fail without them.\n" +
+            "Install Visual Studio Build Tools 2022 with:\n" +
+            "  - Desktop development with C++\n" +
+            "  - MSVC v143 build tools\n" +
+            "  - Windows 10/11 SDK\n" +
+            "Then run:\n" +
+            "  npm config set msvs_version 2022\n" +
+            "Download: https://visualstudio.microsoft.com/visual-cpp-build-tools/\n"
         );
         // Don't exit — prebuilt binaries may work without compilation
       }
+    }
+
+    const pyRes = spawnSync("py", ["-3", "--version"], { encoding: "utf8" });
+    const pythonRes = pyRes.status === 0
+      ? pyRes
+      : spawnSync("python", ["--version"], { encoding: "utf8" });
+    if (pythonRes.status !== 0) {
+      console.warn(
+        "\n[cowork] Warning: Python 3 was not detected (`py -3` / `python`).\n" +
+          "node-gyp requires Python 3 for native module builds.\n"
+      );
+    }
+
+    if (process.arch === "arm64" && (nodeMajorVersion() ?? 0) >= 24) {
+      console.log(
+        "[cowork] Windows ARM64 + Node 24 detected. If native ARM64 rebuild fails,\n" +
+          "setup will auto-try x64 Electron emulation for better compatibility."
+      );
     }
   }
 }
@@ -300,30 +389,39 @@ function main() {
     // 2) electron-rebuild for the one module (keeps rebuild surface small).
     // 2) Prefer an Electron-targeted rebuild for better-sqlite3 (often prebuilt, lighter).
     if (electronVersion) {
-      const electronEnv = {
-        ...env,
-        npm_config_runtime: "electron",
-        npm_config_target: electronVersion,
-        npm_config_disturl: "https://electronjs.org/headers",
-        npm_config_arch: process.arch,
-      };
+      const electronEnv = makeElectronTargetEnv(env, electronVersion, process.arch);
       const rebuildElectronRes = run(
         NPM_CMD,
         ["rebuild", "--ignore-scripts=false", "better-sqlite3"],
         { env: electronEnv, cwd: installRootDir }
       );
-      if (rebuildElectronRes.status !== 0) return rebuildElectronRes;
+      if (rebuildElectronRes.status !== 0) {
+        console.log(
+          "[cowork] Electron-targeted npm rebuild failed; trying fallback paths."
+        );
+      } else {
+        const testRes = testBetterSqlite3InElectron(electronEnv);
+        if (testRes.status === 0) {
+          console.log("[cowork] better-sqlite3 loads in Electron.");
+          return testRes;
+        }
 
-      const testRes = testBetterSqlite3InElectron(electronEnv);
-      if (testRes.status === 0) {
-        console.log("[cowork] better-sqlite3 loads in Electron.");
-        return testRes;
+        console.log(
+          "[cowork] better-sqlite3 did not load after Electron-targeted rebuild; " +
+            "trying fallback paths."
+        );
       }
 
-      console.log(
-        "[cowork] better-sqlite3 did not load after Electron-targeted rebuild; " +
-          "falling back to electron-rebuild."
+      const winArmFallbackRes = tryWindowsArm64X64Fallback(
+        env,
+        installRootDir,
+        electronInstallScript,
+        electronVersion
       );
+      if (winArmFallbackRes) {
+        if (winArmFallbackRes.status === 0) return winArmFallbackRes;
+        return winArmFallbackRes;
+      }
     } else {
       console.log(
         "[cowork] Could not determine Electron version; falling back to electron-rebuild."

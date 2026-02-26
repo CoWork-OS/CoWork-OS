@@ -129,6 +129,7 @@ Web search with fallback support:
 
 | Provider | File | Capabilities |
 |----------|------|--------------|
+| DuckDuckGo | `duckduckgo-provider.ts` | Web (free, built-in, no API key) |
 | Tavily | `tavily-provider.ts` | Web, News (AI-optimized) |
 | Brave | `brave-provider.ts` | Web, News, Images |
 | SerpAPI | `serpapi-provider.ts` | Web, News, Images (Google results) |
@@ -136,6 +137,7 @@ Web search with fallback support:
 
 **Features**:
 - Primary + fallback provider configuration
+- DuckDuckGo as automatic last-resort fallback (no API key required)
 - Auto-detection of available providers
 - Rate limiting and error handling
 
@@ -578,6 +580,19 @@ npm run type-check       # Check TypeScript types
 | MCP SSE/WebSocket | Production | Web-based MCP transports |
 | In-app file viewer | Production | View artifacts without leaving app |
 | Personality System | Production | Customizable agent behavior, personas, response styles |
+| Citation Engine | Production | Auto-tracks web sources with deduplication and inline references |
+| Scratchpad Tools | Production | Session-scoped note-taking for agents during long tasks |
+| Workflow Pipeline | Production | Multi-phase task decomposition and sequential execution |
+| Deep Work Mode | Production | Extended execution with progress journaling |
+| Document Generation Tools | Production | PDF, PPTX, XLSX generation as agent tools |
+| Event Triggers | Production | Condition-based automation (cron, webhook, channel) |
+| File Hub | Production | Unified file aggregation across workspace, artifacts, cloud |
+| Web Access Server | Production | HTTP/WebSocket server for browser-based access |
+| Vision Tools (enhanced) | Production | Result caching, auto-downscaling, multi-provider fallback |
+| DuckDuckGo Search | Production | Free built-in web search, always available |
+| Discord MCP Connector | Production | 19-tool REST API connector for Discord bots |
+| OAuth Connectors | Production | Google Workspace, DocuSign, Outreach, Slack OAuth flows |
+| Financial Plugin Packs | Production | 5 packs: Equity Research, Financial Analysis, IB, PE, Wealth |
 
 ### Planned
 
@@ -669,11 +684,13 @@ CoWork OS is a production-ready agentic task automation app with:
 
 - **5 LLM providers** (cloud and local)
 - **5 search providers** with fallback (including DuckDuckGo free built-in)
-- **12 browser automation tools**
+- **17 browser automation tools**
 - **3 code tools** (glob, grep, edit_file)
 - **2 web fetch tools** (web_fetch, http_request)
-- **4 document skills** with real Office output
+- **4 document skills** with real Office output + 3 document generation tools (PDF, PPTX, XLSX)
 - **4 channel integrations** (WhatsApp, Telegram, Discord, Slack)
+- **17 bundled plugin packs** with 55+ role-specific skills
+- **139 built-in standalone skills**
 - **Full MCP support** (Client, Host, Registry with SSE/WebSocket)
 - **Custom Skills** (user-defined reusable workflows)
 - **Personality System** (6 personalities, 9 personas, response styles, quirks)

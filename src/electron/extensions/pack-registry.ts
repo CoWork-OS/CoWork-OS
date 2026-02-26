@@ -111,6 +111,10 @@ export class PackRegistry {
 
       const response = await this.fetchWithTimeout(catalogUrl);
       if (!response.ok) {
+        if (response.status === 404) {
+          console.log("[PackRegistry] Catalog not found (404) — no remote catalog available");
+          return this.catalogCache?.entries || [];
+        }
         throw new Error(`Failed to fetch pack catalog: ${response.status}`);
       }
 

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-02-26
+
+### Fixed
+- **Windows ARM64 first-run native setup**: when `better-sqlite3` cannot be rebuilt for `arm64`, setup now automatically falls back to `x64` Electron emulation and validates module loading before launch.
+- **Windows ARM64 fallback robustness**: if npm-based x64 rebuild is insufficient, setup now runs an explicit `@electron/rebuild` pass with `--arch x64 --version <electron>` to avoid npm 11 runtime/target env ambiguity.
+- **Windows node-gyp instructions**: replaced invalid npm config guidance with environment-variable-based setup (`GYP_MSVS_VERSION` / `npm_config_msvs_version`) for MSVC detection compatibility.
+
 ## [0.4.0] - 2026-02-26
 
 ### Added

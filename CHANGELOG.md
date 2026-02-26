@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-02-26
+
+### Added
+- **Windows support**: CoWork OS now runs natively on Windows with an NSIS installer (.exe), custom frameless title bar with minimize/maximize/close controls, and full feature parity with the macOS version
+- **Windows build target**: electron-builder config produces Windows NSIS installer alongside existing macOS DMG
+- **Windows app icon**: .ico icon with 16x16, 32x32, 48x48, and 256x256 sizes
+- **Custom window controls**: frameless window on Windows with styled minimize, maximize, and close buttons matching the macOS aesthetic
+- **Windows shell execution**: agent commands run via PowerShell 7 (pwsh.exe) → Windows PowerShell → cmd.exe fallback chain with `-NoProfile -Command` args
+- **Windows process tree management**: PowerShell `Get-CimInstance Win32_Process` for child process enumeration with wmic fallback for older Windows versions
+- **Windows Tailscale integration**: added Windows Tailscale binary paths and fixed `isExecutable` check (uses `R_OK` instead of `X_OK` on Windows)
+- **Windows Chrome paths for PDF generation**: added Program Files, Program Files (x86), and LOCALAPPDATA Chrome paths for headless PDF generation
+- **Windows image downscaling**: Electron `nativeImage` fallback when macOS `sips` and ImageMagick `convert` are unavailable
+- **Cross-platform setup scripts**: replaced POSIX shell-based npm setup scripts with Node.js entry points (`scripts/setup.mjs`) that work on macOS, Linux, and Windows
+- **Windows build tools prerequisite check**: setup script warns if Visual C++ Build Tools are missing (required for native module compilation)
+- **Windows CI/CD**: GitHub Actions build matrix includes `windows-latest` for both CI and release workflows
+
+### Fixed
+- **Platform-aware paths**: replaced hardcoded Unix paths (`/tmp`, `~/.local/share`, `/bin/sh`) with platform-aware alternatives across signal-client, sandbox-factory, runner, and control-plane handlers
+- **HOME/USERPROFILE fallback**: all `process.env.HOME` references now include `process.env.USERPROFILE` fallback for Windows across 8 files (main.ts, extensions loader/registry/scaffold/pack-installer, control-plane handlers)
+- **Path separator handling**: replaced `filePath.split("/").pop()` with `path.basename()` in executor-helpers for correct Windows backslash path handling
+- **Sandbox shell resolution**: `NoSandbox.execute()` now uses platform-aware shell instead of hardcoded `/bin/sh`
+- **npm global install detection**: added Windows system-level path (`Program Files/nodejs/node_modules`) to update-manager detection patterns
+
+### Changed
+- **Window appearance on Windows**: opaque background (`#1a1a1c`) replaces macOS vibrancy/transparency; CSS overrides via `html.platform-win32` class
+- **Tray settings terminology**: dynamically shows "System Tray" on Windows vs "Menu Bar" on macOS; dock icon toggle hidden on Windows
+- **System tray enabled on Windows**: tray icon and quick input window now initialize on both macOS and Windows
+- **QuickInputWindow**: vibrancy, transparency, and `setVisibleOnAllWorkspaces` are macOS-only; Windows gets opaque frameless window
+- **Roadmap updated**: "Cross-platform UI support (Windows, Linux)" replaced with "Linux desktop support" since Windows is complete
+
 ## [0.3.95] - 2026-02-26
 
 ### Added

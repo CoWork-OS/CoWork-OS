@@ -3290,6 +3290,46 @@ a,
   line-height: 1.5;
 }
 
+.context-summary-preamble {
+  margin-bottom: 8px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.context-summary-section {
+  margin-bottom: 4px;
+}
+
+.context-summary-section > summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--color-text-primary);
+  padding: 4px 0;
+  list-style: disclosure-closed;
+}
+
+.context-summary-section[open] > summary {
+  list-style: disclosure-open;
+  margin-bottom: 4px;
+}
+
+.context-summary-section-content {
+  padding-left: 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  color: var(--color-text-secondary);
+}
+
+.context-summary-stats {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  margin-top: 6px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(99, 102, 241, 0.15);
+}
+
 .event-line {
   flex: 1;
   width: 2px;
@@ -9838,6 +9878,50 @@ button {
   border-color: rgba(239, 68, 68, 0.35);
 }
 
+/* Task header duration badge */
+.task-duration {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+
+.task-duration svg {
+  opacity: 0.6;
+}
+
+/* Timeline "Worked for" duration divider */
+.timeline-duration-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0 4px;
+  opacity: 0.5;
+}
+
+.timeline-duration-line {
+  flex: 1;
+  height: 1px;
+  background: var(--color-text-muted);
+  opacity: 0.3;
+}
+
+.timeline-duration-label {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+  letter-spacing: 0.02em;
+}
+
+/* Light theme adjustments */
+.theme-light .timeline-duration-line {
+  opacity: 0.2;
+}
+
 .cli-task-content {
   flex: 1;
   min-width: 0;
@@ -16288,13 +16372,14 @@ button {
 .command-close-btn {
   display: flex;
   align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
+  gap: 4px;
+  padding: 4px 8px;
   background: transparent;
-  border: 1px solid transparent;
+  border: 1px solid var(--color-border);
   border-radius: 4px;
   color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 500;
   cursor: pointer;
   transition: all 0.15s ease;
 }
@@ -16637,7 +16722,7 @@ button {
 }
 
 .browser-view {
-  height: calc(100vh - 40px);
+  height: 100vh;
   display: flex;
   flex-direction: column;
   background: var(--color-bg);
@@ -16649,8 +16734,16 @@ button {
   align-items: center;
   gap: 8px;
   padding: 10px 16px;
+  padding-top: calc(var(--title-bar-height) + 10px);
+  padding-left: 80px;
   border-bottom: 1px solid var(--color-border-subtle);
   background: rgba(0, 0, 0, 0.2);
+  -webkit-app-region: drag;
+}
+
+.browser-toolbar-btn,
+.browser-url {
+  -webkit-app-region: no-drag;
 }
 
 .browser-toolbar-btn {

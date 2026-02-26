@@ -269,4 +269,63 @@ describe("BedrockProvider", () => {
 
     expect(resolved).toBe("us.anthropic.claude-haiku-4-5-v1:0");
   });
+
+  it("does not silently downgrade to a different family when no compatible profile exists", async () => {
+    const provider = new BedrockProvider(config) as any;
+
+    provider.getClaudeInferenceProfiles = vi.fn().mockResolvedValue([
+      {
+        id: "us.anthropic.claude-3-sonnet-v1:0",
+        type: "SYSTEM_DEFINED",
+        modelArns: [
+          "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0",
+        ],
+      },
+    ]);
+
+    const resolved = await provider.resolveInferenceProfileFallback(
+      "anthropic.claude-haiku-4-5-20250514",
+    );
+
+    expect(resolved).toBeNull();
+  });
+
+  it("clamps maxTokens on inference-profile retry path", async () => {
+    const provider = new BedrockProvider(config) as any;
+    vi.spyOn(provider, "resolveModelId").mockResolvedValue("anthropic.claude-haiku-4-5-20250514");
+    vi.spyOn(provider, "resolveInferenceProfileFallback").mockResolvedValue(
+      "us.anthropic.claude-3-sonnet-20240229-v1:0",
+    );
+
+    const send = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new Error("Model requires an inference profile and does not support on-demand throughput."),
+      )
+      .mockResolvedValueOnce({
+        output: {
+          message: {
+            content: [{ text: "ok" }],
+          },
+        },
+        stopReason: "end_turn",
+        usage: {
+          inputTokens: 10,
+          outputTokens: 20,
+        },
+      });
+    provider.client.send = send;
+
+    await provider.createMessage({
+      model: "anthropic.claude-haiku-4-5-20250514",
+      maxTokens: 48_000,
+      system: "system prompt",
+      messages: [{ role: "user", content: "hello" }],
+    });
+
+    expect(send).toHaveBeenCalledTimes(2);
+    const retryInput = send.mock.calls[1][0].input;
+    expect(retryInput.modelId).toBe("us.anthropic.claude-3-sonnet-20240229-v1:0");
+    expect(retryInput.inferenceConfig.maxTokens).toBe(4096);
+  });
 });

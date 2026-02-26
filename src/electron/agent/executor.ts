@@ -113,7 +113,10 @@ import {
   maybeInjectStopReasonNudge as maybeInjectStopReasonNudgeUtil,
   maybeInjectToolLoopBreak as maybeInjectToolLoopBreakUtil,
   maybeInjectVariedFailureNudge as maybeInjectVariedFailureNudgeUtil,
+  shouldForceStopAfterSkippedToolOnlyTurns as shouldForceStopAfterSkippedToolOnlyTurnsUtil,
+  shouldLockFollowUpToolCalls as shouldLockFollowUpToolCallsUtil,
   type ToolLoopCall,
+  updateSkippedToolOnlyTurnStreak as updateSkippedToolOnlyTurnStreakUtil,
 } from "./executor-loop-utils";
 import {
   preflightWorkspaceCheck as preflightWorkspaceCheckUtil,
@@ -11095,6 +11098,8 @@ TASK / CONVERSATION HISTORY:
     let stopReasonNudgeInjected = false;
     let consecutiveToolUseStops = 0;
     let consecutiveMaxTokenStops = 0;
+    let followUpToolCallsLocked = false;
+    let consecutiveSkippedToolOnlyTurns = 0;
     // Varied failure detection: non-resetting per-tool failure counter (not reset on success)
     const persistentToolFailures = new Map<string, number>();
     let variedFailureNudgeInjected = false;
@@ -11427,6 +11432,36 @@ TASK / CONVERSATION HISTORY:
             log: (message) => console.log(`${this.logTag}${message}`),
             emitStopReasonEvent: (payload) =>
               this.emitEvent("stop_reason_nudge", { followUp: true, ...payload }),
+          });
+        }
+
+        if (
+          !followUpToolCallsLocked &&
+          shouldLockFollowUpToolCallsUtil({
+            stopReason: response.stopReason,
+            consecutiveToolUseStops,
+            followUpToolCallCount,
+            stopReasonNudgeInjected,
+          })
+        ) {
+          followUpToolCallsLocked = true;
+          this.emitEvent("tool_use_lock_enabled", {
+            followUp: true,
+            consecutiveToolUseStops,
+            followUpToolCallCount,
+            reason: "persistent_tool_use_streak",
+          });
+          messages.push({
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text:
+                  "Tool calls are now disabled for this follow-up because repeated tool-only turns are not converging. " +
+                  "Use current evidence and provide the best direct answer now. " +
+                  "If data is missing, list blockers clearly instead of making more tool calls.",
+              },
+            ],
           });
         }
 

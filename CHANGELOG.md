@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.95] - 2026-02-26
+
 ### Added
 - **Scoped temp workspace identity**: temp workspaces now use scope prefixes (`ui`, `gateway`, `hooks`, `tray`) for context-specific isolation, replacing the flat ID convention
 - **Temp workspace lease management**: in-memory lease tracking with 6-hour TTL prevents active workspaces from being pruned; UI refreshes leases every 60 seconds

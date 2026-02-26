@@ -60,7 +60,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest]
+        os: [macos-latest, windows-latest]
 
     steps:
       - name: Checkout code
@@ -106,4 +106,5 @@ jobs:
           path: |
             release/*.dmg
             release/*.zip
+            release/*.exe
           if-no-files-found: warn

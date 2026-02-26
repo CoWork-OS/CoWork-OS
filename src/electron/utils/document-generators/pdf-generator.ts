@@ -37,8 +37,18 @@ export async function generatePDF(
     const puppeteer = require("puppeteer-core") as Any;
     // Attempt to find an available Chromium executable
     const execPaths = [
-      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-      "/Applications/Chromium.app/Contents/MacOS/Chromium",
+      ...(process.platform === "win32"
+        ? [
+            "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+            "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+            process.env.LOCALAPPDATA
+              ? `${process.env.LOCALAPPDATA}\\Google\\Chrome\\Application\\chrome.exe`
+              : "",
+          ]
+        : [
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            "/Applications/Chromium.app/Contents/MacOS/Chromium",
+          ]),
       process.env.PUPPETEER_EXECUTABLE_PATH,
     ].filter(Boolean) as string[];
 

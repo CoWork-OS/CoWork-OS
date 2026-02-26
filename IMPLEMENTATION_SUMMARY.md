@@ -593,6 +593,12 @@ npm run type-check       # Check TypeScript types
 | Discord MCP Connector | Production | 19-tool REST API connector for Discord bots |
 | OAuth Connectors | Production | Google Workspace, DocuSign, Outreach, Slack OAuth flows |
 | Financial Plugin Packs | Production | 5 packs: Equity Research, Financial Analysis, IB, PE, Wealth |
+| Scoped Temp Workspaces | Production | Scope-aware isolation (ui, gateway, hooks, tray) with lease protection |
+| Sandbox Profile Cleanup | Production | Periodic pruning of stale .sb files from temp directory |
+| Managed Cron Workspaces | Production | Deterministic paths under userData with per-run directories |
+| Cron Workspace Context | Production | Runtime workspace migration, template variables for run paths |
+| Idle Session Cleanup | Production | Gateway auto-prunes idle sessions older than 7 days |
+| Workspace Cascade Delete | Production | Transactional deletion of workspace + all related data |
 
 ### Planned
 

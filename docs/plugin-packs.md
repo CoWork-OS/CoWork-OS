@@ -131,7 +131,7 @@ It auto-refreshes every 30 seconds and provides at-a-glance awareness of your ac
 
 ## Bundled Plugin Packs
 
-CoWork OS ships with 12 plugin packs covering common job functions.
+CoWork OS ships with 17 plugin packs covering common job functions.
 
 ### Engineering
 
@@ -420,9 +420,129 @@ CoWork OS ships with 12 plugin packs covering common job functions.
 
 ---
 
+### Equity Research
+
+| | |
+|---|---|
+| **Icon** | 📈 |
+| **Category** | Finance |
+| **Agent Role** | Equity Research Analyst |
+
+**Skills:**
+- **Earnings Analysis** — Parse earnings results, analyze beat/miss vs consensus, assess forward guidance quality
+- **Sector Analysis** — In-depth research on market dynamics, competitive landscape, regulatory environment, technology trends
+- **Coverage Initiation** — Draft initiation of coverage notes with investment thesis, financial analysis, and rating
+- **Price Target** — Build price targets using DCF, multiples, and scenario analysis with sensitivity testing
+- **Catalyst Tracking** — Identify and analyze upcoming catalysts (earnings, product launches, M&A, regulatory events)
+
+**Try Asking:**
+- "Analyze Tesla's latest earnings vs consensus expectations"
+- "Write a semiconductor industry deep dive focusing on AI chip demand"
+- "Draft CrowdStrike coverage initiation with buy thesis"
+- "Build blended price target for Shopify using DCF and EV/EBITDA"
+- "Identify 12-month catalysts for Nvidia"
+
+---
+
+### Financial Analysis
+
+| | |
+|---|---|
+| **Icon** | 📊 |
+| **Category** | Finance |
+| **Agent Role** | Financial Analyst |
+
+**Skills:**
+- **DCF Modeling** — Build discounted cash flow models with WACC calculation, terminal value, sensitivity analysis
+- **Ratio Analysis** — Comprehensive liquidity, profitability, leverage, and efficiency metrics with industry benchmarking
+- **Financial Statement Analysis** — Deep income statement, balance sheet, and cash flow analysis with trend identification
+- **Peer Benchmarking** — Compare company vs peers and industry on key financial and operational metrics
+- **Valuation Summary** — Multi-method valuation combining DCF, comparables, and precedent transactions
+
+**Try Asking:**
+- "Build DCF model for Apple with 10-year projection and sensitivity analysis"
+- "Analyze Tesla's liquidity and profitability ratios"
+- "Compare Microsoft's financials over 5 years and flag trends"
+- "Benchmark Nvidia against AMD and Intel"
+- "Provide blended valuation for Alphabet using DCF, comparables, and precedent transactions"
+
+---
+
+### Investment Banking
+
+| | |
+|---|---|
+| **Icon** | 🏦 |
+| **Category** | Finance |
+| **Agent Role** | Investment Banker |
+
+**Skills:**
+- **Deal Screening** — Screen and identify M&A targets, IPO candidates based on strategic and financial criteria
+- **Pitch Book** — Prepare structured pitch book content with situation overview, strategic alternatives, valuation, process
+- **M&A Analysis** — Synergy analysis, accretion/dilution modeling, deal structure evaluation
+- **Due Diligence** — Comprehensive due diligence checklist and findings analysis (Financial, Legal, Commercial, Technical)
+- **Comps Analysis** — Trading comparable companies and precedent transaction analysis for valuation
+
+**Try Asking:**
+- "Screen potential M&A targets in healthcare SaaS under $500M EV"
+- "Prepare pitch book for mid-market tech company sale process"
+- "Analyze accretion/dilution of Company A acquiring Company B at 30% premium"
+- "Build due diligence checklist for fintech acquisition"
+- "Run trading comps and precedent transactions for cybersecurity company"
+
+---
+
+### Private Equity
+
+| | |
+|---|---|
+| **Icon** | 🏢 |
+| **Category** | Finance |
+| **Agent Role** | PE Associate |
+
+**Skills:**
+- **Deal Sourcing** — Source and screen PE investment targets based on financial, strategic, operational criteria
+- **LBO Modeling** — Build leveraged buyout models with debt structuring, sources/uses, returns analysis, sensitivity
+- **Portfolio Monitoring** — Track portfolio company performance against business plan with KPI dashboards
+- **Exit Analysis** — Analyze exit options (IPO, strategic sale, secondary buyout, dividend recap) and compare returns
+- **Fund Reporting** — Prepare fund-level LP reports with performance metrics, capital accounts, portfolio summaries
+
+**Try Asking:**
+- "Screen mid-market healthcare services companies suitable for platform acquisition"
+- "Build LBO model for $200M acquisition with 5x leverage and 20% equity"
+- "Generate quarterly performance dashboard for logistics portfolio company"
+- "Analyze exit options for SaaS company held 4 years with 3x revenue growth"
+- "Prepare quarterly LP update with IRR and MOIC calculations"
+
+---
+
+### Wealth Management
+
+| | |
+|---|---|
+| **Icon** | 💎 |
+| **Category** | Finance |
+| **Agent Role** | Wealth Advisor |
+
+**Skills:**
+- **Portfolio Construction** — Build diversified portfolios using modern portfolio theory, factor analysis, constraint optimization
+- **Asset Allocation** — Strategic and tactical asset allocation recommendations based on macro outlook and client profile
+- **Client Reporting** — Generate client-facing performance reports with attribution, commentary, and forward outlook
+- **Risk Assessment** — Comprehensive portfolio risk analysis (VaR, drawdown, stress testing, factor decomposition)
+- **Tax Optimization** — Tax-loss harvesting identification, asset location optimization, tax-aware strategies
+
+**Try Asking:**
+- "Construct balanced portfolio for moderate-risk client with $2M investable assets"
+- "Recommend tactical asset allocation shift given current macro environment"
+- "Prepare quarterly performance review for Henderson family account"
+- "Run comprehensive risk analysis including VaR and drawdown metrics"
+- "Identify tax-loss harvesting opportunities across equity positions"
+
+---
+
 ## Digital Twin Integration
 
-Six of the twelve bundled packs link to [Digital Twin Personas](digital-twins.md):
+Seven of the seventeen bundled packs link to [Digital Twin Personas](digital-twins.md):
 
 | Pack | Persona Template | Proactive Tasks |
 |------|-----------------|-----------------|

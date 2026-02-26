@@ -102,13 +102,16 @@ Available: Claude, GPT-4, Gemini, Llama, Mistral, and more — see [openrouter.a
 
 ## Web Search Providers
 
-Multi-provider web search for research tasks with automatic retry and fallback.
+Multi-provider web search for research tasks with automatic retry and fallback. DuckDuckGo is built-in and requires no setup — it serves as a free fallback so web search always works, even without API keys.
 
-| Provider | Types | Best For |
-|----------|-------|----------|
-| **Tavily** | Web, News | AI-optimized results (recommended) |
-| **Brave Search** | Web, News, Images | Privacy-focused |
-| **SerpAPI** | Web, News, Images | Google results |
-| **Google Custom Search** | Web, Images | Direct Google integration |
+| Provider | Types | API Key | Best For |
+|----------|-------|---------|----------|
+| **DuckDuckGo** | Web | Not required (built-in) | Zero-config free fallback |
+| **Tavily** | Web, News | Required | AI-optimized results (recommended) |
+| **Brave Search** | Web, News, Images | Required | Privacy-focused |
+| **SerpAPI** | Web, News, Images | Required | Google results |
+| **Google Custom Search** | Web, Images | Required | Direct Google integration |
 
-Configure in **Settings** > **Web Search**.
+DuckDuckGo is always available as the last-resort fallback. When paid providers are configured, they are tried first in the configured order, with DuckDuckGo only used if all others fail.
+
+Configure paid providers in **Settings** > **Web Search**.

@@ -22859,3 +22859,68 @@ button {
     opacity: 0.5;
   }
 }
+
+/* ============================================
+   Windows Platform Overrides
+   On Windows, vibrancy/transparency is not available.
+   Use opaque backgrounds instead of see-through RGBA values.
+   ============================================ */
+html.platform-win32 {
+  --color-bg: #1a1a1c;
+  --color-bg-primary: rgba(30, 30, 30, 0.95);
+  --color-bg-darker: rgba(15, 15, 15, 0.95);
+  --color-bg-sidebar: rgba(20, 20, 22, 0.98);
+  --color-bg-elevated: rgba(45, 45, 48, 0.98);
+}
+
+html.platform-win32 .theme-light {
+  --color-bg: #f0f0f2;
+  --color-bg-primary: rgba(255, 255, 255, 0.98);
+  --color-bg-darker: rgba(245, 245, 247, 0.98);
+  --color-bg-sidebar: rgba(248, 248, 250, 0.99);
+  --color-bg-elevated: rgba(255, 255, 255, 0.99);
+}
+
+/* Windows: reduce left padding (no macOS traffic lights) */
+html.platform-win32 .title-bar {
+  padding-left: 12px;
+}
+
+/* Windows title bar control buttons (minimize, maximize, close) */
+.win-controls {
+  -webkit-app-region: no-drag;
+  display: flex;
+  align-items: center;
+  margin-left: 8px;
+}
+
+.win-control-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 32px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  transition: background-color 0.1s ease;
+  -webkit-app-region: no-drag;
+}
+
+.win-control-btn:hover {
+  background-color: var(--color-bg-hover);
+}
+
+.win-control-btn.win-close:hover {
+  background-color: #e81123;
+  color: #ffffff;
+}
+
+.win-control-btn svg {
+  width: 10px;
+  height: 10px;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  fill: none;
+}

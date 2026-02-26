@@ -26,7 +26,7 @@
 - **Task-Based Workflow**: Multi-step execution with plan-execute-observe loops
 - **Live Terminal**: Shell commands run in a real-time terminal view — see output as it happens, stop execution, or provide interactive input (e.g. `y`/`n` prompts)
 - **Dynamic Re-Planning**: Agent can revise its plan mid-execution
-- **100+ Built-in Skills**: GitHub, Slack, Notion, Spotify, Apple Notes, and more
+- **130+ Built-in Skills**: GitHub, Slack, Notion, Spotify, Apple Notes, Unity, Unreal, Terraform, Kubernetes, and more
 - **Document Creation**: Excel, Word, PDF, PowerPoint with professional formatting
 - **Persistent Memory**: Cross-session context with privacy-aware observation capture
 - **Knowledge Graph**: SQLite-backed entity/relationship memory with FTS5 search, graph traversal, and auto-extraction
@@ -462,15 +462,30 @@ See [Live Canvas](live-canvas.md) for the full guide.
 
 Three-tier web interaction stack — from lightweight HTTP fetching to full browser automation to anti-bot scraping — all as native agent tools with no external CLI dependencies.
 
+### Web Search (5 providers, always available)
+
+Multi-provider web search with automatic fallback. DuckDuckGo is built-in and requires no API key, so `web_search` works out of the box for every user.
+
+| Provider | Types | API Key | Notes |
+|----------|-------|---------|-------|
+| **DuckDuckGo** | Web | Not required | Built-in free fallback, always last in chain |
+| **Tavily** | Web, News | Required | AI-optimized results (recommended) |
+| **Brave Search** | Web, News, Images | Required | Privacy-focused |
+| **SerpAPI** | Web, News, Images | Required | Google results |
+| **Google Custom Search** | Web, Images | Required | Direct Google integration |
+
+Paid providers are tried first in configured order. DuckDuckGo is automatically appended as the last-resort fallback. Includes retry with exponential backoff for transient errors.
+
 ### Architecture
 
 ```
+Tier 0: web_search                   (multi-provider search — always available)
 Tier 1: web_fetch / http_request     (no browser — fastest)
 Tier 2: browser_* tools              (Playwright in-process — full interaction)
 Tier 3: scrape_* tools               (Scrapling — anti-bot bypass)
 ```
 
-The agent auto-selects the appropriate tier: `web_fetch` for reading known URLs, `browser_*` when interaction or JS rendering is needed, and `scrape_*` for anti-bot-protected sites.
+The agent auto-selects the appropriate tier: `web_search` for discovering information, `web_fetch` for reading known URLs, `browser_*` when interaction or JS rendering is needed, and `scrape_*` for anti-bot-protected sites.
 
 ### Browser Tools (17 tools)
 

@@ -131,7 +131,7 @@ It auto-refreshes every 30 seconds and provides at-a-glance awareness of your ac
 
 ## Bundled Plugin Packs
 
-CoWork OS ships with 10 plugin packs covering common job functions.
+CoWork OS ships with 12 plugin packs covering common job functions.
 
 ### Engineering
 
@@ -217,6 +217,10 @@ CoWork OS ships with 10 plugin packs covering common job functions.
 - **Deployment Checklist** — Pre-deployment (code review, tests, migrations, configs), deployment steps, post-deployment (health checks, smoke tests, monitoring), rollback procedure
 - **Monitoring Setup** — Key metrics (latency, throughput, errors, saturation), alert thresholds, dashboard layout, log aggregation, health checks, SLO/SLA targets
 - **Post-mortem Report** — Blameless format: timeline, impact, 5 Whys root cause, contributing factors, what went well, action items with owners
+- **Terraform Plan Review** — Review `terraform plan` output, flag resource changes, detect drift, assess blast radius, and recommend approval or rejection
+- **Kubernetes Manifest Generation** — Generate and review Kubernetes manifests (Deployments, Services, Ingress, ConfigMaps, Secrets, HPA) with best practices
+- **Cloud Migration Assessment** — Assess workloads using the 6 Rs framework (Rehost, Replatform, Refactor, Repurchase, Retain, Retire) with cost estimation
+- **Docker Compose File Generation** — Generate and review Docker Compose files with service definitions, networking, volumes, health checks, and multi-stage builds
 
 **Try Asking:**
 - "Create an incident response plan for this production issue"
@@ -224,6 +228,56 @@ CoWork OS ships with 10 plugin packs covering common job functions.
 - "Design monitoring and alerting for the payment service"
 - "Write a blameless post-mortem for yesterday's outage"
 - "What's our SLA compliance looking like this month?"
+- "Review this Terraform plan and flag any risky changes"
+- "Generate Kubernetes manifests for a Node.js API with Redis"
+- "Assess these workloads for cloud migration readiness"
+- "Create a Docker Compose setup for a full-stack app"
+
+---
+
+### Mobile Development
+
+| | |
+|---|---|
+| **Icon** | 📱 |
+| **Category** | Engineering |
+| **Agent Role** | Mobile Developer |
+
+**Skills:**
+- **React Native Setup** — Project scaffolding, navigation (React Navigation), state management, native module integration, Expo vs bare workflow guidance
+- **iOS Development** — SwiftUI and UIKit patterns, @Observable, SwiftData/Core Data, async/await, push notifications (APNs), `xcodebuild` commands, `xcrun simctl` simulator management, code signing, App Store submission
+- **Android Development** — Jetpack Compose, ViewModel, Room, Retrofit, Hilt/Dagger, Coroutines/Flow, Gradle builds, ADB/emulator commands, ProGuard/R8, Play Store submission
+- **Build Pipeline** — Fastlane setup, code signing automation, CI/CD for mobile, TestFlight/Play Store deployment, beta distribution
+
+**Try Asking:**
+- "Set up a new React Native project with navigation and state management"
+- "Build and deploy this iOS app to TestFlight"
+- "Create a Jetpack Compose screen with a ViewModel and Room database"
+- "Set up Fastlane for automated iOS and Android builds"
+- "Debug why my app crashes on launch with this stack trace"
+
+---
+
+### Game Development
+
+| | |
+|---|---|
+| **Icon** | 🎮 |
+| **Category** | Engineering |
+| **Agent Role** | Game Developer |
+
+**Skills:**
+- **Unity Development** — C# scripting, MonoBehaviour lifecycle, ScriptableObjects, Addressables, URP/HDRP Shader Graph, physics, UI Toolkit, editor scripting, Unity CLI batch builds and testing
+- **Unreal Engine Development** — C++/Blueprints, Gameplay Framework, Enhanced Input, UCLASS/UPROPERTY/UFUNCTION macros, Niagara particles, Lumen/Nanite, multiplayer replication, UnrealBuildTool packaging
+- **Godot Development** — GDScript patterns, node tree architecture, signals, Godot 4 rendering, export presets, physics, UI controls, and GDNative/C++ extensions
+- **Cross-Engine Performance** — Draw call batching, LOD configuration, occlusion culling, texture optimization, object pooling, memory budgets, GPU profiling, and platform-specific tuning (mobile/PC/console)
+
+**Try Asking:**
+- "Create a Unity player controller with camera follow and input handling"
+- "Set up an Unreal Engine character with Enhanced Input and C++"
+- "Optimize this scene — draw calls are too high and FPS is dropping"
+- "Write a GDScript state machine for enemy AI"
+- "Profile GPU performance and reduce frame time on mobile"
 
 ---
 
@@ -368,7 +422,7 @@ CoWork OS ships with 10 plugin packs covering common job functions.
 
 ## Digital Twin Integration
 
-Six of the ten bundled packs link to [Digital Twin Personas](digital-twins.md):
+Six of the twelve bundled packs link to [Digital Twin Personas](digital-twins.md):
 
 | Pack | Persona Template | Proactive Tasks |
 |------|-----------------|-----------------|
@@ -911,6 +965,22 @@ See [Digital Twin Personas Guide](digital-twin-personas-guide.md) for the full l
 3. Before releases, generate a **Deployment Checklist** tailored to your environment
 4. After incidents, write **Post-mortem Reports** in blameless format
 5. The **DevOps/SRE** twin monitors deployment health and surfaces alerts proactively
+
+### Mobile Developer
+
+1. Enable **Mobile Development** pack
+2. Use **React Native Setup** to scaffold a new cross-platform project with navigation and state management
+3. Use **iOS Development** skills for SwiftUI patterns, simulator management, and code signing
+4. Use **Android Development** skills for Jetpack Compose, Gradle builds, and Play Store submission
+5. Set up **Build Pipeline** with Fastlane for automated iOS and Android deployment
+
+### Game Developer
+
+1. Enable **Game Development** pack
+2. Use **Unity Development** for C# scripting, ScriptableObjects, and Unity CLI builds
+3. Use **Unreal Engine Development** for C++/Blueprint patterns, Niagara, and packaging
+4. Use **Godot Development** for GDScript, signals, and export presets
+5. Run **Cross-Engine Performance** analysis to optimize draw calls, LOD, and memory usage
 
 ### Cross-Functional Team
 

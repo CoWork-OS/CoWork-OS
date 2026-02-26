@@ -130,23 +130,29 @@ export class SandboxRunner {
     const spawnOptions: SpawnOptions = {
       cwd,
       env,
-      shell: true,
+      shell: false,
       stdio: ["ignore", "pipe", "pipe"],
     };
 
     if (useSandboxExec && this.sandboxProfile) {
       // Use sandbox-exec on macOS
       const { profilePath, cleanup } = this.writeTempProfile();
-      proc = spawn(
-        "sandbox-exec",
-        ["-f", profilePath, "/bin/sh", "-c", `${command} ${args.join(" ")}`],
-        spawnOptions,
-      );
+      proc =
+        args.length > 0
+          ? spawn("sandbox-exec", ["-f", profilePath, command, ...args], spawnOptions)
+          : spawn("sandbox-exec", ["-f", profilePath, "/bin/sh", "-c", command], spawnOptions);
       proc.on("close", cleanup);
       proc.on("error", cleanup);
     } else {
       // Fallback: execute without OS-level sandboxing (still has resource limits)
-      proc = spawn("/bin/sh", ["-c", `${command} ${args.join(" ")}`], spawnOptions);
+      if (args.length > 0) {
+        proc = spawn(command, args, spawnOptions);
+      } else if (process.platform === "win32") {
+        const comspec = process.env.COMSPEC || "cmd.exe";
+        proc = spawn(comspec, ["/d", "/s", "/c", command], spawnOptions);
+      } else {
+        proc = spawn("/bin/sh", ["-c", command], spawnOptions);
+      }
     }
 
     return new Promise((resolve) => {
@@ -304,20 +310,30 @@ export class SandboxRunner {
       }
     }
 
-    // Set safe defaults
-    safeEnv.HOME = process.env.HOME || os.homedir();
-    safeEnv.USER = process.env.USER || os.userInfo().username;
-    safeEnv.SHELL = process.env.SHELL || "/bin/bash";
-    safeEnv.TERM = "xterm-256color";
-    safeEnv.LANG = process.env.LANG || "en_US.UTF-8";
-    safeEnv.TMPDIR = os.tmpdir();
+    // Set safe defaults (platform-aware)
+    safeEnv.HOME = process.env.HOME || process.env.USERPROFILE || os.homedir();
+    safeEnv.USER = process.env.USER || process.env.USERNAME || os.userInfo().username;
 
-    // Minimal PATH with only standard locations
-    safeEnv.PATH = ["/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(":");
+    if (process.platform === "win32") {
+      safeEnv.USERPROFILE = process.env.USERPROFILE || os.homedir();
+      safeEnv.COMSPEC = process.env.COMSPEC || "C:\\Windows\\System32\\cmd.exe";
+      safeEnv.PATH = process.env.PATH || "";
+      safeEnv.TEMP = process.env.TEMP || os.tmpdir();
+      safeEnv.TMP = process.env.TMP || os.tmpdir();
+      safeEnv.SystemRoot = process.env.SystemRoot || "C:\\Windows";
+    } else {
+      safeEnv.SHELL = process.env.SHELL || "/bin/bash";
+      safeEnv.TERM = "xterm-256color";
+      safeEnv.LANG = process.env.LANG || "en_US.UTF-8";
+      safeEnv.TMPDIR = os.tmpdir();
 
-    // Add homebrew paths on macOS
-    if (process.platform === "darwin") {
-      safeEnv.PATH = `/opt/homebrew/bin:/opt/homebrew/sbin:${safeEnv.PATH}`;
+      // Minimal PATH with only standard locations
+      safeEnv.PATH = ["/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(":");
+
+      // Add homebrew paths on macOS
+      if (process.platform === "darwin") {
+        safeEnv.PATH = `/opt/homebrew/bin:/opt/homebrew/sbin:${safeEnv.PATH}`;
+      }
     }
 
     return safeEnv;

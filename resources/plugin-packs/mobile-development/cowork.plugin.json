@@ -1,0 +1,80 @@
+{
+  "name": "mobile-development-pack",
+  "displayName": "Mobile Development",
+  "version": "1.0.0",
+  "description": "Skills for React Native, iOS/Swift, Android/Kotlin development, emulator management, build configuration, and mobile CI/CD",
+  "type": "pack",
+  "author": "CoWork-OSS",
+  "keywords": ["mobile", "react-native", "ios", "android", "swift", "kotlin", "xcode", "gradle", "app-store", "play-store"],
+  "icon": "📱",
+  "category": "Engineering",
+  "personaTemplateId": "mobile-developer",
+  "tryAsking": [
+    "Set up a new React Native project with TypeScript and React Navigation",
+    "Generate a Kotlin data class and Room database entity for user profiles",
+    "Create a SwiftUI view with Core Data integration and search",
+    "Configure Fastlane for iOS and Android CI/CD",
+    "Debug why my app crashes on Android 14 but works on 13"
+  ],
+  "skills": [
+    {
+      "id": "mobile-react-native-setup",
+      "name": "React Native Setup",
+      "description": "Scaffold a React Native project with TypeScript, navigation, state management, and development tooling",
+      "icon": "⚛️",
+      "category": "Mobile",
+      "prompt": "Set up a React Native project with the following requirements.\n\nRequirements: {{requirements}}\n\nPlease provide:\n1. Project initialization commands (npx react-native init or expo)\n2. TypeScript configuration\n3. Navigation setup (React Navigation with typed routes)\n4. State management recommendation and setup (Redux Toolkit, Zustand, or Jotai)\n5. Essential dependencies (async storage, safe area, gesture handler)\n6. Folder structure recommendation\n7. ESLint and Prettier config\n8. Development commands (iOS simulator, Android emulator)\n9. Environment variable management (react-native-config)\n10. Testing setup (Jest + React Native Testing Library)",
+      "parameters": [
+        { "name": "requirements", "type": "string", "description": "App requirements and feature list", "required": true }
+      ],
+      "enabled": true
+    },
+    {
+      "id": "mobile-ios-development",
+      "name": "iOS Development",
+      "description": "SwiftUI/UIKit patterns, Core Data, Xcode build configuration, and App Store submission",
+      "icon": "🍎",
+      "category": "Mobile",
+      "prompt": "Help with the following iOS development task.\n\nTask: {{task}}\n\nConsider:\n1. SwiftUI vs UIKit patterns (prefer SwiftUI for new code)\n2. Data persistence (Core Data, SwiftData, UserDefaults)\n3. Concurrency (async/await, Combine, actors)\n4. Architecture (MVVM with ObservableObject / @Observable)\n5. Xcode build commands: xcodebuild -workspace App.xcworkspace -scheme App -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 15' build\n6. Simulator management: xcrun simctl list devices, xcrun simctl boot, xcrun simctl install\n7. Code signing and provisioning profiles\n8. App Store Connect and TestFlight distribution\n9. Accessibility (VoiceOver, Dynamic Type)\n10. Performance (Instruments profiling)",
+      "parameters": [
+        { "name": "task", "type": "string", "description": "iOS development task or question", "required": true }
+      ],
+      "enabled": true
+    },
+    {
+      "id": "mobile-android-development",
+      "name": "Android Development",
+      "description": "Jetpack Compose, Room database, Gradle configuration, and Play Store submission",
+      "icon": "🤖",
+      "category": "Mobile",
+      "prompt": "Help with the following Android development task.\n\nTask: {{task}}\n\nConsider:\n1. Jetpack Compose vs XML layouts (prefer Compose for new code)\n2. Architecture (MVVM with ViewModel, Hilt DI, Repository pattern)\n3. Data layer (Room for local DB, Retrofit for network, DataStore for preferences)\n4. Coroutines and Flow for async operations\n5. Gradle commands: ./gradlew assembleDebug, ./gradlew connectedAndroidTest, ./gradlew lint\n6. Emulator: emulator -list-avds, emulator @Pixel_7_API_34\n7. ADB: adb install app.apk, adb logcat, adb shell am start\n8. ProGuard/R8 for release builds\n9. Firebase integration (FCM, Crashlytics, Remote Config)\n10. Play Store submission (App Bundle, release tracks)",
+      "parameters": [
+        { "name": "task", "type": "string", "description": "Android development task or question", "required": true }
+      ],
+      "enabled": true
+    },
+    {
+      "id": "mobile-build-pipeline",
+      "name": "Mobile CI/CD Pipeline",
+      "description": "Configure Fastlane, code signing, and automated build/deploy pipelines for iOS and Android",
+      "icon": "🔧",
+      "category": "Mobile",
+      "prompt": "Set up a mobile CI/CD pipeline for the following project.\n\nProject details: {{project}}\n\nPlease provide:\n1. Fastlane configuration (Fastfile, Appfile, Matchfile)\n2. iOS code signing (match for certificates, profiles)\n3. Android signing (keystore generation, Gradle signing config)\n4. Build lanes:\n   - beta: Build + upload to TestFlight / Play Console internal track\n   - release: Build + upload to App Store / Play Store production\n   - test: Run unit tests + UI tests\n5. CI service integration (GitHub Actions, Bitrise, or CircleCI)\n6. Environment management (staging vs production configs)\n7. Version bumping strategy (semantic versioning)\n8. Artifact management and build caching",
+      "parameters": [
+        { "name": "project", "type": "string", "description": "Project type (React Native, native iOS, native Android, or both) and CI requirements", "required": true }
+      ],
+      "enabled": true
+    }
+  ],
+  "agentRoles": [
+    {
+      "name": "mobile-developer",
+      "displayName": "Mobile Developer",
+      "description": "Specializes in cross-platform and native mobile development for iOS and Android",
+      "icon": "📱",
+      "color": "#8b5cf6",
+      "capabilities": ["code", "build", "debug", "test", "design"],
+      "systemPrompt": "You are a Mobile Developer agent. You excel at React Native, Swift/iOS, and Kotlin/Android development. You understand mobile-specific concerns: app lifecycle, navigation patterns, state management, push notifications, deep linking, app store submission, performance profiling, and responsive layouts. You leverage shell tools for running emulators (xcrun simctl, emulator), building (xcodebuild, ./gradlew), and testing. You prefer SwiftUI over UIKit and Jetpack Compose over XML layouts for new code."
+    }
+  ]
+}

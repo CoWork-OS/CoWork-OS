@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Scoped temp workspace identity**: temp workspaces now use scope prefixes (`ui`, `gateway`, `hooks`, `tray`) for context-specific isolation, replacing the flat ID convention
+- **Temp workspace lease management**: in-memory lease tracking with 6-hour TTL prevents active workspaces from being pruned; UI refreshes leases every 60 seconds
+- **Stale sandbox profile pruning**: automatic periodic cleanup (6-hour interval) of leftover `.sb` sandbox profile files from the system temp directory
+- **Managed scheduled workspace paths**: cron jobs now get deterministic workspace paths under `userData/scheduled-workspaces/` with per-run directories (`<workspace>/.cowork/scheduled-runs/run-<timestamp>-<id>`)
+- **CronService workspace context resolution**: `resolveWorkspaceContext` hook enables runtime workspace migration for scheduled jobs on add (temp→managed) and run (per-run directory creation) phases; adds `{{workspace_path}}`, `{{run_workspace_path}}`, `{{run_workspace_relpath}}` template variables
+- **Cascade delete for temp workspaces**: `deleteWorkspaceAndRelatedData` performs transactional deletion that introspects all tables for `workspace_id`/`task_id`/`session_id` columns and removes related rows before deleting the workspace itself
+
+### Fixed
+- **Idle session cleanup**: channel gateway now prunes idle sessions older than 7 days automatically via `deleteIdleOlderThan`
+- **Sandbox profile temp file cleanup**: replaced fixed `setTimeout` cleanup with process-event-driven (`close`/`error`) handlers and idempotent `cleanupOnce` pattern in both `MacOSSandbox` and `SandboxRunner`
+- **Temp workspace init**: renderer no longer forces `createNew: true` on startup, reusing existing temp workspaces instead of creating duplicates
+- **Control plane temp workspace filtering**: uses `isTempWorkspaceId()` instead of exact `TEMP_WORKSPACE_ID` match to correctly filter all scoped variants
+
+### Changed
+- **Active task status filtering**: temp workspace pruning now only considers active task statuses (pending, queued, planning, executing, paused, blocked), ignoring completed/failed tasks
+- **Cron-tools workspace delegation**: removed inline `ensureDedicatedWorkspaceForScheduledJob` from `CronTools`; workspace normalization is handled by CronService's `resolveWorkspaceContext` hook
+- **Build-mode skill**: added routing metadata (useWhen, dontUseWhen, outputs, successCriteria) for intent-based skill matching
+
 ## [0.3.94] - 2026-02-26
 
 ### Added

@@ -77,6 +77,7 @@ function createExecutorWithStubs(responses: LLMResponse[], toolResults: Record<s
         kind: "none",
       },
     })),
+    getContextUtilization: vi.fn().mockReturnValue({ utilization: 0 }),
     getAvailableTokens: vi.fn().mockReturnValue(1_000_000),
   };
   executor.checkBudgets = vi.fn();
@@ -284,6 +285,49 @@ describe("TaskExecutor executeStep failure handling", () => {
       }),
     );
     expect(executor.toolRegistry.executeTool).not.toHaveBeenCalled();
+  });
+
+  it("does not reference follow-up lock state when step tool calls are soft-blocked by turn budget", async () => {
+    executor = createExecutorWithStubs(
+      [
+        toolUseResponse("web_search", { query: "latest nokia earnings" }),
+        textResponse("Using current evidence only."),
+      ],
+      {},
+    );
+    (executor as any).guardrailPhaseAEnabled = true;
+    (executor as any).getRemainingTurnBudget = vi.fn().mockReturnValue(0);
+    (executor as any).crossStepToolFailures = new Map();
+    (executor as any).pendingFollowUps = [];
+
+    const step: any = { id: "step-turn-budget", description: "Search for source links", status: "pending" };
+
+    await expect((executor as any).executeStep(step)).resolves.toBeUndefined();
+    expect(String(step.error || "")).not.toContain("followUpToolCallsLocked");
+  });
+
+  it("fails fast after repeated policy-blocked tool-only turns with no text output", async () => {
+    executor = createExecutorWithStubs(
+      [
+        toolUseResponse("web_search", { query: "first blocked call" }),
+        toolUseResponse("web_search", { query: "second blocked call" }),
+      ],
+      {},
+    );
+    (executor as any).guardrailPhaseAEnabled = true;
+    (executor as any).getRemainingTurnBudget = vi.fn().mockReturnValue(0);
+    (executor as any).crossStepToolFailures = new Map();
+    (executor as any).pendingFollowUps = [];
+
+    const step: any = {
+      id: "step-blocked-loop",
+      description: "Find sources",
+      status: "pending",
+    };
+
+    await expect((executor as any).executeStep(step)).resolves.toBeUndefined();
+    expect(step.status).toBe("failed");
+    expect(String(step.error || "")).toContain("repeated tool-only turns");
   });
 
   it("marks verification step failed when no new image is found", async () => {

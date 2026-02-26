@@ -56,7 +56,7 @@ const getDefaultExtensionsDirs = (): string[] => {
   }
 
   // User extensions directory
-  const userDataPath = app?.getPath?.("userData") || path.join(process.env.HOME || "", ".cowork");
+  const userDataPath = app?.getPath?.("userData") || path.join(process.env.HOME || process.env.USERPROFILE || "", ".cowork");
   const userExtensionsDir = path.join(userDataPath, "extensions");
   if (fs.existsSync(userExtensionsDir)) {
     dirs.push(userExtensionsDir);
@@ -296,7 +296,7 @@ export async function loadPlugin(pluginPath: string): Promise<PluginLoadResult> 
  * Create the user extensions directory if it doesn't exist
  */
 export function ensureExtensionsDirectory(): string {
-  const userDataPath = app?.getPath?.("userData") || path.join(process.env.HOME || "", ".cowork");
+  const userDataPath = app?.getPath?.("userData") || path.join(process.env.HOME || process.env.USERPROFILE || "", ".cowork");
   const extensionsDir = path.join(userDataPath, "extensions");
 
   if (!fs.existsSync(extensionsDir)) {
@@ -310,7 +310,7 @@ export function ensureExtensionsDirectory(): string {
  * Get the path to a plugin's data directory
  */
 export function getPluginDataPath(pluginName: string): string {
-  const userDataPath = app?.getPath?.("userData") || path.join(process.env.HOME || "", ".cowork");
+  const userDataPath = app?.getPath?.("userData") || path.join(process.env.HOME || process.env.USERPROFILE || "", ".cowork");
   const pluginDataDir = path.join(userDataPath, "plugin-data", pluginName);
 
   if (!fs.existsSync(pluginDataDir)) {

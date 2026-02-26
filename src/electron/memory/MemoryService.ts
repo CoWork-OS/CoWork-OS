@@ -87,6 +87,7 @@ export class MemoryService {
   private static initialized = false;
   private static compressionQueue: string[] = [];
   private static compressionInProgress = false;
+  private static compressionPauseCount = 0;
   private static cleanupIntervalHandle?: ReturnType<typeof setInterval>;
 
   /**
@@ -700,10 +701,38 @@ export class MemoryService {
   }
 
   /**
+   * Pause background LLM compression to avoid contention during active task execution.
+   * Queued items are preserved and processed when resumed.
+   */
+  static pauseCompression(): void {
+    this.compressionPauseCount += 1;
+  }
+
+  /**
+   * Resume background LLM compression and drain any queued items.
+   */
+  static resumeCompression(): void {
+    if (this.compressionPauseCount > 0) {
+      this.compressionPauseCount -= 1;
+    }
+    if (!this.isCompressionPaused() && this.compressionQueue.length > 0) {
+      this.processCompressionQueue();
+    }
+  }
+
+  private static isCompressionPaused(): boolean {
+    return this.compressionPauseCount > 0;
+  }
+
+  /**
    * Process compression queue asynchronously
    */
   private static async processCompressionQueue(): Promise<void> {
-    if (this.compressionInProgress || this.compressionQueue.length === 0) {
+    if (
+      this.compressionInProgress ||
+      this.compressionQueue.length === 0 ||
+      this.isCompressionPaused()
+    ) {
       return;
     }
 
@@ -714,13 +743,15 @@ export class MemoryService {
       const batch = this.compressionQueue.splice(0, COMPRESSION_BATCH_SIZE);
 
       for (const memoryId of batch) {
+        // Check pause flag between items to yield promptly when a task starts.
+        if (this.isCompressionPaused()) break;
         await this.compressMemory(memoryId);
         // Small delay to avoid overwhelming the LLM
         await new Promise((resolve) => setTimeout(resolve, COMPRESSION_DELAY_MS));
       }
 
-      // Continue if more items
-      if (this.compressionQueue.length > 0) {
+      // Continue if more items (and not paused)
+      if (this.compressionQueue.length > 0 && !this.isCompressionPaused()) {
         setTimeout(() => this.processCompressionQueue(), 1000);
       }
     } catch (error) {

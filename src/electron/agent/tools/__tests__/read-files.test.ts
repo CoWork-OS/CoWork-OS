@@ -143,4 +143,83 @@ describe("readFilesByPatterns", () => {
     const out = await scopedFileTools.readFile(staleAbsolutePath);
     expect(out.content).toContain(expectedContent);
   });
+
+  it("returns canonical resolved path after case-insensitive fallback", async () => {
+    writeFile(path.join(tmpDir, "docs", "spec.md"), "# Spec\n");
+
+    const out = await fileTools.readFile("Docs/SPEC.md");
+    expect(out.content).toContain("# Spec");
+    expect(out.path).toBe("docs/spec.md");
+  });
+
+  it("blocks read_file symlink escapes outside workspace when unrestricted access is off", async () => {
+    if (process.platform === "win32") return;
+
+    const workspaceRoot = path.join(tmpDir, "secure-read");
+    fs.mkdirSync(workspaceRoot, { recursive: true });
+    const workspaceScoped: Workspace = {
+      ...workspace,
+      path: workspaceRoot,
+      isTemp: false,
+      permissions: {
+        ...workspace.permissions,
+        unrestrictedFileAccess: false,
+      } as any,
+    };
+    const daemon = {
+      logEvent: vi.fn(),
+      requestApproval: vi.fn(),
+    } as any;
+    const scopedFileTools = new FileTools(workspaceScoped, daemon, "task-3");
+
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-outside-read-"));
+    try {
+      const outsideFile = path.join(outsideDir, "secret.txt");
+      fs.writeFileSync(outsideFile, "top-secret", "utf-8");
+      const linkPath = path.join(workspaceRoot, "link-secret.txt");
+      fs.symlinkSync(outsideFile, linkPath);
+
+      await expect(scopedFileTools.readFile("link-secret.txt")).rejects.toThrow(
+        /outside workspace boundary via symbolic link/i,
+      );
+    } finally {
+      fs.rmSync(outsideDir, { recursive: true, force: true });
+    }
+  });
+
+  it("blocks write_file symlink escapes outside workspace when unrestricted access is off", async () => {
+    if (process.platform === "win32") return;
+
+    const workspaceRoot = path.join(tmpDir, "secure-write");
+    fs.mkdirSync(workspaceRoot, { recursive: true });
+    const workspaceScoped: Workspace = {
+      ...workspace,
+      path: workspaceRoot,
+      isTemp: false,
+      permissions: {
+        ...workspace.permissions,
+        unrestrictedFileAccess: false,
+      } as any,
+    };
+    const daemon = {
+      logEvent: vi.fn(),
+      requestApproval: vi.fn(),
+    } as any;
+    const scopedFileTools = new FileTools(workspaceScoped, daemon, "task-4");
+
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-outside-write-"));
+    try {
+      const outsideFile = path.join(outsideDir, "target.txt");
+      fs.writeFileSync(outsideFile, "old", "utf-8");
+      const linkPath = path.join(workspaceRoot, "link-target.txt");
+      fs.symlinkSync(outsideFile, linkPath);
+
+      await expect(scopedFileTools.writeFile("link-target.txt", "new")).rejects.toThrow(
+        /outside workspace boundary via symbolic link/i,
+      );
+      expect(fs.readFileSync(outsideFile, "utf-8")).toBe("old");
+    } finally {
+      fs.rmSync(outsideDir, { recursive: true, force: true });
+    }
+  });
 });

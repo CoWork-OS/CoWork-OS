@@ -422,7 +422,12 @@ const sidebarItems: Array<{
   { tab: "personality", label: "Personality", group: "General", icon: <User {...I} /> },
   { tab: "missioncontrol", label: "Mission Control", group: "General", icon: <Users {...I} /> },
   { tab: "digitaltwins", label: "Digital Twins", group: "General", icon: <User {...I} /> },
-  { tab: "tray", label: "Menu Bar", group: "General", icon: <PanelTop {...I} />, macOnly: true },
+  {
+    tab: "tray",
+    label: "Tray",
+    group: "General",
+    icon: <PanelTop {...I} />,
+  },
   { tab: "voice", label: "Voice Mode", group: "General", icon: <Mic {...I} /> },
   { tab: "llm", label: "AI Model", group: "AI & Models", icon: <Layers {...I} /> },
   { tab: "search", label: "Web Search", group: "AI & Models", icon: <Search {...I} /> },
@@ -551,6 +556,24 @@ export function Settings({
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; error?: string } | null>(null);
 
+  const platform =
+    window.electronAPI?.getPlatform?.() ??
+    (() => {
+      if (typeof navigator === "undefined") return "unknown";
+      const navPlatform = navigator.platform.toLowerCase();
+      if (navPlatform.includes("win")) return "win32";
+      if (navPlatform.includes("mac")) return "darwin";
+      return "linux";
+    })();
+  const isMacPlatform = platform === "darwin";
+  const supportsTraySettings = platform === "darwin" || platform === "win32";
+  const getSidebarItemLabel = (item: (typeof sidebarItems)[number]): string => {
+    if (item.tab === "tray") {
+      return platform === "win32" ? "System Tray" : platform === "darwin" ? "Menu Bar" : "Tray";
+    }
+    return item.label;
+  };
+
   // Form state for credentials (not persisted directly)
   const [anthropicApiKey, setAnthropicApiKey] = useState("");
   const [awsRegion, setAwsRegion] = useState("us-east-1");
@@ -654,6 +677,12 @@ export function Settings({
   useEffect(() => {
     loadConfigStatus();
   }, []);
+
+  useEffect(() => {
+    if (!supportsTraySettings && activeTab === "tray") {
+      setActiveTab("appearance");
+    }
+  }, [activeTab, supportsTraySettings]);
 
   const resolveCustomProviderId = (providerType: LLMProviderType) =>
     providerType === "kimi-coding" ? "kimi-code" : providerType;
@@ -1614,8 +1643,11 @@ export function Settings({
             {
               sidebarItems
                 .filter((item) => {
+                  if (item.tab === "tray" && !supportsTraySettings) {
+                    return false;
+                  }
                   // Filter by macOnly if applicable
-                  if (item.macOnly && !navigator.platform.toLowerCase().includes("mac")) {
+                  if (item.macOnly && !isMacPlatform) {
                     return false;
                   }
                   // Adaptive complexity: three-tier visibility
@@ -1655,7 +1687,9 @@ export function Settings({
                   }
                   // Filter by search query
                   if (sidebarSearch) {
-                    return item.label.toLowerCase().includes(sidebarSearch.toLowerCase());
+                    return getSidebarItemLabel(item)
+                      .toLowerCase()
+                      .includes(sidebarSearch.toLowerCase());
                   }
                   return true;
                 })
@@ -1677,7 +1711,7 @@ export function Settings({
                         onClick={() => setActiveTab(item.tab)}
                       >
                         {item.icon}
-                        {item.label}
+                        {getSidebarItemLabel(item)}
                       </button>,
                     );
                     return acc;
@@ -1687,8 +1721,11 @@ export function Settings({
             }
             {sidebarSearch &&
               sidebarItems.filter((item) => {
-                if (item.macOnly && !navigator.platform.toLowerCase().includes("mac")) return false;
-                return item.label.toLowerCase().includes(sidebarSearch.toLowerCase());
+                if (item.tab === "tray" && !supportsTraySettings) return false;
+                if (item.macOnly && !isMacPlatform) return false;
+                return getSidebarItemLabel(item)
+                  .toLowerCase()
+                  .includes(sidebarSearch.toLowerCase());
               }).length === 0 && (
                 <div className="settings-nav-no-results">No matching settings</div>
               )}

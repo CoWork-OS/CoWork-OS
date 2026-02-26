@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.94] - 2026-02-26
+
 ### Added
 - **DuckDuckGo free search fallback**: built-in web search provider that requires no API key. Works out of the box by scraping DuckDuckGo's HTML endpoint. Automatically used as a last-resort fallback when paid providers fail or are not configured. The `web_search` tool is now always available — users no longer need to configure a search provider to use web search. Supports web search with region and date range filters. Configured providers still take priority; DuckDuckGo is appended at the end of the fallback chain.
 - **Discord MCP Connector**: full REST API connector for Discord Bot management with 19 tools — guild listing, channel CRUD, message sending with rich embed support, thread creation, role CRUD, reactions, webhooks, and member listing. Includes 429 rate-limit retry (2 attempts, 10s cap), 2000-char message validation, embed schema enforcement (10 embeds max, typed fields), and privileged intent error hints for `list_members` and `get_messages`. Configurable in Settings > Connectors with bot token, application ID, and optional default guild ID.
@@ -69,6 +71,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Focused mode tabs**: Mission Control now correctly included in focused mode tab list.
+- **Bedrock inference profile fallback**: improved profile scoring to prefer same-family models and prevent silent downgrade to a different model family. MaxTokens is now clamped to model-specific limits on the retry path.
+- **Browser HTTP status errors**: browser tools returning HTTP 4xx/5xx no longer immediately circuit-break the tool. These URL-specific failures are now treated as input-dependent with a higher threshold before disabling.
+- **Skipped-tool-only turn detection**: executor now detects agents stuck emitting only policy-blocked tool calls with no text output; injects nudge after first turn, force-stops after 2 consecutive blocked-only turns.
+- **Follow-up tool call lock placement**: relocated `followUpToolCallsLocked` from `executeStep` to `executeGoalStep` where the loop detection state is maintained, fixing misplaced lock reference.
 
 ## [0.3.91] - 2026-02-24
 

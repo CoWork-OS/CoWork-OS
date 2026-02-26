@@ -3,7 +3,7 @@
  * Allows switching between Tavily, Brave Search, SerpAPI, and Google Custom Search
  */
 
-export type SearchProviderType = "tavily" | "brave" | "serpapi" | "google";
+export type SearchProviderType = "tavily" | "brave" | "serpapi" | "google" | "duckduckgo";
 
 export type SearchType = "web" | "news" | "images";
 
@@ -118,5 +118,11 @@ export const SEARCH_PROVIDER_INFO = {
     supportedTypes: ["web", "images"] as SearchType[],
     envVars: ["GOOGLE_API_KEY", "GOOGLE_SEARCH_ENGINE_ID"],
     signupUrl: "https://developers.google.com/custom-search/v1/introduction",
+  },
+  duckduckgo: {
+    displayName: "DuckDuckGo",
+    description: "Free built-in web search — no API key required",
+    supportedTypes: ["web"] as SearchType[],
+    signupUrl: "https://duckduckgo.com/",
   },
 } as const;

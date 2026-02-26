@@ -633,7 +633,7 @@ export function CanvasPreview({
     }
   }, [session.id]);
 
-  // Open a remote web page inside the canvas window
+  // Open canvas content (or remote URL) inside the in-app browser view
   const handleOpenBrowserCanvas = useCallback(() => {
     setShowExportMenu(false);
     if (!onOpenBrowser) {
@@ -641,8 +641,10 @@ export function CanvasPreview({
       setTimeout(() => setCopyFeedback(null), 2000);
       return;
     }
-    onOpenBrowser(session.url || "");
-  }, [onOpenBrowser, session.url]);
+    // For browser-mode sessions use the remote URL; for HTML-mode use the canvas:// protocol
+    const targetUrl = session.url || `canvas://${session.id}/index.html`;
+    onOpenBrowser(targetUrl);
+  }, [onOpenBrowser, session.url, session.id]);
 
   // Submit URL from browser input
   const handleSubmitBrowserUrl = useCallback(() => {

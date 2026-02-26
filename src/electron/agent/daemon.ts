@@ -328,6 +328,8 @@ export class AgentDaemon extends EventEmitter {
     const route = IntentRouter.route(input.title, input.prompt);
     const strategy = TaskStrategyService.derive(route, input.agentConfig);
     const agentConfig = TaskStrategyService.applyToAgentConfig(input.agentConfig, strategy);
+    // Store detected intent for intent-based tool filtering
+    agentConfig.taskIntent = route.intent;
     const relationshipContext = RelationshipMemoryService.buildPromptContext({
       maxPerLayer: 2,
       maxChars: 1200,
@@ -663,15 +665,22 @@ export class AgentDaemon extends EventEmitter {
     this.logEvent(effectiveTask.id, "task_created", { task: executionTask });
     console.log(`[AgentDaemon] Task status updated to 'planning', starting execution...`);
 
+    // Pause background memory compression to avoid contention with the executor's
+    // LLM calls — compression creates its own provider instance and its API calls
+    // interleave with the executor's, adding latency and cost.
+    MemoryService.pauseCompression();
+
     // Start execution (non-blocking)
     executor
       .execute()
       .then(() => {
+        MemoryService.resumeCompression();
         // After execution completes, process any follow-ups that were queued
         // while the executor was running but arrived too late for the loop to pick up.
         this.processOrphanedFollowUps(effectiveTask.id, executor);
       })
       .catch((error) => {
+        MemoryService.resumeCompression();
         console.error(`[AgentDaemon] Task ${effectiveTask.id} execution failed:`, error);
         this.taskRepo.update(effectiveTask.id, {
           status: "failed",
@@ -982,7 +991,8 @@ export class AgentDaemon extends EventEmitter {
     if (!this.isTurnLimitContinuationEligible(task, events)) {
       this.taskRepo.update(task.id, {
         status: "failed",
-        error: "Task can no longer be continued because latest failure is not turn-limit exhaustion.",
+        error:
+          "Task can no longer be continued because latest failure is not turn-limit exhaustion.",
         completedAt: Date.now(),
       });
       this.logEvent(task.id, "error", {

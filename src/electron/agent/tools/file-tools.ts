@@ -244,6 +244,98 @@ export class FileTools {
     }
   }
 
+  private isInsideWorkspace(absolutePath: string): boolean {
+    const normalizedWorkspace = path.resolve(this.workspace.path);
+    const normalizedPath = path.resolve(absolutePath);
+    const relative = path.relative(normalizedWorkspace, normalizedPath);
+    return !relative.startsWith("..") && !path.isAbsolute(relative);
+  }
+
+  private isInsideWorkspaceRealpathAware(absolutePath: string): boolean {
+    if (this.isInsideWorkspace(absolutePath)) return true;
+
+    try {
+      const workspaceReal = fsSync.realpathSync.native
+        ? fsSync.realpathSync.native(this.workspace.path)
+        : fsSync.realpathSync(this.workspace.path);
+      const pathReal = fsSync.realpathSync.native
+        ? fsSync.realpathSync.native(absolutePath)
+        : fsSync.realpathSync(absolutePath);
+      const relative = path.relative(path.resolve(workspaceReal), path.resolve(pathReal));
+      return !relative.startsWith("..") && !path.isAbsolute(relative);
+    } catch {
+      return false;
+    }
+  }
+
+  private assertResolvedPathAllowed(
+    absolutePath: string,
+    operation: "read" | "write",
+    context: "target" | "parent",
+  ): void {
+    if (this.isInsideWorkspaceRealpathAware(absolutePath)) return;
+
+    if (this.workspace.isTemp || this.workspace.permissions.unrestrictedFileAccess) {
+      if (operation !== "read" && this.isProtectedPath(absolutePath)) {
+        throw new Error(`Cannot ${operation} protected system path: ${absolutePath}`);
+      }
+      return;
+    }
+
+    if (this.isPathAllowed(absolutePath)) {
+      if (operation !== "read" && this.isProtectedPath(absolutePath)) {
+        throw new Error(`Cannot ${operation} protected system path: ${absolutePath}`);
+      }
+      return;
+    }
+
+    throw new Error(
+      `Path resolves outside workspace boundary via symbolic link (${context}). ` +
+        `Resolved path: ${absolutePath}. Workspace: ${path.resolve(this.workspace.path)}.`,
+    );
+  }
+
+  private async realpathIfExists(p: string): Promise<string | null> {
+    try {
+      return await fs.realpath(p);
+    } catch (error: any) {
+      if (this.isNotFoundError(error)) return null;
+      throw error;
+    }
+  }
+
+  private async realpathNearestExistingAncestor(p: string): Promise<string | null> {
+    let current = path.resolve(p);
+    while (true) {
+      const real = await this.realpathIfExists(current);
+      if (real) return real;
+      const parent = path.dirname(current);
+      if (parent === current) return null;
+      current = parent;
+    }
+  }
+
+  /**
+   * Prevent symlink-based workspace escapes by validating the real path target.
+   * For writes, also validates the nearest existing ancestor of the destination path.
+   */
+  private async enforceSymlinkSafeAccess(
+    absolutePath: string,
+    operation: "read" | "write",
+  ): Promise<void> {
+    const realTarget = await this.realpathIfExists(absolutePath);
+    if (realTarget) {
+      this.assertResolvedPathAllowed(realTarget, operation, "target");
+    }
+
+    if (operation === "write") {
+      const ancestor = await this.realpathNearestExistingAncestor(path.dirname(absolutePath));
+      if (ancestor) {
+        this.assertResolvedPathAllowed(ancestor, operation, "parent");
+      }
+    }
+  }
+
   /**
    * Read a plain-text file for local processing (does not append truncation markers).
    *
@@ -315,6 +407,7 @@ export class FileTools {
           throw error;
         }
       }
+      await this.enforceSymlinkSafeAccess(fullPath, "read");
 
       if (!stats?.isFile?.()) {
         throw new Error("Path is not a file");
@@ -345,7 +438,7 @@ export class FileTools {
    */
   async readFile(
     relativePath: string,
-  ): Promise<{ content: string; size: number; truncated?: boolean; format?: string }> {
+  ): Promise<{ content: string; size: number; truncated?: boolean; format?: string; path: string }> {
     // Validate input
     if (!relativePath || typeof relativePath !== "string") {
       throw new Error("Invalid path: path must be a non-empty string");
@@ -375,20 +468,51 @@ export class FileTools {
           throw error;
         }
       }
+      await this.enforceSymlinkSafeAccess(fullPath, "read");
+      let canonicalPath = fullPath;
+      try {
+        canonicalPath = await fs.realpath(fullPath);
+      } catch {
+        // Keep resolved path when realpath is unavailable.
+      }
+      let canonicalWorkspacePath = this.workspace.path;
+      try {
+        canonicalWorkspacePath = await fs.realpath(this.workspace.path);
+      } catch {
+        // Keep configured workspace path when realpath is unavailable.
+      }
+      const toWorkspaceRelative = (base: string, target: string): string | null => {
+        const rel = path.relative(base, target);
+        if (!rel.startsWith("..") && !path.isAbsolute(rel)) {
+          return rel.replace(/\\/g, "/");
+        }
+        return null;
+      };
+      const outputPath = (() => {
+        const rel =
+          toWorkspaceRelative(this.workspace.path, canonicalPath) ||
+          toWorkspaceRelative(canonicalWorkspacePath, canonicalPath) ||
+          toWorkspaceRelative(this.workspace.path, fullPath);
+        if (rel) return rel;
+        return canonicalPath;
+      })();
 
       // Handle DOCX files
       if (ext === ".docx") {
-        return await this.readDocxFile(fullPath, stats.size);
+        const out = await this.readDocxFile(fullPath, stats.size);
+        return { ...out, path: outputPath };
       }
 
       // Handle PDF files
       if (ext === ".pdf") {
-        return await this.readPdfFile(fullPath, stats.size);
+        const out = await this.readPdfFile(fullPath, stats.size);
+        return { ...out, path: outputPath };
       }
 
       // Handle PPTX files
       if (ext === ".pptx") {
-        return await this.readPptxFile(fullPath, stats.size);
+        const out = await this.readPptxFile(fullPath, stats.size);
+        return { ...out, path: outputPath };
       }
 
       // Legacy PPT files
@@ -412,6 +536,7 @@ export class FileTools {
               `\n\n[... File truncated. Showing first ${Math.round(MAX_FILE_SIZE / 1024)}KB of ${Math.round(stats.size / 1024)}KB ...]`,
             size: stats.size,
             truncated: true,
+            path: outputPath,
           };
         } finally {
           await fileHandle.close();
@@ -422,6 +547,7 @@ export class FileTools {
       return {
         content,
         size: stats.size,
+        path: outputPath,
       };
     } catch (error: any) {
       throw new Error(`Failed to read file: ${error.message}`);
@@ -631,6 +757,7 @@ export class FileTools {
     this.checkPermission("write");
     const fullPath = this.resolvePath(relativePath, "write");
     await this.enforceProjectAccess(fullPath);
+    await this.enforceSymlinkSafeAccess(fullPath, "write");
 
     // Check file size against guardrail limits
     const contentSizeBytes = Buffer.byteLength(content, "utf-8");
@@ -690,6 +817,7 @@ export class FileTools {
     this.checkPermission("read");
     const fullPath = this.resolvePath(pathToUse, "read");
     await this.enforceProjectAccess(fullPath);
+    await this.enforceSymlinkSafeAccess(fullPath, "read");
 
     try {
       const entries = await fs.readdir(fullPath, { withFileTypes: true });
@@ -744,6 +872,7 @@ export class FileTools {
     this.checkPermission("read");
     const fullPath = this.resolvePath(pathToUse, "read");
     await this.enforceProjectAccess(fullPath);
+    await this.enforceSymlinkSafeAccess(fullPath, "read");
 
     try {
       const entries = await fs.readdir(fullPath, { withFileTypes: true });
@@ -807,6 +936,7 @@ export class FileTools {
     this.checkPermission("read");
     const fullPath = this.resolvePath(relativePath, "read");
     await this.enforceProjectAccess(fullPath);
+    await this.enforceSymlinkSafeAccess(fullPath, "read");
 
     try {
       const stats = await fs.stat(fullPath);
@@ -842,6 +972,8 @@ export class FileTools {
     const newFullPath = this.resolvePath(newPath, "write");
     await this.enforceProjectAccess(oldFullPath);
     await this.enforceProjectAccess(newFullPath);
+    await this.enforceSymlinkSafeAccess(oldFullPath, "write");
+    await this.enforceSymlinkSafeAccess(newFullPath, "write");
 
     try {
       // Ensure target directory exists
@@ -882,6 +1014,8 @@ export class FileTools {
     const destFullPath = this.resolvePath(destPath, "write");
     await this.enforceProjectAccess(sourceFullPath);
     await this.enforceProjectAccess(destFullPath);
+    await this.enforceSymlinkSafeAccess(sourceFullPath, "read");
+    await this.enforceSymlinkSafeAccess(destFullPath, "write");
 
     try {
       // Ensure target directory exists
@@ -1007,6 +1141,7 @@ export class FileTools {
     this.checkPermission("write");
     const fullPath = this.resolvePath(relativePath, "write");
     await this.enforceProjectAccess(fullPath);
+    await this.enforceSymlinkSafeAccess(fullPath, "write");
 
     try {
       await fs.mkdir(fullPath, { recursive: true });
@@ -1041,6 +1176,7 @@ export class FileTools {
     this.checkPermission("read");
     const fullPath = this.resolvePath(relativePath, "read");
     await this.enforceProjectAccess(fullPath);
+    await this.enforceSymlinkSafeAccess(fullPath, "read");
     const matches: Array<{ path: string; type: "filename" | "content" }> = [];
     let filesSearched = 0;
     const maxFilesToSearch = 500; // Limit files to search for performance

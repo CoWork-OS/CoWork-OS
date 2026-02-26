@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.6] - 2026-02-26
+
+This release is the first recommended Windows install baseline for normal users following the documented GitHub/npm installation steps.
+
+### Fixed
+- **Windows title bar actions alignment**: corrected Windows header layout so action icons stay in the top-right region instead of drifting toward center.
+- **Windows-first release messaging and metadata**: package description/keywords and release notes now explicitly reflect desktop support for both macOS and Windows.
+- **Cross-platform docs consistency**: updated setup, migration, self-hosting, getting-started, and status docs to remove outdated desktop-level macOS-only wording while preserving truly macOS-only feature notes (for example iMessage).
+
 ## [0.4.5] - 2026-02-26
 
 ### Fixed

@@ -315,15 +315,27 @@ src/
 
 **Main Process (Backend)**:
 - Use `console.log()` - shows in terminal
-- Check logs: `~/Library/Application Support/cowork-os/`
+- Check logs:
+  - macOS: `~/Library/Application Support/cowork-os/`
+  - Windows: `%APPDATA%\\cowork-os\\`
 
 ### Database
 
-SQLite database location: `~/Library/Application Support/cowork-os/cowork-os.db`
+SQLite database location:
+- macOS: `~/Library/Application Support/cowork-os/cowork-os.db`
+- Windows: `%APPDATA%\\cowork-os\\cowork-os.db`
 
 View it with any SQLite browser or:
 ```bash
+# macOS
 sqlite3 ~/Library/Application\ Support/cowork-os/cowork-os.db
+.tables
+SELECT * FROM tasks;
+```
+
+```powershell
+# Windows (PowerShell)
+sqlite3 "$env:APPDATA\cowork-os\cowork-os.db"
 .tables
 SELECT * FROM tasks;
 ```
@@ -334,11 +346,11 @@ SELECT * FROM tasks;
 # Build both renderer and electron
 npm run build
 
-# Package as macOS app
+# Package desktop app
 npm run package
 ```
 
-Output: `release/CoWork-OS-{version}.dmg`
+Output: `release/*.dmg` (macOS) and `release/*.exe` (Windows)
 
 ## Common Issues
 

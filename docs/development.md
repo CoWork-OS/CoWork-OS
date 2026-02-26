@@ -3,8 +3,9 @@
 ## Prerequisites
 
 - Node.js 24+ and npm
-- macOS 12 (Monterey) or later
-- Xcode Command Line Tools (needed for `better-sqlite3`): `xcode-select --install`
+- macOS 12 (Monterey)+ or Windows 10/11
+- macOS: Xcode Command Line Tools (needed for `better-sqlite3`): `xcode-select --install`
+- Windows: Visual Studio Build Tools 2022 (C++) and Python 3 (needed for native module builds)
 - LLM provider credentials are optional — the app defaults to OpenRouter's free model router
 
 ## Build from Source
@@ -17,17 +18,19 @@ cd CoWork-OS
 # Install dependencies
 npm install
 
-# Set up native modules for Electron (includes automatic macOS retry handling)
+# Set up native modules for Electron (includes macOS retry and Windows ARM64 fallback handling)
 npm run setup
 
 # Build and package the app
 npm run build          # compile TypeScript and bundle the UI
-npm run package        # package into a macOS .app / .dmg
+npm run package        # package desktop installers (.dmg on macOS, .exe on Windows)
 ```
 
 Once complete, the packaged app will be in the `release/` folder:
-- **`CoWork OS-<version>-arm64.dmg`** — open this, drag CoWork OS to your Applications folder
-- **`mac-arm64/CoWork OS.app`** — the app itself (can also double-click to run directly)
+- **`*.dmg`** — macOS installer image
+- **`*.exe`** — Windows NSIS installer
+- **`mac-*/CoWork OS.app`** — unpacked macOS app bundle
+- **`win-*/`** — unpacked Windows app directory
 
 ## Development Mode
 
@@ -43,7 +46,7 @@ npm run dev
 |---------|-------------|
 | `npm run dev` | Start development server with hot reload |
 | `npm run build` | Production build |
-| `npm run package` | Package into macOS .app / .dmg |
+| `npm run package` | Package desktop installers (`.dmg` on macOS, `.exe` on Windows) |
 | `npm run setup` | Set up native modules for Electron |
 | `npm run fmt` | Format code with Oxfmt |
 | `npm run fmt:check` | Check formatting without writing |
@@ -78,14 +81,15 @@ See [Enterprise Connectors](enterprise-connectors.md) for the full connector con
 
 | Requirement | Minimum | Recommended |
 |-------------|---------|-------------|
-| **macOS** | 12 (Monterey) | 13+ (Ventura or later) |
+| **Desktop OS** | macOS 12 / Windows 10 | macOS 13+ / Windows 11 |
 | **RAM** | 4 GB | 8 GB+ |
 | **CPU** | 2 cores | 4+ cores |
-| **Architecture** | Intel (x64) or Apple Silicon (arm64) | Apple Silicon |
+| **Architecture** | x64 or arm64 | Native architecture of your host |
 
-### Supported macOS Versions
+### Supported Desktop OS Versions
 
-macOS 12 Monterey, 13 Ventura, 14 Sonoma, 15 Sequoia
+- macOS 12 Monterey, 13 Ventura, 14 Sonoma, 15 Sequoia
+- Windows 10 and Windows 11 (x64 and ARM64)
 
 ### Resource Usage
 
@@ -94,12 +98,13 @@ macOS 12 Monterey, 13 Ventura, 14 Sonoma, 15 Sequoia
 - **Playwright automation**: ~200-500 MB when active
 - **CPU**: Mostly idle; spikes during AI API calls
 
-### Running on a macOS VM
+### Running in a VM
 
-| Platform | VM Options |
+| Host Platform | VM Options |
 |----------|------------|
 | **Apple Silicon Mac** | UTM, Parallels Desktop, VMware Fusion |
 | **Intel Mac** | Parallels Desktop, VMware Fusion, VirtualBox |
+| **Windows** | Hyper-V, VMware Workstation, VirtualBox |
 
 Recommended VM specs: 4+ GB RAM, 2+ CPU cores, 40+ GB disk space.
 

@@ -12,7 +12,7 @@ The key idea: on Linux you typically do **not** run a desktop app UI. Instead yo
 - **Control Plane CLI** (`bin/coworkctl.js`)
 - Optional: messaging channels (Telegram/Discord/Slack/etc) as your “chat UI”
 
-If you need the macOS desktop app UI, that’s a separate mode.
+If you need the desktop app UI on macOS or Windows, that’s a separate mode.
 
 ## First 10 Minutes (What Users Actually Do)
 
@@ -116,7 +116,7 @@ Back up that directory (or the Docker volume) to back up the instance.
 No. Linux headless mode is designed to be fully usable by itself via Control Plane (web/CLI) and optionally messaging channels.
 
 **Is there a GUI?**  
-You get a minimal **Web UI** (served by the daemon) plus a CLI. The full desktop UI is macOS-only.
+You get a minimal **Web UI** (served by the daemon) plus a CLI. The full desktop UI is available on macOS and Windows.
 
 **How do I run my first task?**  
 Create a workspace (bootstrap or `workspace.create`), then `task.create`, then watch `task.event` (Web UI or `coworkctl`).

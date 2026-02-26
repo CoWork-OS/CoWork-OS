@@ -62,7 +62,7 @@
 | Feature | CoWork OS | OpenClaw | Claude Cowork | ChatGPT Desktop | n8n |
 |---|---|---|---|---|---|
 | **Self-hosted / Local-first** | ✅ Electron + headless daemon | ✅ Node.js daemon | ❌ Cloud-only | ❌ Cloud-only | ✅ Self-hostable |
-| **Desktop GUI** | ✅ Electron app (macOS today) | ❌ CLI only | ✅ Native app (Mac/Win) | ✅ Native app | ✅ Web UI |
+| **Desktop GUI** | ✅ Electron app (macOS + Windows) | ❌ CLI only | ✅ Native app (Mac/Win) | ✅ Native app | ✅ Web UI |
 | **Multi-channel messaging** | ✅ 14+ channels (WhatsApp, Telegram, Discord, Slack, iMessage, Signal, Teams, Matrix, etc.) | ✅ Multi-channel support (varies by release) | ❌ None | ❌ None | ❌ None |
 | **Model agnostic** | ✅ Any provider (OpenAI, Anthropic, Gemini, Ollama, etc.) | ✅ Multiple providers | ❌ Claude only | ❌ GPT only | ✅ Multiple |
 | **MCP support** | ✅ External MCP servers | ✅ MCP support | ✅ MCP support | ❌ Limited | ❌ |

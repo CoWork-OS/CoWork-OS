@@ -31,9 +31,9 @@ Please read and follow our [Code of Conduct](CODE_OF_CONDUCT.md) to keep our com
 
 ### Prerequisites
 
-- Node.js 18 or higher
+- Node.js 24 or higher
 - npm 9 or higher
-- macOS (for Electron native features)
+- macOS or Windows (for Electron desktop features)
 - Git
 
 ### Installation

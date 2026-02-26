@@ -403,9 +403,9 @@ Operations Requiring Approval:
 
 Before first run, verify:
 
-- [ ] Node.js 18+ installed
+- [ ] Node.js 24+ installed
 - [ ] `npm install` completed successfully
-- [ ] On macOS (required for Electron native features)
+- [ ] On macOS or Windows (required for Electron desktop features)
 
 Then run:
 ```bash
@@ -466,7 +466,7 @@ Expected behavior:
 ### Planned
 - VM sandbox using macOS Virtualization.framework
 - Network egress controls with proxy
-- Cross-platform support (Windows, Linux)
+- Linux desktop support
 - Web Browser Mode (`--serve`) — full app accessible from any browser via HTTP/WebSocket
 
 The architecture is extensible. All future features can be added without refactoring core systems.

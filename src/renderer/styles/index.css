@@ -1143,7 +1143,7 @@ body {
   z-index: 1000;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   padding-left: 80px;
   padding-right: 12px;
   overflow: visible;
@@ -1165,6 +1165,7 @@ body {
   gap: 4px;
   overflow: visible;
   padding-top: 4px;
+  margin-left: auto;
 }
 
 /* Title bar icon buttons */

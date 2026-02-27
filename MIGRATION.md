@@ -4,7 +4,7 @@ This guide helps users transition from other AI assistant platforms or set up Co
 
 ## Overview
 
-CoWork OS is a security-first personal AI assistant that runs on your Mac. If you're coming from another multi-channel AI platform or looking to self-host your AI assistant, this guide will help you get started.
+CoWork OS is a security-first personal AI assistant that runs on macOS and Windows. If you're coming from another multi-channel AI platform or looking to self-host your AI assistant, this guide will help you get started.
 
 ---
 
@@ -59,9 +59,9 @@ Moving to CoWork OS provides several advantages:
 
 | Feature | Benefit |
 |---------|---------|
-| **6 LLM providers** | Claude, GPT-4, Gemini, Bedrock, OpenRouter, Ollama |
+| **30+ LLM providers** | Built-in + compatible gateways with BYOK flexibility |
 | **Local LLM support** | Run completely free and offline with Ollama |
-| **Native desktop app** | Full macOS integration with menu bar and shortcuts |
+| **Native desktop app** | Full desktop UX on macOS and Windows (menu bar on macOS, system tray on Windows) |
 | **Real-time timeline** | See exactly what the agent is doing |
 | **Document creation** | Excel, Word, PDF, PowerPoint built-in |
 | **Personality system** | Customize how your AI communicates |
@@ -76,7 +76,7 @@ Moving to CoWork OS provides several advantages:
 | Aspect | CoWork OS | Typical CLI Platform |
 |--------|-----------|---------------------|
 | **Form factor** | Desktop app (Electron) | CLI + daemon |
-| **Primary platform** | macOS | Cross-platform |
+| **Primary platform** | macOS + Windows | Cross-platform |
 | **Installation** | `npm install` + `npm run dev` | `npm install -g` |
 | **Configuration** | GUI Settings panel | Config files / CLI flags |
 
@@ -165,7 +165,8 @@ During transition, you may want to run both platforms:
 
 CoWork OS uses a JSON-based skill format. If your existing platform exports skills, you may need to convert them. Skills are stored in:
 ```
-~/Library/Application Support/cowork-os/skills/
+macOS: ~/Library/Application Support/cowork-os/skills/
+Windows: %APPDATA%\cowork-os\skills\
 ```
 
 ### Do I need to re-pair users?

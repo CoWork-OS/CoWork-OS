@@ -103,6 +103,8 @@ git push && git push --tags
 - [ ] Linting passes (`npm run lint`)
 - [ ] CHANGELOG.md updated
 - [ ] README.md reflects any new features
+- [ ] Run [Windows npm smoke-test checklist](docs/windows-npm-smoke-test.md) on a clean Windows machine (x64 and/or ARM64)
+- [ ] GitHub release contains desktop installer assets (`.exe` for Windows, `.dmg` for macOS)
 - [ ] No sensitive data in committed files
 
 ## How to Contribute

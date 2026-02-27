@@ -15,6 +15,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     strategy:
+      fail-fast: false
       matrix:
         os: [macos-latest, windows-latest]
 
@@ -30,7 +31,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '22'
+          node-version: '24'
           cache: 'npm'
 
       - name: Install dependencies
@@ -136,18 +137,24 @@ jobs:
           NPM_VERSION: ${{ steps.release_metadata.outputs.npm_version }}
 
       - name: Prepare draft GitHub release for packaging
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
           release_tag="${{ steps.release_metadata.outputs.release_tag }}"
           npm_version="${{ steps.release_metadata.outputs.npm_version }}"
+          release_title="Release ${npm_version}"
 
+          # Handle parallel matrix jobs safely: create if missing, otherwise edit.
           if gh release view "${release_tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             echo "Found existing release tag: ${release_tag}"
-            gh release edit "${release_tag}" --repo "${GITHUB_REPOSITORY}" --title "Release ${npm_version}" --notes-file release-notes.md --draft=true
+            gh release edit "${release_tag}" --repo "${GITHUB_REPOSITORY}" --title "${release_title}" --notes-file release-notes.md --draft=true
+          elif gh release create "${release_tag}" --repo "${GITHUB_REPOSITORY}" --title "${release_title}" --notes-file release-notes.md --draft; then
+            echo "Created draft release: ${release_tag}"
           else
-            echo "Creating draft release for ${release_tag}"
-            gh release create "${release_tag}" --repo "${GITHUB_REPOSITORY}" --title "Release ${npm_version}" --notes-file release-notes.md --draft
+            echo "Release create failed (likely concurrent create); retrying edit."
+            gh release edit "${release_tag}" --repo "${GITHUB_REPOSITORY}" --title "${release_title}" --notes-file release-notes.md --draft=true
           fi
 
           echo "Cowork release draft prepared: ${release_tag}"
@@ -174,8 +181,52 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # unsigned macOS build publishing to GitHub releases
 
+      - name: Verify expected desktop artifacts exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          if [ "${RUNNER_OS}" = "Windows" ]; then
+            windows_artifacts=(release/*.exe)
+            if [ "${#windows_artifacts[@]}" -eq 0 ]; then
+              echo "No Windows installer (.exe) found in release/." >&2
+              exit 1
+            fi
+            printf 'Windows artifacts:\n'
+            printf '  %s\n' "${windows_artifacts[@]}"
+          fi
+          if [ "${RUNNER_OS}" = "macOS" ]; then
+            mac_artifacts=(release/*.dmg)
+            if [ "${#mac_artifacts[@]}" -eq 0 ]; then
+              echo "No macOS installer (.dmg) found in release/." >&2
+              exit 1
+            fi
+            printf 'macOS artifacts:\n'
+            printf '  %s\n' "${mac_artifacts[@]}"
+          fi
+
+      - name: Upload release artifacts explicitly
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          release_tag="${{ steps.release_metadata.outputs.release_tag }}"
+          artifacts=(release/*.exe release/*.dmg release/*.zip release/*.yml release/*.blockmap)
+          if [ "${#artifacts[@]}" -eq 0 ]; then
+            echo "No release artifacts found to upload." >&2
+            exit 1
+          fi
+          for artifact in "${artifacts[@]}"; do
+            [ -f "${artifact}" ] || continue
+            echo "Uploading ${artifact}"
+            gh release upload "${release_tag}" "${artifact}" --repo "${GITHUB_REPOSITORY}" --clobber
+          done
+
       - name: Publish draft GitHub release
         if: runner.os != 'Windows'
+        shell: bash
         run: |
           release_tag="${{ steps.release_metadata.outputs.release_tag }}"
           gh release edit "${release_tag}" --draft=false --repo "${GITHUB_REPOSITORY}"
@@ -199,7 +250,7 @@ jobs:
       - name: Setup Node.js for npm
         uses: actions/setup-node@v6
         with:
-          node-version: '22'
+          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
       - name: Install dependencies
@@ -230,7 +281,7 @@ jobs:
       - name: Setup Node.js for GitHub Packages
         uses: actions/setup-node@v6
         with:
-          node-version: '22'
+          node-version: '24'
           registry-url: 'https://npm.pkg.github.com'
           scope: '@cowork-os'
 

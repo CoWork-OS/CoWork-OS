@@ -50,6 +50,7 @@ export default defineConfig({
           { text: 'Self-Hosting', link: '/self-hosting' },
           { text: 'VPS / Linux', link: '/vps-linux' },
           { text: 'Remote Access', link: '/remote-access' },
+          { text: 'Windows npm Smoke Test', link: '/windows-npm-smoke-test' },
         ],
       },
       {

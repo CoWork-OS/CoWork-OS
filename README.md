@@ -318,6 +318,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
 | [Admin Policies](docs/admin-policies.md) | Enterprise admin policies and organization pack management |
 | [Digital Twins](docs/digital-twins.md) | Role-based AI twin personas and cognitive offload |
 | [Digital Twins Guide](docs/digital-twin-personas-guide.md) | Comprehensive guide with scenarios and expanded job areas |
+| [Windows npm Smoke Test](docs/windows-npm-smoke-test.md) | Clean Windows install/launch validation checklist for npm releases |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
 | [Uninstall](docs/uninstall.md) | Uninstall instructions |
 

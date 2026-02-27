@@ -98,6 +98,8 @@ git push && git push --tags
 - [ ] Type checking passes
 - [ ] CHANGELOG.md updated
 - [ ] README.md reflects any new features
+- [ ] Run [Windows npm smoke-test checklist](windows-npm-smoke-test.md) on a clean Windows machine (x64 and/or ARM64)
+- [ ] GitHub release contains desktop installer assets (`.exe` for Windows, `.dmg` for macOS)
 - [ ] No sensitive data in committed files
 
 ## How to Contribute

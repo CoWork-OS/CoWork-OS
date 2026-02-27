@@ -79,6 +79,7 @@ jobs:
         run: npm run build
 
       - name: Prepare package.json for electron-builder
+        shell: bash
         run: |
           node -e "
             const fs = require('fs');
@@ -91,7 +92,7 @@ jobs:
                 delete pkg.dependencies[dep];
               }
             }
-            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\\n');
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
           "
 
       - name: Package application

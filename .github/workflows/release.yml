@@ -150,7 +150,7 @@ jobs:
           if gh release view "${release_tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             echo "Found existing release tag: ${release_tag}"
             gh release edit "${release_tag}" --repo "${GITHUB_REPOSITORY}" --title "${release_title}" --notes-file release-notes.md --draft=true
-          elif gh release create "${release_tag}" --repo "${GITHUB_REPOSITORY}" --title "${release_title}" --notes-file release-notes.md --draft; then
+          elif gh release create "${release_tag}" --repo "${GITHUB_REPOSITORY}" --target "${GITHUB_SHA}" --title "${release_title}" --notes-file release-notes.md --draft; then
             echo "Created draft release: ${release_tag}"
           else
             echo "Release create failed (likely concurrent create); retrying edit."
@@ -160,6 +160,7 @@ jobs:
           echo "Cowork release draft prepared: ${release_tag}"
 
       - name: Prepare package.json for electron-builder
+        shell: bash
         run: |
           node -e "
             const fs = require('fs');
@@ -172,7 +173,7 @@ jobs:
                 delete pkg.dependencies[dep];
               }
             }
-            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\\n');
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
           "
 
       - name: Package and publish Electron app

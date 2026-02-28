@@ -12,7 +12,24 @@
       "useWhen": "Use when the user asks to batch-generate images via OpenAI Images API. Random prompt sampler + index.html gallery.",
       "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
       "outputs": "Outcome from Openai-image-gen: task-specific result plus concrete action notes.",
-      "successCriteria": "Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior."
+      "successCriteria": "Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior.",
+      "examples": {
+        "positive": [
+          "Use the openai-image-gen skill for this request.",
+          "Help me with openai-image-gen.",
+          "Use when the user asks to batch-generate images via OpenAI Images API. Random prompt sampler + index.html gallery.",
+          "Openai-image-gen: provide an actionable result."
+        ],
+        "negative": [
+          "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
+          "Do not use openai-image-gen for unrelated requests.",
+          "This request is outside openai-image-gen scope.",
+          "This is conceptual discussion only; no tool workflow is needed."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "medium"
     }
   }
 }

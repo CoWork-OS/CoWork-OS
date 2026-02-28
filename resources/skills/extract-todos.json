@@ -20,7 +20,24 @@
       "useWhen": "Use when the user wants TODO/FIXME/HACK/XXX inventorying, triage, or stale-task cleanup.",
       "dontUseWhen": "Don't use for implementation requests or when a code review already includes a TODO pass.",
       "outputs": "Prioritized TODO inventory with counts, file grouping, and stale candidates.",
-      "successCriteria": "Findings list all TODO-like markers with location, context, and suggested priority rationale."
+      "successCriteria": "Findings list all TODO-like markers with location, context, and suggested priority rationale.",
+      "examples": {
+        "positive": [
+          "Use the extract-todos skill for this request.",
+          "Help me with extract todos.",
+          "Use when the user wants TODO/FIXME/HACK/XXX inventorying, triage, or stale-task cleanup.",
+          "Extract TODOs: provide an actionable result."
+        ],
+        "negative": [
+          "Don't use for implementation requests or when a code review already includes a TODO pass.",
+          "Do not use extract-todos for unrelated requests.",
+          "This request is outside extract todos scope.",
+          "This is conceptual discussion only; no tool workflow is needed."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "low"
     }
   }
 }

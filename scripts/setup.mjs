@@ -31,6 +31,16 @@ function electronPresent() {
   return fs.existsSync(local) || fs.existsSync(parent);
 }
 
+function installGitHooks() {
+  const res = spawnSync(process.execPath, ["scripts/install_git_hooks.mjs"], {
+    stdio: "inherit",
+    env: process.env,
+  });
+  if (res.status !== 0) {
+    console.warn("[cowork] setup:hooks install failed. You can retry with `npm run hooks:install`.");
+  }
+}
+
 async function main() {
   // 1. Bootstrap: install deps if electron is missing
   if (!electronPresent()) {
@@ -70,6 +80,7 @@ async function main() {
     lastStatus = res.status ?? 1;
 
     if (lastStatus === 0) {
+      installGitHooks();
       process.exit(0);
     }
 

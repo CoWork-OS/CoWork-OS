@@ -374,6 +374,38 @@ Then verify:
 node bin/coworkctl.js call config.get
 ```
 
+### API-first account lifecycle (agent signup support)
+
+Use the managed account API to track signup status, store credentials, and let agents orchestrate account setup flows without relying on manual UI state.
+
+```bash
+# Create or update an account record (secrets stored encrypted)
+node bin/coworkctl.js call account.upsert '{
+  "provider":"openrouter",
+  "label":"OpenRouter production",
+  "status":"pending_signup",
+  "signupUrl":"https://openrouter.ai/signup",
+  "notes":"Need billing enabled before production traffic"
+}'
+
+# Add secrets once available (or rotate later)
+node bin/coworkctl.js call account.upsert '{
+  "id":"<accountId>",
+  "status":"active",
+  "secrets":{"api_key":"sk-or-..."},
+  "lastVerifiedAt":1739923200000
+}'
+
+# List records (redacted by default)
+node bin/coworkctl.js call account.list
+
+# Fetch a single account
+node bin/coworkctl.js call account.get '{"accountId":"<accountId>"}'
+
+# Remove account metadata/credentials
+node bin/coworkctl.js call account.remove '{"accountId":"<accountId>"}'
+```
+
 ### Option 2: Configure via env import
 
 CoWork OS supports an explicit, opt-in import path:

@@ -176,8 +176,8 @@ export class TaskRepository {
     };
 
     const stmt = this.db.prepare(`
-      INSERT INTO tasks (id, title, prompt, raw_prompt, user_prompt, status, workspace_id, created_at, updated_at, budget_tokens, budget_cost, success_criteria, max_attempts, current_attempt, parent_task_id, agent_type, agent_config, depth, result_summary, source, strategy_lock, budget_profile, terminal_status, failure_class, budget_usage)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO tasks (id, title, prompt, raw_prompt, user_prompt, status, workspace_id, created_at, updated_at, budget_tokens, budget_cost, success_criteria, max_attempts, current_attempt, parent_task_id, agent_type, agent_config, depth, result_summary, source, strategy_lock, budget_profile, terminal_status, failure_class, budget_usage, risk_level, eval_case_id, eval_run_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -206,6 +206,9 @@ export class TaskRepository {
       newTask.terminalStatus || null,
       newTask.failureClass || null,
       newTask.budgetUsage ? JSON.stringify(newTask.budgetUsage) : null,
+      newTask.riskLevel || null,
+      newTask.evalCaseId || null,
+      newTask.evalRunId || null,
     );
 
     return newTask;
@@ -247,6 +250,9 @@ export class TaskRepository {
     "terminalStatus",
     "failureClass",
     "budgetUsage",
+    "riskLevel",
+    "evalCaseId",
+    "evalRunId",
     // Git Worktree fields
     "worktreePath",
     "worktreeBranch",
@@ -542,6 +548,9 @@ export class TaskRepository {
       budgetProfile: row.budget_profile || undefined,
       terminalStatus: row.terminal_status || undefined,
       failureClass: row.failure_class || undefined,
+      riskLevel: row.risk_level || undefined,
+      evalCaseId: row.eval_case_id || undefined,
+      evalRunId: row.eval_run_id || undefined,
       budgetUsage: row.budget_usage
         ? safeJsonParse(row.budget_usage, undefined, "task.budgetUsage")
         : undefined,

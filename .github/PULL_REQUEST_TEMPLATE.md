@@ -16,6 +16,13 @@ Fixes #
 - [ ] Performance improvement
 - [ ] Test update
 
+## Reliability Regression Policy
+<!-- Required for incident-driven fixes -->
+- [ ] This PR fixes a production failure/incident.
+- [ ] If checked above, I added or updated at least one eval case file under `scripts/qa/eval-cases/`.
+- Eval case file path(s): 
+  - `scripts/qa/eval-cases/...`
+
 ## Category
 <!-- What area does this change affect? -->
 - [ ] Security / Guardrails

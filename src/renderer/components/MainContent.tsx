@@ -30,6 +30,14 @@ import { useVoiceTalkMode } from "../hooks/useVoiceTalkMode";
 import { useAgentContext, type AgentContext } from "../hooks/useAgentContext";
 import { getMessage } from "../utils/agentMessages";
 import {
+  hasTaskOutputs,
+  resolveTaskOutputSummaryFromCompletionEvent,
+} from "../utils/task-outputs";
+import {
+  ALWAYS_VISIBLE_TECHNICAL_EVENT_TYPES,
+  isImportantTaskEvent,
+} from "../utils/task-event-visibility";
+import {
   ATTACHMENT_CONTENT_END_MARKER,
   ATTACHMENT_CONTENT_START_MARKER,
   MAX_IMAGE_OCR_CHARS,
@@ -57,45 +65,6 @@ const ACTIVE_WORK_EVENT_TYPES: EventType[] = [
   "retry_started",
   "llm_streaming",
 ];
-
-// Important event types shown in non-verbose mode
-// These are high-level steps that represent meaningful progress
-const IMPORTANT_EVENT_TYPES: EventType[] = [
-  "task_created",
-  "task_completed",
-  "task_cancelled",
-  "plan_created",
-  "step_started",
-  "step_completed",
-  "step_failed",
-  "assistant_message",
-  "user_message",
-  "file_created",
-  "file_modified",
-  "file_deleted",
-  "error",
-  "verification_started",
-  "verification_passed",
-  "verification_failed",
-  "retry_started",
-  "approval_requested",
-];
-
-// Helper to check if an event is important (shown in non-verbose mode)
-// Note: We intentionally hide most tool traffic in Summary mode, but some tools
-// produce user-facing output (e.g. scheduling) that should remain visible.
-const isImportantEvent = (event: TaskEvent): boolean => {
-  if (IMPORTANT_EVENT_TYPES.includes(event.type)) return true;
-
-  // Keep schedule confirmation visible even in Summary mode so users can see
-  // what was created (name/schedule/next run via event title/details).
-  if (event.type === "tool_result") {
-    const tool = String((event as Any)?.payload?.tool || "");
-    if (tool === "schedule_task") return true;
-  }
-
-  return false;
-};
 
 // In non-verbose mode, hide verification noise (verification steps are still executed by the agent).
 const isVerificationNoiseEvent = (event: TaskEvent): boolean => {
@@ -1931,6 +1900,7 @@ interface MainContentProps {
   onStopTask?: () => void;
   onWrapUpTask?: () => void;
   onOpenBrowserView?: (url?: string) => void;
+  onViewTaskOutputs?: (taskId: string, primaryOutputPath?: string) => void;
   selectedModel: string;
   availableModels: LLMModelInfo[];
   onModelChange: (model: string) => void;
@@ -1963,6 +1933,7 @@ export function MainContent({
   onStopTask,
   onWrapUpTask,
   onOpenBrowserView,
+  onViewTaskOutputs,
   selectedModel,
   availableModels,
   onModelChange,
@@ -2308,7 +2279,7 @@ export function MainContent({
 
   // Filter events based on verbose mode
   const filteredEvents = useMemo(() => {
-    const baseEvents = verboseSteps ? events : events.filter(isImportantEvent);
+    const baseEvents = verboseSteps ? events : events.filter(isImportantTaskEvent);
     // Command output is rendered separately via CommandOutput component
     const visibleEvents = baseEvents.filter((event) => event.type !== "command_output");
     // Always keep explicit verification steps silent; surface failures elsewhere.
@@ -3001,6 +2972,10 @@ export function MainContent({
   const hasEventDetails = (event: TaskEvent): boolean => {
     if (isImageFileEvent(event)) return true;
     if (isSpreadsheetFileEvent(event)) return true;
+    if (event.type === "task_completed") {
+      return hasTaskOutputs(resolveTaskOutputSummaryFromCompletionEvent(event, events));
+    }
+    if (event.type === "artifact_created" && typeof event.payload?.path === "string") return true;
     if (
       event.type === "file_created" &&
       (event.payload?.contentPreview || event.payload?.copiedFrom)
@@ -3027,6 +3002,8 @@ export function MainContent({
   const shouldDefaultExpand = (event: TaskEvent): boolean => {
     if (isImageFileEvent(event)) return true;
     if (isSpreadsheetFileEvent(event)) return true;
+    if (event.type === "task_completed") return hasEventDetails(event);
+    if (event.type === "artifact_created") return true;
     // Code previews: expand by default unless user opted for collapsed
     if (codePreviewsExpanded) {
       if (
@@ -4106,7 +4083,12 @@ export function MainContent({
   const getEventDotClass = (type: TaskEvent["type"]) => {
     if (type === "error" || type === "step_failed" || type === "verification_failed")
       return "error";
-    if (type === "step_completed" || type === "task_completed" || type === "verification_passed")
+    if (
+      type === "step_completed" ||
+      type === "task_completed" ||
+      type === "verification_passed" ||
+      type === "artifact_created"
+    )
       return "success";
     if (
       type === "step_started" ||
@@ -5809,16 +5791,8 @@ export function MainContent({
                 }
 
                 // Technical events - only show when showSteps is true
-                const alwaysVisibleEvents = new Set([
-                  "approval_requested",
-                  "approval_granted",
-                  "approval_denied",
-                  "error",
-                  "step_failed",
-                  "verification_failed",
-                ]);
                 const showEvenWithoutSteps =
-                  alwaysVisibleEvents.has(event.type) ||
+                  ALWAYS_VISIBLE_TECHNICAL_EVENT_TYPES.has(event.type) ||
                   isImageFileEvent(event) ||
                   isSpreadsheetFileEvent(event) ||
                   (event.type === "tool_result" && event.payload?.tool === "schedule_task");
@@ -5894,6 +5868,8 @@ export function MainContent({
                           renderEventDetails(event, voiceEnabled, markdownComponents, {
                             workspacePath: workspace?.path,
                             onOpenViewer: setViewerFilePath,
+                            events,
+                            onViewOutputs: onViewTaskOutputs,
                             hideVerificationSteps: true,
                           })}
                       </div>
@@ -6580,6 +6556,18 @@ function renderEventTitle(
     }
     case "file_deleted":
       return `Removed: ${event.payload.path}`;
+    case "artifact_created": {
+      const acp = event.payload || {};
+      const acPath = typeof acp.path === "string" ? acp.path : "";
+      const acType = typeof acp.type === "string" ? acp.type : "artifact";
+      return acPath ? (
+        <span>
+          Artifact ready:{" "}
+          <ClickableFilePath path={acPath} workspacePath={workspacePath} onOpenViewer={onOpenViewer} />
+          <span className="event-title-meta"> ({acType})</span>
+        </span>
+      ) : `Artifact ready (${acType})`;
+    }
     case "error":
       return getMessage("error", msgCtx);
     case "approval_requested":
@@ -6606,14 +6594,85 @@ function renderEventDetails(
   options?: {
     workspacePath?: string;
     onOpenViewer?: (path: string) => void;
+    events?: TaskEvent[];
+    onViewOutputs?: (taskId: string, primaryOutputPath?: string) => void;
     hideVerificationSteps?: boolean;
   },
 ) {
   const workspacePath = options?.workspacePath;
   const onOpenViewer = options?.onOpenViewer;
+  const eventStream = options?.events || [];
+  const onViewOutputs = options?.onViewOutputs;
   const imageExt = /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i;
 
   switch (event.type) {
+    case "task_completed": {
+      const outputSummary = resolveTaskOutputSummaryFromCompletionEvent(event, eventStream);
+      if (!hasTaskOutputs(outputSummary)) return null;
+
+      const primaryOutputPath = outputSummary.primaryOutputPath;
+      const primaryOutputName = primaryOutputPath
+        ? primaryOutputPath.split("/").pop() || primaryOutputPath
+        : "";
+      const outputLabel =
+        outputSummary.outputCount === 1
+          ? `1 output ready`
+          : `${outputSummary.outputCount} outputs ready`;
+
+      return (
+        <div className="event-details completion-output-card">
+          <div className="completion-output-header">Output ready</div>
+          <div className="completion-output-subtitle">{outputLabel}</div>
+          {primaryOutputPath && (
+            <div className="completion-output-primary">
+              Primary file:{" "}
+              <ClickableFilePath
+                path={primaryOutputPath}
+                workspacePath={workspacePath}
+                onOpenViewer={onOpenViewer}
+              />
+              {primaryOutputName && <span className="event-title-meta"> ({primaryOutputName})</span>}
+            </div>
+          )}
+          <div className="completion-output-actions">
+            <button
+              className="completion-output-btn"
+              disabled={!primaryOutputPath}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (!primaryOutputPath) return;
+                void window.electronAPI.openFile(primaryOutputPath, workspacePath);
+              }}
+            >
+              Open file
+            </button>
+            <button
+              className="completion-output-btn secondary"
+              disabled={!primaryOutputPath}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (!primaryOutputPath) return;
+                void window.electronAPI.showInFinder(primaryOutputPath, workspacePath);
+              }}
+            >
+              Show in Finder
+            </button>
+            <button
+              className="completion-output-btn secondary"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onViewOutputs?.(event.taskId, primaryOutputPath);
+              }}
+            >
+              View in Files
+            </button>
+          </div>
+        </div>
+      );
+    }
     case "plan_created": {
       const inlinePlanMarkdownComponents = {
         ...markdownComponents,
@@ -6877,6 +6936,22 @@ function renderEventDetails(
         );
       }
 
+      return null;
+    }
+    case "artifact_created": {
+      const artifactPath = event.payload?.path;
+      if (typeof artifactPath === "string" && artifactPath.trim().length > 0) {
+        return (
+          <div className="event-details">
+            Saved artifact:{" "}
+            <ClickableFilePath
+              path={artifactPath}
+              workspacePath={workspacePath}
+              onOpenViewer={onOpenViewer}
+            />
+          </div>
+        );
+      }
       return null;
     }
     case "error":

@@ -14,6 +14,14 @@ const DEFAULT_SETTINGS: XSettingsData = {
   timeoutMs: 20000,
   cookieTimeoutMs: 20000,
   quoteDepth: 1,
+  mentionTrigger: {
+    enabled: false,
+    commandPrefix: "do:",
+    allowedAuthors: [],
+    pollIntervalSec: 120,
+    fetchCount: 25,
+    workspaceMode: "temporary",
+  },
 };
 
 export class XSettingsManager {
@@ -31,7 +39,14 @@ export class XSettingsManager {
         const repository = SecureSettingsRepository.getInstance();
         const stored = repository.load<XSettingsData>("x");
         if (stored) {
-          settings = { ...DEFAULT_SETTINGS, ...stored };
+          settings = {
+            ...DEFAULT_SETTINGS,
+            ...stored,
+            mentionTrigger: {
+              ...DEFAULT_SETTINGS.mentionTrigger,
+              ...(stored.mentionTrigger || {}),
+            },
+          };
         }
       }
     } catch (error) {

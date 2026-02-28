@@ -88,25 +88,25 @@ describe("loadCronStore", () => {
 
   it("should return empty store when file does not exist", async () => {
     const result = await loadCronStore("/non/existent/path.json");
-    expect(result).toEqual({ version: 1, jobs: [] });
+    expect(result).toEqual({ version: 1, jobs: [], outbox: [] });
   });
 
   it("should return empty store for invalid JSON", async () => {
     await fs.promises.writeFile(testStorePath, "not valid json");
     const result = await loadCronStore(testStorePath);
-    expect(result).toEqual({ version: 1, jobs: [] });
+    expect(result).toEqual({ version: 1, jobs: [], outbox: [] });
   });
 
   it("should return empty store for null content", async () => {
     await fs.promises.writeFile(testStorePath, "null");
     const result = await loadCronStore(testStorePath);
-    expect(result).toEqual({ version: 1, jobs: [] });
+    expect(result).toEqual({ version: 1, jobs: [], outbox: [] });
   });
 
   it("should return empty store when jobs is not an array", async () => {
     await fs.promises.writeFile(testStorePath, JSON.stringify({ version: 1, jobs: "not-array" }));
     const result = await loadCronStore(testStorePath);
-    expect(result).toEqual({ version: 1, jobs: [] });
+    expect(result).toEqual({ version: 1, jobs: [], outbox: [] });
   });
 
   it("should load valid jobs", async () => {
@@ -184,7 +184,7 @@ describe("loadCronStoreSync", () => {
 
   it("should return empty store when file does not exist", () => {
     const result = loadCronStoreSync("/non/existent/path.json");
-    expect(result).toEqual({ version: 1, jobs: [] });
+    expect(result).toEqual({ version: 1, jobs: [], outbox: [] });
   });
 
   it("should load valid jobs synchronously", () => {

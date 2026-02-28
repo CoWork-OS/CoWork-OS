@@ -57,6 +57,33 @@ Key code:
 - Timeout recovery: `src/electron/agent/executor.ts` (`finalizeWithTimeoutRecovery`, `finalizeTaskBestEffort`, `buildTimeoutRecoveryAnswer`)
 - Retry helpers: `src/electron/agent/executor.ts` (`applyRetryTokenCap`, `getRetryTimeoutMs`, `isAbortLikeError`)
 
+#### Completion Output Summary & Renderer Confidence
+
+To make “task done + file ready” unambiguous in the UI, completion events can now carry structured output metadata. The executor computes `TaskOutputSummary` at completion with a created-first rule:
+
+- Primary signal: created outputs (`file_created`, `artifact_created`)
+- Fallback signal: modified outputs (`file_modified`) only when no created outputs exist
+- Normalized fields: `created`, optional `modifiedFallback`, `primaryOutputPath`, `outputCount`, `folders`
+
+`AgentDaemon.completeTask(...)` passes this as optional `payload.outputSummary` on `task_completed`. Renderer code resolves outputs from this payload first, then falls back to event-derivation for backward compatibility with older tasks/events.
+
+Completion UX behavior built on this contract:
+
+- Output-aware completion toasts with direct file actions (`Open file`, `Show in Finder`, `View in Files`)
+- Automatic right-panel expansion + output highlight for the currently selected completed task
+- Unseen-output badge when completion happens outside the active task/view
+- Files section emphasis (primary output highlight + location context line) while keeping filename-only rows
+- `artifact_created` parity in summary/technical timelines and child-task merge flows
+
+Key code:
+- Summary computation + completion wiring: `src/electron/agent/executor.ts`, `src/electron/agent/daemon.ts`
+- Child-event merge parity: `src/electron/ipc/handlers.ts`
+- Bridge allowlist parity: `src/electron/control-plane/task-event-bridge-contract.ts`
+- Renderer output derivation: `src/renderer/utils/task-outputs.ts`
+- Renderer completion decisions/actions: `src/renderer/utils/task-completion-ux.ts`
+- Timeline visibility rules: `src/renderer/utils/task-event-visibility.ts`
+- UI integration: `src/renderer/App.tsx`, `src/renderer/components/MainContent.tsx`, `src/renderer/components/RightPanel.tsx`
+
 ### 2. Use Tools and Skills
 
 CoWork OS exposes "tools" to the agent. Tools include:
@@ -495,6 +522,35 @@ Major table families (non-exhaustive):
 - Secure encrypted settings: `secure_settings`
 - "Mission Control" features: `agent_roles`, `agent_mentions`, `agent_working_state`, `task_subscriptions`, `standup_reports`, etc.
 
+### Reliability flywheel (eval + risk gates)
+
+CoWork OS includes a reliability hardening loop that converts failures into replayable eval cases and gates risky task completions.
+
+Core parts:
+- Eval persistence model in SQLite:
+  - Task metadata: `tasks.risk_level`, `tasks.eval_case_id`, `tasks.eval_run_id`
+  - Eval tables: `eval_cases`, `eval_suites`, `eval_runs`, `eval_case_runs`
+- Eval runtime service:
+  - `src/electron/eval/EvalService.ts`
+  - Baseline metrics: task success rate, tool failure rate, retries/task, approval dead-end rate, verification pass rate
+- Risk scoring and tiered review gate:
+  - `src/electron/eval/risk.ts`
+  - `src/electron/agent/daemon.ts` completion path
+  - Policy levels: `off`, `balanced`, `strict`
+- Eval IPC surface:
+  - `eval:listSuites`, `eval:runSuite`, `eval:getRun`, `eval:getCase`, `eval:createCaseFromTask`
+  - Wired in `src/electron/ipc/handlers.ts` and `src/electron/preload.ts`
+- Prompt/skill hardening:
+  - Prompt section composer and token budgets: `src/electron/agent/executor-prompt-sections.ts`
+  - Skill shortlist routing and injection caps: `src/electron/agent/custom-skill-loader.ts`
+- CI/release enforcement:
+  - PR regression policy gate: `.github/workflows/ci.yml` + `scripts/qa/enforce_eval_regression_policy.cjs`
+  - Nightly hardening: `.github/workflows/nightly-hardening.yml`
+  - Release hardening gate: `.github/workflows/release.yml`
+
+For full operational details and commands, see:
+- `docs/reliability-flywheel.md`
+
 ## Development Workflow
 
 Build system:
@@ -526,6 +582,7 @@ See also:
 - `docs/node-daemon.md`: Node-only daemon setup and configuration
 - `docs/vps-linux.md`: VPS/Linux deployment with Docker and systemd
 - `docs/use-cases.md`: use-case skill template documentation
+- `docs/reliability-flywheel.md`: eval corpus, risk gates, CI/release reliability workflow
 
 ## Web Browser Mode (Planned — `--serve`)
 

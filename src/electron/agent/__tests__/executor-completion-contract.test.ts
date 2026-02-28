@@ -187,6 +187,74 @@ describe("TaskExecutor completion contract integration", () => {
     );
   });
 
+  it("does not complete high-risk research summaries without dated fetched evidence", async () => {
+    const executor = createExecuteHarness({
+      title: "Daily AI Agent Trends Research",
+      prompt:
+        "Research the latest AI agent trends from the last day and summarize key launches and funding updates.",
+      lastOutput:
+        "Major releases include Gemini 2.0 and Copilot Marketplace. Funding surged to $2.5B this quarter.",
+      planStepDescription: "Summarize latest AI agent releases and funding trends",
+    });
+
+    (executor as Any).toolResultMemory = [
+      {
+        tool: "web_search",
+        summary: "query \"AI agent trends\" returned sources",
+        timestamp: Date.now(),
+      },
+    ];
+    (executor as Any).webEvidenceMemory = [
+      {
+        tool: "web_fetch",
+        url: "https://example.com/ai-news",
+        timestamp: Date.now(),
+      },
+    ];
+
+    await (executor as Any).execute();
+
+    expect(executor.daemon.completeTask).not.toHaveBeenCalled();
+    expect(executor.daemon.updateTask).toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({
+        status: "failed",
+        error: expect.stringContaining("missing source validation"),
+      }),
+    );
+  });
+
+  it("allows high-risk research summaries when fetched sources include publish dates", async () => {
+    const executor = createExecuteHarness({
+      title: "Daily AI Agent Trends Research",
+      prompt:
+        "Research the latest AI agent trends from the last day and summarize key launches and funding updates.",
+      lastOutput:
+        "Major releases include Gemini 2.0 and Copilot Marketplace. Funding surged to $2.5B this quarter.",
+      planStepDescription: "Summarize latest AI agent releases and funding trends",
+    });
+
+    (executor as Any).webEvidenceMemory = [
+      {
+        tool: "web_fetch",
+        url: "https://example.com/ai-news",
+        publishDate: "2026-02-26",
+        timestamp: Date.now(),
+      },
+    ];
+
+    await (executor as Any).execute();
+
+    expect(executor.daemon.completeTask).toHaveBeenCalledTimes(1);
+    expect(executor.daemon.updateTask).not.toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({
+        status: "failed",
+        error: expect.stringContaining("missing source validation"),
+      }),
+    );
+  });
+
   it("completes only when the completion contract requirements are satisfied", async () => {
     const executor = createExecuteHarness({
       title: "Video review",

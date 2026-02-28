@@ -61,9 +61,26 @@
       "useWhen": "Use for contract markups, last-minute deal term demands, or clause-by-clause negotiation defense work.",
       "dontUseWhen": "Do not use for pure legal research questions that do not require document comparison.",
       "outputs": "Clause matrix, severity-ranked recommendations, counter-language, and a written negotiation brief.",
-      "successCriteria": "Finds cross-document conflicts, produces actionable counterpositions, and writes the report artifact."
+      "successCriteria": "Finds cross-document conflicts, produces actionable counterpositions, and writes the report artifact.",
+      "examples": {
+        "positive": [
+          "Use the legal-contract-negotiation-review skill for this request.",
+          "Help me with legal contract negotiation review.",
+          "Use for contract markups, last-minute deal term demands, or clause-by-clause negotiation defense work.",
+          "Legal Contract Negotiation Review: provide an actionable result."
+        ],
+        "negative": [
+          "Do not use for pure legal research questions that do not require document comparison.",
+          "Do not use legal-contract-negotiation-review for unrelated requests.",
+          "This request is outside legal contract negotiation review scope.",
+          "This is conceptual discussion only; no tool workflow is needed."
+        ]
+      }
     },
     "version": "1.0.0",
-    "author": "CoWork OS"
+    "author": "CoWork OS",
+    "authoring": {
+      "complexity": "medium"
+    }
   }
 }

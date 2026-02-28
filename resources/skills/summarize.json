@@ -20,7 +20,24 @@
       "useWhen": "Use when the user asks to summarize or extract text/transcripts from URLs, podcasts, and local files great fallback for “transcribe this YouTube/video”.",
       "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
       "outputs": "Outcome from Summarize: task-specific result plus concrete action notes.",
-      "successCriteria": "Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior."
+      "successCriteria": "Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior.",
+      "examples": {
+        "positive": [
+          "Use the summarize skill for this request.",
+          "Help me with summarize.",
+          "Use when the user asks to summarize or extract text/transcripts from URLs, podcasts, and local files great fallback for “transcribe this YouTube/video”.",
+          "Summarize: provide an actionable result."
+        ],
+        "negative": [
+          "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
+          "Do not use summarize for unrelated requests.",
+          "This request is outside summarize scope.",
+          "This is conceptual discussion only; no tool workflow is needed."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "low"
     }
   }
 }

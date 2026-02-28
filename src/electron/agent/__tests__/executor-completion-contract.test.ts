@@ -32,6 +32,7 @@ function createExecuteHarness(options: HarnessOptions) {
     updateTaskStatus: vi.fn(),
     updateTask: vi.fn(),
     completeTask: vi.fn(),
+    getTaskEvents: vi.fn().mockReturnValue([]),
     handleTransientTaskFailure: vi.fn().mockReturnValue(false),
     dispatchMentionedAgents: vi.fn(),
     getAgentRoleById: vi.fn().mockReturnValue(null),
@@ -90,6 +91,7 @@ function createExecuteHarness(options: HarnessOptions) {
       updateTaskStatus: ReturnType<typeof vi.fn>;
       updateTask: ReturnType<typeof vi.fn>;
       completeTask: ReturnType<typeof vi.fn>;
+      getTaskEvents: ReturnType<typeof vi.fn>;
     };
   };
 }

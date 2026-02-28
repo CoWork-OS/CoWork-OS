@@ -99,6 +99,7 @@ import { setupCanvasHandlers, cleanupCanvasHandlers } from "./ipc/canvas-handler
 import { pruneTempWorkspaces } from "./utils/temp-workspace";
 import { getActiveTempWorkspaceLeases } from "./utils/temp-workspace-lease";
 import { getPluginRegistry } from "./extensions/registry";
+import { getCustomSkillLoader } from "./agent/custom-skill-loader";
 import { pruneTempSandboxProfiles } from "./utils/temp-sandbox-profiles";
 // Gap features: triggers, briefing, file hub, web access
 import { EventTriggerService } from "./triggers/EventTriggerService";
@@ -110,6 +111,9 @@ import { setupFileHubHandlers } from "./ipc/file-hub-handlers";
 import { WebAccessServer } from "./web-server/WebAccessServer";
 import { DEFAULT_WEB_ACCESS_CONFIG, type WebAccessConfig } from "./web-server/types";
 import { setupWebAccessHandlers } from "./ipc/web-access-handlers";
+import { ManagedAccountManager, type ManagedAccountStatus } from "./accounts/managed-account-manager";
+import { initializeXMentionBridgeService, XMentionBridgeService } from "./x-mentions";
+import { createLogger } from "./utils/logger";
 
 let mainWindow: BrowserWindow | null = null;
 let dbManager: DatabaseManager;
@@ -119,6 +123,7 @@ let cronService: CronService | null = null;
 let crossSignalService: CrossSignalService | null = null;
 let feedbackService: FeedbackService | null = null;
 let loreService: LoreService | null = null;
+let xMentionBridgeService: XMentionBridgeService | null = null;
 let tempWorkspacePruneTimer: NodeJS.Timeout | null = null;
 let tempSandboxProfilePruneTimer: NodeJS.Timeout | null = null;
 const TEMP_WORKSPACE_PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -129,6 +134,53 @@ const FORCE_ENABLE_CONTROL_PLANE = shouldEnableControlPlaneFromArgsOrEnv();
 const PRINT_CONTROL_PLANE_TOKEN = shouldPrintControlPlaneTokenFromArgsOrEnv();
 const IMPORT_ENV_SETTINGS = shouldImportEnvSettingsFromArgsOrEnv();
 const IMPORT_ENV_SETTINGS_MODE = getEnvSettingsImportModeFromArgsOrEnv();
+const logger = createLogger("Main");
+const TRANSIENT_MAIN_PROCESS_ERROR_RE =
+  /(ECONNRESET|ETIMEDOUT|EPIPE|ENOTFOUND|ENETUNREACH|EHOSTUNREACH|socket hang up|Timed Out|Connection Closed)/i;
+let processErrorGuardsInstalled = false;
+
+function toErrorMessage(reason: unknown): string {
+  if (reason instanceof Error) {
+    return `${reason.name}: ${reason.message}`;
+  }
+  if (typeof reason === "string") {
+    return reason;
+  }
+  try {
+    return JSON.stringify(reason);
+  } catch {
+    return String(reason);
+  }
+}
+
+function isTransientMainProcessError(reason: unknown): boolean {
+  return TRANSIENT_MAIN_PROCESS_ERROR_RE.test(toErrorMessage(reason));
+}
+
+function installProcessErrorGuards(): void {
+  if (processErrorGuardsInstalled) {
+    return;
+  }
+  processErrorGuardsInstalled = true;
+
+  process.on("unhandledRejection", (reason) => {
+    if (isTransientMainProcessError(reason)) {
+      logger.warn(`Suppressed transient unhandledRejection: ${toErrorMessage(reason)}`);
+      return;
+    }
+    logger.error("unhandledRejection:", reason);
+  });
+
+  process.on("uncaughtException", (error) => {
+    if (isTransientMainProcessError(error)) {
+      logger.warn(`Suppressed transient uncaughtException: ${toErrorMessage(error)}`);
+      return;
+    }
+    logger.error("uncaughtException:", error);
+  });
+}
+
+installProcessErrorGuards();
 
 // Suppress GPU-related Chromium errors that occur with transparent windows and vibrancy
 // These are cosmetic errors that don't affect functionality
@@ -269,6 +321,13 @@ if (!gotTheLock) {
   }
 
   app.whenReady().then(async () => {
+    const startupStartedAt = Date.now();
+    const logPhase = (name: string, phaseStartedAt: number): void => {
+      logger.debug(`Startup phase "${name}" completed in ${Date.now() - phaseStartedAt} ms`);
+    };
+    let mcpStartupSummary = { enabled: 0, attempted: 0, connected: 0, failed: 0 };
+    let pluginStartupSummary = { loaded: 0, enabled: 0 };
+
     // Allow overriding userData path for headless/VPS deployments (e.g., mount a persistent volume).
     const userDataOverride = process.env.COWORK_USER_DATA_DIR || getArgValue("--user-data-dir");
     if (
@@ -280,9 +339,9 @@ if (!gotTheLock) {
       try {
         await fs.mkdir(resolved, { recursive: true });
         app.setPath("userData", resolved);
-        console.log(`[Main] Using userData directory override: ${resolved}`);
+        logger.info(`Using userData directory override: ${resolved}`);
       } catch (error) {
-        console.warn("[Main] Failed to apply userData directory override:", error);
+        logger.warn("Failed to apply userData directory override:", error);
       }
     }
 
@@ -314,6 +373,7 @@ if (!gotTheLock) {
     }
 
     // Initialize database first - required for SecureSettingsRepository
+    const coreInitStartedAt = Date.now();
     dbManager = new DatabaseManager();
     const tempWorkspaceRoot = path.join(os.tmpdir(), TEMP_WORKSPACE_ROOT_DIR_NAME);
     const runTempWorkspacePrune = () => {
@@ -324,7 +384,7 @@ if (!gotTheLock) {
           protectedWorkspaceIds: getActiveTempWorkspaceLeases(),
         });
       } catch (error) {
-        console.warn("[Main] Failed to prune temp workspaces:", error);
+        logger.warn("Failed to prune temp workspaces:", error);
       }
     };
     runTempWorkspacePrune();
@@ -334,7 +394,7 @@ if (!gotTheLock) {
       try {
         pruneTempSandboxProfiles();
       } catch (error) {
-        console.warn("[Main] Failed to prune temp sandbox profiles:", error);
+        logger.warn("Failed to prune temp sandbox profiles:", error);
       }
     };
     runTempSandboxProfilePrune();
@@ -347,7 +407,7 @@ if (!gotTheLock) {
     // Initialize secure settings repository for encrypted settings storage
     // This MUST be done before provider factories so they can migrate legacy settings
     new SecureSettingsRepository(dbManager.getDatabase());
-    console.log("[Main] SecureSettingsRepository initialized");
+    logger.info("SecureSettingsRepository initialized");
 
     // Initialize provider factories (loads settings from disk, migrates legacy files)
     LLMProviderFactory.initialize();
@@ -356,6 +416,7 @@ if (!gotTheLock) {
     AppearanceManager.initialize();
     PersonalityManager.initialize();
     MemoryFeaturesManager.initialize();
+    logPhase("core-init", coreInitStartedAt);
 
     // Migrate .env configuration to Settings (one-time upgrade path)
     const migrationResult = await migrateEnvToSettings();
@@ -364,12 +425,12 @@ if (!gotTheLock) {
     if (IMPORT_ENV_SETTINGS) {
       const importResult = await importProcessEnvToSettings({ mode: IMPORT_ENV_SETTINGS_MODE });
       if (importResult.migrated && importResult.migratedKeys.length > 0) {
-        console.log(
-          `[Main] Imported credentials from process.env (${IMPORT_ENV_SETTINGS_MODE}): ${importResult.migratedKeys.join(", ")}`,
+        logger.info(
+          `Imported credentials from process.env (${IMPORT_ENV_SETTINGS_MODE}): ${importResult.migratedKeys.join(", ")}`,
         );
       }
       if (importResult.error) {
-        console.warn("[Main] Failed to import credentials from process.env:", importResult.error);
+        logger.warn("Failed to import credentials from process.env:", importResult.error);
       }
     }
 
@@ -391,12 +452,12 @@ if (!gotTheLock) {
           llmSettings?.bedrock?.profile
         );
         if (!hasAnyLlmCreds) {
-          console.warn(
-            "[Main] No LLM credentials configured. In headless mode, set COWORK_IMPORT_ENV_SETTINGS=1 and an LLM key (e.g. OPENAI_API_KEY or ANTHROPIC_API_KEY), then restart.",
+          logger.warn(
+            "No LLM credentials configured. In headless mode, set COWORK_IMPORT_ENV_SETTINGS=1 and an LLM key (e.g. OPENAI_API_KEY or ANTHROPIC_API_KEY), then restart.",
           );
         }
       } catch (error) {
-        console.warn("[Main] Failed to check LLM credential configuration:", error);
+        logger.warn("Failed to check LLM credential configuration:", error);
       }
     }
 
@@ -434,78 +495,84 @@ if (!gotTheLock) {
               : path.basename(workspacePath) || "Workspace";
 
           const ws = agentDaemon.createWorkspace(workspaceName, workspacePath);
-          console.log(`[Main] Bootstrapped workspace: ${ws.id} (${ws.name}) at ${ws.path}`);
+          logger.info(`Bootstrapped workspace: ${ws.id} (${ws.name}) at ${ws.path}`);
         } else {
-          console.log(
-            `[Main] Bootstrap workspace exists: ${existing.id} (${existing.name}) at ${existing.path}`,
+          logger.info(
+            `Bootstrap workspace exists: ${existing.id} (${existing.name}) at ${existing.path}`,
           );
         }
       }
     } catch (error) {
-      console.warn("[Main] Failed to bootstrap workspace:", error);
+      logger.warn("Failed to bootstrap workspace:", error);
     }
 
     // Initialize cross-agent signal tracker (best-effort; do not block app startup)
     try {
       crossSignalService = new CrossSignalService(dbManager.getDatabase());
       await crossSignalService.start(agentDaemon);
-      console.log("[Main] CrossSignalService initialized");
+      logger.info("CrossSignalService initialized");
     } catch (error) {
-      console.error("[Main] Failed to initialize CrossSignalService:", error);
+      logger.error("Failed to initialize CrossSignalService:", error);
     }
 
     // Initialize feedback logger (best-effort; persists approve/reject/edit/next into workspace kit files)
     try {
       feedbackService = new FeedbackService(dbManager.getDatabase());
       await feedbackService.start(agentDaemon);
-      console.log("[Main] FeedbackService initialized");
+      logger.info("FeedbackService initialized");
     } catch (error) {
-      console.error("[Main] Failed to initialize FeedbackService:", error);
+      logger.error("Failed to initialize FeedbackService:", error);
     }
 
     // Initialize lore service (best-effort; auto-records workspace history from task completions)
     try {
       loreService = new LoreService(dbManager.getDatabase());
       await loreService.start(agentDaemon);
-      console.log("[Main] LoreService initialized");
+      logger.info("LoreService initialized");
     } catch (error) {
-      console.error("[Main] Failed to initialize LoreService:", error);
+      logger.error("Failed to initialize LoreService:", error);
     }
 
     // Initialize Memory Service for cross-session context
     try {
       MemoryService.initialize(dbManager);
-      console.log("[Main] Memory Service initialized");
+      logger.info("Memory Service initialized");
     } catch (error) {
-      console.error("[Main] Failed to initialize Memory Service:", error);
+      logger.error("Failed to initialize Memory Service:", error);
       // Don't fail app startup if memory init fails
     }
 
     // Initialize Knowledge Graph Service for structured entity/relationship memory
     try {
       KnowledgeGraphService.initialize(dbManager.getDatabase());
-      console.log("[Main] Knowledge Graph Service initialized");
+      logger.info("Knowledge Graph Service initialized");
     } catch (error) {
-      console.error("[Main] Failed to initialize Knowledge Graph Service:", error);
+      logger.error("Failed to initialize Knowledge Graph Service:", error);
       // Don't fail app startup if KG init fails
     }
 
     // Initialize MCP Client Manager - auto-connects enabled servers on startup
     try {
+      const mcpInitStartedAt = Date.now();
       const mcpClientManager = MCPClientManager.getInstance();
       await mcpClientManager.initialize();
-      console.log("[Main] MCP Client Manager initialized");
+      mcpStartupSummary = mcpClientManager.getStartupStats();
+      logger.info(
+        `MCP summary: enabled=${mcpStartupSummary.enabled}, attempted=${mcpStartupSummary.attempted}, connected=${mcpStartupSummary.connected}, failed=${mcpStartupSummary.failed}`,
+      );
+      logger.info("MCP Client Manager initialized");
+      logPhase("mcp-init", mcpInitStartedAt);
     } catch (error) {
-      console.error("[Main] Failed to initialize MCP Client Manager:", error);
+      logger.error("Failed to initialize MCP Client Manager:", error);
       // Don't fail app startup if MCP init fails
     }
 
     // Initialize Infrastructure Manager - restores wallet, configures providers
     try {
       await InfraManager.getInstance().initialize();
-      console.log("[Main] InfraManager initialized");
+      logger.info("InfraManager initialized");
     } catch (error) {
-      console.error("[Main] Failed to initialize InfraManager:", error);
+      logger.error("Failed to initialize InfraManager:", error);
       // Don't fail app startup if infra init fails
     }
 
@@ -677,6 +744,9 @@ if (!gotTheLock) {
             status: task.status,
             error: task.error ?? null,
             resultSummary: task.resultSummary ?? null,
+            terminalStatus: task.terminalStatus ?? null,
+            failureClass: task.failureClass ?? null,
+            budgetUsage: task.budgetUsage ?? null,
           };
         },
         getTaskResultText: async (taskId) => {
@@ -781,7 +851,10 @@ if (!gotTheLock) {
 
           const resultAvailable =
             typeof params.resultText === "string" && params.resultText.trim().length > 0;
-          const hasFullResult = params.status === "ok" && !params.summaryOnly && resultAvailable;
+          const hasFullResult =
+            (params.status === "ok" || params.status === "partial_success") &&
+            !params.summaryOnly &&
+            resultAvailable;
 
           console.log(
             `[Cron] Delivery for "${params.jobName}": hasFullResult=${hasFullResult}, ` +
@@ -790,7 +863,13 @@ if (!gotTheLock) {
 
           // Build the message
           const statusEmoji =
-            params.status === "ok" ? "✅" : params.status === "error" ? "❌" : "⏱️";
+            params.status === "ok"
+              ? "✅"
+              : params.status === "partial_success"
+                ? "⚠️"
+                : params.status === "error"
+                  ? "❌"
+                  : "⏱️";
           let message: string;
 
           if (hasFullResult) {
@@ -807,6 +886,8 @@ if (!gotTheLock) {
 
             if (params.status === "ok") {
               msg += `Task completed successfully.\n`;
+            } else if (params.status === "partial_success") {
+              msg += `Task completed with partial results.\n`;
             } else if (params.status === "error") {
               msg += `Task failed.\n`;
             } else {
@@ -837,6 +918,7 @@ if (!gotTheLock) {
             // Send the message via the gateway
             await channelGateway.sendMessage(resolvedType as Any, params.channelId, message, {
               parseMode: "markdown",
+              idempotencyKey: params.idempotencyKey,
             });
             console.log(`[Cron] Delivered to ${resolvedType}:${params.channelId}`);
           } catch (err) {
@@ -856,9 +938,22 @@ if (!gotTheLock) {
 
           // Show desktop notification when scheduled task finishes
           if (evt.action === "finished") {
-            const statusEmoji = evt.status === "ok" ? "✅" : evt.status === "error" ? "❌" : "⏱️";
+            const statusEmoji =
+              evt.status === "ok"
+                ? "✅"
+                : evt.status === "partial_success"
+                  ? "⚠️"
+                  : evt.status === "error"
+                    ? "❌"
+                    : "⏱️";
             const statusText =
-              evt.status === "ok" ? "completed" : evt.status === "error" ? "failed" : "timed out";
+              evt.status === "ok"
+                ? "completed"
+                : evt.status === "partial_success"
+                  ? "completed with partial results"
+                  : evt.status === "error"
+                    ? "failed"
+                    : "timed out";
 
             // Add in-app notification
             const notificationService = getNotificationService();
@@ -913,22 +1008,29 @@ if (!gotTheLock) {
       });
       setCronService(cronService);
       await cronService.start();
-      console.log("[Main] Cron Service initialized");
+      logger.info("Cron Service initialized");
     } catch (error) {
-      console.error("[Main] Failed to initialize Cron Service:", error);
+      logger.error("Failed to initialize Cron Service:", error);
       // Don't fail app startup if cron init fails
     }
 
     // Initialize extension/plugin system — auto-discovers and loads plugins
     try {
+      const pluginInitStartedAt = Date.now();
       const pluginRegistry = getPluginRegistry();
       await pluginRegistry.initialize();
-      const pluginCount = pluginRegistry.getPlugins().length;
-      if (pluginCount > 0) {
-        console.log(`[Main] Plugin registry initialized (${pluginCount} plugins)`);
-      }
+      const plugins = pluginRegistry.getPlugins();
+      pluginStartupSummary = {
+        loaded: plugins.length,
+        enabled: plugins.filter((plugin: Any) => plugin.state === "enabled").length,
+      };
+      logger.info(
+        `Plugins summary: loaded=${pluginStartupSummary.loaded}, enabled=${pluginStartupSummary.enabled}`,
+      );
+      logger.info(`Plugin registry initialized (${plugins.length} plugins)`);
+      logPhase("plugin-init", pluginInitStartedAt);
     } catch (error) {
-      console.error("[Main] Failed to initialize Plugin Registry:", error);
+      logger.error("Failed to initialize Plugin Registry:", error);
       // Don't fail app startup if plugin init fails
     }
 
@@ -940,6 +1042,29 @@ if (!gotTheLock) {
 
     // Setup IPC handlers
     await setupIpcHandlers(dbManager, agentDaemon, channelGateway);
+    void getCustomSkillLoader()
+      .initialize()
+      .then(() => {
+        const skills = getCustomSkillLoader().getLoadStats();
+        logger.info(
+          `Skills summary: total=${skills.total}, bundled=${skills.bundled}, managed=${skills.managed}, workspace=${skills.workspace}, overrides=${skills.overridden}`,
+        );
+      })
+      .catch((error) => {
+        logger.debug("Skills summary unavailable:", error);
+      });
+
+    const startXMentionBridge = () => {
+      if (!xMentionBridgeService) {
+        xMentionBridgeService = initializeXMentionBridgeService(agentDaemon, {
+          isNativeXChannelEnabled: () => {
+            const nativeX = channelGateway.getChannelByType("x");
+            return nativeX?.enabled === true && nativeX.status === "connected";
+          },
+        });
+      }
+      xMentionBridgeService.start();
+    };
 
     // Initialize heartbeat and Mission Control services
     let heartbeatService: HeartbeatService | null = null;
@@ -950,7 +1075,7 @@ if (!gotTheLock) {
       // Sync any new default agents to existing workspaces
       const addedAgents = agentRoleRepo.syncNewDefaults();
       if (addedAgents.length > 0) {
-        console.log(`[Main] Added ${addedAgents.length} new default agent(s)`);
+        logger.info(`Added ${addedAgents.length} new default agent(s)`);
       }
 
       const mentionRepo = new MentionRepository(db);
@@ -1029,14 +1154,14 @@ if (!gotTheLock) {
         });
       });
     } catch (error) {
-      console.error("[Main] Failed to initialize Heartbeat:", error);
+      logger.error("Failed to initialize Heartbeat:", error);
       // Don't fail app startup if heartbeat init fails
     }
 
     // Setup Mission Control IPC handlers
     try {
       if (!heartbeatService) {
-        console.error("[Main] Mission Control handlers skipped: Heartbeat service unavailable");
+        logger.error("Mission Control handlers skipped: Heartbeat service unavailable");
       } else {
         const db = dbManager.getDatabase();
         const agentRoleRepo = new AgentRoleRepository(db);
@@ -1051,10 +1176,10 @@ if (!gotTheLock) {
           getMainWindow: () => mainWindow,
         });
 
-        console.log("[Main] Mission Control services initialized");
+        logger.info("Mission Control services initialized");
       }
     } catch (error) {
-      console.error("[Main] Failed to initialize Mission Control:", error);
+      logger.error("Failed to initialize Mission Control:", error);
       // Don't fail app startup if Mission Control init fails
     }
 
@@ -1065,38 +1190,38 @@ if (!gotTheLock) {
       const personaTemplateService = getPersonaTemplateService(agentRoleRepo);
       await personaTemplateService.initialize();
       setupPersonaTemplateHandlers({ personaTemplateService });
-      console.log("[Main] Persona Template service initialized");
+      logger.info("Persona Template service initialized");
     } catch (error) {
-      console.error("[Main] Failed to initialize Persona Templates:", error);
+      logger.error("Failed to initialize Persona Templates:", error);
     }
 
     // Initialize Plugin Pack handlers (Customize panel)
     try {
       setupPluginPackHandlers();
-      console.log("[Main] Plugin Pack handlers initialized");
+      logger.debug("Plugin Pack handlers initialized");
     } catch (error) {
-      console.error("[Main] Failed to initialize Plugin Pack handlers:", error);
+      logger.error("Failed to initialize Plugin Pack handlers:", error);
     }
 
     // Initialize Plugin Distribution handlers (scaffold, install, registry)
     try {
       setupPluginDistributionHandlers();
-      console.log("[Main] Plugin Distribution handlers initialized");
+      logger.debug("Plugin Distribution handlers initialized");
     } catch (error) {
-      console.error("[Main] Failed to initialize Plugin Distribution handlers:", error);
+      logger.error("Failed to initialize Plugin Distribution handlers:", error);
     }
 
     // Initialize Admin Policy handlers
     try {
       setupAdminPolicyHandlers();
-      console.log("[Main] Admin Policy handlers initialized");
+      logger.debug("Admin Policy handlers initialized");
     } catch (error) {
-      console.error("[Main] Failed to initialize Admin Policy handlers:", error);
+      logger.error("Failed to initialize Admin Policy handlers:", error);
     }
 
     if (HEADLESS) {
-      console.log("[Main] Headless mode enabled (no UI)");
-      console.log(`[Main] userData: ${getUserDataDir()}`);
+      logger.info("Headless mode enabled (no UI)");
+      logger.info(`userData: ${getUserDataDir()}`);
 
       // For security, only print the token when explicitly requested, or when it was just generated.
       let hadControlPlaneToken = false;
@@ -1125,15 +1250,22 @@ if (!gotTheLock) {
             ...(typeof cpPort === "number" && Number.isFinite(cpPort) ? { port: cpPort } : {}),
           });
         } catch (error) {
-          console.warn("[Main] Failed to apply Control Plane overrides:", error);
+          logger.warn("Failed to apply Control Plane overrides:", error);
         }
       }
 
       // Initialize messaging gateway without a BrowserWindow
       try {
+        const channelInitStartedAt = Date.now();
         await channelGateway.initialize();
+        const channelStats = channelGateway.getStartupStats();
+        logger.info(
+          `Channels summary: loaded=${channelStats.loaded}, enabled=${channelStats.enabled}, connected=${channelStats.connected}`,
+        );
+        logPhase("channel-gateway-headless", channelInitStartedAt);
+        startXMentionBridge();
       } catch (error) {
-        console.error("[Main] Failed to initialize Channel Gateway (headless):", error);
+        logger.error("Failed to initialize Channel Gateway (headless):", error);
         // Don't fail app startup if gateway init fails
       }
 
@@ -1152,9 +1284,9 @@ if (!gotTheLock) {
       });
 
       if (!cp.ok) {
-        console.error("[Main] Control Plane failed to start:", cp.error);
+        logger.error("Control Plane failed to start:", cp.error);
       } else if (!cp.skipped && cp.address) {
-        console.log(`[Main] Control Plane listening: ${cp.address.wsUrl}`);
+        logger.info(`Control Plane listening: ${cp.address.wsUrl}`);
         if (
           (FORCE_ENABLE_CONTROL_PLANE || PRINT_CONTROL_PLANE_TOKEN) &&
           (PRINT_CONTROL_PLANE_TOKEN || !hadControlPlaneToken)
@@ -1162,16 +1294,17 @@ if (!gotTheLock) {
           try {
             const settings = ControlPlaneSettingsManager.loadSettings();
             if (settings?.token) {
-              console.log(`[Main] Control Plane token: ${settings.token}`);
+              logger.info(`Control Plane token: ${settings.token}`);
             }
           } catch {
             // ignore
           }
         }
       } else if (cp.skipped) {
-        console.log("[Main] Control Plane disabled (skipping auto-start)");
+        logger.info("Control Plane disabled (skipping auto-start)");
       }
 
+      logger.info(`Startup complete in ${Date.now() - startupStartedAt} ms`);
       return;
     }
 
@@ -1193,7 +1326,14 @@ if (!gotTheLock) {
       agentDaemon.setComparisonService(comparisonService);
       setupWorktreeHandlers(agentDaemon);
 
+      const channelInitStartedAt = Date.now();
       await channelGateway.initialize(mainWindow);
+      const channelStats = channelGateway.getStartupStats();
+      logger.info(
+        `Channels summary: loaded=${channelStats.loaded}, enabled=${channelStats.enabled}, connected=${channelStats.connected}`,
+      );
+      logPhase("channel-gateway-ui", channelInitStartedAt);
+      startXMentionBridge();
       // Initialize update manager with main window reference
       updateManager.setMainWindow(mainWindow);
 
@@ -1406,6 +1546,48 @@ if (!gotTheLock) {
               return webAccessWorkspaceRepo
                 .findAll()
                 .filter((workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id));
+            case "account:list": {
+              const payload = args[0] && typeof args[0] === "object" ? args[0] : {};
+              const status =
+                typeof payload.status === "string" ? payload.status.trim() : undefined;
+              const accounts = ManagedAccountManager.list({
+                provider: typeof payload.provider === "string" ? payload.provider : undefined,
+                status: status as ManagedAccountStatus | undefined,
+              });
+              const includeSecrets = payload.includeSecrets === true;
+              return {
+                accounts: accounts.map((account) =>
+                  ManagedAccountManager.toPublicView(account, includeSecrets),
+                ),
+              };
+            }
+            case "account:get": {
+              const payload = args[0] && typeof args[0] === "object" ? args[0] : {};
+              const accountId = typeof payload.accountId === "string" ? payload.accountId.trim() : "";
+              if (!accountId) {
+                throw new Error("accountId is required.");
+              }
+              const account = ManagedAccountManager.getById(accountId);
+              if (!account) {
+                return { account: null };
+              }
+              return {
+                account: ManagedAccountManager.toPublicView(account, payload.includeSecrets === true),
+              };
+            }
+            case "account:upsert": {
+              const payload = args[0] && typeof args[0] === "object" ? args[0] : {};
+              const account = ManagedAccountManager.upsert(payload);
+              return { account: ManagedAccountManager.toPublicView(account, false) };
+            }
+            case "account:remove": {
+              const payload = args[0] && typeof args[0] === "object" ? args[0] : {};
+              const accountId = typeof payload.accountId === "string" ? payload.accountId.trim() : "";
+              if (!accountId) {
+                throw new Error("accountId is required.");
+              }
+              return { removed: ManagedAccountManager.remove(accountId) };
+            }
             case "briefing:generate": {
               const workspaceId =
                 typeof args[0] === "string" && args[0].trim().length > 0
@@ -1489,6 +1671,8 @@ if (!gotTheLock) {
       }
     }
 
+    logger.info(`Startup complete in ${Date.now() - startupStartedAt} ms`);
+
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) {
         createWindow();
@@ -1507,7 +1691,7 @@ if (!gotTheLock) {
   if (HEADLESS) {
     for (const sig of ["SIGINT", "SIGTERM"] as const) {
       process.on(sig, () => {
-        console.log(`[Main] Received ${sig}, shutting down...`);
+        logger.info(`Received ${sig}, shutting down...`);
         app.quit();
       });
     }
@@ -1530,6 +1714,15 @@ if (!gotTheLock) {
     if (cronService) {
       await cronService.stop();
       setCronService(null);
+    }
+
+    if (xMentionBridgeService) {
+      try {
+        xMentionBridgeService.stop();
+      } catch (error) {
+        console.error("[Main] Failed to stop X mention bridge service:", error);
+      }
+      xMentionBridgeService = null;
     }
 
     // Cleanup canvas manager (close all windows and watchers)

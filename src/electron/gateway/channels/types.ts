@@ -22,7 +22,8 @@ export type ChannelType =
   | "bluebubbles"
   | "email"
   | "teams"
-  | "googlechat";
+  | "googlechat"
+  | "x";
 
 /**
  * Channel connection status
@@ -93,6 +94,8 @@ export interface OutgoingMessage {
   chatId: string;
   /** Message content */
   text: string;
+  /** Optional idempotency key used for safe retries */
+  idempotencyKey?: string;
   /** Optional reply-to message ID */
   replyTo?: string;
   /** Parse mode for formatting */
@@ -569,6 +572,22 @@ export interface GoogleChatConfig extends ChannelConfig {
   maxReconnectAttempts?: number;
   /** Pub/Sub subscription name (alternative to webhook) */
   pubsubSubscription?: string;
+}
+
+/**
+ * X (Twitter) channel configuration
+ */
+export interface XConfig extends ChannelConfig {
+  /** Mention command prefix (default: do:) */
+  commandPrefix?: string;
+  /** Allowlisted X handles */
+  allowedAuthors?: string[];
+  /** Poll interval in seconds */
+  pollIntervalSec?: number;
+  /** Mentions fetch count per poll */
+  fetchCount?: number;
+  /** Enables outbound posting from the gateway path */
+  outboundEnabled?: boolean;
 }
 
 /**

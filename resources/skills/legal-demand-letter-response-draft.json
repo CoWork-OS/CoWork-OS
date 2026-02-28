@@ -59,9 +59,26 @@
       "useWhen": "Use when a demand letter must be analyzed and answered against contract language.",
       "dontUseWhen": "Do not use when the task is generic writing unrelated to legal allegations.",
       "outputs": "Allegation map and response draft with section-level legal grounding.",
-      "successCriteria": "Produces a defensible response draft, avoids unsupported admissions, and writes both artifacts."
+      "successCriteria": "Produces a defensible response draft, avoids unsupported admissions, and writes both artifacts.",
+      "examples": {
+        "positive": [
+          "Use the legal-demand-letter-response-draft skill for this request.",
+          "Help me with legal demand letter response draft.",
+          "Use when a demand letter must be analyzed and answered against contract language.",
+          "Legal Demand Letter Response Draft: provide an actionable result."
+        ],
+        "negative": [
+          "Do not use when the task is generic writing unrelated to legal allegations.",
+          "Do not use legal-demand-letter-response-draft for unrelated requests.",
+          "This request is outside legal demand letter response draft scope.",
+          "This is conceptual discussion only; no tool workflow is needed."
+        ]
+      }
     },
     "version": "1.0.0",
-    "author": "CoWork OS"
+    "author": "CoWork OS",
+    "authoring": {
+      "complexity": "low"
+    }
   }
 }

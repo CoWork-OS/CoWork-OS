@@ -73,6 +73,21 @@ export class SearchTools {
       };
     } catch (error: Any) {
       const message = error?.message || "Web search failed";
+      const failedProvider =
+        typeof error?.failedProvider === "string" ? (error.failedProvider as SearchProviderType) : undefined;
+      const providerErrorScope =
+        error?.providerErrorScope === "provider" || error?.providerErrorScope === "global"
+          ? error.providerErrorScope
+          : undefined;
+      const failureClass =
+        error?.failureClass === "provider_quota" ||
+        error?.failureClass === "provider_rate_limit" ||
+        error?.failureClass === "external_unknown"
+          ? error.failureClass
+          : undefined;
+      const failedProviders = Array.isArray(error?.failedProviders)
+        ? (error.failedProviders as Array<{ provider: SearchProviderType; error: string }>)
+        : undefined;
       this.daemon.logEvent(this.taskId, "tool_result", {
         tool: "web_search",
         error: message,
@@ -87,8 +102,16 @@ export class SearchTools {
         provider: (input.provider || settings.primaryProvider || "none") as
           | SearchProviderType
           | "none",
+        providerErrorScope,
+        failedProvider,
+        failureClass,
+        failedProviders,
         metadata: {
           error: message,
+          providerErrorScope,
+          failedProvider,
+          failureClass,
+          failedProviders,
         },
       };
     }

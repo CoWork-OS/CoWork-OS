@@ -36,6 +36,7 @@ export default defineConfig({
         text: 'Architecture',
         items: [
           { text: 'Overview', link: '/architecture' },
+          { text: 'Reliability Flywheel', link: '/reliability-flywheel' },
           { text: 'Live Canvas', link: '/live-canvas' },
           { text: 'Agent Teams', link: '/agent-teams-contract' },
           { text: 'Enterprise Connectors', link: '/enterprise-connectors' },

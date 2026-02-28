@@ -33,9 +33,26 @@
       "useWhen": "Use for legal/regulatory research memos where citation reliability is critical.",
       "dontUseWhen": "Do not use for contract redline workflows that are primarily document-editing tasks.",
       "outputs": "Structured memo with verified citations, confidence flags, and practical recommendations.",
-      "successCriteria": "Every key claim is linked to a fetched source or clearly labeled uncertain."
+      "successCriteria": "Every key claim is linked to a fetched source or clearly labeled uncertain.",
+      "examples": {
+        "positive": [
+          "Use the legal-verified-research-memo skill for this request.",
+          "Help me with legal verified research memo.",
+          "Use for legal/regulatory research memos where citation reliability is critical.",
+          "Legal Verified Research Memo: provide an actionable result."
+        ],
+        "negative": [
+          "Do not use for contract redline workflows that are primarily document-editing tasks.",
+          "Do not use legal-verified-research-memo for unrelated requests.",
+          "This request is outside legal verified research memo scope.",
+          "This is conceptual discussion only; no tool workflow is needed."
+        ]
+      }
     },
     "version": "1.0.0",
-    "author": "CoWork OS"
+    "author": "CoWork OS",
+    "authoring": {
+      "complexity": "low"
+    }
   }
 }

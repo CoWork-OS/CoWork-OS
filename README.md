@@ -227,7 +227,8 @@ Persistent memory with privacy protection, FTS5 search, LLM compression, and wor
 
 ## Architecture
 
-```
+<div align="center">
+<pre>
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Security Layers                               │
 │  Channel Access Control │ Guardrails & Limits │ Approval Flows   │
@@ -252,7 +253,8 @@ Persistent memory with privacy protection, FTS5 search, LLM compression, and wor
 ┌─────────────────────────────────────────────────────────────────┐
 │  SQLite DB │ Knowledge Graph │ MCP Host │ WebSocket │ Remote Access  │
 └─────────────────────────────────────────────────────────────────┘
-```
+</pre>
+</div>
 
 See [Architecture](docs/architecture.md) for the full technical deep-dive.
 

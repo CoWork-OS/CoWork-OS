@@ -151,3 +151,125 @@ describe("LLMProviderFactory model selection persistence", () => {
     expect(updatedBedrock.bedrock?.model).toBe("us.anthropic.claude-opus-4-6-20260115-v1:0");
   });
 });
+
+describe("LLMProviderFactory profile-based task model routing", () => {
+  it("prefers explicit task model override when profile is not forced", () => {
+    const settings: LLMSettings = {
+      providerType: "openai",
+      modelKey: "sonnet-4-5",
+      openai: {
+        model: "gpt-4o-mini",
+        profileRoutingEnabled: true,
+        strongModelKey: "gpt-4o",
+        cheapModelKey: "gpt-4o-mini",
+      },
+    };
+    vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue(settings);
+
+    const resolved = LLMProviderFactory.resolveTaskModelSelection({
+      providerType: "openai",
+      modelKey: "gpt-4.1-mini",
+      llmProfile: "cheap",
+    });
+
+    expect(resolved.modelSource).toBe("explicit_override");
+    expect(resolved.modelId).toBe("gpt-4.1-mini");
+    expect(resolved.modelKey).toBe("gpt-4.1-mini");
+  });
+
+  it("uses profile model when routing is enabled and no explicit override exists", () => {
+    const settings: LLMSettings = {
+      providerType: "openai",
+      modelKey: "sonnet-4-5",
+      openai: {
+        model: "gpt-4o-mini",
+        profileRoutingEnabled: true,
+        strongModelKey: "gpt-4o",
+        cheapModelKey: "gpt-4o-mini",
+      },
+    };
+    vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue(settings);
+
+    const resolved = LLMProviderFactory.resolveTaskModelSelection({
+      providerType: "openai",
+      llmProfileHint: "strong",
+    });
+
+    expect(resolved.modelSource).toBe("profile_model");
+    expect(resolved.modelId).toBe("gpt-4o");
+    expect(resolved.modelKey).toBe("gpt-4o");
+  });
+
+  it("falls back to provider default model when profile model is invalid", () => {
+    const settings: LLMSettings = {
+      providerType: "anthropic",
+      modelKey: "sonnet-4-5",
+      anthropic: {
+        profileRoutingEnabled: true,
+        strongModelKey: "not-a-real-anthropic-key",
+        cheapModelKey: "haiku-4-5",
+      },
+    };
+    vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue(settings);
+
+    const resolved = LLMProviderFactory.resolveTaskModelSelection({
+      providerType: "anthropic",
+      llmProfileHint: "strong",
+    });
+
+    expect(resolved.modelSource).toBe("provider_default");
+    expect(resolved.modelKey).toBe("sonnet-4-5");
+    expect(resolved.modelId).toBe("claude-sonnet-4-5-20250514");
+    expect(resolved.warnings.length).toBeGreaterThan(0);
+  });
+
+  it("uses strong profile for verification routing", () => {
+    const settings: LLMSettings = {
+      providerType: "openai",
+      modelKey: "sonnet-4-5",
+      openai: {
+        model: "gpt-4o-mini",
+        profileRoutingEnabled: true,
+        strongModelKey: "gpt-4o",
+        cheapModelKey: "gpt-4o-mini",
+        preferStrongForVerification: true,
+      },
+    };
+    vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue(settings);
+
+    const resolved = LLMProviderFactory.resolveTaskModelSelection(
+      {
+        providerType: "openai",
+        llmProfileHint: "cheap",
+      },
+      { isVerificationTask: true },
+    );
+
+    expect(resolved.llmProfileUsed).toBe("strong");
+    expect(resolved.modelKey).toBe("gpt-4o");
+  });
+
+  it("respects forced profile routing over explicit model override", () => {
+    const settings: LLMSettings = {
+      providerType: "openai",
+      modelKey: "sonnet-4-5",
+      openai: {
+        model: "gpt-4o-mini",
+        profileRoutingEnabled: true,
+        strongModelKey: "gpt-4o",
+        cheapModelKey: "gpt-4o-mini",
+      },
+    };
+    vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue(settings);
+
+    const resolved = LLMProviderFactory.resolveTaskModelSelection({
+      providerType: "openai",
+      modelKey: "gpt-4.1",
+      llmProfile: "cheap",
+      llmProfileForced: true,
+    });
+
+    expect(resolved.modelSource).toBe("profile_model");
+    expect(resolved.modelId).toBe("gpt-4o-mini");
+  });
+});

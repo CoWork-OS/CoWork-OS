@@ -50,7 +50,24 @@
       "useWhen": "Use when the user asks to control or coordinate multiple smart-home devices through natural language.",
       "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
       "outputs": "Outcome from Smart Home Brain: dry-run action plan, execution status, and fallback setup instructions when integrations are missing.",
-      "successCriteria": "Safely coordinates smart-home actions with explicit confirmation boundaries and no fabricated execution claims."
+      "successCriteria": "Safely coordinates smart-home actions with explicit confirmation boundaries and no fabricated execution claims.",
+      "examples": {
+        "positive": [
+          "Use the usecase-smart-home-brain skill for this request.",
+          "Help me with smart home brain.",
+          "Use when the user asks to control or coordinate multiple smart-home devices through natural language.",
+          "Smart Home Brain: provide an actionable result."
+        ],
+        "negative": [
+          "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
+          "Do not use usecase-smart-home-brain for unrelated requests.",
+          "This request is outside smart home brain scope.",
+          "This is conceptual discussion only; no tool workflow is needed."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "low"
     }
   }
 }

@@ -27,7 +27,24 @@
       "useWhen": "Use when the user wants to monitor a webpage for changes, track content updates, or set up recurring content checks.",
       "dontUseWhen": "Don't use for one-time scraping where web-scraper skill is more appropriate.",
       "outputs": "Content snapshot with timestamp for comparison, optionally scheduled for recurring checks.",
-      "successCriteria": "Captures a clean content snapshot that can be compared with future scrapes to detect changes."
+      "successCriteria": "Captures a clean content snapshot that can be compared with future scrapes to detect changes.",
+      "examples": {
+        "positive": [
+          "Use the content-monitor skill for this request.",
+          "Help me with content monitor.",
+          "Use when the user wants to monitor a webpage for changes, track content updates, or set up recurring content checks.",
+          "Content Monitor: provide an actionable result."
+        ],
+        "negative": [
+          "Don't use for one-time scraping where web-scraper skill is more appropriate.",
+          "Do not use content-monitor for unrelated requests.",
+          "This request is outside content monitor scope.",
+          "This is conceptual discussion only; no tool workflow is needed."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "low"
     }
   }
 }

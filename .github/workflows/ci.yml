@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   secret-scan:
@@ -52,6 +53,25 @@ jobs:
       - name: Run gitleaks on new commits
         run: gitleaks git --no-banner --redact --log-opts="${{ steps.range.outputs.log_opts }}"
 
+  regression-policy:
+    name: Regression Policy Gate
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Enforce production-failure eval regression policy
+        run: npm run qa:eval:enforce-regressions
+
   lint-and-typecheck:
     name: Lint & Type Check
     runs-on: ubuntu-latest
@@ -63,7 +83,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '22'
+          node-version: '24'
           cache: 'npm'
 
       - name: Install dependencies
@@ -86,7 +106,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '22'
+          node-version: '24'
           cache: 'npm'
 
       - name: Install dependencies
@@ -97,6 +117,51 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+  targeted-eval:
+    name: Targeted Eval (Agent Changes)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Detect agent-path changes
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            agent:
+              - 'src/electron/agent/**'
+              - 'src/electron/agent/tools/**'
+
+      - name: Setup Node.js
+        if: steps.changes.outputs.agent == 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        if: steps.changes.outputs.agent == 'true'
+        run: npm ci
+
+      - name: Install sqlite3 CLI
+        if: steps.changes.outputs.agent == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sqlite3
+
+      - name: Run targeted deterministic eval suite
+        if: steps.changes.outputs.agent == 'true'
+        run: npm run qa:eval:run -- --suite reliability-regressions --mode deterministic
+        env:
+          COWORK_DB_PATH: ${{ runner.temp }}/cowork-eval.db
+
+      - name: Skip notice
+        if: steps.changes.outputs.agent != 'true'
+        run: echo "No agent-path changes detected. Skipping targeted eval gate."
 
   build:
     name: Build (${{ matrix.os }})
@@ -114,7 +179,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '22'
+          node-version: '24'
           cache: 'npm'
 
       - name: Install dependencies

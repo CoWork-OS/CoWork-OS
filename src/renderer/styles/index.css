@@ -6654,13 +6654,18 @@ button {
   position: absolute;
   bottom: calc(100% + 8px);
   left: 0;
-  min-width: 260px;
-  max-width: 360px;
+  min-width: 220px;
+  width: min(320px, calc(100vw - 32px));
+  max-width: min(320px, calc(100vw - 32px));
+  max-height: clamp(180px, 38vh, 320px);
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
-  padding: 6px;
+  padding: 4px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
   z-index: 1000;
   animation: dropdownFadeIn 0.15s ease;
 }
@@ -6670,14 +6675,15 @@ button {
   border: none;
   background: transparent;
   display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 7px 8px;
   border-radius: 8px;
   cursor: pointer;
   text-align: left;
   color: var(--color-text);
-  font-size: 13px;
+  font-size: 12px;
   transition: background 0.12s ease;
 }
 
@@ -6687,14 +6693,14 @@ button {
 }
 
 .mention-autocomplete-icon {
-  width: 26px;
-  height: 26px;
+  width: 22px;
+  height: 22px;
   border-radius: 8px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   color: #fff;
-  font-size: 13px;
+  font-size: 12px;
   flex-shrink: 0;
 }
 
@@ -6702,15 +6708,23 @@ button {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  align-items: flex-start;
+  text-align: left;
+  min-width: 0;
+  flex: 1;
 }
 
 .mention-autocomplete-name {
   font-weight: 600;
+  display: block;
+  text-align: left;
 }
 
 .mention-autocomplete-desc {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--color-text-secondary);
+  display: block;
+  text-align: left;
 }
 
 /* Slash command autocomplete (reuses mention styles) */

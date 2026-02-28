@@ -764,15 +764,6 @@ export function RightPanel({
                   </div>
                 ))}
               </div>
-              {outputSummary && outputSummary.outputCount > 0 && (
-                <div className="cli-output-location-line" title={outputSummary.primaryOutputPath}>
-                  <span className="cli-label">
-                    <span className="terminal-only">OUTPUT:</span>
-                    <span className="modern-only">Output location</span>
-                  </span>
-                  <span className="cli-path">{formatOutputLocationLabel(outputSummary)}</span>
-                </div>
-              )}
               {workspace && (
                 <div
                   className="cli-workspace-path"

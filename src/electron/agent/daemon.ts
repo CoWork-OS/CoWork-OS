@@ -389,6 +389,51 @@ export class AgentDaemon extends EventEmitter {
     };
   }
 
+  /**
+   * Cron jobs run unattended. Keep the default "balanced" budget, but
+   * escalate to "aggressive" for execution-heavy multi-source research prompts
+   * that are likely to exceed the balanced web_search cap.
+   */
+  private resolveCronBudgetProfile(input: {
+    title: string;
+    prompt: string;
+    route: IntentRoute;
+  }): Task["budgetProfile"] {
+    const executionLikeIntent =
+      input.route.intent === "execution" ||
+      input.route.intent === "mixed" ||
+      input.route.intent === "workflow" ||
+      input.route.intent === "deep_work";
+    if (!executionLikeIntent) return "balanced";
+
+    const text = `${String(input.title || "")}\n${String(input.prompt || "")}`.toLowerCase();
+    const searchSignal =
+      /\b(search|research|scan|look up|latest|breaking|news|trend|developments)\b/.test(text) ||
+      /\bweb_search\b/.test(text);
+    const sourceMentions = [
+      "reddit",
+      "x",
+      "twitter",
+      "tech news",
+      "techcrunch",
+      "the verge",
+      "ars technica",
+      "venturebeat",
+      "reuters",
+      "hacker news",
+      "hn",
+    ].filter((source) => text.includes(source)).length;
+    const boundedWindowSignal =
+      /\b(last|past|previous)\s+\d+\s*(hour|hours|day|days|week|weeks|month|months)\b/.test(text) ||
+      /\b24-hour\b|\b24h\b|\blast-24h\b/.test(text);
+
+    if ((searchSignal && sourceMentions >= 2) || (searchSignal && boundedWindowSignal)) {
+      return "aggressive";
+    }
+
+    return "balanced";
+  }
+
   private applyRuntimeTaskStrategy(task: Task): {
     task: Task;
     route: IntentRoute;
@@ -1186,6 +1231,13 @@ export class AgentDaemon extends EventEmitter {
       agentConfig: params.agentConfig,
     });
     const isCronTask = params.source === "cron";
+    const cronBudgetProfile = isCronTask
+      ? this.resolveCronBudgetProfile({
+          title: params.title,
+          prompt: params.prompt,
+          route: derived.route,
+        })
+      : undefined;
     const task = this.taskRepo.create({
       title: params.title,
       prompt: derived.prompt,
@@ -1196,7 +1248,7 @@ export class AgentDaemon extends EventEmitter {
       budgetTokens: params.budgetTokens,
       budgetCost: params.budgetCost,
       strategyLock: isCronTask,
-      budgetProfile: isCronTask ? "balanced" : undefined,
+      budgetProfile: cronBudgetProfile,
       ...(params.source ? { source: params.source } : {}),
     });
     this.logEvent(task.id, "log", {

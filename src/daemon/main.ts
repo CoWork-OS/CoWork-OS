@@ -44,6 +44,7 @@ import { MemoryService } from "../electron/memory/MemoryService";
 import { CrossSignalService } from "../electron/agents/CrossSignalService";
 import { FeedbackService } from "../electron/agents/FeedbackService";
 import { attachAgentDaemonTaskBridge, registerControlPlaneMethods } from "./control-plane-methods";
+import { initializeXMentionBridgeService, XMentionBridgeService } from "../electron/x-mentions";
 
 interface StartedControlPlane {
   server: ControlPlaneServer;
@@ -301,8 +302,16 @@ async function main(): Promise<void> {
     autoConnect: true,
     agentDaemon,
   });
+  let xMentionBridgeService: XMentionBridgeService | null = null;
   try {
     await channelGateway.initialize();
+    xMentionBridgeService = initializeXMentionBridgeService(agentDaemon, {
+      isNativeXChannelEnabled: () => {
+        const nativeX = channelGateway.getChannelByType("x");
+        return nativeX?.enabled === true && nativeX.status === "connected";
+      },
+    });
+    xMentionBridgeService.start();
     console.log("[Daemon] Channel Gateway initialized");
   } catch (error) {
     console.error("[Daemon] Failed to initialize Channel Gateway:", error);
@@ -572,6 +581,14 @@ async function main(): Promise<void> {
       if (startedControlPlane?.server?.isRunning) await startedControlPlane.server.stop();
     } catch (error) {
       console.warn("[Daemon] Failed to stop Control Plane:", error);
+    }
+    try {
+      if (xMentionBridgeService) {
+        xMentionBridgeService.stop();
+        xMentionBridgeService = null;
+      }
+    } catch (error) {
+      console.warn("[Daemon] Failed to stop X mention bridge service:", error);
     }
     try {
       await channelGateway.shutdown();

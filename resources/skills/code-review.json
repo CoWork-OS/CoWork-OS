@@ -23,7 +23,24 @@
       "successCriteria": "Returns prioritized issues with concrete fixes and no false-critical claims.",
       "expectedArtifacts": [
         "review-notes.md"
-      ]
+      ],
+      "examples": {
+        "positive": [
+          "Use the code-review skill for this request.",
+          "Help me with code review.",
+          "Use when a user explicitly asks for a code review, bug-risk sweep, or pre-merge feedback for a specific path.",
+          "Code Review: provide an actionable result."
+        ],
+        "negative": [
+          "Don't use when the task is a broad architecture rewrite or only formatting fixes.",
+          "Do not use code-review for unrelated requests.",
+          "This request is outside code review scope.",
+          "This is conceptual discussion only; no tool workflow is needed."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "low"
     }
   }
 }

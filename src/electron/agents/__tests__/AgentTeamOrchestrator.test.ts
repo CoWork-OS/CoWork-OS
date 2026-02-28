@@ -190,6 +190,7 @@ describe("AgentTeamOrchestrator", () => {
     expect(call.agentConfig).toMatchObject({
       retainMemory: false,
       bypassQueue: false,
+      llmProfile: "cheap",
       modelKey: "haiku-4-5",
       personalityId: "technical",
     });
@@ -295,8 +296,103 @@ describe("AgentTeamOrchestrator", () => {
     expect(call.agentConfig).toMatchObject({
       retainMemory: false,
       bypassQueue: false,
+      llmProfile: "cheap",
     });
     expect(call.agentConfig.modelKey).toBeUndefined();
     expect(call.agentConfig.personalityId).toBeUndefined();
+  });
+
+  it("routes validator-style checklist items to strong profile", async () => {
+    const now = Date.now();
+
+    const team: AgentTeam = {
+      id: "team-3",
+      workspaceId: "ws-3",
+      name: "Team C",
+      description: undefined,
+      leadAgentRoleId: "role-lead-3",
+      maxParallelAgents: 1,
+      defaultModelPreference: "same",
+      defaultPersonality: "same",
+      isActive: true,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const run: AgentTeamRun = {
+      id: "run-3",
+      teamId: team.id,
+      rootTaskId: "task-root-3",
+      status: "running",
+      startedAt: now,
+      completedAt: undefined,
+      error: undefined,
+      summary: undefined,
+    };
+
+    const item: AgentTeamItem = {
+      id: "item-3",
+      teamRunId: run.id,
+      parentItemId: undefined,
+      title: "Validation pass",
+      description: "Verify quality and correctness",
+      ownerAgentRoleId: undefined,
+      sourceTaskId: undefined,
+      status: "todo",
+      resultSummary: undefined,
+      sortOrder: 1,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const rootTask: Task = {
+      id: run.rootTaskId,
+      title: "Root 3",
+      prompt: "Ship the change",
+      status: "executing",
+      workspaceId: team.workspaceId,
+      createdAt: now,
+      updatedAt: now,
+      agentType: "main",
+      depth: 0,
+    };
+
+    const tasksById = new Map<string, Task>([[rootTask.id, rootTask]]);
+
+    const createChildTask = vi.fn(async (params: Any) => {
+      const child: Task = {
+        id: `task-child-${Math.random().toString(16).slice(2)}`,
+        title: params.title,
+        prompt: params.prompt,
+        status: "pending",
+        workspaceId: params.workspaceId,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        parentTaskId: params.parentTaskId,
+        agentType: params.agentType,
+        agentConfig: params.agentConfig,
+        depth: params.depth,
+        assignedAgentRoleId: params.assignedAgentRoleId,
+      };
+      tasksById.set(child.id, child);
+      return child;
+    });
+
+    const { teamRepo, runRepo, itemRepo } = makeRepos({ team, run, items: [item] });
+    const { AgentTeamOrchestrator } = await import("../AgentTeamOrchestrator");
+    const orch = new AgentTeamOrchestrator(
+      {
+        getDatabase: () => ({}) as Any,
+        getTaskById: async (taskId: string) => tasksById.get(taskId),
+        createChildTask,
+        cancelTask: async () => {},
+      },
+      { teamRepo, runRepo, itemRepo },
+    );
+
+    await orch.tickRun(run.id, "test");
+
+    const call = createChildTask.mock.calls[0][0];
+    expect(call.agentConfig.llmProfile).toBe("strong");
   });
 });

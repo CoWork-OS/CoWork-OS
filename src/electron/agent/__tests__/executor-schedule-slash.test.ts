@@ -23,6 +23,7 @@ describe("TaskExecutor /schedule slash command handling", () => {
       logEvent: vi.fn(),
       updateTaskStatus: vi.fn(),
       completeTask: vi.fn(),
+      getTaskEvents: vi.fn().mockReturnValue([]),
     };
 
     executor.toolRegistry = {
@@ -45,6 +46,7 @@ describe("TaskExecutor /schedule slash command handling", () => {
         logEvent: ReturnType<typeof vi.fn>;
         updateTaskStatus: ReturnType<typeof vi.fn>;
         completeTask: ReturnType<typeof vi.fn>;
+        getTaskEvents: ReturnType<typeof vi.fn>;
       };
       toolRegistry: { executeTool: ReturnType<typeof vi.fn> };
       saveConversationSnapshot: ReturnType<typeof vi.fn>;

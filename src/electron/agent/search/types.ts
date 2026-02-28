@@ -57,10 +57,18 @@ export interface SearchResponse {
   // Providers may omit these; SearchTools sets them for explicit failure signaling.
   success?: boolean;
   error?: string;
+  providerErrorScope?: "provider" | "global";
+  failedProvider?: SearchProviderType;
+  failureClass?: "provider_quota" | "provider_rate_limit" | "external_unknown";
+  failedProviders?: Array<{ provider: SearchProviderType; error: string }>;
   // Optional metadata for additional info (e.g., errors, configuration status)
   metadata?: {
     error?: string;
     notConfigured?: boolean;
+    providerErrorScope?: "provider" | "global";
+    failedProvider?: SearchProviderType;
+    failureClass?: "provider_quota" | "provider_rate_limit" | "external_unknown";
+    failedProviders?: Array<{ provider: SearchProviderType; error: string }>;
     [key: string]: unknown;
   };
 }

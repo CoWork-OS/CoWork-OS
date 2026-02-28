@@ -30,6 +30,7 @@ import {
   LineConfig,
   BlueBubblesConfig,
   EmailConfig,
+  XConfig,
 } from "./channels/types";
 import { createTelegramAdapter } from "./channels/telegram";
 import { createDiscordAdapter } from "./channels/discord";
@@ -45,6 +46,7 @@ import { createTwitchAdapter } from "./channels/twitch";
 import { createLineAdapter } from "./channels/line";
 import { createBlueBubblesAdapter } from "./channels/bluebubbles";
 import { createEmailAdapter } from "./channels/email";
+import { createXAdapter } from "./channels/x";
 import {
   assertSafeLoomMailboxFolder,
   isSecureOrLocalLoomUrl,
@@ -1124,6 +1126,68 @@ export class ChannelRegistry extends EventEmitter {
         },
       },
       factory: (config) => createEmailAdapter(config as EmailConfig),
+    });
+
+    // X
+    this.register({
+      metadata: {
+        type: "x",
+        displayName: "X (Twitter)",
+        description: "X mention-trigger channel via Bird CLI",
+        icon: "🐦",
+        builtin: true,
+        capabilities: {
+          sendMessage: true,
+          receiveMessage: true,
+          attachments: false,
+          reactions: false,
+          inlineKeyboards: false,
+          replyKeyboards: false,
+          polls: false,
+          voice: false,
+          video: false,
+          location: false,
+          editMessage: false,
+          deleteMessage: false,
+          typing: false,
+          readReceipts: false,
+          groups: false,
+          threads: true,
+          webhooks: false,
+          e2eEncryption: false,
+        },
+        configSchema: {
+          type: "object",
+          properties: {
+            commandPrefix: {
+              type: "string",
+              description: 'Command prefix for mention trigger (default: "do:")',
+              default: "do:",
+            },
+            allowedAuthors: {
+              type: "array",
+              description: "Allowlisted author handles",
+            },
+            pollIntervalSec: {
+              type: "number",
+              description: "Poll interval in seconds (recommended: 120+)",
+              default: 120,
+            },
+            fetchCount: {
+              type: "number",
+              description: "Mentions fetched per poll",
+              default: 25,
+            },
+            outboundEnabled: {
+              type: "boolean",
+              description: "Allow outbound posting/reply from gateway",
+              default: false,
+            },
+          },
+          required: [],
+        },
+      },
+      factory: (config) => createXAdapter(config as XConfig),
     });
   }
 

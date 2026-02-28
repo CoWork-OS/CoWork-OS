@@ -14,10 +14,22 @@ import { extractPptxContentFromFile } from "../../utils/pptx-extractor";
 import { parsePdfBuffer } from "../../utils/pdf-parser";
 
 // Limits to prevent context overflow
-const MAX_FILE_SIZE = 100 * 1024; // 100KB max for file reads
+const DEFAULT_READ_WINDOW_CHARS = 300 * 1024; // 300KB default read window
+const MAX_READ_WINDOW_CHARS = 1_000_000; // 1MB max read window
 const MAX_DIR_ENTRIES = 100; // Max files to list per directory
 const MAX_SEARCH_RESULTS = 50; // Max search results
 const MAX_NAME_PAD = 48; // Cap for aligned directory listings
+
+interface ReadWindow {
+  start: number;
+  end: number;
+  total: number;
+}
+
+interface ReadWindowOptions {
+  startChar: number;
+  maxChars: number;
+}
 
 function getElectronShell(): Any | null {
   try {
@@ -439,11 +451,20 @@ export class FileTools {
    */
   async readFile(
     relativePath: string,
-  ): Promise<{ content: string; size: number; truncated?: boolean; format?: string; path: string }> {
+    options?: { startChar?: number; maxChars?: number },
+  ): Promise<{
+    content: string;
+    size: number;
+    truncated?: boolean;
+    format?: string;
+    path: string;
+    window?: ReadWindow;
+  }> {
     // Validate input
     if (!relativePath || typeof relativePath !== "string") {
       throw new Error("Invalid path: path must be a non-empty string");
     }
+    const readWindow = this.normalizeReadWindowOptions(options);
 
     this.checkPermission("read");
     let fullPath = this.resolvePath(relativePath, "read");
@@ -500,19 +521,19 @@ export class FileTools {
 
       // Handle DOCX files
       if (ext === ".docx") {
-        const out = await this.readDocxFile(fullPath, stats.size);
+        const out = await this.readDocxFile(fullPath, stats.size, readWindow);
         return { ...out, path: outputPath };
       }
 
       // Handle PDF files
       if (ext === ".pdf") {
-        const out = await this.readPdfFile(fullPath, stats.size);
+        const out = await this.readPdfFile(fullPath, stats.size, readWindow);
         return { ...out, path: outputPath };
       }
 
       // Handle PPTX files
       if (ext === ".pptx") {
-        const out = await this.readPptxFile(fullPath, stats.size);
+        const out = await this.readPptxFile(fullPath, stats.size, readWindow);
         return { ...out, path: outputPath };
       }
 
@@ -521,34 +542,35 @@ export class FileTools {
         throw new Error("Legacy .ppt files are not supported. Please upload as .pptx.");
       }
 
-      // Handle plain text files
-      // Check file size before reading
-      if (stats.size > MAX_FILE_SIZE) {
-        // Read only the first portion of large files
-        const fileHandle = await fs.open(fullPath, "r");
-        try {
-          const buffer = Buffer.alloc(MAX_FILE_SIZE);
-          await fileHandle.read(buffer, 0, MAX_FILE_SIZE, 0);
+      // Handle plain text files using an explicit read window.
+      const start = Math.min(readWindow.startChar, Math.max(0, stats.size));
+      const bytesRemaining = Math.max(0, stats.size - start);
+      const bytesToRead = Math.min(readWindow.maxChars, bytesRemaining);
 
-          const content = buffer.toString("utf-8");
-          return {
-            content:
-              content +
-              `\n\n[... File truncated. Showing first ${Math.round(MAX_FILE_SIZE / 1024)}KB of ${Math.round(stats.size / 1024)}KB ...]`,
-            size: stats.size,
-            truncated: true,
-            path: outputPath,
-          };
-        } finally {
-          await fileHandle.close();
+      const fileHandle = await fs.open(fullPath, "r");
+      let content = "";
+      try {
+        if (bytesToRead > 0) {
+          const buffer = Buffer.alloc(bytesToRead);
+          const readRes = await fileHandle.read(buffer, 0, bytesToRead, start);
+          content = buffer.toString("utf-8", 0, readRes.bytesRead);
         }
+      } finally {
+        await fileHandle.close();
       }
 
-      const content = await fs.readFile(fullPath, "utf-8");
+      const end = start + bytesToRead;
+      const truncated = start > 0 || end < stats.size;
+      if (truncated) {
+        content += `\n\n[... File window ${start}-${end} of ${stats.size} bytes ...]`;
+      }
+
       return {
         content,
         size: stats.size,
+        truncated,
         path: outputPath,
+        window: { start, end, total: stats.size },
       };
     } catch (error: Any) {
       throw new Error(`Failed to read file: ${error.message}`);
@@ -602,23 +624,63 @@ export class FileTools {
     return current;
   }
 
+  private normalizeReadWindowOptions(options?: {
+    startChar?: number;
+    maxChars?: number;
+  }): ReadWindowOptions {
+    const startCandidate = Number(options?.startChar);
+    const maxCharsCandidate = Number(options?.maxChars);
+
+    const startChar =
+      Number.isFinite(startCandidate) && startCandidate >= 0 ? Math.floor(startCandidate) : 0;
+    const maxChars = Number.isFinite(maxCharsCandidate)
+      ? Math.floor(maxCharsCandidate)
+      : DEFAULT_READ_WINDOW_CHARS;
+
+    return {
+      startChar,
+      maxChars: Math.min(MAX_READ_WINDOW_CHARS, Math.max(1, maxChars)),
+    };
+  }
+
+  private sliceContentWindow(content: string, readWindow: ReadWindowOptions): {
+    content: string;
+    truncated: boolean;
+    window: ReadWindow;
+  } {
+    const total = content.length;
+    const start = Math.min(readWindow.startChar, total);
+    const end = Math.min(total, start + readWindow.maxChars);
+    const truncated = start > 0 || end < total;
+
+    return {
+      content: content.slice(start, end),
+      truncated,
+      window: { start, end, total },
+    };
+  }
+
   /**
    * Read DOCX file and extract text content
    */
   private async readDocxFile(
     fullPath: string,
     size: number,
-  ): Promise<{ content: string; size: number; truncated?: boolean; format: string }> {
+    readWindow: ReadWindowOptions,
+  ): Promise<{
+    content: string;
+    size: number;
+    truncated?: boolean;
+    format: string;
+    window: ReadWindow;
+  }> {
     try {
       const result = await mammoth.extractRawText({ path: fullPath });
-      let content = result.value;
+      const sliced = this.sliceContentWindow(result.value || "", readWindow);
+      let content = sliced.content;
 
-      // Check if extracted text exceeds limit
-      const truncated = content.length > MAX_FILE_SIZE;
-      if (truncated) {
-        content =
-          content.slice(0, MAX_FILE_SIZE) +
-          `\n\n[... Content truncated. Showing first ${Math.round(MAX_FILE_SIZE / 1024)}KB of extracted text ...]`;
+      if (sliced.truncated) {
+        content += `\n\n[... Content window ${sliced.window.start}-${sliced.window.end} of ${sliced.window.total} chars ...]`;
       }
 
       // Add any warnings from mammoth
@@ -630,8 +692,9 @@ export class FileTools {
       return {
         content,
         size,
-        truncated,
+        truncated: sliced.truncated,
         format: "docx",
+        window: sliced.window,
       };
     } catch (error: Any) {
       throw new Error(`Failed to read DOCX file: ${error.message}`);
@@ -644,12 +707,19 @@ export class FileTools {
   private async readPdfFile(
     fullPath: string,
     size: number,
-  ): Promise<{ content: string; size: number; truncated?: boolean; format: string }> {
+    readWindow: ReadWindowOptions,
+  ): Promise<{
+    content: string;
+    size: number;
+    truncated?: boolean;
+    format: string;
+    window: ReadWindow;
+  }> {
     try {
       const dataBuffer = await fs.readFile(fullPath);
       const data = await parsePdfBuffer(dataBuffer);
 
-      let content = data.text;
+      let extracted = data.text;
 
       // Add metadata header
       const metadata: string[] = [];
@@ -658,22 +728,21 @@ export class FileTools {
       if (data.info?.Author) metadata.push(`Author: ${data.info.Author}`);
 
       if (metadata.length > 0) {
-        content = `[PDF Metadata: ${metadata.join(" | ")}]\n\n${content}`;
+        extracted = `[PDF Metadata: ${metadata.join(" | ")}]\n\n${extracted}`;
       }
 
-      // Check if extracted text exceeds limit
-      const truncated = content.length > MAX_FILE_SIZE;
-      if (truncated) {
-        content =
-          content.slice(0, MAX_FILE_SIZE) +
-          `\n\n[... Content truncated. Showing first ${Math.round(MAX_FILE_SIZE / 1024)}KB of extracted text ...]`;
+      const sliced = this.sliceContentWindow(extracted, readWindow);
+      let content = sliced.content;
+      if (sliced.truncated) {
+        content += `\n\n[... Content window ${sliced.window.start}-${sliced.window.end} of ${sliced.window.total} chars ...]`;
       }
 
       return {
         content,
         size,
-        truncated,
+        truncated: sliced.truncated,
         format: "pdf",
+        window: sliced.window,
       };
     } catch (error: Any) {
       throw new Error(`Failed to read PDF file: ${error.message}`);
@@ -686,18 +755,38 @@ export class FileTools {
   private async readPptxFile(
     fullPath: string,
     size: number,
-  ): Promise<{ content: string; size: number; truncated?: boolean; format: string }> {
+    readWindow: ReadWindowOptions,
+  ): Promise<{
+    content: string;
+    size: number;
+    truncated?: boolean;
+    format: string;
+    window: ReadWindow;
+  }> {
     try {
-      const content = await extractPptxContentFromFile(fullPath, {
-        outputCharLimit: MAX_FILE_SIZE,
+      const extractionLimit = Math.min(
+        MAX_READ_WINDOW_CHARS,
+        Math.max(readWindow.startChar + readWindow.maxChars + 1024, DEFAULT_READ_WINDOW_CHARS),
+      );
+      const extracted = await extractPptxContentFromFile(fullPath, {
+        outputCharLimit: extractionLimit,
         maxFileSizeBytes: 50 * 1024 * 1024,
       });
-      const truncated = content.includes("[... Content truncated.");
+      const sourceTruncated = extracted.includes("[... Content truncated.");
+      const sliced = this.sliceContentWindow(extracted, readWindow);
+      let content = sliced.content;
+      const truncated = sourceTruncated || sliced.truncated;
+
+      if (truncated) {
+        content += `\n\n[... Content window ${sliced.window.start}-${sliced.window.end} of at least ${sliced.window.total} chars ...]`;
+      }
+
       return {
         content,
         size,
         truncated,
         format: "pptx",
+        window: sliced.window,
       };
     } catch (error: Any) {
       throw new Error(`Failed to read PPTX file: ${error.message}`);

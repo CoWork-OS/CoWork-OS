@@ -15,6 +15,9 @@ hero:
       text: Features
       link: /features
     - theme: alt
+      text: Reliability Flywheel
+      link: /reliability-flywheel
+    - theme: alt
       text: GitHub
       link: https://github.com/CoWork-OS/CoWork-OS
 

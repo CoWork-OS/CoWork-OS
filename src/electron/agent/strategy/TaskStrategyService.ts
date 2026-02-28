@@ -1,4 +1,10 @@
-import { AgentConfig, ConversationMode, ExecutionMode, TaskDomain } from "../../../shared/types";
+import {
+  AgentConfig,
+  ConversationMode,
+  ExecutionMode,
+  LlmProfile,
+  TaskDomain,
+} from "../../../shared/types";
 import { IntentRoute } from "./IntentRouter";
 
 export interface DerivedTaskStrategy {
@@ -17,12 +23,40 @@ export interface DerivedTaskStrategy {
   autoReportEnabled: boolean;
   /** Emit periodic progress journal entries for fire-and-forget visibility */
   progressJournalEnabled: boolean;
+  /** Strategy-derived model routing hint */
+  llmProfileHint: LlmProfile;
 }
 
 export const STRATEGY_CONTEXT_OPEN = "[AGENT_STRATEGY_CONTEXT_V1]";
 export const STRATEGY_CONTEXT_CLOSE = "[/AGENT_STRATEGY_CONTEXT_V1]";
 
 export class TaskStrategyService {
+  static deriveLlmProfile(
+    strategy: Pick<DerivedTaskStrategy, "executionMode" | "preflightRequired">,
+    taskContext: {
+      intent?: IntentRoute["intent"];
+      isVerificationTask?: boolean;
+    } = {},
+  ): LlmProfile {
+    if (taskContext.isVerificationTask) {
+      return "strong";
+    }
+
+    if (strategy.preflightRequired) {
+      return "strong";
+    }
+
+    if (strategy.executionMode !== "execute") {
+      return "strong";
+    }
+
+    if (taskContext.intent === "planning") {
+      return "strong";
+    }
+
+    return "cheap";
+  }
+
   static derive(route: IntentRoute, existing?: AgentConfig): DerivedTaskStrategy {
     const defaults: Record<
       IntentRoute["intent"],
@@ -33,6 +67,7 @@ export class TaskStrategyService {
         | "deepWorkMode"
         | "autoReportEnabled"
         | "progressJournalEnabled"
+        | "llmProfileHint"
       >
     > = {
       chat: {
@@ -101,7 +136,7 @@ export class TaskStrategyService {
       deep_work: {
         conversationMode: "task",
         maxTurns: 250,
-        qualityPasses: 3,
+        qualityPasses: 2,
         answerFirst: false,
         boundedResearch: false,
         timeoutFinalizeBias: false,
@@ -131,6 +166,15 @@ export class TaskStrategyService {
     const executionMode = existing?.executionMode ?? inferredExecutionMode;
     const taskDomain =
       existing?.taskDomain && existing.taskDomain !== "auto" ? existing.taskDomain : route.domain;
+    const llmProfileHint = this.deriveLlmProfile(
+      {
+        executionMode,
+        preflightRequired,
+      },
+      {
+        intent: route.intent,
+      },
+    );
 
     return {
       // Preserve explicit user-set modes (chat/task/think) but let intent-derived
@@ -151,6 +195,7 @@ export class TaskStrategyService {
       deepWorkMode: isDeepWork,
       autoReportEnabled: isWorkflowOrDeepWork,
       progressJournalEnabled: isDeepWork,
+      llmProfileHint,
     };
   }
 
@@ -179,13 +224,20 @@ export class TaskStrategyService {
     }
     if (strategy.deepWorkMode) {
       next.deepWorkMode = true;
-      next.autonomousMode = true;
+      if (typeof next.autonomousMode !== "boolean") {
+        next.autonomousMode = true;
+      }
     }
     if (strategy.autoReportEnabled) {
       next.autoReportEnabled = true;
     }
     if (strategy.progressJournalEnabled) {
       next.progressJournalEnabled = true;
+    }
+    if (!next.modelKey) {
+      next.llmProfileHint = strategy.llmProfileHint;
+    } else {
+      delete next.llmProfileHint;
     }
     return next;
   }

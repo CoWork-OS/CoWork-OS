@@ -69,6 +69,7 @@ import {
   resolvePersonalityPreference,
 } from "../../../shared/agent-preferences";
 import { isHeadlessMode } from "../../utils/runtime-mode";
+import { sanitizeStoredPreferredName } from "../../utils/preferred-name";
 import { HooksSettingsManager } from "../../hooks/settings";
 import { InfraTools } from "../../infra/infra-tools";
 import { InfraSettingsManager } from "../../infra/infra-settings";
@@ -663,7 +664,7 @@ export class ToolRegistry {
     try {
       const infraSettings = InfraSettingsManager.loadSettings();
       if (infraSettings.enabled) {
-        allTools.push(...InfraTools.getToolDefinitions());
+        allTools.push(...InfraTools.getToolDefinitions(infraSettings));
       }
     } catch {
       // InfraSettingsManager may not be initialized yet
@@ -1092,7 +1093,7 @@ Integration Status:
 - Email channel (IMAP/SMTP): ${emailChannelStatus}
 
 File Operations:
-- read_file: Read contents of a file (supports plain text, DOCX, PDF, and PPTX)
+- read_file: Read contents of a file (supports plain text, DOCX, PDF, and PPTX; supports chunked reads via startChar/maxChars)
 - read_files: Read multiple files matched by glob patterns (supports exclusion patterns with leading "!")
 - write_file: Write content to a file (creates or overwrites). Use edit_file for targeted changes instead.
 - edit_file: Surgical text replacement (preferred over write_file for modifications)
@@ -1350,7 +1351,12 @@ ${skillDescriptions}`;
     }
 
     // File tools
-    if (name === "read_file") return await this.fileTools.readFile(input.path);
+    if (name === "read_file") {
+      return await this.fileTools.readFile(input.path, {
+        startChar: input.startChar,
+        maxChars: input.maxChars,
+      });
+    }
     if (name === "read_files")
       return await readFilesByPatterns(input, {
         globTools: this.globTools,
@@ -1781,6 +1787,7 @@ ${skillDescriptions}`;
           reason:
             amount !== null ? `MCP payment operation (${amount} USDC)` : "MCP payment operation",
         },
+        { allowAutoApprove: false },
       );
       if (approved !== true) {
         throw new Error('Tool "mcp_x402_fetch" approval denied');
@@ -2544,13 +2551,23 @@ ${skillDescriptions}`;
       {
         name: "read_file",
         description:
-          "Read the contents of a file in the workspace. Supports plain text files, DOCX (Word documents), PDF, and PPTX. For DOCX/PDF/PPTX, extracts and returns the text content.",
+          "Read the contents of a file in the workspace. Supports plain text files, DOCX (Word documents), PDF, and PPTX. For DOCX/PDF/PPTX, extracts and returns text. Supports chunked reads with startChar/maxChars for long documents.",
         input_schema: {
           type: "object",
           properties: {
             path: {
               type: "string",
               description: "Relative path to the file within the workspace",
+            },
+            startChar: {
+              type: "number",
+              description:
+                "Optional character offset for chunked reads. Use with maxChars to continue long files.",
+            },
+            maxChars: {
+              type: "number",
+              description:
+                "Optional max characters to return for this read (default: 300000, max: 1000000).",
             },
           },
           required: ["path"],
@@ -4772,14 +4789,19 @@ ${skillDescriptions}`;
     name: string;
     message: string;
   } {
-    const userName = input.name?.trim();
+    const rawUserName = input.name?.trim();
 
-    if (!userName || userName.length === 0) {
+    if (!rawUserName || rawUserName.length === 0) {
       throw new Error("Name cannot be empty");
     }
 
-    if (userName.length > 100) {
+    if (rawUserName.length > 100) {
       throw new Error("Name is too long (max 100 characters)");
+    }
+
+    const userName = sanitizeStoredPreferredName(rawUserName);
+    if (!userName) {
+      throw new Error('Name looks invalid. Please provide just your preferred name (for example: "Alice").');
     }
 
     // Save the user's name

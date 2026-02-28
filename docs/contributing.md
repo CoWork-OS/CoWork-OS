@@ -62,6 +62,7 @@ npm run dev
 - `npm run lint` - Run ESLint
 - `npm run type-check` - Run TypeScript type checking
 - `npm test` - Run tests
+- `npm run skills:check` - Run bundled skill quality checks
 
 ## Releasing (Maintainers Only)
 
@@ -158,6 +159,7 @@ Areas where help is especially needed:
 2. **Make your changes** following our coding standards
 
 3. **Test your changes** thoroughly
+   - If you changed bundled skills under `resources/skills/`, run `npm run skills:check`
 
 4. **Update documentation** if needed
 

@@ -198,6 +198,8 @@ export class MessageRouter {
   // finalize helpers from sending a brand new message when no draft exists (e.g., if called
   // defensively on pause/follow-up events).
   private telegramDraftStreamTouchedTasks: Set<string> = new Set();
+  // Destination-scoped cache for recently-sent idempotent messages.
+  private sentIdempotencyKeys: Map<string, { messageId: string; sentAtMs: number }> = new Map();
 
   constructor(db: Database.Database, config: RouterConfig = {}, agentDaemon?: AgentDaemon) {
     this.db = db;
@@ -375,6 +377,7 @@ export class MessageRouter {
     "email",
     "teams",
     "googlechat",
+    "x",
   ]);
 
   private static readonly TEXT_ONLY_RESTRICTED_TOOLS = [
@@ -1012,6 +1015,15 @@ export class MessageRouter {
    * Send a message through a channel
    */
   async sendMessage(channelType: ChannelType, message: OutgoingMessage): Promise<string> {
+    this.cleanupIdempotencyCache();
+    const cacheKey = this.getIdempotencyCacheKey(channelType, message);
+    if (cacheKey) {
+      const existing = this.sentIdempotencyKeys.get(cacheKey);
+      if (existing) {
+        return existing.messageId;
+      }
+    }
+
     const adapter = this.adapters.get(channelType);
     if (!adapter) {
       throw new Error(`No adapter registered for channel type: ${channelType}`);
@@ -1022,6 +1034,9 @@ export class MessageRouter {
     }
 
     const messageId = await adapter.sendMessage(message);
+    if (cacheKey) {
+      this.sentIdempotencyKeys.set(cacheKey, { messageId, sentAtMs: Date.now() });
+    }
 
     // Best-effort logging: never fail delivery because persistence failed.
     try {
@@ -1049,6 +1064,35 @@ export class MessageRouter {
     }
 
     return messageId;
+  }
+
+  private cleanupIdempotencyCache(): void {
+    const now = Date.now();
+    const ttlMs = 24 * 60 * 60 * 1000;
+    for (const [key, value] of this.sentIdempotencyKeys.entries()) {
+      if (now - value.sentAtMs > ttlMs) {
+        this.sentIdempotencyKeys.delete(key);
+      }
+    }
+    const maxEntries = 5000;
+    if (this.sentIdempotencyKeys.size <= maxEntries) return;
+    const entries = Array.from(this.sentIdempotencyKeys.entries()).sort(
+      (a, b) => a[1].sentAtMs - b[1].sentAtMs,
+    );
+    for (let i = 0; i < entries.length - maxEntries; i++) {
+      this.sentIdempotencyKeys.delete(entries[i][0]);
+    }
+  }
+
+  private getIdempotencyCacheKey(
+    channelType: ChannelType,
+    message: OutgoingMessage,
+  ): string | null {
+    const idempotencyKey =
+      typeof message.idempotencyKey === "string" ? message.idempotencyKey.trim() : "";
+    if (!idempotencyKey) return null;
+    const chatId = typeof message.chatId === "string" ? message.chatId.trim() : "";
+    return `${channelType}:${chatId}:${idempotencyKey}`;
   }
 
   /**
@@ -4281,6 +4325,7 @@ export class MessageRouter {
       "email",
       "teams",
       "googlechat",
+      "x",
     ]);
 
     // Parse leading flags before the prompt.

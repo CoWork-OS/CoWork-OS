@@ -2,7 +2,7 @@
 
 ## Multi-Channel AI Gateway
 
-14 messaging channels with unified operations. See [Channel Integrations](channels.md) for setup details.
+15 messaging channels with unified operations. See [Channel Integrations](channels.md) for setup details.
 
 - **WhatsApp**: QR code pairing, self-chat mode, markdown support
 - **Telegram**: Bot commands, streaming responses, workspace selection
@@ -18,6 +18,7 @@
 - **LINE**: Messaging API webhooks, 200M+ users in Asia
 - **BlueBubbles**: iMessage via Mac server, SMS support
 - **Email**: IMAP/SMTP, any email provider, threading
+- **X (Twitter)**: Mention-trigger task ingress (`do:` prefix by default) with allowlist controls and idempotent session keys ([guide](x-mention-triggers.md))
 
 ---
 
@@ -370,18 +371,57 @@ See [Live Canvas](live-canvas.md) for the full guide.
 
 ## Usage Insights
 
-Dashboard showing task activity, cost trends, and productivity patterns.
+Dashboard showing task activity, cost trends, agent efficiency, and productivity patterns. Access from **Settings** > **Usage Insights**.
 
-| Metric | Description |
-|--------|-------------|
-| **Task Metrics** | Created, completed, failed, cancelled counts with average completion time |
-| **Cost & Tokens** | Total cost, input/output tokens, cost breakdown by model |
+### Overview
+
+The panel opens with a **hero stats row** showing four key metrics at a glance:
+
+| Stat | Description |
+|------|-------------|
+| **Completed** | Total tasks completed in the selected period |
+| **Success Rate** | Percentage of completed tasks out of total, with a color-coded progress bar (green ≥ 70%, amber ≥ 40%, red < 40%) |
+| **Failed** | Total failed tasks |
+| **Avg Time** | Average completion time across completed tasks |
+
+Below the hero row, detailed sections are arranged in a **two-column grid** for information density.
+
+### Workspace Filtering
+
+The workspace dropdown at the top lets you filter insights to a single workspace or view **All Workspaces** (the default). "All Workspaces" aggregates metrics across every workspace, giving you a global view of your agent usage.
+
+### Sections
+
+| Section | Description |
+|---------|-------------|
+| **Cost & Tokens** | Total cost, input/output token counts, and cost breakdown by model |
+| **Agent Efficiency (AWU)** | Agentic Work Unit metrics — see below |
 | **Activity by Day** | Tasks per day-of-week with peak day indicator |
 | **Activity by Hour** | Hourly task histogram with peak hour indicator |
 | **Top Skills** | Most-used skills ranked by usage count |
 | **Skill Usage by Pack** | Skills grouped by their parent plugin pack with aggregated usage counts and mini bar charts |
 
-Supports 7, 14, and 30-day period selection. Per-pack analytics cross-reference skill usage with plugin pack membership, showing which packs drive the most value. Access from **Settings** > **Usage Insights**.
+### Agentic Work Units (AWU)
+
+Inspired by [Salesforce's AWU concept](https://www.salesforce.com/agentforce/agentic-work-unit/), an **Agentic Work Unit** represents one successfully completed unit of agent work.
+
+**Definition:** 1 AWU = 1 task with `status = 'completed'` AND `terminal_status` of `ok` or `partial_success`.
+
+The AWU section shows:
+
+| Metric | Description |
+|--------|-------------|
+| **AWU Count** | Number of completed work units in the period |
+| **Tokens per AWU** | Total tokens consumed ÷ AWU count (lower is more efficient) |
+| **Cost per AWU** | Total cost ÷ AWU count (lower is cheaper) |
+| **AWUs per Dollar** | AWU count ÷ total cost (higher is better ROI) |
+| **Efficiency Trend** | Percentage change in tokens/AWU and cost/AWU vs the previous period. A downward arrow (green) means improvement; upward (red) means regression |
+
+The trend comparison uses the same period length — e.g., if you're viewing a 7-day window, it compares against the prior 7 days. The AWU section is hidden when no tasks were completed in the period.
+
+### Period Selection
+
+Supports **7-day**, **14-day**, and **30-day** windows. Per-pack analytics cross-reference skill usage with plugin pack membership, showing which packs drive the most value.
 
 ---
 
@@ -504,9 +544,9 @@ Serve CoWork OS as a web application accessible from any browser on the network.
 | **HTTP server** | Configurable host/port with static file serving |
 | **Authentication** | Bearer token with timing-safe comparison |
 | **CORS** | Origin whitelisting for cross-origin access |
-| **REST API** | Maps endpoints to IPC channels (tasks, workspaces, briefings, suggestions) |
+| **REST API** | Maps endpoints to IPC channels (tasks, workspaces, accounts, briefings, suggestions) |
 | **WebSocket** | Real-time event streaming for connected clients |
-| **Health check** | Unauthenticated `/health` endpoint for monitoring |
+| **Health check** | Unauthenticated `/api/health` endpoint for monitoring |
 
 Configure in **Settings** > **Web Access**.
 
@@ -885,6 +925,7 @@ Configure in **Settings** > **Infrastructure**. The settings UI shows:
 - API key configuration for each provider
 - Wallet address with copy button and balance display
 - Tool category toggles (enable/disable sandbox, domain, or payment tools independently)
+- Coinbase Agentic Wallet remote signer configuration (`wallet.provider = coinbase_agentic`) — see [Coinbase Agentic Signer Contract](coinbase-agentic-signer.md)
 
 ---
 

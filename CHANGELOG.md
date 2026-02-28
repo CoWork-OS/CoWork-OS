@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Agentic Work Unit (AWU) metric**: Usage Insights now tracks agent efficiency via AWU — successfully completed tasks measured against tokens and cost consumed. Shows AWU count, tokens/AWU, cost/AWU, AWUs per dollar, and period-over-period trend comparison.
+- **All Workspaces aggregation**: Usage Insights defaults to "All Workspaces" view, aggregating metrics across every workspace. Individual workspace filtering remains available via dropdown.
+
+### Changed
+- **Usage Insights UI redesign**: Replaced single-column layout with compact hero stats row (completed, success rate with color-coded progress bar, failed, avg time) and two-column grid for detailed sections (Cost & AWU side-by-side, Activity Day & Hour side-by-side, Skills & Packs side-by-side).
+
 ## [0.4.9] - 2026-02-26
 
 ### Fixed

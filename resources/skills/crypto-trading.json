@@ -80,7 +80,24 @@
       "useWhen": "Use when users ask for live crypto prices, balances, or order placement across ccxt-supported exchanges.",
       "dontUseWhen": "Do not use for non-crypto topics, legal/compliance guidance, or high-level strategy discussion without concrete execution.",
       "outputs": "Returns normalized JSON for price, balance, and order intent/results.",
-      "successCriteria": "Returns explicit mode-specific result plus next steps, with safe handling when order confirmation is missing."
+      "successCriteria": "Returns explicit mode-specific result plus next steps, with safe handling when order confirmation is missing.",
+      "examples": {
+        "positive": [
+          "Use the crypto-trading skill for this request.",
+          "Help me with crypto trading.",
+          "Use when users ask for live crypto prices, balances, or order placement across ccxt-supported exchanges.",
+          "Crypto Trading: provide an actionable result."
+        ],
+        "negative": [
+          "Do not use for non-crypto topics, legal/compliance guidance, or high-level strategy discussion without concrete execution.",
+          "Do not use crypto-trading for unrelated requests.",
+          "This request is outside crypto trading scope.",
+          "This is conceptual discussion only; no tool workflow is needed."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "low"
     }
   }
 }

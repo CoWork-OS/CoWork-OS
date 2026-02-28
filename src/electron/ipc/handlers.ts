@@ -177,6 +177,7 @@ import type { MemorySettings } from "../database/repositories";
 import { VoiceSettingsManager } from "../voice/voice-settings-manager";
 import { getVoiceService } from "../voice/VoiceService";
 import { AgentPerformanceReviewService } from "../reports/AgentPerformanceReviewService";
+import { EvalService } from "../eval/EvalService";
 import { getCronService } from "../cron";
 import type { CronJobCreate } from "../cron/types";
 import { getXMentionBridgeService, getXMentionTriggerStatus } from "../x-mentions";
@@ -484,6 +485,8 @@ rateLimiter.configure(IPC_CHANNELS.TEAM_ITEM_DELETE, RATE_LIMIT_CONFIGS.limited)
 rateLimiter.configure(IPC_CHANNELS.TEAM_ITEM_MOVE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.REVIEW_GENERATE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.REVIEW_DELETE, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.EVAL_RUN_SUITE, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.EVAL_CREATE_CASE_FROM_TASK, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.KIT_INIT, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.KIT_PROJECT_CREATE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.MEMORY_ADD_USER_FACT, RATE_LIMIT_CONFIGS.limited);
@@ -519,6 +522,7 @@ export async function setupIpcHandlers(
   const teamItemRepo = new AgentTeamItemRepository(db);
   const teamThoughtRepo = new AgentTeamThoughtRepository(db);
   const reviewService = new AgentPerformanceReviewService(db);
+  const evalService = new EvalService(db);
   const taskLabelRepo = new TaskLabelRepository(db);
   const workingStateRepo = new WorkingStateRepository(db);
   const contextPolicyManager = new ContextPolicyManager(db);
@@ -1739,7 +1743,7 @@ export async function setupIpcHandlers(
       const childTasks = taskRepo.findByParent(taskId);
       if (childTasks.length > 0) {
         const childIds = childTasks.map((c) => c.id);
-        const fileTypes = ["file_created", "file_modified", "file_deleted"];
+        const fileTypes = ["file_created", "file_modified", "file_deleted", "artifact_created"];
         const childFileEvents = taskEventRepo.findByTaskIds(childIds, fileTypes);
         // Merge and sort by timestamp
         events.push(...childFileEvents);
@@ -3805,6 +3809,43 @@ export async function setupIpcHandlers(
     const validated = validateInput(UUIDSchema, id, "review ID");
     const success = reviewService.delete(validated);
     return { success };
+  });
+
+  // Eval Suites / Runs (Reliability Flywheel)
+  ipcMain.handle(IPC_CHANNELS.EVAL_LIST_SUITES, async (_, options?: { windowDays?: number }) => {
+    const windowDays =
+      typeof options?.windowDays === "number" && Number.isFinite(options.windowDays)
+        ? options.windowDays
+        : 30;
+    return {
+      suites: evalService.listSuites(),
+      metrics: evalService.getBaselineMetrics(windowDays),
+    };
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.EVAL_CREATE_CASE_FROM_TASK,
+    async (_, data: { taskId: string }) => {
+      checkRateLimit(IPC_CHANNELS.EVAL_CREATE_CASE_FROM_TASK);
+      const taskId = validateInput(UUIDSchema, data?.taskId, "task ID");
+      return evalService.createCaseFromTask(taskId);
+    },
+  );
+
+  ipcMain.handle(IPC_CHANNELS.EVAL_GET_CASE, async (_, caseId: string) => {
+    const validated = validateInput(UUIDSchema, caseId, "eval case ID");
+    return evalService.getCase(validated);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.EVAL_RUN_SUITE, async (_, suiteId: string) => {
+    checkRateLimit(IPC_CHANNELS.EVAL_RUN_SUITE);
+    const validated = validateInput(UUIDSchema, suiteId, "eval suite ID");
+    return evalService.runSuite(validated);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.EVAL_GET_RUN, async (_, runId: string) => {
+    const validated = validateInput(UUIDSchema, runId, "eval run ID");
+    return evalService.getRun(validated);
   });
 
   // Usage Insights

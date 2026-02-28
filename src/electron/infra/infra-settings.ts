@@ -7,8 +7,10 @@
 
 import { InfraSettings, DEFAULT_INFRA_SETTINGS } from "../../shared/types";
 import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
+import { createLogger } from "../utils/logger";
 
 const STORAGE_KEY = "infra";
+const logger = createLogger("Infra Settings");
 
 export class InfraSettingsManager {
   private static cachedSettings: InfraSettings | null = null;
@@ -17,7 +19,7 @@ export class InfraSettingsManager {
   static initialize(): void {
     if (this.initialized) return;
     this.initialized = true;
-    console.log("[Infra Settings] Initialized");
+    logger.debug("Initialized");
   }
 
   static loadSettings(): InfraSettings {
@@ -37,8 +39,21 @@ export class InfraSettingsManager {
             ...stored,
             e2b: { ...DEFAULT_INFRA_SETTINGS.e2b, ...stored.e2b },
             domains: { ...DEFAULT_INFRA_SETTINGS.domains, ...stored.domains },
-            wallet: { ...DEFAULT_INFRA_SETTINGS.wallet, ...stored.wallet },
-            payments: { ...DEFAULT_INFRA_SETTINGS.payments, ...stored.payments },
+            wallet: {
+              ...DEFAULT_INFRA_SETTINGS.wallet,
+              ...stored.wallet,
+              coinbase: {
+                ...DEFAULT_INFRA_SETTINGS.wallet.coinbase,
+                ...stored.wallet?.coinbase,
+              },
+            },
+            payments: {
+              ...DEFAULT_INFRA_SETTINGS.payments,
+              ...stored.payments,
+              allowedHosts: Array.isArray(stored.payments?.allowedHosts)
+                ? stored.payments.allowedHosts
+                : DEFAULT_INFRA_SETTINGS.payments.allowedHosts,
+            },
             enabledCategories: {
               ...DEFAULT_INFRA_SETTINGS.enabledCategories,
               ...stored.enabledCategories,
@@ -48,7 +63,7 @@ export class InfraSettingsManager {
         }
       }
     } catch (error) {
-      console.error("[Infra Settings] Failed to load settings:", error);
+      logger.error("Failed to load settings:", error);
     }
 
     this.cachedSettings = { ...DEFAULT_INFRA_SETTINGS };
@@ -67,9 +82,9 @@ export class InfraSettingsManager {
 
       const repository = SecureSettingsRepository.getInstance();
       repository.save(STORAGE_KEY, settings);
-      console.log("[Infra Settings] Saved settings to encrypted database");
+      logger.debug("Saved settings to encrypted database");
     } catch (error) {
-      console.error("[Infra Settings] Failed to save settings:", error);
+      logger.error("Failed to save settings:", error);
       throw error;
     }
   }

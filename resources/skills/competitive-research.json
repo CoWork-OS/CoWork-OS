@@ -20,7 +20,26 @@
       "dontUseWhen": "Don't use for general web research that isn't competitive analysis.",
       "outputs": "Structured competitive analysis with feature comparison, market positioning, and differentiation recommendations.",
       "successCriteria": "Identifies at least 3 real competitors with accurate information and provides actionable differentiation advice.",
-      "expectedArtifacts": ["competitive-analysis.md"]
+      "expectedArtifacts": [
+        "competitive-analysis.md"
+      ],
+      "examples": {
+        "positive": [
+          "Use the competitive-research skill for this request.",
+          "Help me with competitive research.",
+          "Use when a user asks to research competitors, analyze a market, or find alternatives to a product.",
+          "Competitive Research: provide an actionable result."
+        ],
+        "negative": [
+          "Don't use for general web research that isn't competitive analysis.",
+          "Do not use competitive-research for unrelated requests.",
+          "This request is outside competitive research scope.",
+          "This is conceptual discussion only; no tool workflow is needed."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "low"
     }
   }
 }

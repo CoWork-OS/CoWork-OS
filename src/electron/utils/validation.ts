@@ -47,8 +47,11 @@ const OriginChannelSchema = z.preprocess(
     "email",
     "teams",
     "googlechat",
+    "x",
   ] as const),
 );
+
+const LlmProfileSchema = z.enum(["strong", "cheap"]);
 
 // ============ Workspace Schemas ============
 
@@ -75,6 +78,9 @@ export const AgentConfigSchema = z
   .object({
     providerType: z.enum(LLM_PROVIDER_TYPES).optional(),
     modelKey: z.string().max(200).optional(),
+    llmProfile: LlmProfileSchema.optional(),
+    llmProfileForced: z.boolean().optional(),
+    llmProfileHint: LlmProfileSchema.optional(),
     personalityId: PersonalityIdSchema.optional(),
     gatewayContext: z.enum(["private", "group", "public"]).optional(),
     toolRestrictions: z.array(z.string().min(1).max(200)).max(50).optional(),
@@ -247,9 +253,17 @@ export const ApprovalResponseSchema = z.object({
 
 export const LLMProviderTypeSchema = z.enum(LLM_PROVIDER_TYPES);
 
+const ProviderRoutingSettingsSchema = {
+  profileRoutingEnabled: z.boolean().optional(),
+  strongModelKey: z.string().max(200).optional(),
+  cheapModelKey: z.string().max(200).optional(),
+  preferStrongForVerification: z.boolean().optional(),
+} as const;
+
 export const AnthropicSettingsSchema = z
   .object({
     apiKey: z.string().max(500).optional(),
+    ...ProviderRoutingSettingsSchema,
   })
   .optional();
 
@@ -262,6 +276,7 @@ export const BedrockSettingsSchema = z
     profile: z.string().max(100).optional(),
     useDefaultCredentials: z.boolean().optional(),
     model: z.string().max(200).optional(),
+    ...ProviderRoutingSettingsSchema,
   })
   .optional();
 
@@ -270,6 +285,7 @@ export const OllamaSettingsSchema = z
     baseUrl: z.string().url().max(500).optional(),
     model: z.string().max(200).optional(),
     apiKey: z.string().max(500).optional(),
+    ...ProviderRoutingSettingsSchema,
   })
   .optional();
 
@@ -277,6 +293,7 @@ export const GeminiSettingsSchema = z
   .object({
     apiKey: z.string().max(500).optional(),
     model: z.string().max(200).optional(),
+    ...ProviderRoutingSettingsSchema,
   })
   .optional();
 
@@ -285,6 +302,7 @@ export const OpenRouterSettingsSchema = z
     apiKey: z.string().max(500).optional(),
     model: z.string().max(200).optional(),
     baseUrl: z.string().max(500).optional(),
+    ...ProviderRoutingSettingsSchema,
   })
   .optional();
 
@@ -297,6 +315,7 @@ export const OpenAISettingsSchema = z
     refreshToken: z.string().max(2000).optional(),
     tokenExpiresAt: z.number().optional(),
     authMethod: z.enum(["api_key", "oauth"]).optional(),
+    ...ProviderRoutingSettingsSchema,
   })
   .optional();
 
@@ -307,6 +326,7 @@ export const AzureSettingsSchema = z
     deployment: z.string().max(200).optional(),
     deployments: z.array(z.string().max(200)).max(50).optional(),
     apiVersion: z.string().max(200).optional(),
+    ...ProviderRoutingSettingsSchema,
   })
   .optional();
 
@@ -315,6 +335,7 @@ export const GroqSettingsSchema = z
     apiKey: z.string().max(500).optional(),
     model: z.string().max(200).optional(),
     baseUrl: z.string().max(500).optional(),
+    ...ProviderRoutingSettingsSchema,
   })
   .optional();
 
@@ -323,6 +344,7 @@ export const XAISettingsSchema = z
     apiKey: z.string().max(500).optional(),
     model: z.string().max(200).optional(),
     baseUrl: z.string().max(500).optional(),
+    ...ProviderRoutingSettingsSchema,
   })
   .optional();
 
@@ -331,6 +353,7 @@ export const KimiSettingsSchema = z
     apiKey: z.string().max(500).optional(),
     model: z.string().max(200).optional(),
     baseUrl: z.string().max(500).optional(),
+    ...ProviderRoutingSettingsSchema,
   })
   .optional();
 
@@ -339,6 +362,7 @@ export const OpenAICompatibleSettingsSchema = z
     apiKey: z.string().max(500).optional(),
     baseUrl: z.string().max(500).optional(),
     model: z.string().max(200).optional(),
+    ...ProviderRoutingSettingsSchema,
   })
   .optional();
 
@@ -346,6 +370,7 @@ export const CustomProviderConfigSchema = z.object({
   apiKey: z.string().max(500).optional(),
   model: z.string().max(200).optional(),
   baseUrl: z.string().max(500).optional(),
+  ...ProviderRoutingSettingsSchema,
 });
 
 export const CustomProvidersSchema = z.record(z.string(), CustomProviderConfigSchema).optional();
@@ -413,6 +438,31 @@ export const XSettingsSchema = z.object({
   timeoutMs: z.number().int().min(1000).max(120000).optional(),
   cookieTimeoutMs: z.number().int().min(1000).max(120000).optional(),
   quoteDepth: z.number().int().min(0).max(5).optional(),
+  mentionTrigger: z
+    .object({
+      enabled: z.boolean().default(false),
+      commandPrefix: z.string().trim().min(1).max(50).default("do:"),
+      allowedAuthors: z.array(z.string().trim().min(1).max(50)).max(200).default([]),
+      pollIntervalSec: z.number().int().min(30).max(3600).default(120),
+      fetchCount: z.number().int().min(1).max(200).default(25),
+      workspaceMode: z.enum(["temporary"]).default("temporary"),
+    })
+    .default({
+      enabled: false,
+      commandPrefix: "do:",
+      allowedAuthors: [],
+      pollIntervalSec: 120,
+      fetchCount: 25,
+      workspaceMode: "temporary",
+    }),
+}).superRefine((data, ctx) => {
+  if (data.mentionTrigger.enabled && data.mentionTrigger.allowedAuthors.length === 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["mentionTrigger", "allowedAuthors"],
+      message: "At least one allowed author is required when mention trigger is enabled",
+    });
+  }
 });
 
 // ============ Notion Settings Schema ============
@@ -522,10 +572,19 @@ export const InfraSettingsSchema = z
     }),
     wallet: z.object({
       enabled: z.boolean(),
+      provider: z.enum(["local", "coinbase_agentic"]),
+      coinbase: z.object({
+        enabled: z.boolean(),
+        signerEndpoint: z.string().max(500),
+        network: z.enum(["base-mainnet", "base-sepolia"]),
+        accountId: z.string().max(200),
+      }),
     }),
     payments: z.object({
       requireApproval: z.boolean(),
       maxAutoApproveUsd: z.number().min(0).max(1000),
+      hardLimitUsd: z.number().min(0).max(10000),
+      allowedHosts: z.array(z.string().max(255)).max(200),
     }),
     enabledCategories: z.object({
       sandbox: z.boolean(),
@@ -666,6 +725,17 @@ export const AddBlueBubblesChannelSchema = z.object({
   ambientMode: z.boolean().optional(),
   silentUnauthorized: z.boolean().optional(),
   captureSelfMessages: z.boolean().optional(),
+});
+
+export const AddXChannelSchema = z.object({
+  type: z.literal("x"),
+  name: z.string().min(1).max(MAX_TITLE_LENGTH),
+  securityMode: SecurityModeSchema.optional(),
+  xCommandPrefix: z.string().trim().min(1).max(50).optional(),
+  xAllowedAuthors: z.array(z.string().trim().min(1).max(50)).max(200).optional(),
+  xPollIntervalSec: z.number().int().min(30).max(3600).optional(),
+  xFetchCount: z.number().int().min(1).max(200).optional(),
+  xOutboundEnabled: z.boolean().optional(),
 });
 
 const getOptionalString = (value: unknown): string | undefined => {
@@ -883,6 +953,7 @@ export const AddChannelSchema = z.discriminatedUnion("type", [
   AddTwitchChannelSchema,
   AddLineChannelSchema,
   AddBlueBubblesChannelSchema,
+  AddXChannelSchema,
   AddEmailChannelSchema,
 ]);
 

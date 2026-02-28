@@ -21,6 +21,7 @@ import type {
   CronRunHistoryResult,
   CronWebhookConfig,
   CronWorkspaceContext,
+  CronOutboxEntry,
 } from "./types";
 import { loadCronStore, saveCronStore, resolveCronStorePath } from "./store";
 import { computeNextRunAtMs } from "./schedule";
@@ -75,7 +76,9 @@ interface CronServiceState {
   };
   store: CronStoreFile | null;
   timer: ReturnType<typeof setTimeout> | null;
+  outboxTimer: ReturnType<typeof setTimeout> | null;
   running: boolean;
+  processingOutbox: boolean;
   runningJobIds: Set<string>; // Track currently running jobs
   opLock: Promise<unknown>;
   webhookServer: CronWebhookServer | null;
@@ -102,7 +105,9 @@ export class CronService {
       },
       store: null,
       timer: null,
+      outboxTimer: null,
       running: false,
+      processingOutbox: false,
       runningJobIds: new Set(),
       opLock: Promise.resolve(),
       webhookServer: null,
@@ -138,6 +143,7 @@ export class CronService {
 
       await this.persist();
       this.armTimer();
+      this.armOutboxTimer();
 
       // Start webhook server if configured
       if (deps.webhook?.enabled) {
@@ -184,6 +190,7 @@ export class CronService {
    */
   async stop(): Promise<void> {
     this.stopTimer();
+    this.stopOutboxTimer();
 
     // Stop webhook server if running
     if (this.state.webhookServer) {
@@ -466,7 +473,10 @@ export class CronService {
 
   private ensureStore(): CronStoreFile {
     if (!this.state.store) {
-      this.state.store = { version: 1, jobs: [] };
+      this.state.store = { version: 1, jobs: [], outbox: [] };
+    }
+    if (!Array.isArray(this.state.store.outbox)) {
+      this.state.store.outbox = [];
     }
     return this.state.store;
   }
@@ -548,7 +558,7 @@ export class CronService {
 
     const startTime = Date.now();
     let taskId: string | undefined;
-    let status: "ok" | "error" | "timeout" = "ok";
+    let status: "ok" | "partial_success" | "error" | "timeout" = "ok";
     let errorMsg: string | undefined;
     let resultText: string | undefined;
     let workspaceContext: CronWorkspaceContext | null = null;
@@ -605,7 +615,7 @@ export class CronService {
 
           const taskStatus = typeof task.status === "string" ? task.status : "";
           if (taskStatus === "completed") {
-            status = "ok";
+            status = task.terminalStatus === "partial_success" ? "partial_success" : "ok";
             if (typeof task.resultSummary === "string" && task.resultSummary.trim()) {
               pollResultSummary = task.resultSummary.trim();
             }
@@ -634,7 +644,7 @@ export class CronService {
           const finalTask = await deps.getTaskStatus(taskId);
           const finalStatus = typeof finalTask?.status === "string" ? finalTask.status : "";
           if (finalStatus === "completed") {
-            status = "ok";
+            status = finalTask?.terminalStatus === "partial_success" ? "partial_success" : "ok";
             if (
               !pollResultSummary &&
               typeof finalTask?.resultSummary === "string" &&
@@ -651,7 +661,7 @@ export class CronService {
           }
         }
 
-        if (status === "ok") {
+        if (status === "ok" || status === "partial_success") {
           if (deps.getTaskResultText) {
             try {
               resultText = await deps.getTaskResultText(taskId);
@@ -682,7 +692,7 @@ export class CronService {
 
     // Update run statistics
     job.state.totalRuns = (job.state.totalRuns ?? 0) + 1;
-    if (status === "ok") {
+    if (status === "ok" || status === "partial_success") {
       job.state.successfulRuns = (job.state.successfulRuns ?? 0) + 1;
     } else {
       job.state.failedRuns = (job.state.failedRuns ?? 0) + 1;
@@ -697,6 +707,8 @@ export class CronService {
       taskId,
       workspaceId: workspaceIdForRun,
       runWorkspacePath: workspaceContext?.runWorkspacePath,
+      deliveryAttempts: 0,
+      deliverableStatus: "none",
     };
     job.state.runHistory = job.state.runHistory ?? [];
     job.state.runHistory.unshift(historyEntry);
@@ -724,16 +736,31 @@ export class CronService {
 
     await this.persist();
     this.armTimer();
+    this.armOutboxTimer();
 
     // Deliver results to channel if configured
-    const deliveryResult = await this.deliverToChannel(job, status, taskId, errorMsg, resultText);
+    const deliveryResult = await this.deliverToChannel(
+      job,
+      status,
+      taskId,
+      errorMsg,
+      resultText,
+      nowMs,
+    );
 
     // Update history entry with delivery status
     if (deliveryResult.attempted && job.state.runHistory?.[0]) {
-      job.state.runHistory[0].deliveryStatus = deliveryResult.success ? "success" : "failed";
+      job.state.runHistory[0].deliveryStatus = deliveryResult.success
+        ? deliveryResult.deliverableStatus === "queued"
+          ? "skipped"
+          : "success"
+        : "failed";
       if (deliveryResult.error) {
         job.state.runHistory[0].deliveryError = deliveryResult.error;
       }
+      job.state.runHistory[0].deliveryMode = deliveryResult.mode;
+      job.state.runHistory[0].deliveryAttempts = deliveryResult.attempts;
+      job.state.runHistory[0].deliverableStatus = deliveryResult.deliverableStatus;
       await this.persist();
     }
 
@@ -760,16 +787,24 @@ export class CronService {
    */
   private async deliverToChannel(
     job: CronJob,
-    status: "ok" | "error" | "timeout",
+    status: "ok" | "partial_success" | "error" | "timeout",
     taskId?: string,
     error?: string,
     resultText?: string,
-  ): Promise<{ attempted: boolean; success?: boolean; error?: string }> {
+    runAtMs?: number,
+  ): Promise<{
+    attempted: boolean;
+    success?: boolean;
+    error?: string;
+    mode?: "direct" | "outbox";
+    attempts: number;
+    deliverableStatus: "none" | "queued" | "sent" | "dead_letter";
+  }> {
     const { deps, log } = this.getContext();
 
     // Check if delivery is configured and enabled
     if (!job.delivery?.enabled || !deps.deliverToChannel) {
-      return { attempted: false };
+      return { attempted: false, attempts: 0, deliverableStatus: "none" };
     }
 
     const {
@@ -783,24 +818,26 @@ export class CronService {
     } = job.delivery;
 
     // Check if we should deliver based on status
-    const isSuccess = status === "ok";
+    const isSuccess = status === "ok" || status === "partial_success";
     const shouldDeliver =
       (isSuccess && deliverOnSuccess !== false) || (!isSuccess && deliverOnError !== false);
 
     if (!shouldDeliver || !channelType || !channelId) {
-      return { attempted: false };
+      return { attempted: false, attempts: 0, deliverableStatus: "none" };
     }
 
-    if (status === "ok" && deliverOnlyIfResult) {
+    if (isSuccess && deliverOnlyIfResult) {
       const hasNonEmpty = typeof resultText === "string" && resultText.trim().length > 0;
       if (!hasNonEmpty) {
         log.info(
           `Skipping delivery for job "${job.name}": deliverOnlyIfResult is enabled but no result text available`,
         );
-        return { attempted: false };
+        return { attempted: false, attempts: 0, deliverableStatus: "none" };
       }
     }
 
+    const runKey = Number.isFinite(runAtMs) ? Math.trunc(runAtMs as number) : this.state.deps.nowMs();
+    const idempotencyKey = `${job.id}:${runKey}:${taskId || "no-task"}:${channelType}:${channelId}`;
     const doDeliver = () =>
       deps.deliverToChannel!({
         channelType,
@@ -812,28 +849,60 @@ export class CronService {
         error,
         summaryOnly,
         resultText,
+        idempotencyKey,
       });
 
+    let attempts = 0;
     try {
+      attempts += 1;
       await doDeliver();
       log.info(`Delivered results for job "${job.name}" to ${channelType}:${channelId}`);
-      return { attempted: true, success: true };
-    } catch  {
-      // Single retry after a short delay for transient failures
-      // (e.g. momentary WhatsApp disconnect, network blip).
-      log.warn(`First delivery attempt failed for job "${job.name}", retrying in 3s…`);
-      await new Promise((r) => setTimeout(r, 3000));
-      try {
-        await doDeliver();
-        log.info(
-          `Delivered results for job "${job.name}" to ${channelType}:${channelId} (retry succeeded)`,
+      return {
+        attempted: true,
+        success: true,
+        mode: "direct",
+        attempts,
+        deliverableStatus: "sent",
+      };
+    } catch (deliveryError) {
+      const errMsg = deliveryError instanceof Error ? deliveryError.message : String(deliveryError);
+      const outboxQueued = this.enqueueOutboxEntry({
+        job,
+        runAtMs: runAtMs ?? this.state.deps.nowMs(),
+        status,
+        channelType,
+        channelDbId,
+        channelId,
+        summaryOnly,
+        resultText,
+        error,
+        taskId,
+        idempotencyKey,
+      });
+      if (outboxQueued) {
+        log.warn(
+          `Direct delivery failed for job "${job.name}"; queued in outbox for retry`,
+          deliveryError,
         );
-        return { attempted: true, success: true };
-      } catch (retryError) {
-        const errMsg = retryError instanceof Error ? retryError.message : String(retryError);
-        log.error(`Failed to deliver results for job "${job.name}" after retry:`, retryError);
-        return { attempted: true, success: false, error: errMsg };
+        return {
+          attempted: true,
+          success: true,
+          mode: "outbox",
+          attempts,
+          error: errMsg,
+          deliverableStatus: "queued",
+        };
       }
+
+      log.error(`Failed to deliver results for job "${job.name}":`, deliveryError);
+      return {
+        attempted: true,
+        success: false,
+        error: errMsg,
+        mode: "direct",
+        attempts,
+        deliverableStatus: "dead_letter",
+      };
     }
   }
 
@@ -971,6 +1040,195 @@ export class CronService {
     if (this.state.timer) {
       clearTimeout(this.state.timer);
       this.state.timer = null;
+    }
+  }
+
+  private computeOutboxBackoffMs(attempt: number): number {
+    const safeAttempt = Math.max(1, attempt);
+    const baseMs = 5000 * Math.pow(2, safeAttempt - 1);
+    const cappedMs = Math.min(baseMs, 5 * 60 * 1000);
+    const jitterMs = Math.floor(Math.random() * 1000);
+    return cappedMs + jitterMs;
+  }
+
+  private enqueueOutboxEntry(params: {
+    job: CronJob;
+    runAtMs: number;
+    status: "ok" | "partial_success" | "error" | "timeout";
+    channelType: NonNullable<CronJob["delivery"]>["channelType"];
+    channelDbId?: string;
+    channelId: string;
+    summaryOnly?: boolean;
+    resultText?: string;
+    error?: string;
+    taskId?: string;
+    idempotencyKey: string;
+  }): boolean {
+    const store = this.ensureStore();
+    const channelType = params.channelType;
+    if (!channelType) return false;
+
+    if (
+      store.outbox?.some(
+        (entry) =>
+          entry.idempotencyKey === params.idempotencyKey &&
+          (entry.state === "queued" || entry.state === "sent"),
+      )
+    ) {
+      return true;
+    }
+
+    const nowMs = this.state.deps.nowMs();
+    const entry: CronOutboxEntry = {
+      id: uuidv4(),
+      jobId: params.job.id,
+      runAtMs: params.runAtMs,
+      queuedAtMs: nowMs,
+      nextAttemptAtMs: nowMs + this.computeOutboxBackoffMs(1),
+      attempts: 0,
+      maxAttempts: 6,
+      status: params.status,
+      channelType,
+      channelDbId: params.channelDbId,
+      channelId: params.channelId,
+      summaryOnly: params.summaryOnly,
+      resultText: params.resultText,
+      error: params.error,
+      taskId: params.taskId,
+      idempotencyKey: params.idempotencyKey,
+      state: "queued",
+    };
+    store.outbox = store.outbox ?? [];
+    store.outbox.push(entry);
+    this.armOutboxTimer();
+    return true;
+  }
+
+  private updateRunHistoryDeliveryFromOutbox(entry: CronOutboxEntry): void {
+    const store = this.ensureStore();
+    const job = store.jobs.find((j) => j.id === entry.jobId);
+    if (!job?.state?.runHistory?.length) return;
+    const history = job.state.runHistory.find((h) => h.runAtMs === entry.runAtMs);
+    if (!history) return;
+    history.deliveryMode = "outbox";
+    // Include the initial direct delivery attempt that queued this outbox entry.
+    history.deliveryAttempts = Math.max(1, entry.attempts + 1);
+    if (entry.state === "sent") {
+      history.deliveryStatus = "success";
+      history.deliverableStatus = "sent";
+      history.deliveryError = undefined;
+      return;
+    }
+    if (entry.state === "dead_letter") {
+      history.deliveryStatus = "failed";
+      history.deliverableStatus = "dead_letter";
+      history.deliveryError = entry.lastError;
+      return;
+    }
+    history.deliveryStatus = "skipped";
+    history.deliverableStatus = "queued";
+    history.deliveryError = entry.lastError;
+  }
+
+  private async processOutboxQueue(): Promise<void> {
+    if (this.state.processingOutbox) return;
+    this.state.processingOutbox = true;
+
+    try {
+      await this.withLock(async () => {
+        const { deps, log } = this.getContext();
+        if (!deps.deliverToChannel) return;
+        const store = this.ensureStore();
+        const nowMs = deps.nowMs();
+        const outbox = store.outbox ?? [];
+        let changed = false;
+
+        const dueEntries = outbox
+          .filter((entry) => entry.state === "queued" && entry.nextAttemptAtMs <= nowMs)
+          .slice(0, 10);
+
+        for (const entry of dueEntries) {
+          entry.attempts += 1;
+          entry.lastAttemptAtMs = nowMs;
+          try {
+            await deps.deliverToChannel({
+              channelType: entry.channelType,
+              channelDbId: entry.channelDbId,
+              channelId: entry.channelId,
+              jobName: store.jobs.find((j) => j.id === entry.jobId)?.name || "Scheduled Task",
+              status: entry.status,
+              taskId: entry.taskId,
+              error: entry.error,
+              summaryOnly: entry.summaryOnly,
+              resultText: entry.resultText,
+              idempotencyKey: entry.idempotencyKey,
+            });
+            entry.state = "sent";
+            entry.lastError = undefined;
+            this.updateRunHistoryDeliveryFromOutbox(entry);
+            changed = true;
+          } catch (error) {
+            const errMsg = error instanceof Error ? error.message : String(error);
+            entry.lastError = errMsg;
+            if (entry.attempts >= entry.maxAttempts) {
+              entry.state = "dead_letter";
+              this.updateRunHistoryDeliveryFromOutbox(entry);
+              changed = true;
+              log.error("metric cron_dead_letter_total=1", {
+                jobId: entry.jobId,
+                outboxId: entry.id,
+              });
+              log.error(
+                `Cron outbox dead-lettered entry ${entry.id} (${entry.channelType}:${entry.channelId})`,
+                { jobId: entry.jobId, error: errMsg, attempts: entry.attempts },
+              );
+            } else {
+              entry.nextAttemptAtMs = nowMs + this.computeOutboxBackoffMs(entry.attempts + 1);
+              this.updateRunHistoryDeliveryFromOutbox(entry);
+              changed = true;
+              log.warn("metric cron_outbox_retry_total=1", {
+                jobId: entry.jobId,
+                outboxId: entry.id,
+                attempts: entry.attempts,
+              });
+              log.warn(
+                `Cron outbox retry scheduled for entry ${entry.id} in ${Math.round((entry.nextAttemptAtMs - nowMs) / 1000)}s`,
+                { jobId: entry.jobId, error: errMsg, attempts: entry.attempts },
+              );
+            }
+          }
+        }
+
+        if (changed) {
+          await this.persist();
+        }
+      });
+    } finally {
+      this.state.processingOutbox = false;
+      this.armOutboxTimer();
+    }
+  }
+
+  private armOutboxTimer(): void {
+    this.stopOutboxTimer();
+    const store = this.ensureStore();
+    const nowMs = this.state.deps.nowMs();
+    const next = (store.outbox ?? [])
+      .filter((entry) => entry.state === "queued")
+      .sort((a, b) => a.nextAttemptAtMs - b.nextAttemptAtMs)[0];
+    if (!next) return;
+    const delayMs = Math.max(1, Math.min(MAX_TIMEOUT_MS, next.nextAttemptAtMs - nowMs));
+    this.state.outboxTimer = setTimeout(() => {
+      this.processOutboxQueue().catch((error) => {
+        this.getContext().log.error("Outbox processing error", error);
+      });
+    }, delayMs);
+  }
+
+  private stopOutboxTimer(): void {
+    if (this.state.outboxTimer) {
+      clearTimeout(this.state.outboxTimer);
+      this.state.outboxTimer = null;
     }
   }
 

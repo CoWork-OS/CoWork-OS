@@ -9,6 +9,9 @@ import { StandupReportService } from "../reports/StandupReportService";
 import { HeartbeatService } from "../agents/HeartbeatService";
 import { rateLimiter } from "../utils/rate-limiter";
 import { validateInput, UUIDSchema } from "../utils/validation";
+import { createLogger } from "../utils/logger";
+
+const logger = createLogger("MissionControl");
 
 // Get main window for event broadcasting
 let mainWindowGetter: (() => BrowserWindow | null) | null = null;
@@ -192,5 +195,5 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
     },
   );
 
-  console.log("[MissionControl] Handlers initialized");
+  logger.debug("Handlers initialized");
 }

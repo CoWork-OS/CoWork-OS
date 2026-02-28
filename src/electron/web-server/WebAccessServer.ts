@@ -202,6 +202,9 @@ export class WebAccessServer {
       // Map REST routes to IPC channels
       let channel: string;
       let args: Any[];
+      const includeSecrets =
+        url.searchParams.get("includeSecrets") === "1" ||
+        url.searchParams.get("includeSecrets")?.toLowerCase() === "true";
 
       if (url.pathname === "/api/tasks" && req.method === "GET") {
         channel = "task:list";
@@ -224,6 +227,30 @@ export class WebAccessServer {
       } else if (url.pathname === "/api/workspaces" && req.method === "GET") {
         channel = "workspace:list";
         args = [];
+      } else if (url.pathname === "/api/accounts" && req.method === "GET") {
+        channel = "account:list";
+        args = [
+          {
+            provider: url.searchParams.get("provider") || undefined,
+            status: url.searchParams.get("status") || undefined,
+            includeSecrets,
+          },
+        ];
+      } else if (url.pathname === "/api/accounts" && req.method === "POST") {
+        channel = "account:upsert";
+        args = [params];
+      } else if (url.pathname.match(/^\/api\/accounts\/[^/]+$/) && req.method === "GET") {
+        const accountId = url.pathname.split("/").pop()!;
+        channel = "account:get";
+        args = [{ accountId, includeSecrets }];
+      } else if (url.pathname.match(/^\/api\/accounts\/[^/]+$/) && req.method === "PUT") {
+        const accountId = url.pathname.split("/").pop()!;
+        channel = "account:upsert";
+        args = [{ ...params, id: accountId }];
+      } else if (url.pathname.match(/^\/api\/accounts\/[^/]+$/) && req.method === "DELETE") {
+        const accountId = url.pathname.split("/").pop()!;
+        channel = "account:remove";
+        args = [{ accountId }];
       } else if (url.pathname === "/api/briefing" && req.method === "POST") {
         channel = "briefing:generate";
         args = [params.workspaceId];

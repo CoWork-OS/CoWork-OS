@@ -12,7 +12,24 @@
       "useWhen": "Use when the user asks to manage Apple Reminders via the remindctl CLI on macOS list, add, edit, complete, delete. Supports lists, date filters, and JSON/plain output.",
       "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead. Avoid using this in non-macOS environments.",
       "outputs": "Outcome from Apple-reminders: task-specific result plus concrete action notes.",
-      "successCriteria": "Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior."
+      "successCriteria": "Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior.",
+      "examples": {
+        "positive": [
+          "Use the apple-reminders skill for this request.",
+          "Help me with apple-reminders.",
+          "Use when the user asks to manage Apple Reminders via the remindctl CLI on macOS list, add, edit, complete, delete. Supports lists, date filters, and JSON/plain output.",
+          "Apple-reminders: provide an actionable result."
+        ],
+        "negative": [
+          "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead. Avoid using this in non-macOS environments.",
+          "Do not use apple-reminders for unrelated requests.",
+          "This request is outside apple-reminders scope.",
+          "This is conceptual discussion only; no tool workflow is needed."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "low"
     }
   }
 }

@@ -424,6 +424,35 @@ describe("CustomSkillLoader", () => {
       expect(loader.getSkill("good")).toBeDefined();
     });
 
+    it("silently ignores build-mode metadata file", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      mockFiles.set("build-mode.json", JSON.stringify({ mode: "dev" }));
+      mockFiles.set("good.json", JSON.stringify(createTestSkill({ id: "good" })));
+
+      await loader.reloadSkills();
+
+      expect(loader.listSkills()).toHaveLength(1);
+      expect(loader.getSkill("good")).toBeDefined();
+      expect(warnSpy).not.toHaveBeenCalledWith(
+        expect.stringContaining("Invalid skill file: build-mode.json"),
+      );
+      warnSpy.mockRestore();
+    });
+
+    it("still warns for truly invalid skill files", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      mockFiles.set("bad-skill.json", JSON.stringify({ id: "bad-skill" }));
+      mockFiles.set("good.json", JSON.stringify(createTestSkill({ id: "good" })));
+
+      await loader.reloadSkills();
+
+      expect(loader.listSkills()).toHaveLength(1);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("Invalid skill file: bad-skill.json"),
+      );
+      warnSpy.mockRestore();
+    });
+
     it("should return empty array when directory does not exist", async () => {
       mockDirExists = false;
       const skills = await loader.reloadSkills();

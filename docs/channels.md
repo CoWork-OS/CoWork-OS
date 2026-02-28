@@ -1,6 +1,6 @@
 # Channel Integrations
 
-CoWork OS supports 14 messaging channels. All channels share these common features:
+CoWork OS supports 15 messaging channels. All channels share these common features:
 
 - Security modes (pairing, allowlist, open)
 - Brute-force protection
@@ -150,6 +150,33 @@ Service account auth, spaces/DMs, threaded conversations.
 5. Configure in **Settings** > **Google Chat** — enter service account key path, optional Project ID, webhook port (default: 3979)
 
 > **Note:** Google Chat bots only work within Google Workspace organizations.
+
+---
+
+## X (Twitter)
+
+Mention-based task ingress via Bird CLI with allowlist + command-prefix enforcement.
+
+### Setup
+
+1. Open **Settings > X**
+2. Enable X integration and test connection
+3. Enable **Mention Trigger**
+4. Set:
+   - command prefix (default `do:`)
+   - allowlisted authors (required)
+   - poll interval and fetch count
+5. Save settings
+
+### Behavior
+
+- Mentions are parsed oldest-to-newest.
+- Only allowlisted authors with matching prefix and non-empty command are accepted.
+- Tasks are idempotent by tweet id (`sessionKey = xmention:<tweetId>`).
+- Temporary workspace routing is default.
+- No automatic outbound posting unless explicitly enabled on the native `x` channel.
+
+See [X Mention Triggers](x-mention-triggers.md) for desktop/headless details and troubleshooting.
 
 ---
 

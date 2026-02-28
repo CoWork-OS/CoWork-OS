@@ -48,7 +48,24 @@
       "useWhen": "Use when the user asks to solve a task autonomously with fallback behavior when tools fail.",
       "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
       "outputs": "Outcome from Figure It Out Agent: attempt log, verified result status, and fallback handoff plan when blocked.",
-      "successCriteria": "Applies explicit fallback logic, reports evidence-based outcomes, and preserves approval boundaries for risky actions."
+      "successCriteria": "Applies explicit fallback logic, reports evidence-based outcomes, and preserves approval boundaries for risky actions.",
+      "examples": {
+        "positive": [
+          "Use the usecase-figure-it-out-agent skill for this request.",
+          "Help me with figure it out agent.",
+          "Use when the user asks to solve a task autonomously with fallback behavior when tools fail.",
+          "Figure It Out Agent: provide an actionable result."
+        ],
+        "negative": [
+          "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
+          "Do not use usecase-figure-it-out-agent for unrelated requests.",
+          "This request is outside figure it out agent scope.",
+          "This is conceptual discussion only; no tool workflow is needed."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "low"
     }
   }
 }

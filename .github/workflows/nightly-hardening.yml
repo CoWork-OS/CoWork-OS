@@ -1,0 +1,136 @@
+name: Nightly Hardening
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  hardening:
+    name: Eval + Battery (Node 24)
+    runs-on: ubuntu-latest
+    env:
+      HARDENING_REQUIRED_AFTER_UTC: '2026-03-14T00:00:00Z'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install sqlite3 CLI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sqlite3
+
+      - name: Prepare artifact directory
+        run: mkdir -p .artifacts/hardening
+
+      - name: Build eval corpus
+        id: build_eval_corpus
+        continue-on-error: true
+        run: |
+          npm run qa:eval:build -- --window-days 30 --limit 300 --suite reliability-regressions \
+            | tee .artifacts/hardening/build-eval-corpus.log
+
+      - name: Run deterministic eval suite
+        id: run_eval_suite
+        continue-on-error: true
+        run: |
+          npm run qa:eval:run -- --suite reliability-regressions --mode deterministic \
+            | tee .artifacts/hardening/eval-suite.log
+
+      - name: Run battery suite when hooks are configured
+        id: run_battery
+        continue-on-error: true
+        env:
+          COWORK_HOOKS_ORIGIN: ${{ secrets.COWORK_HOOKS_ORIGIN }}
+          COWORK_HOOKS_TOKEN: ${{ secrets.COWORK_HOOKS_TOKEN }}
+          COWORK_DB_PATH: ${{ secrets.COWORK_DB_PATH }}
+        run: |
+          if [ -n "${COWORK_HOOKS_ORIGIN}" ] && [ -n "${COWORK_HOOKS_TOKEN}" ] && [ -n "${COWORK_DB_PATH}" ]; then
+            node scripts/qa/run_battery.cjs | tee .artifacts/hardening/battery.log
+          else
+            echo "Battery skipped: set COWORK_HOOKS_ORIGIN, COWORK_HOOKS_TOKEN, and COWORK_DB_PATH secrets." \
+              | tee .artifacts/hardening/battery.log
+          fi
+
+      - name: Build grouped hardening summary
+        if: always()
+        run: |
+          {
+            echo "# Nightly Hardening Summary"
+            echo
+            echo "## Eval Corpus"
+            tail -n 40 .artifacts/hardening/build-eval-corpus.log || true
+            echo
+            echo "## Eval Suite"
+            tail -n 80 .artifacts/hardening/eval-suite.log || true
+            echo
+            echo "## Battery"
+            tail -n 80 .artifacts/hardening/battery.log || true
+          } > .artifacts/hardening/summary.md
+
+      - name: Build machine-readable hardening report
+        if: always()
+        env:
+          BUILD_EVAL_OUTCOME: ${{ steps.build_eval_corpus.outcome }}
+          RUN_EVAL_OUTCOME: ${{ steps.run_eval_suite.outcome }}
+          RUN_BATTERY_OUTCOME: ${{ steps.run_battery.outcome }}
+        run: |
+          cat > .artifacts/hardening/report.json <<JSON
+          {
+            "requiredAfterUtc": "${HARDENING_REQUIRED_AFTER_UTC}",
+            "generatedAtUtc": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "steps": {
+              "buildEvalCorpus": "${BUILD_EVAL_OUTCOME}",
+              "runEvalSuite": "${RUN_EVAL_OUTCOME}",
+              "runBattery": "${RUN_BATTERY_OUTCOME}"
+            }
+          }
+          JSON
+
+      - name: Enforce hardening gate after stability window
+        if: always()
+        env:
+          BUILD_EVAL_OUTCOME: ${{ steps.build_eval_corpus.outcome }}
+          RUN_EVAL_OUTCOME: ${{ steps.run_eval_suite.outcome }}
+          RUN_BATTERY_OUTCOME: ${{ steps.run_battery.outcome }}
+        run: |
+          set -euo pipefail
+          now_epoch="$(date -u +%s)"
+          cutoff_epoch="$(date -u -d "${HARDENING_REQUIRED_AFTER_UTC}" +%s)"
+          strict_mode="false"
+          if [ "${now_epoch}" -ge "${cutoff_epoch}" ]; then
+            strict_mode="true"
+          fi
+
+          echo "Hardening strict mode: ${strict_mode} (cutoff: ${HARDENING_REQUIRED_AFTER_UTC})"
+          echo "Outcomes: build=${BUILD_EVAL_OUTCOME} eval=${RUN_EVAL_OUTCOME} battery=${RUN_BATTERY_OUTCOME}"
+
+          if [ "${strict_mode}" != "true" ]; then
+            echo "Stability window active. Failures are non-blocking."
+            exit 0
+          fi
+
+          if [ "${RUN_EVAL_OUTCOME}" != "success" ] || [ "${RUN_BATTERY_OUTCOME}" != "success" ]; then
+            echo "Hardening gate failed after stability window."
+            exit 1
+          fi
+
+          echo "Hardening gate passed."
+
+      - name: Upload hardening artifacts
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: nightly-hardening-${{ github.run_id }}
+          path: .artifacts/hardening/
+          if-no-files-found: warn

@@ -18,6 +18,14 @@ export { resolveHookMappings, applyHookMappings, normalizeHooksPath } from "./ma
 export { HooksServer, resolveHooksConfig } from "./server";
 export type { HooksServerConfig, HooksServerHandlers } from "./server";
 
+// Shared ingress/idempotency
+export {
+  HookAgentIngress,
+  initializeHookAgentIngress,
+  getHookAgentIngress,
+} from "./agent-ingress";
+export { HookSessionRepository } from "./HookSessionRepository";
+
 // Gmail Watcher
 export {
   startGmailWatcher,

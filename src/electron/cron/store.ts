@@ -54,6 +54,7 @@ export async function loadCronStore(storePath: string): Promise<CronStoreFile> {
     const raw = await fs.promises.readFile(storePath, "utf-8");
     const parsed = JSON.parse(raw) as Partial<CronStoreFile> | null;
     const jobs = Array.isArray(parsed?.jobs) ? parsed.jobs : [];
+    const outbox = Array.isArray(parsed?.outbox) ? parsed.outbox : [];
 
     // Validate and filter jobs
     const validJobs = jobs.filter((job): job is CronStoreFile["jobs"][number] => {
@@ -73,10 +74,20 @@ export async function loadCronStore(storePath: string): Promise<CronStoreFile> {
     return {
       version: 1,
       jobs: validJobs,
+      outbox: outbox.filter(
+        (entry) =>
+          entry &&
+          typeof entry === "object" &&
+          typeof (entry as Any).id === "string" &&
+          typeof (entry as Any).jobId === "string" &&
+          typeof (entry as Any).channelType === "string" &&
+          typeof (entry as Any).channelId === "string" &&
+          typeof (entry as Any).state === "string",
+      ) as CronStoreFile["outbox"],
     };
   } catch  {
     // File doesn't exist or is invalid - return empty store
-    return { version: 1, jobs: [] };
+    return { version: 1, jobs: [], outbox: [] };
   }
 }
 
@@ -88,6 +99,7 @@ export function loadCronStoreSync(storePath: string): CronStoreFile {
     const raw = fs.readFileSync(storePath, "utf-8");
     const parsed = JSON.parse(raw) as Partial<CronStoreFile> | null;
     const jobs = Array.isArray(parsed?.jobs) ? parsed.jobs : [];
+    const outbox = Array.isArray(parsed?.outbox) ? parsed.outbox : [];
 
     // Validate and filter jobs
     const validJobs = jobs.filter((job): job is CronStoreFile["jobs"][number] => {
@@ -107,9 +119,19 @@ export function loadCronStoreSync(storePath: string): CronStoreFile {
     return {
       version: 1,
       jobs: validJobs,
+      outbox: outbox.filter(
+        (entry) =>
+          entry &&
+          typeof entry === "object" &&
+          typeof (entry as Any).id === "string" &&
+          typeof (entry as Any).jobId === "string" &&
+          typeof (entry as Any).channelType === "string" &&
+          typeof (entry as Any).channelId === "string" &&
+          typeof (entry as Any).state === "string",
+      ) as CronStoreFile["outbox"],
     };
   } catch {
-    return { version: 1, jobs: [] };
+    return { version: 1, jobs: [], outbox: [] };
   }
 }
 

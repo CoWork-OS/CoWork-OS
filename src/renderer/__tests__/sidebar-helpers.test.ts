@@ -7,6 +7,8 @@ import type { Task } from "../../shared/types";
 import {
   compareTasksByPinAndRecency,
   countHiddenFailedSessions,
+  isActiveSessionStatus,
+  isAwaitingSessionStatus,
   shouldShowRootTaskInSidebar,
 } from "../components/Sidebar";
 
@@ -122,5 +124,41 @@ describe("countHiddenFailedSessions", () => {
     const tasks = [createTask({ id: "failed-root", status: "failed" })];
     const count = countHiddenFailedSessions(tasks, "full");
     expect(count).toBe(0);
+  });
+});
+
+describe("isActiveSessionStatus", () => {
+  it("returns true for executing, planning, and interrupted", () => {
+    expect(isActiveSessionStatus("executing")).toBe(true);
+    expect(isActiveSessionStatus("planning")).toBe(true);
+    expect(isActiveSessionStatus("interrupted")).toBe(true);
+  });
+
+  it("returns false for non-active statuses", () => {
+    expect(isActiveSessionStatus("pending")).toBe(false);
+    expect(isActiveSessionStatus("queued")).toBe(false);
+    expect(isActiveSessionStatus("paused")).toBe(false);
+    expect(isActiveSessionStatus("blocked")).toBe(false);
+    expect(isActiveSessionStatus("completed")).toBe(false);
+    expect(isActiveSessionStatus("failed")).toBe(false);
+    expect(isActiveSessionStatus("cancelled")).toBe(false);
+  });
+});
+
+describe("isAwaitingSessionStatus", () => {
+  it("returns true for paused and blocked", () => {
+    expect(isAwaitingSessionStatus("paused")).toBe(true);
+    expect(isAwaitingSessionStatus("blocked")).toBe(true);
+  });
+
+  it("returns false for non-awaiting statuses", () => {
+    expect(isAwaitingSessionStatus("pending")).toBe(false);
+    expect(isAwaitingSessionStatus("queued")).toBe(false);
+    expect(isAwaitingSessionStatus("planning")).toBe(false);
+    expect(isAwaitingSessionStatus("executing")).toBe(false);
+    expect(isAwaitingSessionStatus("interrupted")).toBe(false);
+    expect(isAwaitingSessionStatus("completed")).toBe(false);
+    expect(isAwaitingSessionStatus("failed")).toBe(false);
+    expect(isAwaitingSessionStatus("cancelled")).toBe(false);
   });
 });

@@ -264,6 +264,7 @@ const IPC_CHANNELS = {
   SKILL_GET: "skill:get",
   LLM_GET_SETTINGS: "llm:getSettings",
   LLM_SAVE_SETTINGS: "llm:saveSettings",
+  LLM_RESET_PROVIDER_CREDENTIALS: "llm:resetProviderCredentials",
   LLM_TEST_PROVIDER: "llm:testProvider",
   LLM_GET_MODELS: "llm:getModels",
   LLM_GET_CONFIG_STATUS: "llm:getConfigStatus",
@@ -1080,7 +1081,9 @@ type CronSchedule =
   | { kind: "every"; everyMs: number; anchorMs?: number }
   | { kind: "cron"; expr: string; tz?: string };
 
-type CronJobStatus = "ok" | "error" | "skipped" | "timeout";
+type CronJobStatus = "ok" | "partial_success" | "error" | "skipped" | "timeout";
+type CronDeliveryMode = "direct" | "outbox";
+type CronDeliverableStatus = "none" | "queued" | "sent" | "dead_letter";
 
 interface CronRunHistoryEntry {
   runAtMs: number;
@@ -1088,6 +1091,9 @@ interface CronRunHistoryEntry {
   status: CronJobStatus;
   error?: string;
   taskId?: string;
+  deliveryMode?: CronDeliveryMode;
+  deliveryAttempts?: number;
+  deliverableStatus?: CronDeliverableStatus;
 }
 
 interface CronJobState {
@@ -1120,7 +1126,8 @@ interface CronDeliveryConfig {
     | "bluebubbles"
     | "email"
     | "teams"
-    | "googlechat";
+    | "googlechat"
+    | "x";
   channelId?: string;
   deliverOnSuccess?: boolean;
   deliverOnError?: boolean;
@@ -2084,6 +2091,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // LLM Settings APIs
   getLLMSettings: () => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_SETTINGS),
   saveLLMSettings: (settings: Any) => ipcRenderer.invoke(IPC_CHANNELS.LLM_SAVE_SETTINGS, settings),
+  resetLLMProviderCredentials: (providerType: LLMProviderType) =>
+    ipcRenderer.invoke(IPC_CHANNELS.LLM_RESET_PROVIDER_CREDENTIALS, providerType),
   testLLMProvider: (config: Any) => ipcRenderer.invoke(IPC_CHANNELS.LLM_TEST_PROVIDER, config),
   getLLMModels: () => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_MODELS),
   getLLMConfigStatus: () => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_CONFIG_STATUS),
@@ -3315,6 +3324,7 @@ export interface ElectronAPI {
   // LLM Settings
   getLLMSettings: () => Promise<Any>;
   saveLLMSettings: (settings: Any) => Promise<{ success: boolean }>;
+  resetLLMProviderCredentials: (providerType: LLMProviderType) => Promise<{ success: boolean }>;
   testLLMProvider: (config: Any) => Promise<{ success: boolean; error?: string }>;
   getLLMModels: () => Promise<Array<{ key: string; displayName: string; description: string }>>;
   getLLMConfigStatus: () => Promise<{
@@ -3452,6 +3462,14 @@ export interface ElectronAPI {
     timeoutMs?: number;
     cookieTimeoutMs?: number;
     quoteDepth?: number;
+    mentionTrigger: {
+      enabled: boolean;
+      commandPrefix: string;
+      allowedAuthors: string[];
+      pollIntervalSec: number;
+      fetchCount: number;
+      workspaceMode: "temporary";
+    };
   }>;
   saveXSettings: (settings: Any) => Promise<{ success: boolean }>;
   testXConnection: () => Promise<{
@@ -3465,6 +3483,16 @@ export interface ElectronAPI {
     connected: boolean;
     username?: string;
     error?: string;
+    mentionTriggerStatus: {
+      mode: "bridge" | "native" | "disabled";
+      running: boolean;
+      lastPollAt?: number;
+      lastSuccessAt?: number;
+      lastError?: string;
+      acceptedCount: number;
+      ignoredCount: number;
+      lastTaskId?: string;
+    };
   }>;
   // Notion Settings
   getNotionSettings: () => Promise<{

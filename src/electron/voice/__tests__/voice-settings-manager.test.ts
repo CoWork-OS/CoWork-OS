@@ -13,6 +13,19 @@ const mockRepositorySave = vi.fn();
 const mockRepositoryLoad = vi.fn();
 const mockRepositoryDelete = vi.fn();
 const mockRepositoryExists = vi.fn();
+const mockRepositoryConstructor = vi.fn();
+const mockRepositoryGetInstance = vi.fn();
+let mockSecureSettingsInitialized = false;
+let mockSecureSettingsInstance: Any = null;
+
+function createMockRepositoryInstance(): Any {
+  return {
+    save: mockRepositorySave,
+    load: mockRepositoryLoad,
+    delete: mockRepositoryDelete,
+    exists: mockRepositoryExists,
+  };
+}
 
 // Mock SecureSettingsRepository before importing VoiceSettingsManager
 vi.mock("../../database/SecureSettingsRepository", () => {
@@ -22,7 +35,24 @@ vi.mock("../../database/SecureSettingsRepository", () => {
       load = mockRepositoryLoad;
       delete = mockRepositoryDelete;
       exists = mockRepositoryExists;
-      constructor(_db: Any) {}
+
+      constructor(_db: Any) {
+        mockRepositoryConstructor(_db);
+        mockSecureSettingsInitialized = true;
+        mockSecureSettingsInstance = this;
+      }
+
+      static isInitialized(): boolean {
+        return mockSecureSettingsInitialized;
+      }
+
+      static getInstance(): Any {
+        mockRepositoryGetInstance();
+        if (!mockSecureSettingsInstance) {
+          mockSecureSettingsInstance = createMockRepositoryInstance();
+        }
+        return mockSecureSettingsInstance;
+      }
     },
   };
 });
@@ -73,6 +103,8 @@ describe("VoiceSettingsManager", () => {
     VoiceSettingsManager.clearCache();
     (VoiceSettingsManager as Any).repository = null;
     (VoiceSettingsManager as Any).migrationComplete = false;
+    mockSecureSettingsInitialized = false;
+    mockSecureSettingsInstance = null;
 
     // Default mock behavior - no existing settings
     mockRepositoryExists.mockReturnValue(false);
@@ -97,6 +129,24 @@ describe("VoiceSettingsManager", () => {
     it("should create a SecureSettingsRepository", () => {
       VoiceSettingsManager.initialize(mockDb);
       expect((VoiceSettingsManager as Any).repository).toBeDefined();
+    });
+
+    it("reuses existing SecureSettingsRepository singleton when already initialized", () => {
+      mockSecureSettingsInitialized = true;
+      mockSecureSettingsInstance = createMockRepositoryInstance();
+
+      VoiceSettingsManager.initialize(mockDb);
+
+      expect(mockRepositoryConstructor).not.toHaveBeenCalled();
+      expect(mockRepositoryGetInstance).toHaveBeenCalledTimes(1);
+      expect((VoiceSettingsManager as Any).repository).toBe(mockSecureSettingsInstance);
+    });
+
+    it("does not construct a second repository after initialize", () => {
+      VoiceSettingsManager.initialize(mockDb);
+      VoiceSettingsManager.setRepository(mockDb);
+
+      expect(mockRepositoryConstructor).toHaveBeenCalledTimes(1);
     });
   });
 

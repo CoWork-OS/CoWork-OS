@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Lightweight wrapper that locates the sherpa-onnx binary in runtime installs.
+
+if [[ -n "${SHERPA_ONNX_TTS_BIN:-}" ]]; then
+  exec "$SHERPA_ONNX_TTS_BIN" "$@"
+fi
+
+RUNTIME_DIR="${SHERPA_ONNX_RUNTIME_DIR:-}"
+if [[ -z "$RUNTIME_DIR" ]]; then
+  echo "Set SHERPA_ONNX_RUNTIME_DIR to your sherpa-onnx runtime directory." >&2
+  exit 1
+fi
+
+candidates=(
+  "$RUNTIME_DIR/sherpa-onnx-offline-tts"
+  "$RUNTIME_DIR/sherpa-onnx-tts"
+  "$RUNTIME_DIR/bin/sherpa-onnx-offline-tts"
+  "$RUNTIME_DIR/bin/sherpa-onnx-tts"
+)
+
+for bin in "${candidates[@]}"; do
+  if [[ -x "$bin" ]]; then
+    exec "$bin" "$@"
+  fi
+done
+
+echo "Could not find sherpa-onnx TTS binary under: $RUNTIME_DIR" >&2
+echo "Set SHERPA_ONNX_TTS_BIN to the exact executable path." >&2
+exit 1

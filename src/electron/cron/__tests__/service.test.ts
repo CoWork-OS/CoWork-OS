@@ -628,6 +628,114 @@ describe("CronService", () => {
       expect(deliverToChannel).toHaveBeenCalledTimes(1);
     });
 
+    it("marks run as partial_success when task completes with partial terminal status", async () => {
+      service = createService({
+        nowMs: () => 1000000,
+        getTaskStatus: async () => ({
+          status: "completed",
+          terminalStatus: "partial_success",
+          resultSummary: "Partial summary",
+        }),
+        getTaskResultText: async () => "Partial summary",
+      });
+      await service.start();
+
+      await service.add({
+        name: "Partial Status Job",
+        enabled: true,
+        workspaceId: "ws-1",
+        taskPrompt: "Do work",
+        schedule: { kind: "at", atMs: 900000 },
+        state: { nextRunAtMs: 900000 },
+      });
+
+      await service.run("job-1", "force");
+      const history = await service.getRunHistory("job-1");
+      expect(history?.entries[0]?.status).toBe("partial_success");
+      expect(history?.successfulRuns).toBe(1);
+      expect(history?.failedRuns).toBe(0);
+    });
+
+    it("queues delivery in outbox when direct delivery fails, then sends from outbox", async () => {
+      const deliverToChannel = vi
+        .fn()
+        .mockRejectedValueOnce(new Error("down-1"))
+        .mockResolvedValue(undefined);
+
+      service = createService({
+        nowMs: () => 1000000,
+        deliverToChannel,
+        getTaskStatus: async () => ({ status: "completed", terminalStatus: "ok" }),
+        getTaskResultText: async () => "OK",
+      });
+      await service.start();
+
+      await service.add({
+        name: "Outbox Delivery Job",
+        enabled: true,
+        workspaceId: "ws-1",
+        taskPrompt: "Do work",
+        schedule: { kind: "at", atMs: 900000 },
+        state: { nextRunAtMs: 900000 },
+        delivery: {
+          enabled: true,
+          channelType: "telegram" as Any,
+          channelId: "chat-1",
+        },
+      });
+
+      await service.run("job-1", "force");
+      const queuedHistory = await service.getRunHistory("job-1");
+      expect(queuedHistory?.entries[0]?.deliveryMode).toBe("outbox");
+      expect(queuedHistory?.entries[0]?.deliverableStatus).toBe("queued");
+      expect(queuedHistory?.entries[0]?.deliveryAttempts).toBe(1);
+
+      const internalStore = (service as Any).state.store as CronStoreFile;
+      expect(Array.isArray(internalStore.outbox)).toBe(true);
+      expect(internalStore.outbox?.length).toBe(1);
+      if (internalStore.outbox?.[0]) {
+        internalStore.outbox[0].nextAttemptAtMs = 0;
+      }
+
+      await (service as Any).processOutboxQueue();
+
+      const sentHistory = await service.getRunHistory("job-1");
+      expect(sentHistory?.entries[0]?.deliverableStatus).toBe("sent");
+      expect(sentHistory?.entries[0]?.deliveryAttempts).toBe(2);
+      expect(deliverToChannel).toHaveBeenCalledTimes(2);
+    });
+
+    it("uses a per-run idempotency key for channel delivery", async () => {
+      const deliverToChannel = vi.fn().mockResolvedValue(undefined);
+      service = createService({
+        nowMs: () => 1000000,
+        deliverToChannel,
+        getTaskStatus: async () => ({ status: "completed", terminalStatus: "ok" }),
+        getTaskResultText: async () => "OK",
+      });
+      await service.start();
+
+      await service.add({
+        name: "Idempotency Key Job",
+        enabled: true,
+        workspaceId: "ws-1",
+        taskPrompt: "Do work",
+        schedule: { kind: "at", atMs: 900000 },
+        state: { nextRunAtMs: 900000 },
+        delivery: {
+          enabled: true,
+          channelType: "telegram" as Any,
+          channelId: "chat-1",
+        },
+      });
+
+      await service.run("job-1", "force");
+
+      expect(deliverToChannel).toHaveBeenCalledTimes(1);
+      const call = deliverToChannel.mock.calls[0]?.[0] as Any;
+      expect(call?.idempotencyKey).toBe("job-1:1000000:task-123:telegram:chat-1");
+    });
+
     it("should return not-found for non-existent job", async () => {
       service = createService();
       await service.start();

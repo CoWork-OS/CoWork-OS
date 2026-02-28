@@ -16,6 +16,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Calendly scheduling skill**: manage Calendly via the v2 API. Covers event types, scheduled events, invitees with custom Q&A, availability and busy times, cancellation, no-show management, one-off booking links, webhooks, and organization members. Includes 8 workflow recipes and timezone-aware agenda formatting.
 - **Moltbook agent social network skill**: interact with Moltbook — the social network for AI agents. Post content, reply to discussions, browse feeds, upvote/downvote, join submolt communities, follow agents, search semantically, and track engagement. Includes agent registration, verification challenges, and formatted feed output.
 - **Marketing Strategist skill**: comprehensive marketing strategy across 25 disciplines — positioning, buyer psychology, copywriting frameworks (PAS, AIDA, BAB, 4Ps, FAB), SEO, landing page CRO, paid ads (Google/Meta/LinkedIn), funnel architecture, analytics, pricing, product launches, growth loops, competitive intelligence, and marketing operations. Includes 8 workflow recipes and integrates with existing channel-specific skills.
+- **Completion output summary payload**: `task_completed` now supports optional `outputSummary` metadata (`created`, `modifiedFallback`, `primaryOutputPath`, `outputCount`, `folders`) so output-aware UI remains accurate beyond capped event history.
+- **Action-oriented completion UX**: completion toasts now surface output filename/count and include direct actions for opening the file, revealing in Finder, or jumping to the Files panel.
+- **Artifact parity across output UX**: `artifact_created` is now treated as a first-class output signal in renderer output derivation, collaborative child-event merge, and control-plane event bridging.
+- **Renderer completion UX helper layer**: shared utilities now centralize output-derivation fallback, completion attention rules, and panel/badge behavior for deterministic testing.
+
+### Changed
+- **Output detection precedence**: output detection now prefers created outputs and only uses modified outputs as fallback when no created outputs are detected.
+- **Right-panel files UX**: Files rows remain filename-only, with a primary output highlight, output count badge, and an explicit location context line (folder or “Workspace root”).
+- **Timeline completion details**: `task_completed` now shows an “Output ready” detail card with `Open file`, `Show in Finder`, and `View in Files` actions when outputs are present.
+- **Task status mapping consistency**: `artifact_created` now maps to `executing` in shared status mapping to keep progress indicators coherent.
+
+### Fixed
+- **Files list filtering edge case**: extensionless output files are no longer excluded from the right panel.
 
 ## [0.3.90] - 2026-02-23
 

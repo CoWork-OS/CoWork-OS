@@ -29,6 +29,7 @@ import {
   MultiLlmConfig,
   ExecutionMode,
   TaskDomain,
+  LlmProfile,
 } from "../shared/types";
 import { TASK_EVENT_STATUS_MAP } from "../shared/task-event-status-map";
 import { applyPersistedLanguage } from "./i18n";
@@ -1034,6 +1035,8 @@ export function App() {
       verificationAgent?: boolean;
       executionMode?: ExecutionMode;
       taskDomain?: TaskDomain;
+      llmProfile?: LlmProfile;
+      llmProfileForced?: boolean;
     },
     images?: ImageAttachment[],
   ) => {
@@ -1063,6 +1066,8 @@ export function App() {
     const verificationAgent = options?.verificationAgent === true;
     const executionMode = options?.executionMode;
     const taskDomain = options?.taskDomain;
+    const llmProfile = options?.llmProfile;
+    const llmProfileForced = options?.llmProfileForced;
 
     const agentConfig =
       autonomousMode ||
@@ -1070,7 +1075,8 @@ export function App() {
       multiLlmMode ||
       verificationAgent ||
       executionMode ||
-      taskDomain
+      taskDomain ||
+      llmProfile
         ? {
             ...(autonomousMode ? { allowUserInput: false, autonomousMode: true } : {}),
             ...(collaborativeMode ? { collaborativeMode: true } : {}),
@@ -1080,6 +1086,8 @@ export function App() {
             ...(verificationAgent ? { verificationAgent: true } : {}),
             ...(executionMode ? { executionMode } : {}),
             ...(taskDomain ? { taskDomain } : {}),
+            ...(llmProfile ? { llmProfile } : {}),
+            ...(llmProfileForced ? { llmProfileForced: true } : {}),
           }
         : undefined;
 

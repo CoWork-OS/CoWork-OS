@@ -110,6 +110,26 @@ export function InfraSettings() {
     }
   };
 
+  const handleWalletCoinbaseChange = async (key: string, value: Any) => {
+    if (!settings) return;
+    const updated: InfraSettingsType = {
+      ...settings,
+      wallet: {
+        ...settings.wallet,
+        coinbase: {
+          ...settings.wallet.coinbase,
+          [key]: value,
+        },
+      },
+    };
+    setSettings(updated);
+    try {
+      await ipcAPI.infraSaveSettings(updated);
+    } catch (error) {
+      console.error("Failed to save infrastructure settings:", error);
+    }
+  };
+
   const copyAddress = () => {
     if (status?.wallet?.address) {
       navigator.clipboard.writeText(status.wallet.address);
@@ -172,7 +192,7 @@ export function InfraSettings() {
                 (via Namecheap)
               </li>
               <li>
-                <strong>Crypto Wallet</strong> — Auto-generated USDC wallet on Base network
+                <strong>Crypto Wallet</strong> — Local wallet or Coinbase Agentic Wallet signer
               </li>
               <li>
                 <strong>x402 Payments</strong> — Machine-to-machine HTTP payments
@@ -241,6 +261,62 @@ export function InfraSettings() {
           {/* Wallet Section */}
           <div className="infra-wallet-card">
             <h3>Wallet</h3>
+            <div className="infra-setting-row">
+              <label>Provider</label>
+              <select
+                className="settings-input"
+                value={settings?.wallet?.provider || "local"}
+                onChange={(e) => handleNestedChange("wallet", "provider", e.target.value)}
+              >
+                <option value="local">Local wallet (keychain-encrypted)</option>
+                <option value="coinbase_agentic">Coinbase Agentic Wallet (remote signer)</option>
+              </select>
+            </div>
+            {settings?.wallet?.provider === "coinbase_agentic" && (
+              <>
+                <div className="infra-setting-row">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={settings?.wallet?.coinbase?.enabled ?? false}
+                      onChange={(e) => handleWalletCoinbaseChange("enabled", e.target.checked)}
+                    />
+                    Enable Coinbase Agentic Wallet provider
+                  </label>
+                </div>
+                <div className="infra-setting-row">
+                  <label>Signer Endpoint</label>
+                  <input
+                    type="text"
+                    className="settings-input"
+                    value={settings?.wallet?.coinbase?.signerEndpoint || ""}
+                    onChange={(e) => handleWalletCoinbaseChange("signerEndpoint", e.target.value)}
+                    placeholder="https://your-signer.example.com"
+                  />
+                </div>
+                <div className="infra-setting-row">
+                  <label>Network</label>
+                  <select
+                    className="settings-input"
+                    value={settings?.wallet?.coinbase?.network || "base-mainnet"}
+                    onChange={(e) => handleWalletCoinbaseChange("network", e.target.value)}
+                  >
+                    <option value="base-mainnet">Base Mainnet</option>
+                    <option value="base-sepolia">Base Sepolia</option>
+                  </select>
+                </div>
+                <div className="infra-setting-row">
+                  <label>Account ID (optional)</label>
+                  <input
+                    type="text"
+                    className="settings-input"
+                    value={settings?.wallet?.coinbase?.accountId || ""}
+                    onChange={(e) => handleWalletCoinbaseChange("accountId", e.target.value)}
+                    placeholder="agent-wallet-prod"
+                  />
+                </div>
+              </>
+            )}
             {status?.wallet ? (
               <div className="infra-wallet-info">
                 <div className="infra-wallet-address-row">
@@ -270,14 +346,17 @@ export function InfraSettings() {
                 <div className="infra-wallet-safety">
                   <strong>Wallet Security</strong>
                   <p>
-                    Your private key is encrypted and stored in CoWork OS's secure database (backed
-                    by your OS keychain). CoWork OS never transmits your private key.
+                    {settings?.wallet?.provider === "coinbase_agentic"
+                      ? "Payment signatures are delegated to your Coinbase signer endpoint. Keep your signer locked down with strict budgets and host allowlists."
+                      : "Your private key is encrypted and stored in CoWork OS's secure database (backed by your OS keychain). CoWork OS never transmits your private key."}
                   </p>
                 </div>
               </div>
             ) : (
               <p className="infra-wallet-hint">
-                Wallet will be generated when you enable infrastructure.
+                {settings?.wallet?.provider === "coinbase_agentic"
+                  ? "Connect your signer endpoint, then enable the provider to use remote agentic signing."
+                  : "Wallet will be generated when you enable infrastructure."}
               </p>
             )}
           </div>
@@ -378,6 +457,50 @@ export function InfraSettings() {
                 Require approval before payments
               </label>
             </div>
+            <div className="infra-setting-row">
+              <label>Auto-approve up to (USDC)</label>
+              <input
+                type="number"
+                min={0}
+                max={1000}
+                step={0.01}
+                value={settings?.payments?.maxAutoApproveUsd ?? 1}
+                onChange={(e) =>
+                  handleNestedChange("payments", "maxAutoApproveUsd", Number(e.target.value))
+                }
+                className="settings-input"
+              />
+            </div>
+            <div className="infra-setting-row">
+              <label>Hard limit per payment (USDC)</label>
+              <input
+                type="number"
+                min={0}
+                max={10000}
+                step={0.01}
+                value={settings?.payments?.hardLimitUsd ?? 100}
+                onChange={(e) =>
+                  handleNestedChange("payments", "hardLimitUsd", Number(e.target.value))
+                }
+                className="settings-input"
+              />
+            </div>
+            <div className="infra-setting-row">
+              <label>Allowed x402 hosts (comma or newline separated)</label>
+              <textarea
+                className="settings-input"
+                rows={3}
+                value={(settings?.payments?.allowedHosts || []).join(", ")}
+                onChange={(e) => {
+                  const hosts = e.target.value
+                    .split(/[\n,]/)
+                    .map((entry) => entry.trim().toLowerCase())
+                    .filter(Boolean);
+                  handleNestedChange("payments", "allowedHosts", hosts);
+                }}
+                placeholder="api.example.com, *.trusted-payments.com"
+              />
+            </div>
           </div>
 
           {/* General Settings */}
@@ -453,9 +576,9 @@ export function InfraSettings() {
               <div className="infra-info-item">
                 <strong>Crypto Wallet</strong>
                 <p>
-                  A crypto wallet is generated locally during setup. Your private key is encrypted
-                  using your OS keychain and never leaves your machine. Fund it with USDC on Base
-                  from Coinbase, MetaMask, or bridge at bridge.base.org.
+                  Use either a local wallet (generated on setup, keychain-encrypted private key) or
+                  a Coinbase Agentic Wallet signer endpoint for delegated signing. Fund with USDC on
+                  Base from Coinbase, MetaMask, or bridge at bridge.base.org.
                 </p>
               </div>
               <div className="infra-info-item">
@@ -463,7 +586,8 @@ export function InfraSettings() {
                 <p>
                   The x402 protocol enables HTTP-native machine-to-machine payments. When agents
                   encounter a 402 Payment Required response, they sign a payment intent and retry.
-                  All payments require your approval.
+                  Approval settings, auto-approve thresholds, hard limits, and host allowlists are
+                  enforced before payment execution.
                 </p>
               </div>
             </div>

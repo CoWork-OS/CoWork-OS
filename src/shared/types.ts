@@ -594,6 +594,8 @@ export type ExecutionMode = "execute" | "propose" | "analyze";
 export type TaskDomain = "auto" | "code" | "research" | "operations" | "writing" | "general";
 export type ToolDecision = "allow" | "deny" | "ask";
 export type LlmProfile = "strong" | "cheap";
+export type ReviewPolicy = "off" | "balanced" | "strict";
+export type TaskRiskLevel = "low" | "medium" | "high";
 
 /**
  * Per-task agent configuration for customizing LLM and personality
@@ -692,6 +694,13 @@ export interface AgentConfig {
   multiLlmConfig?: MultiLlmConfig;
   /** Spawn an independent verification agent after task completion to audit deliverables */
   verificationAgent?: boolean;
+  /**
+   * Post-completion reliability review policy:
+   * - off: keep legacy behavior
+   * - balanced: enable risk-aware review escalation
+   * - strict: enforce the strongest post-completion checks
+   */
+  reviewPolicy?: ReviewPolicy;
   /** Whether to emit a pre-flight problem framing before execution (set by strategy service) */
   preflightRequired?: boolean;
   /** Enable deep work mode: long-running autonomous execution with research-retry, journaling, auto-report */
@@ -768,6 +777,9 @@ export interface Task {
   // Execution result metadata (for partial success + diagnostics)
   terminalStatus?: "ok" | "partial_success" | "failed";
   failureClass?: "budget_exhausted" | "tool_error" | "contract_error" | "unknown";
+  riskLevel?: TaskRiskLevel;
+  evalCaseId?: string;
+  evalRunId?: string;
   awaitingUserInputReasonCode?: string;
   retryReason?: "success_criteria_failed" | "explicit_retry_policy";
   recoveryClass?: "user_blocker" | "local_runtime" | "provider_quota" | "external_unknown";
@@ -896,6 +908,18 @@ export interface TaskEvent {
   payload: Any;
 }
 
+/**
+ * Normalized summary of file outputs produced during a task run.
+ * `created` is the primary signal; `modifiedFallback` is used only when no created outputs exist.
+ */
+export interface TaskOutputSummary {
+  created: string[];
+  modifiedFallback?: string[];
+  primaryOutputPath?: string;
+  outputCount: number;
+  folders: string[];
+}
+
 export interface TaskUsageTotals {
   inputTokens: number;
   outputTokens: number;
@@ -910,6 +934,70 @@ export interface TaskFileChanges {
   created: string[];
   modified: string[];
   deleted: string[];
+}
+
+export interface EvalCase {
+  id: string;
+  name: string;
+  workspaceId?: string;
+  sourceTaskId?: string;
+  prompt: string;
+  sanitizedPrompt: string;
+  assertions?: {
+    expectedTerminalStatus?: Task["terminalStatus"];
+    mustContainAll?: string[];
+    mustCreatePaths?: string[];
+  };
+  metadata?: Record<string, unknown>;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface EvalSuite {
+  id: string;
+  name: string;
+  description?: string;
+  caseIds: string[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface EvalRun {
+  id: string;
+  suiteId: string;
+  status: "running" | "completed" | "failed";
+  startedAt: number;
+  completedAt?: number;
+  passCount: number;
+  failCount: number;
+  skippedCount: number;
+  metadata?: Record<string, unknown>;
+}
+
+export interface EvalCaseRun {
+  id: string;
+  runId: string;
+  caseId: string;
+  status: "pass" | "fail" | "skipped";
+  details?: string;
+  startedAt: number;
+  completedAt?: number;
+  durationMs?: number;
+}
+
+export interface EvalBaselineMetrics {
+  generatedAt: number;
+  windowDays: number;
+  taskSuccessRate: number;
+  approvalDeadEndRate: number;
+  verificationPassRate: number;
+  retriesPerTask: number;
+  toolFailureRateByTool: Array<{
+    tool: string;
+    calls: number;
+    failures: number;
+    failureRate: number;
+  }>;
 }
 
 export interface TaskExportQuery {
@@ -2266,6 +2354,11 @@ export const IPC_CHANNELS = {
   REVIEW_GET_LATEST: "review:getLatest",
   REVIEW_LIST: "review:list",
   REVIEW_DELETE: "review:delete",
+  EVAL_LIST_SUITES: "eval:listSuites",
+  EVAL_RUN_SUITE: "eval:runSuite",
+  EVAL_GET_RUN: "eval:getRun",
+  EVAL_GET_CASE: "eval:getCase",
+  EVAL_CREATE_CASE_FROM_TASK: "eval:createCaseFromTask",
 
   // Mission Control - Agent Teams
   TEAM_LIST: "team:list",
@@ -3793,12 +3886,19 @@ export interface SkillMetadata {
   tags?: string[];
   primaryEnv?: string; // Main environment variable for API key etc.
   pluginSource?: string; // Plugin that registered this skill
+  authoring?: {
+    complexity?: "low" | "medium" | "high";
+  };
   routing?: {
     useWhen?: string;
     dontUseWhen?: string;
     outputs?: string;
     successCriteria?: string;
     expectedArtifacts?: string[];
+    examples?: {
+      positive: string[];
+      negative: string[];
+    };
   };
 }
 

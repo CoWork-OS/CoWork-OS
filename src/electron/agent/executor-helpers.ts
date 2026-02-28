@@ -263,7 +263,6 @@ export function isAskingQuestion(text: string): boolean {
   const blockingCuePatterns = [
     /(?:need|required)\s+(?:your|a|the)\b/i,
     /before\s+i\s+can\s+(?:proceed|continue)\b/i,
-    /to\s+(?:proceed|continue|move\s+forward)\b/i,
     /i\s+can(?:not|'t)\s+(?:proceed|continue)\b/i,
     /\bawaiting\s+your\b/i,
     /\baction\s+required\b/i,
@@ -349,6 +348,8 @@ export class ToolCallDeduplicator {
     new Map();
   // Track semantic patterns (tool name -> list of recent inputs for pattern detection)
   private semanticPatterns: Map<string, Array<{ input: Any; time: number }>> = new Map();
+  // Track semantic signature totals for the full task run (not reset per step)
+  private semanticTotalCounts: Map<string, number> = new Map();
   // Rate limiting: track calls per tool per minute
   private rateLimitCounters: Map<string, { count: number; windowStart: number }> = new Map();
 
@@ -356,12 +357,20 @@ export class ToolCallDeduplicator {
   private readonly windowMs: number;
   private readonly maxSemanticSimilar: number;
   private readonly rateLimit: number; // Max calls per tool per minute
+  private readonly maxSemanticPerRun: number;
 
-  constructor(maxDuplicates = 2, windowMs = 60000, maxSemanticSimilar = 4, rateLimit = 20) {
+  constructor(
+    maxDuplicates = 2,
+    windowMs = 60000,
+    maxSemanticSimilar = 4,
+    rateLimit = 20,
+    maxSemanticPerRun = 12,
+  ) {
     this.maxDuplicates = maxDuplicates;
     this.windowMs = windowMs;
     this.maxSemanticSimilar = maxSemanticSimilar;
     this.rateLimit = rateLimit;
+    this.maxSemanticPerRun = maxSemanticPerRun;
   }
 
   /**
@@ -418,6 +427,9 @@ export class ToolCallDeduplicator {
       const normalizedQuery = query
         .replace(/site:(twitter\.com|x\.com|reddit\.com|github\.com)/gi, "")
         .replace(/\b(reddit|twitter|x\.com|github)\b/gi, "")
+        .replace(/\b(19|20)\d{2}\b/g, "")
+        .replace(/\b(january|february|march|april|may|june|july|august|september|october|november|december)\b/gi, "")
+        .replace(/\b(today|latest|breaking|news)\b/gi, "")
         .replace(/["']/g, "")
         .replace(/\s+/g, " ")
         .trim();
@@ -520,6 +532,16 @@ export class ToolCallDeduplicator {
           `Detected ${recentPatterns.length + 1} semantically similar "${toolName}" calls within ${this.windowMs / 1000}s. ` +
           `This appears to be a retry loop with slight parameter variations. ` +
           `Please try a different approach or check if the previous operation actually succeeded.`,
+      };
+    }
+
+    const totalSeen = this.semanticTotalCounts.get(signature) || 0;
+    if (totalSeen >= this.maxSemanticPerRun) {
+      return {
+        isDuplicate: true,
+        reason:
+          `Per-run duplicate cap reached for "${toolName}" semantic signature after ${totalSeen} attempts. ` +
+          "Stop retrying near-identical calls and synthesize from current evidence.",
       };
     }
 
@@ -626,6 +648,7 @@ export class ToolCallDeduplicator {
     const patterns = this.semanticPatterns.get(signature) || [];
     patterns.push({ input, time: now });
     this.semanticPatterns.set(signature, patterns);
+    this.semanticTotalCounts.set(signature, (this.semanticTotalCounts.get(signature) || 0) + 1);
 
     // Update rate limit counter
     const counter = this.rateLimitCounters.get(toolName);
@@ -740,6 +763,16 @@ export class ToolFailureTracker {
     return this.maxInputDependentFailures;
   }
 
+  private extractSearchProvider(errorMessage: string): string | null {
+    const lower = String(errorMessage || "").toLowerCase();
+    if (lower.includes("tavily")) return "tavily";
+    if (lower.includes("brave")) return "brave";
+    if (lower.includes("serpapi")) return "serpapi";
+    if (lower.includes("google")) return "google";
+    if (lower.includes("duckduckgo")) return "duckduckgo";
+    return null;
+  }
+
   /**
    * Record a tool failure
    * @returns true if the tool should be disabled (circuit broken)
@@ -748,6 +781,18 @@ export class ToolFailureTracker {
     const browserHttpStatusFailure =
       toolName.startsWith("browser_") &&
       /http\s*[45]\d{2}|client error\s*\(\d{3}\)|server error\s*\(\d{3}\)/i.test(errorMessage);
+
+    // Provider-scoped quota/rate failures for web_search should not disable the
+    // whole tool globally on first failure. ProviderFactory handles provider fallback/cooldown.
+    if (toolName === "web_search" && isNonRetryableError(errorMessage)) {
+      const provider = this.extractSearchProvider(errorMessage);
+      if (provider) {
+        console.log(
+          `[ToolFailureTracker] Provider-scoped non-retryable error for ${toolName}:${provider}: ${errorMessage.substring(0, 100)}`,
+        );
+        return false;
+      }
+    }
 
     // If it's a non-retryable error (quota, rate limit), disable immediately
     if (isNonRetryableError(errorMessage) && !browserHttpStatusFailure) {

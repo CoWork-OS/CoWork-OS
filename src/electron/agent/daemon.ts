@@ -318,7 +318,12 @@ export class AgentDaemon extends EventEmitter {
     return JSON.stringify(a ?? {}) === JSON.stringify(b ?? {});
   }
 
-  private deriveTaskStrategy(input: { title: string; prompt: string; agentConfig?: AgentConfig }): {
+  private deriveTaskStrategy(input: {
+    title: string;
+    prompt: string;
+    routingPrompt?: string;
+    agentConfig?: AgentConfig;
+  }): {
     route: IntentRoute;
     strategy: DerivedTaskStrategy;
     prompt: string;
@@ -326,9 +331,16 @@ export class AgentDaemon extends EventEmitter {
     promptChanged: boolean;
     agentConfigChanged: boolean;
   } {
-    const route = IntentRouter.route(input.title, input.prompt);
+    const route = IntentRouter.route(input.title, input.routingPrompt ?? input.prompt);
     const strategy = TaskStrategyService.derive(route, input.agentConfig);
     const agentConfig = TaskStrategyService.applyToAgentConfig(input.agentConfig, strategy);
+    const hasExplicitModelOverride =
+      typeof input.agentConfig?.modelKey === "string" && input.agentConfig.modelKey.trim().length > 0;
+    if (hasExplicitModelOverride) {
+      delete agentConfig.llmProfileHint;
+    } else {
+      agentConfig.llmProfileHint = strategy.llmProfileHint;
+    }
     // Store detected intent for intent-based tool filtering
     agentConfig.taskIntent = route.intent;
     if (!agentConfig.taskDomain || agentConfig.taskDomain === "auto") {
@@ -367,8 +379,18 @@ export class AgentDaemon extends EventEmitter {
     const derived = this.deriveTaskStrategy({
       title: task.title,
       prompt: task.prompt,
+      routingPrompt: task.rawPrompt || task.userPrompt || task.prompt,
       agentConfig: task.agentConfig,
     });
+    if (task.strategyLock) {
+      return {
+        task,
+        route: derived.route,
+        strategy: derived.strategy,
+        promptChanged: false,
+        agentConfigChanged: false,
+      };
+    }
     const nextTask: Task =
       derived.promptChanged || derived.agentConfigChanged
         ? { ...task, prompt: derived.prompt, agentConfig: derived.agentConfig }
@@ -566,7 +588,8 @@ export class AgentDaemon extends EventEmitter {
         message:
           `Execution strategy active: intent=${runtimeStrategy.route.intent}, ` +
           `domain=${runtimeStrategy.strategy.taskDomain}, convoMode=${runtimeStrategy.strategy.conversationMode}, ` +
-          `execMode=${runtimeStrategy.strategy.executionMode}, answerFirst=${runtimeStrategy.strategy.answerFirst}`,
+          `execMode=${runtimeStrategy.strategy.executionMode}, answerFirst=${runtimeStrategy.strategy.answerFirst}, ` +
+          `llmProfileHint=${runtimeStrategy.strategy.llmProfileHint}`,
       });
     }
 
@@ -1120,16 +1143,21 @@ export class AgentDaemon extends EventEmitter {
     const derived = this.deriveTaskStrategy({
       title: params.title,
       prompt: params.prompt,
+      routingPrompt: params.prompt,
       agentConfig: params.agentConfig,
     });
+    const isCronTask = params.source === "cron";
     const task = this.taskRepo.create({
       title: params.title,
       prompt: derived.prompt,
+      rawPrompt: params.prompt,
       status: "pending",
       workspaceId: params.workspaceId,
       agentConfig: derived.agentConfig,
       budgetTokens: params.budgetTokens,
       budgetCost: params.budgetCost,
+      strategyLock: isCronTask,
+      budgetProfile: isCronTask ? "balanced" : undefined,
       ...(params.source ? { source: params.source } : {}),
     });
     this.logEvent(task.id, "log", {
@@ -1764,9 +1792,12 @@ export class AgentDaemon extends EventEmitter {
     type: string,
     description: string,
     details: Any,
+    opts?: { allowAutoApprove?: boolean },
   ): Promise<boolean> {
+    const allowAutoApprove = opts?.allowAutoApprove !== false;
+
     // Session-level auto-approve (set via "Approve all" UI button)
-    if (this.sessionAutoApproveAll) {
+    if (allowAutoApprove && this.sessionAutoApproveAll) {
       const approval = this.approvalRepo.create({
         taskId,
         type: type as Any,
@@ -1789,7 +1820,7 @@ export class AgentDaemon extends EventEmitter {
     }
 
     const task = this.taskRepo.findById(taskId);
-    if (task?.agentConfig?.autonomousMode) {
+    if (allowAutoApprove && task?.agentConfig?.autonomousMode) {
       const approval = this.approvalRepo.create({
         taskId,
         type: type as Any,
@@ -3221,7 +3252,18 @@ export class AgentDaemon extends EventEmitter {
    */
   updateTask(
     taskId: string,
-    updates: Partial<Pick<Task, "currentAttempt" | "status" | "error" | "completedAt">>,
+    updates: Partial<
+      Pick<
+        Task,
+        | "currentAttempt"
+        | "status"
+        | "error"
+        | "completedAt"
+        | "terminalStatus"
+        | "failureClass"
+        | "budgetUsage"
+      >
+    >,
   ): void {
     const existing = this.taskRepo.findById(taskId);
     this.taskRepo.update(taskId, updates);
@@ -3250,7 +3292,15 @@ export class AgentDaemon extends EventEmitter {
    * Mark task as completed
    * Note: We keep the executor in memory for follow-up messages (with TTL-based cleanup)
    */
-  completeTask(taskId: string, resultSummary?: string): void {
+  completeTask(
+    taskId: string,
+    resultSummary?: string,
+    metadata?: {
+      terminalStatus?: Task["terminalStatus"];
+      failureClass?: Task["failureClass"];
+      budgetUsage?: Task["budgetUsage"];
+    },
+  ): void {
     const existingTask = this.taskRepo.findById(taskId);
     if (!existingTask) {
       console.warn(`[AgentDaemon] completeTask called for unknown task ${taskId}`);
@@ -3261,6 +3311,9 @@ export class AgentDaemon extends EventEmitter {
       completedAt: Date.now(),
       // Clear any previous error so completed tasks don't display stale failure state.
       error: null,
+      terminalStatus: metadata?.terminalStatus || "ok",
+      failureClass: metadata?.failureClass || undefined,
+      budgetUsage: metadata?.budgetUsage,
     };
     if (typeof resultSummary === "string" && resultSummary.trim().length > 0) {
       updates.resultSummary = resultSummary.trim();
@@ -3274,8 +3327,14 @@ export class AgentDaemon extends EventEmitter {
       cached.lastAccessed = Date.now();
     }
     this.logEvent(taskId, "task_completed", {
-      message: "Task completed successfully",
+      message:
+        metadata?.terminalStatus === "partial_success"
+          ? "Task completed with partial results"
+          : "Task completed successfully",
       ...(updates.resultSummary ? { resultSummary: updates.resultSummary } : {}),
+      ...(metadata?.terminalStatus ? { terminalStatus: metadata.terminalStatus } : {}),
+      ...(metadata?.failureClass ? { failureClass: metadata.failureClass } : {}),
+      ...(metadata?.budgetUsage ? { budgetUsage: metadata.budgetUsage } : {}),
     });
 
     // === WORKTREE AUTO-COMMIT ===

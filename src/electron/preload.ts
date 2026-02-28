@@ -11,6 +11,10 @@ import type {
   AgentThought,
   AgentPerformanceReview,
   AgentReviewGenerateRequest,
+  EvalBaselineMetrics,
+  EvalCase,
+  EvalRun,
+  EvalSuite,
   InfraSettings,
   InfraStatus,
   WalletInfo,
@@ -740,6 +744,11 @@ const IPC_CHANNELS = {
   REVIEW_GET_LATEST: "review:getLatest",
   REVIEW_LIST: "review:list",
   REVIEW_DELETE: "review:delete",
+  EVAL_LIST_SUITES: "eval:listSuites",
+  EVAL_RUN_SUITE: "eval:runSuite",
+  EVAL_GET_RUN: "eval:getRun",
+  EVAL_GET_CASE: "eval:getCase",
+  EVAL_CREATE_CASE_FROM_TASK: "eval:createCaseFromTask",
   // Git Worktree operations
   WORKTREE_GET_INFO: "worktree:getInfo",
   WORKTREE_LIST: "worktree:list",
@@ -3005,6 +3014,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
   listAgentReviews: (query: { workspaceId: string; agentRoleId?: string; limit?: number }) =>
     ipcRenderer.invoke(IPC_CHANNELS.REVIEW_LIST, query),
   deleteAgentReview: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.REVIEW_DELETE, id),
+  listEvalSuites: (options?: { windowDays?: number }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.EVAL_LIST_SUITES, options),
+  runEvalSuite: (suiteId: string) => ipcRenderer.invoke(IPC_CHANNELS.EVAL_RUN_SUITE, suiteId),
+  getEvalRun: (runId: string) => ipcRenderer.invoke(IPC_CHANNELS.EVAL_GET_RUN, runId),
+  getEvalCase: (caseId: string) => ipcRenderer.invoke(IPC_CHANNELS.EVAL_GET_CASE, caseId),
+  createEvalCaseFromTask: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.EVAL_CREATE_CASE_FROM_TASK, { taskId }),
 
   // Task Board APIs
   moveTaskToColumn: (taskId: string, column: TaskBoardColumn) =>
@@ -4658,6 +4674,14 @@ export interface ElectronAPI {
     limit?: number;
   }) => Promise<AgentPerformanceReview[]>;
   deleteAgentReview: (id: string) => Promise<{ success: boolean }>;
+  listEvalSuites: (options?: { windowDays?: number }) => Promise<{
+    suites: Array<(EvalSuite & { caseCount: number; latestRun?: Partial<EvalRun> })>;
+    metrics: EvalBaselineMetrics;
+  }>;
+  runEvalSuite: (suiteId: string) => Promise<EvalRun>;
+  getEvalRun: (runId: string) => Promise<(EvalRun & { caseRuns: Any[] }) | null>;
+  getEvalCase: (caseId: string) => Promise<EvalCase | null>;
+  createEvalCaseFromTask: (taskId: string) => Promise<EvalCase>;
   // Task Board APIs
   moveTaskToColumn: (taskId: string, column: TaskBoardColumn) => Promise<Any>;
   setTaskPriority: (taskId: string, priority: number) => Promise<Any>;

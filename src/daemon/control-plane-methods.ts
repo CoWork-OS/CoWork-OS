@@ -23,6 +23,11 @@ import {
   getControlPlaneLlmStatus,
 } from "../electron/control-plane/llm-configure";
 import {
+  ManagedAccountManager,
+  type ManagedAccountStatus,
+  type UpsertManagedAccountInput,
+} from "../electron/accounts/managed-account-manager";
+import {
   getEnvSettingsImportModeFromArgsOrEnv,
   isHeadlessMode,
   shouldImportEnvSettingsFromArgsOrEnv,
@@ -265,6 +270,138 @@ function sanitizeChannelUpdateParams(params: unknown): {
   }
 
   return { channelId, updates };
+}
+
+function sanitizeAccountListParams(params: unknown): {
+  includeSecrets: boolean;
+  provider?: string;
+  status?: ManagedAccountStatus;
+} {
+  const p = (params ?? {}) as Any;
+  const includeSecrets = p.includeSecrets === true;
+  const provider = typeof p.provider === "string" ? p.provider.trim() : "";
+  const status = typeof p.status === "string" ? p.status.trim().toLowerCase() : "";
+  const allowedStatuses: ManagedAccountStatus[] = [
+    "draft",
+    "pending_signup",
+    "pending_verification",
+    "active",
+    "blocked",
+    "disabled",
+    "error",
+  ];
+  const normalizedStatus = allowedStatuses.includes(status as ManagedAccountStatus)
+    ? (status as ManagedAccountStatus)
+    : undefined;
+
+  return {
+    includeSecrets,
+    ...(provider ? { provider } : {}),
+    ...(normalizedStatus ? { status: normalizedStatus } : {}),
+  };
+}
+
+function sanitizeAccountGetParams(params: unknown): { accountId: string; includeSecrets: boolean } {
+  const p = (params ?? {}) as Any;
+  const accountId = typeof p.accountId === "string" ? p.accountId.trim() : "";
+  if (!accountId) throw { code: ErrorCodes.INVALID_PARAMS, message: "accountId is required" };
+  return { accountId, includeSecrets: p.includeSecrets === true };
+}
+
+function sanitizeAccountUpsertParams(params: unknown): UpsertManagedAccountInput {
+  const p = (params ?? {}) as Any;
+
+  if (!p || typeof p !== "object") {
+    throw { code: ErrorCodes.INVALID_PARAMS, message: "params must be an object" };
+  }
+
+  const result: UpsertManagedAccountInput = {};
+
+  if (typeof p.id === "string" && p.id.trim()) {
+    result.id = p.id.trim();
+  }
+  if (typeof p.provider === "string" && p.provider.trim()) {
+    result.provider = p.provider.trim();
+  }
+  if (p.label !== undefined) {
+    if (typeof p.label !== "string") {
+      throw { code: ErrorCodes.INVALID_PARAMS, message: "label must be a string" };
+    }
+    result.label = p.label;
+  }
+  if (p.status !== undefined) {
+    if (typeof p.status !== "string") {
+      throw { code: ErrorCodes.INVALID_PARAMS, message: "status must be a string" };
+    }
+    result.status = p.status as ManagedAccountStatus;
+  }
+  if (p.signupUrl !== undefined) {
+    if (typeof p.signupUrl !== "string") {
+      throw { code: ErrorCodes.INVALID_PARAMS, message: "signupUrl must be a string" };
+    }
+    result.signupUrl = p.signupUrl;
+  }
+  if (p.dashboardUrl !== undefined) {
+    if (typeof p.dashboardUrl !== "string") {
+      throw { code: ErrorCodes.INVALID_PARAMS, message: "dashboardUrl must be a string" };
+    }
+    result.dashboardUrl = p.dashboardUrl;
+  }
+  if (p.docsUrl !== undefined) {
+    if (typeof p.docsUrl !== "string") {
+      throw { code: ErrorCodes.INVALID_PARAMS, message: "docsUrl must be a string" };
+    }
+    result.docsUrl = p.docsUrl;
+  }
+  if (p.notes !== undefined) {
+    if (typeof p.notes !== "string") {
+      throw { code: ErrorCodes.INVALID_PARAMS, message: "notes must be a string" };
+    }
+    result.notes = p.notes;
+  }
+  if (p.lastError !== undefined) {
+    if (typeof p.lastError !== "string") {
+      throw { code: ErrorCodes.INVALID_PARAMS, message: "lastError must be a string" };
+    }
+    result.lastError = p.lastError;
+  }
+  if (p.lastVerifiedAt !== undefined) {
+    if (typeof p.lastVerifiedAt !== "number" || !Number.isFinite(p.lastVerifiedAt)) {
+      throw { code: ErrorCodes.INVALID_PARAMS, message: "lastVerifiedAt must be a number" };
+    }
+    result.lastVerifiedAt = p.lastVerifiedAt;
+  }
+  if (p.metadata !== undefined) {
+    if (!p.metadata || typeof p.metadata !== "object" || Array.isArray(p.metadata)) {
+      throw { code: ErrorCodes.INVALID_PARAMS, message: "metadata must be an object" };
+    }
+    result.metadata = p.metadata as Record<string, unknown>;
+  }
+  if (p.secrets !== undefined) {
+    if (!p.secrets || typeof p.secrets !== "object" || Array.isArray(p.secrets)) {
+      throw { code: ErrorCodes.INVALID_PARAMS, message: "secrets must be an object" };
+    }
+    result.secrets = p.secrets as Record<string, unknown>;
+  }
+  if (p.clearSecrets !== undefined) {
+    if (typeof p.clearSecrets !== "boolean") {
+      throw { code: ErrorCodes.INVALID_PARAMS, message: "clearSecrets must be a boolean" };
+    }
+    result.clearSecrets = p.clearSecrets;
+  }
+
+  if (!result.id && !result.provider) {
+    throw { code: ErrorCodes.INVALID_PARAMS, message: "provider is required for new accounts" };
+  }
+
+  return result;
+}
+
+function sanitizeAccountRemoveParams(params: unknown): { accountId: string } {
+  const p = (params ?? {}) as Any;
+  const accountId = typeof p.accountId === "string" ? p.accountId.trim() : "";
+  if (!accountId) throw { code: ErrorCodes.INVALID_PARAMS, message: "accountId is required" };
+  return { accountId };
 }
 
 function maskSecretString(value: string): string {
@@ -528,6 +665,52 @@ export function registerControlPlaneMethods(
     securityConfig: channel.securityConfig ? { mode: channel.securityConfig.mode } : undefined,
     createdAt: channel.createdAt,
     updatedAt: channel.updatedAt,
+  });
+
+  // Managed Accounts (API-first signup/account lifecycle)
+  server.registerMethod(Methods.ACCOUNT_LIST, async (client, params) => {
+    requireScope(client, "read");
+    const { includeSecrets, provider, status } = sanitizeAccountListParams(params);
+    const accounts = ManagedAccountManager.list({ provider, status });
+    const canIncludeSecrets = includeSecrets && isAdminClient(client);
+    return {
+      accounts: accounts.map((account) =>
+        ManagedAccountManager.toPublicView(account, canIncludeSecrets),
+      ),
+    };
+  });
+
+  server.registerMethod(Methods.ACCOUNT_GET, async (client, params) => {
+    requireScope(client, "read");
+    const { accountId, includeSecrets } = sanitizeAccountGetParams(params);
+    const account = ManagedAccountManager.getById(accountId);
+    if (!account) {
+      throw { code: ErrorCodes.INVALID_PARAMS, message: `Account not found: ${accountId}` };
+    }
+    const canIncludeSecrets = includeSecrets && isAdminClient(client);
+    return { account: ManagedAccountManager.toPublicView(account, canIncludeSecrets) };
+  });
+
+  server.registerMethod(Methods.ACCOUNT_UPSERT, async (client, params) => {
+    requireScope(client, "admin");
+    const validated = sanitizeAccountUpsertParams(params);
+
+    try {
+      const account = ManagedAccountManager.upsert(validated);
+      return { account: ManagedAccountManager.toPublicView(account, false) };
+    } catch (error: Any) {
+      throw {
+        code: ErrorCodes.INVALID_PARAMS,
+        message: error?.message || "Invalid account payload",
+      };
+    }
+  });
+
+  server.registerMethod(Methods.ACCOUNT_REMOVE, async (client, params) => {
+    requireScope(client, "admin");
+    const { accountId } = sanitizeAccountRemoveParams(params);
+    const removed = ManagedAccountManager.remove(accountId);
+    return { removed };
   });
 
   // Workspaces
@@ -1133,6 +1316,7 @@ export function registerControlPlaneMethods(
       "line",
       "bluebubbles",
       "email",
+      "x",
     ];
     return { types };
   });

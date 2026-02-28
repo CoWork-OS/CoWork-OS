@@ -119,6 +119,7 @@ Current built-in channels (see files in that folder):
 - LINE
 - BlueBubbles
 - Email
+- X (Twitter)
 
 Core gateway code:
 - Gateway manager: `src/electron/gateway/index.ts`
@@ -300,6 +301,8 @@ Key methods (see `src/electron/control-plane/protocol.ts`):
 - Approvals (admin): `approval.list`, `approval.respond`
 - Channels: `channel.list`, `channel.get`
 - Channels (admin): `channel.create`, `channel.update`, `channel.test`, `channel.enable`, `channel.disable`, `channel.remove`
+- Managed accounts: `account.list`, `account.get`
+- Managed accounts (admin): `account.upsert`, `account.remove`
 - LLM setup (admin): `llm.configure`
 - Config/Health: `config.get` (sanitized, no secrets)
 

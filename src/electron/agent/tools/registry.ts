@@ -1047,7 +1047,15 @@ export class ToolRegistry {
   /**
    * Get human-readable tool descriptions
    */
-  getToolDescriptions(visibleTools?: string[]): string {
+  getToolDescriptions(
+    visibleTools?: string[],
+    options?: {
+      skillRoutingQuery?: string;
+      skillShortlistSize?: number;
+      skillLowConfidenceThreshold?: number;
+      skillTextBudgetChars?: number;
+    },
+  ): string {
     const visibleToolSet = visibleTools?.length
       ? new Set(visibleTools.map((tool) => tool.trim()).filter(Boolean))
       : null;
@@ -1287,7 +1295,27 @@ Channel Message Log (Local Gateway):
     // Add custom skills available for use_skill
     const skillLoader = getCustomSkillLoader();
     const availableToolNames = new Set(this.getTools().map((tool) => tool.name));
-    const skillDescriptions = skillLoader.getSkillDescriptionsForModel({ availableToolNames });
+    const resolvedSkillShortlistSize =
+      typeof options?.skillShortlistSize === "number" && Number.isFinite(options.skillShortlistSize)
+        ? Math.min(Math.max(Math.round(options.skillShortlistSize), 1), 200)
+        : parseBoundedIntEnv("COWORK_SKILL_SHORTLIST_SIZE", 20, 1, 200);
+    const resolvedSkillLowConfidenceThreshold =
+      typeof options?.skillLowConfidenceThreshold === "number" &&
+      Number.isFinite(options.skillLowConfidenceThreshold)
+        ? Math.min(Math.max(options.skillLowConfidenceThreshold, 0), 1)
+        : 0.55;
+    const resolvedSkillTextBudgetChars =
+      typeof options?.skillTextBudgetChars === "number" &&
+      Number.isFinite(options.skillTextBudgetChars)
+        ? Math.max(Math.round(options.skillTextBudgetChars), 1500)
+        : parseBoundedIntEnv("COWORK_SKILL_TEXT_BUDGET_CHARS", 12000, 1500, 50000);
+    const skillDescriptions = skillLoader.getSkillDescriptionsForModel({
+      availableToolNames,
+      routingQuery: options?.skillRoutingQuery,
+      shortlistSize: resolvedSkillShortlistSize,
+      lowConfidenceThreshold: resolvedSkillLowConfidenceThreshold,
+      textBudgetChars: resolvedSkillTextBudgetChars,
+    });
     if (skillDescriptions) {
       descriptions += `
 

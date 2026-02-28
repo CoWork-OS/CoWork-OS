@@ -17,6 +17,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { getUserDataDir } from "../utils/user-data-dir";
 import { getSafeStorage, type SafeStorageLike } from "../utils/safe-storage";
+import { createLogger } from "../utils/logger";
 
 /** Result status for load operations */
 export type LoadStatus =
@@ -79,6 +80,7 @@ interface SecureSettingsRow {
 
 /** Machine ID file name - persisted for stable key derivation */
 const MACHINE_ID_FILE = ".cowork-machine-id";
+const logger = createLogger("SecureSettingsRepository");
 
 /**
  * Repository for securely storing encrypted settings in the database
@@ -121,15 +123,15 @@ export class SecureSettingsRepository {
       const machineIdPath = path.join(userDataPath, MACHINE_ID_FILE);
 
       if (fs.existsSync(machineIdPath)) {
-        this.machineId = fs.readFileSync(machineIdPath, "utf-8").trim();
-        console.log("[SecureSettingsRepository] Loaded existing machine ID");
-      } else {
-        // Generate a new stable machine ID
-        this.machineId = uuidv4();
-        // Write with restrictive permissions (owner read/write only)
-        fs.writeFileSync(machineIdPath, this.machineId, { mode: 0o600 });
-        console.log("[SecureSettingsRepository] Generated new machine ID");
-      }
+      this.machineId = fs.readFileSync(machineIdPath, "utf-8").trim();
+      logger.debug("Loaded existing machine ID");
+    } else {
+      // Generate a new stable machine ID
+      this.machineId = uuidv4();
+      // Write with restrictive permissions (owner read/write only)
+      fs.writeFileSync(machineIdPath, this.machineId, { mode: 0o600 });
+      logger.debug("Generated new machine ID");
+    }
     } catch (error) {
       console.warn(
         "[SecureSettingsRepository] Failed to initialize machine ID, using fallback:",
@@ -188,7 +190,7 @@ export class SecureSettingsRepository {
       stmt.run(uuidv4(), category, encryptedData, checksum, now, now);
     }
 
-    console.log(`[SecureSettingsRepository] Saved settings for category: ${category}`);
+    logger.debug(`Saved settings for category: ${category}`);
   }
 
   /**
@@ -330,7 +332,7 @@ export class SecureSettingsRepository {
       const encryptedBackup = this.encrypt(jsonData);
 
       fs.writeFileSync(backupPath, encryptedBackup, { mode: 0o600 });
-      console.log(`[SecureSettingsRepository] Created backup with ${categories.length} categories`);
+      logger.debug(`Created backup with ${categories.length} categories`);
 
       return { success: true, categoriesBackedUp: categories };
     } catch (error) {
@@ -369,7 +371,7 @@ export class SecureSettingsRepository {
 
         // Skip if exists and not overwriting
         if (existingStatus === "success" && !overwrite) {
-          console.log(`[SecureSettingsRepository] Skipping ${category} (exists, overwrite=false)`);
+          logger.debug(`Skipping ${category} (exists, overwrite=false)`);
           continue;
         }
 
@@ -377,9 +379,7 @@ export class SecureSettingsRepository {
         categoriesRestored.push(category);
       }
 
-      console.log(
-        `[SecureSettingsRepository] Restored ${categoriesRestored.length} categories from backup`,
-      );
+      logger.debug(`Restored ${categoriesRestored.length} categories from backup`);
       return { success: true, categoriesRestored };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -402,9 +402,7 @@ export class SecureSettingsRepository {
       return false;
     }
 
-    console.log(
-      `[SecureSettingsRepository] Deleting corrupted settings for ${category} (status: ${status})`,
-    );
+    logger.debug(`Deleting corrupted settings for ${category} (status: ${status})`);
     return this.delete(category);
   }
 
@@ -432,9 +430,7 @@ export class SecureSettingsRepository {
       }
     }
 
-    console.log(
-      `[SecureSettingsRepository] Re-encrypted ${processed.length}/${categories.length} categories`,
-    );
+    logger.debug(`Re-encrypted ${processed.length}/${categories.length} categories`);
     return { success: errors.length === 0, categoriesProcessed: processed, errors };
   }
 

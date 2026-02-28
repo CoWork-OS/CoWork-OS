@@ -22,7 +22,7 @@ interface CronJobState {
   nextRunAtMs?: number;
   runningAtMs?: number;
   lastRunAtMs?: number;
-  lastStatus?: "ok" | "error" | "skipped" | "timeout";
+  lastStatus?: "ok" | "partial_success" | "error" | "skipped" | "timeout";
   lastError?: string;
   lastDurationMs?: number;
   lastTaskId?: string;
@@ -738,10 +738,18 @@ export function ScheduledTasksSettings() {
                           ? "var(--color-warning)"
                           : lastStatus === "error"
                             ? "var(--color-error)"
+                            : lastStatus === "partial_success"
+                              ? "var(--color-warning)"
                             : "var(--color-success)",
                       boxShadow:
                         job.enabled && !job.state.runningAtMs
-                          ? `0 0 8px ${lastStatus === "error" ? "var(--color-error)" : "var(--color-success)"}`
+                          ? `0 0 8px ${
+                              lastStatus === "error"
+                                ? "var(--color-error)"
+                                : lastStatus === "partial_success"
+                                  ? "var(--color-warning)"
+                                  : "var(--color-success)"
+                            }`
                           : "none",
                     }}
                   />
@@ -757,12 +765,22 @@ export function ScheduledTasksSettings() {
                             backgroundColor:
                               lastStatus === "ok"
                                 ? "var(--color-success-subtle)"
+                                : lastStatus === "partial_success"
+                                  ? "var(--color-warning-subtle)"
                                 : "var(--color-error-subtle)",
                             color:
-                              lastStatus === "ok" ? "var(--color-success)" : "var(--color-error)",
+                              lastStatus === "ok"
+                                ? "var(--color-success)"
+                                : lastStatus === "partial_success"
+                                  ? "var(--color-warning)"
+                                  : "var(--color-error)",
                           }}
                         >
-                          {lastStatus === "ok" ? Icons.check : Icons.x}
+                          {lastStatus === "ok"
+                            ? Icons.check
+                            : lastStatus === "partial_success"
+                              ? Icons.clock
+                              : Icons.x}
                           {lastStatus}
                         </span>
                       )}

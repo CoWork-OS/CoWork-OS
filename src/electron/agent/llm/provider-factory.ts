@@ -39,7 +39,7 @@ import {
   CUSTOM_PROVIDER_IDS,
   type ProviderCatalogEntry,
 } from "../../../shared/llm-provider-catalog";
-import type { CustomProviderConfig } from "../../../shared/types";
+import type { AgentConfig, CustomProviderConfig, LlmProfile } from "../../../shared/types";
 import { getUserDataDir } from "../../utils/user-data-dir";
 import { getSafeStorage } from "../../utils/safe-storage";
 
@@ -341,6 +341,12 @@ function getCustomProviderConfig(
   return fallbackConfig;
 }
 
+function normalizeModelKey(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : undefined;
+}
+
 function isCustomProviderConfigured(
   entry: ProviderCatalogEntry,
   config?: CustomProviderConfig,
@@ -606,6 +612,13 @@ export interface CachedModelInfo {
   size?: number; // For Ollama models (in bytes)
 }
 
+interface ProviderRoutingSettings {
+  profileRoutingEnabled?: boolean;
+  strongModelKey?: string;
+  cheapModelKey?: string;
+  preferStrongForVerification?: boolean;
+}
+
 /**
  * Stored settings for LLM provider
  */
@@ -614,7 +627,7 @@ export interface LLMSettings {
   modelKey: ModelKey | string; // String for custom Ollama model names
   anthropic?: {
     apiKey?: string;
-  };
+  } & ProviderRoutingSettings;
   bedrock?: {
     region?: string;
     accessKeyId?: string;
@@ -623,21 +636,21 @@ export interface LLMSettings {
     profile?: string;
     useDefaultCredentials?: boolean;
     model?: string;
-  };
+  } & ProviderRoutingSettings;
   ollama?: {
     baseUrl?: string;
     model?: string;
     apiKey?: string; // Optional, for remote Ollama servers
-  };
+  } & ProviderRoutingSettings;
   gemini?: {
     apiKey?: string;
     model?: string;
-  };
+  } & ProviderRoutingSettings;
   openrouter?: {
     apiKey?: string;
     model?: string;
     baseUrl?: string;
-  };
+  } & ProviderRoutingSettings;
   openai?: {
     apiKey?: string;
     model?: string;
@@ -646,39 +659,39 @@ export interface LLMSettings {
     refreshToken?: string;
     tokenExpiresAt?: number;
     authMethod?: "api_key" | "oauth";
-  };
+  } & ProviderRoutingSettings;
   azure?: {
     apiKey?: string;
     endpoint?: string;
     deployment?: string;
     deployments?: string[];
     apiVersion?: string;
-  };
+  } & ProviderRoutingSettings;
   groq?: {
     apiKey?: string;
     model?: string;
     baseUrl?: string;
-  };
+  } & ProviderRoutingSettings;
   xai?: {
     apiKey?: string;
     model?: string;
     baseUrl?: string;
-  };
+  } & ProviderRoutingSettings;
   kimi?: {
     apiKey?: string;
     model?: string;
     baseUrl?: string;
-  };
+  } & ProviderRoutingSettings;
   pi?: {
     provider?: string; // pi-ai KnownProvider
     apiKey?: string;
     model?: string;
-  };
+  } & ProviderRoutingSettings;
   openaiCompatible?: {
     apiKey?: string;
     baseUrl?: string;
     model?: string;
-  };
+  } & ProviderRoutingSettings;
   customProviders?: Record<string, CustomProviderConfig>;
   // Cached models from API (populated when user refreshes)
   cachedGeminiModels?: CachedModelInfo[];
@@ -697,6 +710,16 @@ const DEFAULT_SETTINGS: LLMSettings = {
   providerType: "anthropic",
   modelKey: DEFAULT_MODEL,
 };
+
+export interface ResolvedTaskModelSelection {
+  providerType: LLMProviderType;
+  modelId: string;
+  modelKey: string;
+  llmProfileUsed: LlmProfile;
+  resolvedModelKey: string;
+  modelSource: "explicit_override" | "profile_model" | "provider_default";
+  warnings: string[];
+}
 
 /**
  * Factory for creating LLM providers
@@ -734,6 +757,289 @@ export class LLMProviderFactory {
     } else if (rawProviderType === "amazon-bedrock") {
       settings.providerType = "bedrock";
     }
+  }
+
+  private static getProviderRoutingSettingsNode(
+    settings: LLMSettings,
+    providerType: LLMProviderType,
+    createIfMissing = false,
+  ): ProviderRoutingSettings | undefined {
+    const resolvedProviderType = resolveCustomProviderId(providerType);
+    if (CUSTOM_PROVIDER_IDS.has(resolvedProviderType as Any)) {
+      if (!settings.customProviders) {
+        if (!createIfMissing) return undefined;
+        settings.customProviders = {};
+      }
+
+      const existing =
+        settings.customProviders[resolvedProviderType] || settings.customProviders[providerType];
+      if (existing) {
+        if (settings.customProviders[providerType] && resolvedProviderType !== providerType) {
+          delete settings.customProviders[providerType];
+        }
+        settings.customProviders[resolvedProviderType] = existing;
+        return settings.customProviders[resolvedProviderType];
+      }
+
+      if (!createIfMissing) return undefined;
+      settings.customProviders[resolvedProviderType] = {};
+      return settings.customProviders[resolvedProviderType];
+    }
+
+    switch (resolvedProviderType) {
+      case "anthropic":
+        if (!settings.anthropic && createIfMissing) settings.anthropic = {};
+        return settings.anthropic;
+      case "bedrock":
+        if (!settings.bedrock && createIfMissing) settings.bedrock = {};
+        return settings.bedrock;
+      case "ollama":
+        if (!settings.ollama && createIfMissing) settings.ollama = {};
+        return settings.ollama;
+      case "gemini":
+        if (!settings.gemini && createIfMissing) settings.gemini = {};
+        return settings.gemini;
+      case "openrouter":
+        if (!settings.openrouter && createIfMissing) settings.openrouter = {};
+        return settings.openrouter;
+      case "openai":
+        if (!settings.openai && createIfMissing) settings.openai = {};
+        return settings.openai;
+      case "azure":
+        if (!settings.azure && createIfMissing) settings.azure = {};
+        return settings.azure;
+      case "groq":
+        if (!settings.groq && createIfMissing) settings.groq = {};
+        return settings.groq;
+      case "xai":
+        if (!settings.xai && createIfMissing) settings.xai = {};
+        return settings.xai;
+      case "kimi":
+        if (!settings.kimi && createIfMissing) settings.kimi = {};
+        return settings.kimi;
+      case "pi":
+        if (!settings.pi && createIfMissing) settings.pi = {};
+        return settings.pi;
+      case "openai-compatible":
+        if (!settings.openaiCompatible && createIfMissing) settings.openaiCompatible = {};
+        return settings.openaiCompatible;
+      default:
+        return undefined;
+    }
+  }
+
+  private static getProviderDefaultModelKey(
+    settings: LLMSettings,
+    providerType: LLMProviderType,
+  ): string {
+    const fallback = normalizeModelKey(String(settings.modelKey)) || "";
+    try {
+      const status = this.getProviderModelStatus({ ...settings, providerType });
+      return normalizeModelKey(status.currentModel) || fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
+  private static applyProfileRoutingDefaults(settings: LLMSettings): LLMSettings {
+    const next: LLMSettings = { ...settings };
+
+    const applyDefaults = (providerType: LLMProviderType, createIfMissing = false): void => {
+      const target = this.getProviderRoutingSettingsNode(next, providerType, createIfMissing);
+      if (!target) return;
+
+      const providerDefaultModel = this.getProviderDefaultModelKey(next, providerType);
+      if (!normalizeModelKey(target.strongModelKey) && providerDefaultModel) {
+        target.strongModelKey = providerDefaultModel;
+      }
+      if (!normalizeModelKey(target.cheapModelKey) && providerDefaultModel) {
+        target.cheapModelKey = providerDefaultModel;
+      }
+      if (typeof target.preferStrongForVerification !== "boolean") {
+        target.preferStrongForVerification = true;
+      }
+    };
+
+    applyDefaults(next.providerType, true);
+    if (next.anthropic) applyDefaults("anthropic");
+    if (next.bedrock) applyDefaults("bedrock");
+    if (next.ollama) applyDefaults("ollama");
+    if (next.gemini) applyDefaults("gemini");
+    if (next.openrouter) applyDefaults("openrouter");
+    if (next.openai) applyDefaults("openai");
+    if (next.azure) applyDefaults("azure");
+    if (next.groq) applyDefaults("groq");
+    if (next.xai) applyDefaults("xai");
+    if (next.kimi) applyDefaults("kimi");
+    if (next.pi) applyDefaults("pi");
+    if (next.openaiCompatible) applyDefaults("openai-compatible");
+
+    if (next.customProviders) {
+      for (const customProviderType of Object.keys(next.customProviders)) {
+        applyDefaults(customProviderType as LLMProviderType);
+      }
+    }
+
+    return next;
+  }
+
+  static getProviderRoutingSettings(
+    settings: LLMSettings,
+    providerType: LLMProviderType,
+  ): Required<Pick<ProviderRoutingSettings, "profileRoutingEnabled" | "preferStrongForVerification">> &
+    Pick<ProviderRoutingSettings, "strongModelKey" | "cheapModelKey"> {
+    const configured = this.getProviderRoutingSettingsNode(settings, providerType, false);
+    const defaultModel = this.getProviderDefaultModelKey(settings, providerType);
+    return {
+      profileRoutingEnabled: configured?.profileRoutingEnabled === true,
+      strongModelKey: normalizeModelKey(configured?.strongModelKey) || defaultModel || undefined,
+      cheapModelKey: normalizeModelKey(configured?.cheapModelKey) || defaultModel || undefined,
+      preferStrongForVerification: configured?.preferStrongForVerification !== false,
+    };
+  }
+
+  private static resolveModelIdForProvider(
+    settings: LLMSettings,
+    providerType: LLMProviderType,
+    modelKey: string,
+    source: ResolvedTaskModelSelection["modelSource"],
+  ): string {
+    const azureDeployment = settings.azure?.deployment || settings.azure?.deployments?.[0];
+
+    if (providerType === "anthropic") {
+      if (modelKey.startsWith("claude-")) return modelKey;
+      return this.getModelId(
+        modelKey,
+        providerType,
+        settings.ollama?.model,
+        settings.gemini?.model,
+        settings.openrouter?.model,
+        settings.openai?.model,
+        azureDeployment,
+        settings.groq?.model,
+        settings.xai?.model,
+        settings.kimi?.model,
+        settings.customProviders,
+        settings.bedrock?.model,
+      );
+    }
+
+    if (providerType === "bedrock") {
+      if (modelKey.startsWith("us.") || modelKey.startsWith("anthropic.")) {
+        return modelKey;
+      }
+      return this.getModelId(
+        modelKey,
+        providerType,
+        settings.ollama?.model,
+        settings.gemini?.model,
+        settings.openrouter?.model,
+        settings.openai?.model,
+        azureDeployment,
+        settings.groq?.model,
+        settings.xai?.model,
+        settings.kimi?.model,
+        settings.customProviders,
+        source === "provider_default" ? settings.bedrock?.model : undefined,
+      );
+    }
+
+    return modelKey;
+  }
+
+  static resolveTaskModelSelection(
+    taskAgentConfig?: Pick<
+      AgentConfig,
+      | "providerType"
+      | "modelKey"
+      | "llmProfile"
+      | "llmProfileHint"
+      | "llmProfileForced"
+      | "verificationAgent"
+    >,
+    options?: {
+      forceProfile?: LlmProfile;
+      isVerificationTask?: boolean;
+    },
+  ): ResolvedTaskModelSelection {
+    const settings = this.loadSettings();
+    const providerType = (taskAgentConfig?.providerType || settings.providerType) as LLMProviderType;
+    const routing = this.getProviderRoutingSettings(settings, providerType);
+    const warnings: string[] = [];
+
+    let llmProfileUsed: LlmProfile =
+      options?.forceProfile ||
+      taskAgentConfig?.llmProfile ||
+      taskAgentConfig?.llmProfileHint ||
+      "cheap";
+
+    const shouldForceStrongForVerification =
+      options?.isVerificationTask === true ||
+      taskAgentConfig?.verificationAgent === true;
+    if (
+      shouldForceStrongForVerification &&
+      routing.preferStrongForVerification &&
+      !options?.forceProfile
+    ) {
+      llmProfileUsed = "strong";
+    }
+
+    const explicitModelOverride = normalizeModelKey(taskAgentConfig?.modelKey);
+    const profileForced =
+      taskAgentConfig?.llmProfileForced === true &&
+      Boolean(taskAgentConfig?.llmProfile || options?.forceProfile);
+    const allowExplicitModelOverride = Boolean(explicitModelOverride) && !profileForced;
+
+    let modelSource: ResolvedTaskModelSelection["modelSource"] = "provider_default";
+    let resolvedModelKey = "";
+
+    if (allowExplicitModelOverride && explicitModelOverride) {
+      modelSource = "explicit_override";
+      resolvedModelKey = explicitModelOverride;
+    } else if (routing.profileRoutingEnabled) {
+      const profileModelKey =
+        llmProfileUsed === "strong" ? routing.strongModelKey : routing.cheapModelKey;
+      const normalizedProfileModelKey = normalizeModelKey(profileModelKey);
+      if (normalizedProfileModelKey) {
+        modelSource = "profile_model";
+        resolvedModelKey = normalizedProfileModelKey;
+      } else {
+        warnings.push(
+          `[LLMProviderFactory] Missing ${llmProfileUsed} profile model for provider "${providerType}". Falling back to provider default model.`,
+        );
+      }
+    }
+
+    if (!resolvedModelKey) {
+      resolvedModelKey = this.getProviderDefaultModelKey(settings, providerType);
+      modelSource = "provider_default";
+    }
+
+    let modelId: string;
+    try {
+      modelId = this.resolveModelIdForProvider(settings, providerType, resolvedModelKey, modelSource);
+    } catch (error: Any) {
+      if (modelSource === "profile_model") {
+        warnings.push(
+          `[LLMProviderFactory] Invalid profile model "${resolvedModelKey}" for provider "${providerType}". Falling back to provider default model.`,
+        );
+        resolvedModelKey = this.getProviderDefaultModelKey(settings, providerType);
+        modelSource = "provider_default";
+        modelId = this.resolveModelIdForProvider(settings, providerType, resolvedModelKey, modelSource);
+      } else {
+        throw error;
+      }
+    }
+
+    return {
+      providerType,
+      modelId,
+      modelKey: resolvedModelKey,
+      llmProfileUsed,
+      resolvedModelKey,
+      modelSource,
+      warnings,
+    };
   }
 
   /**
@@ -852,8 +1158,9 @@ export class LLMProviderFactory {
       }
     }
 
-    this.cachedSettings = settings;
-    return settings;
+    const normalizedSettings = this.applyProfileRoutingDefaults(settings);
+    this.cachedSettings = normalizedSettings;
+    return normalizedSettings;
   }
 
   /**
@@ -921,11 +1228,12 @@ export class LLMProviderFactory {
       }
 
       const repository = SecureSettingsRepository.getInstance();
+      const normalizedSettings = this.applyProfileRoutingDefaults(settings);
 
       // Save entire settings object to encrypted database
       // No need for per-field encryption - the entire object is encrypted
-      repository.save("llm", settings);
-      this.cachedSettings = settings;
+      repository.save("llm", normalizedSettings);
+      this.cachedSettings = normalizedSettings;
 
       console.log("[LLMProviderFactory] Settings saved to encrypted database");
     } catch (error) {
@@ -957,20 +1265,22 @@ export class LLMProviderFactory {
 
     const config: LLMProviderConfig = {
       type: providerType,
-      model: this.getModelId(
-        settings.modelKey,
-        providerType,
-        settings.ollama?.model,
-        settings.gemini?.model,
-        settings.openrouter?.model,
-        settings.openai?.model,
-        azureDeployment,
-        settings.groq?.model,
-        settings.xai?.model,
-        settings.kimi?.model,
-        settings.customProviders,
-        settings.bedrock?.model,
-      ),
+      model:
+        normalizeModelKey(overrideConfig?.model) ||
+        this.getModelId(
+          settings.modelKey,
+          providerType,
+          settings.ollama?.model,
+          settings.gemini?.model,
+          settings.openrouter?.model,
+          settings.openai?.model,
+          azureDeployment,
+          settings.groq?.model,
+          settings.xai?.model,
+          settings.kimi?.model,
+          settings.customProviders,
+          settings.bedrock?.model,
+        ),
       // Anthropic config - from settings only
       anthropicApiKey:
         normalizeSecret(overrideConfig?.anthropicApiKey) || settings.anthropic?.apiKey,

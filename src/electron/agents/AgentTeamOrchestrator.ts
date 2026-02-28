@@ -8,6 +8,7 @@ import type {
   AgentTeamRunPhase,
   AgentTeamItemStatus,
   AgentThought,
+  LlmProfile,
   UpdateAgentTeamItemRequest,
   MultiLlmParticipant,
 } from "../../shared/types";
@@ -102,6 +103,18 @@ function isTerminalItemStatus(status: AgentTeamItemStatus): boolean {
 
 function isTerminalTaskStatus(status: Task["status"]): boolean {
   return status === "completed" || status === "failed" || status === "cancelled";
+}
+
+function deriveTeamItemProfile(itemTitle: string, itemDescription?: string): LlmProfile {
+  const normalized = `${itemTitle || ""}\n${itemDescription || ""}`.toLowerCase();
+  if (
+    /\b(plan|planning|critic|critique|validator|validate|verification|verify|judge|audit|synthes(?:is|ize))\b/.test(
+      normalized,
+    )
+  ) {
+    return "strong";
+  }
+  return "cheap";
 }
 
 export class AgentTeamOrchestrator {
@@ -250,6 +263,7 @@ export class AgentTeamOrchestrator {
             bypassQueue: false,
             providerType: participant.providerType,
             modelKey: participant.modelKey,
+            llmProfile: "cheap",
           };
 
           const child = await this.deps.createChildTask({
@@ -292,6 +306,7 @@ export class AgentTeamOrchestrator {
         const agentConfig: AgentConfig = {
           retainMemory: false,
           bypassQueue: false,
+          llmProfile: deriveTeamItemProfile(item.title, item.description),
         };
         const modelKey = resolveModelPreferenceToModelKey(team.defaultModelPreference);
         if (modelKey) agentConfig.modelKey = modelKey;
@@ -595,12 +610,14 @@ export class AgentTeamOrchestrator {
       bypassQueue: true,
       conversationMode: "chat", // Skip planning/steps — single-turn text synthesis
       qualityPasses: 1,
+      llmProfile: rootTask.agentConfig?.llmProfileHint || "strong",
     };
 
     if (run.multiLlmMode && rootTask.agentConfig?.multiLlmConfig) {
       // Use judge's provider/model for synthesis
       agentConfig.providerType = rootTask.agentConfig.multiLlmConfig.judgeProviderType;
       agentConfig.modelKey = rootTask.agentConfig.multiLlmConfig.judgeModelKey;
+      agentConfig.llmProfile = "strong";
     } else {
       const modelKey = resolveModelPreferenceToModelKey(team.defaultModelPreference);
       if (modelKey) agentConfig.modelKey = modelKey;

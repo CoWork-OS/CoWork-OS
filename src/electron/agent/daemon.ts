@@ -20,6 +20,7 @@ import {
   Task,
   TaskStatus,
   TaskEvent,
+  TaskOutputSummary,
   IPC_CHANNELS,
   QueueSettings,
   QueueStatus,
@@ -59,6 +60,12 @@ import { AgentTeamItemRepository } from "../agents/AgentTeamItemRepository";
 import { AgentTeamRunRepository } from "../agents/AgentTeamRunRepository";
 import { WorktreeManager } from "../git/WorktreeManager";
 import type { ComparisonService } from "../git/ComparisonService";
+import {
+  deriveReviewGateDecision,
+  inferMutationFromSummary,
+  resolveReviewPolicy,
+  scoreTaskRisk,
+} from "../eval/risk";
 
 // Memory management constants
 const MAX_CACHED_EXECUTORS = 10; // Maximum number of completed task executors to keep in memory
@@ -93,6 +100,19 @@ const THROTTLED_ACTIVITY_TYPES = new Set([
   "file_modified",
   "file_deleted",
 ]);
+
+function parseBooleanEnv(envName: string, fallback = false): boolean {
+  const raw = process.env[envName];
+  if (raw === undefined) return fallback;
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on") {
+    return true;
+  }
+  if (normalized === "0" || normalized === "false" || normalized === "no" || normalized === "off") {
+    return false;
+  }
+  return fallback;
+}
 
 interface CachedExecutor {
   executor: TaskExecutor;
@@ -382,6 +402,25 @@ export class AgentDaemon extends EventEmitter {
       routingPrompt: task.rawPrompt || task.userPrompt || task.prompt,
       agentConfig: task.agentConfig,
     });
+    let nextAgentConfig = derived.agentConfig;
+    let agentConfigChanged = derived.agentConfigChanged;
+
+    // Reliability default: optionally auto-enable balanced review policy for code/operations tasks.
+    // This stays opt-in to preserve backward compatibility.
+    const autoReviewPolicyEnabled = parseBooleanEnv("COWORK_REVIEW_POLICY_ENABLE_AUTO", false);
+    if (autoReviewPolicyEnabled && !nextAgentConfig.reviewPolicy) {
+      if (derived.strategy.taskDomain === "code" || derived.strategy.taskDomain === "operations") {
+        const configured = (process.env.COWORK_REVIEW_POLICY_AUTO_DEFAULT || "balanced")
+          .trim()
+          .toLowerCase();
+        nextAgentConfig = {
+          ...nextAgentConfig,
+          reviewPolicy: configured === "strict" ? "strict" : "balanced",
+        };
+        agentConfigChanged = true;
+      }
+    }
+
     if (task.strategyLock) {
       return {
         task,
@@ -392,8 +431,8 @@ export class AgentDaemon extends EventEmitter {
       };
     }
     const nextTask: Task =
-      derived.promptChanged || derived.agentConfigChanged
-        ? { ...task, prompt: derived.prompt, agentConfig: derived.agentConfig }
+      derived.promptChanged || agentConfigChanged
+        ? { ...task, prompt: derived.prompt, agentConfig: nextAgentConfig }
         : task;
 
     return {
@@ -401,7 +440,7 @@ export class AgentDaemon extends EventEmitter {
       route: derived.route,
       strategy: derived.strategy,
       promptChanged: derived.promptChanged,
-      agentConfigChanged: derived.agentConfigChanged,
+      agentConfigChanged,
     };
   }
 
@@ -3288,6 +3327,125 @@ export class AgentDaemon extends EventEmitter {
     this.retryCounts.delete(taskId);
   }
 
+  private runQuickQualityPass(params: {
+    resultSummary?: string;
+    outputSummary?: TaskOutputSummary;
+    explicitEvidenceRequired: boolean;
+    strictCompletionContract: boolean;
+    riskReasons: string[];
+  }): { passed: boolean; issues: string[] } {
+    const issues: string[] = [];
+    const summary = params.resultSummary?.trim() || "";
+    if (!summary) {
+      issues.push("missing_result_summary");
+    } else if (summary.length < 20) {
+      issues.push("result_summary_too_short");
+    }
+
+    const hasArtifactEvidence =
+      (params.outputSummary?.created?.length || 0) > 0 ||
+      (params.outputSummary?.modifiedFallback?.length || 0) > 0;
+    if (params.explicitEvidenceRequired && !hasArtifactEvidence) {
+      issues.push("missing_artifact_or_file_evidence");
+    }
+    if (params.explicitEvidenceRequired && params.riskReasons.includes("tests_expected_without_evidence")) {
+      issues.push("tests_expected_without_execution_evidence");
+    }
+    if (params.strictCompletionContract && summary.length < 60) {
+      issues.push("strict_mode_requires_more_complete_summary");
+    }
+
+    return {
+      passed: issues.length === 0,
+      issues,
+    };
+  }
+
+  private async runPostCompletionVerification(
+    parentTask: Task,
+    parentSummary?: string,
+    timeoutMs = 120_000,
+  ): Promise<void> {
+    // Guard: verifier should only run for top-level tasks.
+    if (parentTask.parentTaskId || (parentTask.agentType ?? "main") !== "main") return;
+
+    const currentDepth = parentTask.depth ?? 0;
+    if (currentDepth >= 3) return;
+
+    const verificationPrompt = [
+      "You are an independent post-completion verification agent.",
+      "Audit the deliverables and detect missing work, regressions, or unsafe assumptions.",
+      "",
+      "## Original Task",
+      `Title: ${parentTask.title}`,
+      `Prompt: ${parentTask.rawPrompt || parentTask.userPrompt || parentTask.prompt}`,
+      "",
+      "## Parent Summary",
+      parentSummary || "(no summary)",
+      "",
+      "## Instructions",
+      "1. Inspect files and outputs using read/search tools only.",
+      "2. Check whether the original request was actually satisfied.",
+      "3. Start the final answer with exactly VERDICT: PASS or VERDICT: FAIL.",
+      "4. Then provide concise bullet findings focused on gaps and evidence.",
+      "5. Do not modify files.",
+    ].join("\n");
+
+    const childTask = await this.createChildTask({
+      title: `Verify: ${parentTask.title}`.slice(0, 200),
+      prompt: verificationPrompt,
+      workspaceId: parentTask.workspaceId,
+      parentTaskId: parentTask.id,
+      agentType: "sub",
+      depth: currentDepth + 1,
+      agentConfig: {
+        autonomousMode: true,
+        allowUserInput: false,
+        retainMemory: false,
+        maxTurns: 12,
+        conversationMode: "task",
+        llmProfile: "strong",
+        llmProfileForced: true,
+        verificationAgent: false,
+        reviewPolicy: "off",
+        toolRestrictions: ["group:write", "group:destructive", "group:image"],
+      },
+    });
+
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      const child = this.taskRepo.findById(childTask.id);
+      if (!child) break;
+      if (child.status === "completed" || child.status === "failed" || child.status === "cancelled") {
+        const verdict = child.resultSummary || "";
+        const passed = /VERDICT:\s*PASS/i.test(verdict);
+        this.logEvent(parentTask.id, passed ? "verification_passed" : "verification_failed", {
+          source: "post_completion_review_gate",
+          childTaskId: childTask.id,
+          message: passed
+            ? "Post-completion verifier confirmed deliverables."
+            : "Post-completion verifier found issues.",
+          verdict: verdict.slice(0, 2000),
+        });
+
+        if (!passed) {
+          this.taskRepo.update(parentTask.id, {
+            terminalStatus: "partial_success",
+            failureClass: "contract_error",
+          });
+        }
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+
+    this.logEvent(parentTask.id, "verification_failed", {
+      source: "post_completion_review_gate",
+      message: "Post-completion verifier timed out.",
+      timeoutMs,
+    });
+  }
+
   /**
    * Mark task as completed
    * Note: We keep the executor in memory for follow-up messages (with TTL-based cleanup)
@@ -3299,6 +3457,7 @@ export class AgentDaemon extends EventEmitter {
       terminalStatus?: Task["terminalStatus"];
       failureClass?: Task["failureClass"];
       budgetUsage?: Task["budgetUsage"];
+      outputSummary?: TaskOutputSummary;
     },
   ): void {
     const existingTask = this.taskRepo.findById(taskId);
@@ -3306,18 +3465,56 @@ export class AgentDaemon extends EventEmitter {
       console.warn(`[AgentDaemon] completeTask called for unknown task ${taskId}`);
       return;
     }
+    const historicalEvents = this.eventRepo.findByTaskId(taskId);
+    const risk = scoreTaskRisk(
+      {
+        title: existingTask.title,
+        prompt: existingTask.rawPrompt || existingTask.userPrompt || existingTask.prompt,
+      },
+      historicalEvents,
+      metadata?.outputSummary,
+    );
+    const reviewPolicy = resolveReviewPolicy(existingTask.agentConfig?.reviewPolicy);
+    const reviewDecision = deriveReviewGateDecision({
+      policy: reviewPolicy,
+      riskLevel: risk.level,
+      isMutatingTask:
+        inferMutationFromSummary(metadata?.outputSummary) || risk.signals.changedFileCount > 0,
+    });
+
+    const trimmedSummary =
+      typeof resultSummary === "string" && resultSummary.trim().length > 0
+        ? resultSummary.trim()
+        : undefined;
+    let terminalStatus: NonNullable<Task["terminalStatus"]> = metadata?.terminalStatus || "ok";
+    let failureClass: Task["failureClass"] | undefined = metadata?.failureClass || undefined;
+    let quality: { passed: boolean; issues: string[] } | null = null;
+
+    if (reviewDecision.runQualityPass) {
+      quality = this.runQuickQualityPass({
+        resultSummary: trimmedSummary,
+        outputSummary: metadata?.outputSummary,
+        explicitEvidenceRequired: reviewDecision.explicitEvidenceRequired,
+        strictCompletionContract: reviewDecision.strictCompletionContract,
+        riskReasons: risk.reasons,
+      });
+      if (!quality.passed && reviewDecision.strictCompletionContract) {
+        terminalStatus = "partial_success";
+        failureClass = "contract_error";
+      }
+    }
+
     const updates: Partial<Task> = {
       status: "completed",
       completedAt: Date.now(),
       // Clear any previous error so completed tasks don't display stale failure state.
       error: null,
-      terminalStatus: metadata?.terminalStatus || "ok",
-      failureClass: metadata?.failureClass || undefined,
+      terminalStatus,
+      failureClass,
       budgetUsage: metadata?.budgetUsage,
+      riskLevel: risk.level,
+      ...(trimmedSummary ? { resultSummary: trimmedSummary } : {}),
     };
-    if (typeof resultSummary === "string" && resultSummary.trim().length > 0) {
-      updates.resultSummary = resultSummary.trim();
-    }
     this.taskRepo.update(taskId, updates);
     this.clearRetryState(taskId);
     // Mark executor as completed for TTL-based cleanup
@@ -3328,14 +3525,42 @@ export class AgentDaemon extends EventEmitter {
     }
     this.logEvent(taskId, "task_completed", {
       message:
-        metadata?.terminalStatus === "partial_success"
+        terminalStatus === "partial_success"
           ? "Task completed with partial results"
           : "Task completed successfully",
       ...(updates.resultSummary ? { resultSummary: updates.resultSummary } : {}),
-      ...(metadata?.terminalStatus ? { terminalStatus: metadata.terminalStatus } : {}),
-      ...(metadata?.failureClass ? { failureClass: metadata.failureClass } : {}),
+      terminalStatus,
+      ...(failureClass ? { failureClass } : {}),
       ...(metadata?.budgetUsage ? { budgetUsage: metadata.budgetUsage } : {}),
+      ...(metadata?.outputSummary ? { outputSummary: metadata.outputSummary } : {}),
+      risk: {
+        score: risk.score,
+        level: risk.level,
+        reasons: risk.reasons,
+        signals: risk.signals,
+      },
+      reviewPolicy,
+      reviewGate: reviewDecision,
     });
+
+    if (quality) {
+      this.logEvent(taskId, quality.passed ? "review_quality_passed" : "review_quality_failed", {
+        policy: reviewPolicy,
+        tier: reviewDecision.tier,
+        issues: quality.issues,
+      });
+    }
+
+    if (reviewDecision.runVerificationAgent) {
+      this.logEvent(taskId, "verification_started", {
+        source: "post_completion_review_gate",
+        policy: reviewPolicy,
+        tier: reviewDecision.tier,
+      });
+      void this.runPostCompletionVerification(existingTask, updates.resultSummary).catch((error) => {
+        console.warn("[AgentDaemon] Post-completion verification failed to launch:", error);
+      });
+    }
 
     // === WORKTREE AUTO-COMMIT ===
     // If the task has an active worktree, auto-commit changes on completion.

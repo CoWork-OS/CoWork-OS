@@ -45,15 +45,18 @@ export class OpenAIProvider implements LLMProvider {
     this.model = config.model;
 
     if (accessToken && refreshToken) {
+      const resolvedTokenExpiresAt = this.resolveOAuthTokenExpiry(tokenExpiresAt, accessToken);
+
       // Use OAuth - will use pi-ai SDK for API calls
       this.oauthTokens = {
         access_token: accessToken,
         refresh_token: refreshToken,
-        expires_at: tokenExpiresAt || 0, // Use stored expiry or 0 if not available
+        // Fallback to JWT-derived expiry when persisted expiry is missing.
+        expires_at: resolvedTokenExpiresAt || 0,
       };
       this.authMethod = "oauth";
       console.log(
-        `[OpenAI] Using OAuth authentication with pi-ai SDK (token expires: ${tokenExpiresAt ? new Date(tokenExpiresAt).toISOString() : "unknown"})`,
+        `[OpenAI] Using OAuth authentication with pi-ai SDK (token expires: ${resolvedTokenExpiresAt ? new Date(resolvedTokenExpiresAt).toISOString() : "unknown"})`,
       );
     } else if (apiKey) {
       // Use API key - standard OpenAI SDK
@@ -62,6 +65,37 @@ export class OpenAIProvider implements LLMProvider {
       console.log("[OpenAI] Using API key authentication");
     } else {
       throw new Error("OpenAI authentication required. Use API key or sign in with ChatGPT.");
+    }
+  }
+
+  private resolveOAuthTokenExpiry(
+    tokenExpiresAt: number | undefined,
+    accessToken: string | undefined,
+  ): number | undefined {
+    if (typeof tokenExpiresAt === "number" && Number.isFinite(tokenExpiresAt) && tokenExpiresAt > 0) {
+      return tokenExpiresAt;
+    }
+    if (!accessToken) {
+      return undefined;
+    }
+    return this.getJwtExpiry(accessToken);
+  }
+
+  private getJwtExpiry(token: string): number | undefined {
+    try {
+      const parts = token.split(".");
+      if (parts.length < 2) return undefined;
+      const payload = parts[1];
+      const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+      const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
+      const decoded = Buffer.from(padded, "base64").toString("utf8");
+      const claims = JSON.parse(decoded) as { exp?: number };
+      if (typeof claims.exp !== "number" || !Number.isFinite(claims.exp) || claims.exp <= 0) {
+        return undefined;
+      }
+      return claims.exp * 1000;
+    } catch {
+      return undefined;
     }
   }
 

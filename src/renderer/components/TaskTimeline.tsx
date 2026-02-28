@@ -1,4 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { TaskEvent, DEFAULT_QUIRKS } from "../../shared/types";
 import { isVerificationStepDescription } from "../../shared/plan-utils";
 import { ThemeIcon } from "./ThemeIcon";
@@ -83,6 +85,15 @@ interface TaskTimelineProps {
 }
 
 const ACTIVE_TASK_STATUSES = new Set(["executing", "planning", "interrupted"]);
+const GLOB_TOKEN_REGEX = /(?<![`\\])\*\*\/\*[^\s,;()]+/g;
+const TIMELINE_TITLE_MARKDOWN_COMPONENTS = {
+  // Keep timeline titles inline; avoid wrapping plain text in <p> blocks.
+  p: ({ children }: Any) => <>{children}</>,
+};
+
+function protectGlobTokens(text: string): string {
+  return String(text || "").replace(GLOB_TOKEN_REGEX, (token) => `\`${token}\``);
+}
 
 export function TaskTimeline({ events, agentContext, taskId, taskStatus }: TaskTimelineProps) {
   const isTaskActive = taskStatus ? ACTIVE_TASK_STATUSES.has(taskStatus) : false;
@@ -395,13 +406,24 @@ export function TaskTimeline({ events, agentContext, taskId, taskStatus }: TaskT
       case "plan_created":
         return (
           <div className="event-details">
-            <div className="plan-description">{event.payload.plan?.description}</div>
+            <div className="plan-description markdown-content">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {protectGlobTokens(String(event.payload.plan?.description || ""))}
+              </ReactMarkdown>
+            </div>
             {event.payload.plan?.steps && (
               <ul className="plan-steps">
                 {event.payload.plan.steps
                   .filter((step: Any) => !isVerificationStepDescription(step?.description))
                   .map((step: Any, i: number) => (
-                    <li key={i}>{step.description}</li>
+                    <li key={i}>
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        components={TIMELINE_TITLE_MARKDOWN_COMPONENTS}
+                      >
+                        {protectGlobTokens(String(step?.description || ""))}
+                      </ReactMarkdown>
+                    </li>
                   ))}
               </ul>
             )}
@@ -519,7 +541,14 @@ export function TaskTimeline({ events, agentContext, taskId, taskStatus }: TaskT
               <div className="event-icon">{getEventIcon(event.type)}</div>
               <div className="event-content">
                 <div className="event-header">
-                  <div className="event-title">{getEventTitle(event)}</div>
+                  <div className="event-title">
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={TIMELINE_TITLE_MARKDOWN_COMPONENTS}
+                    >
+                      {protectGlobTokens(getEventTitle(event))}
+                    </ReactMarkdown>
+                  </div>
                   <div className="event-time">
                     {formatTime(event.timestamp)}
                     {isActiveStep && (

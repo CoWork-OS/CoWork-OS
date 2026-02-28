@@ -34,6 +34,13 @@ describe("New Methods constants", () => {
     expect(Methods.CHANNEL_REMOVE).toBe("channel.remove");
   });
 
+  it("has managed account methods", () => {
+    expect(Methods.ACCOUNT_LIST).toBe("account.list");
+    expect(Methods.ACCOUNT_GET).toBe("account.get");
+    expect(Methods.ACCOUNT_UPSERT).toBe("account.upsert");
+    expect(Methods.ACCOUNT_REMOVE).toBe("account.remove");
+  });
+
   it("has config methods", () => {
     expect(Methods.CONFIG_GET).toBe("config.get");
     expect(Methods.CONFIG_SET).toBe("config.set");

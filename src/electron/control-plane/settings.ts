@@ -13,10 +13,12 @@ import type { ControlPlaneConnectionMode, RemoteGatewayConfig } from "../../shar
 import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
 import { getUserDataDir } from "../utils/user-data-dir";
 import { getSafeStorage } from "../utils/safe-storage";
+import { createLogger } from "../utils/logger";
 
 const LEGACY_SETTINGS_FILE = "control-plane-settings.json";
 const MASKED_VALUE = "***configured***";
 const ENCRYPTED_PREFIX = "encrypted:";
+const logger = createLogger("ControlPlane Settings");
 
 /**
  * Control plane settings interface
@@ -100,7 +102,7 @@ function _encryptSecret(value?: string): string | undefined {
       return ENCRYPTED_PREFIX + encrypted.toString("base64");
     }
   } catch (error) {
-    console.warn("[ControlPlane Settings] Failed to encrypt secret:", error);
+    logger.warn("Failed to encrypt secret:", error);
   }
   return MASKED_VALUE;
 }
@@ -120,7 +122,7 @@ function decryptSecret(value?: string): string | undefined {
         return safeStorage.decryptString(encrypted);
       }
     } catch (error: Any) {
-      console.error("[ControlPlane Settings] Failed to decrypt:", error.message || error);
+      logger.error("Failed to decrypt:", error.message || error);
     }
   }
 
@@ -151,7 +153,7 @@ export class ControlPlaneSettingsManager {
     this.legacySettingsPath = path.join(userDataPath, LEGACY_SETTINGS_FILE);
     this.initialized = true;
 
-    console.log("[ControlPlane Settings] Initialized");
+    logger.debug("Initialized");
 
     // Migrate from legacy JSON file to encrypted database
     this.migrateFromLegacyFile();
@@ -165,9 +167,7 @@ export class ControlPlaneSettingsManager {
 
     try {
       if (!SecureSettingsRepository.isInitialized()) {
-        console.log(
-          "[ControlPlane Settings] SecureSettingsRepository not yet initialized, skipping migration",
-        );
+        logger.debug("SecureSettingsRepository not yet initialized, skipping migration");
         return;
       }
 
@@ -179,14 +179,12 @@ export class ControlPlaneSettingsManager {
       }
 
       if (!fs.existsSync(this.legacySettingsPath)) {
-        console.log("[ControlPlane Settings] No legacy settings file found");
+        logger.debug("No legacy settings file found");
         this.migrationCompleted = true;
         return;
       }
 
-      console.log(
-        "[ControlPlane Settings] Migrating settings from legacy JSON file to encrypted database...",
-      );
+      logger.debug("Migrating settings from legacy JSON file to encrypted database...");
 
       // Create backup before migration
       const backupPath = this.legacySettingsPath + ".migration-backup";
@@ -216,20 +214,20 @@ export class ControlPlaneSettingsManager {
         }
 
         repository.save("controlplane", merged);
-        console.log("[ControlPlane Settings] Settings migrated to encrypted database");
+        logger.debug("Settings migrated to encrypted database");
 
         // Migration successful - delete backup and original
         fs.unlinkSync(backupPath);
         fs.unlinkSync(this.legacySettingsPath);
-        console.log("[ControlPlane Settings] Migration complete, cleaned up legacy files");
+        logger.debug("Migration complete, cleaned up legacy files");
 
         this.migrationCompleted = true;
       } catch (migrationError) {
-        console.error("[ControlPlane Settings] Migration failed, backup preserved at:", backupPath);
+        logger.error("Migration failed, backup preserved at:", backupPath);
         throw migrationError;
       }
     } catch (error) {
-      console.error("[ControlPlane Settings] Migration failed:", error);
+      logger.error("Migration failed:", error);
     }
   }
 
@@ -272,15 +270,15 @@ export class ControlPlaneSettingsManager {
             };
           }
           this.cachedSettings = merged;
-          console.log("[ControlPlane Settings] Loaded settings from encrypted database");
+          logger.debug("Loaded settings from encrypted database");
           return this.cachedSettings;
         }
       }
     } catch (error) {
-      console.error("[ControlPlane Settings] Failed to load:", error);
+      logger.error("Failed to load:", error);
     }
 
-    console.log("[ControlPlane Settings] No settings found, using defaults");
+    logger.debug("No settings found, using defaults");
     this.cachedSettings = { ...DEFAULT_CONTROL_PLANE_SETTINGS };
     return this.cachedSettings;
   }
@@ -299,9 +297,9 @@ export class ControlPlaneSettingsManager {
       const repository = SecureSettingsRepository.getInstance();
       repository.save("controlplane", settings);
       this.cachedSettings = settings;
-      console.log("[ControlPlane Settings] Saved settings to encrypted database");
+      logger.debug("Saved settings to encrypted database");
     } catch (error) {
-      console.error("[ControlPlane Settings] Failed to save:", error);
+      logger.error("Failed to save:", error);
       throw error;
     }
   }

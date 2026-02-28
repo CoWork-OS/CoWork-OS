@@ -40,6 +40,8 @@
 - **Task Pinning**: Pin important tasks in the sidebar for quick access
 - **Wrap-Up Task**: Gracefully wrap up running tasks instead of hard-cancelling
 - **Capability Matcher**: Auto-select the best agents for a task
+- **Completion Output Confidence UX**: When tasks finish with file outputs, users get high-signal completion toasts with direct actions (`Open file`, `Show in Finder`, `View in Files`), automatic right-panel focus for the active task, and unseen-output badges when reviewing another task/view.
+- **Artifact-First Output Visibility**: Artifact-only tasks are treated the same as file-created outputs across progress, timeline, and Files panel surfaces.
 - **Performance Reviews**: Score and review agent-role outcomes with autonomy-level recommendations
 - **Vision**: Analyze workspace images via `analyze_image` tool (OpenAI, Anthropic, Gemini, or Bedrock)
 - **Image Attachments**: Attach images to tasks and follow-ups for multimodal analysis
@@ -52,6 +54,24 @@
 - **Problem Framing Pre-flight**: Complex tasks show a structured problem restatement, assumptions, risks, and approach before execution begins
 - **Graceful Uncertainty**: Agent expresses uncertainty honestly and rates confidence on recommendations. Low-confidence messages display with an amber indicator.
 - **AI Playbook**: Auto-captures successful patterns (approach, outcome, tools) and lessons from failures with error classification (7 categories: tool failure, wrong approach, missing context, permission denied, timeout, rate limit, user correction). Time-based decay scoring deprioritises stale entries. Proven patterns reinforced on repeated success. Mid-task user corrections automatically detected and captured. Relevant entries injected into system prompts. View in Settings > AI Playbook.
+
+### Reliability Flywheel
+
+Reliability is built as a continuous loop: capture failures -> replay deterministically -> gate risky completions -> harden nightly/release workflows.
+
+| Reliability Capability | What It Does |
+|------------------------|--------------|
+| **Eval Corpus (local)** | Converts failed/partial tasks into replayable eval cases stored in local SQLite |
+| **Deterministic Replay** | Re-runs eval suites to catch regressions before they reappear in production usage |
+| **Risk-Based Review Gate** | Scores task risk (`low`/`medium`/`high`) and escalates review/verification only when justified |
+| **Policy Modes** | `off`, `balanced`, and `strict` review policies for domain-appropriate guard strength |
+| **Skill/Prompt Hardening** | Uses modular prompt sections, explicit token budgets, and skill shortlist routing to reduce drift and context overload |
+| **PR Reliability Contract** | Enforces “production failure fix must add/update eval case” in CI |
+| **Nightly Hardening** | Runs eval + battery loops nightly, produces grouped and machine-readable artifacts |
+| **Release Gate** | Applies hardening checks before release with a date-based stability-window promotion |
+| **Local-Only Data Policy** | Keeps reliability artifacts local; no required telemetry upload path |
+
+See [Reliability Flywheel](reliability-flywheel.md) for architecture, schema, scripts, IPC endpoints, CI workflows, and operational commands.
 
 ### Per-Task Execution Modes
 

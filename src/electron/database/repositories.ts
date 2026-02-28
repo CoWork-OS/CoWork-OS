@@ -176,14 +176,15 @@ export class TaskRepository {
     };
 
     const stmt = this.db.prepare(`
-      INSERT INTO tasks (id, title, prompt, user_prompt, status, workspace_id, created_at, updated_at, budget_tokens, budget_cost, success_criteria, max_attempts, current_attempt, parent_task_id, agent_type, agent_config, depth, result_summary, source)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO tasks (id, title, prompt, raw_prompt, user_prompt, status, workspace_id, created_at, updated_at, budget_tokens, budget_cost, success_criteria, max_attempts, current_attempt, parent_task_id, agent_type, agent_config, depth, result_summary, source, strategy_lock, budget_profile, terminal_status, failure_class, budget_usage)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
       newTask.id,
       newTask.title,
       newTask.prompt,
+      newTask.rawPrompt || null,
       newTask.userPrompt || null,
       newTask.status,
       newTask.workspaceId,
@@ -200,6 +201,11 @@ export class TaskRepository {
       newTask.depth ?? 0,
       newTask.resultSummary || null,
       newTask.source || "manual",
+      newTask.strategyLock ? 1 : 0,
+      newTask.budgetProfile || null,
+      newTask.terminalStatus || null,
+      newTask.failureClass || null,
+      newTask.budgetUsage ? JSON.stringify(newTask.budgetUsage) : null,
     );
 
     return newTask;
@@ -235,6 +241,12 @@ export class TaskRepository {
     "mentionedAgentRoleIds",
     "userPrompt",
     "pinned",
+    "rawPrompt",
+    "strategyLock",
+    "budgetProfile",
+    "terminalStatus",
+    "failureClass",
+    "budgetUsage",
     // Git Worktree fields
     "worktreePath",
     "worktreeBranch",
@@ -264,11 +276,14 @@ export class TaskRepository {
         (key === "successCriteria" ||
           key === "agentConfig" ||
           key === "labels" ||
-          key === "mentionedAgentRoleIds") &&
+          key === "mentionedAgentRoleIds" ||
+          key === "budgetUsage") &&
         value != null
       ) {
         values.push(JSON.stringify(value));
       } else if (key === "pinned") {
+        values.push(Number(Boolean(value)));
+      } else if (key === "strategyLock") {
         values.push(Number(Boolean(value)));
       } else {
         values.push(value);
@@ -480,6 +495,7 @@ export class TaskRepository {
       id: row.id,
       title: row.title,
       prompt: row.prompt,
+      rawPrompt: row.raw_prompt || undefined,
       userPrompt: row.user_prompt || undefined,
       status: row.status,
       workspaceId: row.workspace_id,
@@ -522,6 +538,13 @@ export class TaskRepository {
       worktreeStatus: (row.worktree_status as Task["worktreeStatus"]) || undefined,
       comparisonSessionId: row.comparison_session_id || undefined,
       source: (row.source as Task["source"]) || undefined,
+      strategyLock: Number(row.strategy_lock) === 1,
+      budgetProfile: row.budget_profile || undefined,
+      terminalStatus: row.terminal_status || undefined,
+      failureClass: row.failure_class || undefined,
+      budgetUsage: row.budget_usage
+        ? safeJsonParse(row.budget_usage, undefined, "task.budgetUsage")
+        : undefined,
     };
   }
 

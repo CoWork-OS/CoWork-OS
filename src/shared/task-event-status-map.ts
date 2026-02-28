@@ -18,6 +18,7 @@ export const TASK_EVENT_STATUS_MAP: Readonly<Partial<Record<string, Task["status
   file_created: "executing",
   file_modified: "executing",
   file_deleted: "executing",
+  artifact_created: "executing",
   task_completed: "completed",
   task_paused: "paused",
   approval_requested: "blocked",

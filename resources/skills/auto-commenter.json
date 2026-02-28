@@ -12,7 +12,24 @@
       "useWhen": "Use when the user asks to generate authentic, personalized comments for Reddit and other online communities. Uses your writing style to create human-like engagement that builds community presence and identifies potential leads.",
       "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
       "outputs": "Outcome from Auto Commenter: task-specific result plus concrete action notes.",
-      "successCriteria": "Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior."
+      "successCriteria": "Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior.",
+      "examples": {
+        "positive": [
+          "Use the auto-commenter skill for this request.",
+          "Help me with auto commenter.",
+          "Use when the user asks to generate authentic, personalized comments for Reddit and other online communities. Uses your writing style to create human-like engagement that builds community presence and identifies potential leads.",
+          "Auto Commenter: provide an actionable result."
+        ],
+        "negative": [
+          "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
+          "Do not use auto-commenter for unrelated requests.",
+          "This request is outside auto commenter scope.",
+          "This is conceptual discussion only; no tool workflow is needed."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "medium"
     }
   }
 }

@@ -386,9 +386,6 @@ export class DatabaseManager {
       -- Indexes for performance
       CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
       CREATE INDEX IF NOT EXISTS idx_tasks_workspace ON tasks(workspace_id);
-      CREATE INDEX IF NOT EXISTS idx_tasks_risk_level ON tasks(risk_level);
-      CREATE INDEX IF NOT EXISTS idx_tasks_eval_case_id ON tasks(eval_case_id);
-      CREATE INDEX IF NOT EXISTS idx_tasks_eval_run_id ON tasks(eval_run_id);
       CREATE INDEX IF NOT EXISTS idx_hook_sessions_task ON hook_sessions(task_id);
       CREATE INDEX IF NOT EXISTS idx_hook_session_locks_expires ON hook_session_locks(expires_at);
       CREATE INDEX IF NOT EXISTS idx_task_events_task ON task_events(task_id);

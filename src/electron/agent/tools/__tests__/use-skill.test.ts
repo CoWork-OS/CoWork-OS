@@ -606,6 +606,12 @@ describe("set_user_name tool", () => {
       );
     });
 
+    it("should reject sentence-like task fragments", async () => {
+      await expect(
+        registry.executeTool("set_user_name", { name: "building a cowork assistant for Nokia" }),
+      ).rejects.toThrow("Name looks invalid");
+    });
+
     it("should accept names up to 100 characters", async () => {
       const maxName = "A".repeat(100);
       const result = await registry.executeTool("set_user_name", {

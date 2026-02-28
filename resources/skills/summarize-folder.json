@@ -23,7 +23,24 @@
       "successCriteria": "Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior.",
       "expectedArtifacts": [
         "summary.md"
-      ]
+      ],
+      "examples": {
+        "positive": [
+          "Use the summarize-folder skill for this request.",
+          "Help me with summarize folder.",
+          "Use when the user asks to create a summary of all files in a folder.",
+          "Summarize Folder: provide an actionable result."
+        ],
+        "negative": [
+          "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
+          "Do not use summarize-folder for unrelated requests.",
+          "This request is outside summarize folder scope.",
+          "This is conceptual discussion only; no tool workflow is needed."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "low"
     }
   }
 }

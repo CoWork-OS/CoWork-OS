@@ -19,7 +19,10 @@ export type CronSchedule =
 /**
  * Job status after execution
  */
-export type CronJobStatus = "ok" | "error" | "skipped" | "timeout";
+export type CronJobStatus = "ok" | "partial_success" | "error" | "skipped" | "timeout";
+
+export type CronDeliveryMode = "direct" | "outbox";
+export type CronDeliverableStatus = "none" | "queued" | "sent" | "dead_letter";
 
 /**
  * Single run history entry
@@ -34,6 +37,9 @@ export interface CronRunHistoryEntry {
   runWorkspacePath?: string;
   deliveryStatus?: "success" | "failed" | "skipped";
   deliveryError?: string;
+  deliveryMode?: CronDeliveryMode;
+  deliveryAttempts?: number;
+  deliverableStatus?: CronDeliverableStatus;
 }
 
 export interface CronWorkspaceContext {
@@ -117,6 +123,29 @@ export interface CronJob {
 export interface CronStoreFile {
   version: 1;
   jobs: CronJob[];
+  outbox?: CronOutboxEntry[];
+}
+
+export interface CronOutboxEntry {
+  id: string;
+  jobId: string;
+  runAtMs: number;
+  queuedAtMs: number;
+  nextAttemptAtMs: number;
+  attempts: number;
+  maxAttempts: number;
+  status: CronJobStatus;
+  channelType: ChannelType;
+  channelDbId?: string;
+  channelId: string;
+  summaryOnly?: boolean;
+  resultText?: string;
+  error?: string;
+  taskId?: string;
+  idempotencyKey: string;
+  state: "queued" | "sent" | "dead_letter";
+  lastError?: string;
+  lastAttemptAtMs?: number;
 }
 
 /**
@@ -187,7 +216,22 @@ export interface CronServiceDeps {
   // Optional task status hooks (enables waiting for completion + delivering final output)
   getTaskStatus?: (
     taskId: string,
-  ) => Promise<{ status: string; error?: string | null; resultSummary?: string | null } | null>;
+  ) => Promise<
+    | {
+        status: string;
+        error?: string | null;
+        resultSummary?: string | null;
+        terminalStatus?: "ok" | "partial_success" | "failed" | null;
+        failureClass?: "budget_exhausted" | "tool_error" | "contract_error" | "unknown" | null;
+        budgetUsage?: {
+          turns: number;
+          toolCalls: number;
+          webSearchCalls: number;
+          duplicatesBlocked: number;
+        } | null;
+      }
+    | null
+  >;
   getTaskResultText?: (taskId: string) => Promise<string | undefined>;
   // Channel delivery handler for sending results to messaging platforms
   deliverToChannel?: (params: {
@@ -200,6 +244,7 @@ export interface CronServiceDeps {
     error?: string;
     summaryOnly?: boolean;
     resultText?: string;
+    idempotencyKey?: string;
   }) => Promise<void>;
   onEvent?: (evt: CronEvent) => void;
   log?: {

@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "[cowork] pre-commit: gitleaks is required."
+  echo "[cowork] install with one of:"
+  echo "  - macOS (Homebrew): brew install gitleaks"
+  echo "  - Windows (Chocolatey): choco install gitleaks"
+  echo "  - Linux (script): curl -sSfL https://raw.githubusercontent.com/gitleaks/gitleaks/master/install.sh | sh -s -- -b /usr/local/bin"
+  exit 1
+fi
+
+echo "[cowork] pre-commit: scanning staged changes for secrets..."
+gitleaks git --pre-commit --staged --no-banner --redact

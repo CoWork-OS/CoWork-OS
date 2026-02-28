@@ -116,6 +116,9 @@ describe("TaskExecutor /schedule slash command handling", () => {
     expect(executor.daemon.completeTask).toHaveBeenCalledWith(
       "task-1",
       "Listed 1 scheduled task(s).",
+      expect.objectContaining({
+        terminalStatus: "ok",
+      }),
     );
   });
 

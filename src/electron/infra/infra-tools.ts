@@ -5,10 +5,11 @@
  * wallet management, and x402 payments. Registered directly in ToolRegistry.
  */
 
-import { Workspace } from "../../shared/types";
+import { InfraSettings, Workspace } from "../../shared/types";
 import { AgentDaemon } from "../agent/daemon";
 import { LLMTool } from "../agent/llm/types";
 import { InfraManager } from "./infra-manager";
+import { InfraSettingsManager } from "./infra-settings";
 
 export class InfraTools {
   constructor(
@@ -21,9 +22,8 @@ export class InfraTools {
     this.workspace = workspace;
   }
 
-  static getToolDefinitions(): LLMTool[] {
-    return [
-      // === Cloud Sandbox Tools ===
+  static getToolDefinitions(settings?: InfraSettings): LLMTool[] {
+    const sandboxTools: LLMTool[] = [
       {
         name: "cloud_sandbox_create",
         description:
@@ -126,8 +126,9 @@ export class InfraTools {
           required: ["sandbox_id", "port"],
         },
       },
+    ];
 
-      // === Domain Tools ===
+    const domainTools: LLMTool[] = [
       {
         name: "domain_search",
         description:
@@ -209,8 +210,9 @@ export class InfraTools {
           required: ["domain", "type", "name"],
         },
       },
+    ];
 
-      // === Wallet & Payment Tools ===
+    const paymentTools: LLMTool[] = [
       {
         name: "wallet_info",
         description:
@@ -245,12 +247,18 @@ export class InfraTools {
             url: { type: "string", description: "URL to fetch" },
             method: { type: "string", description: "HTTP method (default: GET)" },
             body: { type: "string", description: "Request body (for POST/PUT)" },
+            headers: {
+              type: "object",
+              description: "Additional HTTP headers",
+              additionalProperties: { type: "string" },
+            },
           },
           required: ["url"],
         },
       },
+    ];
 
-      // === Infrastructure Status Tools ===
+    const statusTools: LLMTool[] = [
       {
         name: "infra_status",
         description:
@@ -258,6 +266,17 @@ export class InfraTools {
         input_schema: { type: "object", properties: {}, required: [] },
       },
     ];
+
+    if (!settings) {
+      return [...sandboxTools, ...domainTools, ...paymentTools, ...statusTools];
+    }
+
+    const toolDefs: LLMTool[] = [];
+    if (settings.enabledCategories.sandbox) toolDefs.push(...sandboxTools);
+    if (settings.enabledCategories.domains) toolDefs.push(...domainTools);
+    if (settings.enabledCategories.payments) toolDefs.push(...paymentTools);
+    toolDefs.push(...statusTools);
+    return toolDefs;
   }
 
   /**
@@ -265,10 +284,20 @@ export class InfraTools {
    */
   async executeTool(toolName: string, args: Record<string, Any>): Promise<Any> {
     const manager = InfraManager.getInstance();
+    const settings = InfraSettingsManager.loadSettings();
 
     this.daemon.logEvent(this.taskId, "tool_call", { tool: toolName, args });
 
     try {
+      if (!settings.enabled && toolName !== "infra_status") {
+        return { error: "Infrastructure tools are disabled in settings." };
+      }
+
+      const categoryError = this.getCategoryError(toolName, settings);
+      if (categoryError) {
+        return { error: categoryError };
+      }
+
       let result: Any;
 
       switch (toolName) {
@@ -321,6 +350,7 @@ export class InfraTools {
             "external_service",
             `Register domain "${args.domain}" for ${args.years || 1} year(s)?`,
             { tool: "domain_register", params: args },
+            { allowAutoApprove: false },
           );
           if (!approved) {
             result = { error: "Domain registration was not approved by the user." };
@@ -358,29 +388,76 @@ export class InfraTools {
           break;
 
         case "wallet_balance":
-          result = { balance: await manager.getWalletBalance(), currency: "USDC", network: "Base" };
+          result = {
+            balance: await manager.getWalletBalance(),
+            currency: "USDC",
+            network: manager.getWalletInfo()?.network || "base",
+          };
           break;
 
         // x402 tools
-        case "x402_check":
-          result = await manager.x402Check(args.url);
-          break;
-
-        case "x402_fetch": {
-          // Require user approval for x402 payments
-          const payApproved = await this.daemon.requestApproval(
-            this.taskId,
-            "external_service",
-            `Make an x402 payment request to "${args.url}"? This may deduct USDC from your wallet.`,
-            { tool: "x402_fetch", params: args, reason: "x402 payment operation" },
-          );
-          if (!payApproved) {
-            result = { error: "x402 payment was not approved by the user." };
+        case "x402_check": {
+          const hostError = this.getHostAllowlistError(args.url, settings);
+          if (hostError) {
+            result = { error: hostError };
             break;
           }
+          result = await manager.x402Check(args.url);
+          break;
+        }
+
+        case "x402_fetch": {
+          const hostError = this.getHostAllowlistError(args.url, settings);
+          if (hostError) {
+            result = { error: hostError };
+            break;
+          }
+
+          // Preflight payment requirement and amount before execution.
+          const preflight = await manager.x402Check(args.url);
+          const amount = this.extractPreflightAmount(preflight);
+          const effectiveHardLimit = this.resolveEffectiveHardLimit(settings);
+
+          if (amount !== null && amount > effectiveHardLimit) {
+            result = {
+              error:
+                `x402 payment amount (${amount} USDC) exceeds configured hard limit ` +
+                `(${effectiveHardLimit} USDC).`,
+            };
+            break;
+          }
+
+          const shouldRequireApproval =
+            settings.payments.requireApproval ||
+            amount === null ||
+            amount > settings.payments.maxAutoApproveUsd;
+
+          if (preflight.requires402 && shouldRequireApproval) {
+            const payApproved = await this.daemon.requestApproval(
+              this.taskId,
+              "external_service",
+              `Make an x402 payment request to "${args.url}"? ` +
+                `${amount !== null ? `Estimated amount: ${amount} USDC.` : "Amount unknown."}`,
+              {
+                tool: "x402_fetch",
+                params: args,
+                reason:
+                  amount !== null
+                    ? `x402 payment operation (${amount} USDC)`
+                    : "x402 payment operation",
+              },
+              { allowAutoApprove: false },
+            );
+            if (!payApproved) {
+              result = { error: "x402 payment was not approved by the user." };
+              break;
+            }
+          }
+
           result = await manager.x402Fetch(args.url, {
             method: args.method,
             body: args.body,
+            headers: args.headers,
           });
           break;
         }
@@ -408,5 +485,61 @@ export class InfraTools {
       });
       return { error: error.message || String(error) };
     }
+  }
+
+  private getCategoryError(toolName: string, settings: InfraSettings): string | null {
+    if (toolName === "infra_status") return null;
+    if (toolName.startsWith("cloud_sandbox_") && !settings.enabledCategories.sandbox) {
+      return "Cloud sandbox tools are disabled in Infrastructure settings.";
+    }
+    if (toolName.startsWith("domain_") && !settings.enabledCategories.domains) {
+      return "Domain tools are disabled in Infrastructure settings.";
+    }
+    if ((toolName.startsWith("wallet_") || toolName.startsWith("x402_")) && !settings.enabledCategories.payments) {
+      return "Payments & wallet tools are disabled in Infrastructure settings.";
+    }
+    return null;
+  }
+
+  private extractPreflightAmount(preflight: Any): number | null {
+    const rawAmount = preflight?.paymentDetails?.amount;
+    const amount = Number(rawAmount);
+    if (!Number.isFinite(amount) || amount < 0) return null;
+    return amount;
+  }
+
+  private resolveEffectiveHardLimit(settings: InfraSettings): number {
+    const configuredLimit = Number(settings.payments.hardLimitUsd);
+    const safeConfiguredLimit = Number.isFinite(configuredLimit) && configuredLimit > 0 ? configuredLimit : 0;
+    const envLimit = Number(process.env.COWORK_PAYMENT_LIMIT_USD);
+    if (!Number.isFinite(envLimit) || envLimit <= 0) {
+      return safeConfiguredLimit;
+    }
+    return safeConfiguredLimit > 0 ? Math.min(safeConfiguredLimit, envLimit) : envLimit;
+  }
+
+  private getHostAllowlistError(url: string, settings: InfraSettings): string | null {
+    const allowed = (settings.payments.allowedHosts || [])
+      .map((host) => host.trim().toLowerCase())
+      .filter(Boolean);
+    if (allowed.length === 0) return null;
+
+    let hostname: string;
+    try {
+      hostname = new URL(url).hostname.toLowerCase();
+    } catch {
+      return `Invalid URL for x402 request: "${url}"`;
+    }
+
+    const isAllowed = allowed.some((entry) => {
+      if (entry.startsWith("*.")) {
+        const suffix = entry.slice(2);
+        return hostname === suffix || hostname.endsWith(`.${suffix}`);
+      }
+      return hostname === entry;
+    });
+
+    if (isAllowed) return null;
+    return `x402 host "${hostname}" is not in the allowed hosts list.`;
   }
 }

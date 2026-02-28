@@ -10,9 +10,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Agentic Work Unit (AWU) metric**: Usage Insights now tracks agent efficiency via AWU — successfully completed tasks measured against tokens and cost consumed. Shows AWU count, tokens/AWU, cost/AWU, AWUs per dollar, and period-over-period trend comparison.
 - **All Workspaces aggregation**: Usage Insights defaults to "All Workspaces" view, aggregating metrics across every workspace. Individual workspace filtering remains available via dropdown.
+- **Completion output summary payload**: `task_completed` events now support an optional `outputSummary` contract with normalized output metadata (`created`, `modifiedFallback`, `primaryOutputPath`, `outputCount`, `folders`). This keeps completion UX accurate even when renderer event history is capped.
+- **Completion output UX actions**: completion toasts now show output-aware copy (including filename/count) and include direct actions for `Open file`, `Show in Finder`, and `View in Files`.
+- **Shared renderer completion UX utilities**: added reusable helpers for completion toast construction, output badge behavior, panel auto-open decisions, and output/event visibility rules.
+- **Artifact visibility parity across bridges**: `artifact_created` is now included in collaborative child-file merging and in the control-plane task event bridge allowlist, so artifact-only tasks are visible consistently in all surfaces.
 
 ### Changed
 - **Usage Insights UI redesign**: Replaced single-column layout with compact hero stats row (completed, success rate with color-coded progress bar, failed, avg time) and two-column grid for detailed sections (Cost & AWU side-by-side, Activity Day & Hour side-by-side, Skills & Packs side-by-side).
+- **Output detection rule**: completion output detection now prefers newly created outputs (`file_created`, `artifact_created`) and only falls back to modified outputs when no created outputs exist.
+- **Right panel file-output emphasis**: Files section now highlights primary output, shows an output count badge, and adds a separate location context line while keeping filename-only rows.
+- **Completion timeline details**: `task_completed` now renders an explicit “Output ready” details card (with actions) when outputs exist; `artifact_created` is treated as important and expandable in summary/technical timelines.
+- **Status-map coherence for artifact events**: `artifact_created` now maps to `executing` in shared task event status mapping for consistent in-progress state display.
+
+### Fixed
+- **Hidden extensionless outputs in files list**: output files without a dot in the filename are no longer filtered out from the right-panel files section.
 
 ## [0.4.9] - 2026-02-26
 

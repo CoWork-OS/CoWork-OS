@@ -98,10 +98,19 @@
     "lint": "oxlint src -c .oxlintrc.json --tsconfig tsconfig.json",
     "lint:eslint": "eslint src --ext ts,tsx",
     "skills:validate-routing": "node scripts/qa/validate-skills-routing.mjs",
+    "skills:validate-content": "node scripts/qa/validate-skills-content.mjs",
+    "skills:audit": "node scripts/qa/skills-audit-report.mjs",
+    "skills:eval-routing": "node scripts/qa/eval-skills-routing.mjs",
+    "qa:eval:build": "node scripts/qa/build_eval_corpus.cjs",
+    "qa:eval:run": "node scripts/qa/run_eval_suite.cjs",
+    "qa:eval:enforce-regressions": "node scripts/qa/enforce_eval_regression_policy.cjs",
+    "qa:reliability": "npm run qa:eval:run && node scripts/qa/run_battery.cjs",
+    "skills:check:core": "npm run skills:validate-routing && npm run skills:validate-content && npm run skills:audit",
+    "skills:check": "node scripts/qa/skills-check.mjs",
     "type-check": "tsc --noEmit",
-    "test": "npm run skills:validate-routing && vitest run",
+    "test": "npm run skills:check && vitest run",
     "test:watch": "vitest",
-    "test:coverage": "npm run skills:validate-routing && vitest run --coverage"
+    "test:coverage": "npm run skills:check && vitest run --coverage"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",
@@ -195,7 +204,9 @@
         "to": "skills",
         "filter": [
           "**/*.json",
-          "scripts/**"
+          "**/SKILL.md",
+          "**/references/**",
+          "**/scripts/**"
         ]
       },
       {

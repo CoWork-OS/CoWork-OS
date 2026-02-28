@@ -21,7 +21,24 @@
       "useWhen": "Use when the user wants to understand a website's structure, discover all pages, or create a site inventory.",
       "dontUseWhen": "Don't use for single-page scraping or when the user only needs content from one specific URL.",
       "outputs": "Hierarchical site map with page titles, URLs, and content summaries.",
-      "successCriteria": "Discovers and maps the main pages of the target website with accurate structure."
+      "successCriteria": "Discovers and maps the main pages of the target website with accurate structure.",
+      "examples": {
+        "positive": [
+          "Use the site-mapper skill for this request.",
+          "Help me with site mapper.",
+          "Use when the user wants to understand a website's structure, discover all pages, or create a site inventory.",
+          "Site Mapper: provide an actionable result."
+        ],
+        "negative": [
+          "Don't use for single-page scraping or when the user only needs content from one specific URL.",
+          "Do not use site-mapper for unrelated requests.",
+          "This request is outside site mapper scope.",
+          "This is conceptual discussion only; no tool workflow is needed."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "low"
     }
   }
 }

@@ -31,7 +31,14 @@ interface WalletFileFormat {
   createdAt: string;
 }
 
+const BASE_NETWORK = { chainId: 8453, name: "base" } as const;
+const DEFAULT_BASE_RPC_URLS = ["https://mainnet.base.org", "https://base.llamarpc.com"] as const;
+const BALANCE_RPC_TIMEOUT_MS = 10_000;
+const RPC_LOG_THROTTLE_MS = 60_000;
+
 export class WalletManager {
+  private static readonly rpcErrorLogAt = new Map<string, number>();
+
   /**
    * Generate a new wallet, store encrypted, and return key info.
    */
@@ -195,32 +202,42 @@ export class WalletManager {
     const address = this.getAddress();
     if (!address) return "0.00";
 
-    const RPC_URLS = ["https://mainnet.base.org", "https://base.llamarpc.com"];
+    const rpcUrls = this.getBaseRpcUrls();
     const USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 
-    for (const rpcUrl of RPC_URLS) {
+    for (const rpcUrl of rpcUrls) {
+      let provider: ethers.JsonRpcProvider | null = null;
       try {
-        const provider = new ethers.JsonRpcProvider(rpcUrl, undefined, {
+        // Pin the network so ethers does not try to bootstrap chain detection on startup.
+        provider = new ethers.JsonRpcProvider(rpcUrl, BASE_NETWORK, {
           staticNetwork: true,
           batchMaxCount: 1,
         });
+
         const usdc = new ethers.Contract(
           USDC_ADDRESS,
           ["function balanceOf(address) view returns (uint256)"],
           provider,
         );
-        const balance = await Promise.race([
-          usdc.balanceOf(address),
-          new Promise((_, reject) => setTimeout(() => reject(new Error("RPC timeout")), 10_000)),
-        ]);
+
+        const balance = await this.withTimeout(
+          usdc.balanceOf(address) as Promise<bigint>,
+          BALANCE_RPC_TIMEOUT_MS,
+          `RPC timeout (${rpcUrl})`,
+        );
         // USDC has 6 decimals
         return ethers.formatUnits(balance, 6);
       } catch (error) {
-        console.warn(`[WalletManager] Balance fetch failed (${rpcUrl}):`, error);
+        this.logRpcFailure(rpcUrl, error);
         continue;
+      } finally {
+        provider?.destroy();
       }
     }
-    console.warn("[WalletManager] All RPC endpoints failed for balance fetch");
+    this.logWarnThrottled(
+      "all",
+      "[WalletManager] All RPC endpoints failed for balance fetch; returning cached 0.00",
+    );
     return "0.00";
   }
 
@@ -241,6 +258,69 @@ export class WalletManager {
       return repository.load<EncryptedWalletData>(STORAGE_KEY) || null;
     } catch {
       return null;
+    }
+  }
+
+  private static getBaseRpcUrls(): string[] {
+    const fromEnv = process.env.COWORK_BASE_RPC_URLS
+      ?.split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+    if (fromEnv && fromEnv.length > 0) {
+      return [...new Set(fromEnv)];
+    }
+    return [...DEFAULT_BASE_RPC_URLS];
+  }
+
+  private static async withTimeout<T>(
+    promise: Promise<T>,
+    timeoutMs: number,
+    timeoutMessage: string,
+  ): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<T>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+    });
+    try {
+      return await Promise.race([promise, timeoutPromise]);
+    } finally {
+      if (timer) {
+        clearTimeout(timer);
+      }
+    }
+  }
+
+  private static logRpcFailure(rpcUrl: string, error: unknown): void {
+    const message = this.errorToMessage(error);
+    this.logWarnThrottled(
+      rpcUrl,
+      `[WalletManager] Balance fetch failed (${rpcUrl}): ${message}`,
+    );
+  }
+
+  private static logWarnThrottled(scope: string, message: string): void {
+    const now = Date.now();
+    const key = `wallet-rpc:${scope}`;
+    const last = this.rpcErrorLogAt.get(key) ?? 0;
+    if (now - last < RPC_LOG_THROTTLE_MS) {
+      return;
+    }
+    this.rpcErrorLogAt.set(key, now);
+    console.warn(message);
+  }
+
+  private static errorToMessage(error: unknown): string {
+    if (error instanceof Error) {
+      const maybeCode = (error as { code?: string }).code;
+      return maybeCode ? `${error.message} (code=${maybeCode})` : error.message;
+    }
+    if (typeof error === "string") {
+      return error;
+    }
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return String(error);
     }
   }
 }

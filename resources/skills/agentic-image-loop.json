@@ -12,7 +12,24 @@
       "useWhen": "Use when the user asks to generate -> annotate -> refine -> repeat using generate_image + Visual Annotator Live Canvas.",
       "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
       "outputs": "Outcome from Agentic Image Loop: task-specific result plus concrete action notes.",
-      "successCriteria": "Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior."
+      "successCriteria": "Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior.",
+      "examples": {
+        "positive": [
+          "Use the agentic-image-loop skill for this request.",
+          "Help me with agentic image loop.",
+          "Use when the user asks to generate -> annotate -> refine -> repeat using generate_image + Visual Annotator Live Canvas.",
+          "Agentic Image Loop: provide an actionable result."
+        ],
+        "negative": [
+          "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
+          "Do not use agentic-image-loop for unrelated requests.",
+          "This request is outside agentic image loop scope.",
+          "This is conceptual discussion only; no tool workflow is needed."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "medium"
     }
   }
 }

@@ -36,7 +36,24 @@
       "successCriteria": "Includes positive/negative cases and test setup assumptions.",
       "expectedArtifacts": [
         "tests.md"
-      ]
+      ],
+      "examples": {
+        "positive": [
+          "Use the write-tests skill for this request.",
+          "Help me with write tests.",
+          "Use when the user requests missing test coverage for a specific file or module.",
+          "Write Tests: provide an actionable result."
+        ],
+        "negative": [
+          "Don't use for snapshot tests or manual QA-only validation.",
+          "Do not use write-tests for unrelated requests.",
+          "This request is outside write tests scope.",
+          "This is conceptual discussion only; no tool workflow is needed."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "low"
     }
   }
 }

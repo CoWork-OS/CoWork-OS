@@ -14,7 +14,7 @@ The Control Plane WebSocket server binds to `127.0.0.1:18789` by default for sec
 
 When the server is running, it also serves a minimal web dashboard at `/` (same host/port).
 This is useful for headless/VPS setups: open the URL in a browser (via tunnel/Tailscale), paste the token, and manage tasks/approvals.
-It also includes basic workspace and channel management so you can bring up a fresh VPS without a desktop UI.
+It also includes basic workspace, channel, and account management so you can bring up a fresh VPS without a desktop UI.
 
 ## SSH Tunnel (Recommended for Personal Use)
 

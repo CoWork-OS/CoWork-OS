@@ -25,7 +25,7 @@
       "playbooks"
     ],
     "routing": {
-      "useWhen": "Use when the user asks for email-marketing help such as campaign audits, win-back/re-engagement flows, or writing copy for inactive-subscriber nurture/return campaigns. Trigger phrases include 30/60/90-day inactivity, reactivation, win-back, dormant list cleanup, re-engagement cadence, campaign design for inactive subscribers, flow design, segmentation, deliverability, compliance, or platform selection guidance.",
+      "useWhen": "Use when the user asks to get email-marketing help such as campaign audits, win-back/re-engagement flows, or writing copy for inactive-subscriber nurture/return campaigns. Trigger phrases include 30/60/90-day inactivity, reactivation, win-back, dormant list cleanup, re-engagement cadence, campaign design for inactive subscribers, flow design, segmentation, deliverability, compliance, or platform selection guidance.",
       "dontUseWhen": "Do not use when the user asks for unrelated product strategy or non-email-specific business tasks.",
       "outputs": "Concrete, actionable email marketing recommendations with assumptions, priorities, and measurable next steps.",
       "successCriteria": "Recommendations should cite tradeoffs, measurable thresholds, and the specific campaign/segment/platform context."

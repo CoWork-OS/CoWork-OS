@@ -1,28 +1,37 @@
 import { useEffect, useState } from "react";
-import { XSettingsData } from "../../shared/types";
+import { XSettingsData, XMentionTriggerStatus } from "../../shared/types";
+
+interface XStatusView {
+  installed: boolean;
+  connected: boolean;
+  username?: string;
+  error?: string;
+  mentionTriggerStatus: XMentionTriggerStatus;
+}
 
 export function XSettings() {
   const [settings, setSettings] = useState<XSettingsData | null>(null);
   const [cookieSourcesInput, setCookieSourcesInput] = useState("");
+  const [allowlistInput, setAllowlistInput] = useState("");
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [saveMessage, setSaveMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [testResult, setTestResult] = useState<{
     success: boolean;
     error?: string;
     username?: string;
     userId?: string;
   } | null>(null);
-  const [status, setStatus] = useState<{
-    installed: boolean;
-    connected: boolean;
-    username?: string;
-    error?: string;
-  } | null>(null);
+  const [status, setStatus] = useState<XStatusView | null>(null);
   const [statusLoading, setStatusLoading] = useState(false);
 
   useEffect(() => {
-    loadSettings();
-    refreshStatus();
+    void loadSettings();
+    void refreshStatus();
+    const interval = setInterval(() => {
+      void refreshStatus();
+    }, 10_000);
+    return () => clearInterval(interval);
   }, []);
 
   const loadSettings = async () => {
@@ -30,6 +39,7 @@ export function XSettings() {
       const loaded = await window.electronAPI.getXSettings();
       setSettings(loaded);
       setCookieSourcesInput((loaded.cookieSource || []).join(", "));
+      setAllowlistInput((loaded.mentionTrigger?.allowedAuthors || []).join(", "));
     } catch (error) {
       console.error("Failed to load X settings:", error);
     }
@@ -44,22 +54,33 @@ export function XSettings() {
     if (!settings) return;
     setSaving(true);
     setTestResult(null);
+    setSaveMessage(null);
     try {
       const cookieSource = cookieSourcesInput
         .split(",")
         .map((item) => item.trim())
         .filter(Boolean);
+      const allowedAuthors = allowlistInput
+        .split(",")
+        .map((item) => item.trim().replace(/^@+/, ""))
+        .filter(Boolean);
 
       const payload: XSettingsData = {
         ...settings,
         cookieSource,
+        mentionTrigger: {
+          ...settings.mentionTrigger,
+          allowedAuthors,
+        },
       };
 
       await window.electronAPI.saveXSettings(payload);
       setSettings(payload);
+      setSaveMessage({ ok: true, text: "Settings saved. Mention polling triggered." });
       await refreshStatus();
-    } catch (error) {
+    } catch (error: Any) {
       console.error("Failed to save X settings:", error);
+      setSaveMessage({ ok: false, text: error?.message || "Failed to save settings." });
     } finally {
       setSaving(false);
     }
@@ -69,7 +90,7 @@ export function XSettings() {
     try {
       setStatusLoading(true);
       const result = await window.electronAPI.getXStatus();
-      setStatus(result);
+      setStatus(result as XStatusView);
     } catch (error) {
       console.error("Failed to load X status:", error);
     } finally {
@@ -124,11 +145,8 @@ export function XSettings() {
           </button>
         </div>
         <p className="settings-description">
-          Connect the agent to an X account using the Bird CLI. Log in via your browser or provide
-          cookie tokens, then use the built-in `x_action` tool for reading and posting. If a request
-          is blocked (rate limit/challenge), the tool now attempts browser fallback automation for
-          read and post/reply/follow steps where possible, with manual fallback details when full
-          automation is not possible.
+          Connect CoWork OS to X using Bird CLI. Mention triggers can create tasks from allowlisted
+          authors using your configurable command prefix.
         </p>
         {status?.error && <p className="settings-hint">Status check: {status.error}</p>}
         <div className="settings-actions">
@@ -152,6 +170,108 @@ export function XSettings() {
             />
             <span className="toggle-slider" />
           </label>
+        </div>
+
+        <div className="settings-field">
+          <label>Enable Mention Trigger</label>
+          <label className="settings-toggle">
+            <input
+              type="checkbox"
+              checked={settings.mentionTrigger.enabled}
+              onChange={(e) =>
+                updateSettings({
+                  mentionTrigger: {
+                    ...settings.mentionTrigger,
+                    enabled: e.target.checked,
+                  },
+                })
+              }
+            />
+            <span className="toggle-slider" />
+          </label>
+        </div>
+
+        <div className="settings-field">
+          <label>Command Prefix</label>
+          <input
+            type="text"
+            className="settings-input"
+            placeholder="do:"
+            value={settings.mentionTrigger.commandPrefix}
+            onChange={(e) =>
+              updateSettings({
+                mentionTrigger: {
+                  ...settings.mentionTrigger,
+                  commandPrefix: e.target.value,
+                },
+              })
+            }
+          />
+          <p className="settings-hint">Case-insensitive, customizable trigger prefix.</p>
+          <p className="settings-hint">Changes apply after you click “Save Settings”.</p>
+        </div>
+
+        <div className="settings-field">
+          <label>Allowed Authors</label>
+          <input
+            type="text"
+            className="settings-input"
+            placeholder="@tomosman, @alice"
+            value={allowlistInput}
+            onChange={(e) => setAllowlistInput(e.target.value)}
+          />
+          <p className="settings-hint">
+            Comma-separated handles that are allowed to trigger tasks.
+          </p>
+        </div>
+
+        <div className="settings-field">
+          <label>Poll Interval (sec)</label>
+          <input
+            type="number"
+            className="settings-input"
+            min={30}
+            max={3600}
+            value={settings.mentionTrigger.pollIntervalSec}
+            onChange={(e) =>
+              updateSettings({
+                mentionTrigger: {
+                  ...settings.mentionTrigger,
+                  pollIntervalSec: Number(e.target.value),
+                },
+              })
+            }
+          />
+          <p className="settings-hint">Recommended: 120-300 seconds for normal use.</p>
+        </div>
+
+        <div className="settings-field">
+          <label>Fetch Count</label>
+          <input
+            type="number"
+            className="settings-input"
+            min={1}
+            max={200}
+            value={settings.mentionTrigger.fetchCount}
+            onChange={(e) =>
+              updateSettings({
+                mentionTrigger: {
+                  ...settings.mentionTrigger,
+                  fetchCount: Number(e.target.value),
+                },
+              })
+            }
+          />
+        </div>
+
+        <div className="settings-field">
+          <label>Workspace Mode</label>
+          <input
+            type="text"
+            className="settings-input"
+            value={settings.mentionTrigger.workspaceMode}
+            disabled
+          />
         </div>
 
         <div className="settings-field">
@@ -291,6 +411,11 @@ export function XSettings() {
             {saving ? "Saving..." : "Save Settings"}
           </button>
         </div>
+        {saveMessage && (
+          <div className={`test-result ${saveMessage.ok ? "success" : "error"}`}>
+            <span>{saveMessage.text}</span>
+          </div>
+        )}
 
         {testResult && (
           <div className={`test-result ${testResult.success ? "success" : "error"}`}>
@@ -302,6 +427,38 @@ export function XSettings() {
           </div>
         )}
       </div>
+
+      {status?.mentionTriggerStatus && (
+        <div className="settings-section">
+          <h4>Mention Trigger Runtime</h4>
+          <p className="settings-hint">
+            Mode: <code>{status.mentionTriggerStatus.mode}</code> · Running:{" "}
+            <code>{status.mentionTriggerStatus.running ? "yes" : "no"}</code>
+          </p>
+          <p className="settings-hint">
+            Accepted: <code>{status.mentionTriggerStatus.acceptedCount}</code> · Ignored:{" "}
+            <code>{status.mentionTriggerStatus.ignoredCount}</code>
+          </p>
+          <p className="settings-hint">
+            Last poll:{" "}
+            {status.mentionTriggerStatus.lastPollAt
+              ? new Date(status.mentionTriggerStatus.lastPollAt).toLocaleString()
+              : "n/a"}
+          </p>
+          <p className="settings-hint">
+            Last success:{" "}
+            {status.mentionTriggerStatus.lastSuccessAt
+              ? new Date(status.mentionTriggerStatus.lastSuccessAt).toLocaleString()
+              : "n/a"}
+          </p>
+          <p className="settings-hint">
+            Last task id: <code>{status.mentionTriggerStatus.lastTaskId || "n/a"}</code>
+          </p>
+          {status.mentionTriggerStatus.lastError && (
+            <p className="settings-hint">Last error: {status.mentionTriggerStatus.lastError}</p>
+          )}
+        </div>
+      )}
 
       <div className="settings-section">
         <h4>Login Help</h4>

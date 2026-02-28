@@ -670,6 +670,7 @@ export class CronTools {
                     "email",
                     "teams",
                     "googlechat",
+                    "x",
                   ],
                   description: "Type of messaging channel to deliver to",
                 },

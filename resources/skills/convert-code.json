@@ -36,7 +36,24 @@
       "useWhen": "Use when asked to translate source code from one language to another while preserving behavior.",
       "dontUseWhen": "Don't use when target language constraints, API semantics, or requirements are unclear.",
       "outputs": "Converted source plus migration notes and any intentional semantic deviations.",
-      "successCriteria": "Core logic and behavior stay equivalent, with idiomatic target-language usage."
+      "successCriteria": "Core logic and behavior stay equivalent, with idiomatic target-language usage.",
+      "examples": {
+        "positive": [
+          "Use the convert-code skill for this request.",
+          "Help me with convert code.",
+          "Use when asked to translate source code from one language to another while preserving behavior.",
+          "Convert Code: provide an actionable result."
+        ],
+        "negative": [
+          "Don't use when target language constraints, API semantics, or requirements are unclear.",
+          "Do not use convert-code for unrelated requests.",
+          "This request is outside convert code scope.",
+          "This is conceptual discussion only; no tool workflow is needed."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "low"
     }
   }
 }

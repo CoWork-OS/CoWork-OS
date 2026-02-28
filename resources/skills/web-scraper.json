@@ -27,7 +27,24 @@
       "useWhen": "Use when the user wants to scrape content from websites, especially sites with anti-bot protection, dynamic content, or structured data that needs extraction.",
       "dontUseWhen": "Don't use for simple URL fetching where web_fetch works fine. Don't use for internal files or local content.",
       "outputs": "Extracted web content including text, tables, links, images, and metadata.",
-      "successCriteria": "Successfully extracts the requested content from the target URL with clean formatting."
+      "successCriteria": "Successfully extracts the requested content from the target URL with clean formatting.",
+      "examples": {
+        "positive": [
+          "Use the web-scraper skill for this request.",
+          "Help me with web scraper.",
+          "Use when the user wants to scrape content from websites, especially sites with anti-bot protection, dynamic content, or structured data that needs extraction.",
+          "Web Scraper: provide an actionable result."
+        ],
+        "negative": [
+          "Don't use for simple URL fetching where web_fetch works fine. Don't use for internal files or local content.",
+          "Do not use web-scraper for unrelated requests.",
+          "This request is outside web scraper scope.",
+          "This is conceptual discussion only; no tool workflow is needed."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "low"
     }
   }
 }

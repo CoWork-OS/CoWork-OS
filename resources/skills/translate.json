@@ -41,7 +41,24 @@
       "successCriteria": "Preserves meaning and structure with style-appropriate phrasing.",
       "expectedArtifacts": [
         "{{language}}.md"
-      ]
+      ],
+      "examples": {
+        "positive": [
+          "Use the translate skill for this request.",
+          "Help me with translate.",
+          "Use when user asks for language localization of user-visible content.",
+          "Translate: provide an actionable result."
+        ],
+        "negative": [
+          "Don't use for translating source code identifiers or binary formats.",
+          "Do not use translate for unrelated requests.",
+          "This request is outside translate scope.",
+          "This is conceptual discussion only; no tool workflow is needed."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "low"
     }
   }
 }

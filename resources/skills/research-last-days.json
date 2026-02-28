@@ -26,7 +26,16 @@
       "description": "Target AI tool for the prompts (optional context)",
       "required": false,
       "default": "Any",
-      "options": ["Any", "ChatGPT", "Claude", "Midjourney", "DALL-E", "Stable Diffusion", "Cursor", "Claude Code"]
+      "options": [
+        "Any",
+        "ChatGPT",
+        "Claude",
+        "Midjourney",
+        "DALL-E",
+        "Stable Diffusion",
+        "Cursor",
+        "Claude Code"
+      ]
     }
   ],
   "enabled": true,
@@ -35,7 +44,24 @@
       "useWhen": "Use when the user asks to research what happened recently on a topic, look up news from the last N days, or find recent trends and discussions.",
       "dontUseWhen": "Do not use for planning documents, high-level strategy, or non-executable discussion.",
       "outputs": "Summary of recent findings with trends, patterns, and actionable insights.",
-      "successCriteria": "Returns concrete findings from the specified time period with sources and no fabricated results."
+      "successCriteria": "Returns concrete findings from the specified time period with sources and no fabricated results.",
+      "examples": {
+        "positive": [
+          "Use the research-last-days skill for this request.",
+          "Help me with last x days research.",
+          "Use when the user asks to research what happened recently on a topic, look up news from the last N days, or find recent trends and discussions.",
+          "Last X Days Research: provide an actionable result."
+        ],
+        "negative": [
+          "Do not use for planning documents, high-level strategy, or non-executable discussion.",
+          "Do not use research-last-days for unrelated requests.",
+          "This request is outside last x days research scope.",
+          "This is conceptual discussion only; no tool workflow is needed."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "low"
     }
   }
 }

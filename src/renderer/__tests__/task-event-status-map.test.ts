@@ -7,6 +7,7 @@ describe("TASK_EVENT_STATUS_MAP", () => {
     expect(TASK_EVENT_STATUS_MAP.task_queued).toBe("queued");
     expect(TASK_EVENT_STATUS_MAP.task_dequeued).toBe("planning");
     expect(TASK_EVENT_STATUS_MAP.executing).toBe("executing");
+    expect(TASK_EVENT_STATUS_MAP.artifact_created).toBe("executing");
     expect(TASK_EVENT_STATUS_MAP.task_paused).toBe("paused");
     expect(TASK_EVENT_STATUS_MAP.task_completed).toBe("completed");
     expect(TASK_EVENT_STATUS_MAP.error).toBe("failed");

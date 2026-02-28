@@ -424,5 +424,187 @@ describe("SearchProviderFactory", () => {
       expect(tavilyProvider.search).toHaveBeenCalledTimes(1);
       expect(braveProvider.search).not.toHaveBeenCalled();
     });
+
+    it("falls back to the next provider when requested provider fails with quota/rate errors", async () => {
+      const tavilyProvider = { search: vi.fn().mockRejectedValue(new Error("Tavily API error: 432")) };
+      const braveProvider = { search: vi.fn().mockResolvedValue({ provider: "brave" }) };
+
+      vi.spyOn(SearchProviderFactory, "loadSettings").mockReturnValue({
+        primaryProvider: "tavily",
+        fallbackProvider: "brave",
+        tavily: { apiKey: "tavily" },
+        brave: { apiKey: "brave" },
+      } as Any);
+
+      vi.spyOn(SearchProviderFactory as Any, "getProviderExecutionOrder").mockReturnValue([
+        "brave",
+        "tavily",
+      ]);
+
+      vi.spyOn(SearchProviderFactory as Any, "getProviderConfig").mockImplementation(
+        (providerType: string) => ({
+          type: providerType,
+        }),
+      );
+
+      vi.spyOn(SearchProviderFactory as Any, "createProviderFromConfig").mockImplementation(
+        (config: Any) => {
+          if (config.type === "tavily") return tavilyProvider;
+          return braveProvider;
+        },
+      );
+
+      vi.spyOn(SearchProviderFactory as Any, "searchWithRetry").mockImplementation(
+        async (provider: Any) => provider.search(),
+      );
+
+      const response = await SearchProviderFactory.searchWithFallback({
+        query: "f1 latest",
+        searchType: "web",
+        provider: "tavily",
+      });
+
+      expect(response.provider).toBe("brave");
+      expect(tavilyProvider.search).toHaveBeenCalledTimes(1);
+      expect(braveProvider.search).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not fallback when requested provider fails for non-quota reasons", async () => {
+      const tavilyProvider = { search: vi.fn().mockRejectedValue(new Error("Invalid API key")) };
+      const braveProvider = { search: vi.fn().mockResolvedValue({ provider: "brave" }) };
+
+      vi.spyOn(SearchProviderFactory, "loadSettings").mockReturnValue({
+        primaryProvider: "tavily",
+        fallbackProvider: "brave",
+        tavily: { apiKey: "tavily" },
+        brave: { apiKey: "brave" },
+      } as Any);
+
+      vi.spyOn(SearchProviderFactory as Any, "getProviderExecutionOrder").mockReturnValue([
+        "brave",
+        "tavily",
+      ]);
+
+      vi.spyOn(SearchProviderFactory as Any, "getProviderConfig").mockImplementation(
+        (providerType: string) => ({
+          type: providerType,
+        }),
+      );
+
+      vi.spyOn(SearchProviderFactory as Any, "createProviderFromConfig").mockImplementation(
+        (config: Any) => {
+          if (config.type === "tavily") return tavilyProvider;
+          return braveProvider;
+        },
+      );
+
+      vi.spyOn(SearchProviderFactory as Any, "searchWithRetry").mockImplementation(
+        async (provider: Any) => provider.search(),
+      );
+
+      await expect(
+        SearchProviderFactory.searchWithFallback({
+          query: "f1 latest",
+          searchType: "web",
+          provider: "tavily",
+        }),
+      ).rejects.toThrow("Search provider (tavily) failed: Invalid API key");
+
+      expect(tavilyProvider.search).toHaveBeenCalledTimes(1);
+      expect(braveProvider.search).not.toHaveBeenCalled();
+    });
+
+    it("labels providerErrorScope as global when explicit-provider fallback chain also fails", async () => {
+      const tavilyProvider = { search: vi.fn().mockRejectedValue(new Error("Tavily API error: 432")) };
+      const braveProvider = { search: vi.fn().mockRejectedValue(new Error("Brave unavailable")) };
+
+      vi.spyOn(SearchProviderFactory, "loadSettings").mockReturnValue({
+        primaryProvider: "tavily",
+        fallbackProvider: "brave",
+        tavily: { apiKey: "tavily" },
+        brave: { apiKey: "brave" },
+      } as Any);
+
+      vi.spyOn(SearchProviderFactory as Any, "getProviderExecutionOrder").mockReturnValue([
+        "brave",
+        "tavily",
+      ]);
+
+      vi.spyOn(SearchProviderFactory as Any, "getProviderConfig").mockImplementation(
+        (providerType: string) => ({ type: providerType }),
+      );
+
+      vi.spyOn(SearchProviderFactory as Any, "createProviderFromConfig").mockImplementation(
+        (config: Any) => {
+          if (config.type === "tavily") return tavilyProvider;
+          return braveProvider;
+        },
+      );
+
+      vi.spyOn(SearchProviderFactory as Any, "searchWithRetry").mockImplementation(
+        async (provider: Any) => provider.search(),
+      );
+
+      try {
+        await SearchProviderFactory.searchWithFallback({
+          query: "f1 latest",
+          searchType: "web",
+          provider: "tavily",
+        });
+        throw new Error("Expected searchWithFallback to throw");
+      } catch (error: Any) {
+        expect(error.providerErrorScope).toBe("global");
+        expect(Array.isArray(error.failedProviders)).toBe(true);
+        expect(error.failedProviders.length).toBeGreaterThan(1);
+      }
+    });
+
+    it("skips a cooled-down quota-limited provider on subsequent searches", async () => {
+      const tavilyProvider = { search: vi.fn().mockRejectedValue(new Error("Tavily API error: 432")) };
+      const braveProvider = { search: vi.fn().mockResolvedValue({ provider: "brave" }) };
+
+      vi.spyOn(SearchProviderFactory, "loadSettings").mockReturnValue({
+        primaryProvider: "tavily",
+        fallbackProvider: "brave",
+        tavily: { apiKey: "tavily" },
+        brave: { apiKey: "brave" },
+      } as Any);
+
+      vi.spyOn(SearchProviderFactory as Any, "getProviderExecutionOrder").mockReturnValue([
+        "brave",
+        "tavily",
+      ]);
+
+      vi.spyOn(SearchProviderFactory as Any, "getProviderConfig").mockImplementation(
+        (providerType: string) => ({ type: providerType }),
+      );
+
+      vi.spyOn(SearchProviderFactory as Any, "createProviderFromConfig").mockImplementation(
+        (config: Any) => {
+          if (config.type === "tavily") return tavilyProvider;
+          return braveProvider;
+        },
+      );
+
+      vi.spyOn(SearchProviderFactory as Any, "searchWithRetry").mockImplementation(
+        async (provider: Any) => provider.search(),
+      );
+
+      const first = await SearchProviderFactory.searchWithFallback({
+        query: "f1 latest",
+        searchType: "web",
+        provider: "tavily",
+      });
+      const second = await SearchProviderFactory.searchWithFallback({
+        query: "f1 latest",
+        searchType: "web",
+        provider: "tavily",
+      });
+
+      expect(first.provider).toBe("brave");
+      expect(second.provider).toBe("brave");
+      expect(tavilyProvider.search).toHaveBeenCalledTimes(1);
+      expect(braveProvider.search).toHaveBeenCalledTimes(2);
+    });
   });
 });

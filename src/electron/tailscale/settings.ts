@@ -9,8 +9,10 @@ import * as fs from "fs";
 import * as path from "path";
 import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
 import { getUserDataDir } from "../utils/user-data-dir";
+import { createLogger } from "../utils/logger";
 
 const LEGACY_SETTINGS_FILE = "tailscale-settings.json";
+const logger = createLogger("Tailscale Settings");
 
 /**
  * Tailscale mode options
@@ -63,7 +65,7 @@ export class TailscaleSettingsManager {
     this.legacySettingsPath = path.join(userDataPath, LEGACY_SETTINGS_FILE);
     this.initialized = true;
 
-    console.log("[Tailscale Settings] Initialized");
+    logger.debug("Initialized");
 
     // Migrate from legacy JSON file to encrypted database
     this.migrateFromLegacyFile();
@@ -77,9 +79,7 @@ export class TailscaleSettingsManager {
 
     try {
       if (!SecureSettingsRepository.isInitialized()) {
-        console.log(
-          "[Tailscale Settings] SecureSettingsRepository not yet initialized, skipping migration",
-        );
+        logger.debug("SecureSettingsRepository not yet initialized, skipping migration");
         return;
       }
 
@@ -95,9 +95,7 @@ export class TailscaleSettingsManager {
         return;
       }
 
-      console.log(
-        "[Tailscale Settings] Migrating settings from legacy JSON file to encrypted database...",
-      );
+      logger.debug("Migrating settings from legacy JSON file to encrypted database...");
 
       // Create backup before migration
       const backupPath = this.legacySettingsPath + ".migration-backup";
@@ -108,20 +106,20 @@ export class TailscaleSettingsManager {
         const legacySettings = { ...DEFAULT_TAILSCALE_SETTINGS, ...JSON.parse(data) };
 
         repository.save("tailscale", legacySettings);
-        console.log("[Tailscale Settings] Settings migrated to encrypted database");
+        logger.debug("Settings migrated to encrypted database");
 
         // Migration successful - delete backup and original
         fs.unlinkSync(backupPath);
         fs.unlinkSync(this.legacySettingsPath);
-        console.log("[Tailscale Settings] Migration complete, cleaned up legacy files");
+        logger.debug("Migration complete, cleaned up legacy files");
 
         this.migrationCompleted = true;
       } catch (migrationError) {
-        console.error("[Tailscale Settings] Migration failed, backup preserved at:", backupPath);
+        logger.error("Migration failed, backup preserved at:", backupPath);
         throw migrationError;
       }
     } catch (error) {
-      console.error("[Tailscale Settings] Migration failed:", error);
+      logger.error("Migration failed:", error);
     }
   }
 
@@ -154,15 +152,15 @@ export class TailscaleSettingsManager {
             ...stored,
           };
           this.cachedSettings = merged;
-          console.log("[Tailscale Settings] Loaded settings from encrypted database");
+          logger.debug("Loaded settings from encrypted database");
           return this.cachedSettings;
         }
       }
     } catch (error) {
-      console.error("[Tailscale Settings] Failed to load settings:", error);
+      logger.error("Failed to load settings:", error);
     }
 
-    console.log("[Tailscale Settings] No settings found, using defaults");
+    logger.debug("No settings found, using defaults");
     this.cachedSettings = { ...DEFAULT_TAILSCALE_SETTINGS };
     return this.cachedSettings;
   }
@@ -181,9 +179,9 @@ export class TailscaleSettingsManager {
       const repository = SecureSettingsRepository.getInstance();
       repository.save("tailscale", settings);
       this.cachedSettings = settings;
-      console.log("[Tailscale Settings] Saved settings to encrypted database");
+      logger.debug("Saved settings to encrypted database");
     } catch (error) {
-      console.error("[Tailscale Settings] Failed to save settings:", error);
+      logger.error("Failed to save settings:", error);
       throw error;
     }
   }

@@ -10,10 +10,84 @@ permissions:
   packages: write
 
 jobs:
+  hardening-release-gate:
+    name: Hardening Release Gate
+    runs-on: ubuntu-latest
+    env:
+      HARDENING_REQUIRED_AFTER_UTC: '2026-03-14T00:00:00Z'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Install sqlite3 CLI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sqlite3
+
+      - name: Run deterministic eval suite
+        id: run_eval_suite
+        continue-on-error: true
+        run: npm run qa:eval:run -- --suite reliability-regressions --mode deterministic
+        env:
+          COWORK_DB_PATH: ${{ runner.temp }}/cowork-release-eval.db
+
+      - name: Run battery suite when hooks are configured
+        id: run_battery
+        continue-on-error: true
+        env:
+          COWORK_HOOKS_ORIGIN: ${{ secrets.COWORK_HOOKS_ORIGIN }}
+          COWORK_HOOKS_TOKEN: ${{ secrets.COWORK_HOOKS_TOKEN }}
+          COWORK_DB_PATH: ${{ secrets.COWORK_DB_PATH }}
+        run: |
+          if [ -n "${COWORK_HOOKS_ORIGIN}" ] && [ -n "${COWORK_HOOKS_TOKEN}" ] && [ -n "${COWORK_DB_PATH}" ]; then
+            node scripts/qa/run_battery.cjs
+          else
+            echo "Battery skipped: set COWORK_HOOKS_ORIGIN, COWORK_HOOKS_TOKEN, and COWORK_DB_PATH secrets."
+          fi
+
+      - name: Enforce release hardening gate
+        env:
+          RUN_EVAL_OUTCOME: ${{ steps.run_eval_suite.outcome }}
+          RUN_BATTERY_OUTCOME: ${{ steps.run_battery.outcome }}
+        run: |
+          set -euo pipefail
+          now_epoch="$(date -u +%s)"
+          cutoff_epoch="$(date -u -d "${HARDENING_REQUIRED_AFTER_UTC}" +%s)"
+          strict_mode="false"
+          if [ "${now_epoch}" -ge "${cutoff_epoch}" ]; then
+            strict_mode="true"
+          fi
+
+          echo "Release hardening strict mode: ${strict_mode} (cutoff: ${HARDENING_REQUIRED_AFTER_UTC})"
+          echo "Outcomes: eval=${RUN_EVAL_OUTCOME} battery=${RUN_BATTERY_OUTCOME}"
+
+          if [ "${strict_mode}" != "true" ]; then
+            echo "Stability window active. Hardening failures do not block release."
+            exit 0
+          fi
+
+          if [ "${RUN_EVAL_OUTCOME}" != "success" ] || [ "${RUN_BATTERY_OUTCOME}" != "success" ]; then
+            echo "Release blocked: hardening gate failed after stability window."
+            exit 1
+          fi
+
+          echo "Release hardening gate passed."
+
   release:
     name: Release (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
+    needs: hardening-release-gate
     strategy:
       fail-fast: false
       matrix:
@@ -61,7 +135,7 @@ jobs:
         run: npm test
 
       - name: Validate published-package first-install flow
-        if: false
+        if: runner.os != 'Windows'
         env:
           CO_WORK_INSTALL_VERSION: ${{ steps.release_metadata.outputs.npm_version }}
         run: |

@@ -33,6 +33,7 @@ import {
   getPersonaById,
 } from "../../shared/types";
 import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
+import { sanitizeStoredPreferredName } from "../utils/preferred-name";
 import { getUserDataDir } from "../utils/user-data-dir";
 
 const LEGACY_SETTINGS_FILE = "personality-settings.json";
@@ -190,6 +191,7 @@ export class PersonalityManager {
     this.ensureInitialized();
 
     if (this.cachedSettings) {
+      this.cachedSettings.relationship = this.sanitizeRelationshipData(this.cachedSettings.relationship);
       return this.cachedSettings;
     }
 
@@ -224,6 +226,7 @@ export class PersonalityManager {
       if (!isValidPersonaId(settings.activePersona)) {
         settings.activePersona = DEFAULT_SETTINGS.activePersona;
       }
+      settings.relationship = this.sanitizeRelationshipData(settings.relationship);
     } catch (error) {
       console.error("[PersonalityManager] Failed to load settings:", error);
       // Deep copy DEFAULT_SETTINGS to avoid mutating the original constants
@@ -268,9 +271,11 @@ export class PersonalityManager {
         quirks: settings.quirks
           ? { ...existingSettings.quirks, ...settings.quirks }
           : existingSettings.quirks,
-        relationship: settings.relationship
-          ? { ...existingSettings.relationship, ...settings.relationship }
-          : existingSettings.relationship,
+        relationship: this.sanitizeRelationshipData(
+          settings.relationship
+            ? { ...existingSettings.relationship, ...settings.relationship }
+            : existingSettings.relationship,
+        ),
       };
 
       const repository = SecureSettingsRepository.getInstance();
@@ -680,9 +685,10 @@ COMPANION MINDSET:
    */
   static setUserName(name: string): void {
     const settings = this.loadSettings();
+    const sanitizedName = sanitizeStoredPreferredName(name);
     settings.relationship = {
       ...settings.relationship,
-      userName: name.trim() || undefined,
+      userName: sanitizedName || undefined,
     } as RelationshipData;
     this.saveSettings(settings);
   }
@@ -699,6 +705,27 @@ COMPANION MINDSET:
    */
   static getDefinitions(): PersonalityDefinition[] {
     return PERSONALITY_DEFINITIONS;
+  }
+
+  private static sanitizeRelationshipData(
+    relationship: RelationshipData | undefined,
+  ): RelationshipData {
+    const normalized = {
+      ...DEFAULT_RELATIONSHIP,
+      ...(relationship || {}),
+    } as RelationshipData;
+
+    const sanitizedName = sanitizeStoredPreferredName(normalized.userName);
+    if (sanitizedName) {
+      normalized.userName = sanitizedName;
+      return normalized;
+    }
+
+    if (typeof normalized.userName === "string" && normalized.userName.trim().length > 0) {
+      normalized.userName = undefined;
+    }
+
+    return normalized;
   }
 
   /**

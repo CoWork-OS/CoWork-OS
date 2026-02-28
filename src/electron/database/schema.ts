@@ -265,7 +265,55 @@ export class DatabaseManager {
         terminal_status TEXT,
         failure_class TEXT,
         budget_usage TEXT,
+        risk_level TEXT,
+        eval_case_id TEXT,
+        eval_run_id TEXT,
         FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS eval_cases (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        workspace_id TEXT REFERENCES workspaces(id),
+        source_task_id TEXT REFERENCES tasks(id),
+        prompt TEXT NOT NULL,
+        sanitized_prompt TEXT NOT NULL,
+        assertions TEXT,
+        metadata TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS eval_suites (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        description TEXT,
+        case_ids TEXT NOT NULL DEFAULT '[]',
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS eval_runs (
+        id TEXT PRIMARY KEY,
+        suite_id TEXT NOT NULL REFERENCES eval_suites(id),
+        status TEXT NOT NULL,
+        started_at INTEGER NOT NULL,
+        completed_at INTEGER,
+        pass_count INTEGER NOT NULL DEFAULT 0,
+        fail_count INTEGER NOT NULL DEFAULT 0,
+        skipped_count INTEGER NOT NULL DEFAULT 0,
+        metadata TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS eval_case_runs (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL REFERENCES eval_runs(id) ON DELETE CASCADE,
+        case_id TEXT NOT NULL REFERENCES eval_cases(id),
+        status TEXT NOT NULL,
+        details TEXT,
+        started_at INTEGER NOT NULL,
+        completed_at INTEGER,
+        duration_ms INTEGER
       );
 
       CREATE TABLE IF NOT EXISTS hook_sessions (
@@ -338,6 +386,9 @@ export class DatabaseManager {
       -- Indexes for performance
       CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
       CREATE INDEX IF NOT EXISTS idx_tasks_workspace ON tasks(workspace_id);
+      CREATE INDEX IF NOT EXISTS idx_tasks_risk_level ON tasks(risk_level);
+      CREATE INDEX IF NOT EXISTS idx_tasks_eval_case_id ON tasks(eval_case_id);
+      CREATE INDEX IF NOT EXISTS idx_tasks_eval_run_id ON tasks(eval_run_id);
       CREATE INDEX IF NOT EXISTS idx_hook_sessions_task ON hook_sessions(task_id);
       CREATE INDEX IF NOT EXISTS idx_hook_session_locks_expires ON hook_session_locks(expires_at);
       CREATE INDEX IF NOT EXISTS idx_task_events_task ON task_events(task_id);
@@ -345,6 +396,11 @@ export class DatabaseManager {
       CREATE INDEX IF NOT EXISTS idx_approvals_task ON approvals(task_id);
       CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status);
       CREATE INDEX IF NOT EXISTS idx_llm_models_active ON llm_models(is_active);
+      CREATE INDEX IF NOT EXISTS idx_eval_cases_workspace ON eval_cases(workspace_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_eval_cases_source_task ON eval_cases(source_task_id);
+      CREATE INDEX IF NOT EXISTS idx_eval_runs_suite ON eval_runs(suite_id, started_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_eval_case_runs_run ON eval_case_runs(run_id);
+      CREATE INDEX IF NOT EXISTS idx_eval_case_runs_case ON eval_case_runs(case_id);
 
       -- Channel Gateway tables
       CREATE TABLE IF NOT EXISTS channels (
@@ -724,6 +780,9 @@ export class DatabaseManager {
       "ALTER TABLE tasks ADD COLUMN terminal_status TEXT",
       "ALTER TABLE tasks ADD COLUMN failure_class TEXT",
       "ALTER TABLE tasks ADD COLUMN budget_usage TEXT",
+      "ALTER TABLE tasks ADD COLUMN risk_level TEXT",
+      "ALTER TABLE tasks ADD COLUMN eval_case_id TEXT",
+      "ALTER TABLE tasks ADD COLUMN eval_run_id TEXT",
     ];
 
     for (const sql of strategyAndResultColumns) {
@@ -746,6 +805,73 @@ export class DatabaseManager {
       this.db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_task_id)");
     } catch {
       // Index already exists, ignore
+    }
+
+    // Migration: Add reliability indexes for risk/eval metadata
+    try {
+      this.db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_risk_level ON tasks(risk_level)");
+      this.db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_eval_case_id ON tasks(eval_case_id)");
+      this.db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_eval_run_id ON tasks(eval_run_id)");
+    } catch {
+      // Index already exists, ignore
+    }
+
+    // Migration: Create eval corpus and run tracking tables
+    try {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS eval_cases (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          workspace_id TEXT REFERENCES workspaces(id),
+          source_task_id TEXT REFERENCES tasks(id),
+          prompt TEXT NOT NULL,
+          sanitized_prompt TEXT NOT NULL,
+          assertions TEXT,
+          metadata TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS eval_suites (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL UNIQUE,
+          description TEXT,
+          case_ids TEXT NOT NULL DEFAULT '[]',
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS eval_runs (
+          id TEXT PRIMARY KEY,
+          suite_id TEXT NOT NULL REFERENCES eval_suites(id),
+          status TEXT NOT NULL,
+          started_at INTEGER NOT NULL,
+          completed_at INTEGER,
+          pass_count INTEGER NOT NULL DEFAULT 0,
+          fail_count INTEGER NOT NULL DEFAULT 0,
+          skipped_count INTEGER NOT NULL DEFAULT 0,
+          metadata TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS eval_case_runs (
+          id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL REFERENCES eval_runs(id) ON DELETE CASCADE,
+          case_id TEXT NOT NULL REFERENCES eval_cases(id),
+          status TEXT NOT NULL,
+          details TEXT,
+          started_at INTEGER NOT NULL,
+          completed_at INTEGER,
+          duration_ms INTEGER
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_eval_cases_workspace ON eval_cases(workspace_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_eval_cases_source_task ON eval_cases(source_task_id);
+        CREATE INDEX IF NOT EXISTS idx_eval_runs_suite ON eval_runs(suite_id, started_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_eval_case_runs_run ON eval_case_runs(run_id);
+        CREATE INDEX IF NOT EXISTS idx_eval_case_runs_case ON eval_case_runs(case_id);
+      `);
+    } catch {
+      // Table or index already exists, ignore
     }
 
     // Migration: Create agent_roles table for Agent Squad feature

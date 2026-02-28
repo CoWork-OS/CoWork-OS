@@ -10,13 +10,22 @@ interface SkillParameterModalProps {
 export function SkillParameterModal({ skill, onSubmit, onCancel }: SkillParameterModalProps) {
   const [values, setValues] = useState<Record<string, string | number | boolean>>({});
   const firstInputRef = useRef<HTMLInputElement | HTMLSelectElement>(null);
+  const ARTIFACT_DIR_FALLBACK = "artifacts";
+
+  const normalizeTemplateDefault = (value: unknown): unknown => {
+    if (typeof value !== "string") return value;
+    return value.replace(/\{artifactDir\}/g, ARTIFACT_DIR_FALLBACK);
+  };
 
   // Initialize with default values
   useEffect(() => {
     const initialValues: Record<string, string | number | boolean> = {};
     skill.parameters?.forEach((param) => {
       if (param.default !== undefined) {
-        initialValues[param.name] = param.default;
+        initialValues[param.name] = normalizeTemplateDefault(param.default) as
+          | string
+          | number
+          | boolean;
       } else if (param.type === "boolean") {
         initialValues[param.name] = false;
       } else if (param.type === "number") {
@@ -55,10 +64,14 @@ export function SkillParameterModal({ skill, onSubmit, onCancel }: SkillParamete
     skill.parameters?.forEach((param) => {
       const value = values[param.name] ?? param.default ?? "";
       const placeholder = new RegExp(`\\{\\{${param.name}\\}\\}`, "g");
-      prompt = prompt.replace(placeholder, String(value));
+      const normalizedValue =
+        typeof value === "string" ? value.replace(/\{artifactDir\}/g, ARTIFACT_DIR_FALLBACK) : value;
+      prompt = prompt.replace(placeholder, String(normalizedValue));
     });
     // Remove any remaining unreplaced placeholders
     prompt = prompt.replace(/\{\{[^}]+\}\}/g, "");
+    // Ensure direct modal runs don't leak literal template tokens.
+    prompt = prompt.replace(/\{artifactDir\}/g, ARTIFACT_DIR_FALLBACK);
     return prompt.trim();
   };
 
@@ -73,7 +86,8 @@ export function SkillParameterModal({ skill, onSubmit, onCancel }: SkillParamete
       skill.parameters?.every((param) => {
         if (param.required) {
           const value = values[param.name];
-          if (value === undefined || value === "") return false;
+          if (value === undefined) return false;
+          if (typeof value === "string" && value.trim() === "") return false;
         }
         return true;
       }) ?? true

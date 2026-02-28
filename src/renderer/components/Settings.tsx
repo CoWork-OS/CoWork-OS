@@ -205,6 +205,13 @@ interface ProviderInfo {
   configured: boolean;
 }
 
+interface ProviderRoutingConfig {
+  profileRoutingEnabled?: boolean;
+  strongModelKey?: string;
+  cheapModelKey?: string;
+  preferStrongForVerification?: boolean;
+}
+
 // Helper to format bytes to human-readable size
 function formatBytes(bytes: number): string {
   if (bytes === 0) return "0 B";
@@ -550,10 +557,12 @@ export function Settings({
     modelKey: "sonnet-3-5",
   });
   const [models, setModels] = useState<ModelOption[]>([]);
+  const [providerRoutingModels, setProviderRoutingModels] = useState<ModelOption[]>([]);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [resettingCredentials, setResettingCredentials] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; error?: string } | null>(null);
 
   const platform =
@@ -707,11 +716,32 @@ export function Settings({
       const apiKey = value.apiKey?.trim();
       const model = value.model?.trim();
       const baseUrl = value.baseUrl?.trim();
-      if (apiKey || model || baseUrl) {
+      const strongModelKey = value.strongModelKey?.trim();
+      const cheapModelKey = value.cheapModelKey?.trim();
+      const profileRoutingEnabled = value.profileRoutingEnabled === true;
+      const preferStrongForVerification =
+        typeof value.preferStrongForVerification === "boolean"
+          ? value.preferStrongForVerification
+          : undefined;
+      if (
+        apiKey ||
+        model ||
+        baseUrl ||
+        strongModelKey ||
+        cheapModelKey ||
+        profileRoutingEnabled ||
+        typeof preferStrongForVerification === "boolean"
+      ) {
         sanitized[key] = {
           ...(apiKey ? { apiKey } : {}),
           ...(model ? { model } : {}),
           ...(baseUrl ? { baseUrl } : {}),
+          ...(strongModelKey ? { strongModelKey } : {}),
+          ...(cheapModelKey ? { cheapModelKey } : {}),
+          ...(profileRoutingEnabled ? { profileRoutingEnabled: true } : {}),
+          ...(typeof preferStrongForVerification === "boolean"
+            ? { preferStrongForVerification }
+            : {}),
         };
       }
     });
@@ -750,6 +780,178 @@ export function Settings({
     };
   };
 
+  const getProviderRoutingConfig = (providerType: LLMProviderType): ProviderRoutingConfig => {
+    const resolvedType = resolveCustomProviderId(providerType);
+    const customEntry = CUSTOM_PROVIDER_MAP.get(resolvedType);
+    if (customEntry) {
+      return customProviders[resolvedType] || {};
+    }
+
+    switch (providerType) {
+      case "anthropic":
+        return settings.anthropic || {};
+      case "bedrock":
+        return settings.bedrock || {};
+      case "ollama":
+        return settings.ollama || {};
+      case "gemini":
+        return settings.gemini || {};
+      case "openrouter":
+        return settings.openrouter || {};
+      case "openai":
+        return settings.openai || {};
+      case "azure":
+        return settings.azure || {};
+      case "groq":
+        return settings.groq || {};
+      case "xai":
+        return settings.xai || {};
+      case "kimi":
+        return settings.kimi || {};
+      case "pi":
+        return settings.pi || {};
+      case "openai-compatible":
+        return settings.openaiCompatible || {};
+      default:
+        return {};
+    }
+  };
+
+  const setProviderRoutingConfig = (
+    providerType: LLMProviderType,
+    updates: Partial<ProviderRoutingConfig>,
+  ) => {
+    const resolvedType = resolveCustomProviderId(providerType);
+    const customEntry = CUSTOM_PROVIDER_MAP.get(resolvedType);
+    if (customEntry) {
+      setCustomProviders((prev) => ({
+        ...prev,
+        [resolvedType]: {
+          ...prev[resolvedType],
+          ...updates,
+        },
+      }));
+      return;
+    }
+
+    const patchSettings = <T extends keyof LLMSettingsData>(key: T) =>
+      setSettings((prev) => ({
+        ...prev,
+        [key]: {
+          ...(prev[key] as Record<string, unknown> | undefined),
+          ...updates,
+        },
+      }));
+
+    switch (providerType) {
+      case "anthropic":
+        patchSettings("anthropic");
+        return;
+      case "bedrock":
+        patchSettings("bedrock");
+        return;
+      case "ollama":
+        patchSettings("ollama");
+        return;
+      case "gemini":
+        patchSettings("gemini");
+        return;
+      case "openrouter":
+        patchSettings("openrouter");
+        return;
+      case "openai":
+        patchSettings("openai");
+        return;
+      case "azure":
+        patchSettings("azure");
+        return;
+      case "groq":
+        patchSettings("groq");
+        return;
+      case "xai":
+        patchSettings("xai");
+        return;
+      case "kimi":
+        patchSettings("kimi");
+        return;
+      case "pi":
+        patchSettings("pi");
+        return;
+      case "openai-compatible":
+        patchSettings("openaiCompatible");
+        return;
+      default:
+        return;
+    }
+  };
+
+  const getProviderPrimaryModel = (providerType: LLMProviderType): string => {
+    const resolvedType = resolveCustomProviderId(providerType);
+    const customEntry = CUSTOM_PROVIDER_MAP.get(resolvedType);
+    if (customEntry) {
+      return customProviders[resolvedType]?.model || customEntry.defaultModel || "";
+    }
+
+    switch (providerType) {
+      case "anthropic":
+        return settings.modelKey || "sonnet-3-5";
+      case "bedrock":
+        return bedrockModel || settings.bedrock?.model || settings.modelKey || "";
+      case "ollama":
+        return ollamaModel || settings.ollama?.model || "";
+      case "gemini":
+        return geminiModel || settings.gemini?.model || "";
+      case "openrouter":
+        return openrouterModel || settings.openrouter?.model || "";
+      case "openai":
+        return openaiModel || settings.openai?.model || "";
+      case "azure": {
+        const azureBuilt = buildAzureSettings();
+        return azureBuilt.deployment || settings.azure?.deployment || "";
+      }
+      case "groq":
+        return groqModel || settings.groq?.model || "";
+      case "xai":
+        return xaiModel || settings.xai?.model || "";
+      case "kimi":
+        return kimiModel || settings.kimi?.model || "";
+      case "pi":
+        return piModel || settings.pi?.model || "";
+      case "openai-compatible":
+        return openaiCompatModel || settings.openaiCompatible?.model || "";
+      default:
+        return settings.modelKey || "";
+    }
+  };
+
+  const getRoutingModelOptions = (providerType: LLMProviderType): ModelOption[] => {
+    const routing = getProviderRoutingConfig(providerType);
+    const deduped = new Map<string, ModelOption>();
+    const addOption = (value?: string, label?: string) => {
+      const normalized = value?.trim();
+      if (!normalized || deduped.has(normalized)) return;
+      deduped.set(normalized, { key: normalized, displayName: label || normalized });
+    };
+
+    providerRoutingModels.forEach((model) => addOption(model.key, model.displayName));
+    models.forEach((model) => addOption(model.key, model.displayName));
+    addOption(getProviderPrimaryModel(providerType));
+    addOption(routing.strongModelKey);
+    addOption(routing.cheapModelKey);
+
+    return Array.from(deduped.values());
+  };
+
+  const loadProviderRoutingModels = async (providerType: LLMProviderType) => {
+    try {
+      const providerModels = await window.electronAPI.getProviderModels(providerType);
+      setProviderRoutingModels(providerModels || []);
+    } catch (error) {
+      console.error("Failed to load provider models for routing:", error);
+      setProviderRoutingModels([]);
+    }
+  };
+
   useEffect(() => {
     if (!azureDeployment) {
       const deployments = parseAzureDeployments(azureDeploymentsText);
@@ -784,6 +986,7 @@ export function Settings({
       } else {
         setCustomProviders({});
       }
+      await loadProviderRoutingModels(loadedSettings.providerType as LLMProviderType);
 
       // Set form state from loaded settings
       if (loadedSettings.bedrock?.region) {
@@ -1227,6 +1430,23 @@ export function Settings({
       });
     }
 
+    const currentRouting = getProviderRoutingConfig(providerType);
+    const providerPrimaryModel = getProviderPrimaryModel(providerType);
+    if (
+      providerPrimaryModel &&
+      (!currentRouting.strongModelKey || !currentRouting.cheapModelKey)
+    ) {
+      setProviderRoutingConfig(providerType, {
+        strongModelKey: currentRouting.strongModelKey || providerPrimaryModel,
+        cheapModelKey: currentRouting.cheapModelKey || providerPrimaryModel,
+        preferStrongForVerification:
+          typeof currentRouting.preferStrongForVerification === "boolean"
+            ? currentRouting.preferStrongForVerification
+            : true,
+      });
+    }
+    void loadProviderRoutingModels(providerType);
+
     if (providerType === "ollama") {
       loadOllamaModels();
     } else if (providerType === "gemini") {
@@ -1326,8 +1546,131 @@ export function Settings({
     } catch (error) {
       console.error("Failed to load Bedrock models:", error);
       setBedrockModels([]);
+      const rawMessage = error instanceof Error ? error.message : String(error || "");
+      if (rawMessage.includes("Could not load credentials from any providers")) {
+        setTestResult({
+          success: false,
+          error:
+            "Bedrock credentials were cleared. Configure AWS credentials via default chain (~/.aws/credentials, env vars, or IAM role) or enter access key + secret key, then refresh models.",
+        });
+      } else {
+        setTestResult({
+          success: false,
+          error: rawMessage || "Failed to load Bedrock models.",
+        });
+      }
     } finally {
       setLoadingBedrockModels(false);
+    }
+  };
+
+  const clearProviderFormState = (providerType: LLMProviderType) => {
+    switch (providerType) {
+      case "anthropic":
+        setAnthropicApiKey("");
+        break;
+      case "bedrock":
+        setAwsRegion("us-east-1");
+        setAwsAccessKeyId("");
+        setAwsSecretAccessKey("");
+        setAwsProfile("");
+        setUseDefaultCredentials(true);
+        setBedrockModel("");
+        setBedrockModels([]);
+        break;
+      case "ollama":
+        setOllamaBaseUrl("http://localhost:11434");
+        setOllamaModel("llama3.2");
+        setOllamaApiKey("");
+        setOllamaModels([]);
+        break;
+      case "gemini":
+        setGeminiApiKey("");
+        setGeminiModel("gemini-2.0-flash");
+        setGeminiModels([]);
+        break;
+      case "openrouter":
+        setOpenrouterApiKey("");
+        setOpenrouterBaseUrl("");
+        setOpenrouterModel("anthropic/claude-3.5-sonnet");
+        setOpenrouterModels([]);
+        break;
+      case "openai":
+        setOpenaiApiKey("");
+        setOpenaiModel("gpt-4o-mini");
+        setOpenaiModels([]);
+        setOpenaiAuthMethod("api_key");
+        setOpenaiOAuthConnected(false);
+        break;
+      case "azure":
+        setAzureApiKey("");
+        setAzureEndpoint("");
+        setAzureDeployment("");
+        setAzureDeploymentsText("");
+        setAzureApiVersion("2024-02-15-preview");
+        break;
+      case "groq":
+        setGroqApiKey("");
+        setGroqBaseUrl("");
+        setGroqModel("llama-3.1-8b-instant");
+        setGroqModels([]);
+        break;
+      case "xai":
+        setXaiApiKey("");
+        setXaiBaseUrl("");
+        setXaiModel("grok-4-fast-non-reasoning");
+        setXaiModels([]);
+        break;
+      case "kimi":
+        setKimiApiKey("");
+        setKimiBaseUrl("");
+        setKimiModel("kimi-k2.5");
+        setKimiModels([]);
+        break;
+      case "pi":
+        setPiProvider("anthropic");
+        setPiApiKey("");
+        setPiModel("");
+        setPiModels([]);
+        break;
+      case "openai-compatible":
+        setOpenaiCompatBaseUrl("");
+        setOpenaiCompatApiKey("");
+        setOpenaiCompatModel("");
+        setOpenaiCompatModels([]);
+        break;
+      default:
+        setCustomProviders((prev) => {
+          const next = { ...prev };
+          delete next[providerType];
+          if (providerType === "kimi-code") {
+            delete next["kimi-coding"];
+          }
+          return next;
+        });
+        break;
+    }
+  };
+
+  const handleResetProviderCredentials = async () => {
+    try {
+      setResettingCredentials(true);
+      setTestResult(null);
+
+      const providerType = resolveCustomProviderId(settings.providerType as LLMProviderType);
+      await window.electronAPI.resetLLMProviderCredentials(providerType);
+
+      clearProviderFormState(providerType);
+      await loadConfigStatus();
+      onSettingsChanged?.();
+    } catch (error: Any) {
+      console.error("Failed to reset provider credentials:", error);
+      setTestResult({
+        success: false,
+        error: error?.message || "Failed to reset provider credentials",
+      });
+    } finally {
+      setResettingCredentials(false);
     }
   };
 
@@ -1353,6 +1696,20 @@ export function Settings({
         sanitizedCustomProviders[resolvedProviderTypeForSave] = withDefaults;
       }
       const azureSettings = buildAzureSettings();
+      const routingFor = (providerType: LLMProviderType): ProviderRoutingConfig => {
+        const routing = getProviderRoutingConfig(providerType);
+        const strongModelKey = routing.strongModelKey?.trim();
+        const cheapModelKey = routing.cheapModelKey?.trim();
+        return {
+          profileRoutingEnabled: routing.profileRoutingEnabled === true,
+          strongModelKey: strongModelKey || undefined,
+          cheapModelKey: cheapModelKey || undefined,
+          preferStrongForVerification:
+            typeof routing.preferStrongForVerification === "boolean"
+              ? routing.preferStrongForVerification
+              : true,
+        };
+      };
 
       // Always save settings for ALL providers to preserve API keys and model selections
       // when switching between providers
@@ -1361,12 +1718,14 @@ export function Settings({
         // Always include anthropic settings
         anthropic: {
           apiKey: anthropicApiKey || undefined,
+          ...routingFor("anthropic"),
         },
         // Always include bedrock settings
         bedrock: {
           region: awsRegion,
           useDefaultCredentials,
           model: bedrockModel || undefined,
+          ...routingFor("bedrock"),
           ...(useDefaultCredentials
             ? {
                 profile: awsProfile || undefined,
@@ -1381,23 +1740,27 @@ export function Settings({
           baseUrl: ollamaBaseUrl || undefined,
           model: ollamaModel || undefined,
           apiKey: ollamaApiKey || undefined,
+          ...routingFor("ollama"),
         },
         // Always include gemini settings
         gemini: {
           apiKey: geminiApiKey || undefined,
           model: geminiModel || undefined,
+          ...routingFor("gemini"),
         },
         // Always include openrouter settings
         openrouter: {
           apiKey: openrouterApiKey || undefined,
           model: openrouterModel || undefined,
           baseUrl: openrouterBaseUrl || undefined,
+          ...routingFor("openrouter"),
         },
         // Always include openai settings
         openai: {
           apiKey: openaiAuthMethod === "api_key" ? openaiApiKey || undefined : undefined,
           model: openaiModel || undefined,
           authMethod: openaiAuthMethod,
+          ...routingFor("openai"),
         },
         // Always include Azure OpenAI settings
         azure: {
@@ -1406,36 +1769,42 @@ export function Settings({
           deployment: azureSettings.deployment,
           deployments: azureSettings.deployments,
           apiVersion: azureApiVersion || undefined,
+          ...routingFor("azure"),
         },
         // Always include Groq settings
         groq: {
           apiKey: groqApiKey || undefined,
           model: groqModel || undefined,
           baseUrl: groqBaseUrl || undefined,
+          ...routingFor("groq"),
         },
         // Always include xAI settings
         xai: {
           apiKey: xaiApiKey || undefined,
           model: xaiModel || undefined,
           baseUrl: xaiBaseUrl || undefined,
+          ...routingFor("xai"),
         },
         // Always include Kimi settings
         kimi: {
           apiKey: kimiApiKey || undefined,
           model: kimiModel || undefined,
           baseUrl: kimiBaseUrl || undefined,
+          ...routingFor("kimi"),
         },
         // Always include Pi settings
         pi: {
           provider: piProvider || undefined,
           apiKey: piApiKey || undefined,
           model: piModel || undefined,
+          ...routingFor("pi"),
         },
         // Always include OpenAI-compatible settings
         openaiCompatible: {
           baseUrl: openaiCompatBaseUrl || undefined,
           apiKey: openaiCompatApiKey || undefined,
           model: openaiCompatModel || undefined,
+          ...routingFor("openai-compatible"),
         },
         customProviders:
           Object.keys(sanitizedCustomProviders).length > 0 ? sanitizedCustomProviders : undefined,
@@ -1577,11 +1946,23 @@ export function Settings({
     }
   };
 
-  const resolvedProviderType = resolveCustomProviderId(settings.providerType as LLMProviderType);
+  const currentProviderType = settings.providerType as LLMProviderType;
+  const resolvedProviderType = resolveCustomProviderId(currentProviderType);
   const selectedCustomProvider = CUSTOM_PROVIDER_MAP.get(resolvedProviderType);
   const selectedCustomConfig = selectedCustomProvider
     ? customProviders[resolvedProviderType] || {}
     : {};
+  const providerRouting = getProviderRoutingConfig(currentProviderType);
+  const routingEnabled = providerRouting.profileRoutingEnabled === true;
+  const providerPrimaryModel = getProviderPrimaryModel(currentProviderType);
+  const strongRoutingModel = providerRouting.strongModelKey || providerPrimaryModel;
+  const cheapRoutingModel = providerRouting.cheapModelKey || providerPrimaryModel;
+  const routingModelOptions = getRoutingModelOptions(currentProviderType);
+  const routingModelsIdentical =
+    routingEnabled &&
+    !!strongRoutingModel &&
+    !!cheapRoutingModel &&
+    strongRoutingModel === cheapRoutingModel;
 
   return (
     <div className="settings-page">
@@ -3022,6 +3403,117 @@ export function Settings({
                     </>
                   )}
 
+                  <div className="settings-section">
+                    <h3>Profile-Based Routing</h3>
+                    <p className="settings-description">
+                      Route strong tasks (planning/verification) and cheap execution tasks to
+                      different models for this provider.
+                    </p>
+                    <label className="settings-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={routingEnabled}
+                        onChange={(e) => {
+                          const enabled = e.target.checked;
+                          const fallbackModel = providerPrimaryModel || strongRoutingModel || "";
+                          setProviderRoutingConfig(currentProviderType, {
+                            profileRoutingEnabled: enabled,
+                            ...(enabled
+                              ? {
+                                  strongModelKey: strongRoutingModel || fallbackModel || undefined,
+                                  cheapModelKey: cheapRoutingModel || fallbackModel || undefined,
+                                }
+                              : {}),
+                            preferStrongForVerification:
+                              typeof providerRouting.preferStrongForVerification === "boolean"
+                                ? providerRouting.preferStrongForVerification
+                                : true,
+                          });
+                        }}
+                      />
+                      <span>Enable profile-based routing</span>
+                    </label>
+
+                    {routingEnabled && (
+                      <>
+                        <div className="settings-subsection">
+                          <h4>Strong / Planning Model</h4>
+                          <select
+                            className="settings-select"
+                            value={strongRoutingModel || ""}
+                            onChange={(e) =>
+                              setProviderRoutingConfig(currentProviderType, {
+                                strongModelKey: e.target.value || undefined,
+                              })
+                            }
+                          >
+                            {routingModelOptions.map((model) => (
+                              <option key={model.key} value={model.key}>
+                                {model.displayName}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="settings-subsection">
+                          <h4>Cheap / Execution Model</h4>
+                          <select
+                            className="settings-select"
+                            value={cheapRoutingModel || ""}
+                            onChange={(e) =>
+                              setProviderRoutingConfig(currentProviderType, {
+                                cheapModelKey: e.target.value || undefined,
+                              })
+                            }
+                          >
+                            {routingModelOptions.map((model) => (
+                              <option key={model.key} value={model.key}>
+                                {model.displayName}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="settings-subsection">
+                          <button
+                            className="button-small button-secondary"
+                            type="button"
+                            onClick={() =>
+                              setProviderRoutingConfig(currentProviderType, {
+                                strongModelKey:
+                                  strongRoutingModel || providerPrimaryModel || undefined,
+                                cheapModelKey:
+                                  strongRoutingModel || providerPrimaryModel || undefined,
+                              })
+                            }
+                          >
+                            Use same model for both
+                          </button>
+                        </div>
+
+                        <label className="settings-checkbox">
+                          <input
+                            type="checkbox"
+                            checked={providerRouting.preferStrongForVerification !== false}
+                            onChange={(e) =>
+                              setProviderRoutingConfig(currentProviderType, {
+                                preferStrongForVerification: e.target.checked,
+                              })
+                            }
+                          />
+                          <span>Prefer strong model for verification tasks</span>
+                        </label>
+
+                        {routingModelsIdentical && (
+                          <p className="settings-hint">
+                            Strong and cheap models are identical, so routing will not change model
+                            cost/quality.
+                          </p>
+                        )}
+                      </>
+                    )}
+                  </div>
+
                   {testResult && (
                     <div className={`test-result ${testResult.success ? "success" : "error"}`}>
                       {testResult.success ? (
@@ -3073,14 +3565,21 @@ export function Settings({
                     <button
                       className="button-secondary"
                       onClick={handleTestConnection}
-                      disabled={loading || testing}
+                      disabled={loading || testing || resettingCredentials}
                     >
                       {testing ? "Testing..." : "Test Connection"}
                     </button>
                     <button
+                      className="button-secondary"
+                      onClick={handleResetProviderCredentials}
+                      disabled={loading || saving || testing || resettingCredentials}
+                    >
+                      {resettingCredentials ? "Resetting..." : "Reset Provider Credentials"}
+                    </button>
+                    <button
                       className="button-primary"
                       onClick={handleSave}
-                      disabled={loading || saving}
+                      disabled={loading || saving || resettingCredentials}
                     >
                       {saving ? "Saving..." : "Save Settings"}
                     </button>

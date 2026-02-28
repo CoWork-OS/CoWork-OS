@@ -166,6 +166,7 @@ import {
   generateHookToken,
   DEFAULT_HOOKS_PORT,
 } from "../hooks";
+import { initializeHookAgentIngress } from "../hooks/agent-ingress";
 import { MemoryService } from "../memory/MemoryService";
 import { UserProfileService } from "../memory/UserProfileService";
 import { InfraManager } from "../infra/infra-manager";
@@ -178,13 +179,18 @@ import { getVoiceService } from "../voice/VoiceService";
 import { AgentPerformanceReviewService } from "../reports/AgentPerformanceReviewService";
 import { getCronService } from "../cron";
 import type { CronJobCreate } from "../cron/types";
+import { getXMentionBridgeService, getXMentionTriggerStatus } from "../x-mentions";
 import { pruneTempWorkspaces } from "../utils/temp-workspace";
 import {
   createScopedTempWorkspaceIdentity,
   isTempWorkspaceInScope,
   sanitizeTempWorkspaceKey,
 } from "../utils/temp-workspace-scope";
-import { getActiveTempWorkspaceLeases, touchTempWorkspaceLease } from "../utils/temp-workspace-lease";
+import {
+  getActiveTempWorkspaceLeases,
+  touchTempWorkspaceLease,
+} from "../utils/temp-workspace-lease";
+import { createLogger } from "../utils/logger";
 
 type FileViewerRequestOptions = {
   workspacePath?: string;
@@ -195,6 +201,7 @@ type FileViewerRequestOptions = {
 type MacSystemSettingsTarget = "microphone" | "dictation";
 
 const execFileAsync = promisify(execFile);
+const logger = createLogger("IPC");
 
 const isMacSystemSettingsTarget = (value: unknown): value is MacSystemSettingsTarget =>
   value === "microphone" || value === "dictation";
@@ -442,6 +449,7 @@ rateLimiter.configure(IPC_CHANNELS.TASK_CONTINUE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.TASK_PIN, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.TASK_EXPORT_JSON, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.LLM_SAVE_SETTINGS, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.LLM_RESET_PROVIDER_CREDENTIALS, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.LLM_TEST_PROVIDER, RATE_LIMIT_CONFIGS.expensive);
 rateLimiter.configure(IPC_CHANNELS.LLM_GET_OLLAMA_MODELS, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.LLM_GET_GEMINI_MODELS, RATE_LIMIT_CONFIGS.standard);
@@ -2003,15 +2011,96 @@ export async function setupIpcHandlers(
     return { success: true };
   });
 
+  ipcMain.handle(
+    IPC_CHANNELS.LLM_RESET_PROVIDER_CREDENTIALS,
+    async (_, providerType: string) => {
+      checkRateLimit(IPC_CHANNELS.LLM_RESET_PROVIDER_CREDENTIALS);
+
+      const resolvedProviderType = resolveCustomProviderId(providerType);
+      const settings = LLMProviderFactory.loadSettings();
+      const updatedSettings = { ...settings };
+
+      const clearCustomProviderConfig = (providerId: string) => {
+        if (!updatedSettings.customProviders) return;
+
+        const nextCustomProviders = { ...updatedSettings.customProviders };
+        delete nextCustomProviders[providerId];
+        if (providerId === "kimi-code") {
+          delete nextCustomProviders["kimi-coding"];
+        }
+        updatedSettings.customProviders =
+          Object.keys(nextCustomProviders).length > 0 ? nextCustomProviders : undefined;
+      };
+
+      switch (resolvedProviderType) {
+        case "anthropic":
+          updatedSettings.anthropic = undefined;
+          break;
+        case "bedrock":
+          updatedSettings.bedrock = undefined;
+          updatedSettings.cachedBedrockModels = undefined;
+          break;
+        case "ollama":
+          updatedSettings.ollama = undefined;
+          updatedSettings.cachedOllamaModels = undefined;
+          break;
+        case "gemini":
+          updatedSettings.gemini = undefined;
+          updatedSettings.cachedGeminiModels = undefined;
+          break;
+        case "openrouter":
+          updatedSettings.openrouter = undefined;
+          updatedSettings.cachedOpenRouterModels = undefined;
+          break;
+        case "openai":
+          updatedSettings.openai = undefined;
+          updatedSettings.cachedOpenAIModels = undefined;
+          break;
+        case "azure":
+          updatedSettings.azure = undefined;
+          break;
+        case "groq":
+          updatedSettings.groq = undefined;
+          updatedSettings.cachedGroqModels = undefined;
+          break;
+        case "xai":
+          updatedSettings.xai = undefined;
+          updatedSettings.cachedXaiModels = undefined;
+          break;
+        case "kimi":
+          updatedSettings.kimi = undefined;
+          updatedSettings.cachedKimiModels = undefined;
+          break;
+        case "pi":
+          updatedSettings.pi = undefined;
+          updatedSettings.cachedPiModels = undefined;
+          break;
+        case "openai-compatible":
+          updatedSettings.openaiCompatible = undefined;
+          updatedSettings.cachedOpenAICompatibleModels = undefined;
+          break;
+        default:
+          clearCustomProviderConfig(resolvedProviderType);
+          break;
+      }
+
+      LLMProviderFactory.saveSettings(updatedSettings);
+      LLMProviderFactory.clearCache();
+      return { success: true };
+    },
+  );
+
   ipcMain.handle(IPC_CHANNELS.LLM_TEST_PROVIDER, async (_, config: Any) => {
     checkRateLimit(IPC_CHANNELS.LLM_TEST_PROVIDER);
     // For OpenAI OAuth, get tokens from stored settings if authMethod is 'oauth'
     let openaiAccessToken: string | undefined;
     let openaiRefreshToken: string | undefined;
+    let openaiTokenExpiresAt: number | undefined;
     if (config.providerType === "openai" && config.openai?.authMethod === "oauth") {
       const settings = LLMProviderFactory.loadSettings();
       openaiAccessToken = settings.openai?.accessToken;
       openaiRefreshToken = settings.openai?.refreshToken;
+      openaiTokenExpiresAt = settings.openai?.tokenExpiresAt;
     }
     const resolvedProviderType = resolveCustomProviderId(config.providerType);
     const customProviderConfig =
@@ -2048,6 +2137,7 @@ export async function setupIpcHandlers(
       openaiApiKey: config.openai?.apiKey,
       openaiAccessToken: openaiAccessToken,
       openaiRefreshToken: openaiRefreshToken,
+      openaiTokenExpiresAt: openaiTokenExpiresAt,
       azureApiKey: config.azure?.apiKey,
       azureEndpoint: config.azure?.endpoint,
       azureDeployment: azureDeployment,
@@ -2329,6 +2419,11 @@ export async function setupIpcHandlers(
     const validated = validateInput(XSettingsSchema, settings, "x settings") as XSettingsData;
     XSettingsManager.saveSettings(validated);
     XSettingsManager.clearCache();
+    try {
+      getXMentionBridgeService()?.triggerNow();
+    } catch (error) {
+      console.warn("[X] Failed to trigger immediate mention bridge poll:", error);
+    }
     return { success: true };
   });
 
@@ -2340,14 +2435,15 @@ export async function setupIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.X_GET_STATUS, async () => {
     checkRateLimit(IPC_CHANNELS.X_GET_STATUS);
+    const mentionTriggerStatus = getXMentionTriggerStatus();
     const installStatus = await checkBirdInstalled();
     if (!installStatus.installed) {
-      return { installed: false, connected: false };
+      return { installed: false, connected: false, mentionTriggerStatus };
     }
 
     const settings = XSettingsManager.loadSettings();
     if (!settings.enabled) {
-      return { installed: true, connected: false };
+      return { installed: true, connected: false, mentionTriggerStatus };
     }
 
     const result = await testXConnection(settings);
@@ -2356,6 +2452,7 @@ export async function setupIpcHandlers(
       connected: result.success,
       username: result.username,
       error: result.success ? undefined : result.error,
+      mentionTriggerStatus,
     };
   });
 
@@ -2822,6 +2919,26 @@ export async function setupIpcHandlers(
       return toPublicChannel(channel, "connecting");
     }
 
+    if (validated.type === "x") {
+      const channel = await gateway.addXChannel(
+        validated.name,
+        {
+          commandPrefix: validated.xCommandPrefix,
+          allowedAuthors: validated.xAllowedAuthors,
+          pollIntervalSec: validated.xPollIntervalSec,
+          fetchCount: validated.xFetchCount,
+          outboundEnabled: validated.xOutboundEnabled ?? false,
+        },
+        validated.securityMode || "pairing",
+      );
+
+      gateway.enableChannel(channel.id).catch((err) => {
+        console.error("Failed to enable X channel:", err);
+      });
+
+      return toPublicChannel(channel, "connecting");
+    }
+
     if (validated.type === "email") {
       const emailProtocol = validated.emailProtocol || "imap-smtp";
       const channel = await gateway.addEmailChannel(
@@ -3186,7 +3303,11 @@ export async function setupIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.ACTIVITY_CREATE, async (_, request: Any) => {
     checkRateLimit(IPC_CHANNELS.ACTIVITY_CREATE);
-    const validatedWorkspaceId = validateInput(WorkspaceIdSchema, request.workspaceId, "workspace ID");
+    const validatedWorkspaceId = validateInput(
+      WorkspaceIdSchema,
+      request.workspaceId,
+      "workspace ID",
+    );
     const activity = activityRepo.create({ ...request, workspaceId: validatedWorkspaceId });
     // Emit activity event for real-time updates
     getMainWindow()?.webContents.send(IPC_CHANNELS.ACTIVITY_EVENT, { type: "created", activity });
@@ -3691,7 +3812,9 @@ export async function setupIpcHandlers(
     IPC_CHANNELS.USAGE_INSIGHTS_GET,
     async (_, workspaceId: string, periodDays?: number) => {
       checkRateLimit(IPC_CHANNELS.USAGE_INSIGHTS_GET);
-      const validatedWorkspaceId = validateInput(UUIDSchema, workspaceId, "workspace ID");
+      // Allow "__all__" sentinel for cross-workspace aggregation
+      const validatedWorkspaceId =
+        workspaceId === "__all__" ? null : validateInput(UUIDSchema, workspaceId, "workspace ID");
       // Clamp period to a reasonable range to prevent excessive DB scans
       const clampedPeriod = Math.min(Math.max(Math.round(periodDays ?? 7), 1), 365);
       const { UsageInsightsService } = await import("../reports/UsageInsightsService");
@@ -4305,7 +4428,7 @@ function setupInfraHandlers(): void {
     InfraSettingsManager.saveSettings(validated);
     InfraSettingsManager.clearCache();
     // Re-apply settings to providers
-    InfraManager.getInstance().applySettings(validated);
+    await InfraManager.getInstance().applySettings(validated);
     return { success: true };
   });
 
@@ -4319,12 +4442,33 @@ function setupInfraHandlers(): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.INFRA_WALLET_RESTORE, async () => {
+    const settings = InfraSettingsManager.loadSettings();
+    if (settings.wallet.provider === "coinbase_agentic") {
+      await InfraManager.getInstance().applySettings(settings);
+      const wallet = await InfraManager.getInstance().getWalletInfoWithBalance();
+      return {
+        success: !!wallet?.address,
+        address: wallet?.address || undefined,
+        status: wallet?.address ? "ok" : "no_wallet",
+      };
+    }
+
     // Attempt to migrate/restore wallet
     const check = WalletManager.startupCheck();
     return { success: !!check.address, address: check.address || undefined, status: check.status };
   });
 
   ipcMain.handle(IPC_CHANNELS.INFRA_WALLET_VERIFY, async () => {
+    const settings = InfraSettingsManager.loadSettings();
+    if (settings.wallet.provider === "coinbase_agentic") {
+      await InfraManager.getInstance().applySettings(settings);
+      const wallet = await InfraManager.getInstance().getWalletInfoWithBalance();
+      return {
+        status: wallet?.address ? "ok" : "no_wallet",
+        address: wallet?.address || undefined,
+      };
+    }
+
     const hasWallet = WalletManager.hasWallet();
     return {
       status: hasWallet ? "ok" : "no_wallet",
@@ -4343,11 +4487,11 @@ function setupInfraHandlers(): void {
  * Set up Scraping (Scrapling integration) IPC handlers
  */
 function setupScrapingHandlers(): void {
-// oxlint-disable-next-line typescript-eslint(no-require-imports)
+  // oxlint-disable-next-line typescript-eslint(no-require-imports)
   const { ScrapingSettingsManager } = require("../scraping/scraping-settings");
-// oxlint-disable-next-line typescript-eslint(no-require-imports)
+  // oxlint-disable-next-line typescript-eslint(no-require-imports)
   const { spawn } = require("child_process");
-// oxlint-disable-next-line typescript-eslint(no-require-imports)
+  // oxlint-disable-next-line typescript-eslint(no-require-imports)
   const _path = require("path");
 
   ipcMain.handle(IPC_CHANNELS.SCRAPING_GET_SETTINGS, async () => {
@@ -4432,7 +4576,7 @@ function setupScrapingHandlers(): void {
  * Set up Cron (Scheduled Tasks) IPC handlers
  */
 function setupCronHandlers(): void {
-// oxlint-disable-next-line typescript-eslint(no-require-imports)
+  // oxlint-disable-next-line typescript-eslint(no-require-imports)
   const { getCronService } = require("../cron");
 
   // Get service status
@@ -4532,7 +4676,7 @@ function setupNotificationHandlers(): void {
     onEvent: (event) => {
       // Forward notification events to renderer
       // We need to import BrowserWindow from electron to send to all windows
-// oxlint-disable-next-line typescript-eslint(no-require-imports)
+      // oxlint-disable-next-line typescript-eslint(no-require-imports)
       const { BrowserWindow } = require("electron");
       const windows = BrowserWindow.getAllWindows();
       for (const win of windows) {
@@ -4543,7 +4687,7 @@ function setupNotificationHandlers(): void {
     },
   });
 
-  console.log("[Notifications] Service initialized");
+  logger.debug("[Notifications] Service initialized");
 
   // List all notifications
   ipcMain.handle(IPC_CHANNELS.NOTIFICATION_LIST, async () => {
@@ -4616,9 +4760,11 @@ export function getHooksServer(): HooksServer | null {
  * Set up Hooks (Webhooks & Gmail Pub/Sub) IPC handlers
  */
 async function setupHooksHandlers(agentDaemon: AgentDaemon): Promise<void> {
-  const db = agentDaemon.getDatabase();
-  const workspaceRepo = new WorkspaceRepository(db);
-  const tempWorkspaceRoot = path.join(os.tmpdir(), TEMP_WORKSPACE_ROOT_DIR_NAME);
+  const hookIngress = initializeHookAgentIngress(agentDaemon, {
+    scope: "hooks",
+    defaultTempWorkspaceKey: "default",
+    logger: (...args) => console.warn(...args),
+  });
 
   // Initialize settings manager
   HooksSettingsManager.initialize();
@@ -4635,60 +4781,6 @@ async function setupHooksHandlers(agentDaemon: AgentDaemon): Promise<void> {
     };
   };
 
-  const createTempWorkspaceForHooks = async (): Promise<Workspace> => {
-    await fs.mkdir(tempWorkspaceRoot, { recursive: true });
-
-    const identity = createScopedTempWorkspaceIdentity("hooks", "default");
-    const workspaceId = identity.workspaceId;
-    const workspacePath = path.join(tempWorkspaceRoot, identity.slug);
-    await fs.mkdir(workspacePath, { recursive: true });
-
-    const now = Date.now();
-    const permissions: Workspace["permissions"] = {
-      read: true,
-      write: true,
-      delete: true,
-      network: true,
-      shell: false,
-      unrestrictedFileAccess: true,
-    };
-
-    db.prepare(`
-      INSERT INTO workspaces (id, name, path, created_at, last_used_at, permissions)
-      VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        name = excluded.name,
-        path = excluded.path,
-        last_used_at = excluded.last_used_at,
-        permissions = excluded.permissions
-    `).run(workspaceId, TEMP_WORKSPACE_NAME, workspacePath, now, now, JSON.stringify(permissions));
-
-    const workspace = workspaceRepo.findById(workspaceId) ?? {
-      id: workspaceId,
-      name: TEMP_WORKSPACE_NAME,
-      path: workspacePath,
-      createdAt: now,
-      lastUsedAt: now,
-      permissions,
-      isTemp: true,
-    };
-
-    try {
-      pruneTempWorkspaces({
-        db,
-        tempWorkspaceRoot,
-        currentWorkspaceId: workspace.id,
-        protectedWorkspaceIds: getActiveTempWorkspaceLeases(),
-      });
-    } catch (error) {
-      console.warn("[Hooks] Failed to prune temp workspaces:", error);
-    }
-
-    touchTempWorkspaceLease(workspace.id);
-
-    return workspace;
-  };
-
   const ensureHooksServerRunning = async (): Promise<void> => {
     const settings = getHooksRuntimeSettings();
 
@@ -4699,7 +4791,7 @@ async function setupHooksHandlers(agentDaemon: AgentDaemon): Promise<void> {
       // (e.g. migrated from legacy settings without a token)
       const token = HooksSettingsManager.regenerateToken();
       settings.token = token;
-      console.log("[Hooks] Auto-generated missing token for enabled hooks server");
+      logger.debug("[Hooks] Auto-generated missing token for enabled hooks server");
     }
 
     // If already running, just refresh config (covers mapping updates + token overrides).
@@ -4733,23 +4825,14 @@ async function setupHooksHandlers(agentDaemon: AgentDaemon): Promise<void> {
         }
       },
       onAgent: async (action) => {
-        console.log("[Hooks] Agent action:", action.message.substring(0, 100));
-
-        // Create a task for the agent action
-        const workspaceId = action.workspaceId || (await createTempWorkspaceForHooks()).id;
-        const task = await agentDaemon.createTask({
-          title: action.name || "Webhook Task",
-          prompt: action.message,
-          workspaceId,
-          agentConfig: {
-            allowUserInput: false,
-          },
+        logger.debug("[Hooks] Agent action:", action.message.substring(0, 100));
+        const result = await hookIngress.createTaskFromAgentAction(action, {
+          tempWorkspaceKey: "default",
         });
-
-        return { taskId: task.id };
+        return { taskId: result.taskId };
       },
       onTaskMessage: async (action) => {
-        console.log("[Hooks] Task message:", action.taskId);
+        logger.debug("[Hooks] Task message:", action.taskId);
         // Don't block the webhook call until the whole follow-up run completes.
         // We only validate that the task exists; execution happens asynchronously.
         const task = agentDaemon.getTask(action.taskId);
@@ -4763,7 +4846,7 @@ async function setupHooksHandlers(agentDaemon: AgentDaemon): Promise<void> {
         });
       },
       onApprovalRespond: async (action) => {
-        console.log(
+        logger.debug(
           "[Hooks] Approval respond:",
           action.approvalId,
           action.approved ? "approve" : "deny",
@@ -4771,7 +4854,7 @@ async function setupHooksHandlers(agentDaemon: AgentDaemon): Promise<void> {
         return agentDaemon.respondToApproval(action.approvalId, action.approved);
       },
       onEvent: (event) => {
-        console.log("[Hooks] Server event:", event.action);
+        logger.debug("[Hooks] Server event:", event.action);
         // Forward events to renderer (with error handling for destroyed windows)
         const windows = BrowserWindow.getAllWindows();
         for (const win of windows) {
@@ -5071,7 +5154,7 @@ async function setupHooksHandlers(agentDaemon: AgentDaemon): Promise<void> {
     return { ok: true };
   });
 
-  console.log("[Hooks] IPC handlers initialized");
+  logger.debug("[Hooks] IPC handlers initialized");
 }
 
 /**
@@ -6122,7 +6205,7 @@ function setupMemoryHandlers(): void {
     return { cancelled: false };
   });
 
-  console.log("[Memory] Handlers initialized");
+  logger.debug("[Memory] Handlers initialized");
 
   // === Migration Status Handlers ===
   // These handlers help show one-time notifications after app migration (cowork-oss → cowork-os)
@@ -6168,7 +6251,7 @@ function setupMemoryHandlers(): void {
           dismissedAt: new Date().toISOString(),
         }),
       );
-      console.log("[Migration] Notification dismissed");
+      logger.debug("[Migration] Notification dismissed");
       return { success: true };
     } catch (error) {
       console.error("[Migration] Failed to dismiss notification:", error);
@@ -6176,11 +6259,11 @@ function setupMemoryHandlers(): void {
     }
   });
 
-  console.log("[Migration] Handlers initialized");
+  logger.debug("[Migration] Handlers initialized");
 
   // === Extension / Plugin Handlers ===
   // eslint-disable-next-line @typescript-eslint/no-var-requires
-// oxlint-disable-next-line typescript-eslint(no-require-imports)
+  // oxlint-disable-next-line typescript-eslint(no-require-imports)
   const { getPluginRegistry } = require("../extensions/registry");
 
   // List all extensions
@@ -6317,7 +6400,7 @@ function setupMemoryHandlers(): void {
     }
   });
 
-  console.log("[Extensions] Handlers initialized");
+  logger.debug("[Extensions] Handlers initialized");
 
   // === Webhook Tunnel Handlers ===
   let tunnelManager: Any = null;
@@ -6371,7 +6454,7 @@ function setupMemoryHandlers(): void {
     }
   });
 
-  console.log("[Tunnel] Handlers initialized");
+  logger.debug("[Tunnel] Handlers initialized");
 
   // === Voice Mode Handlers ===
 
@@ -6560,5 +6643,5 @@ function setupMemoryHandlers(): void {
     console.error("[Voice] Failed to initialize:", err);
   });
 
-  console.log("[Voice] Handlers initialized");
+  logger.debug("[Voice] Handlers initialized");
 }

@@ -15,7 +15,24 @@
       "useWhen": "Use when the user asks to react Native and Expo best practices for performance, UI patterns, and native integrations.",
       "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
       "outputs": "Outcome from react-native-skills: task-specific result plus concrete action notes.",
-      "successCriteria": "Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior."
+      "successCriteria": "Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior.",
+      "examples": {
+        "positive": [
+          "Use the react-native-skills skill for this request.",
+          "Help me with react-native-skills.",
+          "Use when the user asks to react Native and Expo best practices for performance, UI patterns, and native integrations.",
+          "react-native-skills: provide an actionable result."
+        ],
+        "negative": [
+          "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
+          "Do not use react-native-skills for unrelated requests.",
+          "This request is outside react-native-skills scope.",
+          "This is conceptual discussion only; no tool workflow is needed."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "medium"
     }
   }
 }

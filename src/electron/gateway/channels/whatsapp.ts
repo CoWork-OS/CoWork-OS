@@ -180,6 +180,8 @@ export class WhatsAppAdapter implements ChannelAdapter {
   private readonly MESSAGE_SEND_RETRY_MAX_MS = 2000;
   private readonly MESSAGE_SEND_RETRY_MULTIPLIER = 1.8;
   private readonly MESSAGE_SEND_RETRY_JITTER = 0.25;
+  private readonly TRANSIENT_NETWORK_ERROR_RE =
+    /(ECONNRESET|ETIMEDOUT|EPIPE|ENOTFOUND|ENETUNREACH|EHOSTUNREACH|socket hang up|Timed Out|Connection Closed)/i;
 
   constructor(config: WhatsAppConfig) {
     this.config = {
@@ -290,8 +292,22 @@ export class WhatsAppAdapter implements ChannelAdapter {
         markOnlineOnConnect: false,
       });
 
+      // Guard websocket-level errors so transient network blips do not surface as uncaught exceptions.
+      this.sock.ws?.on("error", (error: unknown) => {
+        const err = error instanceof Error ? error : new Error(String(error));
+        const level = this.isTransientNetworkError(err) ? "warn" : "error";
+        console[level]("[WhatsApp] WebSocket error:", err.message);
+        this.handleError(err, "websocket");
+      });
+
       // Handle credential updates
-      this.sock.ev.on("creds.update", saveCreds);
+      this.sock.ev.on("creds.update", () => {
+        Promise.resolve(saveCreds()).catch((error: unknown) => {
+          const err = error instanceof Error ? error : new Error(String(error));
+          console.error("[WhatsApp] Failed to persist credentials:", err);
+          this.handleError(err, "creds.update");
+        });
+      });
 
       // Handle connection updates
       this.sock.ev.on("connection.update", (update) => {
@@ -1877,6 +1893,22 @@ export class WhatsAppAdapter implements ChannelAdapter {
 
     const asAny = err as Any;
     return asAny?.output?.statusCode || asAny?.status || undefined;
+  }
+
+  private isTransientNetworkError(err: unknown): boolean {
+    const message =
+      err instanceof Error
+        ? err.message
+        : typeof err === "string"
+          ? err
+          : (() => {
+              try {
+                return JSON.stringify(err);
+              } catch {
+                return String(err);
+              }
+            })();
+    return this.TRANSIENT_NETWORK_ERROR_RE.test(message);
   }
 
   /**

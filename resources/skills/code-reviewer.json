@@ -12,10 +12,27 @@
       "useWhen": "Use for formal, structured review workflows on local diffs or GitHub PRs.",
       "dontUseWhen": "Don't use for one-off formatting checks without code-quality feedback.",
       "outputs": "Findings grouped by severity with rationale and approval/revise recommendation.",
-      "successCriteria": "Covers correctness, maintainability, performance, security, and testability."
+      "successCriteria": "Covers correctness, maintainability, performance, security, and testability.",
+      "examples": {
+        "positive": [
+          "Use the code-reviewer skill for this request.",
+          "Help me with code-reviewer.",
+          "Use for formal, structured review workflows on local diffs or GitHub PRs.",
+          "code-reviewer: provide an actionable result."
+        ],
+        "negative": [
+          "Don't use for one-off formatting checks without code-quality feedback.",
+          "Do not use code-reviewer for unrelated requests.",
+          "This request is outside code-reviewer scope.",
+          "This is conceptual discussion only; no tool workflow is needed."
+        ]
+      }
     },
     "version": "1.0.0",
     "author": "google-gemini",
-    "repository": "https://github.com/google-gemini/gemini-cli/tree/main/.gemini/skills/code-reviewer"
+    "repository": "https://github.com/google-gemini/gemini-cli/tree/main/.gemini/skills/code-reviewer",
+    "authoring": {
+      "complexity": "medium"
+    }
   }
 }

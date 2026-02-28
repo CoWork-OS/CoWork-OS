@@ -20,7 +20,24 @@
       "useWhen": "Use for import hygiene: unused imports, sorting, grouping, and duplicate cleanup in local source files.",
       "dontUseWhen": "Don't use for formatting-only tasks or API-logic refactors where imports are secondary.",
       "outputs": "Refactored import blocks and a concise list of removed/sorted/grouped changes.",
-      "successCriteria": "No functional change while improving import ordering, grouping, and deduplication without overreach."
+      "successCriteria": "No functional change while improving import ordering, grouping, and deduplication without overreach.",
+      "examples": {
+        "positive": [
+          "Use the clean-imports skill for this request.",
+          "Help me with clean imports.",
+          "Use for import hygiene: unused imports, sorting, grouping, and duplicate cleanup in local source files.",
+          "Clean Imports: provide an actionable result."
+        ],
+        "negative": [
+          "Don't use for formatting-only tasks or API-logic refactors where imports are secondary.",
+          "Do not use clean-imports for unrelated requests.",
+          "This request is outside clean imports scope.",
+          "This is conceptual discussion only; no tool workflow is needed."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "low"
     }
   }
 }

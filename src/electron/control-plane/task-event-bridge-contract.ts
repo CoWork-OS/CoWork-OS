@@ -22,6 +22,7 @@ export const TASK_EVENT_BRIDGE_ALLOWLIST = [
   "verification_passed",
   "verification_failed",
   "file_created",
+  "artifact_created",
   "file_modified",
   "file_deleted",
   "error",

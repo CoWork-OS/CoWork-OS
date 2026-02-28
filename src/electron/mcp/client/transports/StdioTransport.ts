@@ -14,12 +14,14 @@ import {
   JSONRPCResponse,
   JSONRPCNotification,
 } from "../../types";
+import { createLogger } from "../../../utils/logger";
 
 interface PendingRequest {
   resolve: (result: Any) => void;
   reject: (error: Error) => void;
   timeout: ReturnType<typeof setTimeout>;
 }
+const logger = createLogger("MCP StdioTransport");
 
 export class StdioTransport extends EventEmitter implements MCPTransport {
   private process: ChildProcess | null = null;
@@ -75,7 +77,7 @@ export class StdioTransport extends EventEmitter implements MCPTransport {
           processEnv.ELECTRON_RUN_AS_NODE = "1";
         }
 
-        console.log(`[MCP StdioTransport] Spawning: ${command} ${args.join(" ")}`);
+        logger.debug(`Spawning: ${command} ${args.join(" ")}`);
 
         this.process = spawn(command, args, {
           cwd: cwd || process.cwd(),
@@ -92,7 +94,7 @@ export class StdioTransport extends EventEmitter implements MCPTransport {
         // Handle stderr (logging/errors from server)
         this.process.stderr?.on("data", (data: Buffer) => {
           const text = data.toString();
-          console.debug(`[MCP StdioTransport] Server stderr: ${text}`);
+          logger.debug(`Server stderr: ${text}`);
           // Capture stderr for better error messages (limit to last 1000 chars)
           this.stderrBuffer += text;
           if (this.stderrBuffer.length > 1000) {
@@ -103,7 +105,7 @@ export class StdioTransport extends EventEmitter implements MCPTransport {
         // Handle process errors
         this.process.on("error", (error) => {
           clearTimeout(timeout);
-          console.error(`[MCP StdioTransport] Process error:`, error);
+          logger.error("Process error:", error);
           this.errorHandler?.(error);
           if (!this.connected) {
             reject(error);
@@ -124,7 +126,11 @@ export class StdioTransport extends EventEmitter implements MCPTransport {
             const stderrSnippet = this.stderrBuffer.trim().slice(-500); // Last 500 chars
             message += `: ${stderrSnippet}`;
           }
-          console.log(`[MCP StdioTransport] ${message}`);
+          if (code === 0) {
+            logger.debug(message);
+          } else {
+            logger.warn(message);
+          }
 
           if (!this.connected) {
             reject(new Error(message));
@@ -151,11 +157,11 @@ export class StdioTransport extends EventEmitter implements MCPTransport {
         // The actual MCP handshake will be done by MCPServerConnection
         this.connected = true;
         clearTimeout(timeout);
-        console.log(`[MCP StdioTransport] Process spawned successfully`);
+        logger.debug("Process spawned successfully");
         resolve();
       } catch (error) {
         clearTimeout(timeout);
-        console.error(`[MCP StdioTransport] Failed to spawn process:`, error);
+        logger.error("Failed to spawn process:", error);
         reject(error);
       }
     });
@@ -169,7 +175,7 @@ export class StdioTransport extends EventEmitter implements MCPTransport {
       return;
     }
 
-    console.log(`[MCP StdioTransport] Disconnecting...`);
+    logger.debug("Disconnecting...");
 
     // Reject all pending requests
     for (const [_id, pending] of this.pendingRequests) {
@@ -191,7 +197,7 @@ export class StdioTransport extends EventEmitter implements MCPTransport {
     await new Promise<void>((resolve) => {
       const forceKillTimeout = setTimeout(() => {
         if (this.process && !this.process.killed) {
-          console.log(`[MCP StdioTransport] Force killing process`);
+          logger.warn("Force killing process");
           this.process.kill("SIGKILL");
         }
         resolve();
@@ -310,7 +316,7 @@ export class StdioTransport extends EventEmitter implements MCPTransport {
           const message = JSON.parse(line);
           this.handleMessage(message);
         } catch  {
-          console.error(`[MCP StdioTransport] Failed to parse message: ${line}`);
+          logger.warn(`Failed to parse message: ${line}`);
         }
       }
     }

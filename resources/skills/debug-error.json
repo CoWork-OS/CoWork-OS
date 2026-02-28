@@ -22,7 +22,24 @@
       "successCriteria": "Provides plausible cause, fix plan, and verification step.",
       "expectedArtifacts": [
         "debug-notes.md"
-      ]
+      ],
+      "examples": {
+        "positive": [
+          "Use the debug-error skill for this request.",
+          "Help me with debug error.",
+          "Use when user shares an error message and asks for root-cause analysis.",
+          "Debug Error: provide an actionable result."
+        ],
+        "negative": [
+          "Don't use for feature requests or non-debug planning questions.",
+          "Do not use debug-error for unrelated requests.",
+          "This request is outside debug error scope.",
+          "This is conceptual discussion only; no tool workflow is needed."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "low"
     }
   }
 }

@@ -49,6 +49,17 @@ const DEFAULT_SETTINGS: SearchSettings = {
  * Factory for creating Search providers with fallback support
  */
 export class SearchProviderFactory {
+  private static readonly PROVIDER_RATE_LIMIT_COOLDOWN_MS = 2 * 60 * 1000;
+  private static readonly PROVIDER_QUOTA_COOLDOWN_MS = 15 * 60 * 1000;
+  private static providerCooldowns: Map<
+    SearchProviderType,
+    {
+      until: number;
+      reason: string;
+      failureClass: "provider_quota" | "provider_rate_limit";
+    }
+  > = new Map();
+
   private static async sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
@@ -68,6 +79,109 @@ export class SearchProviderFactory {
       /504/.test(message) ||
       /service unavailable/i.test(message)
     );
+  }
+
+  private static classifyProviderFailure(
+    message: string,
+  ): "provider_quota" | "provider_rate_limit" | "external_unknown" {
+    if (
+      /rate.*limit|too many requests|\b429\b|retry later|request limit/i.test(message) ||
+      /temporarily blocked/i.test(message)
+    ) {
+      return "provider_rate_limit";
+    }
+    if (
+      /quota|usage.*limit|\b432\b|upgrade your plan|billing|payment required|resource.*exhausted/i.test(
+        message,
+      )
+    ) {
+      return "provider_quota";
+    }
+    return "external_unknown";
+  }
+
+  private static isQuotaOrRateLimitedError(error: Any): boolean {
+    const message = String(error?.message || "");
+    const failureClass = this.classifyProviderFailure(message);
+    return failureClass === "provider_quota" || failureClass === "provider_rate_limit";
+  }
+
+  private static buildSearchProviderError(
+    message: string,
+    opts: {
+      provider: SearchProviderType;
+      failureClass: "provider_quota" | "provider_rate_limit" | "external_unknown";
+      failedProviders: Array<{
+        provider: SearchProviderType;
+        error: string;
+        failureClass: "provider_quota" | "provider_rate_limit" | "external_unknown";
+      }>;
+      providerErrorScope?: "provider" | "global";
+    },
+  ): Error {
+    const error = new Error(message) as Any;
+    error.provider = opts.provider;
+    error.failedProvider = opts.provider;
+    error.failureClass = opts.failureClass;
+    error.providerErrorScope = opts.providerErrorScope || "provider";
+    error.failedProviders = opts.failedProviders.map(({ provider, error: providerError }) => ({
+      provider,
+      error: providerError,
+    }));
+    return error as Error;
+  }
+
+  private static setProviderCooldown(
+    provider: SearchProviderType,
+    failureClass: "provider_quota" | "provider_rate_limit" | "external_unknown",
+    reason: string,
+  ): void {
+    if (failureClass !== "provider_quota" && failureClass !== "provider_rate_limit") {
+      return;
+    }
+    const cooldownMs =
+      failureClass === "provider_quota"
+        ? this.PROVIDER_QUOTA_COOLDOWN_MS
+        : this.PROVIDER_RATE_LIMIT_COOLDOWN_MS;
+    this.providerCooldowns.set(provider, {
+      until: Date.now() + cooldownMs,
+      reason,
+      failureClass,
+    });
+  }
+
+  private static clearProviderCooldown(provider: SearchProviderType): void {
+    this.providerCooldowns.delete(provider);
+  }
+
+  private static getProviderCooldown(provider: SearchProviderType): {
+    until: number;
+    reason: string;
+    failureClass: "provider_quota" | "provider_rate_limit";
+  } | null {
+    const cooldown = this.providerCooldowns.get(provider);
+    if (!cooldown) return null;
+    if (Date.now() >= cooldown.until) {
+      this.providerCooldowns.delete(provider);
+      return null;
+    }
+    return cooldown;
+  }
+
+  private static resolveProviderErrorScope(
+    query: SearchQuery,
+    providerErrors: Array<{
+      provider: SearchProviderType;
+      error: string;
+      failureClass: "provider_quota" | "provider_rate_limit" | "external_unknown";
+    }>,
+  ): "provider" | "global" {
+    if (!query.provider) return "global";
+    if (!providerErrors.length) return "provider";
+    const distinctFailedProviders = new Set(providerErrors.map((entry) => entry.provider));
+    return distinctFailedProviders.size === 1 && distinctFailedProviders.has(query.provider)
+      ? "provider"
+      : "global";
   }
 
   private static async searchWithRetry(
@@ -309,6 +423,7 @@ export class SearchProviderFactory {
    */
   static clearCache(): void {
     this.cachedSettings = null;
+    this.providerCooldowns.clear();
   }
 
   /**
@@ -368,34 +483,73 @@ export class SearchProviderFactory {
   static async searchWithFallback(query: SearchQuery): Promise<SearchResponse> {
     const settings = this.loadSettings();
 
-    // If a specific provider was requested, use it directly
-    if (query.provider) {
-      const providerConfig = this.getProviderConfig(query.provider);
-      const provider = this.createProviderFromConfig(providerConfig);
-      return await this.searchWithRetry(provider, query);
-    }
-
-    // getProviderExecutionOrder always includes DuckDuckGo as a last-resort fallback
-    const providersToTry = this.getProviderExecutionOrder(settings);
+    // getProviderExecutionOrder always includes DuckDuckGo as a last-resort fallback.
+    // When a provider is explicitly requested we still allow fallback on quota/rate errors.
+    const providerExecutionOrder = this.getProviderExecutionOrder(settings);
+    const providersToTry = query.provider
+      ? [query.provider, ...providerExecutionOrder.filter((provider) => provider !== query.provider)]
+      : providerExecutionOrder;
     if (!providersToTry.length) {
       throw new Error("No search provider available");
     }
 
-    const providerErrors: Array<{ provider: SearchProviderType; error: string }> = [];
+    const providerErrors: Array<{
+      provider: SearchProviderType;
+      error: string;
+      failureClass: "provider_quota" | "provider_rate_limit" | "external_unknown";
+    }> = [];
 
-    for (let i = 0; i < providersToTry.length; i++) {
-      const providerType = providersToTry[i];
+    const activeProviders = providersToTry.filter((provider) => !this.getProviderCooldown(provider));
+    const cooledProviders = providersToTry.filter((provider) => !!this.getProviderCooldown(provider));
+    const skipCooledProviders = activeProviders.length > 0;
+    const orderedProviders = [...activeProviders, ...cooledProviders];
+
+    for (let i = 0; i < orderedProviders.length; i++) {
+      const providerType = orderedProviders[i];
+      const cooldown = this.getProviderCooldown(providerType);
+      if (skipCooledProviders && cooldown) {
+        const remainingSeconds = Math.max(1, Math.ceil((cooldown.until - Date.now()) / 1000));
+        const skippedMessage =
+          `Search provider (${providerType}) skipped due to recent ${cooldown.failureClass} ` +
+          `(cooldown ${remainingSeconds}s remaining): ${cooldown.reason}`;
+        providerErrors.push({
+          provider: providerType,
+          error: skippedMessage,
+          failureClass: cooldown.failureClass,
+        });
+        const nextProvider = orderedProviders[i + 1];
+        if (nextProvider) {
+          console.log(`Attempting fallback to ${nextProvider}...`);
+        }
+        continue;
+      }
 
       try {
         const providerConfig = this.getProviderConfig(providerType);
         const provider = this.createProviderFromConfig(providerConfig);
-        return await this.searchWithRetry(provider, query);
+        const scopedQuery: SearchQuery = { ...query, provider: providerType };
+        const response = await this.searchWithRetry(provider, scopedQuery);
+        this.clearProviderCooldown(providerType);
+        return response;
       } catch (error: Any) {
         const message = error?.message || "Search provider request failed";
-        providerErrors.push({ provider: providerType, error: message });
+        const failureClass = this.classifyProviderFailure(message);
+        const scopedMessage = `Search provider (${providerType}) failed: ${message}`;
+        providerErrors.push({ provider: providerType, error: scopedMessage, failureClass });
         console.error(`Search provider (${providerType}) failed:`, message);
+        this.setProviderCooldown(providerType, failureClass, message);
 
-        const nextProvider = providersToTry[i + 1];
+        const requestedProviderFailed = !!query.provider && providerType === query.provider;
+        if (requestedProviderFailed && !this.isQuotaOrRateLimitedError(error)) {
+          throw this.buildSearchProviderError(scopedMessage, {
+            provider: providerType,
+            failureClass,
+            failedProviders: providerErrors,
+            providerErrorScope: "provider",
+          });
+        }
+
+        const nextProvider = orderedProviders[i + 1];
         if (nextProvider) {
           console.log(`Attempting fallback to ${nextProvider}...`);
         }
@@ -403,14 +557,25 @@ export class SearchProviderFactory {
     }
 
     if (providerErrors.length === 1) {
-      throw new Error(providerErrors[0].error);
+      const onlyFailure = providerErrors[0];
+      throw this.buildSearchProviderError(onlyFailure.error, {
+        provider: onlyFailure.provider,
+        failureClass: onlyFailure.failureClass,
+        failedProviders: providerErrors,
+        providerErrorScope: this.resolveProviderErrorScope(query, providerErrors),
+      });
     }
 
-    throw new Error(
-      `Search failed after trying all configured providers: ${providerErrors
-        .map((entry) => `${entry.provider}: ${entry.error}`)
-        .join("; ")}`,
-    );
+    const aggregateMessage = `Search failed after trying all configured providers: ${providerErrors
+      .map((entry) => entry.error)
+      .join("; ")}`;
+    const firstFailure = providerErrors[0];
+    throw this.buildSearchProviderError(aggregateMessage, {
+      provider: firstFailure?.provider || (query.provider || "duckduckgo"),
+      failureClass: firstFailure?.failureClass || "external_unknown",
+      failedProviders: providerErrors,
+      providerErrorScope: this.resolveProviderErrorScope(query, providerErrors),
+    });
   }
 
   /**

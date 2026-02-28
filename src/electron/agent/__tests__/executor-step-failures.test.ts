@@ -3,6 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
+import fs from "node:fs";
 import { TaskExecutor } from "../executor";
 import type { LLMResponse } from "../llm";
 
@@ -149,6 +150,11 @@ function createExecutorWithStubs(responses: LLMResponse[], toolResults: Record<s
   executor.getAvailableTools = vi.fn().mockReturnValue([
     { name: "run_command", description: "", input_schema: { type: "object", properties: {} } },
     { name: "glob", description: "", input_schema: { type: "object", properties: {} } },
+    { name: "read_file", description: "", input_schema: { type: "object", properties: {} } },
+    { name: "list_directory", description: "", input_schema: { type: "object", properties: {} } },
+    { name: "get_file_info", description: "", input_schema: { type: "object", properties: {} } },
+    { name: "system_info", description: "", input_schema: { type: "object", properties: {} } },
+    { name: "infra_status", description: "", input_schema: { type: "object", properties: {} } },
     { name: "web_search", description: "", input_schema: { type: "object", properties: {} } },
     { name: "write_file", description: "", input_schema: { type: "object", properties: {} } },
     { name: "create_document", description: "", input_schema: { type: "object", properties: {} } },
@@ -539,7 +545,7 @@ describe("TaskExecutor executeStep failure handling", () => {
     executor = createExecutorWithStubs(
       [
         textResponse(
-          "1) Who is the primary user?\n2) What is the core flow?\n3) List 3 must-have features.",
+          "Please choose the required input file path:\n1) inputs/demand-letter.txt\n2) inputs/buyer-demand-letter.txt\nReply with 1 or 2.",
         ),
       ],
       {},
@@ -553,22 +559,122 @@ describe("TaskExecutor executeStep failure handling", () => {
     });
   });
 
-  it("does not pause when user input is disabled for the task", async () => {
+  it("fails with user_action_required when required-input pauses are disabled", async () => {
     executor = createExecutorWithStubs(
       [
         textResponse(
-          "1) Who is the primary user?\n2) What is the core flow?\n3) List 3 must-have features.",
+          "Please choose the required input file path:\n1) inputs/demand-letter.txt\n2) inputs/buyer-demand-letter.txt\nReply with 1 or 2.",
         ),
       ],
       {},
     );
     (executor as Any).shouldPauseForQuestions = false;
+    (executor as Any).shouldPauseForRequiredDecision = false;
 
     const step: Any = { id: "3b", description: "Clarify requirements", status: "pending" };
 
     await (executor as Any).executeStep(step);
 
+    expect(step.status).toBe("failed");
+    expect(String(step.error || "")).toContain("User action required");
+  });
+
+  it("does not treat non-blocking exploratory questions as required-decision blockers", async () => {
+    executor = createExecutorWithStubs(
+      [textResponse("Who is the primary user for this feature and what outcomes matter most?")],
+      {},
+    );
+    (executor as Any).shouldPauseForQuestions = false;
+    (executor as Any).shouldPauseForRequiredDecision = true;
+
+    const step: Any = { id: "3d", description: "Explore product context", status: "pending" };
+
+    await (executor as Any).executeStep(step);
     expect(step.status).toBe("completed");
+  });
+
+  it("does not pause on non-question progress text that mentions integration availability", async () => {
+    executor = createExecutorWithStubs(
+      [
+        textResponse(
+          "Captured command context and integration availability scope. Ready to proceed with the lightweight health checks.",
+        ),
+      ],
+      {},
+    );
+    (executor as Any).shouldPauseForQuestions = true;
+    (executor as Any).shouldPauseForRequiredDecision = true;
+
+    const step: Any = { id: "3e", description: "Capture mention context", status: "pending" };
+
+    await (executor as Any).executeStep(step);
+    expect(step.status).toBe("completed");
+  });
+
+  it("pauses for required decisions even when autonomous question pausing is disabled", async () => {
+    executor = createExecutorWithStubs(
+      [
+        textResponse(
+          "1) Which counterparty demand file should I use?\n2) Confirm the agreement path.",
+        ),
+      ],
+      {},
+    );
+    (executor as Any).shouldPauseForQuestions = false;
+    (executor as Any).shouldPauseForRequiredDecision = true;
+
+    const step: Any = { id: "3c", description: "Resolve required documents", status: "pending" };
+
+    await expect((executor as Any).executeStep(step)).rejects.toMatchObject({
+      name: "AwaitingUserInputError",
+    });
+  });
+
+  it("does not fail a step as limitation-only when tools already ran and only input-dependent errors occurred", async () => {
+    executor = createExecutorWithStubs(
+      [
+        toolUseResponse("glob", { pattern: "**/*" }),
+        toolUseResponse("read_file", { path: "." }),
+        textResponse(
+          "I cannot run deeper telemetry in this environment, but fallback checks completed with current evidence.",
+        ),
+      ],
+      {
+        glob: { success: true, matches: ["tmp.txt"] },
+      },
+    );
+    (executor as Any).toolRegistry.executeTool = vi.fn(async (name: string) => {
+      if (name === "read_file") {
+        throw new Error("Failed to read file: EISDIR: illegal operation on a directory, read");
+      }
+      if (name === "glob") {
+        return { success: true, matches: ["tmp.txt"] };
+      }
+      return { success: true };
+    });
+
+    const step: Any = { id: "3f", description: "Fallback lane checks", status: "pending" };
+
+    await (executor as Any).executeStep(step);
+    expect(step.status).toBe("completed");
+    expect(String(step.error || "")).not.toContain("limitation statement");
+  });
+
+  it("skips quality refine passes for recovery steps even when qualityPasses=2", async () => {
+    executor = createExecutorWithStubs([textResponse("Fallback path complete.")], {});
+    (executor as Any).task.agentConfig = { qualityPasses: 2 };
+    const step: Any = {
+      id: "3g",
+      description: "Summary fallback lane outcome",
+      status: "pending",
+      kind: "recovery",
+    };
+    (executor as Any).plan = { description: "Plan", steps: [step] };
+
+    await (executor as Any).executeStep(step);
+
+    expect(step.status).toBe("completed");
+    expect((executor as Any).callLLMWithRetry).toHaveBeenCalledTimes(1);
   });
 
   it("skips workspace preflight pauses when user input is disabled", () => {
@@ -655,6 +761,71 @@ describe("TaskExecutor executeStep failure handling", () => {
     await (executor as Any).executeStep(step);
 
     expect(step.status).toBe("completed");
+  });
+
+  it("accepts artifact presence for compile/summary steps without requiring new writes", async () => {
+    executor = createExecutorWithStubs([textResponse("Compiled summary is complete.")], {});
+    const existingArtifact = "/tmp/KARU_Whitepaper.md";
+    fs.writeFileSync(existingArtifact, "# Existing artifact\n");
+    (executor as Any).fileOperationTracker = {
+      getKnowledgeSummary: vi.fn().mockReturnValue(""),
+      getCreatedFiles: vi.fn().mockReturnValue(["KARU_Whitepaper.md"]),
+    };
+
+    const step: Any = {
+      id: "artifact-presence-1",
+      description: "Prepare final summary document for KARU_Whitepaper.md",
+      status: "pending",
+    };
+
+    try {
+      await (executor as Any).executeStep(step);
+      expect(step.status).toBe("completed");
+    } finally {
+      try {
+        fs.unlinkSync(existingArtifact);
+      } catch {
+        // Ignore cleanup failures in test env.
+      }
+    }
+  });
+
+  it("requires step-local artifact evidence for compile/summary steps", async () => {
+    executor = createExecutorWithStubs([textResponse("Prepared final summary.")], {});
+    (executor as Any).fileOperationTracker = {
+      getKnowledgeSummary: vi.fn().mockReturnValue(""),
+      // Simulate a previously created file from earlier steps, with no new writes in this step.
+      getCreatedFiles: vi.fn().mockReturnValue(["earlier_artifact.md"]),
+    };
+
+    const step: Any = {
+      id: "artifact-presence-2",
+      description: "Prepare final summary document",
+      status: "pending",
+    };
+
+    await (executor as Any).executeStep(step);
+
+    expect(step.status).toBe("failed");
+    expect(step.error).toContain("artifact reference/presence");
+  });
+
+  it("enforces hard tool-call budget contracts", () => {
+    executor = createExecutorWithStubs([], {});
+    (executor as Any).budgetContractsEnabled = true;
+    (executor as Any).budgetContract = {
+      maxTurns: 20,
+      maxToolCalls: 1,
+      maxWebSearchCalls: 1,
+      maxConsecutiveSearchSteps: 2,
+      maxAutoRecoverySteps: 1,
+    };
+    (executor as Any).totalToolCallCount = 1;
+    (executor as Any).webSearchToolCallCount = 1;
+
+    expect(() => (executor as Any).enforceToolBudget("write_file")).toThrow("Tool-call budget");
+    (executor as Any).totalToolCallCount = 0;
+    expect(() => (executor as Any).enforceToolBudget("web_search")).toThrow("web_search budget");
   });
 
   it("fails final verification steps unless the response is exactly OK", async () => {

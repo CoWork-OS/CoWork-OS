@@ -4,6 +4,7 @@
 
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import type { CustomSkill } from "../../../../shared/types";
+import * as path from "path";
 
 // Mock settings storage for personality manager
 let mockPersonalitySettings: Any = {};
@@ -51,8 +52,18 @@ vi.mock("../../custom-skill-loader", () => ({
     getSkill: vi.fn().mockImplementation((id: string) => mockSkills.get(id)),
     listModelInvocableSkills: vi.fn().mockImplementation(() => Array.from(mockSkills.values())),
     getSkillStatusEntry: vi.fn().mockResolvedValue(null),
-    expandPrompt: vi.fn().mockImplementation((skill: CustomSkill, params: Record<string, Any>) => {
+    expandPrompt: vi.fn().mockImplementation((
+      skill: CustomSkill,
+      params: Record<string, Any>,
+      context: { artifactDir?: string } = {},
+    ) => {
       let prompt = skill.prompt;
+      const fileDir = skill.filePath ? path.dirname(skill.filePath) : "/mock/resources/skills";
+      const scopedBaseDir = skill.filePath ? path.join(fileDir, skill.id) : fileDir;
+      prompt = prompt.replace(/\{baseDir\}/g, scopedBaseDir);
+      if (context.artifactDir) {
+        prompt = prompt.replace(/\{artifactDir\}/g, context.artifactDir);
+      }
       if (skill.parameters) {
         for (const param of skill.parameters) {
           const value = params[param.name] ?? param.default ?? "";
@@ -420,6 +431,28 @@ describe("use_skill tool", () => {
 
       expect(result.instruction).toBeDefined();
       expect(result.instruction).toContain("Execute");
+    });
+
+    it("should resolve {baseDir} and {artifactDir} placeholders in expanded prompt", async () => {
+      const skill = createTestSkill({
+        id: "script-skill",
+        filePath: "/mock/resources/skills/script-skill.json",
+        prompt: "Run {baseDir}/scripts/run.sh > {artifactDir}/result.txt",
+        parameters: [],
+      });
+      mockSkills.set("script-skill", skill);
+
+      const result = await registry.executeTool("use_skill", {
+        skill_id: "script-skill",
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.expanded_prompt).toContain(
+        "/mock/resources/skills/script-skill/scripts/run.sh",
+      );
+      expect(result.expanded_prompt).toContain(
+        "/mock/workspace/artifacts/skills/test-task-123/script-skill/result.txt",
+      );
     });
 
     it("should return skill metadata in response", async () => {

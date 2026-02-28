@@ -6,6 +6,7 @@ interface SidebarProps {
   workspace: Workspace | null;
   tasks: Task[];
   selectedTaskId: string | null;
+  completionAttentionTaskIds?: string[];
   onSelectTask: (id: string | null) => void;
   onNewSession?: () => void;
   onOpenSettings: () => void;
@@ -48,6 +49,20 @@ export function getSessionMode(task: Task): SessionMode {
 }
 
 const HIDDEN_FOCUSED_STATUSES: ReadonlySet<Task["status"]> = new Set(["failed", "cancelled"]);
+const ACTIVE_SESSION_STATUSES: ReadonlySet<Task["status"]> = new Set([
+  "executing",
+  "planning",
+  "interrupted",
+]);
+const AWAITING_SESSION_STATUSES: ReadonlySet<Task["status"]> = new Set(["paused", "blocked"]);
+
+export function isActiveSessionStatus(status: Task["status"]): boolean {
+  return ACTIVE_SESSION_STATUSES.has(status);
+}
+
+export function isAwaitingSessionStatus(status: Task["status"]): boolean {
+  return AWAITING_SESSION_STATUSES.has(status);
+}
 
 export function compareTasksByPinAndRecency(a: Task, b: Task): number {
   const pinnedDiff = Number(Boolean(b.pinned)) - Number(Boolean(a.pinned));
@@ -120,6 +135,7 @@ export function Sidebar({
   workspace: _workspace,
   tasks,
   selectedTaskId,
+  completionAttentionTaskIds = [],
   onSelectTask,
   onNewSession,
   onOpenSettings,
@@ -140,6 +156,10 @@ export function Sidebar({
   const menuRef = useRef<HTMLDivElement>(null);
   const menuButtonRef = useRef<Map<string, HTMLButtonElement>>(new Map());
   const renameInputRef = useRef<HTMLInputElement>(null);
+  const completionAttentionSet = useMemo(
+    () => new Set(completionAttentionTaskIds),
+    [completionAttentionTaskIds],
+  );
 
   // Helper to get date group for a timestamp
   const getDateGroup = useCallback((timestamp: number): string => {
@@ -503,69 +523,52 @@ export function Sidebar({
     });
   };
 
-  const getStatusIndicator = (status: Task["status"]) => {
+  const getStatusIndicator = (status: Task["status"], showCompletionAttention = false) => {
+    if (isActiveSessionStatus(status)) {
+      return (
+        <>
+          <span className="terminal-only">[~]</span>
+          <span className="modern-only">
+            <span className="cli-session-indicator cli-session-indicator-active" aria-hidden="true" />
+          </span>
+        </>
+      );
+    }
+
+    if (isAwaitingSessionStatus(status)) {
+      return (
+        <>
+          <span className="terminal-only">[?]</span>
+          <span className="modern-only">
+            <span
+              className="cli-session-indicator cli-session-indicator-awaiting"
+              aria-hidden="true"
+            />
+          </span>
+        </>
+      );
+    }
+
     switch (status) {
       case "completed":
+        if (!showCompletionAttention) {
+          return (
+            <>
+              <span className="terminal-only">[ ]</span>
+              <span className="modern-only">
+                <span className="cli-session-indicator cli-session-indicator-invisible" aria-hidden="true" />
+              </span>
+            </>
+          );
+        }
         return (
           <>
-            <span className="terminal-only">[✓]</span>
+            <span className="terminal-only">[•]</span>
             <span className="modern-only">
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="3"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <polyline points="20 6 9 17 4 12"></polyline>
-              </svg>
-            </span>
-          </>
-        );
-      case "paused":
-        return (
-          <>
-            <span className="terminal-only">[P]</span>
-            <span className="modern-only">
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="3"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <circle cx="12" cy="12" r="10"></circle>
-                <line x1="10" y1="15" x2="10" y2="9"></line>
-                <line x1="14" y1="15" x2="14" y2="9"></line>
-              </svg>
-            </span>
-          </>
-        );
-      case "blocked":
-        return (
-          <>
-            <span className="terminal-only">[!]</span>
-            <span className="modern-only">
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="3"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <circle cx="12" cy="12" r="10"></circle>
-                <line x1="12" y1="8" x2="12" y2="12"></line>
-                <line x1="12" y1="16" x2="12.01" y2="16"></line>
-              </svg>
+              <span
+                className="cli-session-indicator cli-session-indicator-completed"
+                aria-hidden="true"
+              />
             </span>
           </>
         );
@@ -587,28 +590,6 @@ export function Sidebar({
               >
                 <line x1="18" y1="6" x2="6" y2="18"></line>
                 <line x1="6" y1="6" x2="18" y2="18"></line>
-              </svg>
-            </span>
-          </>
-        );
-      case "executing":
-      case "planning":
-      case "interrupted":
-        return (
-          <>
-            <span className="terminal-only">[~]</span>
-            <span className="modern-only">
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="3"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <circle cx="12" cy="12" r="10"></circle>
               </svg>
             </span>
           </>
@@ -636,21 +617,15 @@ export function Sidebar({
     }
   };
 
-  const getStatusClass = (status: Task["status"]) => {
+  const getStatusClass = (status: Task["status"], showCompletionAttention = false) => {
+    if (isActiveSessionStatus(status)) return "active";
+    if (isAwaitingSessionStatus(status)) return "awaiting";
+    if (status === "completed" && showCompletionAttention) return "completed";
+
     switch (status) {
-      case "completed":
-        return "completed";
-      case "paused":
-        return "paused";
-      case "blocked":
-        return "blocked";
       case "failed":
       case "cancelled":
         return "failed";
-      case "executing":
-      case "planning":
-      case "interrupted":
-        return "active";
       default:
         return "";
     }
@@ -699,6 +674,10 @@ export function Sidebar({
     const treePrefix = depth > 0 ? (isLast ? "└─" : "├─") : "";
     const taskMode = depth === 0 ? getSessionMode(task) : null;
     const modeClass = taskMode && taskMode !== "standard" ? `session-mode-${taskMode}` : "";
+    const showCompletionAttention =
+      task.status === "completed" &&
+      selectedTaskId !== task.id &&
+      completionAttentionSet.has(task.id);
 
     return (
       <div key={task.id} className="task-tree-node">
@@ -728,8 +707,8 @@ export function Sidebar({
             </span>
           )}
 
-          <span className={`cli-task-status ${getStatusClass(task.status)}`}>
-            {getStatusIndicator(task.status)}
+          <span className={`cli-task-status ${getStatusClass(task.status, showCompletionAttention)}`}>
+            {getStatusIndicator(task.status, showCompletionAttention)}
           </span>
 
           {task.pinned && (
@@ -784,9 +763,14 @@ export function Sidebar({
                 onClick={(e) => e.stopPropagation()}
               />
             ) : (
-              <span className="cli-task-title" title={task.title}>
-                {task.title}
-              </span>
+              <div className="cli-task-title-row">
+                <span className="cli-task-title" title={task.title}>
+                  {task.title}
+                </span>
+                {isAwaitingSessionStatus(task.status) && (
+                  <span className="cli-task-awaiting-badge">Awaiting response</span>
+                )}
+              </div>
             )}
           </div>
 

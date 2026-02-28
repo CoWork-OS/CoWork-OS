@@ -593,6 +593,7 @@ export type ConversationMode = "task" | "chat" | "hybrid" | "think";
 export type ExecutionMode = "execute" | "propose" | "analyze";
 export type TaskDomain = "auto" | "code" | "research" | "operations" | "writing" | "general";
 export type ToolDecision = "allow" | "deny" | "ask";
+export type LlmProfile = "strong" | "cheap";
 
 /**
  * Per-task agent configuration for customizing LLM and personality
@@ -603,6 +604,16 @@ export interface AgentConfig {
   providerType?: LLMProviderType;
   /** Override the model key (e.g., 'opus-4-5', 'sonnet-4-5', 'haiku-4-5') */
   modelKey?: string;
+  /**
+   * Optional LLM profile override:
+   * - strong: high-capability planning/critical profile
+   * - cheap: lower-cost execution profile
+   */
+  llmProfile?: LlmProfile;
+  /** When true, force profile routing even if modelKey is set. */
+  llmProfileForced?: boolean;
+  /** Strategy-derived profile hint (auto-routing metadata). */
+  llmProfileHint?: LlmProfile;
   /** Override the personality for this agent */
   personalityId?: PersonalityId;
   /** Gateway context for context-aware tool restrictions (e.g., memory isolation in group/public chats) */
@@ -630,6 +641,16 @@ export interface AgentConfig {
   bypassQueue?: boolean;
   /** Whether this task may pause and wait for user input (default: true) */
   allowUserInput?: boolean;
+  /**
+   * Explicitly allow retry loops even when no success criteria are defined.
+   * Defaults to false.
+   */
+  retryWithoutSuccessCriteria?: boolean;
+  /**
+   * Whether blocking required decisions should pause execution, even in autonomous mode.
+   * Defaults to true.
+   */
+  pauseForRequiredDecision?: boolean;
   /**
    * For group/public gateway contexts, allow read-only memory context injection
    * only when explicitly trusted/opted in at the channel level.
@@ -702,6 +723,7 @@ export interface Task {
   id: string;
   title: string;
   prompt: string;
+  rawPrompt?: string; // Original prompt used for intent routing (without strategy decoration)
   userPrompt?: string; // Original user prompt (before agent dispatch formatting)
   status: TaskStatus;
   pinned?: boolean;
@@ -740,6 +762,22 @@ export interface Task {
   comparisonSessionId?: string; // If this task is part of a comparison session
   // Origin source for distinguishing how the task was created
   source?: "manual" | "cron" | "hook" | "api";
+  // Strategy/routing controls
+  strategyLock?: boolean; // When true, do not re-route intent at runtime
+  budgetProfile?: "balanced" | "strict" | "aggressive";
+  // Execution result metadata (for partial success + diagnostics)
+  terminalStatus?: "ok" | "partial_success" | "failed";
+  failureClass?: "budget_exhausted" | "tool_error" | "contract_error" | "unknown";
+  awaitingUserInputReasonCode?: string;
+  retryReason?: "success_criteria_failed" | "explicit_retry_policy";
+  recoveryClass?: "user_blocker" | "local_runtime" | "provider_quota" | "external_unknown";
+  toolDisabledScope?: "provider" | "global";
+  budgetUsage?: {
+    turns: number;
+    toolCalls: number;
+    webSearchCalls: number;
+    duplicatesBlocked: number;
+  };
 }
 
 // ============ Git Worktree Types ============
@@ -976,6 +1014,10 @@ export interface WorkspacePermissions {
 export interface PlanStep {
   id: string;
   description: string;
+  /**
+   * Optional orchestration classification used for deterministic recovery accounting.
+   */
+  kind?: "primary" | "verification" | "recovery";
   status: "pending" | "in_progress" | "completed" | "failed" | "skipped";
   startedAt?: number;
   completedAt?: number;
@@ -2068,10 +2110,19 @@ export interface InfraSettings {
   };
   wallet: {
     enabled: boolean;
+    provider: "local" | "coinbase_agentic";
+    coinbase: {
+      enabled: boolean;
+      signerEndpoint: string;
+      network: "base-mainnet" | "base-sepolia";
+      accountId: string;
+    };
   };
   payments: {
     requireApproval: boolean;
     maxAutoApproveUsd: number;
+    hardLimitUsd: number;
+    allowedHosts: string[];
   };
   enabledCategories: {
     sandbox: boolean;
@@ -2095,10 +2146,19 @@ export const DEFAULT_INFRA_SETTINGS: InfraSettings = {
   },
   wallet: {
     enabled: true,
+    provider: "local",
+    coinbase: {
+      enabled: false,
+      signerEndpoint: "",
+      network: "base-mainnet",
+      accountId: "",
+    },
   },
   payments: {
     requireApproval: true,
     maxAutoApproveUsd: 1.0,
+    hardLimitUsd: 100.0,
+    allowedHosts: [],
   },
   enabledCategories: {
     sandbox: true,
@@ -2359,6 +2419,7 @@ export const IPC_CHANNELS = {
   // LLM Settings
   LLM_GET_SETTINGS: "llm:getSettings",
   LLM_SAVE_SETTINGS: "llm:saveSettings",
+  LLM_RESET_PROVIDER_CREDENTIALS: "llm:resetProviderCredentials",
   LLM_TEST_PROVIDER: "llm:testProvider",
   LLM_GET_MODELS: "llm:getModels",
   LLM_GET_CONFIG_STATUS: "llm:getConfigStatus",
@@ -2841,6 +2902,17 @@ export interface CustomProviderConfig {
   apiKey?: string;
   model?: string;
   baseUrl?: string;
+  profileRoutingEnabled?: boolean;
+  strongModelKey?: string;
+  cheapModelKey?: string;
+  preferStrongForVerification?: boolean;
+}
+
+export interface ProviderRoutingSettings {
+  profileRoutingEnabled?: boolean;
+  strongModelKey?: string;
+  cheapModelKey?: string;
+  preferStrongForVerification?: boolean;
 }
 
 export interface LLMSettingsData {
@@ -2848,7 +2920,7 @@ export interface LLMSettingsData {
   modelKey: string;
   anthropic?: {
     apiKey?: string;
-  };
+  } & ProviderRoutingSettings;
   bedrock?: {
     region?: string;
     accessKeyId?: string;
@@ -2857,21 +2929,21 @@ export interface LLMSettingsData {
     profile?: string;
     useDefaultCredentials?: boolean;
     model?: string;
-  };
+  } & ProviderRoutingSettings;
   ollama?: {
     baseUrl?: string;
     model?: string;
     apiKey?: string; // Optional, for remote Ollama servers
-  };
+  } & ProviderRoutingSettings;
   gemini?: {
     apiKey?: string;
     model?: string;
-  };
+  } & ProviderRoutingSettings;
   openrouter?: {
     apiKey?: string;
     model?: string;
     baseUrl?: string;
-  };
+  } & ProviderRoutingSettings;
   openai?: {
     apiKey?: string;
     model?: string;
@@ -2880,39 +2952,39 @@ export interface LLMSettingsData {
     refreshToken?: string;
     tokenExpiresAt?: number;
     authMethod?: "api_key" | "oauth";
-  };
+  } & ProviderRoutingSettings;
   azure?: {
     apiKey?: string;
     endpoint?: string;
     deployment?: string;
     deployments?: string[];
     apiVersion?: string;
-  };
+  } & ProviderRoutingSettings;
   groq?: {
     apiKey?: string;
     model?: string;
     baseUrl?: string;
-  };
+  } & ProviderRoutingSettings;
   xai?: {
     apiKey?: string;
     model?: string;
     baseUrl?: string;
-  };
+  } & ProviderRoutingSettings;
   kimi?: {
     apiKey?: string;
     model?: string;
     baseUrl?: string;
-  };
+  } & ProviderRoutingSettings;
   pi?: {
     provider?: string; // pi-ai KnownProvider (e.g. 'anthropic', 'openai', 'google')
     apiKey?: string;
     model?: string;
-  };
+  } & ProviderRoutingSettings;
   openaiCompatible?: {
     apiKey?: string;
     baseUrl?: string;
     model?: string;
-  };
+  } & ProviderRoutingSettings;
   // Cached models from API (populated when user refreshes)
   cachedGeminiModels?: CachedModelInfo[];
   cachedOpenRouterModels?: CachedModelInfo[];
@@ -2961,7 +3033,8 @@ export type ChannelType =
   | "bluebubbles"
   | "email"
   | "teams"
-  | "googlechat";
+  | "googlechat"
+  | "x";
 export type ChannelStatus = "disconnected" | "connecting" | "connected" | "error";
 export type SecurityMode = "open" | "allowlist" | "pairing";
 
@@ -3127,6 +3200,12 @@ export interface AddChannelRequest {
   serviceAccountKeyPath?: string;
   projectId?: string;
   webhookPath?: string;
+  // X-specific fields
+  xCommandPrefix?: string;
+  xAllowedAuthors?: string[];
+  xPollIntervalSec?: number;
+  xFetchCount?: number;
+  xOutboundEnabled?: boolean;
 }
 
 export interface UpdateChannelRequest {
@@ -3235,6 +3314,28 @@ export interface SearchSettingsData {
 // X/Twitter integration settings
 export type XAuthMethod = "browser" | "manual";
 
+export type XMentionWorkspaceMode = "temporary";
+
+export interface XMentionTriggerSettings {
+  enabled: boolean;
+  commandPrefix: string;
+  allowedAuthors: string[];
+  pollIntervalSec: number;
+  fetchCount: number;
+  workspaceMode: XMentionWorkspaceMode;
+}
+
+export interface XMentionTriggerStatus {
+  mode: "bridge" | "native" | "disabled";
+  running: boolean;
+  lastPollAt?: number;
+  lastSuccessAt?: number;
+  lastError?: string;
+  acceptedCount: number;
+  ignoredCount: number;
+  lastTaskId?: string;
+}
+
 export interface XSettingsData {
   enabled: boolean;
   authMethod: XAuthMethod;
@@ -3250,6 +3351,7 @@ export interface XSettingsData {
   timeoutMs?: number;
   cookieTimeoutMs?: number;
   quoteDepth?: number;
+  mentionTrigger: XMentionTriggerSettings;
 }
 
 export interface XConnectionTestResult {

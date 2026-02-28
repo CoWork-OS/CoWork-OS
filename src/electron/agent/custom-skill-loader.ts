@@ -22,10 +22,13 @@ import { SkillEligibilityChecker, getSkillEligibilityChecker } from "./skill-eli
 import { getSkillRegistry as _getSkillRegistry } from "./skill-registry";
 import { InputSanitizer } from "./security";
 import { getUserDataDir } from "../utils/user-data-dir";
+import { createLogger } from "../utils/logger";
 
 const SKILLS_FOLDER_NAME = "skills";
 const SKILL_FILE_EXTENSION = ".json";
 const RELOAD_DEBOUNCE_MS = 100; // Debounce rapid reload calls
+const IGNORED_SKILL_METADATA_FILES = new Set(["build-mode.json"]);
+const logger = createLogger("CustomSkillLoader");
 
 export interface SkillLoaderConfig {
   bundledSkillsDir?: string;
@@ -59,6 +62,7 @@ export class CustomSkillLoader {
   private workspaceSkillsDir: string | null = null;
   private skills: Map<string, CustomSkill> = new Map();
   private initialized: boolean = false;
+  private initializationPromise: Promise<void> | null = null;
   private skillsConfig?: SkillsConfig;
   private eligibilityChecker: SkillEligibilityChecker;
 
@@ -66,6 +70,19 @@ export class CustomSkillLoader {
   private reloadDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   private reloadPromise: Promise<CustomSkill[]> | null = null;
   private isReloading: boolean = false;
+  private lastLoadStats: {
+    bundled: number;
+    managed: number;
+    workspace: number;
+    total: number;
+    overridden: number;
+  } = {
+    bundled: 0,
+    managed: 0,
+    workspace: 0,
+    total: 0,
+    overridden: 0,
+  };
 
   constructor(config?: SkillLoaderConfig) {
     // Bundled skills directory
@@ -96,22 +113,29 @@ export class CustomSkillLoader {
    */
   async initialize(): Promise<void> {
     if (this.initialized) return;
+    if (this.initializationPromise) return this.initializationPromise;
 
-    // Ensure managed skills directory exists
-    if (!fs.existsSync(this.managedSkillsDir)) {
-      fs.mkdirSync(this.managedSkillsDir, { recursive: true });
-    }
+    this.initializationPromise = (async () => {
+      // Ensure managed skills directory exists
+      if (!fs.existsSync(this.managedSkillsDir)) {
+        fs.mkdirSync(this.managedSkillsDir, { recursive: true });
+      }
 
-    // Load all skills
-    await this.reloadSkills();
+      // Load all skills
+      await this.reloadSkills();
 
-    this.initialized = true;
-    console.log(`[CustomSkillLoader] Initialized with ${this.skills.size} skills`);
-    console.log(`[CustomSkillLoader] Bundled: ${this.bundledSkillsDir}`);
-    console.log(`[CustomSkillLoader] Managed: ${this.managedSkillsDir}`);
-    if (this.workspaceSkillsDir) {
-      console.log(`[CustomSkillLoader] Workspace: ${this.workspaceSkillsDir}`);
-    }
+      this.initialized = true;
+      logger.info(`Initialized with ${this.skills.size} skills`);
+      logger.debug(`Bundled: ${this.bundledSkillsDir}`);
+      logger.debug(`Managed: ${this.managedSkillsDir}`);
+      if (this.workspaceSkillsDir) {
+        logger.debug(`Workspace: ${this.workspaceSkillsDir}`);
+      }
+    })().finally(() => {
+      this.initializationPromise = null;
+    });
+
+    return this.initializationPromise;
   }
 
   /**
@@ -158,6 +182,10 @@ export class CustomSkillLoader {
       const skillFiles = files.filter((f) => f.endsWith(SKILL_FILE_EXTENSION));
 
       for (const file of skillFiles) {
+        if (IGNORED_SKILL_METADATA_FILES.has(file.toLowerCase())) {
+          logger.debug(`Skipping metadata file: ${file}`);
+          continue;
+        }
         try {
           const filePath = path.join(dir, file);
           const content = fs.readFileSync(filePath, "utf-8");
@@ -171,14 +199,14 @@ export class CustomSkillLoader {
           if (this.validateSkill(skill)) {
             skills.push(skill);
           } else {
-            console.warn(`[CustomSkillLoader] Invalid skill file: ${file}`);
+            logger.warn(`Invalid skill file: ${file}`);
           }
         } catch (error) {
-          console.error(`[CustomSkillLoader] Failed to load skill file ${file}:`, error);
+          logger.error(`Failed to load skill file ${file}:`, error);
         }
       }
     } catch (error) {
-      console.error(`[CustomSkillLoader] Failed to read directory ${dir}:`, error);
+      logger.error(`Failed to read directory ${dir}:`, error);
     }
 
     return skills;
@@ -252,11 +280,12 @@ export class CustomSkillLoader {
 
     const rawTotal = counts.bundled + counts.managed + counts.workspace;
     const overridden = rawTotal - counts.total;
-    console.log(
-      `[CustomSkillLoader] Loaded ${counts.total} skills ` +
-        `(bundled: ${counts.bundled}, managed: ${counts.managed}, workspace: ${counts.workspace}` +
-        (overridden > 0 ? `, ${overridden} overridden` : "") +
-        ")",
+    this.lastLoadStats = {
+      ...counts,
+      overridden,
+    };
+    logger.info(
+      `Loaded ${counts.total} skills (bundled: ${counts.bundled}, managed: ${counts.managed}, workspace: ${counts.workspace}, overridden: ${overridden})`,
     );
 
     return this.listSkills();
@@ -285,19 +314,27 @@ export class CustomSkillLoader {
    */
   registerPluginSkill(skill: CustomSkill): void {
     if (!this.validateSkill(skill)) {
-      console.warn(`[CustomSkillLoader] Invalid plugin skill: ${skill.id}`);
+      logger.warn(`Invalid plugin skill: ${skill.id}`);
       return;
     }
     // Plugin skills don't override workspace skills
     const existing = this.skills.get(skill.id);
     if (existing && existing.source === "workspace") {
-      console.log(
-        `[CustomSkillLoader] Skipping plugin skill ${skill.id} (workspace override exists)`,
-      );
+      logger.debug(`Skipping plugin skill ${skill.id} (workspace override exists)`);
       return;
     }
     this.skills.set(skill.id, skill);
-    console.log(`[CustomSkillLoader] Plugin skill registered: ${skill.id}`);
+    logger.debug(`Plugin skill registered: ${skill.id}`);
+  }
+
+  getLoadStats(): {
+    bundled: number;
+    managed: number;
+    workspace: number;
+    total: number;
+    overridden: number;
+  } {
+    return { ...this.lastLoadStats };
   }
 
   /**
@@ -355,10 +392,10 @@ export class CustomSkillLoader {
     // Validate and sanitize each guideline before injection
     return enabledGuidelines
       .map((skill) => {
-        const validation = InputSanitizer.validateSkillGuidelines(skill.prompt);
-        if (!validation.valid) {
-          console.warn(
-            `[CustomSkillLoader] Security: Skill "${skill.id}" guidelines contain suspicious patterns:`,
+          const validation = InputSanitizer.validateSkillGuidelines(skill.prompt);
+          if (!validation.valid) {
+          logger.warn(
+            `Security: Skill "${skill.id}" guidelines contain suspicious patterns:`,
             validation.issues,
           );
           return validation.sanitized;

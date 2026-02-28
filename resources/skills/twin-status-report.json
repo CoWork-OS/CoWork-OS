@@ -2,7 +2,7 @@
   "id": "twin-status-report",
   "name": "Status Report Generator",
   "description": "Generate a concise status report from recent activity, tasks, commits, and conversations. Used by digital twin personas to prepare standup updates and progress summaries.",
-  "icon": "\ud83d\udccb",
+  "icon": "📋",
   "category": "Digital Twin",
   "prompt": "Generate a concise status report covering:\n\n1. **Completed work** (last {{period}}): List tasks completed, PRs merged, and key decisions made.\n2. **In progress**: Current active work items with estimated completion.\n3. **Blocked / At risk**: Items that need attention or are behind schedule.\n4. **Upcoming**: Key items in the next cycle.\n\nFormat as a clean markdown document suitable for {{audience}}.\n\nKeep it actionable - every item should either inform a decision or prompt a follow-up.\n\nWrite the report to `{artifactDir}/status-report.md`.",
   "parameters": [
@@ -19,20 +19,49 @@
       "description": "Who the report is for",
       "required": false,
       "default": "team standup",
-      "options": ["team standup", "engineering leadership", "cross-functional stakeholders", "executive summary"]
+      "options": [
+        "team standup",
+        "engineering leadership",
+        "cross-functional stakeholders",
+        "executive summary"
+      ]
     }
   ],
   "enabled": true,
   "metadata": {
     "version": "1.0.0",
     "author": "CoWork OS",
-    "tags": ["digital-twin", "status", "reporting", "standup"],
+    "tags": [
+      "digital-twin",
+      "status",
+      "reporting",
+      "standup"
+    ],
     "routing": {
       "useWhen": "Use when generating status updates, standup reports, progress summaries, or sprint reviews.",
       "dontUseWhen": "Don't use for detailed technical analysis or code review.",
       "outputs": "Markdown status report organized by completion status",
       "successCriteria": "Report covers all active work streams with clear status and action items",
-      "expectedArtifacts": ["status-report.md"]
+      "expectedArtifacts": [
+        "status-report.md"
+      ],
+      "examples": {
+        "positive": [
+          "Use the twin-status-report skill for this request.",
+          "Help me with status report generator.",
+          "Use when generating status updates, standup reports, progress summaries, or sprint reviews.",
+          "Status Report Generator: provide an actionable result."
+        ],
+        "negative": [
+          "Don't use for detailed technical analysis or code review.",
+          "Do not use twin-status-report for unrelated requests.",
+          "This request is outside status report generator scope.",
+          "This is conceptual discussion only; no tool workflow is needed."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "low"
     }
   }
 }

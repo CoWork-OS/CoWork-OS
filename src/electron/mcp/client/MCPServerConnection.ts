@@ -23,6 +23,7 @@ import {
 import { StdioTransport } from "./transports/StdioTransport";
 import { SSETransport } from "./transports/SSETransport";
 import { WebSocketTransport } from "./transports/WebSocketTransport";
+import { createLogger } from "../../utils/logger";
 
 // MCP Protocol version we support
 const PROTOCOL_VERSION = "2024-11-05";
@@ -32,6 +33,7 @@ const CLIENT_INFO = {
   name: "CoWork-OS",
   version: "1.0.0",
 };
+const logger = createLogger("MCPServerConnection");
 
 export interface MCPServerConnectionEvents {
   status_changed: (status: MCPConnectionStatus, error?: string) => void;
@@ -127,9 +129,9 @@ export class MCPServerConnection extends EventEmitter {
       this.reconnectAttempts = 0;
       this.setStatus("connected");
 
-      console.log(`[MCPServerConnection] Connected to ${this.config.name}`);
+      logger.debug(`Connected to ${this.config.name}`);
     } catch (error: Any) {
-      console.error(`[MCPServerConnection] Failed to connect to ${this.config.name}:`, error);
+      logger.error(`Failed to connect to ${this.config.name}:`, error);
       this.setStatus("error", error.message);
       await this.cleanup();
       throw error;
@@ -162,7 +164,7 @@ export class MCPServerConnection extends EventEmitter {
 
     await this.cleanup();
     this.setStatus("disconnected");
-    console.log(`[MCPServerConnection] Disconnected from ${this.config.name}`);
+    logger.debug(`Disconnected from ${this.config.name}`);
   }
 
   /**
@@ -179,7 +181,7 @@ export class MCPServerConnection extends EventEmitter {
       throw new Error(`Tool ${name} not found on server ${this.config.name}`);
     }
 
-    console.debug(`[MCPServerConnection] Calling tool ${name} on ${this.config.name}`);
+    logger.debug(`Calling tool ${name} on ${this.config.name}`);
 
     try {
       const result = await this.transport!.sendRequest(MCP_METHODS.TOOLS_CALL, {
@@ -189,7 +191,7 @@ export class MCPServerConnection extends EventEmitter {
 
       return result as MCPCallResult;
     } catch (error: Any) {
-      console.error(`[MCPServerConnection] Tool call failed:`, error);
+      logger.error("Tool call failed:", error);
       throw new Error(`Tool ${name} failed: ${error.message}`);
     }
   }
@@ -234,7 +236,7 @@ export class MCPServerConnection extends EventEmitter {
     });
 
     this.transport.onClose((error) => {
-      console.log(`[MCPServerConnection] Transport closed for ${this.config.name}`, error);
+      logger.debug(`Transport closed for ${this.config.name}`, error);
       // Only trigger reconnection for unexpected disconnections
       if (this.status === "connected" && !this.intentionalDisconnect) {
         this.handleDisconnection(error);
@@ -242,7 +244,7 @@ export class MCPServerConnection extends EventEmitter {
     });
 
     this.transport.onError((error) => {
-      console.error(`[MCPServerConnection] Transport error for ${this.config.name}:`, error);
+      logger.error(`Transport error for ${this.config.name}:`, error);
       this.emit("error", error);
     });
   }
@@ -255,7 +257,7 @@ export class MCPServerConnection extends EventEmitter {
       throw new Error("No transport");
     }
 
-    console.log(`[MCPServerConnection] Initializing connection to ${this.config.name}`);
+    logger.debug(`Initializing connection to ${this.config.name}`);
 
     const result = await this.transport!.sendRequest(MCP_METHODS.INITIALIZE, {
       protocolVersion: PROTOCOL_VERSION,
@@ -274,7 +276,7 @@ export class MCPServerConnection extends EventEmitter {
       capabilities: result.capabilities,
     };
 
-    console.log(`[MCPServerConnection] Server info:`, this.serverInfo);
+    logger.debug("Server info:", this.serverInfo);
 
     // Send initialized notification
     await this.transport.send({
@@ -296,12 +298,10 @@ export class MCPServerConnection extends EventEmitter {
       try {
         const result = await this.transport!.sendRequest(MCP_METHODS.TOOLS_LIST);
         this.tools = result.tools || [];
-        console.log(
-          `[MCPServerConnection] Discovered ${this.tools.length} tools from ${this.config.name}`,
-        );
+        logger.debug(`Discovered ${this.tools.length} tools from ${this.config.name}`);
         this.emit("tools_changed", this.tools);
       } catch (error) {
-        console.warn(`[MCPServerConnection] Failed to list tools:`, error);
+        logger.warn("Failed to list tools:", error);
       }
     }
 
@@ -310,12 +310,10 @@ export class MCPServerConnection extends EventEmitter {
       try {
         const result = await this.transport!.sendRequest(MCP_METHODS.RESOURCES_LIST);
         this.resources = result.resources || [];
-        console.log(
-          `[MCPServerConnection] Discovered ${this.resources.length} resources from ${this.config.name}`,
-        );
+        logger.debug(`Discovered ${this.resources.length} resources from ${this.config.name}`);
         this.emit("resources_changed", this.resources);
       } catch (error) {
-        console.warn(`[MCPServerConnection] Failed to list resources:`, error);
+        logger.warn("Failed to list resources:", error);
       }
     }
 
@@ -324,12 +322,10 @@ export class MCPServerConnection extends EventEmitter {
       try {
         const result = await this.transport!.sendRequest(MCP_METHODS.PROMPTS_LIST);
         this.prompts = result.prompts || [];
-        console.log(
-          `[MCPServerConnection] Discovered ${this.prompts.length} prompts from ${this.config.name}`,
-        );
+        logger.debug(`Discovered ${this.prompts.length} prompts from ${this.config.name}`);
         this.emit("prompts_changed", this.prompts);
       } catch (error) {
-        console.warn(`[MCPServerConnection] Failed to list prompts:`, error);
+        logger.warn("Failed to list prompts:", error);
       }
     }
   }
@@ -379,7 +375,7 @@ export class MCPServerConnection extends EventEmitter {
 
       default:
         // Only log truly unknown notifications at debug level
-        console.debug(`[MCPServerConnection] Unknown notification: ${notification.method}`);
+        logger.debug(`Unknown notification: ${notification.method}`);
     }
   }
 
@@ -394,7 +390,7 @@ export class MCPServerConnection extends EventEmitter {
       this.tools = result.tools || [];
       this.emit("tools_changed", this.tools);
     } catch (error) {
-      console.warn(`[MCPServerConnection] Failed to refresh tools:`, error);
+      logger.warn("Failed to refresh tools:", error);
     }
   }
 
@@ -409,7 +405,7 @@ export class MCPServerConnection extends EventEmitter {
       this.resources = result.resources || [];
       this.emit("resources_changed", this.resources);
     } catch (error) {
-      console.warn(`[MCPServerConnection] Failed to refresh resources:`, error);
+      logger.warn("Failed to refresh resources:", error);
     }
   }
 
@@ -424,7 +420,7 @@ export class MCPServerConnection extends EventEmitter {
       this.prompts = result.prompts || [];
       this.emit("prompts_changed", this.prompts);
     } catch (error) {
-      console.warn(`[MCPServerConnection] Failed to refresh prompts:`, error);
+      logger.warn("Failed to refresh prompts:", error);
     }
   }
 
@@ -451,8 +447,8 @@ export class MCPServerConnection extends EventEmitter {
     this.reconnectAttempts++;
     const delay = this.calculateReconnectDelay();
 
-    console.log(
-      `[MCPServerConnection] Scheduling reconnect attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delay}ms`,
+    logger.debug(
+      `Scheduling reconnect attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delay}ms`,
     );
     this.setStatus("reconnecting");
 
@@ -462,7 +458,7 @@ export class MCPServerConnection extends EventEmitter {
       try {
         await this.connect();
       } catch (error) {
-        console.error(`[MCPServerConnection] Reconnect failed:`, error);
+        logger.error("Reconnect failed:", error);
         // connect() will handle further reconnection attempts
       }
     }, delay);

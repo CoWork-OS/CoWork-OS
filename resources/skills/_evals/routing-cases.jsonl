@@ -1,0 +1,22 @@
+{"prompt":"Translate this email to Turkish and keep the tone professional.","expectedSkillIds":["translate"],"forbiddenSkillIds":["summarize"]}
+{"prompt":"Summarize this long article into five key bullet points.","expectedSkillIds":["summarize"],"forbiddenSkillIds":["translate"]}
+{"prompt":"Proofread this draft and fix grammar issues.","expectedSkillIds":["proofread"],"forbiddenSkillIds":["web-scraper"]}
+{"prompt":"Analyze this CSV and show top trends.","expectedSkillIds":["analyze-csv"],"forbiddenSkillIds":["translate"]}
+{"prompt":"Scrape this product page and extract title, price, and stock status.","expectedSkillIds":["web-scraper","price-tracker"],"forbiddenSkillIds":["proofread"]}
+{"prompt":"Track this product price daily and alert me when it drops.","expectedSkillIds":["price-tracker","content-monitor"],"forbiddenSkillIds":["site-mapper"]}
+{"prompt":"Map this website and list all internal pages.","expectedSkillIds":["site-mapper"],"forbiddenSkillIds":["translate"]}
+{"prompt":"Extract B2B leads from these company pages.","expectedSkillIds":["lead-scraper"],"forbiddenSkillIds":["spotify-player"]}
+{"prompt":"Monitor this competitor blog weekly and report changes.","expectedSkillIds":["content-monitor"],"forbiddenSkillIds":["git-commit"]}
+{"prompt":"Review this pull request for bugs and security issues.","expectedSkillIds":["code-review","code-reviewer"],"forbiddenSkillIds":["weather"]}
+{"prompt":"Write unit tests for this module.","expectedSkillIds":["write-tests"],"forbiddenSkillIds":["translate"]}
+{"prompt":"Check dependency vulnerabilities in this project.","expectedSkillIds":["dependency-check","security-audit"],"forbiddenSkillIds":["youtube"]}
+{"prompt":"Generate a clean git commit message from current diff.","expectedSkillIds":["git-commit"],"forbiddenSkillIds":["proofread"]}
+{"prompt":"Create a changelog entry from these merged commits.","expectedSkillIds":["create-changelog"],"forbiddenSkillIds":["translate"]}
+{"prompt":"Add documentation for this API endpoint.","expectedSkillIds":["add-documentation"],"forbiddenSkillIds":["weather"]}
+{"prompt":"Assess this workload migration from on-prem to AWS cloud.","expectedSkillIds":["cloud-migration"],"forbiddenSkillIds":["spotify-player"]}
+{"prompt":"Review this Terraform plan and highlight risky changes.","expectedSkillIds":["terraform-ops"],"forbiddenSkillIds":["translate"]}
+{"prompt":"Generate Kubernetes manifests for this Node.js service.","expectedSkillIds":["kubernetes-ops"],"forbiddenSkillIds":["weather"]}
+{"prompt":"Play my focus playlist on Spotify.","expectedSkillIds":["spotify-player"],"forbiddenSkillIds":["code-review"]}
+{"prompt":"What is the weather in Lisbon tomorrow?","expectedSkillIds":["weather"],"forbiddenSkillIds":["git-commit"]}
+{"prompt":"Set up 1Password CLI and verify signin works.","expectedSkillIds":["1password"],"forbiddenSkillIds":["translate"]}
+{"prompt":"Open a tmux session and run this long task in the background.","expectedSkillIds":["tmux"],"forbiddenSkillIds":["proofread"]}

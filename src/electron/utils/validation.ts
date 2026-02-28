@@ -119,6 +119,7 @@ export const AgentConfigSchema = z
       })
       .optional(),
     verificationAgent: z.boolean().optional(),
+    reviewPolicy: z.enum(["off", "balanced", "strict"]).optional(),
   })
   .strict();
 

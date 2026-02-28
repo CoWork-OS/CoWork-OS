@@ -1,0 +1,69 @@
+{
+  "id": "legal-contract-negotiation-review",
+  "name": "Legal Contract Negotiation Review",
+  "description": "Analyze counterparty contract changes against agreement/schedules, flag conflicts, and produce severity-rated counterpositions.",
+  "icon": "⚖️",
+  "category": "Legal",
+  "prompt": "Legal negotiation review workflow.\n\nGoal\n- Analyze counterparty demands against governing deal documents and produce a defensible counter-position package.\n\nInputs\n- Primary agreement path (optional): {{agreement_path}}\n- Disclosure schedules path (optional): {{disclosure_schedules_path}}\n- Counterparty markup/demand path (optional): {{counterparty_changes_path}}\n- Client side: {{client_side}}\n- Output report path: {{output_report_path}}\n- Optional revised draft DOCX path: {{output_docx_path}}\n\nExecution rules\n1) Resolve input documents:\n   - If agreement_path is empty, discover likely candidates with glob patterns like: **/*purchase*agreement*.*, **/*stock*purchase*.*, **/*spa*.*\n   - If counterparty_changes_path is empty, discover likely candidates with patterns like: **/*demand*letter*.*, **/*markup*.*, **/*redline*.*\n   - If disclosure_schedules_path is empty, try optional patterns like: **/*disclosure*schedule*.*, **/*schedule*3*.*\n   - If multiple plausible candidates exist for a required doc, present top candidates and ask user to pick one, then STOP.\n2) Read every resolved document with read_file.\n3) If a file response indicates truncation/windowing, continue with read_file(path, startChar=<previous window.end>, maxChars=<same>) until fully covered.\n4) Build a clause-level change matrix with these columns:\n   - Counterparty request\n   - Current agreement language\n   - Cross-references impacted\n   - Risk to {{client_side}} (high/medium/low)\n   - Recommended response (accept / reject / counter)\n5) Explicitly check for:\n   - Internal contradictions between proposed edits and existing defined terms/cross-references\n   - Conflicts with disclosure schedules and exception language\n   - Changes that unintentionally weaken enforcement, remedies, or post-closing protections\n6) Produce concise counter-language for each high-severity item.\n7) Produce a negotiation posture section: what to concede, what to hold, and fallback positions.\n8) Save the full markdown analysis to {{output_report_path}} using write_file.\n9) If output_docx_path is provided (non-empty):\n   - copy_file agreement_path -> output_docx_path\n   - apply approved edits with edit_document\n   - also write a \"redline-summary.md\" file alongside the report describing each edit and reason\n   - IMPORTANT: treat this as a clean revised draft workflow, not native Word tracked-changes metadata.\n10) End with an attorney-review checklist (facts to verify, sections to re-check before send).",
+  "parameters": [
+    {
+      "name": "agreement_path",
+      "type": "string",
+      "description": "Optional explicit path to the main agreement (DOCX/PDF/TXT)",
+      "required": false,
+      "default": ""
+    },
+    {
+      "name": "disclosure_schedules_path",
+      "type": "string",
+      "description": "Optional explicit path to disclosure schedules or side letter",
+      "required": false,
+      "default": ""
+    },
+    {
+      "name": "counterparty_changes_path",
+      "type": "string",
+      "description": "Optional explicit path to counterparty redline or demand letter",
+      "required": false,
+      "default": ""
+    },
+    {
+      "name": "client_side",
+      "type": "select",
+      "description": "Which side you represent",
+      "required": false,
+      "default": "seller",
+      "options": [
+        "seller",
+        "buyer",
+        "vendor",
+        "customer"
+      ]
+    },
+    {
+      "name": "output_report_path",
+      "type": "string",
+      "description": "Where to write the negotiation analysis markdown",
+      "required": false,
+      "default": "artifacts/legal/negotiation-analysis.md"
+    },
+    {
+      "name": "output_docx_path",
+      "type": "string",
+      "description": "Optional path for a clean revised DOCX draft",
+      "required": false,
+      "default": ""
+    }
+  ],
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use for contract markups, last-minute deal term demands, or clause-by-clause negotiation defense work.",
+      "dontUseWhen": "Do not use for pure legal research questions that do not require document comparison.",
+      "outputs": "Clause matrix, severity-ranked recommendations, counter-language, and a written negotiation brief.",
+      "successCriteria": "Finds cross-document conflicts, produces actionable counterpositions, and writes the report artifact."
+    },
+    "version": "1.0.0",
+    "author": "CoWork OS"
+  }
+}

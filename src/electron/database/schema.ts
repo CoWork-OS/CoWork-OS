@@ -250,6 +250,7 @@ export class DatabaseManager {
         id TEXT PRIMARY KEY,
         title TEXT NOT NULL,
         prompt TEXT NOT NULL,
+        raw_prompt TEXT,
         status TEXT NOT NULL,
         workspace_id TEXT NOT NULL,
         created_at INTEGER NOT NULL,
@@ -259,7 +260,24 @@ export class DatabaseManager {
         budget_cost REAL,
         error TEXT,
         is_pinned INTEGER DEFAULT 0,
+        strategy_lock INTEGER DEFAULT 0,
+        budget_profile TEXT,
+        terminal_status TEXT,
+        failure_class TEXT,
+        budget_usage TEXT,
         FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS hook_sessions (
+        session_key TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL REFERENCES tasks(id),
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS hook_session_locks (
+        session_key TEXT PRIMARY KEY,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL
       );
 
       CREATE TABLE IF NOT EXISTS task_events (
@@ -320,6 +338,8 @@ export class DatabaseManager {
       -- Indexes for performance
       CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
       CREATE INDEX IF NOT EXISTS idx_tasks_workspace ON tasks(workspace_id);
+      CREATE INDEX IF NOT EXISTS idx_hook_sessions_task ON hook_sessions(task_id);
+      CREATE INDEX IF NOT EXISTS idx_hook_session_locks_expires ON hook_session_locks(expires_at);
       CREATE INDEX IF NOT EXISTS idx_task_events_task ON task_events(task_id);
       CREATE INDEX IF NOT EXISTS idx_artifacts_task ON artifacts(task_id);
       CREATE INDEX IF NOT EXISTS idx_approvals_task ON approvals(task_id);
@@ -689,6 +709,24 @@ export class DatabaseManager {
     ];
 
     for (const sql of subAgentColumns) {
+      try {
+        this.db.exec(sql);
+      } catch {
+        // Column already exists, ignore
+      }
+    }
+
+    // Migration: Add strategy routing + execution result metadata columns to tasks table
+    const strategyAndResultColumns = [
+      "ALTER TABLE tasks ADD COLUMN raw_prompt TEXT",
+      "ALTER TABLE tasks ADD COLUMN strategy_lock INTEGER DEFAULT 0",
+      "ALTER TABLE tasks ADD COLUMN budget_profile TEXT",
+      "ALTER TABLE tasks ADD COLUMN terminal_status TEXT",
+      "ALTER TABLE tasks ADD COLUMN failure_class TEXT",
+      "ALTER TABLE tasks ADD COLUMN budget_usage TEXT",
+    ];
+
+    for (const sql of strategyAndResultColumns) {
       try {
         this.db.exec(sql);
       } catch {
@@ -1397,6 +1435,34 @@ export class DatabaseManager {
       this.db.exec("ALTER TABLE tasks ADD COLUMN source TEXT DEFAULT 'manual'");
     } catch {
       // Column already exists
+    }
+
+    // ============ Hook Session Idempotency ============
+    try {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS hook_sessions (
+          session_key TEXT PRIMARY KEY,
+          task_id TEXT NOT NULL REFERENCES tasks(id),
+          created_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_hook_sessions_task ON hook_sessions(task_id);
+      `);
+    } catch {
+      // Table/index already exists
+    }
+
+    // ============ Hook Session Locks ============
+    try {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS hook_session_locks (
+          session_key TEXT PRIMARY KEY,
+          created_at INTEGER NOT NULL,
+          expires_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_hook_session_locks_expires ON hook_session_locks(expires_at);
+      `);
+    } catch {
+      // Table/index already exists
     }
 
     // ============ Knowledge Graph Tables ============

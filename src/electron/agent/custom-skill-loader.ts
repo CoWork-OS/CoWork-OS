@@ -29,12 +29,23 @@ const SKILL_FILE_EXTENSION = ".json";
 const RELOAD_DEBOUNCE_MS = 100; // Debounce rapid reload calls
 const IGNORED_SKILL_METADATA_FILES = new Set(["build-mode.json"]);
 const logger = createLogger("CustomSkillLoader");
+const DEFAULT_MODEL_SKILL_SHORTLIST_SIZE = 20;
+const DEFAULT_ROUTING_CONFIDENCE_THRESHOLD = 0.55;
+const DEFAULT_SKILL_TEXT_BUDGET_CHARS = 12_000;
 
 export interface SkillLoaderConfig {
   bundledSkillsDir?: string;
   managedSkillsDir?: string;
   workspaceSkillsDir?: string;
   skillsConfig?: SkillsConfig;
+}
+
+interface ModelSkillDescriptionOptions {
+  availableToolNames?: Set<string>;
+  routingQuery?: string;
+  shortlistSize?: number;
+  lowConfidenceThreshold?: number;
+  textBudgetChars?: number;
 }
 
 function isPackagedElectronApp(): boolean {
@@ -445,19 +456,107 @@ export class CustomSkillLoader {
     });
   }
 
+  private tokenizeForRouting(text: string): Set<string> {
+    const tokens = String(text || "")
+      .toLowerCase()
+      .split(/[^a-z0-9_]+/g)
+      .map((token) => token.trim())
+      .filter((token) => token.length >= 3);
+    return new Set(tokens);
+  }
+
+  private scoreSkillForQuery(skill: CustomSkill, query: string, queryTokens: Set<string>): number {
+    if (!query || queryTokens.size === 0) return 0;
+
+    const haystack = [
+      skill.id || "",
+      skill.name || "",
+      skill.description || "",
+      skill.category || "",
+      skill.metadata?.routing?.useWhen || "",
+      skill.metadata?.routing?.outputs || "",
+      skill.metadata?.routing?.successCriteria || "",
+      skill.metadata?.routing?.dontUseWhen || "",
+    ]
+      .join(" ")
+      .toLowerCase();
+    if (!haystack.trim()) return 0;
+
+    let overlap = 0;
+    for (const token of queryTokens) {
+      if (haystack.includes(token)) overlap += 1;
+    }
+    const overlapScore = overlap / Math.max(queryTokens.size, 1);
+
+    const exactIdHit = query.toLowerCase().includes((skill.id || "").toLowerCase()) ? 0.35 : 0;
+    const exactNameHit = query.toLowerCase().includes((skill.name || "").toLowerCase()) ? 0.2 : 0;
+    const routingBoost = skill.metadata?.routing?.useWhen ? 0.05 : 0;
+    return Math.min(1, overlapScore + exactIdHit + exactNameHit + routingBoost);
+  }
+
+  private shortlistSkillsForQuery(
+    skills: CustomSkill[],
+    query: string,
+    shortlistSize: number,
+  ): {
+    skills: CustomSkill[];
+    confidence: number;
+    totalEligible: number;
+  } {
+    const normalizedQuery = String(query || "").trim();
+    if (!normalizedQuery) {
+      return {
+        skills,
+        confidence: 1,
+        totalEligible: skills.length,
+      };
+    }
+
+    const queryTokens = this.tokenizeForRouting(normalizedQuery);
+    const ranked = skills
+      .map((skill) => ({
+        skill,
+        score: this.scoreSkillForQuery(skill, normalizedQuery, queryTokens),
+      }))
+      .sort((a, b) => b.score - a.score || a.skill.id.localeCompare(b.skill.id));
+
+    return {
+      skills: ranked.slice(0, shortlistSize).map((entry) => entry.skill),
+      confidence: ranked[0]?.score ?? 0,
+      totalEligible: skills.length,
+    };
+  }
+
   /**
    * Get formatted skill descriptions for the model's system prompt
    * Groups skills by category and includes parameter info
    */
-  getSkillDescriptionsForModel(options: { availableToolNames?: Set<string> } = {}): string {
-    const skills = this.listModelInvocableSkills(options);
+  getSkillDescriptionsForModel(options: ModelSkillDescriptionOptions = {}): string {
+    const skills = this.listModelInvocableSkills({ availableToolNames: options.availableToolNames });
     if (skills.length === 0) {
       return "";
     }
 
+    const shortlistSize =
+      typeof options.shortlistSize === "number" && Number.isFinite(options.shortlistSize)
+        ? Math.min(Math.max(Math.floor(options.shortlistSize), 1), 200)
+        : DEFAULT_MODEL_SKILL_SHORTLIST_SIZE;
+    const lowConfidenceThreshold =
+      typeof options.lowConfidenceThreshold === "number" &&
+      Number.isFinite(options.lowConfidenceThreshold)
+        ? Math.min(Math.max(options.lowConfidenceThreshold, 0), 1)
+        : DEFAULT_ROUTING_CONFIDENCE_THRESHOLD;
+    const textBudgetChars =
+      typeof options.textBudgetChars === "number" && Number.isFinite(options.textBudgetChars)
+        ? Math.max(Math.floor(options.textBudgetChars), 1_500)
+        : DEFAULT_SKILL_TEXT_BUDGET_CHARS;
+
+    const routed = this.shortlistSkillsForQuery(skills, options.routingQuery || "", shortlistSize);
+    const selectedSkills = routed.skills;
+
     // Group skills by category
     const byCategory: Record<string, CustomSkill[]> = {};
-    for (const skill of skills) {
+    for (const skill of selectedSkills) {
       const category = skill.category || "General";
       if (!byCategory[category]) {
         byCategory[category] = [];
@@ -467,6 +566,14 @@ export class CustomSkillLoader {
 
     // Format descriptions
     const lines: string[] = [];
+    if (selectedSkills.length < routed.totalEligible) {
+      lines.push(
+        `Routing shortlist: showing ${selectedSkills.length} of ${routed.totalEligible} skills for this task.`,
+      );
+    }
+    if (routed.confidence < lowConfidenceThreshold) {
+      lines.push("Routing confidence is low. If needed, call skill_list for additional discovery.");
+    }
     for (const [category, categorySkills] of Object.entries(byCategory).sort()) {
       lines.push(`\n${category}:`);
       for (const skill of categorySkills) {
@@ -481,8 +588,11 @@ export class CustomSkillLoader {
         }
       }
     }
-
-    return lines.join("\n");
+    let rendered = lines.join("\n");
+    if (rendered.length > textBudgetChars) {
+      rendered = `${rendered.slice(0, textBudgetChars)}\n[Skill descriptions truncated for prompt budget. Use skill_list for full inventory.]`;
+    }
+    return rendered;
   }
 
   /**
@@ -586,6 +696,32 @@ export class CustomSkillLoader {
 
   private resolveBaseDir(skill: CustomSkill): string {
     const fileDir = skill.filePath ? path.dirname(skill.filePath) : this.bundledSkillsDir;
+    const skillScopedDir = this.resolveSkillScopedBaseDir(skill, fileDir);
+    const prompt = String(skill.prompt || "");
+    const requiresScopedDir =
+      prompt.includes("{baseDir}/SKILL.md") || prompt.includes("{baseDir}/references/");
+    const scopedHasScripts =
+      skillScopedDir && fs.existsSync(path.join(skillScopedDir, "scripts"));
+    const referencedRelativePaths = Array.from(
+      prompt.matchAll(/\{baseDir\}\/([A-Za-z0-9._\-/]+)/g),
+      (match) => match[1],
+    );
+
+    if (skillScopedDir && (requiresScopedDir || scopedHasScripts)) {
+      return skillScopedDir;
+    }
+    if (skillScopedDir && referencedRelativePaths.length > 0) {
+      const scopedHits = referencedRelativePaths.filter((relPath) =>
+        fs.existsSync(path.join(skillScopedDir, relPath)),
+      ).length;
+      const fileDirHits = referencedRelativePaths.filter((relPath) =>
+        fs.existsSync(path.join(fileDir, relPath)),
+      ).length;
+      if (scopedHits > fileDirHits) {
+        return skillScopedDir;
+      }
+    }
+
     const candidates = [
       fileDir,
       this.bundledSkillsDir,
@@ -604,6 +740,34 @@ export class CustomSkillLoader {
     }
 
     return fileDir;
+  }
+
+  /**
+   * Resolve a skill-specific folder next to the skill manifest when present.
+   * This makes {baseDir} point to resources/skills/<skill-id>/ for bundled skills
+   * while preserving compatibility for managed/workspace skills.
+   */
+  private resolveSkillScopedBaseDir(skill: CustomSkill, fileDir: string): string | null {
+    const baseNames = new Set<string>();
+    if (skill.id && typeof skill.id === "string") {
+      baseNames.add(skill.id);
+    }
+    if (skill.filePath) {
+      baseNames.add(path.basename(skill.filePath, path.extname(skill.filePath)));
+    }
+
+    for (const baseName of baseNames) {
+      const candidate = path.join(fileDir, baseName);
+      try {
+        if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) {
+          return candidate;
+        }
+      } catch {
+        // ignore and continue
+      }
+    }
+
+    return null;
   }
 
   /**

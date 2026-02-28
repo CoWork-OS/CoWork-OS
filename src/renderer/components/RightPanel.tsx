@@ -1,8 +1,14 @@
-import { useState, useEffect, useMemo, type ComponentType } from "react";
+import { useState, useEffect, useMemo, useRef, type ComponentType } from "react";
 import { Task, Workspace, TaskEvent, PlanStep, QueueStatus } from "../../shared/types";
 import { isVerificationStepDescription } from "../../shared/plan-utils";
 import { FileViewer } from "./FileViewer";
 import { useAgentContext } from "../hooks/useAgentContext";
+import {
+  deriveTaskOutputSummaryFromEvents,
+  formatOutputLocationLabel,
+  hasTaskOutputs,
+  resolveTaskOutputSummaryFromCompletionEvent,
+} from "../utils/task-outputs";
 import {
   Cloud,
   Database,
@@ -157,6 +163,8 @@ interface RightPanelProps {
   queueStatus?: QueueStatus | null;
   onSelectTask?: (taskId: string) => void;
   onCancelTask?: (taskId: string) => void;
+  highlightOutputPath?: string | null;
+  onHighlightConsumed?: () => void;
 }
 
 interface FileInfo {
@@ -179,6 +187,8 @@ export function RightPanel({
   queueStatus,
   onSelectTask,
   onCancelTask,
+  highlightOutputPath = null,
+  onHighlightConsumed,
 }: RightPanelProps) {
   const [expandedSections, setExpandedSections] = useState({
     progress: true,
@@ -188,6 +198,8 @@ export function RightPanel({
     context: true,
   });
   const [viewerFilePath, setViewerFilePath] = useState<string | null>(null);
+  const [highlightedOutputPath, setHighlightedOutputPath] = useState<string | null>(null);
+  const fileItemRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
   const agentContext = useAgentContext();
 
   // Active context: connectors + skills
@@ -278,6 +290,7 @@ export function RightPanel({
 
     events.forEach((event) => {
       if (event.type === "file_created" && event.payload.path) {
+        if (event.payload.type === "directory") return;
         fileMap.set(event.payload.path, {
           path: event.payload.path,
           action: "created",
@@ -299,16 +312,68 @@ export function RightPanel({
           timestamp: event.timestamp,
         });
       }
+      if (event.type === "artifact_created" && event.payload.path) {
+        fileMap.set(event.payload.path, {
+          path: event.payload.path,
+          action: "created",
+          timestamp: event.timestamp,
+        });
+      }
     });
 
+    const latestCompletionEvent = [...events]
+      .reverse()
+      .find((event) => event.type === "task_completed");
+    const completionOutputSummary = latestCompletionEvent
+      ? resolveTaskOutputSummaryFromCompletionEvent(latestCompletionEvent, events)
+      : null;
+    if (latestCompletionEvent && hasTaskOutputs(completionOutputSummary)) {
+      const modifiedFallbackSet = new Set(completionOutputSummary.modifiedFallback || []);
+      const completionOutputPaths =
+        completionOutputSummary.created.length > 0
+          ? completionOutputSummary.created
+          : completionOutputSummary.modifiedFallback || [];
+      completionOutputPaths.forEach((outputPath, index) => {
+        if (fileMap.has(outputPath)) return;
+        fileMap.set(outputPath, {
+          path: outputPath,
+          action: modifiedFallbackSet.has(outputPath) ? "modified" : "created",
+          timestamp: latestCompletionEvent.timestamp - index,
+        });
+      });
+    }
+
     return Array.from(fileMap.values())
-      .filter((f) => {
-        // Filter out directories – only show actual files
-        const name = f.path.split("/").pop() || f.path;
-        return name.includes(".");
-      })
+      .filter((f) => !f.path.endsWith("/") && !f.path.endsWith("\\"))
       .sort((a, b) => b.timestamp - a.timestamp);
   }, [events]);
+  const outputSummary = useMemo(() => {
+    const latestCompletionEvent = [...events]
+      .reverse()
+      .find((event) => event.type === "task_completed");
+    if (latestCompletionEvent) {
+      const fromCompletion = resolveTaskOutputSummaryFromCompletionEvent(latestCompletionEvent, events);
+      if (fromCompletion) return fromCompletion;
+    }
+    return deriveTaskOutputSummaryFromEvents(events);
+  }, [events]);
+
+  useEffect(() => {
+    if (!highlightOutputPath) return;
+
+    setExpandedSections((prev) => (prev.folder ? prev : { ...prev, folder: true }));
+    const targetEl = fileItemRefs.current.get(highlightOutputPath);
+    if (!targetEl) return;
+
+    targetEl.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    setHighlightedOutputPath(highlightOutputPath);
+    onHighlightConsumed?.();
+
+    const timer = setTimeout(() => {
+      setHighlightedOutputPath((prev) => (prev === highlightOutputPath ? null : prev));
+    }, 2200);
+    return () => clearTimeout(timer);
+  }, [highlightOutputPath, files.length]);
 
   // Extract tool usage from events
   const toolUsage = useMemo((): ToolUsage[] => {
@@ -665,6 +730,9 @@ export function RightPanel({
               <span className="terminal-only">{agentContext.getUiCopy("rightFilesTitle")}</span>
               <span className="modern-only">Files</span>
             </span>
+            {outputSummary && outputSummary.outputCount > 0 && (
+              <span className="cli-output-count-badge">{outputSummary.outputCount}</span>
+            )}
             <span className="cli-section-toggle">
               <span className="terminal-only">{expandedSections.folder ? "[-]" : "[+]"}</span>
               <span className="modern-only">{expandedSections.folder ? "−" : "+"}</span>
@@ -674,7 +742,13 @@ export function RightPanel({
             <div className="cli-section-content">
               <div className="cli-file-list">
                 {files.map((file, index) => (
-                  <div key={`${file.path}-${index}`} className={`cli-file-item ${file.action}`}>
+                  <div
+                    key={`${file.path}-${index}`}
+                    ref={(el) => {
+                      fileItemRefs.current.set(file.path, el);
+                    }}
+                    className={`cli-file-item ${file.action} ${outputSummary?.primaryOutputPath === file.path ? "primary-output" : ""} ${highlightedOutputPath === file.path ? "highlight-output" : ""}`}
+                  >
                     <span className={`cli-file-action ${file.action}`}>
                       <span className="terminal-only">{getFileActionSymbol(file.action)}</span>
                       <span className="modern-only">
@@ -690,6 +764,15 @@ export function RightPanel({
                   </div>
                 ))}
               </div>
+              {outputSummary && outputSummary.outputCount > 0 && (
+                <div className="cli-output-location-line" title={outputSummary.primaryOutputPath}>
+                  <span className="cli-label">
+                    <span className="terminal-only">OUTPUT:</span>
+                    <span className="modern-only">Output location</span>
+                  </span>
+                  <span className="cli-path">{formatOutputLocationLabel(outputSummary)}</span>
+                </div>
+              )}
               {workspace && (
                 <div
                   className="cli-workspace-path"

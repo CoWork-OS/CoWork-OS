@@ -103,4 +103,16 @@ describe("ToolFailureTracker browser HTTP status handling", () => {
     expect(tracker.recordFailure("web_fetch", "HTTP 429 rate limit exceeded")).toBe(true);
     expect(tracker.isDisabled("web_fetch")).toBe(true);
   });
+
+  it("does not globally disable web_search for provider-scoped quota failures", () => {
+    const tracker = new ToolFailureTracker();
+
+    expect(
+      tracker.recordFailure(
+        "web_search",
+        'Tavily API error: 432 - {"detail":{"error":"This request exceeds your plan\'s set usage limit"}}',
+      ),
+    ).toBe(false);
+    expect(tracker.isDisabled("web_search")).toBe(false);
+  });
 });

@@ -19,7 +19,24 @@
       "useWhen": "Use when asked to analyze a CSV file for schema, data quality, statistical summaries, or anomalies.",
       "dontUseWhen": "Don't use this for non-tabular files or for purely visual charting without data inspection.",
       "outputs": "Concise dataset summary with column stats, missing-value signals, and actionable insights.",
-      "successCriteria": "Reports include row/column counts, datatype observations, numeric statistics, and high-confidence anomalies."
+      "successCriteria": "Reports include row/column counts, datatype observations, numeric statistics, and high-confidence anomalies.",
+      "examples": {
+        "positive": [
+          "Use the analyze-csv skill for this request.",
+          "Help me with analyze csv.",
+          "Use when asked to analyze a CSV file for schema, data quality, statistical summaries, or anomalies.",
+          "Analyze CSV: provide an actionable result."
+        ],
+        "negative": [
+          "Don't use this for non-tabular files or for purely visual charting without data inspection.",
+          "Do not use analyze-csv for unrelated requests.",
+          "This request is outside analyze csv scope.",
+          "This is conceptual discussion only; no tool workflow is needed."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "low"
     }
   }
 }

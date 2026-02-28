@@ -32,9 +32,11 @@ import { discoverPlugins, loadPlugin, getPluginDataPath, isPluginCompatible } fr
 import { ChannelAdapter, ChannelConfig } from "../gateway/channels/types";
 import { getUserDataDir } from "../utils/user-data-dir";
 import { getSafeStorage } from "../utils/safe-storage";
+import { createLogger } from "../utils/logger";
 
 // Package version (will be replaced at build time or read from package.json)
 const COWORK_VERSION = process.env.npm_package_version || "0.3.0";
+const logger = createLogger("PluginRegistry");
 
 /**
  * Plugin Registry - Singleton manager for all plugins
@@ -144,7 +146,7 @@ export class PluginRegistry extends EventEmitter {
       }
       fs.writeFileSync(this.packStatesPath, JSON.stringify({ packs, skills }, null, 2), "utf-8");
     } catch (error) {
-      console.warn("[PluginRegistry] Failed to save pack states:", error);
+      logger.warn("Failed to save pack states:", error);
     }
   }
 
@@ -217,7 +219,7 @@ export class PluginRegistry extends EventEmitter {
     this.initialized = true;
 
     if (this.plugins.size > 0) {
-      console.log(`[PluginRegistry] Initialized with ${this.plugins.size} plugins`);
+      logger.info(`Initialized with ${this.plugins.size} plugins`);
     }
   }
 
@@ -235,7 +237,7 @@ export class PluginRegistry extends EventEmitter {
       }
     }
     if (newCount > 0) {
-      console.log(`Discovered ${newCount} new plugin(s)`);
+      logger.info(`Discovered ${newCount} new plugin(s)`);
     }
   }
 
@@ -247,13 +249,13 @@ export class PluginRegistry extends EventEmitter {
 
     // Check compatibility
     if (!isPluginCompatible(manifest, COWORK_VERSION)) {
-      console.warn(`Plugin ${pluginName} requires CoWork ${manifest.coworkVersion}, skipping`);
+      logger.warn(`Plugin ${pluginName} requires CoWork ${manifest.coworkVersion}, skipping`);
       return;
     }
 
     // Check if already loaded
     if (this.plugins.has(pluginName)) {
-      console.warn(`Plugin ${pluginName} already loaded, skipping`);
+      logger.warn(`Plugin ${pluginName} already loaded, skipping`);
       return;
     }
 
@@ -262,7 +264,7 @@ export class PluginRegistry extends EventEmitter {
       const result = await loadPlugin(pluginPath);
 
       if (!result.success || !result.plugin) {
-        console.error(`Failed to load plugin ${pluginName}:`, result.error);
+        logger.error(`Failed to load plugin ${pluginName}:`, result.error);
         return;
       }
 
@@ -290,9 +292,9 @@ export class PluginRegistry extends EventEmitter {
       loadedPlugin.state = shouldStartDisabled ? "disabled" : "registered";
 
       this.emitPluginEvent("plugin:registered", pluginName);
-      console.log(`Plugin ${pluginName} registered successfully`);
+      logger.debug(`Plugin ${pluginName} registered successfully`);
     } catch (error) {
-      console.error(`Error registering plugin ${pluginName}:`, error);
+      logger.error(`Error registering plugin ${pluginName}:`, error);
 
       const loadedPlugin = this.plugins.get(pluginName);
       if (loadedPlugin) {
@@ -321,13 +323,13 @@ export class PluginRegistry extends EventEmitter {
 
       registerChannel: (options: RegisterChannelOptions) => {
         this.channelAdapters.set(pluginName, options);
-        console.log(`Channel adapter registered by plugin: ${pluginName}`);
+        logger.debug(`Channel adapter registered by plugin: ${pluginName}`);
       },
 
       registerTool: (options: RegisterToolOptions) => {
         const toolKey = `${pluginName}:${options.name}`;
         this.tools.set(toolKey, options);
-        console.log(`Tool registered: ${toolKey}`);
+        logger.debug(`Tool registered: ${toolKey}`);
       },
 
       getConfig: <T = Record<string, unknown>>(): T => {
@@ -369,7 +371,7 @@ export class PluginRegistry extends EventEmitter {
             try {
               handler(data);
             } catch (e) {
-              console.error(`Error in plugin event handler:`, e);
+              logger.error("Error in plugin event handler:", e);
             }
           }
         }
@@ -409,8 +411,8 @@ export class PluginRegistry extends EventEmitter {
           // Check for duplicate skill ID conflicts
           const existingOwner = this.skillOwnership.get(skill.id);
           if (existingOwner && existingOwner !== pluginName) {
-            console.warn(
-              `[PluginRegistry] Skill ID conflict: "${skill.id}" is defined by both "${existingOwner}" and "${pluginName}". The later registration will overwrite the earlier one.`,
+            logger.warn(
+              `Skill ID conflict: "${skill.id}" is defined by both "${existingOwner}" and "${pluginName}". The later registration will overwrite the earlier one.`,
             );
           }
           this.skillOwnership.set(skill.id, pluginName);
@@ -429,11 +431,9 @@ export class PluginRegistry extends EventEmitter {
             loader.registerPluginSkill(skill);
           }
         }
-        console.log(
-          `[PluginRegistry] Registered ${manifest.skills.length} skill(s) from ${pluginName}`,
-        );
+        logger.debug(`Registered ${manifest.skills.length} skill(s) from ${pluginName}`);
       } catch (error) {
-        console.error(`[PluginRegistry] Failed to register skills from ${pluginName}:`, error);
+        logger.error(`Failed to register skills from ${pluginName}:`, error);
       }
     }
 
@@ -443,15 +443,10 @@ export class PluginRegistry extends EventEmitter {
         try {
           this.emit("plugin:register-role", { pluginName, role });
         } catch (error) {
-          console.error(
-            `[PluginRegistry] Failed to emit role registration from ${pluginName}:`,
-            error,
-          );
+          logger.error(`Failed to emit role registration from ${pluginName}:`, error);
         }
       }
-      console.log(
-        `[PluginRegistry] Emitted ${manifest.agentRoles.length} role(s) from ${pluginName}`,
-      );
+      logger.debug(`Emitted ${manifest.agentRoles.length} role(s) from ${pluginName}`);
     }
 
     // 3. Register declarative connectors as tools
@@ -460,8 +455,8 @@ export class PluginRegistry extends EventEmitter {
       for (const connector of manifest.connectors) {
         const validationError = validateConnector(connector);
         if (validationError) {
-          console.warn(
-            `[PluginRegistry] Skipping invalid connector ${connector.name} from ${pluginName}: ${validationError}`,
+          logger.warn(
+            `Skipping invalid connector ${connector.name} from ${pluginName}: ${validationError}`,
           );
           continue;
         }
@@ -470,7 +465,7 @@ export class PluginRegistry extends EventEmitter {
         this.tools.set(toolKey, toolOptions);
         registered++;
       }
-      console.log(`[PluginRegistry] Registered ${registered} connector(s) from ${pluginName}`);
+      logger.debug(`Registered ${registered} connector(s) from ${pluginName}`);
     }
   }
 

@@ -18,6 +18,7 @@ import {
 import { MCPSettingsManager } from "../settings";
 import { MCPServerConnection } from "./MCPServerConnection";
 import { IPC_CHANNELS } from "../../../shared/types";
+import { createLogger } from "../../utils/logger";
 
 const CONNECTOR_SCRIPT_PATH_REGEX =
   /(?:^|[\\/])connectors[\\/]([^\\/]+)-mcp[\\/]dist[\\/]index\.js$/i;
@@ -32,6 +33,7 @@ const KNOWN_CONNECTORS = new Set([
   "okta",
   "resend",
 ]);
+const logger = createLogger("MCPClientManager");
 
 function getAllElectronWindows(): Any[] {
   try {
@@ -53,6 +55,12 @@ export class MCPClientManager extends EventEmitter {
   private initialized = false;
   private isInitializing = false; // Flag to batch operations during startup
   private rebuildToolMapDebounceTimer: NodeJS.Timeout | null = null;
+  private startupStats: { enabled: number; attempted: number; connected: number; failed: number } = {
+    enabled: 0,
+    attempted: 0,
+    connected: 0,
+    failed: 0,
+  };
 
   private constructor() {
     super();
@@ -76,7 +84,7 @@ export class MCPClientManager extends EventEmitter {
       return;
     }
 
-    console.log("[MCPClientManager] Initializing...");
+    logger.info("Initializing...");
     this.isInitializing = true;
 
     // Initialize settings manager
@@ -105,18 +113,33 @@ export class MCPClientManager extends EventEmitter {
           MCPSettingsManager.updateServer(server.id, { enabled: false });
         }
       }
-      console.log(
-        `[MCPClientManager] Auto-connecting to ${autoConnectServers.length} enabled server(s) in parallel`,
+      logger.info(
+        `Auto-connecting to ${autoConnectServers.length} enabled server(s) in parallel`,
       );
 
       const connectionPromises = autoConnectServers.map((server) =>
         this.connectServer(server.id).catch((error) => {
-          console.error(`[MCPClientManager] Failed to auto-connect to ${server.name}:`, error);
+          logger.error(`Failed to auto-connect to ${server.name}:`, error);
           return null; // Don't throw, allow other connections to continue
         }),
       );
 
       await Promise.allSettled(connectionPromises);
+      const connected = autoConnectServers.filter(
+        (server) => this.connections.get(server.id)?.getStatus().status === "connected",
+      ).length;
+      const failed = autoConnectServers.length - connected;
+      this.startupStats = {
+        enabled: enabledServers.length,
+        attempted: autoConnectServers.length,
+        connected,
+        failed,
+      };
+      logger.info(
+        `Auto-connect summary: enabled=${enabledServers.length}, attempted=${autoConnectServers.length}, connected=${connected}, failed=${failed}`,
+      );
+    } else {
+      this.startupStats = { enabled: 0, attempted: 0, connected: 0, failed: 0 };
     }
 
     this.isInitializing = false;
@@ -128,14 +151,14 @@ export class MCPClientManager extends EventEmitter {
     // End batch mode - this will save settings once if any changes were made
     MCPSettingsManager.endBatch();
 
-    console.log("[MCPClientManager] Initialized");
+    logger.info("Initialized");
   }
 
   /**
    * Shutdown and disconnect all servers
    */
   async shutdown(): Promise<void> {
-    console.log("[MCPClientManager] Shutting down...");
+    logger.debug("Shutting down...");
 
     // Clear debounce timer to prevent memory leaks
     if (this.rebuildToolMapDebounceTimer) {
@@ -145,7 +168,7 @@ export class MCPClientManager extends EventEmitter {
 
     const disconnectPromises = Array.from(this.connections.keys()).map((id) =>
       this.disconnectServer(id).catch((error) =>
-        console.error(`[MCPClientManager] Error disconnecting ${id}:`, error),
+        logger.error(`Error disconnecting ${id}:`, error),
       ),
     );
 
@@ -154,7 +177,7 @@ export class MCPClientManager extends EventEmitter {
     this.toolServerMap.clear();
     this.initialized = false;
 
-    console.log("[MCPClientManager] Shutdown complete");
+    logger.debug("Shutdown complete");
   }
 
   /**
@@ -165,7 +188,7 @@ export class MCPClientManager extends EventEmitter {
     if (this.connections.has(serverId)) {
       const existing = this.connections.get(serverId)!;
       if (existing.getStatus().status === "connected") {
-        console.log(`[MCPClientManager] Server ${serverId} already connected`);
+        logger.debug(`Server ${serverId} already connected`);
         return;
       }
     }
@@ -176,7 +199,7 @@ export class MCPClientManager extends EventEmitter {
       throw new Error(`Server ${serverId} not found`);
     }
 
-    console.log(`[MCPClientManager] Connecting to server: ${config.name}`);
+    logger.debug(`Connecting to server: ${config.name}`);
 
     // Get settings for reconnection config
     const settings = MCPSettingsManager.loadSettings();
@@ -206,11 +229,11 @@ export class MCPClientManager extends EventEmitter {
   async disconnectServer(serverId: string): Promise<void> {
     const connection = this.connections.get(serverId);
     if (!connection) {
-      console.log(`[MCPClientManager] Server ${serverId} not connected`);
+      logger.debug(`Server ${serverId} not connected`);
       return;
     }
 
-    console.log(`[MCPClientManager] Disconnecting from server: ${serverId}`);
+    logger.debug(`Disconnecting from server: ${serverId}`);
     await connection.disconnect();
     this.connections.delete(serverId);
 
@@ -338,12 +361,16 @@ export class MCPClientManager extends EventEmitter {
     }
   }
 
+  getStartupStats(): { enabled: number; attempted: number; connected: number; failed: number } {
+    return { ...this.startupStats };
+  }
+
   /**
    * Set up event handlers for a connection
    */
   private setupConnectionHandlers(serverId: string, connection: MCPServerConnection): void {
     connection.on("status_changed", (status, error) => {
-      console.log(`[MCPClientManager] Server ${serverId} status: ${status}`, error || "");
+      logger.debug(`Server ${serverId} status: ${status}`, error || "");
 
       // Update settings with last error
       if (error) {
@@ -370,7 +397,7 @@ export class MCPClientManager extends EventEmitter {
     });
 
     connection.on("tools_changed", (tools) => {
-      console.log(`[MCPClientManager] Server ${serverId} tools changed: ${tools.length} tools`);
+      logger.debug(`Server ${serverId} tools changed: ${tools.length} tools`);
 
       // Update settings with tools
       MCPSettingsManager.updateServerTools(serverId, tools);
@@ -387,7 +414,7 @@ export class MCPClientManager extends EventEmitter {
     });
 
     connection.on("error", (error) => {
-      console.error(`[MCPClientManager] Server ${serverId} error:`, error);
+      logger.error(`Server ${serverId} error:`, error);
     });
   }
 
@@ -421,8 +448,8 @@ export class MCPClientManager extends EventEmitter {
       if (connection.getStatus().status === "connected") {
         for (const tool of connection.getTools()) {
           if (this.toolServerMap.has(tool.name)) {
-            console.warn(
-              `[MCPClientManager] Tool name collision: ${tool.name} from ${serverId} conflicts with ${this.toolServerMap.get(tool.name)}`,
+            logger.warn(
+              `Tool name collision: ${tool.name} from ${serverId} conflicts with ${this.toolServerMap.get(tool.name)}`,
             );
           } else {
             this.toolServerMap.set(tool.name, serverId);
@@ -431,7 +458,7 @@ export class MCPClientManager extends EventEmitter {
       }
     }
 
-    console.log(`[MCPClientManager] Tool map rebuilt: ${this.toolServerMap.size} tools`);
+    logger.debug(`Tool map rebuilt: ${this.toolServerMap.size} tools`);
   }
 
   /**
@@ -458,8 +485,8 @@ export class MCPClientManager extends EventEmitter {
       return true;
     }
 
-    console.log(
-      `[MCPClientManager] Skipping auto-connect for unconfigured connector: ${server.name} (${connectorId})`,
+    logger.debug(
+      `Skipping auto-connect for unconfigured connector: ${server.name} (${connectorId})`,
     );
     return false;
   }

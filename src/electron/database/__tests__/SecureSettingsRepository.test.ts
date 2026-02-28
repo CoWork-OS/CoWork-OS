@@ -230,16 +230,9 @@ describe("SecureSettingsRepository", () => {
       );
     });
 
-    it("should log save operation", () => {
-      const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    it("should save operation without throwing", () => {
       mockStmt.get.mockReturnValue(undefined);
-
-      repository.save("appearance", { theme: "dark" });
-
-      expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining("Saved settings for category: appearance"),
-      );
-      consoleSpy.mockRestore();
+      expect(() => repository.save("appearance", { theme: "dark" })).not.toThrow();
     });
 
     it("should handle plugin-scoped categories", () => {

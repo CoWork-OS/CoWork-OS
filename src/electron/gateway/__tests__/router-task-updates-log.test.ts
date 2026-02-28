@@ -103,4 +103,40 @@ describe("MessageRouter.sendTaskUpdate logging", () => {
       }),
     );
   });
+
+  it("scopes idempotency dedupe to destination chat", async () => {
+    const db = createMockDb();
+    const router = new MessageRouter(db, {}, undefined);
+
+    const adapter = {
+      type: "discord",
+      status: "connected",
+      botUsername: "test-bot",
+      onMessage: vi.fn(),
+      onError: vi.fn(),
+      onStatusChange: vi.fn(),
+      sendMessage: vi.fn().mockResolvedValueOnce("m1").mockResolvedValueOnce("m2"),
+      connect: vi.fn(),
+      disconnect: vi.fn(),
+    } as Any;
+
+    (router as Any).adapters.set("discord", adapter);
+    (router as Any).channelRepo.findByType = vi.fn().mockReturnValue({ id: "c1" });
+    (router as Any).messageRepo.create = vi.fn();
+
+    const first = await router.sendMessage("discord", {
+      chatId: "chat1",
+      text: "first",
+      idempotencyKey: "same-key",
+    });
+    const second = await router.sendMessage("discord", {
+      chatId: "chat2",
+      text: "second",
+      idempotencyKey: "same-key",
+    });
+
+    expect(first).toBe("m1");
+    expect(second).toBe("m2");
+    expect(adapter.sendMessage).toHaveBeenCalledTimes(2);
+  });
 });

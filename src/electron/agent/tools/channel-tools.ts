@@ -92,6 +92,7 @@ export class ChannelTools {
       "email",
       "teams",
       "googlechat",
+      "x",
     ];
 
     return [

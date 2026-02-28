@@ -282,6 +282,12 @@ export const Methods = {
   WORKSPACE_GET: "workspace.get",
   WORKSPACE_CREATE: "workspace.create",
 
+  // Managed account operations (API-first signup/account lifecycle)
+  ACCOUNT_LIST: "account.list",
+  ACCOUNT_GET: "account.get",
+  ACCOUNT_UPSERT: "account.upsert",
+  ACCOUNT_REMOVE: "account.remove",
+
   // Channel operations (gateway)
   CHANNEL_LIST: "channel.list",
   CHANNEL_GET: "channel.get",

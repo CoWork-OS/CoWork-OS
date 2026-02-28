@@ -27,7 +27,26 @@
       "dontUseWhen": "Don't use for other social media platforms (LinkedIn, Instagram, TikTok) or general copywriting not specific to X/Twitter.",
       "outputs": "Hook variations, single tweet, thread version, and posting strategy based on real viral examples.",
       "successCriteria": "Research-backed content with specific hooks, proper character counts, algorithm optimization, and clear CTAs.",
-      "expectedArtifacts": ["twitter-content.md"]
+      "expectedArtifacts": [
+        "twitter-content.md"
+      ],
+      "examples": {
+        "positive": [
+          "Use the twitter skill for this request.",
+          "Help me with twitter / x writer.",
+          "Use when a user asks to write tweets, create X/Twitter content, write threads, or develop social media copy for X.",
+          "Twitter / X Writer: provide an actionable result."
+        ],
+        "negative": [
+          "Don't use for other social media platforms (LinkedIn, Instagram, TikTok) or general copywriting not specific to X/Twitter.",
+          "Do not use twitter for unrelated requests.",
+          "This request is outside twitter / x writer scope.",
+          "This is conceptual discussion only; no tool workflow is needed."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "medium"
     }
   }
 }

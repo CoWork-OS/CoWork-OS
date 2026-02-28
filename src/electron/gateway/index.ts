@@ -43,6 +43,7 @@ import { TwitchAdapter, createTwitchAdapter } from "./channels/twitch";
 import { LineAdapter, createLineAdapter } from "./channels/line";
 import { BlueBubblesAdapter, createBlueBubblesAdapter } from "./channels/bluebubbles";
 import { EmailAdapter, createEmailAdapter } from "./channels/email";
+import { XAdapter, createXAdapter, type XAdapterConfig } from "./channels/x";
 import {
   ChannelRepository,
   ChannelUserRepository,
@@ -51,13 +52,19 @@ import {
   Channel,
 } from "../database/repositories";
 import { AgentDaemon } from "../agent/daemon";
+import {
+  HookAgentIngress,
+  initializeHookAgentIngress,
+} from "../hooks/agent-ingress";
 import { PersonalityManager } from "../settings/personality-manager";
+import { buildMentionTaskPrompt, type ParsedMentionCommand } from "../x-mentions/parser";
 import {
   getChannelMessage,
   DEFAULT_CHANNEL_CONTEXT,
   type ChannelMessageContext,
 } from "../../shared/channelMessages";
 import { DEFAULT_QUIRKS } from "../../shared/types";
+import { createLogger } from "../utils/logger";
 
 export interface GatewayConfig {
   /** Router configuration */
@@ -72,6 +79,7 @@ const DEFAULT_CONFIG: GatewayConfig = {
   autoConnect: true,
 };
 const IDLE_SESSION_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const logger = createLogger("ChannelGateway");
 
 /**
  * Channel Gateway - Main class for managing multi-channel messaging
@@ -88,6 +96,7 @@ export class ChannelGateway {
   private config: GatewayConfig;
   private initialized = false;
   private agentDaemon?: AgentDaemon;
+  private hookIngress: HookAgentIngress | null = null;
   private daemonListeners: Array<{ event: string; handler: (...args: Any[]) => void }> = [];
   private pendingCleanupInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -128,7 +137,7 @@ export class ChannelGateway {
         };
       }
     } catch (error) {
-      console.error("[ChannelGateway] Failed to load personality settings:", error);
+      logger.error("Failed to load personality settings:", error);
     }
     return DEFAULT_CHANNEL_CONTEXT;
   }
@@ -266,9 +275,7 @@ export class ChannelGateway {
           errorMsg,
         );
       if (noisyCanvasError) {
-        console.log(
-          `[ChannelGateway] Suppressed non-user-facing canvas tool error for task ${data.taskId}`,
-        );
+        logger.debug(`Suppressed non-user-facing canvas tool error for task ${data.taskId}`);
         return;
       }
       const message = getChannelMessage("toolError", this.getMessageContext(), {
@@ -380,7 +387,7 @@ export class ChannelGateway {
     this.startPendingCleanup();
 
     this.initialized = true;
-    console.log("Channel Gateway initialized");
+    logger.debug("Initialized");
   }
 
   /**
@@ -405,7 +412,18 @@ export class ChannelGateway {
     await this.router.disconnectAll();
     this.stopPendingCleanup();
     this.initialized = false;
-    console.log("Channel Gateway shutdown");
+    logger.debug("Shutdown complete");
+  }
+
+  getStartupStats(): { loaded: number; enabled: number; connected: number } {
+    const channels = this.channelRepo.findAll();
+    const enabled = channels.filter((channel) => channel.enabled).length;
+    const connected = channels.filter((channel) => channel.status === "connected").length;
+    return {
+      loaded: channels.length,
+      enabled,
+      connected,
+    };
   }
 
   private startPendingCleanup(): void {
@@ -1011,6 +1029,49 @@ export class ChannelGateway {
   }
 
   /**
+   * Add a new X channel
+   */
+  async addXChannel(
+    name: string,
+    options?: {
+      commandPrefix?: string;
+      allowedAuthors?: string[];
+      pollIntervalSec?: number;
+      fetchCount?: number;
+      outboundEnabled?: boolean;
+    },
+    securityMode: "open" | "allowlist" | "pairing" = "pairing",
+  ): Promise<Channel> {
+    const existing = this.channelRepo.findByType("x");
+    if (existing) {
+      throw new Error("X channel already configured. Update or remove it first.");
+    }
+
+    const channel = this.channelRepo.create({
+      type: "x",
+      name,
+      enabled: false,
+      config: {
+        commandPrefix: options?.commandPrefix || "do:",
+        allowedAuthors: options?.allowedAuthors || [],
+        pollIntervalSec: options?.pollIntervalSec ?? 120,
+        fetchCount: options?.fetchCount ?? 25,
+        outboundEnabled: options?.outboundEnabled === true,
+      },
+      securityConfig: {
+        mode: securityMode,
+        allowedUsers: options?.allowedAuthors || [],
+        pairingCodeTTL: 300,
+        maxPairingAttempts: 5,
+        rateLimitPerMinute: 30,
+      },
+      status: "disconnected",
+    });
+
+    return channel;
+  }
+
+  /**
    * Update a channel configuration
    */
   updateChannel(channelId: string, updates: Partial<Channel>): void {
@@ -1288,11 +1349,16 @@ export class ChannelGateway {
     channelType: ChannelType,
     chatId: string,
     text: string,
-    options?: { replyTo?: string; parseMode?: "text" | "markdown" | "html" },
+    options?: {
+      replyTo?: string;
+      parseMode?: "text" | "markdown" | "html";
+      idempotencyKey?: string;
+    },
   ): Promise<string> {
     return this.router.sendMessage(channelType, {
       chatId,
       text,
+      idempotencyKey: options?.idempotencyKey,
       replyTo: options?.replyTo,
       parseMode: options?.parseMode,
     });
@@ -1369,6 +1435,20 @@ export class ChannelGateway {
   }
 
   // Private methods
+
+  private getHookIngress(): HookAgentIngress | null {
+    if (!this.agentDaemon) {
+      return null;
+    }
+    if (!this.hookIngress) {
+      this.hookIngress = initializeHookAgentIngress(this.agentDaemon, {
+        scope: "hooks",
+        defaultTempWorkspaceKey: "x-mentions",
+        logger: (...args) => console.warn(...args),
+      });
+    }
+    return this.hookIngress;
+  }
 
   private resolveWhatsAppAuthDir(channel?: Channel): string {
     const configured = (channel?.config as { authDir?: string } | undefined)?.authDir;
@@ -1571,6 +1651,31 @@ export class ChannelGateway {
           loomStatePath,
         });
 
+      case "x":
+        return createXAdapter({
+          enabled: channel.enabled,
+          commandPrefix: channel.config.commandPrefix as string | undefined,
+          allowedAuthors: channel.config.allowedAuthors as string[] | undefined,
+          pollIntervalSec: channel.config.pollIntervalSec as number | undefined,
+          fetchCount: channel.config.fetchCount as number | undefined,
+          outboundEnabled: channel.config.outboundEnabled as boolean | undefined,
+          onMentionCommand: async (mention: ParsedMentionCommand) => {
+            const ingress = this.getHookIngress();
+            if (!ingress) return;
+            const created = await ingress.createTaskFromAgentAction(
+              {
+                name: `X mention from @${mention.author}`,
+                message: buildMentionTaskPrompt(mention),
+                sessionKey: `xmention:${mention.tweetId}`,
+              },
+              {
+                tempWorkspaceKey: `x-${mention.author}`,
+              },
+            );
+            return { taskId: created.taskId };
+          },
+        } as XAdapterConfig);
+
       default:
         throw new Error(`Unsupported channel type: ${channel.type}`);
     }
@@ -1606,6 +1711,7 @@ export { BlueBubblesAdapter, createBlueBubblesAdapter } from "./channels/bluebub
 export { BlueBubblesClient } from "./channels/bluebubbles-client";
 export { EmailAdapter, createEmailAdapter } from "./channels/email";
 export { EmailClient } from "./channels/email-client";
+export { XAdapter, createXAdapter } from "./channels/x";
 export { LoomEmailClient } from "./channels/loom-client";
 export { TunnelManager, getAvailableTunnelProviders, createAutoTunnel } from "./tunnel";
 export type { TunnelProvider, TunnelStatus, TunnelConfig, TunnelInfo } from "./tunnel";

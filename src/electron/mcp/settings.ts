@@ -12,11 +12,13 @@ import { v4 as uuidv4 } from "uuid";
 import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
 import { getUserDataDir } from "../utils/user-data-dir";
 import { getSafeStorage } from "../utils/safe-storage";
+import { createLogger } from "../utils/logger";
 
 const LEGACY_SETTINGS_FILE = "mcp-settings.json";
 const MASKED_VALUE = "***configured***";
 const ENCRYPTED_PREFIX = "encrypted:";
 const CONNECTOR_SCRIPT_PATH_REGEX = /(?:^|[\\/])connectors[\\/]([^\\/]+)[\\/]dist[\\/]index\.js$/;
+const logger = createLogger("MCP Settings");
 
 function getElectronApp(): Any | null {
   try {
@@ -105,7 +107,7 @@ function encryptSecret(value?: string): string | undefined {
       return ENCRYPTED_PREFIX + encrypted.toString("base64");
     }
   } catch (error) {
-    console.warn("[MCP Settings] Failed to encrypt secret, storing masked:", error);
+    logger.warn("Failed to encrypt secret, storing masked:", error);
   }
   // Fallback to masked value if encryption fails
   return MASKED_VALUE;
@@ -126,13 +128,11 @@ function decryptSecret(value?: string): string | undefined {
         const decrypted = safeStorage.decryptString(encrypted);
         return decrypted;
       } else {
-        console.error(
-          "[MCP Settings] safeStorage encryption not available - cannot decrypt secrets",
-        );
+        logger.error("safeStorage encryption not available - cannot decrypt secrets");
       }
     } catch (error: Any) {
-      console.error("[MCP Settings] Failed to decrypt secret - this can happen after app updates");
-      console.error("[MCP Settings] Error:", error.message || error);
+      logger.error("Failed to decrypt secret - this can happen after app updates");
+      logger.error("Error:", error.message || error);
     }
   }
 
@@ -219,7 +219,7 @@ export class MCPSettingsManager {
     this.legacySettingsPath = path.join(userDataPath, LEGACY_SETTINGS_FILE);
     this.initialized = true;
 
-    console.log("[MCP Settings] Initialized");
+    logger.debug("Initialized");
 
     // Migrate from legacy JSON file to encrypted database
     this.migrateFromLegacyFile();
@@ -233,9 +233,7 @@ export class MCPSettingsManager {
 
     try {
       if (!SecureSettingsRepository.isInitialized()) {
-        console.log(
-          "[MCP Settings] SecureSettingsRepository not yet initialized, skipping migration",
-        );
+        logger.debug("SecureSettingsRepository not yet initialized, skipping migration");
         return;
       }
 
@@ -247,14 +245,12 @@ export class MCPSettingsManager {
       }
 
       if (!fs.existsSync(this.legacySettingsPath)) {
-        console.log("[MCP Settings] No legacy settings file found");
+        logger.debug("No legacy settings file found");
         this.migrationCompleted = true;
         return;
       }
 
-      console.log(
-        "[MCP Settings] Migrating settings from legacy JSON file to encrypted database...",
-      );
+      logger.debug("Migrating settings from legacy JSON file to encrypted database...");
 
       // Create backup before migration
       const backupPath = this.legacySettingsPath + ".migration-backup";
@@ -274,20 +270,20 @@ export class MCPSettingsManager {
         const decrypted = decryptSettings(merged);
 
         repository.save("mcp", decrypted);
-        console.log("[MCP Settings] Settings migrated to encrypted database");
+        logger.debug("Settings migrated to encrypted database");
 
         // Migration successful - delete backup and original
         fs.unlinkSync(backupPath);
         fs.unlinkSync(this.legacySettingsPath);
-        console.log("[MCP Settings] Migration complete, cleaned up legacy files");
+        logger.debug("Migration complete, cleaned up legacy files");
 
         this.migrationCompleted = true;
       } catch (migrationError) {
-        console.error("[MCP Settings] Migration failed, backup preserved at:", backupPath);
+        logger.error("Migration failed, backup preserved at:", backupPath);
         throw migrationError;
       }
     } catch (error) {
-      console.error("[MCP Settings] Migration failed:", error);
+      logger.error("Migration failed:", error);
     }
   }
 
@@ -326,21 +322,19 @@ export class MCPSettingsManager {
           };
 
           if (normalizedChanged) {
-            console.log("[MCP Settings] Normalized local connector runtime paths");
+            logger.debug("Normalized local connector runtime paths");
             this.saveSettings(this.cachedSettings);
           }
 
-          console.log(
-            `[MCP Settings] Loaded ${this.cachedSettings.servers.length} server(s) from encrypted database`,
-          );
+          logger.debug(`Loaded ${this.cachedSettings.servers.length} server(s) from encrypted database`);
           return this.cachedSettings;
         }
       }
     } catch (error) {
-      console.error("[MCP Settings] Failed to load settings:", error);
+      logger.error("Failed to load settings:", error);
     }
 
-    console.log("[MCP Settings] No settings found, using defaults");
+    logger.debug("No settings found, using defaults");
     this.cachedSettings = { ...DEFAULT_MCP_SETTINGS };
     return this.cachedSettings;
   }
@@ -374,11 +368,9 @@ export class MCPSettingsManager {
 
       const repository = SecureSettingsRepository.getInstance();
       repository.save("mcp", settings);
-      console.log(
-        `[MCP Settings] Saved ${settings.servers.length} server(s) to encrypted database`,
-      );
+      logger.debug(`Saved ${settings.servers.length} server(s) to encrypted database`);
     } catch (error) {
-      console.error("[MCP Settings] Failed to save settings:", error);
+      logger.error("Failed to save settings:", error);
       throw error;
     }
   }
@@ -442,7 +434,7 @@ export class MCPSettingsManager {
     const index = settings.servers.findIndex((s) => s.id === id);
 
     if (index === -1) {
-      console.warn(`[MCP Settings] Server not found: ${id}`);
+      logger.warn(`Server not found: ${id}`);
       return null;
     }
 
@@ -468,11 +460,11 @@ export class MCPSettingsManager {
 
     if (settings.servers.length < initialLength) {
       this.saveSettings(settings);
-      console.log(`[MCP Settings] Removed server: ${id}`);
+      logger.debug(`Removed server: ${id}`);
       return true;
     }
 
-    console.warn(`[MCP Settings] Server not found for removal: ${id}`);
+    logger.warn(`Server not found for removal: ${id}`);
     return false;
   }
 

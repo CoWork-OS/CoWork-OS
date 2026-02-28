@@ -8,7 +8,7 @@
 
 <p align="center">
   <strong>Looking for an OpenClaw alternative? CoWork OS is a local-first option for production workflows.</strong><br>
-  Security-hardened, local-first AI operating system — 30+ LLM providers, 14 channels, 139 skills
+  Security-hardened, local-first AI operating system — 30+ LLM providers, 15 channels, 139 skills
 </p>
 
 <p align="center">
@@ -36,7 +36,7 @@
 ### Why CoWork OS?
 
 - **30+ LLM providers** — Anthropic, OpenAI, Google, Ollama, AWS Bedrock, OpenRouter, and more. Bring your own keys.
-- **14 messaging channels** — WhatsApp, Telegram, Discord, Slack, Teams, iMessage, Signal, and more. Chat with your AI from anywhere.
+- **15 messaging channels** — WhatsApp, Telegram, Discord, Slack, Teams, iMessage, Signal, X, and more. Chat with your AI from anywhere.
 - **139 built-in skills** — Documents, code review, web search, image generation, cloud integrations, game development, mobile development, financial analysis, infrastructure-as-code, and more.
 - **Digital Twin Personas** — Pre-built AI twins for every role (engineer, manager, PM, director). Each twin absorbs cognitively draining work — PR triage, meeting prep, status reports, dependency tracking — so the human stays in flow.
 - **Plugin Platform** — 17 bundled role-specific packs (including Mobile Development, Game Development, and 5 Financial packs) with 55+ skills, in-app Plugin Store for installing community packs, remote registry, and enterprise admin policies for organization-wide control.
@@ -59,7 +59,7 @@ OpenClaw has a large and passionate community for agent experimentation. CoWork 
 | Category | Agent toolkit / experimentation layer | Security-hardened AI operating system |
 | Primary use case | Build and iterate on agent workflows | Run agent workflows in production |
 | Security posture | Varies by workflow and setup | Built-in approvals, guardrails, sandbox isolation, encrypted local storage |
-| Runtime surfaces | CLI-centric control paths | Desktop app + headless daemon + 14-channel gateway |
+| Runtime surfaces | CLI-centric control paths | Desktop app + headless daemon + 15-channel gateway |
 | Data ownership model | BYOK/self-hosting workflows | Local-first, BYOK, no telemetry, optional offline Ollama |
 
 See the full guide: [OpenClaw alternative: CoWork OS vs OpenClaw](docs/openclaw-comparison.md)
@@ -104,6 +104,8 @@ npm run build && npm run package
 ```
 
 > **Windows prerequisites:** Native module setup may require [Visual Studio Build Tools 2022 (C++)](https://visualstudio.microsoft.com/visual-cpp-build-tools/) and Python 3. On Windows ARM64, setup automatically falls back to x64 Electron emulation when ARM64 native prebuilds are unavailable.
+>
+> `npm run setup` also installs local git hooks (`.githooks/`) including a pre-commit secret scan. If needed, reinstall hooks with `npm run hooks:install`.
 
 See the [Development Guide](docs/development.md) for prerequisites and details.
 
@@ -134,7 +136,7 @@ Agent-driven visual workspace for interactive HTML/CSS/JS content, data visualiz
 
 ### Multichannel Gateway
 
-Unified AI gateway across 14 channels with security modes, rate limiting, ambient mode, scheduled tasks, and chat commands. [Learn more](docs/channels.md)
+Unified AI gateway across 15 channels with security modes, rate limiting, ambient mode, scheduled tasks, and chat commands. [Learn more](docs/channels.md)
 
 ### Infrastructure
 
@@ -301,7 +303,8 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
 | [Use Case Showcase](docs/showcase.md) | Comprehensive guide to what you can build and automate |
 | [Features](docs/features.md) | Complete feature reference |
 | [OpenClaw Alternative Guide](docs/openclaw-comparison.md) | Respectful category framing for users evaluating an OpenClaw alternative |
-| [Channels](docs/channels.md) | Messaging channel setup (14 channels) |
+| [Channels](docs/channels.md) | Messaging channel setup (15 channels) |
+| [X Mention Triggers](docs/x-mention-triggers.md) | Configure `do:` mention-triggered task ingress on desktop and headless |
 | [Providers](docs/providers.md) | LLM provider configuration |
 | [Migration from OpenClaw](docs/migration.md#from-openclaw-to-cowork-os) | Practical checklist for teams moving from OpenClaw to CoWork OS |
 | [Development](docs/development.md) | Build from source, project structure |

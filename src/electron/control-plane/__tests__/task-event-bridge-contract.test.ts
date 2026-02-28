@@ -16,6 +16,7 @@ describe("TASK_EVENT_BRIDGE_ALLOWLIST", () => {
     expect(TASK_EVENT_BRIDGE_ALLOWLIST).toContain("step_started");
     expect(TASK_EVENT_BRIDGE_ALLOWLIST).toContain("step_completed");
     expect(TASK_EVENT_BRIDGE_ALLOWLIST).toContain("step_failed");
+    expect(TASK_EVENT_BRIDGE_ALLOWLIST).toContain("artifact_created");
     expect(TASK_EVENT_BRIDGE_ALLOWLIST).toContain("error");
   });
 

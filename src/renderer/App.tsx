@@ -33,6 +33,18 @@ import {
 } from "../shared/types";
 import { TASK_EVENT_STATUS_MAP } from "../shared/task-event-status-map";
 import { applyPersistedLanguage } from "./i18n";
+import {
+  hasTaskOutputs,
+  resolveTaskOutputSummaryFromCompletionEvent,
+} from "./utils/task-outputs";
+import {
+  addUniqueTaskId,
+  buildTaskCompletionToast,
+  decideCompletionPanelBehavior,
+  removeTaskId,
+  shouldClearUnseenOutputBadges,
+  shouldTrackUnseenCompletion,
+} from "./utils/task-completion-ux";
 
 // Helper to get effective theme based on system preference
 function getEffectiveTheme(themeMode: ThemeMode): "light" | "dark" {
@@ -124,6 +136,12 @@ export function App() {
   const [queueStatus, setQueueStatus] = useState<QueueStatus | null>(null);
   const [toasts, setToasts] = useState<ToastNotification[]>([]);
   const [sessionAutoApproveAll, setSessionAutoApproveAll] = useState(false);
+  const [unseenOutputTaskIds, setUnseenOutputTaskIds] = useState<string[]>([]);
+  const [unseenCompletedTaskIds, setUnseenCompletedTaskIds] = useState<string[]>([]);
+  const [rightPanelHighlight, setRightPanelHighlight] = useState<{
+    taskId: string;
+    path: string;
+  } | null>(null);
 
   // Sidebar collapse state
   const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(false);
@@ -133,6 +151,11 @@ export function App() {
   const tasksRef = useRef<Task[]>([]);
   const sessionAutoApproveAllRef = useRef(false);
   const pendingApprovalsRef = useRef<Map<string, ApprovalRequest>>(new Map());
+  const eventsRef = useRef<TaskEvent[]>([]);
+  const selectedTaskIdRef = useRef<string | null>(null);
+  const currentViewRef = useRef<AppView>("main");
+  const rightSidebarCollapsedRef = useRef(false);
+  const currentWorkspaceRef = useRef<Workspace | null>(null);
 
   // Disclaimer state (null = loading)
   const [disclaimerAccepted, setDisclaimerAccepted] = useState<boolean | null>(null);
@@ -652,6 +675,26 @@ export function App() {
     tasksRef.current = tasks;
   }, [tasks]);
 
+  useEffect(() => {
+    eventsRef.current = events;
+  }, [events]);
+
+  useEffect(() => {
+    selectedTaskIdRef.current = selectedTaskId;
+  }, [selectedTaskId]);
+
+  useEffect(() => {
+    currentViewRef.current = currentView;
+  }, [currentView]);
+
+  useEffect(() => {
+    rightSidebarCollapsedRef.current = rightSidebarCollapsed;
+  }, [rightSidebarCollapsed]);
+
+  useEffect(() => {
+    currentWorkspaceRef.current = currentWorkspace;
+  }, [currentWorkspace]);
+
   // Restore session auto-approve state from main process (survives HMR and renderer resets)
   useEffect(() => {
     if (!window.electronAPI?.getSessionAutoApprove) return;
@@ -849,12 +892,82 @@ export function App() {
       // Show toast notifications for task completion/failure
       if (event.type === "task_completed") {
         const task = tasksRef.current.find((t) => t.id === event.taskId);
-        addToast({
-          type: "success",
-          title: "✅ Task Done!",
-          message: task?.title || "Task finished successfully",
-          taskId: event.taskId,
-        });
+        const isMainView = currentViewRef.current === "main";
+        const isSelectedTask = selectedTaskIdRef.current === event.taskId;
+        if (shouldTrackUnseenCompletion({ isMainView, isSelectedTask })) {
+          setUnseenCompletedTaskIds((prev) => addUniqueTaskId(prev, event.taskId));
+        }
+        const fallbackEventsForTask =
+          event.taskId === selectedTaskIdRef.current
+            ? capTaskEvents([...eventsRef.current, event])
+            : undefined;
+        const outputSummary = resolveTaskOutputSummaryFromCompletionEvent(
+          event,
+          fallbackEventsForTask,
+        );
+        const resolveWorkspacePathForTask = async (): Promise<string | undefined> => {
+          const taskForEvent = tasksRef.current.find((t) => t.id === event.taskId);
+          if (!taskForEvent) return currentWorkspaceRef.current?.path;
+          if (currentWorkspaceRef.current?.id === taskForEvent.workspaceId) {
+            return currentWorkspaceRef.current.path;
+          }
+          try {
+            const allWorkspaces = await window.electronAPI.listWorkspaces();
+            return allWorkspaces.find((w) => w.id === taskForEvent.workspaceId)?.path;
+          } catch {
+            return currentWorkspaceRef.current?.path;
+          }
+        };
+        const primaryOutputPath = hasTaskOutputs(outputSummary)
+          ? outputSummary.primaryOutputPath
+          : undefined;
+        addToast(
+          buildTaskCompletionToast({
+            taskId: event.taskId,
+            taskTitle: task?.title,
+            outputSummary,
+            actionDependencies: hasTaskOutputs(outputSummary)
+              ? {
+                  resolveWorkspacePath: resolveWorkspacePathForTask,
+                  openFile: (path, workspacePath) => window.electronAPI.openFile(path, workspacePath),
+                  showInFinder: (path, workspacePath) =>
+                    window.electronAPI.showInFinder(path, workspacePath),
+                  onViewInFiles: () => {
+                    setCurrentView("main");
+                    setSelectedTaskId(event.taskId);
+                    setRightSidebarCollapsed(false);
+                    if (primaryOutputPath) {
+                      setRightPanelHighlight({ taskId: event.taskId, path: primaryOutputPath });
+                    }
+                    setUnseenOutputTaskIds((prev) => removeTaskId(prev, event.taskId));
+                    setUnseenCompletedTaskIds((prev) => removeTaskId(prev, event.taskId));
+                  },
+                  onOpenFileError: (error) => {
+                    console.error("Failed to open completion output:", error);
+                  },
+                  onShowInFinderError: (error) => {
+                    console.error("Failed to reveal completion output:", error);
+                  },
+                }
+              : undefined,
+          }),
+        );
+
+        if (hasTaskOutputs(outputSummary)) {
+          const panelBehavior = decideCompletionPanelBehavior({
+            isMainView,
+            isSelectedTask,
+            panelCollapsed: rightSidebarCollapsedRef.current,
+          });
+          if (panelBehavior.autoOpenPanel) {
+            setRightSidebarCollapsed(false);
+            if (primaryOutputPath) {
+              setRightPanelHighlight({ taskId: event.taskId, path: primaryOutputPath });
+            }
+          } else if (panelBehavior.markUnseenOutput) {
+            setUnseenOutputTaskIds((prev) => addUniqueTaskId(prev, event.taskId));
+          }
+        }
       } else if (event.type === "error") {
         const task = tasksRef.current.find((t) => t.id === event.taskId);
         addToast({
@@ -883,7 +996,8 @@ export function App() {
         !isSelectedTask &&
         (event.type === "file_created" ||
           event.type === "file_modified" ||
-          event.type === "file_deleted") &&
+          event.type === "file_deleted" ||
+          event.type === "artifact_created") &&
         (() => {
           const childTask = tasksRef.current.find((t) => t.id === event.taskId);
           if (!childTask?.parentTaskId || childTask.parentTaskId !== selectedTaskId) return false;
@@ -1275,6 +1389,32 @@ export function App() {
   // Smart right panel visibility: auto-collapse on welcome screen in focused mode
   const effectiveRightCollapsed =
     uiDensity === "full" ? rightSidebarCollapsed : !selectedTaskId ? true : rightSidebarCollapsed;
+  const unseenOutputCount = unseenOutputTaskIds.length;
+
+  useEffect(() => {
+    if (!shouldClearUnseenOutputBadges(currentView === "main", effectiveRightCollapsed)) return;
+    if (unseenOutputTaskIds.length > 0) {
+      setUnseenOutputTaskIds([]);
+    }
+  }, [currentView, effectiveRightCollapsed, unseenOutputTaskIds.length]);
+
+  useEffect(() => {
+    if (!selectedTaskId || currentView !== "main") return;
+    setUnseenCompletedTaskIds((prev) =>
+      prev.includes(selectedTaskId) ? prev.filter((id) => id !== selectedTaskId) : prev,
+    );
+  }, [selectedTaskId, currentView]);
+
+  useEffect(() => {
+    setUnseenCompletedTaskIds((prev) => {
+      if (prev.length === 0) return prev;
+      const completedTaskIds = new Set(
+        tasks.filter((task) => task.status === "completed").map((task) => task.id),
+      );
+      const next = prev.filter((taskId) => completedTaskIds.has(taskId));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [tasks]);
 
   if (!hasElectronAPI) {
     return (
@@ -1506,6 +1646,11 @@ export function App() {
               <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
               <line x1="15" y1="3" x2="15" y2="21" />
             </svg>
+            {effectiveRightCollapsed && unseenOutputCount > 0 && (
+              <span className="title-bar-output-badge" aria-label={`${unseenOutputCount} new outputs`}>
+                {unseenOutputCount > 9 ? "9+" : unseenOutputCount}
+              </span>
+            )}
           </button>
         </div>
         {/* Windows custom window controls (minimize, maximize, close) */}
@@ -1600,6 +1745,7 @@ export function App() {
                 workspace={currentWorkspace}
                 tasks={tasks}
                 selectedTaskId={selectedTaskId}
+                completionAttentionTaskIds={unseenCompletedTaskIds}
                 onSelectTask={setSelectedTaskId}
                 onNewSession={handleNewSession}
                 onOpenSettings={() => setCurrentView("settings")}
@@ -1630,6 +1776,16 @@ export function App() {
               onStopTask={handleCancelTask}
               onWrapUpTask={handleWrapUpTask}
               onOpenBrowserView={handleOpenBrowserView}
+              onViewTaskOutputs={(taskId, primaryOutputPath) => {
+                setCurrentView("main");
+                setSelectedTaskId(taskId);
+                setRightSidebarCollapsed(false);
+                if (primaryOutputPath) {
+                  setRightPanelHighlight({ taskId, path: primaryOutputPath });
+                }
+                setUnseenOutputTaskIds((prev) => prev.filter((id) => id !== taskId));
+                setUnseenCompletedTaskIds((prev) => prev.filter((id) => id !== taskId));
+              }}
               selectedModel={selectedModel}
               availableModels={availableModels}
               onModelChange={handleModelChange}
@@ -1645,6 +1801,16 @@ export function App() {
                 queueStatus={queueStatus}
                 onSelectTask={setSelectedTaskId}
                 onCancelTask={handleCancelTaskById}
+                highlightOutputPath={
+                  selectedTaskId && rightPanelHighlight?.taskId === selectedTaskId
+                    ? rightPanelHighlight.path
+                    : null
+                }
+                onHighlightConsumed={() => {
+                  setRightPanelHighlight((prev) =>
+                    prev && prev.taskId === selectedTaskId ? null : prev,
+                  );
+                }}
               />
             )}
           </div>

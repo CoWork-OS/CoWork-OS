@@ -60,7 +60,24 @@
       "successCriteria": "Finder completes with concrete file paths, line ranges, and focused next steps that reduce implementation context.",
       "expectedArtifacts": [
         "finder-report.md"
-      ]
+      ],
+      "examples": {
+        "positive": [
+          "Use the pi-finder-subagent skill for this request.",
+          "Help me with pi-finder-subagent.",
+          "Use when users ask to scout the local repository, identify relevant files/snippets, or reduce context before coding.",
+          "Pi-finder-subagent: provide an actionable result."
+        ],
+        "negative": [
+          "Do not use for remote GitHub-first research across external repositories; use pi-librarian instead.",
+          "Do not use pi-finder-subagent for unrelated requests.",
+          "This request is outside pi-finder-subagent scope.",
+          "This is conceptual discussion only; no tool workflow is needed."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "low"
     }
   }
 }

@@ -2,7 +2,7 @@
   "id": "twin-pr-triage",
   "name": "PR Triage & Review Queue",
   "description": "Scan open pull requests, assess risk and complexity, and build a prioritized review queue. Used by digital twin personas to reduce PR review cognitive load.",
-  "icon": "\ud83d\udd0d",
+  "icon": "🔍",
   "category": "Digital Twin",
   "prompt": "Analyze all open pull requests in the current repository:\n\n1. For each PR, provide:\n   - **Title** and **author**\n   - **Lines changed** (additions/deletions)\n   - **Risk assessment** (low/medium/high) based on: files touched, test coverage, complexity, and blast radius\n   - **Age** (hours/days since opened)\n   - **CI status** (passing/failing/pending)\n   - **Review status** (approved/changes-requested/awaiting-review)\n2. Produce a **prioritized review queue**, highest priority first. Priority considers: risk level, age, and whether the PR is blocking other work.\n3. Flag any PRs that are **stale** (older than {{stale_hours}} hours without activity).\n4. Note PRs with **merge conflicts** that need rebasing.\n\nWrite findings to `{artifactDir}/pr-triage.md`.",
   "parameters": [
@@ -15,19 +15,46 @@
     }
   ],
   "requires": {
-    "bins": ["gh"]
+    "bins": [
+      "gh"
+    ]
   },
   "enabled": true,
   "metadata": {
     "version": "1.0.0",
     "author": "CoWork OS",
-    "tags": ["digital-twin", "code-review", "PR", "triage", "github"],
+    "tags": [
+      "digital-twin",
+      "code-review",
+      "PR",
+      "triage",
+      "github"
+    ],
     "routing": {
       "useWhen": "Use when triaging open pull requests, building a review queue, or assessing PR backlog health.",
       "dontUseWhen": "Don't use for performing actual code reviews or making merge decisions.",
       "outputs": "Prioritized PR review queue with risk assessments",
       "successCriteria": "All open PRs listed with accurate risk and priority assessment",
-      "expectedArtifacts": ["pr-triage.md"]
+      "expectedArtifacts": [
+        "pr-triage.md"
+      ],
+      "examples": {
+        "positive": [
+          "Use the twin-pr-triage skill for this request.",
+          "Help me with pr triage & review queue.",
+          "Use when triaging open pull requests, building a review queue, or assessing PR backlog health.",
+          "PR Triage & Review Queue: provide an actionable result."
+        ],
+        "negative": [
+          "Don't use for performing actual code reviews or making merge decisions.",
+          "Do not use twin-pr-triage for unrelated requests.",
+          "This request is outside pr triage & review queue scope.",
+          "This is conceptual discussion only; no tool workflow is needed."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "low"
     }
   }
 }

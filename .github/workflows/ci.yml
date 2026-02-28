@@ -7,6 +7,51 @@ on:
     branches: [main]
 
 jobs:
+  secret-scan:
+    name: Secret Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install gitleaks
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/gitleaks/gitleaks/master/install.sh | sh -s -- -b /usr/local/bin
+
+      - name: Resolve commit range
+        id: range
+        shell: bash
+        run: |
+          set -euo pipefail
+          event_name="${{ github.event_name }}"
+
+          if [ "$event_name" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+            echo "log_opts=${base}..${head}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          before="${{ github.event.before }}"
+          head="${{ github.sha }}"
+
+          if [ -z "$before" ] || [ "$before" = "0000000000000000000000000000000000000000" ]; then
+            if git rev-parse "${head}~1" >/dev/null 2>&1; then
+              echo "log_opts=${head}~1..${head}" >> "$GITHUB_OUTPUT"
+            else
+              echo "log_opts=${head}" >> "$GITHUB_OUTPUT"
+            fi
+            exit 0
+          fi
+
+          echo "log_opts=${before}..${head}" >> "$GITHUB_OUTPUT"
+
+      - name: Run gitleaks on new commits
+        run: gitleaks git --no-banner --redact --log-opts="${{ steps.range.outputs.log_opts }}"
+
   lint-and-typecheck:
     name: Lint & Type Check
     runs-on: ubuntu-latest
@@ -56,7 +101,7 @@ jobs:
   build:
     name: Build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    needs: [lint-and-typecheck, test]
+    needs: [secret-scan, lint-and-typecheck, test]
     strategy:
       fail-fast: false
       matrix:

@@ -35,13 +35,42 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 export class IntentRouter {
+  private static stripStrategyContext(text: string): string {
+    if (!text) return text;
+    const open = "[AGENT_STRATEGY_CONTEXT_V1]";
+    const close = "[/AGENT_STRATEGY_CONTEXT_V1]";
+    const openIndex = text.indexOf(open);
+    if (openIndex === -1) return text;
+    const closeIndex = text.indexOf(close, openIndex);
+    if (closeIndex === -1) {
+      return text.slice(0, openIndex).trim();
+    }
+    const before = text.slice(0, openIndex).trim();
+    const after = text.slice(closeIndex + close.length).trim();
+    return [before, after].filter(Boolean).join("\n\n").trim();
+  }
+
   private static inferDomain(lower: string): TaskDomain {
-    const codeSignal =
-      /\b(code|coding|typescript|javascript|python|rust|java|node|repo|repository|branch|commit|pull request|pr|diff|test|build|compile|lint|debug|bug|stack trace|api|sdk)\b/.test(
+    const compileCodeSignal =
+      /\bcompile\b/.test(lower) &&
+      /\b(code|coding|typescript|javascript|python|rust|java|node|repo|repository|branch|commit|pull request|pr|diff|test|build|lint|debug|bug|stack trace|api|sdk|binary|program)\b/.test(
         lower,
-      ) ||
+      );
+
+    const codeKeywordSignal =
+      /\b(code|coding|typescript|javascript|python|rust|java|node|repo|repository|branch|commit|pull request|pr|diff|test|build|lint|debug|bug|stack trace|api|sdk)\b/.test(
+        lower,
+      );
+    const pathLikeSignal = /\/[a-z0-9_./-]+/.test(lower);
+    const codePathCue =
+      /\b(src|dist|lib|package\.json|tsconfig|node_modules|dockerfile|makefile|readme\.md)\b/.test(
+        lower,
+      ) || /\.[a-z0-9]{1,5}\b/.test(lower);
+    const codeSignal =
+      codeKeywordSignal ||
+      compileCodeSignal ||
       /`[^`]+`/.test(lower) ||
-      /\/[a-z0-9_./-]+/.test(lower);
+      (pathLikeSignal && codePathCue && codeKeywordSignal);
     if (codeSignal) return "code";
 
     const operationsSignal =
@@ -66,7 +95,8 @@ export class IntentRouter {
   }
 
   static route(title: string, prompt: string): IntentRoute {
-    const text = `${title || ""}\n${prompt || ""}`.trim();
+    const sanitizedPrompt = this.stripStrategyContext(String(prompt || ""));
+    const text = `${title || ""}\n${sanitizedPrompt}`.trim();
     const lower = text.toLowerCase();
     const scores: IntentScores = { chat: 0, advice: 0, planning: 0, execution: 0, thinking: 0 };
     const signals: string[] = [];
@@ -209,10 +239,9 @@ export class IntentRouter {
         lower,
       );
 
-    // Deep work: explicit signal + complex prompt, OR very high action density with workflow connectives
+    // Deep work should require an explicit autonomy signal from the user.
     const isDeepWork =
-      (hasDeepWorkSignal && executionLike >= 3 && (wordCount > 100 || uniqueActionVerbs >= 4)) ||
-      (hasWorkflowConnectives && uniqueActionVerbs >= 5 && wordCount > 200 && executionLike >= 3);
+      hasDeepWorkSignal && executionLike >= 3 && (wordCount > 100 || uniqueActionVerbs >= 4);
 
     let intent: RoutedIntent;
     // Deep work: highest priority — long-running autonomous execution

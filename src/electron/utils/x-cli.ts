@@ -42,7 +42,7 @@ function parseJsonSafe(text: string): Any | undefined {
   }
 }
 
-function buildGlobalArgs(settings: XSettingsData, json: boolean): string[] {
+function buildGlobalArgs(settings: XSettingsData): string[] {
   const args: string[] = [];
 
   if (settings.authMethod === "manual") {
@@ -76,10 +76,6 @@ function buildGlobalArgs(settings: XSettingsData, json: boolean): string[] {
   if (settings.quoteDepth !== undefined) {
     args.push("--quote-depth", String(settings.quoteDepth));
   }
-  if (json) {
-    args.push("--json");
-  }
-
   return args;
 }
 
@@ -87,6 +83,7 @@ export interface XCommandResult {
   stdout: string;
   stderr: string;
   data?: Any;
+  jsonFallbackUsed?: boolean;
 }
 
 export async function runBirdCommand(
@@ -96,8 +93,8 @@ export async function runBirdCommand(
 ): Promise<XCommandResult> {
   const useJson = options?.json !== false;
   const timeoutMs = options?.timeoutMs ?? settings.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const globalArgs = buildGlobalArgs(settings, useJson);
-  const fullArgs = [...globalArgs, ...args];
+  const globalArgs = buildGlobalArgs(settings);
+  const fullArgs = [...globalArgs, ...args, ...(useJson ? ["--json"] : [])];
 
   try {
     const { stdout, stderr } = await execFileAsync("bird", fullArgs, {
@@ -122,7 +119,8 @@ export async function runBirdCommand(
     const combined = `${baseMessage}${detail ? `: ${detail}` : ""}`;
 
     if (useJson && /unknown option.*--json/i.test(combined)) {
-      return runBirdCommand(settings, args, { ...options, json: false });
+      const fallback = await runBirdCommand(settings, args, { ...options, json: false });
+      return { ...fallback, jsonFallbackUsed: true };
     }
 
     if (error?.code === "ENOENT") {

@@ -54,10 +54,8 @@ function inferModelLimit(modelKey: string): number | null {
 const RESERVED_TOKENS = 8000;
 
 // Maximum tokens for a single tool result
-const MAX_TOOL_RESULT_TOKENS = 10000;
-
-// Maximum characters per tool result (rough estimate: 4 chars ≈ 1 token)
-const MAX_TOOL_RESULT_CHARS = MAX_TOOL_RESULT_TOKENS * 4;
+const MAX_TOOL_RESULT_TOKENS_DEFAULT = 10000;
+const MAX_TOOL_RESULT_TOKENS_DOCUMENT = 30000;
 
 // Messages that begin with one of these tags are treated as "pinned" and should
 // survive compaction. (They are system-generated context blocks, not normal chat turns.)
@@ -161,33 +159,57 @@ function safeJsonParse(jsonString: string): Any | null {
   }
 }
 
+function isExpandedDocumentPayload(parsed: Any): boolean {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+  if (typeof parsed.content !== "string") return false;
+
+  const format = String(parsed.format || "").toLowerCase();
+  if (format === "docx" || format === "pdf" || format === "pptx") return true;
+
+  const filePath = String(parsed.path || "").toLowerCase();
+  return /\.(docx|pdf|pptx)$/i.test(filePath);
+}
+
+function getToolResultTokenBudget(parsed: Any | null): number {
+  if (parsed && isExpandedDocumentPayload(parsed)) {
+    return MAX_TOOL_RESULT_TOKENS_DOCUMENT;
+  }
+  return MAX_TOOL_RESULT_TOKENS_DEFAULT;
+}
+
 /**
  * Truncate tool result content if too large
  */
 export function truncateToolResult(result: string): string {
-  if (result.length <= MAX_TOOL_RESULT_CHARS) return result;
-
   // For JSON results, try to preserve structure
   const parsed = safeJsonParse(result);
+  const tokenBudget = getToolResultTokenBudget(parsed);
+  const maxChars = tokenBudget * 4;
+
+  if (result.length <= maxChars) return result;
+
   if (parsed !== null) {
     // If it's an array, limit items
     if (Array.isArray(parsed)) {
       const limited = parsed.slice(0, 50);
       const truncatedJson = JSON.stringify(limited, null, 2);
-      if (truncatedJson.length <= MAX_TOOL_RESULT_CHARS) {
+      if (truncatedJson.length <= maxChars) {
         return truncatedJson + `\n\n[... showing ${limited.length} of ${parsed.length} items ...]`;
       }
     }
 
     // If it's an object with content field (like file content), truncate the content
     if (parsed.content && typeof parsed.content === "string") {
-      parsed.content = truncateToTokens(parsed.content, MAX_TOOL_RESULT_TOKENS / 2);
+      const contentBudget = isExpandedDocumentPayload(parsed)
+        ? Math.max(4000, tokenBudget - 1500)
+        : Math.floor(tokenBudget / 2);
+      parsed.content = truncateToTokens(parsed.content, contentBudget);
       return JSON.stringify(parsed, null, 2);
     }
   }
 
   // Plain text truncation
-  return truncateToTokens(result, MAX_TOOL_RESULT_TOKENS);
+  return truncateToTokens(result, tokenBudget);
 }
 
 export type CompactionKind = "none" | "tool_truncation_only" | "message_removal";

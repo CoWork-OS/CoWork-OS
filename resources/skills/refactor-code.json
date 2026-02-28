@@ -33,7 +33,24 @@
       "useWhen": "Use when user asks to improve maintainability, readability, modularity, or error handling in code.",
       "dontUseWhen": "Don't use for behavior-only fixes where refactor risk is unnecessary.",
       "outputs": "Refactor changes, rationale, and minimal review checklist for behavior-sensitive sections.",
-      "successCriteria": "Preserves behavior while improving structure and readability."
+      "successCriteria": "Preserves behavior while improving structure and readability.",
+      "examples": {
+        "positive": [
+          "Use the refactor-code skill for this request.",
+          "Help me with refactor code.",
+          "Use when user asks to improve maintainability, readability, modularity, or error handling in code.",
+          "Refactor Code: provide an actionable result."
+        ],
+        "negative": [
+          "Don't use for behavior-only fixes where refactor risk is unnecessary.",
+          "Do not use refactor-code for unrelated requests.",
+          "This request is outside refactor code scope.",
+          "This is conceptual discussion only; no tool workflow is needed."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "low"
     }
   }
 }

@@ -200,3 +200,38 @@ Use up to 3 fallback attempts.
 Never claim success without evidence.
 STOP before irreversible external actions and ask for confirmation.
 ```
+
+### 12) Legal Deal Defense (Contract + Demand Letter + Counterpositions)
+
+Prompt:
+```
+Use the legal-contract-negotiation-review skill with:
+- agreement_path: "docs/purchase-agreement.docx"
+- disclosure_schedules_path: "docs/disclosure-schedules.docx"
+- counterparty_changes_path: "docs/buyer-demand-letter.pdf"
+- client_side: "seller"
+
+If any read_file call is windowed/truncated, continue with startChar until all files are fully covered.
+Write the final report to artifacts/legal/negotiation-analysis.md.
+```
+
+Prompt (demand letter response draft):
+```
+Use the legal-demand-letter-response-draft skill with:
+- agreement_path: "docs/services-agreement.docx"
+- demand_letter_path: "docs/demand-letter.pdf"
+- facts_path: "docs/fact-timeline.md"
+- client_role: "responding party"
+- response_output_path: "artifacts/legal/demand-response-draft.md"
+- issues_table_output_path: "artifacts/legal/demand-issues-table.md"
+```
+
+Prompt (verified legal research memo):
+```
+Use the legal-verified-research-memo skill with:
+- question: "What U.S. federal and state licensing issues apply to operating a custodial crypto wallet product for consumers?"
+- jurisdictions: "United States federal + New York + California"
+- output_report_path: "artifacts/legal/research-memo.md"
+
+Require primary authority first and include a claim-level verification log.
+```

@@ -60,7 +60,24 @@
       "useWhen": "Use when the user asks to build a morning or daily executive brief from calendar, inbox, tasks, and optional ops signals.",
       "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
       "outputs": "Outcome from Chief of Staff Briefing: one high-signal brief plus prioritized next actions.",
-      "successCriteria": "Delivers a concise brief with explicit data availability boundaries and clear recommended actions."
+      "successCriteria": "Delivers a concise brief with explicit data availability boundaries and clear recommended actions.",
+      "examples": {
+        "positive": [
+          "Use the usecase-chief-of-staff-briefing skill for this request.",
+          "Help me with chief of staff briefing.",
+          "Use when the user asks to build a morning or daily executive brief from calendar, inbox, tasks, and optional ops signals.",
+          "Chief of Staff Briefing: provide an actionable result."
+        ],
+        "negative": [
+          "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
+          "Do not use usecase-chief-of-staff-briefing for unrelated requests.",
+          "This request is outside chief of staff briefing scope.",
+          "This is conceptual discussion only; no tool workflow is needed."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "low"
     }
   }
 }

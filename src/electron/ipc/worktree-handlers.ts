@@ -9,6 +9,9 @@ import {
   ComparisonCreateSchema,
 } from "../utils/validation";
 import { rateLimiter, RATE_LIMIT_CONFIGS } from "../utils/rate-limiter";
+import { createLogger } from "../utils/logger";
+
+const logger = createLogger("Worktree");
 
 function checkRateLimit(channel: string): void {
   if (!rateLimiter.check(channel)) {
@@ -140,5 +143,5 @@ export function setupWorktreeHandlers(agentDaemon: AgentDaemon): void {
     return session?.comparisonResult ?? null;
   });
 
-  console.log("[Worktree] IPC handlers initialized");
+  logger.debug("IPC handlers initialized");
 }

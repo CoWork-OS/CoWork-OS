@@ -12,7 +12,24 @@
       "useWhen": "Use when requested to inspect dependency freshness, vulnerabilities, or deprecated packages.",
       "dontUseWhen": "Don't use for single-file code changes without project dependency context.",
       "outputs": "Dependency audit table with stale versions, risk flags, and safe upgrade notes.",
-      "successCriteria": "Identifies package manager, flags vulnerability and deprecation signals, and gives practical upgrade sequencing."
+      "successCriteria": "Identifies package manager, flags vulnerability and deprecation signals, and gives practical upgrade sequencing.",
+      "examples": {
+        "positive": [
+          "Use the dependency-check skill for this request.",
+          "Help me with dependency check.",
+          "Use when requested to inspect dependency freshness, vulnerabilities, or deprecated packages.",
+          "Dependency Check: provide an actionable result."
+        ],
+        "negative": [
+          "Don't use for single-file code changes without project dependency context.",
+          "Do not use dependency-check for unrelated requests.",
+          "This request is outside dependency check scope.",
+          "This is conceptual discussion only; no tool workflow is needed."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "low"
     }
   }
 }

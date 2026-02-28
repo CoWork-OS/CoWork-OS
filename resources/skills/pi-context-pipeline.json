@@ -108,7 +108,24 @@
         "librarian-report.md",
         "context-pack.md",
         "codex-kickoff.txt"
-      ]
+      ],
+      "examples": {
+        "positive": [
+          "Use the pi-context-pipeline skill for this request.",
+          "Help me with pi-context-pipeline.",
+          "Use when users want a Finder plus Librarian pre-coding pipeline that narrows context and prepares a coding handoff prompt.",
+          "Pi-context-pipeline: provide an actionable result."
+        ],
+        "negative": [
+          "Do not use for direct coding changes that are already scoped to a few known files.",
+          "Do not use pi-context-pipeline for unrelated requests.",
+          "This request is outside pi-context-pipeline scope.",
+          "This is conceptual discussion only; no tool workflow is needed."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "medium"
     }
   }
 }

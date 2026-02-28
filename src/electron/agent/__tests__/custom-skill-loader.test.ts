@@ -8,8 +8,44 @@ import * as path from "path";
 
 // Track file system operations
 let mockFiles: Map<string, string> = new Map();
+let mockDirs: Set<string> = new Set();
 let mockDirExists = true;
 const getFilename = (p: string): string => path.basename(p);
+function normalizePath(p: string): string {
+  return p.replaceAll("\\\\", "/");
+}
+
+function mockExists(p: string): boolean {
+  const normalized = normalizePath(p);
+  if (normalized.endsWith("/skills") || normalized === "skills") return mockDirExists;
+  if (mockDirs.has(normalized)) return true;
+  const filename = getFilename(p);
+  for (const [key] of mockFiles) {
+    if (key.endsWith(filename)) return true;
+  }
+  return false;
+}
+
+function mockRead(p: string): string {
+  const filename = getFilename(p);
+  for (const [key, value] of mockFiles) {
+    if (key.endsWith(filename)) return value;
+  }
+  throw new Error(`File not found: ${p}`);
+}
+
+function mockReaddir(): string[] {
+  return Array.from(mockFiles.keys())
+    .filter((k) => k.endsWith(".json"))
+    .map((k) => getFilename(k));
+}
+
+function mockStat(p: string): { isDirectory: () => boolean } {
+  const normalized = normalizePath(p);
+  return {
+    isDirectory: () => mockDirs.has(normalized),
+  };
+}
 
 // Mock electron app
 vi.mock("electron", () => ({
@@ -21,49 +57,15 @@ vi.mock("electron", () => ({
 // Mock fs module - use a function to extract just the filename from any path
 vi.mock("fs", () => ({
   default: {
-    existsSync: vi.fn().mockImplementation((p: string) => {
-      if (p.endsWith("skills")) return mockDirExists;
-      // Check if any mock file ends with the same filename
-      const filename = getFilename(p);
-      for (const [key] of mockFiles) {
-        if (key.endsWith(filename)) return true;
-      }
-      return false;
-    }),
-    readFileSync: vi.fn().mockImplementation((p: string) => {
-      // Find mock file by filename
-      const filename = getFilename(p);
-      for (const [key, value] of mockFiles) {
-        if (key.endsWith(filename)) return value;
-      }
-      throw new Error(`File not found: ${p}`);
-    }),
-    readdirSync: vi.fn().mockImplementation(() => {
-      return Array.from(mockFiles.keys())
-        .filter((k) => k.endsWith(".json"))
-        .map((k) => getFilename(k));
-    }),
+    existsSync: vi.fn().mockImplementation(mockExists),
+    readFileSync: vi.fn().mockImplementation(mockRead),
+    readdirSync: vi.fn().mockImplementation(mockReaddir),
+    statSync: vi.fn().mockImplementation(mockStat),
   },
-  existsSync: vi.fn().mockImplementation((p: string) => {
-    if (p.endsWith("skills")) return mockDirExists;
-    const filename = getFilename(p);
-    for (const [key] of mockFiles) {
-      if (key.endsWith(filename)) return true;
-    }
-    return false;
-  }),
-  readFileSync: vi.fn().mockImplementation((p: string) => {
-    const filename = getFilename(p);
-    for (const [key, value] of mockFiles) {
-      if (key.endsWith(filename)) return value;
-    }
-    throw new Error(`File not found: ${p}`);
-  }),
-  readdirSync: vi.fn().mockImplementation(() => {
-    return Array.from(mockFiles.keys())
-      .filter((k) => k.endsWith(".json"))
-      .map((k) => getFilename(k));
-  }),
+  existsSync: vi.fn().mockImplementation(mockExists),
+  readFileSync: vi.fn().mockImplementation(mockRead),
+  readdirSync: vi.fn().mockImplementation(mockReaddir),
+  statSync: vi.fn().mockImplementation(mockStat),
 }));
 
 // Import after mocking
@@ -99,6 +101,7 @@ describe("CustomSkillLoader", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockFiles.clear();
+    mockDirs.clear();
     mockDirExists = true;
     // Create a fresh instance for each test
     loader = new CustomSkillLoader();
@@ -222,6 +225,42 @@ describe("CustomSkillLoader", () => {
       const result = loader.expandPrompt(skill, { enabled: true });
 
       expect(result).toBe("Enabled: true");
+    });
+
+    it("should resolve {baseDir} to a sibling skill folder when present", () => {
+      const localLoader = new CustomSkillLoader({
+        bundledSkillsDir: "/mock/resources/skills",
+        managedSkillsDir: "/mock/managed/skills",
+      });
+      const skill = createTestSkill({
+        id: "sample-skill",
+        filePath: "/mock/resources/skills/sample-skill.json",
+        prompt: "Run {baseDir}/scripts/do.sh",
+      });
+      mockDirs.add("/mock/resources/skills/sample-skill");
+      mockDirs.add("/mock/resources/skills/sample-skill/scripts");
+
+      const result = localLoader.expandBaseDir(skill.prompt, skill);
+
+      expect(result).toContain("/mock/resources/skills/sample-skill/scripts/do.sh");
+    });
+
+    it("should fall back to manifest directory when sibling skill folder is missing", () => {
+      const localLoader = new CustomSkillLoader({
+        bundledSkillsDir: "/mock/resources/skills",
+        managedSkillsDir: "/mock/managed/skills",
+      });
+      const skill = createTestSkill({
+        id: "fallback-skill",
+        filePath: "/mock/resources/skills/fallback-skill.json",
+        prompt: "Run {baseDir}/scripts/do.sh",
+      });
+      mockDirs.add("/mock/resources/skills/scripts");
+
+      const result = localLoader.expandBaseDir(skill.prompt, skill);
+
+      expect(result).toContain("/mock/resources/skills/scripts/do.sh");
+      expect(result).not.toContain("/mock/resources/skills/fallback-skill/scripts/do.sh");
     });
   });
 
@@ -744,6 +783,95 @@ describe("getSkillDescriptionsForModel", () => {
 
     expect(descriptions).toContain("enabled-skill");
     expect(descriptions).not.toContain("disabled-skill");
+  });
+
+  it("should apply routing shortlist for a focused query", async () => {
+    const deploySkill = createTestSkill({
+      id: "render-deploy",
+      name: "Render Deploy",
+      description: "Deploy applications to Render cloud",
+      category: "Deploy",
+    });
+    const audioSkill = createTestSkill({
+      id: "speech",
+      name: "Speech",
+      description: "Text to speech generation and voiceover",
+      category: "Media",
+    });
+    const tradingSkill = createTestSkill({
+      id: "crypto-trading",
+      name: "Crypto Trading",
+      description: "Crypto trading workflows",
+      category: "Finance",
+    });
+
+    mockFiles.set("render-deploy.json", JSON.stringify(deploySkill));
+    mockFiles.set("speech.json", JSON.stringify(audioSkill));
+    mockFiles.set("crypto-trading.json", JSON.stringify(tradingSkill));
+
+    await loader.reloadSkills();
+    const descriptions = loader.getSkillDescriptionsForModel({
+      routingQuery: "deploy my app to render",
+      shortlistSize: 1,
+    });
+
+    expect(descriptions).toContain("Routing shortlist: showing 1 of 3 skills");
+    expect(descriptions).toContain("render-deploy");
+    expect(descriptions).not.toContain("crypto-trading");
+    expect(descriptions).not.toContain("speech");
+  });
+
+  it("should include fallback discovery hint when routing confidence is low", async () => {
+    mockFiles.set(
+      "render-deploy.json",
+      JSON.stringify(
+        createTestSkill({
+          id: "render-deploy",
+          description: "Deploy web apps",
+        }),
+      ),
+    );
+    mockFiles.set(
+      "speech.json",
+      JSON.stringify(
+        createTestSkill({
+          id: "speech",
+          description: "Generate narration",
+        }),
+      ),
+    );
+
+    await loader.reloadSkills();
+    const descriptions = loader.getSkillDescriptionsForModel({
+      routingQuery: "unknownconcepttotallyunrelated",
+      shortlistSize: 2,
+      lowConfidenceThreshold: 0.9,
+    });
+
+    expect(descriptions).toContain("Routing confidence is low");
+    expect(descriptions).toContain("skill_list");
+  });
+
+  it("should truncate descriptions to respect prompt text budget", async () => {
+    const hugeDescription = "x".repeat(10_000);
+    mockFiles.set(
+      "huge.json",
+      JSON.stringify(
+        createTestSkill({
+          id: "huge-skill",
+          description: hugeDescription,
+          category: "Huge",
+        }),
+      ),
+    );
+
+    await loader.reloadSkills();
+    const descriptions = loader.getSkillDescriptionsForModel({
+      textBudgetChars: 400,
+    });
+
+    expect(descriptions.length).toBeLessThanOrEqual(1700);
+    expect(descriptions).toContain("truncated for prompt budget");
   });
 });
 

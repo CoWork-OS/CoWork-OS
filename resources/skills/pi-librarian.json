@@ -88,7 +88,24 @@
       "expectedArtifacts": [
         "librarian-report.md",
         "librarian-summary.md"
-      ]
+      ],
+      "examples": {
+        "positive": [
+          "Use the pi-librarian skill for this request.",
+          "Help me with pi-librarian.",
+          "Use when users ask to research external GitHub repositories, compare implementation patterns, or gather cited repo evidence before coding.",
+          "Pi-librarian: provide an actionable result."
+        ],
+        "negative": [
+          "Do not use for local-workspace-only discovery or when GitHub access is unnecessary; use pi-finder-subagent instead.",
+          "Do not use pi-librarian for unrelated requests.",
+          "This request is outside pi-librarian scope.",
+          "This is conceptual discussion only; no tool workflow is needed."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "low"
     }
   }
 }

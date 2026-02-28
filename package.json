@@ -80,6 +80,7 @@
   ],
   "scripts": {
     "setup": "node scripts/setup.mjs",
+    "hooks:install": "node scripts/install_git_hooks.mjs",
     "setup:native": "node scripts/setup_native_driver.mjs",
     "setup:server": "npm install && npm rebuild --ignore-scripts=false better-sqlite3",
     "dev": "concurrently \"npm run dev:react\" \"npm run dev:electron\"",
@@ -110,7 +111,7 @@
     "@google/generative-ai": "^0.24.1",
     "@grammyjs/runner": "^2.0.3",
     "@grammyjs/transformer-throttler": "^1.2.1",
-    "@mariozechner/pi-ai": "^0.52.12",
+    "@mariozechner/pi-ai": "^0.55.3",
     "@pydantic/monty": "^0.0.4",
     "@slack/bolt": "^4.6.0",
     "@whiskeysockets/baileys": "6.7.16",

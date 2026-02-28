@@ -295,6 +295,26 @@ See [Security Guide](docs/security-guide.md) and [Security Architecture](docs/se
   <br><em>Structured spreadsheet outputs generated directly in chat</em>
 </p>
 
+<p align="center">
+  <img src="screenshots/cowork-os-connectors.png" alt="Connector Setup" width="700">
+  <br><em>Enterprise connector setup with OAuth and credential management</em>
+</p>
+
+<p align="center">
+  <img src="screenshots/cowork-os-usageinsights.png" alt="Usage Insights Dashboard" width="700">
+  <br><em>Usage Insights dashboard with performance, efficiency, and activity trends</em>
+</p>
+
+<p align="center">
+  <img src="screenshots/cowork-os-extensions.png" alt="Extensions Manager" width="700">
+  <br><em>Extensions manager for installed plugin packs and lifecycle controls</em>
+</p>
+
+<p align="center">
+  <img src="screenshots/cowork-os-skillpacks.png" alt="Customize Skill Packs" width="700">
+  <br><em>Pack-level customization with per-skill toggles and suggested prompts</em>
+</p>
+
 ## Roadmap
 
 ### Planned

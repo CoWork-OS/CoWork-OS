@@ -2,7 +2,7 @@
   "id": "twin-decision-prep",
   "name": "Decision Preparation Package",
   "description": "Assemble data, options, and analysis for a pending decision. Presents trade-offs and recommendations without making the decision. Used by digital twin personas to reduce decision fatigue.",
-  "icon": "\u2696\ufe0f",
+  "icon": "⚖️",
   "category": "Digital Twin",
   "prompt": "Prepare a decision package for: **{{decision_topic}}**\n\n1. **Decision statement**: What exactly needs to be decided? Frame it as a clear yes/no or choice-between-options question.\n2. **Context**: What led to this decision point? What constraints exist?\n3. **Options**: List {{num_options}} viable options. For each:\n   - Description of the option\n   - Pros (benefits, advantages)\n   - Cons (risks, downsides, costs)\n   - Effort estimate (relative: low/medium/high)\n   - Reversibility (easy to reverse / hard to reverse / one-way door)\n4. **Data**: Relevant metrics, benchmarks, precedents, or external research that informs the decision.\n5. **Stakeholder input**: Known positions or concerns from stakeholders (if available from context).\n6. **Recommendation**: Based on the available data, which option appears strongest? Clearly label this as a suggestion for human decision-making, not a decision.\n7. **Open questions**: What additional information would improve this decision?\n\nWrite to `{artifactDir}/decision-package.md`.",
   "parameters": [
@@ -18,20 +18,48 @@
       "description": "Number of options to analyze",
       "required": false,
       "default": "2-4",
-      "options": ["2", "2-4", "3-5"]
+      "options": [
+        "2",
+        "2-4",
+        "3-5"
+      ]
     }
   ],
   "enabled": true,
   "metadata": {
     "version": "1.0.0",
     "author": "CoWork OS",
-    "tags": ["digital-twin", "decision", "analysis", "trade-off"],
+    "tags": [
+      "digital-twin",
+      "decision",
+      "analysis",
+      "trade-off"
+    ],
     "routing": {
       "useWhen": "Use when preparing analysis for a decision, architecture choice, technology selection, or any trade-off evaluation.",
       "dontUseWhen": "Don't use when the user has already made a decision and just needs implementation help.",
       "outputs": "Structured decision package with options, trade-offs, and recommendation",
       "successCriteria": "Package presents clear options with honest trade-offs and sufficient data for an informed decision",
-      "expectedArtifacts": ["decision-package.md"]
+      "expectedArtifacts": [
+        "decision-package.md"
+      ],
+      "examples": {
+        "positive": [
+          "Use the twin-decision-prep skill for this request.",
+          "Help me with decision preparation package.",
+          "Use when preparing analysis for a decision, architecture choice, technology selection, or any trade-off evaluation.",
+          "Decision Preparation Package: provide an actionable result."
+        ],
+        "negative": [
+          "Don't use when the user has already made a decision and just needs implementation help.",
+          "Do not use twin-decision-prep for unrelated requests.",
+          "This request is outside decision preparation package scope.",
+          "This is conceptual discussion only; no tool workflow is needed."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "low"
     }
   }
 }

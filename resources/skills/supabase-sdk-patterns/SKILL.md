@@ -1,42 +1,38 @@
 ---
 name: supabase-sdk-patterns
-description: |
-  Execute apply production-ready Supabase SDK patterns for TypeScript and Python.
-  Use when implementing Supabase integrations, refactoring SDK usage,
-  or establishing team coding standards for Supabase.
-  Trigger with phrases like "supabase SDK patterns", "supabase best practices",
-  "supabase code patterns", "idiomatic supabase".
-allowed-tools: Read, Write, Edit
-version: 1.0.0
-license: MIT
-author: Jeremy Longshore <jeremy@intentsolutions.io>
+description: "Apply production-ready Supabase SDK patterns for TypeScript and Python projects."
 ---
 
-# Supabase Sdk Patterns
+# supabase-sdk-patterns
 
-## Prerequisites
-- Completed `supabase-install-auth` setup
-- Familiarity with async/await patterns
-- Understanding of error handling best practices
+## Purpose
 
+Apply production-ready Supabase SDK patterns for TypeScript and Python projects.
 
-See `{baseDir}/references/implementation.md` for detailed implementation guide.
+## Routing
 
-## Output
-- Type-safe client singleton
-- Robust error handling with structured logging
-- Automatic retry with exponential backoff
-- Runtime validation for API responses
+- Use when: Use when the user asks to apply production-ready Supabase SDK patterns for TypeScript and Python projects.
+- Do not use when: Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.
+- Outputs: Outcome from supabase-sdk-patterns: task-specific result plus concrete action notes.
+- Success criteria: Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior.
 
-## Error Handling
+## Trigger Examples
 
-See `{baseDir}/references/errors.md` for comprehensive error handling.
+### Positive
 
-## Examples
+- Use the supabase-sdk-patterns skill for this request.
+- Help me with supabase-sdk-patterns.
+- Use when the user asks to apply production-ready Supabase SDK patterns for TypeScript and Python projects.
+- supabase-sdk-patterns: provide an actionable result.
 
-See `{baseDir}/references/examples.md` for detailed examples.
+### Negative
 
-## Resources
-- [Supabase SDK Reference](https://supabase.com/docs/sdk)
-- [Supabase API Types](https://supabase.com/docs/types)
-- [Zod Documentation](https://zod.dev/)
+- Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.
+- Do not use supabase-sdk-patterns for unrelated requests.
+- This request is outside supabase-sdk-patterns scope.
+- This is conceptual discussion only; no tool workflow is needed.
+
+## Runtime Prompt
+
+- Current runtime prompt length: 949 characters.
+- Runtime prompt is defined directly in `../supabase-sdk-patterns.json`. 

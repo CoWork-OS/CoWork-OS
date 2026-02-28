@@ -274,7 +274,12 @@ Each connector provides tools like `search`, `get`, `create`, and `update` for i
 #### X (Twitter)
 1. Open **Settings** > **X (Twitter)**
 2. Choose Browser Cookies or Manual Cookies
-3. Save and test the connection
+3. (Optional) Enable **Mention Trigger** and configure:
+   - command prefix (default `do:`)
+   - allowlisted authors
+   - poll interval and fetch count
+4. Save and test the connection
+5. See [X Mention Triggers](x-mention-triggers.md) for bridge/native behavior and troubleshooting.
 
 ## Development Workflow
 

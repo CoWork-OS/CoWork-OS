@@ -21,7 +21,24 @@
       "useWhen": "Use when the user wants to extract business information, contact details, or lead data from websites.",
       "dontUseWhen": "Don't use for personal data harvesting without consent or for spam purposes.",
       "outputs": "Structured business/contact data in table format.",
-      "successCriteria": "Extracts accurate contact and business information from the target page."
+      "successCriteria": "Extracts accurate contact and business information from the target page.",
+      "examples": {
+        "positive": [
+          "Use the lead-scraper skill for this request.",
+          "Help me with lead scraper.",
+          "Use when the user wants to extract business information, contact details, or lead data from websites.",
+          "Lead Scraper: provide an actionable result."
+        ],
+        "negative": [
+          "Don't use for personal data harvesting without consent or for spam purposes.",
+          "Do not use lead-scraper for unrelated requests.",
+          "This request is outside lead scraper scope.",
+          "This is conceptual discussion only; no tool workflow is needed."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "low"
     }
   }
 }

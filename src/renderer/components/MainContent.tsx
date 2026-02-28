@@ -924,6 +924,12 @@ const CITATION_REF_REGEX = /\[(\d+)\]/g;
  */
 const BARE_URL_REGEX =
   /(?<!\(|\[)(?:^|(?<=\s))((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}\/[^\s)\]]+)/gi;
+const GLOB_TOKEN_REGEX = /(?<![`\\])\*\*\/\*[^\s,;()]+/g;
+const SOURCES_HEADING_REGEX = /(^|\n)(?:#{1,6}\s*)?sources\b[^\n]*(?:\n|$)/i;
+const SOURCE_ENTRY_INLINE_SPLIT_REGEX =
+  /\s+(\[\d+\]\s*(?:(?:\[[^\]]+\]\([^)]+\))|https?:\/\/))/gi;
+const SOURCE_ENTRY_DETECT_REGEX =
+  /\[\d+\]\s*(?:(?:\[[^\]]+\]\([^)]+\))|https?:\/\/\S+)/i;
 
 /**
  * Pre-process assistant message text to convert bare domain URLs into markdown links.
@@ -933,6 +939,51 @@ function autolinkBareUrls(text: string): string {
   return text.replace(BARE_URL_REGEX, (_match, url) => {
     return `[${url}](https://${url})`;
   });
+}
+
+/** Keep glob-style path patterns literal when rendering markdown. */
+function protectGlobTokens(text: string): string {
+  return text.replace(GLOB_TOKEN_REGEX, (token) => `\`${token}\``);
+}
+
+/**
+ * In a "Sources" section, force each numbered source entry onto its own line.
+ * Example: "[1] ... [2] ..." -> "[1] ...  \n[2] ..."
+ */
+function normalizeSourcesSection(text: string): string {
+  const heading = SOURCES_HEADING_REGEX.exec(text);
+  if (!heading) return text;
+
+  const headingStart = heading.index + (heading[1] ? heading[1].length : 0);
+  const headingLineEnd = text.indexOf("\n", headingStart);
+  if (headingLineEnd === -1) return text;
+
+  const sectionStart = headingLineEnd + 1;
+  const remainder = text.slice(sectionStart);
+  const nextHeading = /\n#{1,6}\s+\S/.exec(remainder);
+  const sectionEnd = nextHeading ? sectionStart + nextHeading.index + 1 : text.length;
+  const sectionBody = text.slice(sectionStart, sectionEnd);
+  if (!SOURCE_ENTRY_DETECT_REGEX.test(sectionBody)) return text;
+
+  const normalizedSectionBody = sectionBody
+    .replace(SOURCE_ENTRY_INLINE_SPLIT_REGEX, "  \n$1")
+    .trimStart();
+
+  return `${text.slice(0, sectionStart)}${normalizedSectionBody}${text.slice(sectionEnd)}`;
+}
+
+function normalizeMarkdownForDisplay(text: string): string {
+  return normalizeSourcesSection(protectGlobTokens(text));
+}
+
+function cleanAssistantMessageForDisplay(message: string): string {
+  return normalizeMarkdownForDisplay(
+    String(message || "")
+      .replace(/\[\[speak\]\]([\s\S]*?)\[\[\/speak\]\]/gi, "$1")
+      .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, "")
+      .replace(/<tool_result>[\s\S]*?<\/tool_result>/gi, "")
+      .trim(),
+  );
 }
 
 const buildMarkdownComponents = (options: {
@@ -1471,6 +1522,15 @@ const TASK_DOMAIN_LABEL: Record<TaskDomain, string> = {
   writing: "Writing",
   general: "General",
 };
+const TASK_DOMAIN_HINT: Record<TaskDomain, string> = {
+  auto: "Adapts orchestration automatically",
+  code: "Optimized for coding and refactors",
+  research: "Optimized for research and synthesis",
+  operations: "Optimized for infra and operational workflows",
+  writing: "Optimized for writing and editing output",
+  general: "Balanced behavior for mixed tasks",
+};
+type OverflowSubmenu = "mode" | "domain";
 
 type SettingsTab =
   | "appearance"
@@ -2127,18 +2187,6 @@ export function MainContent({
       setMultiLlmConfig(null);
     }
   }, []);
-  const cycleExecutionMode = useCallback(() => {
-    setExecutionMode((current) => {
-      const index = EXECUTION_MODE_ORDER.indexOf(current);
-      return EXECUTION_MODE_ORDER[(index + 1) % EXECUTION_MODE_ORDER.length];
-    });
-  }, []);
-  const cycleTaskDomain = useCallback(() => {
-    setTaskDomain((current) => {
-      const index = TASK_DOMAIN_ORDER.indexOf(current);
-      return TASK_DOMAIN_ORDER[(index + 1) % TASK_DOMAIN_ORDER.length];
-    });
-  }, []);
   // Collaborative team run detection for current task
   const [collaborativeRun, setCollaborativeRun] = useState<AgentTeamRun | null>(null);
   const [showSteps, setShowSteps] = useState(true);
@@ -2221,6 +2269,14 @@ export function MainContent({
       buildMarkdownComponents({ workspacePath: workspace?.path, onOpenViewer: setViewerFilePath, citations }),
     [workspace?.path, setViewerFilePath, citations],
   );
+  const eventTitleMarkdownComponents = useMemo(
+    () => ({
+      ...markdownComponents,
+      // Keep timeline titles inline; avoid wrapping plain text in <p> blocks.
+      p: ({ children }: Any) => <>{children}</>,
+    }),
+    [markdownComponents],
+  );
   // Canvas sessions state - track active canvas sessions for current task
   const [canvasSessions, setCanvasSessions] = useState<CanvasSession[]>([]);
   // Workspace dropdown state
@@ -2244,6 +2300,7 @@ export function MainContent({
   const workspaceDropdownRef = useRef<HTMLDivElement>(null);
   // Focused mode overflow menu state
   const [showOverflowMenu, setShowOverflowMenu] = useState(false);
+  const [overflowSubmenu, setOverflowSubmenu] = useState<OverflowSubmenu | null>(null);
   const overflowMenuRef = useRef<HTMLDivElement>(null);
   const overflowToggleBtnRef = useRef<HTMLButtonElement>(null);
   const [showModelDropdownFromLabel, setShowModelDropdownFromLabel] = useState(false);
@@ -2781,6 +2838,12 @@ export function MainContent({
     const items = getOverflowMenuItems();
     items[0]?.focus();
   }, [showOverflowMenu, getOverflowMenuItems]);
+
+  useEffect(() => {
+    if (!showOverflowMenu) {
+      setOverflowSubmenu(null);
+    }
+  }, [showOverflowMenu]);
 
   const handleOverflowButtonKeyDown = useCallback((e: React.KeyboardEvent<HTMLButtonElement>) => {
     if (e.key === "ArrowDown") {
@@ -3841,6 +3904,132 @@ export function MainContent({
     );
   };
 
+  const renderExecutionModeRow = () => (
+    <div className="overflow-menu-item" role="none">
+      <button
+        className={`goal-mode-toggle overflow-submenu-trigger menu-tooltip-target ${
+          overflowSubmenu === "mode" ? "active" : ""
+        }`}
+        style={{ margin: 0 }}
+        onClick={() => setOverflowSubmenu((current) => (current === "mode" ? null : "mode"))}
+        data-tooltip={EXECUTION_MODE_HINT[executionMode]}
+        role="menuitem"
+        aria-haspopup="menu"
+        aria-expanded={overflowSubmenu === "mode"}
+        data-overflow-menu-item
+      >
+        <span className="overflow-submenu-trigger-content">
+          <span className="goal-mode-toggle-text">
+            <span className="goal-mode-label">Mode: {EXECUTION_MODE_LABEL[executionMode]}</span>
+          </span>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            className="overflow-submenu-chevron"
+            aria-hidden="true"
+          >
+            <path d="M9 6l6 6-6 6" />
+          </svg>
+        </span>
+      </button>
+    </div>
+  );
+
+  const renderTaskDomainRow = () => (
+    <div className="overflow-menu-item" role="none">
+      <button
+        className={`goal-mode-toggle overflow-submenu-trigger menu-tooltip-target ${
+          overflowSubmenu === "domain" ? "active" : ""
+        }`}
+        style={{ margin: 0 }}
+        onClick={() => setOverflowSubmenu((current) => (current === "domain" ? null : "domain"))}
+        data-tooltip={TASK_DOMAIN_HINT[taskDomain]}
+        role="menuitem"
+        aria-haspopup="menu"
+        aria-expanded={overflowSubmenu === "domain"}
+        data-overflow-menu-item
+      >
+        <span className="overflow-submenu-trigger-content">
+          <span className="goal-mode-toggle-text">
+            <span className="goal-mode-label">Domain: {TASK_DOMAIN_LABEL[taskDomain]}</span>
+          </span>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            className="overflow-submenu-chevron"
+            aria-hidden="true"
+          >
+            <path d="M9 6l6 6-6 6" />
+          </svg>
+        </span>
+      </button>
+    </div>
+  );
+
+  const renderOverflowSubmenu = () => {
+    if (overflowSubmenu === null) return null;
+
+    const isModeSubmenu = overflowSubmenu === "mode";
+    const title = isModeSubmenu ? "Mode" : "Domain";
+
+    return (
+      <div className="overflow-submenu-panel" role="menu" aria-label={`${title} options`}>
+        <div className="overflow-submenu-header">
+          <span className="overflow-submenu-title">{title}</span>
+        </div>
+        {(isModeSubmenu ? EXECUTION_MODE_ORDER : TASK_DOMAIN_ORDER).map((value) => {
+          const label = isModeSubmenu
+            ? EXECUTION_MODE_LABEL[value as ExecutionMode]
+            : TASK_DOMAIN_LABEL[value as TaskDomain];
+          const selected = isModeSubmenu ? executionMode === value : taskDomain === value;
+
+          return (
+            <button
+              key={value}
+              type="button"
+              className={`overflow-submenu-option ${selected ? "active" : ""}`}
+              onClick={() => {
+                if (isModeSubmenu) {
+                  setExecutionMode(value as ExecutionMode);
+                } else {
+                  setTaskDomain(value as TaskDomain);
+                }
+                setOverflowSubmenu(null);
+              }}
+              role="menuitemradio"
+              aria-checked={selected}
+              data-overflow-menu-item
+            >
+              <span>{label}</span>
+              {selected && (
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  className="overflow-submenu-check"
+                  aria-hidden="true"
+                >
+                  <path d="M20 6L9 17l-5-5" />
+                </svg>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    );
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (mentionOpen && mentionOptions.length > 0) {
       switch (e.key) {
@@ -4330,6 +4519,7 @@ export function MainContent({
                               <button
                                 className="folder-selector"
                                 onClick={() => {
+                                  setOverflowSubmenu(null);
                                   setShowOverflowMenu(false);
                                   handleWorkspaceDropdownToggle();
                                 }}
@@ -4357,6 +4547,7 @@ export function MainContent({
                               <button
                                 className={`shell-toggle ${shellEnabled ? "enabled" : ""}`}
                                 onClick={() => {
+                                  setOverflowSubmenu(null);
                                   handleShellToggle();
                                   setShowOverflowMenu(false);
                                 }}
@@ -4380,6 +4571,7 @@ export function MainContent({
                               <button
                                 className="skills-menu-btn"
                                 onClick={() => {
+                                  setOverflowSubmenu(null);
                                   setShowOverflowMenu(false);
                                   setShowSkillsMenu(!showSkillsMenu);
                                 }}
@@ -4392,99 +4584,95 @@ export function MainContent({
                             </div>
                             <div className="overflow-menu-item" role="none">
                               <button
-                                className="goal-mode-toggle"
+                                className="goal-mode-toggle goal-mode-toggle-switch-row menu-tooltip-target"
                                 style={{ margin: 0 }}
-                                onClick={() => setAutonomousModeSelection(!autonomousModeEnabled)}
+                                onClick={() => {
+                                  setOverflowSubmenu(null);
+                                  setAutonomousModeSelection(!autonomousModeEnabled);
+                                }}
+                                data-tooltip="Runs without asking for approval"
                                 role="menuitemcheckbox"
                                 aria-checked={autonomousModeEnabled}
                                 data-overflow-menu-item
                               >
-                                <span className="goal-mode-label">
-                                  Autonomous {autonomousModeEnabled ? "ON" : "OFF"}
-                                </span>
-                                <span className="goal-mode-hint">
-                                  Runs without asking for approval
+                                <span className="goal-mode-toggle-switch-content">
+                                  <span className="goal-mode-toggle-text">
+                                    <span className="goal-mode-label">Autonomous</span>
+                                  </span>
+                                  <span
+                                    className={`goal-mode-switch-track ${
+                                      autonomousModeEnabled ? "on" : ""
+                                    }`}
+                                    aria-hidden="true"
+                                  >
+                                    <span className="goal-mode-switch-thumb" />
+                                  </span>
                                 </span>
                               </button>
                             </div>
                             <div className="overflow-menu-item" role="none">
                               <button
-                                className="goal-mode-toggle"
+                                className="goal-mode-toggle goal-mode-toggle-switch-row menu-tooltip-target"
                                 style={{ margin: 0 }}
-                                onClick={() =>
-                                  setCollaborativeModeSelection(!collaborativeModeEnabled)
-                                }
+                                onClick={() => {
+                                  setOverflowSubmenu(null);
+                                  setCollaborativeModeSelection(!collaborativeModeEnabled);
+                                }}
+                                data-tooltip="Multiple agents share perspectives"
                                 role="menuitemcheckbox"
                                 aria-checked={collaborativeModeEnabled}
                                 data-overflow-menu-item
                               >
-                                <span className="goal-mode-label">
-                                  Collab {collaborativeModeEnabled ? "ON" : "OFF"}
-                                </span>
-                                <span className="goal-mode-hint">
-                                  Multiple agents share perspectives
+                                <span className="goal-mode-toggle-switch-content">
+                                  <span className="goal-mode-toggle-text">
+                                    <span className="goal-mode-label">Collab</span>
+                                  </span>
+                                  <span
+                                    className={`goal-mode-switch-track ${
+                                      collaborativeModeEnabled ? "on" : ""
+                                    }`}
+                                    aria-hidden="true"
+                                  >
+                                    <span className="goal-mode-switch-thumb" />
+                                  </span>
                                 </span>
                               </button>
                             </div>
                             {availableProviders.filter((p) => p.configured).length >= 2 && (
                               <div className="overflow-menu-item" role="none">
                                 <button
-                                  className="goal-mode-toggle"
+                                  className="goal-mode-toggle goal-mode-toggle-switch-row menu-tooltip-target"
                                   style={{ margin: 0 }}
-                                  onClick={() => setMultiLlmModeSelection(!multiLlmModeEnabled)}
+                                  onClick={() => {
+                                    setOverflowSubmenu(null);
+                                    setMultiLlmModeSelection(!multiLlmModeEnabled);
+                                  }}
+                                  data-tooltip="Sends task to multiple AI models"
                                   role="menuitemcheckbox"
                                   aria-checked={multiLlmModeEnabled}
                                   data-overflow-menu-item
                                 >
-                                  <span className="goal-mode-label">
-                                    Multi-LLM {multiLlmModeEnabled ? "ON" : "OFF"}
-                                  </span>
-                                  <span className="goal-mode-hint">
-                                    Sends task to multiple AI models
+                                  <span className="goal-mode-toggle-switch-content">
+                                    <span className="goal-mode-toggle-text">
+                                      <span className="goal-mode-label">Multi-LLM</span>
+                                    </span>
+                                    <span
+                                      className={`goal-mode-switch-track ${
+                                        multiLlmModeEnabled ? "on" : ""
+                                      }`}
+                                      aria-hidden="true"
+                                    >
+                                      <span className="goal-mode-switch-thumb" />
+                                    </span>
                                   </span>
                                 </button>
                               </div>
                             )}
-                            <div className="overflow-menu-item" role="none">
-                              <button
-                                className="goal-mode-toggle"
-                                style={{ margin: 0 }}
-                                onClick={() => {
-                                  cycleExecutionMode();
-                                  setShowOverflowMenu(false);
-                                }}
-                                role="menuitem"
-                                data-overflow-menu-item
-                              >
-                                <span className="goal-mode-label">
-                                  Mode: {EXECUTION_MODE_LABEL[executionMode]}
-                                </span>
-                                <span className="goal-mode-hint">
-                                  {EXECUTION_MODE_HINT[executionMode]}
-                                </span>
-                              </button>
-                            </div>
-                            <div className="overflow-menu-item" role="none">
-                              <button
-                                className="goal-mode-toggle"
-                                style={{ margin: 0 }}
-                                onClick={() => {
-                                  cycleTaskDomain();
-                                  setShowOverflowMenu(false);
-                                }}
-                                role="menuitem"
-                                data-overflow-menu-item
-                              >
-                                <span className="goal-mode-label">
-                                  Domain: {TASK_DOMAIN_LABEL[taskDomain]}
-                                </span>
-                                <span className="goal-mode-hint">
-                                  Guides orchestration and completion checks
-                                </span>
-                              </button>
-                            </div>
+                            {renderExecutionModeRow()}
+                            {renderTaskDomainRow()}
                           </div>
                         )}
+                        {showOverflowMenu && renderOverflowSubmenu()}
                       </div>
                       <div className="workspace-dropdown-container" ref={workspaceDropdownRef}>
                         {showWorkspaceDropdown && (
@@ -4760,6 +4948,7 @@ export function MainContent({
                               <button
                                 className={`shell-toggle ${shellEnabled ? "enabled" : ""}`}
                                 onClick={() => {
+                                  setOverflowSubmenu(null);
                                   handleShellToggle();
                                   setShowOverflowMenu(false);
                                 }}
@@ -4781,104 +4970,101 @@ export function MainContent({
                             </div>
                             <div className="overflow-menu-item" role="none">
                               <button
-                                className="goal-mode-toggle"
+                                className="goal-mode-toggle goal-mode-toggle-switch-row menu-tooltip-target"
                                 style={{ margin: 0 }}
-                                onClick={() => setAutonomousModeSelection(!autonomousModeEnabled)}
+                                onClick={() => {
+                                  setOverflowSubmenu(null);
+                                  setAutonomousModeSelection(!autonomousModeEnabled);
+                                }}
+                                data-tooltip="Runs without asking for approval"
                                 role="menuitemcheckbox"
                                 aria-checked={autonomousModeEnabled}
                                 data-overflow-menu-item
                               >
-                                <span className="goal-mode-label">
-                                  Autonomous {autonomousModeEnabled ? "ON" : "OFF"}
-                                </span>
-                                <span className="goal-mode-hint">
-                                  Runs without asking for approval
+                                <span className="goal-mode-toggle-switch-content">
+                                  <span className="goal-mode-toggle-text">
+                                    <span className="goal-mode-label">Autonomous</span>
+                                  </span>
+                                  <span
+                                    className={`goal-mode-switch-track ${
+                                      autonomousModeEnabled ? "on" : ""
+                                    }`}
+                                    aria-hidden="true"
+                                  >
+                                    <span className="goal-mode-switch-thumb" />
+                                  </span>
                                 </span>
                               </button>
                             </div>
                             <div className="overflow-menu-item" role="none">
                               <button
-                                className="goal-mode-toggle"
+                                className="goal-mode-toggle goal-mode-toggle-switch-row menu-tooltip-target"
                                 style={{ margin: 0 }}
-                                onClick={() =>
-                                  setCollaborativeModeSelection(!collaborativeModeEnabled)
-                                }
+                                onClick={() => {
+                                  setOverflowSubmenu(null);
+                                  setCollaborativeModeSelection(!collaborativeModeEnabled);
+                                }}
+                                data-tooltip="Multiple agents share perspectives"
                                 role="menuitemcheckbox"
                                 aria-checked={collaborativeModeEnabled}
                                 data-overflow-menu-item
                               >
-                                <span className="goal-mode-label">
-                                  Collab {collaborativeModeEnabled ? "ON" : "OFF"}
-                                </span>
-                                <span className="goal-mode-hint">
-                                  Multiple agents share perspectives
+                                <span className="goal-mode-toggle-switch-content">
+                                  <span className="goal-mode-toggle-text">
+                                    <span className="goal-mode-label">Collab</span>
+                                  </span>
+                                  <span
+                                    className={`goal-mode-switch-track ${
+                                      collaborativeModeEnabled ? "on" : ""
+                                    }`}
+                                    aria-hidden="true"
+                                  >
+                                    <span className="goal-mode-switch-thumb" />
+                                  </span>
                                 </span>
                               </button>
                             </div>
                             {availableProviders.filter((p) => p.configured).length >= 2 && (
                               <div className="overflow-menu-item" role="none">
                                 <button
-                                  className="goal-mode-toggle"
+                                  className="goal-mode-toggle goal-mode-toggle-switch-row menu-tooltip-target"
                                   style={{ margin: 0 }}
-                                  onClick={() => setMultiLlmModeSelection(!multiLlmModeEnabled)}
+                                  onClick={() => {
+                                    setOverflowSubmenu(null);
+                                    setMultiLlmModeSelection(!multiLlmModeEnabled);
+                                  }}
+                                  data-tooltip="Sends task to multiple AI models"
                                   role="menuitemcheckbox"
                                   aria-checked={multiLlmModeEnabled}
                                   data-overflow-menu-item
                                 >
-                                  <span className="goal-mode-label">
-                                    Multi-LLM {multiLlmModeEnabled ? "ON" : "OFF"}
-                                  </span>
-                                  <span className="goal-mode-hint">
-                                    Sends task to multiple AI models
+                                  <span className="goal-mode-toggle-switch-content">
+                                    <span className="goal-mode-toggle-text">
+                                      <span className="goal-mode-label">Multi-LLM</span>
+                                    </span>
+                                    <span
+                                      className={`goal-mode-switch-track ${
+                                        multiLlmModeEnabled ? "on" : ""
+                                      }`}
+                                      aria-hidden="true"
+                                    >
+                                      <span className="goal-mode-switch-thumb" />
+                                    </span>
                                   </span>
                                 </button>
                               </div>
                             )}
+                            {renderExecutionModeRow()}
+                            {renderTaskDomainRow()}
                             <div className="overflow-menu-item" role="none">
                               <button
-                                className="goal-mode-toggle"
+                                className="goal-mode-toggle menu-tooltip-target"
                                 style={{ margin: 0 }}
                                 onClick={() => {
-                                  cycleExecutionMode();
-                                  setShowOverflowMenu(false);
+                                  setOverflowSubmenu(null);
+                                  setVerificationAgentEnabled(!verificationAgentEnabled);
                                 }}
-                                role="menuitem"
-                                data-overflow-menu-item
-                              >
-                                <span className="goal-mode-label">
-                                  Mode: {EXECUTION_MODE_LABEL[executionMode]}
-                                </span>
-                                <span className="goal-mode-hint">
-                                  {EXECUTION_MODE_HINT[executionMode]}
-                                </span>
-                              </button>
-                            </div>
-                            <div className="overflow-menu-item" role="none">
-                              <button
-                                className="goal-mode-toggle"
-                                style={{ margin: 0 }}
-                                onClick={() => {
-                                  cycleTaskDomain();
-                                  setShowOverflowMenu(false);
-                                }}
-                                role="menuitem"
-                                data-overflow-menu-item
-                              >
-                                <span className="goal-mode-label">
-                                  Domain: {TASK_DOMAIN_LABEL[taskDomain]}
-                                </span>
-                                <span className="goal-mode-hint">
-                                  Guides orchestration and completion checks
-                                </span>
-                              </button>
-                            </div>
-                            <div className="overflow-menu-item" role="none">
-                              <button
-                                className="goal-mode-toggle"
-                                style={{ margin: 0 }}
-                                onClick={() =>
-                                  setVerificationAgentEnabled(!verificationAgentEnabled)
-                                }
+                                data-tooltip="Double-checks results before finishing"
                                 role="menuitemcheckbox"
                                 aria-checked={verificationAgentEnabled}
                                 data-overflow-menu-item
@@ -4886,13 +5072,11 @@ export function MainContent({
                                 <span className="goal-mode-label">
                                   Verify {verificationAgentEnabled ? "ON" : "OFF"}
                                 </span>
-                                <span className="goal-mode-hint">
-                                  Double-checks results before finishing
-                                </span>
                               </button>
                             </div>
                           </div>
                         )}
+                        {showOverflowMenu && renderOverflowSubmenu()}
                       </div>
                       <ModelDropdown
                         models={availableModels}
@@ -5476,6 +5660,7 @@ export function MainContent({
                 // Render assistant messages as chat bubbles on the left
                 if (isAssistantMessage) {
                   const messageText = event.payload?.message || "";
+                  const cleanedMessageText = cleanAssistantMessageForDisplay(messageText);
                   const isLastAssistant = event === lastAssistantMessage;
                   return (
                     <Fragment key={event.id || `event-${item.eventIndex}`}>
@@ -5520,11 +5705,7 @@ export function MainContent({
                               remarkPlugins={[remarkGfm]}
                               components={markdownComponents}
                             >
-                              {messageText
-                                .replace(/\[\[speak\]\]([\s\S]*?)\[\[\/speak\]\]/gi, "$1")
-                                .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, "")
-                                .replace(/<tool_result>[\s\S]*?<\/tool_result>/gi, "")
-                                .trim()}
+                              {cleanedMessageText}
                             </ReactMarkdown>
                           </div>
                         </div>
@@ -5662,6 +5843,12 @@ export function MainContent({
 
                 const isExpandable = hasEventDetails(event);
                 const isExpanded = isEventExpanded(event);
+                const eventTitle = renderEventTitle(
+                  event,
+                  workspace?.path,
+                  setViewerFilePath,
+                  agentContext,
+                );
 
                 return (
                   <Fragment key={event.id || `event-${item.eventIndex}`}>
@@ -5689,11 +5876,15 @@ export function MainContent({
                               </svg>
                             )}
                             <div className="event-title">
-                              {renderEventTitle(
-                                event,
-                                workspace?.path,
-                                setViewerFilePath,
-                                agentContext,
+                              {typeof eventTitle === "string" ? (
+                                <ReactMarkdown
+                                  remarkPlugins={[remarkGfm]}
+                                  components={eventTitleMarkdownComponents}
+                                >
+                                  {normalizeMarkdownForDisplay(eventTitle)}
+                                </ReactMarkdown>
+                              ) : (
+                                eventTitle
                               )}
                             </div>
                           </div>
@@ -6424,18 +6615,32 @@ function renderEventDetails(
 
   switch (event.type) {
     case "plan_created": {
+      const inlinePlanMarkdownComponents = {
+        ...markdownComponents,
+        // Keep each list item inline; avoid wrapping with extra <p> inside <li>.
+        p: ({ children }: Any) => <>{children}</>,
+      };
       const planSteps = Array.isArray(event.payload.plan?.steps) ? event.payload.plan.steps : [];
       const visiblePlanSteps = options?.hideVerificationSteps
         ? planSteps.filter((step: Any) => !isVerificationStepDescription(step?.description))
         : planSteps;
       return (
-        <div className="event-details">
-          <div style={{ marginBottom: 8, fontWeight: 500 }}>{event.payload.plan?.description}</div>
+        <div className="event-details markdown-content">
+          <div style={{ marginBottom: 8, fontWeight: 500 }}>
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+              {normalizeMarkdownForDisplay(String(event.payload.plan?.description || ""))}
+            </ReactMarkdown>
+          </div>
           {visiblePlanSteps.length > 0 && (
             <ul style={{ margin: 0, paddingLeft: 18 }}>
               {visiblePlanSteps.map((step: Any, i: number) => (
                 <li key={i} style={{ marginBottom: 4 }}>
-                  {step.description}
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={inlinePlanMarkdownComponents}
+                  >
+                    {normalizeMarkdownForDisplay(String(step?.description || ""))}
+                  </ReactMarkdown>
                 </li>
               ))}
             </ul>
@@ -6511,11 +6716,7 @@ function renderEventDetails(
         </div>
       );
     case "assistant_message": {
-      const cleanedMessage = event.payload.message
-        .replace(/\[\[speak\]\]([\s\S]*?)\[\[\/speak\]\]/gi, "$1")
-        .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, "")
-        .replace(/<tool_result>[\s\S]*?<\/tool_result>/gi, "")
-        .trim();
+      const cleanedMessage = cleanAssistantMessageForDisplay(event.payload.message);
       const linkedMessage = autolinkBareUrls(cleanedMessage);
       return (
         <div className="event-details assistant-message event-details-scrollable">

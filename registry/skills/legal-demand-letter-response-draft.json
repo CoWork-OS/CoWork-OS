@@ -1,0 +1,67 @@
+{
+  "id": "legal-demand-letter-response-draft",
+  "name": "Legal Demand Letter Response Draft",
+  "description": "Map allegations to contract language and draft a response letter with no unintended admissions.",
+  "icon": "✉️",
+  "category": "Legal",
+  "prompt": "Demand-letter response workflow.\n\nGoal\n- Draft a response letter grounded in contract text and documented facts while avoiding unintended admissions.\n\nInputs\n- Governing agreement path (optional): {{agreement_path}}\n- Demand letter path (optional): {{demand_letter_path}}\n- Optional facts/timeline path: {{facts_path}}\n- Client role: {{client_role}}\n- Response output path: {{response_output_path}}\n- Issues table output path: {{issues_table_output_path}}\n\nExecution rules\n1) Resolve input documents:\n   - If agreement_path is empty, discover likely candidates with glob patterns like: **/*services*agreement*.*, **/*msa*.*\n   - If demand_letter_path is empty, discover likely candidates with patterns like: **/*demand*letter*.*, **/*notice*breach*.*\n   - facts_path is optional; if empty, proceed without it.\n   - If multiple plausible candidates exist for required docs, list candidates and ask user to choose, then STOP.\n2) Read all resolved files with read_file. If any file is windowed/truncated, continue reading with startChar until complete.\n3) Build an allegation map table:\n   - Allegation from demand\n   - Contract section cited by counterparty\n   - Actual controlling language\n   - Evidence/fact status from supplied materials\n   - Exposure level (high/medium/low)\n   - Suggested response stance\n4) Stress-test each proposed argument for cross-section side effects (for example, avoid defenses that concede separate disputes).\n5) Draft response letter with this structure:\n   - Reservation of rights\n   - Point-by-point response to allegations\n   - Requested clarifications or cure path\n   - Proposed next-step process/timeline\n6) Avoid factual admissions not supported by provided documents. Mark assumptions explicitly.\n7) Write the allegation map to {{issues_table_output_path}} and the response draft to {{response_output_path}} using write_file.\n8) End with a short \"Attorney final review\" checklist before sending.",
+  "parameters": [
+    {
+      "name": "agreement_path",
+      "type": "string",
+      "description": "Optional explicit path to the governing contract",
+      "required": false,
+      "default": ""
+    },
+    {
+      "name": "demand_letter_path",
+      "type": "string",
+      "description": "Optional explicit path to the demand letter",
+      "required": false,
+      "default": ""
+    },
+    {
+      "name": "facts_path",
+      "type": "string",
+      "description": "Optional chronology/facts memo path",
+      "required": false,
+      "default": ""
+    },
+    {
+      "name": "client_role",
+      "type": "select",
+      "description": "Role of your client in the dispute",
+      "required": false,
+      "default": "responding party",
+      "options": [
+        "responding party",
+        "claiming party"
+      ]
+    },
+    {
+      "name": "response_output_path",
+      "type": "string",
+      "description": "Where to write the draft response letter",
+      "required": false,
+      "default": "artifacts/legal/demand-response-draft.md"
+    },
+    {
+      "name": "issues_table_output_path",
+      "type": "string",
+      "description": "Where to write the allegation mapping table",
+      "required": false,
+      "default": "artifacts/legal/demand-issues-table.md"
+    }
+  ],
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when a demand letter must be analyzed and answered against contract language.",
+      "dontUseWhen": "Do not use when the task is generic writing unrelated to legal allegations.",
+      "outputs": "Allegation map and response draft with section-level legal grounding.",
+      "successCriteria": "Produces a defensible response draft, avoids unsupported admissions, and writes both artifacts."
+    },
+    "version": "1.0.0",
+    "author": "CoWork OS"
+  }
+}

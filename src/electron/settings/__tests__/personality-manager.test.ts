@@ -944,6 +944,18 @@ describe("PersonalityManager - relationship", () => {
 
       expect((mockStoredSettings.relationship as Any)?.userName).toBeUndefined();
     });
+
+    it("should preserve explicit multi-part names", () => {
+      PersonalityManager.setUserName("Mary Jane Watson Parker");
+
+      expect((mockStoredSettings.relationship as Any)?.userName).toBe("Mary Jane Watson Parker");
+    });
+
+    it("should clear sentence-like task fragments", () => {
+      PersonalityManager.setUserName("building a cowork agent for Nokia");
+
+      expect((mockStoredSettings.relationship as Any)?.userName).toBeUndefined();
+    });
   });
 
   describe("getUserName", () => {
@@ -957,6 +969,20 @@ describe("PersonalityManager - relationship", () => {
     it("should return empty string when not set", () => {
       // Default relationship has userName as empty string
       expect(PersonalityManager.getUserName()).toBe("");
+    });
+
+    it("should ignore stale task-fragment names from corrupted memory", () => {
+      mockStoredSettings = { relationship: { userName: "building a cowork agent for Nokia" } };
+      PersonalityManager.clearCache();
+
+      expect(PersonalityManager.getUserName()).toBeUndefined();
+    });
+
+    it("should keep explicit longer names loaded from storage", () => {
+      mockStoredSettings = { relationship: { userName: "Mary Jane Watson Parker" } };
+      PersonalityManager.clearCache();
+
+      expect(PersonalityManager.getUserName()).toBe("Mary Jane Watson Parker");
     });
   });
 

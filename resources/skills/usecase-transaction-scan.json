@@ -52,7 +52,24 @@
       "useWhen": "Use when the user asks to scan recent messages/emails for card transactions and flag suspicious charges.",
       "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
       "outputs": "Outcome from Transaction Scan: task-specific result plus concrete action notes.",
-      "successCriteria": "Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior."
+      "successCriteria": "Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior.",
+      "examples": {
+        "positive": [
+          "Use the usecase-transaction-scan skill for this request.",
+          "Help me with transaction scan.",
+          "Use when the user asks to scan recent messages/emails for card transactions and flag suspicious charges.",
+          "Transaction Scan: provide an actionable result."
+        ],
+        "negative": [
+          "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
+          "Do not use usecase-transaction-scan for unrelated requests.",
+          "This request is outside transaction scan scope.",
+          "This is conceptual discussion only; no tool workflow is needed."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "low"
     }
   }
 }

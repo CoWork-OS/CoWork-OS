@@ -8,6 +8,10 @@ import {
 } from "../../shared/types";
 import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
 import { PersonalityManager } from "../settings/personality-manager";
+import {
+  extractPreferredNameFromMessage,
+  sanitizePreferredNameMemoryLine,
+} from "../utils/preferred-name";
 import { RelationshipMemoryService } from "./RelationshipMemoryService";
 
 const MAX_FACTS = 250;
@@ -17,18 +21,6 @@ const EMPTY_PROFILE: UserProfile = {
   facts: [],
   updatedAt: 0,
 };
-
-const NAME_STOP_WORDS = new Set([
-  "there",
-  "here",
-  "just",
-  "working",
-  "trying",
-  "thinking",
-  "ready",
-  "curious",
-  "busy",
-]);
 
 export class UserProfileService {
   private static inMemoryProfile: UserProfile = { ...EMPTY_PROFILE };
@@ -241,31 +233,20 @@ export class UserProfileService {
     const text = message.trim();
     const lowered = text.toLowerCase();
 
-    const nameMatch = text.match(/\b(?:my name is|i am|i'm|call me)\s+([a-z][a-z' -]{1,40})/i);
-    if (nameMatch) {
-      const rawName = nameMatch[1].trim().replace(/\s+/g, " ");
-      const cleanName = rawName
-        .split(" ")
-        .slice(0, 3)
-        .map((part) => part.replace(/[^a-z'-]/gi, ""))
-        .filter(Boolean)
-        .join(" ")
-        .trim();
-      const lowerName = cleanName.toLowerCase();
-      if (cleanName.length >= 2 && cleanName.length <= 40 && !NAME_STOP_WORDS.has(lowerName)) {
-        facts.push({
-          category: "identity",
-          value: `Preferred name: ${cleanName}`,
-          confidence: 0.95,
-          source: "conversation",
-          pinned: true,
-          taskId,
-        });
-        try {
-          PersonalityManager.setUserName(cleanName);
-        } catch {
-          // best-effort
-        }
+    const preferredName = extractPreferredNameFromMessage(text);
+    if (preferredName) {
+      facts.push({
+        category: "identity",
+        value: `Preferred name: ${preferredName}`,
+        confidence: 0.95,
+        source: "conversation",
+        pinned: true,
+        taskId,
+      });
+      try {
+        PersonalityManager.setUserName(preferredName);
+      } catch {
+        // best-effort
       }
     }
 
@@ -376,6 +357,7 @@ export class UserProfileService {
       profile = this.inMemoryProfile;
     }
 
+    let profileWasSanitized = false;
     const normalized: UserProfile = {
       summary: typeof profile.summary === "string" ? profile.summary : undefined,
       facts: Array.isArray(profile.facts)
@@ -384,17 +366,43 @@ export class UserProfileService {
               (fact): fact is UserFact =>
                 !!fact && typeof fact.value === "string" && typeof fact.id === "string",
             )
-            .map((fact) => ({
-              ...fact,
-              value: this.normalizeFactValue(fact.value),
-              confidence: this.clampConfidence(fact.confidence),
-              category: this.normalizeCategory(fact.category),
-            }))
+            .map((fact) => {
+              const category = this.normalizeCategory(fact.category);
+              const normalizedValue = this.normalizeFactValue(fact.value);
+              const clampedConfidence = this.clampConfidence(fact.confidence);
+              if (category !== fact.category) profileWasSanitized = true;
+              if (normalizedValue !== fact.value) profileWasSanitized = true;
+              if (clampedConfidence !== fact.confidence) profileWasSanitized = true;
+              if (category === "identity") {
+                const sanitizedIdentity = sanitizePreferredNameMemoryLine(normalizedValue);
+                if (!sanitizedIdentity) {
+                  profileWasSanitized = true;
+                  return null;
+                }
+                if (sanitizedIdentity !== normalizedValue) profileWasSanitized = true;
+                return {
+                  ...fact,
+                  value: sanitizedIdentity,
+                  confidence: clampedConfidence,
+                  category,
+                };
+              }
+              return {
+                ...fact,
+                value: normalizedValue,
+                confidence: clampedConfidence,
+                category,
+              };
+            })
+            .filter((fact): fact is UserFact => fact !== null)
         : [],
       updatedAt: Number.isFinite(profile.updatedAt) ? profile.updatedAt : 0,
     };
 
     this.inMemoryProfile = normalized;
+    if (profileWasSanitized) {
+      this.save(normalized);
+    }
     return normalized;
   }
 

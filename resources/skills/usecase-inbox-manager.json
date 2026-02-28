@@ -50,7 +50,24 @@
       "useWhen": "Use when the user asks to triage inbox, draft replies, and suggest cleanup automations with strict confirmation gates.",
       "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
       "outputs": "Outcome from Inbox Manager: prioritized inbox plan, safe draft replies, and explicit next-step actions.",
-      "successCriteria": "Produces actionable inbox triage with clear confirmation boundaries and no fabricated tool-side behavior."
+      "successCriteria": "Produces actionable inbox triage with clear confirmation boundaries and no fabricated tool-side behavior.",
+      "examples": {
+        "positive": [
+          "Use the usecase-inbox-manager skill for this request.",
+          "Help me with inbox manager.",
+          "Use when the user asks to triage inbox, draft replies, and suggest cleanup automations with strict confirmation gates.",
+          "Inbox Manager: provide an actionable result."
+        ],
+        "negative": [
+          "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
+          "Do not use usecase-inbox-manager for unrelated requests.",
+          "This request is outside inbox manager scope.",
+          "This is conceptual discussion only; no tool workflow is needed."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "low"
     }
   }
 }

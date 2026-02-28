@@ -1,0 +1,41 @@
+{
+  "id": "legal-verified-research-memo",
+  "name": "Legal Verified Research Memo",
+  "description": "Generate a legal research memo with claim-level source verification, confidence flags, and primary-authority priority.",
+  "icon": "📚",
+  "category": "Legal",
+  "prompt": "Verified legal research workflow.\n\nGoal\n- Produce a practical legal memo with verifiable citations and explicit uncertainty handling.\n\nInputs\n- Research question: {{question}}\n- Jurisdictions: {{jurisdictions}}\n- Output path: {{output_report_path}}\n\nExecution rules\n1) Decompose the question into sub-issues.\n2) For each sub-issue, prioritize primary authority in this order:\n   a) Statutes and regulations\n   b) Agency guidance/enforcement releases\n   c) Case law\n   d) Secondary commentary (only if needed)\n3) Use web_search + web_fetch to gather sources for each sub-issue.\n4) For each material claim in the memo, verify that at least one fetched source supports it.\n5) If a claim cannot be verified from fetched sources, either remove it or mark it clearly as uncertain.\n6) Include a \"Verification Log\" table with columns:\n   - Claim\n   - Source URL\n   - Authority type\n   - Verification status (verified / partial / unverified)\n   - Confidence (high / medium / low)\n7) Include a \"Practical Advice\" section that translates legal findings into concrete next actions.\n8) Write the final memo to {{output_report_path}} via write_file.\n9) Final pass: ensure no uncited definitive legal claim remains in the memo.",
+  "parameters": [
+    {
+      "name": "question",
+      "type": "string",
+      "description": "Legal question to research",
+      "required": true
+    },
+    {
+      "name": "jurisdictions",
+      "type": "string",
+      "description": "Jurisdiction scope",
+      "required": false,
+      "default": "United States federal + relevant states"
+    },
+    {
+      "name": "output_report_path",
+      "type": "string",
+      "description": "Where to write the research memo",
+      "required": false,
+      "default": "artifacts/legal/research-memo.md"
+    }
+  ],
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use for legal/regulatory research memos where citation reliability is critical.",
+      "dontUseWhen": "Do not use for contract redline workflows that are primarily document-editing tasks.",
+      "outputs": "Structured memo with verified citations, confidence flags, and practical recommendations.",
+      "successCriteria": "Every key claim is linked to a fetched source or clearly labeled uncertain."
+    },
+    "version": "1.0.0",
+    "author": "CoWork OS"
+  }
+}

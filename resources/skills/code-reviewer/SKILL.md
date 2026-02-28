@@ -1,65 +1,38 @@
 ---
 name: code-reviewer
-description:
-  Use this skill to review code. It supports both local changes (staged or working tree)
-  and remote Pull Requests (by ID or URL). It focuses on correctness, maintainability,
-  and adherence to project standards.
+description: "Perform professional code review for local changes or GitHub pull requests."
 ---
 
-# Code Reviewer
+# code-reviewer
 
-This skill guides the agent in conducting professional and thorough code reviews for both local development and remote Pull Requests.
+## Purpose
 
-## Workflow
+Perform professional code review for local changes or GitHub pull requests.
 
-### 1. Determine Review Target
-*   **Remote PR**: If the user provides a PR number or URL (e.g., "Review PR #123"), target that remote PR.
-*   **Local Changes**: If no specific PR is mentioned, or if the user asks to "review my changes", target the current local file system states (staged and unstaged changes).
+## Routing
 
-### 2. Preparation
+- Use when: Use for formal, structured review workflows on local diffs or GitHub PRs.
+- Do not use when: Don't use for one-off formatting checks without code-quality feedback.
+- Outputs: Findings grouped by severity with rationale and approval/revise recommendation.
+- Success criteria: Covers correctness, maintainability, performance, security, and testability.
 
-#### For Remote PRs:
-1.  **Checkout**: Use the GitHub CLI to checkout the PR.
-    ```bash
-    gh pr checkout <PR_NUMBER>
-    ```
-2.  **Preflight**: Execute the project's standard verification suite to catch automated failures early.
-    ```bash
-    npm run preflight
-    ```
-3.  **Context**: Read the PR description and any existing comments to understand the goal and history.
+## Trigger Examples
 
-#### For Local Changes:
-1.  **Identify Changes**:
-    *   Check status: `git status`
-    *   Read diffs: `git diff` (working tree) and/or `git diff --staged` (staged).
-2.  **Preflight (Optional)**: If the changes are substantial, ask the user if they want to run `npm run preflight` before reviewing.
+### Positive
 
-### 3. In-Depth Analysis
-Analyze the code changes based on the following pillars:
+- Use the code-reviewer skill for this request.
+- Help me with code-reviewer.
+- Use for formal, structured review workflows on local diffs or GitHub PRs.
+- code-reviewer: provide an actionable result.
 
-*   **Correctness**: Does the code achieve its stated purpose without bugs or logical errors?
-*   **Maintainability**: Is the code clean, well-structured, and easy to understand and modify in the future? Consider factors like code clarity, modularity, and adherence to established design patterns.
-*   **Readability**: Is the code well-commented (where necessary) and consistently formatted according to our project's coding style guidelines?
-*   **Efficiency**: Are there any obvious performance bottlenecks or resource inefficiencies introduced by the changes?
-*   **Security**: Are there any potential security vulnerabilities or insecure coding practices?
-*   **Edge Cases and Error Handling**: Does the code appropriately handle edge cases and potential errors?
-*   **Testability**: Is the new or modified code adequately covered by tests (even if preflight checks pass)? Suggest additional test cases that would improve coverage or robustness.
+### Negative
 
-### 4. Provide Feedback
+- Don't use for one-off formatting checks without code-quality feedback.
+- Do not use code-reviewer for unrelated requests.
+- This request is outside code-reviewer scope.
+- This is conceptual discussion only; no tool workflow is needed.
 
-#### Structure
-*   **Summary**: A high-level overview of the review.
-*   **Findings**:
-    *   **Critical**: Bugs, security issues, or breaking changes.
-    *   **Improvements**: Suggestions for better code quality or performance.
-    *   **Nitpicks**: Formatting or minor style issues (optional).
-*   **Conclusion**: Clear recommendation (Approved / Request Changes).
+## Runtime Prompt
 
-#### Tone
-*   Be constructive, professional, and friendly.
-*   Explain *why* a change is requested.
-*   For approvals, acknowledge the specific value of the contribution.
-
-### 5. Cleanup (Remote PRs only)
-*   After the review, ask the user if they want to switch back to the default branch (e.g., `main` or `master`).
+- Current runtime prompt length: 3052 characters.
+- Runtime prompt is defined directly in `../code-reviewer.json`. 

@@ -1,9 +1,15 @@
 import Database from "better-sqlite3";
 
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
+}
+
 export interface UsageInsights {
   periodStart: number;
   periodEnd: number;
-  workspaceId: string;
+  workspaceId: string | null;
   generatedAt: number;
 
   taskMetrics: {
@@ -32,7 +38,41 @@ export interface UsageInsights {
 
   topSkills: Array<{ skill: string; count: number }>;
 
+  awuMetrics: {
+    /** Number of successfully completed tasks (terminal_status = 'ok' or 'partial_success') */
+    awuCount: number;
+    /** Total tokens consumed across all tasks in the period */
+    totalTokens: number;
+    /** Total cost across all tasks in the period */
+    totalCost: number;
+    /** Tokens per AWU (lower is better); null if awuCount === 0 */
+    tokensPerAwu: number | null;
+    /** Cost per AWU (lower is better); null if awuCount === 0 */
+    costPerAwu: number | null;
+    /** AWUs per dollar (higher is better); null if totalCost === 0 */
+    awuPerDollar: number | null;
+    /** Trend comparison vs previous period */
+    trend: {
+      previousAwuCount: number;
+      previousTokensPerAwu: number | null;
+      previousCostPerAwu: number | null;
+      /** Percentage change in tokensPerAwu: negative means improvement */
+      tokensPerAwuChange: number | null;
+      /** Percentage change in costPerAwu: negative means improvement */
+      costPerAwuChange: number | null;
+    };
+  };
+
   formatted: string;
+}
+
+/** Returns a SQL WHERE fragment and params for optional workspace filtering. */
+function wsFilter(
+  workspaceId: string | null,
+  alias: string,
+): { clause: string; params: unknown[] } {
+  if (workspaceId) return { clause: `${alias}workspace_id = ? AND `, params: [workspaceId] };
+  return { clause: "", params: [] };
 }
 
 /**
@@ -42,7 +82,7 @@ export interface UsageInsights {
 export class UsageInsightsService {
   constructor(private db: Database.Database) {}
 
-  generate(workspaceId: string, periodDays = 7): UsageInsights {
+  generate(workspaceId: string | null, periodDays = 7): UsageInsights {
     const now = Date.now();
     const periodStart = now - periodDays * 24 * 60 * 60 * 1000;
     const periodEnd = now;
@@ -51,6 +91,7 @@ export class UsageInsightsService {
     const costMetrics = this.getCostMetrics(workspaceId, periodStart, periodEnd);
     const activityPattern = this.getActivityPattern(workspaceId, periodStart, periodEnd);
     const topSkills = this.getTopSkills(workspaceId, periodStart, periodEnd);
+    const awuMetrics = this.getAwuMetrics(workspaceId, periodStart, periodEnd, costMetrics);
 
     const formatted = this.formatReport(
       periodDays,
@@ -58,6 +99,7 @@ export class UsageInsightsService {
       costMetrics,
       activityPattern,
       topSkills,
+      awuMetrics,
     );
 
     return {
@@ -69,25 +111,26 @@ export class UsageInsightsService {
       costMetrics,
       activityPattern,
       topSkills,
+      awuMetrics,
       formatted,
     };
   }
 
   private getTaskMetrics(
-    workspaceId: string,
+    workspaceId: string | null,
     periodStart: number,
     periodEnd: number,
   ): UsageInsights["taskMetrics"] {
-    // Single query with GROUP BY instead of 4 separate count queries
+    const ws = wsFilter(workspaceId, "");
     const rows = this.db
       .prepare(
         `SELECT status, COUNT(*) as count,
                 AVG(CASE WHEN status = 'completed' AND completed_at IS NOT NULL THEN completed_at - created_at END) as avg_time
          FROM tasks
-         WHERE workspace_id = ? AND created_at >= ? AND created_at <= ?
+         WHERE ${ws.clause}created_at >= ? AND created_at <= ?
          GROUP BY status`,
       )
-      .all(workspaceId, periodStart, periodEnd) as Array<{
+      .all(...ws.params, periodStart, periodEnd) as Array<{
       status: string;
       count: number;
       avg_time: number | null;
@@ -107,7 +150,7 @@ export class UsageInsightsService {
   }
 
   private getCostMetrics(
-    workspaceId: string,
+    workspaceId: string | null,
     periodStart: number,
     periodEnd: number,
   ): UsageInsights["costMetrics"] {
@@ -117,15 +160,16 @@ export class UsageInsightsService {
     const modelMap = new Map<string, { cost: number; calls: number }>();
 
     try {
+      const ws = wsFilter(workspaceId, "t.");
       const rows = this.db
         .prepare(
           `SELECT te.payload
            FROM task_events te
            JOIN tasks t ON te.task_id = t.id
-           WHERE t.workspace_id = ? AND te.type = 'llm_usage'
+           WHERE ${ws.clause}te.type = 'llm_usage'
              AND te.timestamp >= ? AND te.timestamp <= ?`,
         )
-        .all(workspaceId, periodStart, periodEnd) as Array<{ payload: string }>;
+        .all(...ws.params, periodStart, periodEnd) as Array<{ payload: string }>;
 
       for (const row of rows) {
         try {
@@ -159,7 +203,7 @@ export class UsageInsightsService {
   }
 
   private getActivityPattern(
-    workspaceId: string,
+    workspaceId: string | null,
     periodStart: number,
     periodEnd: number,
   ): UsageInsights["activityPattern"] {
@@ -167,11 +211,12 @@ export class UsageInsightsService {
     const tasksByHour = Array.from({ length: 24 }, () => 0);
 
     try {
+      const ws = wsFilter(workspaceId, "");
       const rows = this.db
         .prepare(
-          "SELECT created_at FROM tasks WHERE workspace_id = ? AND created_at >= ? AND created_at <= ?",
+          `SELECT created_at FROM tasks WHERE ${ws.clause}created_at >= ? AND created_at <= ?`,
         )
-        .all(workspaceId, periodStart, periodEnd) as Array<{ created_at: number }>;
+        .all(...ws.params, periodStart, periodEnd) as Array<{ created_at: number }>;
 
       for (const row of rows) {
         const d = new Date(row.created_at);
@@ -191,20 +236,21 @@ export class UsageInsightsService {
   }
 
   private getTopSkills(
-    workspaceId: string,
+    workspaceId: string | null,
     periodStart: number,
     periodEnd: number,
   ): UsageInsights["topSkills"] {
     try {
+      const ws = wsFilter(workspaceId, "t.");
       const rows = this.db
         .prepare(
           `SELECT te.payload
            FROM task_events te
            JOIN tasks t ON te.task_id = t.id
-           WHERE t.workspace_id = ? AND te.type = 'skill_used'
+           WHERE ${ws.clause}te.type = 'skill_used'
              AND te.timestamp >= ? AND te.timestamp <= ?`,
         )
-        .all(workspaceId, periodStart, periodEnd) as Array<{ payload: string }>;
+        .all(...ws.params, periodStart, periodEnd) as Array<{ payload: string }>;
 
       const skillCounts = new Map<string, number>();
       for (const row of rows) {
@@ -226,12 +272,120 @@ export class UsageInsightsService {
     }
   }
 
+  private countAwus(workspaceId: string | null, periodStart: number, periodEnd: number): number {
+    try {
+      const ws = wsFilter(workspaceId, "");
+      const row = this.db
+        .prepare(
+          `SELECT COUNT(*) as count FROM tasks
+           WHERE ${ws.clause}completed_at >= ? AND completed_at <= ?
+             AND status = 'completed'
+             AND (terminal_status IN ('ok', 'partial_success') OR terminal_status IS NULL)`,
+        )
+        .get(...ws.params, periodStart, periodEnd) as { count: number } | undefined;
+      return row?.count ?? 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  private getPeriodCost(
+    workspaceId: string | null,
+    periodStart: number,
+    periodEnd: number,
+  ): { totalCost: number; totalInputTokens: number; totalOutputTokens: number } {
+    let totalCost = 0;
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
+    try {
+      const ws = wsFilter(workspaceId, "t.");
+      const rows = this.db
+        .prepare(
+          `SELECT te.payload
+           FROM task_events te
+           JOIN tasks t ON te.task_id = t.id
+           WHERE ${ws.clause}te.type = 'llm_usage'
+             AND te.timestamp >= ? AND te.timestamp <= ?`,
+        )
+        .all(...ws.params, periodStart, periodEnd) as Array<{ payload: string }>;
+      for (const row of rows) {
+        try {
+          const payload = JSON.parse(row.payload);
+          totalCost += payload.delta?.cost ?? 0;
+          totalInputTokens += payload.delta?.inputTokens ?? 0;
+          totalOutputTokens += payload.delta?.outputTokens ?? 0;
+        } catch {
+          // Skip malformed
+        }
+      }
+    } catch {
+      // Gracefully handle
+    }
+    return { totalCost, totalInputTokens, totalOutputTokens };
+  }
+
+  private getAwuMetrics(
+    workspaceId: string | null,
+    periodStart: number,
+    periodEnd: number,
+    costMetrics: UsageInsights["costMetrics"],
+  ): UsageInsights["awuMetrics"] {
+    const awuCount = this.countAwus(workspaceId, periodStart, periodEnd);
+
+    const totalTokens = costMetrics.totalInputTokens + costMetrics.totalOutputTokens;
+    const totalCost = costMetrics.totalCost;
+
+    const tokensPerAwu = awuCount > 0 ? Math.round(totalTokens / awuCount) : null;
+    const costPerAwu = awuCount > 0 ? totalCost / awuCount : null;
+    const awuPerDollar = totalCost > 0 ? awuCount / totalCost : null;
+
+    // Compute previous period for trend comparison
+    const periodLengthMs = periodEnd - periodStart;
+    const prevStart = periodStart - periodLengthMs;
+    const prevEnd = periodStart;
+
+    const previousAwuCount = this.countAwus(workspaceId, prevStart, prevEnd);
+    const prevCost = this.getPeriodCost(workspaceId, prevStart, prevEnd);
+    const prevTokens = prevCost.totalInputTokens + prevCost.totalOutputTokens;
+
+    const previousTokensPerAwu =
+      previousAwuCount > 0 ? Math.round(prevTokens / previousAwuCount) : null;
+    const previousCostPerAwu = previousAwuCount > 0 ? prevCost.totalCost / previousAwuCount : null;
+
+    const tokensPerAwuChange =
+      tokensPerAwu !== null && previousTokensPerAwu !== null && previousTokensPerAwu > 0
+        ? ((tokensPerAwu - previousTokensPerAwu) / previousTokensPerAwu) * 100
+        : null;
+
+    const costPerAwuChange =
+      costPerAwu !== null && previousCostPerAwu !== null && previousCostPerAwu > 0
+        ? ((costPerAwu - previousCostPerAwu) / previousCostPerAwu) * 100
+        : null;
+
+    return {
+      awuCount,
+      totalTokens,
+      totalCost,
+      tokensPerAwu,
+      costPerAwu,
+      awuPerDollar,
+      trend: {
+        previousAwuCount,
+        previousTokensPerAwu,
+        previousCostPerAwu,
+        tokensPerAwuChange,
+        costPerAwuChange,
+      },
+    };
+  }
+
   private formatReport(
     periodDays: number,
     taskMetrics: UsageInsights["taskMetrics"],
     costMetrics: UsageInsights["costMetrics"],
     activityPattern: UsageInsights["activityPattern"],
     topSkills: UsageInsights["topSkills"],
+    awuMetrics: UsageInsights["awuMetrics"],
   ): string {
     const lines: string[] = [];
     const label = periodDays === 7 ? "Weekly" : `${periodDays}-Day`;
@@ -265,11 +419,33 @@ export class UsageInsightsService {
       lines.push("");
     }
 
+    // AWU Efficiency
+    if (awuMetrics.awuCount > 0) {
+      lines.push("**Agent Efficiency (AWU):**");
+      lines.push(`- Work units completed: ${awuMetrics.awuCount}`);
+      if (awuMetrics.tokensPerAwu !== null) {
+        lines.push(`- Tokens per AWU: ${formatTokens(awuMetrics.tokensPerAwu)}`);
+      }
+      if (awuMetrics.costPerAwu !== null) {
+        lines.push(`- Cost per AWU: $${awuMetrics.costPerAwu.toFixed(4)}`);
+      }
+      if (awuMetrics.awuPerDollar !== null) {
+        lines.push(`- AWUs per dollar: ${awuMetrics.awuPerDollar.toFixed(1)}`);
+      }
+      if (awuMetrics.trend.tokensPerAwuChange !== null) {
+        const dir = awuMetrics.trend.tokensPerAwuChange <= 0 ? "improved" : "worsened";
+        lines.push(
+          `- Efficiency trend: ${dir} by ${Math.abs(awuMetrics.trend.tokensPerAwuChange).toFixed(0)}% vs previous period`,
+        );
+      }
+      lines.push("");
+    }
+
     // Activity pattern
     lines.push("**Activity Pattern:**");
     lines.push(`- Most active day: ${activityPattern.mostActiveDay}`);
     lines.push(
-      `- Peak hour: ${activityPattern.mostActiveHour}:00–${activityPattern.mostActiveHour + 1}:00`,
+      `- Peak hour: ${activityPattern.mostActiveHour}:00\u2013${activityPattern.mostActiveHour + 1}:00`,
     );
     lines.push("");
 

@@ -220,9 +220,9 @@ Built-in structured entity and relationship memory backed by SQLite. The agent b
 Persistent memory with privacy protection, FTS5 search, LLM compression, and workspace kit (`.cowork/`) for durable project context. **Import your ChatGPT history** to eliminate the cold-start problem — CoWork OS knows you from day one. All imported data is stored locally and encrypted on your machine. **Proactive session compaction** automatically generates comprehensive structured summaries when context reaches 90% capacity — preserving user messages, decisions, file changes, errors, and pending work so the agent continues seamlessly without losing critical context. [Learn more](docs/features.md#persistent-memory-system) | [Context Compaction](docs/context-compaction.md)
 
 <p align="center">
-  <img src="screenshots/cowork-os-main3.png" alt="Collaborative Mode" width="700">
+  <img src="screenshots/cowork-os-agents.png" alt="Agent Personas" width="700">
   <br>
-  <em>Multi-agent collaborative mode with real-time thought sharing</em>
+  <em>Role-specific agent personas and intent-first task startup</em>
 </p>
 
 ## Architecture
@@ -286,13 +286,13 @@ See [Security Guide](docs/security-guide.md) and [Security Architecture](docs/se
 ## Screenshots
 
 <p align="center">
-  <img src="screenshots/cowork-os-main2.png" alt="Task Timeline" width="700">
-  <br><em>Task timeline and execution view</em>
+  <img src="screenshots/cowork-os-canvas.png" alt="Live Canvas" width="700">
+  <br><em>Live Canvas for visual, iterative build workflows</em>
 </p>
 
 <p align="center">
-  <img src="screenshots/cowork-os-settings1.png" alt="Settings" width="700">
-  <br><em>AI provider and channel configuration</em>
+  <img src="screenshots/cowork-os-excel.png" alt="Spreadsheet Output" width="700">
+  <br><em>Structured spreadsheet outputs generated directly in chat</em>
 </p>
 
 ## Roadmap

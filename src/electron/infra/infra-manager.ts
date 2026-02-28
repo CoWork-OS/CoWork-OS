@@ -9,19 +9,25 @@
 
 import { InfraStatus, InfraSettings, WalletInfo, DEFAULT_INFRA_SETTINGS } from "../../shared/types";
 import { InfraSettingsManager } from "./infra-settings";
-import { WalletManager } from "./wallet/wallet-manager";
 import { E2BSandboxProvider } from "./providers/e2b-sandbox";
 import { NamecheapDomainsProvider } from "./providers/namecheap-domains";
-import { X402Client } from "./providers/x402-client";
+import { LocalWalletProvider } from "./providers/local-wallet-provider";
+import { CoinbaseAgenticWalletProvider } from "./providers/coinbase-agentic-wallet-provider";
+import { WalletProvider, WalletProviderKind } from "./providers/wallet-provider";
 
 export class InfraManager {
   private static instance: InfraManager | null = null;
 
   private sandboxProvider = new E2BSandboxProvider();
   private domainsProvider = new NamecheapDomainsProvider();
-  private x402Client = new X402Client();
+  private walletProvider: WalletProvider = new LocalWalletProvider();
+  private walletProviderKind: WalletProviderKind = "local";
   private initialized = false;
   private cachedBalance: string = "0.00";
+  private cachedWalletAddress: string | null = null;
+  private cachedWalletNetwork: string = "base";
+  private walletProviderConnected = false;
+  private walletProviderError: string | null = null;
   private balancePollInterval: ReturnType<typeof setInterval> | null = null;
 
   private constructor() {}
@@ -46,26 +52,11 @@ export class InfraManager {
     InfraSettingsManager.initialize();
     const settings = InfraSettingsManager.loadSettings();
 
-    // Wallet startup check — migrate from legacy store if needed
-    const walletCheck = WalletManager.startupCheck();
-    console.log(
-      `[InfraManager] Wallet status: ${walletCheck.status}, address: ${walletCheck.address || "none"}`,
-    );
-
     // Configure providers from settings
-    this.applySettings(settings);
-
-    // Set up wallet for x402 client
-    if (WalletManager.hasWallet()) {
-      const pk = WalletManager.getPrivateKey();
-      const addr = WalletManager.getAddress();
-      if (pk && addr) {
-        this.x402Client.setWallet(pk, addr);
-      }
-    }
+    await this.applySettings(settings);
 
     // Start balance polling if wallet exists
-    if (WalletManager.hasWallet() && settings.enabled) {
+    if (this.walletProviderConnected && settings.enabled) {
       this.startBalancePolling();
     }
 
@@ -75,7 +66,7 @@ export class InfraManager {
   /**
    * Apply settings to providers
    */
-  applySettings(settings: InfraSettings): void {
+  async applySettings(settings: InfraSettings): Promise<void> {
     // E2B
     if (settings.e2b.apiKey) {
       this.sandboxProvider.setApiKey(settings.e2b.apiKey);
@@ -89,19 +80,29 @@ export class InfraManager {
         clientIp: settings.domains.clientIp,
       });
     }
+
+    await this.configureWalletProvider(settings);
+
+    if (!settings.enabled || !this.walletProviderConnected) {
+      this.stopBalancePolling();
+      return;
+    }
+
+    this.startBalancePolling();
   }
 
   // === Status ===
 
   getStatus(): InfraStatus {
     const settings = InfraSettingsManager.loadSettings();
+    const walletStatus = this.getWalletProviderStatus(settings);
 
     return {
       enabled: settings.enabled,
-      wallet: WalletManager.hasWallet()
+      wallet: this.walletProviderConnected && this.cachedWalletAddress
         ? {
-            address: WalletManager.getAddress()!,
-            network: WalletManager.getNetwork(),
+            address: this.cachedWalletAddress,
+            network: this.cachedWalletNetwork,
             balanceUsdc: this.cachedBalance,
           }
         : undefined,
@@ -109,9 +110,10 @@ export class InfraManager {
       providers: {
         e2b: this.sandboxProvider.hasApiKey() ? "connected" : "not_configured",
         domains: this.domainsProvider.isConfigured() ? "connected" : "not_configured",
-        wallet: WalletManager.hasWallet() ? "connected" : "not_configured",
+        wallet: walletStatus,
       },
       activeSandboxes: this.sandboxProvider.list().length,
+      ...(this.walletProviderError ? { error: this.walletProviderError } : {}),
     };
   }
 
@@ -121,18 +123,6 @@ export class InfraManager {
    * Initial setup — generate wallet if needed
    */
   async setup(): Promise<InfraStatus> {
-    if (!WalletManager.hasWallet()) {
-      WalletManager.generate();
-      console.log("[InfraManager] Generated new wallet during setup");
-    }
-
-    // Set up x402 client with wallet
-    const pk = WalletManager.getPrivateKey();
-    const addr = WalletManager.getAddress();
-    if (pk && addr) {
-      this.x402Client.setWallet(pk, addr);
-    }
-
     // Enable infra
     const settings = InfraSettingsManager.loadSettings();
     if (!settings.enabled) {
@@ -140,7 +130,17 @@ export class InfraManager {
       InfraSettingsManager.saveSettings(settings);
     }
 
-    this.startBalancePolling();
+    await this.applySettings(settings);
+    if (this.canProvisionWalletOnSetup(settings)) {
+      await this.walletProvider.ensureWallet();
+    }
+    await this.refreshWalletSnapshot({ fetchBalance: true });
+
+    if (settings.enabled && this.walletProviderConnected) {
+      this.startBalancePolling();
+    } else {
+      this.stopBalancePolling();
+    }
 
     return this.getStatus();
   }
@@ -153,13 +153,31 @@ export class InfraManager {
     await this.sandboxProvider.cleanup();
 
     // Reset settings to defaults
-    InfraSettingsManager.saveSettings({ ...DEFAULT_INFRA_SETTINGS });
+    const resetSettings: InfraSettings = {
+      ...DEFAULT_INFRA_SETTINGS,
+      e2b: { ...DEFAULT_INFRA_SETTINGS.e2b },
+      domains: { ...DEFAULT_INFRA_SETTINGS.domains },
+      wallet: {
+        ...DEFAULT_INFRA_SETTINGS.wallet,
+        coinbase: { ...DEFAULT_INFRA_SETTINGS.wallet.coinbase },
+      },
+      payments: {
+        ...DEFAULT_INFRA_SETTINGS.payments,
+        allowedHosts: [...DEFAULT_INFRA_SETTINGS.payments.allowedHosts],
+      },
+      enabledCategories: { ...DEFAULT_INFRA_SETTINGS.enabledCategories },
+    };
+    InfraSettingsManager.saveSettings(resetSettings);
     InfraSettingsManager.clearCache();
 
     // Re-configure providers (will be empty)
     this.sandboxProvider = new E2BSandboxProvider();
     this.domainsProvider = new NamecheapDomainsProvider();
-    this.x402Client = new X402Client();
+    this.walletProvider = new LocalWalletProvider();
+    this.walletProviderKind = "local";
+    await this.walletProvider.initialize();
+    await this.walletProvider.applySettings(resetSettings);
+    await this.refreshWalletSnapshot({ fetchBalance: false });
 
     console.log("[InfraManager] Reset complete");
   }
@@ -167,27 +185,36 @@ export class InfraManager {
   // === Wallet ===
 
   getWalletInfo(): WalletInfo | null {
-    if (!WalletManager.hasWallet()) return null;
+    if (!this.walletProviderConnected || !this.cachedWalletAddress) return null;
     return {
-      address: WalletManager.getAddress()!,
-      network: WalletManager.getNetwork(),
+      address: this.cachedWalletAddress,
+      network: this.cachedWalletNetwork,
       balanceUsdc: this.cachedBalance,
     };
   }
 
   async getWalletInfoWithBalance(): Promise<WalletInfo | null> {
-    if (!WalletManager.hasWallet()) return null;
+    if (!this.walletProviderConnected || !this.cachedWalletAddress) return null;
     const balance = await this.getWalletBalance();
     return {
-      address: WalletManager.getAddress()!,
-      network: WalletManager.getNetwork(),
+      address: this.cachedWalletAddress,
+      network: this.cachedWalletNetwork,
       balanceUsdc: balance,
     };
   }
 
   async getWalletBalance(): Promise<string> {
     try {
-      this.cachedBalance = await WalletManager.getBalance();
+      if (!(await this.walletProvider.hasWallet())) {
+        this.walletProviderError = null;
+        this.walletProviderConnected = false;
+        this.cachedWalletAddress = null;
+        this.cachedBalance = "0.00";
+        return "0.00";
+      }
+      this.cachedBalance = await this.walletProvider.getBalanceUsdc();
+      this.walletProviderError = null;
+      this.walletProviderConnected = true;
       return this.cachedBalance;
     } catch (error) {
       console.warn("[InfraManager] Balance fetch failed:", error);
@@ -254,11 +281,16 @@ export class InfraManager {
   // === x402 operations ===
 
   async x402Check(url: string) {
-    return this.x402Client.check(url);
+    return this.walletProvider.x402Check(url);
   }
 
-  async x402Fetch(url: string, opts?: { method?: string; body?: string }) {
-    return this.x402Client.fetchWithPayment(url, opts);
+  async x402Fetch(url: string, opts?: { method?: string; body?: string; headers?: Record<string, string> }) {
+    return this.walletProvider.x402Fetch({
+      url,
+      method: opts?.method,
+      body: opts?.body,
+      headers: opts?.headers,
+    });
   }
 
   // === Cleanup ===
@@ -287,5 +319,68 @@ export class InfraManager {
       clearInterval(this.balancePollInterval);
       this.balancePollInterval = null;
     }
+  }
+
+  private async configureWalletProvider(settings: InfraSettings): Promise<void> {
+    const desiredKind: WalletProviderKind =
+      settings.wallet.provider === "coinbase_agentic" ? "coinbase_agentic" : "local";
+
+    if (this.walletProviderKind !== desiredKind) {
+      this.walletProvider = this.createWalletProvider(desiredKind);
+      this.walletProviderKind = desiredKind;
+    }
+
+    await this.walletProvider.initialize();
+    await this.walletProvider.applySettings(settings);
+    await this.refreshWalletSnapshot({ fetchBalance: settings.enabled });
+  }
+
+  private createWalletProvider(kind: WalletProviderKind): WalletProvider {
+    if (kind === "coinbase_agentic") {
+      return new CoinbaseAgenticWalletProvider();
+    }
+    return new LocalWalletProvider();
+  }
+
+  private async refreshWalletSnapshot(opts?: { fetchBalance?: boolean }): Promise<void> {
+    try {
+      const status = await this.walletProvider.getStatus();
+      this.walletProviderConnected = status.connected;
+      this.cachedWalletAddress = status.address || null;
+      this.cachedWalletNetwork = status.network || "base";
+      this.walletProviderError = null;
+
+      if (typeof status.balanceUsdc === "string") {
+        this.cachedBalance = status.balanceUsdc;
+      } else if (opts?.fetchBalance && this.walletProviderConnected) {
+        this.cachedBalance = await this.walletProvider.getBalanceUsdc();
+      }
+    } catch (error) {
+      this.walletProviderConnected = false;
+      this.cachedWalletAddress = null;
+      this.walletProviderError = String(error);
+    }
+  }
+
+  private getWalletProviderStatus(settings: InfraSettings): "connected" | "disconnected" | "error" | "not_configured" {
+    if (this.walletProviderError) return "error";
+    if (this.walletProviderConnected) return "connected";
+    if (!settings.wallet.enabled) return "not_configured";
+    if (settings.wallet.provider === "coinbase_agentic" && !settings.wallet.coinbase.enabled) {
+      return "not_configured";
+    }
+    if (settings.wallet.provider === "coinbase_agentic" && !settings.wallet.coinbase.signerEndpoint) {
+      return "not_configured";
+    }
+    return "disconnected";
+  }
+
+  private canProvisionWalletOnSetup(settings: InfraSettings): boolean {
+    if (!settings.wallet.enabled) return false;
+    if (settings.wallet.provider !== "coinbase_agentic") return true;
+    return (
+      settings.wallet.coinbase.enabled &&
+      String(settings.wallet.coinbase.signerEndpoint || "").trim().length > 0
+    );
   }
 }

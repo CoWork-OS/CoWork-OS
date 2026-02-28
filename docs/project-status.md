@@ -15,6 +15,20 @@ CoWork OS is a **security-first personal AI assistant platform** with multi-chan
 
 ### 1. Core Architecture
 
+#### Reliability Flywheel (Eval + Risk Gates)
+- [x] Eval corpus extraction from failed/partial tasks (`scripts/qa/build_eval_corpus.cjs`)
+- [x] Deterministic eval suite replay runner (`scripts/qa/run_eval_suite.cjs`)
+- [x] Eval schema and task metadata (`eval_cases`, `eval_suites`, `eval_runs`, `eval_case_runs`, task risk/eval columns)
+- [x] Eval service and IPC endpoints (`eval:listSuites`, `eval:runSuite`, `eval:getRun`, `eval:getCase`, `eval:createCaseFromTask`)
+- [x] Risk scoring and policy-driven tiered review gate (`off`, `balanced`, `strict`)
+- [x] Prompt reliability hardening (modular prompt sections, shared policy dedupe, token budgets)
+- [x] Skill shortlist routing with low-confidence fallback and text budget caps
+- [x] PR regression policy gate for production incident fixes
+- [x] Nightly hardening workflow with machine-readable report artifact
+- [x] Release hardening gate (date-based strictness window)
+- [x] Local-only reliability data policy (no required telemetry upload path)
+- [x] Reference: `docs/reliability-flywheel.md`
+
 #### Database Layer
 - [x] SQLite schema with 6 tables (workspaces, tasks, events, artifacts, approvals, skills)
 - [x] Repository pattern for data access

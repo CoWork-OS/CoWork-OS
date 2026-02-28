@@ -54,9 +54,25 @@ cp .env.example .env
 npm run dev
 ```
 
+`npm run setup` installs local git hooks (`.githooks/`) and enables a pre-commit secret scan with `gitleaks`.
+
+Install `gitleaks` locally if you commit from this clone:
+
+```bash
+# macOS (Homebrew)
+brew install gitleaks
+
+# Windows (Chocolatey)
+choco install gitleaks
+
+# Linux (official install script)
+curl -sSfL https://raw.githubusercontent.com/gitleaks/gitleaks/master/install.sh | sh -s -- -b /usr/local/bin
+```
+
 ### Available Scripts
 
 - `npm run dev` - Start development mode with hot reload
+- `npm run hooks:install` - Reinstall local git hooks (`.githooks`)
 - `npm run build` - Build for production
 - `npm run package` - Package the Electron app
 - `npm run fmt` - Format code with Oxfmt

@@ -1,5 +1,9 @@
 import { v4 as uuidv4 } from "uuid";
 import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
+import {
+  extractPreferredNameFromMessage,
+  sanitizePreferredNameMemoryLine,
+} from "../utils/preferred-name";
 
 type RelationshipLayer = "identity" | "preferences" | "context" | "history" | "commitments";
 type RelationshipSource = "conversation" | "feedback" | "task";
@@ -120,11 +124,11 @@ export class RelationshipMemoryService {
     const candidates: Array<Omit<RelationshipMemoryItem, "id" | "createdAt" | "updatedAt">> = [];
     const _lower = text.toLowerCase();
 
-    const nameMatch = text.match(/\b(?:my name is|call me|i am|i'm)\s+([a-z][a-z' -]{1,40})/i);
-    if (nameMatch) {
+    const preferredName = extractPreferredNameFromMessage(text);
+    if (preferredName) {
       candidates.push({
         layer: "identity",
-        text: `Preferred name: ${nameMatch[1].trim()}`,
+        text: `Preferred name: ${preferredName}`,
         confidence: 0.9,
         source: "conversation",
         lastTaskId: taskId,
@@ -404,31 +408,60 @@ export class RelationshipMemoryService {
       profile = this.inMemoryProfile;
     }
 
-    return {
+    let profileWasSanitized = false;
+    const normalizedProfile: RelationshipMemoryProfile = {
       items: Array.isArray(profile.items)
         ? profile.items
             .filter(
               (item) => !!item && typeof item.id === "string" && typeof item.text === "string",
             )
-            .map((item) => ({
-              id: item.id,
-              layer: item.layer,
-              text: this.normalizeText(item.text),
-              confidence: clamp(Number(item.confidence ?? 0.65), 0, 1),
-              source:
-                item.source === "feedback" || item.source === "task" ? item.source : "conversation",
-              createdAt: Number(item.createdAt || Date.now()),
-              updatedAt: Number(item.updatedAt || Date.now()),
-              lastTaskId: typeof item.lastTaskId === "string" ? item.lastTaskId : undefined,
-              status: item.status === "done" ? "done" : item.status === "open" ? "open" : undefined,
-              dueAt:
-                typeof item.dueAt === "number" && Number.isFinite(item.dueAt)
-                  ? Math.floor(item.dueAt)
-                  : undefined,
-            }))
+            .map((item): RelationshipMemoryItem | null => {
+              const normalizedText = this.normalizeText(item.text);
+              if (normalizedText !== item.text) profileWasSanitized = true;
+              const cleanedIdentityText =
+                item.layer === "identity"
+                  ? sanitizePreferredNameMemoryLine(normalizedText)
+                  : normalizedText;
+              if (!cleanedIdentityText) {
+                profileWasSanitized = true;
+                return null;
+              }
+              if (cleanedIdentityText !== normalizedText) profileWasSanitized = true;
+
+              const sanitizedItem: RelationshipMemoryItem = {
+                id: item.id,
+                layer: item.layer,
+                text: cleanedIdentityText,
+                confidence: clamp(Number(item.confidence ?? 0.65), 0, 1),
+                source:
+                  item.source === "feedback" || item.source === "task" ? item.source : "conversation",
+                createdAt: Number(item.createdAt || Date.now()),
+                updatedAt: Number(item.updatedAt || Date.now()),
+              };
+
+              if (typeof item.lastTaskId === "string") {
+                sanitizedItem.lastTaskId = item.lastTaskId;
+              }
+              if (item.status === "open" || item.status === "done") {
+                sanitizedItem.status = item.status;
+              }
+              if (typeof item.dueAt === "number" && Number.isFinite(item.dueAt)) {
+                sanitizedItem.dueAt = Math.floor(item.dueAt);
+              }
+
+              return sanitizedItem;
+            })
+            .filter((item): item is RelationshipMemoryItem => item !== null)
         : [],
       updatedAt: Number(profile.updatedAt || 0),
     };
+
+    this.inMemoryProfile = normalizedProfile;
+    if (profileWasSanitized) {
+      this.save(normalizedProfile);
+    }
+
+    return normalizedProfile;
   }
 
   private static save(profile: RelationshipMemoryProfile): void {

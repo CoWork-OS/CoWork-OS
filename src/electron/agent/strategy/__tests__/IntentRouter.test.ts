@@ -63,4 +63,14 @@ bounded_research=true
     expect(routed.domain).not.toBe("code");
     expect(routed.intent).not.toBe("deep_work");
   });
+
+  it("routes Box file inventory questions to execution intent", () => {
+    const routed = IntentRouter.route("Box files", "which files I have on box?");
+    expect(routed.intent).toBe("execution");
+  });
+
+  it("routes Dropbox content listing questions to execution intent", () => {
+    const routed = IntentRouter.route("Dropbox listing", "what files are in my dropbox");
+    expect(routed.intent).toBe("execution");
+  });
 });

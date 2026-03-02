@@ -118,6 +118,12 @@ export function MCPRegistryBrowser({
     );
   };
 
+  const normalizeAuthor = (author?: string): string => {
+    const trimmed = typeof author === "string" ? author.trim() : "";
+    if (!trimmed) return "Unknown";
+    return /^cowork-oss$/i.test(trimmed) ? "CoWork OS" : trimmed;
+  };
+
   if (loading) {
     return <div className="registry-loading">Loading MCP servers registry...</div>;
   }
@@ -210,7 +216,7 @@ export function MCPRegistryBrowser({
               <p className="registry-server-description">{entry.description}</p>
 
               <div className="registry-server-meta">
-                <span className="registry-author">by {entry.author}</span>
+                <span className="registry-author">by {normalizeAuthor(entry.author)}</span>
                 <span className="registry-tools-count">{entry.tools.length} tools</span>
                 {entry.category && <span className="registry-category">{entry.category}</span>}
               </div>
@@ -309,7 +315,9 @@ export function MCPRegistryBrowser({
                   </div>
                   <div className="registry-detail-row">
                     <span className="registry-detail-label">Author:</span>
-                    <span className="registry-detail-value">{viewingDetails.author}</span>
+                    <span className="registry-detail-value">
+                      {normalizeAuthor(viewingDetails.author)}
+                    </span>
                   </div>
                   <div className="registry-detail-row">
                     <span className="registry-detail-label">License:</span>

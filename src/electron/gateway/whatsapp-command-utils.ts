@@ -295,6 +295,22 @@ export function normalizeWhatsAppNaturalCommand(text: string): string | undefine
     return rest ? `/inbox ${rest}` : "/inbox";
   }
 
+  const simplifyMatch = normalized.match(
+    /^(?:simplify this|tighten this|polish this|simplify|run simplify)(?:\s+(.*))?$/i,
+  );
+  if (simplifyMatch) {
+    const rest = simplifyMatch[1]?.trim();
+    return rest ? `/simplify ${rest}` : "/simplify";
+  }
+
+  const batchMatch = normalized.match(
+    /^(?:batch|run batch|batch this|batch migrate|migrate in batch)(?:\s+(.*))?$/i,
+  );
+  if (batchMatch) {
+    const rest = batchMatch[1]?.trim();
+    return rest ? `/batch ${rest}` : "/batch";
+  }
+
   const scheduleMatch = normalized.match(/^(?:schedule|remind me|reminder)\s+(.*)$/i);
   if (scheduleMatch) {
     const rest = scheduleMatch[1].trim();

@@ -58,6 +58,10 @@ import {
   DEFAULT_CHANNEL_CONTEXT,
   type ChannelMessageContext,
 } from "../../shared/channelMessages";
+import {
+  parseLeadingSkillSlashCommand,
+  type ParsedSkillSlashCommand,
+} from "../../shared/skill-slash-commands";
 import { DEFAULT_QUIRKS } from "../../shared/types";
 import { formatChatTranscriptForPrompt } from "./chat-transcript";
 import { evaluateWorkspaceRouterRules } from "./router-rules";
@@ -1966,6 +1970,28 @@ export class MessageRouter {
         await this.handleInboxCommand(adapter, message, sessionId, args, securityContext);
         break;
 
+      case "/simplify":
+        await this.handleSkillSlashCommand(
+          adapter,
+          message,
+          sessionId,
+          "/simplify",
+          args,
+          securityContext,
+        );
+        break;
+
+      case "/batch":
+        await this.handleSkillSlashCommand(
+          adapter,
+          message,
+          sessionId,
+          "/batch",
+          args,
+          securityContext,
+        );
+        break;
+
       case "/schedule":
         await this.handleScheduleCommand(adapter, message, sessionId, args, securityContext);
         break;
@@ -3474,6 +3500,78 @@ export class MessageRouter {
       text: prompt,
     };
 
+    await this.forwardToDesktopApp(adapter, synthetic, sessionId, securityContext);
+  }
+
+  private getSkillSlashUsage(command: "/simplify" | "/batch"): string {
+    if (command === "/simplify") {
+      return (
+        "Usage:\n" +
+        "- `/simplify`\n" +
+        "- `/simplify <objective>`\n" +
+        "- `/simplify <objective> --domain auto|code|research|operations|writing|general`\n" +
+        "- `/simplify <objective> --scope current|workspace|path`"
+      );
+    }
+
+    return (
+      "Usage:\n" +
+      "- `/batch <objective>`\n" +
+      "- `/batch <objective> --parallel 1-8`\n" +
+      "- `/batch <objective> --domain auto|code|research|operations|writing|general`\n" +
+      "- `/batch <objective> --external confirm|execute|none`"
+    );
+  }
+
+  private serializeParsedSkillSlashCommand(parsed: ParsedSkillSlashCommand): string {
+    const parts: string[] = [`/${parsed.command}`];
+    if (parsed.objective) {
+      parts.push(parsed.objective);
+    }
+    if (parsed.flags.domain) {
+      parts.push("--domain", parsed.flags.domain);
+    }
+    if (parsed.command === "simplify" && parsed.flags.scope) {
+      parts.push("--scope", parsed.flags.scope);
+    }
+    if (parsed.command === "batch") {
+      if (typeof parsed.flags.parallel === "number") {
+        parts.push("--parallel", String(parsed.flags.parallel));
+      }
+      if (parsed.flags.external) {
+        parts.push("--external", parsed.flags.external);
+      }
+    }
+    return parts.join(" ").trim();
+  }
+
+  private async handleSkillSlashCommand(
+    adapter: ChannelAdapter,
+    message: IncomingMessage,
+    sessionId: string,
+    command: "/simplify" | "/batch",
+    args: string[],
+    securityContext?: MessageSecurityContext,
+  ): Promise<void> {
+    const raw = `${command} ${args.join(" ")}`.trim();
+    const parsed = parseLeadingSkillSlashCommand(raw);
+    if (!parsed.matched || !parsed.parsed || parsed.error) {
+      const usage = this.getSkillSlashUsage(command);
+      const errorPrefix = parsed.error ? `Invalid ${command} command: ${parsed.error}\n\n` : "";
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        parseMode: "markdown",
+        replyTo: message.messageId,
+        text: `${errorPrefix}${usage}`,
+      });
+      return;
+    }
+
+    const normalized = this.serializeParsedSkillSlashCommand(parsed.parsed);
+    const synthetic: IncomingMessage = {
+      ...message,
+      text: normalized,
+    };
     await this.forwardToDesktopApp(adapter, synthetic, sessionId, securityContext);
   }
 

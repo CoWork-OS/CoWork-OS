@@ -129,7 +129,7 @@ jobs:
 
       - name: Upload hardening artifacts
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: nightly-hardening-${{ github.run_id }}
           path: .artifacts/hardening/

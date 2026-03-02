@@ -1,0 +1,78 @@
+{
+  "id": "simplify",
+  "name": "Simplify",
+  "description": "Improve existing work with focused simplification passes across code, writing, research, operations, or general tasks.",
+  "icon": "🧹",
+  "category": "Use Cases",
+  "prompt": "Simplify workflow.\n\nGoal\n- Improve existing work quality while preserving intent and behavior.\n\nInputs\n- Objective: {{objective}}\n- Domain: {{domain}}\n- Scope: {{scope}}\n\nExecution rules\n1) Resolve target context from Objective + Scope.\n   - If Objective is empty, use current task context and latest outputs.\n2) Run a domain-aware simplification pass:\n   - code: reduce complexity, remove duplication, tighten naming/structure, preserve behavior.\n   - writing: remove fluff, tighten structure, improve clarity and flow.\n   - research: compress to decision-first summary and remove low-signal sections.\n   - operations: reduce steps, clarify runbook actions, make rollback explicit.\n   - general/auto: pick the strongest simplification pattern based on current artifacts.\n3) Preserve meaning and intent. Do not introduce speculative changes.\n4) If scope requires edits, apply minimal, verifiable edits and summarize what changed.\n5) Return a concise before/after delta summary and next-step recommendation.\n\nOutput\n- Simplified result\n- Key deltas (what got simpler)\n- Residual risks or tradeoffs\n- Next action\n",
+  "parameters": [
+    {
+      "name": "objective",
+      "type": "string",
+      "description": "What to simplify; if empty, use current task context",
+      "required": false,
+      "default": "current task context and latest outputs"
+    },
+    {
+      "name": "domain",
+      "type": "select",
+      "description": "Task domain",
+      "required": false,
+      "default": "auto",
+      "options": [
+        "auto",
+        "code",
+        "research",
+        "operations",
+        "writing",
+        "general"
+      ]
+    },
+    {
+      "name": "scope",
+      "type": "select",
+      "description": "Simplification scope",
+      "required": false,
+      "default": "current",
+      "options": [
+        "current",
+        "workspace",
+        "path"
+      ]
+    }
+  ],
+  "enabled": true,
+  "metadata": {
+    "version": "1.0.0",
+    "author": "CoWork OS",
+    "tags": [
+      "workflow",
+      "quality",
+      "optimization",
+      "cross-domain"
+    ],
+    "routing": {
+      "useWhen": "Use when the user asks to simplify or tighten existing outputs, code, docs, reports, plans, or runbooks without changing core intent.",
+      "dontUseWhen": "Do not use when the user requests net-new content generation from scratch or asks for parallel migrations across many independent targets (use batch).",
+      "outputs": "A simplified, higher-signal result plus explicit before/after deltas and tradeoffs.",
+      "successCriteria": "The output is materially clearer or leaner while preserving original intent/behavior and keeping changes verifiable.",
+      "examples": {
+        "positive": [
+          "Run /simplify on this patch and make it cleaner without changing behavior.",
+          "Tighten this report, then run /simplify.",
+          "Simplify this runbook for on-call use.",
+          "Use simplify to reduce noise in this proposal."
+        ],
+        "negative": [
+          "Migrate 300 files from one framework to another in parallel.",
+          "Create a new strategy memo from scratch on a topic we have not covered.",
+          "Install and configure a brand new integration end-to-end.",
+          "Use batch for broad multi-target migrations instead of simplify."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "low"
+    }
+  }
+}

@@ -2,8 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Check, X, Play, Loader2 } from "lucide-react";
-import type { Task, TaskEvent, EventType } from "../../shared/types";
+import type { Task, TaskEvent } from "../../shared/types";
 import { getEmojiIcon } from "../utils/emoji-icon-map";
+import { getEffectiveTaskEventType } from "../utils/task-event-compat";
 
 interface AgentRoleInfo {
   id: string;
@@ -39,12 +40,31 @@ function safeMarkdownUrlTransform(url: string): string {
 const DISPLAY_EVENT_TYPES = new Set<string>([
   "assistant_message",
   "step_started",
+  "progress_update",
   "step_completed",
   "step_failed",
   "plan_created",
   "task_completed",
   "task_cancelled",
   "error",
+]);
+
+type StreamEventType =
+  | "assistant_message"
+  | "step_started"
+  | "progress_update"
+  | "step_completed"
+  | "step_failed"
+  | "plan_created"
+  | "task_completed"
+  | "task_cancelled"
+  | "error";
+
+const COMPACT_STREAM_EVENT_TYPES = new Set<StreamEventType>([
+  "step_started",
+  "step_completed",
+  "step_failed",
+  "progress_update",
 ]);
 
 interface StreamItem {
@@ -54,13 +74,17 @@ interface StreamItem {
   agentIcon: string;
   agentColor: string;
   agentName: string;
-  type: EventType;
+  type: StreamEventType;
   content: string;
   timestamp: number;
 }
 
+function isCompactStreamEventType(type: StreamEventType): boolean {
+  return COMPACT_STREAM_EVENT_TYPES.has(type);
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- event payloads are untyped
-function formatEventContent(type: EventType, payload: TaskEvent["payload"]): string {
+function formatEventContent(type: StreamEventType, payload: TaskEvent["payload"]): string {
   const p = payload as Record<string, unknown> | undefined;
   const step = p?.step as Record<string, unknown> | undefined;
   const plan = p?.plan as Record<string, unknown> | undefined;
@@ -69,6 +93,8 @@ function formatEventContent(type: EventType, payload: TaskEvent["payload"]): str
       return (p?.message as string) || "";
     case "step_started":
       return `Starting: ${(step?.description as string) || (p?.description as string) || "step"}`;
+    case "progress_update":
+      return (p?.message as string) || "";
     case "step_completed":
       return `Completed: ${(step?.description as string) || (p?.description as string) || "step"}`;
     case "step_failed":
@@ -88,10 +114,11 @@ function formatEventContent(type: EventType, payload: TaskEvent["payload"]): str
   }
 }
 
-function StreamBubble({ item }: { item: StreamItem }) {
+function StreamBubble({ item, isCompactEvent }: { item: StreamItem; isCompactEvent: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const isLong = item.content.length > 600;
-  const displayContent = isLong && !expanded ? item.content.slice(0, 600) + "..." : item.content;
+  const displayContent =
+    !isCompactEvent && isLong && !expanded ? item.content.slice(0, 600) + "..." : item.content;
 
   const time = new Date(item.timestamp);
   const timeStr = time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -99,6 +126,35 @@ function StreamBubble({ item }: { item: StreamItem }) {
   const isStep =
     item.type === "step_started" || item.type === "step_completed" || item.type === "step_failed";
   const isMarkdown = item.type === "assistant_message";
+
+  if (isCompactEvent) {
+    return (
+      <div className="thought-bubble thought-bubble-compact-event">
+        <div className="stream-event-row">
+          <div className="stream-event-main">
+            {item.type === "step_completed" && (
+              <Check size={14} strokeWidth={2.5} className="step-icon step-icon-completed" />
+            )}
+            {item.type === "step_failed" && (
+              <X size={14} strokeWidth={2.5} className="step-icon step-icon-failed" />
+            )}
+            {item.type === "step_started" && (
+              <Play size={14} strokeWidth={2} className="step-icon step-icon-started" />
+            )}
+            {item.type === "progress_update" && (
+              <Loader2 size={14} strokeWidth={2} className="step-icon step-icon-progress" />
+            )}
+            <p
+              className={`step-event ${item.type === "step_completed" ? "step-completed" : ""} ${item.type === "step_failed" ? "step-failed" : ""} ${item.type === "progress_update" ? "step-progress" : ""}`}
+            >
+              {displayContent}
+            </p>
+          </div>
+          <span className="stream-event-time thought-time">{timeStr}</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="thought-bubble">
@@ -128,7 +184,7 @@ function StreamBubble({ item }: { item: StreamItem }) {
       </div>
       <div className="thought-footer">
         <span className="thought-time">{timeStr}</span>
-        {isLong && (
+        {!isCompactEvent && isLong && (
           <button className="thought-expand-btn" onClick={() => setExpanded(!expanded)}>
             {expanded ? "Show less" : "Show more"}
           </button>
@@ -249,12 +305,13 @@ export function DispatchedAgentsPanel({
   const streamItems = useMemo(() => {
     const items: StreamItem[] = [];
     for (const event of childEvents) {
-      if (!DISPLAY_EVENT_TYPES.has(event.type)) continue;
+      const effectiveType = getEffectiveTaskEventType(event);
+      if (!DISPLAY_EVENT_TYPES.has(effectiveType)) continue;
       const task = childTasks.find((t) => t.id === event.taskId);
       if (!task) continue;
       const role = task.assignedAgentRoleId ? agentRoles.get(task.assignedAgentRoleId) : undefined;
 
-      const content = formatEventContent(event.type, event.payload);
+      const content = formatEventContent(effectiveType as StreamEventType, event.payload);
       if (!content) continue;
 
       items.push({
@@ -264,7 +321,7 @@ export function DispatchedAgentsPanel({
         agentIcon: role?.icon || "🤖",
         agentColor: role?.color || "#6366f1",
         agentName: role?.displayName || task.title.replace(/^@[^:]+:\s*/, ""),
-        type: event.type,
+        type: effectiveType as StreamEventType,
         content,
         timestamp: event.timestamp,
       });
@@ -331,6 +388,7 @@ export function DispatchedAgentsPanel({
         {streamItems.map((item, i) => {
           const prev = i > 0 ? streamItems[i - 1] : null;
           const showHeader = !prev || prev.agentRoleId !== item.agentRoleId;
+          const isCompactEvent = isCompactStreamEventType(item.type);
 
           return (
             <div key={item.id}>
@@ -347,8 +405,11 @@ export function DispatchedAgentsPanel({
                   </span>
                 </div>
               )}
-              <div className="stream-thought" style={{ borderLeftColor: item.agentColor }}>
-                <StreamBubble item={item} />
+              <div
+                className={`stream-thought ${isCompactEvent ? "stream-thought-compact" : ""}`}
+                style={{ borderLeftColor: item.agentColor }}
+              >
+                <StreamBubble item={item} isCompactEvent={isCompactEvent} />
               </div>
             </div>
           );

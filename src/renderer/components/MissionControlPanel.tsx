@@ -20,6 +20,7 @@ import { AgentTeamsPanel } from "./AgentTeamsPanel";
 import { AgentPerformanceReviewViewer } from "./AgentPerformanceReviewViewer";
 import { useAgentContext } from "../hooks/useAgentContext";
 import type { UiCopyKey } from "../utils/agentMessages";
+import { getEffectiveTaskEventType } from "../utils/task-event-compat";
 
 type AgentRole = AgentRoleData;
 type MissionColumn = {
@@ -293,11 +294,12 @@ export function MissionControlPanel({ onClose: _onClose }: MissionControlPanelPr
 
     // Task events - handle new tasks and status updates
     const unsubscribeTaskEvents = window.electronAPI.onTaskEvent((event: Any) => {
+      const effectiveType = getEffectiveTaskEventType(event as Any);
       const currentWorkspaceId = workspaceIdRef.current;
       const isAutoApprovalRequested =
-        event.type === "approval_requested" && event.payload?.autoApproved === true;
+        effectiveType === "approval_requested" && event.payload?.autoApproved === true;
 
-      if (event.type === "task_created") {
+      if (effectiveType === "task_created") {
         const isNewTask = !tasksRef.current.some((task) => task.id === event.taskId);
         if (isNewTask && currentWorkspaceId) {
           // Fetch the task and add it if it belongs to current workspace
@@ -319,7 +321,9 @@ export function MissionControlPanel({ onClose: _onClose }: MissionControlPanelPr
       }
 
       const newStatus =
-        event.type === "task_status" ? event.payload?.status : TASK_EVENT_STATUS_MAP[event.type];
+        effectiveType === "task_status"
+          ? event.payload?.status
+          : TASK_EVENT_STATUS_MAP[effectiveType as keyof typeof TASK_EVENT_STATUS_MAP];
       if (newStatus && !isAutoApprovalRequested) {
         setTasks((prev) =>
           prev.map((task) =>

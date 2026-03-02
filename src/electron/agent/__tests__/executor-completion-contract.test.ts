@@ -3,6 +3,7 @@ import { TaskExecutor } from "../executor";
 
 type HarnessOptions = {
   prompt: string;
+  rawPrompt?: string;
   title?: string;
   lastOutput: string;
   createdFiles?: string[];
@@ -17,6 +18,7 @@ function createExecuteHarness(options: HarnessOptions) {
     id: "task-1",
     title: options.title || "Test task",
     prompt: options.prompt,
+    ...(options.rawPrompt ? { rawPrompt: options.rawPrompt } : {}),
     createdAt: Date.now() - 1000,
     currentAttempt: 0,
     maxAttempts: 1,
@@ -101,6 +103,60 @@ describe("TaskExecutor completion contract integration", () => {
     vi.clearAllMocks();
   });
 
+  it("short-circuits simple non-execute answer-first prompts without running plan execution", async () => {
+    const executor = createExecuteHarness({
+      title: "Ethics question",
+      prompt:
+        "Would you feel guilty if your efficiency caused job cuts in companies?\n\n[AGENT_STRATEGY_CONTEXT_V1]\nanswer_first=true\n[/AGENT_STRATEGY_CONTEXT_V1]",
+      lastOutput: "",
+      planStepDescription: "Draft a plan",
+    });
+    executor.task.agentConfig = {
+      executionMode: "propose",
+    };
+    (executor as Any).emitAnswerFirstResponse = vi.fn(async function emitAnswerFirstStub(this: Any) {
+      const text =
+        "I don't feel guilt, but this is a serious ethical risk and should be handled responsibly.";
+      this.lastAssistantOutput = text;
+      this.lastNonVerificationOutput = text;
+      this.lastAssistantText = text;
+    });
+
+    await (executor as Any).execute();
+
+    expect((executor as Any).emitAnswerFirstResponse).toHaveBeenCalledTimes(1);
+    expect(executor.createPlan).not.toHaveBeenCalled();
+    expect(executor.executePlan).not.toHaveBeenCalled();
+    expect(executor.daemon.completeTask).toHaveBeenCalledTimes(1);
+  });
+
+  it("short-circuits simple advice prompts even if stale executionMode is execute", async () => {
+    const executor = createExecuteHarness({
+      title: "Ethics question",
+      prompt:
+        "Would you feel guilty if your efficiency caused job cuts in companies?\n\n[AGENT_STRATEGY_CONTEXT_V1]\nanswer_first=true\n[/AGENT_STRATEGY_CONTEXT_V1]",
+      lastOutput: "",
+      planStepDescription: "Draft a plan",
+    });
+    executor.task.agentConfig = {
+      executionMode: "execute",
+      taskIntent: "advice",
+    };
+    (executor as Any).emitAnswerFirstResponse = vi.fn(async function emitAnswerFirstStub(this: Any) {
+      const text = "I don't feel guilt, but job impacts should be handled responsibly.";
+      this.lastAssistantOutput = text;
+      this.lastNonVerificationOutput = text;
+      this.lastAssistantText = text;
+    });
+
+    await (executor as Any).execute();
+
+    expect((executor as Any).emitAnswerFirstResponse).toHaveBeenCalledTimes(1);
+    expect(executor.createPlan).not.toHaveBeenCalled();
+    expect(executor.executePlan).not.toHaveBeenCalled();
+    expect(executor.daemon.completeTask).toHaveBeenCalledTimes(1);
+  });
+
   it("does not complete the task when a direct answer is required but missing", async () => {
     const executor = createExecuteHarness({
       title: "Video decision",
@@ -140,6 +196,105 @@ describe("TaskExecutor completion contract integration", () => {
       expect.objectContaining({
         status: "failed",
         error: expect.stringContaining("missing artifact evidence"),
+      }),
+    );
+  });
+
+  it("completes website tasks even when strategy context mentions docx artifacts", async () => {
+    const executor = createExecuteHarness({
+      title: "Windows 95 website",
+      prompt: `Create a fully working website simulating the Windows 95 UI.
+
+[AGENT_STRATEGY_CONTEXT_V1]
+relationship_memory:
+- Completed task: create a short word document where you write about ... Outcome: inner_world.docx
+[/AGENT_STRATEGY_CONTEXT_V1]`,
+      lastOutput: "Created files: index.html, styles/win95.css, scripts/desktop.js",
+      createdFiles: ["index.html", "styles/win95.css", "scripts/desktop.js"],
+      planStepDescription: "Implement website files",
+    });
+
+    await (executor as Any).execute();
+
+    expect(executor.daemon.completeTask).toHaveBeenCalledTimes(1);
+    expect(executor.daemon.updateTask).not.toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({
+        status: "failed",
+        error: expect.stringContaining("missing artifact evidence"),
+      }),
+    );
+  });
+
+  it("uses raw prompt for contract inference when runtime prompt metadata mentions docx", async () => {
+    const executor = createExecuteHarness({
+      title: "Windows 95 website",
+      rawPrompt: "Create a fully working website simulating the Windows 95 UI.",
+      prompt: `Create a fully working website simulating the Windows 95 UI.
+
+ADDITIONAL CONTEXT:
+DOCUMENT CREATION BEST PRACTICES:
+1. ONLY use create_document (docx/pdf) when the user explicitly requests DOCX or PDF format.`,
+      lastOutput: "Created files: index.html, styles/win95.css, scripts/desktop.js",
+      createdFiles: ["index.html", "styles/win95.css", "scripts/desktop.js"],
+      planStepDescription: "Implement website files",
+    });
+
+    await (executor as Any).execute();
+
+    expect(executor.daemon.completeTask).toHaveBeenCalledTimes(1);
+    expect(executor.daemon.updateTask).not.toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({
+        status: "failed",
+        error: expect.stringContaining("missing artifact evidence"),
+      }),
+    );
+  });
+
+  it("does not complete canvas build tasks when write_file and canvas_push evidence is missing", async () => {
+    const executor = createExecuteHarness({
+      title: "Competition demo",
+      prompt: "Build something to win this competition and show it in canvas.",
+      lastOutput: "Built and rendered an interactive prototype in canvas.",
+      createdFiles: ["prototype.html"],
+      planStepDescription: "Build an interactive app and show it in canvas",
+    });
+    (executor as Any).successfulToolUsageCounts = new Map();
+
+    await (executor as Any).execute();
+
+    expect(executor.daemon.completeTask).not.toHaveBeenCalled();
+    expect(executor.daemon.updateTask).toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({
+        status: "failed",
+        error: expect.stringContaining("missing required tool evidence"),
+      }),
+    );
+  });
+
+  it("completes canvas build tasks when write_file and canvas_push evidence is present", async () => {
+    const executor = createExecuteHarness({
+      title: "Competition demo",
+      prompt: "Build something to win this competition and show it in canvas.",
+      lastOutput: "Built and rendered an interactive prototype in canvas.",
+      createdFiles: ["prototype.html"],
+      planStepDescription: "Build an interactive app and show it in canvas",
+    });
+    (executor as Any).successfulToolUsageCounts = new Map([
+      ["write_file", 1],
+      ["canvas_push", 1],
+    ]);
+
+    await (executor as Any).execute();
+
+    expect(executor.daemon.completeTask).toHaveBeenCalledTimes(1);
+    expect(executor.daemon.updateTask).not.toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({
+        status: "failed",
+        error: expect.stringContaining("missing required tool evidence"),
       }),
     );
   });

@@ -137,7 +137,7 @@ export const CUSTOM_PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     id: "minimax",
     name: "MiniMax",
     compatibility: "openai",
-    baseUrl: "https://api.minimax.chat/v1",
+    baseUrl: "https://api.minimax.io/v1",
     defaultModel: "MiniMax-M2.1",
     apiKeyLabel: "API Key",
     apiKeyPlaceholder: "minimax-...",

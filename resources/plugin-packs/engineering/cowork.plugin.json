@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "description": "Code review, PR triage, test coverage analysis, dependency tracking, and technical documentation for software engineers.",
   "type": "pack",
-  "author": "CoWork-OSS",
+  "author": "CoWork OS",
   "keywords": ["engineering", "code-review", "testing", "development", "IC"],
   "icon": "👨‍💻",
   "category": "Engineering",

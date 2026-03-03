@@ -16,6 +16,8 @@ interface AppearanceSettingsProps {
   onAccentChange: (accent: AccentColor) => void;
   uiDensity: UiDensity;
   onUiDensityChange: (density: UiDensity) => void;
+  devRunLoggingEnabled: boolean;
+  onDevRunLoggingEnabledChange: (enabled: boolean) => void;
   onShowOnboarding?: () => void;
   onboardingCompletedAt?: string;
 }
@@ -29,6 +31,8 @@ export function AppearanceSettings({
   onAccentChange,
   uiDensity,
   onUiDensityChange,
+  devRunLoggingEnabled,
+  onDevRunLoggingEnabledChange,
   onShowOnboarding,
   onboardingCompletedAt,
 }: AppearanceSettingsProps) {
@@ -333,6 +337,22 @@ export function AppearanceSettings({
             </button>
           ))}
         </div>
+      </div>
+
+      <div className="appearance-section">
+        <h4>Developer logging</h4>
+        <p className="settings-description">
+          When enabled, <code>npm run dev</code> writes timestamped output to <code>logs/</code>{" "}
+          for troubleshooting.
+        </p>
+        <label className="settings-checkbox">
+          <input
+            type="checkbox"
+            checked={devRunLoggingEnabled}
+            onChange={(event) => onDevRunLoggingEnabledChange(event.target.checked)}
+          />
+          <span>Capture `npm run dev` logs to files (default: off)</span>
+        </label>
       </div>
     </div>
   );

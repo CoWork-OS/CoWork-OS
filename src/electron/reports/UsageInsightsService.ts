@@ -38,6 +38,24 @@ export interface UsageInsights {
 
   topSkills: Array<{ skill: string; count: number }>;
 
+  executionMetrics: {
+    totalPromptTokens: number;
+    totalCompletionTokens: number;
+    totalTokens: number;
+    totalLlmCalls: number;
+    avgTokensPerLlmCall: number | null;
+    avgTokensPerTask: number | null;
+    outputInputRatio: number | null;
+    totalToolCalls: number;
+    totalToolResults: number;
+    toolErrors: number;
+    toolBlocked: number;
+    toolWarnings: number;
+    toolCompletionRate: number | null;
+    uniqueTools: number;
+    topTools: Array<{ tool: string; calls: number; errors: number }>;
+  };
+
   awuMetrics: {
     /** Number of successfully completed tasks (terminal_status = 'ok', 'partial_success', or 'needs_user_action') */
     awuCount: number;
@@ -91,6 +109,13 @@ export class UsageInsightsService {
     const costMetrics = this.getCostMetrics(workspaceId, periodStart, periodEnd);
     const activityPattern = this.getActivityPattern(workspaceId, periodStart, periodEnd);
     const topSkills = this.getTopSkills(workspaceId, periodStart, periodEnd);
+    const executionMetrics = this.getExecutionMetrics(
+      workspaceId,
+      periodStart,
+      periodEnd,
+      taskMetrics,
+      costMetrics,
+    );
     const awuMetrics = this.getAwuMetrics(workspaceId, periodStart, periodEnd, costMetrics);
 
     const formatted = this.formatReport(
@@ -99,6 +124,7 @@ export class UsageInsightsService {
       costMetrics,
       activityPattern,
       topSkills,
+      executionMetrics,
       awuMetrics,
     );
 
@@ -111,6 +137,7 @@ export class UsageInsightsService {
       costMetrics,
       activityPattern,
       topSkills,
+      executionMetrics,
       awuMetrics,
       formatted,
     };
@@ -272,6 +299,152 @@ export class UsageInsightsService {
     }
   }
 
+  private getExecutionMetrics(
+    workspaceId: string | null,
+    periodStart: number,
+    periodEnd: number,
+    taskMetrics: UsageInsights["taskMetrics"],
+    costMetrics: UsageInsights["costMetrics"],
+  ): UsageInsights["executionMetrics"] {
+    const totalPromptTokens = costMetrics.totalInputTokens;
+    const totalCompletionTokens = costMetrics.totalOutputTokens;
+    const totalTokens = totalPromptTokens + totalCompletionTokens;
+    const totalLlmCalls = costMetrics.costByModel.reduce((sum, m) => sum + m.calls, 0);
+
+    const avgTokensPerLlmCall = totalLlmCalls > 0 ? Math.round(totalTokens / totalLlmCalls) : null;
+    const avgTokensPerTask =
+      taskMetrics.totalCreated > 0 ? Math.round(totalTokens / taskMetrics.totalCreated) : null;
+    const outputInputRatio = totalPromptTokens > 0 ? totalCompletionTokens / totalPromptTokens : null;
+
+    let totalToolCalls = 0;
+    let totalToolResults = 0;
+    let toolErrors = 0;
+    let toolBlocked = 0;
+    let toolWarnings = 0;
+    const toolMap = new Map<string, { calls: number; errors: number }>();
+
+    try {
+      const ws = wsFilter(workspaceId, "t.");
+      const rows = this.db
+        .prepare(
+          `SELECT te.type, te.legacy_type as legacy_type, te.payload
+           FROM task_events te
+           JOIN tasks t ON te.task_id = t.id
+           WHERE ${ws.clause}te.timestamp >= ? AND te.timestamp <= ?
+             AND (
+               te.type IN ('tool_call', 'tool_result', 'tool_error', 'tool_blocked', 'tool_warning')
+               OR te.legacy_type IN ('tool_call', 'tool_result', 'tool_error', 'tool_blocked', 'tool_warning')
+             )`,
+        )
+        .all(...ws.params, periodStart, periodEnd) as Array<{
+        type: string;
+        legacy_type?: string;
+        payload: string;
+      }>;
+
+      for (const row of rows) {
+        const eventType =
+          row.type === "tool_call" ||
+          row.type === "tool_result" ||
+          row.type === "tool_error" ||
+          row.type === "tool_blocked" ||
+          row.type === "tool_warning"
+            ? row.type
+            : row.legacy_type === "tool_call" ||
+                row.legacy_type === "tool_result" ||
+                row.legacy_type === "tool_error" ||
+                row.legacy_type === "tool_blocked" ||
+                row.legacy_type === "tool_warning"
+              ? row.legacy_type
+              : null;
+
+        if (!eventType) continue;
+
+        let tool = "";
+        try {
+          const payload = JSON.parse(row.payload);
+          tool =
+            (typeof payload?.tool === "string" && payload.tool) ||
+            (typeof payload?.name === "string" && payload.name) ||
+            (typeof payload?.toolName === "string" && payload.toolName) ||
+            "";
+        } catch {
+          // Ignore malformed payloads
+        }
+
+        if (tool && !toolMap.has(tool)) {
+          toolMap.set(tool, { calls: 0, errors: 0 });
+        }
+
+        if (eventType === "tool_call") {
+          totalToolCalls += 1;
+          if (tool && toolMap.has(tool)) {
+            const entry = toolMap.get(tool)!;
+            entry.calls += 1;
+            toolMap.set(tool, entry);
+          }
+          continue;
+        }
+
+        if (eventType === "tool_result") {
+          totalToolResults += 1;
+          continue;
+        }
+
+        if (eventType === "tool_error") {
+          toolErrors += 1;
+          if (tool && toolMap.has(tool)) {
+            const entry = toolMap.get(tool)!;
+            entry.errors += 1;
+            toolMap.set(tool, entry);
+          }
+          continue;
+        }
+
+        if (eventType === "tool_blocked") {
+          toolBlocked += 1;
+          continue;
+        }
+
+        if (eventType === "tool_warning") {
+          toolWarnings += 1;
+        }
+      }
+    } catch {
+      // Gracefully handle missing columns/table
+    }
+
+    const topTools = Array.from(toolMap.entries())
+      .map(([tool, data]) => ({ tool, calls: data.calls, errors: data.errors }))
+      .filter((tool) => tool.calls > 0 || tool.errors > 0)
+      .sort((a, b) => {
+        if (b.calls !== a.calls) return b.calls - a.calls;
+        return b.errors - a.errors;
+      })
+      .slice(0, 8);
+
+    const toolCompletionRate =
+      totalToolCalls > 0 ? Math.min(100, (totalToolResults / totalToolCalls) * 100) : null;
+
+    return {
+      totalPromptTokens,
+      totalCompletionTokens,
+      totalTokens,
+      totalLlmCalls,
+      avgTokensPerLlmCall,
+      avgTokensPerTask,
+      outputInputRatio,
+      totalToolCalls,
+      totalToolResults,
+      toolErrors,
+      toolBlocked,
+      toolWarnings,
+      toolCompletionRate,
+      uniqueTools: toolMap.size,
+      topTools,
+    };
+  }
+
   private countAwus(workspaceId: string | null, periodStart: number, periodEnd: number): number {
     try {
       const ws = wsFilter(workspaceId, "");
@@ -385,6 +558,7 @@ export class UsageInsightsService {
     costMetrics: UsageInsights["costMetrics"],
     activityPattern: UsageInsights["activityPattern"],
     topSkills: UsageInsights["topSkills"],
+    executionMetrics: UsageInsights["executionMetrics"],
     awuMetrics: UsageInsights["awuMetrics"],
   ): string {
     const lines: string[] = [];
@@ -415,6 +589,31 @@ export class UsageInsightsService {
         for (const m of costMetrics.costByModel.slice(0, 5)) {
           lines.push(`  - ${m.model}: $${m.cost.toFixed(4)} (${m.calls} calls)`);
         }
+      }
+      lines.push("");
+    }
+
+    if (executionMetrics.totalTokens > 0 || executionMetrics.totalToolCalls > 0) {
+      lines.push("**Token & Tool Insights:**");
+      lines.push(
+        `- Tokens: ${formatTokens(executionMetrics.totalPromptTokens)} prompt, ${formatTokens(executionMetrics.totalCompletionTokens)} completion, ${formatTokens(executionMetrics.totalTokens)} total`,
+      );
+      if (executionMetrics.totalLlmCalls > 0) {
+        lines.push(
+          `- LLM calls: ${executionMetrics.totalLlmCalls} (${formatTokens(executionMetrics.avgTokensPerLlmCall || 0)} avg tokens/call)`,
+        );
+      }
+      if (executionMetrics.totalToolCalls > 0) {
+        lines.push(
+          `- Tool calls: ${executionMetrics.totalToolCalls} (${executionMetrics.totalToolResults} results, ${executionMetrics.toolErrors} errors)`,
+        );
+      }
+      if (executionMetrics.topTools.length > 0) {
+        const top = executionMetrics.topTools
+          .slice(0, 3)
+          .map((t) => `${t.tool} (${t.calls})`)
+          .join(", ");
+        lines.push(`- Top tools: ${top}`);
       }
       lines.push("");
     }

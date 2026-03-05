@@ -146,35 +146,63 @@ export function MemoryHubSettings(props?: {
         <h3>Global Toggles</h3>
 
         <div className="settings-form-group">
-          <label className="settings-toggle">
-            <input
-              type="checkbox"
-              checked={features.contextPackInjectionEnabled}
-              onChange={(e) => saveFeatures({ contextPackInjectionEnabled: e.target.checked })}
-              disabled={saving}
-            />
-            <span className="settings-toggle-label">Enable Workspace Context Pack Injection</span>
-          </label>
-          <p className="settings-form-hint">
-            When enabled, the app may inject redacted notes from <code>.cowork/</code> into agent
-            context to improve continuity.
-          </p>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "flex-start",
+              gap: "12px",
+            }}
+          >
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontWeight: 500, color: "var(--color-text-primary)" }}>
+                Enable Workspace Context Pack Injection
+              </div>
+              <p className="settings-form-hint" style={{ marginTop: "4px", marginBottom: 0 }}>
+                When enabled, the app may inject redacted notes from <code>.cowork/</code> into
+                agent context to improve continuity.
+              </p>
+            </div>
+            <label className="settings-toggle" style={{ flexShrink: 0, marginTop: "2px" }}>
+              <input
+                type="checkbox"
+                checked={features.contextPackInjectionEnabled}
+                onChange={(e) => saveFeatures({ contextPackInjectionEnabled: e.target.checked })}
+                disabled={saving}
+              />
+              <span className="toggle-slider" />
+            </label>
+          </div>
         </div>
 
         <div className="settings-form-group">
-          <label className="settings-toggle">
-            <input
-              type="checkbox"
-              checked={features.heartbeatMaintenanceEnabled}
-              onChange={(e) => saveFeatures({ heartbeatMaintenanceEnabled: e.target.checked })}
-              disabled={saving}
-            />
-            <span className="settings-toggle-label">Enable Maintenance Heartbeats</span>
-          </label>
-          <p className="settings-form-hint">
-            When enabled, lead agents can create a daily maintenance task if{" "}
-            <code>.cowork/HEARTBEAT.md</code> exists.
-          </p>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "flex-start",
+              gap: "12px",
+            }}
+          >
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontWeight: 500, color: "var(--color-text-primary)" }}>
+                Enable Maintenance Heartbeats
+              </div>
+              <p className="settings-form-hint" style={{ marginTop: "4px", marginBottom: 0 }}>
+                When enabled, lead agents can create a daily maintenance task if{" "}
+                <code>.cowork/HEARTBEAT.md</code> exists.
+              </p>
+            </div>
+            <label className="settings-toggle" style={{ flexShrink: 0, marginTop: "2px" }}>
+              <input
+                type="checkbox"
+                checked={features.heartbeatMaintenanceEnabled}
+                onChange={(e) => saveFeatures({ heartbeatMaintenanceEnabled: e.target.checked })}
+                disabled={saving}
+              />
+              <span className="toggle-slider" />
+            </label>
+          </div>
         </div>
       </div>
 

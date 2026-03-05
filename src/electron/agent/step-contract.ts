@@ -179,6 +179,20 @@ export function descriptionHasWriteIntent(text: string): boolean {
     );
   if (explicitWriteVerb) return true;
 
+  const structuredWriteVerb = /\b(lock|define|specify|establish|set)\b/.test(desc);
+  if (structuredWriteVerb) {
+    const hasArtifactCue = descriptionHasArtifactCue(desc) || hasArtifactExtensionMention(desc);
+    const hasArtifactPath = extractArtifactPathCandidates(desc).length > 0;
+    const namingOnlyCue =
+      /\b(output|artifact|file)\s+name\b/.test(desc) ||
+      /\bname\s+(?:the\s+)?(?:output|artifact|file)\b/.test(desc) ||
+      /\bdefine\s+(?:the\s+)?(?:output|artifact|file)\s+name\b/.test(desc) ||
+      /\bset\s+(?:the\s+)?(?:output|artifact|file)\s+name\b/.test(desc);
+    if (!namingOnlyCue && (hasArtifactCue || hasArtifactPath)) {
+      return true;
+    }
+  }
+
   // "prepare" is ambiguous (often setup/planning only). Treat it as write-intent
   // only when paired with a concrete artifact/output cue.
   const prepareArtifactCue =
@@ -212,6 +226,12 @@ export function descriptionHasArtifactCue(text: string): boolean {
   return /\b(file|document|docx?|pdf|whitepaper|markdown|csv|xlsx|json|jsonl|txt|pptx|presentation|slides?|spec(?:ification)?|proposal|project|workspace|widget|xcode|scheme|entitlements?|plist|source code|code file)\b/.test(
     desc,
   );
+}
+
+export function descriptionHasChecklistReportCue(text: string): boolean {
+  const desc = String(text || "").toLowerCase();
+  if (!desc.trim()) return false;
+  return /\b(checklist|scorecard|qa|audit|report)\b/.test(desc);
 }
 
 export function deriveStepContractMode(opts: {

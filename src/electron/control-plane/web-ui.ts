@@ -160,6 +160,16 @@ export function getControlPlaneWebUIHtml(): string {
           <div class="hint">Approvals are log-only until you approve/deny. They auto-timeout after ~5 minutes.</div>
         </div>
 
+        <div class="card">
+          <h2>Input Requests</h2>
+          <div class="row" style="margin-bottom: 10px;">
+            <button class="btn" id="btnRefreshInputRequests" disabled>Refresh</button>
+            <span class="muted small" id="inputRequestCount"></span>
+          </div>
+          <div id="inputRequests"></div>
+          <div class="hint">Structured plan-mode prompts waiting for Submit/Dismiss.</div>
+        </div>
+
         <div class="card" style="grid-column: 1 / -1;">
           <h2>Status</h2>
           <div class="row" style="margin-bottom: 10px;">
@@ -374,6 +384,9 @@ export function getControlPlaneWebUIHtml(): string {
       const approvalsEl = el('approvals');
       const approvalCountEl = el('approvalCount');
       const btnRefreshApprovals = el('btnRefreshApprovals');
+      const inputRequestsEl = el('inputRequests');
+      const inputRequestCountEl = el('inputRequestCount');
+      const btnRefreshInputRequests = el('btnRefreshInputRequests');
 
       const btnRefreshStatus = el('btnRefreshStatus');
       const statusSummaryEl = el('statusSummary');
@@ -441,6 +454,7 @@ export function getControlPlaneWebUIHtml(): string {
       let workspaces = [];
       let tasks = [];
       let pendingApprovals = [];
+      let pendingInputRequests = [];
       let status = null;
       let channels = [];
 
@@ -490,6 +504,7 @@ export function getControlPlaneWebUIHtml(): string {
         btnDisconnect.disabled = !connected;
         btnRefresh.disabled = !connected;
         btnRefreshApprovals.disabled = !connected;
+        btnRefreshInputRequests.disabled = !connected;
         btnRefreshStatus.disabled = !connected;
         btnSaveLlm.disabled = !connected;
         btnRefreshChannels.disabled = !connected;
@@ -748,6 +763,148 @@ export function getControlPlaneWebUIHtml(): string {
         approvalsEl.appendChild(table);
       }
 
+      function buildDefaultInputAnswers(request) {
+        const answers = {};
+        const questions = Array.isArray(request?.questions) ? request.questions : [];
+        for (const question of questions) {
+          const id = typeof question?.id === 'string' ? question.id.trim() : '';
+          if (!id) continue;
+          const options = Array.isArray(question?.options) ? question.options : [];
+          const first = options.length > 0 ? options[0] : null;
+          if (first && typeof first.label === 'string' && first.label.trim()) {
+            answers[id] = { optionLabel: first.label.trim() };
+          } else {
+            answers[id] = {};
+          }
+        }
+        return answers;
+      }
+
+      function renderInputRequests() {
+        inputRequestCountEl.textContent = pendingInputRequests.length
+          ? pendingInputRequests.length + ' pending'
+          : 'No pending input requests';
+        inputRequestsEl.innerHTML = '';
+        if (pendingInputRequests.length === 0) return;
+
+        const table = document.createElement('table');
+        table.className = 'table';
+        table.innerHTML = '<thead><tr><th>When</th><th>Task</th><th>Prompt</th><th>Actions</th></tr></thead>';
+        const tbody = document.createElement('tbody');
+
+        for (const requestItem of pendingInputRequests) {
+          const tr = document.createElement('tr');
+
+          const when = document.createElement('td');
+          when.className = 'nowrap mono';
+          when.textContent = formatTs(requestItem.requestedAt || Date.now());
+
+          const taskTd = document.createElement('td');
+          taskTd.className = 'mono';
+          taskTd.textContent =
+            (requestItem.taskTitle ? requestItem.taskTitle + ' • ' : '') +
+            (requestItem.taskId || '').slice(0, 12);
+
+          const promptTd = document.createElement('td');
+          const questions = Array.isArray(requestItem.questions) ? requestItem.questions : [];
+          const lines = questions.map((q, idx) => {
+            const qText = typeof q?.question === 'string' ? q.question : '';
+            return (idx + 1) + '. ' + qText;
+          });
+          const pre = document.createElement('pre');
+          pre.className = 'mono';
+          pre.style.margin = '0';
+          pre.style.whiteSpace = 'pre-wrap';
+          pre.textContent = lines.join('\n');
+          promptTd.appendChild(pre);
+
+          if (questions.length > 0) {
+            const details = document.createElement('details');
+            const summary = document.createElement('summary');
+            summary.className = 'muted small';
+            summary.textContent = 'options';
+            const optionsPre = document.createElement('pre');
+            optionsPre.className = 'mono';
+            optionsPre.style.whiteSpace = 'pre-wrap';
+            optionsPre.textContent = safeJson(questions);
+            details.appendChild(summary);
+            details.appendChild(optionsPre);
+            promptTd.appendChild(details);
+          }
+
+          const actions = document.createElement('td');
+          const answerBox = document.createElement('textarea');
+          answerBox.className = 'mono';
+          answerBox.style.width = '100%';
+          answerBox.style.minHeight = '72px';
+          answerBox.value = safeJson(buildDefaultInputAnswers(requestItem));
+
+          const submitBtn = document.createElement('button');
+          submitBtn.className = 'btn primary';
+          submitBtn.textContent = 'Submit';
+          submitBtn.style.marginTop = '8px';
+
+          const dismissBtn = document.createElement('button');
+          dismissBtn.className = 'btn danger';
+          dismissBtn.textContent = 'Dismiss';
+          dismissBtn.style.marginTop = '8px';
+          dismissBtn.style.marginLeft = '8px';
+
+          submitBtn.onclick = async () => {
+            submitBtn.disabled = true;
+            dismissBtn.disabled = true;
+            try {
+              let parsedAnswers = {};
+              const raw = String(answerBox.value || '').trim();
+              if (raw) {
+                parsedAnswers = JSON.parse(raw);
+              }
+              await request('input_request.respond', {
+                requestId: requestItem.id,
+                status: 'submitted',
+                answers: parsedAnswers,
+              });
+              await refreshInputRequests();
+            } catch (error) {
+              alert('Submit failed: ' + (error?.message || error));
+            } finally {
+              submitBtn.disabled = false;
+              dismissBtn.disabled = false;
+            }
+          };
+
+          dismissBtn.onclick = async () => {
+            submitBtn.disabled = true;
+            dismissBtn.disabled = true;
+            try {
+              await request('input_request.respond', {
+                requestId: requestItem.id,
+                status: 'dismissed',
+              });
+              await refreshInputRequests();
+            } catch (error) {
+              alert('Dismiss failed: ' + (error?.message || error));
+            } finally {
+              submitBtn.disabled = false;
+              dismissBtn.disabled = false;
+            }
+          };
+
+          actions.appendChild(answerBox);
+          actions.appendChild(submitBtn);
+          actions.appendChild(dismissBtn);
+
+          tr.appendChild(when);
+          tr.appendChild(taskTd);
+          tr.appendChild(promptTd);
+          tr.appendChild(actions);
+          tbody.appendChild(tr);
+        }
+
+        table.appendChild(tbody);
+        inputRequestsEl.appendChild(table);
+      }
+
       function renderStatus() {
         if (!status) {
           statusSummaryEl.textContent = '';
@@ -870,8 +1027,21 @@ export function getControlPlaneWebUIHtml(): string {
         renderApprovals();
       }
 
+      async function refreshInputRequests() {
+        const res = await request('input_request.list', { limit: 100, offset: 0, status: 'pending' });
+        pendingInputRequests = (res && res.inputRequests) ? res.inputRequests : [];
+        renderInputRequests();
+      }
+
       async function refreshAll() {
-        await Promise.allSettled([refreshStatus(), refreshChannels(), refreshWorkspaces(), refreshTasks(), refreshApprovals()]);
+        await Promise.allSettled([
+          refreshStatus(),
+          refreshChannels(),
+          refreshWorkspaces(),
+          refreshTasks(),
+          refreshApprovals(),
+          refreshInputRequests(),
+        ]);
       }
 
       function onFrame(frame) {
@@ -900,6 +1070,13 @@ export function getControlPlaneWebUIHtml(): string {
               if (!evt?.payload?.autoApproved) {
                 refreshApprovals().catch(() => {});
               }
+            }
+            if (
+              type === 'input_request_created' ||
+              type === 'input_request_resolved' ||
+              type === 'input_request_dismissed'
+            ) {
+              refreshInputRequests().catch(() => {});
             }
           }
         }
@@ -972,6 +1149,8 @@ export function getControlPlaneWebUIHtml(): string {
       btnRefreshWorkspaces.onclick = () => refreshWorkspaces().catch((e) => alert(e?.message || e));
       btnRefreshTasks.onclick = () => refreshTasks().catch((e) => alert(e?.message || e));
       btnRefreshApprovals.onclick = () => refreshApprovals().catch((e) => alert(e?.message || e));
+      btnRefreshInputRequests.onclick = () =>
+        refreshInputRequests().catch((e) => alert(e?.message || e));
 
       llmProvider.onchange = () => {
         updateLlmSettingsPlaceholder();

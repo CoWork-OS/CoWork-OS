@@ -80,6 +80,115 @@ function isValidUsername(username: string | undefined): username is string {
   return /^[a-zA-Z0-9_-]{1,32}$/.test(username);
 }
 
+function getLeadingShellTokens(command: string, maxTokens = 16): string[] {
+  const tokens: string[] = [];
+  const pattern = /\s*(?:"([^"]*)"|'([^']*)'|(\S+))/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(command)) !== null && tokens.length < maxTokens) {
+    const token = match[1] ?? match[2] ?? match[3] ?? "";
+    if (!token) continue;
+    tokens.push(token);
+  }
+  return tokens;
+}
+
+function getExecutableTokenIndex(tokens: string[]): number {
+  const isEnvAssignment = (token: string): boolean =>
+    /^[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|\S*)$/.test(token);
+
+  let index = 0;
+  while (index < tokens.length && isEnvAssignment(tokens[index])) {
+    index += 1;
+  }
+
+  if (tokens[index] === "env") {
+    index += 1;
+    while (index < tokens.length && (tokens[index].startsWith("-") || isEnvAssignment(tokens[index]))) {
+      index += 1;
+    }
+  }
+  return index;
+}
+
+function isApplyPatchToken(token: string): boolean {
+  const executableName = token.split(/[\\/]/).pop()?.toLowerCase() || "";
+  return executableName === "apply_patch";
+}
+
+function tryExtractNestedShellCommand(executableName: string, args: string[]): string | null {
+  if (args.length === 0) return null;
+
+  const lowerExecutable = executableName.toLowerCase();
+  const isUnixShell =
+    lowerExecutable === "sh" ||
+    lowerExecutable === "bash" ||
+    lowerExecutable === "zsh" ||
+    lowerExecutable === "dash" ||
+    lowerExecutable === "ash" ||
+    lowerExecutable === "ksh" ||
+    lowerExecutable === "fish";
+  const isPowerShell = lowerExecutable === "powershell" || lowerExecutable === "pwsh";
+  const isCmd = lowerExecutable === "cmd" || lowerExecutable === "cmd.exe";
+
+  if (isUnixShell) {
+    for (let i = 0; i < args.length - 1; i += 1) {
+      const arg = args[i];
+      if (arg === "-c" || arg === "-lc" || arg === "-cl" || arg === "-ic" || arg === "-ci") {
+        return args[i + 1] || null;
+      }
+    }
+    return null;
+  }
+
+  if (isPowerShell) {
+    for (let i = 0; i < args.length - 1; i += 1) {
+      const arg = args[i].toLowerCase();
+      if (arg === "-command" || arg === "-c") {
+        return args[i + 1] || null;
+      }
+    }
+    return null;
+  }
+
+  if (isCmd) {
+    for (let i = 0; i < args.length - 1; i += 1) {
+      const arg = args[i].toLowerCase();
+      if (arg === "/c" || arg === "/k") {
+        return args[i + 1] || null;
+      }
+    }
+    return null;
+  }
+
+  return null;
+}
+
+function containsApplyPatchCommandBoundary(command: string): boolean {
+  const normalized = String(command || "").trim();
+  if (!normalized) return false;
+  return /(?:^|&&\s*|\|\|\s*|[;|]\s*)apply_patch(?:\s|$)/i.test(normalized);
+}
+
+function isDirectApplyPatchInvocation(command: string, depth = 0): boolean {
+  if (depth > 3) return false;
+  const tokens = getLeadingShellTokens(command, 64);
+  if (tokens.length === 0) return false;
+
+  const executableIndex = getExecutableTokenIndex(tokens);
+  const executable = tokens[executableIndex] || "";
+  if (!executable) return false;
+  if (isApplyPatchToken(executable)) return true;
+
+  const executableName = executable.split(/[\\/]/).pop()?.toLowerCase() || "";
+  const nestedCommand = tryExtractNestedShellCommand(
+    executableName,
+    tokens.slice(executableIndex + 1),
+  );
+  if (!nestedCommand) return false;
+  if (containsApplyPatchCommandBoundary(nestedCommand)) return true;
+  return isDirectApplyPatchInvocation(nestedCommand, depth + 1);
+}
+
 function resolveShellForCommandExecution(): string {
   if (process.platform === "win32") {
     // Prefer PowerShell 7+ (pwsh), then Windows PowerShell, then cmd.exe
@@ -520,6 +629,20 @@ export class ShellTools {
       );
     }
 
+    const applyPatchViaShell = isDirectApplyPatchInvocation(String(command || ""));
+    if (applyPatchViaShell) {
+      const remediation =
+        "Tool protocol violation: run_command cannot invoke apply_patch. Use the apply_patch tool directly.";
+      this.daemon.logEvent(this.taskId, "tool_protocol_violation", {
+        tool: "run_command",
+        command,
+        reason: "apply_patch_via_shell",
+        remediation: "use_apply_patch_tool_directly",
+        message: remediation,
+      });
+      throw new Error(remediation);
+    }
+
     // Check if command is trusted (auto-approve without user confirmation)
     const trustCheck = GuardrailManager.isCommandTrusted(command);
     const autoApproveEnabled = BuiltinToolsSettingsManager.getToolAutoApprove("run_command");
@@ -574,8 +697,8 @@ export class ShellTools {
           this.taskId,
           "run_command",
           bundleEligible
-            ? `Run command (single approval bundle for this task): ${command}`
-            : `Run command: ${command}`,
+            ? `Running command (single approval bundle for this task): ${command}`
+            : `Running command: ${command}`,
           {
             command,
             cwd: options?.cwd || this.workspace.path,

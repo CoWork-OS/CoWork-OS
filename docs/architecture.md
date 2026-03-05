@@ -124,6 +124,7 @@ Notes on "skills":
   - Workspace skills: `<workspace>/skills/`
   - Managed skills: Electron `userData/skills/` (on macOS typically `~/Library/Application Support/cowork-os/skills/`)
   - Bundled skills: `resources/skills/` (includes use-case templates: booking options, draft reply, family digest, household capture, newsletter digest, transaction scan, inbox manager, chief-of-staff briefing, smart-home brain, dev task queue, figure-it-out agent)
+- Managed and workspace skills can also use a sibling directory named after the skill ID (for example `webxr-dev.json` plus `webxr-dev/`). When present, `{baseDir}` resolves to that sibling directory so the skill can load `SKILL.md`, `references/`, and `scripts/`.
 
 ### 3. Messaging Gateway (Channels)
 

@@ -197,6 +197,10 @@ CoWork OS uses a JSON-based skill format. If your existing platform exports skil
 ~/Library/Application Support/cowork-os/skills/
 ```
 
+For Codex-style skill repos that only ship a `SKILL.md`, create a CoWork manifest such as `webxr-dev.json` and, if you want to preserve bundled instructions, add a sibling directory such as `webxr-dev/SKILL.md`. The same sidecar directory can also contain `references/` and `scripts/` that the prompt references through `{baseDir}`.
+
+To invoke an imported managed skill, mention it explicitly in the prompt by ID, for example: `Use the webxr-dev skill to add teleport locomotion to my Three.js Quest scene.` The `/skill <id>` command only toggles a skill on or off; it does not execute the skill as a slash command.
+
 ### Do I need to re-pair users?
 
 Yes. CoWork OS maintains its own pairing database. Users will need to pair again using the pairing code flow.

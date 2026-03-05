@@ -45,5 +45,57 @@ describe("TimelineEmitter", () => {
       }),
     );
   });
-});
 
+  it("emits lane step start with explicit group id", () => {
+    const emit = vi.fn();
+    const timeline = createTimelineEmitter("task-1", emit);
+
+    timeline.startStep(
+      {
+        id: "tool_lane:step:use-1",
+        description: "Running web_search",
+      },
+      {
+        groupId: "tools:step:build:1",
+        actor: "tool",
+      },
+    );
+
+    expect(emit).toHaveBeenCalledWith(
+      "timeline_step_started",
+      expect.objectContaining({
+        stepId: "tool_lane:step:use-1",
+        groupId: "tools:step:build:1",
+        status: "in_progress",
+        actor: "tool",
+      }),
+    );
+  });
+
+  it("emits lane step finish with final status and group id", () => {
+    const emit = vi.fn();
+    const timeline = createTimelineEmitter("task-1", emit);
+
+    timeline.finishStep(
+      {
+        id: "tool_lane:follow_up:use-2",
+        description: "Running web_fetch",
+      },
+      {
+        groupId: "tools:follow_up:build:2",
+        actor: "tool",
+        status: "failed",
+      },
+    );
+
+    expect(emit).toHaveBeenCalledWith(
+      "timeline_step_finished",
+      expect.objectContaining({
+        stepId: "tool_lane:follow_up:use-2",
+        groupId: "tools:follow_up:build:2",
+        status: "failed",
+        actor: "tool",
+      }),
+    );
+  });
+});

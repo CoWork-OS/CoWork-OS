@@ -293,6 +293,36 @@ describe("AgentDaemon.completeTask", () => {
     );
   });
 
+  it("does not block completion for failed tool-lane steps", () => {
+    const daemonLike = createDaemonLike();
+    daemonLike.failedPlanStepsByTask.set("task-1", new Set(["tool_lane:step:use-1"]));
+    daemonLike.knownPlanStepIdsByTask.set("task-1", new Set(["tool_lane:step:use-1"]));
+    daemonLike.normalizeStepIdForPlanTracking = AgentDaemon.prototype["normalizeStepIdForPlanTracking"];
+    daemonLike.isSyntheticNonPlanStepId = AgentDaemon.prototype["isSyntheticNonPlanStepId"];
+    daemonLike.isKnownPlanStepId = AgentDaemon.prototype["isKnownPlanStepId"];
+    daemonLike.getUnresolvedFailedSteps = AgentDaemon.prototype["getUnresolvedFailedSteps"];
+
+    AgentDaemon.prototype.completeTask.call(daemonLike, "task-1", "done", {
+      terminalStatus: "partial_success",
+      failureClass: "contract_error",
+    });
+
+    expect(daemonLike.taskRepo.update).toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({
+        status: "completed",
+        terminalStatus: "partial_success",
+        failureClass: "contract_error",
+      }),
+    );
+    expect(daemonLike.taskRepo.update).not.toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({
+        status: "failed",
+      }),
+    );
+  });
+
   it("blocks completion when mutation-required failures are reported by executor metadata", () => {
     const daemonLike = createDaemonLike();
     daemonLike.getUnresolvedFailedSteps.mockReturnValue([]);

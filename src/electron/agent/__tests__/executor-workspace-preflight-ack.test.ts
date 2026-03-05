@@ -761,6 +761,45 @@ describe("TaskExecutor workspace preflight acknowledgement", () => {
     );
   });
 
+  it("does not pin task root from non-scaffold timing phrases", () => {
+    const fakeThis: Any = Object.create((TaskExecutor as Any).prototype);
+    fakeThis.workspace = { path: process.cwd() };
+    fakeThis.emitEvent = vi.fn();
+    fakeThis.reliabilityTaskRootPinningV6Enabled = true;
+    fakeThis.reliabilityPathDriftRewriteV6Enabled = true;
+    fakeThis.reliabilityPathDriftRetryV6Enabled = true;
+    fakeThis.reliabilityWorkspaceAliasRewriteV5Enabled = false;
+    fakeThis.taskPathRootPolicy = "pin_and_rewrite";
+    fakeThis.taskPinnedRoot = ".";
+    fakeThis.taskPinnedRootSource = "unset";
+    fakeThis.stepAliasPathHints = Object.create(null);
+
+    const plan = {
+      description: "Research recent AI agent updates",
+      steps: [
+        {
+          id: "1",
+          description:
+            "Verify that all referenced sources are within the last 24 hours and summarize the findings.",
+          kind: "verification",
+          status: "pending",
+        },
+      ],
+    };
+
+    (TaskExecutor as Any).prototype.sanitizePlan.call(fakeThis, plan);
+    expect(fakeThis.taskPinnedRoot).toBe(".");
+    expect(
+      fakeThis.emitEvent.mock.calls.some(
+        (call: Any[]) =>
+          call[0] === "task_path_root_pinned" &&
+          call[1] &&
+          typeof call[1] === "object" &&
+          call[1].root === "the",
+      ),
+    ).toBe(false);
+  });
+
   it("auto-recovers relative path drift to pinned root with retry budget", async () => {
     const fakeThis: Any = Object.create((TaskExecutor as Any).prototype);
     fakeThis.workspace = { path: process.cwd() };

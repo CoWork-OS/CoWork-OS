@@ -7788,30 +7788,32 @@ function renderEventDetails(
     const refs = Array.isArray(event.payload?.evidenceRefs) ? event.payload.evidenceRefs : [];
     if (!refs.length) return null;
     return (
-      <div className="event-details">
-        <div style={{ marginBottom: 8, fontWeight: 500 }}>Evidence</div>
-        <ul style={{ margin: 0, paddingLeft: 18 }}>
-          {refs.map((entry: Any, index: number) => {
-            const source =
-              typeof entry?.sourceUrlOrPath === "string" ? entry.sourceUrlOrPath.trim() : "";
-            if (!source) return null;
-            const snippet =
-              typeof entry?.snippet === "string" ? stripHtmlTags(entry.snippet) : "";
-            const label = snippet || source;
-            const isWeb = /^https?:\/\//i.test(source);
-            return (
-              <li key={`${source}-${index}`} style={{ marginBottom: 4 }}>
-                {isWeb ? (
-                  <a href={source} target="_blank" rel="noreferrer">
-                    {label}
-                  </a>
-                ) : (
-                  <span>{label}</span>
-                )}
-              </li>
-            );
-          })}
-        </ul>
+      <div className="event-details evidence-event-details">
+        <div className="evidence-event-details-title">Evidence</div>
+        <div className="evidence-event-details-scroll">
+          <ul className="evidence-event-details-list">
+            {refs.map((entry: Any, index: number) => {
+              const source =
+                typeof entry?.sourceUrlOrPath === "string" ? entry.sourceUrlOrPath.trim() : "";
+              if (!source) return null;
+              const snippet =
+                typeof entry?.snippet === "string" ? stripHtmlTags(entry.snippet) : "";
+              const label = snippet || source;
+              const isWeb = /^https?:\/\//i.test(source);
+              return (
+                <li key={`${source}-${index}`} className="evidence-event-details-item">
+                  {isWeb ? (
+                    <a href={source} target="_blank" rel="noreferrer">
+                      {label}
+                    </a>
+                  ) : (
+                    <span>{label}</span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
       </div>
     );
   }

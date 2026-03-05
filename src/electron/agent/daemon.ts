@@ -2616,8 +2616,10 @@ export class AgentDaemon extends EventEmitter {
     if (!stepId) return true;
     return (
       stepId.startsWith("tool:") ||
+      stepId.startsWith("tool_lane:") ||
       stepId.startsWith("command:") ||
       stepId.startsWith("task:") ||
+      stepId.startsWith("timeline:") ||
       stepId.startsWith("completion_gate:") ||
       stepId.startsWith("evidence_gate:")
     );

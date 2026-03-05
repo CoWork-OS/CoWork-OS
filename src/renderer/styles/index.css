@@ -3675,6 +3675,44 @@ a,
   word-wrap: break-word;
 }
 
+.evidence-event-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.evidence-event-details-title {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 0;
+  font-weight: 600;
+  background: var(--color-bg-secondary);
+}
+
+.evidence-event-details-scroll {
+  max-height: min(320px, 45vh);
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 6px;
+}
+
+.evidence-event-details-list {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.evidence-event-details-item + .evidence-event-details-item {
+  margin-top: 8px;
+}
+
+.evidence-event-details-list a,
+.evidence-event-details-list span {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .event-details.assistant-message {
   font-family: var(--font-ui);
   font-size: 14px;

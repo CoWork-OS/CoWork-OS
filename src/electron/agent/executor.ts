@@ -1941,7 +1941,17 @@ export class TaskExecutor {
   }
 
   private inferTaskPinnedRootFromPlan(steps: PlanStep[], planDescription: string): string | null {
-    const searchTexts = [planDescription, ...steps.map((step) => String(step?.description || ""))];
+    const searchTexts: string[] = [];
+    const normalizedPlanDescription = String(planDescription || "");
+    if (descriptionHasScaffoldIntent(normalizedPlanDescription)) {
+      searchTexts.push(normalizedPlanDescription);
+    }
+    for (const step of steps) {
+      const description = String(step?.description || "");
+      if (descriptionHasScaffoldIntent(description)) {
+        searchTexts.push(description);
+      }
+    }
     for (const text of searchTexts) {
       const rootCues = this.extractRootCueCandidatesFromText(text);
       for (const cue of rootCues) {

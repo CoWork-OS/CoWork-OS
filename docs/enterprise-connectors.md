@@ -259,6 +259,31 @@ These are included in the local MCP registry and appear in **Settings → MCP Se
 - DocuSign (E-signatures — OAuth)
 - Outreach (Sales engagement — OAuth)
 
+## Chat Setup Orchestration (Tier-1)
+
+The runtime now exposes a provider-agnostic setup tool for Tier-1 connectors:
+
+- Tool: `integration_setup`
+- Actions: `list`, `inspect`, `configure`
+- Providers: `resend`, `slack`, `gmail`, `google-calendar`, `google-drive`, `jira`, `linear`, `hubspot`
+
+Operational contract:
+
+- `list`: returns install/config/connect/ready status for each Tier-1 provider
+- `inspect`: returns missing inputs and a deterministic `plan_hash`
+- `configure`: can install, apply env/OAuth settings, connect, and health-check
+- `expected_plan_hash` can be passed to `configure`; if stale, configure fails safely with `stale_plan=true` and performs no mutation
+- Resend keeps provider-specific inbound webhook configuration (`enable_inbound`, `webhook_secret`)
+
+Shared capability metadata now drives both:
+
+- chat setup semantics (`integration_setup`)
+- MCP auto-connect readiness checks
+
+This removes drift between configuration UI/runtime behavior and connector readiness detection.
+
+See [Integration Setup, Skill Proposals, and Bootstrap Lifecycle](integration-skill-bootstrap-lifecycle.md) for full payload examples and response fields.
+
 ## Phase 1 Exit Criteria
 
 - Connector contract documented (this file).

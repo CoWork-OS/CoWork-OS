@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <strong>Looking for an OpenClaw alternative? CoWork OS is a local-first option for production workflows.</strong><br>
+  <strong>CoWork OS is a local-first option for production workflows.</strong><br>
   Security-hardened, local-first AI operating system — 30+ LLM providers, 15 channels, 139 skills
 </p>
 
@@ -22,7 +22,7 @@
 <p align="center">
   <a href="docs/getting-started.md">Getting Started</a> &middot;
   <a href="docs/showcase.md">Use Cases</a> &middot;
-  <a href="docs/openclaw-comparison.md">OpenClaw Alternative Guide</a> &middot;
+  <a href="docs/integration-skill-bootstrap-lifecycle.md">Platform Updates</a> &middot;
   <a href="docs/">Documentation</a> &middot;
   <a href="CHANGELOG.md">Changelog</a> &middot;
   <a href="SECURITY.md">Security</a> &middot;
@@ -50,19 +50,15 @@
 - **Security-first** — Approval workflows, sandboxed execution, configurable guardrails, encrypted storage, and 3200+ tests.
 - **Local-first & BYOK** — Your data and API keys stay on your machine. No telemetry. No middleman.
 
-### Looking for an OpenClaw Alternative?
+### Recent Platform Updates
 
-OpenClaw has a large and passionate community for agent experimentation. CoWork OS is a respectful alternative for teams and builders who want local-first operations with approvals, guardrails, and reliable multi-channel execution.
+The latest runtime updates add three core capabilities:
 
-| Positioning Lens | OpenClaw | CoWork OS |
-|---|---|---|
-| Category | Agent toolkit / experimentation layer | Security-hardened AI operating system |
-| Primary use case | Build and iterate on agent workflows | Run agent workflows in production |
-| Security posture | Varies by workflow and setup | Built-in approvals, guardrails, sandbox isolation, encrypted local storage |
-| Runtime surfaces | CLI-centric control paths | Desktop app + headless daemon + 15-channel gateway |
-| Data ownership model | BYOK/self-hosting workflows | Local-first, BYOK, no telemetry, optional offline Ollama |
+- **Tier-1 chat integration setup** with `integration_setup` (`list`, `inspect`, `configure`), OAuth support, and stale-plan safety via `expected_plan_hash`
+- **Approval-gated skill expansion** with `skill_proposal` (`create`, `list`, `approve`, `reject`) and workspace-local proposal persistence
+- **Workspace bootstrap + heartbeat alignment** with `.cowork/BOOTSTRAP.md`, `.cowork/VIBES.md`, `.cowork/LORE.md`, onboarding lifecycle state, and proactive task frequency enforcement
 
-See the full guide: [OpenClaw alternative: CoWork OS vs OpenClaw](docs/openclaw-comparison.md)
+See [Integration Setup, Skill Proposals, and Bootstrap Lifecycle](docs/integration-skill-bootstrap-lifecycle.md) for full implementation details and testing scenarios.
 
 ## Quick Start
 
@@ -334,11 +330,11 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
 | [Getting Started](docs/getting-started.md) | First-time setup and usage |
 | [Use Case Showcase](docs/showcase.md) | Comprehensive guide to what you can build and automate |
 | [Features](docs/features.md) | Complete feature reference |
-| [OpenClaw Alternative Guide](docs/openclaw-comparison.md) | Respectful category framing for users evaluating an OpenClaw alternative |
+| [Platform Updates](docs/integration-skill-bootstrap-lifecycle.md) | Detailed implementation notes for integration setup, skill proposals, and bootstrap lifecycle |
 | [Channels](docs/channels.md) | Messaging channel setup (15 channels) |
 | [X Mention Triggers](docs/x-mention-triggers.md) | Configure `do:` mention-triggered task ingress on desktop and headless |
 | [Providers](docs/providers.md) | LLM provider configuration |
-| [Migration from OpenClaw](docs/migration.md#from-openclaw-to-cowork-os) | Practical checklist for teams moving from OpenClaw to CoWork OS |
+| [Migration Guide](docs/migration.md) | Migration checklist and compatibility notes |
 | [Development](docs/development.md) | Build from source, project structure |
 | [Architecture](docs/architecture.md) | Technical architecture deep-dive |
 | [Security Guide](docs/security-guide.md) | Security model and best practices |

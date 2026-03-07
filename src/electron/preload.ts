@@ -1162,6 +1162,8 @@ interface CronJob {
   name: string;
   description?: string;
   enabled: boolean;
+  shellAccess?: boolean;
+  allowUserInput?: boolean;
   deleteAfterRun?: boolean;
   createdAtMs: number;
   updatedAtMs: number;
@@ -1180,6 +1182,8 @@ interface CronJobCreate {
   name: string;
   description?: string;
   enabled: boolean;
+  shellAccess?: boolean;
+  allowUserInput?: boolean;
   deleteAfterRun?: boolean;
   schedule: CronSchedule;
   workspaceId: string;
@@ -1195,6 +1199,8 @@ interface CronJobPatch {
   name?: string;
   description?: string;
   enabled?: boolean;
+  shellAccess?: boolean;
+  allowUserInput?: boolean;
   deleteAfterRun?: boolean;
   schedule?: CronSchedule;
   workspaceId?: string;

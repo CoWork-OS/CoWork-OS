@@ -4690,6 +4690,10 @@ export class AgentDaemon extends EventEmitter {
       return desc.includes("verify:") || desc.includes("verification") || desc.includes("verify ");
     };
     const historicalEvents = this.getTaskEventsForReplay(taskId);
+    const trimmedSummary =
+      typeof resultSummary === "string" && resultSummary.trim().length > 0
+        ? resultSummary.trim()
+        : undefined;
     const unresolvedFailedSteps = this.getUnresolvedFailedSteps(taskId);
     const timelineErrorStepIds = Array.from(this.timelineErrorsByTask.get(taskId) || new Set<string>())
       .map((id) => String(id || "").trim())
@@ -4880,6 +4884,7 @@ export class AgentDaemon extends EventEmitter {
 
     const autoWaivedVerificationStepIds: string[] = [];
     const autoWaivedBudgetStepIds: string[] = [];
+    const autoWaivedEvidenceBackedStepIds = new Set<string>();
     const mutationContractBlockers = Array.from(failedMutationRequiredStepIds.values());
     const mutationContractBlockersNormalized = new Set(
       mutationContractBlockers.map((id) => normalizeStepIdForComparison(id)),
@@ -4888,15 +4893,11 @@ export class AgentDaemon extends EventEmitter {
       metadata?.terminalStatus === "partial_success" &&
       metadata?.failureClass === "budget_exhausted" &&
       ((metadata?.waiveFailedStepIds || []).length === 0);
+    const allowEvidenceBackedAutoWaive =
+      metadata?.terminalStatus === "partial_success" &&
+      (((metadata?.outputSummary?.outputCount || 0) > 0) || (trimmedSummary?.length || 0) >= 160);
     let blockingFailedSteps = unresolvedFailedSteps.filter((id) => {
       const normalized = normalizeStepIdForComparison(id);
-      if (
-        failedMutationRequiredStepIds.has(id) ||
-        failedMutationRequiredNormalizedStepIds.has(normalized) ||
-        mutationContractBlockersNormalized.has(normalized)
-      ) {
-        return true;
-      }
       if (waivedFailedStepIds.has(id) || waivedNormalizedStepIds.has(normalized)) {
         return false;
       }
@@ -4912,9 +4913,24 @@ export class AgentDaemon extends EventEmitter {
         autoWaivedBudgetStepIds.push(id);
         return false;
       }
+      if (allowEvidenceBackedAutoWaive && !isVerificationFailureStep(id)) {
+        autoWaivedEvidenceBackedStepIds.add(id);
+        return false;
+      }
+      if (
+        failedMutationRequiredStepIds.has(id) ||
+        failedMutationRequiredNormalizedStepIds.has(normalized) ||
+        mutationContractBlockersNormalized.has(normalized)
+      ) {
+        return true;
+      }
       return true;
     });
     for (const stepId of mutationContractBlockers) {
+      if (allowEvidenceBackedAutoWaive && !isVerificationFailureStep(stepId)) {
+        autoWaivedEvidenceBackedStepIds.add(stepId);
+        continue;
+      }
       const normalized = normalizeStepIdForComparison(stepId);
       if (
         !blockingFailedSteps.some(
@@ -4968,6 +4984,31 @@ export class AgentDaemon extends EventEmitter {
         legacyType: "progress_update",
       });
       blockingFailedSteps = blockingFailedSteps.filter((id) => !autoWaivedBudgetStepIds.includes(id));
+    }
+    if (autoWaivedEvidenceBackedStepIds.size > 0) {
+      const autoWaivedStepIds = Array.from(autoWaivedEvidenceBackedStepIds.values());
+      for (const stepId of autoWaivedStepIds) {
+        waivedFailedStepIds.add(stepId);
+        waivedNormalizedStepIds.add(normalizeStepIdForComparison(stepId));
+      }
+      this.logEvent(taskId, "log", {
+        metric: "completion_gate_auto_waive_evidence_backed_steps",
+        blocked: false,
+        autoWaivedStepIds,
+        outputSummary: metadata?.outputSummary,
+        terminalStatusReason: metadata?.terminalStatusReason,
+      });
+      this.logEvent(taskId, "timeline_step_updated", {
+        stepId: "completion_gate:auto_waive_evidence_backed",
+        status: "in_progress",
+        actor: "system",
+        message:
+          "Auto-waived failed steps because the task already produced substantive outputs/results and is completing as partial_success.",
+        autoWaivedStepIds,
+        gate: "completion_failed_step_gate",
+        legacyType: "progress_update",
+      });
+      blockingFailedSteps = blockingFailedSteps.filter((id) => !autoWaivedEvidenceBackedStepIds.has(id));
     }
     blockingFailedSteps = Array.from(
       new Set(
@@ -5059,10 +5100,6 @@ export class AgentDaemon extends EventEmitter {
         inferMutationFromSummary(metadata?.outputSummary) || risk.signals.changedFileCount > 0,
     });
 
-    const trimmedSummary =
-      typeof resultSummary === "string" && resultSummary.trim().length > 0
-        ? resultSummary.trim()
-        : undefined;
     let terminalStatus: NonNullable<Task["terminalStatus"]> = metadata?.terminalStatus || "ok";
     let failureClass: Task["failureClass"] | undefined = metadata?.failureClass || undefined;
     if (this.verificationOutcomeV2Enabled && metadata?.verificationOutcome === "pending_user_action") {

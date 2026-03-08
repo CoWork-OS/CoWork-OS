@@ -30,5 +30,6 @@ describe("TASK_EVENT_STATUS_MAP", () => {
   it("does not force terminal failure on intermediate execution failures", () => {
     expect(TASK_EVENT_STATUS_MAP.step_failed).toBeUndefined();
     expect(TASK_EVENT_STATUS_MAP.verification_failed).toBeUndefined();
+    expect(TASK_EVENT_STATUS_MAP.timeline_error).toBeUndefined();
   });
 });

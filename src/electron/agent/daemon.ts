@@ -65,6 +65,7 @@ import {
 import { createTimelineEmitter } from "./timeline-emitter";
 import { TaskExecutor } from "./executor";
 import { TaskQueueManager } from "./queue-manager";
+import { decideTaskOutcome, getTaskBestKnownOutcome, hasSubstantiveOutcomeEvidence } from "./outcome-policy";
 import { approvalIdempotency, taskIdempotency as _taskIdempotency, IdempotencyManager } from "../security/concurrency";
 import { MemoryService } from "../memory/MemoryService";
 import { GuardrailManager } from "../guardrails/guardrail-manager";
@@ -2104,7 +2105,11 @@ export class AgentDaemon extends EventEmitter {
       status: "pending",
     });
 
-    this.updateTaskStatus(taskId, "paused");
+    this.updateTask(taskId, {
+      status: "paused",
+      terminalStatus: "needs_user_action",
+      failureClass: undefined,
+    });
     this.logEvent(taskId, "input_request_created", { request });
     this.logEvent(taskId, "task_paused", {
       message: "Waiting for structured user input.",
@@ -2185,6 +2190,12 @@ export class AgentDaemon extends EventEmitter {
       requestedAt: Date.now(),
     });
 
+    this.updateTask(taskId, {
+      status: "blocked",
+      terminalStatus: "awaiting_approval",
+      failureClass: undefined,
+    });
+
     // Emit event to UI
     this.logEvent(taskId, "approval_requested", { approval });
 
@@ -2198,6 +2209,12 @@ export class AgentDaemon extends EventEmitter {
             pending.resolved = true;
             this.pendingApprovals.delete(approval.id);
             this.approvalRepo.update(approval.id, "denied");
+            this.updateTask(taskId, {
+              status: "paused",
+              terminalStatus: "needs_user_action",
+              failureClass: undefined,
+              error: "Approval request timed out",
+            });
             this.logEvent(taskId, "approval_denied", {
               approvalId: approval.id,
               reason: "timeout",
@@ -2258,6 +2275,12 @@ export class AgentDaemon extends EventEmitter {
 
         this.pendingApprovals.delete(approvalId);
         this.approvalRepo.update(approvalId, approved ? "approved" : "denied");
+        this.updateTask(pending.taskId, {
+          status: approved ? "executing" : "paused",
+          terminalStatus: approved ? undefined : "needs_user_action",
+          failureClass: undefined,
+          error: approved ? null : "User denied approval",
+        });
 
         // Emit event so UI knows the approval has been handled
         const eventType = approved ? "approval_granted" : "approval_denied";
@@ -2329,9 +2352,17 @@ export class AgentDaemon extends EventEmitter {
 
       if (!isTerminalTask) {
         if (response.status === "submitted") {
-          this.updateTaskStatus(request.taskId, "executing");
+          this.updateTask(request.taskId, {
+            status: "executing",
+            terminalStatus: undefined,
+            failureClass: undefined,
+          });
         } else {
-          this.updateTaskStatus(request.taskId, "paused");
+          this.updateTask(request.taskId, {
+            status: "paused",
+            terminalStatus: "needs_user_action",
+            failureClass: undefined,
+          });
         }
       }
 
@@ -4252,6 +4283,7 @@ export class AgentDaemon extends EventEmitter {
         | "lastCompactionTokensAfter"
         | "noProgressStreak"
         | "lastLoopFingerprint"
+        | "bestKnownOutcome"
       >
     >,
   ): void {
@@ -4656,6 +4688,7 @@ export class AgentDaemon extends EventEmitter {
       waivedVerificationStepIds?: string[];
       terminalStatusReason?: string;
       nonBlockingFailedStepIds?: string[];
+      bestKnownOutcome?: Task["bestKnownOutcome"];
       verificationOutcome?: VerificationOutcome;
       verificationScope?: VerificationScope;
       verificationEvidenceMode?: VerificationEvidenceMode;
@@ -4694,6 +4727,7 @@ export class AgentDaemon extends EventEmitter {
       typeof resultSummary === "string" && resultSummary.trim().length > 0
         ? resultSummary.trim()
         : undefined;
+    const bestKnownOutcome = metadata?.bestKnownOutcome || getTaskBestKnownOutcome(existingTask);
     const unresolvedFailedSteps = this.getUnresolvedFailedSteps(taskId);
     const timelineErrorStepIds = Array.from(this.timelineErrorsByTask.get(taskId) || new Set<string>())
       .map((id) => String(id || "").trim())
@@ -4895,7 +4929,11 @@ export class AgentDaemon extends EventEmitter {
       ((metadata?.waiveFailedStepIds || []).length === 0);
     const allowEvidenceBackedAutoWaive =
       metadata?.terminalStatus === "partial_success" &&
-      (((metadata?.outputSummary?.outputCount || 0) > 0) || (trimmedSummary?.length || 0) >= 160);
+      hasSubstantiveOutcomeEvidence({
+        resultSummary: trimmedSummary,
+        outputSummary: metadata?.outputSummary,
+        bestKnownOutcome,
+      });
     let blockingFailedSteps = unresolvedFailedSteps.filter((id) => {
       const normalized = normalizeStepIdForComparison(id);
       if (waivedFailedStepIds.has(id) || waivedNormalizedStepIds.has(normalized)) {
@@ -5062,6 +5100,7 @@ export class AgentDaemon extends EventEmitter {
         completedAt: Date.now(),
         terminalStatus: terminalFailureStatus,
         failureClass: terminalFailureClass,
+        ...(bestKnownOutcome ? { bestKnownOutcome } : {}),
       });
       this.clearRetryState(taskId);
       if (this.teamOrchestrator) {
@@ -5169,18 +5208,33 @@ export class AgentDaemon extends EventEmitter {
       }
     }
 
+    const resolvedOutcome = decideTaskOutcome({
+      requestedStatus: "completed",
+      terminalStatus,
+      failureClass,
+      resultSummary: trimmedSummary,
+      outputSummary: metadata?.outputSummary,
+      bestKnownOutcome,
+    });
+    terminalStatus = resolvedOutcome.terminalStatus;
+    failureClass = resolvedOutcome.failureClass;
+
     const completionTelemetry = {
       ...this.computeTimelineTelemetryFromEvents(this.getTaskEventsForReplay(taskId)),
       telemetry_source: "runtime_v2",
     };
 
     const updates: Partial<Task> = {
-      status: "completed",
+      status: resolvedOutcome.status,
       completedAt: Date.now(),
-      // Clear any previous error so completed tasks don't display stale failure state.
-      error: null,
+      // Preserve a helpful prompt for resumable states; otherwise clear stale failures.
+      error:
+        resolvedOutcome.status === "completed"
+          ? null
+          : existingTask.error || (resolvedOutcome.terminalStatus === "resume_available" ? "Resume available" : null),
       terminalStatus,
       failureClass,
+      ...(bestKnownOutcome ? { bestKnownOutcome } : {}),
       budgetUsage: metadata?.budgetUsage,
       riskLevel: risk.level,
       ...(trimmedSummary ? { resultSummary: trimmedSummary } : {}),
@@ -5193,16 +5247,24 @@ export class AgentDaemon extends EventEmitter {
       cached.status = "completed";
       cached.lastAccessed = Date.now();
     }
-    this.logEvent(taskId, "task_completed", {
-      message:
-        terminalStatus === "needs_user_action"
-          ? "Task completed - action required"
-          : terminalStatus === "partial_success"
+    const completionMessage =
+      terminalStatus === "needs_user_action"
+        ? "Task completed - action required"
+        : terminalStatus === "partial_success"
           ? "Task completed with partial results"
-          : "Task completed successfully",
+          : "Task completed successfully";
+    this.logEvent(taskId, resolvedOutcome.status === "completed" ? "task_completed" : "task_status", {
+      message:
+        resolvedOutcome.status === "completed"
+          ? completionMessage
+          : resolvedOutcome.status === "interrupted"
+            ? "Task interrupted - resume available"
+            : "Task is waiting for approval or further input",
       ...(updates.resultSummary ? { resultSummary: updates.resultSummary } : {}),
+      ...(resolvedOutcome.status !== "completed" ? { status: resolvedOutcome.status } : {}),
       terminalStatus,
       ...(failureClass ? { failureClass } : {}),
+      ...(bestKnownOutcome ? { bestKnownOutcome } : {}),
       ...(metadata?.budgetUsage ? { budgetUsage: metadata.budgetUsage } : {}),
       ...(metadata?.outputSummary ? { outputSummary: metadata.outputSummary } : {}),
       ...(metadata?.verificationOutcome ? { verificationOutcome: metadata.verificationOutcome } : {}),
@@ -5643,12 +5705,24 @@ export class AgentDaemon extends EventEmitter {
 
       // Mark as "interrupted" instead of "cancelled" so we can resume on restart
       try {
+        const currentTask = this.taskRepo.findById(taskId);
+        const interruptedOutcome = decideTaskOutcome({
+          requestedStatus: "interrupted",
+          terminalStatus: "resume_available",
+          failureClass: currentTask?.failureClass,
+          resultSummary: currentTask?.resultSummary,
+          bestKnownOutcome: getTaskBestKnownOutcome(currentTask),
+          error: "Application shutdown while task was running - will resume on restart",
+        });
         this.taskRepo.update(taskId, {
-          status: "interrupted" as TaskStatus,
+          status: interruptedOutcome.status as TaskStatus,
+          terminalStatus: interruptedOutcome.terminalStatus,
+          failureClass: interruptedOutcome.failureClass,
           error: "Application shutdown while task was running - will resume on restart",
         });
         this.logEvent(taskId, "task_interrupted", {
           message: "Task interrupted by application shutdown. Will resume on restart.",
+          terminalStatus: interruptedOutcome.terminalStatus,
         });
       } catch (err) {
         console.error(`[AgentDaemon] Failed to update task ${taskId} status on shutdown:`, err);

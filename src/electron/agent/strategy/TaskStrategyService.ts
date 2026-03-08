@@ -94,6 +94,13 @@ export class TaskStrategyService {
       return "strong";
     }
 
+    // Verified mode: planning phase uses strong (handled here via preflightRequired
+    // which is forced true for verified mode). Execution steps switch to cheap
+    // dynamically inside the executor, not here.
+    if (strategy.executionMode === "verified") {
+      return "strong";
+    }
+
     if (strategy.executionMode !== "execute") {
       return "strong";
     }
@@ -197,7 +204,7 @@ export class TaskStrategyService {
     };
 
     // Enable pre-flight framing for complex execution/mixed tasks, all workflows, and deep work
-    const preflightRequired =
+    let preflightRequired =
       route.intent === "workflow" ||
       route.intent === "deep_work" ||
       ((route.intent === "execution" || route.intent === "mixed") && route.complexity === "high");
@@ -256,7 +263,11 @@ export class TaskStrategyService {
           ? "analyze"
           : "propose";
     const existingExecutionMode = existing?.executionMode;
-    // Keep explicit non-execute overrides (propose/analyze), but do not let a
+    // Verified mode is always user-selected; preserve it and force planning.
+    if (existingExecutionMode === "verified") {
+      preflightRequired = true;
+    }
+    // Keep explicit non-execute overrides (propose/analyze/verified), but do not let a
     // stale default `execute` force non-execution intents into full task mode.
     const executionMode =
       existingExecutionMode && (existingExecutionMode !== "execute" || inferredExecutionMode === "execute")
@@ -372,7 +383,10 @@ export class TaskStrategyService {
       next.maxTurns = strategy.maxTurns;
     }
     if (!next.turnBudgetPolicy) {
-      next.turnBudgetPolicy = strategy.executionMode === "execute" ? "adaptive_unbounded" : "hard_window";
+      next.turnBudgetPolicy =
+        strategy.executionMode === "execute" || strategy.executionMode === "verified"
+          ? "adaptive_unbounded"
+          : "hard_window";
     }
     if (!next.workspacePathAliasPolicy) {
       next.workspacePathAliasPolicy = "rewrite_and_retry";

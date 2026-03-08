@@ -94,7 +94,7 @@ export const AgentConfigSchema = z
     allowUserInput: z.boolean().optional(),
     allowSharedContextMemory: z.boolean().optional(),
     conversationMode: z.enum(["task", "chat", "hybrid"]).optional(),
-    executionMode: z.enum(["execute", "propose", "analyze"]).optional(),
+    executionMode: z.enum(["execute", "propose", "analyze", "verified"]).optional(),
     taskDomain: z.enum(["auto", "code", "research", "operations", "writing", "general"]).optional(),
     autonomousMode: z.boolean().optional(),
     qualityPasses: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional(),

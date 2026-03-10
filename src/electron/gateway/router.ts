@@ -5364,7 +5364,8 @@ export class MessageRouter {
       const newSettings = LLMProviderFactory.applyModelSelection(settings, result.model!);
 
       LLMProviderFactory.saveSettings(newSettings);
-      LLMProviderFactory.clearCache();
+      // Note: do NOT call clearCache() here — saveSettings() already updates the cache.
+      // Calling clearCache() after would discard the update and keep the stale provider.
 
       await adapter.sendMessage({
         chatId: message.chatId,
@@ -5387,7 +5388,7 @@ export class MessageRouter {
     const newSettings = LLMProviderFactory.applyModelSelection(settings, result.model!.key);
 
     LLMProviderFactory.saveSettings(newSettings);
-    LLMProviderFactory.clearCache();
+    // Note: do NOT call clearCache() here — saveSettings() already updates the cache.
 
     await adapter.sendMessage({
       chatId: message.chatId,
@@ -8025,7 +8026,7 @@ Node.js: \`${nodeVersion}\`
     const newSettings = LLMProviderFactory.applyModelSelection(settings, modelKey);
 
     LLMProviderFactory.saveSettings(newSettings);
-    LLMProviderFactory.clearCache();
+    // Note: do NOT call clearCache() here — saveSettings() already updates the cache.
 
     // Update the original message
     if (adapter.editMessageWithKeyboard) {

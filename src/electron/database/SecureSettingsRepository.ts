@@ -66,6 +66,7 @@ export type SettingsCategory =
   | "infra"
   | "infra-wallet"
   | "proactive-suggestions-state"
+  | "improvement-loop"
   | "webaccess"
   | "adaptive-style-engine"
   | `plugin:${string}`;

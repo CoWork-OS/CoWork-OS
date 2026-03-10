@@ -73,9 +73,11 @@ function createLineTimestampWriter(streamA, streamB) {
 
 function spawnDev(startWithCapture) {
   const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+  const childEnv = { ...process.env };
+  delete childEnv.ELECTRON_RUN_AS_NODE;
   const child = spawn(npmCommand, ["run", "dev:start"], {
     cwd: process.cwd(),
-    env: process.env,
+    env: childEnv,
     stdio: startWithCapture ? ["inherit", "pipe", "pipe"] : "inherit",
   });
 

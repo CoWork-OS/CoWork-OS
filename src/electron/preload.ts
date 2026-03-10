@@ -17,6 +17,9 @@ import type {
   EvalSuite,
   InfraSettings,
   InfraStatus,
+  ImprovementCandidate,
+  ImprovementLoopSettings,
+  ImprovementRun,
   WalletInfo,
   CreateAgentTeamItemRequest,
   CreateAgentTeamMemberRequest,
@@ -288,6 +291,7 @@ const IPC_CHANNELS = {
   LLM_GET_PI_MODELS: "llm:getPiModels",
   LLM_GET_PI_PROVIDERS: "llm:getPiProviders",
   LLM_GET_OPENAI_COMPATIBLE_MODELS: "llm:getOpenAICompatibleModels",
+  LLM_REFRESH_CUSTOM_PROVIDER_MODELS: "llm:refreshCustomProviderModels",
   LLM_OPENAI_OAUTH_START: "llm:openaiOAuthStart",
   LLM_OPENAI_OAUTH_LOGOUT: "llm:openaiOAuthLogout",
   LLM_GET_BEDROCK_MODELS: "llm:getBedrockModels",
@@ -583,6 +587,16 @@ const IPC_CHANNELS = {
   MEMORY_FEATURES_GET_SETTINGS: "memoryFeatures:getSettings",
   MEMORY_FEATURES_SAVE_SETTINGS: "memoryFeatures:saveSettings",
 
+  // Self-improvement loop
+  IMPROVEMENT_GET_SETTINGS: "improvement:getSettings",
+  IMPROVEMENT_SAVE_SETTINGS: "improvement:saveSettings",
+  IMPROVEMENT_LIST_CANDIDATES: "improvement:listCandidates",
+  IMPROVEMENT_LIST_RUNS: "improvement:listRuns",
+  IMPROVEMENT_REFRESH: "improvement:refresh",
+  IMPROVEMENT_RUN_NEXT: "improvement:runNext",
+  IMPROVEMENT_DISMISS_CANDIDATE: "improvement:dismissCandidate",
+  IMPROVEMENT_REVIEW_RUN: "improvement:reviewRun",
+
   // Workspace Kit (.cowork)
   KIT_GET_STATUS: "kit:getStatus",
   KIT_INIT: "kit:init",
@@ -747,6 +761,30 @@ const IPC_CHANNELS = {
   STANDUP_GET_LATEST: "standup:getLatest",
   STANDUP_LIST: "standup:list",
   STANDUP_DELIVER: "standup:deliver",
+  // Mission Control - Company Ops / Planner
+  MC_COMPANY_LIST: "missionControl:companyList",
+  MC_COMPANY_GET: "missionControl:companyGet",
+  MC_COMPANY_CREATE: "missionControl:companyCreate",
+  MC_COMPANY_UPDATE: "missionControl:companyUpdate",
+  MC_GOAL_LIST: "missionControl:goalList",
+  MC_GOAL_GET: "missionControl:goalGet",
+  MC_GOAL_CREATE: "missionControl:goalCreate",
+  MC_GOAL_UPDATE: "missionControl:goalUpdate",
+  MC_PROJECT_LIST: "missionControl:projectList",
+  MC_PROJECT_GET: "missionControl:projectGet",
+  MC_PROJECT_CREATE: "missionControl:projectCreate",
+  MC_PROJECT_UPDATE: "missionControl:projectUpdate",
+  MC_ISSUE_LIST: "missionControl:issueList",
+  MC_ISSUE_GET: "missionControl:issueGet",
+  MC_ISSUE_CREATE: "missionControl:issueCreate",
+  MC_ISSUE_UPDATE: "missionControl:issueUpdate",
+  MC_ISSUE_COMMENT_LIST: "missionControl:issueCommentList",
+  MC_RUN_LIST: "missionControl:runList",
+  MC_RUN_EVENT_LIST: "missionControl:runEventList",
+  MC_PLANNER_GET_CONFIG: "missionControl:plannerGetConfig",
+  MC_PLANNER_UPDATE_CONFIG: "missionControl:plannerUpdateConfig",
+  MC_PLANNER_RUN: "missionControl:plannerRun",
+  MC_PLANNER_LIST_RUNS: "missionControl:plannerListRuns",
   // Mission Control - Agent Performance Reviews
   REVIEW_GENERATE: "review:generate",
   REVIEW_GET_LATEST: "review:getLatest",
@@ -1679,6 +1717,7 @@ type AgentAutonomyLevel = "intern" | "specialist" | "lead";
 interface AgentRoleData {
   id: string;
   name: string;
+  companyId?: string;
   displayName: string;
   description?: string;
   icon: string;
@@ -1706,6 +1745,7 @@ interface AgentRoleData {
 
 interface CreateAgentRoleRequest {
   name: string;
+  companyId?: string;
   displayName: string;
   description?: string;
   icon?: string;
@@ -1726,6 +1766,7 @@ interface CreateAgentRoleRequest {
 
 interface UpdateAgentRoleRequest {
   id: string;
+  companyId?: string | null;
   displayName?: string;
   description?: string;
   icon?: string;
@@ -1862,6 +1903,9 @@ interface HeartbeatResult {
   pendingMentions: number;
   assignedTasks: number;
   relevantActivities: number;
+  maintenanceChecks?: number;
+  maintenanceWorkspaceId?: string;
+  silent?: boolean;
   taskCreated?: string;
   error?: string;
 }
@@ -2152,6 +2196,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
   setLLMModel: (modelKey: string) => ipcRenderer.invoke(IPC_CHANNELS.LLM_SET_MODEL, modelKey),
   getProviderModels: (providerType: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_PROVIDER_MODELS, providerType),
+  refreshCustomProviderModels: (
+    providerType: string,
+    overrides?: { apiKey?: string; baseUrl?: string },
+  ) => ipcRenderer.invoke(IPC_CHANNELS.LLM_REFRESH_CUSTOM_PROVIDER_MODELS, providerType, overrides),
   getOllamaModels: (baseUrl?: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_OLLAMA_MODELS, baseUrl),
   getGeminiModels: (apiKey?: string) =>
@@ -2776,6 +2824,32 @@ contextBridge.exposeInMainWorld("electronAPI", {
   saveMemoryFeaturesSettings: (settings: MemoryFeaturesSettings) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_FEATURES_SAVE_SETTINGS, settings),
 
+  // Self-improvement loop APIs
+  getImprovementSettings: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.IMPROVEMENT_GET_SETTINGS) as Promise<ImprovementLoopSettings>,
+  saveImprovementSettings: (settings: ImprovementLoopSettings) =>
+    ipcRenderer.invoke(IPC_CHANNELS.IMPROVEMENT_SAVE_SETTINGS, settings) as Promise<{
+      success: boolean;
+    }>,
+  listImprovementCandidates: (workspaceId?: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.IMPROVEMENT_LIST_CANDIDATES, workspaceId) as Promise<
+      ImprovementCandidate[]
+    >,
+  listImprovementRuns: (workspaceId?: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.IMPROVEMENT_LIST_RUNS, workspaceId) as Promise<ImprovementRun[]>,
+  refreshImprovementCandidates: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.IMPROVEMENT_REFRESH) as Promise<{ candidateCount: number }>,
+  runNextImprovementExperiment: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.IMPROVEMENT_RUN_NEXT) as Promise<ImprovementRun | null>,
+  dismissImprovementCandidate: (candidateId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.IMPROVEMENT_DISMISS_CANDIDATE, candidateId) as Promise<
+      ImprovementCandidate | undefined
+    >,
+  reviewImprovementRun: (runId: string, reviewStatus: "accepted" | "dismissed") =>
+    ipcRenderer.invoke(IPC_CHANNELS.IMPROVEMENT_REVIEW_RUN, runId, reviewStatus) as Promise<
+      ImprovementRun | undefined
+    >,
+
   // Workspace Kit (.cowork) APIs
   getWorkspaceKitStatus: (workspaceId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.KIT_GET_STATUS, workspaceId) as Promise<WorkspaceKitStatus>,
@@ -2837,6 +2911,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getAgentRole: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.AGENT_ROLE_GET, id),
   createAgentRole: (request: {
     name: string;
+    companyId?: string;
     displayName: string;
     description?: string;
     icon?: string;
@@ -2850,6 +2925,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   }) => ipcRenderer.invoke(IPC_CHANNELS.AGENT_ROLE_CREATE, request),
   updateAgentRole: (request: {
     id: string;
+    companyId?: string | null;
     displayName?: string;
     description?: string;
     icon?: string;
@@ -2877,6 +2953,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   activatePersonaTemplate: (request: {
     templateId: string;
     customization?: {
+      companyId?: string;
       displayName?: string;
       icon?: string;
       color?: string;
@@ -2890,6 +2967,54 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.PERSONA_TEMPLATE_PREVIEW, templateId),
   getPersonaTemplateCategories: () =>
     ipcRenderer.invoke(IPC_CHANNELS.PERSONA_TEMPLATE_GET_CATEGORIES),
+
+  // Mission Control - Company Ops / Planner
+  listCompanies: () => ipcRenderer.invoke(IPC_CHANNELS.MC_COMPANY_LIST),
+  getCompany: (companyId: string) => ipcRenderer.invoke(IPC_CHANNELS.MC_COMPANY_GET, companyId),
+  createCompany: (input: import("../shared/types").CompanyCreateInput) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MC_COMPANY_CREATE, input),
+  updateCompany: (request: { companyId: string } & import("../shared/types").CompanyUpdate) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MC_COMPANY_UPDATE, request),
+  listCompanyGoals: (companyId: string) => ipcRenderer.invoke(IPC_CHANNELS.MC_GOAL_LIST, companyId),
+  getGoal: (goalId: string) => ipcRenderer.invoke(IPC_CHANNELS.MC_GOAL_GET, goalId),
+  createGoal: (input: import("../shared/types").GoalCreateInput) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MC_GOAL_CREATE, input),
+  updateGoal: (request: { goalId: string } & import("../shared/types").GoalUpdate) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MC_GOAL_UPDATE, request),
+  listCompanyProjects: (companyId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MC_PROJECT_LIST, companyId),
+  getProject: (projectId: string) => ipcRenderer.invoke(IPC_CHANNELS.MC_PROJECT_GET, projectId),
+  createProject: (input: import("../shared/types").ProjectCreateInput) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MC_PROJECT_CREATE, input),
+  updateProject: (request: { projectId: string } & import("../shared/types").ProjectUpdate) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MC_PROJECT_UPDATE, request),
+  listCompanyIssues: (companyId: string, limit?: number) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MC_ISSUE_LIST, { companyId, limit }),
+  getIssue: (issueId: string) => ipcRenderer.invoke(IPC_CHANNELS.MC_ISSUE_GET, issueId),
+  createIssue: (input: import("../shared/types").IssueCreateInput) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MC_ISSUE_CREATE, input),
+  updateIssue: (request: { issueId: string } & import("../shared/types").IssueUpdate) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MC_ISSUE_UPDATE, request),
+  listIssueComments: (issueId: string) => ipcRenderer.invoke(IPC_CHANNELS.MC_ISSUE_COMMENT_LIST, issueId),
+  listCompanyRuns: (companyId: string, issueId?: string, limit?: number) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MC_RUN_LIST, { companyId, issueId, limit }),
+  listRunEvents: (runId: string) => ipcRenderer.invoke(IPC_CHANNELS.MC_RUN_EVENT_LIST, runId),
+  getPlannerConfig: (companyId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MC_PLANNER_GET_CONFIG, companyId),
+  updatePlannerConfig: (request: {
+    companyId: string;
+    enabled?: boolean;
+    intervalMinutes?: number;
+    planningWorkspaceId?: string | null;
+    plannerAgentRoleId?: string | null;
+    autoDispatch?: boolean;
+    approvalPreset?: "manual" | "safe_autonomy" | "founder_edge";
+    maxIssuesPerRun?: number;
+    staleIssueDays?: number;
+  }) => ipcRenderer.invoke(IPC_CHANNELS.MC_PLANNER_UPDATE_CONFIG, request),
+  runPlanner: (companyId: string) => ipcRenderer.invoke(IPC_CHANNELS.MC_PLANNER_RUN, companyId),
+  listPlannerRuns: (companyId: string, limit?: number) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MC_PLANNER_LIST_RUNS, { companyId, limit }),
 
   // Plugin Packs (Customize panel) APIs
   listPluginPacks: () => ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_PACK_LIST),
@@ -3423,6 +3548,10 @@ export interface ElectronAPI {
   setLLMModel: (modelKey: string) => Promise<{ success: boolean }>;
   getProviderModels: (
     providerType: string,
+  ) => Promise<Array<{ key: string; displayName: string; description: string }>>;
+  refreshCustomProviderModels: (
+    providerType: string,
+    overrides?: { apiKey?: string; baseUrl?: string },
   ) => Promise<Array<{ key: string; displayName: string; description: string }>>;
   getOllamaModels: (
     baseUrl?: string,
@@ -4408,6 +4537,19 @@ export interface ElectronAPI {
   getMemoryFeaturesSettings: () => Promise<MemoryFeaturesSettings>;
   saveMemoryFeaturesSettings: (settings: MemoryFeaturesSettings) => Promise<{ success: boolean }>;
 
+  // Self-improvement loop
+  getImprovementSettings: () => Promise<ImprovementLoopSettings>;
+  saveImprovementSettings: (settings: ImprovementLoopSettings) => Promise<{ success: boolean }>;
+  listImprovementCandidates: (workspaceId?: string) => Promise<ImprovementCandidate[]>;
+  listImprovementRuns: (workspaceId?: string) => Promise<ImprovementRun[]>;
+  refreshImprovementCandidates: () => Promise<{ candidateCount: number }>;
+  runNextImprovementExperiment: () => Promise<ImprovementRun | null>;
+  dismissImprovementCandidate: (candidateId: string) => Promise<ImprovementCandidate | undefined>;
+  reviewImprovementRun: (
+    runId: string,
+    reviewStatus: "accepted" | "dismissed",
+  ) => Promise<ImprovementRun | undefined>;
+
   // Workspace Kit (.cowork)
   getWorkspaceKitStatus: (workspaceId: string) => Promise<WorkspaceKitStatus>;
   initWorkspaceKit: (request: WorkspaceKitInitRequest) => Promise<WorkspaceKitStatus>;
@@ -4464,6 +4606,7 @@ export interface ElectronAPI {
   activatePersonaTemplate: (request: {
     templateId: string;
     customization?: {
+      companyId?: string;
       displayName?: string;
       icon?: string;
       color?: string;
@@ -4500,6 +4643,67 @@ export interface ElectronAPI {
       count: number;
     }>
   >;
+
+  // Mission Control - Company Ops / Planner
+  listCompanies: () => Promise<import("../shared/types").Company[]>;
+  getCompany: (companyId: string) => Promise<import("../shared/types").Company | undefined>;
+  createCompany: (
+    input: import("../shared/types").CompanyCreateInput,
+  ) => Promise<import("../shared/types").Company>;
+  updateCompany: (
+    request: { companyId: string } & import("../shared/types").CompanyUpdate,
+  ) => Promise<import("../shared/types").Company | undefined>;
+  listCompanyGoals: (companyId: string) => Promise<import("../shared/types").Goal[]>;
+  getGoal: (goalId: string) => Promise<import("../shared/types").Goal | undefined>;
+  createGoal: (input: import("../shared/types").GoalCreateInput) => Promise<import("../shared/types").Goal>;
+  updateGoal: (
+    request: { goalId: string } & import("../shared/types").GoalUpdate,
+  ) => Promise<import("../shared/types").Goal | undefined>;
+  listCompanyProjects: (companyId: string) => Promise<import("../shared/types").Project[]>;
+  getProject: (projectId: string) => Promise<import("../shared/types").Project | undefined>;
+  createProject: (
+    input: import("../shared/types").ProjectCreateInput,
+  ) => Promise<import("../shared/types").Project>;
+  updateProject: (
+    request: { projectId: string } & import("../shared/types").ProjectUpdate,
+  ) => Promise<import("../shared/types").Project | undefined>;
+  listCompanyIssues: (
+    companyId: string,
+    limit?: number,
+  ) => Promise<import("../shared/types").Issue[]>;
+  getIssue: (issueId: string) => Promise<import("../shared/types").Issue | undefined>;
+  createIssue: (
+    input: import("../shared/types").IssueCreateInput,
+  ) => Promise<import("../shared/types").Issue>;
+  updateIssue: (
+    request: { issueId: string } & import("../shared/types").IssueUpdate,
+  ) => Promise<import("../shared/types").Issue | undefined>;
+  listIssueComments: (issueId: string) => Promise<import("../shared/types").IssueComment[]>;
+  listCompanyRuns: (
+    companyId: string,
+    issueId?: string,
+    limit?: number,
+  ) => Promise<import("../shared/types").HeartbeatRun[]>;
+  listRunEvents: (runId: string) => Promise<import("../shared/types").HeartbeatRunEvent[]>;
+  getPlannerConfig: (
+    companyId: string,
+  ) => Promise<import("../shared/types").StrategicPlannerConfig>;
+  updatePlannerConfig: (request: {
+    companyId: string;
+    enabled?: boolean;
+    intervalMinutes?: number;
+    planningWorkspaceId?: string | null;
+    plannerAgentRoleId?: string | null;
+    autoDispatch?: boolean;
+    approvalPreset?: "manual" | "safe_autonomy" | "founder_edge";
+    maxIssuesPerRun?: number;
+    staleIssueDays?: number;
+  }) => Promise<import("../shared/types").StrategicPlannerConfig>;
+  runPlanner: (companyId: string) => Promise<import("../shared/types").StrategicPlannerRun>;
+  listPlannerRuns: (
+    companyId: string,
+    limit?: number,
+  ) => Promise<import("../shared/types").StrategicPlannerRun[]>;
 
   // Plugin Packs (Customize panel)
   listPluginPacks: () => Promise<

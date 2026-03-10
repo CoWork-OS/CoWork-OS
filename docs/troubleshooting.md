@@ -177,3 +177,88 @@ Notes:
 - `cached` is the default mode.
 - If strict cached provider behavior is unavailable, runtime falls back to `live` and emits `web_search_mode_fallback_live`.
 - Domain filtering emits `web_search_domain_filtered_result_count`. If all results are filtered, `web_search` returns a structured policy error.
+
+## Self-improvement startup warnings in development
+
+If `npm run dev` or `npm run dev:log` shows warnings like:
+
+```text
+[AgentDaemon] Task requires git worktree isolation, but worktrees are unavailable for this workspace.
+[AgentDaemon] Memory capture failed: Error: [MemoryService] Not initialized. Call MemoryService.initialize() first.
+[AgentDaemon] Error emitting legacy alias event error: Error [ERR_UNHANDLED_ERROR]: Unhandled error.
+```
+
+these messages come from the autonomous self-improvement loop, not from the main Electron boot path itself.
+
+### What the warnings mean
+
+`Task requires git worktree isolation, but worktrees are unavailable for this workspace.`
+
+- An autonomous improvement task was created with `requireWorktree: true`.
+- Its target workspace was not eligible for worktree use.
+- Common reasons: the workspace is not a git repo, it is temporary, or worktree support is disabled/unavailable.
+
+`Memory capture failed: Error: [MemoryService] Not initialized. Call MemoryService.initialize() first.`
+
+- The improvement loop started early enough that task-event persistence attempted `MemoryService.capture(...)` before `MemoryService.initialize(...)` finished.
+- This was a startup-order race and usually did not stop the rest of the app from starting.
+
+`ERR_UNHANDLED_ERROR`
+
+- This was secondary log noise.
+- The daemon emitted a legacy event alias literally named `"error"`.
+- In Node's `EventEmitter`, `"error"` is special and throws if there is no listener.
+- The underlying problem was still the worktree requirement failure; this log line just made it look scarier.
+
+### Current fix
+
+Current builds address the issue in three places:
+
+1. `ImprovementLoopService` now starts after `MemoryService` has been initialized.
+2. When autonomous improvement requires worktrees, candidate selection skips workspaces that cannot use worktrees.
+3. The daemon no longer emits the legacy `"error"` alias when no `error` listener is registered.
+
+### How to verify
+
+Use the timestamped dev logger:
+
+```bash
+npm run dev:log
+```
+
+Then inspect:
+
+```bash
+logs/dev-latest.log
+```
+
+You should no longer see the self-improvement task start before memory initialization, and you should no longer see the legacy `ERR_UNHANDLED_ERROR` line for this case.
+
+### If you still see the worktree warning
+
+The autonomous loop is still finding a candidate in a workspace that cannot support isolated git execution. Check:
+
+1. The workspace path is inside a real git repository.
+2. The workspace is not temporary.
+3. Git worktree support is enabled.
+4. The repository is usable from the app's runtime environment.
+
+If you intentionally use non-git workspaces, either:
+
+- leave self-improvement enabled and let it operate only on git-backed workspaces
+- or disable/self-limit the improvement loop for that environment
+
+### If you still see memory initialization warnings
+
+That indicates a different startup-order regression. Capture the latest log and compare the relative timestamps for:
+
+- `MemoryService` initialization
+- `ImprovementLoopService initialized`
+- the first `Improve:` task startup line
+
+If the task starts before memory initialization, treat it as a bug and inspect the startup sequence in `src/electron/main.ts`.
+
+See also:
+
+- [Development Guide](development.md)
+- [Self-Improving Agent Architecture](self-improving-agent.md)

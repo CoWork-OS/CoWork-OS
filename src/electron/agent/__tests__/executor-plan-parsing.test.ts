@@ -143,4 +143,37 @@ describe("TaskExecutor plan parsing", () => {
     expect(executor.plan?.steps?.[1]?.description).toContain("`win95-ui/scripts/main.js`");
     expect(executor.plan?.steps?.[2]?.description).toContain("`win95-ui/styles/win95.css`");
   });
+
+  it("sanitizes raw tool-call markup from plan descriptions and steps", async () => {
+    const response = {
+      usage: { inputTokens: 10, outputTokens: 20 },
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            description: 'Execution plan [TOOL_CALL]{tool => "glob", args => {"pattern":"**/*community*pack*"}}[/TOOL_CALL]',
+            steps: [
+              {
+                id: "1",
+                description:
+                  'I will analyze the workspace brief. [TOOL_CALL]{tool => "read_file", args => {"path":".cowork/workspace-example-community-packs.md"}}[/TOOL_CALL]',
+              },
+              {
+                id: "2",
+                description:
+                  '[TOOL_CALL]{tool => "glob", args => {"pattern":"**/*community*pack*"}}[/TOOL_CALL]',
+              },
+            ],
+          }),
+        },
+      ],
+    };
+    const executor = createPlanExecutor(response);
+
+    await executor.createPlan();
+
+    expect(executor.plan?.description).toBe("Execution plan");
+    expect(executor.plan?.steps?.[0]?.description).toBe("I will analyze the workspace brief.");
+    expect(executor.plan?.steps?.[1]?.description).toBe("Step 2");
+  });
 });

@@ -565,6 +565,8 @@ export class TaskStrategyService {
       "memory_save",
       // System
       "system_info",
+      // Diagrams (lightweight UI-only, no side effects)
+      "create_diagram",
     ];
 
     // Action-heavy intents get all tools

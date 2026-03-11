@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Sidebar } from "./components/Sidebar";
 import { MainContent } from "./components/MainContent";
 import { RightPanel } from "./components/RightPanel";
@@ -143,6 +143,7 @@ function extractInputRequestId(event: TaskEvent): string | null {
 export function App() {
   const [currentWorkspace, setCurrentWorkspace] = useState<Workspace | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [hasMoreTasks, setHasMoreTasks] = useState(true);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [currentView, setCurrentView] = useState<AppView>("main");
   const [browserUrl, setBrowserUrl] = useState<string>("");
@@ -1387,18 +1388,72 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [childTasks.map((c) => c.id).join(",")]);
 
+  // Load all existing sessions upfront so the sidebar is fully populated.
+  // Pagination only kicks in for sessions beyond INITIAL_TASK_LOAD (extremely
+  // rare — most users will never hit this).
+  const INITIAL_TASK_LOAD = 10_000;
+  const TASK_LOAD_MORE = 100;
+
+  // Refs let loadMoreTasks read current state without being in its dep array
+  // (avoids re-creating the callback — and re-subscribing the scroll listener
+  // — every time hasMoreTasks or offset changes).
+  const taskOffsetRef = useRef(0);
+  const isLoadingMoreRef = useRef(false);
+  const hasMoreTasksRef = useRef(false);
+
   const loadTasks = async () => {
     if (!window.electronAPI?.listTasks) {
       setTasks([]);
+      setHasMoreTasks(false);
+      hasMoreTasksRef.current = false;
       return;
     }
     try {
-      const loadedTasks = await window.electronAPI.listTasks();
+      taskOffsetRef.current = 0;
+      isLoadingMoreRef.current = false;
+      const loadedTasks = await window.electronAPI.listTasks({
+        limit: INITIAL_TASK_LOAD,
+        offset: 0,
+      });
       setTasks(loadedTasks);
+      const more = loadedTasks.length >= INITIAL_TASK_LOAD;
+      setHasMoreTasks(more);
+      hasMoreTasksRef.current = more;
+      taskOffsetRef.current = loadedTasks.length;
     } catch (error) {
       console.error("Failed to load tasks:", error);
     }
   };
+
+  const loadMoreTasks = useCallback(async () => {
+    if (!window.electronAPI?.listTasks || isLoadingMoreRef.current || !hasMoreTasksRef.current) {
+      return;
+    }
+    isLoadingMoreRef.current = true;
+    try {
+      const offset = taskOffsetRef.current;
+      const moreTasks = await window.electronAPI.listTasks({
+        limit: TASK_LOAD_MORE,
+        offset,
+      });
+      if (moreTasks.length > 0) {
+        setTasks((prev) => {
+          const existingIds = new Set(prev.map((t) => t.id));
+          const fresh = moreTasks.filter((t: Task) => !existingIds.has(t.id));
+          return fresh.length > 0 ? [...prev, ...fresh] : prev;
+        });
+        taskOffsetRef.current = offset + moreTasks.length;
+      }
+      const more = moreTasks.length >= TASK_LOAD_MORE;
+      setHasMoreTasks(more);
+      hasMoreTasksRef.current = more;
+    } catch (error) {
+      console.error("Failed to load more tasks:", error);
+    } finally {
+      isLoadingMoreRef.current = false;
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Handle workspace change - opens folder selection dialog directly
   const handleChangeWorkspace = async () => {
@@ -2085,6 +2140,8 @@ export function App() {
                   setCurrentView("settings");
                 }}
                 onTasksChanged={loadTasks}
+                onLoadMoreTasks={loadMoreTasks}
+                hasMoreTasks={hasMoreTasks}
                 uiDensity={uiDensity}
               />
             )}
@@ -2192,6 +2249,11 @@ export function App() {
           onCreateTask={(title, prompt) => {
             setCurrentView("main");
             handleCreateTask(title, prompt);
+          }}
+          onOpenTask={(taskId) => {
+            setCurrentView("main");
+            setSelectedTaskId(taskId);
+            setRightSidebarCollapsed(false);
           }}
         />
       )}

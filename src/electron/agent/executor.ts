@@ -402,7 +402,7 @@ type StepVerificationMode =
   | "canvas_session"
   | "browser_session"
   | "artifact_file";
-type StepArtifactKind = "none" | "document" | "canvas" | "file";
+type StepArtifactKind = "none" | "document" | "canvas" | "file" | "diagram";
 type VerificationArtifactPathRole =
   | "inspect_existing"
   | "optional_output_inline"
@@ -2527,10 +2527,12 @@ export class TaskExecutor {
   }
 
   private sanitizePlan(plan: Plan): Plan {
+    const sanitizedPlanDescription = sanitizeToolCallTextFromAssistant(String(plan?.description || "").trim()).text;
     const steps = Array.isArray(plan?.steps) ? plan.steps : [];
     const normalizedSteps = steps.map((step, index) => {
       const rawDescription = String(step?.description || "").trim();
-      let description = rawDescription || `Step ${index + 1}`;
+      const sanitizedDescription = sanitizeToolCallTextFromAssistant(rawDescription).text;
+      let description = sanitizedDescription || `Step ${index + 1}`;
       if (this.isMetaOnlyPlanStepDescription(description)) {
         description =
           "Confirm concrete output constraints (format, exact limits, filename) and execute the required tool actions.";
@@ -2587,7 +2589,7 @@ export class TaskExecutor {
 
     return {
       ...plan,
-      description: String(plan?.description || "Execution plan"),
+      description: sanitizedPlanDescription || "Execution plan",
       steps: taskRootNormalizedSteps,
     };
   }
@@ -6311,6 +6313,7 @@ ${transcript}
     const canonical = canonicalizeToolNameUtil(toolName);
     return (
       isFileMutationToolNameUtil(canonical) ||
+      canonical === "create_diagram" ||
       canonical === "canvas_create" ||
       canonical === "canvas_push" ||
       canonical === "create_document" ||
@@ -6840,6 +6843,11 @@ ${transcript}
       required.add(canonicalizeToolNameUtil("canvas_create"));
     }
 
+    const inlineDiagramIntent = this.stepIndicatesInlineDiagramIntent(desc);
+    if (inlineDiagramIntent && hasWriteIntent) {
+      required.add(canonicalizeToolNameUtil("create_diagram"));
+    }
+
     const scaffoldIntent =
       /\b(scaffold|bootstrap|initialize|set up project|setup project|create widget)\b/.test(desc);
     if (scaffoldIntent) {
@@ -6908,6 +6916,10 @@ ${transcript}
 
     if (this.stepIndicatesBrowserSessionVerification(description)) {
       return "browser_session";
+    }
+
+    if (this.stepIndicatesInlineDiagramIntent(description)) {
+      return "none";
     }
 
     const artifactVerificationCue =
@@ -7041,8 +7053,10 @@ ${transcript}
     const scaffoldIntent = descriptionHasScaffoldIntent(description);
     const hasWriteIntent = descriptionHasWriteIntent(description);
     const summaryCue = descriptionHasSummaryCue(description);
+    const inlineDiagramIntent = this.stepIndicatesInlineDiagramIntent(description);
     const inferredMutation =
       artifactWriteRequired ||
+      (!verificationStep && inlineDiagramIntent && hasWriteIntent) ||
       (!verificationStep &&
         (softwareArtifactExtensionMentioned || scaffoldIntent) &&
         hasWriteIntent &&
@@ -7051,6 +7065,7 @@ ${transcript}
       requiredTools.has("create_document") ||
       requiredTools.has("create_spreadsheet") ||
       requiredTools.has("create_presentation") ||
+      requiredTools.has("create_diagram") ||
       requiredTools.has("canvas_push") ||
       requiredTools.has("write_file") ||
       requiredTools.has("edit_file") ||
@@ -7079,6 +7094,8 @@ ${transcript}
     let artifactKind: StepArtifactKind = "none";
     if (requiredTools.has("canvas_push") || requiredTools.has("canvas_create")) {
       artifactKind = "canvas";
+    } else if (requiredTools.has("create_diagram") || inlineDiagramIntent) {
+      artifactKind = "diagram";
     } else if (requiredTools.has("create_document") || /\b(docx|pdf|word document)\b/.test(description)) {
       artifactKind = "document";
     } else if (requiredTools.has("create_spreadsheet") || requiredTools.has("create_presentation")) {
@@ -8863,6 +8880,7 @@ ${transcript}
       "generate_spreadsheet",
       "create_presentation",
       "generate_presentation",
+      "create_diagram",
       "run_command",
       "run_applescript",
     ]);
@@ -12892,6 +12910,7 @@ You are continuing a previous conversation. The context from the previous conver
     const desc = String(step.description || "").toLowerCase();
     if (!desc.trim()) return false;
     if (this.stepAllowsInlineDeliverable(step)) return false;
+    if (this.stepIndicatesInlineDiagramIntent(desc)) return false;
 
     const hasWriteVerb = descriptionHasWriteIntent(desc);
 
@@ -12919,6 +12938,30 @@ You are continuing a previous conversation. The context from the previous conver
       /\b(or|and\/or)\s+return\s+inline\b/.test(desc) ||
       /\b(return|provide|output)\s+(?:the\s+)?(?:result|output)\s+inline\b/.test(desc)
     );
+  }
+
+  private stepIndicatesInlineDiagramIntent(description: string): boolean {
+    const desc = String(description || "").toLowerCase();
+    if (!desc.trim()) return false;
+
+    const diagramCue =
+      /\b(diagram|flowchart|chart|graph|sequence diagram|class diagram|state diagram|erd|er diagram|mindmap|mind map|timeline|gantt|pie chart|gitgraph|mermaid)\b/.test(
+        desc,
+      );
+    if (!diagramCue) return false;
+
+    // Explicit standalone-file/page requests should continue through file/canvas flows.
+    if (
+      /\b(html|webpage|web page|standalone page|standalone html|canvas|screenshot|png|jpg|jpeg|svg|pdf|file)\b/.test(
+        desc,
+      ) ||
+      hasArtifactExtensionMention(desc) ||
+      extractArtifactPathCandidates(desc).length > 0
+    ) {
+      return false;
+    }
+
+    return true;
   }
 
   private isStrictLengthArtifactTask(): boolean {
@@ -15932,6 +15975,12 @@ SKILL + TOOL ROUTING:
 - For general research start with web_search; for a known URL prefer web_fetch; use browser tools for interactive/JS pages.
 - Never use run_command curl/wget for web access.
 
+DIAGRAM + VISUALIZATION ROUTING (CRITICAL):
+- For ANY diagram, flowchart, chart, graph, architecture diagram, sequence diagram, mind map, timeline, ERD, Gantt chart, or other visualization: use create_diagram — NOT an HTML file.
+- create_diagram renders the Mermaid diagram inline in the UI immediately. The user sees it live without opening any file.
+- NEVER plan a step like "create an HTML file" or "generate an HTML page" for a diagram/flowchart — always use create_diagram instead.
+- Only use HTML files (via canvas or write_file) when the user explicitly asks for a standalone HTML page for reasons beyond diagram display.
+
 QUALITY + OUTPUT:
 - Keep plan language clear; add technical depth only when requested or when domain is code/operations.
 - Include scheduling/history tools when user intent matches reminders or prior conversation lookup.
@@ -17169,6 +17218,12 @@ PATH DISCOVERY (CRITICAL):
     3. DO NOT create placeholder reports, generic checklists, or "framework" documents
     4. STOP execution - the clearRemaining:true removes all pending steps
   - This is a HARD STOP - revise_plan with clearRemaining cancels all remaining work.
+
+DIAGRAM + VISUALIZATION (CRITICAL):
+- For ANY diagram, flowchart, architecture diagram, sequence diagram, mind map, ERD, Gantt chart, pie chart, timeline, or other visualization: call create_diagram with valid Mermaid syntax.
+- create_diagram renders the diagram live in the UI — the user sees it immediately without any file to open.
+- NEVER write an HTML file to display a diagram or chart. Always use create_diagram instead.
+- You may also include Mermaid code blocks (\`\`\`mermaid ... \`\`\`) in your text responses and they will render inline.
 
 TOOL CALL STYLE:
 - Default: do NOT narrate routine, low-risk tool calls. Just call the tool silently.
@@ -19496,6 +19551,18 @@ TASK / CONVERSATION HISTORY:
                   stepSucceededWithCanvasMutation = true;
                   foundCanvasEvidence = true;
                   this.canvasEvidenceObserved = true;
+                  if (!mutationSignalEmitted) {
+                    mutationSignalEmitted = true;
+                    this.emitEvent("log", {
+                      metric: "file_mutation_attempted",
+                      stepId: step.id,
+                      value: true,
+                      tool: content.name,
+                    });
+                  }
+                }
+                if (content.name === "create_diagram") {
+                  stepSucceededWithCanvasMutation = true;
                   if (!mutationSignalEmitted) {
                     mutationSignalEmitted = true;
                     this.emitEvent("log", {
@@ -22448,6 +22515,12 @@ PATH DISCOVERY (CRITICAL):
     3. DO NOT create placeholder reports, generic checklists, or "framework" documents
     4. STOP execution - the clearRemaining:true removes all pending steps
   - This is a HARD STOP - revise_plan with clearRemaining cancels all remaining work.
+
+DIAGRAM + VISUALIZATION (CRITICAL):
+- For ANY diagram, flowchart, architecture diagram, sequence diagram, mind map, ERD, Gantt chart, pie chart, timeline, or other visualization: call create_diagram with valid Mermaid syntax.
+- create_diagram renders the diagram live in the UI — the user sees it immediately without any file to open.
+- NEVER write an HTML file to display a diagram or chart. Always use create_diagram instead.
+- You may also include Mermaid code blocks (\`\`\`mermaid ... \`\`\`) in your text responses and they will render inline.
 
 TOOL CALL STYLE:
 - Default: do NOT narrate routine, low-risk tool calls. Just call the tool silently.

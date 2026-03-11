@@ -13,6 +13,8 @@ interface SidebarProps {
   onOpenMissionControl: () => void;
 
   onTasksChanged: () => void;
+  onLoadMoreTasks?: () => void;
+  hasMoreTasks?: boolean;
   uiDensity?: UiDensity;
 }
 
@@ -46,6 +48,19 @@ export function getSessionMode(task: Task): SessionMode {
   if (task.comparisonSessionId) return "comparison";
   if (task.source === "cron" || task.title?.startsWith("Scheduled:")) return "scheduled";
   return "standard";
+}
+
+/** Returns true for sessions that were created automatically (not by the user
+ *  directly). These are grouped into a collapsible "Automated" folder at the
+ *  bottom of the sidebar so they don't push user sessions off screen. */
+export function isAutomatedSession(task: Task): boolean {
+  return (
+    task.source === "improvement" ||
+    task.source === "cron" ||
+    task.source === "hook" ||
+    task.source === "api" ||
+    !!task.heartbeatRunId
+  );
 }
 
 const HIDDEN_FOCUSED_STATUSES: ReadonlySet<Task["status"]> = new Set(["failed", "cancelled"]);
@@ -142,6 +157,8 @@ export function Sidebar({
   onOpenMissionControl,
 
   onTasksChanged,
+  onLoadMoreTasks,
+  hasMoreTasks = false,
   uiDensity = "focused",
 }: SidebarProps) {
   const [menuOpenTaskId, setMenuOpenTaskId] = useState<string | null>(null);
@@ -152,10 +169,13 @@ export function Sidebar({
   const [pinActionError, setPinActionError] = useState<string | null>(null);
   const [activeModeFilters, setActiveModeFilters] = useState<Set<SessionMode>>(new Set());
   const [showFilterBar, setShowFilterBar] = useState(false);
+  // Automated sessions folder is collapsed by default to keep the sidebar clean
+  const [automatedFolderCollapsed, setAutomatedFolderCollapsed] = useState(true);
   const pinActionErrorTimeoutRef = useRef<number | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuButtonRef = useRef<Map<string, HTMLButtonElement>>(new Map());
   const renameInputRef = useRef<HTMLInputElement>(null);
+  const taskListRef = useRef<HTMLDivElement>(null);
   const completionAttentionSet = useMemo(
     () => new Set(completionAttentionTaskIds),
     [completionAttentionTaskIds],
@@ -229,20 +249,38 @@ export function Sidebar({
     return rootTasks.map(buildNode);
   }, [tasks, uiDensity, showFailedSessions]);
 
+  // Split root tasks into user-created vs automated sessions.
+  // Automated sessions (improvement, cron, hook, api, heartbeat) are rendered
+  // in a separate collapsible folder so they don't crowd out user sessions.
+  const { userTaskTree, automatedTaskTree } = useMemo(() => {
+    const user: TaskTreeNode[] = [];
+    const automated: TaskTreeNode[] = [];
+    for (const node of taskTree) {
+      if (isAutomatedSession(node.task)) {
+        automated.push(node);
+      } else {
+        user.push(node);
+      }
+    }
+    return { userTaskTree: user, automatedTaskTree: automated };
+  }, [taskTree]);
+
   // Count hidden failed sessions for the toggle label
   const failedSessionCount = useMemo(() => {
     return countHiddenFailedSessions(tasks, uiDensity);
   }, [tasks, uiDensity]);
 
-  // Count root tasks per session mode (for filter badge counts)
+  // Count root tasks per session mode (for filter badge counts).
+  // Automated sessions live in their own folder, so they're excluded from
+  // the mode-filter bar counts.
   const modeCounts = useMemo(() => {
     const counts = new Map<SessionMode, number>();
-    for (const node of taskTree) {
+    for (const node of userTaskTree) {
       const mode = getSessionMode(node.task);
       counts.set(mode, (counts.get(mode) || 0) + 1);
     }
     return counts;
-  }, [taskTree]);
+  }, [userTaskTree]);
 
   // Which modes are actually present in current sessions
   const availableModes = useMemo(() => {
@@ -263,11 +301,12 @@ export function Sidebar({
     });
   }, [availableModes]);
 
-  // Apply mode filter to the task tree
+  // Apply mode filter to user sessions only; automated sessions are always
+  // shown in their own folder regardless of the active mode filter.
   const filteredTaskTree = useMemo(() => {
-    if (activeModeFilters.size === 0) return taskTree;
-    return taskTree.filter((node) => activeModeFilters.has(getSessionMode(node.task)));
-  }, [taskTree, activeModeFilters]);
+    if (activeModeFilters.size === 0) return userTaskTree;
+    return userTaskTree.filter((node) => activeModeFilters.has(getSessionMode(node.task)));
+  }, [userTaskTree, activeModeFilters]);
 
   const toggleModeFilter = useCallback((mode: SessionMode) => {
     setActiveModeFilters((prev) => {
@@ -362,6 +401,23 @@ export function Sidebar({
       hasInitializedCollapse.current = false;
     }
   }, [uiDensity, tasks]);
+
+  // Infinite scroll — load the next page when the user scrolls near the bottom
+  useEffect(() => {
+    const el = taskListRef.current;
+    if (!el || !onLoadMoreTasks) return;
+
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = el;
+      // Trigger 200 px before the very bottom so loading feels instant
+      if (scrollHeight - scrollTop - clientHeight < 200) {
+        onLoadMoreTasks();
+      }
+    };
+
+    el.addEventListener("scroll", handleScroll, { passive: true });
+    return () => el.removeEventListener("scroll", handleScroll);
+  }, [onLoadMoreTasks]);
 
   // Close menu when clicking outside
   useEffect(() => {
@@ -886,7 +942,7 @@ export function Sidebar({
       </div>
 
       {/* Sessions List */}
-      <div className="task-list cli-task-list">
+      <div className="task-list cli-task-list" ref={taskListRef}>
         {pinActionError && (
           <div className="cli-sidebar-error" role="alert">
             {pinActionError}
@@ -950,14 +1006,50 @@ export function Sidebar({
             )}
           </div>
         )}
-        {filteredTaskTree.length === 0 ? (
-          activeModeFilters.size > 0 ? (
-            <div className="sidebar-empty cli-empty sidebar-empty-filtered">
-              <p className="cli-hint">
-                <span>No sessions match the selected filters</span>
-              </p>
-            </div>
-          ) : (
+        {filteredTaskTree.length === 0 && activeModeFilters.size > 0 && (
+          <div className="sidebar-empty cli-empty sidebar-empty-filtered">
+            <p className="cli-hint">
+              <span>No sessions match the selected filters</span>
+            </p>
+          </div>
+        )}
+        {/* Automated sessions folder — collapsed by default, shown at top */}
+        {automatedTaskTree.length > 0 && (
+          <div className="automated-sessions-folder">
+            <button
+              type="button"
+              className="automated-folder-header"
+              onClick={() => setAutomatedFolderCollapsed((v) => !v)}
+              aria-expanded={!automatedFolderCollapsed}
+              title={automatedFolderCollapsed ? "Show automated sessions" : "Hide automated sessions"}
+            >
+              <span className="automated-folder-chevron" aria-hidden="true">
+                {automatedFolderCollapsed ? "▸" : "▾"}
+              </span>
+              <span className="automated-folder-label">
+                <span className="terminal-only">AUTOMATED</span>
+                <span className="modern-only">Automated</span>
+              </span>
+              <span className="automated-folder-count">{automatedTaskTree.length}</span>
+              {automatedTaskTree.some((n) => isActiveSessionStatus(n.task.status)) && (
+                <span
+                  className="cli-session-indicator cli-session-indicator-active automated-folder-active"
+                  aria-label="Has active session"
+                />
+              )}
+            </button>
+            {!automatedFolderCollapsed && (
+              <div className="automated-folder-body">
+                {automatedTaskTree.map((node, index) =>
+                  renderTaskNode(node, index, 0, index === automatedTaskTree.length - 1),
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {filteredTaskTree.length === 0 && automatedTaskTree.length === 0 ? (
+          activeModeFilters.size > 0 ? null : (
             <div
               className={`sidebar-empty cli-empty ${uiDensity === "focused" ? "sidebar-empty-focused" : ""}`}
             >
@@ -1000,6 +1092,14 @@ export function Sidebar({
           filteredTaskTree.map((node, index) =>
             renderTaskNode(node, index, 0, index === filteredTaskTree.length - 1),
           )
+        )}
+
+        {/* Pagination footer — shown while more tasks exist below the fold */}
+        {hasMoreTasks && (
+          <div className="task-list-load-more">
+            <span className="terminal-only">loading more...</span>
+            <span className="modern-only">Loading more sessions…</span>
+          </div>
         )}
       </div>
 

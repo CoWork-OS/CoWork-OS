@@ -22,15 +22,20 @@ let mockSettings = {
   autoRun: false,
   includeDevLogs: false,
   intervalMinutes: 1440,
-  variantsPerCampaign: 4,
+  variantsPerCampaign: 1,
   maxConcurrentCampaigns: 1,
+  maxConcurrentImprovementExecutors: 1,
+  maxQueuedImprovementCampaigns: 1,
   maxOpenCandidatesPerWorkspace: 25,
   requireWorktree: true,
-  reviewRequired: true,
-  judgeRequired: true,
+  reviewRequired: false,
+  judgeRequired: false,
   promotionMode: "github_pr" as const,
   evalWindowDays: 14,
   replaySetSize: 2,
+  campaignTimeoutMinutes: 30,
+  campaignTokenBudget: 60000,
+  campaignCostBudget: 15,
 };
 
 vi.mock("../ImprovementSettingsManager", () => ({
@@ -64,6 +69,8 @@ vi.mock("../../database/repositories", () => ({
         agentType: input.agentType,
         depth: input.depth,
         resultSummary: input.resultSummary,
+        budgetTokens: input.budgetTokens,
+        budgetCost: input.budgetCost,
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
@@ -124,7 +131,9 @@ vi.mock("../ImprovementRepositories", () => ({
       return rows;
     }
     countActive() {
-      return [...campaigns.values()].filter((item) => ["planning", "running_variants", "judging"].includes(item.status)).length;
+      return [...campaigns.values()].filter((item) =>
+        ["queued", "preflight", "reproducing", "implementing", "verifying"].includes(item.status),
+      ).length;
     }
   },
   ImprovementVariantRunRepository: class {
@@ -186,57 +195,29 @@ vi.mock("../ExperimentEvaluationService", () => ({
       };
     }
     evaluateVariant(params: Any) {
+      const task = tasks.get(params.variant.taskId);
+      const passed =
+        task?.status === "completed" &&
+        task?.terminalStatus === "ok" &&
+        /reproduction method/i.test(String(task?.resultSummary || "")) &&
+        /verification/i.test(String(task?.resultSummary || "")) &&
+        /pr readiness/i.test(String(task?.resultSummary || ""));
       return {
         variantId: params.variant.id,
         lane: params.variant.lane,
-        score: params.variant.lane === "root_cause" ? 0.91 : 0.72,
-        targetedVerificationPassed: params.variant.lane !== "guardrail_hardening",
-        verificationPassed: true,
-        regressionSignals: params.variant.lane === "guardrail_hardening" ? ["Verification failed event recorded."] : [],
-        failureClassResolved: true,
-        replayPassRate: params.variant.lane === "root_cause" ? 1 : 0.5,
+        score: passed ? 0.91 : 0.1,
+        targetedVerificationPassed: passed,
+        verificationPassed: passed,
+        regressionSignals: passed ? [] : ["Missing PR-ready verification evidence."],
+        failureClassResolved: passed,
+        replayPassRate: passed ? 1 : 0,
         diffSizePenalty: 0.02,
-        summary: `Variant ${params.variant.lane} evaluated.`,
-        notes: [`Variant ${params.variant.lane} notes.`],
+        summary: passed ? `Variant ${params.variant.lane} passed.` : `Variant ${params.variant.lane} failed.`,
+        notes: [passed ? "passed" : "failed"],
       };
     }
-    evaluateCampaign(params: Any) {
-      const winner = params.variants.find((variant: ImprovementVariantRun) => variant.lane === "root_cause");
-      const verdict: ImprovementJudgeVerdict = {
-        id: `judge-${params.campaign.id}`,
-        campaignId: params.campaign.id,
-        winnerVariantId: winner?.id,
-        status: winner ? "passed" : "failed",
-        summary: winner ? "Selected root_cause as the campaign winner." : "No winner.",
-        notes: ["Judge completed."],
-        comparedAt: Date.now(),
-        variantRankings: params.variants.map((variant: ImprovementVariantRun, index: number) => ({
-          variantId: variant.id,
-          lane: variant.lane,
-          score: 0.9 - index * 0.1,
-        })),
-        replayCases: params.campaign.replayCases,
-      };
-      return {
-        verdict,
-        outcomeMetrics: this.snapshot(params.evalWindowDays),
-        winner: winner
-          ? {
-              variantId: winner.id,
-              lane: winner.lane,
-              score: 0.91,
-              targetedVerificationPassed: true,
-              verificationPassed: true,
-              regressionSignals: [],
-              failureClassResolved: true,
-              replayPassRate: 1,
-              diffSizePenalty: 0.02,
-              summary: "winner",
-              notes: [],
-            }
-          : undefined,
-        evaluations: [],
-      };
+    evaluateCampaign() {
+      throw new Error("evaluateCampaign should not be used in staged self-improvement mode");
     }
   },
 }));
@@ -275,20 +256,10 @@ describe("ImprovementLoopService", () => {
           summary: "Verifier still fails after task completion.",
           createdAt: Date.now() - 1000,
         },
-        {
-          type: "task_failure",
-          taskId: "task-old-2",
-          summary: "Completion blocked by contract error.",
-          createdAt: Date.now() - 500,
-        },
-        {
-          type: "dev_log",
-          summary: "Error: artifact missing.",
-          createdAt: Date.now(),
-        },
       ],
       firstSeenAt: Date.now() - 2000,
       lastSeenAt: Date.now(),
+      failureStreak: 0,
     };
   }
 
@@ -296,7 +267,7 @@ describe("ImprovementLoopService", () => {
     return {
       id: "workspace-1",
       name: "Workspace",
-      path: "/tmp/workspace-1",
+      path: process.cwd(),
       createdAt: Date.now(),
       permissions: {
         read: true,
@@ -308,7 +279,20 @@ describe("ImprovementLoopService", () => {
     };
   }
 
-  it("creates one campaign with four distinct variants and a judge verdict", async () => {
+  function completeVariantTask(taskId: string, summary: string, terminalStatus: Task["terminalStatus"] = "ok") {
+    const task = tasks.get(taskId);
+    tasks.set(taskId, {
+      ...task!,
+      status: terminalStatus === "ok" ? "completed" : "failed",
+      completedAt: Date.now(),
+      terminalStatus,
+      worktreePath: `/tmp/${taskId}`,
+      worktreeBranch: `codex/${taskId}`,
+      resultSummary: summary,
+    });
+  }
+
+  it("runs scout then implementation sequentially and opens a draft PR", async () => {
     const workspace = makeWorkspace();
     const candidate = makeCandidate();
     workspaces.set(workspace.id, workspace);
@@ -320,81 +304,8 @@ describe("ImprovementLoopService", () => {
       markCandidateRunning: vi.fn(),
       markCandidateReview: vi.fn(),
       markCandidateResolved: vi.fn(),
-      reopenCandidate: vi.fn(),
-      getTopCandidateForWorkspace: vi.fn().mockReturnValue(candidate),
-    } as Any;
-
-    const daemon = new EventEmitter() as Any;
-    daemon.createChildTask = vi.fn().mockImplementation(async (params: Any) => {
-      const taskId = `task-${tasks.size + 1}`;
-      const task: Task = {
-        id: taskId,
-        title: params.title,
-        prompt: params.prompt,
-        status: "executing",
-        workspaceId: params.workspaceId,
-        agentConfig: params.agentConfig,
-        source: params.source,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
-      tasks.set(task.id, task);
-      return task;
-    });
-    daemon.getWorktreeManager = vi.fn(() => ({
-      shouldUseWorktree: vi.fn().mockResolvedValue(true),
-      openPullRequest: vi.fn(),
-      mergeToBase: vi.fn(),
-    }));
-
-    const service = new ImprovementLoopService({} as Any, candidateService);
-    await service.start(daemon);
-    const campaign = await service.runNextExperiment();
-
-    expect(campaign).toBeTruthy();
-    expect(campaign?.variants).toHaveLength(4);
-    expect(new Set(campaign?.variants.map((variant) => variant.lane))).toEqual(
-      new Set(["minimal_patch", "test_first", "root_cause", "guardrail_hardening"]),
-    );
-
-    for (const variant of campaign!.variants) {
-      const task = tasks.get(variant.taskId!);
-      tasks.set(variant.taskId!, {
-        ...task!,
-        status: "completed",
-        completedAt: Date.now(),
-        terminalStatus: "ok",
-        worktreePath: `/tmp/${variant.id}`,
-        worktreeBranch: `codex/${variant.id}`,
-        resultSummary: `Completed ${variant.lane}`,
-      });
-      daemon.emit("worktree_created", { taskId: variant.taskId, branch: `codex/${variant.id}` });
-      daemon.emit("task_completed", { taskId: variant.taskId });
-    }
-
-    await vi.waitFor(() => {
-      const updated = campaigns.get(campaign!.id);
-      expect(updated?.status).toBe("ready_for_review");
-      expect(updated?.winnerVariantId).toBeTruthy();
-      expect(verdicts.get(campaign!.id)?.status).toBe("passed");
-    });
-
-    const latest = await service.listCampaignsFresh(workspace.id);
-    expect(latest[0]?.judgeVerdict?.winnerVariantId).toBe(campaigns.get(campaign!.id)?.winnerVariantId);
-  });
-
-  it("promotes only the judge-selected winner variant", async () => {
-    const workspace = makeWorkspace();
-    const candidate = makeCandidate();
-    workspaces.set(workspace.id, workspace);
-    candidates.set(candidate.id, candidate);
-
-    const candidateService = {
-      refresh: vi.fn().mockResolvedValue({ candidateCount: 1 }),
-      dismissCandidate: vi.fn(),
-      markCandidateRunning: vi.fn(),
-      markCandidateReview: vi.fn(),
-      markCandidateResolved: vi.fn(),
+      markCandidateParked: vi.fn(),
+      recordCampaignFailure: vi.fn(),
       reopenCandidate: vi.fn(),
       getTopCandidateForWorkspace: vi.fn().mockReturnValue(candidate),
     } as Any;
@@ -427,29 +338,50 @@ describe("ImprovementLoopService", () => {
     await service.start(daemon);
     const campaign = await service.runNextExperiment();
 
-    for (const variant of campaign!.variants) {
-      tasks.set(variant.taskId!, {
-        ...(tasks.get(variant.taskId!) as Task),
-        status: "completed",
-        completedAt: Date.now(),
-        terminalStatus: "ok",
-        worktreePath: `/tmp/${variant.id}`,
-        worktreeBranch: `codex/${variant.id}`,
-        resultSummary: `Completed ${variant.lane}`,
-      });
-      daemon.emit("worktree_created", { taskId: variant.taskId, branch: `codex/${variant.id}` });
-      daemon.emit("task_completed", { taskId: variant.taskId });
-    }
+    expect(campaign).toBeTruthy();
+    expect(campaign?.status).toBe("reproducing");
+    expect(campaign?.variants).toHaveLength(1);
+    expect(daemon.createChildTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentConfig: expect.objectContaining({
+          bypassQueue: false,
+          deepWorkMode: false,
+          autoContinueOnTurnLimit: false,
+          progressJournalEnabled: false,
+        }),
+      }),
+    );
+
+    const scout = campaign!.variants[0];
+    completeVariantTask(
+      scout.taskId!,
+      "Reproduction method: reproduced from logs. Verification: scoped failure. PR readiness: not ready until fix is applied.",
+    );
+    daemon.emit("worktree_created", { taskId: scout.taskId, branch: `codex/${scout.id}` });
+    daemon.emit("task_completed", { taskId: scout.taskId });
 
     await vi.waitFor(() => {
-      expect(campaigns.get(campaign!.id)?.status).toBe("ready_for_review");
+      expect(campaigns.get(campaign!.id)?.status).toBe("implementing");
+      expect([...variants.values()]).toHaveLength(2);
     });
 
-    const reviewed = await service.reviewCampaign(campaign!.id, "accepted");
-    expect(reviewed?.promotionStatus).toBe("pr_opened");
-    const winner = variants.get(reviewed!.winnerVariantId!);
+    const implement = [...variants.values()].find((variant) => variant.id !== scout.id)!;
+    completeVariantTask(
+      implement.taskId!,
+      "Reproduction method: reproduced from logs. Changed files summary: src/app.ts. Verification: npm test passes. PR readiness: ready.",
+    );
+    daemon.emit("worktree_created", { taskId: implement.taskId, branch: `codex/${implement.id}` });
+    daemon.emit("task_completed", { taskId: implement.taskId });
+
+    await vi.waitFor(() => {
+      const updated = campaigns.get(campaign!.id);
+      expect(updated?.status).toBe("pr_opened");
+      expect(updated?.promotionStatus).toBe("pr_opened");
+      expect(updated?.pullRequest?.url).toBe("https://example.test/pr/42");
+    });
+
     expect(openPullRequest).toHaveBeenCalledWith(
-      winner?.taskId,
+      implement.taskId,
       expect.objectContaining({
         title: expect.stringContaining(candidate.title),
       }),
@@ -457,7 +389,7 @@ describe("ImprovementLoopService", () => {
     expect(candidateService.markCandidateResolved).toHaveBeenCalledWith(candidate.id);
   });
 
-  it("reopens the candidate when the judge cannot find a valid winner", async () => {
+  it("fails closed when the implementation output is not promotable", async () => {
     const workspace = makeWorkspace();
     const candidate = makeCandidate();
     workspaces.set(workspace.id, workspace);
@@ -469,6 +401,8 @@ describe("ImprovementLoopService", () => {
       markCandidateRunning: vi.fn(),
       markCandidateReview: vi.fn(),
       markCandidateResolved: vi.fn(),
+      markCandidateParked: vi.fn(),
+      recordCampaignFailure: vi.fn(),
       reopenCandidate: vi.fn(),
       getTopCandidateForWorkspace: vi.fn().mockReturnValue(candidate),
     } as Any;
@@ -500,44 +434,99 @@ describe("ImprovementLoopService", () => {
     await service.start(daemon);
     const campaign = await service.runNextExperiment();
 
-    (service as Any).evaluationService.evaluateCampaign = vi.fn(() => ({
-      verdict: {
-        id: `judge-${campaign!.id}`,
-        campaignId: campaign!.id,
-        status: "failed",
-        summary: "No winner.",
-        notes: [],
-        comparedAt: Date.now(),
-        variantRankings: [],
-        replayCases: [],
-      },
-      outcomeMetrics: {
-        generatedAt: Date.now(),
-        windowDays: 14,
-        taskSuccessRate: 0.5,
-        approvalDeadEndRate: 0.1,
-        verificationPassRate: 0.6,
-        retriesPerTask: 1,
-        toolFailureRateByTool: [],
-      },
-      winner: undefined,
-      evaluations: [],
-    }));
+    const scout = campaign!.variants[0];
+    completeVariantTask(
+      scout.taskId!,
+      "Reproduction method: reproduced from logs. Verification: scoped failure. PR readiness: not ready until fix is applied.",
+    );
+    daemon.emit("task_completed", { taskId: scout.taskId });
 
-    for (const variant of campaign!.variants) {
-      tasks.set(variant.taskId!, {
-        ...(tasks.get(variant.taskId!) as Task),
-        status: "completed",
-        completedAt: Date.now(),
-        terminalStatus: "failed",
-        resultSummary: `Failed ${variant.lane}`,
-      });
-      daemon.emit("task_completed", { taskId: variant.taskId });
-    }
+    await vi.waitFor(() => {
+      expect(campaigns.get(campaign!.id)?.status).toBe("implementing");
+      expect([...variants.values()]).toHaveLength(2);
+    });
+
+    const implement = [...variants.values()].find((variant) => variant.id !== scout.id)!;
+    completeVariantTask(implement.taskId!, "Changed files summary only.", "failed");
+    daemon.emit("task_completed", { taskId: implement.taskId });
 
     await vi.waitFor(() => {
       expect(campaigns.get(campaign!.id)?.status).toBe("failed");
-      expect(candidateService.reopenCandidate).toHaveBeenCalledWith(candidate.id);
     });
+    expect(candidateService.recordCampaignFailure).toHaveBeenCalled();
+    expect(campaigns.get(campaign!.id)?.promotionStatus).toBe("promotion_failed");
+  });
+
+  it("parks the candidate when PR opening fails", async () => {
+    const workspace = makeWorkspace();
+    const candidate = makeCandidate();
+    workspaces.set(workspace.id, workspace);
+    candidates.set(candidate.id, candidate);
+
+    const candidateService = {
+      refresh: vi.fn().mockResolvedValue({ candidateCount: 1 }),
+      dismissCandidate: vi.fn(),
+      markCandidateRunning: vi.fn(),
+      markCandidateReview: vi.fn(),
+      markCandidateResolved: vi.fn(),
+      markCandidateParked: vi.fn(),
+      recordCampaignFailure: vi.fn(),
+      reopenCandidate: vi.fn(),
+      getTopCandidateForWorkspace: vi.fn().mockReturnValue(candidate),
+    } as Any;
+
+    const openPullRequest = vi.fn().mockResolvedValue({ success: false, error: "429 Too Many Requests" });
+    const daemon = new EventEmitter() as Any;
+    daemon.createChildTask = vi.fn().mockImplementation(async (params: Any) => {
+      const taskId = `task-${tasks.size + 1}`;
+      const task: Task = {
+        id: taskId,
+        title: params.title,
+        prompt: params.prompt,
+        status: "executing",
+        workspaceId: params.workspaceId,
+        agentConfig: params.agentConfig,
+        source: params.source,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      tasks.set(task.id, task);
+      return task;
+    });
+    daemon.getWorktreeManager = vi.fn(() => ({
+      shouldUseWorktree: vi.fn().mockResolvedValue(true),
+      openPullRequest,
+      mergeToBase: vi.fn(),
+    }));
+
+    const service = new ImprovementLoopService({} as Any, candidateService);
+    await service.start(daemon);
+    const campaign = await service.runNextExperiment();
+
+    const scout = campaign!.variants[0];
+    completeVariantTask(
+      scout.taskId!,
+      "Reproduction method: reproduced from logs. Verification: scoped failure. PR readiness: not ready until fix is applied.",
+    );
+    daemon.emit("task_completed", { taskId: scout.taskId });
+
+    await vi.waitFor(() => {
+      expect(campaigns.get(campaign!.id)?.status).toBe("implementing");
+      expect([...variants.values()]).toHaveLength(2);
+    });
+
+    const implement = [...variants.values()].find((variant) => variant.id !== scout.id)!;
+    completeVariantTask(
+      implement.taskId!,
+      "Reproduction method: reproduced from logs. Changed files summary: src/app.ts. Verification: npm test passes. PR readiness: ready.",
+    );
+    daemon.emit("worktree_created", { taskId: implement.taskId, branch: `codex/${implement.id}` });
+    daemon.emit("task_completed", { taskId: implement.taskId });
+
+    await vi.waitFor(() => {
+      expect(campaigns.get(campaign!.id)?.status).toBe("parked");
+      expect(campaigns.get(campaign!.id)?.promotionStatus).toBe("promotion_failed");
+    });
+    expect(candidateService.recordCampaignFailure).toHaveBeenCalled();
   });
 });

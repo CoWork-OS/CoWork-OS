@@ -203,6 +203,10 @@ export function ControlPlaneSettings() {
     copyToClipboard(token);
   };
 
+  const handleToggleRemoteTokenVisibility = async () => {
+    setShowRemoteToken((value) => !value);
+  };
+
   const handleToggleLAN = async () => {
     setSaving(true);
     try {
@@ -706,7 +710,7 @@ export function ControlPlaneSettings() {
                 />
                 <button
                   className="btn-icon"
-                  onClick={() => setShowRemoteToken(!showRemoteToken)}
+                  onClick={handleToggleRemoteTokenVisibility}
                   title={showRemoteToken ? "Hide" : "Show"}
                 >
                   {showRemoteToken ? "Hide" : "Show"}
@@ -785,7 +789,7 @@ export function ControlPlaneSettings() {
               )}
             </div>
 
-            <div className="button-row">
+            <div className="button-row" style={{ marginTop: "0.5rem", marginBottom: "1.5rem" }}>
               {remoteStatus?.state === "connected" ? (
                 <button
                   onClick={handleDisconnectRemote}

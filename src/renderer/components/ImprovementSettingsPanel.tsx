@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import type {
+  ImprovementCampaign,
   ImprovementCandidate,
   ImprovementLoopSettings,
-  ImprovementRun,
   Workspace,
 } from "../../shared/types";
 
@@ -13,12 +14,15 @@ const DEFAULT_SETTINGS: ImprovementLoopSettings = {
   autoRun: true,
   includeDevLogs: true,
   intervalMinutes: 24 * 60,
-  maxConcurrentExperiments: 1,
+  variantsPerCampaign: 4,
+  maxConcurrentCampaigns: 1,
   maxOpenCandidatesPerWorkspace: 25,
   requireWorktree: true,
   reviewRequired: true,
+  judgeRequired: true,
   promotionMode: "github_pr",
   evalWindowDays: 14,
+  replaySetSize: 3,
 };
 
 const SCROLL_PANEL_STYLE = {
@@ -39,20 +43,20 @@ function getWorkspaceModeMeta(workspace: Workspace | undefined) {
     return {
       label: "Aggregate View",
       tone: "var(--color-accent-primary)",
-      description: "Showing issues and runs across every workspace.",
+      description: "Showing issues and campaign activity across every workspace.",
     };
   }
   if (workspace.isTemp) {
     return {
       label: "Direct Apply",
       tone: "#b7791f",
-      description: "Temporary workspaces can run improvements, but successful runs apply directly instead of opening a PR.",
+      description: "Temporary workspaces can still run campaigns, but successful winners apply directly instead of opening a PR.",
     };
   }
   return {
     label: "Promotable If Git-Backed",
     tone: "#2f855a",
-    description: "If this workspace supports git worktrees, successful runs can move into review and open a PR or merge.",
+    description: "Git-backed workspaces can promote the judge-selected winner into a PR or merge.",
   };
 }
 
@@ -64,34 +68,33 @@ export function ImprovementSettingsPanel(props?: {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState("");
   const [candidates, setCandidates] = useState<ImprovementCandidate[]>([]);
-  const [runs, setRuns] = useState<ImprovementRun[]>([]);
+  const [campaigns, setCampaigns] = useState<ImprovementCampaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [actionMessage, setActionMessage] = useState<string>("");
+  const [actionMessage, setActionMessage] = useState("");
   const [candidateStatusFilter, setCandidateStatusFilter] = useState("all");
   const [candidateSourceFilter, setCandidateSourceFilter] = useState("all");
 
-  const pendingReviewRuns = useMemo(
-    () =>
-      runs.filter(
-        (run) =>
-          run.status === "passed" &&
-          (run.reviewStatus === "pending" || run.promotionStatus === "promotion_failed"),
-      ),
-    [runs],
+  const pendingReviewCampaigns = useMemo(
+    () => campaigns.filter((campaign) => campaign.status === "ready_for_review"),
+    [campaigns],
   );
-  const recentPromotedRuns = useMemo(
+  const recentPromotedCampaigns = useMemo(
     () =>
-      [...runs]
-        .filter(
-          (run) =>
-            run.promotionStatus === "applied" ||
-            run.promotionStatus === "merged" ||
-            run.promotionStatus === "pr_opened",
+      [...campaigns]
+        .filter((campaign) =>
+          ["applied", "merged", "pr_opened"].includes(campaign.promotionStatus || "idle"),
         )
         .sort((a, b) => (b.promotedAt || b.createdAt) - (a.promotedAt || a.createdAt))
         .slice(0, 5),
-    [runs],
+    [campaigns],
+  );
+  const recentCampaigns = useMemo(
+    () =>
+      [...campaigns]
+        .sort((a, b) => (b.startedAt || b.createdAt) - (a.startedAt || a.createdAt))
+        .slice(0, 10),
+    [campaigns],
   );
   const workspaceNameById = useMemo(
     () => new Map(workspaces.map((workspace) => [workspace.id, workspace.name])),
@@ -105,20 +108,11 @@ export function ImprovementSettingsPanel(props?: {
     () => getWorkspaceModeMeta(selectedWorkspace),
     [selectedWorkspace],
   );
-  const recentRuns = useMemo(
-    () =>
-      [...runs]
-        .sort((a, b) => (b.startedAt || b.createdAt) - (a.startedAt || a.createdAt))
-        .slice(0, 10),
-    [runs],
-  );
   const filteredCandidates = useMemo(
     () =>
       candidates.filter((candidate) => {
-        const statusMatches =
-          candidateStatusFilter === "all" || candidate.status === candidateStatusFilter;
-        const sourceMatches =
-          candidateSourceFilter === "all" || candidate.source === candidateSourceFilter;
+        const statusMatches = candidateStatusFilter === "all" || candidate.status === candidateStatusFilter;
+        const sourceMatches = candidateSourceFilter === "all" || candidate.source === candidateSourceFilter;
         return statusMatches && sourceMatches;
       }),
     [candidateStatusFilter, candidateSourceFilter, candidates],
@@ -156,9 +150,7 @@ export function ImprovementSettingsPanel(props?: {
       setWorkspaces(combined);
       const preferred = props?.initialWorkspaceId || combined[0]?.id || "";
       setSelectedWorkspaceId(preferred);
-      if (preferred) {
-        await refreshWorkspaceData(preferred);
-      }
+      if (preferred) await refreshWorkspaceData(preferred);
     } finally {
       setLoading(false);
     }
@@ -166,12 +158,12 @@ export function ImprovementSettingsPanel(props?: {
 
   const refreshWorkspaceData = async (workspaceId: string) => {
     const filterWorkspaceId = workspaceId === ALL_WORKSPACES_VALUE ? undefined : workspaceId;
-    const [nextCandidates, nextRuns] = await Promise.all([
+    const [nextCandidates, nextCampaigns] = await Promise.all([
       window.electronAPI.listImprovementCandidates(filterWorkspaceId),
-      window.electronAPI.listImprovementRuns(filterWorkspaceId),
+      window.electronAPI.listImprovementCampaigns(filterWorkspaceId),
     ]);
     setCandidates(nextCandidates);
-    setRuns(nextRuns);
+    setCampaigns(nextCampaigns);
   };
 
   const saveSettings = async (updates: Partial<ImprovementLoopSettings>) => {
@@ -189,10 +181,8 @@ export function ImprovementSettingsPanel(props?: {
     try {
       setBusy(true);
       const result = await window.electronAPI.refreshImprovementCandidates();
-      if (selectedWorkspaceId) {
-        await refreshWorkspaceData(selectedWorkspaceId);
-      }
-      setActionMessage(`Signals refreshed. ${result.candidateCount} candidate(s) currently in backlog.`);
+      if (selectedWorkspaceId) await refreshWorkspaceData(selectedWorkspaceId);
+      setActionMessage(`Signals refreshed. ${result.candidateCount} candidate issue(s) currently in backlog.`);
     } finally {
       setBusy(false);
     }
@@ -201,15 +191,13 @@ export function ImprovementSettingsPanel(props?: {
   const runNextExperiment = async () => {
     try {
       setBusy(true);
-      const run = await window.electronAPI.runNextImprovementExperiment();
-      if (selectedWorkspaceId) {
-        await refreshWorkspaceData(selectedWorkspaceId);
-      }
-      if (run?.taskId) {
-        setActionMessage(`Started improvement run for task ${run.taskId}. See Run Activity below.`);
+      const campaign = await window.electronAPI.runNextImprovementExperiment();
+      if (selectedWorkspaceId) await refreshWorkspaceData(selectedWorkspaceId);
+      if (campaign) {
+        setActionMessage(`Started campaign ${campaign.id.slice(0, 8)} with ${campaign.variants.length} variant lane(s).`);
       } else {
         setActionMessage(
-          "No eligible experiment was started. Check that the loop is enabled, no other improvement run is active, and at least one open candidate is available.",
+          "No eligible campaign was started. Check that the loop is enabled, no other campaign is active, and at least one open candidate is available.",
         );
       }
     } finally {
@@ -221,37 +209,31 @@ export function ImprovementSettingsPanel(props?: {
     try {
       setBusy(true);
       await window.electronAPI.dismissImprovementCandidate(candidateId);
-      if (selectedWorkspaceId) {
-        await refreshWorkspaceData(selectedWorkspaceId);
-      }
+      if (selectedWorkspaceId) await refreshWorkspaceData(selectedWorkspaceId);
     } finally {
       setBusy(false);
     }
   };
 
-  const reviewRun = async (runId: string, reviewStatus: "accepted" | "dismissed") => {
+  const reviewCampaign = async (campaignId: string, reviewStatus: "accepted" | "dismissed") => {
     try {
       setBusy(true);
-      await window.electronAPI.reviewImprovementRun(runId, reviewStatus);
-      if (selectedWorkspaceId) {
-        await refreshWorkspaceData(selectedWorkspaceId);
-      }
+      await window.electronAPI.reviewImprovementCampaign(campaignId, reviewStatus);
+      if (selectedWorkspaceId) await refreshWorkspaceData(selectedWorkspaceId);
     } finally {
       setBusy(false);
     }
   };
 
-  const retryRun = async (runId: string) => {
+  const retryCampaign = async (campaignId: string) => {
     try {
       setBusy(true);
-      const run = await window.electronAPI.retryImprovementRun(runId);
-      if (selectedWorkspaceId) {
-        await refreshWorkspaceData(selectedWorkspaceId);
-      }
-      if (run?.taskId) {
-        setActionMessage(`Retried improvement run with task ${run.taskId}. See Run Activity below.`);
+      const campaign = await window.electronAPI.retryImprovementCampaign(campaignId);
+      if (selectedWorkspaceId) await refreshWorkspaceData(selectedWorkspaceId);
+      if (campaign) {
+        setActionMessage(`Retried campaign ${campaign.id.slice(0, 8)} with ${campaign.variants.length} variant lane(s).`);
       } else {
-        setActionMessage("Retry could not start. Check that no other improvement run is active and the candidate still exists.");
+        setActionMessage("Retry could not start. Check that no other campaign is active and the candidate still exists.");
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error || "Retry could not start.");
@@ -273,61 +255,45 @@ export function ImprovementSettingsPanel(props?: {
     <div className="settings-section">
       <h2 className="settings-section-title">Self-Improvement</h2>
       <p className="settings-section-description">
-        Mine recurring failures, run repair experiments in the active workspace, and use branch-isolated
-        promotion when git worktrees are available.
+        Mine recurring failures, spawn parallel repair variants, judge them against a held-out replay set,
+        and only promote the winning branch.
       </p>
 
       <div className="settings-subsection">
         <h3>How It Works</h3>
-        <div className="settings-form-group">
-          <p className="settings-form-hint" style={{ margin: 0 }}>
-            <strong>1. Observation</strong> Cowork watches failed tasks, verification failures, user feedback,
-            and optional dev logs to build a backlog of recurring issues.
-          </p>
-        </div>
-        <div className="settings-form-group">
-          <p className="settings-form-hint" style={{ margin: 0 }}>
-            <strong>2. Investigation</strong> Cowork launches an <code>Improve: ...</code> task for the highest
-            priority candidate and tries to reproduce and fix the problem.
-          </p>
-        </div>
-        <div className="settings-form-group">
-          <p className="settings-form-hint" style={{ margin: 0 }}>
-            <strong>3. Outcome</strong> If the workspace supports git worktrees, successful runs can move into the
-            review queue and then open a PR or merge. If not, successful runs stay in the review queue when manual
-            review is enabled, then become <code>applied</code> after approval because the fix was made directly in
-            the workspace.
-          </p>
-        </div>
-        <div className="settings-form-group">
-          <p className="settings-form-hint" style={{ margin: 0 }}>
-            <strong>4. Review</strong> The review queue can hold either promotable branch runs or direct-apply runs.
-            Only promotable runs can open a PR or merge; direct-apply runs become <code>applied</code> after you
-            accept them.
-          </p>
-        </div>
+        <HintBlock title="1. Observation">
+          Cowork watches failed tasks, verification failures, user feedback, and optional dev logs to build a backlog of recurring issues.
+        </HintBlock>
+        <HintBlock title="2. Campaign">
+          For the top candidate, Cowork creates one campaign and launches four strategy lanes by default: <code>minimal_patch</code>, <code>test_first</code>, <code>root_cause</code>, and <code>guardrail_hardening</code>.
+        </HintBlock>
+        <HintBlock title="3. Judge">
+          Variants only see training evidence. A separate judge verdict ranks them using targeted verification, replay-set generalization, and regression signals.
+        </HintBlock>
+        <HintBlock title="4. Promotion">
+          Only the judge-selected winner can enter review and open a PR or merge.
+        </HintBlock>
       </div>
 
       <div className="settings-subsection">
         <h3>Loop Settings</h3>
-
         <ToggleRow
           label="Enable Self-Improvement Loop"
-          description="Allow Cowork to build a backlog of recurring failures and run repair experiments."
+          description="Allow Cowork to build a backlog of recurring failures and run repair campaigns."
           checked={settings.enabled}
           disabled={busy}
           onChange={(checked) => void saveSettings({ enabled: checked })}
         />
         <ToggleRow
-          label="Auto-Run Experiments"
-          description="Pick the highest-priority candidate on a schedule and launch one autonomous experiment."
+          label="Auto-Run Campaigns"
+          description="Pick the highest-priority candidate on a schedule and launch one campaign."
           checked={settings.autoRun}
           disabled={busy || !settings.enabled}
           onChange={(checked) => void saveSettings({ autoRun: checked })}
         />
         <ToggleRow
           label="Require Worktree Isolation"
-          description="Use git worktrees when available; otherwise improvement runs apply directly in the workspace."
+          description="Use git worktrees when available; otherwise the winner applies directly in the workspace."
           checked={settings.requireWorktree}
           disabled={busy || !settings.enabled}
           onChange={(checked) => void saveSettings({ requireWorktree: checked })}
@@ -341,10 +307,17 @@ export function ImprovementSettingsPanel(props?: {
         />
         <ToggleRow
           label="Manual Review Required"
-          description="Keep successful experiments in a review queue until you accept or dismiss them."
+          description="Keep winning campaigns in a review queue until you accept or dismiss them."
           checked={settings.reviewRequired}
           disabled={busy || !settings.enabled}
           onChange={(checked) => void saveSettings({ reviewRequired: checked })}
+        />
+        <ToggleRow
+          label="Require Judge Verdict"
+          description="Do not promote a campaign until the internal judge compares all completed variants."
+          checked={settings.judgeRequired}
+          disabled={busy || !settings.enabled}
+          onChange={(checked) => void saveSettings({ judgeRequired: checked })}
         />
         <SelectRow
           label="Promotion Mode"
@@ -354,11 +327,8 @@ export function ImprovementSettingsPanel(props?: {
             { value: "github_pr", label: "Open GitHub PR" },
             { value: "merge", label: "Merge to Base Branch" },
           ]}
-          onChange={(value) =>
-            void saveSettings({ promotionMode: value as ImprovementLoopSettings["promotionMode"] })
-          }
+          onChange={(value) => void saveSettings({ promotionMode: value as ImprovementLoopSettings["promotionMode"] })}
         />
-
         <NumberRow
           label="Run Interval (minutes)"
           value={settings.intervalMinutes}
@@ -366,6 +336,30 @@ export function ImprovementSettingsPanel(props?: {
           min={15}
           max={10080}
           onChange={(value) => void saveSettings({ intervalMinutes: value })}
+        />
+        <NumberRow
+          label="Variants Per Campaign"
+          value={settings.variantsPerCampaign}
+          disabled={busy || !settings.enabled}
+          min={2}
+          max={6}
+          onChange={(value) => void saveSettings({ variantsPerCampaign: value })}
+        />
+        <NumberRow
+          label="Max Concurrent Campaigns"
+          value={settings.maxConcurrentCampaigns}
+          disabled={busy || !settings.enabled}
+          min={1}
+          max={3}
+          onChange={(value) => void saveSettings({ maxConcurrentCampaigns: value })}
+        />
+        <NumberRow
+          label="Replay Set Size"
+          value={settings.replaySetSize}
+          disabled={busy || !settings.enabled}
+          min={1}
+          max={10}
+          onChange={(value) => void saveSettings({ replaySetSize: value })}
         />
         <NumberRow
           label="Eval Window (days)"
@@ -378,26 +372,19 @@ export function ImprovementSettingsPanel(props?: {
       </div>
 
       <div className="settings-subsection">
-        <div
-          style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}
-        >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
           <div>
             <h3 style={{ marginBottom: 4 }}>Workspace Candidates</h3>
             <p className="settings-form-hint" style={{ margin: 0 }}>
-              Observation happens here first. Refresh signals to update the backlog, then run the next
-              investigation manually if you do not want to wait for auto-run.
+              Refresh signals to update the backlog, then start the next campaign manually if you do not want to wait for auto-run.
             </p>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <button className="settings-button" onClick={() => void refreshCandidates()} disabled={busy}>
               Refresh Signals
             </button>
-            <button
-              className="settings-button"
-              onClick={() => void runNextExperiment()}
-              disabled={busy || !settings.enabled}
-            >
-              Run Next Experiment
+            <button className="settings-button" onClick={() => void runNextExperiment()} disabled={busy || !settings.enabled}>
+              Run Next Campaign
             </button>
           </div>
         </div>
@@ -410,11 +397,7 @@ export function ImprovementSettingsPanel(props?: {
         {workspaces.length > 0 ? (
           <div className="settings-form-group" style={{ maxWidth: 520 }}>
             <label className="settings-label">Workspace</label>
-            <select
-              value={selectedWorkspaceId}
-              onChange={(event) => setSelectedWorkspaceId(event.target.value)}
-              className="settings-select"
-            >
+            <select value={selectedWorkspaceId} onChange={(event) => setSelectedWorkspaceId(event.target.value)} className="settings-select">
               {workspaces.map((workspace) => (
                 <option key={workspace.id} value={workspace.id}>
                   {workspace.name}
@@ -444,17 +427,10 @@ export function ImprovementSettingsPanel(props?: {
           </div>
         ) : null}
 
-        <div
-          className="settings-form-group"
-          style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "end" }}
-        >
+        <div className="settings-form-group" style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "end" }}>
           <div style={{ width: 260, maxWidth: "100%" }}>
             <label className="settings-label">Issue Status</label>
-            <select
-              value={candidateStatusFilter}
-              onChange={(event) => setCandidateStatusFilter(event.target.value)}
-              className="settings-select"
-            >
+            <select value={candidateStatusFilter} onChange={(event) => setCandidateStatusFilter(event.target.value)} className="settings-select">
               <option value="all">All Statuses</option>
               <option value="open">Open</option>
               <option value="running">Running</option>
@@ -465,11 +441,7 @@ export function ImprovementSettingsPanel(props?: {
           </div>
           <div style={{ width: 260, maxWidth: "100%" }}>
             <label className="settings-label">Issue Type</label>
-            <select
-              value={candidateSourceFilter}
-              onChange={(event) => setCandidateSourceFilter(event.target.value)}
-              className="settings-select"
-            >
+            <select value={candidateSourceFilter} onChange={(event) => setCandidateSourceFilter(event.target.value)} className="settings-select">
               <option value="all">All Types</option>
               <option value="task_failure">Task Failure</option>
               <option value="verification_failure">Verification Failure</option>
@@ -480,228 +452,213 @@ export function ImprovementSettingsPanel(props?: {
         </div>
 
         <p className="settings-form-hint" style={{ marginTop: 0 }}>
-          Showing <code>{filteredCandidates.length}</code> of <code>{candidates.length}</code> candidate issue(s)
-          for the current workspace filter.
+          Showing <code>{filteredCandidates.length}</code> of <code>{candidates.length}</code> candidate issue(s) for the current workspace filter.
         </p>
-        <div>
-          <h3 style={{ marginTop: 0, marginBottom: 8 }}>Issues</h3>
-          <div style={SCROLL_PANEL_STYLE}>
-            {filteredCandidates.length === 0 ? (
-              <p className="settings-form-hint">No candidate issues match the current filters.</p>
-            ) : (
-              filteredCandidates.map((candidate) => (
-                <div key={candidate.id} className="settings-form-group">
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontWeight: 600, color: "var(--color-text-primary)" }}>
-                        {candidate.title}
-                      </div>
-                      <p className="settings-form-hint" style={{ margin: "4px 0 0 0" }}>
-                        {candidate.summary}
-                      </p>
-                      <p className="settings-form-hint" style={{ margin: "6px 0 0 0" }}>
-                        Source: <code>{candidate.source}</code> | Status: <code>{candidate.status}</code> |
-                        Priority: <code>{candidate.priorityScore.toFixed(2)}</code> | Recurrence:{" "}
-                        <code>{candidate.recurrenceCount}</code>
-                        {selectedWorkspaceId === ALL_WORKSPACES_VALUE ? (
-                          <>
-                            {" "}
-                            | Workspace:{" "}
-                            <code>{workspaceNameById.get(candidate.workspaceId) || candidate.workspaceId}</code>
-                          </>
-                        ) : null}
-                      </p>
-                    </div>
-                    <div style={{ flexShrink: 0 }}>
-                      {candidate.status !== "dismissed" ? (
-                        <button
-                          className="settings-button settings-button-secondary"
-                          onClick={() => void dismissCandidate(candidate.id)}
-                          disabled={busy}
-                        >
-                          Dismiss
-                        </button>
+
+        <div style={SCROLL_PANEL_STYLE}>
+          {filteredCandidates.length === 0 ? (
+            <p className="settings-form-hint">No candidate issues match the current filters.</p>
+          ) : (
+            filteredCandidates.map((candidate) => (
+              <div key={candidate.id} className="settings-form-group">
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, color: "var(--color-text-primary)" }}>{candidate.title}</div>
+                    <p className="settings-form-hint" style={{ margin: "4px 0 0 0" }}>
+                      {candidate.summary}
+                    </p>
+                    <p className="settings-form-hint" style={{ margin: "6px 0 0 0" }}>
+                      Source: <code>{candidate.source}</code> | Status: <code>{candidate.status}</code> | Priority:{" "}
+                      <code>{candidate.priorityScore.toFixed(2)}</code> | Recurrence: <code>{candidate.recurrenceCount}</code>
+                      {selectedWorkspaceId === ALL_WORKSPACES_VALUE ? (
+                        <>
+                          {" "}
+                          | Workspace: <code>{workspaceNameById.get(candidate.workspaceId) || candidate.workspaceId}</code>
+                        </>
                       ) : null}
-                    </div>
+                    </p>
                   </div>
+                  {candidate.status !== "dismissed" ? (
+                    <button className="settings-button settings-button-secondary" onClick={() => void dismissCandidate(candidate.id)} disabled={busy}>
+                      Dismiss
+                    </button>
+                  ) : null}
                 </div>
-              ))
-            )}
-          </div>
+              </div>
+            ))
+          )}
         </div>
 
         <div style={{ marginTop: 20 }}>
-          <h3 style={{ marginTop: 0, marginBottom: 8 }}>Runs</h3>
+          <h3 style={{ marginTop: 0, marginBottom: 8 }}>Campaigns</h3>
           <div style={SCROLL_PANEL_STYLE}>
-            <p className="settings-form-hint" style={{ marginTop: 0 }}>
-              Monitor queued, running, failed, applied, and review-ready improvement runs here.
-            </p>
-
-            <div className="settings-form-group">
-              <div style={{ fontWeight: 600, color: "var(--color-text-primary)" }}>Review Queue</div>
-              <p className="settings-form-hint" style={{ margin: "4px 0 0 0" }}>
-                Git-backed successful runs waiting for PR or merge approval.
-              </p>
-            </div>
-            {pendingReviewRuns.length === 0 ? (
-              <p className="settings-form-hint">No successful experiments are waiting for review.</p>
+            <SectionTitle title="Review Queue" hint="Judge-approved campaigns waiting for promotion or dismissal." />
+            {pendingReviewCampaigns.length === 0 ? (
+              <p className="settings-form-hint">No campaigns are waiting for review.</p>
             ) : (
-              pendingReviewRuns.map((run) => (
-                <div key={`review-${run.id}`} className="settings-form-group">
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontWeight: 600, color: "var(--color-text-primary)" }}>
-                        {run.verdictSummary || "Successful improvement experiment"}
-                      </div>
-                      <p className="settings-form-hint" style={{ margin: "4px 0 0 0" }}>
-                        Task: <code>{run.taskId || "pending"}</code>
-                        {run.branchName ? (
-                          <>
-                            {" "}
-                            | Branch: <code>{run.branchName}</code>
-                          </>
-                        ) : null}
-                        {" "} | Promotion: <code>{run.promotionStatus || "idle"}</code>
-                      </p>
-                    </div>
-                    <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-                      <button
-                        className="settings-button"
-                        onClick={() => void reviewRun(run.id, "accepted")}
-                        disabled={busy}
-                      >
-                        {run.promotionStatus === "promotion_failed"
-                          ? settings.promotionMode === "github_pr"
-                            ? "Retry PR"
-                            : "Retry Merge"
-                          : settings.promotionMode === "github_pr"
-                            ? "Accept + Open PR"
-                            : "Accept + Merge"}
-                      </button>
-                      <button
-                        className="settings-button settings-button-secondary"
-                        onClick={() => void reviewRun(run.id, "dismissed")}
-                        disabled={busy}
-                      >
-                        Dismiss
-                      </button>
-                    </div>
-                  </div>
-                </div>
+              pendingReviewCampaigns.map((campaign) => (
+                <CampaignCard
+                  key={`review-${campaign.id}`}
+                  campaign={campaign}
+                  workspaceNameById={workspaceNameById}
+                  showWorkspace={selectedWorkspaceId === ALL_WORKSPACES_VALUE}
+                  onOpenTask={props?.onOpenTask}
+                  primaryActionLabel={
+                    campaign.promotionStatus === "promotion_failed"
+                      ? settings.promotionMode === "github_pr"
+                        ? "Retry PR"
+                        : "Retry Merge"
+                      : settings.promotionMode === "github_pr"
+                        ? "Accept + Open PR"
+                        : "Accept + Merge"
+                  }
+                  onPrimaryAction={() => void reviewCampaign(campaign.id, "accepted")}
+                  onSecondaryAction={() => void reviewCampaign(campaign.id, "dismissed")}
+                />
               ))
             )}
 
-            <div className="settings-form-group">
-              <div style={{ fontWeight: 600, color: "var(--color-text-primary)" }}>Recent Promotions</div>
-              <p className="settings-form-hint" style={{ margin: "4px 0 0 0" }}>
-                Recent PRs, merges, and direct-apply improvements.
-              </p>
-            </div>
-            {recentPromotedRuns.length === 0 ? (
-              <p className="settings-form-hint">No improvements have been promoted yet.</p>
+            <SectionTitle title="Recent Promotions" hint="Recent PRs, merges, and direct-apply campaign promotions." />
+            {recentPromotedCampaigns.length === 0 ? (
+              <p className="settings-form-hint">No campaign promotions have been recorded yet.</p>
             ) : (
-              recentPromotedRuns.map((run) => (
-                <div key={`promo-${run.id}`} className="settings-form-group">
-                  <div style={{ fontWeight: 600, color: "var(--color-text-primary)" }}>
-                    {run.verdictSummary || "Promoted improvement run"}
-                  </div>
-                  <p className="settings-form-hint" style={{ margin: "4px 0 0 0" }}>
-                    Status: <code>{run.promotionStatus || "idle"}</code>
-                    {selectedWorkspaceId === ALL_WORKSPACES_VALUE ? (
-                      <>
-                        {" "}
-                        | Observed In: <code>{workspaceNameById.get(run.workspaceId) || run.workspaceId}</code>
-                      </>
-                    ) : null}
-                    {(run.executionWorkspaceId || run.workspaceId) !== run.workspaceId ? (
-                      <>
-                        {" "}
-                        | Runs In:{" "}
-                        <code>
-                          {workspaceNameById.get(run.executionWorkspaceId || "") ||
-                            run.executionWorkspaceId ||
-                            run.workspaceId}
-                        </code>
-                      </>
-                    ) : null}
-                  </p>
-                </div>
+              recentPromotedCampaigns.map((campaign) => (
+                <CampaignCard
+                  key={`promo-${campaign.id}`}
+                  campaign={campaign}
+                  workspaceNameById={workspaceNameById}
+                  showWorkspace={selectedWorkspaceId === ALL_WORKSPACES_VALUE}
+                />
               ))
             )}
 
-            <div className="settings-form-group">
-              <div style={{ fontWeight: 600, color: "var(--color-text-primary)" }}>Run Activity</div>
-            </div>
-            {recentRuns.length === 0 ? (
-              <p className="settings-form-hint">No improvement runs have been recorded for this view yet.</p>
+            <SectionTitle title="Campaign Activity" hint="Variant fan-out, current leader, and judge outcome for recent campaigns." />
+            {recentCampaigns.length === 0 ? (
+              <p className="settings-form-hint">No campaign activity has been recorded for this view yet.</p>
             ) : (
-              recentRuns.map((run) => (
-                <div key={`run-${run.id}`} className="settings-form-group">
-                  <div style={{ fontWeight: 600, color: "var(--color-text-primary)" }}>
-                    {run.verdictSummary || "Improvement run"}
-                  </div>
-                  <p className="settings-form-hint" style={{ margin: "4px 0 0 0" }}>
-                    Run: <code>{run.status}</code> | Review: <code>{run.reviewStatus}</code> | Promotion:{" "}
-                    <code>{run.promotionStatus || "idle"}</code>
-                    {run.taskId ? (
-                      <>
-                        {" "}
-                        | Task: <code>{run.taskId}</code>
-                      </>
-                    ) : null}
-                    {selectedWorkspaceId === ALL_WORKSPACES_VALUE ? (
-                      <>
-                        {" "}
-                        | Observed In: <code>{workspaceNameById.get(run.workspaceId) || run.workspaceId}</code>
-                      </>
-                    ) : null}
-                    {(run.executionWorkspaceId || run.workspaceId) !== run.workspaceId ? (
-                      <>
-                        {" "}
-                        | Runs In:{" "}
-                        <code>
-                          {workspaceNameById.get(run.executionWorkspaceId || "") ||
-                            run.executionWorkspaceId ||
-                            run.workspaceId}
-                        </code>
-                      </>
-                    ) : null}
-                  </p>
-                  {run.taskId && props?.onOpenTask ? (
-                    <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <button
-                        className="settings-button settings-button-secondary"
-                        onClick={() => props.onOpenTask?.(run.taskId!)}
-                      >
-                        Open Task
-                      </button>
-                      {(run.status === "failed" || run.status === "cancelled") && (
-                        <button
-                          className="settings-button settings-button-secondary"
-                          onClick={() => void retryRun(run.id)}
-                          disabled={busy}
-                        >
-                          Retry Run
-                        </button>
-                      )}
-                    </div>
-                  ) : (run.status === "failed" || run.status === "cancelled") ? (
-                    <div style={{ marginTop: 8 }}>
-                      <button
-                        className="settings-button settings-button-secondary"
-                        onClick={() => void retryRun(run.id)}
-                        disabled={busy}
-                      >
-                        Retry Run
-                      </button>
-                    </div>
-                  ) : null}
-                </div>
+              recentCampaigns.map((campaign) => (
+                <CampaignCard
+                  key={`campaign-${campaign.id}`}
+                  campaign={campaign}
+                  workspaceNameById={workspaceNameById}
+                  showWorkspace={selectedWorkspaceId === ALL_WORKSPACES_VALUE}
+                  onOpenTask={props?.onOpenTask}
+                  showRetry={campaign.status === "failed"}
+                  onRetry={() => void retryCampaign(campaign.id)}
+                  busy={busy}
+                />
               ))
             )}
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function HintBlock(props: { title: string; children: ReactNode }) {
+  return (
+    <div className="settings-form-group">
+      <p className="settings-form-hint" style={{ margin: 0 }}>
+        <strong>{props.title}</strong> {props.children}
+      </p>
+    </div>
+  );
+}
+
+function SectionTitle(props: { title: string; hint: string }) {
+  return (
+    <div className="settings-form-group">
+      <div style={{ fontWeight: 600, color: "var(--color-text-primary)" }}>{props.title}</div>
+      <p className="settings-form-hint" style={{ margin: "4px 0 0 0" }}>
+        {props.hint}
+      </p>
+    </div>
+  );
+}
+
+function CampaignCard(props: {
+  campaign: ImprovementCampaign;
+  workspaceNameById: Map<string, string>;
+  showWorkspace: boolean;
+  onOpenTask?: (taskId: string) => void;
+  primaryActionLabel?: string;
+  onPrimaryAction?: () => void;
+  onSecondaryAction?: () => void;
+  showRetry?: boolean;
+  onRetry?: () => void;
+  busy?: boolean;
+}) {
+  const winner = props.campaign.variants.find((variant) => variant.id === props.campaign.winnerVariantId);
+  return (
+    <div className="settings-form-group">
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontWeight: 600, color: "var(--color-text-primary)" }}>
+            {props.campaign.verdictSummary || "Improvement campaign"}
+          </div>
+          <p className="settings-form-hint" style={{ margin: "4px 0 0 0" }}>
+            Campaign: <code>{props.campaign.status}</code> | Review: <code>{props.campaign.reviewStatus}</code> | Promotion:{" "}
+            <code>{props.campaign.promotionStatus || "idle"}</code>
+            {winner ? (
+              <>
+                {" "}
+                | Winner: <code>{winner.lane}</code>
+              </>
+            ) : null}
+            {props.showWorkspace ? (
+              <>
+                {" "}
+                | Workspace: <code>{props.workspaceNameById.get(props.campaign.workspaceId) || props.campaign.workspaceId}</code>
+              </>
+            ) : null}
+          </p>
+          <p className="settings-form-hint" style={{ margin: "6px 0 0 0" }}>
+            Variants:{" "}
+            {props.campaign.variants.map((variant) => (
+              <span key={variant.id}>
+                <code>{variant.lane}</code>=<code>{variant.status}</code>{" "}
+              </span>
+            ))}
+          </p>
+          {props.campaign.judgeVerdict ? (
+            <p className="settings-form-hint" style={{ margin: "6px 0 0 0" }}>
+              Judge: <code>{props.campaign.judgeVerdict.status}</code> | Rankings:{" "}
+              {props.campaign.judgeVerdict.variantRankings.map((ranking) => (
+                <span key={ranking.variantId}>
+                  <code>{ranking.lane}</code>:<code>{ranking.score.toFixed(2)}</code>{" "}
+                </span>
+              ))}
+            </p>
+          ) : null}
+        </div>
+        {props.primaryActionLabel || props.showRetry ? (
+          <div style={{ display: "flex", gap: 8, flexShrink: 0, flexWrap: "wrap" }}>
+            {props.primaryActionLabel && props.onPrimaryAction ? (
+              <button className="settings-button" onClick={props.onPrimaryAction} disabled={props.busy}>
+                {props.primaryActionLabel}
+              </button>
+            ) : null}
+            {props.onSecondaryAction ? (
+              <button className="settings-button settings-button-secondary" onClick={props.onSecondaryAction} disabled={props.busy}>
+                Dismiss
+              </button>
+            ) : null}
+            {props.showRetry && props.onRetry ? (
+              <button className="settings-button settings-button-secondary" onClick={props.onRetry} disabled={props.busy}>
+                Retry Campaign
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+      {props.onOpenTask && winner?.taskId ? (
+        <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button className="settings-button settings-button-secondary" onClick={() => props.onOpenTask?.(winner.taskId!)}>
+            Open Winner Task
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -723,12 +680,7 @@ function ToggleRow(props: {
           </p>
         </div>
         <label className="settings-toggle" style={{ flexShrink: 0, marginTop: 2 }}>
-          <input
-            type="checkbox"
-            checked={props.checked}
-            disabled={props.disabled}
-            onChange={(event) => props.onChange(event.target.checked)}
-          />
+          <input type="checkbox" checked={props.checked} disabled={props.disabled} onChange={(event) => props.onChange(event.target.checked)} />
           <span className="toggle-slider" />
         </label>
       </div>
@@ -763,19 +715,14 @@ function NumberRow(props: {
 function SelectRow(props: {
   label: string;
   value: string;
-  disabled?: boolean;
   options: Array<{ value: string; label: string }>;
+  disabled?: boolean;
   onChange: (value: string) => void;
 }) {
   return (
     <div className="settings-form-group">
       <label className="settings-label">{props.label}</label>
-      <select
-        value={props.value}
-        disabled={props.disabled}
-        onChange={(event) => props.onChange(event.target.value)}
-        className="settings-select"
-      >
+      <select className="settings-select" value={props.value} disabled={props.disabled} onChange={(event) => props.onChange(event.target.value)}>
         {props.options.map((option) => (
           <option key={option.value} value={option.value}>
             {option.label}

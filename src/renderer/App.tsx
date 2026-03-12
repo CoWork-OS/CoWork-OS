@@ -2239,7 +2239,6 @@ export function App() {
                   setCurrentView("main");
                 }}
                 onNewSession={handleNewSession}
-                onQuickTask={handleQuickTask}
                 onOpenScheduledTasks={() => {
                   setSettingsTab("scheduled");
                   setCurrentView("settings");

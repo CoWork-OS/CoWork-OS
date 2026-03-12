@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
-  ArrowUp,
   Bot,
   CheckCircle2,
   CircleDot,
@@ -12,7 +11,6 @@ import {
   Image as ImageIcon,
   Pause,
   Plus,
-  SlidersHorizontal,
   Sparkles,
   TimerReset,
   Wand2,
@@ -46,7 +44,6 @@ interface HomeDashboardProps {
   tasks: Task[];
   onOpenTask: (taskId: string) => void;
   onNewSession: () => void;
-  onQuickTask: (prompt: string) => Promise<void> | void;
   onOpenScheduledTasks: () => void;
   onOpenMissionControl: () => void;
   onOpenSkills: () => void;
@@ -282,25 +279,21 @@ export function HomeDashboard({
   tasks,
   onOpenTask,
   onNewSession,
-  onQuickTask,
   onOpenScheduledTasks,
   onOpenMissionControl,
   onOpenSkills,
   onOpenConnectedTools,
   onOpenDevices,
 }: HomeDashboardProps) {
-  const [draftPrompt, setDraftPrompt] = useState("");
-  const [isStartingTask, setIsStartingTask] = useState(false);
   const [recentHubFiles, setRecentHubFiles] = useState<RecentHubFile[]>([]);
   const [connectedNodes, setConnectedNodes] = useState<NodeInfo[]>([]);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
       try {
-        const electronApi = (window as Any).electronAPI;
+        const electronApi = (window as any).electronAPI;
         const recent = await electronApi.getRecentHubFiles(8);
         if (cancelled) return;
         setRecentHubFiles(Array.isArray(recent) ? (recent as RecentHubFile[]) : []);
@@ -407,85 +400,15 @@ export function HomeDashboard({
 
   const displayTasks = activeTasks.length > 0 ? activeTasks.slice(0, 4) : recentSessions.slice(0, 4);
 
-  useEffect(() => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-    textarea.style.height = "auto";
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
-  }, [draftPrompt]);
-
-  const startTask = async () => {
-    const prompt = draftPrompt.trim();
-    if (!prompt || isStartingTask) return;
-    setIsStartingTask(true);
-    try {
-      await onQuickTask(prompt);
-      setDraftPrompt("");
-    } finally {
-      setIsStartingTask(false);
-    }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      void startTask();
-    }
-  };
 
   return (
     <main className="main-content home-main-content">
       <div className="home-dashboard">
-        {/* Task Composer */}
-        <section className="home-composer-bar">
-          <div className="welcome-input-container home-welcome-input-container">
-            <div className="mention-autocomplete-wrapper">
-              <textarea
-                ref={textareaRef}
-                className="welcome-input input-textarea home-composer-bar-input"
-                value={draftPrompt}
-                onChange={(event) => setDraftPrompt(event.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Describe what you want done..."
-                rows={1}
-              />
-            </div>
-            <div className="welcome-input-footer">
-              <div className="input-left-actions">
-                <button
-                  type="button"
-                  className="attachment-btn attachment-btn-left"
-                  onClick={onNewSession}
-                  title="New blank session"
-                >
-                  <Plus size={18} />
-                </button>
-                <button
-                  type="button"
-                  className="attachment-btn"
-                  onClick={() =>
-                    setDraftPrompt(
-                      "Review the latest automated tasks and summarize anything that needs my attention.",
-                    )
-                  }
-                  title="Quick actions"
-                >
-                  <SlidersHorizontal size={18} />
-                </button>
-              </div>
-              <div className="input-right-actions">
-                <button
-                  type="button"
-                  className="lets-go-btn lets-go-btn-sm"
-                  onClick={() => void startTask()}
-                  disabled={!draftPrompt.trim() || isStartingTask}
-                  title="Start task"
-                >
-                  <ArrowUp size={16} />
-                </button>
-              </div>
-            </div>
-          </div>
+        <section className="home-new-task-section">
+          <button type="button" className="home-new-task-btn" onClick={onNewSession}>
+            <Plus size={20} strokeWidth={2.5} />
+            <span>Start a new Task</span>
+          </button>
         </section>
 
         {/* Running Tasks */}
@@ -651,7 +574,7 @@ export function HomeDashboard({
               onClick={() => {
                 const firstFile = recentHubFiles[0];
                 if (firstFile?.path) {
-                  void (window as Any).electronAPI.openFile(firstFile.path, workspace?.path);
+                  void (window as any).electronAPI.openFile(firstFile.path, workspace?.path);
                 }
               }}
               disabled={recentHubFiles.length === 0 && recentOutputs.length === 0}
@@ -683,7 +606,7 @@ export function HomeDashboard({
                 type="button"
                 key={file.id}
                 className="home-file-thumb"
-                onClick={() => void (window as Any).electronAPI.openFile(file.path, workspace?.path)}
+                onClick={() => void (window as any).electronAPI.openFile(file.path, workspace?.path)}
               >
                 <HomeFilePreview
                   filePath={file.path}

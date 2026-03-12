@@ -11,6 +11,7 @@ import {
 } from "../../electron/preload";
 import type {
   Company,
+  CompanyCommandCenterSummary,
   Goal,
   HeartbeatRun,
   HeartbeatRunEvent,
@@ -112,6 +113,7 @@ export function MissionControlPanel({
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
   const [plannerConfig, setPlannerConfig] = useState<StrategicPlannerConfig | null>(null);
   const [plannerRuns, setPlannerRuns] = useState<StrategicPlannerRun[]>([]);
+  const [commandCenterSummary, setCommandCenterSummary] = useState<CompanyCommandCenterSummary | null>(null);
   const [plannerLoading, setPlannerLoading] = useState(false);
   const [plannerSaving, setPlannerSaving] = useState(false);
   const [plannerRunning, setPlannerRunning] = useState(false);
@@ -235,6 +237,16 @@ export function MissionControlPanel({
     }
   }, []);
 
+  const loadCommandCenterSummary = useCallback(async (companyId: string) => {
+    try {
+      const summary = await window.electronAPI.getCommandCenterSummary(companyId);
+      setCommandCenterSummary(summary);
+    } catch (err) {
+      console.error("Failed to load command center summary:", err);
+      setCommandCenterSummary(null);
+    }
+  }, []);
+
   const loadIssueContext = useCallback(async (companyId: string, issueId: string) => {
     try {
       const [comments, runs] = await Promise.all([
@@ -308,13 +320,14 @@ export function MissionControlPanel({
       if (selectedCompanyId) {
         await loadPlannerData(selectedCompanyId);
         await loadCompanyOps(selectedCompanyId);
+        await loadCommandCenterSummary(selectedCompanyId);
       }
     } catch (err) {
       console.error("Failed to refresh mission control data:", err);
     } finally {
       setIsRefreshing(false);
     }
-  }, [loadCompanyOps, loadPlannerData, selectedCompanyId, selectedWorkspaceId]);
+  }, [loadCommandCenterSummary, loadCompanyOps, loadPlannerData, selectedCompanyId, selectedWorkspaceId]);
 
   useEffect(() => {
     loadWorkspaces();
@@ -334,9 +347,12 @@ export function MissionControlPanel({
     if (selectedCompanyId) {
       void loadPlannerData(selectedCompanyId);
       void loadCompanyOps(selectedCompanyId);
+      void loadCommandCenterSummary(selectedCompanyId);
+      setRightTab("ops");
     } else {
       setPlannerConfig(null);
       setPlannerRuns([]);
+      setCommandCenterSummary(null);
       setGoals([]);
       setProjects([]);
       setIssues([]);
@@ -349,7 +365,7 @@ export function MissionControlPanel({
     }
     setSelectedGoalFilter("all");
     setSelectedProjectFilter("all");
-  }, [selectedCompanyId, loadCompanyOps, loadPlannerData]);
+  }, [selectedCompanyId, loadCommandCenterSummary, loadCompanyOps, loadPlannerData]);
 
   useEffect(() => {
     if (!initialCompanyId) return;
@@ -706,6 +722,10 @@ export function MissionControlPanel({
     () => companies.find((company) => company.id === selectedCompanyId) || null,
     [companies, selectedCompanyId],
   );
+  const commandCenterOutputs = commandCenterSummary?.outputs || [];
+  const commandCenterReviewQueue = commandCenterSummary?.reviewQueue || [];
+  const commandCenterOperators = commandCenterSummary?.operators || [];
+  const commandCenterExecutionMap = commandCenterSummary?.executionMap || [];
   const selectedPlannerRun = useMemo(
     () => plannerRuns.find((run) => run.id === selectedPlannerRunId) || null,
     [plannerRuns, selectedPlannerRunId],
@@ -1516,8 +1536,8 @@ export function MissionControlPanel({
           ) : rightTab === "ops" ? (
             <div className="mc-ops-panel">
               <div className="mc-ops-section">
-                <h3>Company snapshot</h3>
-                {selectedCompany ? (
+                <h3>Company Overview</h3>
+                {selectedCompany && commandCenterSummary ? (
                   <>
                     <p className="mc-ops-company-name">{selectedCompany.name}</p>
                     {selectedCompany.description && (
@@ -1525,16 +1545,24 @@ export function MissionControlPanel({
                     )}
                     <div className="mc-ops-stats">
                       <div className="mc-ops-stat-card">
-                        <span className="mc-ops-stat-value">{goals.length}</span>
-                        <span className="mc-ops-stat-label">Goals</span>
+                        <span className="mc-ops-stat-value">{commandCenterSummary.overview.activeGoalCount}</span>
+                        <span className="mc-ops-stat-label">Active goals</span>
                       </div>
                       <div className="mc-ops-stat-card">
-                        <span className="mc-ops-stat-value">{projects.length}</span>
-                        <span className="mc-ops-stat-label">Projects</span>
+                        <span className="mc-ops-stat-value">{commandCenterSummary.overview.activeProjectCount}</span>
+                        <span className="mc-ops-stat-label">Active projects</span>
                       </div>
                       <div className="mc-ops-stat-card">
-                        <span className="mc-ops-stat-value">{plannerManagedIssues.length}</span>
-                        <span className="mc-ops-stat-label">Planner issues</span>
+                        <span className="mc-ops-stat-value">{commandCenterSummary.overview.openIssueCount}</span>
+                        <span className="mc-ops-stat-label">Open issues</span>
+                      </div>
+                      <div className="mc-ops-stat-card">
+                        <span className="mc-ops-stat-value">{commandCenterSummary.overview.pendingReviewCount}</span>
+                        <span className="mc-ops-stat-label">Pending review</span>
+                      </div>
+                      <div className="mc-ops-stat-card">
+                        <span className="mc-ops-stat-value">{commandCenterSummary.overview.valuableOutputCount}</span>
+                        <span className="mc-ops-stat-label">Valuable outputs</span>
                       </div>
                     </div>
                   </>
@@ -1544,14 +1572,144 @@ export function MissionControlPanel({
               </div>
 
               <div className="mc-ops-section">
-                <h3>Selected planner cycle</h3>
+                <h3>Operator Panel</h3>
+                <div className="mc-ops-list">
+                  {commandCenterOperators.length === 0 ? (
+                    <div className="mc-feed-empty">No operators linked to this company yet.</div>
+                  ) : (
+                    commandCenterOperators.map((operator) => (
+                      <div key={operator.agentRoleId} className="mc-ops-row">
+                        <div>
+                          <div className="mc-ops-row-title">
+                            <span style={{ color: operator.color }}>
+                              {operator.icon} {operator.displayName}
+                            </span>
+                          </div>
+                          <div className="mc-ops-row-subtitle">
+                            {(operator.operatorMandate || "No mandate set") +
+                              (operator.currentBottleneck ? ` · Bottleneck: ${operator.currentBottleneck}` : "")}
+                          </div>
+                          <div className="mc-ops-row-subtitle">
+                            {`Last useful output ${operator.lastUsefulOutputAt ? formatRelativeTime(operator.lastUsefulOutputAt) : "never"} · heartbeat ${operator.heartbeatStatus || "idle"}`}
+                          </div>
+                        </div>
+                        <span className="mc-ops-pill">
+                          {typeof operator.operatorHealthScore === "number"
+                            ? `${Math.round(operator.operatorHealthScore * 100)} health`
+                            : operator.activeLoop || "idle"}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div className="mc-ops-section">
+                <h3>Operations Feed</h3>
+                <div className="mc-ops-list">
+                  {commandCenterOutputs.length === 0 ? (
+                    <div className="mc-feed-empty">No valuable outputs yet.</div>
+                  ) : (
+                    commandCenterOutputs.map((output) => (
+                      <button
+                        key={output.id}
+                        type="button"
+                        className={`mc-ops-row mc-ops-row-button ${selectedIssueId === output.issueId ? "selected" : ""}`}
+                        onClick={() => {
+                          if (output.issueId) setSelectedIssueId(output.issueId);
+                        }}
+                      >
+                        <div>
+                          <div className="mc-ops-row-title">{output.title}</div>
+                          <div className="mc-ops-row-subtitle">
+                            {`${output.outputType} · ${output.valueReason}`}
+                          </div>
+                          {(output.whatChanged || output.nextStep) && (
+                            <div className="mc-ops-row-subtitle">
+                              {[output.whatChanged, output.nextStep].filter(Boolean).join(" · ")}
+                            </div>
+                          )}
+                        </div>
+                        <span className={`mc-ops-pill status-${output.status || "idle"}`}>
+                          {output.reviewRequired ? "review" : output.outputType}
+                        </span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div className="mc-ops-section">
+                <h3>Review Queue</h3>
+                <div className="mc-ops-list">
+                  {commandCenterReviewQueue.length === 0 ? (
+                    <div className="mc-feed-empty">No human review gates queued.</div>
+                  ) : (
+                    commandCenterReviewQueue.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        className={`mc-ops-row mc-ops-row-button ${selectedIssueId === item.issueId ? "selected" : ""}`}
+                        onClick={() => {
+                          if (item.issueId) setSelectedIssueId(item.issueId);
+                        }}
+                      >
+                        <div>
+                          <div className="mc-ops-row-title">{item.title}</div>
+                          <div className="mc-ops-row-subtitle">
+                            {`${item.reviewReason} · ${item.outputType || item.sourceType}`}
+                          </div>
+                          {item.summary && <div className="mc-ops-row-subtitle">{item.summary}</div>}
+                        </div>
+                        <span className="mc-ops-pill">{formatRelativeTime(item.createdAt)}</span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div className="mc-ops-section">
+                <h3>Execution Map</h3>
+                <div className="mc-ops-list">
+                  {commandCenterExecutionMap.length === 0 ? (
+                    <div className="mc-feed-empty">No execution lineage yet.</div>
+                  ) : (
+                    commandCenterExecutionMap.slice(0, 12).map((entry) => (
+                      <button
+                        key={entry.issueId}
+                        type="button"
+                        className={`mc-ops-row mc-ops-row-button ${selectedIssueId === entry.issueId ? "selected" : ""}`}
+                        onClick={() => setSelectedIssueId(entry.issueId)}
+                      >
+                        <div>
+                          <div className="mc-ops-row-title">{entry.issueTitle}</div>
+                          <div className="mc-ops-row-subtitle">
+                            {[
+                              entry.goalTitle,
+                              entry.projectName,
+                              entry.outputType,
+                              entry.taskStatus ? `task:${entry.taskStatus}` : undefined,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </div>
+                        </div>
+                        <span className={`mc-ops-pill status-${entry.issueStatus}`}>
+                          {entry.stale ? "stale" : entry.issueStatus}
+                        </span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div className="mc-ops-section">
+                <h3>Planner Runs</h3>
                 {selectedPlannerRun ? (
                   <div className="mc-ops-run-card">
                     <div className="mc-ops-row">
                       <div>
-                        <div className="mc-ops-row-title">
-                          {selectedPlannerRun.summary || "Planner cycle"}
-                        </div>
+                        <div className="mc-ops-row-title">{selectedPlannerRun.summary || "Planner cycle"}</div>
                         <div className="mc-ops-row-subtitle">
                           {selectedPlannerRun.trigger} · {formatRelativeTime(selectedPlannerRun.createdAt)}
                         </div>
@@ -1589,107 +1747,8 @@ export function MissionControlPanel({
                     </div>
                   </div>
                 ) : (
-                  <div className="mc-feed-empty">Select a planner run above to inspect its issue set.</div>
+                  <div className="mc-feed-empty">Select a planner run above to inspect it.</div>
                 )}
-              </div>
-
-              <div className="mc-ops-section">
-                <h3>Goals</h3>
-                <div className="mc-ops-list">
-                  {goals.length === 0 ? (
-                    <div className="mc-feed-empty">No goals yet.</div>
-                  ) : (
-                    goals.slice(0, 8).map((goal) => (
-                      <div key={goal.id} className="mc-ops-row">
-                        <div>
-                          <div className="mc-ops-row-title">{goal.title}</div>
-                          {goal.description && (
-                            <div className="mc-ops-row-subtitle">{goal.description}</div>
-                          )}
-                        </div>
-                        <span className={`mc-ops-pill status-${goal.status}`}>{goal.status}</span>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              <div className="mc-ops-section">
-                <h3>Projects</h3>
-                <div className="mc-ops-list">
-                  {projects.length === 0 ? (
-                    <div className="mc-feed-empty">No projects yet.</div>
-                  ) : (
-                    projects.slice(0, 8).map((project) => (
-                      <div key={project.id} className="mc-ops-row">
-                        <div>
-                          <div className="mc-ops-row-title">{project.name}</div>
-                          {project.description && (
-                            <div className="mc-ops-row-subtitle">{project.description}</div>
-                          )}
-                        </div>
-                        <span className={`mc-ops-pill status-${project.status}`}>{project.status}</span>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              <div className="mc-ops-section">
-                <h3>Planner-managed issues</h3>
-                <div className="mc-ops-filters">
-                  <label className="mc-ops-filter">
-                    <span>Goal</span>
-                    <select
-                      value={selectedGoalFilter}
-                      onChange={(e) => setSelectedGoalFilter(e.target.value)}
-                    >
-                      <option value="all">All goals</option>
-                      {goals.map((goal) => (
-                        <option key={goal.id} value={goal.id}>
-                          {goal.title}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="mc-ops-filter">
-                    <span>Project</span>
-                    <select
-                      value={selectedProjectFilter}
-                      onChange={(e) => setSelectedProjectFilter(e.target.value)}
-                    >
-                      <option value="all">All projects</option>
-                      {projects.map((project) => (
-                        <option key={project.id} value={project.id}>
-                          {project.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-                <div className="mc-ops-list">
-                  {filteredIssues.length === 0 ? (
-                    <div className="mc-feed-empty">No planner-managed issues yet.</div>
-                  ) : (
-                    filteredIssues.slice(0, 12).map((issue) => (
-                      <button
-                        key={issue.id}
-                        type="button"
-                        className={`mc-ops-row mc-ops-row-button ${selectedIssueId === issue.id ? "selected" : ""}`}
-                        onClick={() => setSelectedIssueId(issue.id)}
-                      >
-                        <div>
-                          <div className="mc-ops-row-title">{issue.title}</div>
-                          <div className="mc-ops-row-subtitle">
-                            {(getAgent(issue.assigneeAgentRoleId)?.displayName || "Unassigned") +
-                              (issue.taskId ? ` · task linked` : "")}
-                          </div>
-                        </div>
-                        <span className={`mc-ops-pill status-${issue.status}`}>{issue.status}</span>
-                      </button>
-                    ))
-                  )}
-                </div>
               </div>
 
               <div className="mc-ops-section">

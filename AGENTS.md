@@ -6,9 +6,10 @@ When a user reports a failure, error, or unexpected behavior:
 
 1. Check development logs first, if available.
 2. Read `logs/dev-latest.log` for the most recent captured run.
-3. If needed, inspect the newest timestamped file in `logs/dev-*.log` for full context.
-4. Quote relevant error lines with timestamps when summarizing findings.
-5. If logs are missing, state that clearly and continue with other diagnostics.
+3. If `logs/dev-latest.log` is missing or stale for the current repro, run `npm run dev:log` to capture a fresh run.
+4. If needed, inspect the newest timestamped file in `logs/dev-*.log` for full context.
+5. Quote relevant error lines with timestamps when summarizing findings.
+6. If logs are missing, state that clearly and continue with other diagnostics.
 
 ## Dev Log Availability
 

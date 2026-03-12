@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useCallback, Fragment } from "react";
-import { Filter } from "lucide-react";
+import { Filter, Cpu, EyeOff } from "lucide-react";
 import { Task, Workspace, UiDensity, InfraStatus } from "../../shared/types";
 
 interface SidebarProps {
@@ -75,70 +75,15 @@ const ACTIVE_SESSION_STATUSES: ReadonlySet<Task["status"]> = new Set([
 ]);
 const AWAITING_SESSION_STATUSES: ReadonlySet<Task["status"]> = new Set(["paused", "blocked"]);
 
-function createMacMiniIconDataUrl(color: string): string {
-  const size = 18;
-  const scale = 2;
-  const s = size * scale;
-  const canvas = document.createElement("canvas");
-  canvas.width = s;
-  canvas.height = s;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return "";
-
-  ctx.clearRect(0, 0, s, s);
-  ctx.strokeStyle = color;
-  ctx.fillStyle = color;
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-
-  const sc = s / 24;
-
-  const bodyX = 2.2 * sc;
-  const bodyY = 6.5 * sc;
-  const bodyW = 19.6 * sc;
-  const bodyH = 9.4 * sc;
-  const bodyR = 1.8 * sc;
-  const sw = 1.7 * sc;
-
-  ctx.lineWidth = sw;
-  ctx.beginPath();
-  ctx.moveTo(bodyX + bodyR, bodyY);
-  ctx.lineTo(bodyX + bodyW - bodyR, bodyY);
-  ctx.quadraticCurveTo(bodyX + bodyW, bodyY, bodyX + bodyW, bodyY + bodyR);
-  ctx.lineTo(bodyX + bodyW, bodyY + bodyH - bodyR);
-  ctx.quadraticCurveTo(bodyX + bodyW, bodyY + bodyH, bodyX + bodyW - bodyR, bodyY + bodyH);
-  ctx.lineTo(bodyX + bodyR, bodyY + bodyH);
-  ctx.quadraticCurveTo(bodyX, bodyY + bodyH, bodyX, bodyY + bodyH - bodyR);
-  ctx.lineTo(bodyX, bodyY + bodyR);
-  ctx.quadraticCurveTo(bodyX, bodyY, bodyX + bodyR, bodyY);
-  ctx.stroke();
-
-  const baseY = bodyY + bodyH + 0.3 * sc;
-  const baseLeft = 6.5 * sc;
-  const baseRight = s - 6.5 * sc;
-  const baseSag = 2.2 * sc;
-  const baseSteps = 40;
-
-  ctx.lineWidth = 1.5 * sc;
-  ctx.beginPath();
-  for (let i = 0; i <= baseSteps; i++) {
-    const t = i / baseSteps;
-    const x = baseLeft + (baseRight - baseLeft) * t;
-    const y = baseY + Math.sin(t * Math.PI) * baseSag;
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  }
-  ctx.stroke();
-
-  const dotY = 11.2 * sc;
-  ctx.beginPath();
-  ctx.arc(17.0 * sc, dotY, 1.1 * sc, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.arc(19.6 * sc, dotY, 0.55 * sc, 0, Math.PI * 2);
-  ctx.fill();
-
-  return canvas.toDataURL("image/png");
+function MacMiniIcon({ className, size = 18 }: { className?: string; size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={className} stroke="currentColor" style={{ display: 'block' }}>
+      <path d="M 4 6.5 L 20 6.5 Q 21.8 6.5 21.8 8.3 L 21.8 14.1 Q 21.8 15.9 20 15.9 L 4 15.9 Q 2.2 15.9 2.2 14.1 L 2.2 8.3 Q 2.2 6.5 4 6.5 Z" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M 6.5 16.2 Q 12 19.1 17.5 16.2" strokeWidth="1.5" strokeLinecap="round" />
+      <circle cx="17.0" cy="11.2" r="1.1" fill="currentColor" stroke="none" />
+      <circle cx="19.6" cy="11.2" r="0.55" fill="currentColor" stroke="none" />
+    </svg>
+  );
 }
 
 export function isActiveSessionStatus(status: Task["status"]): boolean {
@@ -266,10 +211,6 @@ export function Sidebar({
     () => new Set(completionAttentionTaskIds),
     [completionAttentionTaskIds],
   );
-  const homeIconSrc = useMemo(() => {
-    const isLightTheme = document.documentElement.classList.contains("theme-light");
-    return createMacMiniIconDataUrl(isLightTheme ? "rgba(17, 24, 39, 0.82)" : "rgba(229, 231, 235, 0.92)");
-  }, []);
 
   // Helper to get date group for a timestamp
   const getDateGroup = useCallback((timestamp: number): string => {
@@ -1054,36 +995,6 @@ export function Sidebar({
       {/* New Session Button */}
       <div className="sidebar-header">
         <div className="cli-header-actions">
-          <button
-            className="cli-action-btn cli-mission-control-btn"
-            onClick={onOpenMissionControl}
-            title="Mission Control"
-          >
-            <span className="terminal-only">
-              <span className="cli-btn-bracket">[</span>
-              <span className="cli-btn-accent">MC</span>
-              <span className="cli-btn-bracket">]</span>
-            </span>
-            <span className="cli-btn-text">
-              <span className="terminal-only">mission_control</span>
-              <span className="modern-only">Mission Control</span>
-            </span>
-          </button>
-          <button
-            className={`cli-action-btn cli-devices-btn ${isDevicesActive ? "active" : ""}`}
-            onClick={onOpenDevices}
-            title="Devices"
-          >
-            <span className="terminal-only">
-              <span className="cli-btn-bracket">[</span>
-              <span className="cli-btn-accent">DV</span>
-              <span className="cli-btn-bracket">]</span>
-            </span>
-            <span className="cli-btn-text">
-              <span className="terminal-only">devices</span>
-              <span className="modern-only">Devices</span>
-            </span>
-          </button>
           <button className="new-task-btn cli-new-task-btn cli-action-btn" onClick={handleNewTask}>
             <span className="terminal-only">
               <span className="cli-btn-bracket">[</span>
@@ -1100,29 +1011,72 @@ export function Sidebar({
               </span>
             </span>
           </button>
-        </div>
-        <button
-          type="button"
-          className={`new-task-btn cli-new-task-btn cli-action-btn sidebar-home-btn ${isHomeActive ? "active" : ""}`}
-          onClick={onOpenHome}
-          aria-pressed={isHomeActive}
-          title="Home"
-        >
-          <span className="cli-btn-text">
-            <span className="terminal-only">home</span>
-            <span className="modern-only cli-new-task-modern-label">
-              <span className="sidebar-home-btn-icon" aria-hidden="true">
-                <img src={homeIconSrc} alt="" className="sidebar-home-btn-icon-image" />
-              </span>
-              <span>Home</span>
+
+          <button
+            className="new-task-btn cli-new-task-btn cli-action-btn cli-mission-control-btn"
+            onClick={onOpenMissionControl}
+            title="Mission Control"
+          >
+            <span className="terminal-only">
+              <span className="cli-btn-bracket">[</span>
+              <span className="cli-btn-accent">MC</span>
+              <span className="cli-btn-bracket">]</span>
             </span>
-          </span>
-        </button>
+            <span className="cli-btn-text">
+              <span className="terminal-only">mission_control</span>
+              <span className="modern-only cli-new-task-modern-label">
+                <span className="sidebar-home-btn-icon" aria-hidden="true">
+                  <span className="cli-btn-accent" style={{ fontSize: '12px' }}>MC</span>
+                </span>
+                <span>Mission Control</span>
+              </span>
+            </span>
+          </button>
+
+          <button
+            type="button"
+            className={`new-task-btn cli-new-task-btn cli-action-btn sidebar-home-btn ${isHomeActive ? "active" : ""}`}
+            onClick={onOpenHome}
+            aria-pressed={isHomeActive}
+            title="Automated"
+          >
+            <span className="cli-btn-text">
+              <span className="terminal-only">automated</span>
+              <span className="modern-only cli-new-task-modern-label">
+                <span className="sidebar-home-btn-icon" aria-hidden="true" style={{ display: 'flex' }}>
+                  <Cpu size={16} strokeWidth={2} style={{ display: 'block' }} />
+                </span>
+                <span>Automated</span>
+              </span>
+            </span>
+          </button>
+
+          <button
+            className={`new-task-btn cli-new-task-btn cli-action-btn sidebar-devices-btn cli-devices-btn ${isDevicesActive ? "active" : ""}`}
+            onClick={onOpenDevices}
+            title="Devices"
+          >
+            <span className="terminal-only">
+              <span className="cli-btn-bracket">[</span>
+              <span className="cli-btn-accent">DV</span>
+              <span className="cli-btn-bracket">]</span>
+            </span>
+            <span className="cli-btn-text">
+              <span className="terminal-only">devices</span>
+              <span className="modern-only cli-new-task-modern-label">
+                <span className="sidebar-home-btn-icon" aria-hidden="true" style={{ display: 'flex' }}>
+                  <MacMiniIcon size={16} />
+                </span>
+                <span>Devices</span>
+              </span>
+            </span>
+          </button>
+        </div>
       </div>
 
-      {/* Sessions List */}
-      <div className="task-list cli-task-list" ref={taskListRef}>
-        <div className="task-list-header cli-list-header cli-sessions-header">
+      {/* Sessions List Header (Unified with top navigation buttons structure) */}
+      <div className="sidebar-header-sessions" style={{ padding: "0 12px", marginBottom: "8px" }}>
+        <div className="new-task-btn cli-new-task-btn cli-action-btn cli-sessions-header" style={{ margin: 0 }}>
           <button
             type="button"
             className="cli-list-header-toggle"
@@ -1143,69 +1097,73 @@ export function Sidebar({
                 className={`session-filter-toggle ${showFilterBar || activeModeFilters.size > 0 ? "active" : ""}`}
                 onClick={() => setShowFilterBar(!showFilterBar)}
                 title="Filter by mode"
+                style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}
               >
-                <Filter size={12} strokeWidth={2.5} />
+                <Filter size={13} strokeWidth={2.5} style={{ display: 'block' }} />
                 {activeModeFilters.size > 0 && (
-                  <span className="filter-count">{activeModeFilters.size}</span>
+                  <span className="filter-count" style={{ marginLeft: '4px', fontSize: '10px' }}>{activeModeFilters.size}</span>
                 )}
               </button>
             )}
-            {uiDensity === "focused" && failedSessionCount > 0 && (
+            {failedSessionCount > 0 && (
               <button
                 type="button"
-                className="show-failed-toggle"
+                className={`show-failed-toggle ${showFailedSessions ? "active" : ""}`}
                 onClick={() => setShowFailedSessions(!showFailedSessions)}
+                style={{ cursor: 'pointer', padding: '2px 4px' }}
               >
                 {showFailedSessions ? "Hide" : "Show"} failed ({failedSessionCount})
               </button>
             )}
           </div>
         </div>
+
+        {pinActionError && (
+          <div className="cli-sidebar-error" role="alert" style={{ marginTop: '4px', marginLeft: '4px', marginRight: '4px' }}>
+            {pinActionError}
+          </div>
+        )}
+
+        {showFilterBar && (
+          <div className="session-filters-bar cli-session-filters">
+            <div className="session-filters-scroll">
+              <button
+                type="button"
+                className={`session-filter-chip standard ${activeModeFilters.size === 0 ? "active" : ""}`}
+                onClick={() => setActiveModeFilters(new Set())}
+              >
+                All
+              </button>
+              {availableModes.map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className={`session-filter-chip ${mode} ${activeModeFilters.has(mode) ? "active" : ""}`}
+                  onClick={() => toggleModeFilter(mode)}
+                >
+                  <span className="filter-chip-dot" />
+                  {mode}
+                </button>
+              ))}
+            </div>
+            {activeModeFilters.size > 0 && (
+              <button
+                type="button"
+                className="session-filter-clear"
+                onClick={() => setActiveModeFilters(new Set())}
+                title="Clear filters"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Sessions Scrollable List */}
+      <div className="task-list cli-task-list" ref={taskListRef}>
         {!sessionsCollapsed && (
           <>
-            {pinActionError && (
-              <div className="cli-sidebar-error" role="alert">
-                {pinActionError}
-              </div>
-            )}
-            {showFilterBar && (availableModes.length > 1 || activeModeFilters.size > 0) && (
-              <div className="session-filter-bar">
-                {availableModes.map((mode) => {
-                  const meta = SESSION_MODE_META[mode];
-                  const isActive = activeModeFilters.has(mode);
-                  return (
-                    <button
-                      type="button"
-                      key={mode}
-                      className={`session-filter-chip ${meta.color} ${isActive ? "active" : ""}`}
-                      onClick={() => toggleModeFilter(mode)}
-                      title={meta.label}
-                    >
-                      <span className="filter-chip-dot" />
-                      {meta.label}
-                      <span className="filter-chip-count">{modeCounts.get(mode) || 0}</span>
-                    </button>
-                  );
-                })}
-                {activeModeFilters.size > 0 && (
-                  <button
-                    type="button"
-                    className="session-filter-clear"
-                    onClick={() => setActiveModeFilters(new Set())}
-                    title="Clear filters"
-                  >
-                    clear
-                  </button>
-                )}
-              </div>
-            )}
-            {filteredTaskTree.length === 0 && activeModeFilters.size > 0 && (
-              <div className="sidebar-empty cli-empty sidebar-empty-filtered">
-                <p className="cli-hint">
-                  <span>No sessions match the selected filters</span>
-                </p>
-              </div>
-            )}
             {/* Automated sessions folder — collapsed by default, shown at top */}
             {automatedTaskTree.length > 0 && (
               <div className="automated-sessions-folder">
@@ -1250,19 +1208,7 @@ export function Sidebar({
 └── ...`}</pre>
                   {uiDensity === "focused" ? (
                     <div className="sidebar-empty-message">
-                      <svg
-                        width="32"
-                        height="32"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        style={{ opacity: 0.3 }}
-                      >
-                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                      </svg>
+                      <EyeOff size={32} style={{ opacity: 0.3 }} />
                       <p>Your conversations will appear here</p>
                       <span>Start a new session to get going</span>
                     </div>

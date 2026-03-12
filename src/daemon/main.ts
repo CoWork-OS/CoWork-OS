@@ -116,7 +116,7 @@ async function startControlPlane(options: {
       ? ControlPlaneSettingsManager.enable()
       : ControlPlaneSettingsManager.loadSettings();
 
-    if (!settings.enabled) {
+    if (!settings.enabled && settings.connectionMode !== "remote") {
       return { ok: true, skipped: true };
     }
 

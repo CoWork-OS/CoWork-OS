@@ -16,6 +16,45 @@ When the server is running, it also serves a minimal web dashboard at `/` (same 
 This is useful for headless/VPS setups: open the URL in a browser (via tunnel/Tailscale), paste the token, and manage tasks, approvals, and pending structured input requests.
 It also includes basic workspace, channel, and account management so you can bring up a fresh VPS without a desktop UI.
 
+## Finding the Remote Address
+
+Before connecting from your main CoWork machine, determine the address that is actually reachable from the client.
+
+### Same Local Network
+
+If the remote machine is a Mac mini, laptop, or VM on the same LAN:
+
+1. Enable **Allow LAN Connections** in CoWork Settings > Control Plane.
+2. On the remote machine, find its local IP:
+
+```bash
+ifconfig | grep "inet "
+```
+
+3. Use the private LAN address, usually something like:
+   - `192.168.x.x`
+   - `10.x.x.x`
+   - `172.16.x.x` to `172.31.x.x`
+4. Do not use:
+   - `127.0.0.1` because that is loopback on the remote machine only
+   - `0.0.0.0` because that is a bind address, not a destination address
+
+Example:
+
+```text
+ws://192.168.64.4:18789
+```
+
+### Public / External Network
+
+If the remote machine is not on the same local network:
+
+- Preferred: use **Tailscale** and connect with the Tailscale hostname / `wss://` URL
+- Safe fallback: use an **SSH tunnel** and connect locally to `ws://127.0.0.1:18789`
+- Direct public IP is possible, but only if you intentionally expose the port and protect it with firewall rules, TLS, and a strong token
+
+If you are using a VPS or another network you do not fully control, prefer Tailscale or SSH tunnel over a raw public WebSocket endpoint.
+
 ## SSH Tunnel (Recommended for Personal Use)
 
 SSH tunnels provide secure remote access using standard SSH port forwarding. This is ideal if you already have SSH access to the machine running CoWork.
@@ -201,6 +240,12 @@ In Settings > Control Plane > Remote Connection:
 | **Gateway URL** | WebSocket URL (e.g., `ws://127.0.0.1:18789` via SSH tunnel) |
 | **Token** | Authentication token from the remote Control Plane |
 | **TLS Fingerprint** | (Optional) Certificate pin for `wss://` connections |
+
+### Examples
+
+- Same network Mac mini or laptop: `ws://192.168.1.25:18789`
+- Same host over SSH tunnel: `ws://127.0.0.1:18789`
+- Tailscale: `wss://my-mac.tailnet-name.ts.net`
 
 ### Connection Modes
 

@@ -415,6 +415,112 @@ export class DatabaseManager {
         updated_at INTEGER NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS companies (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        slug TEXT NOT NULL UNIQUE,
+        description TEXT,
+        status TEXT NOT NULL DEFAULT 'active',
+        is_default INTEGER NOT NULL DEFAULT 0,
+        default_workspace_id TEXT,
+        monthly_budget_cost REAL,
+        budget_paused_at INTEGER,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY (default_workspace_id) REFERENCES workspaces(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS goals (
+        id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        description TEXT,
+        status TEXT NOT NULL DEFAULT 'active',
+        target_date INTEGER,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS projects (
+        id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        goal_id TEXT REFERENCES goals(id) ON DELETE SET NULL,
+        name TEXT NOT NULL,
+        description TEXT,
+        status TEXT NOT NULL DEFAULT 'active',
+        monthly_budget_cost REAL,
+        archived_at INTEGER,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS project_workspace_links (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        is_primary INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(project_id, workspace_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS issues (
+        id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        goal_id TEXT REFERENCES goals(id) ON DELETE SET NULL,
+        project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+        parent_issue_id TEXT REFERENCES issues(id) ON DELETE SET NULL,
+        workspace_id TEXT REFERENCES workspaces(id) ON DELETE SET NULL,
+        task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+        active_run_id TEXT,
+        title TEXT NOT NULL,
+        description TEXT,
+        status TEXT NOT NULL DEFAULT 'backlog',
+        priority INTEGER NOT NULL DEFAULT 1,
+        assignee_agent_role_id TEXT REFERENCES agent_roles(id) ON DELETE SET NULL,
+        reporter_agent_role_id TEXT REFERENCES agent_roles(id) ON DELETE SET NULL,
+        request_depth INTEGER,
+        billing_code TEXT,
+        metadata TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        completed_at INTEGER
+      );
+
+      CREATE TABLE IF NOT EXISTS issue_comments (
+        id TEXT PRIMARY KEY,
+        issue_id TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+        author_type TEXT NOT NULL,
+        author_agent_role_id TEXT REFERENCES agent_roles(id) ON DELETE SET NULL,
+        body TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS heartbeat_runs (
+        id TEXT PRIMARY KEY,
+        issue_id TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+        task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+        agent_role_id TEXT REFERENCES agent_roles(id) ON DELETE SET NULL,
+        workspace_id TEXT REFERENCES workspaces(id) ON DELETE SET NULL,
+        status TEXT NOT NULL,
+        summary TEXT,
+        error TEXT,
+        resumed_from_run_id TEXT REFERENCES heartbeat_runs(id) ON DELETE SET NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        started_at INTEGER,
+        completed_at INTEGER
+      );
+
+      CREATE TABLE IF NOT EXISTS heartbeat_run_events (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL REFERENCES heartbeat_runs(id) ON DELETE CASCADE,
+        timestamp INTEGER NOT NULL,
+        type TEXT NOT NULL,
+        payload TEXT NOT NULL
+      );
+
       -- Indexes for performance
       CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
       CREATE INDEX IF NOT EXISTS idx_tasks_workspace ON tasks(workspace_id);
@@ -432,6 +538,26 @@ export class DatabaseManager {
       CREATE INDEX IF NOT EXISTS idx_eval_runs_suite ON eval_runs(suite_id, started_at DESC);
       CREATE INDEX IF NOT EXISTS idx_eval_case_runs_run ON eval_case_runs(run_id);
       CREATE INDEX IF NOT EXISTS idx_eval_case_runs_case ON eval_case_runs(case_id);
+      CREATE INDEX IF NOT EXISTS idx_companies_default ON companies(is_default, created_at);
+      CREATE INDEX IF NOT EXISTS idx_goals_company ON goals(company_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_projects_company ON projects(company_id, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_projects_goal ON projects(goal_id, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_project_workspace_links_project ON project_workspace_links(project_id);
+      CREATE INDEX IF NOT EXISTS idx_project_workspace_links_workspace ON project_workspace_links(workspace_id);
+      CREATE INDEX IF NOT EXISTS idx_issues_company ON issues(company_id, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_issues_goal ON issues(goal_id, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_issues_project ON issues(project_id, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_issues_workspace ON issues(workspace_id, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_issues_assignee ON issues(assignee_agent_role_id, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_issues_status ON issues(status, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_issue_comments_issue ON issue_comments(issue_id, created_at ASC);
+      CREATE INDEX IF NOT EXISTS idx_heartbeat_runs_issue ON heartbeat_runs(issue_id, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_heartbeat_runs_status ON heartbeat_runs(status, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_heartbeat_runs_agent ON heartbeat_runs(agent_role_id, updated_at DESC);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_heartbeat_runs_active_issue
+        ON heartbeat_runs(issue_id)
+        WHERE status IN ('queued', 'running');
+      CREATE INDEX IF NOT EXISTS idx_heartbeat_run_events_run ON heartbeat_run_events(run_id, timestamp ASC);
 
       -- Channel Gateway tables
       CREATE TABLE IF NOT EXISTS channels (
@@ -1230,6 +1356,13 @@ export class DatabaseManager {
       "ALTER TABLE agent_roles ADD COLUMN last_heartbeat_at INTEGER",
       "ALTER TABLE agent_roles ADD COLUMN heartbeat_status TEXT DEFAULT 'idle'",
       "ALTER TABLE agent_roles ADD COLUMN company_id TEXT REFERENCES companies(id) ON DELETE SET NULL",
+      "ALTER TABLE agent_roles ADD COLUMN operator_mandate TEXT",
+      "ALTER TABLE agent_roles ADD COLUMN allowed_loop_types TEXT",
+      "ALTER TABLE agent_roles ADD COLUMN output_types TEXT",
+      "ALTER TABLE agent_roles ADD COLUMN suppression_policy TEXT",
+      "ALTER TABLE agent_roles ADD COLUMN max_autonomous_outputs_per_cycle INTEGER DEFAULT 1",
+      "ALTER TABLE agent_roles ADD COLUMN last_useful_output_at INTEGER",
+      "ALTER TABLE agent_roles ADD COLUMN operator_health_score REAL",
     ];
 
     for (const sql of missionControlColumns) {
@@ -1830,6 +1963,79 @@ export class DatabaseManager {
           ON improvement_runs(status, created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_improvement_runs_review
           ON improvement_runs(review_status, created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS improvement_campaigns (
+          id TEXT PRIMARY KEY,
+          candidate_id TEXT NOT NULL,
+          workspace_id TEXT NOT NULL,
+          execution_workspace_id TEXT,
+          root_task_id TEXT,
+          status TEXT NOT NULL,
+          review_status TEXT NOT NULL,
+          promotion_status TEXT DEFAULT 'idle',
+          winner_variant_id TEXT,
+          promoted_task_id TEXT,
+          promoted_branch_name TEXT,
+          merge_result TEXT,
+          pull_request TEXT,
+          promotion_error TEXT,
+          baseline_metrics TEXT,
+          outcome_metrics TEXT,
+          verdict_summary TEXT,
+          evaluation_notes TEXT,
+          training_evidence TEXT NOT NULL,
+          holdout_evidence TEXT NOT NULL,
+          replay_cases TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          started_at INTEGER,
+          completed_at INTEGER,
+          promoted_at INTEGER,
+          FOREIGN KEY (candidate_id) REFERENCES improvement_candidates(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_improvement_campaigns_candidate
+          ON improvement_campaigns(candidate_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_improvement_campaigns_status
+          ON improvement_campaigns(status, created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS improvement_variant_runs (
+          id TEXT PRIMARY KEY,
+          campaign_id TEXT NOT NULL,
+          candidate_id TEXT NOT NULL,
+          workspace_id TEXT NOT NULL,
+          execution_workspace_id TEXT,
+          lane TEXT NOT NULL,
+          status TEXT NOT NULL,
+          task_id TEXT,
+          branch_name TEXT,
+          baseline_metrics TEXT,
+          outcome_metrics TEXT,
+          verdict_summary TEXT,
+          evaluation_notes TEXT,
+          created_at INTEGER NOT NULL,
+          started_at INTEGER,
+          completed_at INTEGER,
+          FOREIGN KEY (campaign_id) REFERENCES improvement_campaigns(id) ON DELETE CASCADE,
+          FOREIGN KEY (candidate_id) REFERENCES improvement_candidates(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_improvement_variant_runs_campaign
+          ON improvement_variant_runs(campaign_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_improvement_variant_runs_task
+          ON improvement_variant_runs(task_id);
+
+        CREATE TABLE IF NOT EXISTS improvement_judge_verdicts (
+          id TEXT PRIMARY KEY,
+          campaign_id TEXT NOT NULL UNIQUE,
+          winner_variant_id TEXT,
+          status TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          notes TEXT NOT NULL,
+          variant_rankings TEXT NOT NULL,
+          replay_cases TEXT NOT NULL,
+          compared_at INTEGER NOT NULL,
+          FOREIGN KEY (campaign_id) REFERENCES improvement_campaigns(id) ON DELETE CASCADE
+        );
       `);
     } catch {
       // Table already exists
@@ -1841,6 +2047,7 @@ export class DatabaseManager {
       "ALTER TABLE improvement_runs ADD COLUMN pull_request TEXT",
       "ALTER TABLE improvement_runs ADD COLUMN promotion_error TEXT",
       "ALTER TABLE improvement_runs ADD COLUMN promoted_at INTEGER",
+      "ALTER TABLE improvement_campaigns ADD COLUMN root_task_id TEXT",
     ]) {
       try {
         this.db.exec(statement);
@@ -1848,6 +2055,30 @@ export class DatabaseManager {
         // Column already exists or table not created yet.
       }
     }
+
+    // Device management: target_node_id on tasks + device_profiles table
+    for (const statement of [
+      "ALTER TABLE tasks ADD COLUMN target_node_id TEXT",
+    ]) {
+      try {
+        this.db.exec(statement);
+      } catch {
+        // Column already exists
+      }
+    }
+
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS device_profiles (
+        device_id TEXT PRIMARY KEY,
+        custom_name TEXT,
+        platform TEXT,
+        model_identifier TEXT,
+        last_seen_at INTEGER,
+        settings_json TEXT,
+        created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
+        updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000)
+      );
+    `);
 
     // Seed built-in entity types for all workspaces that don't have them yet
     this.seedKnowledgeGraphTypes();

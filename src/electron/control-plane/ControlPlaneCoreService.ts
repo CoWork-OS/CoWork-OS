@@ -63,6 +63,7 @@ export class ControlPlaneCoreService {
     this.workspaceRepo = new WorkspaceRepository(db);
     this.agentRoleRepo = new AgentRoleRepository(db);
     this.agentTeamRepo = new AgentTeamRepository(db);
+    this.ensureDefaultCompanySeeded();
     this.ensureDefaultWorkspacesProvisioned();
   }
 
@@ -1638,6 +1639,19 @@ export class ControlPlaneCoreService {
 
   private buildCompanyWorkspacePath(slugOrName: string): string {
     return path.join(getUserDataDir(), "company-workspaces", this.normalizeCompanySlug(slugOrName) || "company");
+  }
+
+  private ensureDefaultCompanySeeded(): void {
+    const hasCompany = this.db.prepare("SELECT 1 FROM companies LIMIT 1").get();
+    if (hasCompany) {
+      return;
+    }
+    this.createCompany({
+      name: "Local Company",
+      slug: "local",
+      isDefault: true,
+      status: "active",
+    });
   }
 
   private ensureCompanyWorkspaceStructure(workspacePath: string): void {

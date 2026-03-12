@@ -501,6 +501,7 @@ const IPC_CHANNELS = {
   CONTROL_PLANE_START: "controlPlane:start",
   CONTROL_PLANE_STOP: "controlPlane:stop",
   CONTROL_PLANE_GET_STATUS: "controlPlane:getStatus",
+  CONTROL_PLANE_GET_TOKEN: "controlPlane:getToken",
   CONTROL_PLANE_REGENERATE_TOKEN: "controlPlane:regenerateToken",
   CONTROL_PLANE_EVENT: "controlPlane:event",
   // Tailscale
@@ -2645,6 +2646,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   startControlPlane: () => ipcRenderer.invoke(IPC_CHANNELS.CONTROL_PLANE_START),
   stopControlPlane: () => ipcRenderer.invoke(IPC_CHANNELS.CONTROL_PLANE_STOP),
   getControlPlaneStatus: () => ipcRenderer.invoke(IPC_CHANNELS.CONTROL_PLANE_GET_STATUS),
+  getControlPlaneToken: () => ipcRenderer.invoke(IPC_CHANNELS.CONTROL_PLANE_GET_TOKEN),
   regenerateControlPlaneToken: () =>
     ipcRenderer.invoke(IPC_CHANNELS.CONTROL_PLANE_REGENERATE_TOKEN),
   onControlPlaneEvent: (callback: (event: ControlPlaneEvent) => void) => {
@@ -4370,6 +4372,7 @@ export interface ElectronAPI {
   }>;
   stopControlPlane: () => Promise<{ ok: boolean; error?: string }>;
   getControlPlaneStatus: () => Promise<ControlPlaneStatus>;
+  getControlPlaneToken: () => Promise<{ ok: boolean; token?: string; error?: string }>;
   regenerateControlPlaneToken: () => Promise<{ ok: boolean; token?: string; error?: string }>;
   onControlPlaneEvent: (callback: (event: ControlPlaneEvent) => void) => () => void;
 

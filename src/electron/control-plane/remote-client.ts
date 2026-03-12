@@ -211,35 +211,49 @@ export class RemoteGatewayClient {
               deviceName: `${this.config.deviceName} (test)`,
             });
             testWs.send(serializeFrame(connectFrame));
-
-            // Wait for response
-            testWs.once("message", (data) => {
-              clearTimeout(timeout);
-              const frame = parseFrame(data.toString());
-
-              if (frame?.type === FrameType.Response) {
-                const response = frame as ResponseFrame;
-                if (!response.ok || response.error) {
-                  testWs.close();
-                  resolve({
-                    success: false,
-                    error: response.error?.message || "Authentication failed",
-                  });
-                } else {
-                  const latencyMs = Date.now() - startTime;
-                  testWs.close();
-                  resolve({ success: true, latencyMs });
-                }
-              } else {
-                testWs.close();
-                resolve({ success: false, error: "Invalid response" });
-              }
-            });
           } catch (error: Any) {
             clearTimeout(timeout);
             testWs.close();
             resolve({ success: false, error: error.message });
           }
+        });
+
+        testWs.on("message", (data) => {
+          const frame = parseFrame(data.toString());
+          if (!frame) {
+            return;
+          }
+
+          if (frame.type === FrameType.Event) {
+            const event = frame as EventFrame;
+            if (event.event === "challenge" || event.event === "connect.challenge") {
+              const connectFrame = createRequest(1, Methods.CONNECT, {
+                token: this.config.token,
+                deviceName: `${this.config.deviceName} (test)`,
+              });
+              testWs.send(serializeFrame(connectFrame));
+            }
+            return;
+          }
+
+          if (frame.type !== FrameType.Response) {
+            return;
+          }
+
+          clearTimeout(timeout);
+          const response = frame as ResponseFrame;
+          testWs.close();
+
+          if (!response.ok || response.error) {
+            resolve({
+              success: false,
+              error: response.error?.message || "Authentication failed",
+            });
+            return;
+          }
+
+          const latencyMs = Date.now() - startTime;
+          resolve({ success: true, latencyMs });
         });
 
         testWs.on("error", (error) => {

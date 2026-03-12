@@ -1777,6 +1777,19 @@ export function setupControlPlaneHandlers(
     };
   });
 
+  // Get raw token for local display/copy actions
+  ipcMain.handle(
+    IPC_CHANNELS.CONTROL_PLANE_GET_TOKEN,
+    async (): Promise<{ ok: boolean; token?: string; error?: string }> => {
+      try {
+        const settings = ControlPlaneSettingsManager.loadSettings();
+        return { ok: true, token: settings.token || "" };
+      } catch (error: Any) {
+        return { ok: false, error: error.message || String(error) };
+      }
+    },
+  );
+
   // Regenerate token
   ipcMain.handle(
     IPC_CHANNELS.CONTROL_PLANE_REGENERATE_TOKEN,

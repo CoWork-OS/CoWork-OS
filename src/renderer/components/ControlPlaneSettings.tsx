@@ -27,6 +27,7 @@ export function ControlPlaneSettings() {
   } | null>(null);
   const [connectionMode, setConnectionMode] = useState<ControlPlaneConnectionMode>("local");
   const [showToken, setShowToken] = useState(false);
+  const [localToken, setLocalToken] = useState("");
   const [showRemoteToken, setShowRemoteToken] = useState(false);
   const [allowLAN, setAllowLAN] = useState(false);
 
@@ -168,13 +169,38 @@ export function ControlPlaneSettings() {
   const handleRegenerateToken = async () => {
     setSaving(true);
     try {
-      await window.electronAPI?.regenerateControlPlaneToken?.();
+      const result = await window.electronAPI?.regenerateControlPlaneToken?.();
+      if (result?.ok && result.token) {
+        setLocalToken(result.token);
+      }
       await loadData();
     } catch (error) {
       console.error("Failed to regenerate token:", error);
     } finally {
       setSaving(false);
     }
+  };
+
+  const ensureLocalToken = useCallback(async (): Promise<string> => {
+    if (localToken) return localToken;
+    const result = await window.electronAPI?.getControlPlaneToken?.();
+    const token = result?.ok ? result.token || "" : "";
+    if (token) {
+      setLocalToken(token);
+    }
+    return token;
+  }, [localToken]);
+
+  const handleToggleTokenVisibility = async () => {
+    if (!showToken) {
+      await ensureLocalToken();
+    }
+    setShowToken((value) => !value);
+  };
+
+  const handleCopyLocalToken = async () => {
+    const token = await ensureLocalToken();
+    copyToClipboard(token);
   };
 
   const handleToggleLAN = async () => {
@@ -211,13 +237,25 @@ export function ControlPlaneSettings() {
   };
 
   const handleConnectionModeChange = async (mode: ControlPlaneConnectionMode) => {
-    setConnectionMode(mode);
+    setSaving(true);
+    try {
+      setConnectionMode(mode);
+      await window.electronAPI?.saveControlPlaneSettings?.({
+        connectionMode: mode,
+      });
 
-    if (mode === "local") {
-      // Disconnect from remote if connected
-      if (remoteStatus?.state === "connected") {
-        await window.electronAPI?.disconnectRemoteGateway?.();
+      if (mode === "local") {
+        // Disconnect from remote if connected
+        if (remoteStatus?.state === "connected") {
+          await window.electronAPI?.disconnectRemoteGateway?.();
+        }
       }
+
+      await loadData();
+    } catch (error) {
+      console.error("Failed to change connection mode:", error);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -536,20 +574,20 @@ export function ControlPlaneSettings() {
               <div className="token-display">
                 <input
                   type={showToken ? "text" : "password"}
-                  value={settings.token || ""}
+                  value={showToken ? localToken : settings.token || ""}
                   readOnly
                   className="token-input"
                 />
                 <button
                   className="btn-icon"
-                  onClick={() => setShowToken(!showToken)}
+                  onClick={handleToggleTokenVisibility}
                   title={showToken ? "Hide" : "Show"}
                 >
                   {showToken ? "Hide" : "Show"}
                 </button>
                 <button
                   className="btn-icon"
-                  onClick={() => copyToClipboard(settings.token || "")}
+                  onClick={handleCopyLocalToken}
                   title="Copy"
                 >
                   Copy

@@ -92,6 +92,7 @@ import {
   shutdownControlPlane,
   startControlPlaneFromSettings,
 } from "./control-plane";
+import { sanitizeTaskMessageParams } from "./control-plane/sanitize";
 import {
   getArgValue,
   getEnvSettingsImportModeFromArgsOrEnv,
@@ -1681,12 +1682,20 @@ if (!gotTheLock) {
             }
             case "task:sendMessage": {
               const payload = args[0] && typeof args[0] === "object" ? args[0] : {};
-              const taskId = typeof payload.taskId === "string" ? payload.taskId.trim() : "";
-              const message = typeof payload.message === "string" ? payload.message.trim() : "";
-              if (!taskId || !message) {
-                throw new Error("taskId and message are required.");
+              let taskId: string;
+              let message: string;
+              let images: import("../shared/types").ImageAttachment[] | undefined;
+              try {
+                const sanitized = sanitizeTaskMessageParams(payload);
+                taskId = sanitized.taskId;
+                message = sanitized.message;
+                images = sanitized.images;
+              } catch (err) {
+                throw new Error(
+                  err instanceof Error ? err.message : "taskId and message are required.",
+                );
               }
-              return agentDaemon.sendMessage(taskId, message);
+              return agentDaemon.sendMessage(taskId, message, images);
             }
             case "task:events": {
               const taskId = typeof args[0] === "string" ? args[0].trim() : "";

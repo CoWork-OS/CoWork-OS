@@ -6,6 +6,8 @@ import { Settings } from "./components/Settings";
 import { DisclaimerModal } from "./components/DisclaimerModal";
 import { Onboarding } from "./components/Onboarding";
 import { BrowserView } from "./components/BrowserView";
+import { HomeDashboard } from "./components/HomeDashboard";
+import { DevicesPanel } from "./components/DevicesPanel";
 // TaskQueuePanel moved to RightPanel
 import { ToastContainer } from "./components/Toast";
 import { QuickTaskFAB } from "./components/QuickTaskFAB";
@@ -58,7 +60,7 @@ function getEffectiveTheme(themeMode: ThemeMode): "light" | "dark" {
   return themeMode;
 }
 
-type AppView = "main" | "settings" | "browser";
+type AppView = "home" | "main" | "settings" | "browser" | "devices";
 const MAX_RENDERER_TASK_EVENTS = 600;
 const APPROVAL_TOAST_PREFIX = "approval-request-";
 const APPROVAL_WARNING_TOAST_ID = "approval-auto-approve-warning";
@@ -1576,6 +1578,7 @@ export function App() {
 
       setTasks((prev) => [task, ...prev]);
       setSelectedTaskId(task.id);
+      setCurrentView("main");
     } catch (error: unknown) {
       console.error("Failed to create task:", error);
       // Check if it's an API key error and prompt user to configure settings
@@ -1689,10 +1692,12 @@ export function App() {
     if (!currentWorkspace) return;
 
     const title = prompt.slice(0, 50) + (prompt.length > 50 ? "..." : "");
+    setCurrentView("main");
     await handleCreateTask(title, prompt);
   };
 
   const handleNewSession = async () => {
+    setCurrentView("main");
     setSelectedTaskId(null);
     setEvents([]);
     try {
@@ -1763,8 +1768,50 @@ export function App() {
 
   // Smart right panel visibility: auto-collapse on welcome screen in focused mode
   const effectiveRightCollapsed =
-    uiDensity === "full" ? rightSidebarCollapsed : !selectedTaskId ? true : rightSidebarCollapsed;
+    currentView !== "main"
+      ? true
+      : uiDensity === "full"
+        ? rightSidebarCollapsed
+        : !selectedTaskId
+          ? true
+          : rightSidebarCollapsed;
   const unseenOutputCount = unseenOutputTaskIds.length;
+
+  const handleSelectTaskFromShell = (taskId: string | null) => {
+    setSelectedTaskId(taskId);
+    setCurrentView("main");
+  };
+
+  const openTaskById = useCallback(
+    async (taskId: string) => {
+      setCurrentView("main");
+
+      const existingTask = tasksRef.current.find((task) => task.id === taskId);
+      if (existingTask) {
+        setSelectedTaskId(taskId);
+        return;
+      }
+
+      if (!window.electronAPI?.getTask) return;
+
+      try {
+        const task = (await window.electronAPI.getTask(taskId)) as Task | null;
+        if (!task) return;
+
+        setTasks((prev) => {
+          const existingIndex = prev.findIndex((item) => item.id === task.id);
+          if (existingIndex >= 0) {
+            return prev.map((item) => (item.id === task.id ? { ...item, ...task } : item));
+          }
+          return [task, ...prev];
+        });
+        setSelectedTaskId(task.id);
+      } catch (error) {
+        console.error("Failed to open task from shell navigation:", error);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!shouldClearUnseenOutputBadges(currentView === "main", effectiveRightCollapsed)) return;
@@ -1790,6 +1837,16 @@ export function App() {
       return next.length === prev.length ? prev : next;
     });
   }, [tasks]);
+
+  useEffect(() => {
+    if (!window.electronAPI?.onNavigateToTask) return;
+
+    const unsubscribe = window.electronAPI.onNavigateToTask((taskId) => {
+      void openTaskById(taskId);
+    });
+
+    return typeof unsubscribe === "function" ? unsubscribe : undefined;
+  }, [openTaskById]);
 
   if (!hasElectronAPI) {
     const isHttpContext =
@@ -1873,29 +1930,55 @@ export function App() {
             </svg>
           </button>
           {leftSidebarCollapsed && (
-            <button
-              type="button"
-              className="title-bar-btn"
-              onClick={handleNewSession}
-              title="New Session"
-              aria-label="New Session"
-            >
-              <svg
-                aria-hidden="true"
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="#6b7280"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                style={{ display: "block", flexShrink: 0 }}
+            <>
+              <button
+                type="button"
+                className="title-bar-btn"
+                onClick={() => setCurrentView("home")}
+                title="Home"
+                aria-label="Home"
               >
-                <line x1="12" y1="5" x2="12" y2="19" />
-                <line x1="5" y1="12" x2="19" y2="12" />
-              </svg>
-            </button>
+                <svg
+                  aria-hidden="true"
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="#6b7280"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  style={{ display: "block", flexShrink: 0 }}
+                >
+                  <path d="M3 11.5 12 4l9 7.5" />
+                  <path d="M5 10.5V20h14v-9.5" />
+                  <path d="M9 20v-6h6v6" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                className="title-bar-btn"
+                onClick={handleNewSession}
+                title="New Session"
+                aria-label="New Session"
+              >
+                <svg
+                  aria-hidden="true"
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="#6b7280"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  style={{ display: "block", flexShrink: 0 }}
+                >
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+              </button>
+            </>
           )}
         </div>
         <div className="title-bar-actions">
@@ -1953,12 +2036,8 @@ export function App() {
             onNotificationClick={(notification) => {
               // Prioritize taskId to show the completed task result
               if (notification.taskId) {
-                const task = tasks.find((t) => t.id === notification.taskId);
-                if (task) {
-                  setSelectedTaskId(task.id);
-                  setCurrentView("main");
-                  return;
-                }
+                void openTaskById(notification.taskId);
+                return;
               }
               // Fall back to scheduled tasks settings if only cronJobId
               if (notification.cronJobId) {
@@ -2010,34 +2089,36 @@ export function App() {
               </svg>
             )}
           </button>
-          <button
-            type="button"
-            className="title-bar-btn title-bar-panel-toggle"
-            onClick={() => setRightSidebarCollapsed(!rightSidebarCollapsed)}
-            title={effectiveRightCollapsed ? "Show panel" : "Hide panel"}
-            aria-label={effectiveRightCollapsed ? "Show panel" : "Hide panel"}
-          >
-            <svg
-              aria-hidden="true"
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="#6b7280"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              style={{ display: "block", flexShrink: 0 }}
+          {currentView === "main" && (
+            <button
+              type="button"
+              className="title-bar-btn title-bar-panel-toggle"
+              onClick={() => setRightSidebarCollapsed(!rightSidebarCollapsed)}
+              title={effectiveRightCollapsed ? "Show panel" : "Hide panel"}
+              aria-label={effectiveRightCollapsed ? "Show panel" : "Hide panel"}
             >
-              <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-              <line x1="15" y1="3" x2="15" y2="21" />
-            </svg>
-            {effectiveRightCollapsed && unseenOutputCount > 0 && (
-              <span className="title-bar-output-badge" aria-label={`${unseenOutputCount} new outputs`}>
-                {unseenOutputCount > 9 ? "9+" : unseenOutputCount}
-              </span>
-            )}
-          </button>
+              <svg
+                aria-hidden="true"
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="#6b7280"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                style={{ display: "block", flexShrink: 0 }}
+              >
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                <line x1="15" y1="3" x2="15" y2="21" />
+              </svg>
+              {effectiveRightCollapsed && unseenOutputCount > 0 && (
+                <span className="title-bar-output-badge" aria-label={`${unseenOutputCount} new outputs`}>
+                  {unseenOutputCount > 9 ? "9+" : unseenOutputCount}
+                </span>
+              )}
+            </button>
+          )}
         </div>
         {/* Windows custom window controls (minimize, maximize, close) */}
         {isWindows && (
@@ -2121,7 +2202,7 @@ export function App() {
           </button>
         </div>
       )}
-      {currentView === "main" && (
+      {(currentView === "main" || currentView === "home" || currentView === "devices") && (
         <>
           <div
             className={`app-layout ${leftSidebarCollapsed ? "left-collapsed" : ""} ${effectiveRightCollapsed ? "right-collapsed" : ""}`}
@@ -2131,8 +2212,12 @@ export function App() {
                 workspace={currentWorkspace}
                 tasks={tasks}
                 selectedTaskId={selectedTaskId}
+                isHomeActive={currentView === "home"}
+                isDevicesActive={currentView === "devices"}
                 completionAttentionTaskIds={unseenCompletedTaskIds}
-                onSelectTask={setSelectedTaskId}
+                onSelectTask={handleSelectTaskFromShell}
+                onOpenHome={() => setCurrentView("home")}
+                onOpenDevices={() => setCurrentView("devices")}
                 onNewSession={handleNewSession}
                 onOpenSettings={() => setCurrentView("settings")}
                 onOpenMissionControl={() => {
@@ -2145,63 +2230,129 @@ export function App() {
                 uiDensity={uiDensity}
               />
             )}
-            <MainContent
-              task={selectedTask}
-              selectedTaskId={selectedTaskId}
-              workspace={currentWorkspace}
-              events={events}
-              childTasks={childTasks}
-              childEvents={childEvents}
-              onSelectChildTask={setSelectedTaskId}
-              onSendMessage={handleSendMessage}
-              onCreateTask={handleCreateTask}
-              onChangeWorkspace={handleChangeWorkspace}
-              onSelectWorkspace={(workspace) => setCurrentWorkspace(workspace)}
-              onOpenSettings={(tab) => {
-                setSettingsTab(tab || "appearance");
-                setCurrentView("settings");
-              }}
-              onStopTask={handleCancelTask}
-              onWrapUpTask={handleWrapUpTask}
-              inputRequest={activeInputRequest}
-              onSubmitInputRequest={(requestId, answers) => {
-                void handleInputRequestResponse({
-                  requestId,
-                  status: "submitted",
-                  answers,
-                });
-              }}
-              onDismissInputRequest={(requestId) => {
-                void handleInputRequestResponse({
-                  requestId,
-                  status: "dismissed",
-                });
-              }}
-              onOpenBrowserView={handleOpenBrowserView}
-              onViewTaskOutputs={(taskId, primaryOutputPath) => {
-                setCurrentView("main");
-                setSelectedTaskId(taskId);
-                setRightSidebarCollapsed(false);
-                if (primaryOutputPath) {
-                  setRightPanelHighlight({ taskId, path: primaryOutputPath });
-                }
-                setUnseenOutputTaskIds((prev) => prev.filter((id) => id !== taskId));
-                setUnseenCompletedTaskIds((prev) => prev.filter((id) => id !== taskId));
-              }}
-              selectedModel={selectedModel}
-              availableModels={availableModels}
-              onModelChange={handleModelChange}
-              availableProviders={availableProviders}
-              uiDensity={uiDensity}
-            />
-            {!effectiveRightCollapsed && (
+            {currentView === "home" ? (
+              <HomeDashboard
+                workspace={currentWorkspace}
+                tasks={tasks}
+                onOpenTask={(taskId) => {
+                  setSelectedTaskId(taskId);
+                  setCurrentView("main");
+                }}
+                onNewSession={handleNewSession}
+                onQuickTask={handleQuickTask}
+                onOpenScheduledTasks={() => {
+                  setSettingsTab("scheduled");
+                  setCurrentView("settings");
+                }}
+                onOpenMissionControl={() => {
+                  setSettingsTab("missioncontrol");
+                  setCurrentView("settings");
+                }}
+                onOpenSkills={() => {
+                  setSettingsTab("skills");
+                  setCurrentView("settings");
+                }}
+                onOpenConnectedTools={() => {
+                  setSettingsTab("mcp");
+                  setCurrentView("settings");
+                }}
+                onOpenDevices={() => setCurrentView("devices")}
+              />
+            ) : currentView === "devices" ? (
+              <DevicesPanel
+                tasks={tasks}
+                onOpenTask={(taskId) => {
+                  setSelectedTaskId(taskId);
+                  setCurrentView("main");
+                }}
+                onNewTaskForDevice={async (nodeId, prompt) => {
+                  try {
+                    const res = await window.electronAPI?.deviceAssignTask?.({
+                      nodeId,
+                      prompt,
+                      workspaceId: currentWorkspace?.id,
+                    });
+                    
+                    if (res?.ok) {
+                      addToast({
+                        type: "success",
+                        title: "Task Started Remotely",
+                        message: "The task is now running on the remote device."
+                      });
+                      // Refresh task list to show the new task in the sidebar/dashboard
+                      loadTasks();
+                    } else {
+                      throw new Error(res?.error || "Unknown error assigning task");
+                    }
+                  } catch (err: any) {
+                    console.error("[Devices] deviceAssignTask record failed:", err);
+                    addToast({
+                      type: "error",
+                      title: "Remote Task Failed",
+                      message: err?.message || "Failed to start task on remote device"
+                    });
+                  }
+                }}
+              />
+            ) : (
+              <MainContent
+                task={selectedTask}
+                selectedTaskId={selectedTaskId}
+                workspace={currentWorkspace}
+                events={events}
+                childTasks={childTasks}
+                childEvents={childEvents}
+                onSelectChildTask={setSelectedTaskId}
+                onSendMessage={handleSendMessage}
+                onCreateTask={handleCreateTask}
+                onChangeWorkspace={handleChangeWorkspace}
+                onSelectWorkspace={(workspace) => setCurrentWorkspace(workspace)}
+                onOpenSettings={(tab) => {
+                  setSettingsTab(tab || "appearance");
+                  setCurrentView("settings");
+                }}
+                onStopTask={handleCancelTask}
+                onWrapUpTask={handleWrapUpTask}
+                inputRequest={activeInputRequest}
+                onSubmitInputRequest={(requestId, answers) => {
+                  void handleInputRequestResponse({
+                    requestId,
+                    status: "submitted",
+                    answers,
+                  });
+                }}
+                onDismissInputRequest={(requestId) => {
+                  void handleInputRequestResponse({
+                    requestId,
+                    status: "dismissed",
+                  });
+                }}
+                onOpenBrowserView={handleOpenBrowserView}
+                onViewTaskOutputs={(taskId, primaryOutputPath) => {
+                  setCurrentView("main");
+                  setSelectedTaskId(taskId);
+                  setRightSidebarCollapsed(false);
+                  if (primaryOutputPath) {
+                    setRightPanelHighlight({ taskId, path: primaryOutputPath });
+                  }
+                  setUnseenOutputTaskIds((prev) => prev.filter((id) => id !== taskId));
+                  setUnseenCompletedTaskIds((prev) => prev.filter((id) => id !== taskId));
+                }}
+                selectedModel={selectedModel}
+                availableModels={availableModels}
+                onModelChange={handleModelChange}
+                availableProviders={availableProviders}
+                uiDensity={uiDensity}
+              />
+            )}
+            {currentView === "main" && !effectiveRightCollapsed && (
               <RightPanel
                 task={selectedTask}
                 workspace={currentWorkspace}
                 events={events}
                 tasks={tasks}
                 queueStatus={queueStatus}
-                onSelectTask={setSelectedTaskId}
+                onSelectTask={handleSelectTaskFromShell}
                 onCancelTask={handleCancelTaskById}
                 highlightOutputPath={
                   selectedTaskId && rightPanelHighlight?.taskId === selectedTaskId
@@ -2218,13 +2369,16 @@ export function App() {
           </div>
 
           {/* Quick Task FAB */}
-          {currentWorkspace && <QuickTaskFAB onCreateTask={handleQuickTask} />}
+          {currentWorkspace && currentView === "main" && <QuickTaskFAB onCreateTask={handleQuickTask} />}
 
           {/* Toast Notifications */}
           <ToastContainer
             toasts={toasts}
             onDismiss={dismissToast}
-            onTaskClick={setSelectedTaskId}
+            onTaskClick={(taskId) => {
+              setSelectedTaskId(taskId);
+              setCurrentView("main");
+            }}
           />
         </>
       )}

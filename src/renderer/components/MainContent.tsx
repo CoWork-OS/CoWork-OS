@@ -8103,18 +8103,21 @@ function renderEventDetails(
             </ReactMarkdown>
           </div>
           {visiblePlanSteps.length > 0 && (
-            <ul style={{ margin: 0, paddingLeft: 18 }}>
+            <div className="plan-checklist">
               {visiblePlanSteps.map((step: Any, i: number) => (
-                <li key={i} style={{ marginBottom: 4 }}>
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                    components={inlinePlanMarkdownComponents}
-                  >
-                    {normalizeMarkdownForDisplay(String(step?.description || ""))}
-                  </ReactMarkdown>
-                </li>
+                <div key={i} className="plan-checklist-item">
+                  <span className="plan-checklist-circle" />
+                  <span className="plan-checklist-text">
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={inlinePlanMarkdownComponents}
+                    >
+                      {normalizeMarkdownForDisplay(String(step?.description || ""))}
+                    </ReactMarkdown>
+                  </span>
+                </div>
               ))}
-            </ul>
+            </div>
           )}
         </div>
       );

@@ -6,11 +6,15 @@ interface SidebarProps {
   workspace: Workspace | null;
   tasks: Task[];
   selectedTaskId: string | null;
+  isHomeActive?: boolean;
   completionAttentionTaskIds?: string[];
   onSelectTask: (id: string | null) => void;
+  onOpenHome?: () => void;
   onNewSession?: () => void;
   onOpenSettings: () => void;
   onOpenMissionControl: () => void;
+  onOpenDevices?: () => void;
+  isDevicesActive?: boolean;
 
   onTasksChanged: () => void;
   onLoadMoreTasks?: () => void;
@@ -70,6 +74,72 @@ const ACTIVE_SESSION_STATUSES: ReadonlySet<Task["status"]> = new Set([
   "interrupted",
 ]);
 const AWAITING_SESSION_STATUSES: ReadonlySet<Task["status"]> = new Set(["paused", "blocked"]);
+
+function createMacMiniIconDataUrl(color: string): string {
+  const size = 18;
+  const scale = 2;
+  const s = size * scale;
+  const canvas = document.createElement("canvas");
+  canvas.width = s;
+  canvas.height = s;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return "";
+
+  ctx.clearRect(0, 0, s, s);
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+
+  const sc = s / 24;
+
+  const bodyX = 2.2 * sc;
+  const bodyY = 6.5 * sc;
+  const bodyW = 19.6 * sc;
+  const bodyH = 9.4 * sc;
+  const bodyR = 1.8 * sc;
+  const sw = 1.7 * sc;
+
+  ctx.lineWidth = sw;
+  ctx.beginPath();
+  ctx.moveTo(bodyX + bodyR, bodyY);
+  ctx.lineTo(bodyX + bodyW - bodyR, bodyY);
+  ctx.quadraticCurveTo(bodyX + bodyW, bodyY, bodyX + bodyW, bodyY + bodyR);
+  ctx.lineTo(bodyX + bodyW, bodyY + bodyH - bodyR);
+  ctx.quadraticCurveTo(bodyX + bodyW, bodyY + bodyH, bodyX + bodyW - bodyR, bodyY + bodyH);
+  ctx.lineTo(bodyX + bodyR, bodyY + bodyH);
+  ctx.quadraticCurveTo(bodyX, bodyY + bodyH, bodyX, bodyY + bodyH - bodyR);
+  ctx.lineTo(bodyX, bodyY + bodyR);
+  ctx.quadraticCurveTo(bodyX, bodyY, bodyX + bodyR, bodyY);
+  ctx.stroke();
+
+  const baseY = bodyY + bodyH + 0.3 * sc;
+  const baseLeft = 6.5 * sc;
+  const baseRight = s - 6.5 * sc;
+  const baseSag = 2.2 * sc;
+  const baseSteps = 40;
+
+  ctx.lineWidth = 1.5 * sc;
+  ctx.beginPath();
+  for (let i = 0; i <= baseSteps; i++) {
+    const t = i / baseSteps;
+    const x = baseLeft + (baseRight - baseLeft) * t;
+    const y = baseY + Math.sin(t * Math.PI) * baseSag;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  const dotY = 11.2 * sc;
+  ctx.beginPath();
+  ctx.arc(17.0 * sc, dotY, 1.1 * sc, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(19.6 * sc, dotY, 0.55 * sc, 0, Math.PI * 2);
+  ctx.fill();
+
+  return canvas.toDataURL("image/png");
+}
 
 export function isActiveSessionStatus(status: Task["status"]): boolean {
   return ACTIVE_SESSION_STATUSES.has(status);
@@ -144,17 +214,27 @@ export function countHiddenFailedSessions(tasks: Task[], uiDensity: UiDensity): 
 interface TaskTreeNode {
   task: Task;
   children: TaskTreeNode[];
+  synthetic?: boolean;
+  displayTitle?: string;
+}
+
+function compareTaskTreeNodes(a: TaskTreeNode, b: TaskTreeNode): number {
+  return compareTasksByPinAndRecency(a.task, b.task);
 }
 
 export function Sidebar({
   workspace: _workspace,
   tasks,
   selectedTaskId,
+  isHomeActive = false,
   completionAttentionTaskIds = [],
   onSelectTask,
+  onOpenHome,
   onNewSession,
   onOpenSettings,
   onOpenMissionControl,
+  onOpenDevices,
+  isDevicesActive = false,
 
   onTasksChanged,
   onLoadMoreTasks,
@@ -169,6 +249,7 @@ export function Sidebar({
   const [pinActionError, setPinActionError] = useState<string | null>(null);
   const [activeModeFilters, setActiveModeFilters] = useState<Set<SessionMode>>(new Set());
   const [showFilterBar, setShowFilterBar] = useState(false);
+  const [sessionsCollapsed, setSessionsCollapsed] = useState(false);
   // Automated sessions folder is collapsed by default to keep the sidebar clean
   const [automatedFolderCollapsed, setAutomatedFolderCollapsed] = useState(true);
   const pinActionErrorTimeoutRef = useRef<number | null>(null);
@@ -180,6 +261,10 @@ export function Sidebar({
     () => new Set(completionAttentionTaskIds),
     [completionAttentionTaskIds],
   );
+  const homeIconSrc = useMemo(() => {
+    const isLightTheme = document.documentElement.classList.contains("theme-light");
+    return createMacMiniIconDataUrl(isLightTheme ? "rgba(17, 24, 39, 0.82)" : "rgba(229, 231, 235, 0.92)");
+  }, []);
 
   // Helper to get date group for a timestamp
   const getDateGroup = useCallback((timestamp: number): string => {
@@ -246,7 +331,54 @@ export function Sidebar({
       )
       .sort(compareTasksByPinAndRecency);
 
-    return rootTasks.map(buildNode);
+    const groupedNodes: TaskTreeNode[] = [];
+    const consumed = new Set<string>();
+    const improvementRoots = rootTasks.filter((task) => task.source === "improvement");
+
+    for (const task of improvementRoots) {
+      if (consumed.has(task.id)) continue;
+      const match = task.title.match(/^Improve \(([^)]+)\):\s*(.+)$/);
+      if (!match) continue;
+      const suffix = match[2].trim();
+      const siblings = improvementRoots.filter((candidate) => {
+        if (consumed.has(candidate.id)) return false;
+        const candidateMatch = candidate.title.match(/^Improve \(([^)]+)\):\s*(.+)$/);
+        if (!candidateMatch) return false;
+        if (candidateMatch[2].trim() !== suffix) return false;
+        return Math.abs(candidate.createdAt - task.createdAt) <= 60_000;
+      });
+      if (siblings.length < 2) continue;
+
+      siblings.sort(compareTasksByPinAndRecency);
+      for (const sibling of siblings) consumed.add(sibling.id);
+
+      const syntheticTask: Task = {
+        ...siblings[0],
+        id: `improvement-group:${suffix}:${task.createdAt}`,
+        title: `Improve campaign: ${suffix}`,
+        status: siblings.some((item) => isActiveSessionStatus(item.status))
+          ? "executing"
+          : siblings.some((item) => isAwaitingSessionStatus(item.status))
+            ? "paused"
+            : siblings.every((item) => item.status === "completed")
+              ? "completed"
+              : siblings.every((item) => item.status === "failed" || item.status === "cancelled")
+                ? "failed"
+                : siblings[0].status,
+        createdAt: Math.min(...siblings.map((item) => item.createdAt)),
+        updatedAt: Math.max(...siblings.map((item) => item.updatedAt)),
+      };
+
+      groupedNodes.push({
+        task: syntheticTask,
+        synthetic: true,
+        displayTitle: syntheticTask.title,
+        children: siblings.map((child) => buildNode(child)),
+      });
+    }
+
+    const remainingNodes = rootTasks.filter((task) => !consumed.has(task.id)).map(buildNode);
+    return [...groupedNodes, ...remainingNodes].sort(compareTaskTreeNodes);
   }, [tasks, uiDensity, showFailedSessions]);
 
   // Split root tasks into user-created vs automated sessions.
@@ -738,8 +870,11 @@ export function Sidebar({
     return (
       <div key={task.id} className="task-tree-node">
         <div
-          className={`task-item cli-task-item ${selectedTaskId === task.id ? "task-item-selected" : ""} ${isSubAgent ? "task-item-subagent" : ""} ${modeClass}`}
-          onClick={() => renameTaskId !== task.id && onSelectTask(task.id)}
+          className={`task-item cli-task-item ${selectedTaskId === task.id ? "task-item-selected" : ""} ${isSubAgent ? "task-item-subagent" : ""} ${node.synthetic ? "task-item-group-root" : ""} ${modeClass}`}
+          onClick={() => {
+            if (node.synthetic) return;
+            if (renameTaskId !== task.id) onSelectTask(task.id);
+          }}
           style={{ paddingLeft: depth > 0 ? `${8 + depth * 16}px` : undefined }}
           title={
             taskMode && taskMode !== "standard" ? SESSION_MODE_META[taskMode].label : undefined
@@ -821,7 +956,7 @@ export function Sidebar({
             ) : (
               <div className="cli-task-title-row">
                 <span className="cli-task-title" title={task.title}>
-                  {task.title}
+                  {node.displayTitle || task.title}
                 </span>
                 {isAwaitingSessionStatus(task.status) && (
                   <span className="cli-task-awaiting-badge">Awaiting response</span>
@@ -830,69 +965,71 @@ export function Sidebar({
             )}
           </div>
 
-          <div
-            className="task-item-actions cli-task-actions"
-            ref={menuOpenTaskId === task.id ? menuRef : null}
-          >
-            <button
-              className="task-item-more cli-more-btn"
-              aria-haspopup="menu"
-              aria-expanded={menuOpenTaskId === task.id}
-              aria-controls={`task-menu-${task.id}`}
-              aria-label={`Session actions for ${task.title}`}
-              onClick={(e) => handleMenuToggle(e, task.id)}
-              onKeyDown={(e) => handleMenuButtonKeyDown(e, task.id)}
-              ref={(el) => {
-                if (el) {
-                  menuButtonRef.current.set(task.id, el);
-                } else {
-                  menuButtonRef.current.delete(task.id);
-                }
-              }}
+          {!node.synthetic && (
+            <div
+              className="task-item-actions cli-task-actions"
+              ref={menuOpenTaskId === task.id ? menuRef : null}
             >
-              ···
-            </button>
-            {menuOpenTaskId === task.id && (
-              <div
-                id={`task-menu-${task.id}`}
-                className="task-item-menu cli-task-menu"
-                role="menu"
-                aria-label="Session actions"
-                ref={menuRef}
+              <button
+                className="task-item-more cli-more-btn"
+                aria-haspopup="menu"
+                aria-expanded={menuOpenTaskId === task.id}
+                aria-controls={`task-menu-${task.id}`}
+                aria-label={`Session actions for ${task.title}`}
+                onClick={(e) => handleMenuToggle(e, task.id)}
+                onKeyDown={(e) => handleMenuButtonKeyDown(e, task.id)}
+                ref={(el) => {
+                  if (el) {
+                    menuButtonRef.current.set(task.id, el);
+                  } else {
+                    menuButtonRef.current.delete(task.id);
+                  }
+                }}
               >
-                <button
-                  className="task-item-menu-option cli-menu-option"
-                  role="menuitem"
-                  data-menu-option="rename"
-                  onClick={(e) => handleRenameClick(e, task)}
-                  onKeyDown={(e) => handleMenuItemKeyDown(e, task.id)}
+                ···
+              </button>
+              {menuOpenTaskId === task.id && (
+                <div
+                  id={`task-menu-${task.id}`}
+                  className="task-item-menu cli-task-menu"
+                  role="menu"
+                  aria-label="Session actions"
+                  ref={menuRef}
                 >
-                  <span className="cli-menu-prefix">&gt;</span>
-                  rename
-                </button>
-                <button
-                  className="task-item-menu-option cli-menu-option"
-                  role="menuitem"
-                  data-menu-option="pin"
-                  onClick={(e) => handlePinClick(e, task)}
-                  onKeyDown={(e) => handleMenuItemKeyDown(e, task.id)}
-                >
-                  <span className="cli-menu-prefix">&gt;</span>
-                  {task.pinned ? "unpin" : "pin"}
-                </button>
-                <button
-                  className="task-item-menu-option task-item-menu-option-danger cli-menu-option cli-menu-danger"
-                  role="menuitem"
-                  data-menu-option="archive"
-                  onClick={(e) => handleArchiveClick(e, task.id)}
-                  onKeyDown={(e) => handleMenuItemKeyDown(e, task.id)}
-                >
-                  <span className="cli-menu-prefix">&gt;</span>
-                  archive
-                </button>
-              </div>
-            )}
-          </div>
+                  <button
+                    className="task-item-menu-option cli-menu-option"
+                    role="menuitem"
+                    data-menu-option="rename"
+                    onClick={(e) => handleRenameClick(e, task)}
+                    onKeyDown={(e) => handleMenuItemKeyDown(e, task.id)}
+                  >
+                    <span className="cli-menu-prefix">&gt;</span>
+                    rename
+                  </button>
+                  <button
+                    className="task-item-menu-option cli-menu-option"
+                    role="menuitem"
+                    data-menu-option="pin"
+                    onClick={(e) => handlePinClick(e, task)}
+                    onKeyDown={(e) => handleMenuItemKeyDown(e, task.id)}
+                  >
+                    <span className="cli-menu-prefix">&gt;</span>
+                    {task.pinned ? "unpin" : "pin"}
+                  </button>
+                  <button
+                    className="task-item-menu-option task-item-menu-option-danger cli-menu-option cli-menu-danger"
+                    role="menuitem"
+                    data-menu-option="archive"
+                    onClick={(e) => handleArchiveClick(e, task.id)}
+                    onKeyDown={(e) => handleMenuItemKeyDown(e, task.id)}
+                  >
+                    <span className="cli-menu-prefix">&gt;</span>
+                    archive
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Render children if not collapsed */}
@@ -927,6 +1064,21 @@ export function Sidebar({
               <span className="modern-only">Mission Control</span>
             </span>
           </button>
+          <button
+            className={`cli-action-btn cli-devices-btn ${isDevicesActive ? "active" : ""}`}
+            onClick={onOpenDevices}
+            title="Devices"
+          >
+            <span className="terminal-only">
+              <span className="cli-btn-bracket">[</span>
+              <span className="cli-btn-accent">DV</span>
+              <span className="cli-btn-bracket">]</span>
+            </span>
+            <span className="cli-btn-text">
+              <span className="terminal-only">devices</span>
+              <span className="modern-only">Devices</span>
+            </span>
+          </button>
           <button className="new-task-btn cli-new-task-btn cli-action-btn" onClick={handleNewTask}>
             <span className="terminal-only">
               <span className="cli-btn-bracket">[</span>
@@ -935,171 +1087,209 @@ export function Sidebar({
             </span>
             <span className="cli-btn-text">
               <span className="terminal-only">new_session</span>
-              <span className="modern-only">New Session</span>
+              <span className="modern-only cli-new-task-modern-label">
+                <span className="cli-new-task-modern-plus" aria-hidden="true">
+                  +
+                </span>
+                <span>New</span>
+              </span>
             </span>
           </button>
         </div>
+        <button
+          type="button"
+          className={`new-task-btn cli-new-task-btn cli-action-btn sidebar-home-btn ${isHomeActive ? "active" : ""}`}
+          onClick={onOpenHome}
+          aria-pressed={isHomeActive}
+          title="Home"
+        >
+          <span className="cli-btn-text">
+            <span className="terminal-only">home</span>
+            <span className="modern-only cli-new-task-modern-label">
+              <span className="sidebar-home-btn-icon" aria-hidden="true">
+                <img src={homeIconSrc} alt="" className="sidebar-home-btn-icon-image" />
+              </span>
+              <span>Home</span>
+            </span>
+          </span>
+        </button>
       </div>
 
       {/* Sessions List */}
       <div className="task-list cli-task-list" ref={taskListRef}>
-        {pinActionError && (
-          <div className="cli-sidebar-error" role="alert">
-            {pinActionError}
-          </div>
-        )}
-        <div className="task-list-header cli-list-header">
-          <span className="cli-section-prompt">&gt;</span>
-          <span className="terminal-only">SESSIONS</span>
-          <span className="modern-only">Sessions</span>
-          {(availableModes.length > 1 || activeModeFilters.size > 0) && (
-            <button
-              type="button"
-              className={`session-filter-toggle ${showFilterBar || activeModeFilters.size > 0 ? "active" : ""}`}
-              onClick={() => setShowFilterBar(!showFilterBar)}
-              title="Filter by mode"
-            >
-              <Filter size={12} strokeWidth={2.5} />
-              {activeModeFilters.size > 0 && (
-                <span className="filter-count">{activeModeFilters.size}</span>
-              )}
-            </button>
-          )}
-          {uiDensity === "focused" && failedSessionCount > 0 && (
-            <button
-              type="button"
-              className="show-failed-toggle"
-              onClick={() => setShowFailedSessions(!showFailedSessions)}
-            >
-              {showFailedSessions ? "Hide" : "Show"} failed ({failedSessionCount})
-            </button>
-          )}
-        </div>
-        {showFilterBar && (availableModes.length > 1 || activeModeFilters.size > 0) && (
-          <div className="session-filter-bar">
-            {availableModes.map((mode) => {
-              const meta = SESSION_MODE_META[mode];
-              const isActive = activeModeFilters.has(mode);
-              return (
-                <button
-                  type="button"
-                  key={mode}
-                  className={`session-filter-chip ${meta.color} ${isActive ? "active" : ""}`}
-                  onClick={() => toggleModeFilter(mode)}
-                  title={meta.label}
-                >
-                  <span className="filter-chip-dot" />
-                  {meta.label}
-                  <span className="filter-chip-count">{modeCounts.get(mode) || 0}</span>
-                </button>
-              );
-            })}
-            {activeModeFilters.size > 0 && (
+        <div className="task-list-header cli-list-header cli-sessions-header">
+          <button
+            type="button"
+            className="cli-list-header-toggle"
+            onClick={() => setSessionsCollapsed((value) => !value)}
+            aria-expanded={!sessionsCollapsed}
+            title={sessionsCollapsed ? "Expand sessions" : "Collapse sessions"}
+          >
+            <span className="cli-section-prompt cli-sessions-collapse-indicator">
+              {sessionsCollapsed ? "▸" : "▾"}
+            </span>
+            <span className="terminal-only">SESSIONS</span>
+            <span className="modern-only cli-sessions-title">Sessions</span>
+          </button>
+          <div className="cli-list-header-actions">
+            {(availableModes.length > 1 || activeModeFilters.size > 0) && (
               <button
                 type="button"
-                className="session-filter-clear"
-                onClick={() => setActiveModeFilters(new Set())}
-                title="Clear filters"
+                className={`session-filter-toggle ${showFilterBar || activeModeFilters.size > 0 ? "active" : ""}`}
+                onClick={() => setShowFilterBar(!showFilterBar)}
+                title="Filter by mode"
               >
-                clear
+                <Filter size={12} strokeWidth={2.5} />
+                {activeModeFilters.size > 0 && (
+                  <span className="filter-count">{activeModeFilters.size}</span>
+                )}
+              </button>
+            )}
+            {uiDensity === "focused" && failedSessionCount > 0 && (
+              <button
+                type="button"
+                className="show-failed-toggle"
+                onClick={() => setShowFailedSessions(!showFailedSessions)}
+              >
+                {showFailedSessions ? "Hide" : "Show"} failed ({failedSessionCount})
               </button>
             )}
           </div>
-        )}
-        {filteredTaskTree.length === 0 && activeModeFilters.size > 0 && (
-          <div className="sidebar-empty cli-empty sidebar-empty-filtered">
-            <p className="cli-hint">
-              <span>No sessions match the selected filters</span>
-            </p>
-          </div>
-        )}
-        {/* Automated sessions folder — collapsed by default, shown at top */}
-        {automatedTaskTree.length > 0 && (
-          <div className="automated-sessions-folder">
-            <button
-              type="button"
-              className="automated-folder-header"
-              onClick={() => setAutomatedFolderCollapsed((v) => !v)}
-              aria-expanded={!automatedFolderCollapsed}
-              title={automatedFolderCollapsed ? "Show automated sessions" : "Hide automated sessions"}
-            >
-              <span className="automated-folder-chevron" aria-hidden="true">
-                {automatedFolderCollapsed ? "▸" : "▾"}
-              </span>
-              <span className="automated-folder-label">
-                <span className="terminal-only">AUTOMATED</span>
-                <span className="modern-only">Automated</span>
-              </span>
-              <span className="automated-folder-count">{automatedTaskTree.length}</span>
-              {automatedTaskTree.some((n) => isActiveSessionStatus(n.task.status)) && (
-                <span
-                  className="cli-session-indicator cli-session-indicator-active automated-folder-active"
-                  aria-label="Has active session"
-                />
-              )}
-            </button>
-            {!automatedFolderCollapsed && (
-              <div className="automated-folder-body">
-                {automatedTaskTree.map((node, index) =>
-                  renderTaskNode(node, index, 0, index === automatedTaskTree.length - 1),
+        </div>
+        {!sessionsCollapsed && (
+          <>
+            {pinActionError && (
+              <div className="cli-sidebar-error" role="alert">
+                {pinActionError}
+              </div>
+            )}
+            {showFilterBar && (availableModes.length > 1 || activeModeFilters.size > 0) && (
+              <div className="session-filter-bar">
+                {availableModes.map((mode) => {
+                  const meta = SESSION_MODE_META[mode];
+                  const isActive = activeModeFilters.has(mode);
+                  return (
+                    <button
+                      type="button"
+                      key={mode}
+                      className={`session-filter-chip ${meta.color} ${isActive ? "active" : ""}`}
+                      onClick={() => toggleModeFilter(mode)}
+                      title={meta.label}
+                    >
+                      <span className="filter-chip-dot" />
+                      {meta.label}
+                      <span className="filter-chip-count">{modeCounts.get(mode) || 0}</span>
+                    </button>
+                  );
+                })}
+                {activeModeFilters.size > 0 && (
+                  <button
+                    type="button"
+                    className="session-filter-clear"
+                    onClick={() => setActiveModeFilters(new Set())}
+                    title="Clear filters"
+                  >
+                    clear
+                  </button>
                 )}
               </div>
             )}
-          </div>
-        )}
-
-        {filteredTaskTree.length === 0 && automatedTaskTree.length === 0 ? (
-          activeModeFilters.size > 0 ? null : (
-            <div
-              className={`sidebar-empty cli-empty ${uiDensity === "focused" ? "sidebar-empty-focused" : ""}`}
-            >
-              <pre className="cli-tree terminal-only">{`├── (no sessions yet)
-└── ...`}</pre>
-              {uiDensity === "focused" ? (
-                <div className="sidebar-empty-message">
-                  <svg
-                    width="32"
-                    height="32"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    style={{ opacity: 0.3 }}
-                  >
-                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                  </svg>
-                  <p>Your conversations will appear here</p>
-                  <span>Start a new session to get going</span>
-                </div>
-              ) : (
+            {filteredTaskTree.length === 0 && activeModeFilters.size > 0 && (
+              <div className="sidebar-empty cli-empty sidebar-empty-filtered">
                 <p className="cli-hint">
-                  <span className="terminal-only"># start a new session above</span>
-                  <span className="modern-only">Start a new session to begin</span>
+                  <span>No sessions match the selected filters</span>
                 </p>
-              )}
-            </div>
-          )
-        ) : uiDensity === "focused" ? (
-          focusedTaskEntries.map((entry) => (
-            <Fragment key={entry.node.task.id}>
-              {entry.showHeader && <div className="sidebar-date-group">{entry.group}</div>}
-              {renderTaskNode(entry.node, entry.index, 0, entry.isLast)}
-            </Fragment>
-          ))
-        ) : (
-          filteredTaskTree.map((node, index) =>
-            renderTaskNode(node, index, 0, index === filteredTaskTree.length - 1),
-          )
-        )}
+              </div>
+            )}
+            {/* Automated sessions folder — collapsed by default, shown at top */}
+            {automatedTaskTree.length > 0 && (
+              <div className="automated-sessions-folder">
+                <button
+                  type="button"
+                  className="automated-folder-header"
+                  onClick={() => setAutomatedFolderCollapsed((v) => !v)}
+                  aria-expanded={!automatedFolderCollapsed}
+                  title={automatedFolderCollapsed ? "Show automated sessions" : "Hide automated sessions"}
+                >
+                  <span className="automated-folder-chevron" aria-hidden="true">
+                    {automatedFolderCollapsed ? "▸" : "▾"}
+                  </span>
+                  <span className="automated-folder-label">
+                    <span className="terminal-only">AUTOMATED</span>
+                    <span className="modern-only">Automated</span>
+                  </span>
+                  <span className="automated-folder-count">{automatedTaskTree.length}</span>
+                  {automatedTaskTree.some((n) => isActiveSessionStatus(n.task.status)) && (
+                    <span
+                      className="cli-session-indicator cli-session-indicator-active automated-folder-active"
+                      aria-label="Has active session"
+                    />
+                  )}
+                </button>
+                {!automatedFolderCollapsed && (
+                  <div className="automated-folder-body">
+                    {automatedTaskTree.map((node, index) =>
+                      renderTaskNode(node, index, 0, index === automatedTaskTree.length - 1),
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
-        {/* Pagination footer — shown while more tasks exist below the fold */}
-        {hasMoreTasks && (
-          <div className="task-list-load-more">
-            <span className="terminal-only">loading more...</span>
-            <span className="modern-only">Loading more sessions…</span>
-          </div>
+            {filteredTaskTree.length === 0 && automatedTaskTree.length === 0 ? (
+              activeModeFilters.size > 0 ? null : (
+                <div
+                  className={`sidebar-empty cli-empty ${uiDensity === "focused" ? "sidebar-empty-focused" : ""}`}
+                >
+                  <pre className="cli-tree terminal-only">{`├── (no sessions yet)
+└── ...`}</pre>
+                  {uiDensity === "focused" ? (
+                    <div className="sidebar-empty-message">
+                      <svg
+                        width="32"
+                        height="32"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        style={{ opacity: 0.3 }}
+                      >
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                      </svg>
+                      <p>Your conversations will appear here</p>
+                      <span>Start a new session to get going</span>
+                    </div>
+                  ) : (
+                    <p className="cli-hint">
+                      <span className="terminal-only"># start a new session above</span>
+                      <span className="modern-only">Start a new session to begin</span>
+                    </p>
+                  )}
+                </div>
+              )
+            ) : uiDensity === "focused" ? (
+              focusedTaskEntries.map((entry) => (
+                <Fragment key={entry.node.task.id}>
+                  {entry.showHeader && <div className="sidebar-date-group">{entry.group}</div>}
+                  {renderTaskNode(entry.node, entry.index, 0, entry.isLast)}
+                </Fragment>
+              ))
+            ) : (
+              filteredTaskTree.map((node, index) =>
+                renderTaskNode(node, index, 0, index === filteredTaskTree.length - 1),
+              )
+            )}
+
+            {/* Pagination footer — shown while more tasks exist below the fold */}
+            {hasMoreTasks && (
+              <div className="task-list-load-more">
+                <span className="terminal-only">loading more...</span>
+                <span className="modern-only">Loading more sessions…</span>
+              </div>
+            )}
+          </>
         )}
       </div>
 

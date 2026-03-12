@@ -34,6 +34,7 @@ import {
   shouldImportEnvSettingsFromArgsOrEnv,
 } from "../electron/utils/runtime-mode";
 import { getUserDataDir } from "../electron/utils/user-data-dir";
+import { sanitizeTaskMessageParams } from "../electron/control-plane/sanitize";
 import { registerControlPlaneCoreMethods } from "../electron/control-plane/registerControlPlaneCoreMethods";
 import { registerStrategicPlannerMethods } from "../electron/control-plane/registerStrategicPlannerMethods";
 import { getStrategicPlannerService } from "../electron/control-plane/StrategicPlannerService";
@@ -58,6 +59,7 @@ function sanitizeTaskCreateParams(params: unknown): {
   agentConfig?: AgentConfig;
   budgetTokens?: number;
   budgetCost?: number;
+  shellAccess?: boolean;
 } {
   const p = (params ?? {}) as Any;
   const title = typeof p.title === "string" ? p.title.trim() : "";
@@ -74,6 +76,7 @@ function sanitizeTaskCreateParams(params: unknown): {
     typeof p.budgetCost === "number" && Number.isFinite(p.budgetCost)
       ? Math.max(0, p.budgetCost)
       : undefined;
+  const shellAccess = p.shellAccess === true;
 
   const agentConfig: AgentConfig | undefined = (() => {
     if (!p.agentConfig || typeof p.agentConfig !== "object") return undefined;
@@ -92,6 +95,7 @@ function sanitizeTaskCreateParams(params: unknown): {
     ...(agentConfig ? { agentConfig } : {}),
     ...(budgetTokens !== undefined ? { budgetTokens } : {}),
     ...(budgetCost !== undefined ? { budgetCost } : {}),
+    ...(shellAccess ? { shellAccess } : {}),
   };
 }
 
@@ -100,15 +104,6 @@ function sanitizeTaskIdParams(params: unknown): { taskId: string } {
   const taskId = typeof p.taskId === "string" ? p.taskId.trim() : "";
   if (!taskId) throw { code: ErrorCodes.INVALID_PARAMS, message: "taskId is required" };
   return { taskId };
-}
-
-function sanitizeTaskMessageParams(params: unknown): { taskId: string; message: string } {
-  const p = (params ?? {}) as Any;
-  const taskId = typeof p.taskId === "string" ? p.taskId.trim() : "";
-  const message = typeof p.message === "string" ? p.message.trim() : "";
-  if (!taskId) throw { code: ErrorCodes.INVALID_PARAMS, message: "taskId is required" };
-  if (!message) throw { code: ErrorCodes.INVALID_PARAMS, message: "message is required" };
-  return { taskId, message };
 }
 
 function sanitizeApprovalRespondParams(params: unknown): { approvalId: string; approved: boolean } {
@@ -873,6 +868,51 @@ export function registerControlPlaneMethods(
     return { workspace };
   });
 
+  // File operations (for remote file selection)
+  server.registerMethod(Methods.FILE_LIST_DIRECTORY, async (client, params) => {
+    requireScope(client, "read");
+    const p = (params ?? {}) as Any;
+    const workspaceId = typeof p.workspaceId === "string" ? p.workspaceId.trim() : "";
+    const relativePath = typeof p.path === "string" ? p.path.trim() || "." : ".";
+    if (!workspaceId) throw { code: ErrorCodes.INVALID_PARAMS, message: "workspaceId is required" };
+
+    const workspace = workspaceRepo.findById(workspaceId);
+    if (!workspace) {
+      throw { code: ErrorCodes.INVALID_PARAMS, message: `Workspace not found: ${workspaceId}` };
+    }
+
+    const fullPath = path.join(workspace.path, relativePath);
+    const resolved = path.resolve(fullPath);
+    if (!resolved.startsWith(path.resolve(workspace.path))) {
+      throw { code: ErrorCodes.INVALID_PARAMS, message: "Path escapes workspace" };
+    }
+
+    try {
+      const entries = await fs.readdir(resolved, { withFileTypes: true });
+      const files = await Promise.all(
+        entries.slice(0, 200).map(async (entry) => {
+          try {
+            const entryPath = path.join(resolved, entry.name);
+            const stat = await fs.stat(entryPath);
+            return {
+              name: entry.name,
+              type: stat.isDirectory() ? ("directory" as const) : ("file" as const),
+              size: stat.isFile() ? stat.size : 0,
+            };
+          } catch {
+            return { name: entry.name, type: "file" as const, size: 0 };
+          }
+        }),
+      );
+      return { files };
+    } catch (error: Any) {
+      throw {
+        code: ErrorCodes.METHOD_FAILED,
+        message: error?.message || `Failed to list directory: ${relativePath}`,
+      };
+    }
+  });
+
   // Tasks
   server.registerMethod(Methods.TASK_CREATE, async (client, params) => {
     requireScope(client, "admin");
@@ -884,6 +924,13 @@ export function registerControlPlaneMethods(
         code: ErrorCodes.INVALID_PARAMS,
         message: `Workspace not found: ${validated.workspaceId}`,
       };
+    }
+
+    if (validated.shellAccess && !workspace.permissions?.shell) {
+      workspaceRepo.updatePermissions(validated.workspaceId, {
+        ...workspace.permissions,
+        shell: true,
+      });
     }
 
     const task = taskRepo.create({
@@ -986,8 +1033,8 @@ export function registerControlPlaneMethods(
 
   server.registerMethod(Methods.TASK_SEND_MESSAGE, async (client, params) => {
     requireScope(client, "admin");
-    const { taskId, message } = sanitizeTaskMessageParams(params);
-    await agentDaemon.sendMessage(taskId, message);
+    const { taskId, message, images } = sanitizeTaskMessageParams(params);
+    await agentDaemon.sendMessage(taskId, message, images);
     return { ok: true };
   });
 

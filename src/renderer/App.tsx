@@ -207,6 +207,7 @@ export function App() {
   const [themeMode, setThemeMode] = useState<ThemeMode>("dark");
   const [visualTheme, setVisualTheme] = useState<VisualTheme>("warm");
   const [accentColor, setAccentColor] = useState<AccentColor>("cyan");
+  const [transparencyEffectsEnabled, setTransparencyEffectsEnabled] = useState(true);
   const [uiDensity, setUiDensity] = useState<UiDensity>("focused");
   const [devRunLoggingEnabled, setDevRunLoggingEnabled] = useState(false);
 
@@ -272,18 +273,21 @@ export function App() {
       .getAppearanceRuntimeInfo?.()
       .then((runtimeInfo) => {
         if (cancelled) return;
-        root.classList.toggle("opaque-vibrancy", runtimeInfo?.prefersReducedTransparency === true);
+        root.classList.toggle(
+          "opaque-vibrancy",
+          runtimeInfo?.prefersReducedTransparency === true || !transparencyEffectsEnabled,
+        );
       })
       .catch(() => {
         if (!cancelled) {
-          root.classList.remove("opaque-vibrancy");
+          root.classList.toggle("opaque-vibrancy", !transparencyEffectsEnabled);
         }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [hasElectronAPI]);
+  }, [hasElectronAPI, transparencyEffectsEnabled]);
 
   const handleDisclaimerAccept = (dontShowAgain: boolean) => {
     // Save to main process for persistence
@@ -388,6 +392,7 @@ export function App() {
         setThemeMode(settings.themeMode);
         setVisualTheme(settings.visualTheme || "warm");
         setAccentColor(settings.accentColor);
+        setTransparencyEffectsEnabled(settings.transparencyEffectsEnabled !== false);
         setUiDensity(settings.uiDensity || "focused");
         setDevRunLoggingEnabled(settings.devRunLoggingEnabled === true);
         applyPersistedLanguage(settings.language);
@@ -1887,6 +1892,7 @@ export function App() {
       themeMode: theme,
       visualTheme,
       accentColor,
+      transparencyEffectsEnabled,
     });
   };
 
@@ -1897,6 +1903,7 @@ export function App() {
       themeMode,
       visualTheme: visual,
       accentColor,
+      transparencyEffectsEnabled,
     });
   };
 
@@ -1907,6 +1914,7 @@ export function App() {
       themeMode,
       visualTheme,
       accentColor: accent,
+      transparencyEffectsEnabled,
     });
   };
 
@@ -1916,7 +1924,15 @@ export function App() {
       themeMode,
       visualTheme,
       accentColor,
+      transparencyEffectsEnabled,
       uiDensity: density,
+    });
+  };
+
+  const handleTransparencyEffectsEnabledChange = (enabled: boolean) => {
+    setTransparencyEffectsEnabled(enabled);
+    void window.electronAPI?.saveAppearanceSettings?.({
+      transparencyEffectsEnabled: enabled,
     });
   };
 
@@ -2600,9 +2616,11 @@ export function App() {
           themeMode={themeMode}
           visualTheme={visualTheme}
           accentColor={accentColor}
+          transparencyEffectsEnabled={transparencyEffectsEnabled}
           onThemeChange={handleThemeChange}
           onVisualThemeChange={handleVisualThemeChange}
           onAccentChange={handleAccentChange}
+          onTransparencyEffectsEnabledChange={handleTransparencyEffectsEnabledChange}
           uiDensity={uiDensity}
           onUiDensityChange={handleUiDensityChange}
           devRunLoggingEnabled={devRunLoggingEnabled}

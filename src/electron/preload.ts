@@ -4163,6 +4163,7 @@ export interface ElectronAPI {
   getAppearanceSettings: () => Promise<{
     themeMode: "light" | "dark" | "system";
     visualTheme: "terminal" | "warm" | "oblivion";
+    transparencyEffectsEnabled?: boolean;
     accentColor:
       | "cyan"
       | "blue"
@@ -4188,6 +4189,7 @@ export interface ElectronAPI {
   saveAppearanceSettings: (settings: {
     themeMode?: "light" | "dark" | "system";
     visualTheme?: "terminal" | "warm" | "oblivion";
+    transparencyEffectsEnabled?: boolean;
     accentColor?:
       | "cyan"
       | "blue"

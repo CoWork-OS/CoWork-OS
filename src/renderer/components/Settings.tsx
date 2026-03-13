@@ -187,9 +187,11 @@ interface SettingsProps {
   themeMode: ThemeMode;
   visualTheme: VisualTheme;
   accentColor: AccentColor;
+  transparencyEffectsEnabled: boolean;
   onThemeChange: (theme: ThemeMode) => void;
   onVisualThemeChange: (theme: VisualTheme) => void;
   onAccentChange: (accent: AccentColor) => void;
+  onTransparencyEffectsEnabledChange: (enabled: boolean) => void;
   uiDensity: UiDensity;
   onUiDensityChange: (density: UiDensity) => void;
   devRunLoggingEnabled: boolean;
@@ -547,9 +549,11 @@ export function Settings({
   themeMode,
   visualTheme,
   accentColor,
+  transparencyEffectsEnabled,
   onThemeChange,
   onVisualThemeChange,
   onAccentChange,
+  onTransparencyEffectsEnabledChange,
   uiDensity,
   onUiDensityChange,
   devRunLoggingEnabled,
@@ -2205,9 +2209,11 @@ export function Settings({
                 themeMode={themeMode}
                 visualTheme={visualTheme}
                 accentColor={accentColor}
+                transparencyEffectsEnabled={transparencyEffectsEnabled}
                 onThemeChange={onThemeChange}
                 onVisualThemeChange={onVisualThemeChange}
                 onAccentChange={onAccentChange}
+                onTransparencyEffectsEnabledChange={onTransparencyEffectsEnabledChange}
                 uiDensity={uiDensity}
                 onUiDensityChange={onUiDensityChange}
                 devRunLoggingEnabled={devRunLoggingEnabled}

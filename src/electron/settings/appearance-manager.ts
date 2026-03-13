@@ -25,6 +25,7 @@ const DEFAULT_SETTINGS: AppearanceSettings = {
   themeMode: "system",
   visualTheme: "warm",
   accentColor: "cyan",
+  transparencyEffectsEnabled: true,
   uiDensity: "focused",
   timelineVerbosity: "summary",
   devRunLoggingEnabled: false,
@@ -133,6 +134,7 @@ export class AppearanceManager {
           settings = { ...DEFAULT_SETTINGS, ...stored };
           // Persist defaults for newly added fields when missing/invalid.
           if (
+            typeof stored.transparencyEffectsEnabled !== "boolean" ||
             !isValidUiDensity(stored.uiDensity) ||
             !isValidTimelineVerbosity(stored.timelineVerbosity) ||
             typeof stored.devRunLoggingEnabled !== "boolean"
@@ -155,6 +157,10 @@ export class AppearanceManager {
       }
       if (!isValidAccentColor(settings.accentColor)) {
         settings.accentColor = DEFAULT_SETTINGS.accentColor;
+      }
+      if (typeof settings.transparencyEffectsEnabled !== "boolean") {
+        settings.transparencyEffectsEnabled = DEFAULT_SETTINGS.transparencyEffectsEnabled;
+        needsWrite = true;
       }
       if (!isValidUiDensity(settings.uiDensity)) {
         settings.uiDensity = DEFAULT_SETTINGS.uiDensity;
@@ -223,8 +229,12 @@ export class AppearanceManager {
           : existingSettings.themeMode,
         visualTheme: normalizedVisualTheme,
         accentColor: isValidAccentColor(settings.accentColor)
-          ? settings.accentColor
-          : existingSettings.accentColor,
+            ? settings.accentColor
+            : existingSettings.accentColor,
+        transparencyEffectsEnabled:
+          typeof settings.transparencyEffectsEnabled === "boolean"
+            ? settings.transparencyEffectsEnabled
+            : existingSettings.transparencyEffectsEnabled,
         language: settings.language ?? existingSettings.language,
         disclaimerAccepted: settings.disclaimerAccepted ?? existingSettings.disclaimerAccepted,
         onboardingCompleted: settings.onboardingCompleted ?? existingSettings.onboardingCompleted,

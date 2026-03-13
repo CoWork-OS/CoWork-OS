@@ -20,6 +20,7 @@ export interface AppearanceSettings {
   themeMode: ThemeMode;
   visualTheme: VisualTheme;
   accentColor: AccentColor;
+  transparencyEffectsEnabled?: boolean;
   uiDensity?: UiDensity;
   timelineVerbosity?: TimelineVerbosity;
   devRunLoggingEnabled?: boolean; // Persist npm run dev stdout/stderr to logs/

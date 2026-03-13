@@ -11,9 +11,11 @@ interface AppearanceSettingsProps {
   themeMode: ThemeMode;
   visualTheme: VisualTheme;
   accentColor: AccentColor;
+  transparencyEffectsEnabled: boolean;
   onThemeChange: (theme: ThemeMode) => void;
   onVisualThemeChange: (theme: VisualTheme) => void;
   onAccentChange: (accent: AccentColor) => void;
+  onTransparencyEffectsEnabledChange: (enabled: boolean) => void;
   uiDensity: UiDensity;
   onUiDensityChange: (density: UiDensity) => void;
   devRunLoggingEnabled: boolean;
@@ -26,9 +28,11 @@ export function AppearanceSettings({
   themeMode,
   visualTheme,
   accentColor,
+  transparencyEffectsEnabled,
   onThemeChange,
   onVisualThemeChange,
   onAccentChange,
+  onTransparencyEffectsEnabledChange,
   uiDensity,
   onUiDensityChange,
   devRunLoggingEnabled,
@@ -320,6 +324,22 @@ export function AppearanceSettings({
         <span className="color-swatch-selected-label">
           {ACCENT_COLORS.find((c) => c.id === accentColor)?.label}
         </span>
+      </div>
+
+      <div className="appearance-section">
+        <h4>Transparency effects</h4>
+        <p className="settings-description">
+          Use translucent macOS materials and blur effects. Turn this off on virtual machines or
+          systems where dark mode looks washed out.
+        </p>
+        <label className="settings-checkbox">
+          <input
+            type="checkbox"
+            checked={transparencyEffectsEnabled}
+            onChange={(event) => onTransparencyEffectsEnabledChange(event.target.checked)}
+          />
+          <span>Enable translucent window materials</span>
+        </label>
       </div>
 
       {/* Language */}

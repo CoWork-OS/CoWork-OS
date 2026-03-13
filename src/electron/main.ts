@@ -242,20 +242,21 @@ if (!gotTheLock) {
 
   function createWindow() {
     const isMac = process.platform === "darwin";
-    const useMacVibrancy = isMac && !nativeTheme.prefersReducedTransparency;
+    let useMacVibrancy = isMac && !nativeTheme.prefersReducedTransparency;
 
     // Determine initial background color when the window should be opaque.
     let windowBgColor = "#1a1a1c";
-    if (!useMacVibrancy) {
-      try {
-        const saved = AppearanceManager.loadSettings();
-        const mode = saved.themeMode || "dark";
-        const isLight =
-          mode === "light" || (mode === "system" && nativeTheme.shouldUseDarkColors === false);
-        if (isLight) windowBgColor = "#f0f0f2";
-      } catch {
-        // Fallback to dark if settings aren't available yet
+    try {
+      const saved = AppearanceManager.loadSettings();
+      if (isMac && saved.transparencyEffectsEnabled === false) {
+        useMacVibrancy = false;
       }
+      const mode = saved.themeMode || "dark";
+      const isLight =
+        mode === "light" || (mode === "system" && nativeTheme.shouldUseDarkColors === false);
+      if (isLight) windowBgColor = "#f0f0f2";
+    } catch {
+      // Fallback to dark if settings aren't available yet
     }
 
     mainWindow = new BrowserWindow({

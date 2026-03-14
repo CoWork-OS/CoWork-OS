@@ -4,6 +4,9 @@ import type Database from "better-sqlite3";
 import type { AgentDaemon } from "../agent/daemon";
 import { AgentRoleRepository } from "./AgentRoleRepository";
 import { TaskRepository, WorkspaceRepository } from "../database/repositories";
+import { writeKitFileWithSnapshot } from "../context/kit-revisions";
+
+type Any = any;
 
 type FeedbackEntry = {
   agent: string;
@@ -339,9 +342,7 @@ export class FeedbackService {
 
       const next = upsertMarkedSection(current, patterns.length > 0 ? patterns : ["- (none)"]);
       if (next !== current) {
-        const tmpPath = absPath + ".tmp";
-        fs.writeFileSync(tmpPath, next, "utf8");
-        fs.renameSync(tmpPath, absPath);
+        writeKitFileWithSnapshot(absPath, next, "agent", "service:feedback_flush");
       }
     } catch (error) {
       console.warn("[Feedback] Failed to write MISTAKES.md:", error);

@@ -9,7 +9,7 @@ interface ToastContainerProps {
 function getToastIcon(type: ToastNotification["type"]): string {
   switch (type) {
     case "success":
-      return "OK";
+      return "✓";
     case "error":
       return "!";
     case "info":

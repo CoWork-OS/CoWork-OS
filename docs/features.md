@@ -58,6 +58,8 @@
 - **Problem Framing Pre-flight**: Complex tasks show a structured problem restatement, assumptions, risks, and approach before execution begins
 - **Graceful Uncertainty**: Agent expresses uncertainty honestly and rates confidence on recommendations. Low-confidence messages display with an amber indicator.
 - **AI Playbook**: Auto-captures successful patterns (approach, outcome, tools) and lessons from failures with error classification (7 categories: tool failure, wrong approach, missing context, permission denied, timeout, rate limit, user correction). Time-based decay scoring deprioritises stale entries. Proven patterns reinforced on repeated success. Mid-task user corrections automatically detected and captured. Relevant entries injected into system prompts. View in Settings > AI Playbook.
+- **Message-Level Feedback**: Every completed assistant message shows 👍 / 👎 buttons. Thumbs-down opens a structured reason picker (Incorrect, Too verbose, Ignored instructions, Wrong tone, Unsafe / unwanted). Feedback is routed to the User Profile and Adaptive Style Engine for continuous style learning.
+- **Evolving Agent Intelligence**: The agent visibly improves over time through a connected set of subsystems — unified memory synthesis, adaptive style learning, playbook-to-skill promotion, channel persona adaptation, evolution metrics, and daily operational journaling. See [Evolving Agent Intelligence](evolving-agent-intelligence.md).
 
 ### Managed Devices & Remote Operations
 
@@ -325,6 +327,28 @@ Multi-layered learning system that improves agent behaviour across sessions. No 
 
 See [Self-Improving Agent](self-improving-agent.md) for the full architecture guide.
 
+### Evolving Agent Intelligence
+
+A set of connected subsystems that make improvement visible and measurable over time.
+
+| Subsystem | Purpose |
+|-----------|---------|
+| **Unified Memory Synthesizer** | Collects 7 memory sources (user profile, relationship, playbook, memory, knowledge graph, workspace kit, daily summaries), deduplicates by 120-char fingerprint, ranks by `relevance × 0.45 + confidence × 0.3 + recency × 0.25`, and assembles a single token-budgeted `<cowork_synthesized_memory>` block injected into every task. |
+| **Adaptive Style Engine** | Observes message length, emoji usage, technical vocabulary, and structured feedback to gradually shift personality settings (response length, emoji usage, explanation depth). Rate-limited to a configurable number of level-shifts per week. |
+| **Playbook-to-Skill Promotion** | When a playbook pattern is reinforced 3+ times, auto-generates a `skill_proposal` for admin review. No skill is created until explicitly approved. |
+| **Channel Persona Adapter** | Applies channel-appropriate communication directives (Slack = terse/structured, email = formal/greeting+sign-off, WhatsApp = short/emoji, etc.) on top of the core persona without replacing it. |
+| **Evolution Metrics** | Computes 5 on-demand metrics: Correction Rate, Style Adaptations, Knowledge Graph growth, Task Success Rate, and Style Alignment. Produces an overall 0–100 Evolution Score. Surfaced in the Daily Briefing. |
+| **Daily Operational Log** | `DailyLogService` writes structured per-day entries (task, feedback, decision, observation) to `.cowork/memory/daily/<YYYY-MM-DD>.md` for use by the summarizer. Raw logs are never injected into prompts. |
+| **Daily Log Summarizer** | Reads pre-written daily summary files from `.cowork/memory/summaries/<YYYY-MM-DD>.md`, applies recency decay (half-life: 7 days), and returns ranked `MemoryFragment` objects that enter the Memory Synthesizer pipeline. |
+
+**Behavior Adaptation controls** (Settings > Guardrails > Behavior Adaptation):
+- **Adaptive Style** toggle — enable/disable style learning (off by default)
+- **Max drift per week** — maximum one-level style shifts per 7-day window (default: 1)
+- **Reset learned style** — clears all accumulated style adaptations
+- **Channel Persona** toggle — enable/disable per-channel communication adaptation (off by default)
+
+See [Evolving Agent Intelligence](evolving-agent-intelligence.md) and [Behavior Adaptation](behavior-adaptation.md) for full details.
+
 ---
 
 ## Knowledge Graph
@@ -414,6 +438,10 @@ updated: 2026-03-14
 - `npm run kit:lint` validates the current workspace kit from the command line
 - `npm run kit:lint -- --json` emits raw status JSON
 - `npm run kit:lint -- --strict` exits non-zero on warnings or missing tracked entries
+
+### Quick-open kit files
+
+The Memory Hub exposes **Open USER.md** and **Open MEMORY.md** buttons that open the corresponding `.cowork/` file directly in the system editor. If the file does not exist it is created from a default template (with full frontmatter and section scaffolding) before opening.
 
 Configure in **Settings** > **Memory Hub**.
 

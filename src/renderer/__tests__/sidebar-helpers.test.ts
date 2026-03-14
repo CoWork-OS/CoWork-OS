@@ -181,6 +181,11 @@ describe("isAutomatedSession", () => {
   it("still treats legacy heartbeat tasks without an explicit manual source as automated", () => {
     expect(isAutomatedSession(createTask({ heartbeatRunId: "run-123" }))).toBe(true);
   });
+
+  it("treats explicit Heartbeat titled tasks as automated even when linkage fields are missing", () => {
+    expect(isAutomatedSession(createTask({ source: "api", title: "Heartbeat: CoWork OS Ops Lead" }))).toBe(true);
+    expect(isAutomatedSession(createTask({ title: "Heartbeat: cowork os inc Company Planner" }))).toBe(true);
+  });
 });
 
 describe("isActiveSessionStatus", () => {

@@ -532,6 +532,46 @@ export class TaskRepository {
       const deleteWorktreeInfo = this.db.prepare("DELETE FROM worktree_info WHERE task_id = ?");
       deleteWorktreeInfo.run(taskId);
 
+      // Delete hook_sessions (task_id NOT NULL)
+      const deleteHookSessions = this.db.prepare("DELETE FROM hook_sessions WHERE task_id = ?");
+      deleteHookSessions.run(taskId);
+
+      // Nullify source_task_id in eval_cases
+      const clearEvalCaseSource = this.db.prepare(
+        "UPDATE eval_cases SET source_task_id = NULL WHERE source_task_id = ?",
+      );
+      clearEvalCaseSource.run(taskId);
+
+      // Delete agent_team_runs where this task is the root (cascades to items/thoughts)
+      const deleteTeamRuns = this.db.prepare(
+        "DELETE FROM agent_team_runs WHERE root_task_id = ?",
+      );
+      deleteTeamRuns.run(taskId);
+
+      // Nullify source_task_id in agent_team_items (for runs we did not delete)
+      const clearTeamItemSource = this.db.prepare(
+        "UPDATE agent_team_items SET source_task_id = NULL WHERE source_task_id = ?",
+      );
+      clearTeamItemSource.run(taskId);
+
+      // Nullify source_task_id in agent_team_thoughts
+      const clearTeamThoughtSource = this.db.prepare(
+        "UPDATE agent_team_thoughts SET source_task_id = NULL WHERE source_task_id = ?",
+      );
+      clearTeamThoughtSource.run(taskId);
+
+      // Orphan child tasks so we can delete this parent
+      const clearChildParent = this.db.prepare(
+        "UPDATE tasks SET parent_task_id = NULL WHERE parent_task_id = ?",
+      );
+      clearChildParent.run(taskId);
+
+      // Delete task_subscriptions (ON DELETE CASCADE may not run before FK check in some SQLite configs)
+      const deleteSubscriptions = this.db.prepare(
+        "DELETE FROM task_subscriptions WHERE task_id = ?",
+      );
+      deleteSubscriptions.run(taskId);
+
       // Finally delete the task
       const deleteTask = this.db.prepare("DELETE FROM tasks WHERE id = ?");
       deleteTask.run(taskId);

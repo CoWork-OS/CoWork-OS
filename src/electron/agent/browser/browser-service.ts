@@ -21,6 +21,14 @@ export interface BrowserOptions {
    * "brave" uses a locally installed Brave executable (auto-discovered or BRAVE_PATH).
    */
   channel?: "chromium" | "chrome" | "brave";
+  /**
+   * Chrome DevTools Protocol endpoint for attaching to an existing Chrome instance.
+   * Use when you want to control a signed-in browser session. Enable remote debugging:
+   * - Launch Chrome with --remote-debugging-port=9222
+   * - Or visit chrome://inspect/#devices and enable "Discover USB devices" / remote targets
+   * - Endpoint is typically http://localhost:9222 or the WebSocket URL from the version endpoint
+   */
+  debuggerUrl?: string;
 }
 
 export interface NavigateResult {
@@ -103,6 +111,7 @@ export class BrowserService {
   private page: Page | null = null;
   private workspace: Workspace;
   private options: BrowserOptions;
+  private isAttached = false;
 
   constructor(workspace: Workspace, options: BrowserOptions = {}) {
     this.workspace = workspace;
@@ -112,6 +121,7 @@ export class BrowserService {
       viewport: options.viewport ?? { width: 1280, height: 720 },
       userDataDir: options.userDataDir,
       channel: options.channel,
+      debuggerUrl: options.debuggerUrl,
     };
   }
 
@@ -262,6 +272,27 @@ export class BrowserService {
     let context: BrowserContext | null = null;
 
     try {
+      const debuggerUrl = this.options.debuggerUrl?.trim();
+      if (debuggerUrl) {
+        // Attach to existing Chrome via Chrome DevTools Protocol
+        // Enable with: chrome --remote-debugging-port=9222
+        // Or visit chrome://inspect/#devices for WebSocket URL
+        const endpoint =
+          debuggerUrl.startsWith("ws://") || debuggerUrl.startsWith("wss://")
+            ? debuggerUrl
+            : debuggerUrl.replace(/\/$/, "");
+        browser = await chromium.connectOverCDP(endpoint);
+        const contexts = browser.contexts();
+        context = contexts[0] ?? (await browser.newContext({ viewport: this.options.viewport }));
+        const page = context.pages()[0] ?? (await context.newPage());
+        page.setDefaultTimeout(this.options.timeout!);
+        this.browser = browser;
+        this.context = context;
+        this.page = page;
+        this.isAttached = true;
+        return;
+      }
+
       const channel = this.options.channel === "chrome" ? "chrome" : undefined;
       const executablePath =
         this.options.channel === "brave" ? await this.resolveBraveExecutablePath() : undefined;
@@ -309,6 +340,19 @@ export class BrowserService {
       }
       if (browser) {
         await browser.close().catch(() => {});
+      }
+      // Improve error when profile=user (system Chrome) fails — e.g. Chrome not installed or profile locked
+      const msg = error instanceof Error ? error.message : String(error);
+      const isChromeProfile = this.options.userDataDir && this.options.channel === "chrome";
+      const looksLikeNotFound =
+        /executable.*not found|browser.*not found|channel.*chrome/i.test(msg) ||
+        /ENOENT|does not exist/i.test(msg);
+      const looksLikeLocked = /lock|already in use|profile.*in use/i.test(msg);
+      if (isChromeProfile && (looksLikeNotFound || looksLikeLocked)) {
+        const hint = looksLikeNotFound
+          ? "Google Chrome may not be installed, or Playwright cannot find it. Install Chrome or use browser_attach with debugger_url to connect to an existing Chrome instance."
+          : "Chrome is likely already running with this profile. Close Chrome or use browser_attach with debugger_url to connect to the running instance.";
+        throw new Error(`${msg} ${hint}`);
       }
       throw error;
     }
@@ -950,9 +994,20 @@ export class BrowserService {
   }
 
   /**
-   * Close the browser
+   * Close the browser (or disconnect when attached to existing Chrome)
    */
   async close(): Promise<void> {
+    if (this.isAttached) {
+      // Attached mode: only disconnect, do not close user's browser tabs
+      if (this.browser) {
+        await this.browser.close().catch(() => {});
+        this.browser = null;
+      }
+      this.context = null;
+      this.page = null;
+      this.isAttached = false;
+      return;
+    }
     if (this.page) {
       await this.page.close().catch(() => {});
       this.page = null;

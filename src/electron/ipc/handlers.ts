@@ -178,13 +178,14 @@ import { WORKSPACE_KIT_CONTRACTS } from "../context/kit-contracts";
 import {
   computeWorkspaceKitStatus,
   readWorkspaceKitState,
-  syncBootstrapLifecycleState,
+  ensureBootstrapLifecycleState,
 } from "../context/kit-status";
 import { writeKitFileWithSnapshot } from "../context/kit-revisions";
 import { InfraManager } from "../infra/infra-manager";
 import { InfraSettingsManager } from "../infra/infra-settings";
 import { WalletManager } from "../infra/wallet/wallet-manager";
 import { RelationshipMemoryService } from "../memory/RelationshipMemoryService";
+import { AdaptiveStyleEngine } from "../memory/AdaptiveStyleEngine";
 import type { MemorySettings } from "../database/repositories";
 import { VoiceSettingsManager } from "../voice/voice-settings-manager";
 import { getVoiceService } from "../voice/VoiceService";
@@ -501,6 +502,9 @@ rateLimiter.configure(IPC_CHANNELS.EVAL_RUN_SUITE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.EVAL_CREATE_CASE_FROM_TASK, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.KIT_INIT, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.KIT_PROJECT_CREATE, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.KIT_OPEN_FILE, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.KIT_RESET_ADAPTIVE_STYLE, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.KIT_SUBMIT_MESSAGE_FEEDBACK, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.MEMORY_ADD_USER_FACT, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.MEMORY_UPDATE_USER_FACT, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.MEMORY_DELETE_USER_FACT, RATE_LIMIT_CONFIGS.limited);
@@ -4463,7 +4467,7 @@ export async function setupIpcHandlers(
   await setupHooksHandlers(agentDaemon);
 
   // Workspace kit (.cowork) handlers
-  setupKitHandlers(workspaceRepo);
+  setupKitHandlers(workspaceRepo, agentDaemon);
 
   // Memory system handlers
   setupMemoryHandlers();
@@ -5515,7 +5519,10 @@ function broadcastPersonalitySettingsChanged(settings: Any): void {
 /**
  * Set up Workspace Kit (.cowork) IPC handlers
  */
-function setupKitHandlers(workspaceRepo: WorkspaceRepository): void {
+function setupKitHandlers(
+  workspaceRepo: WorkspaceRepository,
+  agentDaemon: AgentDaemon,
+): void {
   const kitDirName = ".cowork";
 
   const getLocalDateStamp = (now: Date): string => {
@@ -5564,6 +5571,9 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository): void {
 
   const computeStatus = async (workspaceId: string): Promise<WorkspaceKitStatus> => {
     const workspacePath = getWorkspacePath(workspaceId);
+    // Ensure lifecycle state is current (covers bootstrap deletion → onboardingCompletedAt)
+    // before the pure status read so the returned onboarding timestamps are always accurate.
+    await ensureBootstrapLifecycleState(workspacePath);
     return computeWorkspaceKitStatus(workspacePath, workspaceId);
   };
 
@@ -6283,7 +6293,7 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository): void {
       await writeTemplate(workspacePath, t.relPath, t.content, mode);
     }
 
-    await syncBootstrapLifecycleState(workspacePath, workspaceStateBefore);
+    await ensureBootstrapLifecycleState(workspacePath, workspaceStateBefore);
 
     // Best-effort: keep kit notes searchable for hybrid recall (does not affect kit init success).
     try {
@@ -6344,6 +6354,66 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository): void {
       );
 
       return { success: true, projectId: rawId };
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.KIT_OPEN_FILE,
+    async (_event, args: { workspaceId: string; relPath: string }) => {
+      checkRateLimit(IPC_CHANNELS.KIT_OPEN_FILE, RATE_LIMIT_CONFIGS.limited);
+      const workspacePath = getWorkspacePath(args.workspaceId);
+
+      // Sanitize relPath: must start with .cowork/ and not escape it
+      const relPath = (args.relPath || "").replace(/\\/g, "/").trim();
+      if (!relPath.startsWith(".cowork/") || relPath.includes("..")) {
+        throw new Error("Invalid relPath");
+      }
+
+      const absPath = path.join(workspacePath, relPath);
+      await fs.mkdir(path.dirname(absPath), { recursive: true });
+
+      if (!fsSync.existsSync(absPath)) {
+        const fileName = path.basename(relPath);
+        const stamp = getLocalDateStamp(new Date());
+        let defaultContent = withKitFrontmatter(relPath, `# ${fileName.replace(".md", "")}\n\n`, stamp);
+
+        if (fileName === "USER.md") {
+          defaultContent = withKitFrontmatter(
+            relPath,
+            `# USER\n\ntimezone: \ncommunication_style: direct, concise\ndefault_language: English\nprefers: actionable outputs, ready-to-use snippets\navoid: vague advice, unnecessary repetition\n`,
+            stamp,
+          );
+        }
+
+        writeKitFileWithSnapshot(absPath, defaultContent, "system", "seed missing kit file");
+      }
+
+      await shell.openPath(absPath);
+      return true;
+    },
+  );
+
+  ipcMain.handle(IPC_CHANNELS.KIT_RESET_ADAPTIVE_STYLE, () => {
+    checkRateLimit(IPC_CHANNELS.KIT_RESET_ADAPTIVE_STYLE, RATE_LIMIT_CONFIGS.limited);
+    AdaptiveStyleEngine.reset();
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.KIT_SUBMIT_MESSAGE_FEEDBACK,
+    async (
+      _event,
+      payload: {
+        taskId: string;
+        messageId: string;
+        decision: "accepted" | "rejected";
+        reason?: string;
+        note?: string;
+      },
+    ) => {
+      checkRateLimit(IPC_CHANNELS.KIT_SUBMIT_MESSAGE_FEEDBACK, RATE_LIMIT_CONFIGS.limited);
+      const { taskId, decision, reason, note } = payload;
+      const feedback = [reason, note].filter(Boolean).join(": ") || undefined;
+      agentDaemon.logEvent(taskId, "user_feedback", { decision, reason: feedback });
     },
   );
 }

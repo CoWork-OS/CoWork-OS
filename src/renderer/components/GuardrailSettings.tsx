@@ -884,6 +884,88 @@ export function GuardrailSettings() {
         )}
       </div>
 
+      {/* Behavior Adaptation */}
+      <div className="settings-section">
+        <div className="settings-section-header">
+          <h3>Behavior Adaptation</h3>
+        </div>
+        <p className="settings-description">
+          Control whether the assistant adapts style over time and adjusts delivery per channel.
+        </p>
+
+        <div className="settings-form-group">
+          <div className="settings-section-header">
+            <label>Adaptive Style</label>
+            <label className="settings-toggle">
+              <input
+                type="checkbox"
+                checked={settings.adaptiveStyleEnabled}
+                onChange={(e) => setSettings({ ...settings, adaptiveStyleEnabled: e.target.checked })}
+              />
+              <span className="toggle-slider" />
+            </label>
+          </div>
+          <p className="settings-hint">
+            Lets the assistant gradually learn communication preferences from messages and feedback.
+          </p>
+
+          <div className="settings-inline-input">
+            <label>Max style drift per week:</label>
+            <input
+              type="number"
+              className="settings-input settings-input-number"
+              value={settings.adaptiveStyleMaxDriftPerWeek}
+              onChange={(e) =>
+                setSettings({
+                  ...settings,
+                  adaptiveStyleMaxDriftPerWeek: Math.max(0, parseInt(e.target.value) || 1),
+                })
+              }
+              min={0}
+              max={10}
+              step={1}
+              disabled={!settings.adaptiveStyleEnabled}
+            />
+          </div>
+
+          <div style={{ marginTop: "8px" }}>
+            <button
+              className="button-small button-secondary"
+              onClick={async () => {
+                try {
+                  await window.electronAPI.resetAdaptiveStyle();
+                } catch (error) {
+                  console.error("Failed to reset adaptive style:", error);
+                }
+              }}
+              disabled={!settings.adaptiveStyleEnabled}
+            >
+              Reset learned style
+            </button>
+          </div>
+        </div>
+
+        <div className="settings-form-group">
+          <div className="settings-section-header">
+            <label>Channel Persona</label>
+            <label className="settings-toggle">
+              <input
+                type="checkbox"
+                checked={settings.channelPersonaEnabled}
+                onChange={(e) =>
+                  setSettings({ ...settings, channelPersonaEnabled: e.target.checked })
+                }
+              />
+              <span className="toggle-slider" />
+            </label>
+          </div>
+          <p className="settings-hint">
+            Keeps the same core persona while adapting response delivery to Slack, Telegram,
+            WhatsApp, desktop, and other channels.
+          </p>
+        </div>
+      </div>
+
       {/* Actions */}
       <div className="settings-actions">
         <button className="button-secondary" onClick={handleReset} disabled={saving}>

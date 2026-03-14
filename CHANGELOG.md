@@ -8,11 +8,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Chrome DevTools attach mode**: New `browser_attach` tool connects to an existing Chrome instance via the Chrome DevTools Protocol. Use `debugger_url` (e.g. `http://localhost:9222`) to control signed-in browser sessions. See [Browser Automation](docs/features.md#chrome-devtools-attach-mode).
+- **Batched browser actions**: New `browser_act_batch` tool executes multiple actions (click, fill, type, press, wait, scroll) in sequence with optional per-action delays.
+- **Browser profile presets**: Named presets `user` (system Chrome), `chrome-relay`, and `workspace` for browser tools. Use `profile="user"` to launch with system Chrome profile; use `browser_attach` for existing signed-in sessions.
+- **Docker timezone support**: `COWORK_TZ` environment variable pins the container to an IANA timezone (e.g. `America/New_York`). Supported in Docker Compose, systemd env files, and daemon entrypoints. Invalid values fall back to UTC with a warning.
+- **Gateway exec approval fallback**: Channel-originated `run_command` requests now honor per-agent exec policy and allowlist. When the approval UI cannot be shown (headless/remote), trusted commands from the allowlist are auto-approved.
+
+### Changed
+- **Dashboard chat UI**: Tool-heavy event streams (`tool_call`, `tool_result`) are now batched (400ms flush interval) to avoid UI freeze during rapid tool execution. Milestone events flush immediately. Pending events are flushed on subscription cleanup.
+- **Per-agent exec approval**: Gateway-triggered tasks now merge autonomy policy and apply allowlist fallback for trusted commands when approval UI is unavailable.
+
+### Fixed
+- **Browser profile=user errors**: Clearer error messages when Chrome is not installed or the profile is locked (Chrome already running). Suggests using `browser_attach` for existing sessions.
+- **Invalid COWORK_TZ**: Docker entrypoint and daemon scripts now validate timezone values; invalid IANA timezones fall back to UTC with a warning instead of causing silent date bugs.
+- **Event batch loss on task switch**: Subscription cleanup now flushes pending batched tool events before unsubscribing.
+
+### Added (documentation)
 - **Managed Devices workspace**: new Devices tab for local and remote machine management with saved remote devices, per-device summaries, connection controls, task feed, remote task launching, and remote file picking for task attachments.
 - **Automation control center**: Settings now groups Task Queue, Self-Improve, Scheduled Tasks, Webhooks, Event Triggers, and Daily Briefing under a dedicated **Automations** section, and the home dashboard surfaces recent automation runs directly.
 - **Company ops surface expansion**: Companies, Digital Twins, and Mission Control now share company-linked operator context so founder-directed company workflows can move cleanly from setup to planning to execution.
 
-### Changed
+### Changed (documentation)
 - **Self-improvement execution model**: the autonomous improvement loop now runs bounded single-lane campaigns by default, tracks staged progress (`preflight`, `reproducing`, `implementing`, `verifying`, `completed`), records provider-health state, and only promotes candidates that show reproduction, verification, and PR-readiness evidence.
 - **Improvement failure handling**: repeated provider or deterministic failures now trigger cooldowns, candidate parking, and explicit stop reasons instead of retrying indefinitely.
 - **Remote operations UX**: remote sessions now expose device-aware task history, remote workspace browsing, remote file attachment selection, and a clearer distinction between local and remote task views.
@@ -39,7 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Universal workflow slash skills**: `/simplify` and `/batch` now work across desktop and gateway channels, including inline chaining (`then run /simplify`) and shared parsing/normalization.
 - **Zero-config web search fallback**: DuckDuckGo now acts as a built-in last-resort search provider, so `web_search` works even without paid API keys.
-- **Structured input requests**: propose-mode tasks can use `request_user_input` to pause for persisted multiple-choice decisions, with submission from the desktop UI or Control Plane dashboard.
+- **Structured input requests**: plan-mode tasks can use `request_user_input` to pause for persisted multiple-choice decisions, with submission from the desktop UI or Control Plane dashboard.
 - **Tier-1 integration orchestration**: new `integration_setup` flow supports `list`, `inspect`, and `configure` for Resend, Slack, the Google family, Jira, Linear, and HubSpot with `expected_plan_hash` stale-plan protection.
 - **Approval-gated skill expansion**: new `skill_proposal` lifecycle lets agents draft, list, approve, and reject workspace-local skill proposals instead of mutating skills directly.
 - **Workspace bootstrap lifecycle**: `.cowork/BOOTSTRAP.md`, `.cowork/VIBES.md`, `.cowork/LORE.md`, and `.cowork/workspace-state.json` now track onboarding/bootstrap state and heartbeat-ready context.

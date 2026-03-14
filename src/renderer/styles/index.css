@@ -2843,6 +2843,70 @@ a,
   animation: pulse 1s ease-in-out infinite;
 }
 
+/* Message-level thumbs feedback */
+.message-feedback-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 5px;
+  font-size: 13px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  opacity: 0.45;
+  transition: opacity 0.15s ease, background 0.15s ease;
+  line-height: 1;
+}
+
+.message-feedback-btn:hover {
+  opacity: 1;
+  background: var(--color-bg-hover);
+}
+
+.message-feedback-btn.active {
+  opacity: 1;
+}
+
+.message-feedback-thumbdown-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.message-feedback-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 200;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  min-width: 160px;
+}
+
+.message-feedback-reason {
+  padding: 6px 10px;
+  font-size: 12px;
+  text-align: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  transition: background 0.1s ease, color 0.1s ease;
+}
+
+.message-feedback-reason:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
 @keyframes pulse {
 
   0%,
@@ -3773,6 +3837,30 @@ a,
 }
 
 /* Muted events - for summaries like blocked tool calls */
+/* Compact "Done" for task_completed with no outputs in summary mode */
+.timeline-event.completion-compact {
+  min-height: auto;
+  padding: 2px 0;
+}
+
+.completion-compact-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 0;
+}
+
+.completion-compact-label {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  font-weight: 500;
+}
+
+.timeline-event.completion-compact .event-time-muted {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
 .timeline-event.timeline-event-muted {
   opacity: 0.6;
   padding: 6px 0;
@@ -17854,11 +17942,18 @@ button {
   flex-wrap: wrap;
 }
 
+/* Completion-with-outputs: clearer hierarchy, primary CTA stands out */
+.toast-success.toast-with-action .toast-message {
+  font-weight: 500;
+  color: var(--color-text-primary);
+  -webkit-line-clamp: 2;
+}
+
 .toast-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 8px;
+  margin-top: 10px;
 }
 
 .toast-action-btn {
@@ -17866,11 +17961,15 @@ button {
   background: var(--color-accent);
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.toast-action-btn:active {
+  transform: scale(0.98);
 }
 
 .toast-action-btn:hover {

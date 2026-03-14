@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import type {
   ImprovementCampaign,
   ImprovementCandidate,
+  ImprovementEligibility,
   ImprovementLoopSettings,
   Workspace,
 } from "../../shared/types";
@@ -34,6 +35,18 @@ const SCROLL_PANEL_STYLE = {
   maxHeight: 360,
   overflowY: "auto" as const,
   paddingRight: 6,
+};
+
+const DEFAULT_ELIGIBILITY: ImprovementEligibility = {
+  eligible: false,
+  reason: "Checking self-improvement eligibility…",
+  enrolled: false,
+  checks: {
+    unpackagedApp: false,
+    canonicalRepo: false,
+    ownerEnrollment: false,
+    ownerProofPresent: false,
+  },
 };
 
 function getWorkspaceModeMeta(workspace: Workspace | undefined) {
@@ -137,6 +150,8 @@ export function ImprovementSettingsPanel(props?: {
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState("");
   const [candidates, setCandidates] = useState<ImprovementCandidate[]>([]);
   const [campaigns, setCampaigns] = useState<ImprovementCampaign[]>([]);
+  const [eligibility, setEligibility] = useState<ImprovementEligibility>(DEFAULT_ELIGIBILITY);
+  const [ownerEnrollmentSignatureInput, setOwnerEnrollmentSignatureInput] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [actionMessage, setActionMessage] = useState("");
@@ -233,6 +248,8 @@ export function ImprovementSettingsPanel(props?: {
         .slice(0, 5),
     [candidates],
   );
+  const eligibilityBlocked = !eligibility.eligible;
+  const ownerEnrollmentStored = eligibility.checks.ownerEnrollment || eligibility.checks.ownerProofPresent;
 
   useEffect(() => {
     void loadAll();
@@ -246,10 +263,11 @@ export function ImprovementSettingsPanel(props?: {
   const loadAll = async () => {
     try {
       setLoading(true);
-      const [nextSettings, nextWorkspaces, tempWorkspace] = await Promise.all([
+      const [nextSettings, nextWorkspaces, tempWorkspace, nextEligibility] = await Promise.all([
         window.electronAPI.getImprovementSettings().catch(() => DEFAULT_SETTINGS),
         window.electronAPI.listWorkspaces().catch(() => [] as Workspace[]),
         window.electronAPI.getTempWorkspace().catch(() => null as Workspace | null),
+        window.electronAPI.getImprovementEligibility().catch(() => DEFAULT_ELIGIBILITY),
       ]);
       const combined: Workspace[] = [
         {
@@ -263,6 +281,7 @@ export function ImprovementSettingsPanel(props?: {
         ...nextWorkspaces.filter((workspace) => workspace.id !== tempWorkspace?.id),
       ];
       setSettings(nextSettings);
+      setEligibility(nextEligibility);
       setWorkspaces(combined);
       const preferred = props?.initialWorkspaceId || combined[0]?.id || "";
       setSelectedWorkspaceId(preferred);
@@ -284,10 +303,54 @@ export function ImprovementSettingsPanel(props?: {
 
   const saveSettings = async (updates: Partial<ImprovementLoopSettings>) => {
     const next = { ...settings, ...updates };
-    setSettings(next);
     try {
       setBusy(true);
-      await window.electronAPI.saveImprovementSettings(next);
+      const saved = await window.electronAPI.saveImprovementSettings(next);
+      setSettings(saved);
+      if ((updates.enabled || updates.autoRun) && !eligibility.eligible) {
+        setActionMessage(eligibility.reason);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error || "Unable to save self-improvement settings.");
+      setActionMessage(message);
+      setSettings(await window.electronAPI.getImprovementSettings().catch(() => DEFAULT_SETTINGS));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveOwnerEnrollment = async () => {
+    if (!ownerEnrollmentSignatureInput.trim()) {
+      setActionMessage("Enter a maintainer-signed owner enrollment signature first.");
+      return;
+    }
+
+    try {
+      setBusy(true);
+      const nextEligibility = await window.electronAPI.saveImprovementOwnerEnrollment(ownerEnrollmentSignatureInput);
+      setEligibility(nextEligibility);
+      setOwnerEnrollmentSignatureInput("");
+      setSettings(await window.electronAPI.getImprovementSettings().catch(() => DEFAULT_SETTINGS));
+      setActionMessage(nextEligibility.reason);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error || "Unable to save owner enrollment signature.");
+      setActionMessage(message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const clearOwnerEnrollment = async () => {
+    try {
+      setBusy(true);
+      const nextEligibility = await window.electronAPI.clearImprovementOwnerEnrollment();
+      setEligibility(nextEligibility);
+      setOwnerEnrollmentSignatureInput("");
+      setSettings(await window.electronAPI.getImprovementSettings().catch(() => DEFAULT_SETTINGS));
+      setActionMessage("Owner enrollment cleared.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error || "Unable to clear owner enrollment.");
+      setActionMessage(message);
     } finally {
       setBusy(false);
     }
@@ -299,6 +362,9 @@ export function ImprovementSettingsPanel(props?: {
       const result = await window.electronAPI.refreshImprovementCandidates();
       if (selectedWorkspaceId) await refreshWorkspaceData(selectedWorkspaceId);
       setActionMessage(`Signals refreshed. ${result.candidateCount} candidate issue(s) currently in backlog.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error || "Unable to refresh self-improvement signals.");
+      setActionMessage(message);
     } finally {
       setBusy(false);
     }
@@ -316,6 +382,9 @@ export function ImprovementSettingsPanel(props?: {
           "No eligible campaign was started. Check that the loop is enabled, no other campaign is active, and at least one open candidate is available.",
         );
       }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error || "Unable to start a self-improvement campaign.");
+      setActionMessage(message);
     } finally {
       setBusy(false);
     }
@@ -326,6 +395,9 @@ export function ImprovementSettingsPanel(props?: {
       setBusy(true);
       await window.electronAPI.dismissImprovementCandidate(candidateId);
       if (selectedWorkspaceId) await refreshWorkspaceData(selectedWorkspaceId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error || "Unable to dismiss candidate.");
+      setActionMessage(message);
     } finally {
       setBusy(false);
     }
@@ -336,6 +408,9 @@ export function ImprovementSettingsPanel(props?: {
       setBusy(true);
       await window.electronAPI.reviewImprovementCampaign(campaignId, reviewStatus);
       if (selectedWorkspaceId) await refreshWorkspaceData(selectedWorkspaceId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error || "Unable to review campaign.");
+      setActionMessage(message);
     } finally {
       setBusy(false);
     }
@@ -374,6 +449,72 @@ export function ImprovementSettingsPanel(props?: {
         Mine recurring failures, run a bounded scout-then-implement pipeline, and only succeed when a draft PR is opened.
       </p>
 
+      <div
+        className="settings-form-group"
+        style={{
+          border: "1px solid var(--color-border-muted)",
+          borderRadius: 12,
+          padding: "14px 16px",
+          background: "var(--color-bg-secondary)",
+        }}
+      >
+        <div
+          style={{
+            fontWeight: 700,
+            color: eligibility.eligible ? "#2f855a" : "#c53030",
+          }}
+        >
+          {eligibility.eligible ? "Owner-only self-improvement is enabled" : "Self-improvement is locked"}
+        </div>
+        <p className="settings-form-hint" style={{ margin: "6px 0 0 0" }}>
+          {eligibility.reason}
+        </p>
+        <p className="settings-form-hint" style={{ margin: "6px 0 0 0" }}>
+          App: <code>{eligibility.checks.unpackagedApp ? "unpackaged" : "packaged"}</code> | Canonical repo origin: <code>{eligibility.checks.canonicalRepo ? "matched" : "not matched"}</code> | Owner enrollment: <code>{eligibility.checks.ownerEnrollment ? "present" : "missing"}</code>
+        </p>
+        {eligibility.repoPath ? (
+          <p className="settings-form-hint" style={{ margin: "6px 0 0 0" }}>
+            Repo path: <code>{eligibility.repoPath}</code>
+          </p>
+        ) : null}
+        {eligibility.machineFingerprint ? (
+          <p className="settings-form-hint" style={{ margin: "6px 0 0 0" }}>
+            Machine fingerprint: <code>{eligibility.machineFingerprint}</code>
+          </p>
+        ) : null}
+        {eligibility.ownerEnrollmentChallenge ? (
+          <p className="settings-form-hint" style={{ margin: "6px 0 0 0", wordBreak: "break-all" }}>
+            Maintainer signing challenge: <code>{eligibility.ownerEnrollmentChallenge}</code>
+          </p>
+        ) : null}
+        <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+          <label className="settings-label" style={{ marginBottom: 0 }}>
+            Maintainer-signed enrollment signature
+          </label>
+          <input
+            type="password"
+            className="settings-input"
+            value={ownerEnrollmentSignatureInput}
+            onChange={(event) => setOwnerEnrollmentSignatureInput(event.target.value)}
+            placeholder="Paste base64 Ed25519 signature from maintainer"
+            disabled={busy}
+          />
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button className="settings-button" onClick={() => void saveOwnerEnrollment()} disabled={busy || !ownerEnrollmentSignatureInput.trim()}>
+              Save Enrollment Signature
+            </button>
+            <button className="settings-button settings-button-secondary" onClick={() => void clearOwnerEnrollment()} disabled={busy || !ownerEnrollmentStored}>
+              Clear Enrollment
+            </button>
+          </div>
+          <p className="settings-form-hint" style={{ margin: 0 }}>
+            {ownerEnrollmentStored
+              ? "A local owner enrollment is stored for this machine."
+              : "No local owner enrollment is stored yet."} Only the repo maintainer can generate a valid signature because verification is pinned to the maintainer public key shipped in the app. No private key is stored in the repo or database.
+          </p>
+        </div>
+      </div>
+
       <div className="settings-subsection">
         <h3>How It Works</h3>
         <HintBlock title="1. Observation">
@@ -396,48 +537,48 @@ export function ImprovementSettingsPanel(props?: {
           label="Enable Self-Improvement Loop"
           description="Allow Cowork to build a backlog of recurring failures and run repair campaigns."
           checked={settings.enabled}
-          disabled={busy}
+          disabled={busy || eligibilityBlocked}
           onChange={(checked) => void saveSettings({ enabled: checked })}
         />
         <ToggleRow
           label="Auto-Run Campaigns"
           description="Pick the highest-priority candidate on a schedule and launch one campaign."
           checked={settings.autoRun}
-          disabled={busy || !settings.enabled}
+          disabled={busy || !settings.enabled || eligibilityBlocked}
           onChange={(checked) => void saveSettings({ autoRun: checked })}
         />
         <ToggleRow
           label="Require Worktree Isolation"
           description="Use git worktrees when available; otherwise the winner applies directly in the workspace."
           checked={settings.requireWorktree}
-          disabled={busy || !settings.enabled}
+          disabled={busy || !settings.enabled || eligibilityBlocked}
           onChange={(checked) => void saveSettings({ requireWorktree: checked })}
         />
         <ToggleRow
           label="Include Dev Logs"
           description="Parse `logs/dev-latest.log` when looking for recurring local runtime failures."
           checked={settings.includeDevLogs}
-          disabled={busy || !settings.enabled}
+          disabled={busy || !settings.enabled || eligibilityBlocked}
           onChange={(checked) => void saveSettings({ includeDevLogs: checked })}
         />
         <ToggleRow
           label="Manual Review Required"
           description="Legacy toggle. PR-first self-improvement opens a draft PR automatically when promotion gates pass."
           checked={settings.reviewRequired}
-          disabled={busy || !settings.enabled}
+          disabled={busy || !settings.enabled || eligibilityBlocked}
           onChange={(checked) => void saveSettings({ reviewRequired: checked })}
         />
         <ToggleRow
           label="Require Judge Verdict"
           description="Legacy toggle. The new staged pipeline does not fan out multiple variants by default."
           checked={settings.judgeRequired}
-          disabled={busy || !settings.enabled}
+          disabled={busy || !settings.enabled || eligibilityBlocked}
           onChange={(checked) => void saveSettings({ judgeRequired: checked })}
         />
         <SelectRow
           label="Promotion Mode"
           value={settings.promotionMode}
-          disabled={busy || !settings.enabled}
+          disabled={busy || !settings.enabled || eligibilityBlocked}
           options={[
             { value: "github_pr", label: "Open GitHub PR" },
             { value: "merge", label: "Merge to Base Branch" },
@@ -447,7 +588,7 @@ export function ImprovementSettingsPanel(props?: {
         <NumberRow
           label="Run Interval (minutes)"
           value={settings.intervalMinutes}
-          disabled={busy || !settings.enabled}
+          disabled={busy || !settings.enabled || eligibilityBlocked}
           min={15}
           max={10080}
           onChange={(value) => void saveSettings({ intervalMinutes: value })}
@@ -455,7 +596,7 @@ export function ImprovementSettingsPanel(props?: {
         <NumberRow
           label="Variants Per Campaign"
           value={settings.variantsPerCampaign}
-          disabled={busy || !settings.enabled}
+          disabled={busy || !settings.enabled || eligibilityBlocked}
           min={1}
           max={1}
           onChange={(value) => void saveSettings({ variantsPerCampaign: value })}
@@ -463,7 +604,7 @@ export function ImprovementSettingsPanel(props?: {
         <NumberRow
           label="Max Concurrent Campaigns"
           value={settings.maxConcurrentCampaigns}
-          disabled={busy || !settings.enabled}
+          disabled={busy || !settings.enabled || eligibilityBlocked}
           min={1}
           max={1}
           onChange={(value) => void saveSettings({ maxConcurrentCampaigns: value })}
@@ -471,7 +612,7 @@ export function ImprovementSettingsPanel(props?: {
         <NumberRow
           label="Campaign Timeout (minutes)"
           value={settings.campaignTimeoutMinutes}
-          disabled={busy || !settings.enabled}
+          disabled={busy || !settings.enabled || eligibilityBlocked}
           min={5}
           max={120}
           onChange={(value) => void saveSettings({ campaignTimeoutMinutes: value })}
@@ -479,7 +620,7 @@ export function ImprovementSettingsPanel(props?: {
         <NumberRow
           label="Replay Set Size"
           value={settings.replaySetSize}
-          disabled={busy || !settings.enabled}
+          disabled={busy || !settings.enabled || eligibilityBlocked}
           min={1}
           max={10}
           onChange={(value) => void saveSettings({ replaySetSize: value })}
@@ -487,7 +628,7 @@ export function ImprovementSettingsPanel(props?: {
         <NumberRow
           label="Eval Window (days)"
           value={settings.evalWindowDays}
-          disabled={busy || !settings.enabled}
+          disabled={busy || !settings.enabled || eligibilityBlocked}
           min={1}
           max={90}
           onChange={(value) => void saveSettings({ evalWindowDays: value })}
@@ -639,7 +780,7 @@ export function ImprovementSettingsPanel(props?: {
             <button className="settings-button" onClick={() => void refreshCandidates()} disabled={busy}>
               Refresh Signals
             </button>
-            <button className="settings-button" onClick={() => void runNextExperiment()} disabled={busy || !settings.enabled}>
+            <button className="settings-button" onClick={() => void runNextExperiment()} disabled={busy || !settings.enabled || eligibilityBlocked}>
               Run Next Campaign
             </button>
           </div>
@@ -771,6 +912,7 @@ export function ImprovementSettingsPanel(props?: {
                   }
                   onPrimaryAction={() => void reviewCampaign(campaign.id, "accepted")}
                   onSecondaryAction={() => void reviewCampaign(campaign.id, "dismissed")}
+                  busy={busy || eligibilityBlocked}
                 />
               ))
             )}
@@ -802,7 +944,7 @@ export function ImprovementSettingsPanel(props?: {
                   onOpenTask={props?.onOpenTask}
                   showRetry={campaign.status === "failed"}
                   onRetry={() => void retryCampaign(campaign.id)}
-                  busy={busy}
+                  busy={busy || eligibilityBlocked}
                 />
               ))
             )}

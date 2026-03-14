@@ -14,6 +14,7 @@ import { resolveImageOcrChars, runOcrFromImagePath, shouldRunImageOcr } from "./
 import { extractPptxContentFromFile } from "../utils/pptx-extractor";
 import { parsePdfBuffer } from "../utils/pdf-parser";
 import ExcelJS from "exceljs";
+import { createMediaPlaybackUrl } from "../media";
 
 import { DatabaseManager } from "../database/schema";
 import {
@@ -173,6 +174,13 @@ import {
 import { initializeHookAgentIngress } from "../hooks/agent-ingress";
 import { MemoryService } from "../memory/MemoryService";
 import { UserProfileService } from "../memory/UserProfileService";
+import { WORKSPACE_KIT_CONTRACTS } from "../context/kit-contracts";
+import {
+  computeWorkspaceKitStatus,
+  readWorkspaceKitState,
+  syncBootstrapLifecycleState,
+} from "../context/kit-status";
+import { writeKitFileWithSnapshot } from "../context/kit-revisions";
 import { InfraManager } from "../infra/infra-manager";
 import { InfraSettingsManager } from "../infra/infra-settings";
 import { WalletManager } from "../infra/wallet/wallet-manager";
@@ -505,9 +513,18 @@ rateLimiter.configure(
   RATE_LIMIT_CONFIGS.limited,
 );
 
-// Helper function to get the main window
+// Helper function to get the main window (avoids overlay/utility windows)
+let mainWindowGetter: (() => BrowserWindow | null) | null = null;
+
 function getMainWindow(): BrowserWindow | null {
+  if (mainWindowGetter) return mainWindowGetter();
+  // Fallback: first window that loads the app (not data: URL)
   const windows = BrowserWindow.getAllWindows();
+  for (const w of windows) {
+    if (w.isDestroyed() || !w.webContents) continue;
+    const url = w.webContents.getURL();
+    if (url && !url.startsWith("data:")) return w;
+  }
   return windows.length > 0 ? windows[0] : null;
 }
 
@@ -515,7 +532,9 @@ export async function setupIpcHandlers(
   dbManager: DatabaseManager,
   agentDaemon: AgentDaemon,
   gateway?: ChannelGateway,
+  options?: { getMainWindow?: () => BrowserWindow | null },
 ) {
+  if (options?.getMainWindow) mainWindowGetter = options.getMainWindow;
   const db = dbManager.getDatabase();
   const workspaceRepo = new WorkspaceRepository(db);
   const taskRepo = new TaskRepository(db);
@@ -990,6 +1009,7 @@ export async function setupIpcHandlers(
         | "docx"
         | "pdf"
         | "image"
+        | "video"
         | "pptx"
         | "xlsx"
         | "html"
@@ -1038,6 +1058,7 @@ export async function setupIpcHandlers(
           ".eslintrc",
         ];
         const imageExtensions = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico"];
+        const videoExtensions = [".mp4", ".webm"];
 
         if (ext === ".md" || ext === ".markdown") return "markdown";
         if (ext === ".html" || ext === ".htm") return "html";
@@ -1046,6 +1067,7 @@ export async function setupIpcHandlers(
         if (ext === ".pptx") return "pptx";
         if (ext === ".xlsx" || ext === ".xls") return "xlsx";
         if (imageExtensions.includes(ext)) return "image";
+        if (videoExtensions.includes(ext)) return "video";
         if (codeExtensions.includes(ext)) return "code";
         if (textExtensions.includes(ext)) return "text";
 
@@ -1062,11 +1084,15 @@ export async function setupIpcHandlers(
       // Size limits
       const MAX_TEXT_SIZE = 5 * 1024 * 1024; // 5MB
       const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10MB
+      const MAX_VIDEO_SIZE = 500 * 1024 * 1024; // 500MB
       const MAX_PPTX_VIEWER_SIZE = 50 * 1024 * 1024; // 50MB before hard-stop
       const MAX_XLSX_SIZE = 20 * 1024 * 1024; // 20MB for spreadsheets
 
       if (fileType === "image" && stats.size > MAX_IMAGE_SIZE) {
         return { success: false, error: "File too large for preview (max 10MB for images)" };
+      }
+      if (fileType === "video" && stats.size > MAX_VIDEO_SIZE) {
+        return { success: false, error: "File too large for preview (max 500MB for videos)" };
       }
       if (fileType === "pptx" && stats.size > MAX_PPTX_VIEWER_SIZE) {
         return { success: false, error: "PPTX file too large for preview (max 50MB)" };
@@ -1076,6 +1102,7 @@ export async function setupIpcHandlers(
       }
       if (
         fileType !== "image" &&
+        fileType !== "video" &&
         fileType !== "unsupported" &&
         fileType !== "pptx" &&
         fileType !== "xlsx" &&
@@ -1089,6 +1116,8 @@ export async function setupIpcHandlers(
         let htmlContent: string | undefined;
         let ocrText: string | undefined;
         let pdfThumbnailDataUrl: string | undefined;
+        let playbackUrl: string | undefined;
+        let mimeType: string | undefined;
 
         switch (fileType) {
           case "markdown":
@@ -1139,6 +1168,23 @@ export async function setupIpcHandlers(
             break;
           }
 
+          case "video": {
+            mimeType = ((mime.lookup(resolvedPath) || undefined) as string | undefined) || undefined;
+            if (!mimeType || (mimeType !== "video/mp4" && mimeType !== "video/webm")) {
+              return { success: false, error: "Unsupported video type" };
+            }
+            if (!workspacePath || workspacePath.trim().length === 0) {
+              return { success: false, error: "Workspace path is required for video preview" };
+            }
+            playbackUrl = createMediaPlaybackUrl({
+              resolvedPath,
+              workspaceRoot: workspacePath,
+              mimeType,
+            });
+            content = null;
+            break;
+          }
+
           case "html": {
             htmlContent = await fs.readFile(resolvedPath, "utf-8");
             content = null; // HTML content is in htmlContent
@@ -1186,7 +1232,7 @@ export async function setupIpcHandlers(
             return { success: false, error: "Unsupported file type", fileType: "unsupported" };
         }
 
-        return {
+      return {
           success: true,
           data: {
             path: resolvedPath,
@@ -1197,6 +1243,8 @@ export async function setupIpcHandlers(
             size: stats.size,
             ocrText,
             pdfThumbnailDataUrl,
+            playbackUrl,
+            mimeType,
           },
         };
       } catch (error: Any) {
@@ -1456,6 +1504,8 @@ export async function setupIpcHandlers(
       }
       const updatedPermissions = { ...workspace.permissions, ...permissions };
       workspaceRepo.updatePermissions(id, updatedPermissions);
+      // Notify active task executors so they pick up new tool availability (e.g. run_command when shell enabled)
+      agentDaemon.refreshActiveExecutorsForWorkspace(id);
       return workspaceRepo.findById(id);
     },
   );
@@ -4930,11 +4980,10 @@ function setupNotificationHandlers(): void {
   // Initialize overlay manager for custom macOS-style notification banners
   const overlayManager = NotificationOverlayManager.getInstance();
 
-  // Clicking a notification overlay brings the main window to focus
+  // Clicking a notification overlay brings the main window to focus and opens the task
   overlayManager.setOnClick((_notificationId, taskId) => {
-    const windows = BrowserWindow.getAllWindows();
-    const mainWin = windows.find((w) => !w.isDestroyed() && w.webContents);
-    if (mainWin) {
+    const mainWin = getMainWindow();
+    if (mainWin && !mainWin.isDestroyed()) {
       if (mainWin.isMinimized()) mainWin.restore();
       mainWin.show();
       mainWin.focus();
@@ -5468,20 +5517,42 @@ function broadcastPersonalitySettingsChanged(settings: Any): void {
  */
 function setupKitHandlers(workspaceRepo: WorkspaceRepository): void {
   const kitDirName = ".cowork";
-  const workspaceStateFileName = "workspace-state.json";
-  const workspaceStateVersion = 1;
-
-  type KitWorkspaceState = {
-    version: number;
-    bootstrapSeededAt?: number;
-    onboardingCompletedAt?: number;
-  };
 
   const getLocalDateStamp = (now: Date): string => {
     const yyyy = String(now.getFullYear());
     const mm = String(now.getMonth() + 1).padStart(2, "0");
     const dd = String(now.getDate()).padStart(2, "0");
     return `${yyyy}-${mm}-${dd}`;
+  };
+
+  const buildKitFrontmatter = (fileName: string, updated: string): string => {
+    const contract = WORKSPACE_KIT_CONTRACTS[fileName];
+    if (!contract) return "";
+
+    return [
+      "---",
+      `file: ${fileName}`,
+      `updated: ${updated}`,
+      `scope: ${contract.scope.join(", ")}`,
+      `mutability: ${contract.mutability}`,
+      "---",
+      "",
+    ].join("\n");
+  };
+
+  const withKitFrontmatter = (relPath: string, content: string, updated: string): string => {
+    if (!relPath.toLowerCase().endsWith(".md")) {
+      return content.endsWith("\n") ? content : `${content}\n`;
+    }
+
+    const fileName = path.basename(relPath);
+    const frontmatter = buildKitFrontmatter(fileName, updated);
+    const normalized = content.trimEnd() + "\n";
+    if (!frontmatter) {
+      return normalized;
+    }
+
+    return `${frontmatter}${normalized}`;
   };
 
   const getWorkspacePath = (workspaceId: string): string => {
@@ -5491,136 +5562,9 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository): void {
     return ws.path;
   };
 
-  const resolveWorkspaceStatePath = (workspacePath: string): string =>
-    path.join(workspacePath, kitDirName, workspaceStateFileName);
-
-  const readWorkspaceState = async (workspacePath: string): Promise<KitWorkspaceState> => {
-    const statePath = resolveWorkspaceStatePath(workspacePath);
-    try {
-      const raw = await fs.readFile(statePath, "utf8");
-      const parsed = JSON.parse(raw) as Partial<KitWorkspaceState>;
-      return {
-        version: workspaceStateVersion,
-        bootstrapSeededAt:
-          typeof parsed.bootstrapSeededAt === "number" ? parsed.bootstrapSeededAt : undefined,
-        onboardingCompletedAt:
-          typeof parsed.onboardingCompletedAt === "number" ? parsed.onboardingCompletedAt : undefined,
-      };
-    } catch {
-      return {
-        version: workspaceStateVersion,
-      };
-    }
-  };
-
-  const writeWorkspaceState = async (
-    workspacePath: string,
-    state: KitWorkspaceState,
-  ): Promise<void> => {
-    const statePath = resolveWorkspaceStatePath(workspacePath);
-    await fs.mkdir(path.dirname(statePath), { recursive: true });
-    await fs.writeFile(statePath, JSON.stringify(state, null, 2), "utf8");
-  };
-
-  const syncBootstrapLifecycleState = async (
-    workspacePath: string,
-    state?: KitWorkspaceState,
-  ): Promise<{
-    state: KitWorkspaceState;
-    bootstrapPresent: boolean;
-  }> => {
-    const current = state || (await readWorkspaceState(workspacePath));
-    const bootstrapPath = path.join(workspacePath, kitDirName, "BOOTSTRAP.md");
-    const bootstrapPresent = fsSync.existsSync(bootstrapPath);
-    const next: KitWorkspaceState = { ...current, version: workspaceStateVersion };
-    let dirty = false;
-    const now = Date.now();
-
-    if (bootstrapPresent && !next.bootstrapSeededAt) {
-      next.bootstrapSeededAt = now;
-      dirty = true;
-    }
-
-    if (!bootstrapPresent && next.bootstrapSeededAt && !next.onboardingCompletedAt) {
-      next.onboardingCompletedAt = now;
-      dirty = true;
-    }
-
-    if (dirty) {
-      await writeWorkspaceState(workspacePath, next);
-    }
-
-    return { state: next, bootstrapPresent };
-  };
-
   const computeStatus = async (workspaceId: string): Promise<WorkspaceKitStatus> => {
     const workspacePath = getWorkspacePath(workspaceId);
-    const kitRoot = path.join(workspacePath, kitDirName);
-    const lifecycle = await syncBootstrapLifecycleState(workspacePath);
-
-    const required: string[] = [
-      path.join(kitDirName, "AGENTS.md"),
-      path.join(kitDirName, "MEMORY.md"),
-      path.join(kitDirName, "USER.md"),
-      path.join(kitDirName, "SOUL.md"),
-      path.join(kitDirName, "IDENTITY.md"),
-      path.join(kitDirName, "TOOLS.md"),
-      path.join(kitDirName, "BOOTSTRAP.md"),
-      path.join(kitDirName, "VIBES.md"),
-      path.join(kitDirName, "LORE.md"),
-      path.join(kitDirName, "HEARTBEAT.md"),
-      path.join(kitDirName, "PRIORITIES.md"),
-      path.join(kitDirName, "COMPANY.md"),
-      path.join(kitDirName, "OPERATIONS.md"),
-      path.join(kitDirName, "KPIS.md"),
-      path.join(kitDirName, "CROSS_SIGNALS.md"),
-      path.join(kitDirName, "MISTAKES.md"),
-      path.join(kitDirName, "memory"),
-      path.join(kitDirName, "memory", "hourly"),
-      path.join(kitDirName, "memory", "weekly"),
-      path.join(kitDirName, "projects"),
-      path.join(kitDirName, "agents"),
-    ];
-
-    const hasKitDir = (() => {
-      try {
-        return fsSync.existsSync(kitRoot);
-      } catch {
-        return false;
-      }
-    })();
-
-    const files: WorkspaceKitStatus["files"] = [];
-    let missingCount = 0;
-
-    for (const relPath of required) {
-      const absPath = path.join(workspacePath, relPath);
-      try {
-        const stat = await fs.stat(absPath);
-        files.push({
-          relPath,
-          exists: true,
-          sizeBytes: stat.isFile() ? stat.size : undefined,
-          modifiedAt: stat.mtimeMs,
-        });
-      } catch {
-        missingCount += 1;
-        files.push({ relPath, exists: false });
-      }
-    }
-
-    return {
-      workspaceId,
-      workspacePath,
-      hasKitDir,
-      files,
-      missingCount,
-      onboarding: {
-        bootstrapSeededAt: lifecycle.state.bootstrapSeededAt,
-        onboardingCompletedAt: lifecycle.state.onboardingCompletedAt,
-        bootstrapPresent: lifecycle.bootstrapPresent,
-      },
-    };
+    return computeWorkspaceKitStatus(workspacePath, workspaceId);
   };
 
   const templatesForInit = (
@@ -5629,7 +5573,7 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository): void {
   ): Array<{ relPath: string; content: string }> => {
     const stamp = getLocalDateStamp(now);
     const isVenturePreset = preset === "venture_operator";
-    return [
+    const templates = [
       {
         relPath: path.join(kitDirName, "AGENTS.md"),
         content:
@@ -5759,6 +5703,15 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository): void {
           `- Role:\n` +
           `- Operating assumptions:\n` +
           `- Boundaries:\n`,
+      },
+      {
+        relPath: path.join(kitDirName, "RULES.md"),
+        content:
+          `# Operational Rules\n\n` +
+          `- [ ] Requires approval for irreversible actions, external spend, and production-impacting changes\n` +
+          `- [ ] Confirm ambiguous destructive actions before proceeding\n` +
+          `- [ ] Record durable decisions in .cowork/MEMORY.md or project CONTEXT.md\n` +
+          `- [ ] Surface blockers, assumptions, and risks explicitly\n`,
       },
       {
         relPath: path.join(kitDirName, "TOOLS.md"),
@@ -6014,6 +5967,11 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository): void {
           `- \n`,
       },
     ];
+
+    return templates.map((template) => ({
+      ...template,
+      content: withKitFrontmatter(template.relPath, template.content, stamp),
+    }));
   };
 
   const writeTemplate = async (
@@ -6033,6 +5991,11 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository): void {
       } catch {
         // continue
       }
+    }
+
+    if (absPath.toLowerCase().endsWith(".md")) {
+      writeKitFileWithSnapshot(absPath, content, "system", `kit_init:${mode}`);
+      return;
     }
 
     await fs.writeFile(absPath, content, "utf8");
@@ -6292,7 +6255,7 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository): void {
     const mode = request?.mode === "overwrite" ? "overwrite" : "missing";
     const preset = request?.templatePreset === "venture_operator" ? "venture_operator" : "default";
     const workspacePath = getWorkspacePath(request.workspaceId);
-    const workspaceStateBefore = await readWorkspaceState(workspacePath);
+    const workspaceStateBefore = await readWorkspaceKitState(workspacePath);
 
     await ensureDir(workspacePath, path.join(kitDirName, "memory"));
     await ensureDir(workspacePath, path.join(kitDirName, "memory", "hourly"));
@@ -6357,16 +6320,26 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository): void {
       await ensureDir(workspacePath, projectRootRel);
       await ensureDir(workspacePath, path.join(projectRootRel, "research"));
 
+      const projectStamp = getLocalDateStamp(new Date());
+
       await writeTemplate(
         workspacePath,
         path.join(projectRootRel, "ACCESS.md"),
-        `# Access\n\n## Allow\n- all\n\n## Deny\n- \n`,
+        withKitFrontmatter(
+          path.join(projectRootRel, "ACCESS.md"),
+          `# Access\n\n## Allow\n- all\n\n## Deny\n- \n`,
+          projectStamp,
+        ),
         "missing",
       );
       await writeTemplate(
         workspacePath,
         path.join(projectRootRel, "CONTEXT.md"),
-        `# Context\n\nLast updated by:\n\n## Goals\n\n## Constraints\n\n## Decisions\n\n## Notes\n`,
+        withKitFrontmatter(
+          path.join(projectRootRel, "CONTEXT.md"),
+          `# Context\n\nLast updated by:\n\n## Goals\n\n## Constraints\n\n## Decisions\n\n## Notes\n`,
+          projectStamp,
+        ),
         "missing",
       );
 

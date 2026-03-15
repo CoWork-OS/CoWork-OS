@@ -201,6 +201,15 @@ export class TaskStrategyService {
         timeoutFinalizeBias: false,
         preflightRequired: true,
       },
+      redirect: {
+        conversationMode: "task",
+        maxTurns: 64,
+        qualityPasses: 1,
+        answerFirst: false,
+        boundedResearch: false,
+        timeoutFinalizeBias: false,
+        preflightRequired: false,
+      },
     };
 
     // Enable pre-flight framing for complex execution/mixed tasks, all workflows, and deep work

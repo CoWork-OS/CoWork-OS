@@ -6,6 +6,7 @@ import type { AgentDaemon } from "../agent/daemon";
 import { TaskRepository, WorkspaceRepository } from "../database/repositories";
 import type {
   ImprovementCandidate,
+  ImprovementCandidateReadiness,
   ImprovementCandidateSource,
   ImprovementEvidence,
   ImprovementFailureClass,
@@ -82,38 +83,73 @@ export class ImprovementCandidateService {
   dismissCandidate(candidateId: string): ImprovementCandidate | undefined {
     const existing = this.candidateRepo.findById(candidateId);
     if (!existing) return undefined;
+    const readiness = this.deriveReadiness({ ...existing, status: "dismissed", resolvedAt: Date.now() });
     this.candidateRepo.update(candidateId, {
       status: "dismissed",
+      readiness: readiness.readiness,
+      readinessReason: readiness.reason,
       resolvedAt: Date.now(),
     });
     return this.candidateRepo.findById(candidateId);
   }
 
   markCandidateRunning(candidateId: string): void {
+    const existing = this.candidateRepo.findById(candidateId);
+    const readiness = existing
+      ? this.deriveReadiness({ ...existing, status: "running", lastExperimentAt: Date.now(), resolvedAt: undefined })
+      : undefined;
     this.candidateRepo.update(candidateId, {
       status: "running",
+      readiness: readiness?.readiness,
+      readinessReason: readiness?.reason,
       lastExperimentAt: Date.now(),
       resolvedAt: null as Any,
     });
   }
 
   markCandidateReview(candidateId: string): void {
+    const existing = this.candidateRepo.findById(candidateId);
+    const readiness = existing
+      ? this.deriveReadiness({ ...existing, status: "review", resolvedAt: Date.now() })
+      : undefined;
     this.candidateRepo.update(candidateId, {
       status: "review",
+      readiness: readiness?.readiness,
+      readinessReason: readiness?.reason,
       resolvedAt: Date.now(),
     });
   }
 
   markCandidateResolved(candidateId: string): void {
+    const existing = this.candidateRepo.findById(candidateId);
+    const readiness = existing
+      ? this.deriveReadiness({ ...existing, status: "resolved", resolvedAt: Date.now() })
+      : undefined;
     this.candidateRepo.update(candidateId, {
       status: "resolved",
+      readiness: readiness?.readiness,
+      readinessReason: readiness?.reason,
       resolvedAt: Date.now(),
     });
   }
 
   reopenCandidate(candidateId: string): void {
+    const existing = this.candidateRepo.findById(candidateId);
+    const reopened = existing
+      ? ({
+          ...existing,
+          status: "open",
+          cooldownUntil: undefined,
+          parkReason: undefined,
+          parkedAt: undefined,
+          resolvedAt: undefined,
+        } satisfies ImprovementCandidate)
+      : undefined;
+    const readiness = reopened ? this.deriveReadiness(reopened) : undefined;
     this.candidateRepo.update(candidateId, {
       status: "open",
+      readiness: readiness?.readiness,
+      readinessReason: readiness?.reason,
       cooldownUntil: null as Any,
       parkReason: null as Any,
       parkedAt: null as Any,
@@ -122,11 +158,41 @@ export class ImprovementCandidateService {
   }
 
   markCandidateParked(candidateId: string, reason: string): void {
+    const existing = this.candidateRepo.findById(candidateId);
+    const parked = existing
+      ? ({
+          ...existing,
+          status: "parked",
+          parkReason: reason,
+          parkedAt: Date.now(),
+          resolvedAt: Date.now(),
+        } satisfies ImprovementCandidate)
+      : undefined;
+    const readiness = parked ? this.deriveReadiness(parked) : undefined;
     this.candidateRepo.update(candidateId, {
       status: "parked",
+      readiness: readiness?.readiness,
+      readinessReason: readiness?.reason,
       parkReason: reason,
       parkedAt: Date.now(),
       resolvedAt: Date.now(),
+    });
+  }
+
+  recordCandidateSkip(candidateId: string, reason: string): void {
+    const candidate = this.candidateRepo.findById(candidateId);
+    if (!candidate) return;
+    const withSkip: ImprovementCandidate = {
+      ...candidate,
+      lastSkipReason: reason,
+      lastSkipAt: Date.now(),
+    };
+    const readiness = this.deriveReadiness(withSkip, reason);
+    this.candidateRepo.update(candidateId, {
+      lastSkipReason: reason,
+      lastSkipAt: withSkip.lastSkipAt,
+      readiness: readiness.readiness,
+      readinessReason: readiness.reason,
     });
   }
 
@@ -147,8 +213,24 @@ export class ImprovementCandidateService {
     const now = Date.now();
     const shouldPark = sameFingerprint && failureStreak >= MAX_FAILURE_STREAK_BEFORE_PARK;
 
+    const nextCandidate: ImprovementCandidate = {
+      ...candidate,
+      status: shouldPark ? "parked" : "open",
+      failureStreak,
+      cooldownUntil: shouldPark ? undefined : now + cooldownMs,
+      parkReason: shouldPark ? params.reason || params.failureClass : undefined,
+      parkedAt: shouldPark ? now : undefined,
+      lastAttemptFingerprint: params.attemptFingerprint,
+      lastFailureClass: params.failureClass,
+      lastExperimentAt: now,
+      resolvedAt: shouldPark ? now : undefined,
+    };
+    const readiness = this.deriveReadiness(nextCandidate);
+
     this.candidateRepo.update(candidateId, {
       status: shouldPark ? "parked" : "open",
+      readiness: readiness.readiness,
+      readinessReason: readiness.reason,
       failureStreak,
       cooldownUntil: shouldPark ? null as Any : now + cooldownMs,
       parkReason: shouldPark ? params.reason || params.failureClass : null as Any,
@@ -452,8 +534,26 @@ export class ImprovementCandidateService {
           : existing.status === "running" || existing.status === "review" || existing.status === "parked"
             ? existing.status
             : "open";
+      const nextCandidate: ImprovementCandidate = {
+        ...existing,
+        status: nextStatus,
+        title: input.title,
+        summary: input.summary,
+        severity: Math.max(existing.severity, input.severity),
+        recurrenceCount: existing.recurrenceCount + 1,
+        fixabilityScore: Math.max(existing.fixabilityScore, input.fixabilityScore),
+        priorityScore: nextPriority,
+        evidence,
+        lastTaskId: input.lastTaskId || existing.lastTaskId,
+        lastEventType: input.lastEventType || existing.lastEventType,
+        lastSeenAt: input.evidence.createdAt,
+        resolvedAt: nextStatus === "open" ? undefined : existing.resolvedAt,
+      };
+      const readiness = this.deriveReadiness(nextCandidate);
       this.candidateRepo.update(existing.id, {
         status: nextStatus,
+        readiness: readiness.readiness,
+        readinessReason: readiness.reason,
         title: input.title,
         summary: input.summary,
         severity: Math.max(existing.severity, input.severity),
@@ -469,11 +569,34 @@ export class ImprovementCandidateService {
       return this.candidateRepo.findById(existing.id)!;
     }
 
+    const createdCandidate: ImprovementCandidate = {
+      // Temporary placeholder used only for readiness derivation before repository create() assigns the real id.
+      id: "pending",
+      workspaceId,
+      fingerprint,
+      source: input.source,
+      status: "open",
+      title: input.title,
+      summary: input.summary,
+      severity: input.severity,
+      recurrenceCount: 1,
+      fixabilityScore: input.fixabilityScore,
+      priorityScore: nextPriority,
+      evidence: [input.evidence],
+      lastTaskId: input.lastTaskId,
+      lastEventType: input.lastEventType,
+      firstSeenAt: input.evidence.createdAt,
+      lastSeenAt: input.evidence.createdAt,
+    };
+    const readiness = this.deriveReadiness(createdCandidate);
+
     return this.candidateRepo.create({
       workspaceId,
       fingerprint,
       source: input.source,
       status: "open",
+      readiness: readiness.readiness,
+      readinessReason: readiness.reason,
       title: input.title,
       summary: input.summary,
       severity: input.severity,
@@ -562,6 +685,8 @@ export class ImprovementCandidateService {
       if (this.isLikelySuccessOnlyCandidate(candidate)) {
         this.candidateRepo.update(candidate.id, {
           status: "resolved",
+          readiness: "unknown",
+          readinessReason: "Candidate looked like a success-only checkpoint and was auto-resolved.",
           resolvedAt: Date.now(),
         });
         continue;
@@ -597,6 +722,54 @@ export class ImprovementCandidateService {
         fingerprint: normalizedFingerprint,
       });
     }
+  }
+
+  private deriveReadiness(
+    candidate: ImprovementCandidate,
+    overrideReason?: string,
+  ): { readiness: ImprovementCandidateReadiness; reason: string } {
+    if (candidate.status === "parked") {
+      if (candidate.lastFailureClass && this.isProviderFailure(candidate.lastFailureClass)) {
+        return {
+          readiness: "blocked_provider",
+          reason: overrideReason || candidate.parkReason || "Provider failures are parking this candidate.",
+        };
+      }
+      return {
+        readiness: "parked",
+        reason: overrideReason || candidate.parkReason || "Candidate is parked after repeated failures.",
+      };
+    }
+
+    if (candidate.cooldownUntil && candidate.cooldownUntil > Date.now()) {
+      return {
+        readiness: "cooling_down",
+        reason:
+          overrideReason ||
+          `Candidate is cooling down until ${new Date(candidate.cooldownUntil).toLocaleString()}.`,
+      };
+    }
+
+    if (candidate.status !== "open") {
+      return {
+        readiness: "unknown",
+        reason: overrideReason || `Candidate is currently ${candidate.status}.`,
+      };
+    }
+
+    if (candidate.evidence.length < 1 || candidate.fixabilityScore < 0.4) {
+      return {
+        readiness: "needs_more_evidence",
+        reason:
+          overrideReason ||
+          "Candidate needs stronger reproduction or verification evidence before running.",
+      };
+    }
+
+    return {
+      readiness: "ready",
+      reason: overrideReason || "Candidate has sufficient evidence to run a bounded improvement campaign.",
+    };
   }
 
   private isLikelySuccessOnlyCandidate(candidate: ImprovementCandidate): boolean {

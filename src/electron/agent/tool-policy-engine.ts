@@ -71,6 +71,7 @@ const ORCHESTRATION_TOOLS = new Set([
   "orchestrate_agents",
   "wait_for_agent",
   "get_agent_status",
+  "get_orchestration_status",
   "list_agents",
   "send_agent_message",
   "capture_agent_events",
@@ -95,7 +96,6 @@ const INTEGRATION_TOOLS = new Set([
 ]);
 
 const ARTIFACT_TOOLS = new Set([
-  "create_document",
   "generate_document",
   "create_spreadsheet",
   "generate_spreadsheet",
@@ -106,6 +106,7 @@ const ARTIFACT_TOOLS = new Set([
   "generate_image",
   "analyze_image",
   "read_pdf_visual",
+  "parse_document",
 ]);
 
 const CONDITIONAL_SYSTEM_TOOLS = new Set([
@@ -333,6 +334,7 @@ const ALWAYS_MUTATING = new Set([
   "domain_dns_add",
   "domain_dns_delete",
   "x402_fetch",
+  "execute_code",
 ]);
 
 const MUTATING_PREFIXES = [
@@ -421,7 +423,7 @@ function applyModeGate(toolName: string, mode: ExecutionMode): string | null {
 function applyDomainGate(toolName: string, domain: TaskDomain, shellEnabled?: boolean): string | null {
   if (domain === "auto" || domain === "code" || domain === "operations") return null;
 
-  if (toolName === "run_command" || toolName === "run_applescript") {
+  if (toolName === "run_command" || toolName === "run_applescript" || toolName === "execute_code") {
     if (shellEnabled) return null;
     return `Tool "${toolName}" is blocked for the "${domain}" domain. Use non-shell tools or switch domain to code/operations.`;
   }

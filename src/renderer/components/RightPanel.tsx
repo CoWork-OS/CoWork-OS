@@ -574,6 +574,9 @@ export function RightPanel({
     }
   };
 
+  const preservedOutputsTooltip =
+    "Completed with preserved outputs. Cowork kept the files and summary it produced, even though some checks or steps did not fully finish.";
+
   return (
     <div className="right-panel cli-panel">
       {/* Progress Section */}
@@ -934,6 +937,15 @@ export function RightPanel({
 
       {/* Empty space filler */}
       <div style={{ flex: 1 }} />
+
+      {task?.status === "completed" && task?.terminalStatus === "partial_success" && (
+        <div
+          className="right-panel-preserved-line"
+          title={preservedOutputsTooltip}
+        >
+          Completed with preserved outputs
+        </div>
+      )}
 
       {/* Footer note */}
       <div className="cli-panel-footer">

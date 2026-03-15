@@ -46,11 +46,13 @@ export class ImprovementCandidateRepository {
         `
         INSERT INTO improvement_candidates (
           id, workspace_id, fingerprint, source, status, title, summary,
+          readiness, readiness_reason,
           severity, recurrence_count, fixability_score, priority_score,
           evidence, last_task_id, last_event_type, first_seen_at, last_seen_at,
           last_experiment_at, failure_streak, cooldown_until, park_reason, parked_at,
+          last_skip_reason, last_skip_at,
           last_attempt_fingerprint, last_failure_class, resolved_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       )
       .run(
@@ -61,6 +63,8 @@ export class ImprovementCandidateRepository {
         candidate.status,
         candidate.title,
         candidate.summary,
+        candidate.readiness || null,
+        candidate.readinessReason || null,
         candidate.severity,
         candidate.recurrenceCount,
         candidate.fixabilityScore,
@@ -75,6 +79,8 @@ export class ImprovementCandidateRepository {
         candidate.cooldownUntil || null,
         candidate.parkReason || null,
         candidate.parkedAt || null,
+        candidate.lastSkipReason || null,
+        candidate.lastSkipAt || null,
         candidate.lastAttemptFingerprint || null,
         candidate.lastFailureClass || null,
         candidate.resolvedAt || null,
@@ -100,6 +106,9 @@ export class ImprovementCandidateRepository {
       cooldownUntil: "cooldown_until",
       parkReason: "park_reason",
       parkedAt: "parked_at",
+      readinessReason: "readiness_reason",
+      lastSkipReason: "last_skip_reason",
+      lastSkipAt: "last_skip_at",
       lastAttemptFingerprint: "last_attempt_fingerprint",
       lastFailureClass: "last_failure_class",
       resolvedAt: "resolved_at",
@@ -181,6 +190,8 @@ export class ImprovementCandidateRepository {
       fingerprint: String(row.fingerprint),
       source: row.source,
       status: row.status,
+      readiness: row.readiness || undefined,
+      readinessReason: row.readiness_reason || undefined,
       title: String(row.title),
       summary: String(row.summary),
       severity: Number(row.severity || 0),
@@ -197,6 +208,8 @@ export class ImprovementCandidateRepository {
       cooldownUntil: row.cooldown_until ? Number(row.cooldown_until) : undefined,
       parkReason: row.park_reason || undefined,
       parkedAt: row.parked_at ? Number(row.parked_at) : undefined,
+      lastSkipReason: row.last_skip_reason || undefined,
+      lastSkipAt: row.last_skip_at ? Number(row.last_skip_at) : undefined,
       lastAttemptFingerprint: row.last_attempt_fingerprint || undefined,
       lastFailureClass: row.last_failure_class || undefined,
       resolvedAt: row.resolved_at ? Number(row.resolved_at) : undefined,
@@ -366,10 +379,10 @@ export class ImprovementCampaignRepository {
         `
         INSERT INTO improvement_campaigns (
           id, candidate_id, workspace_id, execution_workspace_id, root_task_id, status, stage, review_status, promotion_status,
-          stop_reason, provider_health_snapshot, stage_budget, pr_required, winner_variant_id, promoted_task_id, promoted_branch_name, merge_result, pull_request, promotion_error,
+          stop_reason, provider_health_snapshot, stage_budget, verification_commands, observability, pr_required, winner_variant_id, promoted_task_id, promoted_branch_name, merge_result, pull_request, promotion_error,
           baseline_metrics, outcome_metrics, verdict_summary, evaluation_notes, training_evidence, holdout_evidence,
           replay_cases, created_at, started_at, completed_at, promoted_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       )
       .run(
@@ -385,6 +398,8 @@ export class ImprovementCampaignRepository {
         campaign.stopReason || null,
         campaign.providerHealthSnapshot ? JSON.stringify(campaign.providerHealthSnapshot) : null,
         campaign.stageBudget ? JSON.stringify(campaign.stageBudget) : null,
+        campaign.verificationCommands ? JSON.stringify(campaign.verificationCommands) : null,
+        campaign.observability ? JSON.stringify(campaign.observability) : null,
         campaign.prRequired === false ? 0 : 1,
         campaign.winnerVariantId || null,
         campaign.promotedTaskId || null,
@@ -419,6 +434,8 @@ export class ImprovementCampaignRepository {
       stopReason: "stop_reason",
       providerHealthSnapshot: "provider_health_snapshot",
       stageBudget: "stage_budget",
+      verificationCommands: "verification_commands",
+      observability: "observability",
       prRequired: "pr_required",
       winnerVariantId: "winner_variant_id",
       promotedTaskId: "promoted_task_id",
@@ -513,6 +530,8 @@ export class ImprovementCampaignRepository {
         undefined,
       ),
       stageBudget: safeJsonParse<Record<string, unknown> | undefined>(row.stage_budget, undefined),
+      verificationCommands: safeJsonParse<string[] | undefined>(row.verification_commands, undefined),
+      observability: safeJsonParse<Record<string, unknown> | undefined>(row.observability, undefined) as ImprovementCampaign["observability"],
       prRequired: Number(row.pr_required ?? 1) !== 0,
       winnerVariantId: row.winner_variant_id || undefined,
       promotedTaskId: row.promoted_task_id || undefined,
@@ -555,8 +574,8 @@ export class ImprovementVariantRunRepository {
         INSERT INTO improvement_variant_runs (
           id, campaign_id, candidate_id, workspace_id, execution_workspace_id, lane, status,
           task_id, branch_name, baseline_metrics, outcome_metrics, verdict_summary,
-          evaluation_notes, created_at, started_at, completed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          evaluation_notes, observability, created_at, started_at, completed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       )
       .run(
@@ -573,6 +592,7 @@ export class ImprovementVariantRunRepository {
         run.outcomeMetrics ? JSON.stringify(run.outcomeMetrics) : null,
         run.verdictSummary || null,
         run.evaluationNotes || null,
+        run.observability ? JSON.stringify(run.observability) : null,
         run.createdAt,
         run.startedAt || null,
         run.completedAt || null,
@@ -592,6 +612,7 @@ export class ImprovementVariantRunRepository {
       outcomeMetrics: "outcome_metrics",
       verdictSummary: "verdict_summary",
       evaluationNotes: "evaluation_notes",
+      observability: "observability",
       createdAt: "created_at",
       startedAt: "started_at",
       completedAt: "completed_at",
@@ -647,6 +668,7 @@ export class ImprovementVariantRunRepository {
       outcomeMetrics: safeJsonParse<EvalBaselineMetrics | undefined>(row.outcome_metrics, undefined),
       verdictSummary: row.verdict_summary || undefined,
       evaluationNotes: row.evaluation_notes || undefined,
+      observability: safeJsonParse<Record<string, unknown> | undefined>(row.observability, undefined) as ImprovementVariantRun["observability"],
       createdAt: Number(row.created_at || 0),
       startedAt: row.started_at ? Number(row.started_at) : undefined,
       completedAt: row.completed_at ? Number(row.completed_at) : undefined,
@@ -794,6 +816,8 @@ function updateJsonAwareTable(
       key === "pullRequest" ||
       key === "providerHealthSnapshot" ||
       key === "stageBudget" ||
+      key === "verificationCommands" ||
+      key === "observability" ||
       key === "trainingEvidence" ||
       key === "holdoutEvidence" ||
       key === "replayCases"

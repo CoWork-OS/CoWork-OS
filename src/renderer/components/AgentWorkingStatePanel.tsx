@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { AgentWorkingStateData, WorkingStateType, AgentRoleData } from "../../electron/preload";
+import { getEmojiIcon } from "../utils/emoji-icon-map";
 import { useAgentContext } from "../hooks/useAgentContext";
 import { ThemeIcon } from "./ThemeIcon";
 import { ChartIcon, ClipboardIcon, EditIcon, TargetIcon } from "./LineIcons";
@@ -114,7 +115,10 @@ export function AgentWorkingStatePanel({
         {agent && (
           <div className="agent-info">
             <span className="agent-avatar" style={{ backgroundColor: agent.color }}>
-              {agent.icon}
+              {(() => {
+                const Icon = getEmojiIcon(agent.icon || "🤖");
+                return <Icon size={18} strokeWidth={2} />;
+              })()}
             </span>
             <div className="agent-details">
               <span className="agent-name">{agent.displayName}</span>

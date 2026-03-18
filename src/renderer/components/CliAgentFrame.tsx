@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { Check, X, Play, Loader2, ChevronDown, ChevronRight, Terminal, MessageSquare } from "lucide-react";
+import { getEmojiIcon } from "../utils/emoji-icon-map";
 import type { Task, TaskEvent } from "../../shared/types";
 import type { CliAgentType } from "../../shared/cli-agent-detection";
 import { getCliAgentDisplayInfo } from "../../shared/cli-agent-detection";
@@ -347,7 +348,12 @@ export function CliAgentFrame({ task, events, agentType, defaultExpanded }: CliA
       <button className="cli-agent-frame-header" onClick={() => setExpanded(!expanded)}>
         <div className="cli-agent-frame-header-left">
           {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-          <span className="cli-agent-icon">{displayInfo.icon}</span>
+          <span className="cli-agent-icon">
+            {(() => {
+              const Icon = getEmojiIcon(displayInfo.icon || "🤖");
+              return <Icon size={14} strokeWidth={2} />;
+            })()}
+          </span>
           <span className="cli-agent-title">{task.title}</span>
           <span className="cli-badge" style={{ backgroundColor: displayInfo.color }}>
             {displayInfo.badge}

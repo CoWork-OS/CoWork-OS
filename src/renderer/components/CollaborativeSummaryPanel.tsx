@@ -15,7 +15,7 @@ import type { Task, AgentTeamRun, AgentThought, AgentTeamItem } from "../../shar
 import type { TaskEvent } from "../../shared/types";
 import { SYNTHESIS_TASK_TITLE, isSynthesisChildTask } from "../../shared/synthesis-agent-detection";
 import { getEffectiveTaskEventType } from "../utils/task-event-compat";
-import { normalizeMarkdownForCollab } from "../utils/markdown-inline-lists";
+import { normalizeMarkdownForCollab, fixUnclosedBold } from "../utils/markdown-inline-lists";
 import { replaceEmojisInChildren, stripLeadingEmoji } from "../utils/emoji-replacer";
 import { getEmojiIcon } from "../utils/emoji-icon-map";
 
@@ -382,7 +382,7 @@ export function CollaborativeSummaryPanel({
                           li: ({ children }) => <>{replaceEmojisInChildren(children, 12)}</>,
                         }}
                       >
-                        {normalizeMarkdownForCollab(truncate(entry.description, 150))}
+                        {fixUnclosedBold(truncate(normalizeMarkdownForCollab(entry.description), 150))}
                       </ReactMarkdown>
                     </span>
                     </span>
@@ -412,8 +412,7 @@ export function CollaborativeSummaryPanel({
             }
             if (entry.kind === "thought") {
               const err = isErrorLike(entry.thought.content);
-              const raw = truncate(entry.thought.content, 300);
-              const content = normalizeMarkdownForCollab(raw);
+              const content = fixUnclosedBold(truncate(normalizeMarkdownForCollab(entry.thought.content), 300));
               return (
                 <div
                   key={entry.id}

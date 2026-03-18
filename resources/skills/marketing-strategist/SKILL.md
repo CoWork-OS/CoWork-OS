@@ -12,7 +12,7 @@ Comprehensive marketing strategy across 25 disciplines — positioning, copywrit
 ## Routing
 
 - Use when: User asks about marketing strategy, copywriting, landing page optimization, SEO, paid ads, funnel design, GTM plans, pricing strategy, product launches, growth tactics, content strategy, competitive analysis, or general marketing advice
-- Do not use when: User asks specifically about email marketing (use email-marketing-bible), writing tweets (use twitter skill), or community engagement (use auto-commenter). Use this skill for strategic marketing questions that span multiple channels or disciplines.
+- Do not use when: User asks specifically about email marketing (use email-marketing-bible), writing tweets (use twitter skill), or community engagement. Use this skill for strategic marketing questions that span multiple channels or disciplines.
 - Outputs: Marketing strategies, copy variants, audit reports, campaign plans, pricing recommendations, funnel designs, GTM playbooks, competitive analyses, A/B test plans
 - Success criteria: User receives actionable marketing advice with specific frameworks, copy suggestions, or strategic plans they can immediately execute
 
@@ -27,7 +27,7 @@ Comprehensive marketing strategy across 25 disciplines — positioning, copywrit
 
 ### Negative
 
-- User asks specifically about email marketing (use email-marketing-bible), writing tweets (use twitter skill), or community engagement (use auto-commenter). Use this skill for strategic marketing questions that span multiple channels or disciplines.
+- User asks specifically about email marketing (use email-marketing-bible), writing tweets (use twitter skill), or community engagement. Use this skill for strategic marketing questions that span multiple channels or disciplines.
 - Do not use marketing-strategist for unrelated requests.
 - This request is outside marketing strategist scope.
 - This is conceptual discussion only; no tool workflow is needed.

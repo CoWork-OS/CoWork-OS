@@ -4,7 +4,7 @@
   "description": "Comprehensive marketing strategy across 25 disciplines — positioning, copywriting frameworks, buyer psychology, SEO, CRO, paid ads, funnel architecture, content strategy, growth loops, analytics, pricing, product launches, and competitive intelligence. Use when the user needs marketing strategy, campaign planning, copy review, landing page audits, ad creation, GTM plans, or growth advice.",
   "icon": "📣",
   "category": "Marketing",
-  "prompt": "# Marketing Strategist\n\nUse this skill only when the request is in scope:\n- User asks about marketing strategy, copywriting, landing page optimization, SEO, paid ads, funnel design, GTM plans, pricing strategy, product launches, growth tactics, content strategy, competitive analysis, or general marketing advice\n\nDo not use this skill when:\n- User asks specifically about email marketing (use email-marketing-bible), writing tweets (use twitter skill), or community engagement (use auto-commenter). Use this skill for strategic marketing questions that span multiple channels or disciplines.\n\nExecution workflow:\n1. Read `{baseDir}/SKILL.md` for routing boundaries and expected outputs.\n2. Read `{baseDir}/references/full-guidance.md` for detailed procedures/examples.\n3. If `{baseDir}/scripts` exists, execute scripts instead of rewriting logic.\n4. Return outputs matching: Marketing strategies, copy variants, audit reports, campaign plans, pricing recommendations, funnel designs, GTM playbooks, competitive analyses, A/B test plans.\n5. Verify success criteria: User receives actionable marketing advice with specific frameworks, copy suggestions, or strategic plans they can immediately execute.",
+  "prompt": "# Marketing Strategist\n\nUse this skill only when the request is in scope:\n- User asks about marketing strategy, copywriting, landing page optimization, SEO, paid ads, funnel design, GTM plans, pricing strategy, product launches, growth tactics, content strategy, competitive analysis, or general marketing advice\n\nDo not use this skill when:\n- User asks specifically about email marketing (use email-marketing-bible), writing tweets (use twitter skill), or community engagement. Use this skill for strategic marketing questions that span multiple channels or disciplines.\n\nExecution workflow:\n1. Read `{baseDir}/SKILL.md` for routing boundaries and expected outputs.\n2. Read `{baseDir}/references/full-guidance.md` for detailed procedures/examples.\n3. If `{baseDir}/scripts` exists, execute scripts instead of rewriting logic.\n4. Return outputs matching: Marketing strategies, copy variants, audit reports, campaign plans, pricing recommendations, funnel designs, GTM playbooks, competitive analyses, A/B test plans.\n5. Verify success criteria: User receives actionable marketing advice with specific frameworks, copy suggestions, or strategic plans they can immediately execute.",
   "parameters": [
     {
       "name": "task",
@@ -64,7 +64,7 @@
     ],
     "routing": {
       "useWhen": "User asks about marketing strategy, copywriting, landing page optimization, SEO, paid ads, funnel design, GTM plans, pricing strategy, product launches, growth tactics, content strategy, competitive analysis, or general marketing advice",
-      "dontUseWhen": "User asks specifically about email marketing (use email-marketing-bible), writing tweets (use twitter skill), or community engagement (use auto-commenter). Use this skill for strategic marketing questions that span multiple channels or disciplines.",
+      "dontUseWhen": "User asks specifically about email marketing (use email-marketing-bible), writing tweets (use twitter skill), or community engagement. Use this skill for strategic marketing questions that span multiple channels or disciplines.",
       "outputs": "Marketing strategies, copy variants, audit reports, campaign plans, pricing recommendations, funnel designs, GTM playbooks, competitive analyses, A/B test plans",
       "successCriteria": "User receives actionable marketing advice with specific frameworks, copy suggestions, or strategic plans they can immediately execute",
       "examples": {
@@ -75,7 +75,7 @@
           "Marketing Strategist: provide an actionable result."
         ],
         "negative": [
-          "User asks specifically about email marketing (use email-marketing-bible), writing tweets (use twitter skill), or community engagement (use auto-commenter). Use this skill for strategic marketing questions that span multiple channels or disciplines.",
+          "User asks specifically about email marketing (use email-marketing-bible), writing tweets (use twitter skill), or community engagement. Use this skill for strategic marketing questions that span multiple channels or disciplines.",
           "Do not use marketing-strategist for unrelated requests.",
           "This request is outside marketing strategist scope.",
           "This is conceptual discussion only; no tool workflow is needed."

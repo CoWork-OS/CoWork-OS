@@ -46,6 +46,20 @@ interface ConnectorDefinition {
   envFields?: ConnectorEnvField[];
 }
 
+const SHIPPED_CONNECTOR_IDS = new Set([
+  "salesforce",
+  "jira",
+  "hubspot",
+  "zendesk",
+  "servicenow",
+  "linear",
+  "asana",
+  "okta",
+  "resend",
+  "google-workspace",
+  "discord",
+]);
+
 const CONNECTORS: ConnectorDefinition[] = [
   {
     key: "salesforce",
@@ -135,55 +149,13 @@ const CONNECTORS: ConnectorDefinition[] = [
       { key: "RESEND_BASE_URL", label: "Base URL", placeholder: "https://api.resend.com" },
     ],
   },
-  // --- Google Workspace (OAuth) ---
   {
-    key: "google-calendar",
-    name: "Google Calendar",
-    registryId: "google-calendar",
-    description: "Calendar events, scheduling, and availability.",
+    key: "google-workspace",
+    name: "Google Workspace",
+    registryId: "google-workspace",
+    description: "Single Google MCP connector for Workspace APIs when a connector deployment is needed.",
     supportsOAuth: true,
-    provider: "google-calendar",
-  },
-  {
-    key: "google-drive",
-    name: "Google Drive",
-    registryId: "google-drive",
-    description: "File storage, search, and document management.",
-    supportsOAuth: true,
-    provider: "google-drive",
-  },
-  {
-    key: "gmail",
-    name: "Gmail",
-    registryId: "gmail",
-    description: "Email read, send, and label management.",
-    supportsOAuth: true,
-    provider: "gmail",
-  },
-  // --- OAuth connectors ---
-  {
-    key: "docusign",
-    name: "DocuSign",
-    registryId: "docusign",
-    description: "Envelope management and e-signatures.",
-    supportsOAuth: true,
-    provider: "docusign",
-  },
-  {
-    key: "outreach",
-    name: "Outreach",
-    registryId: "outreach",
-    description: "Sales engagement sequences and analytics.",
-    supportsOAuth: true,
-    provider: "outreach",
-  },
-  {
-    key: "slack",
-    name: "Slack",
-    registryId: "slack",
-    description: "Team messaging, channels, and notifications.",
-    supportsOAuth: true,
-    provider: "slack",
+    provider: "google-workspace",
   },
   {
     key: "discord",
@@ -196,119 +168,6 @@ const CONNECTORS: ConnectorDefinition[] = [
       { key: "DISCORD_APPLICATION_ID", label: "Application ID" },
       { key: "DISCORD_GUILD_ID", label: "Default Guild ID (optional)" },
     ],
-  },
-  // --- API-key connectors ---
-  {
-    key: "apollo",
-    name: "Apollo",
-    registryId: "apollo",
-    description: "Prospecting and data enrichment.",
-    supportsOAuth: false,
-    envFields: [{ key: "APOLLO_API_KEY", label: "API Key", type: "password" }],
-  },
-  {
-    key: "clay",
-    name: "Clay",
-    registryId: "clay",
-    description: "Data enrichment and waterfall workflows.",
-    supportsOAuth: false,
-    envFields: [{ key: "CLAY_API_KEY", label: "API Key", type: "password" }],
-  },
-  {
-    key: "similarweb",
-    name: "Similarweb",
-    registryId: "similarweb",
-    description: "Web traffic analytics and competitive intelligence.",
-    supportsOAuth: false,
-    envFields: [{ key: "SIMILARWEB_API_KEY", label: "API Key", type: "password" }],
-  },
-  {
-    key: "msci",
-    name: "MSCI",
-    registryId: "msci",
-    description: "ESG ratings, risk analytics, and index data.",
-    supportsOAuth: false,
-    envFields: [
-      { key: "MSCI_API_KEY", label: "API Key", type: "password" },
-      { key: "MSCI_BASE_URL", label: "Base URL", placeholder: "https://api.msci.com" },
-    ],
-  },
-  {
-    key: "legalzoom",
-    name: "LegalZoom",
-    registryId: "legalzoom",
-    description: "Legal document management and business filings.",
-    supportsOAuth: false,
-    envFields: [{ key: "LEGALZOOM_API_KEY", label: "API Key", type: "password" }],
-  },
-  {
-    key: "factset",
-    name: "FactSet",
-    registryId: "factset",
-    description: "Financial data, analytics, and research.",
-    supportsOAuth: false,
-    envFields: [
-      { key: "FACTSET_USERNAME", label: "Username" },
-      { key: "FACTSET_API_KEY", label: "API Key", type: "password" },
-    ],
-  },
-  {
-    key: "wordpress",
-    name: "WordPress",
-    registryId: "wordpress",
-    description: "Content management (posts, pages, media).",
-    supportsOAuth: false,
-    envFields: [
-      { key: "WORDPRESS_SITE_URL", label: "Site URL", placeholder: "https://your-site.com" },
-      { key: "WORDPRESS_USERNAME", label: "Username" },
-      { key: "WORDPRESS_APPLICATION_PASSWORD", label: "Application Password", type: "password" },
-    ],
-  },
-  {
-    key: "harvey",
-    name: "Harvey",
-    registryId: "harvey",
-    description: "AI-powered legal research and document analysis.",
-    supportsOAuth: false,
-    envFields: [{ key: "HARVEY_API_KEY", label: "API Key", type: "password" }],
-  },
-  {
-    key: "lseg",
-    name: "LSEG (Refinitiv)",
-    registryId: "lseg",
-    description: "Market data, news, and financial analytics.",
-    supportsOAuth: false,
-    envFields: [
-      { key: "LSEG_API_KEY", label: "API Key", type: "password" },
-      { key: "LSEG_API_SECRET", label: "API Secret", type: "password" },
-    ],
-  },
-  {
-    key: "spglobal",
-    name: "S&P Global",
-    registryId: "spglobal",
-    description: "Financial intelligence, credit ratings, and market data.",
-    supportsOAuth: false,
-    envFields: [
-      { key: "SPGLOBAL_USERNAME", label: "Username" },
-      { key: "SPGLOBAL_API_KEY", label: "API Key", type: "password" },
-    ],
-  },
-  {
-    key: "commonroom",
-    name: "Common Room",
-    registryId: "commonroom",
-    description: "Community intelligence and signal tracking.",
-    supportsOAuth: false,
-    envFields: [{ key: "COMMONROOM_API_KEY", label: "API Key", type: "password" }],
-  },
-  {
-    key: "tribeai",
-    name: "Tribe AI",
-    registryId: "tribeai",
-    description: "AI workforce management and expert matching.",
-    supportsOAuth: false,
-    envFields: [{ key: "TRIBEAI_API_KEY", label: "API Key", type: "password" }],
   },
 ];
 
@@ -415,29 +274,13 @@ function getConnectorColor(name: string): string {
 }
 
 function getConnectorCategory(connector: ConnectorDefinition): Exclude<ConnectorCategory, ""> {
-  if (["salesforce", "hubspot", "zendesk", "apollo", "outreach", "commonroom"].includes(connector.key)) {
+  if (["salesforce", "hubspot", "zendesk"].includes(connector.key)) {
     return "crm";
   }
-  if (["slack", "discord", "gmail", "resend"].includes(connector.key)) {
+  if (["discord", "resend"].includes(connector.key)) {
     return "communication";
   }
-  if (["docusign", "legalzoom", "harvey"].includes(connector.key)) {
-    return "legal";
-  }
-  if (["factset", "lseg", "spglobal", "msci", "similarweb"].includes(connector.key)) {
-    return "finance";
-  }
-  if (
-    [
-      "jira",
-      "linear",
-      "asana",
-      "servicenow",
-      "okta",
-      "wordpress",
-      "tribeai",
-    ].includes(connector.key)
-  ) {
+  if (["jira", "linear", "asana", "servicenow", "okta"].includes(connector.key)) {
     return "devtools";
   }
   return "productivity";
@@ -518,7 +361,7 @@ export function ConnectorsSettings() {
 
   const connectorRows = useMemo(() => {
     if (!settings) return [];
-    return CONNECTORS.map((connector) => {
+    return CONNECTORS.filter((connector) => SHIPPED_CONNECTOR_IDS.has(connector.registryId)).map((connector) => {
       const config = settings.servers.find((server) => matchConnector(server, connector));
       const status = config ? serverStatuses.find((s) => s.id === config.id) : undefined;
       return { connector, config, status };

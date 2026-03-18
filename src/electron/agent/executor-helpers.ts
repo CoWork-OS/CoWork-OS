@@ -1316,11 +1316,17 @@ export class FileOperationTracker {
     existingPath?: string;
     suggestion?: string;
   } {
+    const normalizedPath = this.normalizePath(filename);
+    const existingByPath = this.createdFilePaths.get(normalizedPath);
+    if (existingByPath) {
+      return { isDuplicate: false };
+    }
+
     const normalized = this.normalizeFilename(filename);
 
     // Check for exact match
     const existingPath = this.createdFiles.get(normalized);
-    if (existingPath) {
+    if (existingPath && this.normalizePath(existingPath) !== normalizedPath) {
       return {
         isDuplicate: true,
         existingPath,
@@ -1330,6 +1336,9 @@ export class FileOperationTracker {
 
     // Check for version variants (e.g., v2.4 vs v2.5, _Updated vs _Final)
     for (const [key, path] of this.createdFiles.entries()) {
+      if (this.normalizePath(path) === normalizedPath) {
+        continue;
+      }
       if (this.areSimilarFilenames(normalized, key)) {
         return {
           isDuplicate: true,

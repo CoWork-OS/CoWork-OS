@@ -110,7 +110,7 @@ Include method, path, query/body parameters, example request, example response,
 possible error codes, and authentication requirements.
 ```
 
-**Powered by:** `generate-readme` skill, `create-changelog` skill, `add-documentation` skill, Technical Writing plugin pack
+**Powered by:** `generate-readme` skill, `add-documentation` skill, Technical Writing plugin pack
 
 ---
 
@@ -626,7 +626,7 @@ that have changed since their last update. Produce a table of stale docs
 with the specific sections that need updating and suggested corrections.
 ```
 
-**Powered by:** Technical Writing plugin pack, `create-changelog` skill, `generate-readme` skill
+**Powered by:** Technical Writing plugin pack, `generate-readme` skill
 
 ---
 

@@ -1,6 +1,6 @@
 /**
- * Tests for MCPClientManager - startup optimizations
- * Tests parallel connections, debounced tool map rebuilds, and batch mode integration
+ * Tests for MCPClientManager - startup optimizations and tool catalog freshness
+ * Tests parallel connections, immediate tool snapshot rebuilds, and batch mode integration
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
@@ -62,12 +62,32 @@ vi.mock("../client/MCPServerConnection", () => {
         this.emit("status_changed", "disconnected");
       }
 
+      async callTool(toolName: string, args: Record<string, Any> = {}) {
+        const tool = this.tls.find((candidate) => candidate.name === toolName);
+        if (!tool) {
+          throw new Error(`Tool ${toolName} not found`);
+        }
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ tool: tool.name, args }),
+            },
+          ],
+        };
+      }
+
       getStatus() {
         return { id: this.cfg.id, name: this.cfg.name, status: this.st, tools: this.tls };
       }
 
       getTools() {
         return this.tls;
+      }
+
+      setTools(tools: Any[]) {
+        this.tls = tools;
+        this.emit("tools_changed", tools);
       }
     },
   };
@@ -267,6 +287,55 @@ describe("MCPClientManager startup optimizations", () => {
       expect(manager.hasTool("tool-server-2")).toBe(true);
       expect(manager.hasTool("tool-server-3")).toBe(true);
       expect(manager.hasTool("tool-server-4")).toBe(false);
+    });
+
+    it("makes tools immediately callable after tools_changed", async () => {
+      await manager.initialize();
+
+      const connection = (manager as Any).connections.get("server-1");
+      connection.setTools([
+        {
+          name: "fresh-tool",
+          description: "Fresh",
+          inputSchema: { type: "object", properties: {}, required: [] },
+        },
+      ]);
+
+      expect(manager.getAllTools().map((tool) => tool.name)).toContain("fresh-tool");
+      expect(manager.hasTool("fresh-tool")).toBe(true);
+      await expect(manager.callTool("fresh-tool", { ok: true })).resolves.toMatchObject({
+        content: [
+          {
+            type: "text",
+          },
+        ],
+      });
+    });
+
+    it("removes stale routing immediately when a server renames its tools", async () => {
+      await manager.initialize();
+
+      const connection = (manager as Any).connections.get("server-2");
+      connection.setTools([
+        {
+          name: "renamed-tool",
+          description: "Renamed",
+          inputSchema: { type: "object", properties: {}, required: [] },
+        },
+      ]);
+
+      expect(manager.hasTool("tool-server-2")).toBe(false);
+      expect(manager.hasTool("renamed-tool")).toBe(true);
+      await expect(manager.callTool("tool-server-2")).rejects.toThrow(/not found/i);
+    });
+
+    it("removes disconnected tools from routing immediately", async () => {
+      await manager.initialize();
+
+      await manager.disconnectServer("server-3");
+
+      expect(manager.hasTool("tool-server-3")).toBe(false);
+      await expect(manager.callTool("tool-server-3")).rejects.toThrow(/not found/i);
     });
   });
 });

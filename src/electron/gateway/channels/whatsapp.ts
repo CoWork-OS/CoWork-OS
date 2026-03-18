@@ -182,6 +182,8 @@ export class WhatsAppAdapter implements ChannelAdapter {
   private readonly MESSAGE_SEND_RETRY_JITTER = 0.25;
   private readonly TRANSIENT_NETWORK_ERROR_RE =
     /(ECONNRESET|ETIMEDOUT|EPIPE|ENOTFOUND|ENETUNREACH|EHOSTUNREACH|socket hang up|Timed Out|Connection Closed)/i;
+  private readonly CREDENTIAL_STATE_ERROR_RE =
+    /Unsupported state or unable to authenticate data|Failed to decrypt|bad decrypt/i;
 
   constructor(config: WhatsAppConfig) {
     this.config = {
@@ -304,6 +306,13 @@ export class WhatsAppAdapter implements ChannelAdapter {
       this.sock.ev.on("creds.update", () => {
         Promise.resolve(saveCreds()).catch((error: unknown) => {
           const err = error instanceof Error ? error : new Error(String(error));
+          if (this.isCredentialStateError(err)) {
+            console.warn("[WhatsApp] Stored credentials are unreadable; clearing session and requiring re-authentication.");
+            void this.invalidateCredentials(
+              new Error("WhatsApp credentials became unreadable. Please re-authenticate."),
+            );
+            return;
+          }
           console.error("[WhatsApp] Failed to persist credentials:", err);
           this.handleError(err, "creds.update");
         });
@@ -1909,6 +1918,29 @@ export class WhatsAppAdapter implements ChannelAdapter {
               }
             })();
     return this.TRANSIENT_NETWORK_ERROR_RE.test(message);
+  }
+
+  private isCredentialStateError(err: unknown): boolean {
+    const message =
+      err instanceof Error
+        ? err.message
+        : typeof err === "string"
+          ? err
+          : (() => {
+              try {
+                return JSON.stringify(err);
+              } catch {
+                return String(err);
+              }
+            })();
+    return this.CREDENTIAL_STATE_ERROR_RE.test(message);
+  }
+
+  private async invalidateCredentials(error: Error): Promise<void> {
+    await this.disconnect();
+    await this.clearCredentials();
+    this.setStatus("error", error);
+    this.handleError(error, "credentials");
   }
 
   /**

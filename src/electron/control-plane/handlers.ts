@@ -139,6 +139,12 @@ export function getControlPlaneServer(): ControlPlaneServer | null {
   return controlPlaneServer;
 }
 
+export function getStartupAutoConnectRemoteDeviceIds(
+  devices: Array<Pick<ManagedDevice, "id" | "autoConnect">>,
+): string[] {
+  return devices.filter((device) => device.autoConnect === true).map((device) => device.id);
+}
+
 function requireScope(client: any, scope: "admin" | "read" | "write" | "operator"): void {
   if (!client?.hasScope?.(scope)) {
     throw { code: ErrorCodes.UNAUTHORIZED, message: `Missing required scope: ${scope}` };
@@ -1865,16 +1871,8 @@ export async function startControlPlaneFromSettings(
       : ControlPlaneSettingsManager.loadSettings();
 
     const autoConnectDeviceIds = new Set(
-      listStoredManagedDevices()
-        .filter((device) => device.autoConnect)
-        .map((device) => device.id),
+      getStartupAutoConnectRemoteDeviceIds(listStoredManagedDevices()),
     );
-    if (settings.connectionMode === "remote") {
-      const activeLegacyRemoteId = getLegacyActiveRemoteDeviceId();
-      if (activeLegacyRemoteId) {
-        autoConnectDeviceIds.add(activeLegacyRemoteId);
-      }
-    }
 
     if (!settings.enabled && autoConnectDeviceIds.size === 0) {
       return { ok: true, skipped: true };

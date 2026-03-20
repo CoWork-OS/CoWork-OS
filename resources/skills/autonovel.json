@@ -1,0 +1,114 @@
+{
+  "id": "autonovel",
+  "name": "Autonovel",
+  "description": "Run an autonomous fiction pipeline that develops, drafts, revises, and packages a novel from a seed concept.",
+  "icon": "📚",
+  "category": "Writing",
+  "prompt": "# Autonovel\n\nUse this skill when the user wants to create a novel, novella, serialized fiction project, or a full story pipeline from a seed concept.\n\nDo not use this skill for:\n- Short-form copy, marketing writing, or general brainstorming that does not need a multi-phase fiction workflow.\n- Purely conceptual fiction discussion with no intent to draft or package a manuscript.\n\nWorkflow:\n1. Ask for any missing essentials only if needed: seed concept, genre, protagonist, stakes, tone, target length, and intended audience.\n2. Create a fiction workspace and keep the core artifacts under `{artifactDir}`:\n   - `{artifactDir}/seed.txt`\n   - `{artifactDir}/world.md`\n   - `{artifactDir}/characters.md`\n   - `{artifactDir}/outline.md`\n   - `{artifactDir}/voice.md`\n   - `{artifactDir}/canon.md`\n   - `{artifactDir}/mystery.md`\n   - `{artifactDir}/chapters/ch_01.md`\n   - `{artifactDir}/results.tsv`\n   - `{artifactDir}/briefs/revision-01.md`\n   - `{artifactDir}/edit_logs/cycle-01.json`\n   - `{artifactDir}/typeset/novel.epub`\n   - `{artifactDir}/typeset/novel.pdf`\n   - `{artifactDir}/typeset/novel.html`\n   - `{artifactDir}/landing/index.html`\n3. Run a three-phase loop inspired by autonomous novel pipelines:\n   - Foundation: worldbuilding, cast, outline, voice, and canon.\n   - Draft: write chapters sequentially, keep usable work, and retry weak chapters.\n   - Revision: cut repetition, tighten structure, resolve continuity, and regenerate the weakest sections.\n4. Prefer existing Cowork OS tools over ad hoc prose:\n   - Use document generation for manuscript exports and clean PDFs/HTML fallbacks.\n   - Use `generate_epub` for the final ebook package.\n   - Use `generate_landing_page` for the public project summary page.\n   - Use `generate_narration_audio` for narrated chapter audio when voice is configured.\n   - Use task files and logs for iteration history.\n   - Use voice tooling for narration scripts or read-aloud preparation when helpful.\n5. Produce final deliverables that are actually useful inside Cowork OS:\n   - A manuscript export.\n   - An EPUB ebook.\n   - A landing-page style project summary if requested.\n   - Narration MP3 files or audiobook tracks if requested and voice is configured.\n   - A narration-ready script or audiobook outline if requested.\n   - A concise manifest listing the generated artifacts and any remaining gaps.\n6. If a requested export format is unavailable, provide the closest faithful fallback rather than inventing a tool-side success.\n\nSuccess criteria:\n- The user gets a concrete fiction pipeline, not just a one-off story draft.\n- The output preserves continuity artifacts and revision history.\n- The final result is packageable and easy to continue iterating on.",
+  "parameters": [
+    {
+      "name": "seed",
+      "type": "string",
+      "description": "Story seed concept, premise, or logline",
+      "required": false
+    },
+    {
+      "name": "genre",
+      "type": "select",
+      "description": "Primary genre",
+      "required": false,
+      "options": [
+        "literary",
+        "fantasy",
+        "science-fiction",
+        "thriller",
+        "mystery",
+        "romance",
+        "horror",
+        "historical",
+        "young-adult",
+        "other"
+      ]
+    },
+    {
+      "name": "targetLength",
+      "type": "select",
+      "description": "Approximate target length",
+      "required": false,
+      "options": [
+        "short novella",
+        "long novella",
+        "short novel",
+        "standard novel",
+        "epic novel"
+      ]
+    }
+  ],
+  "enabled": true,
+  "invocation": {
+    "userInvocable": true
+  },
+  "metadata": {
+    "version": "1.0.0",
+    "author": "CoWork OS",
+    "tags": [
+      "writing",
+      "fiction",
+      "novel",
+      "storytelling",
+      "drafting",
+      "revision",
+      "worldbuilding",
+      "serialization"
+    ],
+    "routing": {
+      "useWhen": "User wants to create a novel, novella, serialized fiction project, or a full story pipeline from a seed concept.",
+      "dontUseWhen": "User only needs short-form copy, marketing writing, general brainstorming, or conceptual fiction discussion with no intent to draft or package a manuscript.",
+      "outputs": "A fiction workspace with worldbuilding notes, character bible, outline, voice guide, canon log, chapter drafts, revision briefs, manuscript export, and optional narration-ready artifacts.",
+      "successCriteria": "The user gets a concrete fiction pipeline with continuity artifacts, revision history, and packageable outputs they can continue iterating on.",
+      "expectedArtifacts": [
+        "seed.txt",
+        "world.md",
+        "characters.md",
+        "outline.md",
+        "voice.md",
+        "canon.md",
+        "mystery.md",
+        "chapters/ch_01.md",
+        "results.tsv",
+        "briefs/revision-01.md",
+        "edit_logs/cycle-01.json",
+        "typeset/novel.epub",
+        "typeset/novel.pdf",
+        "typeset/novel.html",
+        "landing/index.html"
+      ],
+      "keywords": [
+        "novel",
+        "novella",
+        "fiction",
+        "worldbuilding",
+        "chapter",
+        "manuscript",
+        "audiobook"
+      ],
+      "examples": {
+        "positive": [
+          "Use the autonovel skill for this request.",
+          "Help me with autonovel.",
+          "User wants to create a novel, novella, serialized fiction project, or a full story pipeline from a seed concept.",
+          "Autonovel: provide an actionable result."
+        ],
+        "negative": [
+          "User only needs short-form copy, marketing writing, general brainstorming, or conceptual fiction discussion with no intent to draft or package a manuscript.",
+          "Do not use autonovel for unrelated requests.",
+          "This request is outside autonovel scope.",
+          "This is conceptual discussion only; no tool workflow is needed."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "medium"
+    }
+  }
+}

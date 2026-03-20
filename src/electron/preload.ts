@@ -42,6 +42,17 @@ import type {
   Workspace,
   GuardrailSettings,
 } from "../shared/types";
+import type {
+  HealthDashboard,
+  HealthSource,
+  HealthSourceInput,
+  HealthSyncResult,
+  HealthWorkflow,
+  HealthWorkflowRequest,
+  HealthWritebackPreview,
+  HealthWritebackRequest,
+  HealthSourceConnectionMode,
+} from "../shared/health";
 
 const ALLOWED_MESSAGE_IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"] as const;
 const ALLOWED_IMAGE_FILE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp"]);
@@ -361,6 +372,19 @@ const IPC_CHANNELS = {
   SHAREPOINT_SAVE_SETTINGS: "sharepoint:saveSettings",
   SHAREPOINT_TEST_CONNECTION: "sharepoint:testConnection",
   SHAREPOINT_GET_STATUS: "sharepoint:getStatus",
+  HEALTH_GET_DASHBOARD: "health:getDashboard",
+  HEALTH_LIST_SOURCES: "health:listSources",
+  HEALTH_UPSERT_SOURCE: "health:upsertSource",
+  HEALTH_REMOVE_SOURCE: "health:removeSource",
+  HEALTH_SYNC_SOURCE: "health:syncSource",
+  HEALTH_IMPORT_FILES: "health:importFiles",
+  HEALTH_GENERATE_WORKFLOW: "health:generateWorkflow",
+  HEALTH_APPLE_STATUS: "health:appleStatus",
+  HEALTH_APPLE_CONNECT: "health:appleConnect",
+  HEALTH_APPLE_DISCONNECT: "health:appleDisconnect",
+  HEALTH_APPLE_RESET: "health:appleReset",
+  HEALTH_APPLE_PREVIEW_WRITEBACK: "health:applePreviewWriteback",
+  HEALTH_APPLE_APPLY_WRITEBACK: "health:appleApplyWriteback",
   // App Updates
   APP_CHECK_UPDATES: "app:checkUpdates",
   APP_DOWNLOAD_UPDATE: "app:downloadUpdate",
@@ -389,6 +413,12 @@ const IPC_CHANNELS = {
   PERSONALITY_SET_PERSONA: "personality:setPersona",
   PERSONALITY_RESET: "personality:reset",
   PERSONALITY_SETTINGS_CHANGED: "personality:settingsChanged",
+  PERSONALITY_EXPORT: "personality:export",
+  PERSONALITY_IMPORT: "personality:import",
+  PERSONALITY_PREVIEW: "personality:preview",
+  PERSONALITY_GET_TRAIT_PRESETS: "personality:getTraitPresets",
+  PERSONALITY_GET_CONFIG_V2: "personality:getConfigV2",
+  PERSONALITY_SAVE_CONFIG_V2: "personality:saveConfigV2",
   // Task Queue
   QUEUE_GET_STATUS: "queue:getStatus",
   QUEUE_GET_SETTINGS: "queue:getSettings",
@@ -608,6 +638,21 @@ const IPC_CHANNELS = {
   MEMORY_RELATIONSHIP_CLEANUP_RECURRING: "memory:relationshipCleanupRecurring",
   MEMORY_COMMITMENTS_GET: "memory:commitmentsGet",
   MEMORY_COMMITMENTS_DUE_SOON: "memory:commitmentsDueSoon",
+  AWARENESS_GET_CONFIG: "awareness:getConfig",
+  AWARENESS_SAVE_CONFIG: "awareness:saveConfig",
+  AWARENESS_LIST_BELIEFS: "awareness:listBeliefs",
+  AWARENESS_UPDATE_BELIEF: "awareness:updateBelief",
+  AWARENESS_DELETE_BELIEF: "awareness:deleteBelief",
+  AWARENESS_GET_SUMMARY: "awareness:getSummary",
+  AWARENESS_GET_SNAPSHOT: "awareness:getSnapshot",
+  AWARENESS_LIST_EVENTS: "awareness:listEvents",
+  AUTONOMY_GET_CONFIG: "autonomy:getConfig",
+  AUTONOMY_SAVE_CONFIG: "autonomy:saveConfig",
+  AUTONOMY_GET_STATE: "autonomy:getState",
+  AUTONOMY_LIST_DECISIONS: "autonomy:listDecisions",
+  AUTONOMY_LIST_ACTIONS: "autonomy:listActions",
+  AUTONOMY_UPDATE_DECISION: "autonomy:updateDecision",
+  AUTONOMY_TRIGGER_EVALUATION: "autonomy:triggerEvaluation",
 
   // Memory Features (global toggles)
   MEMORY_FEATURES_GET_SETTINGS: "memoryFeatures:getSettings",
@@ -878,6 +923,13 @@ const IPC_CHANNELS = {
   WEBACCESS_GET_SETTINGS: "webaccess:getSettings",
   WEBACCESS_SAVE_SETTINGS: "webaccess:saveSettings",
   WEBACCESS_GET_STATUS: "webaccess:getStatus",
+
+  // Playwright QA (Automated Visual Testing)
+  QA_GET_RUNS: "qa:getRuns",
+  QA_GET_RUN: "qa:getRun",
+  QA_START_RUN: "qa:startRun",
+  QA_STOP_RUN: "qa:stopRun",
+  QA_EVENT: "qa:event",
 } as const;
 
 // Mobile Companion Node types (inlined for sandboxed preload)
@@ -1328,6 +1380,7 @@ type NotificationType =
   | "task_failed"
   | "scheduled_task"
   | "input_required"
+  | "companion_suggestion"
   | "info"
   | "warning"
   | "error";
@@ -1342,6 +1395,9 @@ interface AppNotification {
   taskId?: string;
   cronJobId?: string;
   workspaceId?: string;
+  suggestionId?: string;
+  recommendedDelivery?: "briefing" | "inbox" | "nudge";
+  companionStyle?: "email" | "note";
 }
 
 interface NotificationEvent {
@@ -1351,7 +1407,17 @@ interface NotificationEvent {
 }
 
 // Memory System Types (inlined for sandboxed preload)
-type MemoryType = "observation" | "decision" | "error" | "insight" | "summary";
+type MemoryType =
+  | "observation"
+  | "decision"
+  | "error"
+  | "insight"
+  | "summary"
+  | "preference"
+  | "constraint"
+  | "timing_preference"
+  | "workflow_pattern"
+  | "correction_rule";
 type PrivacyMode = "normal" | "strict" | "disabled";
 
 interface MemorySettings {
@@ -2549,6 +2615,34 @@ contextBridge.exposeInMainWorld("electronAPI", {
   testSharePointConnection: () => ipcRenderer.invoke(IPC_CHANNELS.SHAREPOINT_TEST_CONNECTION),
   getSharePointStatus: () => ipcRenderer.invoke(IPC_CHANNELS.SHAREPOINT_GET_STATUS),
 
+  // Health Platform APIs
+  getHealthDashboard: () => ipcRenderer.invoke(IPC_CHANNELS.HEALTH_GET_DASHBOARD),
+  listHealthSources: () => ipcRenderer.invoke(IPC_CHANNELS.HEALTH_LIST_SOURCES),
+  upsertHealthSource: (source: HealthSourceInput) =>
+    ipcRenderer.invoke(IPC_CHANNELS.HEALTH_UPSERT_SOURCE, source),
+  removeHealthSource: (sourceId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.HEALTH_REMOVE_SOURCE, sourceId),
+  syncHealthSource: (sourceId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.HEALTH_SYNC_SOURCE, sourceId),
+  importHealthFiles: (sourceId: string, filePaths: string[]) =>
+    ipcRenderer.invoke(IPC_CHANNELS.HEALTH_IMPORT_FILES, { sourceId, filePaths }),
+  generateHealthWorkflow: (request: HealthWorkflowRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.HEALTH_GENERATE_WORKFLOW, request),
+  getAppleHealthStatus: (sourceId?: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.HEALTH_APPLE_STATUS, sourceId),
+  connectAppleHealth: (payload: {
+    sourceId?: string;
+    connectionMode?: HealthSourceConnectionMode;
+  }) => ipcRenderer.invoke(IPC_CHANNELS.HEALTH_APPLE_CONNECT, payload),
+  disconnectAppleHealth: (sourceId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.HEALTH_APPLE_DISCONNECT, sourceId),
+  resetAppleHealth: (sourceId?: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.HEALTH_APPLE_RESET, sourceId),
+  previewAppleHealthWriteback: (request: HealthWritebackRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.HEALTH_APPLE_PREVIEW_WRITEBACK, request),
+  applyAppleHealthWriteback: (request: HealthWritebackRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.HEALTH_APPLE_APPLY_WRITEBACK, request),
+
   // App Update APIs
   getAppVersion: () => ipcRenderer.invoke(IPC_CHANNELS.APP_GET_VERSION),
   checkForUpdates: () => ipcRenderer.invoke(IPC_CHANNELS.APP_CHECK_UPDATES),
@@ -2598,6 +2692,17 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_SET_PERSONA, personaId),
   resetPersonalitySettings: (preserveRelationship?: boolean) =>
     ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_RESET, preserveRelationship),
+  getPersonalityConfigV2: () => ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_GET_CONFIG_V2),
+  savePersonalityConfigV2: (config: Any) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_SAVE_CONFIG_V2, config),
+  exportPersonalityProfile: (format?: "json" | "md") =>
+    ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_EXPORT, format),
+  importPersonalityProfile: (data: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_IMPORT, data),
+  getPersonalityPreview: (draft: Any, contextMode?: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_PREVIEW, draft, contextMode),
+  getPersonalityTraitPresets: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_GET_TRAIT_PRESETS),
   onPersonalitySettingsChanged: (callback: (settings: Any) => void) => {
     const subscription = (_: Any, data: Any) => callback(data);
     ipcRenderer.on(IPC_CHANNELS.PERSONALITY_SETTINGS_CHANGED, subscription);
@@ -2808,6 +2913,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
     taskId?: string;
     cronJobId?: string;
     workspaceId?: string;
+    suggestionId?: string;
+    recommendedDelivery?: "briefing" | "inbox" | "nudge";
+    companionStyle?: "email" | "note";
   }) => ipcRenderer.invoke(IPC_CHANNELS.NOTIFICATION_ADD, data),
   getUnreadNotificationCount: () => ipcRenderer.invoke("notification:unreadCount"),
   markNotificationRead: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.NOTIFICATION_MARK_READ, id),
@@ -3058,6 +3166,33 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_COMMITMENTS_GET, { limit }),
   getDueSoonCommitments: (windowHours?: number) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_COMMITMENTS_DUE_SOON, { windowHours }),
+  getAwarenessConfig: () => ipcRenderer.invoke(IPC_CHANNELS.AWARENESS_GET_CONFIG),
+  saveAwarenessConfig: (config: Any) =>
+    ipcRenderer.invoke(IPC_CHANNELS.AWARENESS_SAVE_CONFIG, config),
+  listAwarenessBeliefs: (workspaceId?: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.AWARENESS_LIST_BELIEFS, workspaceId),
+  updateAwarenessBelief: (id: string, patch: Any) =>
+    ipcRenderer.invoke(IPC_CHANNELS.AWARENESS_UPDATE_BELIEF, { id, patch }),
+  deleteAwarenessBelief: (id: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.AWARENESS_DELETE_BELIEF, id),
+  getAwarenessSummary: (workspaceId?: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.AWARENESS_GET_SUMMARY, workspaceId),
+  getAwarenessSnapshot: (workspaceId?: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.AWARENESS_GET_SNAPSHOT, workspaceId),
+  listAwarenessEvents: (params?: { workspaceId?: string; limit?: number }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.AWARENESS_LIST_EVENTS, params),
+  getAutonomyConfig: () => ipcRenderer.invoke(IPC_CHANNELS.AUTONOMY_GET_CONFIG),
+  saveAutonomyConfig: (config: Any) => ipcRenderer.invoke(IPC_CHANNELS.AUTONOMY_SAVE_CONFIG, config),
+  getAutonomyState: (workspaceId?: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.AUTONOMY_GET_STATE, workspaceId),
+  listAutonomyDecisions: (workspaceId?: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.AUTONOMY_LIST_DECISIONS, workspaceId),
+  listAutonomyActions: (workspaceId?: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.AUTONOMY_LIST_ACTIONS, workspaceId),
+  updateAutonomyDecision: (id: string, patch: Any) =>
+    ipcRenderer.invoke(IPC_CHANNELS.AUTONOMY_UPDATE_DECISION, { id, patch }),
+  triggerAutonomyEvaluation: (workspaceId?: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.AUTONOMY_TRIGGER_EVALUATION, workspaceId),
 
   // Memory Features APIs
   getMemoryFeaturesSettings: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_FEATURES_GET_SETTINGS),
@@ -3583,6 +3718,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Daily Briefing
   generateDailyBriefing: (workspaceId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.DAILY_BRIEFING_GENERATE, workspaceId),
+  generateBriefing: (workspaceId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.DAILY_BRIEFING_GENERATE, workspaceId),
 
   // Proactive Suggestions
   listSuggestions: (workspaceId: string) =>
@@ -3625,6 +3762,18 @@ contextBridge.exposeInMainWorld("electronAPI", {
   saveWebAccessSettings: (settings: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.WEBACCESS_SAVE_SETTINGS, settings),
   getWebAccessStatus: () => ipcRenderer.invoke(IPC_CHANNELS.WEBACCESS_GET_STATUS),
+
+  // Playwright QA APIs
+  qaGetRuns: () => ipcRenderer.invoke(IPC_CHANNELS.QA_GET_RUNS),
+  qaGetRun: (runId: string) => ipcRenderer.invoke(IPC_CHANNELS.QA_GET_RUN, runId),
+  qaStartRun: (data: { taskId: string; workspaceId: string; config: Any }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.QA_START_RUN, data),
+  qaStopRun: (taskId: string) => ipcRenderer.invoke(IPC_CHANNELS.QA_STOP_RUN, taskId),
+  onQAEvent: (callback: (event: Any) => void) => {
+    const handler = (_: Any, event: Any) => callback(event);
+    ipcRenderer.on(IPC_CHANNELS.QA_EVENT, handler);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.QA_EVENT, handler);
+  },
 
   // Window control APIs (for custom title bar on Windows)
   windowMinimize: () => ipcRenderer.invoke("window:minimize"),
@@ -4135,6 +4284,40 @@ export interface ElectronAPI {
     name?: string;
     error?: string;
   }>;
+  // Health Platform
+  getHealthDashboard: () => Promise<HealthDashboard>;
+  listHealthSources: () => Promise<HealthSource[]>;
+  upsertHealthSource: (source: HealthSourceInput) => Promise<HealthSource>;
+  removeHealthSource: (sourceId: string) => Promise<{ success: boolean }>;
+  syncHealthSource: (sourceId: string) => Promise<HealthSyncResult>;
+  importHealthFiles: (
+    sourceId: string,
+    filePaths: string[],
+  ) => Promise<HealthSyncResult>;
+  generateHealthWorkflow: (
+    request: HealthWorkflowRequest,
+  ) => Promise<{ success: boolean; workflow?: HealthWorkflow; error?: string }>;
+  getAppleHealthStatus: (sourceId?: string) => Promise<{
+    available: boolean;
+    authorizationStatus: string;
+    readableTypes: string[];
+    writableTypes: string[];
+    sourceMode: HealthSourceConnectionMode;
+    lastSyncedAt?: number;
+    lastError?: string;
+  }>;
+  connectAppleHealth: (payload: {
+    sourceId?: string;
+    connectionMode?: HealthSourceConnectionMode;
+  }) => Promise<{ success: boolean; source?: HealthSource; error?: string }>;
+  disconnectAppleHealth: (sourceId: string) => Promise<{ success: boolean }>;
+  resetAppleHealth: (sourceId?: string) => Promise<{ success: boolean; removedCount: number }>;
+  previewAppleHealthWriteback: (request: HealthWritebackRequest) => Promise<
+    { success: boolean; preview?: HealthWritebackPreview; error?: string }
+  >;
+  applyAppleHealthWriteback: (request: HealthWritebackRequest) => Promise<
+    { success: boolean; writtenCount?: number; warnings?: string[]; error?: string }
+  >;
   // App Updates
   getAppVersion: () => Promise<{
     version: string;
@@ -4577,6 +4760,9 @@ export interface ElectronAPI {
     taskId?: string;
     cronJobId?: string;
     workspaceId?: string;
+    suggestionId?: string;
+    recommendedDelivery?: "briefing" | "inbox" | "nudge";
+    companionStyle?: "email" | "note";
   }) => Promise<AppNotification | null>;
   getUnreadNotificationCount: () => Promise<number>;
   markNotificationRead: (id: string) => Promise<AppNotification | null>;
@@ -4816,6 +5002,21 @@ export interface ElectronAPI {
   }>;
   getOpenCommitments: (limit?: number) => Promise<Any[]>;
   getDueSoonCommitments: (windowHours?: number) => Promise<{ items: Any[]; reminderText: string }>;
+  getAwarenessConfig: () => Promise<Any>;
+  saveAwarenessConfig: (config: Any) => Promise<Any>;
+  listAwarenessBeliefs: (workspaceId?: string) => Promise<Any[]>;
+  updateAwarenessBelief: (id: string, patch: Any) => Promise<Any | null>;
+  deleteAwarenessBelief: (id: string) => Promise<{ success: boolean }>;
+  getAwarenessSummary: (workspaceId?: string) => Promise<Any>;
+  getAwarenessSnapshot: (workspaceId?: string) => Promise<Any>;
+  listAwarenessEvents: (params?: { workspaceId?: string; limit?: number }) => Promise<Any[]>;
+  getAutonomyConfig: () => Promise<Any>;
+  saveAutonomyConfig: (config: Any) => Promise<Any>;
+  getAutonomyState: (workspaceId?: string) => Promise<Any>;
+  listAutonomyDecisions: (workspaceId?: string) => Promise<Any[]>;
+  listAutonomyActions: (workspaceId?: string) => Promise<Any[]>;
+  updateAutonomyDecision: (id: string, patch: Any) => Promise<Any | null>;
+  triggerAutonomyEvaluation: (workspaceId?: string) => Promise<Any>;
 
   // Memory Features (global toggles)
   getMemoryFeaturesSettings: () => Promise<MemoryFeaturesSettings>;
@@ -5393,6 +5594,7 @@ export interface ElectronAPI {
 
   // Daily Briefing
   generateDailyBriefing: (workspaceId: string) => Promise<Any>;
+  generateBriefing: (workspaceId: string) => Promise<Any>;
 
   // Proactive Suggestions
   listSuggestions: (workspaceId: string) => Promise<Any[]>;
@@ -5401,6 +5603,13 @@ export interface ElectronAPI {
     workspaceId: string,
     suggestionId: string,
   ) => Promise<{ actionPrompt: string | null }>;
+
+  // Playwright QA APIs
+  qaGetRuns: () => Promise<Any[]>;
+  qaGetRun: (runId: string) => Promise<Any | null>;
+  qaStartRun: (data: { taskId: string; workspaceId: string; config: Any }) => Promise<Any>;
+  qaStopRun: (taskId: string) => Promise<{ success: boolean }>;
+  onQAEvent: (callback: (event: Any) => void) => () => void;
 
   // Window control APIs (for custom title bar on Windows)
   windowMinimize: () => Promise<void>;

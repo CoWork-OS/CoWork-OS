@@ -59,6 +59,7 @@ function createPlanExecutor(response: Any): Any {
   executor.buildUserContent = vi.fn().mockResolvedValue("test-user-content");
   executor.resolveLLMMaxTokens = vi.fn().mockReturnValue(8192);
   executor.callLLMWithRetry = vi.fn().mockResolvedValue(response);
+  executor.requiresVisualQARun = false;
 
   return executor;
 }
@@ -175,5 +176,34 @@ describe("TaskExecutor plan parsing", () => {
     expect(executor.plan?.description).toBe("Execution plan");
     expect(executor.plan?.steps?.[0]?.description).toBe("I will analyze the workspace brief.");
     expect(executor.plan?.steps?.[1]?.description).toBe("Step 2");
+  });
+
+  it("appends a Playwright QA verification step for web-app shipping prompts", async () => {
+    const response = {
+      usage: { inputTokens: 10, outputTokens: 20 },
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            description: "Execution plan",
+            steps: [
+              { id: "1", description: "Inspect the workspace and determine whether to scaffold or reuse files." },
+              { id: "2", description: "Implement the React todo app." },
+              { id: "3", description: "Run tests and build the app." },
+            ],
+          }),
+        },
+      ],
+    };
+    const executor = createPlanExecutor(response);
+    executor.task.title = "Build a simple todo app in React";
+    executor.task.prompt = "Build a simple todo app in React, test it to catch any bugs before shipping.";
+    executor.requiresVisualQARun = true;
+
+    await executor.createPlan();
+
+    expect(executor.plan?.steps?.some((step: Any) => /visual qa with playwright/i.test(step.description))).toBe(true);
+    const qaStep = executor.plan.steps.find((step: Any) => /visual qa with playwright/i.test(step.description));
+    expect(qaStep?.kind).toBe("verification");
   });
 });

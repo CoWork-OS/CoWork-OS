@@ -112,4 +112,60 @@ describe("ProactiveSuggestionsService", () => {
     expect(ProactiveSuggestionsService.listActive("ws-1")).toHaveLength(0);
     expect(ProactiveSuggestionsService.getTopForBriefing("ws-1", 3)).toHaveLength(1);
   });
+
+  it("stores and parses companion suggestion metadata", async () => {
+    memorySearch.mockReturnValue([]);
+    memoryCapture.mockResolvedValue({});
+    const { ProactiveSuggestionsService } = await import("../ProactiveSuggestionsService");
+
+    const created = await ProactiveSuggestionsService.createCompanionSuggestion("ws-1", {
+      title: "Companion summary",
+      description: "Cross-workspace pressure detected.",
+      confidence: 0.88,
+      suggestionClass: "cross_workspace",
+      urgency: "medium",
+      learningSignalIds: ["sig-1", "sig-2"],
+      workspaceScope: "all",
+      sourceSignals: ["focus-1", "due-1"],
+      recommendedDelivery: "inbox",
+      companionStyle: "email",
+    });
+
+    expect(created).toMatchObject({
+      title: "Companion summary",
+      workspaceScope: "all",
+      recommendedDelivery: "inbox",
+      companionStyle: "email",
+      suggestionClass: "cross_workspace",
+    });
+    expect(memoryCapture).toHaveBeenCalledWith(
+      "ws-1",
+      undefined,
+      "insight",
+      expect.stringContaining("\"workspaceScope\":\"all\""),
+    );
+  });
+
+  it("aggregates briefing suggestions across multiple workspaces when requested", async () => {
+    memorySearch.mockImplementation((workspaceId: string) => {
+      if (workspaceId === "ws-1") {
+        return [makeSuggestion("s1", "Workspace one")];
+      }
+      if (workspaceId === "ws-2") {
+        return [makeSuggestion("s2", "Workspace two")];
+      }
+      return [];
+    });
+
+    const { ProactiveSuggestionsService } = await import("../ProactiveSuggestionsService");
+
+    const suggestions = ProactiveSuggestionsService.getTopForBriefingForWorkspaces(
+      "all",
+      ["ws-1", "ws-2"],
+      10,
+    );
+
+    expect(suggestions.map((s) => s.title).sort()).toEqual(["Workspace one", "Workspace two"]);
+    expect(suggestions.map((s) => s.workspaceId).sort()).toEqual(["ws-1", "ws-2"]);
+  });
 });

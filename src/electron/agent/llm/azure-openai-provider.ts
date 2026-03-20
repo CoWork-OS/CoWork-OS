@@ -10,6 +10,8 @@ import {
   LLMToolUse,
   LLMTextContent,
   LLMImageContent,
+  StreamProgressCallback,
+  type AzureReasoningEffort,
 } from "./types";
 import {
   toOpenAICompatibleMessages,
@@ -19,6 +21,7 @@ import {
 
 const DEFAULT_AZURE_API_VERSION = "2024-02-15-preview";
 const AZURE_MAX_TOOLS = 128;
+const textDecoder = new TextDecoder();
 
 const isToolResult = (item: LLMContent | LLMToolResult): item is LLMToolResult =>
   item?.type === "tool_result";
@@ -29,12 +32,16 @@ const isTextContent = (item: LLMContent | LLMToolResult): item is LLMTextContent
 const isImageContent = (item: LLMContent | LLMToolResult): item is LLMImageContent =>
   item?.type === "image";
 
+type AzureRequestKind = "chat_completions" | "responses" | "test_connection";
+type AzureRequestReasoningEffort = "low" | "medium" | "high" | "xhigh";
+
 export class AzureOpenAIProvider implements LLMProvider {
   readonly type = "azure" as const;
   private apiKey: string;
   private endpoint: string;
   private deployment: string;
   private apiVersion: string;
+  private reasoningEffort?: AzureReasoningEffort;
 
   constructor(config: LLMProviderConfig) {
     const apiKey = config.azureApiKey?.trim();
@@ -55,6 +62,39 @@ export class AzureOpenAIProvider implements LLMProvider {
     this.endpoint = endpoint.replace(/\/+$/, "");
     this.deployment = deployment;
     this.apiVersion = config.azureApiVersion?.trim() || DEFAULT_AZURE_API_VERSION;
+    this.reasoningEffort = config.azureReasoningEffort?.trim() as AzureReasoningEffort | undefined;
+  }
+
+  private getReasoningEffort(): AzureRequestReasoningEffort | undefined {
+    switch (this.reasoningEffort) {
+      case "low":
+      case "medium":
+      case "high":
+        return this.reasoningEffort;
+      case "extra_high":
+        return "xhigh";
+      default:
+        return undefined;
+    }
+  }
+
+  private logRequestReasoning(kind: AzureRequestKind, model: string): void {
+    const configured = this.reasoningEffort || "default";
+    const effective = this.getReasoningEffort() || "default";
+    const extra =
+      configured === "extra_high" ? " (sent as xhigh; will fallback to high if rejected)" : "";
+    console.log(
+      `[Azure OpenAI] ${kind} reasoning level for model ${model}: configured=${configured}, effective=${effective}${extra}`,
+    );
+  }
+
+  private getFallbackReasoningEffort(
+    effort: AzureRequestReasoningEffort | undefined,
+  ): AzureRequestReasoningEffort | undefined {
+    if (effort === "xhigh") {
+      return "high";
+    }
+    return undefined;
   }
 
   private getChatCompletionsUrl(): string {
@@ -82,6 +122,7 @@ export class AzureOpenAIProvider implements LLMProvider {
   private buildChatCompletionsBody(
     request: LLMRequest,
     useMaxCompletionTokens: boolean,
+    reasoningEffortOverride?: AzureRequestReasoningEffort,
   ): Record<string, Any> {
     const messages = toOpenAICompatibleMessages(request.messages, request.system, {
       supportsImages: true,
@@ -94,11 +135,13 @@ export class AzureOpenAIProvider implements LLMProvider {
     }
     const tools = rawTools ? rawTools.slice(0, AZURE_MAX_TOOLS) : undefined;
     const tokenField = useMaxCompletionTokens ? "max_completion_tokens" : "max_tokens";
+    const reasoningEffort = reasoningEffortOverride || this.getReasoningEffort();
 
     return {
       model: request.model || this.deployment,
       messages,
       [tokenField]: request.maxTokens,
+      ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
       ...(tools && tools.length > 0 && { tools, tool_choice: "auto" }),
     };
   }
@@ -209,7 +252,10 @@ export class AzureOpenAIProvider implements LLMProvider {
     return result;
   }
 
-  private buildResponsesBody(request: LLMRequest): Record<string, Any> {
+  private buildResponsesBody(
+    request: LLMRequest,
+    reasoningEffortOverride?: AzureRequestReasoningEffort,
+  ): Record<string, Any> {
     const input = this.buildResponsesInput(request.messages);
     const rawResponsesTools = request.tools ? this.toResponsesTools(request.tools) : undefined;
     if (rawResponsesTools && rawResponsesTools.length > AZURE_MAX_TOOLS) {
@@ -218,11 +264,13 @@ export class AzureOpenAIProvider implements LLMProvider {
       );
     }
     const tools = rawResponsesTools ? rawResponsesTools.slice(0, AZURE_MAX_TOOLS) : undefined;
+    const reasoningEffort = reasoningEffortOverride || this.getReasoningEffort();
     return {
       model: request.model || this.deployment,
       input,
       ...(request.system ? { instructions: request.system } : {}),
       max_output_tokens: request.maxTokens,
+      ...(reasoningEffort ? { reasoning: { effort: reasoningEffort } } : {}),
       ...(tools && tools.length > 0 && { tools, tool_choice: "auto" }),
     };
   }
@@ -231,7 +279,12 @@ export class AzureOpenAIProvider implements LLMProvider {
     url: string,
     body: Record<string, Any>,
     signal?: AbortSignal,
+    kind?: AzureRequestKind,
+    model?: string,
   ): Promise<Response> {
+    if (kind && model) {
+      this.logRequestReasoning(kind, model);
+    }
     return fetch(url, {
       method: "POST",
       headers: {
@@ -241,6 +294,270 @@ export class AzureOpenAIProvider implements LLMProvider {
       body: JSON.stringify(body),
       signal,
     });
+  }
+
+  private async sendRequestWithReasoningFallback(
+    url: string,
+    body: Record<string, Any>,
+    signal?: AbortSignal,
+    kind?: AzureRequestKind,
+    model?: string,
+    fallbackBody?: Record<string, Any>,
+  ): Promise<Response> {
+    const response = await this.sendRequest(url, body, signal, kind, model);
+    if (response.ok || !fallbackBody) {
+      return response;
+    }
+
+    const fallbackEffort = String(
+      (fallbackBody as Any)?.reasoning?.effort || (fallbackBody as Any)?.reasoning_effort || "",
+    );
+    if (fallbackEffort) {
+      console.log(
+        `[Azure OpenAI] ${kind || "request"} reasoning fallback for model ${model || this.deployment}: ${fallbackEffort}`,
+      );
+    }
+    return this.sendRequest(url, fallbackBody, signal, kind, model);
+  }
+
+  private emitStreamProgress(
+    onStreamProgress: StreamProgressCallback | undefined,
+    startedAt: number,
+    inputTokens: number,
+    outputTokens: number,
+    outputChars: number,
+    streaming: boolean,
+    text?: string,
+  ): void {
+    onStreamProgress?.({
+      inputTokens,
+      outputTokens,
+      outputChars,
+      elapsedMs: Date.now() - startedAt,
+      streaming,
+      ...(typeof text === "string" ? { text } : {}),
+    });
+  }
+
+  private async consumeSseEvents(
+    response: Response,
+    onEvent: (eventData: string) => void,
+  ): Promise<void> {
+    const reader = response.body?.getReader();
+    if (!reader) {
+      throw new Error("Azure OpenAI streaming response body is unavailable");
+    }
+
+    let buffer = "";
+    let eventDataLines: string[] = [];
+
+    const flushEvent = () => {
+      if (eventDataLines.length === 0) return;
+      onEvent(eventDataLines.join("\n"));
+      eventDataLines = [];
+    };
+
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (value) {
+          buffer += textDecoder.decode(value, { stream: !done });
+        }
+
+        let newlineIndex = buffer.indexOf("\n");
+        while (newlineIndex !== -1) {
+          let line = buffer.slice(0, newlineIndex);
+          buffer = buffer.slice(newlineIndex + 1);
+          if (line.endsWith("\r")) {
+            line = line.slice(0, -1);
+          }
+
+          if (line === "") {
+            flushEvent();
+          } else if (line.startsWith("data:")) {
+            eventDataLines.push(line.slice(5).trimStart());
+          }
+
+          newlineIndex = buffer.indexOf("\n");
+        }
+
+        if (done) {
+          if (buffer.length > 0) {
+            let line = buffer;
+            if (line.endsWith("\r")) {
+              line = line.slice(0, -1);
+            }
+            if (line === "") {
+              flushEvent();
+            } else if (line.startsWith("data:")) {
+              eventDataLines.push(line.slice(5).trimStart());
+            }
+          }
+          flushEvent();
+          break;
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
+  private async fromChatCompletionsStreamResponse(
+    response: Response,
+    request: LLMRequest,
+    startedAt: number,
+  ): Promise<LLMResponse> {
+    let contentText = "";
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let finishReason: LLMResponse["stopReason"] = "end_turn";
+
+    await this.consumeSseEvents(response, (eventData) => {
+      if (!eventData || eventData === "[DONE]") return;
+
+      let payload: Any;
+      try {
+        payload = JSON.parse(eventData);
+      } catch {
+        return;
+      }
+
+      if (payload?.usage) {
+        inputTokens = payload.usage.prompt_tokens ?? inputTokens;
+        outputTokens = payload.usage.completion_tokens ?? outputTokens;
+      }
+
+      const choice = Array.isArray(payload?.choices) ? payload.choices[0] : undefined;
+      const deltaText = choice?.delta?.content;
+      if (typeof deltaText === "string" && deltaText.length > 0) {
+        contentText += deltaText;
+          this.emitStreamProgress(
+            request.onStreamProgress,
+            startedAt,
+            inputTokens,
+            outputTokens,
+            contentText.length,
+            true,
+            contentText,
+          );
+      }
+
+      switch (choice?.finish_reason) {
+        case "tool_calls":
+          finishReason = "tool_use";
+          break;
+        case "length":
+          finishReason = "max_tokens";
+          break;
+        case "stop":
+          finishReason = "end_turn";
+          break;
+        case "content_filter":
+          finishReason = "stop_sequence";
+          break;
+        default:
+          break;
+      }
+    });
+
+    this.emitStreamProgress(
+      request.onStreamProgress,
+      startedAt,
+      inputTokens,
+      outputTokens,
+      contentText.length,
+      false,
+      contentText,
+    );
+
+    return {
+      content: [{ type: "text", text: contentText }],
+      stopReason: finishReason,
+      usage: inputTokens || outputTokens ? { inputTokens, outputTokens } : undefined,
+    };
+  }
+
+  private async fromResponsesStreamResponse(
+    response: Response,
+    request: LLMRequest,
+    startedAt: number,
+  ): Promise<LLMResponse> {
+    let contentText = "";
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let finishReason: LLMResponse["stopReason"] = "end_turn";
+
+    await this.consumeSseEvents(response, (eventData) => {
+      if (!eventData || eventData === "[DONE]") return;
+
+      let payload: Any;
+      try {
+        payload = JSON.parse(eventData);
+      } catch {
+        return;
+      }
+
+      if (payload?.usage) {
+        inputTokens = payload.usage.input_tokens ?? inputTokens;
+        outputTokens = payload.usage.output_tokens ?? outputTokens;
+      }
+
+      switch (payload?.type) {
+        case "response.output_text.delta":
+          if (typeof payload.delta === "string" && payload.delta.length > 0) {
+            contentText += payload.delta;
+            this.emitStreamProgress(
+              request.onStreamProgress,
+              startedAt,
+              inputTokens,
+              outputTokens,
+              contentText.length,
+              true,
+              contentText,
+            );
+          }
+          break;
+        case "response.output_text.done":
+          if (typeof payload.text === "string" && payload.text.length > contentText.length) {
+            contentText = payload.text;
+          }
+          break;
+        case "response.completed":
+          if (payload.response?.usage) {
+            inputTokens = payload.response.usage.input_tokens ?? inputTokens;
+            outputTokens = payload.response.usage.output_tokens ?? outputTokens;
+          }
+          if (typeof payload.response?.output_text === "string" && payload.response.output_text) {
+            contentText = payload.response.output_text;
+          }
+          if (Array.isArray(payload.response?.output)) {
+            for (const item of payload.response.output) {
+              if (item?.type === "function_call") {
+                finishReason = "tool_use";
+              }
+            }
+          }
+          break;
+        default:
+          break;
+      }
+    });
+
+    this.emitStreamProgress(
+      request.onStreamProgress,
+      startedAt,
+      inputTokens,
+      outputTokens,
+      contentText.length,
+      false,
+      contentText,
+    );
+
+    return {
+      content: [{ type: "text", text: contentText }],
+      stopReason: finishReason,
+      usage: inputTokens || outputTokens ? { inputTokens, outputTokens } : undefined,
+    };
   }
 
   private parseFunctionCallArguments(value: Any): Record<string, Any> {
@@ -321,15 +638,22 @@ export class AzureOpenAIProvider implements LLMProvider {
     const wrapped = new Error(message) as Any;
     wrapped.name = error?.name || "AzureOpenAIProviderError";
     wrapped.code = String(error?.code || error?.cause?.code || "").trim() || undefined;
+    const status =
+      typeof error?.status === "number"
+        ? error.status
+        : typeof error?.cause?.status === "number"
+          ? error.cause.status
+          : undefined;
     wrapped.retryable =
+      (typeof status === "number" && status >= 500) ||
       this.isTransientInterruptionMessage(message) ||
       wrapped.code === "ECONNRESET" ||
       wrapped.code === "ETIMEDOUT" ||
       wrapped.code === "ENOTFOUND" ||
       wrapped.code === "EAI_AGAIN" ||
       wrapped.code === "ECONNREFUSED";
-    if (error?.status !== undefined) {
-      wrapped.status = error.status;
+    if (status !== undefined) {
+      wrapped.status = status;
     }
     wrapped.cause = error;
     return wrapped;
@@ -339,61 +663,142 @@ export class AzureOpenAIProvider implements LLMProvider {
     try {
       const chatUrl = this.getChatCompletionsUrl();
       const responsesUrl = this.getResponsesUrl();
+      const model = request.model || this.deployment;
+      const startedAt = Date.now();
+      const shouldStream = request.onStreamProgress !== undefined;
+      const requestedReasoningEffort = this.getReasoningEffort();
+      const fallbackReasoningEffort = this.getFallbackReasoningEffort(requestedReasoningEffort);
 
-      const runResponses = async (): Promise<LLMResponse> => {
-        const response = await this.sendRequest(
+      const runResponses = async (
+        streaming: boolean,
+        reasoningEffortOverride?: AzureRequestReasoningEffort,
+      ): Promise<LLMResponse> => {
+        const body = this.buildResponsesBody(request, reasoningEffortOverride);
+        const fallbackBody =
+          fallbackReasoningEffort && reasoningEffortOverride === requestedReasoningEffort
+            ? this.buildResponsesBody(request, fallbackReasoningEffort)
+            : undefined;
+        if (streaming) {
+          body.stream = true;
+          if (fallbackBody) {
+            fallbackBody.stream = true;
+          }
+        }
+
+        const response = await this.sendRequestWithReasoningFallback(
           responsesUrl,
-          this.buildResponsesBody(request),
+          body,
           request.signal,
+          "responses",
+          model,
+          fallbackBody,
         );
         if (!response.ok) {
           const errorData = (await response.json().catch(() => ({}))) as {
             error?: { message?: string };
           };
-          throw new Error(
+          const error = new Error(
             `Azure OpenAI API error: ${response.status} ${response.statusText}` +
               (errorData.error?.message ? ` - ${errorData.error.message}` : ""),
           );
+          (error as Any).status = response.status;
+          throw error;
         }
+
+        if (streaming) {
+          return await this.fromResponsesStreamResponse(response, request, startedAt);
+        }
+
         const data = (await response.json()) as Any;
         return this.fromResponsesApiResponse(data);
       };
 
-      let response = await this.sendRequest(
-        chatUrl,
-        this.buildChatCompletionsBody(request, false),
-        request.signal,
-      );
-      if (!response.ok) {
-        let errorData = (await response.json().catch(() => ({}))) as {
-          error?: { message?: string };
-        };
+      const runChatCompletions = async (
+        useMaxCompletionTokens: boolean,
+        reasoningEffortOverride?: AzureRequestReasoningEffort,
+      ): Promise<LLMResponse> => {
+        const body = this.buildChatCompletionsBody(
+          request,
+          useMaxCompletionTokens,
+          reasoningEffortOverride,
+        );
+        const fallbackBody =
+          fallbackReasoningEffort && reasoningEffortOverride === requestedReasoningEffort
+            ? this.buildChatCompletionsBody(request, useMaxCompletionTokens, fallbackReasoningEffort)
+            : undefined;
+        if (shouldStream) {
+          body.stream = true;
+          if (fallbackBody) {
+            fallbackBody.stream = true;
+          }
+        }
+
+        const response = await this.sendRequestWithReasoningFallback(
+          chatUrl,
+          body,
+          request.signal,
+          "chat_completions",
+          model,
+          fallbackBody,
+        );
+        if (!response.ok) {
+          const errorData = (await response.json().catch(() => ({}))) as {
+            error?: { message?: string };
+          };
+          return {
+            content: [],
+            stopReason: "end_turn",
+            usage: undefined,
+            errorData,
+            response,
+          } as Any;
+        }
+
+        if (shouldStream) {
+          return await this.fromChatCompletionsStreamResponse(response, request, startedAt);
+        }
+
+        const data = (await response.json()) as Any;
+        return fromOpenAICompatibleResponse(data);
+      };
+
+      const firstChatResult = await runChatCompletions(false, requestedReasoningEffort);
+      if ((firstChatResult as Any).errorData) {
+        let errorData = (firstChatResult as Any).errorData as { error?: { message?: string } };
+        const response = (firstChatResult as Any).response as Response;
+
         if (this.isChatCompletionUnsupported(errorData)) {
-          return await runResponses();
+          return await runResponses(shouldStream, requestedReasoningEffort);
         }
+
         if (this.isMaxTokensUnsupported(errorData)) {
-          response = await this.sendRequest(
-            chatUrl,
-            this.buildChatCompletionsBody(request, true),
-            request.signal,
-          );
-          if (response.ok) {
-            const data = (await response.json()) as Any;
-            return fromOpenAICompatibleResponse(data);
+          const retryResult = await runChatCompletions(true, requestedReasoningEffort);
+          if (!(retryResult as Any).errorData) {
+            return retryResult;
           }
-          errorData = (await response.json().catch(() => ({}))) as { error?: { message?: string } };
+
+          errorData = (retryResult as Any).errorData as { error?: { message?: string } };
           if (this.isChatCompletionUnsupported(errorData)) {
-            return await runResponses();
+            return await runResponses(shouldStream, requestedReasoningEffort);
           }
+
+          const error = new Error(
+            `Azure OpenAI API error: ${response.status} ${response.statusText}` +
+              (errorData.error?.message ? ` - ${errorData.error.message}` : ""),
+          );
+          (error as Any).status = response.status;
+          throw error;
         }
-        throw new Error(
+
+        const error = new Error(
           `Azure OpenAI API error: ${response.status} ${response.statusText}` +
             (errorData.error?.message ? ` - ${errorData.error.message}` : ""),
         );
+        (error as Any).status = response.status;
+        throw error;
       }
 
-      const data = (await response.json()) as Any;
-      return fromOpenAICompatibleResponse(data);
+      return firstChatResult;
     } catch (error: Any) {
       if (error.name === "AbortError" || error.message?.includes("aborted")) {
         console.log("[Azure OpenAI] Request aborted");
@@ -413,9 +818,12 @@ export class AzureOpenAIProvider implements LLMProvider {
     try {
       const chatUrl = this.getChatCompletionsUrl();
       const responsesUrl = this.getResponsesUrl();
+      const model = this.deployment;
+      const requestedReasoningEffort = this.getReasoningEffort();
+      const fallbackReasoningEffort = this.getFallbackReasoningEffort(requestedReasoningEffort);
 
       const runResponses = async (): Promise<{ success: boolean; error?: string }> => {
-        const response = await this.sendRequest(responsesUrl, {
+        const body: Record<string, Any> = {
           model: this.deployment,
           input: [
             {
@@ -425,7 +833,23 @@ export class AzureOpenAIProvider implements LLMProvider {
             },
           ],
           max_output_tokens: testMaxTokens,
-        });
+          ...(requestedReasoningEffort ? { reasoning: { effort: requestedReasoningEffort } } : {}),
+        };
+        const fallbackBody =
+          fallbackReasoningEffort
+            ? {
+                ...body,
+                reasoning: { effort: fallbackReasoningEffort },
+              }
+            : undefined;
+        const response = await this.sendRequestWithReasoningFallback(
+          responsesUrl,
+          body,
+          undefined,
+          "test_connection",
+          model,
+          fallbackBody,
+        );
         if (!response.ok) {
           const errorData = (await response.json().catch(() => ({}))) as {
             error?: { message?: string };
@@ -438,11 +862,28 @@ export class AzureOpenAIProvider implements LLMProvider {
         return { success: true };
       };
 
-      let response = await this.sendRequest(chatUrl, {
+      const chatBody: Record<string, Any> = {
         model: this.deployment,
         messages: [{ role: "user", content: "Hi" }],
         max_tokens: testMaxTokens,
-      });
+        ...(requestedReasoningEffort ? { reasoning_effort: requestedReasoningEffort } : {}),
+      };
+      const chatFallbackBody =
+        fallbackReasoningEffort
+          ? {
+              ...chatBody,
+              reasoning_effort: fallbackReasoningEffort,
+            }
+          : undefined;
+
+      let response = await this.sendRequestWithReasoningFallback(
+        chatUrl,
+        chatBody,
+        undefined,
+        "test_connection",
+        model,
+        chatFallbackBody,
+      );
 
       if (!response.ok) {
         let errorData = (await response.json().catch(() => ({}))) as {
@@ -452,11 +893,26 @@ export class AzureOpenAIProvider implements LLMProvider {
           return await runResponses();
         }
         if (this.isMaxTokensUnsupported(errorData)) {
-          response = await this.sendRequest(chatUrl, {
-            model: this.deployment,
-            messages: [{ role: "user", content: "Hi" }],
-            max_completion_tokens: testMaxTokens,
-          });
+          response = await this.sendRequestWithReasoningFallback(
+            chatUrl,
+            {
+              model: this.deployment,
+              messages: [{ role: "user", content: "Hi" }],
+              max_completion_tokens: testMaxTokens,
+              ...(requestedReasoningEffort ? { reasoning_effort: requestedReasoningEffort } : {}),
+            },
+            undefined,
+            "test_connection",
+            model,
+            fallbackReasoningEffort
+              ? {
+                  model: this.deployment,
+                  messages: [{ role: "user", content: "Hi" }],
+                  max_completion_tokens: testMaxTokens,
+                  reasoning_effort: fallbackReasoningEffort,
+                }
+              : undefined,
+          );
           if (response.ok) {
             return { success: true };
           }

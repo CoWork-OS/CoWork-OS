@@ -388,7 +388,7 @@ function isMutatingTool(toolName: string): boolean {
 }
 
 function inferModeFromConversationMode(conversationMode?: ConversationMode): ExecutionMode | null {
-  if (conversationMode === "chat" || conversationMode === "think") return "analyze";
+  if (conversationMode === "chat" || conversationMode === "think") return "chat";
   return null;
 }
 
@@ -405,6 +405,9 @@ export function normalizeTaskDomain(taskDomain: TaskDomain | undefined): TaskDom
 }
 
 function applyModeGate(toolName: string, mode: ExecutionMode): string | null {
+  if (mode === "chat") {
+    return `Tool "${toolName}" is blocked in chat mode because chat mode is direct-answer only and does not allow tool calls.`;
+  }
   if (toolName === "request_user_input") {
     if (mode === "plan") return null;
     return `Tool "${toolName}" is only available in plan mode. Switch mode to plan to request structured user input.`;

@@ -46,6 +46,7 @@
 - **Active Context sidebar** — Always-visible panel showing connected MCP connectors with branded Lucide icons and enabled skills, auto-refreshed every 30 seconds.
 - **Agent teams** — Multi-agent collaboration with shared checklists, collaborative mode, multi-LLM synthesis, and persistent teams.
 - **Think With Me mode** — Socratic brainstorming that helps you clarify thinking without executing actions.
+- **Chat mode** — Direct LLM chat with no tools, no step timeline, same-session follow-ups, and chat-only streaming for supported providers.
 - **Build Mode** — Go from idea to working prototype with a phased canvas workflow (Concept → Plan → Scaffold → Iterate) and named checkpoints.
 - **AI Playbook** — Auto-captures what worked from successful tasks and injects relevant patterns into future prompts. Repeated patterns auto-promote to governed, one-click-approvable skills via the Playbook-to-Skill pipeline.
 - **Evolving Intelligence** — Unified Memory Synthesizer merges all 6 memory subsystems into a single coherent context block. Adaptive Style Engine learns your communication preferences from message patterns and feedback. Evolution Metrics dashboard quantifies improvement over time (correction rate, knowledge growth, style alignment).
@@ -60,7 +61,7 @@
 
 Since `v0.5.0`, the main product updates are:
 
-- **Connector catalog consolidation** — The shipped MCP registry is now curated to the supported allowlist: Salesforce, Jira, HubSpot, Zendesk, ServiceNow, Linear, Asana, Okta, Resend, Discord, and Google Workspace. Google services are now presented as a single `google-workspace` connector, while DocuSign, Outreach, and Slack were removed from the shipped Tier-1 connector surface.
+- **44 MCP connectors** — The shipped registry includes Salesforce, Jira, HubSpot, Zendesk, ServiceNow, Linear, Asana, Okta, Resend, Discord, Google Workspace, Figma, Vercel, Stripe, Tavily, Grafana, Metabase, Socket, and 26 more. Install from Settings > Connectors. See [Enterprise Connectors](docs/enterprise-connectors.md).
 - **Direct-API-first integrations for GitHub and Notion** — Native CoWork paths are now preferred for GitHub and Notion, with MCP used only as a fallback when needed.
 - **Versioned tool catalog snapshots** — Tool discovery now uses a stable SHA-1 catalog version hash that covers native tools plus MCP state. MCP status or `tools_changed` events rebuild the snapshot immediately, and executor caches are busted when the shared catalog version changes.
 - **Collaborative UI refresh** — The sidebar and collaborative task views now use inline agent headers, Lucide-based role icons instead of raw emoji, cleaner markdown normalization, and explicit back-navigation from sub-task views into the parent task flow.
@@ -118,7 +119,7 @@ See the [Development Guide](docs/development.md) for prerequisites and details.
 ## How It Works
 
 1. **Create a task** — Describe what you want ("organize my Downloads by file type", "create a quarterly report spreadsheet"). No workspace needed — a temp folder is used automatically if you don't select one.
-2. **Choose a mode** — Run normally, or toggle **Autonomous** (auto-approve actions), **Collaborative** (multi-agent perspectives), or **Multi-LLM** (compare providers with a judge) per task.
+2. **Choose a mode** — Pick **Chat**, **Execute**, **Plan**, **Analyze**, or **Verified** for the runtime behavior, then optionally toggle **Autonomous** (auto-approve actions), **Collaborative** (multi-agent perspectives), or **Multi-LLM** (compare providers with a judge) per task.
 3. **Monitor execution** — Watch the real-time task timeline as the agent plans, executes, and produces artifacts. Parallel tool bursts are grouped into lane summaries, and shell commands run in a live terminal view where you can see output in real-time, stop execution, or provide input (e.g. `y`/`n`) directly.
 4. **Respond when needed** — Destructive operations require explicit approval (unless Autonomous mode is on), and plan-mode tasks can pause for structured multiple-choice input before continuing.
 
@@ -126,7 +127,7 @@ See the [Development Guide](docs/development.md) for prerequisites and details.
 
 ### Agent Runtime
 
-Task-based execution with dynamic re-planning, four per-task modes (Autonomous, Collaborative, Multi-LLM, Think With Me), agent teams with persistence, agent comparison, git worktree isolation, AI playbook, and performance reviews. [Learn more](docs/features.md#agent-capabilities)
+Task-based execution with dynamic re-planning, five runtime modes (Chat, Execute, Plan, Analyze, Verified) plus orchestration toggles (Autonomous, Collaborative, Multi-LLM, Think With Me), agent teams with persistence, agent comparison, git worktree isolation, AI playbook, and performance reviews. [Learn more](docs/features.md#agent-capabilities)
 
 Autonomous self-improvement runs now use the same runtime with stricter safeguards: they start only after memory services are initialized, require isolated git worktrees by default, skip non-git workspaces when worktree isolation is required, and can notify you when runs start, fail, or open a PR. See [Self-Improving Agent Architecture](docs/self-improving-agent.md) and [Troubleshooting](docs/troubleshooting.md#self-improvement-startup-warnings-in-development).
 
@@ -196,14 +197,14 @@ Advanced web scraping powered by [Scrapling](https://github.com/D4Vinci/Scraplin
 ### Integrations
 
 - **Cloud Storage**: Notion, Box, OneDrive, Google Workspace, Dropbox, SharePoint
-- **Enterprise Connectors**: Salesforce, Jira, HubSpot, Zendesk, ServiceNow, Linear, Asana, Okta, Discord, Resend, Google Workspace
+- **44 MCP Connectors**: Salesforce, Jira, HubSpot, Zendesk, Stripe, Tavily, Grafana, Metabase, Socket, and 36 more (CRM, dev tools, productivity, payments)
 - **Developer Tools**: Claude Code-style `glob`/`grep`/`edit_file`, Playwright browser automation, MCP client/host/registry
 
 [Learn more](docs/features.md)
 
 ### Active Context Sidebar
 
-Real-time overview of your active integrations, always visible in the right panel. Shows connected shipped MCP connectors and native integrations with branded Lucide icons (HubSpot, Salesforce, Google Workspace, Discord, GitHub, Postgres, and more) and green status dots, plus enabled skills from active packs. Each section shows 4 items with internal scrolling for more. Auto-refreshes every 30 seconds. [Learn more](docs/plugin-packs.md#context-panel)
+Real-time overview of your active integrations, always visible in the right panel. Shows connected MCP connectors (44 available) and native integrations with branded Lucide icons (HubSpot, Salesforce, Google Workspace, Discord, GitHub, Postgres, and more) and green status dots, plus enabled skills from active packs. Each section shows 4 items with internal scrolling for more. Auto-refreshes every 30 seconds. [Learn more](docs/plugin-packs.md#context-panel)
 
 ### Usage Insights
 
@@ -378,6 +379,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
 | [Getting Started](docs/getting-started.md) | First-time setup and usage |
 | [Use Case Showcase](docs/showcase.md) | Comprehensive guide to what you can build and automate |
 | [Features](docs/features.md) | Complete feature reference |
+| [Chat Mode](docs/chat-mode.md) | Direct chat-only mode with no tools and same-session follow-ups |
 | [Platform Updates](docs/integration-skill-bootstrap-lifecycle.md) | Detailed implementation notes for integration setup, skill proposals, workspace-kit contracts, and bootstrap lifecycle |
 | [Channels](docs/channels.md) | Messaging channel setup (15 channels) |
 | [X Mention Triggers](docs/x-mention-triggers.md) | Configure `do:` mention-triggered task ingress on desktop and headless |
@@ -391,7 +393,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
 | [VPS/Linux](docs/vps-linux.md) | Headless server deployment |
 | [Remote Access](docs/remote-access.md) | Tailscale, SSH tunnels, WebSocket API |
 | [Knowledge Graph](docs/knowledge-graph.md) | Structured entity/relationship memory |
-| [Context Compaction](docs/context-compaction.md) | Proactive session compaction with structured summaries |
+| [Context Compaction](docs/context-compaction.md) | Proactive session compaction with structured summaries and chat-history summarization |
 | [Mission Control](docs/mission-control.md) | Agent orchestration dashboard |
 | [Self-Improving Agent](docs/self-improving-agent.md) | Architecture and operating model for bounded autonomous improvement campaigns |
 | [Zero-Human Company Ops](docs/zero-human-company.md) | Founder-directed company planning, operators, and Mission Control ops workflows |

@@ -62,6 +62,41 @@ const FIELDS_BY_SOURCE: Record<string, string[]> = {
   connector_event: ["type", "source", "data"],
 };
 
+/** Example triggers shown when empty; clicking one populates the form */
+const EXAMPLE_TRIGGERS = [
+  {
+    name: "Urgent deploy alert",
+    source: "channel_message" as const,
+    conditions: [{ field: "text", operator: "contains", value: "urgent" }],
+    actionTitle: "Review deploy request",
+    actionPrompt:
+      "Someone requested an urgent deploy. Review the message and create a task to handle it. Context: {{event.text}} from {{event.senderName}}",
+  },
+  {
+    name: "Bug report triage",
+    source: "channel_message" as const,
+    conditions: [{ field: "text", operator: "contains", value: "bug" }],
+    actionTitle: "Triage bug report",
+    actionPrompt:
+      "Triage this bug report and create a task with priority and steps. Message: {{event.text}}",
+  },
+  {
+    name: "Meeting follow-up",
+    source: "email" as const,
+    conditions: [{ field: "subject", operator: "contains", value: "meeting" }],
+    actionTitle: "Meeting follow-up",
+    actionPrompt:
+      "Create follow-up tasks from this meeting email. Extract action items and assign priorities.",
+  },
+  {
+    name: "Webhook deploy",
+    source: "webhook" as const,
+    conditions: [{ field: "path", operator: "equals", value: "/deploy" }],
+    actionTitle: "Deploy triggered",
+    actionPrompt: "A deploy was triggered via webhook. Verify and document the deployment.",
+  },
+];
+
 export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspaceId }) => {
   const [triggers, setTriggers] = useState<EventTrigger[]>([]);
   const [showForm, setShowForm] = useState(false);
@@ -152,6 +187,15 @@ export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspa
     }
   };
 
+  const applyExample = (ex: (typeof EXAMPLE_TRIGGERS)[0]) => {
+    setName(ex.name);
+    setSource(ex.source);
+    setConditions(ex.conditions.map((c) => ({ ...c })));
+    setActionTitle(ex.actionTitle);
+    setActionPrompt(ex.actionPrompt);
+    setShowForm(true);
+  };
+
   const loadHistory = async (triggerId: string) => {
     if (expandedHistory === triggerId) {
       setExpandedHistory(null);
@@ -179,9 +223,11 @@ export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspa
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <Zap size={18} style={{ color: "var(--accent-color, #f59e0b)" }} />
-          <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>Event Triggers</h3>
-          <span style={{ fontSize: 12, color: "var(--text-tertiary, #666)" }}>
+          <Zap size={18} style={{ color: "var(--color-accent)" }} />
+          <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: "var(--color-text)" }}>
+            Event Triggers
+          </h3>
+          <span style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
             {triggers.length} trigger{triggers.length !== 1 ? "s" : ""}
           </span>
         </div>
@@ -192,10 +238,10 @@ export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspa
             alignItems: "center",
             gap: 4,
             padding: "6px 12px",
-            border: "1px solid var(--border-color, #333)",
+            border: "1px solid var(--color-border)",
             borderRadius: 6,
-            background: "var(--surface-secondary, #1a1a1a)",
-            color: "var(--text-primary, #e5e5e5)",
+            background: "var(--color-bg-elevated)",
+            color: "var(--color-text)",
             cursor: "pointer",
             fontSize: 12,
           }}
@@ -206,19 +252,20 @@ export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspa
 
       {showForm && (
         <div
+          className="event-triggers-form"
           style={{
-            border: "1px solid var(--border-color, #333)",
+            border: "1px solid var(--color-border)",
             borderRadius: 8,
             padding: 16,
             marginBottom: 16,
-            background: "var(--surface-secondary, #1a1a1a)",
+            background: "var(--color-bg-elevated)",
           }}
         >
           <div style={{ marginBottom: 12 }}>
             <label
               style={{
                 fontSize: 12,
-                color: "var(--text-secondary, #999)",
+                color: "var(--color-text-secondary)",
                 display: "block",
                 marginBottom: 4,
               }}
@@ -226,18 +273,12 @@ export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspa
               Name
             </label>
             <input
+              type="text"
+              className="settings-input"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. Urgent deploy alert"
-              style={{
-                width: "100%",
-                padding: "6px 10px",
-                borderRadius: 6,
-                border: "1px solid var(--border-color, #333)",
-                background: "var(--surface-primary, #0a0a0a)",
-                color: "var(--text-primary, #e5e5e5)",
-                fontSize: 13,
-              }}
+              style={{ marginBottom: 0 }}
             />
           </div>
 
@@ -245,7 +286,7 @@ export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspa
             <label
               style={{
                 fontSize: 12,
-                color: "var(--text-secondary, #999)",
+                color: "var(--color-text-secondary)",
                 display: "block",
                 marginBottom: 4,
               }}
@@ -264,13 +305,14 @@ export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspa
                   },
                 ]);
               }}
+              className="event-triggers-select"
               style={{
                 width: "100%",
-                padding: "6px 10px",
-                borderRadius: 6,
-                border: "1px solid var(--border-color, #333)",
-                background: "var(--surface-primary, #0a0a0a)",
-                color: "var(--text-primary, #e5e5e5)",
+                padding: "10px 12px",
+                borderRadius: "var(--radius-md)",
+                border: "1px solid var(--color-border)",
+                background: "var(--color-bg-input)",
+                color: "var(--color-text)",
                 fontSize: 13,
               }}
             >
@@ -286,7 +328,7 @@ export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspa
             <label
               style={{
                 fontSize: 12,
-                color: "var(--text-secondary, #999)",
+                color: "var(--color-text-secondary)",
                 display: "block",
                 marginBottom: 4,
               }}
@@ -301,13 +343,14 @@ export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspa
                 <select
                   value={c.field}
                   onChange={(e) => updateCondition(i, { field: e.target.value })}
+                  className="event-triggers-select"
                   style={{
                     flex: 1,
-                    padding: "5px 8px",
-                    borderRadius: 4,
-                    border: "1px solid var(--border-color, #333)",
-                    background: "var(--surface-primary, #0a0a0a)",
-                    color: "var(--text-primary, #e5e5e5)",
+                    padding: "8px 10px",
+                    borderRadius: 6,
+                    border: "1px solid var(--color-border)",
+                    background: "var(--color-bg-input)",
+                    color: "var(--color-text)",
                     fontSize: 12,
                   }}
                 >
@@ -320,13 +363,14 @@ export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspa
                 <select
                   value={c.operator}
                   onChange={(e) => updateCondition(i, { operator: e.target.value })}
+                  className="event-triggers-select"
                   style={{
                     flex: 1,
-                    padding: "5px 8px",
-                    borderRadius: 4,
-                    border: "1px solid var(--border-color, #333)",
-                    background: "var(--surface-primary, #0a0a0a)",
-                    color: "var(--text-primary, #e5e5e5)",
+                    padding: "8px 10px",
+                    borderRadius: 6,
+                    border: "1px solid var(--color-border)",
+                    background: "var(--color-bg-input)",
+                    color: "var(--color-text)",
                     fontSize: 12,
                   }}
                 >
@@ -337,18 +381,12 @@ export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspa
                   ))}
                 </select>
                 <input
+                  type="text"
+                  className="settings-input"
                   value={c.value}
                   onChange={(e) => updateCondition(i, { value: e.target.value })}
                   placeholder="value"
-                  style={{
-                    flex: 2,
-                    padding: "5px 8px",
-                    borderRadius: 4,
-                    border: "1px solid var(--border-color, #333)",
-                    background: "var(--surface-primary, #0a0a0a)",
-                    color: "var(--text-primary, #e5e5e5)",
-                    fontSize: 12,
-                  }}
+                  style={{ flex: 2, marginBottom: 0 }}
                 />
                 {conditions.length > 1 && (
                   <button
@@ -357,7 +395,7 @@ export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspa
                       background: "none",
                       border: "none",
                       cursor: "pointer",
-                      color: "var(--text-tertiary, #666)",
+                      color: "var(--color-text-muted)",
                       padding: 2,
                     }}
                   >
@@ -370,7 +408,7 @@ export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspa
               onClick={addCondition}
               style={{
                 fontSize: 11,
-                color: "var(--accent-color, #60a5fa)",
+                color: "var(--color-accent)",
                 background: "none",
                 border: "none",
                 cursor: "pointer",
@@ -385,7 +423,7 @@ export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspa
             <label
               style={{
                 fontSize: 12,
-                color: "var(--text-secondary, #999)",
+                color: "var(--color-text-secondary)",
                 display: "block",
                 marginBottom: 4,
               }}
@@ -393,34 +431,22 @@ export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspa
               Then (action)
             </label>
             <input
+              type="text"
+              className="settings-input"
               value={actionTitle}
               onChange={(e) => setActionTitle(e.target.value)}
               placeholder="Task title"
-              style={{
-                width: "100%",
-                padding: "6px 10px",
-                borderRadius: 6,
-                border: "1px solid var(--border-color, #333)",
-                background: "var(--surface-primary, #0a0a0a)",
-                color: "var(--text-primary, #e5e5e5)",
-                fontSize: 13,
-                marginBottom: 6,
-              }}
+              style={{ marginBottom: 6 }}
             />
             <textarea
+              className="settings-input"
               value={actionPrompt}
               onChange={(e) => setActionPrompt(e.target.value)}
               placeholder="Task prompt (use {{event.text}}, {{event.senderName}} for variables)"
               rows={3}
               style={{
-                width: "100%",
-                padding: "6px 10px",
-                borderRadius: 6,
-                border: "1px solid var(--border-color, #333)",
-                background: "var(--surface-primary, #0a0a0a)",
-                color: "var(--text-primary, #e5e5e5)",
-                fontSize: 13,
                 resize: "vertical",
+                minHeight: 72,
               }}
             />
           </div>
@@ -431,9 +457,9 @@ export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspa
               style={{
                 padding: "6px 12px",
                 borderRadius: 6,
-                border: "1px solid var(--border-color, #333)",
+                border: "1px solid var(--color-border)",
                 background: "none",
-                color: "var(--text-secondary, #999)",
+                color: "var(--color-text-secondary)",
                 cursor: "pointer",
                 fontSize: 12,
               }}
@@ -447,7 +473,7 @@ export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspa
                 padding: "6px 12px",
                 borderRadius: 6,
                 border: "none",
-                background: "var(--accent-color, #2563eb)",
+                background: "var(--color-accent)",
                 color: "#fff",
                 cursor: "pointer",
                 fontSize: 12,
@@ -461,15 +487,70 @@ export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspa
       )}
 
       {triggers.length === 0 && !showForm && (
-        <div
-          style={{
-            textAlign: "center",
-            padding: 32,
-            color: "var(--text-tertiary, #666)",
-            fontSize: 13,
-          }}
-        >
-          No triggers configured. Create one to automate actions when events occur.
+        <div style={{ marginBottom: 24 }}>
+          <p
+            style={{
+              fontSize: 13,
+              color: "var(--color-text-secondary)",
+              marginBottom: 16,
+            }}
+          >
+            No triggers configured yet. Try an example below or create your own.
+          </p>
+          <div
+            style={{
+              display: "grid",
+              gap: 10,
+              gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+            }}
+          >
+            {EXAMPLE_TRIGGERS.map((ex, i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => applyExample(ex)}
+                style={{
+                  textAlign: "left",
+                  padding: 12,
+                  borderRadius: 8,
+                  border: "1px solid var(--color-border)",
+                  background: "var(--color-bg-elevated)",
+                  color: "var(--color-text)",
+                  cursor: "pointer",
+                  fontSize: 13,
+                  transition: "border-color 0.2s, background 0.2s",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = "var(--color-accent)";
+                  e.currentTarget.style.background = "var(--color-bg-hover)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = "var(--color-border)";
+                  e.currentTarget.style.background = "var(--color-bg-elevated)";
+                }}
+              >
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>{ex.name}</div>
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: "var(--color-text-muted)",
+                  }}
+                >
+                  {ex.source.replace("_", " ")} · {ex.conditions[0].field}{" "}
+                  {ex.conditions[0].operator} "{ex.conditions[0].value}"
+                </div>
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: "var(--color-accent)",
+                    marginTop: 6,
+                  }}
+                >
+                  Use as template →
+                </div>
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
@@ -477,7 +558,7 @@ export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspa
         <div
           key={t.id}
           style={{
-            border: "1px solid var(--border-color, #333)",
+            border: "1px solid var(--color-border)",
             borderRadius: 8,
             marginBottom: 8,
             overflow: "hidden",
@@ -489,9 +570,9 @@ export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspa
               style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }}
             >
               {t.enabled ? (
-                <ToggleRight size={20} style={{ color: "var(--accent-color, #22c55e)" }} />
+                <ToggleRight size={20} style={{ color: "var(--color-success)" }} />
               ) : (
-                <ToggleLeft size={20} style={{ color: "var(--text-tertiary, #666)" }} />
+                <ToggleLeft size={20} style={{ color: "var(--color-text-muted)" }} />
               )}
             </button>
             <div style={{ flex: 1, minWidth: 0 }}>
@@ -499,12 +580,12 @@ export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspa
                 style={{
                   fontSize: 13,
                   fontWeight: 500,
-                  color: t.enabled ? "var(--text-primary, #e5e5e5)" : "var(--text-tertiary, #666)",
+                  color: t.enabled ? "var(--color-text)" : "var(--color-text-muted)",
                 }}
               >
                 {t.name}
               </div>
-              <div style={{ fontSize: 11, color: "var(--text-tertiary, #666)", marginTop: 2 }}>
+              <div style={{ fontSize: 11, color: "var(--color-text-muted)", marginTop: 2 }}>
                 {t.source.replace("_", " ")} · {t.conditions.length} condition
                 {t.conditions.length !== 1 ? "s" : ""} · fired {t.fireCount}x
               </div>
@@ -515,7 +596,7 @@ export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspa
                 background: "none",
                 border: "none",
                 cursor: "pointer",
-                color: "var(--text-tertiary, #666)",
+                color: "var(--color-text-muted)",
                 padding: 4,
               }}
             >
@@ -527,7 +608,7 @@ export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspa
                 background: "none",
                 border: "none",
                 cursor: "pointer",
-                color: "var(--text-tertiary, #666)",
+                color: "var(--color-text-muted)",
                 padding: 4,
               }}
             >
@@ -538,13 +619,13 @@ export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspa
           {expandedHistory === t.id && (
             <div
               style={{
-                borderTop: "1px solid var(--border-color, #333)",
+                borderTop: "1px solid var(--color-border)",
                 padding: "8px 12px",
-                background: "var(--surface-secondary, #111)",
+                background: "var(--color-bg-darker)",
               }}
             >
               {history.length === 0 ? (
-                <div style={{ fontSize: 11, color: "var(--text-tertiary, #666)" }}>
+                <div style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
                   No history yet
                 </div>
               ) : (
@@ -553,18 +634,18 @@ export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspa
                     key={h.id}
                     style={{
                       fontSize: 11,
-                      color: "var(--text-secondary, #999)",
+                      color: "var(--color-text-secondary)",
                       padding: "3px 0",
                       display: "flex",
                       gap: 8,
                     }}
                   >
-                    <span style={{ color: "var(--text-tertiary, #666)" }}>
+                    <span style={{ color: "var(--color-text-muted)" }}>
                       {new Date(h.firedAt).toLocaleString()}
                     </span>
                     <span>{h.actionResult || "fired"}</span>
                     {h.taskId && (
-                      <span style={{ color: "var(--accent-color, #60a5fa)" }}>→ task</span>
+                      <span style={{ color: "var(--color-accent)" }}>→ task</span>
                     )}
                   </div>
                 ))

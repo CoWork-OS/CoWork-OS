@@ -34,6 +34,8 @@ features:
     details: Connect to Claude, GPT, Gemini, Ollama, and more. Bring your own keys, switch models per task.
   - title: 15 Messaging Channels
     details: WhatsApp, Telegram, Discord, Slack, iMessage, Teams, and more. Chat with your AI from anywhere.
+  - title: Chat Mode
+    details: Direct LLM chat with no tools, same-session follow-ups, and chat-only streaming for supported providers.
   - title: Managed Devices
     details: Connect local and remote CoWork nodes, inspect device summaries, browse remote workspaces, and launch tasks against selected machines from one Devices tab.
   - title: Automations
@@ -43,7 +45,7 @@ features:
   - title: Agent Teams
     details: Multi-agent collaboration with shared checklists, collaborative mode, multi-LLM synthesis, and performance reviews.
   - title: Enterprise Connectors
-    details: Salesforce, Jira, HubSpot, Zendesk, ServiceNow, Linear, Asana, Okta, Resend, Discord, and Google Workspace MCP connectors.
+    details: 44 MCP connectors including Salesforce, Jira, HubSpot, Zendesk, Stripe, Tavily, Grafana, Metabase, and more.
   - title: Security First
     details: Local-first architecture, sandboxed execution, guardrails, approval workflows, encrypted storage, and 4000+ tests.
   - title: Best-Fit Operational Workflows

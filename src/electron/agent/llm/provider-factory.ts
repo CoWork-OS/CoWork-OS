@@ -24,6 +24,7 @@ import { GeminiProvider } from "./gemini-provider";
 import { OpenRouterProvider } from "./openrouter-provider";
 import { OpenAIProvider } from "./openai-provider";
 import { AzureOpenAIProvider } from "./azure-openai-provider";
+import { AzureAnthropicProvider } from "./azure-anthropic-provider";
 import { GroqProvider } from "./groq-provider";
 import { XAIProvider } from "./xai-provider";
 import { KimiProvider } from "./kimi-provider";
@@ -566,6 +567,13 @@ function sanitizeSettings(settings: LLMSettings): LLMSettings {
     };
   }
 
+  if (sanitized.azureAnthropic) {
+    sanitized.azureAnthropic = {
+      ...sanitized.azureAnthropic,
+      apiKey: decryptSecret(sanitized.azureAnthropic.apiKey),
+    };
+  }
+
   if (sanitized.groq) {
     sanitized.groq = {
       ...sanitized.groq,
@@ -624,6 +632,7 @@ interface ProviderRoutingSettings {
   profileRoutingEnabled?: boolean;
   strongModelKey?: string;
   cheapModelKey?: string;
+  automatedTaskModelKey?: string;
   preferStrongForVerification?: boolean;
 }
 
@@ -676,6 +685,13 @@ export interface LLMSettings {
     apiVersion?: string;
     reasoningEffort?: "low" | "medium" | "high" | "extra_high";
   } & ProviderRoutingSettings;
+  azureAnthropic?: {
+    apiKey?: string;
+    endpoint?: string;
+    deployment?: string;
+    deployments?: string[];
+    apiVersion?: string;
+  } & ProviderRoutingSettings;
   groq?: {
     apiKey?: string;
     model?: string;
@@ -702,6 +718,11 @@ export interface LLMSettings {
     model?: string;
   } & ProviderRoutingSettings;
   customProviders?: Record<string, CustomProviderConfig>;
+  /** Text-to-image model selection. Default tried first; backup used on failure. */
+  imageGeneration?: {
+    defaultModel?: "gpt-image-1.5" | "nano-banana-2";
+    backupModel?: "gpt-image-1.5" | "nano-banana-2";
+  };
   // Cached models from API (populated when user refreshes)
   cachedGeminiModels?: CachedModelInfo[];
   cachedOpenRouterModels?: CachedModelInfo[];
@@ -817,6 +838,9 @@ export class LLMProviderFactory {
       case "azure":
         if (!settings.azure && createIfMissing) settings.azure = {};
         return settings.azure;
+      case "azure-anthropic":
+        if (!settings.azureAnthropic && createIfMissing) settings.azureAnthropic = {};
+        return settings.azureAnthropic;
       case "groq":
         if (!settings.groq && createIfMissing) settings.groq = {};
         return settings.groq;
@@ -877,6 +901,7 @@ export class LLMProviderFactory {
     if (next.openrouter) applyDefaults("openrouter");
     if (next.openai) applyDefaults("openai");
     if (next.azure) applyDefaults("azure");
+    if (next.azureAnthropic) applyDefaults("azure-anthropic");
     if (next.groq) applyDefaults("groq");
     if (next.xai) applyDefaults("xai");
     if (next.kimi) applyDefaults("kimi");
@@ -896,13 +921,14 @@ export class LLMProviderFactory {
     settings: LLMSettings,
     providerType: LLMProviderType,
   ): Required<Pick<ProviderRoutingSettings, "profileRoutingEnabled" | "preferStrongForVerification">> &
-    Pick<ProviderRoutingSettings, "strongModelKey" | "cheapModelKey"> {
+    Pick<ProviderRoutingSettings, "strongModelKey" | "cheapModelKey" | "automatedTaskModelKey"> {
     const configured = this.getProviderRoutingSettingsNode(settings, providerType, false);
     const defaultModel = this.getProviderDefaultModelKey(settings, providerType);
     return {
       profileRoutingEnabled: configured?.profileRoutingEnabled === true,
       strongModelKey: normalizeModelKey(configured?.strongModelKey) || defaultModel || undefined,
       cheapModelKey: normalizeModelKey(configured?.cheapModelKey) || defaultModel || undefined,
+      automatedTaskModelKey: normalizeModelKey(configured?.automatedTaskModelKey) || undefined,
       preferStrongForVerification: configured?.preferStrongForVerification !== false,
     };
   }
@@ -925,6 +951,7 @@ export class LLMProviderFactory {
         settings.openrouter?.model,
         settings.openai?.model,
         azureDeployment,
+        settings.azureAnthropic?.deployment || settings.azureAnthropic?.deployments?.[0],
         settings.groq?.model,
         settings.xai?.model,
         settings.kimi?.model,
@@ -945,6 +972,7 @@ export class LLMProviderFactory {
         settings.openrouter?.model,
         settings.openai?.model,
         azureDeployment,
+        settings.azureAnthropic?.deployment || settings.azureAnthropic?.deployments?.[0],
         settings.groq?.model,
         settings.xai?.model,
         settings.kimi?.model,
@@ -1195,6 +1223,15 @@ export class LLMProviderFactory {
     if (settings.azure?.apiKey && settings.azure?.endpoint && azureDeployment) {
       return "azure";
     }
+    const azureAnthropicDeployment =
+      settings.azureAnthropic?.deployment || settings.azureAnthropic?.deployments?.[0];
+    if (
+      settings.azureAnthropic?.apiKey &&
+      settings.azureAnthropic?.endpoint &&
+      azureAnthropicDeployment
+    ) {
+      return "azure-anthropic";
+    }
     if (settings.groq?.apiKey) {
       return "groq";
     }
@@ -1271,6 +1308,10 @@ export class LLMProviderFactory {
       overrideConfig?.azureDeployment ||
       settings.azure?.deployment ||
       settings.azure?.deployments?.[0];
+    const azureAnthropicDeployment =
+      overrideConfig?.azureAnthropicDeployment ||
+      settings.azureAnthropic?.deployment ||
+      settings.azureAnthropic?.deployments?.[0];
 
     const config: LLMProviderConfig = {
       type: providerType,
@@ -1284,6 +1325,7 @@ export class LLMProviderFactory {
           settings.openrouter?.model,
           settings.openai?.model,
           azureDeployment,
+          azureAnthropicDeployment,
           settings.groq?.model,
           settings.xai?.model,
           settings.kimi?.model,
@@ -1322,6 +1364,14 @@ export class LLMProviderFactory {
       azureDeployment,
       azureApiVersion: overrideConfig?.azureApiVersion || settings.azure?.apiVersion,
       azureReasoningEffort: overrideConfig?.azureReasoningEffort || settings.azure?.reasoningEffort,
+      // Azure Anthropic config - from settings only
+      azureAnthropicApiKey:
+        normalizeSecret(overrideConfig?.azureAnthropicApiKey) || settings.azureAnthropic?.apiKey,
+      azureAnthropicEndpoint:
+        overrideConfig?.azureAnthropicEndpoint || settings.azureAnthropic?.endpoint,
+      azureAnthropicDeployment,
+      azureAnthropicApiVersion:
+        overrideConfig?.azureAnthropicApiVersion || settings.azureAnthropic?.apiVersion,
       // Groq config - from settings only
       groqApiKey: normalizeSecret(overrideConfig?.groqApiKey) || settings.groq?.apiKey,
       groqBaseUrl: overrideConfig?.groqBaseUrl || settings.groq?.baseUrl,
@@ -1383,6 +1433,9 @@ export class LLMProviderFactory {
       case "azure":
         provider = new AzureOpenAIProvider(config);
         break;
+      case "azure-anthropic":
+        provider = new AzureAnthropicProvider(config);
+        break;
       case "groq":
         provider = new GroqProvider(config);
         break;
@@ -1422,6 +1475,7 @@ export class LLMProviderFactory {
     openrouterModel?: string,
     openaiModel?: string,
     azureDeployment?: string,
+    azureAnthropicDeployment?: string,
     groqModel?: string,
     xaiModel?: string,
     kimiModel?: string,
@@ -1457,6 +1511,11 @@ export class LLMProviderFactory {
     // For Azure OpenAI, use the deployment name
     if (providerType === "azure") {
       return azureDeployment || "";
+    }
+
+    // For Azure Anthropic, use the deployment name
+    if (providerType === "azure-anthropic") {
+      return azureAnthropicDeployment || "";
     }
 
     // For Groq, use the specific model if provided or default
@@ -1574,6 +1633,15 @@ export class LLMProviderFactory {
           settings.azure?.apiKey &&
           settings.azure?.endpoint &&
           (settings.azure?.deployment || settings.azure?.deployments?.length)
+        ),
+      },
+      {
+        type: "azure-anthropic" as LLMProviderType,
+        name: "Azure Anthropic",
+        configured: !!(
+          settings.azureAnthropic?.apiKey &&
+          settings.azureAnthropic?.endpoint &&
+          (settings.azureAnthropic?.deployment || settings.azureAnthropic?.deployments?.length)
         ),
       },
       {
@@ -1862,6 +1930,27 @@ export class LLMProviderFactory {
         };
       }
 
+      case "azure-anthropic": {
+        const deployments = (settings.azureAnthropic?.deployments || []).filter(Boolean);
+        const currentModel =
+          settings.azureAnthropic?.deployment || deployments[0] || "claude-opus-4-6";
+        const modelList = deployments.length
+          ? deployments.map((d) => ({
+              key: d,
+              displayName: d,
+              description: "Azure Anthropic deployment",
+            }))
+          : [
+              { key: "claude-opus-4-6", displayName: "Claude Opus 4.6", description: "Azure Anthropic" },
+              { key: "claude-sonnet-4-6", displayName: "Claude Sonnet 4.6", description: "Azure Anthropic" },
+              { key: "claude-haiku-4-6", displayName: "Claude Haiku 4.6", description: "Azure Anthropic" },
+            ];
+        return {
+          currentModel,
+          models: ensureCurrentModel(modelList, currentModel),
+        };
+      }
+
       case "ollama": {
         const currentModel = settings.ollama?.model || "llama3.2";
         const modelList =
@@ -2018,6 +2107,18 @@ export class LLMProviderFactory {
           : [modelKey, ...existingDeployments];
         updated.azure = {
           ...settings.azure,
+          deployment: modelKey,
+          deployments: nextDeployments.length > 0 ? nextDeployments : undefined,
+        };
+        break;
+      }
+      case "azure-anthropic": {
+        const existingDeployments = (settings.azureAnthropic?.deployments || []).filter(Boolean);
+        const nextDeployments = existingDeployments.includes(modelKey)
+          ? existingDeployments
+          : [modelKey, ...existingDeployments];
+        updated.azureAnthropic = {
+          ...settings.azureAnthropic,
           deployment: modelKey,
           deployments: nextDeployments.length > 0 ? nextDeployments : undefined,
         };

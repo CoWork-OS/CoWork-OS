@@ -59,6 +59,7 @@ export type SettingsCategory =
   | "google-drive"
   | "dropbox"
   | "sharepoint"
+  | "health"
   | "user-profile"
   | "relationship-memory"
   | "conway"
@@ -71,6 +72,8 @@ export type SettingsCategory =
   | "improvement-history"
   | "webaccess"
   | "adaptive-style-engine"
+  | "awareness-state"
+  | "autonomy-chief-of-staff"
   | `plugin:${string}`;
 
 interface SecureSettingsRow {

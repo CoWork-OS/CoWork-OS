@@ -38,6 +38,17 @@ describe("kit-status", () => {
     expect(status.onboarding?.bootstrapPresent).toBe(false);
   });
 
+  it("does not report kit ready when only automated output folders exist under .cowork", async () => {
+    fs.mkdirSync(kitPath(tmpDir, "automated-outputs", "task-123"), { recursive: true });
+    writeFile(kitPath(tmpDir, "automated-outputs", "task-123", "report.md"), "# Auto output\n");
+
+    const status = await computeWorkspaceKitStatus(tmpDir, "workspace-outputs-only");
+
+    expect(status.hasKitDir).toBe(false);
+    expect(status.onboarding?.bootstrapPresent).toBe(false);
+    expect(status.missingCount).toBeGreaterThan(0);
+  });
+
   it("surfaces stale files, secret lint errors, special handling, and revision counts", async () => {
     writeFile(
       kitPath(tmpDir, "TOOLS.md"),

@@ -2,6 +2,15 @@ import { describe, expect, it } from "vitest";
 import { evaluateToolPolicy } from "../tool-policy-engine";
 
 describe("tool-policy-engine request_user_input gating", () => {
+  it("denies all tools in chat mode", () => {
+    const decision = evaluateToolPolicy("read_file", {
+      executionMode: "chat",
+      taskDomain: "auto",
+    });
+    expect(decision.decision).toBe("deny");
+    expect(decision.reason).toContain("chat mode");
+  });
+
   it("allows request_user_input in plan mode", () => {
     const decision = evaluateToolPolicy("request_user_input", {
       executionMode: "plan",

@@ -61,6 +61,7 @@ import {
   Goal,
   Issue,
   IssueFilters,
+  LLMProviderType,
 } from "../../shared/types";
 import {
   extractTimelineEvidenceRefs,
@@ -99,6 +100,8 @@ import {
   resolveReviewPolicy,
   scoreTaskRisk,
 } from "../eval/risk";
+import { isAutomatedTaskLike } from "../../shared/automated-task-detection";
+import { LLMProviderFactory } from "./llm/provider-factory";
 
 // Memory management constants
 const MAX_CACHED_EXECUTORS = 10; // Maximum number of completed task executors to keep in memory
@@ -123,6 +126,37 @@ const CORRECTION_PATTERNS = [
 
 function detectsCorrection(text: string): boolean {
   return CORRECTION_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+function buildStructuredInputSelectionMessage(
+  request: InputRequest,
+  answers?: Record<string, { optionLabel?: string; otherText?: string }>,
+): string {
+  const normalizeText = (value: unknown): string =>
+    typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+  const truncate = (value: string, maxChars: number): string =>
+    value.length > maxChars ? `${value.slice(0, maxChars)}…` : value;
+
+  const answerMap = answers && typeof answers === "object" && !Array.isArray(answers) ? answers : {};
+
+  const lines = ["User selected structured input options:"];
+  for (const question of request.questions) {
+    const label = normalizeText(question.header) || normalizeText(question.question) || "Question";
+    const answer = answerMap[question.id];
+    const optionLabel = normalizeText(answer?.optionLabel);
+    const otherText = normalizeText(answer?.otherText);
+
+    let selection = optionLabel;
+    if (selection && otherText) {
+      selection = `${selection} — ${truncate(otherText, 160)}`;
+    } else if (!selection) {
+      selection = otherText;
+    }
+
+    lines.push(`- ${label}: ${truncate(selection || "no selection recorded", 220)}`);
+  }
+
+  return lines.join("\n");
 }
 
 // Activity throttling constants
@@ -577,6 +611,33 @@ export class AgentDaemon extends EventEmitter {
       }
     }
 
+    // Automated tasks (cron, improvement, heartbeat, etc.) use a dedicated model when
+    // configured, or fall back to Cheap/Execution model when profile routing is enabled.
+    const hasExplicitModelOverride =
+      typeof nextAgentConfig.modelKey === "string" && nextAgentConfig.modelKey.trim().length > 0;
+    if (
+      isAutomatedTaskLike(task) &&
+      !hasExplicitModelOverride &&
+      !task.strategyLock
+    ) {
+      try {
+        const settings = LLMProviderFactory.loadSettings();
+        const providerType =
+          (nextAgentConfig.providerType || settings.providerType) as LLMProviderType;
+        const routing = LLMProviderFactory.getProviderRoutingSettings(settings, providerType);
+        if (routing.automatedTaskModelKey) {
+          nextAgentConfig = { ...nextAgentConfig, modelKey: routing.automatedTaskModelKey };
+          delete nextAgentConfig.llmProfileHint;
+          agentConfigChanged = true;
+        } else if (routing.profileRoutingEnabled && routing.cheapModelKey) {
+          nextAgentConfig = { ...nextAgentConfig, llmProfileHint: "cheap" };
+          agentConfigChanged = true;
+        }
+      } catch {
+        // Ignore; fall back to strategy-derived profile
+      }
+    }
+
     if (task.strategyLock) {
       return {
         task,
@@ -656,7 +717,13 @@ export class AgentDaemon extends EventEmitter {
     // resume them; otherwise mark as failed.
     const orphanedTasks = this.taskRepo.findByStatus(["planning", "executing"]);
 
-    const tasksToResume = [...interruptedTasks];
+    const tasksToResume = interruptedTasks.filter((task) => {
+      if (this.shouldResumeTaskOnStartup(task)) {
+        return true;
+      }
+      this.skipStartupResume(task);
+      return false;
+    });
 
     if (orphanedTasks.length > 0) {
       console.log(
@@ -670,6 +737,10 @@ export class AgentDaemon extends EventEmitter {
         );
 
         if (hasSnapshot || hasPlan) {
+          if (!this.shouldResumeTaskOnStartup(task)) {
+            this.skipStartupResume(task);
+            continue;
+          }
           // Recoverable: mark as interrupted and add to the resume list
           console.log(
             `[AgentDaemon] Orphaned task ${task.id} has saved state — scheduling for resume`,
@@ -1027,6 +1098,34 @@ export class AgentDaemon extends EventEmitter {
         });
       }
     }
+  }
+
+  private shouldResumeTaskOnStartup(task: Task): boolean {
+    const title = String(task.title || "").trim();
+    const source = String(task.source || "manual").trim().toLowerCase();
+    if (source === "hook") return false;
+    if (task.parentTaskId) return false;
+    if (task.agentType === "sub" || task.agentType === "parallel") return false;
+    if (task.agentConfig?.collaborativeMode || task.agentConfig?.multiLlmMode) return false;
+    if (/^heartbeat:/i.test(title)) return false;
+    if (/^routine prep:/i.test(title)) return false;
+    return true;
+  }
+
+  private skipStartupResume(task: Task): void {
+    const current = this.taskRepo.findById(task.id);
+    if (!current) return;
+    if (current.status !== "interrupted" && current.status !== "planning" && current.status !== "executing") {
+      return;
+    }
+    this.taskRepo.update(task.id, {
+      status: "cancelled",
+      completedAt: Date.now(),
+      error: "Skipped automatic resume for background, collaborative, or system task after restart.",
+    });
+    this.logEvent(task.id, "log", {
+      message: "Skipped automatic resume for background, collaborative, or system task after restart.",
+    });
   }
 
   /**
@@ -1709,6 +1808,7 @@ export class AgentDaemon extends EventEmitter {
     const task = this.taskRepo.create({
       title: params.title,
       prompt: params.prompt,
+      rawPrompt: params.prompt,
       userPrompt: params.userPrompt,
       status: "pending",
       workspaceId: params.workspaceId,
@@ -2450,6 +2550,14 @@ export class AgentDaemon extends EventEmitter {
       }
 
       this.inputRequestRepo.resolve(response.requestId, response.status, response.answers);
+
+      if (response.status === "submitted") {
+        this.logEvent(request.taskId, "assistant_message", {
+          message: buildStructuredInputSelectionMessage(request, response.answers),
+          requestId: response.requestId,
+          source: "structured_input_selection",
+        });
+      }
 
       const latencyMs =
         typeof request.requestedAt === "number" && Number.isFinite(request.requestedAt)
@@ -4939,8 +5047,8 @@ export class AgentDaemon extends EventEmitter {
     }
 
     const isChatSession =
-      existingTask.agentConfig?.executionMode === "chat" ||
-      existingTask.agentConfig?.conversationMode === "chat";
+      existingTask.agentConfig?.executionMode === "chat" &&
+      existingTask.agentConfig?.executionModeSource === "user";
     if (isChatSession) {
       const completedAt = Date.now();
       this.taskRepo.update(taskId, {

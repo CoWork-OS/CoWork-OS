@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Plus, Trash2, Power, Edit3, Search, User, Play, Square, Zap } from "lucide-react";
-import { getEmojiIcon } from "../utils/emoji-icon-map";
+import { resolveTwinIcon } from "../utils/twin-icons";
 import type { AgentRoleData, AgentCapability, HeartbeatEvent } from "../../electron/preload";
 import type { Company, HeartbeatStatus } from "../../shared/types";
 import { PersonaTemplateGallery } from "./PersonaTemplateGallery";
@@ -216,7 +216,7 @@ export function DigitalTwinsPanel({ initialCompanyId = null }: DigitalTwinsPanel
       companyId: selectedCompany?.id,
       displayName: "",
       description: "",
-      icon: "\ud83e\uddd1\u200d\ud83d\udcbb",
+      icon: "Laptop",
       color: "#6366f1",
       capabilities: ["code"] as AgentCapability[],
       isSystem: false,
@@ -328,15 +328,33 @@ export function DigitalTwinsPanel({ initialCompanyId = null }: DigitalTwinsPanel
 
   const activeRoles = filteredRoles.filter((r) => r.isActive);
   const inactiveRoles = filteredRoles.filter((r) => !r.isActive);
-  const companyRoles = selectedCompany
-    ? activeRoles.filter((role) => role.companyId === selectedCompany.id)
-    : [];
+
+  // Sort active roles: running (Working) first, then sleeping (Active), idle, then stopped
+  const sortByActivity = (roles: AgentRole[]) =>
+    [...roles].sort((a, b) => {
+      const rank = (r: AgentRole) => {
+        const hb = heartbeatInfos.get(r.id);
+        if (hb?.heartbeatStatus === "running") return 0;
+        if (hb?.heartbeatEnabled && hb?.heartbeatStatus === "sleeping") return 1;
+        if (hb?.heartbeatEnabled) return 2;
+        return 3;
+      };
+      const diff = rank(a) - rank(b);
+      if (diff !== 0) return diff;
+      return (a.sortOrder ?? 100) - (b.sortOrder ?? 100);
+    });
+
+  const companyRoles = sortByActivity(
+    selectedCompany ? activeRoles.filter((role) => role.companyId === selectedCompany.id) : [],
+  );
   const companyInactiveRoles = selectedCompany
     ? inactiveRoles.filter((role) => role.companyId === selectedCompany.id)
     : [];
-  const otherActiveRoles = selectedCompany
-    ? activeRoles.filter((role) => role.companyId !== selectedCompany.id)
-    : activeRoles;
+  const otherActiveRoles = sortByActivity(
+    selectedCompany
+      ? activeRoles.filter((role) => role.companyId !== selectedCompany.id)
+      : activeRoles,
+  );
   const otherInactiveRoles = selectedCompany
     ? inactiveRoles.filter((role) => role.companyId !== selectedCompany.id)
     : inactiveRoles;
@@ -372,7 +390,7 @@ export function DigitalTwinsPanel({ initialCompanyId = null }: DigitalTwinsPanel
             style={{ backgroundColor: role.color }}
           >
             {role.icon ? (() => {
-              const Icon = getEmojiIcon(role.icon);
+              const Icon = resolveTwinIcon(role.icon);
               return <Icon size={20} strokeWidth={2} />;
             })() : null}
           </div>

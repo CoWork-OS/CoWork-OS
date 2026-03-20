@@ -105,6 +105,7 @@ import { getUserDataDir } from "./utils/user-data-dir";
 // Live Canvas feature
 import { registerCanvasScheme, registerCanvasProtocol, CanvasManager } from "./canvas";
 import { setupCanvasHandlers, cleanupCanvasHandlers } from "./ipc/canvas-handlers";
+import { setupQAHandlers } from "./ipc/qa-handlers";
 import { pruneTempWorkspaces } from "./utils/temp-workspace";
 import { getActiveTempWorkspaceLeases } from "./utils/temp-workspace-lease";
 import { getPluginRegistry } from "./extensions/registry";
@@ -129,6 +130,8 @@ import { setupWebAccessHandlers } from "./ipc/web-access-handlers";
 import { ManagedAccountManager, type ManagedAccountStatus } from "./accounts/managed-account-manager";
 import { initializeXMentionBridgeService, XMentionBridgeService } from "./x-mentions";
 import { AmbientMonitoringService } from "./monitoring/AmbientMonitoringService";
+import { AwarenessService } from "./awareness/AwarenessService";
+import { AutonomyEngine } from "./awareness/AutonomyEngine";
 import { ImprovementCandidateService } from "./improvement/ImprovementCandidateService";
 import { ImprovementLoopService } from "./improvement/ImprovementLoopService";
 import { createLogger } from "./utils/logger";
@@ -141,6 +144,9 @@ let channelGateway: ChannelGateway;
 let cronService: CronService | null = null;
 let dailyBriefingService: DailyBriefingService | null = null;
 let ambientMonitoringService: AmbientMonitoringService | null = null;
+let heartbeatService: HeartbeatService | null = null;
+let awarenessService: AwarenessService | null = null;
+let autonomyEngine: AutonomyEngine | null = null;
 let improvementLoopService: ImprovementLoopService | null = null;
 let crossSignalService: CrossSignalService | null = null;
 let feedbackService: FeedbackService | null = null;
@@ -1094,7 +1100,6 @@ if (!gotTheLock) {
     };
 
     // Initialize heartbeat and Mission Control services
-    let heartbeatService: HeartbeatService | null = null;
     try {
       const db = dbManager.getDatabase();
       const agentRoleRepo = new AgentRoleRepository(db);
@@ -1192,6 +1197,22 @@ if (!gotTheLock) {
               workspacePath: workspace.path,
             })),
         getMemoryFeaturesSettings: () => MemoryFeaturesManager.loadSettings(),
+        getAwarenessSummary: (workspaceId?: string) => awarenessService?.getSummary(workspaceId) || null,
+        getAutonomyState: (workspaceId?: string) => autonomyEngine?.getWorldModel(workspaceId) || null,
+        getAutonomyDecisions: (workspaceId?: string) => autonomyEngine?.listDecisions(workspaceId) || [],
+        listActiveSuggestions: (workspaceId: string) =>
+          ProactiveSuggestionsService.listActive(workspaceId, {
+            includeDeferred: true,
+            recordSurface: false,
+          }),
+        createCompanionSuggestion: (workspaceId, suggestion) =>
+          ProactiveSuggestionsService.createCompanionSuggestion(workspaceId, suggestion),
+        addNotification: async (params) => {
+          const notificationService = getNotificationService();
+          await notificationService?.add(params);
+        },
+        captureMemory: (workspaceId, taskId, type, content, isPrivate) =>
+          MemoryService.capture(workspaceId, taskId, type, content, isPrivate),
       };
 
       heartbeatService = new HeartbeatService(heartbeatDeps);
@@ -1205,6 +1226,83 @@ if (!gotTheLock) {
           source: "hook",
         });
       });
+
+      autonomyEngine = AutonomyEngine.initialize({
+        getDefaultWorkspaceId: () => {
+          const fallbackTemp = workspaceRepo
+            .findAll()
+            .find((workspace) => workspace.isTemp || isTempWorkspaceId(workspace.id));
+          return resolveDefaultWorkspace()?.id ?? fallbackTemp?.id ?? TEMP_WORKSPACE_ID;
+        },
+        listWorkspaceIds: () =>
+          workspaceRepo
+            .findAll()
+            .filter((workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id))
+            .map((workspace) => workspace.id),
+        createTask: async (workspaceId, title, prompt) =>
+          agentDaemon.createTask({
+            title,
+            prompt,
+            workspaceId,
+            source: "hook",
+            agentConfig: {
+              allowUserInput: false,
+            },
+          }),
+        recordActivity: ({ workspaceId, title, description, metadata }) => {
+          activityRepo.create({
+            workspaceId,
+            actorType: "system",
+            activityType: "info",
+            title,
+            description,
+            metadata,
+          });
+        },
+        wakeHeartbeats: ({ text, mode }) => {
+          heartbeatService?.submitWakeForAll({
+            text,
+            mode,
+            source: "hook",
+          });
+        },
+        log: (...args: unknown[]) => logger.debug("[Autonomy]", ...args),
+      });
+      await autonomyEngine.start();
+      logger.info("AutonomyEngine initialized");
+
+      // Initialize AwarenessService after Heartbeat and Autonomy so onWakeHeartbeats and onEventCaptured work
+      try {
+        awarenessService = AwarenessService.initialize({
+          getDefaultWorkspaceId: () => {
+            try {
+              const workspaceRepo = new WorkspaceRepository(dbManager.getDatabase());
+              const workspaces = workspaceRepo.findAll();
+              return (
+                workspaces.find((workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id))
+                  ?.id || workspaces[0]?.id
+              );
+            } catch {
+              return undefined;
+            }
+          },
+          onWakeHeartbeats: ({ text, mode }) => {
+            heartbeatService?.submitWakeForAll({
+              text,
+              mode,
+              source: "hook",
+            });
+          },
+          onEventCaptured: (event) => {
+            autonomyEngine?.notifyEvent(event);
+          },
+          log: (...args: unknown[]) => logger.debug("[Awareness]", ...args),
+        });
+        await awarenessService.start();
+        logger.info("AwarenessService initialized");
+      } catch (awarenessError) {
+        logger.error("Failed to initialize AwarenessService:", awarenessError);
+      }
     } catch (error) {
       logger.error("Failed to initialize Heartbeat:", error);
       // Don't fail app startup if heartbeat init fails
@@ -1387,6 +1485,7 @@ if (!gotTheLock) {
       // Initialize Live Canvas handlers BEFORE async operations so IPC handlers
       // are registered before the renderer finishes loading and calls them
       setupCanvasHandlers(mainWindow, agentDaemon);
+      setupQAHandlers(mainWindow, agentDaemon);
       CanvasManager.getInstance().setMainWindow(mainWindow);
 
       // Initialize Git Worktree & Comparison handlers
@@ -1492,6 +1591,17 @@ if (!gotTheLock) {
             source: "hook",
           });
         },
+        captureAwarenessEvent: ({ source, workspaceId, title, summary, sensitivity, payload, tags }) => {
+          awarenessService?.captureEvent({
+            source,
+            workspaceId,
+            title,
+            summary,
+            sensitivity: sensitivity || "low",
+            payload,
+            tags,
+          });
+        },
         log: (...args: unknown[]) => console.log("[AmbientMonitoring]", ...args),
       });
       await ambientMonitoringService.start();
@@ -1550,6 +1660,9 @@ if (!gotTheLock) {
             const workspacePath = workspaceRepo.findById(workspaceId)?.path;
             return readWorkspaceOpenLoops(workspacePath);
           },
+          getAwarenessSummary: async (workspaceId) => awarenessService?.getSummary(workspaceId) || null,
+          getAutonomyState: async (workspaceId) => autonomyEngine?.getWorldModel(workspaceId) || null,
+          getAutonomyDecisions: async (workspaceId) => autonomyEngine?.listDecisions(workspaceId) || [],
           deliverToChannel: async (params) => {
             await channelGateway.sendMessage?.(
               params.channelType as Any,
@@ -1902,6 +2015,14 @@ if (!gotTheLock) {
     if (ambientMonitoringService) {
       await ambientMonitoringService.stop();
       ambientMonitoringService = null;
+    }
+    if (awarenessService) {
+      await awarenessService.stop();
+      awarenessService = null;
+    }
+    if (autonomyEngine) {
+      await autonomyEngine.stop();
+      autonomyEngine = null;
     }
     if (strategicPlannerService) {
       try {

@@ -23,6 +23,7 @@ import {
   InputRequest,
 } from "../../shared/types";
 import { parseLeadingSkillSlashCommand } from "../../shared/skill-slash-commands";
+import { detectModeSuggestions, type ModeSuggestion } from "../../shared/mode-suggestion-detection";
 import { CollaborativeAgentLines } from "./CollaborativeAgentLines";
 import { CollaborativeSummaryPanel } from "./CollaborativeSummaryPanel";
 import { DispatchedAgentsPanel } from "./DispatchedAgentsPanel";
@@ -59,7 +60,21 @@ import {
 } from "./utils/attachment-content";
 import { sanitizeToolCallTextFromAssistant } from "../../shared/tool-call-text-sanitizer";
 import { formatProviderErrorForDisplay } from "../../shared/provider-error-format";
-import { ArrowLeft, Check as CheckIcon } from "lucide-react";
+import {
+  Check as CheckIcon,
+  MessageCircle,
+  Play,
+  ListTodo,
+  Search,
+  ShieldCheck,
+  Sparkles,
+  Code,
+  BookOpen,
+  Settings,
+  PenLine,
+  LayoutGrid,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { InlineVideoPreview } from "./InlineVideoPreview";
 
 const CODE_PREVIEWS_EXPANDED_KEY = "cowork:codePreviewsExpanded";
@@ -110,6 +125,20 @@ const buildTaskTitle = (text: string): string => {
   }
   return `${trimmed.slice(0, TASK_TITLE_MAX_LENGTH)}...`;
 };
+
+export function shouldCreateFreshTaskForSend(params: {
+  executionMode: ExecutionMode;
+  selectedTaskId: string | null;
+  selectedTaskExecutionMode?: ExecutionMode | null;
+}): boolean {
+  if (!params.selectedTaskId) return true;
+  if (params.executionMode === "chat") return false;
+  return false;
+}
+
+export function isChatExecutionTask(executionMode?: ExecutionMode | null): boolean {
+  return executionMode === "chat";
+}
 
 type SelectedFileInfo = {
   path?: string;
@@ -2107,7 +2136,7 @@ interface CreateTaskOptions {
   taskDomain?: TaskDomain;
 }
 
-const EXECUTION_MODE_ORDER: ExecutionMode[] = ["execute", "plan", "analyze", "verified"];
+const EXECUTION_MODE_ORDER: ExecutionMode[] = ["chat", "execute", "plan", "analyze", "verified"];
 const TASK_DOMAIN_ORDER: TaskDomain[] = [
   "auto",
   "code",
@@ -2117,16 +2146,18 @@ const TASK_DOMAIN_ORDER: TaskDomain[] = [
   "general",
 ];
 const EXECUTION_MODE_LABEL: Record<ExecutionMode, string> = {
+  chat: "Chat",
   execute: "Execute",
   plan: "Plan",
   analyze: "Analyze",
   verified: "Verified",
 };
 const EXECUTION_MODE_HINT: Record<ExecutionMode, string> = {
-  execute: "Allows full tool execution",
+  chat: "Direct chat, no tools",
+  execute: "Full task execution with tools",
   plan: "Planning mode, no mutating tools",
   analyze: "Read-only analysis mode",
-  verified: "Execute with external verification after each step",
+  verified: "Execute with verification after each step",
 };
 const TASK_DOMAIN_LABEL: Record<TaskDomain, string> = {
   auto: "Auto",
@@ -2144,6 +2175,21 @@ const TASK_DOMAIN_HINT: Record<TaskDomain, string> = {
   writing: "Optimized for writing and editing output",
   general: "Balanced behavior for mixed tasks",
 };
+const EXECUTION_MODE_ICON: Record<ExecutionMode, LucideIcon> = {
+  chat: MessageCircle,
+  execute: Play,
+  plan: ListTodo,
+  analyze: Search,
+  verified: ShieldCheck,
+};
+const TASK_DOMAIN_ICON: Record<TaskDomain, LucideIcon> = {
+  auto: Sparkles,
+  code: Code,
+  research: BookOpen,
+  operations: Settings,
+  writing: PenLine,
+  general: LayoutGrid,
+};
 type OverflowSubmenu = "mode" | "domain";
 
 type SettingsTab =
@@ -2158,7 +2204,7 @@ type SettingsTab =
   | "morechannels"
   | "integrations"
   | "updates"
-  | "guardrails"
+  | "system"
   | "queue"
   | "skills"
   | "voice"
@@ -2396,7 +2442,7 @@ const FOCUSED_CARD_POOL: FocusedCard[] = [
     iconName: "shield",
     title: "Set safety limits",
     desc: "Control what your AI can and cannot do",
-    action: { type: "settings", tab: "guardrails" },
+    action: { type: "settings", tab: "system" },
     category: "setup",
   },
 
@@ -2791,9 +2837,16 @@ export function MainContent({
   const [collaborativeModeEnabled, setCollaborativeModeEnabled] = useState(false);
   const [multiLlmModeEnabled, setMultiLlmModeEnabled] = useState(false);
   const [executionMode, setExecutionMode] = useState<ExecutionMode>("execute");
+  const [modeSuggestions, setModeSuggestions] = useState<ModeSuggestion[]>([]);
+  const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
+  const modeSuggestionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [taskDomain, setTaskDomain] = useState<TaskDomain>("auto");
   const [multiLlmConfig, setMultiLlmConfig] = useState<MultiLlmConfig | null>(null);
   const [verificationAgentEnabled, setVerificationAgentEnabled] = useState(false);
+  const isChatTask =
+    executionMode === "chat" ||
+    isChatExecutionTask(task?.agentConfig?.executionMode) ||
+    task?.agentConfig?.conversationMode === "chat";
   const setAutonomousModeSelection = useCallback((enabled: boolean) => {
     setAutonomousModeEnabled(enabled);
     if (enabled) {
@@ -2877,9 +2930,17 @@ export function MainContent({
   // Talk Mode hook - continuous voice conversation
   const talkMode = useVoiceTalkMode({
     onSendMessage: (text) => {
-      if (!selectedTaskId && onCreateTask) {
+      if (shouldCreateFreshTaskForSend({
+        executionMode,
+        selectedTaskId,
+        selectedTaskExecutionMode: task?.agentConfig?.executionMode,
+      }) && onCreateTask) {
         const title = text.length > 60 ? text.slice(0, 57) + "..." : text;
-        onCreateTask(title, text);
+        onCreateTask(
+          title,
+          text,
+          executionMode === "chat" ? { executionMode } : undefined,
+        );
       } else {
         onSendMessage(text);
       }
@@ -3023,6 +3084,10 @@ export function MainContent({
   const overflowToggleBtnRef = useRef<HTMLButtonElement>(null);
   const [showModelDropdownFromLabel, setShowModelDropdownFromLabel] = useState(false);
   const modelLabelRef = useRef<HTMLDivElement>(null);
+  const [showModeDropdown, setShowModeDropdown] = useState(false);
+  const modeDropdownRef = useRef<HTMLDivElement>(null);
+  const [showDomainDropdown, setShowDomainDropdown] = useState(false);
+  const domainDropdownRef = useRef<HTMLDivElement>(null);
   const [guardrailDefaultMaxAutoContinuations, setGuardrailDefaultMaxAutoContinuations] =
     useState<number | null>(null);
 
@@ -3948,6 +4013,32 @@ export function MainContent({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [showWorkspaceDropdown]);
 
+  // Close mode dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (modeDropdownRef.current && !modeDropdownRef.current.contains(e.target as Node)) {
+        setShowModeDropdown(false);
+      }
+    };
+    if (showModeDropdown) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showModeDropdown]);
+
+  // Close domain dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (domainDropdownRef.current && !domainDropdownRef.current.contains(e.target as Node)) {
+        setShowDomainDropdown(false);
+      }
+    };
+    if (showDomainDropdown) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showDomainDropdown]);
+
   // Close overflow menu on click outside (focused mode)
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -4639,11 +4730,16 @@ export function MainContent({
       }
       const message = composeResult.message;
 
-      // Use selectedTaskId to determine if we should follow-up or create new task
-      // This fixes the bug where old tasks (beyond the 100 most recent) would create new tasks
-      // instead of sending follow-up messages
-      if (!selectedTaskId && onCreateTask) {
-        // No task selected - create new task with optional autonomy enabled
+      // Chat mode reuses the current chat task when one exists, but creates a new
+      // task for the first message or when the selected task is not a chat session.
+      const shouldCreateFreshTask = shouldCreateFreshTaskForSend({
+        executionMode,
+        selectedTaskId,
+        selectedTaskExecutionMode: task?.agentConfig?.executionMode,
+      });
+
+      if (shouldCreateFreshTask && onCreateTask) {
+        // Fresh task - create new task with optional autonomy enabled.
         const titleSource =
           trimmedInput ||
           (pendingAttachments[0]?.name ? `Review ${pendingAttachments[0].name}` : "New task");
@@ -4680,6 +4776,7 @@ export function MainContent({
       setMentionOpen(false);
       setMentionQuery("");
       setMentionTarget(null);
+      setModeSuggestions([]);
     } catch (error) {
       console.error("Failed to send message:", error);
       sendFailed = true;
@@ -4924,6 +5021,22 @@ export function MainContent({
     setInputValue(value);
     updateMentionState(value, e.target.selectionStart);
     updateSlashState(value, e.target.selectionStart);
+
+    // Debounced mode suggestion detection
+    if (modeSuggestionTimerRef.current) clearTimeout(modeSuggestionTimerRef.current);
+    if (!value.trim()) {
+      setModeSuggestions([]);
+      return;
+    }
+    modeSuggestionTimerRef.current = setTimeout(() => {
+      const excludeModes: string[] = [];
+      // Don't suggest the currently active execution mode
+      excludeModes.push(executionMode);
+      if (collaborativeModeEnabled) excludeModes.push("collaborative");
+      const suggestions = detectModeSuggestions(value, { excludeModes, maxResults: 2, threshold: 0.3 });
+      setModeSuggestions(suggestions);
+      if (suggestions.length > 0) setSuggestionsDismissed(false);
+    }, 300);
   };
 
   const handleInputClick = (e: React.MouseEvent<HTMLTextAreaElement>) => {
@@ -4959,6 +5072,45 @@ export function MainContent({
         textarea.setSelectionRange(cursorPosition, cursorPosition);
       }
     });
+  };
+
+  const handleModeSuggestionClick = useCallback(
+    (suggestion: ModeSuggestion) => {
+      if (suggestion.mode === "collaborative") {
+        setCollaborativeModeSelection(true);
+      } else {
+        setExecutionMode(suggestion.mode as ExecutionMode);
+      }
+      setModeSuggestions((prev) => prev.filter((s) => s.mode !== suggestion.mode));
+    },
+    [setCollaborativeModeSelection],
+  );
+
+  const renderModeSuggestionBar = () => {
+    if (modeSuggestions.length === 0 || suggestionsDismissed) return null;
+    return (
+      <div className="mode-suggestion-bar">
+        {modeSuggestions.map((s) => (
+          <button
+            key={s.mode}
+            className="mode-suggestion-pill"
+            onClick={() => handleModeSuggestionClick(s)}
+            title={s.description}
+          >
+            Use {s.label}
+          </button>
+        ))}
+        <button
+          className="mode-suggestion-dismiss"
+          onClick={() => setSuggestionsDismissed(true)}
+          title="Dismiss"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M18 6L6 18M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+    );
   };
 
   const renderMentionDropdown = () => {
@@ -5562,6 +5714,7 @@ export function MainContent({
                   </button>
                 </div>
               )}
+              {renderModeSuggestionBar()}
               <div className="cli-input-wrapper">
                 <span className="cli-input-prompt">~$</span>
                 <span
@@ -6240,6 +6393,21 @@ export function MainContent({
                 <div className="input-right-actions">
                   {uiDensity === "focused" ? (
                     <>
+                      {(executionMode !== "execute" || collaborativeModeEnabled) && (
+                        <button
+                          className="active-mode-badge"
+                          title="Click to reset mode"
+                          onClick={() => {
+                            setExecutionMode("execute");
+                            setCollaborativeModeEnabled(false);
+                          }}
+                        >
+                          {collaborativeModeEnabled ? "Collab" : EXECUTION_MODE_LABEL[executionMode]}
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M18 6L6 18M6 6l12 12" />
+                          </svg>
+                        </button>
+                      )}
                       <div className="model-label-container" ref={modelLabelRef}>
                         <button
                           className="model-label-subtle"
@@ -6543,6 +6711,9 @@ export function MainContent({
   const stepFeedTimelineIndexPosition = new Map<number, number>();
   let stepFeedEventCount = 0;
   timelineItems.forEach((timelineItem, timelineIndex) => {
+    if (isChatTask && timelineItem.kind === "action_block") {
+      return;
+    }
     if (timelineItem.kind === "action_block") {
       stepFeedTimelineIndexPosition.set(timelineIndex, stepFeedEventCount);
       stepFeedEventCount += 1;
@@ -6598,19 +6769,20 @@ export function MainContent({
         {task?.parentTaskId && onSelectTask && (
           <button
             type="button"
-            className="main-header-back-btn"
+            className="main-header-parent-thread-btn"
             onClick={() => onSelectTask(task.parentTaskId!)}
-            title="Back to team"
-            aria-label="Back to team"
+            title="Back to parent thread"
+            aria-label="Back to parent thread"
           >
-            <ArrowLeft size={16} strokeWidth={2} />
+            <MessageCircle size={14} strokeWidth={1.5} />
+            <span>Parent thread</span>
           </button>
         )}
         <div className="main-header-title" title={headerTooltip}>
           {headerTitle}
         </div>
       </div>
-      {isTaskWorking && (
+      {!isChatTask && isTaskWorking && (
         <div className="main-header-status">
           <span className="chat-status executing">
             <svg
@@ -6698,10 +6870,11 @@ export function MainContent({
           )}
 
           {/* View steps toggle - show right after original prompt */}
-          {events.some((event) => {
-            const effectiveType = getEffectiveTaskEventType(event);
-            return effectiveType !== "user_message" && effectiveType !== "assistant_message";
-          }) && (
+          {!isChatTask &&
+            events.some((event) => {
+              const effectiveType = getEffectiveTaskEventType(event);
+              return effectiveType !== "user_message" && effectiveType !== "assistant_message";
+            }) && (
             <div className="timeline-controls">
               <button
                 className={`view-steps-btn ${showSteps ? "expanded" : ""}`}
@@ -6806,16 +6979,6 @@ export function MainContent({
                             !!task &&
                             ["completed", "failed", "cancelled"].includes(task.status)
                           }
-                          onWrapUp={
-                            onWrapUpTask
-                              ? () => {
-                                  if (!wrappingUp) {
-                                    setWrappingUp(true);
-                                    onWrapUpTask!();
-                                  }
-                                }
-                              : undefined
-                          }
                           isWrappingUp={wrappingUp}
                         />
                       ) : (
@@ -6831,6 +6994,7 @@ export function MainContent({
                 }
 
                 if (item.kind === "action_block") {
+                  if (isChatTask) return null;
                   const isBlockOnlyMinimalCompletions =
                     !verboseSteps &&
                     item.events.length > 0 &&
@@ -7121,6 +7285,41 @@ export function MainContent({
                   item.eventIndex,
                 );
 
+                if (isChatTask && !isUserMessage && !isAssistantMessage) {
+                  if (effectiveType === "llm_streaming" && isTaskWorking) {
+                    const streamingText =
+                      typeof event.payload?.text === "string"
+                        ? event.payload.text
+                        : typeof event.payload?.message === "string"
+                          ? event.payload.message
+                          : "";
+                    return (
+                      <Fragment key={event.id || `event-${item.eventIndex}`}>
+                        <div className="chat-message assistant-message">
+                          <div className="chat-bubble assistant-bubble">
+                            <div className="chat-bubble-content markdown-content">
+                              <AssistantMessageContent
+                                message={cleanAssistantMessageForDisplay(streamingText)}
+                                markdownComponents={markdownComponents}
+                                workspacePath={workspace?.path}
+                                onOpenViewer={setViewerFilePath}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </Fragment>
+                    );
+                  }
+                  if (commandOutputsAfterEvent && commandOutputsAfterEvent.length > 0) {
+                    return (
+                      <Fragment key={event.id || `event-${item.eventIndex}`}>
+                        {renderCommandOutputs(commandOutputsAfterEvent)}
+                      </Fragment>
+                    );
+                  }
+                  return null;
+                }
+
                 // Render user messages as chat bubbles on the right
                 if (isUserMessage) {
                   if (event.id === initialPromptEventId) {
@@ -7182,7 +7381,7 @@ export function MainContent({
                     <Fragment key={event.id || `event-${item.eventIndex}`}>
                       <div className="chat-message assistant-message">
                         <div className="chat-bubble assistant-bubble">
-                          {isLastAssistant && (
+                          {isLastAssistant && !isChatTask && (
                             <div className="chat-bubble-header">
                               {task.status === "completed" && (
                                 <span className="chat-status">
@@ -8145,6 +8344,133 @@ export function MainContent({
                 </span>
               )}
             </span>
+          </div>
+        </div>
+        <div className="input-status-text">
+          <button
+            className="input-status-workspace"
+            onClick={handleWorkspaceDropdownToggle}
+            title={workspace?.path || "Select a workspace folder"}
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              aria-hidden
+            >
+              <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+              <line x1="8" y1="21" x2="16" y2="21" />
+              <line x1="12" y1="17" x2="12" y2="21" />
+            </svg>
+            <span className="input-status-workspace-path">
+              {workspace?.isTemp || isTempWorkspaceId(workspace?.id)
+                ? "Work in a folder"
+                : workspace?.path
+                  ? (() => {
+                      const parts = workspace.path.split(/[/\\]/).filter(Boolean);
+                      return parts.length > 2
+                        ? `~/.../${parts.slice(-2).join("/")}`
+                        : workspace.path;
+                    })()
+                  : "No folder selected"}
+            </span>
+          </button>
+          <div className="input-status-right">
+            <div className="input-status-mode-wrap" ref={modeDropdownRef}>
+              <button
+                type="button"
+                className="input-status-mode menu-tooltip-target"
+                onClick={() => {
+                  setShowDomainDropdown(false);
+                  setShowModeDropdown((v) => !v);
+                }}
+                data-tooltip={`Current mode: ${EXECUTION_MODE_LABEL[executionMode]} · ${EXECUTION_MODE_HINT[executionMode]}`}
+                aria-haspopup="listbox"
+                aria-expanded={showModeDropdown}
+              >
+                {(() => {
+                  const Icon = EXECUTION_MODE_ICON[executionMode];
+                  return <Icon size={12} aria-hidden />;
+                })()}
+                {EXECUTION_MODE_LABEL[executionMode]}
+              </button>
+              {showModeDropdown && (
+                <div
+                  className="input-status-mode-dropdown"
+                  role="listbox"
+                  aria-label="Execution mode"
+                >
+                  {EXECUTION_MODE_ORDER.map((value) => {
+                    const Icon = EXECUTION_MODE_ICON[value];
+                    return (
+                      <button
+                        key={value}
+                        type="button"
+                        className={`input-status-mode-option ${executionMode === value ? "active" : ""}`}
+                        onClick={() => {
+                          setExecutionMode(value);
+                          setShowModeDropdown(false);
+                        }}
+                        role="option"
+                        aria-selected={executionMode === value}
+                      >
+                        <Icon size={14} aria-hidden />
+                        {EXECUTION_MODE_LABEL[value]}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            <div className="input-status-domain-wrap" ref={domainDropdownRef}>
+              <button
+                type="button"
+                className="input-status-domain"
+                onClick={() => {
+                  setShowModeDropdown(false);
+                  setShowDomainDropdown((v) => !v);
+                }}
+                title={TASK_DOMAIN_HINT[taskDomain]}
+                aria-haspopup="listbox"
+                aria-expanded={showDomainDropdown}
+              >
+                {(() => {
+                  const Icon = TASK_DOMAIN_ICON[taskDomain];
+                  return <Icon size={12} aria-hidden />;
+                })()}
+                {TASK_DOMAIN_LABEL[taskDomain]}
+              </button>
+              {showDomainDropdown && (
+                <div
+                  className="input-status-domain-dropdown"
+                  role="listbox"
+                  aria-label="Task domain"
+                >
+                  {TASK_DOMAIN_ORDER.map((value) => {
+                    const Icon = TASK_DOMAIN_ICON[value];
+                    return (
+                      <button
+                        key={value}
+                        type="button"
+                        className={`input-status-domain-option ${taskDomain === value ? "active" : ""}`}
+                        onClick={() => {
+                          setTaskDomain(value);
+                          setShowDomainDropdown(false);
+                        }}
+                        role="option"
+                        aria-selected={taskDomain === value}
+                      >
+                        <Icon size={14} aria-hidden />
+                        {TASK_DOMAIN_LABEL[value]}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
         </div>
         <div className="footer-disclaimer">{agentContext.getMessage("disclaimer")}</div>

@@ -87,12 +87,13 @@
     "dev:start": "node scripts/dev_start.mjs",
     "dev:log": "cross-env COWORK_DEV_LOG_CAPTURE=1 node scripts/dev_with_logs.mjs",
     "dev:react": "vite",
+    "build:healthkit-bridge": "node scripts/build_healthkit_bridge.mjs",
     "dev:electron": "tsc -p tsconfig.electron.json && cross-env ELECTRON_RUN_AS_NODE= NODE_ENV=development electron .",
-    "build": "npm run build:react && concurrently -n electron,daemon \"npm run build:electron\" \"npm run build:daemon\" && npm run build:connectors",
+    "build": "npm run build:react && npm run build:healthkit-bridge && concurrently -n electron,daemon \"npm run build:electron\" \"npm run build:daemon\" && npm run build:connectors",
     "build:react": "vite build",
     "build:electron": "tsc -p tsconfig.electron.json",
     "build:daemon": "tsc -p tsconfig.daemon.json",
-    "build:connectors": "concurrently -n salesforce,jira,hubspot,zendesk,servicenow,linear,asana,okta,resend,discord,google-workspace \"tsc -p connectors/salesforce-mcp/tsconfig.json\" \"tsc -p connectors/jira-mcp/tsconfig.json\" \"tsc -p connectors/hubspot-mcp/tsconfig.json\" \"tsc -p connectors/zendesk-mcp/tsconfig.json\" \"tsc -p connectors/servicenow-mcp/tsconfig.json\" \"tsc -p connectors/linear-mcp/tsconfig.json\" \"tsc -p connectors/asana-mcp/tsconfig.json\" \"tsc -p connectors/okta-mcp/tsconfig.json\" \"tsc -p connectors/resend-mcp/tsconfig.json\" \"tsc -p connectors/discord-mcp/tsconfig.json\" \"tsc -p connectors/google-workspace-mcp/tsconfig.json\"",
+    "build:connectors": "concurrently -n salesforce,jira,hubspot,zendesk,servicenow,linear,asana,okta,resend,discord,google-workspace,figma,vercel,monday \"tsc -p connectors/salesforce-mcp/tsconfig.json\" \"tsc -p connectors/jira-mcp/tsconfig.json\" \"tsc -p connectors/hubspot-mcp/tsconfig.json\" \"tsc -p connectors/zendesk-mcp/tsconfig.json\" \"tsc -p connectors/servicenow-mcp/tsconfig.json\" \"tsc -p connectors/linear-mcp/tsconfig.json\" \"tsc -p connectors/asana-mcp/tsconfig.json\" \"tsc -p connectors/okta-mcp/tsconfig.json\" \"tsc -p connectors/resend-mcp/tsconfig.json\" \"tsc -p connectors/discord-mcp/tsconfig.json\" \"tsc -p connectors/google-workspace-mcp/tsconfig.json\" \"tsc -p connectors/figma-mcp/tsconfig.json\" \"tsc -p connectors/vercel-mcp/tsconfig.json\" \"tsc -p connectors/monday-mcp/tsconfig.json\"",
     "prepack": "npm run build",
     "package": "npm run build && electron-builder",
     "fmt": "oxfmt --write src",
@@ -230,6 +231,10 @@
         "filter": [
           "*.png"
         ]
+      },
+      {
+        "from": "build/healthkit-bridge",
+        "to": "healthkit-bridge"
       }
     ],
     "mac": {

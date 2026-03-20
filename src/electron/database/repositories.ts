@@ -2819,7 +2819,17 @@ export class AuditLogRepository {
 // Memory System Repositories
 // ============================================================
 
-export type MemoryType = "observation" | "decision" | "error" | "insight" | "summary";
+export type MemoryType =
+  | "observation"
+  | "decision"
+  | "error"
+  | "insight"
+  | "summary"
+  | "preference"
+  | "constraint"
+  | "timing_preference"
+  | "workflow_pattern"
+  | "correction_rule";
 export type PrivacyMode = "normal" | "strict" | "disabled";
 export type TimePeriod = "hourly" | "daily" | "weekly";
 

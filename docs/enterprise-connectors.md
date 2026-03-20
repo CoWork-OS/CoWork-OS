@@ -23,19 +23,25 @@ Benefits:
 
 ## Shipped Connector Allowlist
 
-The shipped connector catalog is currently limited to:
+The shipped connector catalog includes **44 connectors** across CRM, productivity, devtools, communication, legal, and finance categories. Install from **Settings > Connectors > Browse Registry**.
 
-- Salesforce
-- Jira
-- HubSpot
-- Zendesk
-- ServiceNow
-- Linear
-- Asana
-- Okta
-- Resend
-- Discord
-- Google Workspace
+### Enterprise & CRM (11)
+Salesforce, Jira, HubSpot, Zendesk, ServiceNow, Linear, Asana, Okta, Resend, Discord, Google Workspace
+
+### Dev Tools & Analytics (19)
+Figma, Vercel, Monday, Excalidraw, Supabase, Netlify, Honeycomb, Ahrefs, Cloudflare, Tavily, tldraw, Amplitude, Clerk, Grafana, Socket, Metabase, Shadcn UI, GrowthBook, Tomba
+
+### Productivity (11)
+Miro, Hugging Face, Mermaid Chart, Make, Smartsheet, Airtable, Cal.com, Cloudinary, Mem, Drafts (macOS), Fantastical (macOS)
+
+### Finance & Payments (4)
+Stripe, PayPal, Square, Attio
+
+### Legal (1)
+Clinical Trials
+
+### Communication (1)
+Mailtrap
 
 ## Connector Contract
 
@@ -229,27 +235,18 @@ Use it to bootstrap new connectors quickly. It includes:
 
 ## Built-in Connectors (Local Registry)
 
-These are included in the local MCP registry and appear in **Settings → MCP Servers → Browse Registry**:
+**44 connectors** are included in the local MCP registry and appear in **Settings → Connectors → Browse Registry**. All are npm-installable MCP servers (stdio transport) unless noted as manual (bundled connectors).
 
-- Salesforce (CRM)
-- Jira (Issue tracking)
-- HubSpot (CRM)
-- Zendesk (Support)
-- ServiceNow (ITSM)
-- Linear (Product/Issue tracking)
-- Asana (Work management)
-- Okta (Identity)
-- Resend (Transactional email / webhook automation)
-- Discord (Community/messaging — 19 tools)
-- Google Workspace (Calendar, Drive, Gmail — OAuth)
+| Category | Connectors |
+|----------|------------|
+| **CRM & Enterprise** | Salesforce, Jira, HubSpot, Zendesk, ServiceNow, Linear, Asana, Okta |
+| **Communication** | Resend, Discord, Mailtrap |
+| **Productivity** | Google Workspace (OAuth), Figma, Vercel, Monday, Miro, Supabase, Excalidraw, Make, Smartsheet, Netlify, Airtable, Cal.com, Cloudinary, Mem, Drafts (macOS), Fantastical (macOS) |
+| **Dev Tools** | Hugging Face, Ahrefs, Mermaid Chart, Cloudflare, Honeycomb, Tavily, tldraw, Amplitude, Clerk, Grafana, Socket, Metabase, Shadcn UI, GrowthBook, Tomba |
+| **Finance** | Stripe, PayPal, Square, Attio |
+| **Legal** | Clinical Trials |
 
-Not shipped in the current connector catalog:
-
-- Slack connector MCP server
-- DocuSign connector MCP server
-- Outreach connector MCP server
-
-Slack remains available as a channel gateway, while GitHub and Notion are handled through native CoWork integrations first.
+Not shipped in the current connector catalog: Slack, DocuSign, Outreach (removed from Tier-1). Slack remains available as a channel gateway. GitHub and Notion prefer native CoWork integrations first, with MCP as fallback.
 
 ## Chat Setup Orchestration (Tier-1)
 

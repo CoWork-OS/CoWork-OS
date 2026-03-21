@@ -21,6 +21,8 @@ const KIT_DIRNAME = ".cowork";
 const MAX_FILE_BYTES = 96 * 1024;
 const MAX_SECTION_CHARS = 6000;
 const MAX_TOTAL_CHARS = 16000;
+const AUTO_LORE_START = "<!-- cowork:auto:lore:start -->";
+const AUTO_LORE_END = "<!-- cowork:auto:lore:end -->";
 
 const MAP_FILES: Array<{ relPath: string; title: string }> = [
   { relPath: "docs/CODEBASE_MAP.md", title: "Codebase Map" },
@@ -140,14 +142,25 @@ function extractFilledKvLines(markdown: string): string {
   return kept.join("\n").trim();
 }
 
+function stripMarkedBlock(markdown: string, startMarker: string, endMarker: string): string {
+  if (!markdown) return "";
+  const pattern = new RegExp(
+    `${startMarker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[\\s\\S]*?${endMarker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\n?`,
+    "g",
+  );
+  return markdown.replace(pattern, "").trim();
+}
+
 function formatWorkspaceKitBody(body: string, contract: KitContract): string {
+  const normalizedBody =
+    contract.file === "LORE.md" ? stripMarkedBlock(body, AUTO_LORE_START, AUTO_LORE_END) : body;
   switch (contract.parser) {
     case "kv-lines":
-      return extractFilledKvLines(body) || body.trim();
+      return extractFilledKvLines(normalizedBody) || normalizedBody.trim();
     case "decision-log":
-      return extractBulletSections(body) || body.trim();
+      return extractBulletSections(normalizedBody) || normalizedBody.trim();
     default:
-      return body.trim();
+      return normalizedBody.trim();
   }
 }
 

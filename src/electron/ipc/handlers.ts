@@ -36,6 +36,7 @@ import { AgentTeamRunRepository } from "../agents/AgentTeamRunRepository";
 import { AgentTeamItemRepository } from "../agents/AgentTeamItemRepository";
 import { AgentTeamThoughtRepository } from "../agents/AgentTeamThoughtRepository";
 import { AgentTeamOrchestrator } from "../agents/AgentTeamOrchestrator";
+import { formatAgentRoleDisplay } from "../agents/agent-role-display";
 import { selectAgentsForTask } from "../agents/capabilityMatcher";
 import { TaskLabelRepository } from "../database/TaskLabelRepository";
 import { WorkingStateRepository } from "../agents/WorkingStateRepository";
@@ -155,7 +156,6 @@ import { getAwarenessService } from "../awareness/AwarenessService";
 import { getAutonomyEngine } from "../awareness/AutonomyEngine";
 import { CustomSkill } from "../../shared/types";
 import {
-  isSpawnSubagentsPrompt,
   parseSpawnAgentCount,
 } from "../../shared/spawn-intent-detection";
 import { MCPSettingsManager } from "../mcp/settings";
@@ -1566,12 +1566,6 @@ export async function setupIpcHandlers(
         }
       : undefined;
 
-    // Auto-enable collaborative mode when prompt requests spawning subagents/agents
-    // (e.g. "spawn 3 subagents", "spawn agents") — before any other processing
-    if (isSpawnSubagentsPrompt(`${title}\n${prompt}`)) {
-      normalizedAgentConfig = { ...(normalizedAgentConfig ?? {}), collaborativeMode: true };
-    }
-
     const task = taskRepo.create({
       title,
       prompt,
@@ -1670,7 +1664,7 @@ export async function setupIpcHandlers(
             if (m.displayName === "Synthesis") continue;
             teamItemRepo.create({
               teamRunId: run.id,
-              title: `${m.icon} ${m.displayName}`,
+              title: formatAgentRoleDisplay(m.displayName, m.icon),
               description: prompt,
               ownerAgentRoleId: m.id,
               status: "todo",
@@ -2276,6 +2270,35 @@ export async function setupIpcHandlers(
       };
     };
 
+    const normalizeAzureAnthropicSettings = (
+      incoming?: LLMSettingsData["azureAnthropic"],
+      existing?: LLMSettingsData["azureAnthropic"],
+    ): LLMSettingsData["azureAnthropic"] | undefined => {
+      if (!incoming && !existing) return undefined;
+      const mergedDeployments = [
+        ...(incoming?.deployments || []),
+        ...(existing?.deployments || []),
+      ]
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+      const deployment = (
+        incoming?.deployment ||
+        existing?.deployment ||
+        mergedDeployments[0] ||
+        ""
+      ).trim();
+      if (deployment && !mergedDeployments.includes(deployment)) {
+        mergedDeployments.unshift(deployment);
+      }
+      return {
+        ...existing,
+        ...incoming,
+        deployment: deployment || undefined,
+        deployments:
+          mergedDeployments.length > 0 ? Array.from(new Set(mergedDeployments)) : undefined,
+      };
+    };
+
     LLMProviderFactory.saveSettings({
       providerType: validated.providerType,
       modelKey: validated.modelKey as ModelKey,
@@ -2286,6 +2309,10 @@ export async function setupIpcHandlers(
       openrouter: validated.openrouter,
       openai: openaiSettings,
       azure: normalizeAzureSettings(validated.azure, existingSettings.azure),
+      azureAnthropic: normalizeAzureAnthropicSettings(
+        validated.azureAnthropic,
+        existingSettings.azureAnthropic,
+      ),
       groq: validated.groq,
       xai: validated.xai,
       kimi: validated.kimi,
@@ -2355,6 +2382,9 @@ export async function setupIpcHandlers(
       case "azure":
         updatedSettings.azure = undefined;
         break;
+      case "azure-anthropic":
+        updatedSettings.azureAnthropic = undefined;
+        break;
       case "groq":
         updatedSettings.groq = undefined;
         updatedSettings.cachedGroqModels = undefined;
@@ -2402,6 +2432,8 @@ export async function setupIpcHandlers(
       config.customProviders?.[resolvedProviderType] ||
       config.customProviders?.[config.providerType];
     const azureDeployment = config.azure?.deployment || config.azure?.deployments?.[0];
+    const azureAnthropicDeployment =
+      config.azureAnthropic?.deployment || config.azureAnthropic?.deployments?.[0];
     const providerConfig: LLMProviderConfig = {
       type: config.providerType,
       model: LLMProviderFactory.getModelId(
@@ -2412,6 +2444,7 @@ export async function setupIpcHandlers(
         config.openrouter?.model,
         config.openai?.model,
         azureDeployment,
+        azureAnthropicDeployment,
         config.groq?.model,
         config.xai?.model,
         config.kimi?.model,
@@ -2438,6 +2471,10 @@ export async function setupIpcHandlers(
       azureDeployment: azureDeployment,
       azureApiVersion: config.azure?.apiVersion,
       azureReasoningEffort: config.azure?.reasoningEffort,
+      azureAnthropicApiKey: config.azureAnthropic?.apiKey,
+      azureAnthropicEndpoint: config.azureAnthropic?.endpoint,
+      azureAnthropicDeployment: azureAnthropicDeployment,
+      azureAnthropicApiVersion: config.azureAnthropic?.apiVersion,
       groqApiKey: config.groq?.apiKey,
       groqBaseUrl: config.groq?.baseUrl,
       xaiApiKey: config.xai?.apiKey,

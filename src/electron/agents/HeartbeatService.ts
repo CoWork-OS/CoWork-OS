@@ -38,6 +38,7 @@ import {
   buildAgentConfigFromAutonomyPolicy,
   resolveOperationalAutonomyPolicy,
 } from "./autonomy-policy";
+import type { MemoryCaptureOptions } from "../memory/MemoryService";
 
 type HeartbeatWakeMode = "now" | "next-heartbeat";
 
@@ -133,6 +134,7 @@ export interface HeartbeatServiceDeps {
   getDefaultWorkspaceId: () => string | undefined;
   getDefaultWorkspacePath: () => string | undefined;
   getWorkspacePath: (workspaceId: string) => string | undefined;
+  hasActiveForegroundTask?: (workspaceId?: string) => boolean;
   recordActivity?: (params: {
     workspaceId: string;
     agentRoleId: string;
@@ -182,10 +184,11 @@ export interface HeartbeatServiceDeps {
       | "preference"
       | "constraint"
       | "timing_preference"
-      | "workflow_pattern"
-      | "correction_rule",
+    | "workflow_pattern"
+    | "correction_rule",
     content: string,
     isPrivate?: boolean,
+    options?: MemoryCaptureOptions,
   ) => Promise<unknown>;
 }
 
@@ -466,6 +469,39 @@ export class HeartbeatService extends EventEmitter {
       };
     }
 
+    const wakeRequests = this.consumeWakeRequests(agent.id);
+    const hasManualWakeRequest = wakeRequests.some((request) => request.source === "manual");
+    if (this.deps.hasActiveForegroundTask?.() && !hasManualWakeRequest) {
+      const result: HeartbeatResult = {
+        agentRoleId: agent.id,
+        status: "ok",
+        pendingMentions: 0,
+        assignedTasks: 0,
+        relevantActivities: 0,
+        silent: true,
+      };
+
+      console.log(
+        `[HeartbeatService] Suppressed ${agent.displayName} while a foreground task is active`,
+      );
+      this.updateHeartbeatStatus(agent.id, "sleeping", Date.now());
+      this.emitHeartbeatEvent({
+        type: "no_work",
+        agentRoleId: agent.id,
+        agentName: agent.displayName,
+        timestamp: Date.now(),
+        result,
+      });
+      this.emitHeartbeatEvent({
+        type: "completed",
+        agentRoleId: agent.id,
+        agentName: agent.displayName,
+        timestamp: Date.now(),
+        result,
+      });
+      return result;
+    }
+
     this.running.set(agent.id, true);
     this.updateHeartbeatStatus(agent.id, "running");
 
@@ -478,8 +514,6 @@ export class HeartbeatService extends EventEmitter {
     });
 
     try {
-      const wakeRequests = this.consumeWakeRequests(agent.id);
-
       // Check for pending work
       const workItems = await this.checkForWork(agent);
       const result: HeartbeatResult = {
@@ -1750,6 +1784,12 @@ export class HeartbeatService extends EventEmitter {
       decision.memoryType,
       decision.memoryContent,
       isPrivate,
+      {
+        origin: "heartbeat",
+        batchKey: `heartbeat:${workspaceId}:${decision.signalFamily}:${Math.floor(Date.now() / 300000)}`,
+        signalFamily: decision.signalFamily,
+        priority: decision.confidence >= HeartbeatService.PROMOTION_THRESHOLD ? "high" : "low",
+      },
     );
   }
 

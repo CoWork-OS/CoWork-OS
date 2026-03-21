@@ -1319,6 +1319,8 @@ export class MessageRouter {
       const settings = LLMProviderFactory.getSettings();
       const providerType = LLMProviderFactory.getSelectedProvider();
       const azureDeployment = settings.azure?.deployment || settings.azure?.deployments?.[0];
+      const azureAnthropicDeployment =
+        settings.azureAnthropic?.deployment || settings.azureAnthropic?.deployments?.[0];
       const modelId = LLMProviderFactory.getModelId(
         settings.modelKey,
         providerType,
@@ -1327,6 +1329,7 @@ export class MessageRouter {
         settings.openrouter?.model,
         settings.openai?.model,
         azureDeployment,
+        azureAnthropicDeployment,
         settings.groq?.model,
         settings.xai?.model,
         settings.kimi?.model,

@@ -70,6 +70,20 @@ describe("AgentDaemon structured input requests", () => {
     });
 
     expect(response).toEqual({ status: "handled", requestId: "req-submit-1" });
+    expect(daemonLike.logEvent).toHaveBeenCalledWith(
+      "task-1",
+      "assistant_message",
+      expect.objectContaining({
+        message: expect.stringContaining("User selected structured input options:"),
+      }),
+    );
+    expect(daemonLike.logEvent).toHaveBeenCalledWith(
+      "task-1",
+      "assistant_message",
+      expect.objectContaining({
+        message: expect.stringContaining("- Mode: Desktop + API (Recommended)"),
+      }),
+    );
     await expect(requestPromise).resolves.toEqual(
       expect.objectContaining({ status: "submitted", requestId: "req-submit-1" }),
     );

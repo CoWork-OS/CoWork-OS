@@ -31,7 +31,19 @@ let heartbeatEvents: HeartbeatEvent[];
 let createdTasks: Task[];
 let createdSuggestions: ProactiveSuggestion[];
 let notifications: Array<Record<string, unknown>>;
-let capturedMemories: Array<Record<string, unknown>>;
+let capturedMemories: Array<{
+  workspaceId: string;
+  taskId: string | undefined;
+  type: string;
+  content: string;
+  isPrivate?: boolean;
+  options?: {
+    origin?: string;
+    batchKey?: string;
+    signalFamily?: string;
+    priority?: string;
+  };
+}>;
 let tmpDir: string;
 let workspacePaths: Map<string, string>;
 
@@ -222,6 +234,7 @@ describe("HeartbeatService", () => {
       getWorkspacePath: (workspaceId: string) => {
         return workspacePaths.get(workspaceId);
       },
+      hasActiveForegroundTask: () => false,
       listWorkspaceContexts: () =>
         Array.from(workspacePaths.entries()).map(([workspaceId, workspacePath]) => ({
           workspaceId,
@@ -261,8 +274,8 @@ describe("HeartbeatService", () => {
       addNotification: async (params) => {
         notifications.push(params);
       },
-      captureMemory: async (workspaceId, taskId, type, content, isPrivate) => {
-        capturedMemories.push({ workspaceId, taskId, type, content, isPrivate });
+      captureMemory: async (workspaceId, taskId, type, content, isPrivate, options) => {
+        capturedMemories.push({ workspaceId, taskId, type, content, isPrivate, options });
       },
     };
 
@@ -499,6 +512,41 @@ describe("HeartbeatService", () => {
       expect(createdTasks[0].prompt).toContain("Due Soon");
     });
 
+    it("tags heartbeat companion memory captures with source metadata", async () => {
+      createAgent("agent-1", { heartbeatEnabled: true });
+      deps.getAwarenessSummary = () => ({
+        generatedAt: Date.now(),
+        workspaceId: "workspace-1",
+        currentFocus: "Release prep",
+        whatChanged: [],
+        whatMattersNow: [],
+        dueSoon: [
+          {
+            id: "due-heartbeat",
+            title: "Release review",
+            detail: "Follow up on the release checklist.",
+            source: "tasks",
+            score: 0.95,
+            tags: ["due_soon"],
+            requiresHeartbeat: false,
+          },
+        ],
+        beliefs: [],
+        wakeReasons: ["deadline_risk"],
+      });
+      service = new HeartbeatService(deps);
+      service.on("heartbeat", (event) => heartbeatEvents.push(event));
+
+      await service.triggerHeartbeat("agent-1");
+
+      expect(capturedMemories).toHaveLength(1);
+      expect(capturedMemories[0]?.options).toMatchObject({
+        origin: "heartbeat",
+        signalFamily: "urgent_interrupt",
+      });
+      expect(String(capturedMemories[0]?.options?.batchKey || "")).toContain("heartbeat:workspace-1");
+    });
+
     it("stays silent when only weak passive signals exist", async () => {
       createAgent("agent-1", { heartbeatEnabled: true });
       deps.getAwarenessSummary = () => ({
@@ -681,6 +729,37 @@ describe("HeartbeatService", () => {
 
     it("creates a task for explicit immediate wake requests", async () => {
       createAgent("agent-1", { heartbeatEnabled: true });
+
+      service.submitWakeRequest("agent-1", {
+        mode: "now",
+        source: "manual",
+        text: "Check this now",
+      });
+
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(createdTasks).toHaveLength(1);
+      expect(createdTasks[0]?.title).toBe("Heartbeat: Agent agent-1");
+    });
+
+    it("suppresses scheduled heartbeat task creation while a foreground task is active", async () => {
+      createAgent("agent-1", {
+        heartbeatEnabled: true,
+        autonomyLevel: "lead",
+      });
+      writeHeartbeatChecklist("workspace-1", "# Recurring Checks\n\n## Daily\n- Review blockers\n");
+      deps.hasActiveForegroundTask = () => true;
+
+      const result = await service.triggerHeartbeat("agent-1");
+
+      expect(result.status).toBe("ok");
+      expect(result.silent).toBe(true);
+      expect(createdTasks).toHaveLength(0);
+    });
+
+    it("still allows manual immediate wake requests while a foreground task is active", async () => {
+      createAgent("agent-1", { heartbeatEnabled: true });
+      deps.hasActiveForegroundTask = () => true;
 
       service.submitWakeRequest("agent-1", {
         mode: "now",

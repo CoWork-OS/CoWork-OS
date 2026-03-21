@@ -283,6 +283,7 @@ const ProviderRoutingSettingsSchema = {
   profileRoutingEnabled: z.boolean().optional(),
   strongModelKey: z.string().max(200).optional(),
   cheapModelKey: z.string().max(200).optional(),
+  automatedTaskModelKey: z.string().max(200).optional(),
   preferStrongForVerification: z.boolean().optional(),
 } as const;
 
@@ -357,6 +358,17 @@ export const AzureSettingsSchema = z
   })
   .optional();
 
+export const AzureAnthropicSettingsSchema = z
+  .object({
+    apiKey: z.string().max(500).optional(),
+    endpoint: z.string().max(500).optional(),
+    deployment: z.string().max(200).optional(),
+    deployments: z.array(z.string().max(200)).max(50).optional(),
+    apiVersion: z.string().max(200).optional(),
+    ...ProviderRoutingSettingsSchema,
+  })
+  .optional();
+
 export const GroqSettingsSchema = z
   .object({
     apiKey: z.string().max(500).optional(),
@@ -423,6 +435,7 @@ export const LLMSettingsSchema = z.object({
   openrouter: OpenRouterSettingsSchema,
   openai: OpenAISettingsSchema,
   azure: AzureSettingsSchema,
+  azureAnthropic: AzureAnthropicSettingsSchema,
   groq: GroqSettingsSchema,
   xai: XAISettingsSchema,
   kimi: KimiSettingsSchema,

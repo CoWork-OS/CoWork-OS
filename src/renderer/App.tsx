@@ -10,6 +10,7 @@ import { HomeDashboard } from "./components/HomeDashboard";
 import { HealthPanel } from "./components/HealthPanel";
 import { DispatchPanel } from "./components/DispatchPanel";
 import { DevicesPanel } from "./components/DevicesPanel";
+import { IdeasPanel } from "./components/IdeasPanel";
 // TaskQueuePanel moved to RightPanel
 import { ToastContainer } from "./components/Toast";
 import { QuickTaskFAB } from "./components/QuickTaskFAB";
@@ -57,6 +58,7 @@ import {
 } from "./utils/task-completion-ux";
 import { isSpawnSubagentsPrompt } from "../shared/spawn-intent-detection";
 import { isSynthesisChildTask } from "../shared/synthesis-agent-detection";
+import { isAutomatedTaskLike } from "../shared/automated-task-detection";
 
 // Helper to get effective theme based on system preference
 function getEffectiveTheme(themeMode: ThemeMode): "light" | "dark" {
@@ -66,7 +68,7 @@ function getEffectiveTheme(themeMode: ThemeMode): "light" | "dark" {
   return themeMode;
 }
 
-type AppView = "home" | "main" | "settings" | "browser" | "devices" | "health" | "dispatch";
+type AppView = "home" | "main" | "settings" | "browser" | "devices" | "health" | "dispatch" | "ideas";
 type RemoteTaskView = {
   deviceId: string;
   deviceName: string;
@@ -1275,7 +1277,8 @@ export function App() {
           outputSummary,
           completionToastNotifiedPathsRef.current,
         );
-        if (toastDecision.show) {
+        const shouldShowToast = toastDecision.show && !isAutomatedTaskLike(task);
+        if (shouldShowToast) {
           recordCompletionToastShown(
             event.taskId,
             toastDecision.pathsToRecord,
@@ -1299,7 +1302,7 @@ export function App() {
         const primaryOutputPath = hasTaskOutputs(outputSummary)
           ? outputSummary.primaryOutputPath
           : undefined;
-        if (toastDecision.show) {
+        if (shouldShowToast) {
           addToast(
             buildTaskCompletionToast({
               taskId: event.taskId,
@@ -1764,8 +1767,10 @@ export function App() {
       llmProfileForced?: boolean;
     },
     images?: ImageAttachment[],
+    workspaceOverride?: Workspace,
   ) => {
-    if (!currentWorkspace) return;
+    const effectiveWorkspace = workspaceOverride ?? currentWorkspace;
+    if (!effectiveWorkspace) return;
 
     // Auto-enable collaborative mode when prompt requests spawning subagents/agents
     // (e.g. "spawn 3 subagents", "spawn agents") — before any other processing
@@ -1839,7 +1844,7 @@ export function App() {
       const task = await window.electronAPI.createTask({
         title,
         prompt,
-        workspaceId: currentWorkspace.id,
+        workspaceId: effectiveWorkspace.id,
         ...(agentConfig && { agentConfig }),
         ...(images && images.length > 0 && { images }),
       });
@@ -2043,6 +2048,24 @@ export function App() {
     setCurrentView("main");
     clearRemoteTaskView();
     await handleCreateTask(title, prompt);
+  };
+
+  const handleCreateTaskFromIdea = async (prompt: string) => {
+    setCurrentView("main");
+    clearRemoteTaskView();
+    let workspace = currentWorkspace;
+    if (!workspace) {
+      try {
+        workspace = await window.electronAPI.getTempWorkspace({ createNew: true });
+        setCurrentWorkspace(workspace);
+      } catch (error) {
+        console.error("Failed to get workspace for idea:", error);
+        addToast({ type: "error", title: "Error", message: "Could not create session" });
+        return;
+      }
+    }
+    const title = prompt.slice(0, 50) + (prompt.length > 50 ? "..." : "");
+    await handleCreateTask(title, prompt, undefined, undefined, workspace);
   };
 
   const handleNewSession = async () => {
@@ -2646,7 +2669,7 @@ export function App() {
           </button>
         </div>
       )}
-      {(currentView === "main" || currentView === "home" || currentView === "devices" || currentView === "health" || currentView === "dispatch") && (
+      {(currentView === "main" || currentView === "home" || currentView === "devices" || currentView === "health" || currentView === "dispatch" || currentView === "ideas") && (
         <>
           <div
             className={`app-layout ${leftSidebarCollapsed ? "left-collapsed" : ""} ${effectiveRightCollapsed ? "right-collapsed" : ""}`}
@@ -2657,12 +2680,14 @@ export function App() {
                 tasks={tasks}
                 selectedTaskId={selectedTaskId}
                 isHomeActive={currentView === "home"}
+                isIdeasActive={currentView === "ideas"}
                 isHealthActive={currentView === "health"}
                 isDispatchActive={currentView === "dispatch"}
                 isDevicesActive={currentView === "devices"}
                 completionAttentionTaskIds={unseenCompletedTaskIds}
                 onSelectTask={handleSelectTaskFromShell}
                 onOpenHome={() => setCurrentView("home")}
+                onOpenIdeas={() => setCurrentView("ideas")}
                 onOpenHealth={() => setCurrentView("health")}
                 onOpenDispatch={() => setCurrentView("dispatch")}
                 onOpenDevices={() => setCurrentView("devices")}
@@ -2792,6 +2817,8 @@ export function App() {
                   handleCreateTask(title, prompt);
                 }}
               />
+            ) : currentView === "ideas" ? (
+              <IdeasPanel onCreateTaskFromPrompt={handleCreateTaskFromIdea} />
             ) : currentView === "dispatch" ? (
               <DispatchPanel
                 onOpenSettings={(tab) => {

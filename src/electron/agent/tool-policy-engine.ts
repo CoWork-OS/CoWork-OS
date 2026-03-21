@@ -161,6 +161,9 @@ const BROWSER_INTENT_PATTERN =
   /\b(browser|website|web page|web app|page|dom|click|button|form|login|navigate|url|screenshot|visual|render|preview|open in browser)\b/i;
 const ARTIFACT_INTENT_PATTERN =
   /\b(docx|pdf|document|report|spreadsheet|excel|xlsx|presentation|slides?|powerpoint|diagram|flowchart|mermaid|chart|graph|erd|gantt|timeline|mindmap|image|visualization)\b/i;
+/** Matches prompts that request AI image generation (draw, picture, create image, etc.) */
+const IMAGE_CREATION_INTENT_PATTERN =
+  /\b(draw|picture|photo|paint|illustrate|render|sketch)\b|create\s+(?:an?\s+)?(?:image|picture|photo|illustration)|generate\s+(?:an?\s+)?(?:image|picture|photo)|make\s+(?:an?\s+)?(?:image|picture|photo|illustration)/i;
 const SYSTEM_INTENT_PATTERN =
   /\b(clipboard|screenshot|finder|application|open app|open url|environment variable|env var|applescript|desktop automation)\b/i;
 const ORCHESTRATION_INTENT_PATTERN =
@@ -276,6 +279,7 @@ export function evaluateToolAvailability(
     case "artifact":
       if (
         ARTIFACT_INTENT_PATTERN.test(taskText) ||
+        IMAGE_CREATION_INTENT_PATTERN.test(taskText) ||
         ctx.taskDomain === "writing" ||
         ctx.taskIntent === "planning"
       ) {

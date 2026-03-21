@@ -97,6 +97,9 @@ describe("AutonomyEngine", () => {
         return { id: `task-${createdTasks.length}` };
       },
     });
+    const config = engine.getConfig();
+    config.actionPolicies.organize_work_session.level = "execute_local";
+    engine.saveConfig(config);
 
     await engine.triggerEvaluation(workspaceId);
 
@@ -105,5 +108,51 @@ describe("AutonomyEngine", () => {
     expect(engine.listDecisions(workspaceId).some((decision) => decision.status === "executed")).toBe(
       true,
     );
+  });
+
+  it("does not auto-execute local decisions while a manual task is active", async () => {
+    const workspaceId = `ws-autonomy-manual-${Date.now()}`;
+    const createdTasks: Array<{ workspaceId: string; title: string; prompt: string }> = [];
+    const awareness = AwarenessService.initialize({
+      getDefaultWorkspaceId: () => workspaceId,
+    });
+
+    awareness.captureConversation("my goal is finish the onboarding redesign", workspaceId);
+    awareness.captureEvent({
+      source: "apps",
+      workspaceId,
+      title: "Cursor",
+      summary: "Cursor - onboarding redesign",
+      sensitivity: "low",
+      payload: {
+        appName: "Cursor",
+        windowTitle: "onboarding redesign",
+      },
+      tags: ["focus"],
+    });
+
+    const engine = new AutonomyEngine({
+      getDefaultWorkspaceId: () => workspaceId,
+      listWorkspaceIds: () => [workspaceId],
+      hasActiveManualTask: () => true,
+      createTask: async (currentWorkspaceId, title, prompt) => {
+        createdTasks.push({ workspaceId: currentWorkspaceId, title, prompt });
+        return { id: `task-${createdTasks.length}` };
+      },
+    });
+    const config = engine.getConfig();
+    config.actionPolicies.organize_work_session.level = "execute_local";
+    engine.saveConfig(config);
+
+    await engine.triggerEvaluation(workspaceId);
+
+    expect(createdTasks).toHaveLength(0);
+    expect(engine.listActions(workspaceId)).toHaveLength(0);
+    expect(
+      engine.listDecisions(workspaceId).some(
+        (decision) =>
+          decision.actionType === "organize_work_session" && decision.status === "suggested",
+      ),
+    ).toBe(true);
   });
 });

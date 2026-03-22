@@ -169,6 +169,85 @@ const EXTRACTION_SUB_AGENT_ALLOWED_TOOLS = [
 const DEFAULT_ACTIVE_SUB_AGENT_LIMIT = 3;
 const ACTIVE_CHILD_AGENT_STATUSES = new Set(["pending", "queued", "planning", "executing"]);
 const EXTRACTION_CONTRACT_MARKER = "[EXTRACTION_OUTPUT_CONTRACT_V1]";
+const CODEX_RUNTIME_TITLE_PATTERNS = [
+  /\bcodex\b/i,
+  /\bcodex\s+cli\b/i,
+  /\bcodex\s+(review|fix|exec|agent|task|audit|critiqu)/i,
+];
+const READ_MOSTLY_CODEX_PROMPT_PATTERN =
+  /\b(review|analy[sz]e|analysis|plan|audit|inspect|investigate|research|summari[sz]e|critique)\b/i;
+
+export type SpawnAgentRuntimeMode = "native" | "acpx";
+export type SpawnAgentRuntimeAgent = "codex";
+
+export function isExplicitCodexSpawnRequest(input: {
+  runtime_agent?: string;
+  title?: string;
+  prompt?: string;
+}): boolean {
+  if (
+    typeof input.runtime_agent === "string" &&
+    input.runtime_agent.trim().toLowerCase() === "codex"
+  ) {
+    return true;
+  }
+  const title = typeof input.title === "string" ? input.title.trim() : "";
+  if (title && CODEX_RUNTIME_TITLE_PATTERNS.some((pattern) => pattern.test(title))) {
+    return true;
+  }
+  const prompt = typeof input.prompt === "string" ? input.prompt.trim() : "";
+  if (prompt && CODEX_RUNTIME_TITLE_PATTERNS.some((pattern) => pattern.test(prompt))) {
+    return true;
+  }
+  return false;
+}
+
+export function resolveExternalRuntimePermissionMode(input: {
+  prompt: string;
+  title?: string;
+  autonomousMode?: boolean;
+}): "approve-reads" | "approve-all" | "deny-all" {
+  if (input.autonomousMode === true) {
+    return "approve-all";
+  }
+  const signalText = `${String(input.title || "")}\n${String(input.prompt || "")}`;
+  return READ_MOSTLY_CODEX_PROMPT_PATTERN.test(signalText) ? "approve-reads" : "deny-all";
+}
+
+export function resolveSpawnAgentExternalRuntime(input: {
+  runtime?: SpawnAgentRuntimeMode;
+  runtime_agent?: SpawnAgentRuntimeAgent;
+  title?: string;
+  prompt: string;
+  autonomousMode?: boolean;
+  defaultCodexRuntimeMode?: "native" | "acpx";
+}): AgentConfig["externalRuntime"] | undefined {
+  const explicitRuntime = typeof input.runtime === "string" ? input.runtime : undefined;
+  if (explicitRuntime === "native") {
+    return undefined;
+  }
+
+  const codexRequested = isExplicitCodexSpawnRequest(input);
+  const shouldUseAcpx =
+    explicitRuntime === "acpx" ||
+    (input.defaultCodexRuntimeMode === "acpx" && codexRequested);
+
+  if (!shouldUseAcpx) {
+    return undefined;
+  }
+
+  if (input.runtime_agent && input.runtime_agent !== "codex") {
+    return undefined;
+  }
+
+  return {
+    kind: "acpx",
+    agent: "codex",
+    sessionMode: "persistent",
+    outputMode: "json",
+    permissionMode: resolveExternalRuntimePermissionMode(input),
+  };
+}
 
 function parseBoundedIntEnv(
   envName: string,
@@ -3010,6 +3089,26 @@ ${skillDescriptions}`;
       };
     }
 
+    if (skill_id === "codex-cli") {
+      const expandedPrompt = await this.buildCodexCliRuntimePrompt();
+      this.daemon.logEvent(this.taskId, "log", {
+        message: `Using skill: ${skill.name}`,
+        skillId: skill_id,
+        parameters,
+        runtimeMode: BuiltinToolsSettingsManager.getCodexRuntimeMode(),
+      });
+
+      return {
+        success: true,
+        skill_id,
+        skill_name: skill.name,
+        skill_description: skill.description,
+        expanded_prompt: expandedPrompt,
+        instruction:
+          "Launch the Codex work as a dedicated child task using the configured runtime. Do not run Codex shell detection commands in the current task.",
+      };
+    }
+
     // Expand the skill prompt with provided parameters
     const expandedPrompt = skillLoader.expandPrompt(skill, parameters, { artifactDir });
 
@@ -3029,6 +3128,99 @@ ${skillDescriptions}`;
       instruction:
         "Execute the task according to the expanded_prompt above. Follow its instructions to complete the user's request.",
     };
+  }
+
+  private async buildCodexCliRuntimePrompt(): Promise<string> {
+    const runtimeMode = BuiltinToolsSettingsManager.getCodexRuntimeMode();
+    const task = await this.daemon
+      .getTaskById?.(this.taskId)
+      .catch(() => null);
+
+    const sourceTitle = this.extractCurrentTaskText(task?.title);
+    const sourcePrompt =
+      this.extractCurrentTaskText(task?.rawPrompt) ||
+      this.extractCurrentTaskText(task?.userPrompt) ||
+      this.extractCurrentTaskText(task?.prompt) ||
+      sourceTitle ||
+      "Handle the assigned coding task.";
+
+    const childTitle = this.deriveCodexChildTaskTitle(sourceTitle, sourcePrompt);
+    const childPrompt = this.deriveCodexChildTaskPrompt(sourcePrompt, sourceTitle);
+
+    const runtimeSection =
+      runtimeMode === "acpx"
+        ? [
+            '- `runtime`: `"acpx"`',
+            '- `runtime_agent`: `"codex"`',
+            "- This routes the child through the ACP/acpx runtime.",
+          ].join("\n")
+        : [
+            "- Omit `runtime` so the child uses the native Codex CLI path.",
+            "- Keep the work in the child task; do not probe the Codex CLI from the parent task.",
+          ].join("\n");
+
+    return [
+      "# Codex Task Launcher",
+      "",
+      "Handle this request by delegating it to exactly one child task.",
+      "Do not run `codex`, `acpx`, `which codex`, `codex --version`, or `codex --help` in the current task.",
+      "",
+      "1. Call `spawn_agent` once with:",
+      `- \`title\`: ${JSON.stringify(childTitle)}`,
+      "- `prompt`: the mission below",
+      '- `capability_hint`: `"cli-agent"`',
+      "- `wait`: `true`",
+      runtimeSection,
+      "",
+      "2. Child task mission:",
+      "```text",
+      childPrompt,
+      "```",
+      "",
+      "3. After the child finishes, summarize the result for the user.",
+    ].join("\n");
+  }
+
+  private extractCurrentTaskText(value: unknown): string {
+    if (typeof value !== "string") return "";
+    return value.trim();
+  }
+
+  private deriveCodexChildTaskTitle(taskTitle: string, taskPrompt: string): string {
+    const combined = `${taskTitle}\n${taskPrompt}`;
+    if (/\breview|audit|inspect|critique\b/i.test(combined)) return "Codex review";
+    if (/\bfix|debug|repair\b/i.test(combined)) return "Codex fix";
+    if (/\bplan|analy[sz]e|investigate|research\b/i.test(combined)) return "Codex analysis";
+    return "Codex task";
+  }
+
+  private deriveCodexChildTaskPrompt(taskPrompt: string, fallbackTitle: string): string {
+    const source = this.extractCurrentTaskText(taskPrompt) || this.extractCurrentTaskText(fallbackTitle);
+    if (!source) {
+      return "Handle the assigned coding task. Focus on the user's requested outcome and report concrete results.";
+    }
+
+    let normalized = source;
+    normalized = normalized.replace(
+      /\bby\s+spawning\s+a\s+child\s+agent\s+titled\s+["'][^"']+["']\s+and\s+have\s+it\b/gi,
+      "and",
+    );
+    normalized = normalized.replace(
+      /\b(?:use|run|launch|start|spin up|spawn|have)\s+(?:a\s+|the\s+)?codex(?:\s+cli)?(?:\s+agent|\s+child\s+task|\s+child)?\s+(?:to\s+|for\s+)?/gi,
+      "",
+    );
+    normalized = normalized.replace(/\b(?:with|via|using)\s+codex(?:\s+cli)?\b/gi, "");
+    normalized = normalized.replace(/\bcodex(?:\s+cli)?\s+(review|fix|agent|task)\b/gi, "$1");
+    normalized = normalized.replace(/\bspawn(?:ing)?\s+a\s+child\s+agent\b/gi, "");
+    normalized = normalized.replace(/\bhave\s+it\b/gi, "");
+    normalized = normalized.replace(/\s+/g, " ").trim();
+    normalized = normalized.replace(/^[,.;:\-)\]]+\s*/g, "");
+
+    if (!/[.!?]$/.test(normalized)) {
+      normalized += ".";
+    }
+
+    return normalized;
   }
 
   /**
@@ -7176,6 +7368,8 @@ ${skillDescriptions}`;
     model_preference?: string;
     capability_hint?: string;
     personality?: string;
+    runtime?: SpawnAgentRuntimeMode;
+    runtime_agent?: SpawnAgentRuntimeAgent;
     wait?: boolean;
     max_turns?: number;
   }): Promise<{
@@ -7186,7 +7380,17 @@ ${skillDescriptions}`;
     result?: Any;
     error?: string;
   }> {
-    const { prompt, title, model_preference, capability_hint, personality, wait = false, max_turns = 20 } = input;
+    const {
+      prompt,
+      title,
+      model_preference,
+      capability_hint,
+      personality,
+      runtime,
+      runtime_agent,
+      wait = false,
+      max_turns = 20,
+    } = input;
 
     // Validate prompt
     if (!prompt || typeof prompt !== "string" || prompt.trim().length === 0) {
@@ -7269,6 +7473,17 @@ ${skillDescriptions}`;
       maxTurns: normalizedMaxTurns,
       retainMemory: false, // Sub-agents don't retain memory
     };
+    const externalRuntime = resolveSpawnAgentExternalRuntime({
+      runtime,
+      runtime_agent,
+      title,
+      prompt: contractedPrompt,
+      autonomousMode: agentConfig.autonomousMode === true,
+      defaultCodexRuntimeMode: BuiltinToolsSettingsManager.getCodexRuntimeMode(),
+    });
+    if (externalRuntime) {
+      agentConfig.externalRuntime = externalRuntime;
+    }
 
     if (phaseCEnabled) {
       const scopedRestrictions = new Set<string>(SUB_AGENT_DEFAULT_DENIED_TOOLS);
@@ -7291,6 +7506,8 @@ ${skillDescriptions}`;
       childTaskTitle: taskTitle,
       modelPreference: model_preference,
       personality: personality,
+      runtime: runtime || (externalRuntime ? "acpx" : "native"),
+      runtimeAgent: externalRuntime?.agent,
       maxTurns: normalizedMaxTurns,
       parentDepth: currentDepth,
       extractionMode,
@@ -8807,6 +9024,18 @@ ${skillDescriptions}`;
               enum: ["same", "professional", "technical", "concise", "creative", "friendly"],
               description:
                 'Personality for the spawned agent. "same" inherits from parent. Default: "concise"',
+            },
+            runtime: {
+              type: "string",
+              enum: ["native", "acpx"],
+              description:
+                'Execution runtime for the spawned agent. "native" uses CoWork\'s built-in executor, "acpx" routes the task through the external acpx runtime.',
+            },
+            runtime_agent: {
+              type: "string",
+              enum: ["codex"],
+              description:
+                'When runtime is "acpx", selects the target adapter. v1 supports only "codex".',
             },
             wait: {
               type: "boolean",

@@ -7,6 +7,7 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { Task, AgentConfig, AgentType } from "../../../shared/types";
+import { isActiveTaskStatus, normalizeTaskLifecycleState } from "../../../shared/task-status";
 
 // Mock electron to avoid getPath errors
 vi.mock("electron", () => ({
@@ -46,6 +47,8 @@ class MockTaskRepository {
     "billingCode",
     "targetNodeId",
     "pinned",
+    "terminalStatus",
+    "failureClass",
     "worktreePath",
     "worktreeBranch",
     "worktreeStatus",
@@ -84,7 +87,20 @@ class MockTaskRepository {
     const stored = mockTasks.get(id);
     if (!stored) return;
 
-    Object.entries(updates).forEach(([key, value]) => {
+    const normalizedUpdates: Partial<Task> = { ...updates };
+    if (isActiveTaskStatus(normalizedUpdates.status)) {
+      if (!Object.prototype.hasOwnProperty.call(normalizedUpdates, "completedAt")) {
+        normalizedUpdates.completedAt = undefined;
+      }
+      if (!Object.prototype.hasOwnProperty.call(normalizedUpdates, "terminalStatus")) {
+        normalizedUpdates.terminalStatus = undefined;
+      }
+      if (!Object.prototype.hasOwnProperty.call(normalizedUpdates, "failureClass")) {
+        normalizedUpdates.failureClass = undefined;
+      }
+    }
+
+    Object.entries(normalizedUpdates).forEach(([key, value]) => {
       if (!MockTaskRepository.ALLOWED_UPDATE_FIELDS.has(key)) {
         console.warn(`Ignoring unknown field in task update: ${key}`);
         return;
@@ -133,7 +149,7 @@ class MockTaskRepository {
   }
 
   private mapStoredToTask(stored: Any): Task {
-    return {
+    return normalizeTaskLifecycleState({
       id: stored.id,
       title: stored.title,
       prompt: stored.prompt,
@@ -167,7 +183,9 @@ class MockTaskRepository {
       worktreeBranch: stored.worktreeBranch || undefined,
       worktreeStatus: stored.worktreeStatus || undefined,
       comparisonSessionId: stored.comparisonSessionId || undefined,
-    };
+      terminalStatus: stored.terminalStatus || undefined,
+      failureClass: stored.failureClass || undefined,
+    });
   }
 }
 
@@ -429,6 +447,44 @@ describe("TaskRepository - Agent Fields", () => {
       expect(retrieved?.agentType).toBe("sub");
       expect(retrieved?.depth).toBe(1);
       expect(retrieved?.resultSummary).toBe("Done");
+    });
+
+    it("clears stale terminal lifecycle fields when moving back to an active status", () => {
+      const task = repository.create({
+        title: "Resume test",
+        prompt: "Test",
+        status: "completed",
+        workspaceId: "workspace-1",
+        completedAt: 123,
+        terminalStatus: "partial_success",
+        failureClass: "budget_exhausted",
+      });
+
+      repository.update(task.id, { status: "executing" });
+
+      const retrieved = repository.findById(task.id);
+      expect(retrieved?.status).toBe("executing");
+      expect(retrieved?.completedAt).toBeUndefined();
+      expect(retrieved?.terminalStatus).toBeUndefined();
+      expect(retrieved?.failureClass).toBeUndefined();
+    });
+
+    it("preserves explicit terminal metadata when an active update intentionally sets it", () => {
+      const task = repository.create({
+        title: "Blocked test",
+        prompt: "Test",
+        status: "pending",
+        workspaceId: "workspace-1",
+      });
+
+      repository.update(task.id, {
+        status: "executing",
+        terminalStatus: "awaiting_approval",
+      });
+
+      const retrieved = repository.findById(task.id);
+      expect(retrieved?.status).toBe("blocked");
+      expect(retrieved?.terminalStatus).toBe("awaiting_approval");
     });
   });
 

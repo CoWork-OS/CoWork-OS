@@ -1415,6 +1415,51 @@ export class DatabaseManager {
       // Index already exists, ignore
     }
 
+    // Fix broken FK reference in tasks table caused by previous heartbeat_runs migration.
+    // SQLite 3.26.0+ automatically updates FK references in other tables when renaming a table.
+    // If the prior migration renamed heartbeat_runs → heartbeat_runs_legacy without
+    // PRAGMA legacy_alter_table = ON, the tasks table now has a broken FK to heartbeat_runs_legacy
+    // (which was subsequently dropped), causing every INSERT INTO tasks to fail.
+    try {
+      const tasksSchema = this.db
+        .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'tasks'")
+        .get() as { sql?: string } | undefined;
+
+      if (tasksSchema?.sql?.includes("heartbeat_runs_legacy")) {
+        console.log(
+          "[DatabaseManager] Fixing broken tasks FK reference (heartbeat_runs_legacy → heartbeat_runs)...",
+        );
+        this.db.exec("PRAGMA foreign_keys = OFF");
+        try {
+          // writable_schema is blocked in this SQLite build — use standard table reconstruction instead.
+          const fixedSql = tasksSchema.sql
+            .replace(/heartbeat_runs_legacy/g, "heartbeat_runs")
+            .replace(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["'`]?tasks["'`]?/i, "CREATE TABLE tasks_rebuild");
+          this.db.exec(fixedSql);
+          const columns = (
+            this.db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>
+          )
+            .map((col) => `"${col.name}"`)
+            .join(", ");
+          this.db.exec(`INSERT INTO tasks_rebuild (${columns}) SELECT ${columns} FROM tasks`);
+          this.db.exec("DROP TABLE tasks");
+          this.db.exec("ALTER TABLE tasks_rebuild RENAME TO tasks");
+          console.log("[DatabaseManager] Fixed broken FK reference in tasks table.");
+        } catch (rebuildErr) {
+          try {
+            this.db.exec("DROP TABLE IF EXISTS tasks_rebuild");
+          } catch {
+            // ignore cleanup error
+          }
+          throw rebuildErr;
+        } finally {
+          this.db.exec("PRAGMA foreign_keys = OFF");
+        }
+      }
+    } catch (error) {
+      console.error("[DatabaseManager] Failed to fix broken FK reference in tasks table:", error);
+    }
+
     try {
       const heartbeatRunColumns = this.db
         .prepare("PRAGMA table_info(heartbeat_runs)")
@@ -1447,6 +1492,10 @@ export class DatabaseManager {
 
       if (requiresHeartbeatRunMigration) {
         this.db.exec("PRAGMA foreign_keys = OFF");
+        // Prevent SQLite 3.26.0+ from automatically rewriting FK references in other tables
+        // (e.g. tasks.heartbeat_run_id) when we rename heartbeat_runs → heartbeat_runs_legacy.
+        // Without this, those FK refs point to the legacy table after it is dropped.
+        this.db.exec("PRAGMA legacy_alter_table = ON");
         try {
           this.db.exec(`
           DROP INDEX IF EXISTS idx_heartbeat_runs_issue;
@@ -1525,6 +1574,7 @@ export class DatabaseManager {
           DROP TABLE heartbeat_runs_legacy;
         `);
         } finally {
+          this.db.exec("PRAGMA legacy_alter_table = OFF");
           this.db.exec("PRAGMA foreign_keys = ON");
         }
         for (const sql of heartbeatRunIndexStatements) {

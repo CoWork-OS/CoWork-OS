@@ -22,7 +22,7 @@ export function PersonalityStyleTab({
   personas,
   onUpdate,
   onSave,
-  saving,
+  saving: _saving,
 }: PersonalityStyleTabProps) {
   const style = config.style;
   const quirks = config.quirks ?? {};

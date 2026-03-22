@@ -25,7 +25,7 @@ export function PersonalityTraitsTab({
   presets,
   onUpdate,
   onSave,
-  saving,
+  saving: _saving,
   onToast,
 }: PersonalityTraitsTabProps) {
   const applyPreset = (presetId: string) => {

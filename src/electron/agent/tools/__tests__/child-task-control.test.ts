@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Task, TaskEvent, Workspace } from "../../../../shared/types";
+import { BuiltinToolsSettingsManager } from "../builtin-settings";
 
 vi.mock("electron", () => ({
   app: {
@@ -705,6 +706,106 @@ describe("ToolRegistry child task control tools", () => {
     } finally {
       process.env.COWORK_SUBAGENT_MAX_ACTIVE_PER_PARENT = prevLimit;
       process.env.COWORK_GUARDRAIL_PHASE_C = prevPhaseC;
+    }
+  });
+
+  it("spawn_agent persists explicit acpx runtime requests into agentConfig", async () => {
+    const daemon = {
+      getTaskById: vi.fn().mockResolvedValue({
+        id: "parent-task",
+        title: "Parent",
+        prompt: "x",
+        status: "executing",
+        workspaceId: workspace.id,
+        createdAt: 1,
+        updatedAt: 1,
+        depth: 0,
+      }),
+      getChildTasks: vi.fn().mockResolvedValue([]),
+      createChildTask: vi.fn().mockResolvedValue({
+        id: "child-acpx",
+        title: "Codex child",
+        prompt: "x",
+        status: "pending",
+        workspaceId: workspace.id,
+        createdAt: 1,
+        updatedAt: 1,
+        parentTaskId: "parent-task",
+        agentType: "sub",
+        depth: 1,
+      }),
+      logEvent: vi.fn(),
+    } as Any;
+
+    const registry = new ToolRegistry(workspace, daemon, "parent-task");
+    const result = await registry.executeTool("spawn_agent", {
+      title: "Codex review",
+      prompt: "Review the patch",
+      runtime: "acpx",
+      runtime_agent: "codex",
+    });
+
+    expect(result.success).toBe(true);
+    const call = daemon.createChildTask.mock.calls[0][0];
+    expect(call.agentConfig.externalRuntime).toEqual({
+      kind: "acpx",
+      agent: "codex",
+      sessionMode: "persistent",
+      outputMode: "json",
+      permissionMode: "approve-reads",
+    });
+  });
+
+  it("spawn_agent uses the Codex runtime default only for explicit Codex flows", async () => {
+    const runtimeSpy = vi
+      .spyOn(BuiltinToolsSettingsManager, "getCodexRuntimeMode")
+      .mockReturnValue("acpx");
+    const daemon = {
+      getTaskById: vi.fn().mockResolvedValue({
+        id: "parent-task",
+        title: "Parent",
+        prompt: "x",
+        status: "executing",
+        workspaceId: workspace.id,
+        createdAt: 1,
+        updatedAt: 1,
+        depth: 0,
+      }),
+      getChildTasks: vi.fn().mockResolvedValue([]),
+      createChildTask: vi.fn().mockResolvedValue({
+        id: "child-default-runtime",
+        title: "Codex child",
+        prompt: "x",
+        status: "pending",
+        workspaceId: workspace.id,
+        createdAt: 1,
+        updatedAt: 1,
+        parentTaskId: "parent-task",
+        agentType: "sub",
+        depth: 1,
+      }),
+      logEvent: vi.fn(),
+    } as Any;
+
+    try {
+      const registry = new ToolRegistry(workspace, daemon, "parent-task");
+      await registry.executeTool("spawn_agent", {
+        title: "Codex CLI Agent",
+        prompt: "Review the patch",
+      });
+
+      const firstCall = daemon.createChildTask.mock.calls[0][0];
+      expect(firstCall.agentConfig.externalRuntime?.kind).toBe("acpx");
+
+      await registry.executeTool("spawn_agent", {
+        title: "Generic analysis",
+        prompt: "Analyze the codebase",
+      });
+
+      const secondCall = daemon.createChildTask.mock.calls[1][0];
+      expect(secondCall.agentConfig.externalRuntime).toBeUndefined();
+    } finally {
+      runtimeSpy.mockRestore();
     }
   });
 });

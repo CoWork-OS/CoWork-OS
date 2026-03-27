@@ -6,6 +6,7 @@ const spawnMock = vi.fn();
 
 vi.mock("fs", () => ({
   accessSync: accessSyncMock,
+  existsSync: vi.fn(() => true),
   constants: { X_OK: 1 },
 }));
 
@@ -156,5 +157,30 @@ describe("AppleHealthBridge", () => {
     const status = await AppleHealthBridge.getStatus("native");
     expect(status.available).toBe(false);
     expect(status.lastError).toContain("Denied");
+  });
+
+  it("surfaces a provisioning guidance error before bundle launch when the embedded profile is missing", async () => {
+    vi.resetModules();
+    accessSyncMock.mockReset();
+    spawnMock.mockReset();
+    accessSyncMock.mockImplementation(() => undefined);
+    vi.doMock("fs", () => ({
+      accessSync: accessSyncMock,
+      existsSync: vi.fn((candidate: string) => !candidate.endsWith("embedded.provisionprofile")),
+      constants: { X_OK: 1 },
+      mkdtempSync: vi.fn(),
+      writeFileSync: vi.fn(),
+      readFileSync: vi.fn(),
+      rmSync: vi.fn(),
+    }));
+    delete process.env.COWORK_HEALTHKIT_BRIDGE_DIRECT;
+
+    const { AppleHealthBridge } = await import("../apple-health-bridge");
+    const status = await AppleHealthBridge.getStatus("native");
+
+    expect(status.available).toBe(false);
+    expect(status.lastError).toContain("embedded provisioning profile");
+    expect(status.lastError).toContain("com.cowork.healthkitbridge");
+    expect(spawnMock).not.toHaveBeenCalled();
   });
 });

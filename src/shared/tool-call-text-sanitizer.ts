@@ -37,14 +37,23 @@ const PLAIN_TOOL_TRANSCRIPT_MARKERS = [
   "assistant to=run_command",
   "\"cwd\":",
   "\"timeout_ms\":",
+  // Full-width CJK bracket separators appear in raw Claude tool-call streams
+  "】【",
+  // Generic JSON parameter patterns common across all tools
+  "\"pattern\":",
+  "\"file_path\":",
+  "\"command\":",
+  "\"query\":",
 ];
 
 function looksLikePlainToolTranscript(input: string): boolean {
   const lower = input.toLowerCase();
   const hasTranscriptLead =
     /\b(?:assistant\s+)?to=[a-z_][\w-]*\b/i.test(input) || lower.includes("to=run_command");
+  if (!hasTranscriptLead) return false;
+  // One marker is sufficient when paired with a clear to=[tool] lead
   const markerHits = PLAIN_TOOL_TRANSCRIPT_MARKERS.filter((marker) => lower.includes(marker)).length;
-  return hasTranscriptLead && markerHits >= 2;
+  return markerHits >= 1;
 }
 
 function stripFencedToolBlocks(input: string): { text: string; removed: number } {

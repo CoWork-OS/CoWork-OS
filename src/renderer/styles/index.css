@@ -23444,8 +23444,54 @@ button {
 
 /* PDF content */
 .file-viewer-pdf {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
   font-size: 14px;
   line-height: 1.6;
+}
+
+.file-viewer-pdf-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.35);
+}
+
+.file-viewer-pdf-summary-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.file-viewer-pdf-summary-row span {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.file-viewer-pdf-summary-row strong {
+  font-size: 16px;
+  color: var(--color-text);
+}
+
+.file-viewer-pdf-summary-note,
+.document-editor-pdf-note {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.file-viewer-pdf-thumbnail img {
+  display: block;
+  max-width: 100%;
+  border-radius: 14px;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.28);
 }
 
 /* Image content */
@@ -33885,6 +33931,60 @@ html.platform-darwin.opaque-vibrancy .remote-file-picker {
   color: var(--text-secondary, #cbd5e1);
   max-height: 160px;
   overflow: auto;
+}
+
+.document-editor-pdf-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.document-editor-pdf-stats div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.document-editor-pdf-stats span,
+.document-editor-pdf-page-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary, #94a3b8);
+}
+
+.document-editor-pdf-stats strong {
+  font-size: 16px;
+  color: var(--text-primary, #f8fafc);
+}
+
+.document-editor-pdf-pages {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.document-editor-pdf-page {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(15, 23, 42, 0.28);
+}
+
+.document-editor-pdf-page-text {
+  white-space: pre-wrap;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary, #cbd5e1);
 }
 
 .document-editor-textarea {

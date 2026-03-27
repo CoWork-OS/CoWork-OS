@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useCallback, Fragment } from "react";
-import { ChevronDown, ChevronRight, SlidersHorizontal, Cpu, EyeOff, AppWindow, Bell, HardDrive, Rows3, Server, Workflow, HeartPulse, Send, Lightbulb } from "lucide-react";
+import { ChevronDown, ChevronRight, SlidersHorizontal, Cpu, EyeOff, AppWindow, Bell, HardDrive, Rows3, Server, Workflow, HeartPulse, Send, Lightbulb, Inbox } from "lucide-react";
 import { resolveTwinIcon } from "../utils/twin-icons";
 import { stripAllEmojis } from "../utils/emoji-replacer";
 import { Task, Workspace, UiDensity, InfraStatus } from "../../shared/types";
@@ -30,12 +30,14 @@ interface SidebarProps {
   selectedTaskId: string | null;
   isHomeActive?: boolean;
   isIdeasActive?: boolean;
+  isInboxAgentActive?: boolean;
   isHealthActive?: boolean;
   isDispatchActive?: boolean;
   completionAttentionTaskIds?: string[];
   onSelectTask: (id: string | null) => void;
   onOpenHome?: () => void;
   onOpenIdeas?: () => void;
+  onOpenInboxAgent?: () => void;
   onOpenHealth?: () => void;
   onOpenDispatch?: () => void;
   onNewSession?: () => void;
@@ -203,12 +205,14 @@ export function Sidebar({
   selectedTaskId,
   isHomeActive = false,
   isIdeasActive = false,
+  isInboxAgentActive = false,
   isHealthActive = false,
   isDispatchActive = false,
   completionAttentionTaskIds = [],
   onSelectTask,
   onOpenHome,
   onOpenIdeas,
+  onOpenInboxAgent,
   onOpenHealth,
   onOpenDispatch,
   onNewSession,
@@ -1373,6 +1377,24 @@ export function Sidebar({
         <>
           {/* Ideas tab — above Sessions */}
           <div className="sidebar-ideas-tab" style={{ padding: "0 12px", marginBottom: "6px" }}>
+            <button
+              type="button"
+              className={`new-task-btn cli-new-task-btn cli-action-btn sidebar-ideas-btn ${isInboxAgentActive ? "active" : ""}`}
+              onClick={onOpenInboxAgent}
+              aria-pressed={isInboxAgentActive}
+              title="Inbox Agent"
+              style={{ marginBottom: "8px" }}
+            >
+              <span className="cli-btn-text">
+                <span className="terminal-only">inbox_agent</span>
+                <span className="modern-only cli-new-task-modern-label">
+                  <span className="sidebar-home-btn-icon" aria-hidden="true" style={{ display: 'flex' }}>
+                    <Inbox size={16} strokeWidth={2} style={{ display: 'block' }} />
+                  </span>
+                  <span>Inbox Agent</span>
+                </span>
+              </span>
+            </button>
             <button
               type="button"
               className={`new-task-btn cli-new-task-btn cli-action-btn sidebar-ideas-btn ${isIdeasActive ? "active" : ""}`}

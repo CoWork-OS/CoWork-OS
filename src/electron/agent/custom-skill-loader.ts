@@ -874,7 +874,7 @@ export class CustomSkillLoader {
   expandPrompt(
     skill: CustomSkill,
     parameterValues: Record<string, string | number | boolean>,
-    context: { artifactDir?: string } = {},
+    context: { artifactDir?: string; workspaceArtifactDir?: string } = {},
   ): string {
     let prompt = this.expandSkillPromptPlaceholders(skill.prompt, skill, context);
 
@@ -907,11 +907,14 @@ export class CustomSkillLoader {
   private expandSkillPromptPlaceholders(
     prompt: string,
     skill: CustomSkill,
-    context: { artifactDir?: string },
+    context: { artifactDir?: string; workspaceArtifactDir?: string },
   ): string {
     let output = this.expandBaseDir(prompt, skill);
     if (context.artifactDir) {
       output = output.replace(/\{artifactDir\}/g, context.artifactDir);
+    }
+    if (context.workspaceArtifactDir) {
+      output = output.replace(/\{workspaceArtifactDir\}/g, context.workspaceArtifactDir);
     }
     return output;
   }

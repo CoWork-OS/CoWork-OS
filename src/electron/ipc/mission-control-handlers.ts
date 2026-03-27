@@ -26,6 +26,7 @@ import { validateInput, UUIDSchema } from "../utils/validation";
 import { createLogger } from "../utils/logger";
 import { ControlPlaneCoreService } from "../control-plane/ControlPlaneCoreService";
 import { StrategicPlannerService } from "../control-plane/StrategicPlannerService";
+import { AgentCompaniesService } from "../control-plane/AgentCompaniesService";
 
 const logger = createLogger("MissionControl");
 
@@ -149,6 +150,7 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
 
   const { db, agentRoleRepo, taskSubscriptionRepo, standupService, heartbeatService } = deps;
   const core = new ControlPlaneCoreService(db);
+  const agentCompanies = new AgentCompaniesService(db, core, agentRoleRepo);
   const taskRepo = new TaskRepository(db);
   const activityRepo = new ActivityRepository(db);
   const requirePlannerService = (): StrategicPlannerService => {
@@ -390,6 +392,57 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
         monthlyBudgetCost:
           request.monthlyBudgetCost === null ? null : optionalNumber(request.monthlyBudgetCost),
         budgetPausedAt: request.budgetPausedAt === null ? null : optionalNumber(request.budgetPausedAt),
+      });
+    },
+  );
+
+  ipcMain.handle(IPC_CHANNELS.MC_COMPANY_PACKAGE_SOURCE_LIST, async (_, companyId?: string) => {
+    return agentCompanies.listSources(companyId);
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.MC_COMPANY_PACKAGE_PREVIEW_IMPORT,
+    async (_, request: import("../../shared/types").CompanyPackageImportRequest) => {
+      checkRateLimit(IPC_CHANNELS.MC_COMPANY_PACKAGE_PREVIEW_IMPORT);
+      return agentCompanies.previewImport(request);
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MC_COMPANY_PACKAGE_IMPORT,
+    async (_, request: import("../../shared/types").CompanyPackageImportRequest) => {
+      checkRateLimit(IPC_CHANNELS.MC_COMPANY_PACKAGE_IMPORT);
+      return agentCompanies.importPackage(request);
+    },
+  );
+
+  ipcMain.handle(IPC_CHANNELS.MC_COMPANY_GRAPH_GET, async (_, companyId: string) => {
+    const validated = validateInput(UUIDSchema, companyId, "company ID");
+    return agentCompanies.getResolvedGraph(validated);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MC_COMPANY_SYNC_LIST, async (_, companyId: string) => {
+    const validated = validateInput(UUIDSchema, companyId, "company ID");
+    return agentCompanies.listSyncStates(validated);
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.MC_COMPANY_ORG_LINK_ROLE,
+    async (
+      _,
+      request: {
+        companyId: string;
+        orgNodeId: string;
+        agentRoleId: string | null;
+      },
+    ) => {
+      checkRateLimit(IPC_CHANNELS.MC_COMPANY_ORG_LINK_ROLE);
+      return agentCompanies.linkOrgNodeToAgentRole({
+        companyId: validateInput(UUIDSchema, request.companyId, "company ID"),
+        orgNodeId: validateInput(UUIDSchema, request.orgNodeId, "org node ID"),
+        agentRoleId: request.agentRoleId
+          ? validateInput(UUIDSchema, request.agentRoleId, "agent role ID")
+          : null,
       });
     },
   );

@@ -276,6 +276,43 @@ export function DocumentEditorModal({
               </div>
             </div>
 
+            {session?.fileType === "pdf" && session.pdfReviewSummary && (
+              <div className="document-editor-panel">
+                <div className="document-editor-panel-title">PDF review</div>
+                <div className="document-editor-pdf-stats">
+                  <div>
+                    <span>Pages</span>
+                    <strong>{session.pdfReviewSummary.pageCount}</strong>
+                  </div>
+                  <div>
+                    <span>Native</span>
+                    <strong>{session.pdfReviewSummary.nativeTextPages}</strong>
+                  </div>
+                  <div>
+                    <span>OCR</span>
+                    <strong>{session.pdfReviewSummary.ocrPages}</strong>
+                  </div>
+                </div>
+                <div className="document-editor-pdf-pages">
+                  {session.pdfReviewSummary.pages.slice(0, 4).map((page) => (
+                    <div key={page.pageIndex} className="document-editor-pdf-page">
+                      <div className="document-editor-pdf-page-label">
+                        Page {page.pageIndex + 1}
+                        {page.usedOcr ? " • OCR" : ""}
+                        {page.truncated ? " • clipped" : ""}
+                      </div>
+                      <div className="document-editor-pdf-page-text">{page.text}</div>
+                    </div>
+                  ))}
+                </div>
+                {session.pdfReviewSummary.truncatedPages && (
+                  <div className="document-editor-pdf-note">
+                    Preview limited to the first extracted pages.
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="document-editor-panel">
               <div className="document-editor-panel-title">Describe the change</div>
               <textarea

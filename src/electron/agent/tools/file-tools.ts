@@ -11,7 +11,7 @@ import {
 } from "../../security/project-access";
 import mammoth from "mammoth";
 import { extractPptxContentFromFile } from "../../utils/pptx-extractor";
-import { parsePdfBuffer } from "../../utils/pdf-parser";
+import { extractPdfReviewData } from "../../utils/pdf-review";
 import {
   detectWorkspacePathAlias,
   shouldRewriteWorkspaceAliasPath,
@@ -875,16 +875,18 @@ export class FileTools {
     window: ReadWindow;
   }> {
     try {
-      const dataBuffer = await fs.readFile(fullPath);
-      const data = await parsePdfBuffer(dataBuffer);
+      const review = await extractPdfReviewData(fullPath, {
+        maxPages: 20,
+        maxCharsPerPage: 2000,
+        maxOcrPages: 4,
+        includeOcr: true,
+      });
 
-      let extracted = data.text;
+      let extracted = review.content;
 
       // Add metadata header
       const metadata: string[] = [];
-      if (data.numpages) metadata.push(`Pages: ${data.numpages}`);
-      if (data.info?.Title) metadata.push(`Title: ${data.info.Title}`);
-      if (data.info?.Author) metadata.push(`Author: ${data.info.Author}`);
+      if (review.pageCount) metadata.push(`Pages: ${review.pageCount}`);
 
       if (metadata.length > 0) {
         extracted = `[PDF Metadata: ${metadata.join(" | ")}]\n\n${extracted}`;

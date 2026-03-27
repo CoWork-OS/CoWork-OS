@@ -533,6 +533,84 @@ export class DatabaseManager {
         payload TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS company_package_sources (
+        id TEXT PRIMARY KEY,
+        company_id TEXT REFERENCES companies(id) ON DELETE CASCADE,
+        source_kind TEXT NOT NULL,
+        name TEXT NOT NULL,
+        root_uri TEXT NOT NULL,
+        local_path TEXT,
+        ref TEXT,
+        pin TEXT,
+        trust_level TEXT NOT NULL DEFAULT 'local',
+        status TEXT NOT NULL DEFAULT 'ready',
+        notes TEXT,
+        last_synced_at INTEGER,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(company_id, root_uri)
+      );
+
+      CREATE TABLE IF NOT EXISTS company_package_manifests (
+        id TEXT PRIMARY KEY,
+        source_id TEXT NOT NULL REFERENCES company_package_sources(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL,
+        slug TEXT NOT NULL,
+        name TEXT NOT NULL,
+        description TEXT,
+        relative_path TEXT NOT NULL,
+        body TEXT NOT NULL,
+        body_hash TEXT NOT NULL,
+        frontmatter_json TEXT NOT NULL,
+        provenance_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(source_id, relative_path)
+      );
+
+      CREATE TABLE IF NOT EXISTS company_org_nodes (
+        id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        source_id TEXT REFERENCES company_package_sources(id) ON DELETE CASCADE,
+        manifest_id TEXT REFERENCES company_package_manifests(id) ON DELETE SET NULL,
+        kind TEXT NOT NULL,
+        slug TEXT NOT NULL,
+        name TEXT NOT NULL,
+        description TEXT,
+        relative_path TEXT,
+        parent_node_id TEXT REFERENCES company_org_nodes(id) ON DELETE SET NULL,
+        metadata_json TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS company_org_edges (
+        id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        source_id TEXT REFERENCES company_package_sources(id) ON DELETE CASCADE,
+        from_node_id TEXT NOT NULL REFERENCES company_org_nodes(id) ON DELETE CASCADE,
+        to_node_id TEXT NOT NULL REFERENCES company_org_nodes(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL,
+        metadata_json TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS company_sync_states (
+        id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        source_id TEXT REFERENCES company_package_sources(id) ON DELETE CASCADE,
+        manifest_id TEXT REFERENCES company_package_manifests(id) ON DELETE SET NULL,
+        org_node_id TEXT REFERENCES company_org_nodes(id) ON DELETE CASCADE,
+        runtime_entity_kind TEXT NOT NULL,
+        runtime_entity_id TEXT NOT NULL,
+        sync_status TEXT NOT NULL DEFAULT 'unlinked',
+        last_synced_at INTEGER,
+        metadata_json TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
       -- Indexes for performance
       CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
       CREATE INDEX IF NOT EXISTS idx_tasks_workspace ON tasks(workspace_id);
@@ -563,6 +641,13 @@ export class DatabaseManager {
       CREATE INDEX IF NOT EXISTS idx_issues_assignee ON issues(assignee_agent_role_id, updated_at DESC);
       CREATE INDEX IF NOT EXISTS idx_issues_status ON issues(status, updated_at DESC);
       CREATE INDEX IF NOT EXISTS idx_issue_comments_issue ON issue_comments(issue_id, created_at ASC);
+      CREATE INDEX IF NOT EXISTS idx_company_package_sources_company ON company_package_sources(company_id, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_company_package_manifests_source ON company_package_manifests(source_id, kind, relative_path);
+      CREATE INDEX IF NOT EXISTS idx_company_org_nodes_company ON company_org_nodes(company_id, kind, name);
+      CREATE INDEX IF NOT EXISTS idx_company_org_nodes_source ON company_org_nodes(source_id, kind, name);
+      CREATE INDEX IF NOT EXISTS idx_company_org_edges_company ON company_org_edges(company_id, kind);
+      CREATE INDEX IF NOT EXISTS idx_company_sync_states_company ON company_sync_states(company_id, runtime_entity_kind, runtime_entity_id);
+      CREATE INDEX IF NOT EXISTS idx_company_sync_states_org_node ON company_sync_states(org_node_id, runtime_entity_kind);
       -- Channel Gateway tables
       CREATE TABLE IF NOT EXISTS channels (
         id TEXT PRIMARY KEY,
@@ -815,6 +900,147 @@ export class DatabaseManager {
       CREATE INDEX IF NOT EXISTS idx_memory_markdown_chunks_workspace ON memory_markdown_chunks(workspace_id);
       CREATE INDEX IF NOT EXISTS idx_memory_markdown_chunks_path ON memory_markdown_chunks(workspace_id, path);
       CREATE INDEX IF NOT EXISTS idx_memory_markdown_chunks_mtime ON memory_markdown_chunks(workspace_id, mtime);
+
+      -- Mailbox domain cache for Inbox Agent
+      CREATE TABLE IF NOT EXISTS mailbox_accounts (
+        id TEXT PRIMARY KEY,
+        provider TEXT NOT NULL,
+        address TEXT NOT NULL,
+        display_name TEXT,
+        status TEXT NOT NULL DEFAULT 'connected',
+        capabilities_json TEXT,
+        sync_cursor TEXT,
+        last_synced_at INTEGER,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS mailbox_threads (
+        id TEXT PRIMARY KEY,
+        account_id TEXT NOT NULL,
+        provider_thread_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        subject TEXT NOT NULL,
+        snippet TEXT NOT NULL,
+        participants_json TEXT,
+        labels_json TEXT,
+        category TEXT NOT NULL DEFAULT 'other',
+        priority_score REAL NOT NULL DEFAULT 0,
+        urgency_score REAL NOT NULL DEFAULT 0,
+        needs_reply INTEGER NOT NULL DEFAULT 0,
+        stale_followup INTEGER NOT NULL DEFAULT 0,
+        cleanup_candidate INTEGER NOT NULL DEFAULT 0,
+        handled INTEGER NOT NULL DEFAULT 0,
+        unread_count INTEGER NOT NULL DEFAULT 0,
+        message_count INTEGER NOT NULL DEFAULT 0,
+        last_message_at INTEGER NOT NULL,
+        last_synced_at INTEGER,
+        metadata_json TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY (account_id) REFERENCES mailbox_accounts(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS mailbox_messages (
+        id TEXT PRIMARY KEY,
+        thread_id TEXT NOT NULL,
+        provider_message_id TEXT NOT NULL,
+        direction TEXT NOT NULL,
+        from_name TEXT,
+        from_email TEXT,
+        to_json TEXT,
+        cc_json TEXT,
+        bcc_json TEXT,
+        subject TEXT NOT NULL,
+        snippet TEXT NOT NULL,
+        body_text TEXT NOT NULL,
+        received_at INTEGER NOT NULL,
+        is_unread INTEGER NOT NULL DEFAULT 0,
+        metadata_json TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY (thread_id) REFERENCES mailbox_threads(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS mailbox_summaries (
+        thread_id TEXT PRIMARY KEY,
+        summary_text TEXT NOT NULL,
+        key_asks_json TEXT,
+        extracted_questions_json TEXT,
+        suggested_next_action TEXT NOT NULL,
+        confidence REAL NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY (thread_id) REFERENCES mailbox_threads(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS mailbox_drafts (
+        id TEXT PRIMARY KEY,
+        thread_id TEXT NOT NULL,
+        subject TEXT NOT NULL,
+        body_text TEXT NOT NULL,
+        tone TEXT NOT NULL,
+        rationale TEXT NOT NULL,
+        schedule_notes TEXT,
+        metadata_json TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY (thread_id) REFERENCES mailbox_threads(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS mailbox_action_proposals (
+        id TEXT PRIMARY KEY,
+        thread_id TEXT NOT NULL,
+        proposal_type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        reasoning TEXT NOT NULL,
+        preview_json TEXT,
+        status TEXT NOT NULL DEFAULT 'suggested',
+        metadata_json TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY (thread_id) REFERENCES mailbox_threads(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS mailbox_contacts (
+        id TEXT PRIMARY KEY,
+        account_id TEXT NOT NULL,
+        email TEXT NOT NULL UNIQUE,
+        name TEXT,
+        company TEXT,
+        role TEXT,
+        crm_links_json TEXT,
+        learned_facts_json TEXT,
+        response_tendency TEXT,
+        last_interaction_at INTEGER,
+        open_commitments INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,
+        FOREIGN KEY (account_id) REFERENCES mailbox_accounts(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS mailbox_commitments (
+        id TEXT PRIMARY KEY,
+        thread_id TEXT NOT NULL,
+        message_id TEXT,
+        title TEXT NOT NULL,
+        due_at INTEGER,
+        state TEXT NOT NULL DEFAULT 'suggested',
+        owner_email TEXT,
+        source_excerpt TEXT,
+        metadata_json TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY (thread_id) REFERENCES mailbox_threads(id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_mailbox_threads_account ON mailbox_threads(account_id);
+      CREATE INDEX IF NOT EXISTS idx_mailbox_threads_priority ON mailbox_threads(priority_score DESC, urgency_score DESC, last_message_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_mailbox_threads_flags ON mailbox_threads(needs_reply, cleanup_candidate, stale_followup);
+      CREATE INDEX IF NOT EXISTS idx_mailbox_messages_thread ON mailbox_messages(thread_id, received_at);
+      CREATE INDEX IF NOT EXISTS idx_mailbox_drafts_thread ON mailbox_drafts(thread_id, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_mailbox_proposals_thread ON mailbox_action_proposals(thread_id, status, proposal_type);
+      CREATE INDEX IF NOT EXISTS idx_mailbox_commitments_thread ON mailbox_commitments(thread_id, state, due_at);
+      CREATE INDEX IF NOT EXISTS idx_mailbox_contacts_email ON mailbox_contacts(email);
     `);
 
     // Initialize FTS5 for memory search (separate exec to handle if not supported)

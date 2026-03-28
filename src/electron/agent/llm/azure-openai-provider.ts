@@ -1,6 +1,7 @@
 import {
   LLMProvider,
   LLMProviderConfig,
+  LLMProviderError,
   LLMRequest,
   LLMResponse,
   LLMMessage,
@@ -18,7 +19,9 @@ import {
   toOpenAICompatibleTools,
   fromOpenAICompatibleResponse,
 } from "./openai-compatible";
+import { createLogger } from "../../utils/logger";
 
+const logger = createLogger("azure-openai");
 const DEFAULT_AZURE_API_VERSION = "2024-12-01-preview";
 const AZURE_MAX_TOOLS = 128;
 const textDecoder = new TextDecoder();
@@ -83,7 +86,7 @@ export class AzureOpenAIProvider implements LLMProvider {
     const effective = this.getReasoningEffort() || "default";
     const extra =
       configured === "extra_high" ? " (sent as xhigh; will fallback to high if rejected)" : "";
-    console.log(
+    logger.debug(
       `[Azure OpenAI] ${kind} reasoning level for model ${model}: configured=${configured}, effective=${effective}${extra}`,
     );
   }
@@ -129,7 +132,7 @@ export class AzureOpenAIProvider implements LLMProvider {
     });
     const rawTools = request.tools ? toOpenAICompatibleTools(request.tools) : undefined;
     if (rawTools && rawTools.length > AZURE_MAX_TOOLS) {
-      console.warn(
+      logger.warn(
         `[Azure] Tool list truncated: ${rawTools.length} → ${AZURE_MAX_TOOLS} (Azure limit). Tools beyond index ${AZURE_MAX_TOOLS - 1} will not be available for this call.`,
       );
     }
@@ -313,7 +316,7 @@ export class AzureOpenAIProvider implements LLMProvider {
       (fallbackBody as Any)?.reasoning?.effort || (fallbackBody as Any)?.reasoning_effort || "",
     );
     if (fallbackEffort) {
-      console.log(
+      logger.debug(
         `[Azure OpenAI] ${kind || "request"} reasoning fallback for model ${model || this.deployment}: ${fallbackEffort}`,
       );
     }
@@ -656,9 +659,36 @@ export class AzureOpenAIProvider implements LLMProvider {
     return normalized.includes("the server had an error while processing your request");
   }
 
-  private toStructuredProviderError(error: Any): Error {
+  private getResponseRequestId(response?: Response): string | undefined {
+    const requestId =
+      response?.headers.get("x-ms-request-id") ||
+      response?.headers.get("apim-request-id") ||
+      response?.headers.get("x-request-id") ||
+      undefined;
+    return typeof requestId === "string" && requestId.trim() ? requestId.trim() : undefined;
+  }
+
+  private buildAzureApiError(
+    response: Response,
+    errorData?: { error?: { message?: string; code?: string } },
+  ): LLMProviderError {
+    const providerMessage = String(errorData?.error?.message || "").trim();
+    const error = new Error(
+      `Azure OpenAI API error: ${response.status} ${response.statusText}` +
+        (providerMessage ? ` - ${providerMessage}` : ""),
+    ) as LLMProviderError;
+    const requestId = this.getResponseRequestId(response);
+    error.status = response.status;
+    error.requestId = requestId;
+    error.providerMessage = providerMessage || undefined;
+    error.providerCode = errorData?.error?.code;
+    error.errorData = errorData;
+    return error;
+  }
+
+  private toStructuredProviderError(error: Any): LLMProviderError {
     const message = String(error?.message || "Azure OpenAI request failed");
-    const wrapped = new Error(message) as Any;
+    const wrapped = new Error(message) as LLMProviderError;
     wrapped.name = error?.name || "AzureOpenAIProviderError";
     wrapped.code = String(error?.code || error?.cause?.code || "").trim() || undefined;
     const status =
@@ -680,6 +710,10 @@ export class AzureOpenAIProvider implements LLMProvider {
     if (status !== undefined) {
       wrapped.status = status;
     }
+    wrapped.requestId = error?.requestId || error?.cause?.requestId;
+    wrapped.providerMessage = error?.providerMessage || error?.cause?.providerMessage;
+    wrapped.providerCode = error?.providerCode || error?.cause?.providerCode;
+    wrapped.errorData = error?.errorData || error?.cause?.errorData;
     wrapped.cause = error;
     return wrapped;
   }
@@ -722,12 +756,7 @@ export class AzureOpenAIProvider implements LLMProvider {
           const errorData = (await response.json().catch(() => ({}))) as {
             error?: { message?: string };
           };
-          const error = new Error(
-            `Azure OpenAI API error: ${response.status} ${response.statusText}` +
-              (errorData.error?.message ? ` - ${errorData.error.message}` : ""),
-          );
-          (error as Any).status = response.status;
-          throw error;
+          throw this.buildAzureApiError(response, errorData);
         }
 
         if (streaming) {
@@ -805,38 +834,38 @@ export class AzureOpenAIProvider implements LLMProvider {
           }
 
           errorData = (retryResult as Any).errorData as { error?: { message?: string } };
+          const retryResponse = (retryResult as Any).response as Response;
           if (this.isChatCompletionUnsupported(errorData)) {
             return await runResponses(shouldStream, requestedReasoningEffort);
           }
 
-          const error = new Error(
-            `Azure OpenAI API error: ${response.status} ${response.statusText}` +
-              (errorData.error?.message ? ` - ${errorData.error.message}` : ""),
-          );
-          (error as Any).status = response.status;
-          throw error;
+          throw this.buildAzureApiError(retryResponse || response, errorData);
         }
 
-        const error = new Error(
-          `Azure OpenAI API error: ${response.status} ${response.statusText}` +
-            (errorData.error?.message ? ` - ${errorData.error.message}` : ""),
-        );
-        (error as Any).status = response.status;
-        throw error;
+        throw this.buildAzureApiError(response, errorData);
       }
 
       return firstChatResult;
     } catch (error: Any) {
       if (error.name === "AbortError" || error.message?.includes("aborted")) {
-        console.log("[Azure OpenAI] Request aborted");
+        logger.debug("[Azure OpenAI] Request aborted");
         throw new Error("Request cancelled");
       }
 
-      console.error("[Azure OpenAI] API error:", {
-        message: error.message,
-        code: error?.code || error?.cause?.code,
-      });
-      throw this.toStructuredProviderError(error);
+      const structuredError = this.toStructuredProviderError(error);
+      const logPayload = {
+        message: structuredError.message,
+        status: structuredError.status,
+        code: structuredError?.code || (structuredError as Any)?.cause?.code,
+        requestId: (structuredError as Any).requestId,
+        retryable: structuredError.retryable === true,
+      };
+      if (structuredError.retryable) {
+        logger.warn("[Azure OpenAI] Transient provider interruption:", logPayload);
+      } else {
+        logger.error("[Azure OpenAI] API error:", logPayload);
+      }
+      throw structuredError;
     }
   }
 

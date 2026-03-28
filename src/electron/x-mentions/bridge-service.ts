@@ -162,6 +162,7 @@ export class XMentionBridgeService {
       const failure = classifyXMentionFailure(error);
       this.consecutiveFailures += 1;
       nextDelayMs = this.getFailureBackoffMs(failure.code, nextDelayMs);
+      this.statusStore.setMode("bridge", false);
       console.warn(
         `[X Mentions] Bridge poll failed (${failure.code}). Next poll in ${Math.round(nextDelayMs / 1000)}s: ${failure.message}`,
       );

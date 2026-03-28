@@ -1268,6 +1268,24 @@ export function Sidebar({
 
           <button
             type="button"
+            className={`new-task-btn cli-new-task-btn cli-action-btn sidebar-home-btn ${isInboxAgentActive ? "active" : ""}`}
+            onClick={onOpenInboxAgent}
+            aria-pressed={isInboxAgentActive}
+            title="Inbox"
+          >
+            <span className="cli-btn-text">
+              <span className="terminal-only">inbox</span>
+              <span className="modern-only cli-new-task-modern-label">
+                <span className="sidebar-home-btn-icon" aria-hidden="true" style={{ display: 'flex' }}>
+                  <Inbox size={16} strokeWidth={2} style={{ display: 'block' }} />
+                </span>
+                <span>Inbox</span>
+              </span>
+            </span>
+          </button>
+
+          <button
+            type="button"
             className={`new-task-btn cli-new-task-btn cli-action-btn sidebar-home-btn ${isHealthActive ? "active" : ""}`}
             onClick={onOpenHealth}
             aria-pressed={isHealthActive}
@@ -1377,24 +1395,6 @@ export function Sidebar({
         <>
           {/* Ideas tab — above Sessions */}
           <div className="sidebar-ideas-tab" style={{ padding: "0 12px", marginBottom: "6px" }}>
-            <button
-              type="button"
-              className={`new-task-btn cli-new-task-btn cli-action-btn sidebar-ideas-btn ${isInboxAgentActive ? "active" : ""}`}
-              onClick={onOpenInboxAgent}
-              aria-pressed={isInboxAgentActive}
-              title="Inbox Agent"
-              style={{ marginBottom: "8px" }}
-            >
-              <span className="cli-btn-text">
-                <span className="terminal-only">inbox_agent</span>
-                <span className="modern-only cli-new-task-modern-label">
-                  <span className="sidebar-home-btn-icon" aria-hidden="true" style={{ display: 'flex' }}>
-                    <Inbox size={16} strokeWidth={2} style={{ display: 'block' }} />
-                  </span>
-                  <span>Inbox Agent</span>
-                </span>
-              </span>
-            </button>
             <button
               type="button"
               className={`new-task-btn cli-new-task-btn cli-action-btn sidebar-ideas-btn ${isIdeasActive ? "active" : ""}`}

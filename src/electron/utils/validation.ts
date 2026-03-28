@@ -667,6 +667,7 @@ export const GoogleWorkspaceSettingsSchema = z.object({
   tokenExpiresAt: z.number().int().optional(),
   scopes: z.array(z.string().max(200)).optional(),
   timeoutMs: z.number().int().min(1000).max(120000).optional(),
+  loginHint: z.string().email().max(254).optional(),
 });
 
 // ============ Dropbox Settings Schema ============

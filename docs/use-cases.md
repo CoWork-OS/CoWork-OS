@@ -14,7 +14,7 @@ Use cases:
 - Household logistics (capture tasks, keep you on track)
 - Booking + forms (find availability, fill forms, stop before final submit)
 - Visibility for others (daily digest to family)
-- Inbox autopilot (triage, drafts, cleanup suggestions)
+- Inbox autopilot / Inbox Agent (triage, drafts, cleanup suggestions, commitment tracking)
 - Chief-of-staff briefing (morning executive brief)
 - Dev task queue management (agent-ready backlog execution)
 - Founder-directed autonomous company operations ("zero-human company" loop)
@@ -129,15 +129,16 @@ STOP before sending and ask me to confirm the final message and where to send it
 
 Prompt:
 ```
-Run inbox triage for the last 24h.
+Run inbox triage in Inbox Agent for the last 24h.
 Prefer gmail_action; if unavailable use email_imap_unread; if unavailable use Email channel history.
 
-Classify each message as urgent, today, this-week, or no-action.
+Classify each message as urgent, today, this-week, or no-action, and also flag action-needed, suggested actions, and open commitments where appropriate.
 Output:
 - Priority table
 - Draft replies for urgent/today items
 - Cleanup candidates (newsletter/promotions) with unsubscribe/archive suggestions
 - Follow-up reminders to create
+- Commitment items that should be tracked as real follow-up tasks
 
 STOP before sending, unsubscribing, archiving, deleting, or labeling anything.
 Ask me what to execute.

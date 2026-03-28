@@ -680,19 +680,22 @@ Start your day with an AI-generated executive brief covering calendar, inbox, ta
 
 ### Inbox Management
 
-Triage email, draft responses, identify cleanup opportunities, and manage follow-ups automatically.
+Triage email in the Inbox Agent workspace, draft responses, identify cleanup opportunities, and manage follow-ups automatically.
 
 **What it handles:**
-- Email classification by urgency (critical, today, this week, no action)
-- Response drafting for priority messages
-- Newsletter and promotional email cleanup suggestions
-- Follow-up reminder creation
-- Unsubscribe recommendations for low-value subscriptions
+- Unread, Action Needed, Suggested Actions, and Open Commitments at a glance
+- Inbox / Sent / All views plus Recent / Priority sorting
+- Response drafting for priority messages, with send-or-discard review
+- Cleanup suggestions for newsletters and promotional mail
+- Follow-up reminder creation and real commitment tracking
+- Schedule creation and thread intelligence refresh when the conversation needs more context
 
 **Example prompt:**
 ```
 /inbox autopilot 180
 ```
+
+See [Inbox Agent](inbox-agent.md) for the full feature workflow.
 
 **Powered by:** `usecase-inbox-manager` skill, Gmail integration, Email channel
 

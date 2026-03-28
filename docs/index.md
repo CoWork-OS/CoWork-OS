@@ -39,6 +39,8 @@ features:
     details: WhatsApp, Telegram, Discord, Slack, iMessage, Teams, and more. Chat with your AI from anywhere.
   - title: Chat Mode
     details: Direct LLM chat with no tools, same-session follow-ups, and chat-only streaming for supported providers.
+  - title: Inbox Agent
+    details: Local-first email triage with AI classification, action-needed and commitment queues, draft review, and resync-safe background sync.
   - title: Managed Devices
     details: Connect local and remote CoWork nodes, inspect device summaries, browse remote workspaces, and launch tasks against selected machines from one Devices tab.
   - title: Automations

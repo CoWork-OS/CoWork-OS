@@ -2,6 +2,8 @@
 
 The Ideas panel shows use case prompts that CoWork OS can execute. Each idea uses **built-in capabilities** that are available by default or via standard integrations.
 
+For the full inbox workspace, see [Inbox Agent](inbox-agent.md).
+
 ## Core Capabilities (Always Available)
 
 | Capability | Tools / Commands | Notes |

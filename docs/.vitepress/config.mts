@@ -71,6 +71,7 @@ export default defineConfig({
         items: [
           { text: 'Channel Integrations', link: '/channels' },
           { text: 'Channel Comparison', link: '/channel-comparison' },
+          { text: 'Inbox Agent', link: '/inbox-agent' },
           { text: 'Release Notes 0.5.11', link: '/release-notes-0.5.11' },
           { text: 'aurl skill (OpenAPI/GraphQL)', link: '/skills/aurl' },
           { text: 'Use Cases', link: '/use-cases' },

@@ -6,6 +6,8 @@ export interface GoogleWorkspaceOAuthRequest {
   clientId: string;
   clientSecret?: string;
   scopes?: string[];
+  /** Email hint to pre-select the correct Google account in the browser */
+  loginHint?: string;
 }
 
 export interface GoogleWorkspaceOAuthResult {
@@ -172,6 +174,113 @@ async function startOAuthCallbackServer(timeoutMs = DEFAULT_TIMEOUT_MS): Promise
   });
 }
 
+/**
+ * Tracks whether a copy-link OAuth callback server is already listening so that a second
+ * concurrent call does not attempt to bind the same port.
+ */
+let oauthGetLinkInFlight = false;
+
+/**
+ * Builds the Google OAuth authorization URL and starts the local callback server without
+ * opening a browser. Returns the URL immediately so the caller can copy it to the clipboard.
+ * Tokens are delivered via `onComplete` once the user finishes authorizing in their browser.
+ */
+export async function startGoogleWorkspaceOAuthGetLink(
+  request: GoogleWorkspaceOAuthRequest,
+  onComplete: (result: GoogleWorkspaceOAuthResult) => void,
+  onError: (error: Error) => void,
+): Promise<string> {
+  if (oauthGetLinkInFlight) {
+    throw new Error(
+      "An OAuth link request is already in progress. Wait for the current authorization to complete before starting a new one.",
+    );
+  }
+  if (!request.clientId) {
+    throw new Error("Google Workspace OAuth requires a client ID");
+  }
+
+  const scopes =
+    request.scopes && request.scopes.length > 0
+      ? request.scopes
+      : [
+          "https://www.googleapis.com/auth/drive",
+          "https://www.googleapis.com/auth/gmail.readonly",
+          "https://www.googleapis.com/auth/gmail.send",
+          "https://www.googleapis.com/auth/calendar",
+        ];
+
+  const { redirectUri, waitForCode, state } = await startOAuthCallbackServer();
+  const codeVerifier = createCodeVerifier();
+  const codeChallenge = createCodeChallenge(codeVerifier);
+
+  const authUrl = new URL(GOOGLE_OAUTH_AUTHORIZE_URL);
+  authUrl.searchParams.set("response_type", "code");
+  authUrl.searchParams.set("client_id", request.clientId);
+  authUrl.searchParams.set("redirect_uri", redirectUri);
+  authUrl.searchParams.set("scope", scopes.join(" "));
+  authUrl.searchParams.set("state", state);
+  authUrl.searchParams.set("code_challenge", codeChallenge);
+  authUrl.searchParams.set("code_challenge_method", "S256");
+  authUrl.searchParams.set("access_type", "offline");
+  authUrl.searchParams.set("prompt", "consent select_account");
+  if (request.loginHint) {
+    authUrl.searchParams.set("login_hint", request.loginHint);
+  }
+
+  // Wait for the browser callback in the background; caller gets the URL immediately.
+  oauthGetLinkInFlight = true;
+  waitForCode()
+    .then(async ({ code }) => {
+      const params = new URLSearchParams({
+        grant_type: "authorization_code",
+        code,
+        client_id: request.clientId,
+        redirect_uri: redirectUri,
+        code_verifier: codeVerifier,
+      });
+      if (request.clientSecret) {
+        params.set("client_secret", request.clientSecret);
+      }
+      const tokenResponse = await fetch(GOOGLE_OAUTH_TOKEN_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: params.toString(),
+      });
+      const rawText = typeof tokenResponse.text === "function" ? await tokenResponse.text() : "";
+      const tokenData = rawText ? parseJsonSafe(rawText) : undefined;
+      if (!tokenResponse.ok) {
+        const message =
+          tokenData?.error_description ||
+          tokenData?.error ||
+          tokenResponse.statusText ||
+          "OAuth failed";
+        onError(new Error(`Google Workspace OAuth failed: ${message}`));
+        return;
+      }
+      const accessToken = tokenData?.access_token as string | undefined;
+      if (!accessToken) {
+        onError(new Error("Google Workspace OAuth did not return an access_token"));
+        return;
+      }
+      const expiresIn =
+        typeof tokenData?.expires_in === "number" ? tokenData.expires_in : undefined;
+      const scopesGranted = parseScopeList(tokenData?.scope);
+      onComplete({
+        accessToken,
+        refreshToken: tokenData?.refresh_token,
+        expiresIn,
+        tokenType: tokenData?.token_type,
+        scopes: scopesGranted,
+      });
+    })
+    .catch((err: Error) => onError(err))
+    .finally(() => {
+      oauthGetLinkInFlight = false;
+    });
+
+  return authUrl.toString();
+}
+
 export async function startGoogleWorkspaceOAuth(
   request: GoogleWorkspaceOAuthRequest,
 ): Promise<GoogleWorkspaceOAuthResult> {
@@ -202,7 +311,10 @@ export async function startGoogleWorkspaceOAuth(
   authUrl.searchParams.set("code_challenge", codeChallenge);
   authUrl.searchParams.set("code_challenge_method", "S256");
   authUrl.searchParams.set("access_type", "offline");
-  authUrl.searchParams.set("prompt", "consent");
+  authUrl.searchParams.set("prompt", "consent select_account");
+  if (request.loginHint) {
+    authUrl.searchParams.set("login_hint", request.loginHint);
+  }
 
   await openExternalUrl(authUrl.toString());
 

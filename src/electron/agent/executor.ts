@@ -67,6 +67,7 @@ import { PersonalityManager } from "../settings/personality-manager";
 import { detectContextMode } from "./context-mode-detector";
 import { calculateCost, formatCost } from "./llm/pricing";
 import { loadImageFromFile, validateImageForProvider } from "./llm/image-utils";
+import { sanitizeToolCallHistory } from "./llm/openai-compatible";
 import { getCustomSkillLoader } from "./custom-skill-loader";
 import { MemoryService } from "../memory/MemoryService";
 import { PlaybookService } from "../memory/PlaybookService";
@@ -406,6 +407,7 @@ interface WebEvidenceEntry {
   tool: "web_search" | "web_fetch";
   url: string;
   title?: string;
+  sourceClass?: "reddit" | "x" | "tech_news";
   publishDate?: string;
   timestamp: number;
 }
@@ -5630,6 +5632,11 @@ ${transcript}
     return /Task missing source validation:/i.test(message);
   }
 
+  private isStrictResearchSourceCoverageGuardError(error: unknown): boolean {
+    const message = String((error as Any)?.message || error || "");
+    return /Task missing source coverage:/i.test(message);
+  }
+
   private hasMinimumCategoryCoverage(candidate: string): boolean {
     const text = String(candidate || "").trim();
     if (!text) return false;
@@ -5722,6 +5729,9 @@ ${transcript}
       /^Task missing (artifact|execution|verification) evidence/i.test(message) &&
       !this.isSourceValidationGuardError(error)
     ) {
+      return false;
+    }
+    if (this.isStrictResearchSourceCoverageGuardError(error)) {
       return false;
     }
     const failureClass = this.classifyFailure(error);
@@ -8701,6 +8711,13 @@ ${transcript}
       return "Task missing source validation: release/funding claims require web_fetch sources with explicit publish dates. Remove unverified claims or fetch dated source pages first.";
     }
 
+    if (this.requiresStrictResearchClaimValidation(bestCandidate)) {
+      const missingCategories = this.getMissingTrendEvidenceCategories();
+      if (missingCategories.length > 0) {
+        return `Task missing source coverage: Daily AI Agent Trends Research requires Reddit, X, and tech news evidence. Missing ${missingCategories.join(", ")}.`;
+      }
+    }
+
     return null;
   }
 
@@ -10339,8 +10356,9 @@ You are continuing a previous conversation. The context from the previous conver
   private serializeConversationWithSizeLimit(history: LLMMessage[]): Any[] {
     const MAX_CONTENT_LENGTH = 50000; // 50KB per content block
     const MAX_TOOL_RESULT_LENGTH = 10000; // 10KB per tool result
+    const sanitizedHistory = sanitizeToolCallHistory(history);
 
-    return history.map((msg) => {
+    return sanitizedHistory.map((msg) => {
       // Handle string content
       if (typeof msg.content === "string") {
         return {
@@ -10432,6 +10450,7 @@ You are continuing a previous conversation. The context from the previous conver
         role: msg.role as "user" | "assistant",
         content: msg.content,
       }));
+      restoredHistory = sanitizeToolCallHistory(restoredHistory);
 
       // Restore file operation tracker state (files read, created, directories explored)
       if (payload.trackerState) {
@@ -13113,6 +13132,7 @@ You are continuing a previous conversation. The context from the previous conver
           tool: "web_search",
           url,
           title: title || undefined,
+          sourceClass: this.classifyWebEvidenceSource(url, title || snippet),
           publishDate,
           timestamp: Date.now(),
         });
@@ -13144,9 +13164,62 @@ You are continuing a previous conversation. The context from the previous conver
       tool: "web_fetch",
       url,
       title: title || undefined,
+      sourceClass: this.classifyWebEvidenceSource(url, `${title}\n${content}`),
       publishDate,
       timestamp: Date.now(),
     });
+  }
+
+  private classifyWebEvidenceSource(
+    url: string,
+    contextText?: string,
+  ): "reddit" | "x" | "tech_news" {
+    const rawUrl = String(url || "").trim();
+    const text = String(contextText || "").toLowerCase();
+    let hostname = "";
+    try {
+      hostname = new URL(rawUrl).hostname.toLowerCase();
+    } catch {
+      hostname = "";
+    }
+
+    if (hostname === "redd.it" || hostname === "reddit.com" || hostname.endsWith(".reddit.com")) {
+      return "reddit";
+    }
+    if (
+      hostname === "x.com" ||
+      hostname.endsWith(".x.com") ||
+      hostname === "twitter.com" ||
+      hostname.endsWith(".twitter.com") ||
+      hostname === "t.co"
+    ) {
+      return "x";
+    }
+    if (/\breddit\b/.test(text)) return "reddit";
+    if (/\b(?:x\.com|twitter)\b/.test(text)) return "x";
+    return "tech_news";
+  }
+
+  private isDailyAiAgentTrendsTask(): boolean {
+    const corpus = `${this.task.title}\n${this.task.prompt}`.toLowerCase();
+    return corpus.includes("daily ai agent trends research") || /\bai agent trends\b/.test(corpus);
+  }
+
+  private getResearchEvidenceCategories(): Set<"reddit" | "x" | "tech_news"> {
+    const categories = new Set<"reddit" | "x" | "tech_news">();
+    for (const entry of this.ensureWebEvidenceMemory()) {
+      if (!entry?.url) continue;
+      categories.add(
+        entry.sourceClass || this.classifyWebEvidenceSource(entry.url, entry.title || ""),
+      );
+    }
+    return categories;
+  }
+
+  private getMissingTrendEvidenceCategories(): Array<"reddit" | "x" | "tech_news"> {
+    if (!this.isDailyAiAgentTrendsTask()) return [];
+    const categories = this.getResearchEvidenceCategories();
+    return (["reddit", "x", "tech_news"] as const).filter((category) => !categories.has(category));
   }
 
   private trackFileRead(toolName: string, result: Any, input?: Any): void {
@@ -15700,6 +15773,34 @@ You are continuing a previous conversation. The context from the previous conver
     );
   }
 
+  private getAutoRoutableSkill(
+    skillId: string,
+    query: string,
+  ): { skill: Any; reason?: string } | null {
+    const normalizedSkillId = String(skillId || "").trim();
+    if (!normalizedSkillId) return null;
+
+    const skillLoader = getCustomSkillLoader();
+    const currentSkill = skillLoader.getSkill(normalizedSkillId);
+    if (!currentSkill) {
+      return {
+        skill: null,
+        reason: `Skill '${normalizedSkillId}' is no longer loaded.`,
+      };
+    }
+
+    if (!skillLoader.matchesSkillRoutingQuery(currentSkill, query)) {
+      return {
+        skill: currentSkill,
+        reason:
+          `Skipped auto-routing to skill '${normalizedSkillId}' because the current task text ` +
+          "does not satisfy its routing keyword gate.",
+      };
+    }
+
+    return { skill: currentSkill };
+  }
+
   private async maybeHandleHighConfidenceSkillRouting(): Promise<boolean> {
     const contractPrompt = this.getContractPrompt();
     const rawQuery = `${this.task.title || ""}\n${contractPrompt}`.trim();
@@ -15724,17 +15825,29 @@ You are continuing a previous conversation. The context from the previous conver
       const explicitMatch = ranked.find((entry) => this.isExplicitSkillInvocation(rawQuery, entry.skill));
 
       if (explicitMatch) {
-        const best = explicitMatch.skill;
+        const routable = this.getAutoRoutableSkill(explicitMatch.skill?.id, rawQuery);
+        if (!routable) {
+          return false;
+        }
+        if (routable.reason) {
+          this.emitEvent("log", {
+            message: routable.reason,
+            skillId: explicitMatch.skill?.id,
+          });
+          return false;
+        }
+
+        const best = routable.skill;
 
         const missingRequiredParams = (best.parameters || []).filter(
-          (param) => param.required && param.default === undefined,
+          (param: Any) => param.required && param.default === undefined,
         );
         if (missingRequiredParams.length > 0) {
           this.emitEvent("log", {
             message:
               `Skipped explicit skill routing to skill '${best.id}' because required parameters are still needed.`,
             skillId: best.id,
-            missingParameters: missingRequiredParams.map((param) => param.name),
+            missingParameters: missingRequiredParams.map((param: Any) => param.name),
           });
           return false;
         }
@@ -15781,33 +15894,47 @@ You are continuing a previous conversation. The context from the previous conver
         return false;
       }
 
+      const routable = this.getAutoRoutableSkill(best.skill?.id, rawQuery);
+      if (!routable) {
+        return false;
+      }
+      if (routable.reason) {
+        this.emitEvent("log", {
+          message: routable.reason,
+          skillId: best.skill?.id,
+          score: best.score,
+        });
+        return false;
+      }
+      const bestSkill = routable.skill;
+
       const marginOverNext = best.score - (second?.score ?? 0);
       if (second && marginOverNext < MIN_MARGIN_OVER_NEXT) {
         return false;
       }
 
-      const missingRequiredParams = (best.skill.parameters || []).filter(
-        (param) => param.required && param.default === undefined,
+      const missingRequiredParams = (bestSkill.parameters || []).filter(
+        (param: Any) => param.required && param.default === undefined,
       );
       if (missingRequiredParams.length > 0) {
         this.emitEvent("log", {
           message:
-            `Skipped deterministic natural-language routing to skill '${best.skill.id}' ` +
+            `Skipped deterministic natural-language routing to skill '${bestSkill.id}' ` +
             `because required parameters are still needed.`,
-          skillId: best.skill.id,
-          missingParameters: missingRequiredParams.map((param) => param.name),
+          skillId: bestSkill.id,
+          missingParameters: missingRequiredParams.map((param: Any) => param.name),
           score: best.score,
         });
         return false;
       }
 
       preserveContractPrompt();
-      const expanded = await this.expandSkillPrompt(best.skill.id, {}, `skill '${best.skill.id}'`);
+      const expanded = await this.expandSkillPrompt(bestSkill.id, {}, `skill '${bestSkill.id}'`);
       this.task.prompt = expanded;
       this.emitEvent("log", {
         message:
-          `Deterministically routed natural-language request to skill '${best.skill.id}'.`,
-        skillId: best.skill.id,
+          `Deterministically routed natural-language request to skill '${bestSkill.id}'.`,
+        skillId: bestSkill.id,
         score: best.score,
         marginOverNext: second ? marginOverNext : null,
       });

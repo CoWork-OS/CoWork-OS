@@ -10,7 +10,11 @@ import {
   isTesseractInstalled,
   sanitizeOcrOutput,
 } from "../ipc/image-viewer-ocr";
-import type { PdfReviewPageSummary, PdfReviewSummary } from "../../shared/types";
+import type {
+  PdfReviewExtractionMode,
+  PdfReviewPageSummary,
+  PdfReviewSummary,
+} from "../../shared/types";
 
 const execFile = promisify(execFileCallback);
 
@@ -30,6 +34,25 @@ type PdfReviewOptions = {
   includeOcr?: boolean;
 };
 
+type NativePageText = {
+  pageIndex: number;
+  text: string;
+  charCount: number;
+  wordCount: number;
+};
+
+type PdfCoverageReport = {
+  totalPages: number;
+  pageLimit: number;
+  nativeTextPages: number;
+  totalNativeChars: number;
+  totalNativeWords: number;
+  coverageRatio: number;
+  averageCharsPerPage: number;
+  averageWordsPerPage: number;
+  imageHeavy: boolean;
+};
+
 export type PdfReviewData = PdfReviewSummary & {
   fullText: string;
   content: string;
@@ -39,8 +62,18 @@ const DEFAULT_MAX_PAGES = 12;
 const DEFAULT_MAX_CHARS_PER_PAGE = 1800;
 const DEFAULT_PAGE_TEXT_THRESHOLD = 32;
 const DEFAULT_MAX_OCR_PAGES = 4;
-const DEFAULT_RENDER_SCALE = 1400;
+const DEFAULT_RENDER_SCALE = 1800;
+const IMAGE_HEAVY_COVERAGE_THRESHOLD = 0.45;
+const IMAGE_HEAVY_AVG_CHAR_THRESHOLD = 140;
+const IMAGE_HEAVY_AVG_WORD_THRESHOLD = 20;
 const OCR_TEMP_PREFIX = "cowork-pdf-ocr-";
+const OCRMYPDF_TEMP_PREFIX = "cowork-pdf-ocrmypdf-";
+const OCRMYPDF_TIMEOUT_MS = 5 * 60 * 1000;
+
+let ocrmypdfChecked = false;
+let isOcrmypdfAvailable = false;
+let ocrmypdfCheckedAt = 0;
+const OCRMYPDF_BINARY_CHECK_TTL_MS = 5 * 60 * 1000;
 
 function normalizeWhitespace(value: string): string {
   return value
@@ -83,6 +116,50 @@ function truncateText(value: string, maxChars: number): { text: string; truncate
 
 async function loadPdfJs() {
   return import("pdfjs-dist/legacy/build/pdf.mjs");
+}
+
+async function isOcrmypdfInstalled(): Promise<boolean> {
+  const now = Date.now();
+  if (ocrmypdfChecked && now - ocrmypdfCheckedAt < OCRMYPDF_BINARY_CHECK_TTL_MS) {
+    return isOcrmypdfAvailable;
+  }
+
+  ocrmypdfChecked = true;
+  ocrmypdfCheckedAt = now;
+  try {
+    await execFile("ocrmypdf", ["--version"], { timeout: 3000 });
+    isOcrmypdfAvailable = true;
+  } catch {
+    isOcrmypdfAvailable = false;
+  }
+  return isOcrmypdfAvailable;
+}
+
+async function runOcrmypdf(pdfPath: string): Promise<Buffer | null> {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), OCRMYPDF_TEMP_PREFIX));
+  const outputPath = path.join(tempDir, "ocr.pdf");
+  try {
+    await execFile(
+      "ocrmypdf",
+      [
+        "--skip-text",
+        "--deskew",
+        "--rotate-pages",
+        "--quiet",
+        pdfPath,
+        outputPath,
+      ],
+      {
+        timeout: OCRMYPDF_TIMEOUT_MS,
+        maxBuffer: 16 * 1024 * 1024,
+      },
+    );
+    return await fs.readFile(outputPath);
+  } catch {
+    return null;
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 async function renderPdfPageForOcr(pdfPath: string, pageNumber: number, renderScale: number) {
@@ -159,9 +236,85 @@ function buildReviewBlock(pageIndex: number, text: string, usedOcr: boolean): st
   return lines.join("\n");
 }
 
-export async function extractPdfReviewData(
+function countWords(text: string): number {
+  const normalized = normalizeWhitespace(text);
+  if (!normalized) return 0;
+  return normalized.split(/\s+/).filter(Boolean).length;
+}
+
+function assessPdfCoverage(nativePages: NativePageText[], totalPages: number, pageLimit: number): PdfCoverageReport {
+  const nativeTextPages = nativePages.filter((page) => page.text.length > 0).length;
+  const totalNativeChars = nativePages.reduce((sum, page) => sum + page.charCount, 0);
+  const totalNativeWords = nativePages.reduce((sum, page) => sum + page.wordCount, 0);
+  const coverageRatio = pageLimit > 0 ? nativeTextPages / pageLimit : 0;
+  const averageCharsPerPage = pageLimit > 0 ? totalNativeChars / pageLimit : 0;
+  const averageWordsPerPage = pageLimit > 0 ? totalNativeWords / pageLimit : 0;
+  const imageHeavy =
+    pageLimit > 0 &&
+    (coverageRatio <= IMAGE_HEAVY_COVERAGE_THRESHOLD ||
+      averageCharsPerPage <= IMAGE_HEAVY_AVG_CHAR_THRESHOLD ||
+      averageWordsPerPage <= IMAGE_HEAVY_AVG_WORD_THRESHOLD);
+
+  return {
+    totalPages,
+    pageLimit,
+    nativeTextPages,
+    totalNativeChars,
+    totalNativeWords,
+    coverageRatio,
+    averageCharsPerPage,
+    averageWordsPerPage,
+    imageHeavy,
+  };
+}
+
+export function decidePdfExtractionMode(params: {
+  includeOcr: boolean;
+  ocrmypdfAvailable: boolean;
+  coverage: PdfCoverageReport;
+}): {
+  extractionMode: PdfReviewExtractionMode;
+  useDocumentOcr: boolean;
+  forcePageOcr: boolean;
+} {
+  const { includeOcr, ocrmypdfAvailable, coverage } = params;
+  const useDocumentOcr = Boolean(includeOcr && ocrmypdfAvailable && coverage.imageHeavy);
+  const forcePageOcr = Boolean(includeOcr && coverage.imageHeavy && !useDocumentOcr);
+
+  return {
+    extractionMode: useDocumentOcr
+      ? "ocrmypdf"
+      : forcePageOcr
+        ? "page-ocr"
+        : "native",
+    useDocumentOcr,
+    forcePageOcr,
+  };
+}
+
+async function collectNativePageTexts(document: Any, pageLimit: number): Promise<NativePageText[]> {
+  const pages: NativePageText[] = [];
+  for (let pageIndex = 0; pageIndex < pageLimit; pageIndex += 1) {
+    const page = await document.getPage(pageIndex + 1);
+    const text = normalizeWhitespace(await extractPageText(page));
+    pages.push({
+      pageIndex,
+      text,
+      charCount: text.length,
+      wordCount: countWords(text),
+    });
+  }
+  return pages;
+}
+
+async function buildPdfReviewFromDocument(
   pdfPath: string,
-  options: PdfReviewOptions = {},
+  document: Any,
+  nativePages: NativePageText[],
+  coverage: PdfCoverageReport,
+  options: PdfReviewOptions,
+  extractionMode: PdfReviewExtractionMode,
+  forcePageOcr: boolean,
 ): Promise<PdfReviewData> {
   const maxPages = Math.max(1, Math.floor(options.maxPages ?? DEFAULT_MAX_PAGES));
   const maxCharsPerPage = Math.max(200, Math.floor(options.maxCharsPerPage ?? DEFAULT_MAX_CHARS_PER_PAGE));
@@ -170,94 +323,166 @@ export async function extractPdfReviewData(
   const renderScale = Math.max(800, Math.floor(options.renderScale ?? DEFAULT_RENDER_SCALE));
   const includeOcr = options.includeOcr !== false;
 
-  const buffer = await fs.readFile(pdfPath);
+  const pageLimit = Math.min(coverage.totalPages, maxPages);
+  const effectiveOcrPageLimit = forcePageOcr ? pageLimit : maxOcrPages;
+
+  const pages: PdfReviewPageSummary[] = [];
+  const reviewBlocks: string[] = [];
+  let nativeTextPages = 0;
+  let ocrPages = 0;
+  let scannedPages = 0;
+  let ocrAttempts = 0;
+
+  try {
+    for (let pageIndex = 0; pageIndex < pageLimit; pageIndex += 1) {
+      const nativePage = nativePages[pageIndex] ?? {
+        pageIndex,
+        text: "",
+        charCount: 0,
+        wordCount: 0,
+      };
+
+      let pageText = nativePage.text;
+      let usedOcr = false;
+
+      if (pageText) {
+        nativeTextPages += 1;
+      }
+
+      const shouldTryOcr =
+        includeOcr &&
+        ocrAttempts < effectiveOcrPageLimit &&
+        (forcePageOcr ||
+          nativePage.charCount < pageTextThreshold ||
+          nativePage.wordCount < pageTextThreshold);
+
+      if (shouldTryOcr) {
+        scannedPages += 1;
+        const pageImagePath = await renderPdfPageForOcr(pdfPath, pageIndex + 1, renderScale);
+        if (pageImagePath) {
+          ocrAttempts += 1;
+          const ocrText = await runPdfPageOcr(pageImagePath);
+          if (ocrText) {
+            const cleanedOcrText = normalizeWhitespace(ocrText);
+            if (
+              forcePageOcr ||
+              !pageText ||
+              cleanedOcrText.length >= pageText.length * 0.8 ||
+              cleanedOcrText.length > pageText.length + 60
+            ) {
+              pageText = cleanedOcrText;
+              usedOcr = true;
+              ocrPages += 1;
+            }
+          }
+          await fs.rm(path.dirname(pageImagePath), { recursive: true, force: true }).catch(() => {});
+        }
+      }
+
+      const normalizedPageText = normalizeWhitespace(pageText || "");
+      const effectiveText = normalizedPageText || "[No extractable text found on this page.]";
+      const truncatedResult = truncateText(effectiveText, maxCharsPerPage);
+
+      pages.push({
+        pageIndex,
+        text: truncatedResult.text,
+        usedOcr,
+        truncated: truncatedResult.truncated,
+      });
+      reviewBlocks.push(buildReviewBlock(pageIndex, truncatedResult.text, usedOcr));
+    }
+  } finally {
+    if (typeof document.destroy === "function") {
+      await document.destroy();
+    }
+  }
+
+  if (coverage.totalPages > pageLimit) {
+    reviewBlocks.push(`[... ${coverage.totalPages - pageLimit} additional page(s) omitted from preview ...]`);
+  }
+
+  const effectiveMode =
+    extractionMode === "ocrmypdf"
+      ? "ocrmypdf"
+      : ocrPages > 0
+        ? "page-ocr"
+        : extractionMode;
+
+  return {
+    pageCount: coverage.totalPages,
+    nativeTextPages,
+    ocrPages,
+    scannedPages,
+    truncatedPages: coverage.totalPages > pageLimit,
+    extractionMode: effectiveMode,
+    imageHeavy: coverage.imageHeavy,
+    pages,
+    fullText: reviewBlocks.join("\n\n"),
+    content: reviewBlocks.join("\n\n"),
+  };
+}
+
+async function extractPdfReviewDataImpl(
+  pdfPath: string,
+  buffer: Buffer,
+  options: PdfReviewOptions = {},
+  allowDocumentOcr = true,
+): Promise<PdfReviewData> {
+  const maxPages = Math.max(1, Math.floor(options.maxPages ?? DEFAULT_MAX_PAGES));
 
   try {
     const pdfjs = await loadPdfJs();
     const loadingTask = pdfjs.getDocument({ data: buffer });
     const document = await loadingTask.promise;
-    const totalPages = document.numPages;
-    const pageLimit = Math.min(totalPages, maxPages);
 
-    const pages: PdfReviewPageSummary[] = [];
-    const reviewBlocks: string[] = [];
-    let nativeTextPages = 0;
-    let ocrPages = 0;
-    let scannedPages = 0;
-    let ocrAttempts = 0;
+    const pageLimit = Math.min(document.numPages, maxPages);
+    const nativePages = await collectNativePageTexts(document, pageLimit);
+    const coverage = assessPdfCoverage(nativePages, document.numPages, pageLimit);
+    const ocrmypdfAvailable = allowDocumentOcr ? await isOcrmypdfInstalled() : false;
+    const decision = decidePdfExtractionMode({
+      includeOcr: options.includeOcr !== false,
+      ocrmypdfAvailable,
+      coverage,
+    });
 
-    try {
-      for (let pageIndex = 0; pageIndex < pageLimit; pageIndex += 1) {
-        const page = await document.getPage(pageIndex + 1);
-        const nativeText = normalizeWhitespace(await extractPageText(page));
-        const nativeWordCount = nativeText ? nativeText.split(/\s+/).filter(Boolean).length : 0;
-        const shouldTryOcr =
-          includeOcr &&
-          ocrAttempts < maxOcrPages &&
-          (nativeText.length < pageTextThreshold || nativeWordCount < pageTextThreshold);
-
-        let pageText = nativeText;
-        let usedOcr = false;
-
-        if (pageText) {
-          nativeTextPages += 1;
-        }
-
-        if (shouldTryOcr) {
-          scannedPages += 1;
-          const pageImagePath = await renderPdfPageForOcr(pdfPath, pageIndex + 1, renderScale);
-          if (pageImagePath) {
-            ocrAttempts += 1;
-            const ocrText = await runPdfPageOcr(pageImagePath);
-            if (ocrText) {
-              pageText = ocrText;
-              usedOcr = true;
-              ocrPages += 1;
-            }
-            await fs.rm(path.dirname(pageImagePath), { recursive: true, force: true }).catch(() => {});
-          }
-        }
-
-        const normalizedPageText = normalizeWhitespace(pageText || "");
-        const effectiveText = normalizedPageText || "[No extractable text found on this page.]";
-        const truncatedResult = truncateText(effectiveText, maxCharsPerPage);
-
-        pages.push({
-          pageIndex,
-          text: truncatedResult.text,
-          usedOcr,
-          truncated: truncatedResult.truncated,
-        });
-        reviewBlocks.push(buildReviewBlock(pageIndex, truncatedResult.text, usedOcr));
+    if (allowDocumentOcr && decision.useDocumentOcr) {
+      const ocrBuffer = await runOcrmypdf(pdfPath);
+      if (ocrBuffer) {
+        const review = await extractPdfReviewDataImpl(
+          `${pdfPath}#ocrmypdf`,
+          ocrBuffer,
+          {
+            ...options,
+            includeOcr: false,
+          },
+          false,
+        );
+        return review.extractionMode === "fallback"
+          ? review
+          : {
+              ...review,
+              extractionMode: "ocrmypdf",
+              imageHeavy: true,
+            };
       }
-    } finally {
-      if (typeof document.destroy === "function") {
-        await document.destroy();
-      }
-      await loadingTask.destroy();
     }
 
-    if (totalPages > pageLimit) {
-      reviewBlocks.push(`[... ${totalPages - pageLimit} additional page(s) omitted from preview ...]`);
-    }
-
-    return {
-      pageCount: totalPages,
-      nativeTextPages,
-      ocrPages,
-      scannedPages,
-      truncatedPages: totalPages > pageLimit,
-      pages,
-      fullText: reviewBlocks.join("\n\n"),
-      content: reviewBlocks.join("\n\n"),
-    };
+    return await buildPdfReviewFromDocument(
+      pdfPath,
+      document,
+      nativePages,
+      coverage,
+      options,
+      decision.extractionMode,
+      decision.forcePageOcr,
+    );
   } catch {
     try {
       const legacy = await parsePdfBuffer(buffer);
       const fallbackText = normalizeWhitespace(legacy.text || "");
       const truncatedResult = truncateText(
         fallbackText || "[No extractable text found in PDF.]",
-        maxCharsPerPage,
+        Math.max(200, Math.floor(options.maxCharsPerPage ?? DEFAULT_MAX_CHARS_PER_PAGE)),
       );
       const pages: PdfReviewPageSummary[] = [
         {
@@ -273,13 +498,18 @@ export async function extractPdfReviewData(
         ocrPages: 0,
         scannedPages: 0,
         truncatedPages: Boolean(legacy.numpages && legacy.numpages > 1),
+        extractionMode: "fallback",
+        imageHeavy: false,
         pages,
         fullText: buildReviewBlock(0, truncatedResult.text, false),
         content: buildReviewBlock(0, truncatedResult.text, false),
       };
     } catch {
       const placeholder = "[No extractable text found in PDF.]";
-      const truncatedResult = truncateText(placeholder, maxCharsPerPage);
+      const truncatedResult = truncateText(
+        placeholder,
+        Math.max(200, Math.floor(options.maxCharsPerPage ?? DEFAULT_MAX_CHARS_PER_PAGE)),
+      );
       const pages: PdfReviewPageSummary[] = [
         {
           pageIndex: 0,
@@ -294,10 +524,20 @@ export async function extractPdfReviewData(
         ocrPages: 0,
         scannedPages: 0,
         truncatedPages: false,
+        extractionMode: "fallback",
+        imageHeavy: false,
         pages,
         fullText: buildReviewBlock(0, truncatedResult.text, false),
         content: buildReviewBlock(0, truncatedResult.text, false),
       };
     }
   }
+}
+
+export async function extractPdfReviewData(
+  pdfPath: string,
+  options: PdfReviewOptions = {},
+): Promise<PdfReviewData> {
+  const buffer = await fs.readFile(pdfPath);
+  return extractPdfReviewDataImpl(pdfPath, buffer, options, true);
 }

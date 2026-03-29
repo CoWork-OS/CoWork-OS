@@ -8,12 +8,12 @@
 
 <p align="center">
   <strong>CoWork OS is a local-first option for production workflows.</strong><br>
-  Security-hardened, local-first AI operating system — 30+ LLM providers, 15 channels, 139 skills
+  Security-hardened, local-first AI operating system — 34 LLM provider options, 15 messaging channels, 137 built-in skills
 </p>
 
 <p align="center">
-  <a href="https://github.com/CoWork-OS/CoWork-OS/actions/workflows/ci.yml"><img src="https://github.com/CoWork-OS/CoWork-OS/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://www.npmjs.com/package/cowork-os"><img src="https://img.shields.io/npm/v/cowork-os.svg" alt="npm"></a>
+  <a href="https://github.com/CoWork-OS/CoWork-OS/actions/workflows/ci.yml"><img src="https://github.com/CoWork-OS/CoWork-OS/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
   <a href="https://www.apple.com/macos/"><img src="https://img.shields.io/badge/platform-macOS-blue.svg" alt="macOS"></a>
   <a href="https://www.microsoft.com/windows"><img src="https://img.shields.io/badge/platform-Windows-0078D6.svg" alt="Windows"></a>
@@ -35,17 +35,17 @@
 
 ### Why CoWork OS?
 
-- **30+ LLM providers** — Anthropic, OpenAI, Google, Ollama, AWS Bedrock, OpenRouter, and more. Bring your own keys.
-- **15 messaging channels** — WhatsApp, Telegram, Discord, Slack, Teams, iMessage, Signal, X, and more. Chat with your AI from anywhere.
 - **Inbox Agent** — local-first email triage with AI classification, action-needed / suggested-actions / commitments views, draft handling, follow-up creation, and background sync.
-- **139 built-in skills** — Documents, code review, web search, image generation, cloud integrations, game development, mobile development, financial analysis, infrastructure-as-code, and more.
 - **Digital Twin Personas** — Pre-built AI twins for every role (engineer, manager, PM, director). Heartbeat v3 keeps them cheap by default: deterministic Pulse checks run quietly, and Dispatch escalates only when signals, cadence, or manual intervention justify visible work.
 - **Zero-Human Company Ops** — Configure CoWork OS as a founder-directed autonomous company shell with venture workspace kits, a dedicated Companies tab, persistent operator twins, strategic planner loops, and Mission Control ops monitoring.
 - **Managed Devices** — Run and inspect tasks across saved remote machines from a dedicated Devices tab with connection controls, summaries, remote task feeds, and remote file attachment picking.
 - **Automations Control Center** — A single Automations section now groups task queueing, scheduled tasks, event triggers, webhooks, daily briefings, and the self-improvement loop.
-- **Plugin Platform** — 17 bundled role-specific packs (including Mobile Development, Game Development, and 5 Financial packs) with 55+ skills, in-app Plugin Store for installing community packs, remote registry, and enterprise admin policies for organization-wide control.
-- **Active Context sidebar** — Always-visible panel showing connected MCP connectors with branded Lucide icons and enabled skills, auto-refreshed every 30 seconds.
-- **Renderer performance** — In the `CoWork-OS/CoWork-OS` repo, the sidebar and timeline now use `@chenglou/pretext` for text measurement, flatten visible sidebar rows before virtualization, and reconcile expanded timeline card heights after render so long task feeds stay responsive.
+- **34 LLM provider options** — 13 built-in providers plus 21 compatible/gateway options, including Anthropic, OpenAI, Google, Ollama, AWS Bedrock, and OpenRouter. Bring your own keys or run local models.
+- **15 messaging channels** — WhatsApp, Telegram, Discord, Slack, Teams, iMessage, Signal, X, and more. Chat with your AI from anywhere.
+- **44 MCP connectors** — Pre-built enterprise integrations across CRM, support, productivity, analytics, and payments, with native connector support for the most common internal surfaces.
+- **18 bundled role-specific packs** — including Mobile Development, Game Development, and 5 Financial packs, with 55+ skills, in-app Plugin Store for installing community packs, remote registry, and enterprise admin policies for organization-wide control.
+- **137 built-in skills** — Documents, code review, web search, image generation, cloud integrations, game development, mobile development, financial analysis, infrastructure-as-code, and more.
+- **Active Context sidebar** — Always-visible panel showing 44 available MCP connectors with branded Lucide icons and enabled skills, auto-refreshed every 30 seconds.
 - **Agent teams** — Multi-agent collaboration with shared checklists, collaborative mode, multi-LLM synthesis, and persistent teams.
 - **Think With Me mode** — Socratic brainstorming that helps you clarify thinking without executing actions.
 - **Chat mode** — Direct LLM chat with no tools, no step timeline, same-session follow-ups, and chat-only streaming for supported providers.
@@ -59,19 +59,16 @@
 - **Runtime resilience** — Adaptive turn budgets, context-overflow recovery, and safe path normalization keep long-running tasks moving without silent file drift.
 - **Local-first & BYOK** — Your data and API keys stay on your machine. No telemetry. No middleman.
 
-### Release 0.5.12 Highlights
+### Ideas & Media
 
-The 0.5.12 release restructures the heartbeat system into a signal-driven Pulse/Dispatch pipeline, introduces the Ideas panel as a curated workflow entry point, adds Azure Anthropic as a built-in provider, expands image generation to OpenRouter, adds document editing sessions and video generation, and tightens task routing and memory compression throughout.
+Stable workflow entry points for the newest high-impact capabilities.
 
-- **Heartbeat v3** — signal-driven `Pulse`/`Dispatch` pipeline: cheap deterministic Pulse runs without LLM calls; Dispatch escalates only when signals, cadence, or manual override justify visible work. Includes signal ledger with fingerprint merging, deferred-state compression during foreground tasks, run tracking, heartbeat profiles, and Mission Control status improvements.
-- **Ideas panel** — curated launch panel accessible from the sidebar with pre-written workflow prompts and an ideas capabilities reference. Deeplinks via `/ideas` gateway route.
-- **Azure Anthropic provider** — Azure-hosted Claude deployments are now a built-in provider. Configure API key, endpoint, and deployment in Settings > LLM > Azure Anthropic.
-- **Image generation expanded** — OpenRouter image generation with preset support; configurable image provider ordering across Gemini, OpenAI, Azure OpenAI, and OpenRouter.
+- **Ideas panel** — curated launchpad of pre-written workflow prompts and capability-aware starting points, with deep links into common tasks.
 - **Document editing sessions** — inline PDF region editing, DOCX block replacement, version browsing, and document-aware file viewing for active editing sessions.
-- **Video generation** — new provider routing for text-to-video and image-to-video models, video model settings, polling tools, and inline preview.
-- **Task routing and memory tightening** — chat-mode locked to user-configured tasks; tighter execution contracts; batch memory compression; concise playbook imports; consistent child task and completion handling.
+- **Image generation** — configurable provider ordering across Gemini, OpenAI, Azure OpenAI, and OpenRouter.
+- **Video generation** — text-to-video and image-to-video routing with polling tools and inline preview.
 
-See [release notes for 0.5.12](docs/release-notes-0.5.12.md), [Features](docs/features.md), [Heartbeat v3](docs/heartbeat-v3.md), and [Providers](docs/providers.md) for the current runtime details.
+See [Features](docs/features.md), [Heartbeat v3](docs/heartbeat-v3.md), [Providers](docs/providers.md), and [Plugin Packs](docs/plugin-packs.md) for current runtime details.
 
 ## Quick Start
 
@@ -120,7 +117,7 @@ See the [Development Guide](docs/development.md) for prerequisites and details.
 
 ## How It Works
 
-1. **Create a task** — Describe what you want ("organize my Downloads by file type", "create a quarterly report spreadsheet"). No workspace needed — a temp folder is used automatically if you don't select one.
+1. **Create a task or start from Ideas** — Describe what you want ("organize my Downloads by file type", "create a quarterly report spreadsheet") or begin from a curated Ideas prompt. No workspace needed — a temp folder is used automatically if you don't select one.
 2. **Choose a mode** — Pick **Chat**, **Execute**, **Plan**, **Analyze**, or **Verified** for the runtime behavior, then optionally toggle **Autonomous** (auto-approve actions), **Collaborative** (multi-agent perspectives), or **Multi-LLM** (compare providers with a judge) per task.
 3. **Monitor execution** — Watch the real-time task timeline as the agent plans, executes, and produces artifacts. Parallel tool bursts are grouped into lane summaries, and shell commands run in a live terminal view where you can see output in real-time, stop execution, or provide input (e.g. `y`/`n`) directly.
 4. **Respond when needed** — Destructive operations require explicit approval (unless Autonomous mode is on), and plan-mode tasks can pause for structured multiple-choice input before continuing.
@@ -209,8 +206,8 @@ Advanced web scraping powered by [Scrapling](https://github.com/D4Vinci/Scraplin
 
 ### Integrations
 
-- **Cloud Storage**: Notion, Box, OneDrive, Google Workspace, Dropbox, SharePoint
-- **44 MCP Connectors**: Salesforce, Jira, HubSpot, Zendesk, Stripe, Tavily, Grafana, Metabase, Socket, and 36 more (CRM, dev tools, productivity, payments)
+- **Cloud Storage**: 6 integrations, including Notion, Box, OneDrive, Google Workspace, Dropbox, and SharePoint
+- **44 MCP Connectors**: pre-built enterprise integrations for CRM, support, productivity, analytics, and payments (Salesforce, Jira, HubSpot, Zendesk, Stripe, Tavily, Grafana, Metabase, Socket, and more)
 - **Developer Tools**: Claude Code-style `glob`/`grep`/`edit_file`, Playwright browser automation, MCP client/host/registry
 
 [Learn more](docs/features.md)
@@ -225,11 +222,11 @@ Dashboard with task metrics, cost/token tracking by model, activity heatmaps (da
 
 ### LLM Providers
 
-12 built-in providers + 20+ compatible/gateway providers. Use cloud APIs or run fully offline with Ollama. [Learn more](docs/providers.md)
+34 provider options, with 13 built-in providers and 21 compatible/gateway providers. Use cloud APIs or run fully offline with Ollama. [Learn more](docs/providers.md)
 
 ### Plugin Platform & Customize
 
-Unified plugin platform with 17 bundled role-specific packs (Engineering, DevOps, Product, Sales, QA, Finance, and more), each bundling skills, agent roles, connectors, and "Try asking" prompts. Packs can link to Digital Twin personas for proactive background work.
+Unified plugin platform with 18 bundled role-specific packs (Engineering, DevOps, Product, Sales, QA, Finance, and more), each bundling skills, agent roles, connectors, and "Try asking" prompts. Packs can link to Digital Twin personas for proactive background work.
 
 - **Search & filter**: Real-time sidebar search across pack names, descriptions, categories, and skill names
 - **Per-skill control**: Enable or disable individual skills within a pack without toggling the whole pack
@@ -257,9 +254,9 @@ These are the workflows where approval gates, local data control, and measurable
 
 ### Extensibility
 
-- **139 built-in skills** across developer, productivity, communication, documents, game development, mobile development, financial analysis, infrastructure-as-code, and more
+- **137 built-in skills** across developer, productivity, communication, documents, game development, mobile development, financial analysis, infrastructure-as-code, and more
 - **Custom skills** in `~/Library/Application Support/cowork-os/skills/` (macOS) or `%APPDATA%\cowork-os\skills\` (Windows)
-- **17 bundled plugin packs** with 55+ role-specific skills and Digital Twin integration
+- **18 bundled plugin packs** with 55+ role-specific skills and Digital Twin integration
 - **Plugin Store** — browse, install from Git/URL, or scaffold custom packs
 - **MCP support** — client, host, and registry
 

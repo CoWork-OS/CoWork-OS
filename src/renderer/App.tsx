@@ -44,6 +44,7 @@ import {
 import { TASK_EVENT_STATUS_MAP } from "../shared/task-event-status-map";
 import { applyPersistedLanguage } from "./i18n";
 import { getEffectiveTaskEventType } from "./utils/task-event-compat";
+import { invalidateGlobalMeasurer } from "./utils/pretext-adapter";
 import {
   hasTaskOutputs,
   resolveTaskOutputSummaryFromCompletionEvent,
@@ -644,6 +645,8 @@ export function App() {
     } catch {
       /* ignore */
     }
+
+    invalidateGlobalMeasurer();
   }, [themeMode, visualTheme, accentColor, uiDensity]);
 
   // Listen for system theme changes when in 'system' mode

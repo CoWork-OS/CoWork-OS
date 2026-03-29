@@ -80,6 +80,32 @@ describe("GmailTools error boundary", () => {
     );
   });
 
+  it("maps Gmail scope errors to reconnect guidance", async () => {
+    const daemon = buildDaemon();
+    const tools = new GmailTools(workspace, daemon as Any, taskId);
+    const gmailRequestMock = gmailRequest as unknown as ReturnType<typeof vi.fn>;
+    gmailRequestMock.mockRejectedValueOnce(
+      Object.assign(new Error("Gmail API error 403: Request had insufficient authentication scopes."), {
+        status: 403,
+      }),
+    );
+
+    await expect(tools.executeAction({ action: "archive_thread", thread_id: "thread-1" })).rejects.toThrow(
+      "Google Workspace authorization failed (403): Gmail modify scope is missing.",
+    );
+
+    expect(daemon.logEvent).toHaveBeenCalledWith(
+      taskId,
+      "tool_error",
+      expect.objectContaining({
+        tool: "gmail_action",
+        action: "archive_thread",
+        message: expect.stringContaining("Gmail modify scope is missing"),
+        status: 403,
+      }),
+    );
+  });
+
   it("maps token refresh errors to auth guidance", async () => {
     const daemon = buildDaemon();
     const tools = new GmailTools(workspace, daemon as Any, taskId);

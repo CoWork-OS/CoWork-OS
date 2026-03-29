@@ -6604,12 +6604,12 @@ export function MainContent({
             {uiDensity === "focused" ? (
               <div className="welcome-header-focused modern-only">
                 <img
-                  src="./cowork-os-logo-text-dark.png"
+                  src="./cowork-os-sl-dark-logo.png"
                   alt="CoWork OS"
                   className="modern-logo-text logo-for-dark"
                 />
                 <img
-                  src="./cowork-os-logo-text.png"
+                  src="./cowork-os-sl-color-logo.png"
                   alt="CoWork OS"
                   className="modern-logo-text logo-for-light"
                 />
@@ -6619,12 +6619,12 @@ export function MainContent({
               <div className="welcome-header-modern modern-only">
                 <div className="modern-logo-container">
                   <img
-                    src="./cowork-os-logo-text-dark.png"
+                    src="./cowork-os-sl-dark-logo.png"
                     alt="CoWork OS"
                     className="modern-logo-text logo-for-dark"
                   />
                   <img
-                    src="./cowork-os-logo-text.png"
+                    src="./cowork-os-sl-color-logo.png"
                     alt="CoWork OS"
                     className="modern-logo-text logo-for-light"
                   />
@@ -6636,7 +6636,16 @@ export function MainContent({
 
             <div className="terminal-only">
               <div className="welcome-logo">
-                <img src="./cowork-os-logo.png" alt="CoWork OS" className="welcome-logo-img" />
+                <img
+                  src="./cowork-os-sl-dark-logo.png"
+                  alt="CoWork OS"
+                  className="welcome-logo-img welcome-brand-wordmark logo-for-dark"
+                />
+                <img
+                  src="./cowork-os-sl-color-logo.png"
+                  alt="CoWork OS"
+                  className="welcome-logo-img welcome-brand-wordmark logo-for-light"
+                />
               </div>
 
               {/* ASCII Terminal Header */}

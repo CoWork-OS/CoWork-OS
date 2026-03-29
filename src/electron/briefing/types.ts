@@ -11,6 +11,7 @@ export type BriefingSectionType =
   | "upcoming_jobs"
   | "open_loops"
   | "awareness_digest"
+  | "mailbox_summary"
   | "evolution_metrics";
 
 export interface BriefingItem {
@@ -55,9 +56,10 @@ export const DEFAULT_BRIEFING_CONFIG: BriefingConfig = {
     active_suggestions: true,
     priority_review: true,
     upcoming_jobs: true,
-    open_loops: true,
-    awareness_digest: true,
-    evolution_metrics: true,
+  open_loops: true,
+  awareness_digest: true,
+  mailbox_summary: true,
+  evolution_metrics: true,
   },
   enabled: false,
 };
@@ -77,6 +79,8 @@ export interface DailyBriefingServiceDeps {
   getOpenLoops: (workspaceId: string) => string[];
   /** Awareness summary for digest generation */
   getAwarenessSummary?: (workspaceId: string) => Any | Promise<Any | null>;
+  /** Mailbox digest for inbox summary generation */
+  getMailboxDigest?: (workspaceId: string) => Any | Promise<Any | null>;
   /** Chief-of-staff world model */
   getAutonomyState?: (workspaceId: string) => Any | Promise<Any | null>;
   /** Pending chief-of-staff interventions */

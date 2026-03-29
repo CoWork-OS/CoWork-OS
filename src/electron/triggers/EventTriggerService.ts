@@ -13,6 +13,17 @@ import { evaluateConditions, substituteEventVariables } from "./condition-evalua
 const DEFAULT_COOLDOWN_MS = 60_000; // 1 minute
 const MAX_HISTORY_PER_TRIGGER = 50;
 
+function isMailboxEventSource(source: string): boolean {
+  return source === "mailbox_event";
+}
+
+function triggerMatchesEventSource(triggerSource: string, eventSource: string): boolean {
+  if (triggerSource === eventSource) return true;
+  if (triggerSource === "email" && eventSource === "mailbox_event") return true;
+  if (triggerSource === "mailbox_event" && eventSource === "email") return true;
+  return false;
+}
+
 export class EventTriggerService {
   private triggers: Map<string, EventTrigger> = new Map();
   private history: Map<string, TriggerHistoryEntry[]> = new Map(); // triggerId → entries
@@ -106,7 +117,7 @@ export class EventTriggerService {
 
     for (const trigger of this.triggers.values()) {
       if (!trigger.enabled) continue;
-      if (trigger.source !== event.source) continue;
+      if (!triggerMatchesEventSource(trigger.source, event.source)) continue;
 
       // Cooldown check
       const cooldown = trigger.cooldownMs ?? DEFAULT_COOLDOWN_MS;
@@ -139,6 +150,7 @@ export class EventTriggerService {
       triggerId: trigger.id,
       firedAt: now,
       eventData: event.fields as Record<string, unknown>,
+      sourceLabel: isMailboxEventSource(trigger.source) ? "Inbox automation" : trigger.source,
     };
 
     try {
@@ -196,6 +208,11 @@ export class EventTriggerService {
       entries.length = MAX_HISTORY_PER_TRIGGER;
     }
     this.saveHistoryToDB(historyEntry);
+    try {
+      this.deps.onTriggerFired?.({ trigger, event, historyEntry });
+    } catch (error) {
+      this.deps.log?.(`Trigger "${trigger.name}" post-fire hook failed:`, error);
+    }
   }
 
   // ── Database persistence ────────────────────────────────────────

@@ -122,6 +122,7 @@
     "@anthropic-ai/sdk": "^0.78.0",
     "@aws-sdk/client-bedrock": "^3.1009.0",
     "@aws-sdk/client-bedrock-runtime": "^3.1009.0",
+    "@chenglou/pretext": "^0.0.3",
     "@electron/rebuild": "^4.0.3",
     "@google/generative-ai": "^0.24.1",
     "@grammyjs/runner": "^2.0.3",

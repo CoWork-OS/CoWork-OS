@@ -1,6 +1,7 @@
 import http from "http";
 import { randomBytes, createHash } from "crypto";
 import { URL } from "url";
+import { GOOGLE_WORKSPACE_DEFAULT_SCOPES } from "../../shared/google-workspace";
 
 export interface GoogleWorkspaceOAuthRequest {
   clientId: string;
@@ -202,12 +203,7 @@ export async function startGoogleWorkspaceOAuthGetLink(
   const scopes =
     request.scopes && request.scopes.length > 0
       ? request.scopes
-      : [
-          "https://www.googleapis.com/auth/drive",
-          "https://www.googleapis.com/auth/gmail.readonly",
-          "https://www.googleapis.com/auth/gmail.send",
-          "https://www.googleapis.com/auth/calendar",
-        ];
+      : GOOGLE_WORKSPACE_DEFAULT_SCOPES;
 
   const { redirectUri, waitForCode, state } = await startOAuthCallbackServer();
   const codeVerifier = createCodeVerifier();
@@ -291,12 +287,7 @@ export async function startGoogleWorkspaceOAuth(
   const scopes =
     request.scopes && request.scopes.length > 0
       ? request.scopes
-      : [
-          "https://www.googleapis.com/auth/drive",
-          "https://www.googleapis.com/auth/gmail.readonly",
-          "https://www.googleapis.com/auth/gmail.send",
-          "https://www.googleapis.com/auth/calendar",
-        ];
+      : GOOGLE_WORKSPACE_DEFAULT_SCOPES;
 
   const { redirectUri, waitForCode, state } = await startOAuthCallbackServer();
   const codeVerifier = createCodeVerifier();

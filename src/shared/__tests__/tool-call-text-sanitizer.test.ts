@@ -21,6 +21,39 @@ describe("sanitizeToolCallTextFromAssistant", () => {
     expect(result.removedSegments).toBeGreaterThan(0);
   });
 
+  it("strips skill_list-style transcript noise before the real payload", () => {
+    const result = sanitizeToolCallTextFromAssistant(
+      '{}【analysis to=skill_list code:\n{"description":"Execution plan","steps":[{"id":"1","description":"Review the repo."}]}',
+    );
+
+    expect(result.text).toBe(
+      '{"description":"Execution plan","steps":[{"id":"1","description":"Review the repo."}]}',
+    );
+    expect(result.hadToolCallText).toBe(true);
+  });
+
+  it("strips same-line skill_list transcript prefixes before the real payload", () => {
+    const result = sanitizeToolCallTextFromAssistant(
+      '{}【analysis to=skill_list code: {"description":"Execution plan","steps":[{"id":"1","description":"Review the repo."}]}',
+    );
+
+    expect(result.text).toBe(
+      '{"description":"Execution plan","steps":[{"id":"1","description":"Review the repo."}]}',
+    );
+    expect(result.hadToolCallText).toBe(true);
+  });
+
+  it("strips mixed leading transcript noise after an empty object and preserves inline JSON", () => {
+    const result = sanitizeToolCallTextFromAssistant(
+      '{}\n【analysis to=skill_list code: {"description":"Execution plan","steps":[{"id":"1","description":"Review the repo."}]}',
+    );
+
+    expect(result.text).toBe(
+      '{"description":"Execution plan","steps":[{"id":"1","description":"Review the repo."}]}',
+    );
+    expect(result.hadToolCallText).toBe(true);
+  });
+
   it("keeps normal prose that merely mentions commands", () => {
     const result = sanitizeToolCallTextFromAssistant(
       "I ran git status locally and the working tree is clean.",

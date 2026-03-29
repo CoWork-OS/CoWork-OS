@@ -4,6 +4,10 @@ import { resolveTwinIcon } from "../utils/twin-icons";
 import { stripAllEmojis } from "../utils/emoji-replacer";
 import { Task, Workspace, UiDensity, InfraStatus } from "../../shared/types";
 import { isAutomatedTaskLike } from "../../shared/automated-task-detection";
+import { VirtualList } from "./VirtualList";
+import { isPretextEnabled } from "../utils/pretext-adapter";
+
+const SIDEBAR_ITEM_HEIGHT = 36;
 
 interface AgentRoleInfo {
   id: string;
@@ -193,6 +197,39 @@ interface TaskTreeNode {
   children: TaskTreeNode[];
   synthetic?: boolean;
   displayTitle?: string;
+}
+
+export interface SidebarVisibleRow {
+  node: TaskTreeNode;
+  depth: number;
+  isLast: boolean;
+  rootIndex: number;
+}
+
+export function flattenVisibleTaskRows(
+  nodes: TaskTreeNode[],
+  collapsedTaskIds: ReadonlySet<string>,
+): SidebarVisibleRow[] {
+  const rows: SidebarVisibleRow[] = [];
+
+  const visit = (siblings: TaskTreeNode[], depth: number, rootIndex: number) => {
+    siblings.forEach((node, siblingIndex) => {
+      const resolvedRootIndex = depth === 0 ? siblingIndex : rootIndex;
+      rows.push({
+        node,
+        depth,
+        isLast: siblingIndex === siblings.length - 1,
+        rootIndex: resolvedRootIndex,
+      });
+
+      if (node.children.length > 0 && !collapsedTaskIds.has(node.task.id)) {
+        visit(node.children, depth + 1, resolvedRootIndex);
+      }
+    });
+  };
+
+  visit(nodes, 0, 0);
+  return rows;
 }
 
 function compareTaskTreeNodes(a: TaskTreeNode, b: TaskTreeNode): number {
@@ -486,6 +523,14 @@ export function Sidebar({
     }, []);
   }, [getDateGroup, filteredTaskTree, uiDensity]);
 
+  const virtualizedTaskRows = useMemo(
+    () => flattenVisibleTaskRows(filteredTaskTree, collapsedTasks),
+    [filteredTaskTree, collapsedTasks],
+  );
+
+  const useVirtualizedTaskRows =
+    uiDensity !== "focused" && isPretextEnabled() && virtualizedTaskRows.length > 30;
+
   // Auto-collapse sub-agent trees in focused mode
   const hasInitializedCollapse = useRef(false);
   useEffect(() => {
@@ -537,6 +582,7 @@ export function Sidebar({
 
   // Infinite scroll — load the next page when the user scrolls near the bottom
   useEffect(() => {
+    if (useVirtualizedTaskRows) return;
     const el = taskListRef.current;
     if (!el || !onLoadMoreTasks) return;
 
@@ -550,7 +596,7 @@ export function Sidebar({
 
     el.addEventListener("scroll", handleScroll, { passive: true });
     return () => el.removeEventListener("scroll", handleScroll);
-  }, [onLoadMoreTasks]);
+  }, [onLoadMoreTasks, useVirtualizedTaskRows]);
 
   // Close menu when clicking outside (use 'click' not 'mousedown' so moving from outside to menu still allows selection)
   useEffect(() => {
@@ -913,9 +959,9 @@ export function Sidebar({
   );
 
   // Render a task node and its children recursively
-  const renderTaskNode = (
+  const renderTaskRow = (
     node: TaskTreeNode,
-    index: number,
+    rootIndex: number,
     depth: number = 0,
     isLast: boolean = true,
   ): React.ReactNode => {
@@ -939,30 +985,26 @@ export function Sidebar({
 
     return (
       <div
-        key={task.id}
-        className={`task-tree-node ${menuOpenTaskId === task.id ? "task-item-menu-open" : ""}`}
+        className={`task-item cli-task-item ${selectedTaskId === task.id ? "task-item-selected" : ""} ${isSubAgent ? "task-item-subagent" : ""} ${node.synthetic ? "task-item-group-root" : ""} ${modeClass} ${hasChildren ? "task-item-has-children" : ""}`}
+        onClick={() => {
+          if (node.synthetic) return;
+          if (renameTaskId === task.id) return;
+          onSelectTask(task.id);
+        }}
+        style={
+          {
+            "--cli-task-padding-left": depth === 0 ? "12px" : `${20 + depth * 22}px`,
+          } as React.CSSProperties
+        }
+        title={
+          taskMode && taskMode !== "standard" ? SESSION_MODE_META[taskMode].label : undefined
+        }
       >
-        <div
-          className={`task-item cli-task-item ${selectedTaskId === task.id ? "task-item-selected" : ""} ${isSubAgent ? "task-item-subagent" : ""} ${node.synthetic ? "task-item-group-root" : ""} ${modeClass} ${hasChildren ? "task-item-has-children" : ""}`}
-          onClick={() => {
-            if (node.synthetic) return;
-            if (renameTaskId === task.id) return;
-            onSelectTask(task.id);
-          }}
-          style={
-            {
-              "--cli-task-padding-left": depth === 0 ? "12px" : `${20 + depth * 22}px`,
-            } as React.CSSProperties
-          }
-          title={
-            taskMode && taskMode !== "standard" ? SESSION_MODE_META[taskMode].label : undefined
-          }
-        >
           {/* Tree connector for sub-agents */}
           {depth > 0 && <span className="cli-tree-prefix">{treePrefix}</span>}
 
           <span className="cli-task-num">
-            {depth === 0 ? String(index + 1).padStart(2, "0") : "··"}
+            {depth === 0 ? String(rootIndex + 1).padStart(2, "0") : "··"}
           </span>
 
           <span className={`cli-task-status ${getStatusClass(task.status, showCompletionAttention)}`}>
@@ -1170,7 +1212,26 @@ export function Sidebar({
               )}
             </div>
           )}
-        </div>
+      </div>
+    );
+  };
+
+  const renderTaskNode = (
+    node: TaskTreeNode,
+    index: number,
+    depth: number = 0,
+    isLast: boolean = true,
+  ): React.ReactNode => {
+    const { task, children } = node;
+    const isCollapsed = collapsedTasks.has(task.id);
+    const hasChildren = children.length > 0;
+
+    return (
+      <div
+        key={task.id}
+        className={`task-tree-node ${menuOpenTaskId === task.id ? "task-item-menu-open" : ""}`}
+      >
+        {renderTaskRow(node, index, depth, isLast)}
 
         {/* Render children if not collapsed */}
         {hasChildren && !isCollapsed && (
@@ -1498,7 +1559,10 @@ export function Sidebar({
               </div>
 
           {/* Sessions Scrollable List */}
-          <div className="task-list cli-task-list" ref={taskListRef}>
+          <div
+            className={`task-list cli-task-list ${useVirtualizedTaskRows ? "task-list-virtualized" : ""}`}
+            ref={taskListRef}
+          >
             {!sessionsCollapsed && (
               <>
             {/* Automated sessions folder — collapsed by default, shown at top */}
@@ -1564,6 +1628,26 @@ export function Sidebar({
                   {renderTaskNode(entry.node, entry.index, 0, entry.isLast)}
                 </Fragment>
               ))
+            ) : useVirtualizedTaskRows ? (
+              <VirtualList
+                items={virtualizedTaskRows}
+                getItemKey={(row) => row.node.task.id}
+                getItemHeight={() => SIDEBAR_ITEM_HEIGHT}
+                renderItem={(row) => (
+                  <div
+                    className={`task-tree-node ${menuOpenTaskId === row.node.task.id ? "task-item-menu-open" : ""}`}
+                  >
+                    {renderTaskRow(row.node, row.rootIndex, row.depth, row.isLast)}
+                  </div>
+                )}
+                estimatedItemHeight={SIDEBAR_ITEM_HEIGHT}
+                overscan={10}
+                enabled
+                className="sidebar-virtual-list"
+                style={{ height: "100%" }}
+                role="list"
+                onScrollNearEnd={onLoadMoreTasks}
+              />
             ) : (
               filteredTaskTree.map((node, index) =>
                 renderTaskNode(node, index, 0, index === filteredTaskTree.length - 1),

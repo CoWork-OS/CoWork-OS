@@ -1,8 +1,8 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="screenshots/cowork-os-logo-text-dark.png">
-    <source media="(prefers-color-scheme: light)" srcset="screenshots/cowork-os-logo-text.png">
-    <img src="screenshots/cowork-os-logo-text.png" alt="CoWork OS" width="360">
+    <source media="(prefers-color-scheme: dark)" srcset="screenshots/cowork-os-sl-dark-logo.png">
+    <source media="(prefers-color-scheme: light)" srcset="screenshots/cowork-os-sl-color-logo.png">
+    <img src="screenshots/cowork-os-sl-color-logo.png" alt="CoWork OS" width="360">
   </picture>
 </p>
 

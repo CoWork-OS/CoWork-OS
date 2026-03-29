@@ -1,17 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { GoogleWorkspaceSettingsData } from "../../shared/types";
-
-const DEFAULT_SCOPES = [
-  "https://www.googleapis.com/auth/drive",
-  "https://www.googleapis.com/auth/gmail.readonly",
-  "https://www.googleapis.com/auth/gmail.send",
-  "https://www.googleapis.com/auth/calendar",
-];
+import { GOOGLE_WORKSPACE_DEFAULT_SCOPES } from "../../shared/google-workspace";
 
 const DEFAULT_TIMEOUT_MS = 20000;
 
 const scopesToText = (scopes?: string[]) =>
-  scopes && scopes.length > 0 ? scopes.join(" ") : DEFAULT_SCOPES.join(" ");
+  scopes && scopes.length > 0 ? scopes.join(" ") : GOOGLE_WORKSPACE_DEFAULT_SCOPES.join(" ");
 
 const textToScopes = (value: string) =>
   value
@@ -120,7 +114,9 @@ export function GoogleWorkspaceSettings() {
 
     try {
       const scopes =
-        settings.scopes && settings.scopes.length > 0 ? settings.scopes : DEFAULT_SCOPES;
+        settings.scopes && settings.scopes.length > 0
+          ? settings.scopes
+          : GOOGLE_WORKSPACE_DEFAULT_SCOPES;
       const result = await window.electronAPI.startGoogleWorkspaceOAuth({
         clientId: settings.clientId,
         clientSecret: settings.clientSecret || undefined,
@@ -163,7 +159,9 @@ export function GoogleWorkspaceSettings() {
 
     try {
       const scopes =
-        settings.scopes && settings.scopes.length > 0 ? settings.scopes : DEFAULT_SCOPES;
+        settings.scopes && settings.scopes.length > 0
+          ? settings.scopes
+          : GOOGLE_WORKSPACE_DEFAULT_SCOPES;
       const { url } = await window.electronAPI.getGoogleWorkspaceOAuthLink({
         clientId: settings.clientId,
         clientSecret: settings.clientSecret || undefined,

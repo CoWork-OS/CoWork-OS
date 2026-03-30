@@ -2907,9 +2907,6 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                   const showConnectorBelow =
                     typeof indicatorPosition === "number" &&
                     indicatorPosition < stepFeedEventCount - 1;
-                  const commandOutputsForBlock = item.eventIndices.flatMap((ei: number) =>
-                    commandOutputSessionsByInsertIndex.get(ei) ?? [],
-                  );
                   // Exclude sessions shown inline inside run_command tool call frames
                   const inlineRunCommandSessionIds = new Set<string>();
                   for (let idx = 0; idx < item.events.length; idx++) {
@@ -2925,9 +2922,6 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                       }
                     }
                   }
-                  const siblingCommandOutputsForBlock = commandOutputsForBlock.filter(
-                    (s: CommandOutputSession) => !inlineRunCommandSessionIds.has(s.id),
-                  );
                   const isBlockShowAll = showAllActionBlocks.has(item.blockId);
                   // Count only truly renderable events to avoid slicing on non-renderable raw events
                   const renderableRawIndices: number[] = [];
@@ -3013,16 +3007,22 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                           const isLastChild = idx === visibleBlockEvents.length - 1;
                           const showChildConnectorAbove = true;
                           const showChildConnectorBelow = !isLastChild || showConnectorBelow;
+
+                          const perEventCmdSessions = (commandOutputSessionsByInsertIndex.get(eventIndex) ?? [])
+                            .filter((s: CommandOutputSession) => !inlineRunCommandSessionIds.has(s.id));
+
                           if (parallelGroup) {
                             return (
-                              <ParallelGroupFeed
-                                key={event.id || `event-${eventIndex}`}
-                                group={parallelGroup}
-                                timeLabel={formatTime(parallelGroup.startedAt)}
-                                formatTime={formatTime}
-                                showConnectorAbove={showChildConnectorAbove}
-                                showConnectorBelow={showChildConnectorBelow}
-                              />
+                              <Fragment key={event.id || `event-${eventIndex}`}>
+                                <ParallelGroupFeed
+                                  group={parallelGroup}
+                                  timeLabel={formatTime(parallelGroup.startedAt)}
+                                  formatTime={formatTime}
+                                  showConnectorAbove={showChildConnectorAbove}
+                                  showConnectorBelow={showChildConnectorBelow}
+                                />
+                                {renderCommandOutputs(perEventCmdSessions)}
+                              </Fragment>
                             );
                           }
                           // In summary mode, render minimal "Done" for task_completed with no outputs
@@ -3038,30 +3038,32 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                             !hasTaskOutputs(outputSummary);
                           if (isMinimalCompletion) {
                             return (
-                              <div
-                                key={event.id || `event-${eventIndex}`}
-                                className="timeline-event completion-compact"
-                              >
-                                <div className="event-indicator">
-                                  {showChildConnectorAbove && (
-                                    <span className="event-connector event-connector-above" aria-hidden="true" />
-                                  )}
-                                  <span
-                                    className="event-indicator-icon tone-success"
-                                    aria-hidden="true"
-                                    title="Done"
-                                  >
-                                    <CheckIcon size={12} strokeWidth={2} />
-                                  </span>
-                                  {showChildConnectorBelow && (
-                                    <span className="event-connector event-connector-below" aria-hidden="true" />
-                                  )}
+                              <Fragment key={event.id || `event-${eventIndex}`}>
+                                <div
+                                  className="timeline-event completion-compact"
+                                >
+                                  <div className="event-indicator">
+                                    {showChildConnectorAbove && (
+                                      <span className="event-connector event-connector-above" aria-hidden="true" />
+                                    )}
+                                    <span
+                                      className="event-indicator-icon tone-success"
+                                      aria-hidden="true"
+                                      title="Done"
+                                    >
+                                      <CheckIcon size={12} strokeWidth={2} />
+                                    </span>
+                                    {showChildConnectorBelow && (
+                                      <span className="event-connector event-connector-below" aria-hidden="true" />
+                                    )}
+                                  </div>
+                                  <div className="event-content completion-compact-content">
+                                    <span className="completion-compact-label">Done</span>
+                                    <span className="event-time-muted">{formatTime(event.timestamp)}</span>
+                                  </div>
                                 </div>
-                                <div className="event-content completion-compact-content">
-                                  <span className="completion-compact-label">Done</span>
-                                  <span className="event-time-muted">{formatTime(event.timestamp)}</span>
-                                </div>
-                              </div>
+                                {renderCommandOutputs(perEventCmdSessions)}
+                              </Fragment>
                             );
                           }
                           const isExpandable = hasEventDetails(event);
@@ -3074,54 +3076,55 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                             { summaryMode: !verboseSteps },
                           );
                           return (
-                            <StepFeed
-                              key={event.id || `event-${eventIndex}`}
-                              title={
-                                typeof eventTitle === "string" ? (
-                                  <ReactMarkdown
-                                    remarkPlugins={[remarkGfm]}
-                                    components={eventTitleMarkdownComponents}
-                                  >
-                                    {normalizeTimelineTitleMarkdownForDisplay(eventTitle)}
-                                  </ReactMarkdown>
-                                ) : (
-                                  eventTitle
-                                )
-                              }
-                              timeLabel={formatTime(event.timestamp)}
-                              indicator={resolveTimelineIndicator(event, {
-                                isTaskCompleted: !isTaskWorking,
-                              })}
-                              showConnectorAbove={showChildConnectorAbove}
-                              showConnectorBelow={showChildConnectorBelow}
-                              showBranchStub={shouldShowTimelineBranchStub(event)}
-                              expandable={isExpandable}
-                              expanded={isExpanded}
-                              onToggle={
-                                isExpandable ? () => toggleEventExpanded(event.id) : undefined
-                              }
-                              details={
-                                isExpanded
-                                  ? renderEventDetails(event, voiceEnabled, markdownComponents, {
-                                      workspacePath: workspace?.path,
-                                      onOpenViewer: setViewerFilePath,
-                                      events,
-                                      onViewOutputs: onViewTaskOutputs,
-                                      hideVerificationSteps: true,
-                                      summaryMode: !verboseSteps,
-                                      task,
-                                      childTasks,
-                                      commandOutputSessions:
-                                        commandOutputSessionsByInsertIndex.get(eventIndex) ?? [],
-                                      renderCommandOutput: renderCommandOutputs,
-                                    })
-                                  : undefined
-                              }
-                            />
+                            <Fragment key={event.id || `event-${eventIndex}`}>
+                              <StepFeed
+                                title={
+                                  typeof eventTitle === "string" ? (
+                                    <ReactMarkdown
+                                      remarkPlugins={[remarkGfm]}
+                                      components={eventTitleMarkdownComponents}
+                                    >
+                                      {normalizeTimelineTitleMarkdownForDisplay(eventTitle)}
+                                    </ReactMarkdown>
+                                  ) : (
+                                    eventTitle
+                                  )
+                                }
+                                timeLabel={formatTime(event.timestamp)}
+                                indicator={resolveTimelineIndicator(event, {
+                                  isTaskCompleted: !isTaskWorking,
+                                })}
+                                showConnectorAbove={showChildConnectorAbove}
+                                showConnectorBelow={showChildConnectorBelow}
+                                showBranchStub={shouldShowTimelineBranchStub(event)}
+                                expandable={isExpandable}
+                                expanded={isExpanded}
+                                onToggle={
+                                  isExpandable ? () => toggleEventExpanded(event.id) : undefined
+                                }
+                                details={
+                                  isExpanded
+                                    ? renderEventDetails(event, voiceEnabled, markdownComponents, {
+                                        workspacePath: workspace?.path,
+                                        onOpenViewer: setViewerFilePath,
+                                        events,
+                                        onViewOutputs: onViewTaskOutputs,
+                                        hideVerificationSteps: true,
+                                        summaryMode: !verboseSteps,
+                                        task,
+                                        childTasks,
+                                        commandOutputSessions:
+                                          commandOutputSessionsByInsertIndex.get(eventIndex) ?? [],
+                                        renderCommandOutput: renderCommandOutputs,
+                                      })
+                                    : undefined
+                                }
+                              />
+                              {renderCommandOutputs(perEventCmdSessions)}
+                            </Fragment>
                           );
                         })}
                       </ActionBlock>
-                      {renderCommandOutputs(siblingCommandOutputsForBlock)}
                     </Fragment>
                   );
                 }
@@ -4283,6 +4286,9 @@ export function MainContent({
   const [messageFeedbackMap, setMessageFeedbackMap] = useState<
     Map<string, "accepted" | "rejected">
   >(new Map());
+  const [taskFeedbackDecision, setTaskFeedbackDecision] = useState<"accepted" | "rejected" | null>(
+    null,
+  );
   const [rejectMenuOpenFor, setRejectMenuOpenFor] = useState<string | null>(null);
   const rejectMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -4319,12 +4325,33 @@ export function MainContent({
     [task?.id],
   );
 
+  const handleTaskFeedback = useCallback(
+    async (decision: "accepted" | "rejected") => {
+      if (!task?.id) return;
+      setTaskFeedbackDecision(decision);
+      try {
+        await window.electronAPI.submitMessageFeedback({
+          taskId: task.id,
+          decision,
+          kind: "task",
+        });
+      } catch (err) {
+        console.error("[Feedback] Failed to submit task feedback:", err);
+      }
+    },
+    [task?.id],
+  );
+
   // Close feedback panel when step changes
   useEffect(() => {
     setStepFeedbackOpen(false);
     setStepFeedbackText("");
     setStepFeedbackSending(false);
   }, [currentStep?.id]);
+
+  useEffect(() => {
+    setTaskFeedbackDecision(null);
+  }, [task?.id]);
 
   const handleStepFeedback = useCallback(
     async (action: StepFeedbackAction, message?: string) => {
@@ -8254,6 +8281,34 @@ export function MainContent({
                 <span className="task-status-banner-detail">
                   Verification is pending user evidence before this can be fully marked done.
                 </span>
+              </div>
+            </div>
+          )}
+          {task.status === "completed" && (
+            <div className="task-status-banner">
+              <div className="task-status-banner-content">
+                <strong>Rate this result</strong>
+                <span className="task-status-banner-detail">
+                  Feedback improves quality reporting for this agent and persona.
+                </span>
+              </div>
+              <div className="task-status-banner-actions">
+                <button
+                  type="button"
+                  className={`message-feedback-btn${taskFeedbackDecision === "accepted" ? " active" : ""}`}
+                  onClick={() => void handleTaskFeedback("accepted")}
+                  title="This task result was helpful"
+                >
+                  Up
+                </button>
+                <button
+                  type="button"
+                  className={`message-feedback-btn${taskFeedbackDecision === "rejected" ? " active" : ""}`}
+                  onClick={() => void handleTaskFeedback("rejected")}
+                  title="This task result needs improvement"
+                >
+                  Down
+                </button>
               </div>
             </div>
           )}

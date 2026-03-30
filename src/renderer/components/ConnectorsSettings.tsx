@@ -948,6 +948,37 @@ export function ConnectorsSettings() {
         </div>
       </div>
 
+      {activeFilter !== "connected" && filteredIntegrations.length > 0 && (
+        <>
+          <div className="cm-section-divider">
+            <span className="cm-section-label">Storage &amp; Productivity</span>
+          </div>
+          <div className="cm-grid">
+            {filteredIntegrations.map((integration) => (
+              <button
+                key={integration.key}
+                className="cm-card"
+                onClick={() => setIntegrationModal(integration)}
+              >
+                <div
+                  className="cm-card-icon"
+                  style={{ backgroundColor: getConnectorColor(integration.name) }}
+                >
+                  {integration.name.charAt(0).toUpperCase()}
+                </div>
+                <div className="cm-card-body">
+                  <span className="cm-card-name">{integration.name}</span>
+                  <span className="cm-card-desc">{integration.description}</span>
+                </div>
+              </button>
+            ))}
+          </div>
+          <div className="cm-section-divider">
+            <span className="cm-section-label">MCP connectors</span>
+          </div>
+        </>
+      )}
+
       <div className="cm-grid">
         {filteredRows.map(({ connector, config, status }) => {
           const isConnected = status?.status === "connected";
@@ -988,34 +1019,6 @@ export function ConnectorsSettings() {
           <div className="cm-empty">No connectors match this filter.</div>
         )}
       </div>
-
-      {activeFilter !== "connected" && filteredIntegrations.length > 0 && (
-        <>
-          <div className="cm-section-divider">
-            <span className="cm-section-label">Storage &amp; Productivity</span>
-          </div>
-          <div className="cm-grid">
-            {filteredIntegrations.map((integration) => (
-              <button
-                key={integration.key}
-                className="cm-card"
-                onClick={() => setIntegrationModal(integration)}
-              >
-                <div
-                  className="cm-card-icon"
-                  style={{ backgroundColor: getConnectorColor(integration.name) }}
-                >
-                  {integration.name.charAt(0).toUpperCase()}
-                </div>
-                <div className="cm-card-body">
-                  <span className="cm-card-name">{integration.name}</span>
-                  <span className="cm-card-desc">{integration.description}</span>
-                </div>
-              </button>
-            ))}
-          </div>
-        </>
-      )}
 
       {integrationModal && (
         <div className="mcp-modal-overlay" onClick={() => setIntegrationModal(null)}>

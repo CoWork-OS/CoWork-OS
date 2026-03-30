@@ -66,7 +66,7 @@ The 0.5.17 release adds a visible operator-facing runtime layer for learning, re
 ### Documentation and product positioning
 
 - **New reference docs**: added dedicated pages for operator runtime visibility, skill store/external skills, and Discord supervisor mode.
-- **Comparison refresh**: added a three-way OpenClaw vs Hermes vs CoWork OS comparison page and supporting comparison graphic, plus linked the broader competitive docs back to that canonical comparison.
+- **Comparison refresh**: refreshed the competitive positioning docs and linked the broader market write-up back to the main comparison pages.
 - **Docs synchronization**: README, docs home, features, channels, architecture, mission control, project status, and related reference pages were refreshed so the new runtime and integration surfaces are discoverable from the main documentation paths.
 
 ## Notes

@@ -22,12 +22,15 @@ import type {
   Task,
   Workspace,
 } from "../../../shared/types";
+import { isTempWorkspaceId } from "../../../shared/types";
 import { TASK_EVENT_STATUS_MAP } from "../../../shared/task-event-status-map";
 import { useAgentContext } from "../../hooks/useAgentContext";
 import { getEffectiveTaskEventType } from "../../utils/task-event-compat";
 
 type AgentRole = AgentRoleData;
 type Any = any; // eslint-disable-line @typescript-eslint/no-explicit-any
+
+export const ALL_WORKSPACES_ID = "__all__";
 
 export type MissionColumn = {
   id: string;
@@ -75,6 +78,8 @@ export type FeedItem = {
   agentName: string;
   content: string;
   taskId?: string;
+  workspaceId?: string;
+  workspaceName?: string;
   timestamp: number;
 };
 
@@ -148,11 +153,30 @@ export function useMissionControlData(initialCompanyId: string | null = null) {
   // ── Refs for stable subscriptions ──
   const tasksRef = useRef<Task[]>([]);
   const workspaceIdRef = useRef<string | null>(null);
+  const visibleWorkspaceIdsRef = useRef<Set<string>>(new Set());
   const agentContext = useAgentContext();
 
   useEffect(() => { tasksRef.current = tasks; }, [tasks]);
   useEffect(() => { workspaceIdRef.current = selectedWorkspaceId; }, [selectedWorkspaceId]);
   useEffect(() => { setCommentText(""); }, [detailPanel]);
+  useEffect(() => {
+    if (!selectedWorkspaceId) return;
+    if (selectedWorkspaceId === ALL_WORKSPACES_ID) {
+      setStandupOpen(false);
+      setTeamsOpen(false);
+      setReviewsOpen(false);
+      return;
+    }
+    if (!isTempWorkspaceId(selectedWorkspaceId)) return;
+    setStandupOpen(false);
+    setReviewsOpen(false);
+  }, [selectedWorkspaceId]);
+  useEffect(() => {
+    visibleWorkspaceIdsRef.current =
+      selectedWorkspaceId === ALL_WORKSPACES_ID
+        ? new Set(workspaces.map((workspace) => workspace.id))
+        : new Set(selectedWorkspaceId ? [selectedWorkspaceId] : []);
+  }, [workspaces, selectedWorkspaceId]);
 
   // Clock
   useEffect(() => {
@@ -170,11 +194,12 @@ export function useMissionControlData(initialCompanyId: string | null = null) {
         ...(tempWorkspace ? [tempWorkspace] : []),
         ...loaded.filter((w) => w.id !== tempWorkspace?.id),
       ];
-      if (combined.length === 0) return;
       setWorkspaces(combined);
-      if (!selectedWorkspaceId || !combined.some((w) => w.id === selectedWorkspaceId)) {
-        setSelectedWorkspaceId(combined[0].id);
-      }
+      setSelectedWorkspaceId((prev) => {
+        if (prev === ALL_WORKSPACES_ID) return ALL_WORKSPACES_ID;
+        if (prev && combined.some((workspace) => workspace.id === prev)) return prev;
+        return combined[0]?.id || null;
+      });
     } catch (err) { console.error("Failed to load workspaces:", err); }
   }, [selectedWorkspaceId]);
 
@@ -249,42 +274,73 @@ export function useMissionControlData(initialCompanyId: string | null = null) {
     }
   }, []);
 
+  const loadWorkspaceScopedData = useCallback(async (workspaceId: string, workspaceList: Workspace[]) => {
+    const [loadedAgents, statuses, loadedTasks] = await Promise.all([
+      window.electronAPI.getAgentRoles(true),
+      window.electronAPI.getAllHeartbeatStatus(),
+      window.electronAPI.listTasks().catch(() => []),
+    ]);
+
+    if (workspaceId === ALL_WORKSPACES_ID) {
+      const workspaceIds = workspaceList.map((workspace) => workspace.id);
+      const workspaceIdSet = new Set(workspaceIds);
+      const [activityGroups, mentionGroups] = await Promise.all([
+        Promise.all(
+          workspaceIds.map((id) =>
+            window.electronAPI.listActivities({ workspaceId: id, limit: 200 }).catch(() => []),
+          ),
+        ),
+        Promise.all(
+          workspaceIds.map((id) =>
+            window.electronAPI.listMentions({ workspaceId: id, limit: 200 }).catch(() => []),
+          ),
+        ),
+      ]);
+      return {
+        loadedAgents,
+        statuses,
+        loadedTasks: loadedTasks.filter((task: Task) => workspaceIdSet.has(task.workspaceId)),
+        loadedActivities: activityGroups.flat().sort((a, b) => b.createdAt - a.createdAt).slice(0, 200),
+        loadedMentions: mentionGroups.flat().sort((a, b) => b.createdAt - a.createdAt).slice(0, 200),
+      };
+    }
+
+    const [loadedActivities, loadedMentions] = await Promise.all([
+      window.electronAPI.listActivities({ workspaceId, limit: 200 }).catch(() => []),
+      window.electronAPI.listMentions({ workspaceId, limit: 200 }).catch(() => []),
+    ]);
+    return {
+      loadedAgents,
+      statuses,
+      loadedTasks: loadedTasks.filter((task: Task) => task.workspaceId === workspaceId),
+      loadedActivities,
+      loadedMentions,
+    };
+  }, []);
+
   const loadData = useCallback(async (workspaceId: string) => {
     try {
       setLoading(true);
-      const [loadedAgents, statuses, loadedTasks, loadedActivities, loadedMentions] =
-        await Promise.all([
-          window.electronAPI.getAgentRoles(true),
-          window.electronAPI.getAllHeartbeatStatus(),
-          window.electronAPI.listTasks().catch(() => []),
-          window.electronAPI.listActivities({ workspaceId, limit: 200 }).catch(() => []),
-          window.electronAPI.listMentions({ workspaceId, limit: 200 }).catch(() => []),
-        ]);
-      setAgents(loadedAgents);
-      setHeartbeatStatuses(statuses);
-      const wsTasks = loadedTasks.filter((t: Task) => t.workspaceId === workspaceId);
-      setTasks(wsTasks);
-      setActivities(loadedActivities);
-      setMentions(loadedMentions);
+      const result = await loadWorkspaceScopedData(workspaceId, workspaces);
+      setAgents(result.loadedAgents);
+      setHeartbeatStatuses(result.statuses);
+      setTasks(result.loadedTasks);
+      setActivities(result.loadedActivities);
+      setMentions(result.loadedMentions);
     } catch (err) { console.error("Failed to load mission control data:", err); }
     finally { setLoading(false); }
-  }, []);
+  }, [loadWorkspaceScopedData, workspaces]);
 
   const handleManualRefresh = useCallback(async () => {
     if (!selectedWorkspaceId && !selectedCompanyId) return;
     try {
       setIsRefreshing(true);
       if (selectedWorkspaceId) {
-        const [statuses, loadedTasks, loadedActivities, loadedMentions] = await Promise.all([
-          window.electronAPI.getAllHeartbeatStatus().catch(() => []),
-          window.electronAPI.listTasks().catch(() => []),
-          window.electronAPI.listActivities({ workspaceId: selectedWorkspaceId, limit: 200 }).catch(() => []),
-          window.electronAPI.listMentions({ workspaceId: selectedWorkspaceId, limit: 200 }).catch(() => []),
-        ]);
-        setHeartbeatStatuses(statuses);
-        setTasks(loadedTasks.filter((t: Task) => t.workspaceId === selectedWorkspaceId));
-        setActivities(loadedActivities);
-        setMentions(loadedMentions);
+        const result = await loadWorkspaceScopedData(selectedWorkspaceId, workspaces);
+        setHeartbeatStatuses(result.statuses);
+        setTasks(result.loadedTasks);
+        setActivities(result.loadedActivities);
+        setMentions(result.loadedMentions);
       }
       if (selectedCompanyId) {
         await loadPlannerData(selectedCompanyId);
@@ -293,7 +349,7 @@ export function useMissionControlData(initialCompanyId: string | null = null) {
       }
     } catch (err) { console.error("Failed to refresh:", err); }
     finally { setIsRefreshing(false); }
-  }, [loadCommandCenterSummary, loadCompanyOps, loadPlannerData, selectedCompanyId, selectedWorkspaceId]);
+  }, [loadCommandCenterSummary, loadCompanyOps, loadPlannerData, loadWorkspaceScopedData, selectedCompanyId, selectedWorkspaceId, workspaces]);
 
   // ── Effects: Load on selection change ──
   useEffect(() => { loadWorkspaces(); }, [loadWorkspaces]);
@@ -334,6 +390,14 @@ export function useMissionControlData(initialCompanyId: string | null = null) {
 
   // ── Event subscriptions (stable, empty deps) ──
   useEffect(() => {
+    const isWorkspaceVisible = (workspaceId?: string | null) => {
+      if (!workspaceId) return false;
+      if (workspaceIdRef.current === ALL_WORKSPACES_ID) {
+        return visibleWorkspaceIdsRef.current.has(workspaceId);
+      }
+      return workspaceIdRef.current === workspaceId;
+    };
+
     const unsubHeartbeat = window.electronAPI.onHeartbeatEvent((event: HeartbeatEvent) => {
       setEvents((prev) => [event, ...prev].slice(0, 100));
       setHeartbeatStatuses((prev) =>
@@ -354,16 +418,23 @@ export function useMissionControlData(initialCompanyId: string | null = null) {
     });
 
     const unsubActivities = window.electronAPI.onActivityEvent((event) => {
-      const wsId = workspaceIdRef.current;
       switch (event.type) {
         case "created":
-          if (event.activity?.workspaceId === wsId) setActivities((prev) => [event.activity!, ...prev].slice(0, 200));
+          if (isWorkspaceVisible(event.activity?.workspaceId)) {
+            setActivities((prev) => [event.activity!, ...prev].slice(0, 200));
+          }
           break;
         case "read":
           setActivities((prev) => prev.map((a) => a.id === event.id ? { ...a, isRead: true } : a));
           break;
         case "all_read":
-          if (event.workspaceId === wsId) setActivities((prev) => prev.map((a) => ({ ...a, isRead: true })));
+          if (isWorkspaceVisible(event.workspaceId)) {
+            setActivities((prev) =>
+              prev.map((activity) =>
+                activity.workspaceId === event.workspaceId ? { ...activity, isRead: true } : activity,
+              ),
+            );
+          }
           break;
         case "pinned":
           if (event.activity) setActivities((prev) => prev.map((a) => a.id === event.activity!.id ? event.activity! : a));
@@ -375,8 +446,7 @@ export function useMissionControlData(initialCompanyId: string | null = null) {
     });
 
     const unsubMentions = window.electronAPI.onMentionEvent((event) => {
-      const wsId = workspaceIdRef.current;
-      if (!event.mention || event.mention.workspaceId !== wsId) return;
+      if (!event.mention || !isWorkspaceVisible(event.mention.workspaceId)) return;
       switch (event.type) {
         case "created": setMentions((prev) => [event.mention!, ...prev]); break;
         case "acknowledged": case "completed": case "dismissed":
@@ -387,14 +457,13 @@ export function useMissionControlData(initialCompanyId: string | null = null) {
 
     const unsubTaskEvents = window.electronAPI.onTaskEvent((event: Any) => {
       const effectiveType = getEffectiveTaskEventType(event as Any);
-      const wsId = workspaceIdRef.current;
       const isAutoApproval = effectiveType === "approval_requested" && event.payload?.autoApproved === true;
       if (effectiveType === "task_created") {
         const isNew = !tasksRef.current.some((t) => t.id === event.taskId);
-        if (isNew && wsId) {
+        if (isNew && workspaceIdRef.current) {
           window.electronAPI.getTask(event.taskId)
             .then((incoming) => {
-              if (!incoming || incoming.workspaceId !== wsId) return;
+              if (!incoming || !isWorkspaceVisible(incoming.workspaceId)) return;
               setTasks((prev) => prev.some((t) => t.id === incoming.id) ? prev : [incoming, ...prev]);
             })
             .catch(() => {});
@@ -549,7 +618,7 @@ export function useMissionControlData(initialCompanyId: string | null = null) {
 
   // ── Comment action ──
   const handlePostComment = useCallback(async () => {
-    if (!selectedWorkspaceId || !detailPanel || detailPanel.kind !== "task") return;
+    if (!detailPanel || detailPanel.kind !== "task") return;
     const text = commentText.trim();
     if (!text) return;
     const task = tasks.find((t) => t.id === detailPanel.taskId);
@@ -557,13 +626,13 @@ export function useMissionControlData(initialCompanyId: string | null = null) {
     try {
       setPostingComment(true);
       await window.electronAPI.createActivity({
-        workspaceId: selectedWorkspaceId, taskId: task.id,
+        workspaceId: task.workspaceId, taskId: task.id,
         actorType: "user", activityType: "comment", title: "Comment", description: text,
       });
       setCommentText("");
     } catch (err) { console.error("Failed to post comment:", err); }
     finally { setPostingComment(false); }
-  }, [commentText, detailPanel, selectedWorkspaceId, tasks]);
+  }, [commentText, detailPanel, tasks]);
 
   // ── Computed values ──
   const activeAgentsCount = useMemo(() =>
@@ -575,6 +644,18 @@ export function useMissionControlData(initialCompanyId: string | null = null) {
     tasks.filter((t) => getMissionColumnForTask(t) !== "done").length,
     [tasks, getMissionColumnForTask],
   );
+
+  const workspaceNameById = useMemo(
+    () => new Map(workspaces.map((workspace) => [workspace.id, workspace.name] as const)),
+    [workspaces],
+  );
+
+  const isAllWorkspacesSelected = selectedWorkspaceId === ALL_WORKSPACES_ID;
+
+  const getWorkspaceName = useCallback((workspaceId?: string | null) => {
+    if (!workspaceId) return "Unknown workspace";
+    return workspaceNameById.get(workspaceId) || workspaceId;
+  }, [workspaceNameById]);
 
   const pendingMentionsCount = useMemo(() =>
     mentions.filter((m) => m.status === "pending").length,
@@ -686,17 +767,33 @@ export function useMissionControlData(initialCompanyId: string | null = null) {
         activity.actorType === "user" ? agentContext.getUiCopy("activityActorUser")
         : getAgent(activity.agentRoleId)?.displayName || agentContext.getUiCopy("activityActorSystem");
       const content = activity.description ? `${activity.title} — ${activity.description}` : activity.title;
-      return { id: activity.id, type: mappedType as FeedItem["type"], agentId: activity.agentRoleId, agentName, content, taskId: activity.taskId, timestamp: activity.createdAt };
+      return {
+        id: activity.id,
+        type: mappedType as FeedItem["type"],
+        agentId: activity.agentRoleId,
+        agentName,
+        content,
+        taskId: activity.taskId,
+        workspaceId: activity.workspaceId,
+        workspaceName: getWorkspaceName(activity.workspaceId),
+        timestamp: activity.createdAt,
+      };
     });
 
     const heartbeatItems = events
       .filter((e) => { if (e.type === "completed") return false; if (e.type === "no_work" && e.result?.silent) return false; return true; })
-      .map((e) => ({
-        id: `event-${e.timestamp}`, type: "status" as const, agentId: e.agentRoleId, agentName: e.agentName,
+      .map<FeedItem>((e) => ({
+        id: `event-${e.timestamp}`,
+        type: "status",
+        agentId: e.agentRoleId,
+        agentName: e.agentName,
         content: e.type === "work_found"
           ? agentContext.getUiCopy("mcHeartbeatFound", { mentions: e.result?.pendingMentions || 0, tasks: e.result?.assignedTasks || 0 })
           : e.type,
-        timestamp: e.timestamp, taskId: undefined as string | undefined,
+        timestamp: e.timestamp,
+        taskId: undefined,
+        workspaceId: undefined,
+        workspaceName: undefined,
       }));
 
     return [...heartbeatItems, ...activityItems]
@@ -707,7 +804,7 @@ export function useMissionControlData(initialCompanyId: string | null = null) {
       })
       .sort((a, b) => b.timestamp - a.timestamp)
       .slice(0, 50);
-  }, [activities, events, feedFilter, selectedAgent, getAgent, agentContext]);
+  }, [activities, events, feedFilter, selectedAgent, getAgent, agentContext, getWorkspaceName]);
 
   // ── Utilities ──
   const formatRelativeTime = useCallback((timestamp?: number) => {
@@ -764,6 +861,7 @@ export function useMissionControlData(initialCompanyId: string | null = null) {
     // Computed
     activeAgentsCount, totalTasksInQueue, pendingMentionsCount,
     selectedWorkspace, selectedCompany, selectedTask,
+    isAllWorkspacesSelected, getWorkspaceName,
     tasksByAgent, feedItems,
     commandCenterOutputs, commandCenterReviewQueue,
     commandCenterOperators, commandCenterExecutionMap,

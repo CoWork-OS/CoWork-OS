@@ -50,6 +50,15 @@ import type {
   CreateCouncilConfigRequest,
   UpdateCouncilConfigRequest,
   PdfReviewSummary,
+  TaskLearningProgress,
+  UnifiedRecallResponse,
+  UnifiedRecallSourceType,
+  ShellSessionInfo,
+  ShellSessionLifecycleEvent,
+  LLMRoutingRuntimeState,
+  SupervisorExchange,
+  SupervisorExchangeEvent,
+  SupervisorExchangeStatus,
 } from "../shared/types";
 import type {
   HealthDashboard,
@@ -355,10 +364,20 @@ const IPC_CHANNELS = {
   TASK_EVENT: "task:event",
   TASK_EVENTS: "task:events",
   TASK_SEMANTIC_TIMELINE: "task:semanticTimeline",
+  TASK_LEARNING_EVENT: "task:learningEvent",
+  TASK_LEARNING_PROGRESS: "task:learningProgress",
   TASK_SEND_MESSAGE: "task:sendMessage",
   TASK_STEP_FEEDBACK: "task:stepFeedback",
   TASK_SEND_STDIN: "task:sendStdin",
   TASK_KILL_COMMAND: "task:killCommand",
+  SHELL_SESSION_EVENT: "shell:sessionEvent",
+  SHELL_SESSION_GET: "shell:sessionGet",
+  SHELL_SESSION_LIST: "shell:sessionList",
+  SHELL_SESSION_RESET: "shell:sessionReset",
+  SHELL_SESSION_CLOSE: "shell:sessionClose",
+  UNIFIED_RECALL_QUERY: "recall:query",
+  LLM_ROUTING_STATUS: "llm:routingStatus",
+  LLM_ROUTING_EVENT: "llm:routingEvent",
   // Sub-agent operations
   AGENT_GET_CHILDREN: "agent:getChildren",
   AGENT_GET_STATUS: "agent:getStatus",
@@ -527,8 +546,12 @@ const IPC_CHANNELS = {
   CUSTOM_SKILL_OPEN_FOLDER: "customSkill:openFolder",
   // Skill Registry (SkillHub)
   SKILL_REGISTRY_SEARCH: "skillRegistry:search",
+  SKILL_REGISTRY_CLAWHUB_SEARCH: "skillRegistry:clawhubSearch",
   SKILL_REGISTRY_GET_DETAILS: "skillRegistry:getDetails",
   SKILL_REGISTRY_INSTALL: "skillRegistry:install",
+  SKILL_REGISTRY_INSTALL_CLAWHUB: "skillRegistry:installClawHub",
+  SKILL_REGISTRY_INSTALL_URL: "skillRegistry:installUrl",
+  SKILL_REGISTRY_INSTALL_GIT: "skillRegistry:installGit",
   SKILL_REGISTRY_UPDATE: "skillRegistry:update",
   SKILL_REGISTRY_UPDATE_ALL: "skillRegistry:updateAll",
   SKILL_REGISTRY_UNINSTALL: "skillRegistry:uninstall",
@@ -880,6 +903,10 @@ const IPC_CHANNELS = {
   MENTION_COMPLETE: "mention:complete",
   MENTION_DISMISS: "mention:dismiss",
   MENTION_EVENT: "mention:event",
+  // Discord supervisor protocol
+  SUPERVISOR_EXCHANGE_LIST: "supervisorExchange:list",
+  SUPERVISOR_EXCHANGE_RESOLVE: "supervisorExchange:resolve",
+  SUPERVISOR_EXCHANGE_EVENT: "supervisorExchange:event",
   // Task Board
   TASK_MOVE_COLUMN: "task:moveColumn",
   TASK_SET_PRIORITY: "task:setPriority",
@@ -1116,6 +1143,7 @@ interface SkillRegistryEntry {
   name: string;
   description: string;
   version: string;
+  source?: "cowork" | "clawhub";
   author?: string;
   downloads?: number;
   rating?: number;
@@ -2178,6 +2206,7 @@ type ActivityType =
   | "command_executed"
   | "tool_used"
   | "mention"
+  | "supervisor_exchange"
   | "agent_assigned"
   | "error"
   | "info";
@@ -2263,6 +2292,10 @@ interface MentionListQuery {
   limit?: number;
   offset?: number;
 }
+
+// SupervisorProtocolIntent, SupervisorExchangeStatus, SupervisorEvidenceRef,
+// SupervisorExchange, and SupervisorExchangeEvent are imported from shared/types above.
+// Use SupervisorExchange (not SupervisorExchange) as the canonical type.
 
 interface MentionEvent {
   type: "created" | "acknowledged" | "completed" | "dismissed";
@@ -2639,9 +2672,18 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on(IPC_CHANNELS.TASK_EVENT, subscription);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.TASK_EVENT, subscription);
   },
+  onTaskLearningEvent: (callback: (event: TaskLearningProgress) => void) => {
+    const subscription = (_: Any, data: TaskLearningProgress) => callback(data);
+    ipcRenderer.on(IPC_CHANNELS.TASK_LEARNING_EVENT, subscription);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.TASK_LEARNING_EVENT, subscription);
+  },
 
   // Task event history (load from DB)
   getTaskEvents: (taskId: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_EVENTS, taskId),
+  getTaskLearningProgress: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_LEARNING_PROGRESS, taskId) as Promise<
+      TaskLearningProgress[]
+    >,
 
   // Semantic timeline projection (normalised UiTimelineEvent[] derived from task_events)
   getSemanticTimeline: (taskId: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_SEMANTIC_TIMELINE, taskId),
@@ -2997,10 +3039,18 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Skill Registry (SkillHub) APIs
   searchSkillRegistry: (query: string, options?: { page?: number; pageSize?: number }) =>
     ipcRenderer.invoke(IPC_CHANNELS.SKILL_REGISTRY_SEARCH, query, options),
+  searchClawHubSkills: (query: string, options?: { page?: number; pageSize?: number }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SKILL_REGISTRY_CLAWHUB_SEARCH, query, options),
   getSkillDetails: (skillId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.SKILL_REGISTRY_GET_DETAILS, skillId),
   installSkillFromRegistry: (skillId: string, version?: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.SKILL_REGISTRY_INSTALL, skillId, version),
+  installSkillFromClawHub: (identifierOrUrl: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SKILL_REGISTRY_INSTALL_CLAWHUB, identifierOrUrl),
+  installSkillFromUrl: (url: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SKILL_REGISTRY_INSTALL_URL, url),
+  installSkillFromGit: (gitUrl: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SKILL_REGISTRY_INSTALL_GIT, gitUrl),
   updateSkillFromRegistry: (skillId: string, version?: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.SKILL_REGISTRY_UPDATE, skillId, version),
   updateAllSkills: () => ipcRenderer.invoke(IPC_CHANNELS.SKILL_REGISTRY_UPDATE_ALL),
@@ -3044,13 +3094,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
       | "google-workspace"
       | "docusign"
       | "outreach"
-      | "slack";
+      | "slack"
+      | "microsoft-email";
     clientId: string;
     clientSecret?: string;
     scopes?: string[];
     loginUrl?: string;
     subdomain?: string;
     teamDomain?: string;
+    tenant?: string;
+    loginHint?: string;
   }) => ipcRenderer.invoke(IPC_CHANNELS.MCP_CONNECTOR_OAUTH_START, payload),
 
   // MCP Status change event listener
@@ -3833,6 +3886,21 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on(IPC_CHANNELS.MENTION_EVENT, subscription);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.MENTION_EVENT, subscription);
   },
+  listSupervisorExchanges: (query: {
+    workspaceId: string;
+    status?: SupervisorExchangeStatus | SupervisorExchangeStatus[];
+    limit?: number;
+  }) => ipcRenderer.invoke(IPC_CHANNELS.SUPERVISOR_EXCHANGE_LIST, query),
+  resolveSupervisorExchange: (request: {
+    id: string;
+    resolution: string;
+    mirrorToDiscord?: boolean;
+  }) => ipcRenderer.invoke(IPC_CHANNELS.SUPERVISOR_EXCHANGE_RESOLVE, request),
+  onSupervisorExchangeEvent: (callback: (event: SupervisorExchangeEvent) => void) => {
+    const subscription = (_: Any, data: SupervisorExchangeEvent) => callback(data);
+    ipcRenderer.on(IPC_CHANNELS.SUPERVISOR_EXCHANGE_EVENT, subscription);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.SUPERVISOR_EXCHANGE_EVENT, subscription);
+  },
 
   // ============ Mission Control APIs ============
 
@@ -3917,6 +3985,59 @@ contextBridge.exposeInMainWorld("electronAPI", {
     const subscription = (_: Any, data: TaskBoardEvent) => callback(data);
     ipcRenderer.on(IPC_CHANNELS.TASK_BOARD_EVENT, subscription);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.TASK_BOARD_EVENT, subscription);
+  },
+
+  // Unified recall
+  queryUnifiedRecall: (query: {
+    workspaceId?: string;
+    query: string;
+    limit?: number;
+    sourceTypes?: UnifiedRecallSourceType[];
+  }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.UNIFIED_RECALL_QUERY, query) as Promise<UnifiedRecallResponse>,
+
+  // Shell sessions
+  onShellSessionEvent: (callback: (event: ShellSessionLifecycleEvent) => void) => {
+    const subscription = (_: Any, data: ShellSessionLifecycleEvent) => callback(data);
+    ipcRenderer.on(IPC_CHANNELS.SHELL_SESSION_EVENT, subscription);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.SHELL_SESSION_EVENT, subscription);
+  },
+  getShellSessionInfo: (
+    taskId: string,
+    workspaceId: string,
+    scope?: "task" | "workspace",
+  ) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SHELL_SESSION_GET, { taskId, workspaceId, scope }) as Promise<
+      ShellSessionInfo | null
+    >,
+  listShellSessions: (taskId?: string, workspaceId?: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SHELL_SESSION_LIST, { taskId, workspaceId }) as Promise<
+      ShellSessionInfo[]
+    >,
+  resetShellSession: (
+    taskId: string,
+    workspaceId: string,
+    scope?: "task" | "workspace",
+  ) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SHELL_SESSION_RESET, { taskId, workspaceId, scope }) as Promise<
+      ShellSessionInfo | null
+    >,
+  closeShellSession: (
+    taskId: string,
+    workspaceId: string,
+    scope?: "task" | "workspace",
+  ) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SHELL_SESSION_CLOSE, { taskId, workspaceId, scope }) as Promise<
+      ShellSessionInfo | null
+    >,
+
+  // LLM routing observability
+  getLLMRoutingStatus: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.LLM_ROUTING_STATUS) as Promise<LLMRoutingRuntimeState>,
+  onLLMRoutingEvent: (callback: (event: LLMRoutingRuntimeState) => void) => {
+    const subscription = (_: Any, data: LLMRoutingRuntimeState) => callback(data);
+    ipcRenderer.on(IPC_CHANNELS.LLM_ROUTING_EVENT, subscription);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.LLM_ROUTING_EVENT, subscription);
   },
 
   // Task Label APIs
@@ -4129,7 +4250,15 @@ export type {
 };
 
 // Export Activity Feed types
-export type { ActivityActorType, ActivityType, ActivityData, ActivityListQuery, ActivityEvent };
+export type {
+  ActivityActorType,
+  ActivityType,
+  ActivityData,
+  ActivityListQuery,
+  ActivityEvent,
+  SupervisorExchange,
+  SupervisorExchangeEvent,
+};
 
 // Export @Mention System types
 export type {
@@ -4324,7 +4453,9 @@ export interface ElectronAPI {
   renameTask: (id: string, title: string) => Promise<void>;
   deleteTask: (id: string) => Promise<void>;
   onTaskEvent: (callback: (event: Any) => void) => () => void;
+  onTaskLearningEvent: (callback: (event: TaskLearningProgress) => void) => () => void;
   getTaskEvents: (taskId: string) => Promise<Any[]>;
+  getTaskLearningProgress: (taskId: string) => Promise<TaskLearningProgress[]>;
   sendMessage: (taskId: string, message: string, images?: ImageAttachment[]) => Promise<void>;
   sendStepFeedback: (
     taskId: string,
@@ -4332,6 +4463,32 @@ export interface ElectronAPI {
     action: "retry" | "skip" | "stop" | "drift",
     message?: string,
   ) => Promise<void>;
+  queryUnifiedRecall: (query: {
+    workspaceId?: string;
+    query: string;
+    limit?: number;
+    sourceTypes?: UnifiedRecallSourceType[];
+  }) => Promise<UnifiedRecallResponse>;
+  getShellSessionInfo: (
+    taskId: string,
+    workspaceId: string,
+    scope?: "task" | "workspace",
+  ) => Promise<ShellSessionInfo | null>;
+  listShellSessions: (
+    taskId?: string,
+    workspaceId?: string,
+  ) => Promise<ShellSessionInfo[]>;
+  resetShellSession: (
+    taskId: string,
+    workspaceId: string,
+    scope?: "task" | "workspace",
+  ) => Promise<ShellSessionInfo | null>;
+  closeShellSession: (
+    taskId: string,
+    workspaceId: string,
+    scope?: "task" | "workspace",
+  ) => Promise<ShellSessionInfo | null>;
+  onShellSessionEvent: (callback: (event: ShellSessionLifecycleEvent) => void) => () => void;
   createWorkspace: (data: Any) => Promise<Workspace>;
   listWorkspaces: () => Promise<Workspace[]>;
   selectWorkspace: (id: string) => Promise<Workspace>;
@@ -4375,6 +4532,8 @@ export interface ElectronAPI {
     }>;
     models: Array<{ key: string; displayName: string; description: string }>;
   }>;
+  getLLMRoutingStatus: () => Promise<LLMRoutingRuntimeState>;
+  onLLMRoutingEvent: (callback: (event: LLMRoutingRuntimeState) => void) => () => void;
   setLLMModel: (modelKey: string) => Promise<{ success: boolean }>;
   getProviderModels: (
     providerType: string,
@@ -5022,10 +5181,21 @@ export interface ElectronAPI {
     query: string,
     options?: { page?: number; pageSize?: number },
   ) => Promise<SkillSearchResult>;
+  searchClawHubSkills: (
+    query: string,
+    options?: { page?: number; pageSize?: number },
+  ) => Promise<SkillSearchResult>;
   getSkillDetails: (skillId: string) => Promise<SkillRegistryEntry | null>;
   installSkillFromRegistry: (
     skillId: string,
     version?: string,
+  ) => Promise<{ success: boolean; skill?: CustomSkill; error?: string }>;
+  installSkillFromClawHub: (
+    identifierOrUrl: string,
+  ) => Promise<{ success: boolean; skill?: CustomSkill; error?: string }>;
+  installSkillFromUrl: (url: string) => Promise<{ success: boolean; skill?: CustomSkill; error?: string }>;
+  installSkillFromGit: (
+    gitUrl: string,
   ) => Promise<{ success: boolean; skill?: CustomSkill; error?: string }>;
   updateSkillFromRegistry: (
     skillId: string,
@@ -5080,13 +5250,16 @@ export interface ElectronAPI {
       | "google-workspace"
       | "docusign"
       | "outreach"
-      | "slack";
+      | "slack"
+      | "microsoft-email";
     clientId: string;
     clientSecret?: string;
     scopes?: string[];
     loginUrl?: string;
     subdomain?: string;
     teamDomain?: string;
+    tenant?: string;
+    loginHint?: string;
   }) => Promise<{
     provider:
       | "salesforce"
@@ -5099,11 +5272,13 @@ export interface ElectronAPI {
       | "google-workspace"
       | "docusign"
       | "outreach"
-      | "slack";
+      | "slack"
+      | "microsoft-email";
     accessToken: string;
     refreshToken?: string;
     expiresIn?: number;
     tokenType?: string;
+    scopes?: string[];
     instanceUrl?: string;
     resources?: Array<{ id: string; name: string; url: string; scopes?: string[] }>;
   }>;
@@ -5887,6 +6062,17 @@ export interface ElectronAPI {
   completeMention: (id: string) => Promise<MentionData | undefined>;
   dismissMention: (id: string) => Promise<MentionData | undefined>;
   onMentionEvent: (callback: (event: MentionEvent) => void) => () => void;
+  listSupervisorExchanges: (query: {
+    workspaceId: string;
+    status?: SupervisorExchangeStatus | SupervisorExchangeStatus[];
+    limit?: number;
+  }) => Promise<SupervisorExchange[]>;
+  resolveSupervisorExchange: (request: {
+    id: string;
+    resolution: string;
+    mirrorToDiscord?: boolean;
+  }) => Promise<SupervisorExchange>;
+  onSupervisorExchangeEvent: (callback: (event: SupervisorExchangeEvent) => void) => () => void;
   // Mission Control - Heartbeat APIs
   getHeartbeatConfig: (agentRoleId: string) => Promise<
     | {

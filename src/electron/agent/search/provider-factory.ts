@@ -10,6 +10,7 @@ import {
   SEARCH_PROVIDER_INFO,
 } from "./types";
 import { TavilyProvider } from "./tavily-provider";
+import { ExaProvider } from "./exa-provider";
 import { BraveProvider } from "./brave-provider";
 import { SerpApiProvider } from "./serpapi-provider";
 import { GoogleProvider } from "./google-provider";
@@ -26,6 +27,9 @@ export interface SearchSettings {
   primaryProvider: SearchProviderType | null;
   fallbackProvider: SearchProviderType | null;
   tavily?: {
+    apiKey?: string;
+  };
+  exa?: {
     apiKey?: string;
   };
   brave?: {
@@ -360,6 +364,10 @@ export class SearchProviderFactory {
     if (settings.tavily?.apiKey) {
       configured.push("tavily");
     }
+    // Check Exa
+    if (settings.exa?.apiKey) {
+      configured.push("exa");
+    }
     // Check Brave
     if (settings.brave?.apiKey) {
       configured.push("brave");
@@ -399,6 +407,7 @@ export class SearchProviderFactory {
         primaryProvider: settings.primaryProvider,
         fallbackProvider: settings.fallbackProvider,
         tavily: settings.tavily?.apiKey ? settings.tavily : existingSettings.tavily,
+        exa: settings.exa?.apiKey ? settings.exa : existingSettings.exa,
         brave: settings.brave?.apiKey ? settings.brave : existingSettings.brave,
         serpapi: settings.serpapi?.apiKey ? settings.serpapi : existingSettings.serpapi,
         google:
@@ -435,6 +444,7 @@ export class SearchProviderFactory {
     return {
       type: providerType,
       tavilyApiKey: settings.tavily?.apiKey,
+      exaApiKey: settings.exa?.apiKey,
       braveApiKey: settings.brave?.apiKey,
       serpApiKey: settings.serpapi?.apiKey,
       googleApiKey: settings.google?.apiKey,
@@ -464,6 +474,8 @@ export class SearchProviderFactory {
     switch (config.type) {
       case "tavily":
         return new TavilyProvider(config);
+      case "exa":
+        return new ExaProvider(config);
       case "brave":
         return new BraveProvider(config);
       case "serpapi":
@@ -597,6 +609,13 @@ export class SearchProviderFactory {
         description: SEARCH_PROVIDER_INFO.tavily.description,
         configured: !!settings.tavily?.apiKey,
         supportedTypes: [...SEARCH_PROVIDER_INFO.tavily.supportedTypes],
+      },
+      {
+        type: "exa",
+        name: SEARCH_PROVIDER_INFO.exa.displayName,
+        description: SEARCH_PROVIDER_INFO.exa.description,
+        configured: !!settings.exa?.apiKey,
+        supportedTypes: [...SEARCH_PROVIDER_INFO.exa.supportedTypes],
       },
       {
         type: "brave",

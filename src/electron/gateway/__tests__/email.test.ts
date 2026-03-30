@@ -169,6 +169,36 @@ describe("EmailAdapter", () => {
       ).toThrow("Email password is required");
     });
 
+    it("should reject Outlook.com-family accounts that require OAuth2", () => {
+      expect(() =>
+        createEmailAdapter({
+          enabled: true,
+          email: "user@msn.com",
+          password: "password",
+          imapHost: "imap-mail.outlook.com",
+          smtpHost: "smtp-mail.outlook.com",
+        }),
+      ).toThrow(
+        "Outlook.com, Hotmail, Live, and MSN accounts require OAuth2/Modern Auth for IMAP/SMTP. Use the Outlook.com provider and connect with Microsoft OAuth instead of a password. Before connecting, create a Microsoft Entra app registration for personal Microsoft accounts, add the Mobile and desktop redirect URI http://localhost, and grant delegated IMAP.AccessAsUser.All plus SMTP.Send permissions.",
+      );
+    });
+
+    it("should allow OAuth-based Outlook.com configuration", () => {
+      const adapter = createEmailAdapter({
+        enabled: true,
+        authMethod: "oauth",
+        oauthProvider: "microsoft",
+        oauthClientId: "client-id",
+        accessToken: "access-token",
+        refreshToken: "refresh-token",
+        email: "user@msn.com",
+        imapHost: "imap-mail.outlook.com",
+        smtpHost: "smtp-mail.outlook.com",
+      });
+
+      expect(adapter).toBeInstanceOf(EmailAdapter);
+    });
+
     it("should throw error if imapHost is missing", () => {
       expect(() =>
         createEmailAdapter({

@@ -8,6 +8,7 @@ import {
   ChannelConfigSchema,
   EmailChannelConfigSchema,
   AddEmailChannelSchema,
+  AddDiscordChannelSchema,
 } from "../validation";
 import { z } from "zod";
 
@@ -406,5 +407,50 @@ describe("ChannelConfigSchema", () => {
 
     expect(result.success).toBe(true);
     expect((result.data as Record<string, unknown>).pluginVersion).toBe("2.0");
+  });
+
+  it("rejects enabled supervisor configs that omit required routing fields", () => {
+    const result = ChannelConfigSchema.safeParse({
+      supervisor: {
+        enabled: true,
+      },
+    });
+
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("AddDiscordChannelSchema", () => {
+  it("rejects enabled supervisor mode without the required automation fields", () => {
+    const result = AddDiscordChannelSchema.safeParse({
+      type: "discord",
+      name: "Discord",
+      botToken: "token",
+      applicationId: "app-id",
+      discordSupervisor: {
+        enabled: true,
+        coordinationChannelId: "123",
+      },
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts a fully configured supervisor mode payload", () => {
+    const result = AddDiscordChannelSchema.safeParse({
+      type: "discord",
+      name: "Discord",
+      botToken: "token",
+      applicationId: "app-id",
+      discordSupervisor: {
+        enabled: true,
+        coordinationChannelId: "123",
+        peerBotUserIds: ["456"],
+        workerAgentRoleId: "550e8400-e29b-41d4-a716-446655440000",
+        supervisorAgentRoleId: "550e8400-e29b-41d4-a716-446655440001",
+      },
+    });
+
+    expect(result.success).toBe(true);
   });
 });

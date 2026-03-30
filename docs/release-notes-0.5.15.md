@@ -1,10 +1,10 @@
-# Next Release Notes (Draft)
+# Release Notes 0.5.15
 
-This page summarizes the product changes currently queued for the first release after `v0.5.14` on 2026-03-29.
+This page summarizes the product changes included in `0.5.15`, based on changes merged after `v0.5.14` on 2026-03-29.
 
 ## Overview
 
-Since `0.5.14`, the branch adds a visible operator-facing runtime layer for learning, recall, shell state, and model routing; introduces a governed Discord supervisor loop for bot-to-bot review and escalation; opens the Skill Store to ClawHub and other external skill sources; and hardens mailbox/email flows around Microsoft OAuth, encryption at rest, and safer mailbox actions. It also refreshes Mission Control with an all-workspaces operator view and broadens the docs/comparison set so the new runtime surfaces are easier to understand and ship.
+The 0.5.15 release adds a visible operator-facing runtime layer for learning, recall, shell state, and model routing; introduces a governed Discord supervisor loop for bot-to-bot review and escalation; opens the Skill Store to ClawHub and other external skill sources; and hardens mailbox/email flows around Microsoft OAuth, encryption at rest, and safer mailbox actions. It also refreshes Mission Control with an all-workspaces operator view, folds Dispatch onboarding into Devices, tightens Inbox Agent ergonomics, and broadens the docs/comparison set so the new runtime surfaces are easier to understand and ship.
 
 ## What Changed
 
@@ -48,6 +48,14 @@ Since `0.5.14`, the branch adds a visible operator-facing runtime layer for lear
 - **Routing runtime panel**: Settings now includes a live routing runtime surface for the currently active provider/model state.
 - **Surface cleanup**: Connectors settings, activity feed items, and command output were updated to better support the new runtime and supervisor workflows.
 
+### Devices, Dispatch, and Inbox UX
+
+- **Dispatch in Devices**: Dispatch onboarding and connected-channel guidance now live directly inside the Devices panel instead of a separate renderer surface.
+- **Standalone Dispatch removal**: the dedicated Dispatch panel and sidebar entry were removed so the remote-device surface owns this workflow end to end.
+- **Dashboard workspace naming**: the home dashboard now resolves companion workspace names from visible workspaces instead of maintaining a second local workspace-name map.
+- **Inbox Agent controls**: mailbox folder filters were tightened into a segmented control, multi-account selection moved into a compact dropdown, and the pulse/triage cards were compressed for denser scanning.
+- **Inbox visual cleanup**: lower-priority thread grouping is less noisy, selection styling is more consistent, and accent usage now aligns better with the rest of the updated inbox surface.
+
 ### Documentation and product positioning
 
 - **New reference docs**: added dedicated pages for operator runtime visibility, skill store/external skills, and Discord supervisor mode.
@@ -56,8 +64,7 @@ Since `0.5.14`, the branch adds a visible operator-facing runtime layer for lear
 
 ## Notes
 
-- This page is a draft release summary for the first release after `v0.5.14`; rename it to the final versioned filename once the release number is chosen.
 - Persistent shell sessions are intentionally limited to eligible non-interactive shell commands and can be reset or closed from the app.
 - Outlook.com-family personal mailboxes require a user-supplied Microsoft Entra app registration with the desktop/native `http://localhost` redirect flow.
 - Discord supervisor mode requires peer bot IDs, a coordination channel, and worker/supervisor agent roles to be configured before strict mode can run.
-- This page is the canonical release-prep summary for the changes currently queued after `v0.5.14`.
+- This page is the canonical summary for the changes included in `0.5.15`.

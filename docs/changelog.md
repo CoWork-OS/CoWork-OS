@@ -7,8 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.15] - 2026-03-30
+
 ### Added
-- **Release notes draft for the next release**: added a detailed summary page covering runtime visibility, Discord supervisor mode, Microsoft email OAuth, mailbox hardening, and external skill imports. See [Next Release Notes](release-notes-next.md).
+- **Release notes for 0.5.15**: added a detailed summary page covering runtime visibility, Discord supervisor mode, Microsoft email OAuth, mailbox hardening, external skill imports, and the related Devices/Inbox UX updates. See [Release Notes 0.5.15](release-notes-0.5.15.md).
 - **Operator runtime visibility**: task completion now surfaces learning progression, unified recall spans tasks/messages/files/workspace notes/memory/knowledge graph, persistent shell sessions preserve task state, and live provider routing/fallback status is visible in task detail and settings.
 - **Discord supervisor mode**: Discord channels can now run a strict worker/supervisor protocol with persisted exchanges, escalation workflows, Mission Control feed integration, resolve actions, and workspace `SUPERVISOR.md` guidance.
 - **Skill Store and external skills**: the desktop app can now browse curated skills, search ClawHub, and import external skills from Git repositories, ClawHub pages, raw manifests, or raw `SKILL.md` URLs into the managed skills directory.
@@ -17,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **Mailbox and email workflows**: mailbox sync, thread actions, and settings now support per-account filtering, no-reply sender handling, Loom recent-message fetches, and OAuth-backed IMAP/SMTP connections with stronger provider validation.
 - **Mission Control and operator UI**: Mission Control now supports an all-workspaces view with workspace badges across board/feed/agent/detail surfaces, task detail shows learning and recall context, and temporary workspaces no longer expose unsupported reporting actions.
+- **Devices and dispatch surfaces**: Dispatch onboarding now lives inside the Devices panel, the standalone Dispatch panel/sidebar entry were removed, Home Dashboard workspace naming now resolves from visible workspaces, and Inbox Agent filter/pulse controls were compacted.
 - **Security hardening**: channel configs are encrypted at rest when available, mailbox bodies/summaries/excerpts are encrypted locally, database/user-data permissions are restricted during setup, mailbox IPC is limited to the main app window, and OAuth secrets are sanitized from renderer-visible channel configs.
 - **Documentation and positioning**: README, features, channels, mission control, architecture, project status, and new comparison/reference pages were refreshed to reflect runtime visibility, supervisor mode, and external skill support.
 - **Renderer performance**: in the `CoWork-OS/CoWork-OS` repo, sidebar rows now flatten before virtualization, timeline cards use `@chenglou/pretext` estimates with `ResizeObserver` reconciliation, and the main transcript cap stays conservative until the transcript surface is virtualized.
@@ -797,7 +800,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | 0.1.0 | 2025-01-24 | First public release with core features |
 | 0.0.1 | 2025-01-20 | Initial development setup |
 
-[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.14...HEAD
+[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.15...HEAD
+[0.5.15]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.5.15
 [0.5.14]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.5.14
 [0.5.13]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.5.13
 [0.5.11]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.5.11

@@ -18,8 +18,8 @@ hero:
       text: Runtime Visibility
       link: /operator-runtime-visibility
     - theme: alt
-      text: Next Release Notes
-      link: /release-notes-next
+      text: Release Notes 0.5.15
+      link: /release-notes-0.5.15
     - theme: alt
       text: Heartbeat v3
       link: /heartbeat-v3
@@ -47,8 +47,8 @@ features:
     details: Direct LLM chat with no tools, same-session follow-ups, and chat-only streaming for supported providers.
   - title: Runtime Visibility
     details: Visible learning progression after each task, unified recall across tasks/messages/files, persistent shell sessions, and live provider routing/fallback status.
-  - title: Next Release Draft
-    details: Draft release summary for the first post-0.5.14 release, covering runtime visibility, Discord supervisor mode, Microsoft email OAuth, mailbox hardening, and external skill imports.
+  - title: Latest Release 0.5.15
+    details: Runtime visibility, Discord supervisor mode, Microsoft email OAuth, mailbox hardening, external skill imports, and Devices/Dispatch UX cleanup.
   - title: Inbox Agent
     details: Local-first email triage with AI classification, action-needed and commitment queues, draft review, and resync-safe background sync.
   - title: Managed Devices

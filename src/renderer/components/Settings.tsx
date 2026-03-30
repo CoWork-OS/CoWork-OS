@@ -60,6 +60,7 @@ import {
   type LLMRoutingRuntimeState,
   type CustomProviderConfig,
   type AzureReasoningEffort,
+  type LLMProviderFallbackConfig,
 } from "../../shared/types";
 import { CUSTOM_PROVIDER_MAP } from "../../shared/llm-provider-catalog";
 import { TelegramSettings } from "./TelegramSettings";
@@ -76,6 +77,8 @@ import { BlueBubblesSettings } from "./BlueBubblesSettings";
 import { EmailSettings } from "./EmailSettings";
 import { TeamsSettings } from "./TeamsSettings";
 import { GoogleChatSettings } from "./GoogleChatSettings";
+import { FeishuSettings } from "./FeishuSettings";
+import { WeComSettings } from "./WeComSettings";
 import { XSettings } from "./XSettings";
 import { SearchSettings } from "./SearchSettings";
 import { UpdateSettings } from "./UpdateSettings";
@@ -87,6 +90,7 @@ import { SkillHubBrowser } from "./SkillHubBrowser";
 import { MCPSettings } from "./MCPSettings";
 import { ConnectorsSettings } from "./ConnectorsSettings";
 import { BuiltinToolsSettings } from "./BuiltinToolsSettings";
+import { ComputerUseSettings } from "./ComputerUseSettings";
 import { TraySettings } from "./TraySettings";
 import { ScheduledTasksSettings } from "./ScheduledTasksSettings";
 import { HooksSettings } from "./HooksSettings";
@@ -95,12 +99,12 @@ import { PersonalitySettings } from "./PersonalitySettings";
 import { NodesSettings } from "./NodesSettings";
 import { ExtensionsSettings } from "./ExtensionsSettings";
 import { VoiceSettings } from "./VoiceSettings";
-import { MissionControlPanel } from "./mission-control";
 import { MemoryHubSettings } from "./MemoryHubSettings";
 import { WorktreeSettings } from "./WorktreeSettings";
 import { UsageInsightsPanel } from "./UsageInsightsPanel";
 import { SuggestionsPanel } from "./SuggestionsPanel";
 import { CustomizePanel } from "./CustomizePanel";
+import { ProfileSettings } from "./ProfileSettings";
 import { AdminPoliciesPanel } from "./AdminPoliciesPanel";
 import { EventTriggersPanel } from "./EventTriggersPanel";
 import { BriefingPanel } from "./BriefingPanel";
@@ -116,7 +120,6 @@ import { ContactIdentitySettings } from "./ContactIdentitySettings";
 type SettingsTab =
   | "appearance"
   | "personality"
-  | "missioncontrol"
   | "companies"
   | "system"
   | "tray"
@@ -174,7 +177,9 @@ type SecondaryChannel =
   | "line"
   | "bluebubbles"
   | "email"
-  | "googlechat";
+  | "googlechat"
+  | "feishu"
+  | "wecom";
 
 
 interface SettingsProps {
@@ -198,6 +203,7 @@ interface SettingsProps {
   workspaceId?: string;
   onCreateTask?: (title: string, prompt: string) => void;
   onOpenTask?: (taskId: string) => void;
+  onNavigateToMissionControl?: (companyId: string) => void;
 }
 
 interface ModelOption {
@@ -206,7 +212,7 @@ interface ModelOption {
 }
 
 interface ProviderInfo {
-  type: string;
+  type: LLMProviderType;
   name: string;
   configured: boolean;
 }
@@ -448,7 +454,6 @@ const sidebarItems: Array<{
 }> = [
   { tab: "appearance", label: "Appearance", group: "General", icon: <Sun {...I} /> },
   { tab: "personality", label: "Personality", group: "General", icon: <User {...I} /> },
-  { tab: "missioncontrol", label: "Mission Control", group: "General", icon: <Users {...I} /> },
   { tab: "companies", label: "Companies", group: "General", icon: <Building2 {...I} /> },
   {
     tab: "system",
@@ -457,7 +462,7 @@ const sidebarItems: Array<{
     icon: <Shield {...I} />,
   },
   { tab: "voice", label: "Voice Mode", group: "General", icon: <Mic {...I} /> },
-  { tab: "digitaltwins", label: "Digital Twins", group: "General", icon: <User {...I} /> },
+  { tab: "digitaltwins", label: "Agent Personas", group: "General", icon: <User {...I} /> },
   {
     tab: "aimodels",
     label: "AI & Models",
@@ -526,6 +531,8 @@ const secondaryChannelItems: Array<{ key: SecondaryChannel; label: string; icon:
   { key: "line", label: "LINE", icon: <MessagesSquare {...S} /> },
   { key: "email", label: "Email", icon: <Mail {...S} /> },
   { key: "googlechat", label: "Google Chat", icon: <MessagesSquare {...S} /> },
+  { key: "feishu", label: "Feishu / Lark", icon: <MessageCircle {...S} /> },
+  { key: "wecom", label: "WeCom", icon: <Building2 {...S} /> },
   { key: "mattermost", label: "Mattermost", icon: <Square {...S} /> },
   { key: "matrix", label: "Matrix", icon: <LayoutGrid {...S} /> },
   { key: "twitch", label: "Twitch", icon: <Tv {...S} /> },
@@ -583,6 +590,7 @@ export function Settings({
   workspaceId,
   onCreateTask,
   onOpenTask,
+  onNavigateToMissionControl,
 }: SettingsProps) {
   const normalizedInitialTab: SettingsTab =
     initialTab === "tray" || initialTab === "guardrails" || initialTab === "policies"
@@ -601,7 +609,6 @@ export function Settings({
                   ? "access"
                   : (initialTab ?? "appearance");
   const [activeTab, setActiveTab] = useState<SettingsTab>(normalizedInitialTab);
-  const [missionControlCompanyId, setMissionControlCompanyId] = useState<string | null>(null);
   const [digitalTwinsCompanyId, setDigitalTwinsCompanyId] = useState<string | null>(null);
   const [activeSecondaryChannel, setActiveSecondaryChannel] = useState<SecondaryChannel>("teams");
   const [activeSkillsSubTab, setActiveSkillsSubTab] = useState<"custom" | "store">(
@@ -634,6 +641,9 @@ export function Settings({
   });
   const [models, setModels] = useState<ModelOption[]>([]);
   const [providerRoutingModels, setProviderRoutingModels] = useState<ModelOption[]>([]);
+  const [providerModelOptionsByType, setProviderModelOptionsByType] = useState<
+    Record<string, ModelOption[]>
+  >({});
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [routingRuntime, setRoutingRuntime] = useState<LLMRoutingRuntimeState | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1176,15 +1186,60 @@ export function Settings({
     return Array.from(deduped.values());
   };
 
-  const loadProviderRoutingModels = async (providerType: LLMProviderType) => {
+  const loadProviderModelsForType = async (providerType: LLMProviderType): Promise<ModelOption[]> => {
     try {
       const providerModels = await window.electronAPI.getProviderModels(providerType);
-      setProviderRoutingModels(providerModels || []);
+      const normalized = providerModels || [];
+      setProviderModelOptionsByType((prev) => ({
+        ...prev,
+        [providerType]: normalized,
+      }));
+      return normalized;
     } catch (error) {
-      console.error("Failed to load provider models for routing:", error);
-      setProviderRoutingModels([]);
+      console.error("Failed to load provider models:", error);
+      setProviderModelOptionsByType((prev) => ({
+        ...prev,
+        [providerType]: [],
+      }));
+      return [];
     }
   };
+
+  const loadProviderRoutingModels = async (providerType: LLMProviderType) => {
+    const providerModels = await loadProviderModelsForType(providerType);
+    setProviderRoutingModels(providerModels);
+  };
+
+  const getFailoverModelOptions = (
+    providerType: LLMProviderType,
+    currentModelKey?: string,
+  ): SearchableSelectOption[] => {
+    const deduped = new Map<string, SearchableSelectOption>();
+    const addOption = (value?: string, label?: string) => {
+      const normalized = value?.trim();
+      if (!normalized || deduped.has(normalized)) return;
+      deduped.set(normalized, { value: normalized, label: label || normalized });
+    };
+
+    for (const model of providerModelOptionsByType[providerType] || []) {
+      addOption(model.key, model.displayName);
+    }
+    addOption(getProviderPrimaryModel(providerType));
+    addOption(currentModelKey);
+
+    return Array.from(deduped.values());
+  };
+
+  const updateFallbackProviders = (
+    updater: (prev: LLMProviderFallbackConfig[]) => LLMProviderFallbackConfig[],
+  ) => {
+    setSettings((prev) => ({
+      ...prev,
+      fallbackProviders: updater(prev.fallbackProviders || []),
+    }));
+  };
+
+  const configuredFallbackProviderOptions = providers.filter((provider) => provider.configured);
 
   useEffect(() => {
     if (!azureDeployment) {
@@ -1204,6 +1259,14 @@ export function Settings({
     }
   }, [azureAnthropicDeploymentsText, azureAnthropicDeployment]);
 
+  useEffect(() => {
+    for (const entry of settings.fallbackProviders || []) {
+      if (!providerModelOptionsByType[entry.providerType]) {
+        void loadProviderModelsForType(entry.providerType);
+      }
+    }
+  }, [settings.fallbackProviders, providerModelOptionsByType]);
+
   const loadConfigStatus = async () => {
     try {
       setLoading(true);
@@ -1213,6 +1276,10 @@ export function Settings({
       // Set providers
       setProviders(configStatus.providers || []);
       setModels(configStatus.models || []);
+      setProviderModelOptionsByType((prev) => ({
+        ...prev,
+        [configStatus.currentProvider]: configStatus.models || [],
+      }));
 
       // Load full settings separately for bedrock config
       const loadedSettings = await window.electronAPI.getLLMSettings();
@@ -2157,11 +2224,28 @@ export function Settings({
               : true,
         };
       };
+      const sanitizedFallbackProviders = (settings.fallbackProviders || [])
+        .map((entry) => ({
+          providerType: resolveCustomProviderId(entry.providerType),
+          modelKey: entry.modelKey?.trim() || undefined,
+        }))
+        .filter((entry, index, array) => {
+          if (!entry.providerType) return false;
+          return (
+            array.findIndex(
+              (candidate) =>
+                candidate.providerType === entry.providerType &&
+                (candidate.modelKey || "") === (entry.modelKey || ""),
+            ) === index
+          );
+        });
 
       // Always save settings for ALL providers to preserve API keys and model selections
       // when switching between providers
       const settingsToSave: LLMSettingsData = {
         ...settings,
+        fallbackProviders:
+          sanitizedFallbackProviders.length > 0 ? sanitizedFallbackProviders : undefined,
         // Always include anthropic settings
         anthropic: {
           apiKey: anthropicApiKey || undefined,
@@ -4626,6 +4710,184 @@ export function Settings({
                   </div>
 
                   <div className="settings-section">
+                    <h3>Provider Failover</h3>
+                    <p className="settings-description">
+                      When the active provider hits quota, outages, or transient network errors,
+                      automatically switch to the next configured provider/model in this order.
+                      Task-level provider or model overrides skip automatic failover.
+                    </p>
+
+                    {(settings.fallbackProviders || []).length > 0 ? (
+                      <div className="settings-subsection">
+                        {(settings.fallbackProviders || []).map((entry, index) => (
+                          <div
+                            key={`${entry.providerType}:${index}`}
+                            style={{
+                              display: "grid",
+                              gridTemplateColumns: "minmax(180px, 220px) minmax(240px, 1fr) auto",
+                              gap: "12px",
+                              alignItems: "end",
+                              marginBottom: "12px",
+                            }}
+                          >
+                            <div>
+                              <label className="settings-label">Backup provider #{index + 1}</label>
+                              <select
+                                className="settings-select"
+                                value={entry.providerType}
+                                onChange={(e) => {
+                                  const nextProvider = e.target.value as LLMProviderType;
+                                  void loadProviderModelsForType(nextProvider);
+                                  updateFallbackProviders((prev) =>
+                                    prev.map((candidate, candidateIndex) =>
+                                      candidateIndex === index
+                                        ? {
+                                            providerType: nextProvider,
+                                            modelKey: getProviderPrimaryModel(nextProvider) || undefined,
+                                          }
+                                        : candidate,
+                                    ),
+                                  );
+                                }}
+                              >
+                                {configuredFallbackProviderOptions.map((provider) => (
+                                  <option key={provider.type} value={provider.type}>
+                                    {provider.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div>
+                              <label className="settings-label">Fallback model</label>
+                              <SearchableSelect
+                                options={[
+                                  { value: "", label: "Use provider default" },
+                                  ...getFailoverModelOptions(entry.providerType, entry.modelKey),
+                                ]}
+                                value={entry.modelKey || ""}
+                                onChange={(value) =>
+                                  updateFallbackProviders((prev) =>
+                                    prev.map((candidate, candidateIndex) =>
+                                      candidateIndex === index
+                                        ? {
+                                            ...candidate,
+                                            modelKey: value.trim() || undefined,
+                                          }
+                                        : candidate,
+                                    ),
+                                  )
+                                }
+                                placeholder="Use provider default"
+                                allowCustomValue
+                              />
+                            </div>
+
+                            <div
+                              style={{
+                                display: "flex",
+                                gap: "8px",
+                                justifyContent: "flex-end",
+                                flexWrap: "wrap",
+                              }}
+                            >
+                              <button
+                                className="button-small button-secondary"
+                                type="button"
+                                onClick={() =>
+                                  updateFallbackProviders((prev) => {
+                                    if (index === 0) return prev;
+                                    const next = [...prev];
+                                    [next[index - 1], next[index]] = [next[index], next[index - 1]];
+                                    return next;
+                                  })
+                                }
+                                disabled={index === 0}
+                              >
+                                Up
+                              </button>
+                              <button
+                                className="button-small button-secondary"
+                                type="button"
+                                onClick={() =>
+                                  updateFallbackProviders((prev) => {
+                                    if (index >= prev.length - 1) return prev;
+                                    const next = [...prev];
+                                    [next[index], next[index + 1]] = [next[index + 1], next[index]];
+                                    return next;
+                                  })
+                                }
+                                disabled={index >= (settings.fallbackProviders || []).length - 1}
+                              >
+                                Down
+                              </button>
+                              <button
+                                className="button-small button-secondary"
+                                type="button"
+                                onClick={() =>
+                                  updateFallbackProviders((prev) =>
+                                    prev.filter((_, candidateIndex) => candidateIndex !== index),
+                                  )
+                                }
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="settings-hint">
+                        No backup providers configured yet. Add at least one to enable ordered
+                        failover beyond the primary route.
+                      </p>
+                    )}
+
+                    <div className="settings-subsection">
+                      <button
+                        className="button-small button-secondary"
+                        type="button"
+                        onClick={() => {
+                          const usedProviders = new Set(
+                            (settings.fallbackProviders || []).map((entry) => entry.providerType),
+                          );
+                          const nextProvider =
+                            configuredFallbackProviderOptions.find(
+                              (provider) =>
+                                provider.type !== settings.providerType &&
+                                !usedProviders.has(provider.type),
+                            ) ||
+                            configuredFallbackProviderOptions.find(
+                              (provider) => provider.type !== settings.providerType,
+                            );
+                          if (!nextProvider) {
+                            return;
+                          }
+                          void loadProviderModelsForType(nextProvider.type);
+                          updateFallbackProviders((prev) => [
+                            ...prev,
+                            {
+                              providerType: nextProvider.type,
+                              modelKey: getProviderPrimaryModel(nextProvider.type) || undefined,
+                            },
+                          ]);
+                        }}
+                        disabled={
+                          configuredFallbackProviderOptions.filter(
+                            (provider) => provider.type !== settings.providerType,
+                          ).length === 0 || (settings.fallbackProviders || []).length >= 5
+                        }
+                      >
+                        Add backup provider
+                      </button>
+                      <p className="settings-hint">
+                        Backups run in order from top to bottom. Leave the model blank to use that
+                        provider&apos;s default model.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="settings-section">
                     <h3>Image Generation (Text-to-Image)</h3>
                     <p className="settings-description">
                       Default and backup model for prompts like &quot;draw a snow leopard&quot; or
@@ -4878,16 +5140,10 @@ export function Settings({
               />
             ) : activeTab === "personality" ? (
               <PersonalitySettings onSettingsChanged={onSettingsChanged} />
-            ) : activeTab === "missioncontrol" ? (
-              <MissionControlPanel initialCompanyId={missionControlCompanyId} />
             ) : activeTab === "companies" ? (
               <CompaniesPanel
-                onOpenMissionControl={(companyId) => {
-                  setMissionControlCompanyId(companyId);
-                  setActiveTab("missioncontrol");
-                }}
+                onOpenMissionControl={(companyId) => onNavigateToMissionControl?.(companyId)}
                 onOpenDigitalTwins={(companyId) => {
-                  setMissionControlCompanyId(companyId);
                   setDigitalTwinsCompanyId(companyId);
                   setActiveTab("digitaltwins");
                 }}
@@ -4898,6 +5154,10 @@ export function Settings({
               <HealthPanel compact onCreateTask={onCreateTask} />
             ) : activeTab === "system" ? (
               <div className="settings-combined-panel">
+                <section className="settings-combined-section">
+                  <h2 className="settings-combined-heading">Profiles</h2>
+                  <ProfileSettings />
+                </section>
                 <section className="settings-combined-section">
                   <h2 className="settings-combined-heading">
                     {platform === "win32" ? "System Tray" : platform === "darwin" ? "Menu Bar" : "Tray"}
@@ -4959,6 +5219,8 @@ export function Settings({
                   {effectiveSecondary === "bluebubbles" && <BlueBubblesSettings />}
                   {effectiveSecondary === "email" && <EmailSettings />}
                   {effectiveSecondary === "googlechat" && <GoogleChatSettings />}
+                  {effectiveSecondary === "feishu" && <FeishuSettings />}
+                  {effectiveSecondary === "wecom" && <WeComSettings />}
                 </div>
               </div>
                 );
@@ -5128,7 +5390,10 @@ export function Settings({
             ) : activeTab === "mcp" ? (
               <MCPSettings />
             ) : activeTab === "tools" ? (
-              <BuiltinToolsSettings />
+              <div className="settings-tools-stack">
+                <BuiltinToolsSettings />
+                <ComputerUseSettings />
+              </div>
             ) : activeTab === "access" ? (
               <div className="more-channels-panel">
                 <div className="more-channels-header">

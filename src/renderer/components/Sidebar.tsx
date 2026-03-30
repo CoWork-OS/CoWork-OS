@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useCallback, Fragment } from "react";
-import { ChevronDown, ChevronRight, SlidersHorizontal, Cpu, EyeOff, AppWindow, Bell, HardDrive, Rows3, Server, Workflow, HeartPulse, Send, Lightbulb, Inbox } from "lucide-react";
+import { ChevronDown, ChevronRight, SlidersHorizontal, Cpu, EyeOff, AppWindow, Bell, HardDrive, Rows3, Server, Workflow, HeartPulse, Lightbulb, Inbox } from "lucide-react";
 import { resolveTwinIcon } from "../utils/twin-icons";
 import { stripAllEmojis } from "../utils/emoji-replacer";
 import { Task, Workspace, UiDensity, InfraStatus } from "../../shared/types";
@@ -36,14 +36,12 @@ interface SidebarProps {
   isIdeasActive?: boolean;
   isInboxAgentActive?: boolean;
   isHealthActive?: boolean;
-  isDispatchActive?: boolean;
   completionAttentionTaskIds?: string[];
   onSelectTask: (id: string | null) => void;
   onOpenHome?: () => void;
   onOpenIdeas?: () => void;
   onOpenInboxAgent?: () => void;
   onOpenHealth?: () => void;
-  onOpenDispatch?: () => void;
   onNewSession?: () => void;
   onOpenSettings: () => void;
   onOpenMissionControl: () => void;
@@ -244,14 +242,12 @@ export function Sidebar({
   isIdeasActive = false,
   isInboxAgentActive = false,
   isHealthActive = false,
-  isDispatchActive = false,
   completionAttentionTaskIds = [],
   onSelectTask,
   onOpenHome,
   onOpenIdeas,
   onOpenInboxAgent,
   onOpenHealth,
-  onOpenDispatch,
   onNewSession,
   onOpenSettings,
   onOpenMissionControl,
@@ -1363,23 +1359,6 @@ export function Sidebar({
             </span>
           </button>
 
-          <button
-            type="button"
-            className={`new-task-btn cli-new-task-btn cli-action-btn sidebar-home-btn ${isDispatchActive ? "active" : ""}`}
-            onClick={onOpenDispatch}
-            aria-pressed={isDispatchActive}
-            title="Dispatch"
-          >
-            <span className="cli-btn-text">
-              <span className="terminal-only">dispatch</span>
-              <span className="modern-only cli-new-task-modern-label">
-                <span className="sidebar-home-btn-icon" aria-hidden="true" style={{ display: 'flex' }}>
-                  <Send size={16} strokeWidth={2} style={{ display: 'block' }} />
-                </span>
-                <span>Dispatch</span>
-              </span>
-            </span>
-          </button>
         </div>
       </div>
 

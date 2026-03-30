@@ -12,8 +12,13 @@ import { HealthPanel } from "./components/HealthPanel";
 import { DevicesPanel } from "./components/DevicesPanel";
 import { IdeasPanel } from "./components/IdeasPanel";
 import { InboxAgentPanel } from "./components/InboxAgentPanel";
+import { MissionControlPanel } from "./components/mission-control";
 // TaskQueuePanel moved to RightPanel
 import { ToastContainer } from "./components/Toast";
+import {
+  ComputerUseApprovalDialog,
+  isComputerUseAppGrantApproval,
+} from "./components/ComputerUseApprovalDialog";
 import { QuickTaskFAB } from "./components/QuickTaskFAB";
 import { NotificationPanel } from "./components/NotificationPanel";
 import { WebAccessClient } from "./components/WebAccessClient";
@@ -78,7 +83,8 @@ type AppView =
   | "devices"
   | "health"
   | "ideas"
-  | "inboxAgent";
+  | "inboxAgent"
+  | "missionControl";
 type RemoteTaskView = {
   deviceId: string;
   deviceName: string;
@@ -192,6 +198,9 @@ export function App() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [remoteTaskView, setRemoteTaskView] = useState<RemoteTaskView | null>(null);
   const [currentView, setCurrentView] = useState<AppView>("main");
+  const [missionControlInitialCompanyId, setMissionControlInitialCompanyId] = useState<string | null>(
+    null,
+  );
   const [browserUrl, setBrowserUrl] = useState<string>("");
   const [settingsTab, setSettingsTab] = useState<
     | "appearance"
@@ -210,7 +219,6 @@ export function App() {
     | "skills"
     | "scheduled"
     | "voice"
-    | "missioncontrol"
     | "companies"
     | "digitaltwins"
     | "mcp"
@@ -268,6 +276,9 @@ export function App() {
   const [toasts, setToasts] = useState<ToastNotification[]>([]);
   const [sessionAutoApproveAll, setSessionAutoApproveAll] = useState(false);
   const [pendingInputRequests, setPendingInputRequests] = useState<InputRequest[]>([]);
+  const [computerUseAppGrantApproval, setComputerUseAppGrantApproval] = useState<ApprovalRequest | null>(
+    null,
+  );
   const [unseenOutputTaskIds, setUnseenOutputTaskIds] = useState<string[]>([]);
   const [unseenCompletedTaskIds, setUnseenCompletedTaskIds] = useState<string[]>([]);
   const [rightPanelHighlight, setRightPanelHighlight] = useState<{
@@ -790,6 +801,7 @@ export function App() {
     if (handled) {
       pendingApprovalsRef.current.delete(approvalId);
       dismissToast(getApprovalToastId(approvalId));
+      setComputerUseAppGrantApproval((prev) => (prev?.id === approvalId ? null : prev));
     }
   };
 
@@ -825,8 +837,10 @@ export function App() {
     // Persist to main process so it survives HMR / renderer state resets
     void window.electronAPI.setSessionAutoApprove(true);
 
-    const pendingApprovalIds = Array.from(pendingApprovalsRef.current.keys());
-    for (const approvalId of pendingApprovalIds) {
+    for (const [approvalId, approval] of pendingApprovalsRef.current) {
+      if (isComputerUseAppGrantApproval(approval)) {
+        continue;
+      }
       void handleApprovalResponse(approvalId, true);
     }
 
@@ -839,7 +853,12 @@ export function App() {
   };
 
   const reshowPendingApprovalToasts = () => {
+    let pendingComputerUse: ApprovalRequest | null = null;
     for (const [id, approval] of pendingApprovalsRef.current) {
+      if (isComputerUseAppGrantApproval(approval)) {
+        pendingComputerUse = approval;
+        continue;
+      }
       addToast({
         id: getApprovalToastId(id),
         type: "info",
@@ -874,6 +893,9 @@ export function App() {
           },
         ],
       });
+    }
+    if (pendingComputerUse) {
+      setComputerUseAppGrantApproval(pendingComputerUse);
     }
   };
 
@@ -1095,7 +1117,9 @@ export function App() {
         if (approval?.id) {
           pendingApprovalsRef.current.set(approval.id, approval);
 
-          if (sessionAutoApproveAllRef.current) {
+          if (isComputerUseAppGrantApproval(approval)) {
+            setComputerUseAppGrantApproval(approval);
+          } else if (sessionAutoApproveAllRef.current) {
             void handleApprovalResponse(approval.id, true);
           } else {
             addToast({
@@ -1141,6 +1165,7 @@ export function App() {
         if (approvalId) {
           pendingApprovalsRef.current.delete(approvalId);
           dismissToast(getApprovalToastId(approvalId));
+          setComputerUseAppGrantApproval((prev) => (prev?.id === approvalId ? null : prev));
         }
       }
 
@@ -2686,7 +2711,13 @@ export function App() {
           </button>
         </div>
       )}
-      {(currentView === "main" || currentView === "home" || currentView === "devices" || currentView === "health" || currentView === "ideas" || currentView === "inboxAgent") && (
+      {(currentView === "main" ||
+        currentView === "home" ||
+        currentView === "devices" ||
+        currentView === "health" ||
+        currentView === "ideas" ||
+        currentView === "inboxAgent" ||
+        currentView === "missionControl") && (
         <>
           <div
             className={`app-layout ${leftSidebarCollapsed ? "left-collapsed" : ""} ${effectiveRightCollapsed ? "right-collapsed" : ""}`}
@@ -2699,6 +2730,7 @@ export function App() {
                 isHomeActive={currentView === "home"}
                 isIdeasActive={currentView === "ideas"}
                 isInboxAgentActive={currentView === "inboxAgent"}
+                isMissionControlActive={currentView === "missionControl"}
                 isHealthActive={currentView === "health"}
                 isDevicesActive={currentView === "devices"}
                 completionAttentionTaskIds={unseenCompletedTaskIds}
@@ -2711,8 +2743,8 @@ export function App() {
                 onNewSession={handleNewSession}
                 onOpenSettings={() => setCurrentView("settings")}
                 onOpenMissionControl={() => {
-                  setSettingsTab("missioncontrol");
-                  setCurrentView("settings");
+                  setMissionControlInitialCompanyId(null);
+                  setCurrentView("missionControl");
                 }}
                 onTasksChanged={loadTasks}
                 onLoadMoreTasks={loadMoreTasks}
@@ -2735,8 +2767,8 @@ export function App() {
                   setCurrentView("settings");
                 }}
                 onOpenMissionControl={() => {
-                  setSettingsTab("missioncontrol");
-                  setCurrentView("settings");
+                  setMissionControlInitialCompanyId(null);
+                  setCurrentView("missionControl");
                 }}
                 onOpenEventTriggers={() => {
                   setSettingsTab("triggers");
@@ -2838,6 +2870,10 @@ export function App() {
               <IdeasPanel onCreateTaskFromPrompt={handleCreateTaskFromIdea} />
             ) : currentView === "inboxAgent" ? (
               <InboxAgentPanel />
+            ) : currentView === "missionControl" ? (
+              <main className="main-content mission-control-main">
+                <MissionControlPanel initialCompanyId={missionControlInitialCompanyId} />
+              </main>
             ) : (
               <MainContent
                 task={selectedTask}
@@ -2930,6 +2966,16 @@ export function App() {
           {/* Quick Task FAB */}
           {currentWorkspace && currentView === "main" && <QuickTaskFAB onCreateTask={handleQuickTask} />}
 
+          {computerUseAppGrantApproval ? (
+            <ComputerUseApprovalDialog
+              approval={computerUseAppGrantApproval}
+              onAllowSession={() =>
+                void handleApprovalResponse(computerUseAppGrantApproval.id, true)
+              }
+              onDeny={() => void handleApprovalResponse(computerUseAppGrantApproval.id, false)}
+            />
+          ) : null}
+
           {/* Toast Notifications */}
           <ToastContainer
             toasts={toasts}
@@ -2969,6 +3015,10 @@ export function App() {
             setCurrentView("main");
             setSelectedTaskId(taskId);
             setRightSidebarCollapsed(false);
+          }}
+          onNavigateToMissionControl={(companyId) => {
+            setMissionControlInitialCompanyId(companyId);
+            setCurrentView("missionControl");
           }}
         />
       )}

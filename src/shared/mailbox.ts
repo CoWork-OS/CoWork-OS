@@ -565,6 +565,7 @@ export interface MailboxDigestSnapshot extends MailboxDigest {
 }
 
 export interface MailboxListThreadsInput {
+  accountId?: string;
   query?: string;
   category?: MailboxThreadCategory | "all";
   mailboxView?: MailboxThreadMailboxView;
@@ -600,6 +601,7 @@ export interface MailboxReclassifyInput {
 export interface MailboxDraftOptions {
   tone?: "concise" | "warm" | "direct" | "executive";
   includeAvailability?: boolean;
+  allowNoreplySender?: boolean;
 }
 
 export interface MailboxBulkReviewInput {
@@ -617,6 +619,7 @@ export interface MailboxApplyActionInput {
   proposalId?: string;
   threadId?: string;
   type:
+    | "cleanup_local"
     | "archive"
     | "trash"
     | "mark_read"
@@ -640,4 +643,46 @@ export function stripMailboxSummaryHtmlArtifacts(text: string): string {
   // `m`: line starts — strips "96 96 …" when junk is on the same line as real prose.
   t = t.replace(/^(\d{1,4})(\s+\d{1,4})+\s*/gm, "").trim();
   return t;
+}
+
+export function normalizeMailboxEmailAddress(value?: string | null): string {
+  const raw = typeof value === "string" ? value.trim() : "";
+  if (!raw) return "";
+  const match = raw.match(/<([^>]+)>/);
+  return (match?.[1] || raw).trim().toLowerCase();
+}
+
+export function isMailboxNoReplyAddress(value?: string | null): boolean {
+  const normalized = normalizeMailboxEmailAddress(value);
+  if (!normalized) return false;
+  const [localPart = ""] = normalized.split("@");
+  return /(^|[._+-])(no[._-]?reply|donotreply|do[._-]?not[._-]?reply)(?=$|[._+-])/i.test(localPart);
+}
+
+export function getMailboxNoReplySender(
+  messages: Array<Pick<MailboxMessage, "direction" | "from">>,
+  participants: Array<Pick<MailboxParticipant, "email" | "name">> = [],
+): MailboxParticipant | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    const email = normalizeMailboxEmailAddress(message?.from?.email);
+    if (message?.direction === "incoming" && isMailboxNoReplyAddress(email)) {
+      return {
+        email,
+        name: message.from?.name,
+      };
+    }
+  }
+
+  for (const participant of participants) {
+    const email = normalizeMailboxEmailAddress(participant?.email);
+    if (isMailboxNoReplyAddress(email)) {
+      return {
+        email,
+        name: participant?.name,
+      };
+    }
+  }
+
+  return null;
 }

@@ -1,6 +1,20 @@
 # ACP / acpx Integration Guide
 
-How to integrate an OpenClaw + acpx–style coding agent stack into Cowork OS.
+How to integrate an OpenClaw + acpx-style coding agent stack into Cowork OS.
+
+## Status Update
+
+Cowork now supports more than ACP discovery-only plumbing:
+
+- remote ACP agent registrations can be persisted locally
+- `acp.task.create` can invoke remote agents over an A2A-compatible JSON-RPC/HTTP bridge
+- `acp.task.get` can poll remote task status/results
+- ACP task state is persisted locally so task ids survive app restarts
+- `acp.task.cancel` can cancel both local delegated work and remote A2A-compatible tasks
+- orchestration tools can target `acp_agent_id` so local DAGs can delegate to local or remote ACP agents
+- remote ACP invocations are approval-gated under the same policy model as other governed actions
+- ACP task and inbox access is scope-aware so non-operator clients are limited to their own work by default
+- remote endpoints are validated and timed out before invocation to reduce bad registrations and unsafe outbound calls
 
 ## Context
 
@@ -14,7 +28,8 @@ How to integrate an OpenClaw + acpx–style coding agent stack into Cowork OS.
 
 - Full **ACP server** on the Control Plane (`acp.discover`, `acp.task.create`, `acp.agent.register`, etc.)
 - Coding agents invoked via **bash + PTY** (`run_command` wrapping `codex exec`, `claude`, etc.)
-- `spawn_agent` for child tasks, but those run Cowork’s own executor, not an external ACP runtime
+- A persisted ACP registry for local and remote agents
+- `spawn_agent` / `orchestrate_agents` support for ACP-targeted delegation, including remote A2A-compatible agents
 
 ## Integration Options
 
@@ -103,10 +118,11 @@ Run acpx in a mode where it connects to Cowork’s Control Plane and registers a
 5. acpx (or a bridge) must poll for tasks or receive them via Control Plane events
 6. acpx spawns Codex, runs the task, updates task status/result
 
-**Gap:** Cowork’s ACP handler creates tasks for **local** agents by calling `createTask` (CoWork task system). For **remote** agents, it only stores the ACP task in memory; nothing polls or pushes to the remote agent. You’d need:
+**Current state:** Cowork can already forward remote ACP work to an external endpoint and poll it for status. The remaining work for a specific acpx deployment is mostly adapter-specific:
 
-- A bridge process that connects to the Control Plane, subscribes to ACP events, and forwards new tasks to acpx
-- Or acpx (or an adapter) implementing a “pull” loop: periodically call `acp.task.list` for tasks assigned to itself, then execute them
+- a bridge or service that exposes the acpx-managed agent behind an HTTP endpoint
+- authentication/header conventions for that endpoint
+- any extra event streaming if you want richer-than-polling status updates
 
 **Files to touch:**
 
@@ -154,9 +170,26 @@ Then `acpx cowork "run this task"` would delegate to Cowork’s agent.
 
 **Short term:** Option 1 (acpx as CLI wrapper). Minimal changes, immediate benefit from structured output and session management.
 
-**Medium term:** Option 2 (acpx as ACP runtime). Formalize `runtime: "acp"` so coding-agent tasks consistently go through acpx, with optional structured event streaming.
+**Medium term:** Option 3 is now practical. Register acpx (or an adapter) as a remote ACP agent and let Cowork delegate to it through the shipped remote-invocation path.
 
-**Long term:** Option 3 or 4 if you want Cowork and acpx to interoperate as first-class ACP peers (e.g. acpx discovering Cowork’s agents, or Cowork delegating to acpx-registered agents).
+**Long term:** Option 2 or 4 if you want deeper runtime-level integration, richer structured event streaming, or bidirectional ACP peer interoperability.
+
+---
+
+## Remote Endpoint Safety Notes
+
+When registering a remote ACP agent:
+
+- prefer `https` endpoints
+- plain `http` is only appropriate for local loopback development
+- private/link-local IP targets are rejected by the remote invoker validation layer
+- requests are bounded by a timeout, so a bad remote endpoint cannot hang the CoWork main process indefinitely
+
+Operational guidance:
+
+- only register remote agents you trust to receive delegated prompts and task context
+- use operator/admin scopes for registration and broad task inspection
+- expect normal task approval/policy gates to still apply before external delegation happens
 
 ---
 

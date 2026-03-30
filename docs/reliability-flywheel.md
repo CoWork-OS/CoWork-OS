@@ -43,6 +43,9 @@ Added indexes:
 
 Added in `src/shared/types.ts`:
 - `AgentConfig.reviewPolicy?: "off" | "balanced" | "strict"`
+- `AgentConfig.entropySweepPolicy?: "off" | "balanced" | "strict"`
+- `AgentConfig.stepIntentAlignmentPolicy?: "off" | "balanced" | "strict"`
+- `AgentConfig.stepDecompositionPolicy?: "off" | "balanced" | "strict"`
 - `Task.riskLevel?: "low" | "medium" | "high"`
 - `Task.evalCaseId?: string`
 - `Task.evalRunId?: string`
@@ -82,10 +85,20 @@ Review policies:
 - `balanced`: quality pass for mutating tasks, strict contract for medium/high, verification agent for high
 - `strict`: quality pass for all, strict contract for all, verification/evidence for medium/high
 
+Post-completion entropy sweep:
+- `off`: disabled
+- `balanced`: run for high-risk or clearly mutating tasks
+- `strict`: run for mutating tasks and non-low-risk tasks
+- Default resolution: explicit config, then `COWORK_ENTROPY_SWEEP_DEFAULT`, then `reviewPolicy`
+
 ### Daemon Enforcement Path
 
 Completion flow computes risk and applies gate policy in:
 - `src/electron/agent/daemon.ts`
+
+Completion flow also passes verified-mode evidence bundles into the quality gate and post-completion verifier, so deterministic checks are visible to the final audit path.
+
+After completion, the daemon may launch a read-only entropy sweep for the task's blast radius to look for stale docs, contradictions, and dead-code hints. The sweep is non-blocking and only reports findings.
 
 Optional auto-policy defaults (for code/operations domains) can be enabled via env vars:
 - `COWORK_REVIEW_POLICY_ENABLE_AUTO`

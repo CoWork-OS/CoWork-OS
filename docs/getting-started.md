@@ -35,6 +35,15 @@ This will:
 4. Click **Test Connection** to verify
 5. Save settings
 
+### Optional: Configure Fallback Chains
+
+After your primary provider works, open:
+
+- **Settings > LLM** to set ordered fallback providers/models
+- **Settings > Web Search** to set primary and fallback search providers such as Tavily, Exa, Brave, SerpAPI, or Google
+
+CoWork OS uses those ordered chains when a provider is unavailable, rate-limited, or lacks the needed capability for a task.
+
 ## Troubleshooting
 
 - If **Test Connection** fails with 401/403, verify the API key and account permissions.
@@ -80,8 +89,12 @@ Once the app opens, the most important places to know are:
 - **Home**: quick launch plus recent sessions and recent automation activity
 - **Devices**: manage the local machine and saved remote CoWork nodes, run remote tasks, and inspect remote task history
 - **Settings > Automations**: Task Queue, Self-Improve, Scheduled Tasks, Webhooks, Event Triggers, and Daily Briefing
+- **Settings > Profiles**: create, switch, export, and import isolated app profiles
 - **Settings > Companies**: company shell setup, goals, projects, issues, planner state, and linked operators
 - **Mission Control**: company and operator monitoring, Kanban board, feed, and Ops view
+- **Settings > Skills**: Skill Store imports plus optional external read-only skill directories
+- **Settings > Channels**: Slack multi-workspace setup, Telegram group routing, Discord guild allowlists, and enterprise channels such as Feishu/Lark and WeCom
+- **Settings → Tools → Computer use** (macOS): Accessibility + Screen Recording onboarding, built-in tool toggles, and context for [desktop automation](computer-use.md)
 
 If you are just getting started, do not configure everything at once. Set up an LLM provider, run one local task, then add Devices, Automations, or Companies as needed.
 
@@ -101,6 +114,20 @@ Use this when you want CoWork OS to run tasks on another machine, such as a Mac 
 7. Select that device and run a small test task.
 
 After connection, you can browse remote workspaces, attach files from the remote machine, and inspect remote task history from the same Devices surface.
+
+## Optional: Set Up Profiles
+
+Use profiles when you want separate CoWork environments for personal work, clients, staging, or isolated channel credentials.
+
+Typical profile workflow:
+
+1. Open **Settings > Profiles**.
+2. Create a new profile or duplicate your current one.
+3. Switch into that profile before configuring channels, providers, or skills.
+4. Use **Export Profile** to create a transferable profile bundle.
+5. Use **Import Profile** on another machine or install to restore the same setup, with optional rename on import.
+
+Each profile keeps its own local database, encrypted settings, managed skills, channel configs, and session history.
 
 ## Optional: Turn On Automations
 
@@ -272,6 +299,7 @@ Web search works immediately via the built-in DuckDuckGo provider (free, no API 
 |----------|-------|
 | DuckDuckGo | Built-in — no setup needed (automatic fallback) |
 | Tavily | Enter API key from [tavily.com](https://tavily.com) |
+| Exa | Enter API key from [exa.ai](https://exa.ai/) |
 | Brave | Enter API key from [brave.com/search/api](https://brave.com/search/api) |
 | SerpAPI | Enter API key from [serpapi.com](https://serpapi.com) |
 | Google | Enter API key and Search Engine ID from Google Cloud Console |
@@ -291,14 +319,17 @@ Web search works immediately via the built-in DuckDuckGo provider (free, no API 
 1. Create bot with [@BotFather](https://t.me/BotFather)
 2. Open **Settings** > **Channels** > **Telegram**
 3. Enter bot token
-4. Enable and test
+4. Optionally set a group routing mode (`all`, `mentionsOnly`, `mentionsOrCommands`, `commandsOnly`)
+5. Optionally add allowed Telegram group chat IDs if the bot should only respond in specific groups
+6. Enable and test
 
 #### Discord Bot
 1. Create app at [Discord Developer Portal](https://discord.com/developers/applications)
 2. Open **Settings** > **Channels** > **Discord**
 3. Enter bot token and application ID
 4. Invite bot to server
-5. Enable and test
+5. Optionally add allowed Guild IDs if the bot should ignore other servers
+6. Enable and test
 
 #### Slack Bot
 1. Create app at [Slack API Apps](https://api.slack.com/apps)
@@ -308,7 +339,20 @@ Web search works immediately via the built-in DuckDuckGo provider (free, no API 
 5. Install to workspace and copy Bot Token (xoxb-...)
 6. Open **Settings** > **Channels** > **Slack**
 7. Enter Bot Token and App-Level Token
-8. Enable and test
+8. Repeat **Add Slack Workspace** if you want more than one Slack installation in the same CoWork profile
+9. Enable and test
+
+#### Feishu / Lark
+1. Create a bot/app in the Feishu or Lark developer console
+2. Copy the App ID, App Secret, verification token, and event encryption key
+3. Open **Settings** > **Channels** > **Feishu / Lark**
+4. Enter credentials, set the webhook/event callback URL shown by CoWork, then enable and test
+
+#### WeCom
+1. Create a WeCom app in the WeCom admin console
+2. Copy the Corp ID, Agent ID, Secret, token, and EncodingAESKey
+3. Open **Settings** > **Channels** > **WeCom**
+4. Enter credentials, configure the callback URL shown by CoWork in WeCom, then enable and test
 
 ### App Integrations (Optional)
 

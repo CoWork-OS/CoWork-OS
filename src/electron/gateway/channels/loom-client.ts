@@ -274,6 +274,12 @@ export class LoomEmailClient extends EventEmitter {
     return unseen;
   }
 
+  async fetchRecentEmails(limit: number): Promise<EmailMessage[]> {
+    const cappedLimit = Math.max(1, Math.min(Number(limit || 20), 100));
+    const mailboxMessages = await this.fetchFolderMessages(this.folder, cappedLimit);
+    return mailboxMessages.slice(0, cappedLimit).map((message) => this.toEmailMessage(message, false));
+  }
+
   async sendEmail(options: {
     to: string;
     subject: string;

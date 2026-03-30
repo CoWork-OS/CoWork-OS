@@ -7,10 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.5.16] - 2026-03-30
+## [0.5.17] - 2026-03-30
 
 ### Added
-- **Release notes for 0.5.16**: added a detailed summary page covering runtime visibility, Discord supervisor mode, Microsoft email OAuth, mailbox hardening, external skill imports, the related Devices/Inbox UX updates, and the release-gate reliability fix. See [Release Notes 0.5.16](docs/release-notes-0.5.16.md).
+- **Release notes for 0.5.17**: added a detailed summary page covering runtime visibility, Discord supervisor mode, Microsoft email OAuth, mailbox hardening, external skill imports, the related Devices/Inbox UX updates, and the release reliability fixes. See [Release Notes 0.5.17](docs/release-notes-0.5.17.md).
 - **Operator runtime visibility**: task completion now surfaces learning progression, unified recall spans tasks/messages/files/workspace notes/memory/knowledge graph, persistent shell sessions preserve task state, and live provider routing/fallback status is visible in task detail and settings.
 - **Discord supervisor mode**: Discord channels can now run a strict worker/supervisor protocol with persisted exchanges, escalation workflows, Mission Control feed integration, resolve actions, and workspace `SUPERVISOR.md` guidance.
 - **Skill Store and external skills**: the desktop app can now browse curated skills, search ClawHub, and import external skills from Git repositories, ClawHub pages, raw manifests, or raw `SKILL.md` URLs into the managed skills directory.
@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Release hardening gate**: deterministic eval runs against fresh CI/release databases can now be explicitly configured to allow an empty regression corpus instead of failing every tag-triggered release before packaging starts.
+- **Release validation on macOS**: shell command unit tests no longer pull the full Electron daemon/runtime graph into Vitest, approval mocks are reset between cases, tool-group risk metadata now matches the security invariants, and the shell-session integration test has a CI-safe timeout budget.
 - **Unsupported Outlook manual setup**: manual password-based IMAP/SMTP setup is now rejected for Outlook.com-family consumer accounts, steering users to Microsoft OAuth instead of failing later in the transport stack.
 - **Outlook MIME handling**: Outlook-style multipart emails are parsed more reliably without leaking MIME boundary artifacts into visible message bodies.
 - **Supervisor and mailbox edge cases**: supervisor configs now validate required routing fields up front, escalated exchanges can be resolved from the activity feed, and mailbox cleanup/no-reply handling is less likely to generate bad follow-up actions.
@@ -1192,7 +1193,8 @@ This release is the first recommended Windows install baseline for normal users 
 | 0.1.0 | 2025-01-24 | First public release with core features |
 | 0.0.1 | 2025-01-20 | Initial development setup |
 
-[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.16...HEAD
+[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.17...HEAD
+[0.5.17]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.5.17
 [0.5.16]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.5.16
 [0.5.15]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.5.15
 [0.5.14]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.5.14

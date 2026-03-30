@@ -23,6 +23,7 @@ import type {
   Task,
   Workspace,
 } from "../../shared/types";
+import { isTempWorkspaceId } from "../../shared/types";
 import { TASK_EVENT_STATUS_MAP } from "../../shared/task-event-status-map";
 import { AgentRoleEditor } from "./AgentRoleEditor";
 import { ActivityFeed } from "./ActivityFeed";
@@ -131,6 +132,8 @@ export function MissionControlPanel({
   const tasksRef = useRef<Task[]>([]);
   const workspaceIdRef = useRef<string | null>(null);
   const agentContext = useAgentContext();
+  const supportsWorkspaceReports =
+    !!selectedWorkspaceId && !isTempWorkspaceId(selectedWorkspaceId);
   const filterLabels: Record<typeof feedFilter, UiCopyKey> = {
     all: "mcFilterAll",
     tasks: "mcFilterTasks",
@@ -149,6 +152,12 @@ export function MissionControlPanel({
   useEffect(() => {
     setCommentText("");
   }, [selectedTaskId]);
+
+  useEffect(() => {
+    if (!selectedWorkspaceId || !isTempWorkspaceId(selectedWorkspaceId)) return;
+    setStandupOpen(false);
+    setReviewsOpen(false);
+  }, [selectedWorkspaceId]);
 
   // Update clock every second
   useEffect(() => {
@@ -1070,14 +1079,14 @@ export function MissionControlPanel({
           <button
             className="mc-standup-btn"
             onClick={() => setReviewsOpen(true)}
-            disabled={!selectedWorkspace}
+            disabled={!supportsWorkspaceReports}
           >
             Reviews
           </button>
           <button
             className="mc-standup-btn"
             onClick={() => setStandupOpen(true)}
-            disabled={!selectedWorkspace}
+            disabled={!supportsWorkspaceReports}
           >
             {agentContext.getUiCopy("mcStandupButton")}
           </button>
@@ -2046,7 +2055,7 @@ export function MissionControlPanel({
         </aside>
       </div>
 
-      {standupOpen && selectedWorkspace && (
+      {standupOpen && supportsWorkspaceReports && selectedWorkspace && (
         <div className="mc-editor-overlay">
           <div className="mc-editor-modal mc-standup-modal">
             <StandupReportViewer
@@ -2079,7 +2088,7 @@ export function MissionControlPanel({
         </div>
       )}
 
-      {reviewsOpen && selectedWorkspaceId && (
+      {reviewsOpen && supportsWorkspaceReports && selectedWorkspaceId && (
         <div className="mc-editor-overlay">
           <div className="mc-editor-modal mc-standup-modal">
             <AgentPerformanceReviewViewer

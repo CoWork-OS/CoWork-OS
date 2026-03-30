@@ -52,6 +52,7 @@
 - **Build Mode** — Go from idea to working prototype with a phased canvas workflow (Concept → Plan → Scaffold → Iterate) and named checkpoints.
 - **AI Playbook** — Auto-captures what worked from successful tasks and injects relevant patterns into future prompts. Repeated patterns auto-promote to governed, one-click-approvable skills via the Playbook-to-Skill pipeline.
 - **Evolving Intelligence** — Unified Memory Synthesizer merges all 6 memory subsystems into a single coherent context block. Adaptive Style Engine learns your communication preferences from message patterns and feedback. Evolution Metrics dashboard quantifies improvement over time (correction rate, knowledge growth, style alignment).
+- **Operator Runtime Visibility** — Task completion now shows what Cowork learned, unified recall spans tasks/messages/files, persistent shell sessions preserve operator state, and model routing/fallback is visible in the UI and Mission Control.
 - **Usage Insights** — Dashboard showing task stats, cost/token tracking by model, activity heatmaps, top skills, and per-pack analytics.
 - **ChatGPT History Import** — Import your full ChatGPT conversation history. CoWork OS instantly knows your preferences, past projects, and context — no cold start. All data stays encrypted on your machine and never leaves it.
 - **Security-first** — Approval workflows, sandboxed execution, configurable guardrails, encrypted storage, and 4000+ tests.
@@ -127,6 +128,8 @@ See the [Development Guide](docs/development.md) for prerequisites and details.
 ### Agent Runtime
 
 Task-based execution with dynamic re-planning, five runtime modes (Chat, Execute, Plan, Analyze, Verified) plus orchestration toggles (Autonomous, Collaborative, Multi-LLM, Think With Me), agent teams with persistence, agent comparison, git worktree isolation, AI playbook, and performance reviews. [Learn more](docs/features.md#agent-capabilities)
+
+Operator Runtime Visibility makes the runtime's learning and routing visible: task detail surfaces now show the learning progression, unified recall spans tasks/messages/files/workspace notes/memory/KG, shell sessions preserve operator state, and live routing/fallback events are surfaced in Mission Control and the task UI. [Learn more](docs/operator-runtime-visibility.md)
 
 Autonomous self-improvement runs now use the same runtime with stricter safeguards: they start only after memory services are initialized, require isolated git worktrees by default, skip non-git workspaces when worktree isolation is required, and can notify you when runs start, fail, or open a PR. See [Self-Improving Agent Architecture](docs/self-improving-agent.md) and [Troubleshooting](docs/troubleshooting.md#self-improvement-startup-warnings-in-development).
 
@@ -234,6 +237,7 @@ Unified plugin platform with 18 bundled role-specific packs (Engineering, DevOps
 - **Update detection**: Background version checks against the registry with visual indicators
 - **"Try asking" in chat**: Empty chat shows randomized prompt suggestions from active packs
 - **Plugin Store**: In-app marketplace for browsing, installing (Git/URL), and scaffolding custom packs
+- **Skill Store & external skills**: Desktop GUI support for CoWork Registry skills, direct ClawHub installs, and generic external skill imports from Git repos, raw manifests, and `SKILL.md` bundles
 - **Remote Registry**: Community pack catalog with search and category filtering
 - **Admin Policies**: Organization-level controls — allow/block/require packs, restrict installations, set agent limits, distribute org-managed packs from a shared directory
 - **Per-pack analytics**: Usage Insights dashboard groups skill usage by parent pack
@@ -258,6 +262,7 @@ These are the workflows where approval gates, local data control, and measurable
 - **Custom skills** in `~/Library/Application Support/cowork-os/skills/` (macOS) or `%APPDATA%\cowork-os\skills\` (Windows)
 - **18 bundled plugin packs** with 55+ role-specific skills and Digital Twin integration
 - **Plugin Store** — browse, install from Git/URL, or scaffold custom packs
+- **Skill Store** — browse CoWork Registry skills, search ClawHub, and import external skills from Git, raw JSON, or raw `SKILL.md`
 - **MCP support** — client, host, and registry
 
 ### Voice Mode
@@ -409,6 +414,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
 | [Self-Improving Agent](docs/self-improving-agent.md) | Architecture and operating model for bounded autonomous improvement campaigns |
 | [Zero-Human Company Ops](docs/zero-human-company.md) | Founder-directed company planning, operators, and Mission Control ops workflows |
 | [Plugin Packs](docs/plugin-packs.md) | Plugin platform, Customize panel, and Plugin Store |
+| [Skill Store & External Skills](docs/skill-store-and-external-skills.md) | ClawHub support, external skill imports, and managed-skill install flows |
 | [Best-Fit Workflows](docs/best-fit-workflows.md) | Support Ops, IT Ops, and Sales Ops — where CoWork OS delivers the strongest ROI |
 | [Admin Policies](docs/admin-policies.md) | Enterprise admin policies and organization pack management |
 | [Digital Twins](docs/digital-twins.md) | Role-based AI twin personas and cognitive offload |

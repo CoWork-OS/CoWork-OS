@@ -90,7 +90,7 @@ When choosing a self-hosted AI assistant platform, security should be a primary 
 - How are vulnerabilities handled?
 
 **CoWork OS approach:**
-- **132 security unit tests** for access control and policy enforcement
+- **135 security unit tests** for access control and policy enforcement
 - **259 WebSocket protocol tests** for API security
 - **Monotonic policy precedence**: Deny-wins across all security layers
 - **Open source**: Full codebase available for audit

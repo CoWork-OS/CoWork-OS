@@ -23,5 +23,5 @@ How CoWork OS channel integrations compare to alternative implementations (e.g. 
 
 ## Related Documentation
 
-- [Channel Integrations](channels.md) — Setup and features for all 15 channels
+- [Channel Integrations](channels.md) — Setup and features for all 17 channels
 - [Research Channels](research-channels.md) — Link-research channels for Telegram and WhatsApp

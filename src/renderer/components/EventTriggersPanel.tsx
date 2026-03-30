@@ -38,6 +38,12 @@ interface TriggerHistoryEntry {
   taskId?: string;
 }
 
+interface MCPServerOption {
+  id: string;
+  name: string;
+  status: string;
+}
+
 const SOURCES = [
   { value: "mailbox_event", label: "Mailbox Event" },
   { value: "channel_message", label: "Channel Message" },
@@ -111,7 +117,7 @@ const FIELDS_BY_SOURCE: Record<string, string[]> = {
     "ownerEmail",
   ],
   webhook: ["path", "method", "body"],
-  connector_event: ["type", "source", "data"],
+  connector_event: ["changeType", "serverId", "connectorId", "resourceUri", "data"],
 };
 
 /** Example triggers shown when empty; clicking one populates the form */
@@ -184,6 +190,29 @@ const EXAMPLE_TRIGGERS: ExampleTrigger[] = [
     actionTitle: "Deploy triggered",
     actionPrompt: "A deploy was triggered via webhook. Verify and document the deployment.",
   },
+  {
+    name: "Jira issue changed",
+    source: "connector_event" as const,
+    conditions: [
+      { field: "connectorId", operator: "equals", value: "jira" },
+      { field: "changeType", operator: "equals", value: "resource_updated" },
+    ],
+    actionTitle: "Review Jira update",
+    actionPrompt:
+      "A Jira-connected MCP resource changed. Review the update and summarize what needs attention.",
+  },
+  {
+    name: "Google doc changed",
+    source: "connector_event" as const,
+    conditions: [
+      { field: "connectorId", operator: "equals", value: "google-workspace" },
+      { field: "changeType", operator: "equals", value: "resource_updated" },
+      { field: "resourceUri", operator: "contains", value: "docs.google.com" },
+    ],
+    actionTitle: "Review document changes",
+    actionPrompt:
+      "A tracked Google document changed through MCP. Review the update and capture the next action.",
+  },
 ];
 
 export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspaceId }) => {
@@ -191,6 +220,7 @@ export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspa
   const [showForm, setShowForm] = useState(false);
   const [expandedHistory, setExpandedHistory] = useState<string | null>(null);
   const [history, setHistory] = useState<TriggerHistoryEntry[]>([]);
+  const [mcpServers, setMcpServers] = useState<MCPServerOption[]>([]);
 
   // Form state
   const [name, setName] = useState("");
@@ -215,6 +245,46 @@ export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspa
   useEffect(() => {
     loadTriggers();
   }, [loadTriggers]);
+
+  useEffect(() => {
+    const loadMcpServers = async () => {
+      try {
+        const statuses = await (window as Any).electronAPI.getMCPStatus?.();
+        if (Array.isArray(statuses)) {
+          setMcpServers(
+            statuses.map((status) => ({
+              id: status.id,
+              name: status.name,
+              status: status.status,
+            })),
+          );
+        }
+      } catch {
+        // API not available yet
+      }
+    };
+    void loadMcpServers();
+  }, []);
+
+  const getConditionValue = useCallback(
+    (field: string) => conditions.find((condition) => condition.field === field)?.value || "",
+    [conditions],
+  );
+
+  const upsertCondition = useCallback((field: string, value: string, operator = "equals") => {
+    setConditions((prev) => {
+      const existing = prev.findIndex((condition) => condition.field === field);
+      if (!value.trim()) {
+        return existing >= 0 ? prev.filter((condition) => condition.field !== field) : prev;
+      }
+      if (existing >= 0) {
+        return prev.map((condition, idx) =>
+          idx === existing ? { ...condition, operator, value } : condition,
+        );
+      }
+      return [...prev, { field, operator, value }];
+    });
+  }, []);
 
   const addCondition = () => {
     const fields = FIELDS_BY_SOURCE[source] || ["text"];
@@ -423,6 +493,71 @@ export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspa
               ))}
             </select>
           </div>
+
+          {source === "connector_event" && (
+            <div
+              style={{
+                display: "grid",
+                gap: 8,
+                gridTemplateColumns: "1fr 1fr",
+                marginBottom: 12,
+              }}
+            >
+              <div>
+                <label
+                  style={{
+                    fontSize: 12,
+                    color: "var(--color-text-secondary)",
+                    display: "block",
+                    marginBottom: 4,
+                  }}
+                >
+                  MCP server
+                </label>
+                <select
+                  value={getConditionValue("serverId")}
+                  onChange={(e) => upsertCondition("serverId", e.target.value)}
+                  className="event-triggers-select"
+                  style={{
+                    width: "100%",
+                    padding: "10px 12px",
+                    borderRadius: 6,
+                    border: "1px solid var(--color-border)",
+                    background: "var(--color-bg-input)",
+                    color: "var(--color-text)",
+                    fontSize: 12,
+                  }}
+                >
+                  <option value="">Any connected server</option>
+                  {mcpServers.map((server) => (
+                    <option key={server.id} value={server.id}>
+                      {server.name} ({server.status})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label
+                  style={{
+                    fontSize: 12,
+                    color: "var(--color-text-secondary)",
+                    display: "block",
+                    marginBottom: 4,
+                  }}
+                >
+                  Resource URI filter
+                </label>
+                <input
+                  type="text"
+                  className="settings-input"
+                  value={getConditionValue("resourceUri")}
+                  onChange={(e) => upsertCondition("resourceUri", e.target.value, "contains")}
+                  placeholder="e.g. jira://issue/PROJ-123"
+                  style={{ marginBottom: 0 }}
+                />
+              </div>
+            </div>
+          )}
 
           <div style={{ marginBottom: 12 }}>
             <label

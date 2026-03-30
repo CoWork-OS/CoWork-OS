@@ -79,6 +79,7 @@ import { deriveCanonicalTaskStatus } from "../../shared/task-status";
 import { createTimelineEmitter } from "./timeline-emitter";
 import { TaskExecutor } from "./executor";
 import { TaskQueueManager } from "./queue-manager";
+import { ComputerUseSessionManager } from "../computer-use/session-manager";
 import { decideTaskOutcome, getTaskBestKnownOutcome, hasSubstantiveOutcomeEvidence } from "./outcome-policy";
 import { approvalIdempotency, taskIdempotency as _taskIdempotency, IdempotencyManager } from "../security/concurrency";
 import { MemoryService } from "../memory/MemoryService";
@@ -1075,7 +1076,7 @@ export class AgentDaemon extends EventEmitter {
       this.clearRetryState(effectiveTask.id);
       this.logEvent(effectiveTask.id, "error", { error: error.message });
       // Notify queue manager so it can start next task
-      this.queueManager.onTaskFinished(effectiveTask.id);
+      this.finishQueueSlot(effectiveTask.id);
       return;
     }
 
@@ -1117,7 +1118,7 @@ export class AgentDaemon extends EventEmitter {
         this.logEvent(effectiveTask.id, "error", { error: error.message });
         this.activeTasks.delete(effectiveTask.id);
         // Notify queue manager so it can start next task
-        this.queueManager.onTaskFinished(effectiveTask.id);
+        this.finishQueueSlot(effectiveTask.id);
         // Even on failure, process orphaned follow-ups so they aren't silently lost
         this.processOrphanedFollowUps(effectiveTask.id, executor);
       });
@@ -1320,7 +1321,7 @@ export class AgentDaemon extends EventEmitter {
         this.clearRetryState(effectiveTask.id);
         this.logEvent(effectiveTask.id, "error", { error: error.message });
         this.activeTasks.delete(effectiveTask.id);
-        this.queueManager.onTaskFinished(effectiveTask.id);
+        this.finishQueueSlot(effectiveTask.id);
         this.processOrphanedFollowUps(effectiveTask.id, executor);
       });
   }
@@ -1462,7 +1463,7 @@ export class AgentDaemon extends EventEmitter {
           this.logEvent(effectiveTask.id, "error", { error: error.message });
         }
         this.activeTasks.delete(effectiveTask.id);
-        this.queueManager.onTaskFinished(effectiveTask.id);
+        this.finishQueueSlot(effectiveTask.id);
         this.processOrphanedFollowUps(effectiveTask.id, executor);
       });
   }
@@ -1511,7 +1512,7 @@ export class AgentDaemon extends EventEmitter {
       this.logEvent(task.id, "error", {
         error: "Queued continuation was rejected because latest task error is not turn-limit.",
       });
-      await this.queueManager.onTaskFinished(task.id);
+      await this.finishQueueSlotAsync(task.id);
       return;
     }
 
@@ -1527,7 +1528,7 @@ export class AgentDaemon extends EventEmitter {
         completedAt: Date.now(),
       });
       this.logEvent(task.id, "error", { error: message });
-      await this.queueManager.onTaskFinished(task.id);
+      await this.finishQueueSlotAsync(task.id);
       return;
     }
 
@@ -2226,7 +2227,7 @@ export class AgentDaemon extends EventEmitter {
 
     // Always notify queue manager to remove from running set
     // (handles orphaned tasks that are in runningTaskIds but have no executor)
-    this.queueManager.onTaskFinished(taskId);
+    this.finishQueueSlot(taskId);
 
     // Always emit cancelled event so UI updates
     this.pendingTaskImages.delete(taskId);
@@ -2274,7 +2275,7 @@ export class AgentDaemon extends EventEmitter {
     } else if (this.queueManager.cancelQueuedTask(taskId)) {
       // Task was queued but hadn't started — no work to preserve, just cancel it
       this.taskRepo.update(taskId, { status: "cancelled", completedAt: Date.now() });
-      this.queueManager.onTaskFinished(taskId);
+      this.finishQueueSlot(taskId);
       this.logEvent(taskId, "task_cancelled", {
         message: "Task removed from queue during wrap-up request",
       });
@@ -2325,7 +2326,7 @@ export class AgentDaemon extends EventEmitter {
 
     // Clear executor and free queue slot
     this.activeTasks.delete(taskId);
-    this.queueManager.onTaskFinished(taskId);
+    this.finishQueueSlot(taskId);
 
     const handle = setTimeout(async () => {
       this.pendingRetries.delete(taskId);
@@ -2406,6 +2407,23 @@ export class AgentDaemon extends EventEmitter {
       return false;
     }
     return cached.executor.killShellProcess(force);
+  }
+
+  /**
+   * Tear down an active computer-use session when a task leaves the queue slot.
+   */
+  private releaseComputerUseSession(taskId: string): void {
+    ComputerUseSessionManager.getInstance().endSessionIfOwner(taskId);
+  }
+
+  private finishQueueSlot(taskId: string): void {
+    this.releaseComputerUseSession(taskId);
+    this.queueManager.onTaskFinished(taskId);
+  }
+
+  private async finishQueueSlotAsync(taskId: string): Promise<void> {
+    this.releaseComputerUseSession(taskId);
+    await this.queueManager.onTaskFinished(taskId);
   }
 
   /**
@@ -4080,6 +4098,10 @@ export class AgentDaemon extends EventEmitter {
     return this.agentRoleRepo.findById(agentRoleId);
   }
 
+  getActiveAgentRoles(): AgentRole[] {
+    return this.agentRoleRepo.findActive();
+  }
+
   /**
    * Get task by ID
    */
@@ -5393,7 +5415,7 @@ export class AgentDaemon extends EventEmitter {
         status: "completed",
         message: resultSummary || "Chat turn completed",
       });
-      this.queueManager.onTaskFinished(taskId);
+      this.finishQueueSlot(taskId);
       return;
     }
 
@@ -5842,7 +5864,7 @@ export class AgentDaemon extends EventEmitter {
         void this.teamOrchestrator.onTaskTerminal(taskId).catch(() => {});
       }
       this.clearTimelineTaskState(taskId);
-      this.queueManager.onTaskFinished(taskId);
+      this.finishQueueSlot(taskId);
       return;
     }
     if (nonBlockingFailedStepIds.size > 0) {
@@ -6171,7 +6193,7 @@ export class AgentDaemon extends EventEmitter {
     }
     this.clearTimelineTaskState(taskId);
     // Notify queue manager so it can start next task
-    this.queueManager.onTaskFinished(taskId);
+    this.finishQueueSlot(taskId);
   }
 
   /**

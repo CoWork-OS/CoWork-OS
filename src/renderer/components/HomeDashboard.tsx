@@ -916,7 +916,7 @@ export function HomeDashboard({
               </div>
               <div className="home-auto-card-copy">
                 <strong>Mission Control</strong>
-                <span>{automationGroups.heartbeat} active</span>
+                <span>{automationGroups.heartbeat} automation reviews</span>
               </div>
             </button>
             <button type="button" className="home-auto-card" onClick={onOpenEventTriggers}>

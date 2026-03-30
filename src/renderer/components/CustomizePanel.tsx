@@ -335,7 +335,7 @@ export function CustomizePanel({
                   <span>
                     <Dna size={14} strokeWidth={1.5} />
                   </span>
-                  <span>Includes Digital Twin</span>
+                  <span>Includes Agent Persona</span>
                 </div>
               )}
               {activePack.bestFitWorkflows && activePack.bestFitWorkflows.length > 0 && (
@@ -476,10 +476,10 @@ export function CustomizePanel({
                         <Dna size={18} strokeWidth={1.5} />
                       </span>
                       <div className="cp-agent-info">
-                        <span className="cp-agent-name">Digital Twin Available</span>
+                        <span className="cp-agent-name">Agent Persona Available</span>
                         <span className="cp-agent-desc">
-                          This pack includes a proactive digital twin persona. Activate it from
-                          Mission Control to get heartbeat-driven background tasks.
+                          This pack includes a proactive agent persona. Activate it from Agent
+                          Personas to get automation-driven background tasks.
                         </span>
                       </div>
                     </div>

@@ -162,6 +162,7 @@ The app connects to these services based on your configuration:
 |----------|----------|-----------|
 | DuckDuckGo | `html.duckduckgo.com` | Free built-in web search (no API key) |
 | Tavily | `api.tavily.com` | Web search (API key required) |
+| Exa | `api.exa.ai` | Web/news search (API key required) |
 | Brave Search | `api.search.brave.com` | Web search (API key required) |
 | SerpAPI | `serpapi.com` | Web search (API key required) |
 | Google Custom Search | `customsearch.googleapis.com` | Web search (API key required) |
@@ -174,6 +175,20 @@ The app connects to these services based on your configuration:
 | `api.telegram.org` | Telegram bot (if configured) |
 | Discord API | Discord bot (if configured) |
 | Signal (via signal-cli) | Signal bot (if configured, local process) |
+| Feishu / Lark APIs | Enterprise messaging gateway traffic (if configured) |
+| WeCom APIs | Enterprise messaging gateway traffic (if configured) |
+| Remote ACP/A2A endpoints | Federated remote-agent invocation (if configured) |
+
+### ACP Remote Agents
+
+Remote ACP delegation is constrained more tightly than ordinary outbound automation:
+
+- registration is scope-gated
+- non-operator clients are limited to their own ACP tasks and inbox reads by default
+- remote endpoints are validated before invocation
+- `https` is preferred, while plain `http` is intended only for loopback development
+- private and link-local IP targets are rejected by the remote invoker validation layer
+- remote requests use bounded timeouts so bad endpoints cannot hang the main process indefinitely
 
 ### No Telemetry
 
@@ -227,9 +242,11 @@ All these are stored encrypted in the database:
 | `search` | Search provider settings, API keys |
 | `appearance` | Theme, accent color preferences |
 | `personality` | Agent personality settings |
+| `skills` | Managed-skill settings and external skill directory pointers |
 | `guardrails` | Safety limits and blocked patterns |
 | `hooks` | Automation hooks configuration |
 | `mcp` | MCP server configurations |
+| `acp` | ACP-related persisted settings and lifecycle metadata |
 | `controlplane` | Control plane settings |
 | `channels` | Channel/gateway configurations |
 | `builtintools` | Built-in tool settings |
@@ -263,6 +280,15 @@ Your API keys are:
 4. Never logged or displayed in full
 5. Never passed to shell commands or subprocesses
 6. Checksummed for integrity verification
+
+### Media and File Validation
+
+CoWork also applies guardrails before certain file and media operations reach external providers:
+
+- large text writes are blocked by the configured file-size guardrail
+- binary files are rejected from text-only write paths
+- video-generation reference images/videos must be absolute paths, real files, and within supported size/type limits
+- external skill directories must be explicit existing absolute paths and are treated as read-only by the app
 
 ---
 
@@ -466,6 +492,17 @@ Tools are categorized by risk level for policy-based access control:
 | **System** | `read_clipboard`, `take_screenshot`, `open_application` | System-level access |
 | **Network** | `web_search`, `browser_*` | External network operations |
 
+The `computer_*` family (screenshot, pointer, keyboard on macOS) is **not** low-risk read-only automation: it can drive arbitrary UI the operator can reach. Treat it as **high trust** and keep the `computer_use` built-in category disabled unless you need it. See [Computer use (macOS)](computer-use.md).
+
+### Computer use (macOS) security
+
+- **Session-scoped per-app consent**: Before interacting with a given app, the user chooses an access tier (`view_only`, `click_only`, `full_control`, or deny) for the **current computer-use session**. Grants do not replace review of the underlying task.
+- **Safety UX**: Active sessions use a visible overlay, **Esc** abort, window isolation, and shortcut guarding to reduce accidental cross-window effects and disruptive global hotkeys during automation.
+- **Tool gating**: Policy defers `computer_*` unless the task signals **native desktop GUI intent**, so gateway and general tasks default to safer tool lanes.
+- **Key chord blocklist**: Certain OS-level shortcuts are rejected at the tool layer to avoid session or system disruption.
+
+Full operator and troubleshooting guidance: [Computer use (macOS)](computer-use.md).
+
 ### Monotonic Policy Precedence (Deny-Wins)
 
 Security policies are evaluated across multiple layers in order:
@@ -558,7 +595,8 @@ SkillHub includes multiple security measures to prevent attacks via malicious sk
 ### Running Security Tests
 
 ```bash
-npm test                    # Run all 132 security tests
+npm run test                # Full suite (~4,583 passing tests; includes security)
+npx vitest run tests/security   # Security-focused tests only (135 tests)
 npm run test:coverage       # With coverage report
 ```
 

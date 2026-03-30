@@ -6,10 +6,22 @@ CoWork OS is a local-first desktop runtime for AI-assisted task execution, backg
 
 - **Electron main process**: task orchestration, agent runtime, heartbeat orchestration, IPC, and tool execution
 - **React renderer**: desktop UI, Mission Control, task timeline, settings, and monitoring surfaces
-- **Tool and connector layer**: file, shell, browser, web, native integrations, MCP connectors, and remote execution
-- **Local persistence**: SQLite, local files, knowledge graph state, run records, and workspace-kit contracts in `.cowork/`
+- **Tool and connector layer**: file, shell, browser, web, native integrations, MCP connectors, remote execution, and **macOS computer use** (`computer_*`) as a governed desktop-GUI lane (session overlay, per-app consent, policy-gated routing). See [Computer use (macOS)](computer-use.md).
+- **Automation/event layer**: scheduled tasks, webhooks, channel events, and MCP connector/resource notifications all flow through the same trigger engine
+- **Adaptive model routing**: the executor can switch into a workflow-pipeline path where decomposed phases run as child tasks with per-phase model overrides or capability-based auto-selection
+- **Federated agent orchestration**: ACP registry + remote invocation let orchestrators target local roles or remote A2A-compatible agents under shared approval and policy controls
+- **Local persistence**: SQLite, local files, knowledge graph state, run records, ACP agent registrations and ACP task state, usage telemetry, feedback events, and workspace-kit contracts in `.cowork/`
 - **Runtime visibility surfaces**: the task runtime emits learning progression, unified recall, persistent shell, and live routing events into Mission Control and the renderer so operator state stays visible instead of hidden in services
 - **Completion hardening**: verified-mode evidence bundles, step-intent alignment/decomposition heuristics, and read-only entropy sweeps make completion checks more explicit without mutating the task's final result
+
+## Profiles and Isolation
+
+CoWork supports multiple app profiles so one install can keep separate operating environments for different users, clients, or trust zones.
+
+- each profile has its own user-data root, SQLite database, encrypted settings, channel configs, managed skills, and session history
+- profile export/import moves a complete app profile bundle without merging it into another profile implicitly
+- workspaces still live outside the app profile, but the profile controls the credentials, automations, channels, and runtime state that operate on those workspaces
+- profile switching is an app-level concern, separate from personality export/import or workspace-kit files
 
 ## Heartbeat V3
 
@@ -38,6 +50,10 @@ The `.cowork/` workspace kit holds durable human-edited operating context.
 - `src/shared/`: shared contracts and types
 - `docs/`: product and architecture documentation
 - `.cowork/`: local workspace operating context
+
+## Computer use (macOS)
+
+Native GUI control is implemented in the main process (`src/electron/computer-use/`, `src/electron/agent/tools/computer-use-tools.ts`) with renderer onboarding and approval dialogs. A **singleton session** coordinates overlay, isolation, and teardown; **AppPermissionManager** enforces per-app tiers during that session. Tool policy and the executor only expose `computer_*` when **native desktop GUI intent** is detected so routine web and repo work stays on browser and shell paths. Product-level behavior, permissions, and troubleshooting are documented in [Computer use (macOS)](computer-use.md).
 
 ## Update Rule
 

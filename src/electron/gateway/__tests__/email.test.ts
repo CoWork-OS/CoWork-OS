@@ -553,6 +553,41 @@ describe("EmailAdapter edge cases", () => {
       const config = (adapterNoFilter as Any).config;
       expect(config.allowedSenders).toEqual([]);
     });
+
+    it("should treat domain allowlists as exact domains, not substrings", async () => {
+      const filteredAdapter = new EmailAdapter({
+        ...defaultConfig,
+        allowedSenders: ["company.com"],
+      });
+      const onMessage = vi.fn();
+      filteredAdapter.onMessage(onMessage);
+
+      await (filteredAdapter as Any).handleIncomingMessage({
+        messageId: "<blocked@example.com>",
+        from: { address: "person@evilcompany.com", name: "Blocked" },
+        to: [{ address: "bot@example.com", name: "Bot" }],
+        subject: "Hello",
+        text: "Should be blocked",
+        date: new Date(),
+      });
+      await (filteredAdapter as Any).handleIncomingMessage({
+        messageId: "<allowed@example.com>",
+        from: { address: "person@company.com", name: "Allowed" },
+        to: [{ address: "bot@example.com", name: "Bot" }],
+        subject: "Hello",
+        text: "Should pass",
+        date: new Date(),
+      });
+
+      expect(onMessage).toHaveBeenCalledTimes(1);
+      expect(onMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          channel: "email",
+          userId: "person@company.com",
+          text: expect.stringContaining("Should pass"),
+        }),
+      );
+    });
   });
 
   describe("subject filtering", () => {

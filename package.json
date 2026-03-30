@@ -1,6 +1,6 @@
 {
   "name": "cowork-os",
-  "version": "0.5.17",
+  "version": "0.5.18",
   "description": "CoWork OS - Local-first AI operating system for macOS and Windows",
   "overrides": {
     "@whiskeysockets/baileys": {

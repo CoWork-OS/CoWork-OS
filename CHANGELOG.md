@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.18] - 2026-03-30
+
+### Fixed
+- **macOS CI release pipeline**: explicitly install Electron binary after `npm ci` to prevent silent postinstall failures that blocked the macOS release job.
+- **Shell session manager test portability**: resolve temp directory symlinks at creation time to avoid `/var` vs `/private/var` mismatches on macOS.
+- **Completion hardening**: verified evidence and entropy sweeps wired into execution, step intent alignment scoring, and LLM fallback for oversized workflow steps.
+
 ## [0.5.17] - 2026-03-30
 
 ### Added

@@ -10,15 +10,26 @@
 
 import { IntentRoute } from "./IntentRouter";
 import type { LLMProvider } from "../llm/types";
+import { recordLlmCallError, recordLlmCallSuccess } from "../llm/usage-telemetry";
+import type { LLMProviderType, LlmProfile, ModelCapability } from "../../../shared/types";
+
+export type WorkflowPhaseType = "research" | "create" | "deliver" | "analyze" | "general";
 
 export interface WorkflowPhase {
   id: string;
   order: number;
   title: string;
   prompt: string;
-  phaseType: "research" | "create" | "deliver" | "analyze" | "general";
+  phaseType: WorkflowPhaseType;
   dependsOn: string[];
   status: "pending" | "running" | "completed" | "failed";
+  llmOverride?: {
+    providerType?: LLMProviderType;
+    modelKey?: string;
+    llmProfile?: LlmProfile;
+    modelPreference?: "cheaper" | "sonnet" | "smarter";
+  };
+  autoSelectModel?: boolean;
   taskId?: string;
   output?: string;
 }
@@ -50,6 +61,20 @@ const PHASE_TYPE_PATTERNS: Array<[RegExp, WorkflowPhase["phaseType"]]> = [
   [/\b(send|email|deliver|share|publish|post|notify|message|forward)\b/i, "deliver"],
   [/\b(analyze|compare|evaluate|assess|review|summarize|audit|benchmark)\b/i, "analyze"],
 ];
+
+export function workflowPhaseTypeToCapability(phaseType: WorkflowPhaseType): ModelCapability | undefined {
+  switch (phaseType) {
+    case "research":
+    case "analyze":
+      return "research";
+    case "create":
+      return "code";
+    case "deliver":
+      return "fast";
+    default:
+      return undefined;
+  }
+}
 
 export class WorkflowDecomposer {
   /**
@@ -87,6 +112,7 @@ export class WorkflowDecomposer {
         phaseType: detectPhaseType(text),
         dependsOn: i > 0 ? [`phase-${i}`] : [],
         status: "pending",
+        autoSelectModel: true,
       };
     });
 
@@ -105,7 +131,7 @@ export class WorkflowDecomposer {
     try {
       const systemPrompt =
         "You decompose complex user prompts into sequential workflow phases. " +
-        'Output ONLY a JSON array of objects with keys: "title" (string), "prompt" (string), "phaseType" (one of: research, create, deliver, analyze, general). ' +
+        'Output ONLY a JSON array of objects with keys: "title" (string), "prompt" (string), "phaseType" (one of: research, create, deliver, analyze, general), and optional "suggestedModel" (one of: cheaper, sonnet, smarter). ' +
         "Each phase should be a self-contained task. Output 2-8 phases. No explanation, just valid JSON.";
 
       const response = await provider.createMessage({
@@ -114,6 +140,15 @@ export class WorkflowDecomposer {
         system: systemPrompt,
         messages: [{ role: "user", content: [{ type: "text", text: prompt }] }],
       });
+      recordLlmCallSuccess(
+        {
+          sourceKind: "workflow_decompose",
+          providerType: provider.type,
+          modelKey: modelId,
+          modelId,
+        },
+        response.usage,
+      );
 
       // Extract text from response
       const text = (response.content || [])
@@ -129,6 +164,7 @@ export class WorkflowDecomposer {
         title: string;
         prompt: string;
         phaseType?: string;
+        suggestedModel?: "cheaper" | "sonnet" | "smarter";
       }>;
 
       if (!Array.isArray(parsed) || parsed.length < 2) return null;
@@ -145,8 +181,19 @@ export class WorkflowDecomposer {
           : "general") as WorkflowPhase["phaseType"],
         dependsOn: i > 0 ? [`phase-${i}`] : [],
         status: "pending" as const,
+        autoSelectModel: true,
+        llmOverride: item.suggestedModel ? { modelPreference: item.suggestedModel } : undefined,
       }));
-    } catch {
+    } catch (error) {
+      recordLlmCallError(
+        {
+          sourceKind: "workflow_decompose",
+          providerType: provider.type,
+          modelKey: modelId,
+          modelId,
+        },
+        error,
+      );
       return null;
     }
   }
@@ -178,6 +225,15 @@ export class WorkflowDecomposer {
           },
         ],
       });
+      recordLlmCallSuccess(
+        {
+          sourceKind: "workflow_step_decompose",
+          providerType: provider.type,
+          modelKey: modelId,
+          modelId,
+        },
+        response.usage,
+      );
 
       const text = (response.content || [])
         .filter((b): b is { type: "text"; text: string } => b.type === "text" && typeof (b as { text?: string }).text === "string")
@@ -196,7 +252,16 @@ export class WorkflowDecomposer {
         .filter((p) => p.description.length > 8);
 
       return out.length >= 2 ? out : null;
-    } catch {
+    } catch (error) {
+      recordLlmCallError(
+        {
+          sourceKind: "workflow_step_decompose",
+          providerType: provider.type,
+          modelKey: modelId,
+          modelId,
+        },
+        error,
+      );
       return null;
     }
   }

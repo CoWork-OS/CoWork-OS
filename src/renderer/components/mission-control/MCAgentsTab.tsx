@@ -58,7 +58,7 @@ export function MCAgentsTab({ data }: MCAgentsTabProps) {
               </div>
               {statusInfo?.nextHeartbeatAt && (
                 <span style={{ fontSize: 9, color: "var(--color-text-muted)" }}>
-                  {agentContext.getUiCopy("mcHeartbeatNext", { time: formatRelativeTime(statusInfo.nextHeartbeatAt) })}
+                  Next review {formatRelativeTime(statusInfo.nextHeartbeatAt)}
                 </span>
               )}
               {statusInfo?.heartbeatEnabled && (

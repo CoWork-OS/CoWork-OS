@@ -922,6 +922,27 @@ describeWithSqlite("MailboxService", () => {
       expect(row.classification_confidence).toBeGreaterThan(0.9);
       expect(row.classification_fingerprint).toBeTruthy();
       expect(row.classification_json).toContain("transactional");
+
+      const usageRow = db
+        .prepare(
+          `SELECT source_kind, model_key, input_tokens, output_tokens, success
+           FROM llm_call_events
+           WHERE source_kind = 'mailbox_classification'
+           ORDER BY timestamp DESC
+           LIMIT 1`,
+        )
+        .get() as {
+        source_kind: string;
+        model_key: string | null;
+        input_tokens: number;
+        output_tokens: number;
+        success: number;
+      };
+      expect(usageRow.source_kind).toBe("mailbox_classification");
+      expect(usageRow.model_key).toBe("gpt-4o-mini");
+      expect(usageRow.input_tokens).toBe(100);
+      expect(usageRow.output_tokens).toBe(30);
+      expect(usageRow.success).toBe(1);
     } finally {
       loadSettingsSpy.mockRestore();
       routingSpy.mockRestore();

@@ -179,4 +179,56 @@ describe("SignalAdapter", () => {
 
     await adapter.disconnect();
   });
+
+  it("should enforce group allowlists separately from DM pairing flow", async () => {
+    const adapter = createSignalAdapter({
+      enabled: true,
+      phoneNumber: "+10000000000",
+      dmPolicy: "pairing",
+      groupPolicy: "allowlist",
+      allowedNumbers: ["+15556667777"],
+    });
+
+    const onMessage = vi.fn().mockResolvedValue(undefined);
+    adapter.onMessage(onMessage);
+    await adapter.connect();
+
+    const blockedGroupMessage = {
+      envelope: {
+        source: "+12223334444",
+        timestamp: 1700000000001,
+        dataMessage: {
+          timestamp: 1700000000001,
+          message: "blocked group",
+          groupInfo: { groupId: "group-1" },
+        },
+      },
+      account: "+10000000000",
+    };
+    const dmMessage = {
+      envelope: {
+        source: "+12223334444",
+        timestamp: 1700000000002,
+        dataMessage: {
+          timestamp: 1700000000002,
+          message: "allowed dm",
+        },
+      },
+      account: "+10000000000",
+    };
+
+    await (adapter as Any).handleIncomingMessage(blockedGroupMessage);
+    await (adapter as Any).handleIncomingMessage(dmMessage);
+
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    expect(onMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "+12223334444",
+        isGroup: false,
+        text: "allowed dm",
+      }),
+    );
+
+    await adapter.disconnect();
+  });
 });

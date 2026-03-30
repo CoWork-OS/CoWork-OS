@@ -11,7 +11,7 @@ export function MCAgentDetail({ data, agentId }: MCAgentDetailProps) {
   const {
     agents, heartbeatStatuses, tasksByAgent,
     getAgentStatus, handleTriggerHeartbeat, handleEditAgent,
-    setDetailPanel, formatRelativeTime, agentContext,
+    setDetailPanel, formatRelativeTime, agentContext, isAllWorkspacesSelected, getWorkspaceName,
   } = data;
 
   const agent = agents.find((a) => a.id === agentId);
@@ -84,7 +84,14 @@ export function MCAgentDetail({ data, agentId }: MCAgentDetailProps) {
                 className="mc-v2-agent-detail-task"
                 onClick={() => setDetailPanel({ kind: "task", taskId: task.id })}
               >
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{task.title}</span>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {task.title}
+                  {isAllWorkspacesSelected ? (
+                    <span className="mc-v2-agent-detail-task-workspace-inline">
+                      {getWorkspaceName(task.workspaceId)}
+                    </span>
+                  ) : null}
+                </span>
                 <span className={`mc-v2-status-pill status-${task.status}`}>{task.status.replace("_", " ")}</span>
               </div>
             ))

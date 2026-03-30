@@ -5,6 +5,7 @@ import {
   GMAIL_DEFAULT_SCOPES,
   GOOGLE_WORKSPACE_DEFAULT_SCOPES,
 } from "../../../shared/google-workspace";
+import { startMicrosoftEmailOAuth } from "../../utils/microsoft-email-oauth";
 
 export type ConnectorOAuthProvider =
   | "salesforce"
@@ -17,7 +18,8 @@ export type ConnectorOAuthProvider =
   | "google-workspace"
   | "docusign"
   | "outreach"
-  | "slack";
+  | "slack"
+  | "microsoft-email";
 
 export interface ConnectorOAuthRequest {
   provider: ConnectorOAuthProvider;
@@ -27,6 +29,8 @@ export interface ConnectorOAuthRequest {
   loginUrl?: string; // Salesforce only
   subdomain?: string; // Zendesk only
   teamDomain?: string; // Slack only
+  tenant?: string; // Microsoft email only
+  loginHint?: string; // Google / Microsoft email
 }
 
 export interface JiraResource {
@@ -42,6 +46,7 @@ export interface ConnectorOAuthResult {
   refreshToken?: string;
   expiresIn?: number;
   tokenType?: string;
+  scopes?: string[];
   instanceUrl?: string; // Salesforce
   resources?: JiraResource[]; // Jira
 }
@@ -93,9 +98,36 @@ export async function startConnectorOAuth(
       return startOutreachOAuth(request);
     case "slack":
       return startSlackOAuth(request);
+    case "microsoft-email":
+      return startMicrosoftEmailConnectorOAuth(request);
     default:
       throw new Error(`Unsupported OAuth provider: ${request.provider}`);
   }
+}
+
+async function startMicrosoftEmailConnectorOAuth(
+  request: ConnectorOAuthRequest,
+): Promise<ConnectorOAuthResult> {
+  if (!request.clientId) {
+    throw new Error("Microsoft email OAuth requires a client ID");
+  }
+
+  const result = await startMicrosoftEmailOAuth({
+    clientId: request.clientId,
+    clientSecret: request.clientSecret,
+    tenant: request.tenant,
+    scopes: request.scopes,
+    loginHint: request.loginHint,
+  });
+
+  return {
+    provider: "microsoft-email",
+    accessToken: result.accessToken,
+    refreshToken: result.refreshToken,
+    expiresIn: result.expiresIn,
+    tokenType: result.tokenType,
+    scopes: result.scopes,
+  };
 }
 
 function createCodeVerifier(): string {

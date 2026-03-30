@@ -47,8 +47,10 @@ describe("channel-config-sanitizer", () => {
       enabled: true,
       status: "connected",
       botUsername: "bot",
+      configReadError: "Secure storage unavailable",
       securityConfig: { mode: "pairing" },
       createdAt: 1700000000000,
+      updatedAt: 1700000000001,
       config: {
         email: "agent@example.com",
         password: "secret-password",
@@ -65,8 +67,10 @@ describe("channel-config-sanitizer", () => {
       enabled: true,
       status: "connected",
       botUsername: "bot",
+      configReadError: "Secure storage unavailable",
       securityMode: "pairing",
       createdAt: 1700000000000,
+      updatedAt: 1700000000001,
       config: {
         email: "agent@example.com",
         markAsRead: true,

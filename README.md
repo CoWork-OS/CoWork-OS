@@ -22,7 +22,7 @@
 <p align="center">
   <a href="docs/getting-started.md">Getting Started</a> &middot;
   <a href="docs/showcase.md">Use Cases</a> &middot;
-  <a href="docs/release-notes-0.5.16.md">Release Notes 0.5.16</a> &middot;
+  <a href="docs/release-notes-0.5.17.md">Release Notes 0.5.17</a> &middot;
   <a href="docs/integration-skill-bootstrap-lifecycle.md">Platform Updates</a> &middot;
   <a href="docs/">Documentation</a> &middot;
   <a href="CHANGELOG.md">Changelog</a> &middot;
@@ -74,7 +74,7 @@ See [Features](docs/features.md), [Heartbeat v3](docs/heartbeat-v3.md), [Provide
 
 ### Latest Release
 
-`0.5.16` centers on five product areas: visible runtime learning/routing state, Discord supervisor mode, Microsoft OAuth for Outlook.com-family personal mailboxes, ClawHub/external skill imports, and mailbox/security hardening, with additional Devices/Dispatch and Inbox UX cleanup plus a release-gate reliability fix. Start with the [Release Notes 0.5.16](docs/release-notes-0.5.16.md), then use the [Changelog](CHANGELOG.md) for the condensed delta from `v0.5.14`.
+`0.5.17` centers on five product areas: visible runtime learning/routing state, Discord supervisor mode, Microsoft OAuth for Outlook.com-family personal mailboxes, ClawHub/external skill imports, and mailbox/security hardening, with additional Devices/Dispatch and Inbox UX cleanup plus release-gate and release-validation fixes. Start with the [Release Notes 0.5.17](docs/release-notes-0.5.17.md), then use the [Changelog](CHANGELOG.md) for the condensed delta from `v0.5.14`.
 
 ## Quick Start
 

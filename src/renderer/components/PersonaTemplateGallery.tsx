@@ -174,7 +174,7 @@ export function PersonaTemplateGallery({
         {/* Header */}
         <div className="pt-gallery-header">
           <div className="pt-gallery-title-row">
-            <h2>Digital Twin Templates</h2>
+            <h2>Agent Persona Templates</h2>
             <button className="pt-close-btn" onClick={onClose}>
               <svg
                 width="18"
@@ -191,8 +191,8 @@ export function PersonaTemplateGallery({
           </div>
           <p className="pt-gallery-subtitle">
             {companyName
-              ? `Create operators for ${companyName}. Start with venture/operator templates, then activate the twins you want running against that company context.`
-              : "Choose a persona template to create an AI digital twin that absorbs cognitively draining tasks so you can stay in flow."}
+              ? `Create operators for ${companyName}. Start with venture/operator templates, then activate the personas you want running against that company context.`
+              : "Choose a persona template to create an AI agent persona with a clear automation policy and operating role."}
           </p>
           {companyName && recommendedTemplateNames.length > 0 ? (
             <div className="pt-company-context">
@@ -269,13 +269,13 @@ export function PersonaTemplateGallery({
               </h3>
               {companyName ? (
                 <p className="pt-activation-subtitle">
-                  This twin will be created for <strong>{companyName}</strong>.
+                  This persona will be created for <strong>{companyName}</strong>.
                 </p>
               ) : null}
 
               <div className="pt-activation-form">
                 <label className="pt-form-label">
-                  Twin Name
+                  Persona Name
                   <input
                     type="text"
                     className="pt-form-input"
@@ -355,7 +355,7 @@ export function PersonaTemplateGallery({
                   onClick={handleConfirmActivation}
                   disabled={activating || !activationState.customName.trim()}
                 >
-                  {activating ? "Creating..." : "Create Digital Twin"}
+                  {activating ? "Creating..." : "Create Agent Persona"}
                 </button>
               </div>
             </div>

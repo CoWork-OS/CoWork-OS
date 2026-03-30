@@ -17,7 +17,7 @@ export default defineConfig({
     nav: [
       { text: 'Guide', link: '/getting-started' },
       { text: 'Platform Updates', link: '/integration-skill-bootstrap-lifecycle' },
-      { text: 'Release Notes', link: '/release-notes-0.5.15' },
+      { text: 'Release Notes', link: '/release-notes-0.5.16' },
       { text: 'Architecture', link: '/architecture' },
       { text: 'Security', link: '/security/' },
       { text: 'GitHub', link: 'https://github.com/CoWork-OS/CoWork-OS' },
@@ -74,6 +74,7 @@ export default defineConfig({
           { text: 'Channel Comparison', link: '/channel-comparison' },
           { text: 'Inbox Agent', link: '/inbox-agent' },
           { text: 'Skill Store & External Skills', link: '/skill-store-and-external-skills' },
+          { text: 'Release Notes 0.5.16', link: '/release-notes-0.5.16' },
           { text: 'Release Notes 0.5.15', link: '/release-notes-0.5.15' },
           { text: 'Release Notes 0.5.14', link: '/release-notes-0.5.14' },
           { text: 'Release Notes 0.5.13', link: '/release-notes-0.5.13' },

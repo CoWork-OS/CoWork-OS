@@ -153,7 +153,7 @@ export function AgentRoleEditor({
             className={`editor-tab ${activeTab === "mission" ? "active" : ""}`}
             onClick={() => setActiveTab("mission")}
           >
-            Mission Control
+            Automation
           </button>
           <button
             type="button"
@@ -312,7 +312,7 @@ export function AgentRoleEditor({
           {activeTab === "mission" && (
             <div className="editor-section">
               <p className="section-description">
-                Configure how this agent operates within the Mission Control system.
+                Configure how this agent behaves when background automation is enabled.
               </p>
 
               <div className="form-row">
@@ -367,7 +367,7 @@ export function AgentRoleEditor({
 
               <div className="heartbeat-section">
                 <div className="section-header">
-                  <h4>Heartbeat System</h4>
+                  <h4>Background Automation</h4>
                   <label className="toggle-switch">
                     <input
                       type="checkbox"
@@ -378,14 +378,14 @@ export function AgentRoleEditor({
                   </label>
                 </div>
                 <p className="section-description">
-                  When enabled, this agent will periodically wake up to check for pending @mentions,
-                  assigned tasks, and relevant activity.
+                  When enabled, this agent runs periodic background reviews for mentions, assigned
+                  work, and other operating signals.
                 </p>
 
                 {editedRole.heartbeatEnabled && (
                   <div className="heartbeat-options">
                     <div className="form-row">
-                      <label>Pulse Every</label>
+                      <label>Review Every</label>
                       <select
                         value={editedRole.pulseEveryMinutes || editedRole.heartbeatIntervalMinutes || 15}
                         onChange={(e) =>
@@ -398,7 +398,7 @@ export function AgentRoleEditor({
                           </option>
                         ))}
                       </select>
-                      <span className="form-hint">Cheap pulse cadence for deterministic heartbeat review</span>
+                      <span className="form-hint">Cheap review cadence for deterministic background checks</span>
                     </div>
 
                     <div className="form-row">
@@ -413,7 +413,7 @@ export function AgentRoleEditor({
                         max={60}
                       />
                       <span className="form-hint">
-                        Offset to stagger heartbeats across multiple agents (0-60 minutes)
+                        Offset to stagger background reviews across multiple agents (0-60 minutes)
                       </span>
                     </div>
 
@@ -435,7 +435,7 @@ export function AgentRoleEditor({
                     </div>
 
                     <div className="form-row">
-                      <label>Dispatch Cooldown (minutes)</label>
+                      <label>Escalation Cooldown (minutes)</label>
                       <input
                         type="number"
                         value={editedRole.dispatchCooldownMinutes || 120}
@@ -445,11 +445,11 @@ export function AgentRoleEditor({
                         min={0}
                         max={1440}
                       />
-                      <span className="form-hint">Minimum gap between dispatch escalations</span>
+                      <span className="form-hint">Minimum gap between escalations</span>
                     </div>
 
                     <div className="form-row">
-                      <label>Max Dispatches / Day</label>
+                      <label>Max Escalations / Day</label>
                       <input
                         type="number"
                         value={editedRole.maxDispatchesPerDay || 6}

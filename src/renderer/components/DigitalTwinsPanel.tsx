@@ -46,6 +46,20 @@ interface DigitalTwinsPanelProps {
   initialCompanyId?: string | null;
 }
 
+function buildHeartbeatPolicyInput(role: AgentRole): import("../../shared/types").HeartbeatPolicyInput {
+  return {
+    enabled: role.heartbeatEnabled,
+    cadenceMinutes: role.pulseEveryMinutes || role.heartbeatIntervalMinutes,
+    staggerOffsetMinutes: role.heartbeatStaggerOffset,
+    dispatchCooldownMinutes: role.dispatchCooldownMinutes,
+    maxDispatchesPerDay: role.maxDispatchesPerDay,
+    profile: role.heartbeatProfile,
+    activeHours: role.activeHours ?? null,
+    primaryCategories: role.heartbeatPolicy?.primaryCategories,
+    proactiveTasks: role.heartbeatPolicy?.proactiveTasks,
+  };
+}
+
 export function DigitalTwinsPanel({ initialCompanyId = null }: DigitalTwinsPanelProps) {
   const [roles, setRoles] = useState<AgentRole[]>([]);
   const [loading, setLoading] = useState(true);
@@ -66,7 +80,7 @@ export function DigitalTwinsPanel({ initialCompanyId = null }: DigitalTwinsPanel
       setRoles(loaded);
       setError(null);
     } catch (err) {
-      setError("Failed to load digital twins");
+      setError("Failed to load agent personas");
       console.error("Failed to load agent roles:", err);
     } finally {
       setLoading(false);
@@ -106,7 +120,7 @@ export function DigitalTwinsPanel({ initialCompanyId = null }: DigitalTwinsPanel
         }
       } catch (err) {
         if (!cancelled) {
-          console.error("Failed to load company context for digital twins:", err);
+          console.error("Failed to load company context for agent personas:", err);
           setSelectedCompany(null);
         }
       }
@@ -172,7 +186,7 @@ export function DigitalTwinsPanel({ initialCompanyId = null }: DigitalTwinsPanel
         return next;
       });
     } catch  {
-      setError("Failed to start twin");
+      setError("Failed to start automation");
     }
   };
 
@@ -191,7 +205,7 @@ export function DigitalTwinsPanel({ initialCompanyId = null }: DigitalTwinsPanel
         return next;
       });
     } catch  {
-      setError("Failed to stop twin");
+      setError("Failed to stop automation");
     }
   };
 
@@ -205,7 +219,7 @@ export function DigitalTwinsPanel({ initialCompanyId = null }: DigitalTwinsPanel
         next.delete(role.id);
         return next;
       });
-      setError("Failed to wake twin");
+      setError("Failed to wake agent");
     }
   };
 
@@ -238,6 +252,9 @@ export function DigitalTwinsPanel({ initialCompanyId = null }: DigitalTwinsPanel
       if (isCreating) {
         const created = await window.electronAPI.createAgentRole({
           name: role.name,
+          roleKind: role.roleKind || "custom",
+          sourceTemplateId: role.sourceTemplateId,
+          sourceTemplateVersion: role.sourceTemplateVersion,
           companyId: role.companyId,
           displayName: role.displayName,
           description: role.description,
@@ -249,11 +266,17 @@ export function DigitalTwinsPanel({ initialCompanyId = null }: DigitalTwinsPanel
           systemPrompt: role.systemPrompt,
           capabilities: role.capabilities,
           toolRestrictions: role.toolRestrictions,
+          autonomyLevel: role.autonomyLevel,
+          soul: role.soul,
+          heartbeatPolicy: buildHeartbeatPolicyInput(role),
         });
         setRoles((prev) => [...prev, created]);
       } else {
         const updated = await window.electronAPI.updateAgentRole({
           id: role.id,
+          roleKind: role.roleKind,
+          sourceTemplateId: role.sourceTemplateId ?? null,
+          sourceTemplateVersion: role.sourceTemplateVersion ?? null,
           companyId: role.companyId ?? null,
           displayName: role.displayName,
           description: role.description,
@@ -267,6 +290,9 @@ export function DigitalTwinsPanel({ initialCompanyId = null }: DigitalTwinsPanel
           toolRestrictions: role.toolRestrictions,
           isActive: role.isActive,
           sortOrder: role.sortOrder,
+          autonomyLevel: role.autonomyLevel,
+          soul: role.soul,
+          heartbeatPolicy: buildHeartbeatPolicyInput(role),
         });
         if (updated) {
           setRoles((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
@@ -276,12 +302,12 @@ export function DigitalTwinsPanel({ initialCompanyId = null }: DigitalTwinsPanel
       setIsCreating(false);
       setError(null);
     } catch (err: Any) {
-      setError(err.message || "Failed to save twin");
+      setError(err.message || "Failed to save agent");
     }
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this digital twin?")) return;
+    if (!confirm("Are you sure you want to delete this agent persona?")) return;
     try {
       const success = await window.electronAPI.deleteAgentRole(id);
       if (success) {
@@ -290,7 +316,7 @@ export function DigitalTwinsPanel({ initialCompanyId = null }: DigitalTwinsPanel
         setError("Cannot delete system agent roles");
       }
     } catch  {
-      setError("Failed to delete twin");
+      setError("Failed to delete agent");
     }
   };
 
@@ -304,7 +330,7 @@ export function DigitalTwinsPanel({ initialCompanyId = null }: DigitalTwinsPanel
         setRoles((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
       }
     } catch  {
-      setError("Failed to update twin status");
+      setError("Failed to update agent status");
     }
   };
 
@@ -470,7 +496,7 @@ export function DigitalTwinsPanel({ initialCompanyId = null }: DigitalTwinsPanel
                 <button
                   className="dt-card-action dt-action-stop"
                   onClick={() => handleStopTwin(role)}
-                  title="Stop twin heartbeat"
+                  title="Stop background automation"
                 >
                   <Square size={12} strokeWidth={2} />
                   <span>Stop</span>
@@ -479,7 +505,7 @@ export function DigitalTwinsPanel({ initialCompanyId = null }: DigitalTwinsPanel
                 <button
                   className="dt-card-action dt-action-start"
                   onClick={() => handleStartTwin(role)}
-                  title="Start twin heartbeat"
+                  title="Start background automation"
                 >
                   <Play size={12} strokeWidth={2} />
                   <span>Start</span>
@@ -491,7 +517,7 @@ export function DigitalTwinsPanel({ initialCompanyId = null }: DigitalTwinsPanel
                 className="dt-card-action dt-action-wake"
                 onClick={() => handleWakeTwin(role)}
                 disabled={isTriggering || isRunning}
-                title="Trigger heartbeat now"
+                title="Run background review now"
               >
                 <Zap size={12} strokeWidth={2} />
                 <span>{isTriggering ? "Waking..." : "Wake"}</span>
@@ -531,7 +557,7 @@ export function DigitalTwinsPanel({ initialCompanyId = null }: DigitalTwinsPanel
       <div className="dt-header">
         <div className="dt-header-top">
           <div className="dt-title-area">
-            <h2>Digital Twins</h2>
+            <h2>Agent Personas</h2>
           <span className="dt-count">
             {selectedCompany ? `${companyRoles.length} for ${selectedCompany.name}` : `${activeRoles.length} active`}
           </span>
@@ -548,15 +574,15 @@ export function DigitalTwinsPanel({ initialCompanyId = null }: DigitalTwinsPanel
           </div>
         </div>
         <p className="dt-subtitle">
-          Create AI digital twins from persona templates or build custom agents. Each twin absorbs
-          cognitively draining tasks so you can stay in flow.
+          Create agent personas from templates or build custom agents. Each persona can run
+          background reviews with an explicit automation policy.
         </p>
         {selectedCompany ? (
           <div className="dt-company-context">
             <div className="dt-company-context-copy">
               <div className="dt-company-context-title">Company context: {selectedCompany.name}</div>
               <div className="dt-company-context-text">
-                Start with venture/operator twins for this company, then enable heartbeat so they can
+                Start with operator personas for this company, then enable automation so they can
                 participate in the operating loop.
               </div>
               <div className="dt-company-context-tags">
@@ -579,7 +605,7 @@ export function DigitalTwinsPanel({ initialCompanyId = null }: DigitalTwinsPanel
             <input
               type="text"
               className="dt-search"
-              placeholder="Search twins..."
+              placeholder="Search agents..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
@@ -597,7 +623,7 @@ export function DigitalTwinsPanel({ initialCompanyId = null }: DigitalTwinsPanel
 
       {/* Content */}
       <div className="dt-content">
-        {loading && <div className="dt-loading">Loading digital twins...</div>}
+        {loading && <div className="dt-loading">Loading agent personas...</div>}
         {error && <div className="dt-error">{error}</div>}
 
         {!loading && roles.length === 0 && (
@@ -605,11 +631,8 @@ export function DigitalTwinsPanel({ initialCompanyId = null }: DigitalTwinsPanel
             <div className="dt-empty-icon">
               <User size={40} strokeWidth={1} />
             </div>
-            <h3>No digital twins yet</h3>
-            <p>
-              Create your first digital twin from a persona template, or build a custom agent from
-              scratch.
-            </p>
+            <h3>No agent personas yet</h3>
+            <p>Create your first agent persona from a template, or build a custom agent from scratch.</p>
             <button className="dt-btn dt-btn-primary" onClick={() => setGalleryOpen(true)}>
               <User size={14} strokeWidth={1.5} />
               Browse Templates
@@ -630,7 +653,7 @@ export function DigitalTwinsPanel({ initialCompanyId = null }: DigitalTwinsPanel
           <div className="dt-empty dt-empty-company">
             <h3>No operators assigned to {selectedCompany.name}</h3>
             <p>
-              Activate venture/operator twins or assign an existing twin to this company from the
+              Activate operator personas or assign an existing agent to this company from the
               Companies tab.
             </p>
             <button className="dt-btn dt-btn-primary" onClick={() => setGalleryOpen(true)}>
@@ -642,7 +665,7 @@ export function DigitalTwinsPanel({ initialCompanyId = null }: DigitalTwinsPanel
 
         {!loading && otherActiveRoles.length > 0 && (
           <div className="dt-section">
-            <h3 className="dt-section-title">{selectedCompany ? "Other Active Twins" : "Active Twins"}</h3>
+            <h3 className="dt-section-title">{selectedCompany ? "Other Active Agents" : "Active Agents"}</h3>
             <div className="dt-grid">
               {otherActiveRoles.map((role) => renderTwinCard(role, false))}
             </div>
@@ -660,7 +683,7 @@ export function DigitalTwinsPanel({ initialCompanyId = null }: DigitalTwinsPanel
 
         {!loading && showInactive && otherInactiveRoles.length > 0 && (
           <div className="dt-section">
-            <h3 className="dt-section-title">{selectedCompany ? "Other Inactive Twins" : "Inactive Twins"}</h3>
+            <h3 className="dt-section-title">{selectedCompany ? "Other Inactive Agents" : "Inactive Agents"}</h3>
             <div className="dt-grid">
               {otherInactiveRoles.map((role) => renderTwinCard(role, true))}
             </div>

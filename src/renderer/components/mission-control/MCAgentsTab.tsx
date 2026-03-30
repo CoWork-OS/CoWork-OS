@@ -13,7 +13,7 @@ export function MCAgentsTab({ data }: MCAgentsTabProps) {
     detailPanel, setDetailPanel,
     getAgentStatus, handleTriggerHeartbeat,
     handleCreateAgent, handleEditAgent,
-    formatRelativeTime, agentContext,
+    formatRelativeTime, agentContext, isAllWorkspacesSelected, getWorkspaceName,
   } = data;
 
   const activeAgents = agents.filter((a) => a.isActive);
@@ -47,6 +47,9 @@ export function MCAgentsTab({ data }: MCAgentsTabProps) {
               </div>
               <span className="mc-v2-agent-desc">{agent.description?.slice(0, 40) || agent.name}</span>
               <span className="mc-v2-agent-task">{currentTask ? currentTask.title : agentContext.getUiCopy("mcNoActiveTask")}</span>
+              {isAllWorkspacesSelected && currentTask ? (
+                <span className="mc-v2-agent-task-workspace">{getWorkspaceName(currentTask.workspaceId)}</span>
+              ) : null}
             </div>
             <div className="mc-v2-agent-right">
               <div className="mc-v2-status-dot-row">

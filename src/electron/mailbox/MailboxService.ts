@@ -7,6 +7,7 @@ import path from "path";
 import { ChannelRepository, TaskRepository, WorkspaceRepository } from "../database/repositories";
 import { AgentRoleRepository } from "../agents/AgentRoleRepository";
 import { LLMProviderFactory } from "../agent/llm/provider-factory";
+import { recordLlmCallError, recordLlmCallSuccess } from "../agent/llm/usage-telemetry";
 import type { LLMMessage } from "../agent/llm/types";
 import { GoogleWorkspaceSettingsManager } from "../settings/google-workspace-manager";
 import { gmailRequest } from "../utils/gmail-api";
@@ -4411,6 +4412,9 @@ export class MailboxService {
     }
 
     const provider = LLMProviderFactory.createProvider();
+    const workspaceId =
+      this.resolveThreadWorkspaceId(thread.accountId) ||
+      this.resolveDefaultWorkspaceId();
     const system = [
       "You classify inbox threads for triage.",
       "Return compact strict JSON only with this shape:",
@@ -4464,6 +4468,17 @@ export class MailboxService {
         system,
         messages,
       });
+      recordLlmCallSuccess(
+        {
+          workspaceId,
+          sourceKind: "mailbox_classification",
+          sourceId: thread.id,
+          providerType: provider.type,
+          modelKey: modelSelection.modelKey,
+          modelId: modelSelection.modelId,
+        },
+        response.usage,
+      );
       const text = response.content
         .map((block) => (block.type === "text" ? block.text : ""))
         .join("\n")
@@ -4473,7 +4488,15 @@ export class MailboxService {
         return mailboxClassificationFallback(snapshot);
       }
       return parsed;
-    } catch {
+    } catch (error) {
+      recordLlmCallError({
+        workspaceId,
+        sourceKind: "mailbox_classification",
+        sourceId: thread.id,
+        providerType: provider.type,
+        modelKey: modelSelection.modelKey,
+        modelId: modelSelection.modelId,
+      }, error);
       return mailboxClassificationFallback(snapshot);
     }
   }

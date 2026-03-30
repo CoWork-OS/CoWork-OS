@@ -38,6 +38,7 @@ export default defineConfig({
         items: [
           { text: 'Overview', link: '/architecture' },
           { text: 'Reliability Flywheel', link: '/reliability-flywheel' },
+          { text: 'Runtime Visibility', link: '/operator-runtime-visibility' },
           { text: 'Live Canvas', link: '/live-canvas' },
           { text: 'Agent Teams', link: '/agent-teams-contract' },
           { text: 'Enterprise Connectors', link: '/enterprise-connectors' },
@@ -72,6 +73,7 @@ export default defineConfig({
           { text: 'Channel Integrations', link: '/channels' },
           { text: 'Channel Comparison', link: '/channel-comparison' },
           { text: 'Inbox Agent', link: '/inbox-agent' },
+          { text: 'Skill Store & External Skills', link: '/skill-store-and-external-skills' },
           { text: 'Release Notes 0.5.13', link: '/release-notes-0.5.13' },
           { text: 'Release Notes 0.5.12', link: '/release-notes-0.5.12' },
           { text: 'Release Notes 0.5.11', link: '/release-notes-0.5.11' },
@@ -80,6 +82,7 @@ export default defineConfig({
           { text: 'Simplify & Batch', link: '/simplify-batch' },
           { text: 'GTM Strategy', link: '/gtm-strategy' },
           { text: 'Competitive Landscape', link: '/competitive-landscape-research' },
+          { text: 'OpenClaw vs Hermes vs CoWork OS', link: '/openclaw-hermes-cowork-comparison' },
           { text: 'Contributing', link: '/contributing' },
           { text: 'Changelog', link: '/changelog' },
           { text: 'Project Status', link: '/project-status' },

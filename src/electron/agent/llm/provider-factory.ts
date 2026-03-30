@@ -39,10 +39,17 @@ import {
   CUSTOM_PROVIDER_IDS,
   type ProviderCatalogEntry,
 } from "../../../shared/llm-provider-catalog";
-import type { AgentConfig, CustomProviderConfig, LlmProfile } from "../../../shared/types";
+import { resolveModelPreferenceToModelKey } from "../../../shared/agent-preferences";
+import type {
+  AgentConfig,
+  CustomProviderConfig,
+  LlmProfile,
+  LLMProviderFallbackConfig,
+} from "../../../shared/types";
 import { getUserDataDir } from "../../utils/user-data-dir";
 import { getSafeStorage } from "../../utils/safe-storage";
 import { loadPiAiModule } from "./pi-ai-loader";
+import { ModelCapabilityRegistry } from "./ModelCapabilityRegistry";
 
 const LEGACY_SETTINGS_FILE = "llm-settings.json";
 const MASKED_VALUE = "***configured***";
@@ -642,6 +649,7 @@ interface ProviderRoutingSettings {
 export interface LLMSettings {
   providerType: LLMProviderType;
   modelKey: ModelKey | string; // String for custom Ollama model names
+  fallbackProviders?: LLMProviderFallbackConfig[];
   anthropic?: {
     apiKey?: string;
   } & ProviderRoutingSettings;
@@ -829,6 +837,90 @@ export class LLMProviderFactory {
       settings.providerType = "kimi-code";
     } else if (rawProviderType === "amazon-bedrock") {
       settings.providerType = "bedrock";
+    }
+
+    this.normalizeFallbackProviders(settings);
+  }
+
+  private static normalizeFallbackProviders(settings: LLMSettings): void {
+    if (!Array.isArray(settings.fallbackProviders)) {
+      delete settings.fallbackProviders;
+      return;
+    }
+
+    const normalized: LLMProviderFallbackConfig[] = [];
+    const seen = new Set<string>();
+    for (const entry of settings.fallbackProviders) {
+      const providerType = resolveCustomProviderId(entry?.providerType as LLMProviderType);
+      if (!providerType) continue;
+      const modelKey = normalizeModelKey(entry?.modelKey);
+      const dedupeKey = `${providerType}:${modelKey || ""}`;
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+      normalized.push({
+        providerType,
+        ...(modelKey ? { modelKey } : {}),
+      });
+    }
+
+    settings.fallbackProviders = normalized.slice(0, 5);
+    if (settings.fallbackProviders.length === 0) {
+      delete settings.fallbackProviders;
+    }
+  }
+
+  private static isProviderConfigured(settings: LLMSettings, providerType: LLMProviderType): boolean {
+    const resolvedProviderType = resolveCustomProviderId(providerType);
+    const customEntry = getCustomProviderEntry(resolvedProviderType);
+    if (customEntry) {
+      return isCustomProviderConfigured(
+        customEntry,
+        getCustomProviderConfig(settings.customProviders, resolvedProviderType),
+      );
+    }
+
+    switch (resolvedProviderType) {
+      case "anthropic":
+        return Boolean(settings.anthropic?.apiKey);
+      case "bedrock":
+        return Boolean(
+          settings.bedrock?.accessKeyId ||
+            settings.bedrock?.profile ||
+            settings.bedrock?.useDefaultCredentials ||
+            settings.bedrock?.region,
+        );
+      case "ollama":
+        return Boolean(settings.ollama?.baseUrl || settings.ollama?.model);
+      case "gemini":
+        return Boolean(settings.gemini?.apiKey);
+      case "openrouter":
+        return Boolean(settings.openrouter?.apiKey);
+      case "openai":
+        return Boolean(settings.openai?.apiKey || settings.openai?.accessToken);
+      case "azure":
+        return Boolean(
+          settings.azure?.apiKey &&
+            settings.azure?.endpoint &&
+            (settings.azure?.deployment || settings.azure?.deployments?.length),
+        );
+      case "azure-anthropic":
+        return Boolean(
+          settings.azureAnthropic?.apiKey &&
+            settings.azureAnthropic?.endpoint &&
+            (settings.azureAnthropic?.deployment || settings.azureAnthropic?.deployments?.length),
+        );
+      case "groq":
+        return Boolean(settings.groq?.apiKey);
+      case "xai":
+        return Boolean(settings.xai?.apiKey);
+      case "kimi":
+        return Boolean(settings.kimi?.apiKey);
+      case "pi":
+        return Boolean(settings.pi?.apiKey && settings.pi?.provider);
+      case "openai-compatible":
+        return Boolean(settings.openaiCompatible?.baseUrl && settings.openaiCompatible?.model);
+      default:
+        return false;
     }
   }
 
@@ -1035,6 +1127,7 @@ export class LLMProviderFactory {
       | "llmProfile"
       | "llmProfileHint"
       | "llmProfileForced"
+      | "capabilityHint"
       | "verificationAgent"
     >,
     options?: {
@@ -1076,6 +1169,14 @@ export class LLMProviderFactory {
     if (allowExplicitModelOverride && explicitModelOverride) {
       modelSource = "explicit_override";
       resolvedModelKey = explicitModelOverride;
+    } else if (taskAgentConfig?.capabilityHint) {
+      const capabilityModelKey = resolveModelPreferenceToModelKey(
+        ModelCapabilityRegistry.selectForCapability(taskAgentConfig.capabilityHint),
+      );
+      if (capabilityModelKey) {
+        modelSource = "profile_model";
+        resolvedModelKey = capabilityModelKey;
+      }
     } else if (routing.profileRoutingEnabled) {
       const profileModelKey =
         llmProfileUsed === "strong" ? routing.strongModelKey : routing.cheapModelKey;
@@ -1120,6 +1221,58 @@ export class LLMProviderFactory {
       modelSource,
       warnings,
     };
+  }
+
+  static resolveProviderFailoverChain(
+    primarySelection: ResolvedTaskModelSelection,
+    taskAgentConfig?: Pick<
+      AgentConfig,
+      | "providerType"
+      | "modelKey"
+      | "llmProfile"
+      | "llmProfileHint"
+      | "llmProfileForced"
+      | "capabilityHint"
+      | "verificationAgent"
+    >,
+    options?: {
+      forceProfile?: LlmProfile;
+      isVerificationTask?: boolean;
+    },
+  ): ResolvedTaskModelSelection[] {
+    if (taskAgentConfig?.providerType || taskAgentConfig?.modelKey) {
+      return [primarySelection];
+    }
+
+    const settings = this.loadSettings();
+    const chain: ResolvedTaskModelSelection[] = [primarySelection];
+    const seen = new Set<string>([
+      `${resolveCustomProviderId(primarySelection.providerType)}:${normalizeModelKey(primarySelection.modelKey) || ""}`,
+    ]);
+
+    for (const entry of settings.fallbackProviders || []) {
+      const providerType = resolveCustomProviderId(entry.providerType);
+      if (!this.isProviderConfigured(settings, providerType)) {
+        continue;
+      }
+
+      const selection = this.resolveTaskModelSelection(
+        {
+          ...taskAgentConfig,
+          providerType,
+          modelKey: normalizeModelKey(entry.modelKey),
+        },
+        options,
+      );
+      const dedupeKey = `${resolveCustomProviderId(selection.providerType)}:${normalizeModelKey(selection.modelKey) || ""}`;
+      if (seen.has(dedupeKey)) {
+        continue;
+      }
+      seen.add(dedupeKey);
+      chain.push(selection);
+    }
+
+    return chain;
   }
 
   /**

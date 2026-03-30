@@ -60,6 +60,7 @@
 - **Adaptive Runtime Recovery**: Execute tasks use adaptive turn budgets, bounded follow-up recovery, and safety-stop escalation instead of hard window failure by default
 - **Path Drift Repair**: `/workspace/...` aliases and drifted relative paths can be normalized back into the active workspace or pinned task root, with strict-fail policies when hard enforcement is preferred
 - **Action-First Planning**: Agent prioritizes direct action over excessive pre-planning
+- **Operator Runtime Visibility**: Task completion now surfaces the learning progression, unified recall spans tasks/messages/files/workspace notes/memory/KG, persistent shell sessions keep operator state, and live provider routing/fallback decisions are visible in the task UI and Mission Control.
 - **Voice Calls**: Outbound phone calls via ElevenLabs Agents
 - **Think With Me Mode**: Socratic brainstorming mode that helps clarify thinking without executing tools. Activated via toggle or auto-detected from brainstorm/trade-off patterns.
 - **Problem Framing Pre-flight**: Complex tasks show a structured problem restatement, assumptions, risks, and approach before execution begins
@@ -268,6 +269,21 @@ Access from **Settings** > **Customize**. See [Plugin Packs](plugin-packs.md) fo
 
 ---
 
+## Skill Store & External Skills
+
+CoWork OS supports external skill installation through the desktop GUI, not just bundled skills or CoWork-native packs.
+
+- **CoWork Registry tab**: Browse curated skills distributed through CoWork’s own registry flow
+- **ClawHub tab**: Search ClawHub directly from the app, view live skill stats, and install from result cards
+- **Popular ClawHub list**: Opening the ClawHub tab with no query shows the top downloaded public ClawHub skills
+- **External import field**: Install skills from Git repositories, ClawHub page URLs, raw JSON manifests, or raw `SKILL.md` URLs
+- **Managed install path**: Imported skills are copied into CoWork’s managed skills directory and treated as managed skills afterward
+- **Cross-ecosystem support**: Other external skill stores are supported when they expose Git repos, raw manifests, or raw `SKILL.md` bundle entry points
+
+Access from **Settings** > **Skills** > **Skill Store**. See [Skill Store & External Skills](skill-store-and-external-skills.md) for detailed documentation.
+
+---
+
 ## Admin Policies (Enterprise)
 
 Organization-level policy controls for managing plugin packs, connectors, and agents across teams.
@@ -405,6 +421,23 @@ A set of connected subsystems that make improvement visible and measurable over 
 - **Channel Persona** toggle — enable/disable per-channel communication adaptation (off by default)
 
 See [Evolving Agent Intelligence](evolving-agent-intelligence.md) and [Behavior Adaptation](behavior-adaptation.md) for full details.
+
+---
+
+## Operator Runtime Visibility
+
+CoWork OS now exposes the learning loop as a visible operator surface instead of leaving it buried inside background services.
+
+| Surface | What users see |
+|---------|----------------|
+| **Task learning progression** | A standardized post-task learning card showing memory capture, playbook reinforcement, skill proposal state, evidence links, and next action. The same event stream also feeds activity feeds and Mission Control task details. |
+| **Unified recall** | One “search everything” surface across tasks, messages, files, workspace notes, memory entries, and knowledge-graph context, with shared ranking/dedup logic for UI and prompt injection. |
+| **Persistent shell sessions** | Long-lived shell state per task/workspace with retained cwd, env deltas, aliases, reset controls, and one-shot fallback for incompatible commands. |
+| **Model routing visibility** | Live active provider/model, routing reason, fallback chain, and retry/fallback state in the task UI and settings surfaces. |
+
+This layer is intentionally additive. It makes learning and routing legible while preserving the desktop control plane, channels, inbox, devices, and governed automation that define CoWork OS.
+
+See [Operator Runtime Visibility](operator-runtime-visibility.md) for the cross-surface implementation summary.
 
 ---
 

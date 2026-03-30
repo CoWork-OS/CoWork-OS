@@ -40,6 +40,7 @@ import {
   assertSafeLoomMailboxFolder,
   normalizeEmailProtocol,
 } from "../../utils/loom";
+import { getUnsupportedManualEmailSetupMessage } from "../../../shared/email-provider-support";
 
 export class EmailAdapter implements ChannelAdapter {
   readonly type = "email" as const;
@@ -142,9 +143,14 @@ export class EmailAdapter implements ChannelAdapter {
         if (!imapHost) throw new Error("IMAP host is required");
         if (!smtpHost) throw new Error("SMTP host is required");
         if (!email) throw new Error("Email address is required");
-        if (!password) throw new Error("Email password is required");
+        if ((this.config.authMethod ?? "password") === "password" && !password) {
+          throw new Error("Email password is required");
+        }
 
         this.client = new EmailClient({
+          authMethod: this.config.authMethod ?? "password",
+          accessToken: this.config.accessToken,
+          oauthAccessTokenProvider: this.config.oauthAccessTokenProvider,
           imapHost,
           imapPort: this.config.imapPort ?? 993,
           imapSecure: this.config.imapSecure ?? true,
@@ -588,8 +594,24 @@ export function createEmailAdapter(config: EmailConfig): EmailAdapter {
   if (!config.email) {
     throw new Error("Email address is required");
   }
-  if (!config.password) {
+  if ((config.authMethod ?? "password") === "oauth") {
+    if (config.oauthProvider !== "microsoft") {
+      throw new Error("Unsupported email OAuth provider");
+    }
+    if (!config.oauthClientId) {
+      throw new Error("Email OAuth client ID is required");
+    }
+    if (!config.oauthAccessTokenProvider && !config.accessToken && !config.refreshToken) {
+      throw new Error("Email OAuth tokens are required");
+    }
+  } else if (!config.password) {
     throw new Error("Email password is required");
+  }
+  if ((config.authMethod ?? "password") === "password") {
+    const unsupportedSetupMessage = getUnsupportedManualEmailSetupMessage(config);
+    if (unsupportedSetupMessage) {
+      throw new Error(unsupportedSetupMessage);
+    }
   }
   return new EmailAdapter({
     ...config,

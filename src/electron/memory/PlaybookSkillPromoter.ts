@@ -18,6 +18,7 @@
 import { MemoryService } from "./MemoryService";
 import {
   SkillProposalService,
+  type SkillProposalStatus,
   type SkillProposalCreateInput,
 } from "../agent/skills/SkillProposalService";
 
@@ -38,6 +39,7 @@ export interface PromotionResult {
   proposed: boolean;
   reason: string;
   proposalId?: string;
+  proposalStatus?: SkillProposalStatus;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────
@@ -283,6 +285,7 @@ export class PlaybookSkillPromoter {
           proposed: true,
           reason: `Proposed skill "${skillName}" (${result.proposal.id})`,
           proposalId: result.proposal.id,
+          proposalStatus: result.proposal.status,
         };
       }
       if (result.duplicateOf) {

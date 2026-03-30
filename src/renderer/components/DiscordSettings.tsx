@@ -5,9 +5,44 @@ interface DiscordSettingsProps {
   onStatusChange?: (connected: boolean) => void;
 }
 
+function parseCsvIds(value: string): string[] {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function formatCsvIds(value?: string[]): string {
+  return (value || []).join(", ");
+}
+
+function getSupervisorConfigError(input: {
+  enabled: boolean;
+  coordinationChannelId: string;
+  workerAgentRoleId: string;
+  supervisorAgentRoleId: string;
+  peerBotUserIds: string;
+}): string | null {
+  if (!input.enabled) return null;
+  if (!input.coordinationChannelId.trim()) {
+    return "Coordination channel ID is required when supervisor mode is enabled.";
+  }
+  if (!parseCsvIds(input.peerBotUserIds).length) {
+    return "At least one peer bot user ID is required when supervisor mode is enabled.";
+  }
+  if (!input.workerAgentRoleId) {
+    return "Worker agent role is required when supervisor mode is enabled.";
+  }
+  if (!input.supervisorAgentRoleId) {
+    return "Supervisor agent role is required when supervisor mode is enabled.";
+  }
+  return null;
+}
+
 export function DiscordSettings({ onStatusChange }: DiscordSettingsProps) {
   const [channel, setChannel] = useState<ChannelData | null>(null);
   const [users, setUsers] = useState<ChannelUserData[]>([]);
+  const [agentRoles, setAgentRoles] = useState<Any[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -23,6 +58,22 @@ export function DiscordSettings({ onStatusChange }: DiscordSettingsProps) {
   const [guildIds, setGuildIds] = useState("");
   const [channelName, setChannelName] = useState("Discord Bot");
   const [securityMode, setSecurityMode] = useState<SecurityMode>("pairing");
+  const [supervisorEnabled, setSupervisorEnabled] = useState(false);
+  const [coordinationChannelId, setCoordinationChannelId] = useState("");
+  const [watchedChannelIds, setWatchedChannelIds] = useState("");
+  const [workerAgentRoleId, setWorkerAgentRoleId] = useState("");
+  const [supervisorAgentRoleId, setSupervisorAgentRoleId] = useState("");
+  const [humanEscalationChannelId, setHumanEscalationChannelId] = useState("");
+  const [humanEscalationUserId, setHumanEscalationUserId] = useState("");
+  const [peerBotUserIds, setPeerBotUserIds] = useState("");
+  const [strictMode, setStrictMode] = useState(true);
+  const supervisorValidationError = getSupervisorConfigError({
+    enabled: supervisorEnabled,
+    coordinationChannelId,
+    workerAgentRoleId,
+    supervisorAgentRoleId,
+    peerBotUserIds,
+  });
 
   // Pairing code state
   const [pairingCode, setPairingCode] = useState<string | null>(null);
@@ -30,13 +81,30 @@ export function DiscordSettings({ onStatusChange }: DiscordSettingsProps) {
   const loadChannel = useCallback(async () => {
     try {
       setLoading(true);
-      const channels = await window.electronAPI.getGatewayChannels();
+      const [channels, roles] = await Promise.all([
+        window.electronAPI.getGatewayChannels(),
+        window.electronAPI.getAgentRoles?.(true).catch(() => []),
+      ]);
+      setAgentRoles(roles || []);
       const discordChannel = channels.find((c: ChannelData) => c.type === "discord");
 
       if (discordChannel) {
         setChannel(discordChannel);
         setChannelName(discordChannel.name);
         setSecurityMode(discordChannel.securityMode);
+        const supervisorConfig =
+          discordChannel.config?.supervisor && typeof discordChannel.config.supervisor === "object"
+            ? discordChannel.config.supervisor
+            : undefined;
+        setSupervisorEnabled(supervisorConfig?.enabled === true);
+        setCoordinationChannelId(supervisorConfig?.coordinationChannelId || "");
+        setWatchedChannelIds(formatCsvIds(supervisorConfig?.watchedChannelIds));
+        setWorkerAgentRoleId(supervisorConfig?.workerAgentRoleId || "");
+        setSupervisorAgentRoleId(supervisorConfig?.supervisorAgentRoleId || "");
+        setHumanEscalationChannelId(supervisorConfig?.humanEscalationChannelId || "");
+        setHumanEscalationUserId(supervisorConfig?.humanEscalationUserId || "");
+        setPeerBotUserIds(formatCsvIds(supervisorConfig?.peerBotUserIds));
+        setStrictMode(supervisorConfig?.strictMode !== false);
         onStatusChange?.(discordChannel.status === "connected");
 
         // Load users for this channel
@@ -67,6 +135,10 @@ export function DiscordSettings({ onStatusChange }: DiscordSettingsProps) {
 
   const handleAddChannel = async () => {
     if (!botToken.trim() || !applicationId.trim()) return;
+    if (supervisorValidationError) {
+      setTestResult({ success: false, error: supervisorValidationError });
+      return;
+    }
 
     try {
       setSaving(true);
@@ -86,6 +158,17 @@ export function DiscordSettings({ onStatusChange }: DiscordSettingsProps) {
         botToken: botToken.trim(),
         applicationId: applicationId.trim(),
         guildIds: parsedGuildIds,
+        discordSupervisor: {
+          enabled: supervisorEnabled,
+          coordinationChannelId: coordinationChannelId.trim() || undefined,
+          watchedChannelIds: parseCsvIds(watchedChannelIds),
+          workerAgentRoleId: workerAgentRoleId || undefined,
+          supervisorAgentRoleId: supervisorAgentRoleId || undefined,
+          humanEscalationChannelId: humanEscalationChannelId.trim() || undefined,
+          humanEscalationUserId: humanEscalationUserId.trim() || undefined,
+          peerBotUserIds: parseCsvIds(peerBotUserIds),
+          strictMode,
+        },
         securityMode,
       });
 
@@ -191,6 +274,40 @@ export function DiscordSettings({ onStatusChange }: DiscordSettingsProps) {
     }
   };
 
+  const handleSaveSupervisorSettings = async () => {
+    if (!channel) return;
+    if (supervisorValidationError) {
+      setTestResult({ success: false, error: supervisorValidationError });
+      return;
+    }
+
+    try {
+      setSaving(true);
+      setTestResult(null);
+      await window.electronAPI.updateGatewayChannel({
+        id: channel.id,
+        config: {
+          supervisor: {
+            enabled: supervisorEnabled,
+            coordinationChannelId: coordinationChannelId.trim() || undefined,
+            watchedChannelIds: parseCsvIds(watchedChannelIds),
+            workerAgentRoleId: workerAgentRoleId || undefined,
+            supervisorAgentRoleId: supervisorAgentRoleId || undefined,
+            humanEscalationChannelId: humanEscalationChannelId.trim() || undefined,
+            humanEscalationUserId: humanEscalationUserId.trim() || undefined,
+            peerBotUserIds: parseCsvIds(peerBotUserIds),
+            strictMode,
+          },
+        },
+      });
+      await loadChannel();
+    } catch (error: Any) {
+      setTestResult({ success: false, error: error.message || "Failed to save supervisor mode" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   if (loading) {
     return <div className="settings-loading">Loading Discord settings...</div>;
   }
@@ -279,6 +396,129 @@ export function DiscordSettings({ onStatusChange }: DiscordSettingsProps) {
             </p>
           </div>
 
+          <div className="settings-section" style={{ marginTop: 24 }}>
+            <h4>Supervisor Mode (Optional)</h4>
+            <p className="settings-description">
+              Configure a dedicated Discord coordination lane where one CoWork agent supervises another.
+            </p>
+
+            <label className="settings-checkbox">
+              <input
+                type="checkbox"
+                checked={supervisorEnabled}
+                onChange={(e) => setSupervisorEnabled(e.target.checked)}
+              />
+              Enable Discord supervisor protocol
+            </label>
+
+            {supervisorEnabled && (
+              <>
+                <div className="settings-field">
+                  <label>Coordination Channel ID</label>
+                  <input
+                    type="text"
+                    className="settings-input"
+                    placeholder="123456789012345678"
+                    value={coordinationChannelId}
+                    onChange={(e) => setCoordinationChannelId(e.target.value)}
+                  />
+                </div>
+
+                <div className="settings-field">
+                  <label>Watched Output Channel IDs</label>
+                  <input
+                    type="text"
+                    className="settings-input"
+                    placeholder="123..., 456..."
+                    value={watchedChannelIds}
+                    onChange={(e) => setWatchedChannelIds(e.target.value)}
+                  />
+                </div>
+
+                <div className="settings-field">
+                  <label>Peer Bot User IDs</label>
+                  <input
+                    type="text"
+                    className="settings-input"
+                    placeholder="987..., 654..."
+                    value={peerBotUserIds}
+                    onChange={(e) => setPeerBotUserIds(e.target.value)}
+                  />
+                  <p className="settings-hint">
+                    These bot user IDs are allowed to participate in the strict coordination protocol.
+                  </p>
+                </div>
+
+                <div className="settings-field">
+                  <label>Worker Agent Role</label>
+                  <select
+                    className="settings-select"
+                    value={workerAgentRoleId}
+                    onChange={(e) => setWorkerAgentRoleId(e.target.value)}
+                  >
+                    <option value="">Select worker role</option>
+                    {agentRoles.map((role) => (
+                      <option key={role.id} value={role.id}>
+                        {role.displayName || role.name || role.id}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="settings-field">
+                  <label>Supervisor Agent Role</label>
+                  <select
+                    className="settings-select"
+                    value={supervisorAgentRoleId}
+                    onChange={(e) => setSupervisorAgentRoleId(e.target.value)}
+                  >
+                    <option value="">Select supervisor role</option>
+                    {agentRoles.map((role) => (
+                      <option key={role.id} value={role.id}>
+                        {role.displayName || role.name || role.id}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="settings-field">
+                  <label>Human Escalation Channel ID</label>
+                  <input
+                    type="text"
+                    className="settings-input"
+                    placeholder="123456789012345678"
+                    value={humanEscalationChannelId}
+                    onChange={(e) => setHumanEscalationChannelId(e.target.value)}
+                  />
+                </div>
+
+                <div className="settings-field">
+                  <label>Human Escalation User ID</label>
+                  <input
+                    type="text"
+                    className="settings-input"
+                    placeholder="123456789012345678"
+                    value={humanEscalationUserId}
+                    onChange={(e) => setHumanEscalationUserId(e.target.value)}
+                  />
+                </div>
+
+                <label className="settings-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={strictMode}
+                    onChange={(e) => setStrictMode(e.target.checked)}
+                  />
+                  Strict marker and peer-mention enforcement
+                </label>
+
+                {supervisorValidationError && (
+                  <p className="settings-hint warning">{supervisorValidationError}</p>
+                )}
+              </>
+            )}
+          </div>
+
           {testResult && (
             <div className={`test-result ${testResult.success ? "success" : "error"}`}>
               {testResult.success ? (
@@ -292,7 +532,12 @@ export function DiscordSettings({ onStatusChange }: DiscordSettingsProps) {
           <button
             className="button-primary"
             onClick={handleAddChannel}
-            disabled={saving || !botToken.trim() || !applicationId.trim()}
+            disabled={
+              saving ||
+              !botToken.trim() ||
+              !applicationId.trim() ||
+              !!supervisorValidationError
+            }
           >
             {saving ? "Adding..." : "Add Discord Bot"}
           </button>
@@ -430,6 +675,130 @@ export function DiscordSettings({ onStatusChange }: DiscordSettingsProps) {
             ))}
           </div>
         )}
+      </div>
+
+      <div className="settings-section">
+        <h4>Supervisor Mode</h4>
+        <p className="settings-description">
+          Configure a strict coordination channel for worker and supervisor agents, plus the human escalation target.
+        </p>
+
+        <label className="settings-checkbox">
+          <input
+            type="checkbox"
+            checked={supervisorEnabled}
+            onChange={(e) => setSupervisorEnabled(e.target.checked)}
+          />
+          Enable Discord supervisor protocol
+        </label>
+
+        <div className="settings-field">
+          <label>Coordination Channel ID</label>
+          <input
+            type="text"
+            className="settings-input"
+            placeholder="123456789012345678"
+            value={coordinationChannelId}
+            onChange={(e) => setCoordinationChannelId(e.target.value)}
+          />
+        </div>
+
+        <div className="settings-field">
+          <label>Watched Output Channel IDs</label>
+          <input
+            type="text"
+            className="settings-input"
+            placeholder="123..., 456..."
+            value={watchedChannelIds}
+            onChange={(e) => setWatchedChannelIds(e.target.value)}
+          />
+        </div>
+
+        <div className="settings-field">
+          <label>Peer Bot User IDs</label>
+          <input
+            type="text"
+            className="settings-input"
+            placeholder="987..., 654..."
+            value={peerBotUserIds}
+            onChange={(e) => setPeerBotUserIds(e.target.value)}
+          />
+        </div>
+
+        <div className="settings-field">
+          <label>Worker Agent Role</label>
+          <select
+            className="settings-select"
+            value={workerAgentRoleId}
+            onChange={(e) => setWorkerAgentRoleId(e.target.value)}
+          >
+            <option value="">Select worker role</option>
+            {agentRoles.map((role) => (
+              <option key={role.id} value={role.id}>
+                {role.displayName || role.name || role.id}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="settings-field">
+          <label>Supervisor Agent Role</label>
+          <select
+            className="settings-select"
+            value={supervisorAgentRoleId}
+            onChange={(e) => setSupervisorAgentRoleId(e.target.value)}
+          >
+            <option value="">Select supervisor role</option>
+            {agentRoles.map((role) => (
+              <option key={role.id} value={role.id}>
+                {role.displayName || role.name || role.id}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="settings-field">
+          <label>Human Escalation Channel ID</label>
+          <input
+            type="text"
+            className="settings-input"
+            placeholder="123456789012345678"
+            value={humanEscalationChannelId}
+            onChange={(e) => setHumanEscalationChannelId(e.target.value)}
+          />
+        </div>
+
+        <div className="settings-field">
+          <label>Human Escalation User ID</label>
+          <input
+            type="text"
+            className="settings-input"
+            placeholder="123456789012345678"
+            value={humanEscalationUserId}
+            onChange={(e) => setHumanEscalationUserId(e.target.value)}
+          />
+        </div>
+
+        <label className="settings-checkbox">
+          <input
+            type="checkbox"
+            checked={strictMode}
+            onChange={(e) => setStrictMode(e.target.checked)}
+          />
+          Strict marker and peer-mention enforcement
+        </label>
+
+        {supervisorValidationError && (
+          <p className="settings-hint warning">{supervisorValidationError}</p>
+        )}
+
+        <button
+          className="button-primary"
+          onClick={handleSaveSupervisorSettings}
+          disabled={saving || !!supervisorValidationError}
+        >
+          {saving ? "Saving..." : "Save Supervisor Mode"}
+        </button>
       </div>
 
       <div className="settings-section">

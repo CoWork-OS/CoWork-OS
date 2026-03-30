@@ -107,6 +107,10 @@ export function ContextPolicySettings({
     "signal",
     "matrix",
     "mattermost",
+    "teams",
+    "googlechat",
+    "feishu",
+    "wecom",
   ].includes(channelType);
 
   return (

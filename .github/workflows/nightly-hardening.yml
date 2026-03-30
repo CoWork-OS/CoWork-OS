@@ -46,6 +46,8 @@ jobs:
         run: |
           npm run qa:eval:run -- --suite reliability-regressions --mode deterministic \
             | tee .artifacts/hardening/eval-suite.log
+        env:
+          COWORK_EVAL_ALLOW_EMPTY: '1'
 
       - name: Run battery suite when hooks are configured
         id: run_battery

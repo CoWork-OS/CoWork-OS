@@ -97,4 +97,12 @@ describe("detectModeSuggestions", () => {
     expect(planSuggestion).toBeDefined();
     expect(planSuggestion!.confidence).toBeLessThanOrEqual(1.0);
   });
+
+  it("detects debug mode for bug / reproduction keywords", () => {
+    const result = detectModeSuggestions(
+      "Intermittent bug with stack trace — help me find root cause and reproduce",
+    );
+    expect(result.length).toBeGreaterThan(0);
+    expect(result.map((s) => s.mode)).toContain("debug");
+  });
 });

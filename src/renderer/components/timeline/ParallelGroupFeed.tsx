@@ -50,6 +50,34 @@ function laneTone(status: TimelineEventStatus): "neutral" | "active" | "success"
   return "neutral";
 }
 
+function buildParallelGroupTitle(group: ParallelGroupProjection, isActive: boolean): string {
+  const count = group.lanes.length;
+  const toolNames = Array.from(
+    new Set(
+      group.lanes
+        .map((lane) => (typeof lane.toolName === "string" ? lane.toolName.trim() : ""))
+        .filter((name) => name.length > 0),
+    ),
+  );
+
+  if (toolNames.length === 1) {
+    const tool = toolNames[0];
+    if (tool === "web_fetch" || tool === "http_request") {
+      return `${isActive ? "Fetching" : "Fetched"} ${count} page${count === 1 ? "" : "s"}`;
+    }
+    if (tool === "web_search") {
+      return `${isActive ? "Searching" : "Searched"} the web`;
+    }
+    if (tool === "read_file" || tool === "read_files") {
+      return `${isActive ? "Reading" : "Read"} ${count} file${count === 1 ? "" : "s"}`;
+    }
+  }
+
+  return isActive
+    ? `Running ${count} task${count === 1 ? "" : "s"} in parallel`
+    : `${count} parallel task${count === 1 ? "" : "s"} completed`;
+}
+
 export function ParallelGroupFeed({
   group,
   timeLabel,
@@ -68,11 +96,14 @@ export function ParallelGroupFeed({
   }, [isActive]);
 
   const indicator = useMemo(() => buildIndicatorForStatus(group.status), [group.status]);
+  const groupTitle = useMemo(() => buildParallelGroupTitle(group, isActive), [group, isActive]);
 
   const title = (
     <span>
-      Running tasks in parallel
-      <span className="event-title-meta"> ({group.lanes.length})</span>
+      {groupTitle}
+      {!(groupTitle.match(/\b\d+\b/) && group.lanes.length > 0) && (
+        <span className="event-title-meta"> ({group.lanes.length})</span>
+      )}
     </span>
   );
 

@@ -248,13 +248,14 @@ export function resolveSpawnAgentExternalRuntime(input: {
   }
 
   const runtimeAgent = explicitRuntimeAgent ?? "codex";
+  const permissionMode = resolveExternalRuntimePermissionMode(input);
 
   return {
     kind: "acpx",
     agent: runtimeAgent,
     sessionMode: "persistent",
     outputMode: "json",
-    permissionMode: resolveExternalRuntimePermissionMode(input),
+    permissionMode,
   };
 }
 
@@ -1546,9 +1547,9 @@ export class ToolRegistry {
   }> {
     const currentTask = await this.daemon.getTaskById(this.taskId);
     const mode = currentTask?.agentConfig?.executionMode ?? "execute";
-    if (mode !== "plan") {
+    if (mode !== "plan" && mode !== "debug") {
       throw new Error(
-        'Tool "request_user_input" is only available in plan mode. Switch mode to plan and retry.',
+        'Tool "request_user_input" is only available in plan or debug mode. Switch mode to plan or debug and retry.',
       );
     }
 
@@ -1996,7 +1997,7 @@ Channel Message Log (Local Gateway):
 
 		Plan Control:
 		- revise_plan: Modify remaining plan steps when obstacles are encountered or new information discovered
-		- request_user_input: Ask the user a structured multiple-choice question set (plan mode only) and wait for selection.
+		- request_user_input: Ask the user a structured multiple-choice question set (plan or debug mode) and wait for selection.
 		- task_history: Query recent task history/messages (use for "what did we talk about yesterday?")
 		- switch_workspace: Switch to a different workspace/working directory. Use when you need to work in a different folder.
 		- integration_setup: List/inspect/configure Tier-1 integrations from chat (resend/google-workspace/jira/linear/hubspot/salesforce/zendesk/servicenow), including plan_hash stale-plan safety and optional OAuth setup.
@@ -8855,7 +8856,7 @@ ${skillDescriptions}`;
         name: "request_user_input",
         description:
           "Ask the user a structured multiple-choice question set and block until they respond. " +
-          "Use only in plan mode when a decision materially changes the implementation plan.",
+          "Use in plan mode when a decision materially changes the implementation plan, or in debug mode for reproduce/confirm checkpoints.",
         input_schema: {
           type: "object",
           properties: {

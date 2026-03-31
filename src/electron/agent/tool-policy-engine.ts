@@ -487,12 +487,12 @@ function applyModeGate(toolName: string, mode: ExecutionMode): string | null {
     return `Tool "${toolName}" is blocked in chat mode because chat mode is direct-answer only and does not allow tool calls.`;
   }
   if (toolName === "request_user_input") {
-    if (mode === "plan") return null;
-    return `Tool "${toolName}" is only available in plan mode. Switch mode to plan to request structured user input.`;
+    if (mode === "plan" || mode === "debug") return null;
+    return `Tool "${toolName}" is only available in plan or debug mode. Switch mode to plan or debug to request structured user input.`;
   }
 
-  // Verified mode allows mutations (like execute) but adds external verification after steps.
-  if (mode === "execute" || mode === "verified") return null;
+  // Verified and debug modes allow mutations (like execute); debug adds runtime-evidence investigation.
+  if (mode === "execute" || mode === "verified" || mode === "debug") return null;
   if (!isMutatingTool(toolName)) return null;
 
   if (mode === "plan") {

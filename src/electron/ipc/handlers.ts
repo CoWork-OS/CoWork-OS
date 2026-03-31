@@ -2049,6 +2049,77 @@ export async function setupIpcHandlers(
     },
   );
 
+  ipcMain.handle(IPC_CHANNELS.MAILBOX_SNIPPETS_LIST, async (event) => {
+    assertTrustedMailboxSender(event);
+    return mailboxService.listMailboxSnippets();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MAILBOX_SNIPPET_UPSERT, async (event, data?: Any) => {
+    assertTrustedMailboxSender(event);
+    return mailboxService.upsertMailboxSnippet({
+      id: typeof data?.id === "string" ? data.id : undefined,
+      shortcut: typeof data?.shortcut === "string" ? data.shortcut : "",
+      body: typeof data?.body === "string" ? data.body : "",
+      subjectHint: typeof data?.subjectHint === "string" ? data.subjectHint : undefined,
+    });
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MAILBOX_SNIPPET_DELETE, async (event, data?: { id?: string }) => {
+    assertTrustedMailboxSender(event);
+    if (!data?.id) throw new Error("Missing snippet id");
+    return mailboxService.deleteMailboxSnippet(data.id);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MAILBOX_SAVED_VIEWS_LIST, async (event) => {
+    assertTrustedMailboxSender(event);
+    return mailboxService.listMailboxSavedViews();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MAILBOX_SAVED_VIEW_CREATE, async (event, data?: Any) => {
+    assertTrustedMailboxSender(event);
+    if (typeof data?.name !== "string" || typeof data?.instructions !== "string") {
+      throw new Error("Missing name or instructions for saved view");
+    }
+    const threadIds = Array.isArray(data?.threadIds)
+      ? data.threadIds.filter((id: unknown): id is string => typeof id === "string")
+      : [];
+    return mailboxService.createMailboxSavedView({
+      name: data.name,
+      instructions: data.instructions,
+      seedThreadId: typeof data?.seedThreadId === "string" ? data.seedThreadId : undefined,
+      threadIds,
+      showInInbox: data?.showInInbox !== false,
+    });
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MAILBOX_SAVED_VIEW_DELETE, async (event, data?: { id?: string }) => {
+    assertTrustedMailboxSender(event);
+    if (!data?.id) throw new Error("Missing saved view id");
+    return mailboxService.deleteMailboxSavedView(data.id);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MAILBOX_SAVED_VIEW_PREVIEW_SIMILAR, async (event, data?: Any) => {
+    assertTrustedMailboxSender(event);
+    if (typeof data?.seedThreadId !== "string") throw new Error("Missing seedThreadId");
+    return mailboxService.previewMailboxLabelSimilar({
+      seedThreadId: data.seedThreadId,
+      name: typeof data?.name === "string" ? data.name : "",
+      instructions: typeof data?.instructions === "string" ? data.instructions : "",
+    });
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MAILBOX_QUICK_REPLY_SUGGESTIONS, async (event, data?: { threadId?: string }) => {
+    assertTrustedMailboxSender(event);
+    if (!data?.threadId) throw new Error("Missing threadId for quick reply suggestions");
+    return mailboxService.getMailboxQuickReplySuggestions(data.threadId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MAILBOX_SAVED_VIEW_REVIEW_SCHEDULE, async (event, data?: { viewId?: string }) => {
+    assertTrustedMailboxSender(event);
+    if (!data?.viewId) throw new Error("Missing viewId for review schedule");
+    return mailboxService.createReviewScheduleForSavedView(data.viewId);
+  });
+
   ipcMain.handle(IPC_CHANNELS.MAILBOX_APPLY_ACTION, async (event, data?: Any) => {
     assertTrustedMailboxSender(event);
     return mailboxService.applyAction({

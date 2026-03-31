@@ -39,7 +39,7 @@ interface FrameEvent {
   timestamp: number;
 }
 
-function classifyEvent(event: TaskEvent, task?: Task): FrameEvent | null {
+function classifyEvent(event: TaskEvent, agentName: string, task?: Task): FrameEvent | null {
   const effectiveType = getEffectiveTaskEventType(event);
   if (!DISPLAY_EVENT_TYPES.has(effectiveType)) return null;
 
@@ -94,7 +94,7 @@ function classifyEvent(event: TaskEvent, task?: Task): FrameEvent | null {
         id: event.id,
         type: effectiveType,
         icon: "play",
-        label: desc || `Running tool: ${tool || "step"}`,
+        label: desc || (tool ? `Running: ${tool}` : `${agentName} is working...`),
         timestamp: event.timestamp,
       };
     }
@@ -186,27 +186,46 @@ function classifyEvent(event: TaskEvent, task?: Task): FrameEvent | null {
       };
     }
     case "step_completed":
-      return {
-        id: event.id,
-        type: effectiveType,
-        icon: "check",
-        label: `Done: ${sanitize(step?.description || p?.description || "step")}`,
-        timestamp: event.timestamp,
-      };
+      {
+        const completedLabel = sanitize(step?.description || p?.description || "step");
+        return {
+          id: event.id,
+          type: effectiveType,
+          icon: "check",
+          label: !completedLabel || completedLabel.toLowerCase() === "step" ? "Done" : `Done: ${completedLabel}`,
+          timestamp: event.timestamp,
+        };
+      }
     case "step_failed":
-      return {
-        id: event.id,
-        type: effectiveType,
-        icon: "x",
-        label: `Failed: ${sanitize(step?.description || p?.description || "step")} — ${sanitize(formatProviderErrorForDisplay(String(p?.error || p?.reason || ""), { task }))}`,
-        timestamp: event.timestamp,
-      };
+      {
+        const failedLabel = sanitize(step?.description || p?.description || "step");
+        const failureText = sanitize(
+          formatProviderErrorForDisplay(String(p?.error || p?.reason || ""), { task }),
+        );
+        return {
+          id: event.id,
+          type: effectiveType,
+          icon: "x",
+          label:
+            !failedLabel || failedLabel.toLowerCase() === "step"
+              ? `Something failed${failureText ? ` — ${failureText}` : ""}`
+              : `Failed: ${failedLabel}${failureText ? ` — ${failureText}` : ""}`,
+          timestamp: event.timestamp,
+        };
+      }
     case "assistant_message":
+      if (
+        task?.resultSummary &&
+        task.resultSummary.trim().length > 0 &&
+        sanitize(p?.message).trim() === task.resultSummary.trim()
+      ) {
+        return null;
+      }
       return {
         id: event.id,
         type: effectiveType,
         icon: "message",
-        label: truncate(sanitize(p?.message), 120),
+        label: truncate(sanitize(p?.message) || `${agentName} sent an update`, 120),
         timestamp: event.timestamp,
       };
     case "progress_update":
@@ -214,7 +233,7 @@ function classifyEvent(event: TaskEvent, task?: Task): FrameEvent | null {
         id: event.id,
         type: effectiveType,
         icon: "loader",
-        label: sanitize(p?.message) || "Working...",
+        label: sanitize(p?.message) || `${agentName} is working...`,
         timestamp: event.timestamp,
       };
     case "plan_created":
@@ -314,15 +333,16 @@ export function CliAgentFrame({ task, events, agentType, defaultExpanded }: CliA
     task.status === "completed" || task.status === "failed" || task.status === "cancelled";
   const [expanded, setExpanded] = useState(defaultExpanded ?? !isTerminal);
   const displayInfo = getCliAgentDisplayInfo(agentType);
+  const agentName = displayInfo.name;
 
   const frameEvents = useMemo<FrameEvent[]>(() => {
     const result: FrameEvent[] = [];
     for (const event of events) {
-      const classified = classifyEvent(event, task);
+      const classified = classifyEvent(event, agentName, task);
       if (classified) result.push(classified);
     }
     return result;
-  }, [events, task]);
+  }, [agentName, events, task]);
 
   const duration = useMemo(() => {
     if (frameEvents.length === 0) return null;
@@ -372,21 +392,27 @@ export function CliAgentFrame({ task, events, agentType, defaultExpanded }: CliA
           {frameEvents.length === 0 ? (
             <div className="cli-event-row cli-event-empty">
               <Loader2 size={13} className="cli-event-icon cli-event-icon-loader" />
-              <span>Warming up…</span>
+              <span>{agentName} is warming up...</span>
             </div>
           ) : (
-            frameEvents.map((fe) => {
+            frameEvents.map((fe, idx) => {
               const time = new Date(fe.timestamp).toLocaleTimeString([], {
                 hour: "2-digit",
                 minute: "2-digit",
                 second: "2-digit",
               });
+              // Loader should only spin for the very last event while the task is still active;
+              // past progress_update events and all loaders in terminal tasks render as static.
+              const effectiveIcon: FrameEvent["icon"] =
+                fe.icon === "loader" && (isTerminal || idx !== frameEvents.length - 1)
+                  ? "message"
+                  : fe.icon;
               return (
                 <div
                   key={fe.id}
                   className={`cli-event-row ${fe.type === "step_failed" || fe.type === "error" ? "cli-event-error" : ""} ${fe.type === "step_completed" || fe.type === "task_completed" ? "cli-event-success" : ""}`}
                 >
-                  <EventIcon icon={fe.icon} />
+                  <EventIcon icon={effectiveIcon} />
                   <span className="cli-event-label">{fe.label}</span>
                   <span className="cli-event-time">{time}</span>
                 </div>

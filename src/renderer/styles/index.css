@@ -9422,25 +9422,25 @@ button {
   font-size: 12px;
 }
 
-/* ==================== APPROVAL DIALOG ==================== */
+/* ==================== APPROVAL DIALOG (legacy ApprovalDialog.tsx) ==================== */
 .approval-dialog-overlay {
   position: fixed;
   inset: 0;
-  background-color: rgba(0, 0, 0, 0.8);
+  background-color: rgba(0, 0, 0, 0.55);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 2000;
-  backdrop-filter: blur(8px);
+  backdrop-filter: blur(10px);
 }
 
 .approval-dialog {
   background-color: var(--color-bg-elevated);
-  border-radius: var(--radius-xl);
+  border-radius: 20px;
   width: 90%;
   max-width: 400px;
   padding: 24px;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35);
   border: 1px solid var(--color-border-subtle);
 }
 
@@ -9496,35 +9496,176 @@ button {
   justify-content: center;
 }
 
-.computer-use-approval-overlay {
+/* ==================== SESSION APPROVAL MODAL (computer use + shell / side effects) ==================== */
+.session-approval-overlay {
+  position: fixed;
+  inset: 0;
   z-index: 2100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(10px);
 }
 
-.computer-use-approval-dialog {
+.session-approval-card {
+  width: 90%;
+  max-width: 440px;
+  padding: 28px 28px 22px;
+  border-radius: 20px;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-subtle);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35);
+}
+
+.theme-light .session-approval-card {
+  background: #ffffff;
+  border-color: rgba(0, 0, 0, 0.08);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.2);
+}
+
+.session-approval-card--computer-use {
   max-width: 440px;
 }
 
-.computer-use-approval-details {
+.session-approval-icon {
+  font-size: 32px;
+  text-align: center;
+  margin-bottom: 10px;
+  line-height: 1;
+}
+
+.session-approval-body {
+  margin-bottom: 4px;
+}
+
+.session-approval-title {
+  margin: 0 0 10px;
+  font-size: 17px;
+  font-weight: 700;
+  text-align: center;
+  color: var(--color-text-primary, #1a1a1a);
+  letter-spacing: -0.02em;
+}
+
+.theme-light .session-approval-title {
+  color: #1a1a1a;
+}
+
+.session-approval-prompt {
+  margin: 0 0 14px;
+  font-size: 13px;
+  line-height: 1.45;
+  text-align: center;
+  color: #757575;
+}
+
+.theme-dark .session-approval-prompt {
+  color: var(--color-text-secondary);
+}
+
+.session-approval-explanation {
+  margin: -4px 0 14px;
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: center;
+  color: var(--color-text-secondary);
+}
+
+.session-approval-details {
   display: grid;
   grid-template-columns: max-content 1fr;
-  gap: 6px 12px;
-  margin: 12px 0 16px;
+  gap: 8px 14px;
+  margin: 4px 0 16px;
   font-size: 12px;
   text-align: left;
 }
 
-.computer-use-approval-details dt {
-  color: var(--color-text-muted);
+.session-approval-details dt {
+  margin: 0;
+  color: #757575;
   font-weight: 500;
 }
 
-.computer-use-approval-details dd {
+.theme-dark .session-approval-details dt {
+  color: var(--color-text-muted);
+}
+
+.session-approval-details dd {
   margin: 0;
-  color: var(--color-text-secondary);
+  min-width: 0;
+  color: var(--color-text-primary);
   word-break: break-word;
 }
 
-.computer-use-sentinel-warning {
+.theme-light .session-approval-details dd {
+  color: #1a1a1a;
+}
+
+.session-approval-code {
+  display: inline-block;
+  max-width: 100%;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: rgba(0, 0, 0, 0.06);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.theme-dark .session-approval-code {
+  background: var(--color-bg-secondary);
+  border-color: var(--color-border-subtle);
+}
+
+.session-approval-code-scroll {
+  max-height: min(40vh, 300px);
+  overflow: auto;
+  width: 100%;
+  min-width: 0;
+  border-radius: 8px;
+}
+
+.session-approval-code--multiline {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.session-approval-footer-hint {
+  margin: 0 0 16px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+}
+
+.session-approval-footer-hint--center {
+  text-align: center;
+}
+
+.session-approval-kbd {
+  display: inline-block;
+  margin: 0 1px;
+  padding: 2px 7px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 6px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--color-text-primary);
+}
+
+.theme-dark .session-approval-kbd {
+  border-color: var(--color-border-subtle);
+  background: var(--color-bg-secondary);
+}
+
+.session-approval-sentinel-warning {
   background: rgba(234, 179, 8, 0.12);
   border: 1px solid rgba(234, 179, 8, 0.35);
   border-radius: var(--radius-md);
@@ -9535,23 +9676,116 @@ button {
   text-align: left;
 }
 
-.computer-use-session-hint {
-  font-size: 11px;
-  color: var(--color-text-muted);
-  text-align: center;
-  margin: 0 0 8px;
-}
-
-.computer-use-session-hint kbd {
-  font-family: var(--font-mono);
-  padding: 1px 6px;
-  border-radius: 4px;
-  border: 1px solid var(--color-border-subtle);
-  background: var(--color-bg-secondary);
-}
-
-.computer-use-approval-actions {
+.session-approval-actions {
+  display: flex;
   flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+  align-items: center;
+}
+
+.session-approval-btn-deny {
+  min-width: 88px;
+  padding: 10px 18px;
+  border: none;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  background: #e5e5e5;
+  color: #1a1a1a;
+  transition:
+    filter 0.15s ease,
+    transform 0.08s ease;
+}
+
+.theme-dark .session-approval-btn-deny {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+.session-approval-btn-deny:hover {
+  filter: brightness(0.97);
+}
+
+.session-approval-btn-deny:active {
+  transform: scale(0.98);
+}
+
+.session-approval-btn-allow {
+  min-width: 168px;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  color: #1a1a1a;
+  background: linear-gradient(90deg, #c09cff 0%, #a094ff 100%);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  transition:
+    filter 0.15s ease,
+    transform 0.08s ease;
+}
+
+.session-approval-btn-allow:hover {
+  filter: brightness(1.05);
+}
+
+.session-approval-btn-allow:active {
+  transform: scale(0.98);
+}
+
+.session-approval-approve-all-link {
+  display: block;
+  width: 100%;
+  margin-top: 14px;
+  padding: 6px;
+  border: none;
+  background: none;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.session-approval-approve-all-link:hover {
+  color: var(--color-text-secondary);
+}
+
+/* Approve-all warning: same card chrome, stacked above other session modals */
+.session-approval-overlay--warning-layer {
+  z-index: 2200;
+}
+
+.session-approval-btn-danger-primary {
+  min-width: 168px;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  color: #ffffff;
+  background: linear-gradient(90deg, #f87171 0%, #ef4444 100%);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  transition:
+    filter 0.15s ease,
+    transform 0.08s ease;
+}
+
+.session-approval-btn-danger-primary:hover {
+  filter: brightness(1.06);
+}
+
+.session-approval-btn-danger-primary:active {
+  transform: scale(0.98);
+}
+
+.session-approval-actions--warning {
+  margin-top: 4px;
 }
 
 .settings-tools-stack {
@@ -11533,6 +11767,54 @@ button {
   color: var(--color-text-muted);
   margin-bottom: 12px;
   line-height: 1.5;
+}
+
+/* Menu bar / system tray settings — label + description stack; toggle on the right */
+.tray-settings-options {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  margin-top: 4px;
+}
+
+.tray-settings-option {
+  margin: 0;
+}
+
+.tray-settings-option-inner {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.tray-settings-option-text {
+  min-width: 0;
+  flex: 1;
+}
+
+.tray-settings-option-title {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  line-height: 1.4;
+}
+
+.tray-settings-option-desc {
+  margin: 6px 0 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+}
+
+.tray-settings .settings-toggle.tray-settings-toggle {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.tray-settings-features {
+  margin-top: 8px;
 }
 
 .settings-combined-panel {

@@ -26,6 +26,7 @@ import { ControlPlaneCoreService } from "../control-plane/ControlPlaneCoreServic
 import { ContactIdentityService } from "../identity/ContactIdentityService";
 import { MailboxAutomationHub } from "./MailboxAutomationHub";
 import { MailboxAutomationRegistry } from "./MailboxAutomationRegistry";
+import { mailboxLlmQuickReplies, mailboxLlmSimilarThreadIds } from "./mailbox-inbox-product-llm";
 import {
   ChannelPreferenceSummary,
   ContactIdentity,
@@ -61,6 +62,11 @@ import {
   MailboxSensitiveContent,
   MailboxListThreadsInput,
   MailboxMessage,
+  MailboxQuickReplySuggestionsResult,
+  MailboxSavedViewPreviewResult,
+  MailboxSavedViewRecord,
+  MailboxSnippetInput,
+  MailboxSnippetRecord,
   MailboxParticipant,
   MailboxPriorityBand,
   MailboxClassificationState,
@@ -1249,6 +1255,8 @@ export class MailboxService {
       .all() as MailboxAccountRow[];
 
     const accounts = accountRows.map((row) => this.mapAccountRow(row));
+    const inboxVisibleFilter = this.buildInboxVisibleThreadFilter();
+    const joinedInboxVisibleFilter = this.buildInboxVisibleThreadFilter("mt");
     const countsRow = this.db
       .prepare(
         `SELECT
@@ -1260,9 +1268,9 @@ export class MailboxService {
              0
            ) AS classification_pending_count
          FROM mailbox_threads
-         WHERE local_inbox_hidden = 0`,
+         WHERE ${inboxVisibleFilter.sql}`,
       )
-      .get() as {
+      .get(...inboxVisibleFilter.params) as {
       thread_count: number;
       unread_count: number;
       needs_reply_count: number;
@@ -1274,18 +1282,18 @@ export class MailboxService {
          FROM mailbox_action_proposals map
          JOIN mailbox_threads mt ON mt.id = map.thread_id
          WHERE map.status = 'suggested'
-           AND mt.local_inbox_hidden = 0`,
+           AND ${joinedInboxVisibleFilter.sql}`,
       )
-      .get() as { count: number };
+      .get(...joinedInboxVisibleFilter.params) as { count: number };
     const commitmentCountRow = this.db
       .prepare(
         `SELECT COUNT(*) AS count
          FROM mailbox_commitments mc
          JOIN mailbox_threads mt ON mt.id = mc.thread_id
          WHERE mc.state IN ('suggested', 'accepted')
-           AND mt.local_inbox_hidden = 0`,
+           AND ${joinedInboxVisibleFilter.sql}`,
       )
-      .get() as { count: number };
+      .get(...joinedInboxVisibleFilter.params) as { count: number };
 
     const lastSyncedAt =
       accounts
@@ -1636,6 +1644,8 @@ export class MailboxService {
       };
     }
 
+    const inboxVisibleFilter = this.buildInboxVisibleThreadFilter("mailbox_threads", resolvedWorkspaceId);
+    const joinedInboxVisibleFilter = this.buildInboxVisibleThreadFilter("mt", resolvedWorkspaceId);
     const counts = this.db
       .prepare(
         `SELECT
@@ -1649,9 +1659,9 @@ export class MailboxService {
            ) AS classification_pending_count,
            COALESCE(SUM(CASE WHEN sensitive_content_json IS NOT NULL AND sensitive_content_json != '' THEN 1 ELSE 0 END), 0) AS sensitive_thread_count
          FROM mailbox_threads
-         WHERE local_inbox_hidden = 0`,
+         WHERE ${inboxVisibleFilter.sql}`,
       )
-      .get() as {
+      .get(...inboxVisibleFilter.params) as {
       thread_count: number;
       message_count: number;
       unread_count: number;
@@ -1665,26 +1675,26 @@ export class MailboxService {
          FROM mailbox_action_proposals map
          JOIN mailbox_threads mt ON mt.id = map.thread_id
          WHERE map.status = 'suggested'
-           AND mt.local_inbox_hidden = 0`,
+           AND ${joinedInboxVisibleFilter.sql}`,
       )
-      .get() as { count: number };
+      .get(...joinedInboxVisibleFilter.params) as { count: number };
     const commitmentCountRow = this.db
       .prepare(
         `SELECT COUNT(*) AS count
          FROM mailbox_commitments mc
          JOIN mailbox_threads mt ON mt.id = mc.thread_id
          WHERE mc.state IN ('suggested', 'accepted')
-           AND mt.local_inbox_hidden = 0`,
+           AND ${joinedInboxVisibleFilter.sql}`,
       )
-      .get() as { count: number };
+      .get(...joinedInboxVisibleFilter.params) as { count: number };
     const draftCountRow = this.db
       .prepare(
         `SELECT COUNT(*) AS count
          FROM mailbox_drafts md
          JOIN mailbox_threads mt ON mt.id = md.thread_id
-         WHERE mt.local_inbox_hidden = 0`,
+         WHERE ${joinedInboxVisibleFilter.sql}`,
       )
-      .get() as { count: number };
+      .get(...joinedInboxVisibleFilter.params) as { count: number };
     const overdueCommitmentCountRow = this.db
       .prepare(
         `SELECT COUNT(*) AS count
@@ -1693,9 +1703,9 @@ export class MailboxService {
          WHERE mc.state IN ('suggested', 'accepted')
            AND mc.due_at IS NOT NULL
            AND mc.due_at < ?
-           AND mt.local_inbox_hidden = 0`,
+           AND ${joinedInboxVisibleFilter.sql}`,
       )
-      .get(Date.now()) as { count: number };
+      .get(Date.now(), ...joinedInboxVisibleFilter.params) as { count: number };
     const eventCountRow = this.db
       .prepare(
         `SELECT COUNT(*) AS count
@@ -1752,6 +1762,110 @@ export class MailboxService {
       (workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id),
     );
     return preferred?.id || workspaces[0]?.id;
+  }
+
+  private buildInboxVisibleThreadFilter(
+    threadAlias = "mailbox_threads",
+    workspaceId = this.resolveDefaultWorkspaceId(),
+  ): { sql: string; params: unknown[] } {
+    const threadRef = `${threadAlias}.id`;
+    const conditions = [
+      `${threadAlias}.local_inbox_hidden = 0`,
+      `EXISTS (
+        SELECT 1
+        FROM mailbox_messages m
+        WHERE m.thread_id = ${threadRef}
+          AND m.direction = 'incoming'
+      )`,
+    ];
+    const params: unknown[] = [];
+    if (workspaceId) {
+      // A thread is hidden from inbox if it belongs to at least one view with
+      // show_in_inbox=0, but does NOT also belong to any view with show_in_inbox=1.
+      conditions.push(
+        `NOT (
+          EXISTS (
+            SELECT 1
+            FROM mailbox_saved_view_threads svt
+            INNER JOIN mailbox_saved_views sv ON sv.id = svt.view_id
+            WHERE svt.thread_id = ${threadRef}
+              AND sv.workspace_id = ?
+              AND sv.show_in_inbox = 0
+          )
+          AND NOT EXISTS (
+            SELECT 1
+            FROM mailbox_saved_view_threads svt2
+            INNER JOIN mailbox_saved_views sv2 ON sv2.id = svt2.view_id
+            WHERE svt2.thread_id = ${threadRef}
+              AND sv2.workspace_id = ?
+              AND sv2.show_in_inbox != 0
+          )
+        )`,
+      );
+      params.push(workspaceId, workspaceId);
+    }
+    return { sql: conditions.join(" AND "), params };
+  }
+
+  /** Drops unknown or stale thread ids (e.g. hallucinated LLM output) before persisting saved views. */
+  private filterValidMailboxThreadIds(threadIds: string[], accountId?: string): string[] {
+    const ids = [...new Set(threadIds.map((id) => id?.trim()).filter(Boolean))] as string[];
+    if (!ids.length) return [];
+    const placeholders = ids.map(() => "?").join(",");
+    const conditions = [`id IN (${placeholders})`];
+    const values: unknown[] = [...ids];
+    if (accountId) {
+      conditions.push("account_id = ?");
+      values.push(accountId);
+    }
+    const rows = this.db
+      .prepare(`SELECT id FROM mailbox_threads WHERE ${conditions.join(" AND ")}`)
+      .all(...values) as { id: string }[];
+    const allowed = new Set(rows.map((r) => r.id));
+    return ids.filter((id) => allowed.has(id));
+  }
+
+  private scoreSavedViewCandidate(seedTokens: Set<string>, subject: string, snippet: string): number {
+    const tokenize = (value: string): string[] =>
+      value
+        .toLowerCase()
+        .split(/[^a-z0-9]+/i)
+        .map((token) => token.trim())
+        .filter((token) => token.length >= 3)
+        .slice(0, 80);
+    const scoreOverlap = (tokens: string[], weight: number): number =>
+      tokens.reduce((score, token) => score + (seedTokens.has(token) ? weight : 0), 0);
+
+    return scoreOverlap(tokenize(subject), 3) + scoreOverlap(tokenize(snippet), 1);
+  }
+
+  private pruneMailboxTriageFeedback(workspaceId: string): void {
+    const maxAgeMs = 90 * 24 * 60 * 60 * 1000;
+    const maxRows = 12_000;
+    const cutoff = Date.now() - maxAgeMs;
+    try {
+      this.db
+        .prepare(`DELETE FROM mailbox_triage_feedback WHERE workspace_id = ? AND created_at < ?`)
+        .run(workspaceId, cutoff);
+      const countRow = this.db
+        .prepare(`SELECT COUNT(*) AS c FROM mailbox_triage_feedback WHERE workspace_id = ?`)
+        .get(workspaceId) as { c: number };
+      if (countRow.c > maxRows) {
+        const excess = countRow.c - maxRows;
+        this.db
+          .prepare(
+            `DELETE FROM mailbox_triage_feedback WHERE rowid IN (
+              SELECT rowid FROM mailbox_triage_feedback
+              WHERE workspace_id = ?
+              ORDER BY created_at ASC
+              LIMIT ?
+            )`,
+          )
+          .run(workspaceId, excess);
+      }
+    } catch {
+      // best-effort retention
+    }
   }
 
   private createThreadSensitiveContent(textParts: string[]): MailboxSensitiveContent {
@@ -1982,6 +2096,9 @@ export class MailboxService {
       throw new Error("Thread not found");
     }
     const updated = await this.classifyThreadById(threadId, { force: true });
+    if (updated) {
+      this.recordMailboxTriageFeedback(threadId, "reclassify");
+    }
     return {
       accountId: thread.account_id,
       scannedThreads: 1,
@@ -2039,15 +2156,9 @@ export class MailboxService {
     }
     const mailboxView: MailboxThreadMailboxView = input.mailboxView || "inbox";
     if (mailboxView === "inbox") {
-      conditions.push("local_inbox_hidden = 0");
-      conditions.push(
-        `EXISTS (
-          SELECT 1
-          FROM mailbox_messages m
-          WHERE m.thread_id = mailbox_threads.id
-            AND m.direction = 'incoming'
-        )`,
-      );
+      const inboxVisibleFilter = this.buildInboxVisibleThreadFilter();
+      conditions.push(inboxVisibleFilter.sql);
+      values.push(...inboxVisibleFilter.params);
     } else if (mailboxView === "sent") {
       conditions.push(
         `NOT EXISTS (
@@ -2102,6 +2213,16 @@ export class MailboxService {
     if (typeof input.cleanupCandidate === "boolean") {
       conditions.push("cleanup_candidate = ?");
       values.push(input.cleanupCandidate ? 1 : 0);
+    }
+    const savedViewId = input.savedViewId?.trim();
+    if (savedViewId) {
+      conditions.push(
+        `EXISTS (
+          SELECT 1 FROM mailbox_saved_view_threads svt
+          WHERE svt.view_id = ? AND svt.thread_id = mailbox_threads.id
+        )`,
+      );
+      values.push(savedViewId);
     }
 
     const limit = Math.min(Math.max(input.limit ?? 40, 1), 100);
@@ -3169,6 +3290,10 @@ export class MailboxService {
   async applyAction(input: MailboxApplyActionInput): Promise<{ success: boolean; action: string; threadId?: string }> {
     if (input.type === "dismiss_proposal" && input.proposalId) {
       this.updateProposalStatus(input.proposalId, "dismissed");
+      const dismissThreadId = input.threadId || this.threadIdFromProposal(input.proposalId);
+      if (dismissThreadId) {
+        this.recordMailboxTriageFeedback(dismissThreadId, "dismiss_proposal");
+      }
       return { success: true, action: input.type };
     }
 
@@ -3239,6 +3364,17 @@ export class MailboxService {
         company: companyFromEmail(primaryContact?.email),
       },
     });
+
+    if (
+      input.type === "archive" ||
+      input.type === "trash" ||
+      input.type === "mark_read" ||
+      input.type === "label" ||
+      input.type === "cleanup_local" ||
+      input.type === "send_draft"
+    ) {
+      this.recordMailboxTriageFeedback(threadId, input.type);
+    }
 
     return {
       success: true,
@@ -6190,6 +6326,389 @@ export class MailboxService {
       );
 
     return task;
+  }
+
+  private recordMailboxTriageFeedback(threadId: string, feedbackKind: string, payload?: Record<string, unknown>): void {
+    const workspaceId = this.resolveDefaultWorkspaceId();
+    if (!workspaceId) return;
+    const id = randomUUID();
+    const now = Date.now();
+    try {
+      this.db
+        .prepare(
+          `INSERT INTO mailbox_triage_feedback (id, workspace_id, thread_id, feedback_kind, payload_json, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          id,
+          workspaceId,
+          threadId,
+          feedbackKind,
+          payload ? JSON.stringify(payload) : null,
+          now,
+        );
+      this.pruneMailboxTriageFeedback(workspaceId);
+    } catch {
+      // Best-effort
+    }
+  }
+
+  listMailboxSnippets(): MailboxSnippetRecord[] {
+    const workspaceId = this.resolveDefaultWorkspaceId();
+    if (!workspaceId) return [];
+    const rows = this.db
+      .prepare(
+        `SELECT id, workspace_id, shortcut, body_text, subject_hint, created_at, updated_at
+         FROM mailbox_snippets
+         WHERE workspace_id = ?
+         ORDER BY updated_at DESC`,
+      )
+      .all(workspaceId) as Array<{
+      id: string;
+      workspace_id: string;
+      shortcut: string;
+      body_text: string;
+      subject_hint: string | null;
+      created_at: number;
+      updated_at: number;
+    }>;
+    return rows.map((row) => ({
+      id: row.id,
+      workspaceId: row.workspace_id,
+      shortcut: row.shortcut,
+      body: row.body_text,
+      subjectHint: row.subject_hint || undefined,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
+  }
+
+  upsertMailboxSnippet(input: MailboxSnippetInput & { id?: string }): MailboxSnippetRecord {
+    const workspaceId = this.resolveDefaultWorkspaceId();
+    if (!workspaceId) {
+      throw new Error("No workspace for mailbox snippets");
+    }
+    const shortcut = input.shortcut.trim();
+    const body = input.body.trim();
+    if (!shortcut || !body) {
+      throw new Error("Snippet shortcut and body are required");
+    }
+    const id = input.id?.trim() || randomUUID();
+    const now = Date.now();
+    const existing = this.db
+      .prepare(`SELECT id FROM mailbox_snippets WHERE id = ? AND workspace_id = ?`)
+      .get(id, workspaceId) as { id: string } | undefined;
+    try {
+      if (existing) {
+        this.db
+          .prepare(
+            `UPDATE mailbox_snippets
+             SET shortcut = ?, body_text = ?, subject_hint = ?, updated_at = ?
+             WHERE id = ? AND workspace_id = ?`,
+          )
+          .run(shortcut, body, input.subjectHint?.trim() || null, now, id, workspaceId);
+      } else {
+        this.db
+          .prepare(
+            `INSERT INTO mailbox_snippets (id, workspace_id, shortcut, body_text, subject_hint, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .run(id, workspaceId, shortcut, body, input.subjectHint?.trim() || null, now, now);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes("UNIQUE constraint failed: mailbox_snippets")) {
+        throw new Error(`A snippet with the shortcut "${shortcut}" already exists in this workspace.`);
+      }
+      throw err;
+    }
+    const row = this.db
+      .prepare(`SELECT * FROM mailbox_snippets WHERE id = ? AND workspace_id = ?`)
+      .get(id, workspaceId) as {
+      id: string;
+      workspace_id: string;
+      shortcut: string;
+      body_text: string;
+      subject_hint: string | null;
+      created_at: number;
+      updated_at: number;
+    };
+    return {
+      id: row.id,
+      workspaceId: row.workspace_id,
+      shortcut: row.shortcut,
+      body: row.body_text,
+      subjectHint: row.subject_hint || undefined,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  deleteMailboxSnippet(id: string): boolean {
+    const workspaceId = this.resolveDefaultWorkspaceId();
+    if (!workspaceId) return false;
+    const result = this.db
+      .prepare(`DELETE FROM mailbox_snippets WHERE id = ? AND workspace_id = ?`)
+      .run(id, workspaceId);
+    return result.changes > 0;
+  }
+
+  listMailboxSavedViews(): MailboxSavedViewRecord[] {
+    const workspaceId = this.resolveDefaultWorkspaceId();
+    if (!workspaceId) return [];
+    const rows = this.db
+      .prepare(
+        `SELECT id, workspace_id, name, instructions, seed_thread_id, show_in_inbox, created_at, updated_at
+         FROM mailbox_saved_views
+         WHERE workspace_id = ?
+         ORDER BY updated_at DESC`,
+      )
+      .all(workspaceId) as Array<{
+      id: string;
+      workspace_id: string;
+      name: string;
+      instructions: string;
+      seed_thread_id: string | null;
+      show_in_inbox: number;
+      created_at: number;
+      updated_at: number;
+    }>;
+    return rows.map((row) => ({
+      id: row.id,
+      workspaceId: row.workspace_id,
+      name: row.name,
+      instructions: row.instructions,
+      seedThreadId: row.seed_thread_id || undefined,
+      showInInbox: row.show_in_inbox !== 0,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
+  }
+
+  async previewMailboxLabelSimilar(input: {
+    seedThreadId: string;
+    name: string;
+    instructions: string;
+  }): Promise<MailboxSavedViewPreviewResult> {
+    const seedAccountId = (
+      this.db.prepare(`SELECT account_id FROM mailbox_threads WHERE id = ?`).get(input.seedThreadId) as
+        | { account_id: string }
+        | undefined
+    )?.account_id;
+    const workspaceId =
+      this.resolveThreadWorkspaceId(seedAccountId || "") || this.resolveDefaultWorkspaceId();
+    if (!workspaceId) {
+      return { threadIds: [] };
+    }
+    const seed = await this.getThreadCore(input.seedThreadId);
+    if (!seed) {
+      return { threadIds: [] };
+    }
+    const summary = this.getSummaryForThread(input.seedThreadId);
+    const seedSummaryText = stripMailboxSummaryHtmlArtifacts(summary?.summary || seed.snippet);
+    const seedTokens = new Set(
+      [
+        input.name,
+        input.instructions,
+        seed.subject,
+        seed.snippet,
+        seedSummaryText,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .split(/[^a-z0-9]+/i)
+        .map((token) => token.trim())
+        .filter((token) => token.length >= 3)
+        .slice(0, 120),
+    );
+    const candidateRows = this.db
+      .prepare(
+        `SELECT id, subject, snippet, last_message_at
+         FROM mailbox_threads
+         WHERE account_id = ?
+           AND id != ?
+         ORDER BY last_message_at DESC
+         LIMIT 300`,
+      )
+      .all(seed.accountId, input.seedThreadId) as Array<{
+      id: string;
+      subject: string;
+      snippet: string;
+      last_message_at: number;
+    }>;
+    const candidateList = candidateRows
+      .map((candidate) => ({
+        threadId: candidate.id,
+        subject: candidate.subject,
+        snippet: candidate.snippet,
+        score: this.scoreSavedViewCandidate(seedTokens, candidate.subject, candidate.snippet),
+        lastMessageAt: candidate.last_message_at,
+      }))
+      .sort((left, right) =>
+        right.score === left.score
+          ? right.lastMessageAt - left.lastMessageAt
+          : right.score - left.score,
+      )
+      .slice(0, 60)
+      .map((c) => ({
+        threadId: c.threadId,
+        subject: c.subject,
+        snippet: c.snippet,
+      }));
+    const result = await mailboxLlmSimilarThreadIds({
+      workspaceId,
+      seedThreadId: input.seedThreadId,
+      seedSubject: seed.subject,
+      seedSnippet: seed.snippet,
+      seedSummary: seedSummaryText,
+      viewName: input.name.trim() || "Saved view",
+      instructions: input.instructions.trim() || "Similar threads to the open conversation.",
+      candidates: candidateList,
+    });
+    const validIds = this.filterValidMailboxThreadIds(result.threadIds, seed.accountId);
+    return {
+      threadIds: validIds,
+      rationale: result.rationale,
+      error: result.error,
+    };
+  }
+
+  async createMailboxSavedView(input: {
+    name: string;
+    instructions: string;
+    seedThreadId?: string;
+    threadIds: string[];
+    showInInbox?: boolean;
+  }): Promise<MailboxSavedViewRecord> {
+    const workspaceId = this.resolveDefaultWorkspaceId();
+    if (!workspaceId) {
+      throw new Error("No workspace for saved views");
+    }
+    const name = input.name.trim();
+    const instructions = input.instructions.trim();
+    if (!name || !instructions) {
+      throw new Error("Saved view name and instructions are required");
+    }
+    const seedAccountId = input.seedThreadId?.trim()
+      ? (
+          this.db.prepare(`SELECT account_id FROM mailbox_threads WHERE id = ?`).get(input.seedThreadId.trim()) as
+            | { account_id: string }
+            | undefined
+        )?.account_id
+      : undefined;
+    const rawIds = [...input.threadIds];
+    if (input.seedThreadId?.trim()) {
+      rawIds.push(input.seedThreadId.trim());
+    }
+    const validThreadIds = this.filterValidMailboxThreadIds(rawIds, seedAccountId);
+    if (validThreadIds.length === 0) {
+      throw new Error("Saved views need at least one valid thread. Preview again before saving.");
+    }
+    const id = randomUUID();
+    const now = Date.now();
+    const showIn = input.showInInbox !== false ? 1 : 0;
+    this.db
+      .prepare(
+        `INSERT INTO mailbox_saved_views
+          (id, workspace_id, name, instructions, seed_thread_id, show_in_inbox, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        workspaceId,
+        name,
+        instructions,
+        input.seedThreadId?.trim() || null,
+        showIn,
+        now,
+        now,
+      );
+    const insertMember = this.db.prepare(
+      `INSERT OR REPLACE INTO mailbox_saved_view_threads (view_id, thread_id, score) VALUES (?, ?, ?)`,
+    );
+    for (const threadId of validThreadIds) {
+      insertMember.run(id, threadId, 1);
+    }
+    return {
+      id,
+      workspaceId,
+      name,
+      instructions,
+      seedThreadId: input.seedThreadId,
+      showInInbox: showIn === 1,
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
+
+  deleteMailboxSavedView(viewId: string): boolean {
+    const workspaceId = this.resolveDefaultWorkspaceId();
+    if (!workspaceId) return false;
+    const result = this.db
+      .prepare(`DELETE FROM mailbox_saved_views WHERE id = ? AND workspace_id = ?`)
+      .run(viewId, workspaceId);
+    return result.changes > 0;
+  }
+
+  async getMailboxQuickReplySuggestions(threadId: string): Promise<MailboxQuickReplySuggestionsResult> {
+    const detail = await this.getThreadCore(threadId);
+    if (!detail) return { suggestions: [] };
+    if (getMailboxNoReplySender(detail.messages, detail.participants)) {
+      return { suggestions: [] };
+    }
+    const workspaceId =
+      this.resolveThreadWorkspaceId(detail.accountId) || this.resolveDefaultWorkspaceId();
+    if (!workspaceId) return { suggestions: [] };
+    const summary = this.getSummaryForThread(threadId);
+    const summaryText = stripMailboxSummaryHtmlArtifacts(summary?.summary || detail.snippet);
+    const latest = detail.messages.filter((m) => m.direction === "incoming").slice(-1)[0] || detail.messages[detail.messages.length - 1];
+    const latestSnippet = latest?.snippet || latest?.body?.slice(0, 600) || detail.snippet;
+    return mailboxLlmQuickReplies({
+      workspaceId,
+      threadId,
+      subject: detail.subject,
+      summary: summaryText,
+      latestSnippet,
+    });
+  }
+
+  async createReviewScheduleForSavedView(viewId: string): Promise<MailboxAutomationRecord> {
+    const workspaceId = this.resolveDefaultWorkspaceId();
+    if (!workspaceId) {
+      throw new Error("No workspace for mailbox automation");
+    }
+    const row = this.db
+      .prepare(
+        `SELECT id, name, instructions FROM mailbox_saved_views WHERE id = ? AND workspace_id = ?`,
+      )
+      .get(viewId, workspaceId) as { id: string; name: string; instructions: string } | undefined;
+    if (!row) {
+      throw new Error("Saved view not found");
+    }
+    try {
+      return await MailboxAutomationRegistry.createSchedule({
+        workspaceId,
+        name: `Inbox view review: ${row.name}`,
+        description: row.instructions,
+        kind: "reminder",
+        schedule: { kind: "cron", expr: "0 9 * * 1", tz: Intl.DateTimeFormat().resolvedOptions().timeZone },
+        taskTitle: `Review saved inbox view: ${row.name}`,
+        taskPrompt: [
+          `Review and triage threads in the Inbox Agent saved view "${row.name}".`,
+          `View instructions: ${row.instructions}`,
+          "Open Inbox Agent, select this saved view filter, and process outstanding threads.",
+        ].join("\n"),
+        enabled: true,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.includes("Cron service") || msg.toLowerCase().includes("cron")) {
+        throw new Error(
+          "The automation scheduler is not available, so weekly reminders cannot be created. Enable automation/cron in your environment and try again.",
+        );
+      }
+      throw e;
+    }
   }
 
   private resolveFollowUpWorkspaceId(): string | null {

@@ -23,7 +23,7 @@ function makeGroup(
         laneKey: "use-1",
         toolUseId: "use-1",
         toolCallIndex: 1,
-        title: "Running web_fetch",
+        title: "Fetching a web page",
         status: "completed",
         startedAt: 1001,
       },
@@ -31,7 +31,7 @@ function makeGroup(
         laneKey: "use-2",
         toolUseId: "use-2",
         toolCallIndex: 2,
-        title: "Running web_search",
+        title: "Searching the web",
         status: "in_progress",
         startedAt: 1002,
       },
@@ -50,9 +50,9 @@ describe("ParallelGroupFeed", () => {
       }),
     );
 
-    expect(markup).toContain("Running tasks in parallel");
-    expect(markup).toContain("Running web_fetch");
-    expect(markup).toContain("Running web_search");
+    expect(markup).toContain("Running 2 tasks in parallel");
+    expect(markup).toContain("Fetching a web page");
+    expect(markup).toContain("Searching the web");
   });
 
   it("renders completed groups collapsed by default", () => {
@@ -63,7 +63,8 @@ describe("ParallelGroupFeed", () => {
           lanes: [
             {
               laneKey: "use-1",
-              title: "Running web_fetch",
+              toolName: "web_fetch",
+              title: "Fetching a web page",
               status: "completed",
               startedAt: 1001,
             },
@@ -74,7 +75,7 @@ describe("ParallelGroupFeed", () => {
       }),
     );
 
-    expect(markup).toContain("Running tasks in parallel");
-    expect(markup).not.toContain("Running web_fetch");
+    expect(markup).toContain("Fetched 1 page");
+    expect(markup).not.toContain("Fetching a web page");
   });
 });

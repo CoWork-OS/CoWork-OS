@@ -69,6 +69,34 @@ const DEFAULT_SETTINGS: TraySettings = {
   showNotifications: true,
 };
 
+/**
+ * Coerce persisted tray settings to valid booleans. Missing or invalid values
+ * (e.g. `null` from corrupted JSON) fall back to defaults so `enabled` does not
+ * silently become falsy and hide the menu bar / system tray icon.
+ */
+export function normalizeTraySettings(
+  raw: Partial<TraySettings> | null | undefined,
+): TraySettings {
+  const merged = { ...DEFAULT_SETTINGS, ...raw };
+  return {
+    enabled: typeof merged.enabled === "boolean" ? merged.enabled : DEFAULT_SETTINGS.enabled,
+    showDockIcon:
+      typeof merged.showDockIcon === "boolean"
+        ? merged.showDockIcon
+        : DEFAULT_SETTINGS.showDockIcon,
+    startMinimized:
+      typeof merged.startMinimized === "boolean"
+        ? merged.startMinimized
+        : DEFAULT_SETTINGS.startMinimized,
+    closeToTray:
+      typeof merged.closeToTray === "boolean" ? merged.closeToTray : DEFAULT_SETTINGS.closeToTray,
+    showNotifications:
+      typeof merged.showNotifications === "boolean"
+        ? merged.showNotifications
+        : DEFAULT_SETTINGS.showNotifications,
+  };
+}
+
 export class TrayManager {
   private tray: Tray | null = null;
   private mainWindow: BrowserWindow | null = null;
@@ -548,7 +576,7 @@ export class TrayManager {
       this.tray = new Tray(icon);
       this.tray.setToolTip("CoWork OS");
 
-      // Supply a live tray bounds provider so notifications always appear below the tray icon
+      // Supply tray bounds so overlay notifications resolve the correct display (multi-monitor)
       try {
         const { NotificationOverlayManager } = require("../notifications/NotificationOverlayWindow");
         const trayRef = this.tray;
@@ -1034,7 +1062,7 @@ export class TrayManager {
       try {
         const data = fs.readFileSync(this.legacySettingsPath, "utf-8");
         const parsed = JSON.parse(data);
-        const merged = { ...DEFAULT_SETTINGS, ...parsed };
+        const merged = normalizeTraySettings({ ...DEFAULT_SETTINGS, ...parsed });
 
         repository.save("tray", merged);
         console.log("[TrayManager] Settings migrated to encrypted database");
@@ -1066,7 +1094,7 @@ export class TrayManager {
         const repository = SecureSettingsRepository.getInstance();
         const stored = repository.load<TraySettings>("tray");
         if (stored) {
-          this.settings = { ...DEFAULT_SETTINGS, ...stored };
+          this.settings = normalizeTraySettings(stored);
           console.log("[TrayManager] Loaded settings from encrypted database");
           return;
         }
@@ -1076,14 +1104,17 @@ export class TrayManager {
     }
 
     // Fall back to defaults
-    this.settings = { ...DEFAULT_SETTINGS };
+    this.settings = normalizeTraySettings(null);
   }
 
   /**
    * Save settings to encrypted database
    */
   saveSettings(settings: Partial<TraySettings>): void {
-    this.settings = { ...this.settings, ...settings };
+    const patch = Object.fromEntries(
+      Object.entries(settings).filter(([, v]) => v !== undefined),
+    ) as Partial<TraySettings>;
+    this.settings = normalizeTraySettings({ ...this.settings, ...patch });
 
     try {
       if (SecureSettingsRepository.isInitialized()) {

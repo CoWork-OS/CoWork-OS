@@ -37,7 +37,7 @@ describe("ToolRegistry request_user_input", () => {
     });
   });
 
-  it("rejects request_user_input outside plan mode", async () => {
+  it("rejects request_user_input outside plan or debug mode", async () => {
     const fakeThis = {
       taskId: "task-2",
       daemon: {
@@ -48,7 +48,26 @@ describe("ToolRegistry request_user_input", () => {
 
     await expect(
       (ToolRegistry as Any).prototype.requestUserInput.call(fakeThis, { questions: validQuestions }),
-    ).rejects.toThrow(/only available in plan mode/i);
+    ).rejects.toThrow(/only available in plan or debug mode/i);
+  });
+
+  it("accepts valid payload in debug mode", async () => {
+    const daemon = {
+      getTaskById: vi.fn().mockResolvedValue({ agentConfig: { executionMode: "debug" } }),
+      requestUserInput: vi.fn().mockResolvedValue({
+        requestId: "req-dbg",
+        status: "submitted",
+        answers: { integration_surface: { optionLabel: "Desktop + API (Recommended)" } },
+      }),
+    };
+    const fakeThis = { daemon, taskId: "task-dbg" } as Any;
+
+    const result = await (ToolRegistry as Any).prototype.requestUserInput.call(fakeThis, {
+      questions: validQuestions,
+    });
+
+    expect(daemon.requestUserInput).toHaveBeenCalledWith("task-dbg", { questions: validQuestions });
+    expect(result.status).toBe("submitted");
   });
 
   it("normalizes imperfect payloads into valid request_user_input schema", async () => {

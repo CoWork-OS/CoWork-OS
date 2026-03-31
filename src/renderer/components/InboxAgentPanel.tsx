@@ -30,6 +30,8 @@ import {
   MailboxMissionControlHandoffPreview,
   MailboxMissionControlHandoffRecord,
   MailboxPriorityBand,
+  MailboxSavedViewRecord,
+  MailboxSnippetRecord,
   MailboxSyncStatus,
   MailboxThreadDetail,
   MailboxThreadListItem,
@@ -497,9 +499,15 @@ function IconBtn({
   return button;
 }
 
+export type InboxAgentPanelProps = {
+  /** Open Mission Control focused on a company issue (e.g. from an inbox handoff). */
+  onOpenMissionControlIssue?: (companyId: string, issueId: string) => void;
+};
+
 // ─── main component ───────────────────────────────────────────────────────────
 
-export function InboxAgentPanel() {
+export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
+  const { onOpenMissionControlIssue } = props;
   const [status, setStatus] = useState<MailboxSyncStatus | null>(null);
   const [digest, setDigest] = useState<MailboxDigestSnapshot | null>(null);
   const [threads, setThreads] = useState<MailboxThreadListItem[]>([]);
@@ -545,6 +553,34 @@ export function InboxAgentPanel() {
     typeof window !== "undefined" &&
       window.localStorage.getItem(MAILBOX_SERVER_ACTION_WARNING_KEY) === "1",
   );
+
+  const [savedViews, setSavedViews] = useState<MailboxSavedViewRecord[]>([]);
+  const [selectedSavedViewId, setSelectedSavedViewId] = useState<string | null>(null);
+  const [snippets, setSnippets] = useState<MailboxSnippetRecord[]>([]);
+  const [quickReplySuggestions, setQuickReplySuggestions] = useState<string[]>([]);
+  const [labelSimilarOpen, setLabelSimilarOpen] = useState(false);
+  const [labelSimilarName, setLabelSimilarName] = useState("");
+  const [labelSimilarInstructions, setLabelSimilarInstructions] = useState("");
+  const [labelSimilarPreviewIds, setLabelSimilarPreviewIds] = useState<string[]>([]);
+  const [labelSimilarRationale, setLabelSimilarRationale] = useState<string | null>(null);
+  const [labelSimilarError, setLabelSimilarError] = useState<string | null>(null);
+  const [labelSimilarShowInInbox, setLabelSimilarShowInInbox] = useState(true);
+  const [labelSimilarDidPreview, setLabelSimilarDidPreview] = useState(false);
+  const [labelSimilarBusy, setLabelSimilarBusy] = useState(false);
+  const [quickReplyError, setQuickReplyError] = useState<string | null>(null);
+  const [quickReplySettled, setQuickReplySettled] = useState(false);
+  const [snippetModalOpen, setSnippetModalOpen] = useState(false);
+  const [snippetShortcutDraft, setSnippetShortcutDraft] = useState("");
+  const [snippetBodyDraft, setSnippetBodyDraft] = useState("");
+
+  const loadSavedViewsAndSnippets = async () => {
+    const [views, snip] = await Promise.all([
+      window.electronAPI.listMailboxSavedViews().catch(() => []),
+      window.electronAPI.listMailboxSnippets().catch(() => []),
+    ]);
+    setSavedViews(views);
+    setSnippets(snip);
+  };
 
   const loadStatus = async () => {
     const next = await window.electronAPI.getMailboxSyncStatus();
@@ -593,6 +629,7 @@ export function InboxAgentPanel() {
       query: opts?.query ?? query,
       category: (opts?.category as Any) ?? category,
       mailboxView: nextMailboxView,
+      savedViewId: selectedSavedViewId || undefined,
       unreadOnly: nextFocus === "unread" ? true : undefined,
       needsReply: nextFocus === "needsReply" ? true : undefined,
       hasSuggestedProposal: nextFocus === "queue" ? true : undefined,
@@ -781,6 +818,7 @@ export function InboxAgentPanel() {
         const nextStatus = await window.electronAPI.getMailboxSyncStatus();
         setStatus(nextStatus);
         await loadDigest();
+        await loadSavedViewsAndSnippets();
         await loadThreads();
         await loadAutomations();
         const shouldAutoSync =
@@ -813,6 +851,34 @@ export function InboxAgentPanel() {
   }, [selectedThreadId]);
 
   useEffect(() => {
+    if (!selectedThread?.id) {
+      setQuickReplySuggestions([]);
+      setQuickReplyError(null);
+      setQuickReplySettled(false);
+      return;
+    }
+    let cancelled = false;
+    setQuickReplySettled(false);
+    setQuickReplyError(null);
+    void window.electronAPI.getMailboxQuickReplySuggestions(selectedThread.id)
+      .then((res) => {
+        if (cancelled) return;
+        setQuickReplySuggestions(res.suggestions);
+        setQuickReplyError(res.error || null);
+        setQuickReplySettled(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setQuickReplySuggestions([]);
+        setQuickReplyError("Could not load quick reply suggestions right now.");
+        setQuickReplySettled(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedThread?.id]);
+
+  useEffect(() => {
     const unsubscribe = window.electronAPI.onMailboxEvent((event) => {
       if (event.threadId && event.threadId === selectedThreadId) {
         void reloadAll(event.threadId);
@@ -823,7 +889,7 @@ export function InboxAgentPanel() {
       }
     });
     return unsubscribe;
-  }, [selectedThreadId, query, category, mailboxView, focusFilter, threadSortOrder, selectedAccountId]);
+  }, [selectedThreadId, query, category, mailboxView, focusFilter, threadSortOrder, selectedAccountId, selectedSavedViewId]);
 
   useEffect(() => {
     if (!handoffPanelOpen || !handoffCompanyId) return;
@@ -897,6 +963,21 @@ export function InboxAgentPanel() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const copyTextToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      setError("Clipboard access failed. Paste from the composer or allow clipboard permissions in your system settings.");
+    }
+  };
+
+  const resetLabelSimilarPreview = () => {
+    setLabelSimilarPreviewIds([]);
+    setLabelSimilarRationale(null);
+    setLabelSimilarError(null);
+    setLabelSimilarDidPreview(false);
   };
 
   const getThreadDetailForDraft = useCallback(
@@ -1692,6 +1773,7 @@ export function InboxAgentPanel() {
                     aria-selected={active}
                     onClick={() => {
                       setMailboxView(view.id);
+                      setSelectedSavedViewId(null);
                       void loadThreads({ mailboxView: view.id });
                     }}
                     style={{
@@ -1714,6 +1796,50 @@ export function InboxAgentPanel() {
                   </button>
                 );
               })}
+            </div>
+
+            <div style={{ width: "100%" }}>
+              <label
+                style={{
+                  fontSize: "0.68rem",
+                  color: "var(--color-text-muted)",
+                  display: "block",
+                  marginBottom: "4px",
+                }}
+              >
+                Saved view
+              </label>
+              <select
+                aria-label="Saved inbox view"
+                value={selectedSavedViewId || ""}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  setSelectedSavedViewId(next || null);
+                  void loadThreads();
+                }}
+                style={{
+                  width: "100%",
+                  margin: 0,
+                  padding: "7px 10px",
+                  borderRadius: "10px",
+                  border: "1px solid var(--color-border-subtle)",
+                  background: "var(--color-bg-secondary)",
+                  fontSize: "0.72rem",
+                  fontWeight: 500,
+                  fontFamily: "var(--font-ui)",
+                  color: "var(--color-text-primary)",
+                  cursor: "pointer",
+                  boxSizing: "border-box",
+                  lineHeight: 1.25,
+                }}
+              >
+                <option value="">None</option>
+                {savedViews.map((view) => (
+                  <option key={view.id} value={view.id}>
+                    {view.name}
+                  </option>
+                ))}
+              </select>
             </div>
 
             {mailboxAccounts.length > 1 && (
@@ -3171,6 +3297,77 @@ export function InboxAgentPanel() {
             </div>
           )}
 
+          {selectedThread && (quickReplySuggestions.length > 0 || quickReplyError || quickReplySettled) && (
+            <div style={{ marginBottom: "14px" }}>
+              <SectionLabel>Quick replies</SectionLabel>
+              {quickReplyError && (
+                <div
+                  style={{
+                    marginTop: "6px",
+                    fontSize: "0.72rem",
+                    color: "#b45309",
+                    lineHeight: 1.45,
+                  }}
+                >
+                  {quickReplyError}
+                </div>
+              )}
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "6px" }}>
+                {quickReplySuggestions.map((text, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => {
+                      if (selectedThreadReplyTargets.length > 0) {
+                        setReplyMessage(text);
+                        openReplyComposer(selectedThreadReplyTargets[0].handleId);
+                      } else {
+                        void copyTextToClipboard(text);
+                      }
+                    }}
+                    style={{
+                      textAlign: "left",
+                      maxWidth: "100%",
+                      padding: "8px 10px",
+                      borderRadius: "var(--radius-sm, 8px)",
+                      border: "1px solid var(--color-border-subtle)",
+                      background: "var(--color-bg-secondary)",
+                      color: "var(--color-text-primary)",
+                      fontSize: "0.74rem",
+                      lineHeight: 1.4,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {text.length > 120 ? `${text.slice(0, 120)}…` : text}
+                  </button>
+                ))}
+              </div>
+              {quickReplySettled && !quickReplyError && quickReplySuggestions.length === 0 && (
+                <div
+                  style={{
+                    marginTop: "6px",
+                    fontSize: "0.72rem",
+                    color: "var(--color-text-muted)",
+                    lineHeight: 1.45,
+                  }}
+                >
+                  No quick reply suggestions for this thread.
+                </div>
+              )}
+              {!selectedThreadReplyTargets.length && quickReplySuggestions.length > 0 && (
+                <div
+                  style={{
+                    marginTop: "6px",
+                    fontSize: "0.7rem",
+                    color: "var(--color-text-muted)",
+                  }}
+                >
+                  Tip: click to copy to clipboard, then paste into your mail client or a generated draft.
+                </div>
+              )}
+            </div>
+          )}
+
           {selectedThreadReplyTargets.length ? (
             <div style={{ marginBottom: "16px" }}>
               <SectionLabel>Reply via</SectionLabel>
@@ -3459,6 +3656,18 @@ export function InboxAgentPanel() {
                           {record.companyName} · {record.operatorDisplayName}
                           {record.latestOutcome ? ` · ${record.latestOutcome}` : ""}
                         </div>
+                        {onOpenMissionControlIssue && (
+                          <div style={{ marginTop: "8px" }}>
+                            <button
+                              type="button"
+                              className="mc-v2-icon-btn"
+                              onClick={() => onOpenMissionControlIssue(record.companyId, record.issueId)}
+                              style={{ fontSize: "0.72rem" }}
+                            >
+                              Open in Mission Control
+                            </button>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -3483,6 +3692,89 @@ export function InboxAgentPanel() {
                   label="Remind later"
                   disabled={busy}
                 />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", marginBottom: "10px" }}>
+                <ActionBtn
+                  onClick={() => {
+                    if (!selectedThread) return;
+                    setLabelSimilarName(selectedThread.subject?.slice(0, 120) || "My saved view");
+                    setLabelSimilarInstructions(
+                      "Threads similar to this conversation (topic, sender type, or action requested).",
+                    );
+                    setLabelSimilarShowInInbox(true);
+                    resetLabelSimilarPreview();
+                    setLabelSimilarOpen(true);
+                  }}
+                  icon={<MailSearch size={13} />}
+                  label="Label similar…"
+                  disabled={busy || !selectedThread}
+                />
+                <ActionBtn
+                  onClick={() =>
+                    runAction(async () => {
+                      if (!selectedSavedViewId) {
+                        setError("Select a saved view in the sidebar first.");
+                        return;
+                      }
+                      await window.electronAPI.createMailboxSavedViewReviewSchedule(selectedSavedViewId);
+                      await loadAutomations(selectedThread?.id);
+                    })
+                  }
+                  icon={<Calendar size={13} />}
+                  label="Weekly view review"
+                  disabled={busy || !selectedSavedViewId}
+                />
+              </div>
+              <div style={{ marginBottom: "10px" }}>
+                <SectionLabel>Snippets</SectionLabel>
+                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+                  <select
+                    aria-label="Insert snippet"
+                    defaultValue=""
+                    onChange={(event) => {
+                      const id = event.target.value;
+                      event.target.value = "";
+                      if (!id) return;
+                      const sn = snippets.find((entry) => entry.id === id);
+                      if (!sn) return;
+                      if (selectedThreadReplyTargets.length > 0) {
+                        openReplyComposer(selectedThreadReplyTargets[0].handleId);
+                        setReplyMessage((prev) => (prev.trim() ? `${prev}\n\n${sn.body}` : sn.body));
+                      } else {
+                        void copyTextToClipboard(sn.body);
+                      }
+                    }}
+                    style={{
+                      flex: 1,
+                      minWidth: "140px",
+                      padding: "6px 8px",
+                      borderRadius: "8px",
+                      border: "1px solid var(--color-border-subtle)",
+                      background: "var(--color-bg-input)",
+                      color: "var(--color-text-primary)",
+                      fontSize: "0.72rem",
+                    }}
+                  >
+                    <option value="">Insert snippet…</option>
+                    {snippets.map((sn) => (
+                      <option key={sn.id} value={sn.id}>
+                        {sn.shortcut}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="mc-v2-icon-btn"
+                    onClick={() => {
+                      setSnippetShortcutDraft("");
+                      setSnippetBodyDraft("");
+                      setSnippetModalOpen(true);
+                    }}
+                    style={{ fontSize: "0.72rem" }}
+                  >
+                    New snippet
+                  </button>
+                </div>
               </div>
               <div
                 style={{
@@ -4417,6 +4709,282 @@ export function InboxAgentPanel() {
             )}
         </div>
       </section>
+
+      {labelSimilarOpen && selectedThread && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.5)",
+            zIndex: 1200,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "20px",
+          }}
+          onClick={() => {
+            if (!labelSimilarBusy) setLabelSimilarOpen(false);
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="mailbox-label-similar-title"
+            onClick={(event) => event.stopPropagation()}
+            style={{
+              maxWidth: 520,
+              width: "100%",
+              maxHeight: "90vh",
+              overflow: "auto",
+              padding: "20px",
+              borderRadius: "14px",
+              background: "var(--color-bg-elevated)",
+              border: "1px solid var(--color-border-subtle)",
+            }}
+          >
+            <h3 id="mailbox-label-similar-title" style={{ margin: "0 0 12px", fontSize: "1rem" }}>
+              Saved view (similar threads)
+            </h3>
+            <label style={{ display: "grid", gap: 4, marginBottom: 10 }}>
+              <span style={{ fontSize: "0.72rem", color: "var(--color-text-muted)" }}>Name</span>
+              <input
+                value={labelSimilarName}
+                onChange={(event) => {
+                  setLabelSimilarName(event.target.value);
+                  resetLabelSimilarPreview();
+                }}
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: "8px",
+                  border: "1px solid var(--color-border)",
+                  background: "var(--color-bg-input)",
+                  color: "var(--color-text-primary)",
+                  fontSize: "0.8rem",
+                }}
+              />
+            </label>
+            <label style={{ display: "grid", gap: 4, marginBottom: 12 }}>
+              <span style={{ fontSize: "0.72rem", color: "var(--color-text-muted)" }}>Instructions</span>
+              <textarea
+                value={labelSimilarInstructions}
+                onChange={(event) => {
+                  setLabelSimilarInstructions(event.target.value);
+                  resetLabelSimilarPreview();
+                }}
+                rows={3}
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: "8px",
+                  border: "1px solid var(--color-border)",
+                  background: "var(--color-bg-input)",
+                  color: "var(--color-text-primary)",
+                  fontSize: "0.8rem",
+                  resize: "vertical",
+                }}
+              />
+            </label>
+            <label
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                marginBottom: 12,
+                fontSize: "0.78rem",
+                color: "var(--color-text-secondary)",
+                cursor: "pointer",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={labelSimilarShowInInbox}
+                onChange={(event) => setLabelSimilarShowInInbox(event.target.checked)}
+              />
+              Show matching threads in the main inbox list
+            </label>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+              <button
+                type="button"
+                className="mc-v2-icon-btn"
+                disabled={labelSimilarBusy}
+                onClick={() =>
+                  runAction(async () => {
+                    if (!selectedThread) return;
+                    setLabelSimilarBusy(true);
+                    setLabelSimilarError(null);
+                    try {
+                      const r = await window.electronAPI.previewMailboxSavedViewSimilar({
+                        seedThreadId: selectedThread.id,
+                        name: labelSimilarName,
+                        instructions: labelSimilarInstructions,
+                      });
+                      setLabelSimilarPreviewIds(r.threadIds);
+                      setLabelSimilarRationale(r.rationale || null);
+                      setLabelSimilarError(r.error || null);
+                      setLabelSimilarDidPreview(true);
+                    } finally {
+                      setLabelSimilarBusy(false);
+                    }
+                  })
+                }
+              >
+                Preview matches
+              </button>
+              <button
+                type="button"
+                className="mc-v2-icon-btn"
+                disabled={labelSimilarBusy || !labelSimilarPreviewIds.length}
+                onClick={() =>
+                  runAction(async () => {
+                    if (!selectedThread) return;
+                    setLabelSimilarBusy(true);
+                    try {
+                      await window.electronAPI.createMailboxSavedView({
+                        name: labelSimilarName,
+                        instructions: labelSimilarInstructions,
+                        seedThreadId: selectedThread.id,
+                        threadIds: labelSimilarPreviewIds,
+                        showInInbox: labelSimilarShowInInbox,
+                      });
+                      await loadSavedViewsAndSnippets();
+                      setLabelSimilarOpen(false);
+                    } finally {
+                      setLabelSimilarBusy(false);
+                    }
+                  })
+                }
+              >
+                Save view
+              </button>
+              <button
+                type="button"
+                className="mc-v2-icon-btn"
+                disabled={labelSimilarBusy}
+                onClick={() => setLabelSimilarOpen(false)}
+              >
+                Cancel
+              </button>
+            </div>
+            {labelSimilarError && (
+              <p style={{ fontSize: "0.74rem", color: "#b45309", lineHeight: 1.45, marginBottom: 8 }}>
+                {labelSimilarError}
+              </p>
+            )}
+            {labelSimilarRationale && (
+              <p style={{ fontSize: "0.74rem", color: "var(--color-text-muted)", lineHeight: 1.45 }}>
+                {labelSimilarRationale}
+              </p>
+            )}
+            {labelSimilarPreviewIds.length > 0 && (
+              <p style={{ fontSize: "0.72rem", color: "var(--color-text-secondary)" }}>
+                {labelSimilarPreviewIds.length} thread{labelSimilarPreviewIds.length === 1 ? "" : "s"} will be linked
+                to this view.
+              </p>
+            )}
+            {!labelSimilarBusy && !labelSimilarError && !labelSimilarDidPreview && (
+              <p style={{ fontSize: "0.72rem", color: "var(--color-text-muted)", lineHeight: 1.45 }}>
+                Run Preview matches to find similar threads from your current mailbox (recent slice). If none appear,
+                try a clearer name and instructions.
+              </p>
+            )}
+            {!labelSimilarBusy &&
+              !labelSimilarError &&
+              labelSimilarDidPreview &&
+              labelSimilarPreviewIds.length === 0 && (
+              <p style={{ fontSize: "0.72rem", color: "var(--color-text-muted)", lineHeight: 1.45 }}>
+                No similar threads in the current preview slice. Adjust instructions or sync more mail and try again.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {snippetModalOpen && (
+        <div
+          role="presentation"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 1200,
+            background: "rgba(0,0,0,0.45)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "16px",
+          }}
+          onMouseDown={() => setSnippetModalOpen(false)}
+        >
+          <div
+            role="dialog"
+            aria-labelledby="mailbox-snippet-modal-title"
+            onMouseDown={(event) => event.stopPropagation()}
+            style={{
+              width: "100%",
+              maxWidth: "420px",
+              padding: "20px",
+              borderRadius: "14px",
+              background: "var(--color-bg-elevated)",
+              border: "1px solid var(--color-border-subtle)",
+            }}
+          >
+            <h3 id="mailbox-snippet-modal-title" style={{ margin: "0 0 12px", fontSize: "1rem" }}>
+              New snippet
+            </h3>
+            <label style={{ display: "grid", gap: 4, marginBottom: 10 }}>
+              <span style={{ fontSize: "0.72rem", color: "var(--color-text-muted)" }}>Label (menu)</span>
+              <input
+                value={snippetShortcutDraft}
+                onChange={(event) => setSnippetShortcutDraft(event.target.value)}
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: "8px",
+                  border: "1px solid var(--color-border)",
+                  background: "var(--color-bg-input)",
+                  color: "var(--color-text-primary)",
+                  fontSize: "0.8rem",
+                }}
+              />
+            </label>
+            <label style={{ display: "grid", gap: 4, marginBottom: 12 }}>
+              <span style={{ fontSize: "0.72rem", color: "var(--color-text-muted)" }}>Body</span>
+              <textarea
+                value={snippetBodyDraft}
+                onChange={(event) => setSnippetBodyDraft(event.target.value)}
+                rows={5}
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: "8px",
+                  border: "1px solid var(--color-border)",
+                  background: "var(--color-bg-input)",
+                  color: "var(--color-text-primary)",
+                  fontSize: "0.8rem",
+                  resize: "vertical",
+                }}
+              />
+            </label>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button type="button" className="mc-v2-icon-btn" onClick={() => setSnippetModalOpen(false)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="mc-v2-icon-btn"
+                onClick={() => {
+                  const shortcut = snippetShortcutDraft.trim();
+                  const body = snippetBodyDraft.trim();
+                  if (!shortcut || !body) return;
+                  void runAction(async () => {
+                    await window.electronAPI.upsertMailboxSnippet({ shortcut, body });
+                    await loadSavedViewsAndSnippets();
+                    setSnippetModalOpen(false);
+                  });
+                }}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <style>{`
         @keyframes spin {

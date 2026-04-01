@@ -48,14 +48,14 @@
 - **137 built-in skills** — Documents, code review, web search, image generation, cloud integrations, game development, mobile development, financial analysis, infrastructure-as-code, and more.
 - **Profiles & portability** — run separate CoWork profiles with isolated app data, export/import complete profile bundles, and keep credentials, channels, skills, and sessions separated by profile.
 - **Active Context sidebar** — Always-visible panel showing 44 available MCP connectors with branded Lucide icons and enabled skills, auto-refreshed every 30 seconds.
-- **Agent teams** — Multi-agent collaboration with shared checklists, collaborative mode, multi-LLM synthesis, persistent teams, and ACP-targeted delegation for local or remote specialists.
-- **External agent orchestration** — Discover ACP agents, delegate work to A2A-compatible remote endpoints, and keep remote calls under the same approval and policy model as other governed actions, with persisted ACP tasks, restart-safe resume, and remote cancel support.
+- **Agent teams** — Multi-agent collaboration with shared checklists, graph-backed runs, collaborative mode, multi-LLM synthesis, persistent teams, and ACP-targeted delegation for local or remote specialists.
+- **External agent orchestration** — Discover ACP agents, delegate work to A2A-compatible remote endpoints, and keep remote calls under the same approval and policy model as other governed actions, with persisted ACP tasks, restart-safe resume, remote cancel support, and the shared orchestration graph as the runtime backbone.
 - **Think With Me mode** — Socratic brainstorming that helps you clarify thinking without executing actions.
 - **Chat mode** — Direct LLM chat with no tools, no step timeline, same-session follow-ups, and chat-only streaming for supported providers.
 - **Build Mode** — Go from idea to working prototype with a phased canvas workflow (Concept → Plan → Scaffold → Iterate) and named checkpoints.
 - **AI Playbook** — Auto-captures what worked from successful tasks and injects relevant patterns into future prompts. Repeated patterns auto-promote to governed, one-click-approvable skills via the Playbook-to-Skill pipeline.
 - **Evolving Intelligence** — Unified Memory Synthesizer merges all 6 memory subsystems into a single coherent context block. Adaptive Style Engine learns your communication preferences from message patterns and feedback. Evolution Metrics dashboard quantifies improvement over time (correction rate, knowledge growth, style alignment).
-- **Operator Runtime Visibility** — Task completion now shows what Cowork learned, unified recall spans tasks/messages/files, persistent shell sessions preserve operator state, and model routing/fallback is visible in the UI and Mission Control.
+- **Operator Runtime Visibility** — Task completion now shows what Cowork learned, semantic batch labels and follow-up completions stay visible, unified recall spans tasks/messages/files, persistent shell sessions preserve operator state, and model routing/fallback is visible in the UI and Mission Control.
 - **Configurable fallback chains** — LLM and web-search providers can run in an explicit ordered fallback chain, including Exa for search and provider/model-level failover visibility in the UI.
 - **Usage Insights** — Dashboard showing task stats, cost/token tracking by model, activity heatmaps, top skills, per-pack analytics, per-persona success/retry metrics, and task-result satisfaction signals.
 - **ChatGPT History Import** — Import your full ChatGPT conversation history. CoWork OS instantly knows your preferences, past projects, and context — no cold start. All data stays encrypted on your machine and never leaves it.
@@ -136,7 +136,7 @@ See the [Development Guide](docs/development.md) for prerequisites and details.
 
 ### Agent Runtime
 
-Task-based execution with dynamic re-planning, five runtime modes (Chat, Execute, Plan, Analyze, Verified) plus orchestration toggles (Autonomous, Collaborative, Multi-LLM, Think With Me), optional workflow-pipeline execution with per-phase model routing, agent teams with persistence, agent comparison, git worktree isolation, AI playbook, and performance reviews. [Learn more](docs/features.md#agent-capabilities)
+Task-based execution with dynamic re-planning, five runtime modes (Chat, Execute, Plan, Analyze, Verified) plus orchestration toggles (Autonomous, Collaborative, Multi-LLM, Think With Me), a shared turn kernel, metadata-driven tool scheduling, graph-backed delegation, typed worker roles, optional workflow-pipeline execution with per-phase model routing, agent teams with persistence, agent comparison, git worktree isolation, AI playbook, and performance reviews. [Learn more](docs/features.md#agent-capabilities)
 
 Operator Runtime Visibility makes the runtime's learning and routing visible: task detail surfaces now show the learning progression, unified recall spans tasks/messages/files/workspace notes/memory/KG, shell sessions preserve operator state, and live routing/fallback events are surfaced in Mission Control and the task UI. [Learn more](docs/operator-runtime-visibility.md)
 
@@ -151,13 +151,14 @@ Completion state and file availability are now explicit:
 - **Unseen-output badge**: if completion happens in another task/view, the collapsed right-panel toggle shows a numeric badge until you open Files
 - **Filename-first rows with clear location context**: Files rows stay filename-only, with output folder context shown separately (or **Workspace root**)
 - **Artifact parity**: artifact-only outputs are treated the same as normal file outputs in completion toasts, timeline details, and Files panel
+- **Semantic completion labels**: completed tool batches and verifier verdicts now feed the richer completion text shown in timelines, feed relays, and export surfaces
 
 ### Guided Input & Runtime Recovery
 
 Long-running tasks now have clearer operator handoffs and stronger recovery defaults:
 
 - **Structured input cards**: plan-mode tasks can pause with 1-3 short multiple-choice prompts, with answers captured inline in the desktop UI or via the Control Plane web dashboard
-- **Adaptive turn recovery**: execute-mode tasks reserve room for a final answer, soft-stop exhausted follow-up windows, and make a bounded recovery attempt before triggering a safety stop
+- **Adaptive turn recovery**: execute-mode tasks reserve room for a final answer, soft-stop exhausted follow-up windows, make a bounded recovery attempt before triggering a safety stop, and keep follow-up completion visible when tasks resume after the main step loop
 - **Context overflow retry**: context-capacity failures trigger compaction and retry instead of immediate hard failure when the model context window is exceeded
 - **Path repair**: `/workspace/...` aliases and drifted relative paths can be normalized back into the active workspace or pinned task root, with strict-fail policies available when you want hard enforcement
 - **Parallel timeline lanes**: read-only tool batches render as grouped timeline rows so the UI stays readable even when searches/fetches run concurrently

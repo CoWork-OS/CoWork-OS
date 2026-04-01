@@ -47,6 +47,8 @@ features:
     details: Direct LLM chat with no tools, same-session follow-ups, and chat-only streaming for supported providers.
   - title: Runtime Visibility
     details: Visible learning progression after each task, unified recall across tasks/messages/files, persistent shell sessions, and live provider routing/fallback status.
+  - title: Runtime Orchestration
+    details: Shared turn kernel, metadata-driven tool scheduler, graph-backed delegation, typed worker roles, and semantic batch summaries keep execution, verification, and follow-up work coherent.
   - title: Latest Release 0.5.19
     details: App profiles, Feishu/Lark and WeCom, gateway upgrades, Exa search, LLM/search fallbacks, external skill dirs, ACP persistence and remote trust, computer use and Usage Insights updates, and 4,500+ automated tests.
   - title: Inbox Agent

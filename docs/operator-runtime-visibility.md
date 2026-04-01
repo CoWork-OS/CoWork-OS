@@ -13,6 +13,7 @@ Every task completion now emits a standardized learning event that can show:
 - skill proposal created, approved, rejected, or pending review
 - evidence links behind each step
 - next action when human review is needed
+- semantic tool-batch labels and verifier verdict/report fields when the task completed through the delegated runtime
 
 The task detail panel in Mission Control is the primary surface for this progression. The same event stream also feeds activity feeds and task history so learning is visible outside the task panel.
 
@@ -50,6 +51,7 @@ The task UI now exposes live provider/model state so users can see:
 - routing reason
 - fallback chain
 - whether a retry or fallback occurred
+- follow-up trigger messages and summary-mode completion relays for delegated or orphaned follow-up work
 
 Automatic routing remains automatic, but it is now observable by default. Manual overrides and multi-LLM judge flows are still supported.
 

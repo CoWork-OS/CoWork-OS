@@ -12,7 +12,7 @@ We respect OpenClaw and its community. This is a fit-based comparison, not an at
 ## Quick Positioning
 
 - OpenClaw is strong for rapid experimentation and operator-driven workflows.
-- CoWork OS is strong for governed daily operations with local-first security controls.
+- CoWork OS is strong for governed daily operations with local-first security controls and now runs delegated work through a shared turn kernel, metadata-driven tool scheduler, graph-backed orchestration, typed worker roles, and semantic completion summaries.
 
 ## OpenClaw vs CoWork OS (Best-Fit Lens)
 

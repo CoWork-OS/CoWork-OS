@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Shared turn/runtime kernel**: task steps, follow-ups, subagents, and verification now run through a canonical `TurnKernel` instead of duplicated loop bodies.
+- **Metadata-driven tool scheduling**: concurrency-safe reads batch together automatically, scoped writes serialize, and post-batch result ordering stays stable through a single `ToolScheduler`.
+- **Graph-backed delegation**: spawned agents, collaborative runs, workflow phases, and ACP task delegation now resolve through a normalized orchestration graph engine.
+- **Typed worker roles**: built-in `researcher`, `implementer`, `verifier`, and `synthesizer` worker roles drive delegation, prompts, and hard tool scopes.
+- **Semantic tool summaries**: completed tool batches now carry concise semantic labels for timeline rows and completion relays.
+
+### Changed
+- **Completion projection**: task completion relays now compose from `resultSummary`, semantic batch labels, and verifier verdict/report fields.
+- **Follow-up visibility**: follow-up completion events now preserve the triggering user text so the timeline can surface orphaned follow-ups explicitly.
+- **Canvas / visual refinement UX**: screenshot-heavy refinement loops render more compactly in summary mode to keep the feed readable.
+
+### Fixed
+- **Stale completion state**: follow-up completion now persists terminal task state together with the completion payload, preventing sidebar/task-detail divergence after a task finishes.
+- **Hidden follow-up triggers**: session follow-up messages now remain visible in the timeline rather than collapsing behind later action blocks.
+
 ## [0.5.19] - 2026-03-30
 
 ### Added

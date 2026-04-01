@@ -3,6 +3,8 @@
 ## Goal
 Define a first-class Tribe Lead + Members model on top of existing CoWork task/agent primitives.
 
+> Current state: team runs are dispatched through the shared orchestration graph engine. This document describes the team contract and projection surfaces, not a standalone execution runtime.
+
 ## Scope
 - Tribe definition and membership
 - Tribe run lifecycle
@@ -180,7 +182,7 @@ interface AgentTeamItem {
 
 ## Execution Rules
 - Team lead creates/owns the run.
-- Team items can be assigned to members; execution uses existing child-task spawn path.
+- Team items can be assigned to members; execution uses the graph-backed child-task spawn path.
 - Child task completion writes `resultSummary` back to both:
   - `tasks.result_summary`
   - `agent_team_items.result_summary` (if linked by `source_task_id`)
@@ -189,6 +191,7 @@ interface AgentTeamItem {
   - `agent_teams.default_model_preference` -> `AgentConfig.modelKey` (e.g., "cheaper" -> `haiku-4-5`)
   - `agent_teams.default_personality` -> `AgentConfig.personalityId`
 - Team-run spawned child tasks set `AgentConfig.bypassQueue=false` so they respect the global task queue concurrency limit.
+- Team runs now surface worker role intent, semantic completion labels, and graph node state through the same delegated-work timeline used elsewhere in the app.
 
 ## Events
 

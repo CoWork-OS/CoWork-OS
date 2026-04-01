@@ -25,7 +25,7 @@ Compared features:
 High level:
 
 - **OpenClaw** appears stronger on plain-markdown workspace memory, public skill registry/discovery, explicit session-history tooling, and cache-stable prompt design.
-- **CoWork OS** appears stronger on structured memory architecture, self-improvement loops, approval-gated skill creation, and built-in governance/security controls.
+- **CoWork OS** appears stronger on structured memory architecture, self-improvement loops, approval-gated skill creation, built-in governance/security controls, and now a shared turn kernel / tool scheduler / orchestration graph stack for delegated work.
 - Some items in the screenshot are not first-class product terms in either repo, so a few rows are marked **Partial** or **Unclear**.
 
 ## Comparison Table

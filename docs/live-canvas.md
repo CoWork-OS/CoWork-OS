@@ -80,6 +80,7 @@ The export menu (E key or export button) provides three options:
 - **Save as PNG**: Download the snapshot with an auto-generated filename
 - **Error details**: When errors occur, see specific details and a "Try Again" button
 - **Memory efficient**: Previous images are cleared before loading new ones to reduce memory usage
+- **Summary-mode friendliness**: repeated screenshot updates from visual refinement loops are collapsed more compactly in task summaries so the feed stays readable while the canvas is iterating
 
 The in-app preview allows you to interact with canvas content directly without switching windows. Use interactive mode (default) for full browser-like interaction, or switch to snapshot mode when you just want to monitor changes.
 

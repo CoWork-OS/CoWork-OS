@@ -40,10 +40,12 @@ CoWork OS is a **security-first personal AI assistant platform** with multi-chan
 
 #### Agent System
 - [x] AgentDaemon - Main orchestrator with worktree isolation and collaborative mode
-- [x] TaskExecutor - Plan-execute-observe loop (modular architecture with dedicated utility modules)
+- [x] TaskExecutor - Shared turn kernel, metadata-driven tool scheduler, and delegated-work orchestration
 - [x] ExecutorEventEmitter - Typed event system for executor lifecycle
 - [x] LifecycleMutex - Concurrency control for executor operations
-- [x] Tool Registry - Manages all available tools
+- [x] Tool Registry - Manages all available tools and scheduler metadata
+- [x] Orchestration graph engine - Normalized delegation runs for spawn_agent, workflow phases, teams, and ACP tasks
+- [x] Worker roles - researcher, implementer, verifier, and synthesizer with hard tool scopes
 - [x] Permission system with approval flow
 - [x] Context Manager - Conversation context handling
 - [x] Capability Matcher - Auto-select agents based on task requirements
@@ -308,11 +310,11 @@ cowork-os/
    |
 3. AgentDaemon starts TaskExecutor
    |
-4. TaskExecutor calls LLM (any configured provider) to create plan
+4. TaskExecutor enters the shared TurnKernel and requests the next model turn
    |
 5. For each plan step:
    - LLM decides which tools to use
-   - TaskExecutor calls tools via ToolRegistry
+   - TaskExecutor routes the batch through ToolScheduler and ToolRegistry
    - Tools perform operations (with permission checks)
    - Results sent back to LLM
    - Events logged and streamed to UI
@@ -325,7 +327,7 @@ cowork-os/
    |
 7. Task completes
    - Status updated to "completed"
-   - All events logged in database
+   - All events and semantic completion summaries logged in database
    - Artifacts tracked
 ```
 

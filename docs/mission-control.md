@@ -121,6 +121,7 @@ Click any task card to see its full details:
 - **Task brief**: Full prompt/description
 - **Updates**: Activity feed for this task with comment box to post updates
 - **Mentions**: Create and manage mentions with status tracking (pending, acknowledged, completed, dismissed)
+- **Completion projection**: task detail completion rows now include semantic batch labels, verifier verdicts, and follow-up trigger text when available
 
 ### Learning, Recall, and Runtime State
 
@@ -187,6 +188,7 @@ Access from the **Teams** button in the header. Full management UI for coordinat
 - **Create team runs**: Execute coordinated multi-agent tasks
 - **Track items**: Shared checklists within a run with status tracking
 - **Real-time events**: Live tracking of team activity (member changes, run status, item updates)
+- **Graph-backed runs**: team work now rides on the same orchestration graph engine used by spawned agents and ACP delegation, so run state and projections stay consistent across surfaces
 
 See [Features — Agent Teams](features.md#agent-teams) for more details.
 

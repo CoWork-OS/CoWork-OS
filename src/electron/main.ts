@@ -392,6 +392,12 @@ if (!gotTheLock) {
       mainWindow = null;
     });
 
+    mainWindow.webContents.on("did-finish-load", () => {
+    });
+
+    mainWindow.webContents.on("render-process-gone", (_event, details) => {
+    });
+
     // Open external links in the system browser instead of inside the app
     mainWindow.webContents.setWindowOpenHandler(({ url }) => {
       // Open all new window requests in external browser
@@ -960,6 +966,9 @@ if (!gotTheLock) {
           const events = taskEventRepo.findByTaskId(taskId);
           return resolveTaskResultText({
             summary: task?.resultSummary,
+            semanticSummary: task?.semanticSummary,
+            verificationVerdict: task?.verificationVerdict,
+            verificationReport: task?.verificationReport,
             events,
           });
         },
@@ -1100,6 +1109,13 @@ if (!gotTheLock) {
                 // Get job name for the notification
                 const job = cronService ? await cronService.get(evt.jobId) : null;
                 const jobName = job?.name || "Scheduled Task";
+                const task = evt.taskId ? taskRepo.findById(evt.taskId) : null;
+                const taskResult = resolveTaskResultText({
+                  summary: task?.resultSummary,
+                  semanticSummary: task?.semanticSummary,
+                  verificationVerdict: task?.verificationVerdict,
+                  verificationReport: task?.verificationReport,
+                });
                 await notificationService.add({
                   type:
                     evt.status === "ok"
@@ -1110,6 +1126,7 @@ if (!gotTheLock) {
                   title: `${statusEmoji} ${jobName} ${statusText}`,
                   message:
                     evt.error ||
+                    taskResult ||
                     (evt.status === "ok"
                       ? "Task completed successfully."
                       : evt.status === "needs_user_action"

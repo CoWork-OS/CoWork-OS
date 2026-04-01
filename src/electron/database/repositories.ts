@@ -182,8 +182,8 @@ export class TaskRepository {
     };
 
     const stmt = this.db.prepare(`
-      INSERT INTO tasks (id, title, prompt, raw_prompt, user_prompt, status, workspace_id, created_at, updated_at, budget_tokens, budget_cost, success_criteria, max_attempts, current_attempt, parent_task_id, agent_type, agent_config, depth, result_summary, source, strategy_lock, budget_profile, terminal_status, failure_class, best_known_outcome, budget_usage, continuation_count, continuation_window, lifetime_turns_used, last_progress_score, auto_continue_block_reason, compaction_count, last_compaction_at, last_compaction_tokens_before, last_compaction_tokens_after, no_progress_streak, last_loop_fingerprint, risk_level, eval_case_id, eval_run_id, issue_id, heartbeat_run_id, company_id, goal_id, project_id, request_depth, billing_code)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO tasks (id, title, prompt, raw_prompt, user_prompt, status, workspace_id, created_at, updated_at, budget_tokens, budget_cost, success_criteria, max_attempts, current_attempt, parent_task_id, agent_type, agent_config, depth, result_summary, source, strategy_lock, budget_profile, terminal_status, failure_class, verification_verdict, verification_report, best_known_outcome, budget_usage, continuation_count, continuation_window, lifetime_turns_used, last_progress_score, auto_continue_block_reason, compaction_count, last_compaction_at, last_compaction_tokens_before, last_compaction_tokens_after, no_progress_streak, last_loop_fingerprint, risk_level, eval_case_id, eval_run_id, issue_id, heartbeat_run_id, company_id, goal_id, project_id, request_depth, billing_code, assigned_agent_role_id, worker_role, semantic_summary)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -211,6 +211,8 @@ export class TaskRepository {
       newTask.budgetProfile || null,
       newTask.terminalStatus || null,
       newTask.failureClass || null,
+      newTask.verificationVerdict || null,
+      newTask.verificationReport || null,
       newTask.bestKnownOutcome ? JSON.stringify(newTask.bestKnownOutcome) : null,
       newTask.budgetUsage ? JSON.stringify(newTask.budgetUsage) : null,
       newTask.continuationCount ?? 0,
@@ -238,6 +240,9 @@ export class TaskRepository {
       newTask.projectId || null,
       newTask.requestDepth ?? null,
       newTask.billingCode || null,
+      newTask.assignedAgentRoleId || null,
+      newTask.workerRole || null,
+      newTask.semanticSummary || null,
     );
 
     return newTask;
@@ -263,6 +268,7 @@ export class TaskRepository {
     "resultSummary",
     // Agent Squad fields
     "assignedAgentRoleId",
+    "workerRole",
     "boardColumn",
     "priority",
     // Task Board fields
@@ -278,6 +284,8 @@ export class TaskRepository {
     "budgetProfile",
     "terminalStatus",
     "failureClass",
+    "verificationVerdict",
+    "verificationReport",
     "bestKnownOutcome",
     "budgetUsage",
     "continuationCount",
@@ -302,12 +310,18 @@ export class TaskRepository {
     "projectId",
     "requestDepth",
     "billingCode",
+    "semanticSummary",
     "targetNodeId",
     // Git Worktree fields
     "worktreePath",
     "worktreeBranch",
     "worktreeStatus",
     "comparisonSessionId",
+    "sessionId",
+    "branchFromTaskId",
+    "branchFromEventId",
+    "branchLabel",
+    "resumeStrategy",
     "source",
   ]);
 
@@ -635,6 +649,7 @@ export class TaskRepository {
       resultSummary: row.result_summary || undefined,
       // Agent Squad fields
       assignedAgentRoleId: row.assigned_agent_role_id || undefined,
+      workerRole: row.worker_role || undefined,
       boardColumn: row.board_column || undefined,
       priority: row.priority ?? undefined,
       // Task Board fields
@@ -650,11 +665,18 @@ export class TaskRepository {
       worktreeBranch: row.worktree_branch || undefined,
       worktreeStatus: (row.worktree_status as Task["worktreeStatus"]) || undefined,
       comparisonSessionId: row.comparison_session_id || undefined,
+      sessionId: row.session_id || undefined,
+      branchFromTaskId: row.branch_from_task_id || undefined,
+      branchFromEventId: row.branch_from_event_id || undefined,
+      branchLabel: row.branch_label || undefined,
+      resumeStrategy: row.resume_strategy || undefined,
       source: (row.source as Task["source"]) || undefined,
       strategyLock: Number(row.strategy_lock) === 1,
       budgetProfile: row.budget_profile || undefined,
       terminalStatus: row.terminal_status || undefined,
       failureClass: row.failure_class || undefined,
+      verificationVerdict: row.verification_verdict || undefined,
+      verificationReport: row.verification_report || undefined,
       bestKnownOutcome: row.best_known_outcome
         ? safeJsonParse(row.best_known_outcome, undefined, "task.bestKnownOutcome")
         : undefined,
@@ -695,6 +717,7 @@ export class TaskRepository {
       requestDepth:
         typeof row.request_depth === "number" ? row.request_depth : undefined,
       billingCode: row.billing_code || undefined,
+      semanticSummary: row.semantic_summary || undefined,
       targetNodeId: row.target_node_id || undefined,
     });
   }

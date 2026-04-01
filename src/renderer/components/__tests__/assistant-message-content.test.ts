@@ -31,4 +31,17 @@ describe("AssistantMessageContent", () => {
       },
     ]);
   });
+
+  it("sanitizes leaked tool transcript prefixes before segment parsing", () => {
+    const segments = parseAssistantMessageSegments(
+      'Tackling: {"id":"call_skill_list","tool":"skill_list","input":{}} <tool name="skill_list">{}</tool>\n{"description":"Real content"}',
+    );
+
+    expect(segments).toEqual([
+      {
+        type: "markdown",
+        content: 'Tackling:\n{"description":"Real content"}',
+      },
+    ]);
+  });
 });

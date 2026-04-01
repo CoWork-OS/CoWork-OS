@@ -159,6 +159,50 @@ describe("normalizeTaskEvents — raw event ID preservation", () => {
   });
 });
 
+describe("normalizeTaskEvents — runtime envelope evidence", () => {
+  it("projects structured envelope evidence into timeline evidence rows", () => {
+    resetSeq();
+    const result = normalizeTaskEvents([
+      makeEvent("tool_result", {
+        tool: "write_file",
+        envelope: {
+          evidence: [
+            {
+              type: "file",
+              label: "File",
+              value: "src/runtime.ts",
+              extra: { operation: "write" },
+            },
+            {
+              type: "runtime_log",
+              label: "Policy",
+              value: "final decision: allow",
+              extra: { source: "write_file" },
+            },
+          ],
+        },
+      }),
+    ]);
+
+    expect(result[0].kind).toBe("summary");
+    if (result[0].kind === "summary") {
+      expect(result[0].evidence).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "file",
+            path: "src/runtime.ts",
+            operation: "write",
+          }),
+          expect.objectContaining({
+            type: "runtime_log",
+            message: "final decision: allow",
+          }),
+        ]),
+      );
+    }
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Phase inference
 // ---------------------------------------------------------------------------

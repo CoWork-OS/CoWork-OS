@@ -663,7 +663,7 @@ describe("listModelInvocableSkills", () => {
     expect(invocableSkills.map((skill) => skill.id)).toContain("binary-skill");
   });
 
-  it('should require the keyword "codex" for codex-cli ranking', async () => {
+  it("should require an explicit codex-cli skill invocation for ranking", async () => {
     const codexSkill = createTestSkill({
       id: "codex-cli",
       name: "Codex CLI Agent",
@@ -680,8 +680,11 @@ describe("listModelInvocableSkills", () => {
     await loader.reloadSkills();
 
     expect(loader.rankModelInvocableSkillsForQuery("run a generic agent on this issue")).toEqual([]);
+    expect(loader.rankModelInvocableSkillsForQuery("run codex on this issue")).toEqual([]);
 
-    const ranked = loader.rankModelInvocableSkillsForQuery("run codex on this issue");
+    const ranked = loader.rankModelInvocableSkillsForQuery(
+      "Use the Codex CLI Agent skill to run on this issue",
+    );
     expect(ranked).toHaveLength(1);
     expect(ranked[0]?.skill.id).toBe("codex-cli");
   });
@@ -915,7 +918,7 @@ describe("getSkillDescriptionsForModel", () => {
     expect(descriptions).not.toContain("speech");
   });
 
-  it("should prefer codex-cli over coding-agent for Codex-specific review prompts", async () => {
+  it("should hide codex-cli for generic Codex mentions but expose it for explicit skill requests", async () => {
     const codexCli = createTestSkill({
       id: "codex-cli",
       name: "Codex CLI Agent",
@@ -935,9 +938,8 @@ describe("getSkillDescriptionsForModel", () => {
             "Codex CLI completes the review and returns output.",
           examples: {
             positive: [
-              "Review PR #55 with Codex",
-              "Spin up Codex to review this PR",
-              "Use codex to review my PR",
+              "Use the Codex CLI Agent skill to review PR #55",
+              "Run the codex-cli skill for this PR review",
             ],
             negative: ["Fix this issue (use coding-agent for generic)"],
           },
@@ -976,22 +978,33 @@ describe("getSkillDescriptionsForModel", () => {
 
     await loader.reloadSkills();
 
-    const ranked = loader.rankModelInvocableSkillsForQuery(
+    const genericMentionRanked = loader.rankModelInvocableSkillsForQuery(
       "We need to review PR #55 on cowork os repo. Spin up Codex to review it.",
       { limit: 2 },
     );
+    expect(genericMentionRanked.map((entry) => entry.skill.id)).not.toContain("codex-cli");
 
-    expect(ranked[0]?.skill.id).toBe("codex-cli");
-    expect(ranked[0]?.score).toBeGreaterThan(ranked[1]?.score ?? 0);
+    const explicitRanked = loader.rankModelInvocableSkillsForQuery(
+      "Use the Codex CLI Agent skill to review PR #55 on cowork os repo.",
+      { limit: 2 },
+    );
+    expect(explicitRanked[0]?.skill.id).toBe("codex-cli");
+    expect(explicitRanked[0]?.score).toBeGreaterThan(explicitRanked[1]?.score ?? 0);
 
-    const descriptions = loader.getSkillDescriptionsForModel({
+    const genericDescriptions = loader.getSkillDescriptionsForModel({
       routingQuery:
         "We need to review PR #55 on cowork os repo. Spin up Codex to review it.",
       shortlistSize: 1,
     });
+    expect(genericDescriptions).not.toContain("- codex-cli:");
 
-    expect(descriptions).toContain("codex-cli");
-    expect(descriptions).not.toContain("- coding-agent:");
+    const explicitDescriptions = loader.getSkillDescriptionsForModel({
+      routingQuery: "Use the Codex CLI Agent skill to review PR #55 on cowork os repo.",
+      shortlistSize: 1,
+    });
+
+    expect(explicitDescriptions).toContain("codex-cli");
+    expect(explicitDescriptions).not.toContain("- coding-agent:");
   });
 
   it("should include fallback discovery hint when routing confidence is low", async () => {

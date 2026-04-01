@@ -15,10 +15,15 @@ export interface DebugSessionPanelProps {
  * Summary strip for tasks created in Debug execution mode: phase, ingest URL, loop stages.
  */
 export function DebugSessionPanel({ events }: DebugSessionPanelProps) {
-  const { ingestUrl, activePhase } = useMemo(() => {
+  const { ingestUrl, activePhase, lastRuntimeTrace, lastPromptStack, lastConsolidation, lastSessionFork } =
+    useMemo(() => {
     let ingest: string | null = null;
     let phase: DebugPhase = "hypothesize";
     let phaseFound = false;
+    let runtimeTrace: { tool: string; decision: string; status: string } | null = null;
+    let promptStack: { memoryIndexInjected: boolean; topicCount: number } | null = null;
+    let consolidation: { topicCount?: number; skipped?: boolean } | null = null;
+    let sessionFork: { sourceTaskId?: string; branchLabel?: string } | null = null;
     for (let i = events.length - 1; i >= 0; i--) {
       const e = events[i];
       const payload = e.payload as Record<string, unknown> | undefined;
@@ -32,11 +37,72 @@ export function DebugSessionPanel({ events }: DebugSessionPanelProps) {
         phase = payload.debugPhase;
         phaseFound = true;
       }
-      if (ingest && phaseFound) {
+      if (
+        !runtimeTrace &&
+        e.type === "log" &&
+        payload?.metric === "tool_runtime_trace" &&
+        typeof payload?.tool === "string"
+      ) {
+        const envelope =
+          payload.envelope && typeof payload.envelope === "object"
+            ? (payload.envelope as Record<string, unknown>)
+            : null;
+        const trace =
+          payload.policyTrace && typeof payload.policyTrace === "object"
+            ? (payload.policyTrace as Record<string, unknown>)
+            : null;
+        runtimeTrace = {
+          tool: payload.tool,
+          decision: typeof trace?.finalDecision === "string" ? trace.finalDecision : "allow",
+          status: typeof envelope?.status === "string" ? envelope.status : "unknown",
+        };
+      }
+      if (
+        !promptStack &&
+        e.type === "log" &&
+        payload?.message === "Prompt stack built"
+      ) {
+        promptStack = {
+          memoryIndexInjected: payload?.memoryIndexInjected === true,
+          topicCount: typeof payload?.topicCount === "number" ? payload.topicCount : 0,
+        };
+      }
+      if (
+        !consolidation &&
+        e.type === "log" &&
+        typeof payload?.consolidation === "object" &&
+        payload?.message &&
+        String(payload.message).includes("Memory consolidation")
+      ) {
+        const result = payload.consolidation as Record<string, unknown>;
+        consolidation = {
+          topicCount: typeof result.topicCount === "number" ? result.topicCount : undefined,
+          skipped: result.skipped === true,
+        };
+      }
+      if (
+        !sessionFork &&
+        e.type === "log" &&
+        payload?.message === "Session fork created"
+      ) {
+        sessionFork = {
+          sourceTaskId:
+            typeof payload?.sourceTaskId === "string" ? payload.sourceTaskId : undefined,
+          branchLabel: typeof payload?.branchLabel === "string" ? payload.branchLabel : undefined,
+        };
+      }
+      if (ingest && phaseFound && runtimeTrace && promptStack && consolidation && sessionFork) {
         break;
       }
     }
-    return { ingestUrl: ingest, activePhase: phase };
+    return {
+      ingestUrl: ingest,
+      activePhase: phase,
+      lastRuntimeTrace: runtimeTrace,
+      lastPromptStack: promptStack,
+      lastConsolidation: consolidation,
+      lastSessionFork: sessionFork,
+    };
   }, [events]);
 
   return (
@@ -95,6 +161,30 @@ export function DebugSessionPanel({ events }: DebugSessionPanelProps) {
       <div style={{ fontSize: "0.68rem", color: "var(--color-text-muted, #8b8fa3)" }}>
         Stages: {DEBUG_PHASE_ORDER.join(" → ")}
       </div>
+      {lastRuntimeTrace ? (
+        <div style={{ fontSize: "0.68rem", color: "var(--color-text-muted, #8b8fa3)" }}>
+          Runtime: <code>{lastRuntimeTrace.tool}</code> · decision {lastRuntimeTrace.decision} · status{" "}
+          {lastRuntimeTrace.status}
+        </div>
+      ) : null}
+      {lastPromptStack ? (
+        <div style={{ fontSize: "0.68rem", color: "var(--color-text-muted, #8b8fa3)" }}>
+          Prompt stack: memory index {lastPromptStack.memoryIndexInjected ? "on" : "off"} · topics{" "}
+          {lastPromptStack.topicCount}
+        </div>
+      ) : null}
+      {lastConsolidation ? (
+        <div style={{ fontSize: "0.68rem", color: "var(--color-text-muted, #8b8fa3)" }}>
+          Consolidation: {lastConsolidation.skipped ? "skipped" : "completed"} · topics{" "}
+          {lastConsolidation.topicCount ?? 0}
+        </div>
+      ) : null}
+      {lastSessionFork ? (
+        <div style={{ fontSize: "0.68rem", color: "var(--color-text-muted, #8b8fa3)" }}>
+          Session fork: {lastSessionFork.branchLabel || "unnamed"} from{" "}
+          <code>{lastSessionFork.sourceTaskId || "unknown"}</code>
+        </div>
+      ) : null}
     </div>
   );
 }

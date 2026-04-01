@@ -31,6 +31,7 @@
 
 - **Ideas Panel**: Curated launch panel accessible from the sidebar above Sessions. Pre-written prompts organized by category let you start common workflows in one click. See [Ideas Panel: Supported Capabilities](ideas-capabilities.md) for the full list of tools each prompt uses and their graceful fallbacks.
 - **Task-Based Workflow**: Multi-step execution with plan-execute-observe loops
+- **Runtime Orchestration**: Shared turn kernel, metadata-driven tool scheduling, graph-backed delegation, typed worker roles, verifier verdicts, and semantic tool-batch summaries keep delegated work coherent across tasks, follow-ups, teams, and ACP runs.
 - **Live Terminal**: Shell commands run in a real-time terminal view — see output as it happens, stop execution, or provide interactive input (e.g. `y`/`n` prompts)
 - **Dynamic Re-Planning**: Agent can revise its plan mid-execution
 - **139+ Built-in Skills**: GitHub, Slack, Notion, Spotify, Apple Notes, Unity, Unreal, Terraform, Kubernetes, financial analysis, and more. Optional CLI-based skills (e.g. [aurl](skills/aurl.md) for OpenAPI/GraphQL APIs) appear when the binary is installed.
@@ -40,19 +41,19 @@
 - **Persistent Memory**: Cross-session context with privacy-aware observation capture
 - **Knowledge Graph**: SQLite-backed entity/relationship memory with FTS5 search, graph traversal, and auto-extraction
 - **Workspace Kit**: `.cowork/` project kit + markdown indexing with context injection
-- **Agent Teams**: Multi-agent collaboration with shared checklists, coordinated runs, and team management UI
-- **Collaborative Mode**: Auto-create ephemeral teams where multiple agents work on the same task, sharing thoughts in real-time
+- **Agent Teams**: Multi-agent collaboration with shared checklists, graph-backed coordinated runs, and team management UI
+- **Collaborative Mode**: Auto-create ephemeral teams where multiple agents work on the same task, sharing thoughts in real-time through the delegated orchestration graph
 - **Multi-LLM Mode**: Send the same task to multiple LLM providers/models simultaneously, with a judge agent synthesizing the best result
 - **Workflow Pipeline**: Optional phase-based execution path where decomposed steps run as child tasks with per-phase LLM overrides or capability-based auto-selection
 - **Agent Comparison Mode**: Compare agent or model outputs side by side
-- **External Agent Orchestration**: Discover ACP agents, target local or remote assignees from orchestration tools, and invoke A2A-compatible remote endpoints behind the normal approval/policy layer
+- **External Agent Orchestration**: Discover ACP agents, target local or remote assignees from orchestration tools, and invoke A2A-compatible remote endpoints behind the normal approval/policy layer; orchestration now flows through the shared graph engine and graph-backed task state
 - **ACP Lifecycle Hardening**: ACP task state is persisted locally, survives restarts, supports remote cancel, and enforces scoped task/inbox access for non-operator clients
 - **Sub-Task Navigation**: Open a delegated sub-task, inspect its timeline, then jump back to the parent task from the main content view
 - **Git Worktree Isolation**: Tasks run in isolated git worktrees with automatic branch creation, auto-commit, merge, conflict detection, and cleanup
 - **Task Pinning**: Pin important tasks in the sidebar for quick access
 - **Wrap-Up Task**: Gracefully wrap up running tasks instead of hard-cancelling
 - **Capability Matcher**: Auto-select the best agents for a task
-- **Completion Output Confidence UX**: When tasks finish with file outputs, users get high-signal completion toasts with direct actions (`Open file`, `Show in Finder`, `View in Files`), automatic right-panel focus for the active task, and unseen-output badges when reviewing another task/view.
+- **Completion Output Confidence UX**: When tasks finish with file outputs, users get high-signal completion toasts with direct actions (`Open file`, `Show in Finder`, `View in Files`), automatic right-panel focus for the active task, unseen-output badges when reviewing another task/view, and richer completion text composed from semantic summaries plus verifier verdict/report when available.
 - **Artifact-First Output Visibility**: Artifact-only tasks are treated the same as file-created outputs across progress, timeline, and Files panel surfaces.
 - **Performance Reviews**: Score and review agent-role outcomes with autonomy-level recommendations
 - **Vision**: Analyze workspace images via `analyze_image` tool (OpenAI, Anthropic, Gemini, or Bedrock)
@@ -62,7 +63,7 @@
 - **Visual Annotation**: Iterative image refinement with the Visual Annotator
 - **Context Summarization**: Automatic context compression surfaced in the task timeline
 - **Structured Input Requests**: In plan-mode flows, the agent can pause with 1-3 short multiple-choice questions instead of asking ambiguous free-text follow-ups
-- **Parallel Tool Timeline**: Concurrent read-only tool bursts are grouped into lane-based timeline cards instead of flooding the event feed
+- **Parallel Tool Timeline**: Concurrent read-only tool bursts are grouped into lane-based timeline cards instead of flooding the event feed; screenshot-heavy refinement loops stay more compact in summary mode
 - **Renderer Performance**: In the `CoWork-OS/CoWork-OS` repo, the renderer uses `@chenglou/pretext` for text-heavy sidebar/timeline measurement, with flattened visible sidebar rows and post-render height reconciliation for expanded timeline cards
 - **Adaptive Runtime Recovery**: Execute tasks use adaptive turn budgets, bounded follow-up recovery, and safety-stop escalation instead of hard window failure by default
 - **Path Drift Repair**: `/workspace/...` aliases and drifted relative paths can be normalized back into the active workspace or pinned task root, with strict-fail policies when hard enforcement is preferred

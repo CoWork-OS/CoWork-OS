@@ -89,9 +89,15 @@ function pickBestCandidate(bucket: {
  */
 export function resolveTaskResultText(opts: {
   summary?: string | null;
+  semanticSummary?: string | null;
+  verificationVerdict?: string | null;
+  verificationReport?: string | null;
   events?: TaskEvent[] | null;
 }): string | undefined {
   const summary = normalizeText(opts.summary);
+  const semanticSummary = normalizeText(opts.semanticSummary);
+  const verificationVerdict = normalizeText(opts.verificationVerdict);
+  const verificationReport = normalizeText(opts.verificationReport);
   const events = Array.isArray(opts.events) ? opts.events : [];
 
   const candidateBucket = {
@@ -103,15 +109,32 @@ export function resolveTaskResultText(opts: {
   let bestInternalCandidate = "";
   let completionEventSummary = "";
   let bestArtifactPreview = "";
+  const explicitCompletionSummary = [summary, semanticSummary].filter((value) => value.length > 0).join("\n\n");
+  const explicitVerificationSummary =
+    verificationVerdict || verificationReport
+      ? [
+          verificationVerdict ? `Verification: ${verificationVerdict}` : "",
+          verificationReport || "",
+        ]
+          .filter((value) => value.length > 0)
+          .join("\n")
+      : "";
 
   for (let i = events.length - 1; i >= 0; i--) {
     const evt = events[i];
     const payload = ((evt?.payload as Any) || {}) as Any;
 
     if (evt.type === "task_completed") {
-      const rs = normalizeText(payload.resultSummary);
-      if (rs.length > completionEventSummary.length) {
-        completionEventSummary = rs;
+      const rs = [normalizeText(payload.resultSummary), normalizeText(payload.semanticSummary)]
+        .filter((value) => value.length > 0)
+        .join("\n\n");
+      const verdict = normalizeText(payload.verificationVerdict);
+      const report = normalizeText(payload.verificationReport);
+      const composed = [rs, verdict ? `Verification: ${verdict}` : "", report || ""]
+        .filter((value) => value.length > 0)
+        .join("\n\n");
+      if (composed.length > completionEventSummary.length) {
+        completionEventSummary = composed;
       }
       continue;
     }
@@ -162,7 +185,12 @@ export function resolveTaskResultText(opts: {
     }
   }
 
-  let eventResult = pickBestCandidate(candidateBucket) || bestInternalCandidate || completionEventSummary;
+  let eventResult =
+    pickBestCandidate(candidateBucket) ||
+    bestInternalCandidate ||
+    completionEventSummary ||
+    explicitCompletionSummary ||
+    explicitVerificationSummary;
 
   if (bestArtifactPreview) {
     if (
@@ -175,11 +203,12 @@ export function resolveTaskResultText(opts: {
   }
 
   if (summary && eventResult) {
+    const completionSummary = [summary, semanticSummary].filter((value) => value.length > 0).join("\n\n");
     if (isFailureLike(summary) && !isFailureLike(eventResult) && eventResult.length >= 200) {
       return eventResult;
     }
-    return eventResult.length > summary.length ? eventResult : summary;
+    return eventResult.length > completionSummary.length ? eventResult : completionSummary;
   }
 
-  return eventResult || summary || undefined;
+  return eventResult || explicitCompletionSummary || explicitVerificationSummary || summary || undefined;
 }

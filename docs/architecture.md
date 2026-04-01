@@ -8,11 +8,14 @@ CoWork OS is a local-first desktop runtime for AI-assisted task execution, backg
 - **React renderer**: desktop UI, Mission Control, task timeline, settings, and monitoring surfaces
 - **Tool and connector layer**: file, shell, browser, web, native integrations, MCP connectors, remote execution, and **macOS computer use** (`computer_*`) as a governed desktop-GUI lane (session overlay, per-app consent, policy-gated routing). See [Computer use (macOS)](computer-use.md).
 - **Automation/event layer**: scheduled tasks, webhooks, channel events, and MCP connector/resource notifications all flow through the same trigger engine
+- **Turn and tool orchestration**: a shared `TurnKernel` owns task steps, follow-ups, subagents, and verification flows, while a metadata-driven `ToolScheduler` batches concurrency-safe reads, serializes conflicting writes, and keeps tool-result ordering stable
+- **Delegation graph**: delegated work now runs through a normalized orchestration graph engine so spawned agents, team work, workflow phases, and ACP tasks share one run/node/event model
+- **Worker roles and verification**: built-in worker roles (`researcher`, `implementer`, `verifier`, `synthesizer`) carry hard tool scopes, and verification runs use a dedicated verdict/report contract instead of ad hoc prompt text
 - **Adaptive model routing**: the executor can switch into a workflow-pipeline path where decomposed phases run as child tasks with per-phase model overrides or capability-based auto-selection
 - **Federated agent orchestration**: ACP registry + remote invocation let orchestrators target local roles or remote A2A-compatible agents under shared approval and policy controls
-- **Local persistence**: SQLite, local files, knowledge graph state, run records, ACP agent registrations and ACP task state, usage telemetry, feedback events, and workspace-kit contracts in `.cowork/`
-- **Runtime visibility surfaces**: the task runtime emits learning progression, unified recall, persistent shell, and live routing events into Mission Control and the renderer so operator state stays visible instead of hidden in services
-- **Completion hardening**: verified-mode evidence bundles, step-intent alignment/decomposition heuristics, and read-only entropy sweeps make completion checks more explicit without mutating the task's final result
+- **Local persistence**: SQLite, local files, knowledge graph state, run records, orchestration graph nodes/events, ACP agent registrations and ACP task state, usage telemetry, feedback events, and workspace-kit contracts in `.cowork/`
+- **Runtime visibility surfaces**: the task runtime emits learning progression, unified recall, persistent shell, live routing events, semantic tool-batch summaries, and follow-up completion events into Mission Control and the renderer so operator state stays visible instead of hidden in services
+- **Completion hardening**: verified-mode evidence bundles, step-intent alignment/decomposition heuristics, read-only entropy sweeps, and verifier verdict/report projection make completion checks more explicit without mutating the task's final result
 
 ## Profiles and Isolation
 

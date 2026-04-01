@@ -3,7 +3,11 @@
  * Allows switching between Anthropic API and AWS Bedrock
  */
 
-import type { LLMProviderType, AzureReasoningEffort } from "../../../shared/types";
+import type {
+  LLMProviderType,
+  AzureReasoningEffort,
+  RuntimeToolMetadata,
+} from "../../../shared/types";
 
 export type { LLMProviderType, AzureReasoningEffort };
 
@@ -71,6 +75,7 @@ export interface LLMTool {
     properties: Record<string, Any>;
     required?: string[];
   };
+  runtime?: RuntimeToolMetadata;
 }
 
 export interface LLMToolUse {

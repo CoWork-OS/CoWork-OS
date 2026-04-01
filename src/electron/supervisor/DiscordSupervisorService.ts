@@ -44,6 +44,34 @@ function truncate(value: string, max = 700): string {
   return trimmed.length <= max ? trimmed : `${trimmed.slice(0, max)}...`;
 }
 
+function buildTaskCompletionSummary(data: {
+  resultSummary?: string;
+  semanticSummary?: string;
+  verificationVerdict?: string;
+  verificationReport?: string;
+  message?: string;
+}): string {
+  const resultSummary = typeof data.resultSummary === "string" ? data.resultSummary.trim() : "";
+  const semanticSummary = typeof data.semanticSummary === "string" ? data.semanticSummary.trim() : "";
+  const verificationVerdict =
+    typeof data.verificationVerdict === "string" ? data.verificationVerdict.trim() : "";
+  const verificationReport =
+    typeof data.verificationReport === "string" ? data.verificationReport.trim() : "";
+  const message = typeof data.message === "string" ? data.message.trim() : "";
+
+  const summary = [resultSummary, semanticSummary].filter((value) => value.length > 0).join("\n\n");
+  const verification =
+    verificationVerdict || verificationReport
+      ? [
+          verificationVerdict ? `Verification: ${verificationVerdict}` : "",
+          verificationReport || "",
+        ]
+          .filter((value) => value.length > 0)
+          .join("\n")
+      : "";
+  return [summary, verification, message].filter((value) => value.length > 0).join("\n\n");
+}
+
 function stripProtocolEnvelope(text: string): string {
   return text
     .replace(/<@!?\d+>\s*/g, "")
@@ -126,7 +154,14 @@ export class DiscordSupervisorService {
     });
     this.agentDaemon.on(
       "task_completed",
-      async (data: { taskId: string; resultSummary?: string; message?: string }) => {
+      async (data: {
+        taskId: string;
+        resultSummary?: string;
+        semanticSummary?: string;
+        verificationVerdict?: string;
+        verificationReport?: string;
+        message?: string;
+      }) => {
         await this.handleTaskCompleted(data);
       },
     );
@@ -498,6 +533,9 @@ export class DiscordSupervisorService {
   private async handleTaskCompleted(data: {
     taskId: string;
     resultSummary?: string;
+    semanticSummary?: string;
+    verificationVerdict?: string;
+    verificationReport?: string;
     message?: string;
   }): Promise<void> {
     const context = this.pendingTasks.get(data.taskId);
@@ -506,13 +544,13 @@ export class DiscordSupervisorService {
     const exchange = this.exchangeRepo.findById(context.exchangeId);
     if (!exchange) return;
 
-    const rawOutput = [
-      this.latestTaskMessages.get(data.taskId) || "",
-      typeof data.resultSummary === "string" ? data.resultSummary : "",
-      typeof data.message === "string" ? data.message : "",
-    ]
-      .find((value) => value.trim().length > 0)
-      ?.trim() || "";
+    const rawOutput = buildTaskCompletionSummary({
+      resultSummary: this.latestTaskMessages.get(data.taskId) || data.resultSummary,
+      semanticSummary: data.semanticSummary,
+      verificationVerdict: data.verificationVerdict,
+      verificationReport: data.verificationReport,
+      message: data.message,
+    });
     this.latestTaskMessages.delete(data.taskId);
 
     if (context.responseMode === "worker") {

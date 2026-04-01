@@ -227,4 +227,67 @@ describe("TaskExecutor chat mode", () => {
         : JSON.stringify(second[0].content),
     ).toContain("<cowork_compaction_summary>");
   });
+
+  it("routes long sub-agent chat synthesis through the shared text turn kernel continuation flow", async () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    const createMessageWithTimeout = vi
+      .fn()
+      .mockResolvedValueOnce({
+        content: [{ type: "text", text: "Part one. " }],
+        stopReason: "max_tokens",
+        usage: { inputTokens: 10, outputTokens: 20, cachedTokens: 0 },
+      })
+      .mockResolvedValueOnce({
+        content: [{ type: "text", text: "Part two." }],
+        stopReason: "end_turn",
+        usage: { inputTokens: 5, outputTokens: 8, cachedTokens: 0 },
+      });
+
+    executor.task = {
+      id: "task-sub-chat",
+      title: "Synthesis child",
+      prompt: "x".repeat(2200),
+      userPrompt: "x".repeat(2200),
+      rawPrompt: "x".repeat(2200),
+      parentTaskId: "parent-1",
+      createdAt: Date.now(),
+      agentType: "sub",
+      agentConfig: {
+        executionMode: "chat",
+        conversationMode: "chat",
+        maxTokens: 16000,
+      },
+    };
+    executor.workspace = {
+      id: "ws-sub-chat",
+      path: "/tmp",
+      isTemp: true,
+      permissions: { read: true, write: true, delete: true, network: true, shell: true },
+    };
+    executor.daemon = {
+      updateTaskStatus: vi.fn(),
+      updateTask: vi.fn(),
+    };
+    executor.emitEvent = vi.fn();
+    executor.getRoleContextPrompt = vi.fn().mockReturnValue("");
+    executor.buildUserContent = vi.fn().mockResolvedValue("Synthesis prompt");
+    executor.callLLMWithRetry = vi.fn(async (fn: Any) => fn());
+    executor.createMessageWithTimeout = createMessageWithTimeout;
+    executor.updateTracking = vi.fn();
+    executor.extractTextFromLLMContent = vi
+      .fn()
+      .mockImplementation((content: Any[]) => content?.map((item) => item.text || "").join("") || "");
+    executor.updateConversationHistory = vi.fn();
+    executor.buildResultSummary = vi.fn().mockReturnValue("summary");
+    executor.finalizeTaskBestEffort = vi.fn();
+
+    await (TaskExecutor as Any).prototype.handleCompanionPrompt.call(executor);
+
+    expect(createMessageWithTimeout).toHaveBeenCalledTimes(2);
+    expect(executor.updateConversationHistory).toHaveBeenCalledWith([
+      { role: "user", content: [{ type: "text", text: "Synthesis prompt" }] },
+      { role: "assistant", content: [{ type: "text", text: "Part one. Part two." }] },
+    ]);
+    expect(executor.finalizeTaskBestEffort).toHaveBeenCalledWith("summary");
+  });
 });

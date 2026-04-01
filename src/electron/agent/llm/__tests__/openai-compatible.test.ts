@@ -309,8 +309,15 @@ describe("toOpenAICompatibleMessages", () => {
       { role: "assistant" as const, content: "Recovered later." },
     ];
 
-    expect(sanitizeToolCallHistory(input)).toEqual([{ role: "assistant", content: "Recovered later." }]);
+    expect(sanitizeToolCallHistory(input)).toEqual([
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "Fetching sources." }],
+      },
+      { role: "assistant", content: "Recovered later." },
+    ]);
     expect(toOpenAICompatibleMessages(input)).toEqual([
+      { role: "assistant", content: "Fetching sources." },
       { role: "assistant", content: "Recovered later." },
     ]);
   });

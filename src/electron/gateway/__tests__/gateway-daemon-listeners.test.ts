@@ -89,6 +89,39 @@ describe("ChannelGateway daemon listeners", () => {
     expect(router.handleTaskCompletion).toHaveBeenCalledWith("t1", "Final summary from daemon.");
   });
 
+  it("includes semantic batch summaries and verifier output in completion payloads", () => {
+    const db = createMockDb();
+    const gateway = new ChannelGateway(db, { agentDaemon: agentDaemon as Any });
+
+    const router = (gateway as Any).router;
+    router.sendTaskUpdate = vi.fn();
+    router.handleTaskCompletion = vi.fn();
+
+    emitTimeline("timeline_step_finished", "t1", "task_completed", {
+      resultSummary: "Final summary from daemon.",
+      semanticSummary: "Read auth config",
+      verificationVerdict: "PASS",
+      verificationReport: "Verifier confirmed the implementation.",
+    });
+
+    expect(router.handleTaskCompletion).toHaveBeenCalledWith(
+      "t1",
+      expect.stringContaining("Final summary from daemon."),
+    );
+    expect(router.handleTaskCompletion).toHaveBeenCalledWith(
+      "t1",
+      expect.stringContaining("Read auth config"),
+    );
+    expect(router.handleTaskCompletion).toHaveBeenCalledWith(
+      "t1",
+      expect.stringContaining("Verification: PASS"),
+    );
+    expect(router.handleTaskCompletion).toHaveBeenCalledWith(
+      "t1",
+      expect.stringContaining("Verifier confirmed the implementation."),
+    );
+  });
+
   it("falls back to last streamed assistant message when resultSummary is missing", () => {
     const db = createMockDb();
     const gateway = new ChannelGateway(db, { agentDaemon: agentDaemon as Any });

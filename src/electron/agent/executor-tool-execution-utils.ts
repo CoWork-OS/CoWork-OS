@@ -53,6 +53,12 @@ const QUERY_STOPWORDS = new Set([
   "output",
 ]);
 
+const NESTED_PACKAGE_MANIFEST_PATH_REGEX = /(?:^|[\\/])src[\\/]+package\.json$/i;
+const WEB_APP_SCAFFOLD_CONTEXT_REGEX =
+  /\b(create|build|scaffold|bootstrap|initialize|set up|setup|implement|make)\b[\s\S]{0,120}\b(website|web app|webapp|app|application|ui|interface|react|vite|next\.?js|nextjs|vue|svelte|angular)\b/i;
+const NESTED_PACKAGE_INTENT_REGEX =
+  /\b(monorepo|multi[- ]package|nested package|subpackage|workspace package|package workspace)\b/i;
+
 function deriveSearchQueryFromContext(context: string): string {
   const tokens = String(context || "")
     .toLowerCase()
@@ -146,6 +152,23 @@ export function preflightValidateAndRepairToolInput(opts: {
         repaired = true;
         repairReasons.push("normalized alternate content field");
       }
+    }
+
+    const normalizedPath = String(input.path || "").replace(/\\/g, "/");
+    const normalizedContext = String(opts.contextText || "");
+    const isSuspiciousNestedPackageManifest =
+      NESTED_PACKAGE_MANIFEST_PATH_REGEX.test(normalizedPath) &&
+      WEB_APP_SCAFFOLD_CONTEXT_REGEX.test(normalizedContext) &&
+      !NESTED_PACKAGE_INTENT_REGEX.test(normalizedContext);
+    if (isSuspiciousNestedPackageManifest) {
+      return {
+        input,
+        error:
+          "write_file to a nested src/package.json is blocked for website/app scaffold tasks. Use the workspace root package.json unless this is explicitly a monorepo or nested-package setup.",
+        repairable: false,
+        repaired,
+        repairReason: repairReasons.join("; ") || undefined,
+      };
     }
   }
 

@@ -425,6 +425,21 @@ export class DatabaseManager {
         FOREIGN KEY (task_id) REFERENCES tasks(id)
       );
 
+      CREATE TABLE IF NOT EXISTS workspace_permission_rules (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        effect TEXT NOT NULL,
+        scope_kind TEXT NOT NULL,
+        scope_tool_name TEXT,
+        scope_path TEXT,
+        scope_prefix TEXT,
+        scope_server_name TEXT,
+        metadata_json TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+      );
+
       CREATE TABLE IF NOT EXISTS input_requests (
         id TEXT PRIMARY KEY,
         task_id TEXT NOT NULL,
@@ -657,6 +672,10 @@ export class DatabaseManager {
       CREATE INDEX IF NOT EXISTS idx_artifacts_task ON artifacts(task_id);
       CREATE INDEX IF NOT EXISTS idx_approvals_task ON approvals(task_id);
       CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status);
+      CREATE INDEX IF NOT EXISTS idx_workspace_permission_rules_workspace
+        ON workspace_permission_rules(workspace_id, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_workspace_permission_rules_scope
+        ON workspace_permission_rules(workspace_id, scope_kind);
       CREATE INDEX IF NOT EXISTS idx_input_requests_task_status ON input_requests(task_id, status);
       CREATE INDEX IF NOT EXISTS idx_input_requests_requested ON input_requests(requested_at);
       CREATE INDEX IF NOT EXISTS idx_llm_models_active ON llm_models(is_active);

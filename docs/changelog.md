@@ -8,18 +8,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Shared turn/runtime kernel**: task steps, follow-ups, subagents, and verification now run through a canonical `TurnKernel` instead of duplicated loop bodies.
+- **Session checklist primitive**: execution-style tasks can create a session-local ordered checklist via `task_list_create`, maintain it with `task_list_update`, inspect it with `task_list_list`, and surface it read-only in the task UI with verification nudge state.
+- **SessionRuntime owner**: task-session state, retry/recovery mirrors, worker state, verification state, and resume snapshots now live in one canonical runtime owner instead of being mirrored across executor paths.
+- **Session snapshot resume algorithm**: persisted task state now prefers `session_runtime_v2` checkpoint/event payloads, falls back to legacy `conversationHistory` payloads or event reconstruction, and rewrites legacy resumes to V2 on the next checkpoint.
+- **Permission engine**: layered tool approvals now evaluate explicit modes, per-tool/path/command-prefix/MCP-server rules, workspace-local policy files, profile rules, and denial fallback instead of relying on a single risk gate.
+- **Workspace rule manager**: Settings now lets users browse and remove workspace-local permission rules directly, and approval prompts can persist workspace or profile rules with explicit scope and reason.
+- **Shared turn/runtime kernel**: task steps, follow-ups, subagents, and verification still run through a canonical `TurnKernel` for individual turn execution instead of duplicated loop bodies.
 - **Metadata-driven tool scheduling**: concurrency-safe reads batch together automatically, scoped writes serialize, and post-batch result ordering stays stable through a single `ToolScheduler`.
 - **Graph-backed delegation**: spawned agents, collaborative runs, workflow phases, and ACP task delegation now resolve through a normalized orchestration graph engine.
 - **Typed worker roles**: built-in `researcher`, `implementer`, `verifier`, and `synthesizer` worker roles drive delegation, prompts, and hard tool scopes.
 - **Semantic tool summaries**: completed tool batches now carry concise semantic labels for timeline rows and completion relays.
 
 ### Changed
+- **SessionRuntime boundary**: runtime state now includes the session checklist bucket, replayable checklist events, and the non-blocking verification nudge algorithm for implementation-first tasks.
 - **Completion projection**: task completion relays now compose from `resultSummary`, semantic batch labels, and verifier verdict/report fields.
+- **Runtime boundary**: TaskExecutor now owns bootstrap, plan construction, finalization, and daemon/UI projection while SessionRuntime owns mutable turn-loop state, persistence, and recovery.
+- **Security surfaces**: the approval dialog, Settings permission panel, workspace manifest mirror, and workspace DB now all participate in the same permission workflow.
 - **Follow-up visibility**: follow-up completion events now preserve the triggering user text so the timeline can surface orphaned follow-ups explicitly.
 - **Canvas / visual refinement UX**: screenshot-heavy refinement loops render more compactly in summary mode to keep the feed readable.
 
 ### Fixed
+- **Resume race on terminal tasks**: approval- or follow-up-driven resume handling no longer overwrites a freshly completed task row back to `executing`; resume now re-checks canonical persisted task state before applying active status.
 - **Stale completion state**: follow-up completion now persists terminal task state together with the completion payload, preventing sidebar/task-detail divergence after a task finishes.
 - **Hidden follow-up triggers**: session follow-up messages now remain visible in the timeline rather than collapsing behind later action blocks.
 

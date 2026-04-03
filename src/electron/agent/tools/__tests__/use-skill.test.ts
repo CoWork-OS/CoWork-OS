@@ -48,6 +48,11 @@ let mockSkills: Map<string, CustomSkill> = new Map();
 
 function matchesSkillRoutingQuery(skill: CustomSkill, query: string): boolean {
   const normalizedQuery = String(query || "")
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`[^`\n]*`/g, " ")
+    .replace(/https?:\/\/\S+/gi, " ")
+    .replace(/(^|\n)\s*>\s.*$/gm, " ")
+    .replace(/["“”'‘’][^"“”'‘’]{1,160}["“”'‘’]/g, " ")
     .toLowerCase()
     .replace(/[-_\s]+/g, " ")
     .trim();
@@ -77,7 +82,37 @@ function matchesSkillRoutingQuery(skill: CustomSkill, query: string): boolean {
     });
   }
 
-  const keywords = skill.metadata?.routing?.keywords;
+  const explicitMatch = [skill.id, skill.name]
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .map((value) => value.toLowerCase().replace(/[-_\s]+/g, " ").trim())
+    .some((target) => {
+      const escaped = target
+        .split(" ")
+        .filter(Boolean)
+        .map((segment) => segment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+        .join("\\s+");
+
+      return (
+        /\b(?:use|run|call|invoke|activate|apply|launch|start|enable|turn on|work on|help with|help me with)\b/.test(
+          normalizedQuery,
+        ) || /\bskill\b/.test(normalizedQuery)
+      ) && new RegExp(`(?:^|[^a-z0-9])${escaped}(?:$|[^a-z0-9])`, "i").test(normalizedQuery);
+    });
+  if (explicitMatch) return true;
+
+  const routing = skill.metadata?.routing;
+  const hasRoutingMetadata =
+    Boolean(routing?.useWhen) ||
+    Boolean(routing?.dontUseWhen) ||
+    Boolean(routing?.outputs) ||
+    Boolean(routing?.successCriteria) ||
+    (Array.isArray(routing?.expectedArtifacts) && routing.expectedArtifacts.length > 0) ||
+    (Array.isArray(routing?.keywords) && routing.keywords.length > 0) ||
+    (Array.isArray(routing?.examples?.positive) && routing.examples.positive.length > 0) ||
+    (Array.isArray(routing?.examples?.negative) && routing.examples.negative.length > 0);
+  if (!hasRoutingMetadata) return false;
+
+  const keywords = routing?.keywords;
   if (!Array.isArray(keywords) || keywords.length === 0) return true;
 
   if (!normalizedQuery) return false;
@@ -280,6 +315,11 @@ function createTestSkill(overrides: Partial<CustomSkill> = {}): CustomSkill {
       },
     ],
     enabled: true,
+    metadata: {
+      routing: {
+        useWhen: "Use when testing skill application behavior.",
+      },
+    },
     ...overrides,
   };
 }
@@ -319,6 +359,8 @@ describe("use_skill tool", () => {
         id: "test-task-123",
         title: "Generic task",
         prompt: "Generic prompt",
+        rawPrompt: "Generic prompt",
+        userPrompt: "Generic prompt",
       }),
     };
 
@@ -370,7 +412,15 @@ describe("use_skill tool", () => {
 
       expect(result.success).toBe(true);
       expect(result.skill_id).toBe("my-skill");
-      expect(result.expanded_prompt).toBeDefined();
+      expect(result.content).toBeDefined();
+      expect(result.context_directives).toBeDefined();
+      expect(result.application_summary).toContain("Applied skill");
+      expect(result.skill_application).toEqual(
+        expect.objectContaining({
+          skillId: "my-skill",
+          trigger: "model",
+        }),
+      );
     });
 
     it("should expand prompt with provided parameters", async () => {
@@ -390,6 +440,7 @@ describe("use_skill tool", () => {
       });
 
       expect(result.success).toBe(true);
+      expect(result.content).toBe("Process test.txt to Spanish");
       expect(result.expanded_prompt).toBe("Process test.txt to Spanish");
     });
 
@@ -416,6 +467,7 @@ describe("use_skill tool", () => {
       });
 
       expect(result.success).toBe(true);
+      expect(result.content).toBe("Hello World with Good day");
       expect(result.expanded_prompt).toBe("Hello World with Good day");
     });
 
@@ -453,6 +505,43 @@ describe("use_skill tool", () => {
       expect(result.error).toContain("cannot be invoked automatically");
     });
 
+    it("should reject automatic invocation for skills without routing metadata", async () => {
+      const skill = createTestSkill({
+        id: "manual-routing-skill",
+        metadata: undefined,
+      });
+      mockSkills.set("manual-routing-skill", skill);
+
+      const result = await registry.executeTool("use_skill", {
+        skill_id: "manual-routing-skill",
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("not available for this task");
+    });
+
+    it("should allow manual slash invocation for a model-disabled skill", async () => {
+      const skill = createTestSkill({
+        id: "manual-only-skill",
+        invocation: { disableModelInvocation: true },
+      });
+      mockSkills.set("manual-only-skill", skill);
+
+      const result = await registry.executeTool("use_skill", {
+        skill_id: "manual-only-skill",
+        parameters: { param1: "value1" },
+        trigger: "slash",
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.skill_application).toEqual(
+        expect.objectContaining({
+          skillId: "manual-only-skill",
+          trigger: "slash",
+        }),
+      );
+    });
+
     it("should log skill invocation event", async () => {
       const skill = createTestSkill({ id: "logged-skill" });
       mockSkills.set("logged-skill", skill);
@@ -485,10 +574,11 @@ describe("use_skill tool", () => {
       });
 
       expect(result.success).toBe(true);
+      expect(result.content).toBe("A simple prompt without parameters");
       expect(result.expanded_prompt).toBe("A simple prompt without parameters");
     });
 
-    it("should include instruction in response", async () => {
+    it("should return additive application metadata", async () => {
       const skill = createTestSkill({ id: "instruction-skill" });
       mockSkills.set("instruction-skill", skill);
 
@@ -497,8 +587,17 @@ describe("use_skill tool", () => {
         parameters: { param1: "test" },
       });
 
-      expect(result.instruction).toBeDefined();
-      expect(result.instruction).toContain("Execute");
+      expect(result.application_summary).toContain("Applied skill");
+      expect(result.context_messages).toEqual([
+        expect.objectContaining({
+          role: "system",
+        }),
+      ]);
+      expect(result.context_directives).toEqual(
+        expect.objectContaining({
+          artifactDirectories: expect.any(Array),
+        }),
+      );
     });
 
     it("should resolve {baseDir} and {artifactDir} placeholders in expanded prompt", async () => {
@@ -584,7 +683,7 @@ describe("use_skill tool", () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toContain("not available for this task");
-      expect(result.reason).toContain("explicit");
+      expect(result.reason).toContain("auto-routable");
     });
 
     it("should allow codex-cli when the task explicitly invokes the skill", async () => {
@@ -612,7 +711,14 @@ describe("use_skill tool", () => {
 
       expect(result.success).toBe(true);
       expect(result.skill_id).toBe("codex-cli");
+      expect(result.content).toContain("codex");
       expect(result.expanded_prompt).toContain("codex");
+      expect(result.skill_application).toEqual(
+        expect.objectContaining({
+          skillId: "codex-cli",
+          trigger: "model",
+        }),
+      );
     });
 
     it("should expand codex-cli into an acpx-backed child task when the setting prefers acpx", async () => {

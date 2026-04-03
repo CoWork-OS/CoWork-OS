@@ -262,6 +262,10 @@ export class MCPClientManager extends EventEmitter {
     return connection.getTools();
   }
 
+  getServerIdForTool(toolName: string): string | null {
+    return this.toolServerMap.get(toolName) || null;
+  }
+
   async syncTriggerResourceSubscriptions(
     triggers: Array<{ serverId?: string; connectorId?: string; resourceUri?: string }>,
   ): Promise<void> {

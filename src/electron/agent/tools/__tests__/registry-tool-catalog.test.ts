@@ -208,6 +208,23 @@ describe("ToolRegistry tool catalog versioning", () => {
     expect(spec.idempotent).toBe(false);
   });
 
+  it("uses the expected scheduler specs for session checklist tools", () => {
+    const registry = new ToolRegistry(createWorkspace(), createDaemon(), "task-checklist");
+
+    const createSpec = registry.getSchedulerSpec("task_list_create", {
+      items: [{ title: "Implement", status: "pending" }],
+    });
+    const listSpec = registry.getSchedulerSpec("task_list_list", {});
+
+    expect(createSpec.concurrencyClass).toBe("serial_only");
+    expect(createSpec.readOnly).toBe(false);
+    expect(createSpec.idempotent).toBe(false);
+
+    expect(listSpec.concurrencyClass).toBe("read_parallel");
+    expect(listSpec.readOnly).toBe(true);
+    expect(listSpec.idempotent).toBe(true);
+  });
+
   it("includes the tool_search meta tool and returns deferred matches", () => {
     const registry = new ToolRegistry(createWorkspace(), createDaemon(), "task-tool-search");
     const deferredTools = registry.getDeferredTools();

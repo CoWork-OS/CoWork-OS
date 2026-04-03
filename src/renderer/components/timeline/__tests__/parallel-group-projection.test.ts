@@ -165,4 +165,97 @@ describe("parallel-group-projection", () => {
     expect(group?.lanes[0]?.title).toContain("api.github.com/repos/foo/bar/contents/src/electron");
     expect(projection.suppressedEventIds.has("evt-3")).toBe(true);
   });
+
+  it("keeps a specific search_files title when completion is generic", () => {
+    const groupId = "tools:step:build:1";
+    const events: TaskEvent[] = [
+      makeEvent("timeline_group_started", "evt-1", {
+        groupId,
+        groupLabel: "Tool batch (1)",
+      }),
+      makeEvent("tool_call", "evt-2", {
+        groupId,
+        tool: "search_files",
+        toolUseId: "use-1",
+        toolCallIndex: 1,
+        input: { query: "SessionRuntime" },
+      }),
+      makeEvent("tool_result", "evt-3", {
+        groupId,
+        tool: "search_files",
+        toolUseId: "use-1",
+        toolCallIndex: 1,
+        result: { matches: [{ path: "src/electron/agent/runtime/SessionRuntime.ts" }], totalFound: 1 },
+      }),
+      makeEvent("timeline_step_finished", "evt-4", {
+        groupId,
+        step: { id: "tool_lane:step:use-1", description: "Running search_files" },
+        status: "completed",
+      }),
+    ];
+
+    const projection = buildParallelGroupProjection(events);
+    const group = projection.groupsByAnchorEventId.get("evt-1");
+    expect(group?.lanes[0]?.title).toBe("Search files: SessionRuntime");
+  });
+
+  it("shows the files read for read_files results", () => {
+    const groupId = "tools:step:build:1";
+    const events: TaskEvent[] = [
+      makeEvent("timeline_group_started", "evt-1", {
+        groupId,
+        groupLabel: "Tool batch (1)",
+      }),
+      makeEvent("tool_result", "evt-2", {
+        groupId,
+        tool: "read_files",
+        toolUseId: "use-1",
+        toolCallIndex: 1,
+        result: {
+          files: [
+            { path: "src/electron/agent/runtime/SessionRuntime.ts", content: "..." },
+            { path: "src/electron/agent/runtime/ToolScheduler.ts", content: "..." },
+          ],
+        },
+      }),
+    ];
+
+    const projection = buildParallelGroupProjection(events);
+    const group = projection.groupsByAnchorEventId.get("evt-1");
+    expect(group?.lanes[0]?.title).toBe("Read files: SessionRuntime.ts, ToolScheduler.ts");
+  });
+
+  it("uses embedded timeline tool payloads for lane titles", () => {
+    const groupId = "tools:step:build:1";
+    const events: TaskEvent[] = [
+      makeEvent("timeline_group_started", "evt-1", {
+        groupId,
+        groupLabel: "Tool batch (1)",
+      }),
+      makeEvent("timeline_step_updated", "evt-2", {
+        groupId,
+        legacyType: "tool_call",
+        tool: "web_fetch",
+        toolUseId: "use-1",
+        toolCallIndex: 1,
+        input: { url: "https://ccunpacked.dev/" },
+        step: { id: "tool_lane:step:use-1", description: "Running web_fetch" },
+        status: "in_progress",
+      }),
+      makeEvent("timeline_step_finished", "evt-3", {
+        groupId,
+        legacyType: "tool_result",
+        tool: "web_fetch",
+        toolUseId: "use-1",
+        toolCallIndex: 1,
+        result: { success: true, url: "https://ccunpacked.dev/", title: "CCUnpacked" },
+        step: { id: "tool_lane:step:use-1", description: "Running web_fetch" },
+        status: "completed",
+      }),
+    ];
+
+    const projection = buildParallelGroupProjection(events);
+    const group = projection.groupsByAnchorEventId.get("evt-1");
+    expect(group?.lanes[0]?.title).toBe("Fetched CCUnpacked");
+  });
 });

@@ -27,6 +27,7 @@ import {
   ArtifactRepository,
   SkillRepository,
   LLMModelRepository,
+  WorkspacePermissionRuleRepository,
 } from "../database/repositories";
 import { AgentRoleRepository } from "../agents/AgentRoleRepository";
 import { ActivityRepository } from "../activity/ActivityRepository";
@@ -80,6 +81,7 @@ import {
   ShellSessionInfo,
   ShellSessionScope,
 } from "../../shared/types";
+import { isTerminalTaskStatus } from "../../shared/task-status";
 import type { MailboxCommitmentState } from "../../shared/mailbox";
 import * as os from "os";
 import { AgentDaemon } from "../agent/daemon";
@@ -95,6 +97,11 @@ import { rateLimiter, RATE_LIMIT_CONFIGS } from "../utils/rate-limiter";
 import { toPublicChannel } from "./channel-config-sanitizer";
 import { buildTaskExportJson } from "../reports/task-export";
 import { ProfileManager } from "../profiles/ProfileManager";
+import { PermissionSettingsManager } from "../security/permission-settings-manager";
+import {
+  appendWorkspacePermissionManifestRule,
+  removeWorkspacePermissionManifestRule,
+} from "../security/workspace-permission-manifest";
 import {
   validateInput,
   WorkspaceCreateSchema,
@@ -117,6 +124,7 @@ import {
   GoogleWorkspaceSettingsSchema,
   DropboxSettingsSchema,
   SharePointSettingsSchema,
+  PermissionSettingsSchema,
   AddChannelSchema,
   UpdateChannelSchema,
   GrantAccessSchema,
@@ -723,6 +731,7 @@ export async function setupIpcHandlers(
   const artifactRepo = new ArtifactRepository(db);
   const skillRepo = new SkillRepository(db);
   const llmModelRepo = new LLMModelRepository(db);
+  const workspacePermissionRuleRepo = new WorkspacePermissionRuleRepository(db);
   const agentRoleRepo = new AgentRoleRepository(db);
   const activityRepo = new ActivityRepository(db);
   const mentionRepo = new MentionRepository(db);
@@ -768,8 +777,13 @@ export async function setupIpcHandlers(
     findOrchestrationGraphByTeamRunId: (teamRunId: string) =>
       agentDaemon.findOrchestrationGraphByTeamRunId(teamRunId),
     completeRootTask: (taskId, status, summary) => {
-      taskRepo.update(taskId, { status, resultSummary: summary, completedAt: Date.now() });
-      emitTaskStatusEvent(taskId, status, { resultSummary: summary });
+      if (status === "failed") {
+        agentDaemon.failTask(taskId, summary, {
+          resultSummary: summary,
+        });
+        return;
+      }
+      agentDaemon.completeTask(taskId, summary);
     },
   });
   agentDaemon.setTeamOrchestrator(teamOrchestrator);
@@ -2427,11 +2441,7 @@ export async function setupIpcHandlers(
           try {
             await agentDaemon.startTask(task, validatedImages);
           } catch (startError: Any) {
-            taskRepo.update(task.id, {
-              status: "failed",
-              error: startError.message || "Failed to start task",
-            });
-            emitTaskStatusEvent(task.id, "failed");
+            agentDaemon.failTask(task.id, startError.message || "Failed to start task");
           }
         }
       })();
@@ -2496,11 +2506,7 @@ export async function setupIpcHandlers(
           try {
             await agentDaemon.startTask(task, validatedImages);
           } catch (startError: Any) {
-            taskRepo.update(task.id, {
-              status: "failed",
-              error: startError.message || "Failed to start task",
-            });
-            emitTaskStatusEvent(task.id, "failed");
+            agentDaemon.failTask(task.id, startError.message || "Failed to start task");
           }
         }
       })();
@@ -2512,11 +2518,7 @@ export async function setupIpcHandlers(
     try {
       await agentDaemon.startTask(task, validatedImages);
     } catch (error: Any) {
-      // Update task status to failed if we can't start it
-      taskRepo.update(task.id, {
-        status: "failed",
-        error: error.message || "Failed to start task",
-      });
+      agentDaemon.failTask(task.id, error.message || "Failed to start task");
       throw new Error(
         error.message || "Failed to start task. Please check your LLM provider settings.",
       );
@@ -2604,10 +2606,11 @@ export async function setupIpcHandlers(
     try {
       await agentDaemon.cancelTask(id);
     } finally {
-      // Always update status even if daemon cancel fails
-      taskRepo.update(id, { status: "cancelled", completedAt: Date.now() });
-      // Emit explicit task_status event so the renderer updates immediately
-      emitTaskStatusEvent(id, "cancelled");
+      const current = taskRepo.findById(id);
+      if (current && !isTerminalTaskStatus(current.status)) {
+        // Fallback if daemon-side cancellation failed before persisting terminal state.
+        agentDaemon.cancelTaskRecord(id, "Task was stopped by user");
+      }
     }
   });
 
@@ -2626,12 +2629,10 @@ export async function setupIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.TASK_RESUME, async (_, id: string) => {
     const validated = validateInput(UUIDSchema, id, "task ID");
-    // Resume daemon first - if it fails, exception propagates and status won't be updated
+    // Resume daemon first. The daemon owns lifecycle transitions and may finish the
+    // task before this call returns, so do not force a stale "executing" write here.
     const resumed = await agentDaemon.resumeTask(validated);
-    if (resumed) {
-      taskRepo.update(validated, { status: "executing" });
-      return;
-    }
+    if (resumed) return;
     console.warn(
       `[IPC] TASK_RESUME ignored for task ${validated}: no active executor available to resume`,
     );
@@ -2903,7 +2904,11 @@ export async function setupIpcHandlers(
   // Approval handlers
   ipcMain.handle(IPC_CHANNELS.APPROVAL_RESPOND, async (_, data) => {
     const validated = validateInput(ApprovalResponseSchema, data, "approval response");
-    await agentDaemon.respondToApproval(validated.approvalId, validated.approved);
+    await agentDaemon.respondToApproval(
+      validated.approvalId,
+      validated.approved ?? validated.action?.startsWith("allow_") === true,
+      validated.action,
+    );
   });
 
   ipcMain.handle(IPC_CHANNELS.INPUT_REQUEST_LIST, async (_, data) => {
@@ -4532,6 +4537,51 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.GUARDRAIL_GET_DEFAULTS, async () => {
     return GuardrailManager.getDefaults();
   });
+
+  ipcMain.handle(IPC_CHANNELS.PERMISSIONS_GET_SETTINGS, async () => {
+    return PermissionSettingsManager.loadSettings();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.PERMISSIONS_SAVE_SETTINGS, async (_, settings) => {
+    checkRateLimit(IPC_CHANNELS.PERMISSIONS_SAVE_SETTINGS);
+    const validated = validateInput(PermissionSettingsSchema, settings, "permission settings");
+    PermissionSettingsManager.saveSettings(validated);
+    PermissionSettingsManager.clearCache();
+    return { success: true };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.PERMISSIONS_GET_WORKSPACE_RULES, async (_, workspaceId: string) => {
+    const validatedWorkspaceId = validateInput(WorkspaceIdSchema, workspaceId, "workspace ID");
+    return workspacePermissionRuleRepo.listByWorkspaceId(validatedWorkspaceId);
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.PERMISSIONS_DELETE_WORKSPACE_RULE,
+    async (_, payload: { workspaceId: string; ruleId: string }) => {
+      const validatedWorkspaceId = validateInput(WorkspaceIdSchema, payload.workspaceId, "workspace ID");
+      const validatedRuleId = validateInput(z.string().uuid(), payload.ruleId, "workspace permission rule ID");
+      const deleted = workspacePermissionRuleRepo.deleteByWorkspaceAndId(
+        validatedWorkspaceId,
+        validatedRuleId,
+      );
+      if (!deleted) {
+        return { success: false, removed: false };
+      }
+      const workspace = workspaceRepo.findById(validatedWorkspaceId);
+      const manifestResult = workspace
+        ? removeWorkspacePermissionManifestRule(workspace.path, deleted)
+        : { success: true, manifestPath: "", removed: false };
+      agentDaemon.refreshActiveExecutorsForWorkspace(validatedWorkspaceId);
+      return {
+        success: true,
+        removed: true,
+        dbRemoved: true,
+        manifestRemoved: manifestResult.removed,
+        manifestPath: manifestResult.manifestPath,
+        manifestError: manifestResult.success ? undefined : manifestResult.error,
+      };
+    },
+  );
 
   // Appearance Settings handlers
   ipcMain.handle(IPC_CHANNELS.APPEARANCE_GET_SETTINGS, async () => {

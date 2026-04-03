@@ -337,11 +337,16 @@ export function inferTimelineSubStageLabel(type: EventType): string | undefined 
     case "verification_text_checklist_evaluated":
     case "verification_mode_selected":
       return "Preparing verification";
+    case "task_list_verification_nudged":
+      return "Preparing verification";
     // Recovery (something went wrong, retrying)
     case "step_failed":
     case "tool_error":
     case "mutation_checkpoint_retry_applied":
       return "Applying fixes";
+    case "task_list_created":
+    case "task_list_updated":
+      return "Updating checklist";
     case "retry_started":
       return "Retrying";
     case "workspace_path_alias_recovery_attempted":
@@ -410,10 +415,13 @@ export function inferTimelineStageForLegacyType(type: EventType): TimelineStage 
     case "file_deleted":
     case "artifact_created":
     case "command_output":
+    case "task_list_created":
+    case "task_list_updated":
       return "BUILD";
     case "verification_started":
     case "verification_passed":
     case "verification_pending_user_action":
+    case "task_list_verification_nudged":
       return "VERIFY";
     case "verification_failed":
     case "retry_started":

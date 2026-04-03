@@ -80,14 +80,15 @@ Restrict tool groups per context:
 
 ### Basic Permissions
 
-Configure per workspace in **Settings > Workspaces**:
+Configure per workspace in **Settings > Workspaces**. These booleans are coarse capability gates;
+the permission engine still evaluates explicit rules, guardrails, and mode defaults.
 
 | Permission | Description | Default |
 |------------|-------------|---------|
 | Read | Read files | Yes |
 | Write | Create/modify files | Yes |
-| Delete | Delete files (always approval-gated) | No |
-| Shell | Run shell commands (always approval-gated) | No |
+| Delete | Delete files (usually approval-gated, unless a matching rule allows it) | No |
+| Shell | Run shell commands (usually approval-gated, unless a matching rule allows it) | No |
 | Network | Browser/web access | Yes |
 
 ### Allowed Paths
@@ -106,6 +107,18 @@ Enable broader file access for development:
 2. Toggle **Unrestricted File Access**
 
 **Warning:** Only use in trusted environments.
+
+### Permission Rules
+
+For explicit tool, path, command-prefix, and MCP-server rules:
+
+1. Open **Settings > System & Security**
+2. Set the default permission mode if needed
+3. Add profile rules for global policy
+4. Use the workspace-local rule list to review or remove rules for the active workspace
+
+Workspace-local rules are stored in SQLite and mirrored to `.cowork/policy/permissions.json`.
+Removing a workspace rule updates both storage locations when possible.
 
 ## Sandbox Configuration
 
@@ -150,10 +163,13 @@ Add custom blocked patterns:
 
 ### Trusted Commands
 
-Auto-approve safe commands:
+Trusted commands feed the permission engine as compatibility rules:
 1. Go to **Settings > Guardrails**
 2. Enable **Auto-approve Trusted Commands**
 3. Default includes: npm/yarn test, git status, ls, etc.
+
+The final decision still comes from the permission engine, so a trusted command can be overridden by
+an explicit deny rule or a higher-priority hard restriction.
 
 ### Budget Limits
 
@@ -187,5 +203,6 @@ After configuration, verify:
 - [ ] Context policies configured for groups
 - [ ] Workspace permissions appropriate
 - [ ] Guardrails configured
+- [ ] Permission rules reviewed
 - [ ] Sandbox type selected
 - [ ] Test with a pairing code

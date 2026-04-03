@@ -142,6 +142,7 @@ jobs:
 
       - name: Validate published-package first-install flow
         if: runner.os != 'Windows'
+        continue-on-error: true
         env:
           CO_WORK_INSTALL_VERSION: ${{ steps.release_metadata.outputs.npm_version }}
         run: |

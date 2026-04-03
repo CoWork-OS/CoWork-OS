@@ -56,6 +56,47 @@ const OriginChannelSchema = z.preprocess(
 );
 
 const LlmProfileSchema = z.enum(["strong", "cheap"]);
+const PermissionModeSchema = z.enum([
+  "default",
+  "plan",
+  "accept_edits",
+  "dont_ask",
+  "bypass_permissions",
+]);
+const PermissionRuleScopeSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("tool"),
+    toolName: z.string().min(1).max(200),
+  }),
+  z.object({
+    kind: z.literal("path"),
+    path: z.string().min(1).max(MAX_PATH_LENGTH),
+    toolName: z.string().min(1).max(200).optional(),
+  }),
+  z.object({
+    kind: z.literal("command_prefix"),
+    prefix: z.string().min(1).max(MAX_PATH_LENGTH),
+  }),
+  z.object({
+    kind: z.literal("mcp_server"),
+    serverName: z.string().min(1).max(200),
+  }),
+]);
+const PermissionRuleSchema = z.object({
+  id: z.string().min(1).max(200).optional(),
+  source: z.enum([
+    "session",
+    "workspace_db",
+    "workspace_manifest",
+    "profile",
+    "legacy_guardrails",
+    "legacy_builtin_settings",
+  ]),
+  effect: z.enum(["allow", "deny", "ask"]),
+  scope: PermissionRuleScopeSchema,
+  createdAt: z.number().int().positive().optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+});
 
 // ============ Workspace Schemas ============
 
@@ -349,7 +390,27 @@ export const DocumentEditRequestSchema = z.object({
 
 export const ApprovalResponseSchema = z.object({
   approvalId: z.string().uuid(),
-  approved: z.boolean(),
+  approved: z.boolean().optional(),
+  action: z
+    .enum([
+      "allow_once",
+      "deny_once",
+      "allow_session",
+      "deny_session",
+      "allow_workspace",
+      "deny_workspace",
+      "allow_profile",
+      "deny_profile",
+    ])
+    .optional(),
+}).refine((data) => typeof data.approved === "boolean" || typeof data.action === "string", {
+  message: "Either approved or action must be provided",
+});
+
+export const PermissionSettingsSchema = z.object({
+  version: z.literal(1),
+  defaultMode: PermissionModeSchema,
+  rules: z.array(PermissionRuleSchema).default([]),
 });
 
 const InputRequestAnswerSchema = z.object({

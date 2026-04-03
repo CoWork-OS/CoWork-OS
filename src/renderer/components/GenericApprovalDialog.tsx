@@ -1,5 +1,49 @@
-import { Fragment, type ReactNode } from "react";
-import type { ApprovalRequest, ApprovalType } from "../../shared/types";
+import { Fragment, useState, type ReactNode } from "react";
+import type {
+  ApprovalRequest,
+  ApprovalResponseAction,
+  ApprovalType,
+  PermissionPromptDetails,
+} from "../../shared/types";
+
+type ScopeKey = "once" | "session" | "workspace" | "profile";
+
+interface ScopePair {
+  scope: ScopeKey;
+  label: string;
+  denyAction: ApprovalResponseAction;
+  allowAction: ApprovalResponseAction;
+}
+
+const SCOPE_ORDER: ScopeKey[] = ["once", "session", "workspace", "profile"];
+const SCOPE_LABELS: Record<ScopeKey, string> = {
+  once: "Once",
+  session: "Session",
+  workspace: "Workspace",
+  profile: "Profile",
+};
+
+function extractScopePairs(
+  actions: { action: ApprovalResponseAction; label: string }[],
+): ScopePair[] | null {
+  const actionSet = new Set(actions.map((a) => a.action));
+  const pairs: ScopePair[] = [];
+
+  for (const scope of SCOPE_ORDER) {
+    const allow = `allow_${scope}` as ApprovalResponseAction;
+    const deny = `deny_${scope}` as ApprovalResponseAction;
+    if (actionSet.has(allow) || actionSet.has(deny)) {
+      pairs.push({
+        scope,
+        label: SCOPE_LABELS[scope],
+        allowAction: allow,
+        denyAction: deny,
+      });
+    }
+  }
+
+  return pairs.length >= 2 ? pairs : null;
+}
 
 function titleForType(type: ApprovalType): string {
   switch (type) {
@@ -52,17 +96,16 @@ function formatApprovalTypeLabel(type: ApprovalType): string {
 
 interface GenericApprovalDialogProps {
   approval: ApprovalRequest;
-  onApprove: () => void;
-  onDeny: () => void;
+  onRespond: (action: ApprovalResponseAction) => void;
   onApproveAllSession?: () => void;
 }
 
 export function GenericApprovalDialog({
   approval,
-  onApprove,
-  onDeny,
+  onRespond,
   onApproveAllSession,
 }: GenericApprovalDialogProps) {
+  const [selectedScope, setSelectedScope] = useState<ScopeKey>("once");
   const details =
     approval.details && typeof approval.details === "object" && !Array.isArray(approval.details)
       ? (approval.details as Record<string, unknown>)
@@ -73,6 +116,10 @@ export function GenericApprovalDialog({
   const bundleScope = typeof details.bundleScope === "string" ? details.bundleScope : null;
   const path = typeof details.path === "string" ? details.path : null;
   const url = typeof details.url === "string" ? details.url : null;
+  const permissionPrompt =
+    details.permissionPrompt && typeof details.permissionPrompt === "object"
+      ? (details.permissionPrompt as PermissionPromptDetails)
+      : null;
 
   const rows: { label: string; value: ReactNode }[] = [];
 
@@ -118,38 +165,113 @@ export function GenericApprovalDialog({
       value: <code className="session-approval-code">{url}</code>,
     });
   }
+  if (permissionPrompt?.scopePreview) {
+    rows.push({
+      label: "Scope",
+      value: permissionPrompt.scopePreview,
+    });
+  }
+  if (permissionPrompt?.reason?.summary) {
+    rows.push({
+      label: "Reason",
+      value: permissionPrompt.reason.summary,
+    });
+  }
+
+  const suggestedActions =
+    permissionPrompt?.suggestedActions?.length
+      ? permissionPrompt.suggestedActions
+      : [
+          { action: "deny_once" as const, label: "Deny once" },
+          { action: "allow_once" as const, label: "Allow once" },
+        ];
+
+  const scopePairs = extractScopePairs(suggestedActions);
+  const activePair = scopePairs?.find((p) => p.scope === selectedScope) ?? scopePairs?.[0];
 
   return (
     <div className="session-approval-overlay" role="dialog" aria-modal="true">
       <div className="session-approval-card">
-        <div className="session-approval-icon" aria-hidden="true">
-          {iconForType(approval.type)}
+        <div className="session-approval-icon-wrap" aria-hidden="true">
+          <span className="session-approval-icon">{iconForType(approval.type)}</span>
         </div>
         <h3 className="session-approval-title">{titleForType(approval.type)}</h3>
         <p className="session-approval-prompt">{approval.description}</p>
 
-        <dl className="session-approval-details">
-          {rows.map((row) => (
-            <Fragment key={row.label}>
-              <dt>{row.label}</dt>
-              <dd>{row.value}</dd>
-            </Fragment>
-          ))}
-        </dl>
+        {rows.length > 0 && (
+          <dl className="session-approval-details">
+            {rows.map((row) => (
+              <Fragment key={row.label}>
+                <dt>{row.label}</dt>
+                <dd>{row.value}</dd>
+              </Fragment>
+            ))}
+          </dl>
+        )}
 
-        <p className="session-approval-footer-hint">
-          This decision applies only to this request. You can enable session auto-approve from the
-          link below if you trust this run.
-        </p>
+        {scopePairs ? (
+          <>
+            <div className="session-approval-scope-row">
+              <span className="session-approval-scope-label">Remember for</span>
+              <div className="session-approval-scope-tabs" role="group" aria-label="Permission scope">
+                {scopePairs.map((pair) => (
+                  <button
+                    key={pair.scope}
+                    type="button"
+                    className={
+                      pair.scope === selectedScope
+                        ? "session-approval-scope-tab session-approval-scope-tab--active"
+                        : "session-approval-scope-tab"
+                    }
+                    onClick={() => setSelectedScope(pair.scope)}
+                    aria-pressed={pair.scope === selectedScope}
+                  >
+                    {pair.label}
+                  </button>
+                ))}
+              </div>
+            </div>
 
-        <div className="session-approval-actions">
-          <button type="button" className="session-approval-btn-deny" onClick={onDeny}>
-            Deny
-          </button>
-          <button type="button" className="session-approval-btn-allow" onClick={onApprove}>
-            Approve
-          </button>
-        </div>
+            <div className="session-approval-actions session-approval-actions--scoped">
+              <button
+                type="button"
+                className="session-approval-btn-deny"
+                onClick={() => activePair && onRespond(activePair.denyAction)}
+              >
+                Deny
+              </button>
+              <button
+                type="button"
+                className="session-approval-btn-allow"
+                onClick={() => activePair && onRespond(activePair.allowAction)}
+              >
+                Allow
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="session-approval-footer-hint">
+              Choose a one-off decision or persist the rule for this session, workspace, or profile.
+            </p>
+            <div className="session-approval-actions">
+              {suggestedActions.map((action) => (
+                <button
+                  key={action.action}
+                  type="button"
+                  className={
+                    action.action.startsWith("allow_")
+                      ? "session-approval-btn-allow"
+                      : "session-approval-btn-deny"
+                  }
+                  onClick={() => onRespond(action.action)}
+                >
+                  {action.label}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
 
         {onApproveAllSession ? (
           <button

@@ -620,6 +620,9 @@ export type EventType =
   // Deep work mode events
   | "progress_journal" // Periodic human-readable status update for long-running tasks
   | "research_recovery_started" // Agent began researching error before retry
+  | "task_list_created"
+  | "task_list_updated"
+  | "task_list_verification_nudged"
   // Timeline V2 canonical event set
   | "timeline_group_started"
   | "timeline_group_finished"
@@ -841,12 +844,32 @@ export interface RuntimeToolMetadata {
   exposure: "always" | "conditional" | "explicit_only";
 }
 
+export type SessionChecklistItemKind = "implementation" | "verification" | "other";
+export type SessionChecklistItemStatus = "pending" | "in_progress" | "completed" | "blocked";
+
+export interface SessionChecklistItem {
+  id: string;
+  title: string;
+  kind: SessionChecklistItemKind;
+  status: SessionChecklistItemStatus;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface SessionChecklistState {
+  items: SessionChecklistItem[];
+  updatedAt: number;
+  verificationNudgeNeeded: boolean;
+  nudgeReason: string | null;
+}
+
 export type ToolPolicyStage =
   | "task_restrictions"
   | "workspace_quick_access"
   | "availability"
   | "mode_and_domain"
   | "workspace_script"
+  | "permissions"
   | "approval";
 
 export type ToolPolicyStageDecision = "allow" | "defer" | "deny" | "require_approval" | "skip";
@@ -863,6 +886,151 @@ export interface ToolPolicyTrace {
   toolName: string;
   finalDecision: Exclude<ToolPolicyStageDecision, "skip">;
   entries: ToolPolicyTraceEntry[];
+}
+
+export type PermissionMode =
+  | "default"
+  | "plan"
+  | "accept_edits"
+  | "dont_ask"
+  | "bypass_permissions";
+
+export type PermissionEffect = "allow" | "deny" | "ask";
+
+export type PermissionRuleSource =
+  | "session"
+  | "workspace_db"
+  | "workspace_manifest"
+  | "profile"
+  | "legacy_guardrails"
+  | "legacy_builtin_settings";
+
+export type PermissionPersistenceDestination = "session" | "workspace" | "profile";
+
+export type PermissionRuleScope =
+  | {
+      kind: "tool";
+      toolName: string;
+    }
+  | {
+      kind: "path";
+      path: string;
+      toolName?: string;
+    }
+  | {
+      kind: "command_prefix";
+      prefix: string;
+    }
+  | {
+      kind: "mcp_server";
+      serverName: string;
+    };
+
+export interface PermissionRule {
+  id?: string;
+  source: PermissionRuleSource;
+  effect: PermissionEffect;
+  scope: PermissionRuleScope;
+  createdAt?: number;
+  metadata?: Record<string, unknown>;
+}
+
+export type PermissionDecisionReason =
+  | {
+      type: "rule";
+      rule: PermissionRule;
+      summary: string;
+      metadata?: Record<string, unknown>;
+    }
+  | {
+      type: "mode";
+      mode: PermissionMode;
+      summary: string;
+      metadata?: Record<string, unknown>;
+    }
+  | {
+      type: "workspace_capability";
+      capability: "read" | "write" | "delete" | "network" | "shell";
+      summary: string;
+      metadata?: Record<string, unknown>;
+    }
+  | {
+      type: "guardrail";
+      summary: string;
+      metadata?: Record<string, unknown>;
+    }
+  | {
+      type: "workspace_script";
+      summary: string;
+      metadata?: Record<string, unknown>;
+    }
+  | {
+      type: "task_restriction";
+      summary: string;
+      metadata?: Record<string, unknown>;
+    }
+  | {
+      type: "denial_fallback";
+      summary: string;
+      metadata?: Record<string, unknown>;
+    }
+  | {
+      type: "bundle_grant";
+      summary: string;
+      metadata?: Record<string, unknown>;
+    }
+  | {
+      type: "legacy_compat";
+      summary: string;
+      metadata?: Record<string, unknown>;
+    }
+  | {
+      type: "other";
+      summary: string;
+      metadata?: Record<string, unknown>;
+    };
+
+export interface PermissionPromptActionOption {
+  action:
+    | "allow_once"
+    | "deny_once"
+    | "allow_session"
+    | "deny_session"
+    | "allow_workspace"
+    | "deny_workspace"
+    | "allow_profile"
+    | "deny_profile";
+  label: string;
+  destination?: PermissionPersistenceDestination;
+  effect: PermissionEffect;
+}
+
+export interface PermissionPromptDetails {
+  scope?: PermissionRuleScope;
+  reason: PermissionDecisionReason;
+  matchedRule?: PermissionRule;
+  scopePreview: string;
+  suggestedActions: PermissionPromptActionOption[];
+  serverName?: string;
+}
+
+export interface PermissionEvaluationResult {
+  decision: PermissionEffect;
+  reason: PermissionDecisionReason;
+  matchedRule?: PermissionRule;
+  suggestions: PermissionPromptActionOption[];
+  scopePreview: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface PersistedPermissionRule extends PermissionRule {
+  workspaceId?: string;
+}
+
+export interface PermissionSettingsData {
+  version: 1;
+  defaultMode: PermissionMode;
+  rules: PermissionRule[];
 }
 
 export type ToolResultEnvelopeStatus =
@@ -1725,6 +1893,30 @@ export interface Task {
   projectId?: string; // Project context
   requestDepth?: number; // Nesting depth of the originating request
   billingCode?: string; // Billing/cost attribution code
+}
+
+export type SkillApplicationTrigger = "slash" | "planner" | "model" | "explicit_hint";
+
+export interface SkillContextDirectives {
+  allowedTools?: string[];
+  toolRestrictions?: string[];
+  modelHint?: {
+    providerType?: LLMProviderType;
+    modelKey?: string;
+  };
+  artifactDirectories?: string[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface SkillApplication {
+  skillId: string;
+  skillName: string;
+  trigger: SkillApplicationTrigger;
+  parameters?: Record<string, unknown>;
+  content: string;
+  reason: string;
+  appliedAt: number;
+  contextDirectives?: SkillContextDirectives;
 }
 
 export type TaskTerminalStatus =
@@ -2787,6 +2979,13 @@ export interface Plan {
   description: string;
 }
 
+export interface SessionChecklistToolItemInput {
+  id?: string;
+  title: string;
+  kind?: SessionChecklistItemKind;
+  status: SessionChecklistItemStatus;
+}
+
 export type StepFeedbackAction = "retry" | "skip" | "stop" | "drift";
 
 export interface StepFeedbackPayload {
@@ -2847,6 +3046,22 @@ export interface ApprovalRequest {
   status: "pending" | "approved" | "denied";
   requestedAt: number;
   resolvedAt?: number;
+}
+
+export type ApprovalResponseAction =
+  | "allow_once"
+  | "deny_once"
+  | "allow_session"
+  | "deny_session"
+  | "allow_workspace"
+  | "deny_workspace"
+  | "allow_profile"
+  | "deny_profile";
+
+export interface ApprovalResponse {
+  approvalId: string;
+  approved?: boolean;
+  action?: ApprovalResponseAction;
 }
 
 export interface RequestUserInputOption {
@@ -4950,6 +5165,12 @@ export const IPC_CHANNELS = {
   GUARDRAIL_GET_SETTINGS: "guardrail:getSettings",
   GUARDRAIL_SAVE_SETTINGS: "guardrail:saveSettings",
   GUARDRAIL_GET_DEFAULTS: "guardrail:getDefaults",
+
+  // Permissions
+  PERMISSIONS_GET_SETTINGS: "permissions:getSettings",
+  PERMISSIONS_SAVE_SETTINGS: "permissions:saveSettings",
+  PERMISSIONS_GET_WORKSPACE_RULES: "permissions:getWorkspaceRules",
+  PERMISSIONS_DELETE_WORKSPACE_RULE: "permissions:deleteWorkspaceRule",
 
   // Appearance
   APPEARANCE_GET_SETTINGS: "appearance:getSettings",

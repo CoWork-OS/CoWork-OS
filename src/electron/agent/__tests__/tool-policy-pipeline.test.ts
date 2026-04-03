@@ -47,4 +47,29 @@ describe("ToolPolicyPipeline", () => {
     expect(result.trace.entries.length).toBeGreaterThan(0);
     expect(result.trace.finalDecision).toBe("allow");
   });
+
+  it("records the permissions stage and requires approval for ask decisions", async () => {
+    const result = await evaluateToolPolicyPipeline({
+      workspace,
+      toolName: "edit_file",
+      toolInput: { path: "foo.ts" },
+      permissionEvaluation: async () => ({
+        decision: "ask",
+        reason: {
+          type: "mode",
+          mode: "default",
+          summary: "Default mode prompts for edits.",
+        },
+        suggestions: [
+          { action: "deny_once", label: "Deny once", effect: "deny" },
+          { action: "allow_once", label: "Allow once", effect: "allow" },
+        ],
+        scopePreview: "edit_file on path /tmp/workspace/foo.ts",
+      }),
+    });
+
+    expect(result.decision).toBe("require_approval");
+    expect(result.trace.finalDecision).toBe("require_approval");
+    expect(result.trace.entries.some((entry) => entry.stage === "permissions")).toBe(true);
+  });
 });

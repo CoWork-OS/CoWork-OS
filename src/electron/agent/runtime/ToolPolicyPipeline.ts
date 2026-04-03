@@ -1,4 +1,8 @@
-import type { GatewayContextType, Workspace } from "../../../shared/types";
+import type {
+  GatewayContextType,
+  PermissionEvaluationResult,
+  Workspace,
+} from "../../../shared/types";
 import { evaluateMontyToolPolicy } from "../../security/monty-tool-policy";
 import { isToolAllowedQuick } from "../../security/policy-manager";
 import {
@@ -19,6 +23,7 @@ export interface ToolPolicyPipelineOptions {
   deniedTools?: Set<string>;
   allowedTools?: Set<string>;
   approvalRequired?: boolean;
+  permissionEvaluation?: () => Promise<PermissionEvaluationResult>;
 }
 
 export interface ToolPolicyPipelineResult {
@@ -158,6 +163,32 @@ export async function evaluateToolPolicyPipeline(
       reason: "approval required by runtime metadata",
       trace: trace.build("require_approval"),
     };
+  }
+
+  if (opts.permissionEvaluation) {
+    const permission = await opts.permissionEvaluation();
+    trace.add("permissions", toStageDecision(permission.decision), permission.reason.summary, {
+      reasonType: permission.reason.type,
+      scopePreview: permission.scopePreview,
+      matchedRuleSource: permission.matchedRule?.source,
+      matchedScopeKind: permission.matchedRule?.scope?.kind,
+    });
+    if (permission.decision === "deny") {
+      return {
+        decision: "deny",
+        reason: permission.reason.summary,
+        trace: trace.build("deny"),
+      };
+    }
+    if (permission.decision === "ask") {
+      return {
+        decision: "require_approval",
+        reason: permission.reason.summary,
+        trace: trace.build("require_approval"),
+      };
+    }
+  } else {
+    trace.add("permissions", "skip");
   }
 
   trace.add("approval", "allow");

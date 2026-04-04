@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { TaskExecutor } from "../executor";
+import { LLMProviderFactory } from "../llm";
 
 function createRetryExecutor(overrides?: {
   successCriteria?: Any;
@@ -26,6 +27,7 @@ function createRetryExecutor(overrides?: {
     updateTaskStatus: vi.fn(),
     updateTask: vi.fn(),
     logEvent: vi.fn(),
+    getTransientRetryCount: vi.fn().mockReturnValue(0),
   };
   executor.emitEvent = vi.fn();
   executor.logTag = "[Executor:test]";
@@ -91,6 +93,22 @@ describe("TaskExecutor executeUnlocked retry semantics", () => {
     expect(
       executor.emitEvent.mock.calls.filter((call: Any[]) => call[0] === "retry_started"),
     ).toHaveLength(0);
+  });
+
+  it("skips replaying the initial prompt and preflight framing on transient task retries", async () => {
+    const executor = createRetryExecutor({
+      agentConfig: { deepWorkMode: true },
+    });
+    executor.shouldEmitPreflight = vi.fn().mockReturnValue(true);
+    executor.emitPreflightFraming = vi.fn().mockResolvedValue(undefined);
+    executor.daemon.getTransientRetryCount = vi.fn().mockReturnValue(1);
+
+    await (executor as Any).executeUnlocked();
+
+    expect(
+      executor.emitEvent.mock.calls.filter((call: Any[]) => call[0] === "user_message"),
+    ).toHaveLength(0);
+    expect(executor.emitPreflightFraming).not.toHaveBeenCalled();
   });
 
   it("retries only while success criteria are failing, then stops after pass", async () => {
@@ -207,6 +225,158 @@ describe("TaskExecutor provider failover retry semantics", () => {
       expect.objectContaining({
         providerType: "anthropic",
         modelKey: "sonnet-4-5",
+        success: true,
+      }),
+    ]);
+  });
+
+  it("uses the configured primary retry cooldown when failover activates", () => {
+    const executor = createRetryExecutor() as Any;
+    executor.provider = { type: "openrouter", createMessage: vi.fn() };
+    executor.modelId = "minimax/minimax-m2.5:free";
+    executor.modelKey = "minimax/minimax-m2.5:free";
+    executor.providerFailoverIndex = 0;
+    executor.providerFailoverSelections = [
+      {
+        providerType: "openrouter",
+        modelId: "minimax/minimax-m2.5:free",
+        modelKey: "minimax/minimax-m2.5:free",
+        llmProfileUsed: "cheap",
+        resolvedModelKey: "minimax/minimax-m2.5:free",
+        modelSource: "provider_default",
+        warnings: [],
+      },
+      {
+        providerType: "openrouter",
+        modelId: "qwen/qwen3.6-plus:free",
+        modelKey: "qwen/qwen3.6-plus:free",
+        llmProfileUsed: "cheap",
+        resolvedModelKey: "qwen/qwen3.6-plus:free",
+        modelSource: "provider_default",
+        warnings: [],
+      },
+    ];
+    executor.cachedLlmSettings = null;
+    executor.lastRoutingState = { fallbackChain: [] };
+    executor.hasExplicitTaskRouteOverride = vi.fn(() => false);
+    executor.appendRoutingFallbackStep = vi.fn(() => []);
+    executor.emitRoutingState = vi.fn();
+    executor.applyResolvedProviderSelection = vi.fn();
+
+    vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue({
+      providerType: "openrouter",
+      modelKey: "openrouter/free",
+      failoverPrimaryRetryCooldownSeconds: 5,
+    } as Any);
+
+    const before = Date.now();
+    const didFailover = executor.failoverToNextProvider("quota", new Error("429"));
+
+    expect(didFailover).toBe(true);
+    expect(executor.providerFailoverPreserveUntil).toBeGreaterThanOrEqual(before + 5000);
+    expect(executor.providerFailoverPreserveUntil).toBeLessThan(before + 7000);
+  });
+
+  it("fails over on retryable OpenRouter moderation route errors", async () => {
+    const executor = createRetryExecutor();
+    executor.llmCallSequence = 0;
+    executor.providerRetryV2Enabled = true;
+    executor.recordObservedOutputThroughput = vi.fn();
+    executor.provider = { type: "openrouter", createMessage: vi.fn() };
+    executor.modelId = "minimax/minimax-m2.5:free";
+    executor.modelKey = "minimax/minimax-m2.5:free";
+    executor.llmProfileUsed = "cheap";
+    executor.resolvedModelKey = "minimax/minimax-m2.5:free";
+    executor.providerFailoverIndex = 0;
+    executor.providerFailoverSelections = [
+      {
+        providerType: "openrouter",
+        modelId: "minimax/minimax-m2.5:free",
+        modelKey: "minimax/minimax-m2.5:free",
+        llmProfileUsed: "cheap",
+        resolvedModelKey: "minimax/minimax-m2.5:free",
+        modelSource: "provider_default",
+        warnings: [],
+      },
+      {
+        providerType: "openrouter",
+        modelId: "qwen/qwen3.6-plus:free",
+        modelKey: "qwen/qwen3.6-plus:free",
+        llmProfileUsed: "cheap",
+        resolvedModelKey: "qwen/qwen3.6-plus:free",
+        modelSource: "provider_default",
+        warnings: [],
+      },
+    ];
+    executor.lastRoutingState = {
+      currentProvider: "openrouter",
+      currentModel: "minimax/minimax-m2.5:free",
+      activeProvider: "openrouter",
+      activeModel: "minimax/minimax-m2.5:free",
+      routeReason: "automatic_execution",
+      fallbackChain: [],
+      fallbackOccurred: false,
+      manualOverride: false,
+      updatedAt: Date.now(),
+    };
+    executor.emitRoutingState = vi.fn((overrides?: Any) => {
+      executor.lastRoutingState = {
+        currentProvider: "openrouter",
+        currentModel: "minimax/minimax-m2.5:free",
+        activeProvider: executor.provider.type,
+        activeModel: executor.modelId,
+        routeReason: overrides?.routeReason || "automatic_execution",
+        fallbackChain: overrides?.fallbackChain || [],
+        fallbackOccurred: overrides?.fallbackOccurred ?? false,
+        manualOverride: overrides?.manualOverride ?? false,
+        updatedAt: Date.now(),
+      };
+    });
+    executor.applyResolvedProviderSelection = vi.fn((selection: Any) => {
+      executor.provider = { type: selection.providerType, createMessage: vi.fn() };
+      executor.modelId = selection.modelId;
+      executor.modelKey = selection.modelKey;
+      executor.llmProfileUsed = selection.llmProfileUsed;
+      executor.resolvedModelKey = selection.resolvedModelKey;
+    });
+
+    const requestFn = vi.fn(async () => {
+      if (executor.modelId === "minimax/minimax-m2.5:free") {
+        const error = new Error(
+          'OpenRouter API error: 403 Forbidden - minimax/minimax-m2.5-20260211:free requires moderation on OpenInference. Your input was flagged for "violence/graphic". No credits were charged.',
+        );
+        (error as Any).status = 403;
+        (error as Any).retryable = true;
+        throw error;
+      }
+      return {
+        content: [],
+        stopReason: "end_turn",
+        usage: { inputTokens: 10, outputTokens: 5 },
+      };
+    });
+
+    const response = await (executor as Any).callLLMWithRetry(
+      requestFn,
+      "provider moderation failover",
+    );
+
+    expect(response.stopReason).toBe("end_turn");
+    expect(requestFn).toHaveBeenCalledTimes(2);
+    expect(executor.modelId).toBe("qwen/qwen3.6-plus:free");
+    expect(executor.providerFailoverIndex).toBe(1);
+    expect(executor.lastRoutingState?.routeReason).toBe("model_capability");
+    expect(executor.lastRoutingState?.fallbackOccurred).toBe(true);
+    expect(executor.lastRoutingState?.fallbackChain).toEqual([
+      expect.objectContaining({
+        providerType: "openrouter",
+        modelKey: "minimax/minimax-m2.5:free",
+        reason: "model_capability",
+        success: false,
+      }),
+      expect.objectContaining({
+        providerType: "openrouter",
+        modelKey: "qwen/qwen3.6-plus:free",
         success: true,
       }),
     ]);

@@ -23,6 +23,7 @@ import { MentionRepository } from "../agents/MentionRepository";
 import { buildAgentDispatchPrompt } from "../agents/agent-dispatch";
 import { extractMentionedRoles } from "../agents/mentions";
 import { selectAgentsForTask } from "../agents/capabilityMatcher";
+import { recordLlmCallError, recordLlmCallSuccess } from "./llm/usage-telemetry";
 import {
   Task,
   ApprovalResponseAction,
@@ -81,6 +82,7 @@ import {
   VerificationVerdict,
 } from "../../shared/types";
 import { parseSpawnAgentCount } from "../../shared/spawn-intent-detection";
+import { normalizeLlmProviderType } from "../../shared/llmProviderDisplay";
 import {
   extractTimelineEvidenceRefs,
   inferTimelineStageForLegacyType,
@@ -262,6 +264,15 @@ interface CachedExecutor {
   status: "active" | "completed";
 }
 
+interface PendingApprovalEntry {
+  taskId: string;
+  approval: Any;
+  resolve: (value: boolean) => void;
+  reject: (reason?: unknown) => void;
+  resolved: boolean;
+  timeoutHandle: ReturnType<typeof setTimeout>;
+}
+
 function getAllElectronWindows(): Any[] {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -301,17 +312,7 @@ export class AgentDaemon extends EventEmitter {
   private teamOrchestrator: AgentTeamOrchestrator | null = null;
   private orchestrationGraphEngine: OrchestrationGraphEngine;
   private activeTasks: Map<string, CachedExecutor> = new Map();
-  private pendingApprovals: Map<
-    string,
-    {
-      taskId: string;
-      approval: Any;
-      resolve: (value: boolean) => void;
-      reject: (reason?: unknown) => void;
-      resolved: boolean;
-      timeoutHandle: ReturnType<typeof setTimeout>;
-    }
-  > = new Map();
+  private pendingApprovals: Map<string, PendingApprovalEntry> = new Map();
   private pendingInputRequests: Map<
     string,
     {
@@ -352,6 +353,7 @@ export class AgentDaemon extends EventEmitter {
   private timelineErrorsByTask: Map<string, Set<string>> = new Map();
   private knownPlanStepIdsByTask: Map<string, Set<string>> = new Map();
   private evidenceRefsByTask: Map<string, Map<string, EvidenceRef>> = new Map();
+  private lastKnownLlmProviderByTask: Map<string, string> = new Map();
   private timelineMetrics = {
     totalEvents: 0,
     droppedEvents: 0,
@@ -1053,7 +1055,11 @@ export class AgentDaemon extends EventEmitter {
     // The executor gets a "virtual workspace" with the path swapped to the worktree directory.
     let effectiveWorkspace = workspace;
     const requiresWorktree = executionTask.agentConfig?.requireWorktree === true;
-    const canUseWorktree = await this.worktreeManager.shouldUseWorktree(workspace.path, workspace.isTemp);
+    const canUseWorktree = await this.worktreeManager.shouldUseWorktree(
+      workspace.path,
+      workspace.isTemp,
+      requiresWorktree,
+    );
     if (requiresWorktree && !canUseWorktree) {
       const errorMessage =
         "Task requires git worktree isolation, but worktrees are unavailable for this workspace.";
@@ -2494,6 +2500,10 @@ export class AgentDaemon extends EventEmitter {
     return true;
   }
 
+  getTransientRetryCount(taskId: string): number {
+    return this.retryCounts.get(taskId) ?? 0;
+  }
+
   /**
    * Pause a running task
    */
@@ -2684,15 +2694,16 @@ export class AgentDaemon extends EventEmitter {
     return permissionScopeFingerprint(scope);
   }
 
-  private inferPermissionToolName(type: string, details: Any): string {
+  private inferPermissionToolName(type: string | undefined, details: Any): string {
     const explicitTool = typeof details?.tool === "string" ? details.tool.trim() : "";
     if (explicitTool) return explicitTool;
+    if (!type) return "external_service";
     return this.inferToolNameFromApprovalType(type);
   }
 
   private evaluatePermissionRequest(
     taskId: string,
-    type: string,
+    type: ApprovalType | undefined,
     details: Any,
     allowPersistence = true,
   ): {
@@ -2722,7 +2733,7 @@ export class AgentDaemon extends EventEmitter {
         toolName,
         toolInput: details?.params ?? details,
         mode,
-        approvalType: type as ApprovalType,
+        approvalType: type,
         command: details?.command,
         path: details?.path,
         serverName,
@@ -2793,7 +2804,7 @@ export class AgentDaemon extends EventEmitter {
       toolInput: details?.params ?? details,
       mode,
       rules,
-      approvalType: type as ApprovalType,
+      approvalType: type,
       command: typeof details?.command === "string" ? details.command : null,
       path: typeof details?.path === "string" ? details.path : null,
       serverName,
@@ -2806,7 +2817,7 @@ export class AgentDaemon extends EventEmitter {
                 toolName,
                 toolInput: details?.params ?? details,
                 mode,
-                approvalType: type as ApprovalType,
+                approvalType: type,
                 command: details?.command,
                 path: details?.path,
                 serverName,
@@ -2836,7 +2847,7 @@ export class AgentDaemon extends EventEmitter {
       toolName,
       toolInput: details?.params ?? details,
       mode,
-      approvalType: type as ApprovalType,
+      approvalType: type,
       command: details?.command,
       path: details?.path,
       serverName,
@@ -2944,7 +2955,7 @@ export class AgentDaemon extends EventEmitter {
   }
 
   evaluateToolPermission(taskId: string, opts: {
-    approvalType: ApprovalType;
+    approvalType?: ApprovalType;
     toolName: string;
     details?: Any;
     allowPersistence?: boolean;
@@ -3050,7 +3061,12 @@ export class AgentDaemon extends EventEmitter {
       return true;
     }
 
-    const permission = this.evaluatePermissionRequest(taskId, type, enrichedDetails, allowAutoApprove);
+    const permission = this.evaluatePermissionRequest(
+      taskId,
+      type as ApprovalType,
+      enrichedDetails,
+      allowAutoApprove,
+    );
     const permissionDetails = {
       ...enrichedDetails,
       permissionPrompt: permission.promptDetails,
@@ -3128,9 +3144,15 @@ export class AgentDaemon extends EventEmitter {
         () => {
           const pending = this.pendingApprovals.get(approval.id);
           if (pending && !pending.resolved) {
+            const currentTask = this.taskRepo.findById(taskId);
+            const currentStatus = currentTask ? deriveCanonicalTaskStatus(currentTask) : undefined;
             pending.resolved = true;
             this.pendingApprovals.delete(approval.id);
             this.approvalRepo.update(approval.id, "denied");
+            if (isTerminalTaskStatus(currentStatus)) {
+              reject(new Error("Approval request timed out after task completion"));
+              return;
+            }
             this.updateTask(taskId, {
               status: "paused",
               terminalStatus: "needs_user_action",
@@ -3263,6 +3285,28 @@ export class AgentDaemon extends EventEmitter {
       approvalIdempotency.fail(idempotencyKey, error);
       throw error;
     }
+  }
+
+  private cleanupPendingApprovalsForTask(taskId: string, rejectionMessage: string): number {
+    let cleared = 0;
+
+    for (const [approvalId, pending] of Array.from(this.pendingApprovals.entries())) {
+      if (pending.taskId !== taskId) continue;
+
+      clearTimeout(pending.timeoutHandle);
+      this.pendingApprovals.delete(approvalId);
+
+      if (pending.resolved) {
+        continue;
+      }
+
+      pending.resolved = true;
+      this.approvalRepo.update(approvalId, "denied");
+      pending.reject(new Error(rejectionMessage));
+      cleared += 1;
+    }
+
+    return cleared;
   }
 
   async respondToInputRequest(
@@ -3408,6 +3452,7 @@ export class AgentDaemon extends EventEmitter {
     }
 
     this.normalizeArtifactEventPayload(taskId, type, payloadObj);
+    this.maybeEnrichLlmTelemetryPayload(taskId, type, payloadObj);
 
     // Streaming progress remains ephemeral, but we bridge it into the v2 timeline
     // as an in-memory step update so UIs can render deterministic progress cards.
@@ -3549,6 +3594,88 @@ export class AgentDaemon extends EventEmitter {
     if (typeof persistTranscriptArtifacts === "function") {
       void persistTranscriptArtifacts.call(this, taskId, timelineEvent, legacyType, legacyPayload);
     }
+  }
+
+  private normalizeProviderTypeValue(value: unknown): string | null {
+    return normalizeLlmProviderType(typeof value === "string" ? value : null);
+  }
+
+  private getProviderTypeFromLogMessage(message: unknown): string | null {
+    if (typeof message !== "string" || message.trim().length === 0) return null;
+    const match = message.match(/\bprovider=([a-z0-9._-]+)/i);
+    return this.normalizeProviderTypeValue(match?.[1]?.toLowerCase() || null);
+  }
+
+  private getProviderTypeFromPayload(payloadObj: Record<string, unknown>): string | null {
+    return (
+      this.normalizeProviderTypeValue(payloadObj.providerType) ||
+      this.normalizeProviderTypeValue(payloadObj.activeProvider) ||
+      this.normalizeProviderTypeValue(payloadObj.currentProvider) ||
+      this.getProviderTypeFromLogMessage(payloadObj.message)
+    );
+  }
+
+  private getTaskAgentConfigProviderType(taskId: string): string | null {
+    return this.normalizeProviderTypeValue(this.taskRepo.findById(taskId)?.agentConfig?.providerType);
+  }
+
+  private getActiveExecutorProviderType(taskId: string): string | null {
+    const activeExecutorProvider = (this.activeTasks.get(taskId)?.executor as Any)?.provider?.type;
+    return this.normalizeProviderTypeValue(activeExecutorProvider);
+  }
+
+  private rememberTaskLlmProviderType(taskId: string, providerType?: string | null): string | null {
+    const normalized = this.normalizeProviderTypeValue(providerType);
+    if (!normalized) return null;
+    this.lastKnownLlmProviderByTask.set(taskId, normalized);
+    return normalized;
+  }
+
+  private resolveTaskLlmProviderType(
+    taskId: string,
+    payloadObj: Record<string, unknown>,
+  ): string | null {
+    return (
+      this.getProviderTypeFromPayload(payloadObj) ||
+      this.getActiveExecutorProviderType(taskId) ||
+      this.lastKnownLlmProviderByTask.get(taskId) ||
+      this.getTaskAgentConfigProviderType(taskId)
+    );
+  }
+
+  private maybeEnrichLlmTelemetryPayload(
+    taskId: string,
+    type: string,
+    payloadObj: Record<string, unknown>,
+  ): void {
+    const payloadLegacyType =
+      typeof payloadObj.legacyType === "string" ? payloadObj.legacyType.trim() : "";
+    const effectiveType = payloadLegacyType || type;
+
+    if (effectiveType === "log") {
+      this.rememberTaskLlmProviderType(taskId, this.getProviderTypeFromLogMessage(payloadObj.message));
+      return;
+    }
+
+    if (effectiveType === "llm_routing_changed") {
+      const providerType =
+        this.getProviderTypeFromPayload(payloadObj) ||
+        this.getActiveExecutorProviderType(taskId) ||
+        this.getTaskAgentConfigProviderType(taskId);
+      if (!providerType) return;
+      payloadObj.providerType = providerType;
+      this.rememberTaskLlmProviderType(taskId, providerType);
+      return;
+    }
+
+    if (effectiveType !== "llm_usage" && effectiveType !== "llm_error") {
+      return;
+    }
+
+    const providerType = this.resolveTaskLlmProviderType(taskId, payloadObj);
+    if (!providerType) return;
+    payloadObj.providerType = providerType;
+    this.rememberTaskLlmProviderType(taskId, providerType);
   }
 
   private async persistTranscriptArtifacts(
@@ -3884,6 +4011,10 @@ export class AgentDaemon extends EventEmitter {
       legacyPayload?: Record<string, unknown>;
     } = {},
   ): void {
+    const effectiveLegacyType = options.legacyType || event.legacyType;
+    const effectiveLegacyPayload = options.legacyPayload || (event.payload as Record<string, unknown>);
+    const effectiveType = effectiveLegacyType || event.type;
+
     this.eventRepo.create({
       id: event.id,
       taskId: event.taskId,
@@ -3898,11 +4029,67 @@ export class AgentDaemon extends EventEmitter {
       stepId: event.stepId,
       groupId: event.groupId,
       actor: event.actor,
-      legacyType: (options.legacyType || event.legacyType) as Any,
+      legacyType: effectiveLegacyType as Any,
     });
 
-    const effectiveLegacyType = options.legacyType || event.legacyType;
-    const effectiveLegacyPayload = options.legacyPayload || (event.payload as Record<string, unknown>);
+    const task = this.taskRepo.findById(event.taskId);
+    if (task && effectiveType === "llm_usage") {
+      const usagePayload = effectiveLegacyPayload as {
+        providerType?: string;
+        modelKey?: string;
+        modelId?: string;
+        delta?: {
+          inputTokens?: number;
+          outputTokens?: number;
+          cachedTokens?: number;
+        };
+      };
+      recordLlmCallSuccess(
+        {
+          workspaceId: task.workspaceId,
+          taskId: task.id,
+          sourceKind: "task_event",
+          sourceId: event.id,
+          providerType: usagePayload.providerType,
+          modelKey: usagePayload.modelKey,
+          modelId: usagePayload.modelId,
+          timestamp: event.timestamp,
+        },
+        {
+          inputTokens: usagePayload.delta?.inputTokens || 0,
+          outputTokens: usagePayload.delta?.outputTokens || 0,
+          cachedTokens: usagePayload.delta?.cachedTokens || 0,
+        },
+      );
+    } else if (task && effectiveType === "llm_error") {
+      const errorPayload = effectiveLegacyPayload as {
+        providerType?: string;
+        modelKey?: string;
+        modelId?: string;
+        message?: string;
+        details?: string;
+      };
+      recordLlmCallError(
+        {
+          workspaceId: task.workspaceId,
+          taskId: task.id,
+          sourceKind: "task_event",
+          sourceId: event.id,
+          providerType: errorPayload.providerType,
+          modelKey: errorPayload.modelKey,
+          modelId: errorPayload.modelId,
+          timestamp: event.timestamp,
+        },
+        {
+          code: "llm_error",
+          message:
+            typeof errorPayload.details === "string"
+              ? `${errorPayload.message || "LLM error"} ${errorPayload.details}`.trim()
+              : errorPayload.message || "LLM error",
+        },
+      );
+    }
+
     if (effectiveLegacyType) {
       this.logActivityForEvent(event.taskId, effectiveLegacyType, effectiveLegacyPayload);
     } else {
@@ -4806,6 +4993,10 @@ export class AgentDaemon extends EventEmitter {
    */
   updateTaskStatus(taskId: string, status: Task["status"]): void {
     const existing = this.taskRepo.findById(taskId);
+    const currentStatus = existing ? deriveCanonicalTaskStatus(existing) : undefined;
+    if (isTerminalTaskStatus(currentStatus) && !isTerminalTaskStatus(status)) {
+      return;
+    }
     this.taskRepo.update(taskId, { status });
     if (status === "completed" || status === "failed" || status === "cancelled") {
       this.clearTimelineTaskState(taskId);
@@ -4859,6 +5050,7 @@ export class AgentDaemon extends EventEmitter {
     this.timelineErrorsByTask.delete(taskId);
     this.knownPlanStepIdsByTask.delete(taskId);
     this.evidenceRefsByTask.delete(taskId);
+    this.lastKnownLlmProviderByTask.delete(taskId);
     this.taskSeqById.delete(taskId);
     this.completionTelemetryBackfilledTaskIds.delete(taskId);
   }
@@ -5596,6 +5788,10 @@ export class AgentDaemon extends EventEmitter {
     >,
   ): void {
     const existing = this.taskRepo.findById(taskId);
+    const currentStatus = existing ? deriveCanonicalTaskStatus(existing) : undefined;
+    if (isTerminalTaskStatus(currentStatus) && updates.status && !isTerminalTaskStatus(updates.status)) {
+      return;
+    }
     this.taskRepo.update(taskId, updates);
     if (
       updates.status === "completed" ||
@@ -5638,6 +5834,14 @@ export class AgentDaemon extends EventEmitter {
       >
     >,
   ): void {
+    const existingTask = this.taskRepo.findById(taskId);
+    const currentStatus = existingTask ? deriveCanonicalTaskStatus(existingTask) : undefined;
+    if (isTerminalTaskStatus(currentStatus)) {
+      return;
+    }
+
+    this.cleanupPendingApprovalsForTask(taskId, "Task ended before the approval request was resolved.");
+
     const completedAt = metadata?.completedAt ?? Date.now();
     const terminalStatus = metadata?.terminalStatus ?? "failed";
     const updates: Partial<Task> = {
@@ -5741,6 +5945,13 @@ export class AgentDaemon extends EventEmitter {
     },
   ): void {
     const existing = this.taskRepo.findById(taskId);
+    const currentStatus = existing ? deriveCanonicalTaskStatus(existing) : undefined;
+    if (isTerminalTaskStatus(currentStatus)) {
+      return;
+    }
+
+    this.cleanupPendingApprovalsForTask(taskId, "Task ended before the approval request was resolved.");
+
     const completedAt = metadata?.completedAt ?? Date.now();
     const errorMessage =
       metadata && Object.prototype.hasOwnProperty.call(metadata, "errorMessage")
@@ -6286,6 +6497,12 @@ export class AgentDaemon extends EventEmitter {
       console.warn(`[AgentDaemon] completeTask called for unknown task ${taskId}`);
       return;
     }
+    const currentStatus = deriveCanonicalTaskStatus(existingTask);
+    if (isTerminalTaskStatus(currentStatus)) {
+      return;
+    }
+
+    this.cleanupPendingApprovalsForTask(taskId, "Task ended before the approval request was resolved.");
 
     const isChatSession =
       existingTask.agentConfig?.executionMode === "chat" &&

@@ -665,9 +665,7 @@ export class TaskStrategyService {
         "generate_document",
         "generate_spreadsheet",
         "generate_presentation",
-        "use_skill",
-        "skill_list",
-        "skill_get",
+        "Skill",
       ];
       if (domain === "writing") {
         tools.push("create_document");

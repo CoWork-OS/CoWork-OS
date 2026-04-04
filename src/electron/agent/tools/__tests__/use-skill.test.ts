@@ -1,5 +1,5 @@
 /**
- * Tests for the use_skill and set_user_name tool functionality in ToolRegistry
+ * Tests for the Skill and set_user_name tool functionality in ToolRegistry
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
@@ -45,6 +45,20 @@ vi.mock("../../../settings/personality-manager", () => ({
 
 // Mock skills storage
 let mockSkills: Map<string, CustomSkill> = new Map();
+
+function toRuntimeDescriptor(skill: CustomSkill) {
+  return {
+    name: skill.id,
+    description: skill.description,
+    whenToUse: skill.metadata?.routing?.useWhen || skill.description,
+    allowedTools: Array.isArray((skill.requires as Any)?.tools)
+      ? ((skill.requires as Any).tools as string[])
+      : undefined,
+    disableModelInvocation: skill.invocation?.disableModelInvocation === true,
+    userInvocable: skill.invocation?.userInvocable !== false,
+    skill,
+  };
+}
 
 function matchesSkillRoutingQuery(skill: CustomSkill, query: string): boolean {
   const normalizedQuery = String(query || "")
@@ -140,6 +154,10 @@ vi.mock("../../custom-skill-loader", () => ({
   getCustomSkillLoader: vi.fn().mockImplementation(() => ({
     getSkill: vi.fn().mockImplementation((id: string) => mockSkills.get(id)),
     listModelInvocableSkills: vi.fn().mockImplementation(() => Array.from(mockSkills.values())),
+    listRuntimeSkillDescriptors: vi
+      .fn()
+      .mockImplementation(() => Array.from(mockSkills.values()).map((skill) => toRuntimeDescriptor(skill))),
+    getRuntimeSkillDescriptor: vi.fn().mockImplementation((skill: CustomSkill) => toRuntimeDescriptor(skill)),
     getSkillStatusEntry: vi.fn().mockResolvedValue(null),
     matchesSkillRoutingQuery: vi
       .fn()
@@ -341,7 +359,7 @@ function createMockWorkspace(): Workspace {
   };
 }
 
-describe("use_skill tool", () => {
+describe("Skill tool", () => {
   let registry: ToolRegistry;
   let mockDaemon: Any;
   let mockWorkspace: Workspace;
@@ -371,29 +389,37 @@ describe("use_skill tool", () => {
     vi.restoreAllMocks();
   });
 
-  describe("tool definition", () => {
-    it("should include use_skill in available tools", () => {
-      const tools = registry.getTools();
-      const useSkillTool = tools.find((t) => t.name === "use_skill");
+  function takeResolvedSkill(result: Any) {
+    expect(result.skill_invocation_id).toBeDefined();
+    return registry.takeResolvedSkillInvocation(result.skill_invocation_id);
+  }
 
-      expect(useSkillTool).toBeDefined();
-      expect(useSkillTool?.description).toContain("custom skill");
+  describe("tool definition", () => {
+    it("should expose Skill and remove legacy model-facing skill tools", () => {
+      const tools = registry.getTools();
+      const skillTool = tools.find((t) => t.name === "Skill");
+
+      expect(skillTool).toBeDefined();
+      expect(skillTool?.description).toContain("Invoke a skill");
+      expect(tools.find((t) => t.name === "use_skill")).toBeUndefined();
+      expect(tools.find((t) => t.name === "skill_list")).toBeUndefined();
+      expect(tools.find((t) => t.name === "skill_get")).toBeUndefined();
     });
 
     it("should have correct input schema", () => {
       const tools = registry.getTools();
-      const useSkillTool = tools.find((t) => t.name === "use_skill");
+      const skillTool = tools.find((t) => t.name === "Skill");
 
-      expect(useSkillTool?.input_schema.properties.skill_id).toBeDefined();
-      expect(useSkillTool?.input_schema.properties.parameters).toBeDefined();
-      expect(useSkillTool?.input_schema.required).toContain("skill_id");
+      expect(skillTool?.input_schema.properties.skill).toBeDefined();
+      expect(skillTool?.input_schema.properties.args).toBeDefined();
+      expect(skillTool?.input_schema.required).toContain("skill");
     });
   });
 
   describe("skill execution", () => {
     it("should return error for non-existent skill", async () => {
-      const result = await registry.executeTool("use_skill", {
-        skill_id: "non-existent",
+      const result = await registry.executeTool("Skill", {
+        skill: "non-existent",
       });
 
       expect(result.success).toBe(false);
@@ -401,29 +427,31 @@ describe("use_skill tool", () => {
       expect(result.available_skills).toBeDefined();
     });
 
-    it("should execute valid skill successfully", async () => {
+    it("should execute a valid skill and store hidden invocation context", async () => {
       const skill = createTestSkill({ id: "my-skill" });
       mockSkills.set("my-skill", skill);
 
-      const result = await registry.executeTool("use_skill", {
-        skill_id: "my-skill",
-        parameters: { param1: "value1" },
+      const result = await registry.executeTool("Skill", {
+        skill: "my-skill",
+        args: "value1",
       });
+      const resolved = takeResolvedSkill(result);
 
       expect(result.success).toBe(true);
-      expect(result.skill_id).toBe("my-skill");
-      expect(result.content).toBeDefined();
-      expect(result.context_directives).toBeDefined();
-      expect(result.application_summary).toContain("Applied skill");
-      expect(result.skill_application).toEqual(
+      expect(result.skill).toBe("my-skill");
+      expect(result.message).toContain("Loaded skill");
+      expect(result.application_summary).toContain("hidden context");
+      expect(resolved).toEqual(
         expect.objectContaining({
           skillId: "my-skill",
+          args: "value1",
+          content: "This is a test prompt with value1 and default-value",
           trigger: "model",
         }),
       );
     });
 
-    it("should expand prompt with provided parameters", async () => {
+    it("should parse JSON args for multi-parameter skills", async () => {
       const skill = createTestSkill({
         id: "parameterized-skill",
         prompt: "Process {{path}} to {{language}}",
@@ -434,14 +462,15 @@ describe("use_skill tool", () => {
       });
       mockSkills.set("parameterized-skill", skill);
 
-      const result = await registry.executeTool("use_skill", {
-        skill_id: "parameterized-skill",
-        parameters: { path: "test.txt", language: "Spanish" },
+      const result = await registry.executeTool("Skill", {
+        skill: "parameterized-skill",
+        args: JSON.stringify({ path: "test.txt", language: "Spanish" }),
       });
+      const resolved = takeResolvedSkill(result);
 
       expect(result.success).toBe(true);
-      expect(result.content).toBe("Process test.txt to Spanish");
-      expect(result.expanded_prompt).toBe("Process test.txt to Spanish");
+      expect(resolved?.content).toBe("Process test.txt to Spanish");
+      expect(resolved?.parameters).toEqual({ path: "test.txt", language: "Spanish" });
     });
 
     it("should use default values for optional parameters", async () => {
@@ -461,14 +490,14 @@ describe("use_skill tool", () => {
       });
       mockSkills.set("default-params-skill", skill);
 
-      const result = await registry.executeTool("use_skill", {
-        skill_id: "default-params-skill",
-        parameters: { name: "World" },
+      const result = await registry.executeTool("Skill", {
+        skill: "default-params-skill",
+        args: "World",
       });
+      const resolved = takeResolvedSkill(result);
 
       expect(result.success).toBe(true);
-      expect(result.content).toBe("Hello World with Good day");
-      expect(result.expanded_prompt).toBe("Hello World with Good day");
+      expect(resolved?.content).toBe("Hello World with Good day");
     });
 
     it("should return error for missing required parameters", async () => {
@@ -480,9 +509,8 @@ describe("use_skill tool", () => {
       });
       mockSkills.set("required-params-skill", skill);
 
-      const result = await registry.executeTool("use_skill", {
-        skill_id: "required-params-skill",
-        parameters: {},
+      const result = await registry.executeTool("Skill", {
+        skill: "required-params-skill",
       });
 
       expect(result.success).toBe(false);
@@ -497,8 +525,8 @@ describe("use_skill tool", () => {
       });
       mockSkills.set("manual-only-skill", skill);
 
-      const result = await registry.executeTool("use_skill", {
-        skill_id: "manual-only-skill",
+      const result = await registry.executeTool("Skill", {
+        skill: "manual-only-skill",
       });
 
       expect(result.success).toBe(false);
@@ -512,8 +540,8 @@ describe("use_skill tool", () => {
       });
       mockSkills.set("manual-routing-skill", skill);
 
-      const result = await registry.executeTool("use_skill", {
-        skill_id: "manual-routing-skill",
+      const result = await registry.executeTool("Skill", {
+        skill: "manual-routing-skill",
       });
 
       expect(result.success).toBe(false);
@@ -527,16 +555,18 @@ describe("use_skill tool", () => {
       });
       mockSkills.set("manual-only-skill", skill);
 
-      const result = await registry.executeTool("use_skill", {
-        skill_id: "manual-only-skill",
-        parameters: { param1: "value1" },
+      const result = await registry.executeTool("Skill", {
+        skill: "manual-only-skill",
+        args: "value1",
         trigger: "slash",
       });
+      const resolved = takeResolvedSkill(result);
 
       expect(result.success).toBe(true);
-      expect(result.skill_application).toEqual(
+      expect(resolved).toEqual(
         expect.objectContaining({
           skillId: "manual-only-skill",
+          args: "value1",
           trigger: "slash",
         }),
       );
@@ -546,9 +576,9 @@ describe("use_skill tool", () => {
       const skill = createTestSkill({ id: "logged-skill" });
       mockSkills.set("logged-skill", skill);
 
-      await registry.executeTool("use_skill", {
-        skill_id: "logged-skill",
-        parameters: { param1: "test" },
+      await registry.executeTool("Skill", {
+        skill: "logged-skill",
+        args: "test",
       });
 
       expect(mockDaemon.logEvent).toHaveBeenCalledWith(
@@ -569,35 +599,13 @@ describe("use_skill tool", () => {
       });
       mockSkills.set("no-params-skill", skill);
 
-      const result = await registry.executeTool("use_skill", {
-        skill_id: "no-params-skill",
+      const result = await registry.executeTool("Skill", {
+        skill: "no-params-skill",
       });
+      const resolved = takeResolvedSkill(result);
 
       expect(result.success).toBe(true);
-      expect(result.content).toBe("A simple prompt without parameters");
-      expect(result.expanded_prompt).toBe("A simple prompt without parameters");
-    });
-
-    it("should return additive application metadata", async () => {
-      const skill = createTestSkill({ id: "instruction-skill" });
-      mockSkills.set("instruction-skill", skill);
-
-      const result = await registry.executeTool("use_skill", {
-        skill_id: "instruction-skill",
-        parameters: { param1: "test" },
-      });
-
-      expect(result.application_summary).toContain("Applied skill");
-      expect(result.context_messages).toEqual([
-        expect.objectContaining({
-          role: "system",
-        }),
-      ]);
-      expect(result.context_directives).toEqual(
-        expect.objectContaining({
-          artifactDirectories: expect.any(Array),
-        }),
-      );
+      expect(resolved?.content).toBe("A simple prompt without parameters");
     });
 
     it("should resolve {baseDir} and {artifactDir} placeholders in expanded prompt", async () => {
@@ -610,18 +618,24 @@ describe("use_skill tool", () => {
       });
       mockSkills.set("script-skill", skill);
 
-      const result = await registry.executeTool("use_skill", {
-        skill_id: "script-skill",
+      const result = await registry.executeTool("Skill", {
+        skill: "script-skill",
       });
+      const resolved = takeResolvedSkill(result);
 
       expect(result.success).toBe(true);
-      expect(result.expanded_prompt).toContain(
+      expect(resolved?.content).toContain(
         "/mock/resources/skills/script-skill/scripts/run.sh",
       );
-      expect(result.expanded_prompt).toContain(
+      expect(resolved?.content).toContain(
         "/mock/workspace/artifacts/skills/test-task-123/script-skill/result.txt",
       );
-      expect(result.expanded_prompt).toContain("/mock/workspace/artifacts/result.txt");
+      expect(resolved?.content).toContain("/mock/workspace/artifacts/result.txt");
+      expect(resolved?.contextDirectives).toEqual(
+        expect.objectContaining({
+          artifactDirectories: expect.any(Array),
+        }),
+      );
     });
 
     it("should return skill metadata in response", async () => {
@@ -632,13 +646,12 @@ describe("use_skill tool", () => {
       });
       mockSkills.set("metadata-skill", skill);
 
-      const result = await registry.executeTool("use_skill", {
-        skill_id: "metadata-skill",
-        parameters: { param1: "test" },
+      const result = await registry.executeTool("Skill", {
+        skill: "metadata-skill",
+        args: "test",
       });
 
       expect(result.skill_name).toBe("Metadata Test Skill");
-      expect(result.skill_description).toBe("A skill with metadata");
     });
 
     it("should reject skill when required tool is unavailable", async () => {
@@ -648,9 +661,9 @@ describe("use_skill tool", () => {
       });
       mockSkills.set("cli-skill", skill);
 
-      const result = await registry.executeTool("use_skill", {
-        skill_id: "cli-skill",
-        parameters: { param1: "test" },
+      const result = await registry.executeTool("Skill", {
+        skill: "cli-skill",
+        args: "test",
       });
 
       expect(result.success).toBe(false);
@@ -677,8 +690,8 @@ describe("use_skill tool", () => {
         prompt: "Run a generic agent on this issue",
       });
 
-      const result = await registry.executeTool("use_skill", {
-        skill_id: "codex-cli",
+      const result = await registry.executeTool("Skill", {
+        skill: "codex-cli",
       });
 
       expect(result.success).toBe(false);
@@ -705,15 +718,15 @@ describe("use_skill tool", () => {
         prompt: "Use the Codex CLI Agent skill to review this change",
       });
 
-      const result = await registry.executeTool("use_skill", {
-        skill_id: "codex-cli",
+      const result = await registry.executeTool("Skill", {
+        skill: "codex-cli",
       });
+      const resolved = takeResolvedSkill(result);
 
       expect(result.success).toBe(true);
-      expect(result.skill_id).toBe("codex-cli");
-      expect(result.content).toContain("codex");
-      expect(result.expanded_prompt).toContain("codex");
-      expect(result.skill_application).toEqual(
+      expect(result.skill).toBe("codex-cli");
+      expect(resolved?.content).toContain("codex");
+      expect(resolved).toEqual(
         expect.objectContaining({
           skillId: "codex-cli",
           trigger: "model",
@@ -745,18 +758,19 @@ describe("use_skill tool", () => {
       });
 
       try {
-        const result = await registry.executeTool("use_skill", {
-          skill_id: "codex-cli",
+        const result = await registry.executeTool("Skill", {
+          skill: "codex-cli",
         });
+        const resolved = takeResolvedSkill(result);
 
         expect(result.success).toBe(true);
-        expect(result.expanded_prompt).toContain("spawn_agent");
-        expect(result.expanded_prompt).toContain('`runtime`: `"acpx"`');
-        expect(result.expanded_prompt).toContain('`runtime_agent`: `"codex"`');
-        expect(result.expanded_prompt).toContain("review the current workspace changes and inspect the diff.");
-        expect(result.expanded_prompt).not.toContain("legacy prompt should be bypassed");
-        expect(result.expanded_prompt).not.toContain("Phase 0");
-        expect(result.expanded_prompt).not.toContain("Read `{baseDir}/SKILL.md`");
+        expect(resolved?.content).toContain("spawn_agent");
+        expect(resolved?.content).toContain('`runtime`: `"acpx"`');
+        expect(resolved?.content).toContain('`runtime_agent`: `"codex"`');
+        expect(resolved?.content).toContain("review the current workspace changes and inspect the diff.");
+        expect(resolved?.content).not.toContain("legacy prompt should be bypassed");
+        expect(resolved?.content).not.toContain("Phase 0");
+        expect(resolved?.content).not.toContain("Read `{baseDir}/SKILL.md`");
       } finally {
         runtimeSpy.mockRestore();
       }
@@ -785,15 +799,16 @@ describe("use_skill tool", () => {
       });
 
       try {
-        const result = await registry.executeTool("use_skill", {
-          skill_id: "codex-cli",
+        const result = await registry.executeTool("Skill", {
+          skill: "codex-cli",
         });
+        const resolved = takeResolvedSkill(result);
 
         expect(result.success).toBe(true);
-        expect(result.expanded_prompt).toContain("spawn_agent");
-        expect(result.expanded_prompt).toContain("Omit `runtime` so the child uses the native Codex CLI path.");
-        expect(result.expanded_prompt).not.toContain('`runtime`: `"acpx"`');
-        expect(result.expanded_prompt).toContain("fix the failing test in the current workspace.");
+        expect(resolved?.content).toContain("spawn_agent");
+        expect(resolved?.content).toContain("Omit `runtime` so the child uses the native Codex CLI path.");
+        expect(resolved?.content).not.toContain('`runtime`: `"acpx"`');
+        expect(resolved?.content).toContain("fix the failing test in the current workspace.");
       } finally {
         runtimeSpy.mockRestore();
       }
@@ -807,8 +822,8 @@ describe("use_skill tool", () => {
       mockSkills.set("skill-1", skill1);
       mockSkills.set("skill-2", skill2);
 
-      const result = await registry.executeTool("use_skill", {
-        skill_id: "unknown-skill",
+      const result = await registry.executeTool("Skill", {
+        skill: "unknown-skill",
       });
 
       expect(result.success).toBe(false);
@@ -832,9 +847,8 @@ describe("use_skill tool", () => {
       });
       mockSkills.set("info-skill", skill);
 
-      const result = await registry.executeTool("use_skill", {
-        skill_id: "info-skill",
-        parameters: {},
+      const result = await registry.executeTool("Skill", {
+        skill: "info-skill",
       });
 
       expect(result.success).toBe(false);

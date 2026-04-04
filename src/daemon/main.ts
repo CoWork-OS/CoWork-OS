@@ -10,7 +10,10 @@ import { GuardrailManager } from "../electron/guardrails/guardrail-manager";
 import { AppearanceManager } from "../electron/settings/appearance-manager";
 import { PersonalityManager } from "../electron/settings/personality-manager";
 import { MemoryFeaturesManager } from "../electron/settings/memory-features-manager";
-import { importProcessEnvToSettings, migrateEnvToSettings } from "../electron/utils/env-migration";
+import {
+  importProcessEnvToSettings,
+  migrateEnvToSettings,
+} from "../electron/utils/env-migration";
 import {
   getArgValue,
   getEnvSettingsImportModeFromArgsOrEnv,
@@ -30,7 +33,11 @@ import {
 } from "../electron/control-plane/remote-client";
 import { getExposureStatus } from "../electron/tailscale";
 import { MCPClientManager } from "../electron/mcp/client/MCPClientManager";
-import { CronService, setCronService, getCronStorePath } from "../electron/cron";
+import {
+  CronService,
+  setCronService,
+  getCronStorePath,
+} from "../electron/cron";
 import { resolveTaskResultText } from "../electron/cron/result-text";
 import {
   TaskEventRepository,
@@ -44,8 +51,14 @@ import { formatChatTranscriptForPrompt } from "../electron/gateway/chat-transcri
 import { MemoryService } from "../electron/memory/MemoryService";
 import { CrossSignalService } from "../electron/agents/CrossSignalService";
 import { FeedbackService } from "../electron/agents/FeedbackService";
-import { attachAgentDaemonTaskBridge, registerControlPlaneMethods } from "./control-plane-methods";
-import { initializeXMentionBridgeService, XMentionBridgeService } from "../electron/x-mentions";
+import {
+  attachAgentDaemonTaskBridge,
+  registerControlPlaneMethods,
+} from "./control-plane-methods";
+import {
+  initializeXMentionBridgeService,
+  XMentionBridgeService,
+} from "../electron/x-mentions";
 import {
   StrategicPlannerService,
   setStrategicPlannerService,
@@ -57,10 +70,13 @@ interface StartedControlPlane {
   detachAgentBridge: (() => void) | null;
 }
 
-async function maybeBootstrapWorkspace(agentDaemon: AgentDaemon): Promise<void> {
+async function maybeBootstrapWorkspace(
+  agentDaemon: AgentDaemon,
+): Promise<void> {
   try {
     const bootstrapPathRaw =
-      process.env.COWORK_BOOTSTRAP_WORKSPACE_PATH || getArgValue("--bootstrap-workspace");
+      process.env.COWORK_BOOTSTRAP_WORKSPACE_PATH ||
+      getArgValue("--bootstrap-workspace");
     if (
       !bootstrapPathRaw ||
       typeof bootstrapPathRaw !== "string" ||
@@ -71,7 +87,11 @@ async function maybeBootstrapWorkspace(agentDaemon: AgentDaemon): Promise<void> 
     const raw = bootstrapPathRaw.trim();
     const home = os.homedir();
     const expanded =
-      raw === "~" ? home : raw.startsWith("~/") ? path.join(home, raw.slice(2)) : raw;
+      raw === "~"
+        ? home
+        : raw.startsWith("~/")
+          ? path.join(home, raw.slice(2))
+          : raw;
     const workspacePath = path.resolve(expanded);
     await fs.mkdir(workspacePath, { recursive: true });
 
@@ -84,21 +104,28 @@ async function maybeBootstrapWorkspace(agentDaemon: AgentDaemon): Promise<void> 
     }
 
     const nameFromEnv =
-      process.env.COWORK_BOOTSTRAP_WORKSPACE_NAME || getArgValue("--bootstrap-workspace-name");
+      process.env.COWORK_BOOTSTRAP_WORKSPACE_NAME ||
+      getArgValue("--bootstrap-workspace-name");
     const workspaceName =
       typeof nameFromEnv === "string" && nameFromEnv.trim().length > 0
         ? nameFromEnv.trim()
         : path.basename(workspacePath) || "Workspace";
 
     const ws = agentDaemon.createWorkspace(workspaceName, workspacePath);
-    console.log(`[Daemon] Bootstrapped workspace: ${ws.id} (${ws.name}) at ${ws.path}`);
+    console.log(
+      `[Daemon] Bootstrapped workspace: ${ws.id} (${ws.name}) at ${ws.path}`,
+    );
   } catch (error) {
     console.warn("[Daemon] Failed to bootstrap workspace:", error);
   }
 }
 
 async function startControlPlane(options: {
-  deps: { agentDaemon: AgentDaemon; dbManager: DatabaseManager; channelGateway: ChannelGateway };
+  deps: {
+    agentDaemon: AgentDaemon;
+    dbManager: DatabaseManager;
+    channelGateway: ChannelGateway;
+  };
   forceEnable: boolean;
   onEvent?: (evt: Any) => void;
 }): Promise<{
@@ -125,7 +152,8 @@ async function startControlPlane(options: {
       if (!remoteConfig?.url || !remoteConfig?.token) {
         return {
           ok: false,
-          error: "Remote gateway URL and token are required (connectionMode=remote)",
+          error:
+            "Remote gateway URL and token are required (connectionMode=remote)",
         };
       }
 
@@ -159,7 +187,10 @@ async function startControlPlane(options: {
     });
 
     registerControlPlaneMethods(server, options.deps);
-    const detach = attachAgentDaemonTaskBridge(server, options.deps.agentDaemon);
+    const detach = attachAgentDaemonTaskBridge(
+      server,
+      options.deps.agentDaemon,
+    );
 
     try {
       await server.startWithTailscale();
@@ -225,14 +256,19 @@ async function main(): Promise<void> {
 
   // Optional: import process.env keys into Settings (explicit opt-in; useful for headless/server deployments).
   if (IMPORT_ENV_SETTINGS) {
-    const importResult = await importProcessEnvToSettings({ mode: IMPORT_ENV_SETTINGS_MODE });
+    const importResult = await importProcessEnvToSettings({
+      mode: IMPORT_ENV_SETTINGS_MODE,
+    });
     if (importResult.migrated && importResult.migratedKeys.length > 0) {
       console.log(
         `[Daemon] Imported credentials from process.env (${IMPORT_ENV_SETTINGS_MODE}): ${importResult.migratedKeys.join(", ")}`,
       );
     }
     if (importResult.error) {
-      console.warn("[Daemon] Failed to import credentials from process.env:", importResult.error);
+      console.warn(
+        "[Daemon] Failed to import credentials from process.env:",
+        importResult.error,
+      );
     }
   }
 
@@ -242,6 +278,7 @@ async function main(): Promise<void> {
       const llmSettings = LLMProviderFactory.loadSettings();
       const hasAnyLlmCreds = !!(
         llmSettings?.anthropic?.apiKey ||
+        llmSettings?.anthropic?.subscriptionToken ||
         llmSettings?.openai?.apiKey ||
         llmSettings?.openai?.accessToken ||
         llmSettings?.gemini?.apiKey ||
@@ -259,8 +296,20 @@ async function main(): Promise<void> {
         );
       }
     } catch (error) {
-      console.warn("[Daemon] Failed to check LLM credential configuration:", error);
+      console.warn(
+        "[Daemon] Failed to check LLM credential configuration:",
+        error,
+      );
     }
+  }
+
+  // Initialize memory before queue recovery starts. AgentDaemon.initialize() can
+  // immediately resume queued tasks, and their early timeline events capture to memory.
+  try {
+    MemoryService.initialize(dbManager);
+    console.log("[Daemon] Memory Service initialized");
+  } catch (error) {
+    console.error("[Daemon] Failed to initialize Memory Service:", error);
   }
 
   // Initialize agent daemon.
@@ -289,13 +338,6 @@ async function main(): Promise<void> {
     console.log("[Daemon] FeedbackService initialized");
   } catch (error) {
     console.error("[Daemon] Failed to initialize FeedbackService:", error);
-  }
-
-  try {
-    MemoryService.initialize(dbManager);
-    console.log("[Daemon] Memory Service initialized");
-  } catch (error) {
-    console.error("[Daemon] Failed to initialize Memory Service:", error);
   }
 
   // Initialize MCP client manager (best-effort).
@@ -367,7 +409,8 @@ async function main(): Promise<void> {
         runAtMs,
         prevRunAtMs,
       }): Promise<Record<string, string>> => {
-        const template = typeof job?.taskPrompt === "string" ? job.taskPrompt : "";
+        const template =
+          typeof job?.taskPrompt === "string" ? job.taskPrompt : "";
         const wantsChatVars =
           template.includes("{{chat_messages}}") ||
           template.includes("{{chat_since}}") ||
@@ -379,7 +422,10 @@ async function main(): Promise<void> {
         const chatContext =
           job.chatContext ||
           (job.delivery?.channelType && job.delivery?.channelId
-            ? { channelType: job.delivery.channelType, channelId: job.delivery.channelId }
+            ? {
+                channelType: job.delivery.channelType,
+                channelId: job.delivery.channelId,
+              }
             : null);
         const channelType = chatContext?.channelType;
         const chatId = chatContext?.channelId;
@@ -416,7 +462,10 @@ async function main(): Promise<void> {
         });
 
         return {
-          chat_messages: rendered.usedCount > 0 ? rendered.transcript : "[no messages found]",
+          chat_messages:
+            rendered.usedCount > 0
+              ? rendered.transcript
+              : "[no messages found]",
           chat_since: new Date(sinceMs).toISOString(),
           chat_until: new Date(runAtMs).toISOString(),
           chat_message_count: String(rendered.usedCount),
@@ -446,7 +495,12 @@ async function main(): Promise<void> {
           !params.summaryOnly &&
           typeof params.resultText === "string" &&
           params.resultText.trim().length > 0;
-        const statusEmoji = params.status === "ok" ? "✅" : params.status === "error" ? "❌" : "⏱️";
+        const statusEmoji =
+          params.status === "ok"
+            ? "✅"
+            : params.status === "error"
+              ? "❌"
+              : "⏱️";
         const message = hasResult
           ? `**${params.jobName}**\n\n${params.resultText!.trim()}`
           : (() => {
@@ -472,10 +526,17 @@ async function main(): Promise<void> {
             })();
 
         try {
-          await channelGateway.sendMessage(params.channelType as Any, params.channelId, message, {
-            parseMode: "markdown",
-          });
-          console.log(`[Cron] Delivered to ${params.channelType}:${params.channelId}`);
+          await channelGateway.sendMessage(
+            params.channelType as Any,
+            params.channelId,
+            message,
+            {
+              parseMode: "markdown",
+            },
+          );
+          console.log(
+            `[Cron] Delivered to ${params.channelType}:${params.channelId}`,
+          );
         } catch (err) {
           console.error(
             `[Cron] Failed to deliver to ${params.channelType}:${params.channelId}:`,
@@ -522,8 +583,12 @@ async function main(): Promise<void> {
   }
 
   // Apply Control Plane host/port overrides.
-  const cpHost = process.env.COWORK_CONTROL_PLANE_HOST || getArgValue("--control-plane-host");
-  const cpPortRaw = process.env.COWORK_CONTROL_PLANE_PORT || getArgValue("--control-plane-port");
+  const cpHost =
+    process.env.COWORK_CONTROL_PLANE_HOST ||
+    getArgValue("--control-plane-host");
+  const cpPortRaw =
+    process.env.COWORK_CONTROL_PLANE_PORT ||
+    getArgValue("--control-plane-port");
   const cpPort = cpPortRaw ? Number.parseInt(cpPortRaw, 10) : undefined;
   if (
     (typeof cpHost === "string" && cpHost.trim()) ||
@@ -531,8 +596,12 @@ async function main(): Promise<void> {
   ) {
     try {
       ControlPlaneSettingsManager.updateSettings({
-        ...(typeof cpHost === "string" && cpHost.trim() ? { host: cpHost.trim() } : {}),
-        ...(typeof cpPort === "number" && Number.isFinite(cpPort) ? { port: cpPort } : {}),
+        ...(typeof cpHost === "string" && cpHost.trim()
+          ? { host: cpHost.trim() }
+          : {}),
+        ...(typeof cpPort === "number" && Number.isFinite(cpPort)
+          ? { port: cpPort }
+          : {}),
       });
     } catch (error) {
       console.warn("[Daemon] Failed to apply Control Plane overrides:", error);
@@ -588,12 +657,14 @@ async function main(): Promise<void> {
       // ignore
     }
     try {
-      if (startedControlPlane?.detachAgentBridge) startedControlPlane.detachAgentBridge();
+      if (startedControlPlane?.detachAgentBridge)
+        startedControlPlane.detachAgentBridge();
     } catch {
       // ignore
     }
     try {
-      if (startedControlPlane?.server?.isRunning) await startedControlPlane.server.stop();
+      if (startedControlPlane?.server?.isRunning)
+        await startedControlPlane.server.stop();
     } catch (error) {
       console.warn("[Daemon] Failed to stop Control Plane:", error);
     }

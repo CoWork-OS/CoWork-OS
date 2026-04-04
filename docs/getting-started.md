@@ -25,15 +25,18 @@ This will:
 
 1. Click the **Settings** icon (gear) in the sidebar
 2. Choose your LLM provider:
-   - **Anthropic** - Claude models (requires API key from [console.anthropic.com](https://console.anthropic.com))
+   - **Claude** - Claude API key or Claude subscription token
    - **Google Gemini** - Gemini models (requires API key from [aistudio.google.com](https://aistudio.google.com/apikey))
    - **OpenRouter** - Multiple models (requires API key from [openrouter.ai](https://openrouter.ai/keys))
    - **OpenAI** - GPT-4o, o1 models (requires API key from [platform.openai.com](https://platform.openai.com/api-keys))
    - **AWS Bedrock** - Enterprise AWS (requires AWS credentials)
    - **Ollama** - Local models (free, requires [Ollama](https://ollama.ai) installed)
-3. Enter your API key
-4. Click **Test Connection** to verify
-5. Save settings
+3. If you choose **Claude**, pick one of these tabs:
+   - **Claude API**: paste an API key from [console.anthropic.com](https://console.anthropic.com/)
+   - **Claude Subscription**: install the provider's terminal app, run its token setup flow, and paste the generated `sk-ant-oat...` token
+4. Click **Refresh Models** to load the live models available to your credential, then choose a model
+5. Click **Test Connection** to verify
+6. Save settings
 
 ### Optional: Configure Fallback Chains
 
@@ -44,13 +47,20 @@ After your primary provider works, open:
 
 CoWork OS uses those ordered chains when a provider is unavailable, rate-limited, or lacks the needed capability for a task.
 
+For LLM providers, retryable failures such as `429` rate limits immediately advance to the next configured fallback provider/model. In **Settings > LLM > Provider Failover**, `Retry primary after (seconds)` controls when CoWork OS should probe the primary route again after failover:
+
+- blank uses the default 60-second cooldown
+- `0` retries the primary on the next route refresh
+- higher values keep the working fallback route active longer before retrying the primary
+
 ## Troubleshooting
 
-- If **Test Connection** fails with 401/403, verify the API key and account permissions.
-- If the model list is empty, click **Refresh Models** after entering your API key (and Base URL if overridden).
+- If **Test Connection** fails with 401/403, verify the API key or token and the account permissions behind it.
+- If the Claude model list is empty, click **Refresh Models** after entering your API key or Claude subscription token.
 - If a provider endpoint changes, override the **Base URL** in Settings (custom providers or Groq/xAI/Kimi/OpenRouter).
 - If Ollama fails to connect, confirm the service is running and the base URL is correct (default `http://localhost:11434`).
 - If `npm run setup` fails on macOS with `Killed: 9`, macOS terminated the native build due to memory pressure. The setup script retries automatically (with exponential backoff); if it still fails, close other apps and run `npm run setup` again.
+- Note: as of April 4, 2026, third-party harnesses connected to your Claude account draw from extra usage instead of from your subscription. If you do not use them, nothing changes. If you do, the credit and bundles above have you covered.
 
 ### Step 4: Create Your First Task
 
@@ -88,7 +98,7 @@ Once the app opens, the most important places to know are:
 
 - **Home**: quick launch plus recent sessions and recent automation activity
 - **Devices**: manage the local machine and saved remote CoWork nodes, run remote tasks, and inspect remote task history
-- **Settings > Automations**: Task Queue, Self-Improve, Scheduled Tasks, Webhooks, Event Triggers, and Daily Briefing
+- **Settings > Automations**: Task Queue, Subconscious, Scheduled Tasks, Webhooks, Event Triggers, and Daily Briefing
 - **Settings > Profiles**: create, switch, export, and import isolated app profiles
 - **Settings > Companies**: company shell setup, goals, projects, issues, planner state, and linked operators
 - **Mission Control**: company and operator monitoring, Kanban board, feed, and Ops view
@@ -139,7 +149,7 @@ Recommended order:
 2. **Scheduled Tasks**: add one safe recurring task.
 3. **Daily Briefing**: enable a daily summary.
 4. **Event Triggers / Webhooks**: connect inbound automation only after you have a stable workspace and provider setup.
-5. **Self-Improve**: enable only on git-backed workspaces where worktrees are available.
+5. **Subconscious**: enable the reflective loop once you have at least one stable workflow target. Code-change dispatch works best on git-backed workspaces where worktrees are available.
 
 ## Zero-Human Company Quick Start
 
@@ -249,11 +259,11 @@ You'll see a dialog with:
 
 ### LLM Providers
 
-Open **Settings** > **Provider** tab:
+Open **Settings** > **LLM**:
 
 | Provider | Setup |
 |----------|-------|
-| Anthropic | Enter API key from [console.anthropic.com](https://console.anthropic.com) |
+| Claude | Use **Claude API** with a key from [console.anthropic.com](https://console.anthropic.com), or use **Claude Subscription** with a token from `claude setup-token` |
 | Google Gemini | Enter API key from [aistudio.google.com](https://aistudio.google.com/apikey) |
 | OpenRouter | Enter API key from [openrouter.ai](https://openrouter.ai/keys) |
 | OpenAI (API Key) | Enter API key from [platform.openai.com](https://platform.openai.com/api-keys) |
@@ -263,6 +273,8 @@ Open **Settings** > **Provider** tab:
 | Groq | Enter API key in Settings |
 | xAI (Grok) | Enter API key in Settings |
 | Kimi (Moonshot) | Enter API key in Settings |
+
+Prompt caching is enabled by default on supported Anthropic and GPT-style routes. CoWork automatically keeps stable session prompt sections cacheable and dynamic turn context uncached, so follow-ups can reuse the provider-side prefix without caching the clock, recall, or one-off guidance.
 
 ### Compatible / Gateway Providers
 
@@ -290,6 +302,8 @@ Configure these in **Settings** > **LLM Provider** by entering API keys/tokens, 
 | Kimi Code | API key in Settings |
 | OpenAI-Compatible (Custom) | API key + base URL in Settings |
 | Anthropic-Compatible (Custom) | API key + base URL in Settings |
+
+Advanced override: prompt caching can be disabled manually with `promptCaching.mode: "off"` in the saved LLM settings payload or by launching the app with `COWORK_PROMPT_CACHE_MODE=off`.
 
 ### Search Providers (Optional — DuckDuckGo works out of the box)
 

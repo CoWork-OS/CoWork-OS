@@ -3,6 +3,7 @@ import * as fs from "fs";
 import Database from "better-sqlite3";
 import { GitService } from "./GitService";
 import { WorktreeInfoRepository } from "../database/repositories";
+import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
 import {
   WorktreeSettings,
   DEFAULT_WORKTREE_SETTINGS,
@@ -13,6 +14,7 @@ import {
 
 const WORKTREES_DIR = ".cowork-worktrees";
 const SETTINGS_KEY = "worktree_settings";
+const SECURE_SETTINGS_CATEGORY = "worktree";
 
 /**
  * High-level worktree lifecycle manager.
@@ -37,14 +39,28 @@ export class WorktreeManager {
    * Load worktree settings from database.
    */
   getSettings(): WorktreeSettings {
+    if (SecureSettingsRepository.isInitialized()) {
+      const stored = SecureSettingsRepository.getInstance().load<WorktreeSettings>(
+        SECURE_SETTINGS_CATEGORY,
+      );
+      if (stored) {
+        return { ...DEFAULT_WORKTREE_SETTINGS, ...stored };
+      }
+    }
+
     try {
-      const stmt = this.db.prepare("SELECT value FROM settings WHERE key = ?");
-      const row = stmt.get(SETTINGS_KEY) as { value: string } | undefined;
-      if (row) {
-        return { ...DEFAULT_WORKTREE_SETTINGS, ...JSON.parse(row.value) };
+      const row = this.db
+        .prepare("SELECT value FROM settings WHERE key = ?")
+        .get(SETTINGS_KEY) as { value: string } | undefined;
+      if (row?.value) {
+        const parsed = { ...DEFAULT_WORKTREE_SETTINGS, ...JSON.parse(row.value) };
+        if (SecureSettingsRepository.isInitialized()) {
+          SecureSettingsRepository.getInstance().save(SECURE_SETTINGS_CATEGORY, parsed);
+        }
+        return parsed;
       }
     } catch {
-      // Settings table might not have this key yet
+      // Legacy settings table may not exist.
     }
     return { ...DEFAULT_WORKTREE_SETTINGS };
   }
@@ -53,17 +69,30 @@ export class WorktreeManager {
    * Save worktree settings to database.
    */
   saveSettings(settings: WorktreeSettings): void {
-    const stmt = this.db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");
-    stmt.run(SETTINGS_KEY, JSON.stringify(settings));
+    if (SecureSettingsRepository.isInitialized()) {
+      SecureSettingsRepository.getInstance().save(SECURE_SETTINGS_CATEGORY, settings);
+      return;
+    }
+
+    try {
+      const stmt = this.db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");
+      stmt.run(SETTINGS_KEY, JSON.stringify(settings));
+    } catch {
+      // Best-effort legacy fallback only.
+    }
   }
 
   /**
    * Check if worktrees should be used for a given workspace.
    * Returns false if: settings disabled, not a git repo, or workspace is temp.
    */
-  async shouldUseWorktree(workspacePath: string, isTemp?: boolean): Promise<boolean> {
+  async shouldUseWorktree(
+    workspacePath: string,
+    isTemp?: boolean,
+    requireIsolation = false,
+  ): Promise<boolean> {
     const settings = this.getSettings();
-    if (!settings.enabled) return false;
+    if (!settings.enabled && !requireIsolation) return false;
     if (isTemp) return false;
 
     try {

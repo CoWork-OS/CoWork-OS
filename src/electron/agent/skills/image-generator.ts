@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as mimetypes from "mime-types";
 import { Workspace } from "../../../shared/types";
+import { getOpenRouterAttributionHeaders } from "../llm/openrouter-attribution";
 import { LLMProviderFactory } from "../llm/provider-factory";
 
 /**
@@ -986,6 +987,7 @@ export class ImageGenerator {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${args.apiKey}`,
+          ...getOpenRouterAttributionHeaders(),
         },
         body: JSON.stringify(body),
       });

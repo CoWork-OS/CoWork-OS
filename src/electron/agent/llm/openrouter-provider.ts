@@ -7,6 +7,7 @@ import {
   LLMMessage,
   LLMTool,
 } from "./types";
+import { getOpenRouterAttributionHeaders } from "./openrouter-attribution";
 
 /**
  * OpenRouter API provider implementation
@@ -43,8 +44,7 @@ export class OpenRouterProvider implements LLMProvider {
         headers: {
           Authorization: `Bearer ${this.apiKey}`,
           "Content-Type": "application/json",
-          "HTTP-Referer": "https://github.com/CoWork-OS/cowork-os",
-          "X-Title": "CoWork-OS",
+          ...getOpenRouterAttributionHeaders(),
         },
         body: JSON.stringify({
           model: request.model || this.defaultModel,
@@ -95,8 +95,7 @@ export class OpenRouterProvider implements LLMProvider {
         headers: {
           Authorization: `Bearer ${this.apiKey}`,
           "Content-Type": "application/json",
-          "HTTP-Referer": "https://github.com/CoWork-OS/cowork-os",
-          "X-Title": "CoWork-OS",
+          ...getOpenRouterAttributionHeaders(),
         },
         body: JSON.stringify({
           model: this.defaultModel,
@@ -299,6 +298,7 @@ export class OpenRouterProvider implements LLMProvider {
       const response = await fetch(`${this.baseUrl}/models`, {
         headers: {
           Authorization: `Bearer ${this.apiKey}`,
+          ...getOpenRouterAttributionHeaders(),
         },
       });
 

@@ -7,55 +7,125 @@ import {
   LLMContent,
   LLMMessage,
   LLMTool,
+  normalizeAnthropicModelId,
 } from "./types";
+import {
+  applyAnthropicExplicitCacheControl,
+  applyExplicitSystemBlockMarker,
+  buildAnthropicCacheMarker,
+  convertSystemBlocksToTextParts,
+  extractAnthropicUsage,
+  isPromptCacheAutoUnsupportedError,
+  normalizeSystemBlocks,
+} from "./prompt-cache";
+import { createLogger } from "../../utils/logger";
 
 /**
  * Anthropic API provider implementation
  */
+const logger = createLogger("Anthropic");
+
 export class AnthropicProvider implements LLMProvider {
   readonly type = "anthropic" as const;
   private client: Anthropic;
+  private promptCacheAutoSupported = true;
+  private static readonly STREAMING_REQUIRED_ERROR_FRAGMENT =
+    "Streaming is required for operations that may take longer than 10 minutes";
 
   constructor(config: LLMProviderConfig) {
     const apiKey = config.anthropicApiKey;
     if (!apiKey) {
       throw new Error(
-        "Anthropic API key is required. Configure it in Settings or get one from https://console.anthropic.com/",
+        "Claude API key or subscription token is required. Configure it in Settings or get one from https://console.anthropic.com/",
       );
     }
 
-    this.client = new Anthropic({ apiKey });
+    const isSubscriptionToken = apiKey.includes("sk-ant-oat");
+    this.client = isSubscriptionToken
+      ? new Anthropic({
+          apiKey: null,
+          authToken: apiKey,
+          defaultHeaders: {
+            "anthropic-beta": "claude-code-20250219,oauth-2025-04-20",
+            "x-app": "cli",
+          },
+        })
+      : new Anthropic({ apiKey });
   }
 
   async createMessage(request: LLMRequest): Promise<LLMResponse> {
-    // Convert our generic format to Anthropic format
-    const messages = this.convertMessages(request.messages);
     const tools = request.tools ? this.convertTools(request.tools) : undefined;
+    const model = normalizeAnthropicModelId(request.model);
+    const requestedPromptCache =
+      request.promptCache?.mode === "disabled"
+        ? undefined
+        : request.promptCache;
+    const effectivePromptCache =
+      requestedPromptCache?.mode === "anthropic_auto" &&
+      !this.promptCacheAutoSupported
+        ? { ...requestedPromptCache, mode: "anthropic_explicit" as const }
+        : requestedPromptCache;
 
     try {
-      console.log(`[Anthropic] Calling API with model: ${request.model}`);
+      logger.debug(`Calling API with model: ${model}`);
 
-      const response = await this.client.messages.create(
-        {
-          model: request.model,
-          max_tokens: request.maxTokens,
-          system: request.system,
-          messages,
-          ...(tools && { tools }),
-        },
-        // Pass abort signal to allow cancellation
-        request.signal ? { signal: request.signal } : undefined,
+      const response = await this.createWithPromptCache(
+        request,
+        effectivePromptCache,
+        tools,
       );
 
       return this.convertResponse(response);
     } catch (error: Any) {
+      if (
+        effectivePromptCache?.mode === "anthropic_auto" &&
+        isPromptCacheAutoUnsupportedError(error?.status, error?.message || "")
+      ) {
+        this.promptCacheAutoSupported = false;
+        logger.warn(
+          "Automatic prompt caching rejected by endpoint; downgrading this provider instance to explicit caching.",
+          {
+            status: error?.status,
+            message: error?.message,
+          },
+        );
+
+        const fallbackResponse = await this.createWithPromptCache(
+          request,
+          { ...effectivePromptCache, mode: "anthropic_explicit" },
+          tools,
+        );
+        return this.convertResponse(fallbackResponse);
+      }
+
+      if (
+        typeof error?.message === "string" &&
+        error.message.includes(
+          AnthropicProvider.STREAMING_REQUIRED_ERROR_FRAGMENT,
+        )
+      ) {
+        logger.warn(
+          "Retrying request with streaming because the SDK rejected the non-streaming timeout budget.",
+          {
+            model,
+            maxTokens: request.maxTokens,
+          },
+        );
+        const streamedResponse = await this.createWithStreaming(
+          request,
+          effectivePromptCache,
+          tools,
+        );
+        return this.convertResponse(streamedResponse);
+      }
+
       // Handle abort errors gracefully
       if (error.name === "AbortError" || error.message?.includes("aborted")) {
-        console.log(`[Anthropic] Request aborted`);
+        logger.info("Request aborted");
         throw new Error("Request cancelled");
       }
 
-      console.error(`[Anthropic] API error:`, {
+      logger.error("API error:", {
         status: error.status,
         message: error.message,
         type: error.type || error.name,
@@ -114,7 +184,11 @@ export class AnthropicProvider implements LLMProvider {
             type: "image" as const,
             source: {
               type: "base64" as const,
-              media_type: item.mimeType as "image/jpeg" | "image/png" | "image/gif" | "image/webp",
+              media_type: item.mimeType as
+                | "image/jpeg"
+                | "image/png"
+                | "image/gif"
+                | "image/webp",
               data: item.data,
             },
           };
@@ -129,6 +203,106 @@ export class AnthropicProvider implements LLMProvider {
         role: msg.role,
         content,
       };
+    }) as Anthropic.MessageParam[];
+  }
+
+  private async createWithPromptCache(
+    request: LLMRequest,
+    promptCache: LLMRequest["promptCache"] | undefined,
+    tools: Anthropic.Tool[] | undefined,
+  ): Promise<Anthropic.Message> {
+    const model = normalizeAnthropicModelId(request.model);
+    const payload: Any = {
+      model,
+      max_tokens: request.maxTokens,
+      system: this.buildSystemPayload(request, promptCache),
+      messages: this.buildMessagesPayload(request.messages, promptCache),
+      ...(tools && { tools }),
+    };
+
+    if (promptCache?.mode === "anthropic_auto") {
+      payload.cache_control = buildAnthropicCacheMarker(promptCache.ttl);
+    }
+
+    return this.client.messages.create(
+      payload,
+      request.signal ? { signal: request.signal } : undefined,
+    ) as Promise<Anthropic.Message>;
+  }
+
+  private async createWithStreaming(
+    request: LLMRequest,
+    promptCache: LLMRequest["promptCache"] | undefined,
+    tools: Anthropic.Tool[] | undefined,
+  ): Promise<Anthropic.Message> {
+    const model = normalizeAnthropicModelId(request.model);
+    const payload: Any = {
+      model,
+      max_tokens: request.maxTokens,
+      system: this.buildSystemPayload(request, promptCache),
+      messages: this.buildMessagesPayload(request.messages, promptCache),
+      ...(tools && { tools }),
+    };
+
+    if (promptCache?.mode === "anthropic_auto") {
+      payload.cache_control = buildAnthropicCacheMarker(promptCache.ttl);
+    }
+
+    const stream = this.client.messages.stream(
+      payload,
+      request.signal ? { signal: request.signal } : undefined,
+    );
+    return stream.finalMessage() as Promise<Anthropic.Message>;
+  }
+
+  private buildSystemPayload(
+    request: Pick<LLMRequest, "system" | "systemBlocks">,
+    promptCache: LLMRequest["promptCache"] | undefined,
+  ):
+    | string
+    | Array<{
+        type: "text";
+        text: string;
+        cache_control?: { type: "ephemeral"; ttl?: "1h" };
+      }> {
+    const blocks = normalizeSystemBlocks(request.system, request.systemBlocks);
+    if (blocks.length === 0) {
+      return request.system;
+    }
+
+    const parts = convertSystemBlocksToTextParts(
+      request.system,
+      request.systemBlocks,
+    );
+    if (promptCache?.mode === "anthropic_explicit") {
+      applyExplicitSystemBlockMarker(parts, blocks, promptCache.ttl);
+    }
+
+    if (
+      !request.systemBlocks &&
+      parts.length === 1 &&
+      !parts[0].cache_control
+    ) {
+      return parts[0].text;
+    }
+
+    return parts;
+  }
+
+  private buildMessagesPayload(
+    messages: LLMMessage[],
+    promptCache: LLMRequest["promptCache"] | undefined,
+  ): Anthropic.MessageParam[] {
+    const converted = this.convertMessages(messages) as Any[];
+    if (promptCache?.mode !== "anthropic_explicit") {
+      return converted as Anthropic.MessageParam[];
+    }
+
+    return applyAnthropicExplicitCacheControl(converted, {
+      ttl: promptCache.ttl,
+      includeSystem: false,
+      maxBreakpoints: Math.max(0, promptCache.explicitRecentMessages || 3),
+      nativeAnthropic: true,
     }) as Anthropic.MessageParam[];
   }
 
@@ -162,14 +336,13 @@ export class AnthropicProvider implements LLMProvider {
     return {
       content,
       stopReason: this.mapStopReason(response.stop_reason),
-      usage: {
-        inputTokens: response.usage.input_tokens,
-        outputTokens: response.usage.output_tokens,
-      },
+      usage: extractAnthropicUsage(response.usage),
     };
   }
 
-  private mapStopReason(reason: Anthropic.Message["stop_reason"]): LLMResponse["stopReason"] {
+  private mapStopReason(
+    reason: Anthropic.Message["stop_reason"],
+  ): LLMResponse["stopReason"] {
     switch (reason) {
       case "end_turn":
         return "end_turn";

@@ -19,6 +19,14 @@ vi.mock("../../settings/memory-features-manager", () => ({
   },
 }));
 
+vi.mock("../../settings/personality-manager", () => ({
+  PersonalityManager: {
+    getPersonalityPrompt: vi.fn().mockReturnValue(""),
+    getPersonalityPromptById: vi.fn().mockReturnValue(""),
+    getIdentityPrompt: vi.fn().mockReturnValue("You are Cowork."),
+  },
+}));
+
 function createPlanExecutor(response: Any): Any {
   const executor = Object.create(TaskExecutor.prototype) as Any;
   executor.task = {
@@ -35,13 +43,32 @@ function createPlanExecutor(response: Any): Any {
   };
   executor.daemon = { logEvent: vi.fn() };
   executor.modelId = "gpt-5.3-codex-spark";
+  executor.provider = { type: "openai" };
+  executor.cachedLlmSettings = {
+    promptCaching: {
+      mode: "off",
+      ttl: "5m",
+      strictStablePrefix: true,
+      surfaceCoverage: {
+        executor: true,
+        followUps: true,
+        chatMode: true,
+        sideCalls: false,
+      },
+    },
+  };
   executor.initialImages = [];
   executor.emitEvent = vi.fn();
+  executor.stableSystemBlocks = [];
+  executor.systemPromptBlocks = [];
+  executor.currentPromptCacheContext = null;
+  executor.promptSectionCache = new Map();
 
   executor.getRoleContextPrompt = vi.fn().mockReturnValue("");
   executor.getInfraContextPrompt = vi.fn().mockReturnValue("");
   executor.getEffectiveExecutionMode = vi.fn().mockReturnValue("execute");
   executor.getAvailableTools = vi.fn().mockReturnValue([]);
+  executor.applyIntentFilter = vi.fn((tools: Any[]) => tools);
   executor.toolRegistry = {
     getToolDescriptions: vi.fn().mockReturnValue(""),
   };
@@ -92,6 +119,64 @@ describe("TaskExecutor plan parsing", () => {
     executor.task.agentConfig = { modelKey: "gpt-5.4-mini" };
     await executor.createPlan();
     expect(executor.refreshProviderIfSettingsChanged).not.toHaveBeenCalled();
+  });
+
+  it("routes plan creation through the prompt-cache request path for Azure profile routing", async () => {
+    const response = {
+      usage: { inputTokens: 1, outputTokens: 2, cachedTokens: 0 },
+      content: [{ type: "text", text: '{"description":"P","steps":[{"id":"1","description":"Do"}]}' }],
+    };
+    const executor = createPlanExecutor(response);
+    executor.modelId = "gpt-5.4";
+    executor.provider = { type: "azure" };
+    executor.task.agentConfig = { taskIntent: "execution" };
+    executor.cachedLlmSettings = {
+      promptCaching: {
+        mode: "auto",
+        ttl: "5m",
+        strictStablePrefix: true,
+        surfaceCoverage: {
+          executor: true,
+          followUps: true,
+          chatMode: true,
+          sideCalls: false,
+        },
+      },
+    };
+    executor.getAvailableTools = vi.fn().mockReturnValue([
+      {
+        name: "write_file",
+        description: "Write a file",
+        input_schema: {
+          type: "object",
+          properties: { path: { type: "string" }, content: { type: "string" } },
+          required: ["path", "content"],
+        },
+      },
+    ]);
+    executor.createMessageWithTimeout = vi.fn().mockResolvedValue(response);
+    executor.callLLMWithRetry = vi.fn(async (requestFn: Any) => requestFn(0));
+
+    await executor.createPlan();
+
+    expect(executor.createMessageWithTimeout).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: "gpt-5.4",
+        toolChoice: "none",
+        tools: expect.arrayContaining([
+          expect.objectContaining({
+            name: "write_file",
+          }),
+        ]),
+        systemBlocks: expect.any(Array),
+        promptCache: expect.objectContaining({
+          mode: "openai_key",
+          cacheKey: expect.any(String),
+        }),
+      }),
+      expect.any(Number),
+      "Plan creation",
+    );
   });
 
   it("parses step-header plans spread across multiple text blocks", async () => {

@@ -14,6 +14,8 @@ import * as path from "path";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { app } from "electron";
+import { InstallSecurityOutcome } from "../../shared/types";
+import { getCapabilityBundleSecurityService } from "../security/capability-bundle-security";
 import { validateManifest } from "./loader";
 import { PluginManifest } from "./types";
 
@@ -29,6 +31,7 @@ const GIT_CLONE_TIMEOUT_MS = 60_000;
 
 /** Maximum manifest download timeout (15 seconds) */
 const FETCH_TIMEOUT_MS = 15_000;
+const securityService = getCapabilityBundleSecurityService();
 
 export interface InstallProgress {
   packName: string;
@@ -48,6 +51,7 @@ export interface InstallResult {
   error?: string;
   skillCount?: number;
   agentCount?: number;
+  security?: InstallSecurityOutcome;
 }
 
 export interface UninstallResult {
@@ -105,6 +109,26 @@ function buildTempInstallDir(extensionsDir: string, hint: string): string {
   const safeHint = hint.toLowerCase().replace(/[^a-z0-9_-]/g, "-") || "pack";
   const nonce = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   return path.join(extensionsDir, `.tmp-${safeHint}-${nonce}`);
+}
+
+function toInstallOutcome(report?: {
+  verdict: "clean" | "warning" | "quarantined";
+  summary: string;
+}): InstallSecurityOutcome | undefined {
+  if (!report) {
+    return undefined;
+  }
+
+  return {
+    state:
+      report.verdict === "quarantined"
+        ? "quarantined"
+        : report.verdict === "warning"
+          ? "installed_with_warning"
+          : "installed",
+    summary: report.summary,
+    report: report as InstallSecurityOutcome["report"],
+  };
 }
 
 /**
@@ -287,11 +311,39 @@ export async function installFromGit(
       return { success: false, error: `Pack "${safeId}" is already installed` };
     }
 
-    fs.renameSync(workingDir, targetDir);
+    const report = await securityService.scanPluginPack({
+      bundleId: safeId,
+      displayName: manifest.displayName,
+      source: "git",
+      managed: true,
+      rootDir: workingDir,
+      manifest,
+    });
+
+    if (report.verdict === "quarantined") {
+      securityService.quarantinePluginPackStage(
+        workingDir,
+        safeId,
+        manifest.displayName,
+        "git",
+        targetDir,
+        report,
+      );
+      return {
+        success: false,
+        packName: safeId,
+        manifest,
+        error: report.summary,
+        skillCount: manifest.skills?.length || 0,
+        agentCount: manifest.agentRoles?.length || 0,
+        security: toInstallOutcome(report),
+      };
+    }
+
+    securityService.activatePluginPack(workingDir, targetDir, report);
     workingDir = targetDir;
 
-    // Remove .git directory to save space (we don't need history)
-    const gitDir = path.join(workingDir, ".git");
+    const gitDir = path.join(targetDir, ".git");
     if (fs.existsSync(gitDir)) {
       fs.rmSync(gitDir, { recursive: true, force: true });
     }
@@ -310,6 +362,7 @@ export async function installFromGit(
       manifest,
       skillCount: manifest.skills?.length || 0,
       agentCount: manifest.agentRoles?.length || 0,
+      security: toInstallOutcome(report),
     };
   } catch (error) {
     // Clean up on failure
@@ -345,6 +398,7 @@ export async function installFromUrl(
   };
 
   notify({ status: "downloading", progress: 10, message: "Fetching manifest..." });
+  let tempDir: string | null = null;
 
   try {
     const controller = new AbortController();
@@ -374,6 +428,7 @@ export async function installFromUrl(
 
     const extensionsDir = ensureExtensionsDir();
     const targetDir = path.join(extensionsDir, safeId);
+    tempDir = buildTempInstallDir(extensionsDir, safeId);
 
     if (fs.existsSync(targetDir)) {
       return { success: false, error: `Pack "${safeId}" is already installed` };
@@ -381,13 +436,43 @@ export async function installFromUrl(
 
     notify({ packName: safeId, status: "installing", progress: 70, message: "Installing pack..." });
 
-    // Create directory and write manifest
-    fs.mkdirSync(targetDir, { recursive: true });
+    fs.mkdirSync(tempDir, { recursive: true });
     fs.writeFileSync(
-      path.join(targetDir, MANIFEST_FILENAME),
+      path.join(tempDir, MANIFEST_FILENAME),
       JSON.stringify(manifest, null, 2) + "\n",
       "utf-8",
     );
+
+    const report = await securityService.scanPluginPack({
+      bundleId: safeId,
+      displayName: manifest.displayName,
+      source: "url",
+      managed: true,
+      rootDir: tempDir,
+      manifest,
+    });
+
+    if (report.verdict === "quarantined") {
+      securityService.quarantinePluginPackStage(
+        tempDir,
+        safeId,
+        manifest.displayName,
+        "url",
+        targetDir,
+        report,
+      );
+      return {
+        success: false,
+        packName: safeId,
+        manifest,
+        error: report.summary,
+        skillCount: manifest.skills?.length || 0,
+        agentCount: manifest.agentRoles?.length || 0,
+        security: toInstallOutcome(report),
+      };
+    }
+
+    securityService.activatePluginPack(tempDir, targetDir, report);
 
     notify({
       packName: safeId,
@@ -403,8 +488,12 @@ export async function installFromUrl(
       manifest,
       skillCount: manifest.skills?.length || 0,
       agentCount: manifest.agentRoles?.length || 0,
+      security: toInstallOutcome(report),
     };
   } catch (error) {
+    if (tempDir && fs.existsSync(tempDir)) {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
     return {
       success: false,
       error: `Install failed: ${error instanceof Error ? error.message : String(error)}`,

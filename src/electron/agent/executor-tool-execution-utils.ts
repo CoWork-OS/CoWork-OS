@@ -599,7 +599,7 @@ export function isHardToolFailure(toolName: string, result: Any, failureReason =
     return false;
   }
 
-  if (toolName === "use_skill") {
+  if (toolName === "Skill") {
     return /not currently executable|cannot be invoked automatically|not found|blocked by|disabled/.test(
       message,
     );

@@ -510,6 +510,8 @@ export class ChatGPTImporter {
     distillProvider?: string,
     distillModel?: string,
   ): Promise<Array<{ type: string; content: string }>> {
+    let providerType = "";
+    let modelId = "";
     try {
       // If a provider override is specified, create a provider for that type
       // (credentials are merged from global settings automatically)
@@ -520,9 +522,9 @@ export class ChatGPTImporter {
           }
         : undefined;
       const provider = LLMProviderFactory.createProvider(overrideConfig);
+      providerType = provider.type;
 
       // Resolve model ID: explicit override > provider default
-      let modelId: string;
       if (distillModel) {
         modelId = distillModel;
       } else {
@@ -578,7 +580,7 @@ Rules:
       recordLlmCallSuccess(
         {
           sourceKind: "chatgpt_import_distill",
-          providerType: provider.type,
+          providerType,
           modelKey: modelId,
           modelId,
         },
@@ -631,6 +633,9 @@ Rules:
       recordLlmCallError(
         {
           sourceKind: "chatgpt_import_distill",
+          providerType,
+          modelKey: modelId,
+          modelId,
         },
         err,
       );

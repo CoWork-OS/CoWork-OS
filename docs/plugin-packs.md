@@ -754,11 +754,13 @@ Click the **"+"** button in the Customize panel sidebar header to open the Plugi
 - Filter by category using clickable chips
 - Paginated results grid with pack cards showing icon, name, description, and category
 - Click "Install" to install from the remote registry (via git URL or manifest download)
+- Install results surface whether the pack was installed cleanly, installed with a warning, or quarantined
 
 **Install from URL/Git**
 - Enter any Git URL (`github:owner/repo`, `https://github.com/...`, `git@github.com:...`)
 - Or enter a direct URL to a `cowork.plugin.json` manifest
 - Progress feedback during installation
+- Imported packs are scanned before activation and can be quarantined with a stored report instead of being loaded immediately
 
 **Create New Pack**
 - Fill in pack name, display name, category, and icon
@@ -771,15 +773,22 @@ Click the **"+"** button in the Customize panel sidebar header to open the Plugi
 **From Git:**
 1. Shallow clone the repository to a temp directory
 2. Validate the `cowork.plugin.json` manifest
-3. Remove the `.git` directory
-4. Move to `~/.cowork/extensions/{pack-name}/`
-5. Trigger plugin discovery to register the new pack
+3. Run install-time bundle security scanning against the manifest, declarative connectors, bundled scripts, and any detected package references
+4. Remove the `.git` directory
+5. Move to `~/.cowork/extensions/{pack-name}/` only if the scan verdict allows activation
+6. Trigger plugin discovery to register the new pack
 
 **From URL:**
 1. Fetch the manifest JSON from the URL
 2. Validate required fields and structure
-3. Write to `~/.cowork/extensions/{pack-name}/cowork.plugin.json`
-4. Trigger plugin discovery to register the new pack
+3. Stage the manifest and run install-time security scanning
+4. Write to `~/.cowork/extensions/{pack-name}/cowork.plugin.json` only if the scan verdict allows activation
+5. Trigger plugin discovery to register the new pack
+
+If a pack is blocked, CoWork stores it in quarantine outside the normal discovery path and exposes:
+- a short install result summary
+- a detailed report view in the Customize panel
+- retry scan and removal actions
 
 **From Scaffold:**
 1. Validate pack name (kebab-case, max 64 chars, no path traversal)
@@ -796,6 +805,18 @@ To uninstall: right-click a personal pack in the sidebar or use the API:
 ```typescript
 window.electronAPI.uninstallPluginPack("my-custom-pack")
 ```
+
+## Imported Pack Security
+
+Imported packs are treated as a trust boundary.
+
+CoWork now applies the following behavior to packs installed from Git or URL sources:
+- installs are staged before activation
+- declarative connectors, manifest fields, bundled text/script content, and inferred package references are scanned before the pack is registered
+- high-confidence malicious findings move the pack into quarantine instead of loading it
+- warning-only findings still allow install, but the Customize panel shows a visible **Security Warning** badge and summary
+- managed packs keep a persisted security report and bundle digest so CoWork can detect post-install changes and quarantine tampered imports on the next discovery pass
+- unmanaged local pack folders are not auto-quarantined, but warning findings can still be surfaced in the Customize panel
 
 ---
 
@@ -1199,6 +1220,11 @@ CoWork OS plugin packs offer capabilities beyond typical AI assistant plugins:
 ### Plugin Store shows "Installation disabled"
 - Admin policies may restrict custom pack creation or remote installation
 - Check Settings > Admin Policies > Installation Permissions
+
+### Pack installed but is not visible
+- The import may have been quarantined during install or on the next discovery pass
+- Open the Customize panel and check the **Quarantined Imports** section
+- Use **View Report** to inspect the finding, then retry the scan or remove the pack
 
 ---
 

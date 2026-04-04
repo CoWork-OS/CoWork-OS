@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { AgentDaemon } from "../daemon";
+import { normalizeLlmProviderType } from "../../../shared/llmProviderDisplay";
+import { LLM_PROVIDER_TYPES } from "../../../shared/types";
 
 function createDaemonLike() {
   let seq = 0;
@@ -9,6 +11,7 @@ function createDaemonLike() {
       findById: vi.fn().mockReturnValue({
         id: "task-1",
         workspaceId: "workspace-1",
+        agentConfig: {},
       }),
     },
     workspaceRepo: {
@@ -35,6 +38,16 @@ function createDaemonLike() {
     trackTimelineStepState: vi.fn(),
     trackEvidenceRefs: vi.fn(),
     persistTimelineEvent: vi.fn(),
+    activeTasks: new Map(),
+    lastKnownLlmProviderByTask: new Map(),
+    normalizeProviderTypeValue: (AgentDaemon.prototype as Any).normalizeProviderTypeValue,
+    getProviderTypeFromLogMessage: (AgentDaemon.prototype as Any).getProviderTypeFromLogMessage,
+    getProviderTypeFromPayload: (AgentDaemon.prototype as Any).getProviderTypeFromPayload,
+    getTaskAgentConfigProviderType: (AgentDaemon.prototype as Any).getTaskAgentConfigProviderType,
+    getActiveExecutorProviderType: (AgentDaemon.prototype as Any).getActiveExecutorProviderType,
+    rememberTaskLlmProviderType: (AgentDaemon.prototype as Any).rememberTaskLlmProviderType,
+    resolveTaskLlmProviderType: (AgentDaemon.prototype as Any).resolveTaskLlmProviderType,
+    maybeEnrichLlmTelemetryPayload: (AgentDaemon.prototype as Any).maybeEnrichLlmTelemetryPayload,
     normalizeArtifactEventPayload: (AgentDaemon.prototype as Any).normalizeArtifactEventPayload,
   } as Any;
 }
@@ -65,6 +78,46 @@ describe("AgentDaemon.logEvent artifact normalization", () => {
     const [timelineEvent] = (daemonLike.persistTimelineEvent as Any).mock.calls[0];
     expect(timelineEvent.payload.path).toBe("https://example.com/report.pdf");
     expect(timelineEvent.payload.label).toBe("https://example.com/report.pdf");
+  });
+
+  it("backfills llm_usage providerType from route logs for every registered provider", () => {
+    for (const providerType of LLM_PROVIDER_TYPES) {
+      const daemonLike = createDaemonLike();
+
+      AgentDaemon.prototype.logEvent.call(daemonLike, "task-1", "log", {
+        message: `LLM route selected: provider=${providerType}, profile=cheap, source=profile_model, model=gpt-5.4-mini`,
+      });
+      AgentDaemon.prototype.logEvent.call(daemonLike, "task-1", "llm_usage", {
+        modelId: "gpt-5.4-mini",
+        modelKey: "gpt-5.4-mini",
+        delta: { inputTokens: 10, outputTokens: 2, cost: 0 },
+      });
+
+      const [timelineEvent, options] = (daemonLike.persistTimelineEvent as Any).mock.calls.at(-1);
+      const normalizedProviderType = normalizeLlmProviderType(providerType);
+
+      expect(timelineEvent.payload.providerType).toBe(normalizedProviderType);
+      expect(options.legacyPayload.providerType).toBe(normalizedProviderType);
+    }
+  });
+
+  it("falls back to the active executor provider when llm_usage arrives without structured provider metadata", () => {
+    const daemonLike = createDaemonLike();
+    daemonLike.activeTasks.set("task-1", {
+      executor: { provider: { type: "openrouter" } },
+      lastAccessed: Date.now(),
+      status: "active",
+    });
+
+    AgentDaemon.prototype.logEvent.call(daemonLike, "task-1", "llm_usage", {
+      modelId: "gpt-5.4",
+      modelKey: "gpt-5.4",
+      delta: { inputTokens: 10, outputTokens: 2, cost: 0 },
+    });
+
+    const [timelineEvent, options] = (daemonLike.persistTimelineEvent as Any).mock.calls.at(-1);
+    expect(timelineEvent.payload.providerType).toBe("openrouter");
+    expect(options.legacyPayload.providerType).toBe("openrouter");
   });
 });
 

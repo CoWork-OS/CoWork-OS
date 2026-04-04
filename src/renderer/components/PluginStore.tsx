@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import type { InstallSecurityOutcome } from "../../shared/types";
 import { isGitPluginUrl } from "../utils/plugin-store-install";
 
 interface PackRegistryEntry {
@@ -21,6 +22,17 @@ interface PackRegistryEntry {
 interface PluginStoreProps {
   onClose: () => void;
   onInstalled?: () => void;
+}
+
+function installMessage(
+  outcome: InstallSecurityOutcome | undefined,
+  fallback: string,
+): string {
+  if (!outcome) {
+    return fallback;
+  }
+
+  return outcome.summary || fallback;
 }
 
 export function PluginStore({ onClose, onInstalled }: PluginStoreProps) {
@@ -100,7 +112,7 @@ export function PluginStore({ onClose, onInstalled }: PluginStoreProps) {
     setInstallResult(null);
 
     try {
-      let result: { success: boolean; packName?: string; error?: string };
+      let result: { success: boolean; packName?: string; error?: string; security?: InstallSecurityOutcome };
 
       if (entry.gitUrl) {
         result = await window.electronAPI.installPluginPackFromGit(entry.gitUrl);
@@ -114,8 +126,8 @@ export function PluginStore({ onClose, onInstalled }: PluginStoreProps) {
         id: entry.id,
         success: result.success,
         message: result.success
-          ? `Installed ${result.packName || entry.displayName}`
-          : result.error || "Install failed",
+          ? installMessage(result.security, `Installed ${result.packName || entry.displayName}`)
+          : installMessage(result.security, result.error || "Install failed"),
       });
 
       if (result.success) {
@@ -139,7 +151,7 @@ export function PluginStore({ onClose, onInstalled }: PluginStoreProps) {
 
     try {
       const isGit = isGitPluginUrl(installUrl);
-      let result: { success: boolean; packName?: string; error?: string };
+      let result: { success: boolean; packName?: string; error?: string; security?: InstallSecurityOutcome };
 
       if (isGit) {
         result = await window.electronAPI.installPluginPackFromGit(installUrl);
@@ -151,8 +163,8 @@ export function PluginStore({ onClose, onInstalled }: PluginStoreProps) {
         id: "url",
         success: result.success,
         message: result.success
-          ? `Installed ${result.packName || "pack"}`
-          : result.error || "Install failed",
+          ? installMessage(result.security, `Installed ${result.packName || "pack"}`)
+          : installMessage(result.security, result.error || "Install failed"),
       });
 
       if (result.success) {

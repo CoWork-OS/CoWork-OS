@@ -1748,14 +1748,17 @@ export class MemoryService {
     memories: Memory[],
   ): Promise<{ summaryText: string; usedLlm: boolean }> {
     const { system, user } = this.buildBatchSummaryPrompt(group, memories);
+    let providerType = "";
+    let modelId = "";
 
     try {
       const provider = LLMProviderFactory.createProvider();
+      providerType = provider.type;
       const settings = LLMProviderFactory.getSettings();
       const azureDeployment = settings.azure?.deployment || settings.azure?.deployments?.[0];
       const azureAnthropicDeployment =
         settings.azureAnthropic?.deployment || settings.azureAnthropic?.deployments?.[0];
-      const modelId = LLMProviderFactory.getModelId(
+      modelId = LLMProviderFactory.getModelId(
         settings.modelKey,
         settings.providerType,
         settings.ollama?.model,
@@ -1787,7 +1790,7 @@ export class MemoryService {
           workspaceId: group.workspaceId,
           sourceKind: "memory_batch_summary",
           sourceId: group.batchKey,
-          providerType: provider.type,
+          providerType,
           modelKey: modelId,
           modelId,
         },
@@ -1806,7 +1809,9 @@ export class MemoryService {
           workspaceId: group.workspaceId,
           sourceKind: "memory_batch_summary",
           sourceId: group.batchKey,
-          providerType: LLMProviderFactory.getSelectedProvider?.() || null,
+          providerType,
+          modelKey: modelId,
+          modelId,
         },
         error,
       );

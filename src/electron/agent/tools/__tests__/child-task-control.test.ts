@@ -855,4 +855,70 @@ describe("ToolRegistry child task control tools", () => {
       runtimeSpy.mockRestore();
     }
   });
+
+  it("spawn_agent resolves worker_role and sends a structured delegation brief", async () => {
+    const daemon = {
+      getTaskById: vi.fn().mockResolvedValue({
+        id: "parent-task",
+        title: "Parent task",
+        prompt: "Ship the feature safely",
+        status: "executing",
+        workspaceId: workspace.id,
+        createdAt: 1,
+        updatedAt: 1,
+        depth: 0,
+      }),
+      getTaskEvents: vi.fn().mockReturnValue([
+        {
+          type: "step_started",
+          payload: { step: { description: "Validate the patch before shipping" } },
+        },
+        {
+          type: "assistant_message",
+          payload: { message: "Latest findings from the parent task." },
+        },
+      ]),
+      getChildTasks: vi.fn().mockResolvedValue([]),
+      createChildTask: vi.fn().mockResolvedValue({
+        id: "child-verifier",
+        title: "Verify patch",
+        prompt: "x",
+        status: "pending",
+        workspaceId: workspace.id,
+        createdAt: 1,
+        updatedAt: 1,
+        parentTaskId: "parent-task",
+        agentType: "sub",
+        depth: 1,
+      }),
+      logEvent: vi.fn(),
+    } as Any;
+
+    const registry = new ToolRegistry(workspace, daemon, "parent-task");
+    const explicit = await registry.executeTool("spawn_agent", {
+      title: "Verify patch",
+      prompt: "Validate the patch and give a second opinion.",
+      worker_role: "verifier",
+    });
+    const inferred = await registry.executeTool("spawn_agent", {
+      title: "Research bug",
+      prompt: "Investigate the failing test and summarize the findings.",
+      worker_role: "auto",
+    });
+
+    expect(explicit.success).toBe(true);
+    expect(inferred.success).toBe(true);
+
+    const explicitCall = daemon.createChildTask.mock.calls[0][0];
+    const inferredCall = daemon.createChildTask.mock.calls[1][0];
+
+    expect(explicitCall.workerRole).toBe("verifier");
+    expect(explicitCall.prompt).toContain("STRUCTURED DELEGATION BRIEF");
+    expect(explicitCall.prompt).toContain("Resolved worker role: Verifier");
+    expect(explicitCall.prompt).toContain("Current step: Validate the patch before shipping");
+    expect(explicitCall.prompt).toContain("Latest findings from the parent task.");
+
+    expect(inferredCall.workerRole).toBe("researcher");
+    expect(inferredCall.prompt).toContain("Resolved worker role: Researcher");
+  });
 });

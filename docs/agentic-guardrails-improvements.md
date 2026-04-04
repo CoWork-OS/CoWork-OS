@@ -3,7 +3,7 @@
 **Date:** 2026-03-06
 **Branch:** main
 **Commits:** 82709df3 and prior
-**Goal:** Reduce task failures caused by overly conservative guardrails and loop detection. Competing products (Codex, Claude Code) give the LLM more room to iterate, retry, and self-correct — these changes bring our agent to parity.
+**Goal:** Reduce task failures caused by overly conservative guardrails and loop detection. Competing coding-agent products give the LLM more room to iterate, retry, and self-correct; these changes bring our agent closer to that baseline.
 
 ---
 

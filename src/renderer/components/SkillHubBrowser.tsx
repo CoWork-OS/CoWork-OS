@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
 import {
+  CapabilitySecurityReport,
   CustomSkill,
+  InstallSecurityOutcome,
+  QuarantinedImportRecord,
   SkillRegistryEntry,
   SkillStatusReport,
   SkillStatusEntry,
@@ -116,6 +119,8 @@ export function SkillHubBrowser({ onSkillInstalled, onClose }: SkillHubBrowserPr
   const [installing, setInstalling] = useState<string | null>(null);
   const [externalSource, setExternalSource] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [quarantinedSkills, setQuarantinedSkills] = useState<QuarantinedImportRecord[]>([]);
+  const [expandedReportId, setExpandedReportId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"browse" | "clawhub" | "installed" | "status">(
     "installed",
   );
@@ -132,7 +137,9 @@ export function SkillHubBrowser({ onSkillInstalled, onClose }: SkillHubBrowserPr
     }
     try {
       const status = await window.electronAPI.getSkillStatus();
+      const quarantine = await window.electronAPI.listQuarantinedImports();
       setSkillStatus(status);
+      setQuarantinedSkills(quarantine.filter((entry) => entry.bundleKind === "skill"));
 
       const installed = new Set<string>();
       status.skills.forEach((skill) => {
@@ -158,6 +165,39 @@ export function SkillHubBrowser({ onSkillInstalled, onClose }: SkillHubBrowserPr
 
   const handleRefresh = () => {
     loadSkillStatus(true);
+  };
+
+  const installMessageForOutcome = (
+    outcome: InstallSecurityOutcome | undefined,
+    fallback: string,
+  ): string => {
+    if (!outcome) {
+      return fallback;
+    }
+
+    switch (outcome.state) {
+      case "installed_with_warning":
+        return outcome.summary || "Installed with security warning";
+      case "quarantined":
+        return outcome.summary || "Import quarantined";
+      case "installed":
+        return outcome.summary || fallback;
+      default:
+        return fallback;
+    }
+  };
+
+  const getSecurityBadge = (report?: CapabilitySecurityReport) => {
+    if (!report) {
+      return null;
+    }
+    if (report.verdict === "quarantined") {
+      return <span className="settings-badge settings-badge--error">Quarantined</span>;
+    }
+    if (report.verdict === "warning") {
+      return <span className="settings-badge settings-badge--warning">Security Warning</span>;
+    }
+    return null;
   };
 
   const handleSearch = useCallback(async () => {
@@ -244,7 +284,8 @@ export function SkillHubBrowser({ onSkillInstalled, onClose }: SkillHubBrowserPr
       if (result.success && result.skill) {
         await installSucceeded(result.skill);
       } else {
-        setError(result.error || "Installation failed");
+        setError(installMessageForOutcome(result.security, result.error || "Installation failed"));
+        await loadSkillStatus();
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Installation failed";
@@ -264,7 +305,8 @@ export function SkillHubBrowser({ onSkillInstalled, onClose }: SkillHubBrowserPr
       if (result.success && result.skill) {
         await installSucceeded(result.skill);
       } else {
-        setError(result.error || "Installation failed");
+        setError(installMessageForOutcome(result.security, result.error || "Installation failed"));
+        await loadSkillStatus();
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Installation failed";
@@ -296,7 +338,8 @@ export function SkillHubBrowser({ onSkillInstalled, onClose }: SkillHubBrowserPr
         await installSucceeded(result.skill);
         setActiveTab("installed");
       } else {
-        setError(result.error || "Import failed");
+        setError(installMessageForOutcome(result.security, result.error || "Import failed"));
+        await loadSkillStatus();
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Import failed";
@@ -337,6 +380,38 @@ export function SkillHubBrowser({ onSkillInstalled, onClose }: SkillHubBrowserPr
 
   const handleOpenFolder = async () => {
     await window.electronAPI.openCustomSkillsFolder();
+  };
+
+  const handleRetryQuarantined = async (recordId: string) => {
+    setInstalling(recordId);
+    setError(null);
+    try {
+      const result = await window.electronAPI.retryQuarantinedImport(recordId);
+      if (!result.success) {
+        setError(result.outcome.summary || result.error || "Retry scan failed");
+      }
+      await loadSkillStatus();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Retry scan failed");
+    } finally {
+      setInstalling(null);
+    }
+  };
+
+  const handleRemoveQuarantined = async (recordId: string) => {
+    setInstalling(recordId);
+    setError(null);
+    try {
+      const result = await window.electronAPI.removeQuarantinedImport(recordId);
+      if (!result.success) {
+        setError(result.error || "Failed to remove quarantined import");
+      }
+      await loadSkillStatus();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to remove quarantined import");
+    } finally {
+      setInstalling(null);
+    }
   };
 
   const getStatusBadge = (entry: SkillStatusEntry) => {
@@ -559,6 +634,67 @@ export function SkillHubBrowser({ onSkillInstalled, onClose }: SkillHubBrowserPr
           </div>
         </div>
 
+        {quarantinedSkills.length > 0 && (
+          <div className="settings-card skillhub-quarantine-card">
+            <div className="settings-section-header">
+              <div>
+                <h4>Quarantined Imports</h4>
+                <p className="settings-description">
+                  These skill imports were stored safely and blocked from activation.
+                </p>
+              </div>
+            </div>
+            <div className="skillhub-quarantine-list">
+              {quarantinedSkills.map((record) => (
+                <div key={record.id} className="skillhub-quarantine-item">
+                  <div>
+                    <div className="skillhub-title-row">
+                      <strong>{record.displayName || record.bundleId}</strong>
+                      <span className="settings-badge settings-badge--error">Quarantined</span>
+                    </div>
+                    <p className="settings-description skillhub-description">{record.summary}</p>
+                  </div>
+                  <div className="skillhub-quarantine-actions">
+                    <button
+                      className="button-secondary button-small"
+                      onClick={() =>
+                        setExpandedReportId((current) => (current === record.id ? null : record.id))
+                      }
+                    >
+                      {expandedReportId === record.id ? "Hide Report" : "View Report"}
+                    </button>
+                    <button
+                      className="button-secondary button-small"
+                      onClick={() => handleRetryQuarantined(record.id)}
+                      disabled={installing === record.id}
+                    >
+                      {installing === record.id ? "Scanning..." : "Retry Scan"}
+                    </button>
+                    <button
+                      className="button-danger button-small"
+                      onClick={() => handleRemoveQuarantined(record.id)}
+                      disabled={installing === record.id}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                  {expandedReportId === record.id && (
+                    <div className="skillhub-report">
+                      {record.report.findings.map((finding, index) => (
+                        <p key={`${record.id}-${index}`}>
+                          <strong>{finding.severity}</strong>: {finding.message}
+                          {finding.path ? ` (${finding.path})` : ""}
+                        </p>
+                      ))}
+                      {record.report.findings.length === 0 && <p>No detailed findings available.</p>}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {managedSkills.length > 0 ? (
           <div className="skillhub-list">
             {managedSkills.map((skill) => (
@@ -570,6 +706,7 @@ export function SkillHubBrowser({ onSkillInstalled, onClose }: SkillHubBrowserPr
                       <div className="skillhub-title-row">
                         <h4 className="skillhub-title">{skill.name}</h4>
                         {getStatusBadge(skill)}
+                        {getSecurityBadge(skill.securityReport)}
                         {skill.category === "ClawHub" && (
                           <span className="settings-badge settings-badge--outline">ClawHub</span>
                         )}
@@ -599,6 +736,11 @@ export function SkillHubBrowser({ onSkillInstalled, onClose }: SkillHubBrowserPr
                     {skill.missing.env.length > 0 && (
                       <p>Missing env vars: {skill.missing.env.join(", ")}</p>
                     )}
+                  </div>
+                )}
+                {skill.securityReport?.verdict === "warning" && (
+                  <div className="skillhub-warnings">
+                    <p>{skill.securityReport.summary}</p>
                   </div>
                 )}
               </div>
@@ -660,7 +802,10 @@ export function SkillHubBrowser({ onSkillInstalled, onClose }: SkillHubBrowserPr
                       <span>{skill.icon || "📦"}</span>
                       <span>{skill.name}</span>
                     </div>
-                    {getStatusBadge(skill)}
+                    <div className="skillhub-group-badges">
+                      {getStatusBadge(skill)}
+                      {getSecurityBadge(skill.securityReport)}
+                    </div>
                   </div>
                 ))}
               </div>

@@ -14,6 +14,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { getLlmProviderDisplayName } from "../../shared/llmProviderDisplay";
 
 export interface LlmSummaryProps {
   totalLlmCalls: number;
@@ -39,7 +40,11 @@ export interface RequestDayRow {
 export interface ProviderSlice {
   provider: string;
   calls: number;
+  distinctTasks: number;
   cost: number;
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens: number;
   percent: number;
 }
 
@@ -113,12 +118,13 @@ export function UsageInsightsLlmSection({
   const pieData = providerBreakdown
     .filter((p) => p.calls > 0)
     .map((p) => ({
-      name: p.provider,
+      name: getLlmProviderDisplayName(p.provider),
       value: ls.totalCost > 0 ? p.cost : p.calls,
       percent: p.percent,
     }));
 
   const tableRows = [...costByModel].sort((a, b) => b.calls - a.calls).slice(0, 15);
+  const providerTableRows = [...providerBreakdown].slice(0, 12);
 
   const chargeablePct =
     ls.chargeableCallRate !== null ? `${ls.chargeableCallRate.toFixed(1)}%` : "\u2014";
@@ -299,7 +305,7 @@ export function UsageInsightsLlmSection({
 
         <div className="insights-card insights-chart-card">
           <div className="insights-card-header">
-            By provider
+            Provider share
             <span className="insights-card-header-sub">
               {ls.totalCost > 0 ? "Share of cost" : "Share of calls"}
             </span>
@@ -366,6 +372,45 @@ export function UsageInsightsLlmSection({
           </table>
         </div>
       </div>
+
+      {providerTableRows.length > 0 && (
+        <div className="insights-card insights-chart-card insights-model-table-card">
+          <div className="insights-card-header">Provider breakdown</div>
+          <div className="insights-table-wrap">
+            <table className="insights-data-table">
+              <thead>
+                <tr>
+                  <th>Provider</th>
+                  <th className="num">Calls</th>
+                  <th className="num">Tasks</th>
+                  <th className="num">Cost</th>
+                  <th className="num">In tok</th>
+                  <th className="num">Out tok</th>
+                  <th className="num">Cache</th>
+                </tr>
+              </thead>
+              <tbody>
+                {providerTableRows.map((row) => (
+                  <tr key={row.provider}>
+                    <td
+                      className="insights-table-model"
+                      title={getLlmProviderDisplayName(row.provider)}
+                    >
+                      {getLlmProviderDisplayName(row.provider)}
+                    </td>
+                    <td className="num">{row.calls}</td>
+                    <td className="num">{row.distinctTasks}</td>
+                    <td className="num">${row.cost.toFixed(4)}</td>
+                    <td className="num">{formatTokens(row.inputTokens)}</td>
+                    <td className="num">{formatTokens(row.outputTokens)}</td>
+                    <td className="num">{formatTokens(row.cachedTokens)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
         </>
       )}
     </div>

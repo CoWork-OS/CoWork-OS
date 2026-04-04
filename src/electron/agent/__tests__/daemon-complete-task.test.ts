@@ -7,7 +7,7 @@ import { PersonalityManager } from "../../settings/personality-manager";
 vi.spyOn(PersonalityManager, "recordTaskCompleted").mockImplementation(() => {});
 
 function createDaemonLike() {
-  return {
+  return Object.assign(Object.create(AgentDaemon.prototype), {
     taskRepo: {
       findById: vi.fn().mockReturnValue({
         id: "task-1",
@@ -23,8 +23,12 @@ function createDaemonLike() {
     eventRepo: {
       findByTaskId: vi.fn().mockReturnValue([]),
     },
+    approvalRepo: {
+      update: vi.fn(),
+    },
     clearRetryState: vi.fn(),
     activeTasks: new Map(),
+    pendingApprovals: new Map(),
     activeTimelineStageByTask: new Map(),
     failedPlanStepsByTask: new Map(),
     timelineErrorsByTask: new Map(),
@@ -79,10 +83,64 @@ function createDaemonLike() {
       this.releaseComputerUseSession(taskId);
       this.queueManager.onTaskFinished(taskId);
     }),
-  } as Any;
+  }) as Any;
 }
 
 describe("AgentDaemon.completeTask", () => {
+  it("clears pending approvals before completing the task", () => {
+    const daemonLike = createDaemonLike();
+    const rejected = vi.fn();
+    const timeoutHandle = setTimeout(() => undefined, 60_000);
+
+    daemonLike.pendingApprovals.set("approval-1", {
+      taskId: "task-1",
+      approval: { id: "approval-1" },
+      resolve: vi.fn(),
+      reject: rejected,
+      resolved: false,
+      timeoutHandle,
+    });
+
+    AgentDaemon.prototype.completeTask.call(daemonLike, "task-1", "done");
+
+    expect(daemonLike.pendingApprovals.size).toBe(0);
+    expect(daemonLike.approvalRepo.update).toHaveBeenCalledWith("approval-1", "denied");
+    expect(rejected).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "Task ended before the approval request was resolved.",
+      }),
+    );
+
+    clearTimeout(timeoutHandle);
+  });
+
+  it("ignores late failures after the task is already completed", () => {
+    const taskState: Any = {
+      id: "task-1",
+      title: "Task 1",
+      status: "executing",
+      workspaceId: "workspace-1",
+      parentTaskId: "parent-task",
+      agentType: "sub",
+    };
+    const daemonLike = createDaemonLike();
+    daemonLike.taskRepo.findById = vi.fn(() => taskState);
+    daemonLike.taskRepo.update = vi.fn((_taskId: string, updates: Record<string, unknown>) => {
+      Object.assign(taskState, updates);
+    });
+
+    AgentDaemon.prototype.completeTask.call(daemonLike, "task-1", "done");
+    AgentDaemon.prototype.failTask.call(daemonLike, "task-1", "late failure");
+
+    expect(taskState.status).toBe("completed");
+    expect(daemonLike.taskRepo.update).not.toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({
+        status: "failed",
+      }),
+    );
+  });
+
   it("emits task_completed with optional outputSummary when provided", () => {
     const daemonLike = createDaemonLike();
     const outputSummary: TaskOutputSummary = {

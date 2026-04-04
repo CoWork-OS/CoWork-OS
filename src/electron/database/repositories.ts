@@ -21,6 +21,7 @@ import {
 } from "../../shared/types";
 import { isActiveTaskStatus, normalizeTaskLifecycleState } from "../../shared/task-status";
 import { isTimelineEventType, normalizeTaskEventToTimelineV2 } from "../../shared/timeline-v2";
+import { UsageInsightsProjector } from "../reports/UsageInsightsProjector";
 import { getSafeStorage } from "../utils/safe-storage";
 import { createLogger } from "../utils/logger";
 
@@ -261,6 +262,8 @@ export class TaskRepository {
       newTask.semanticSummary || null,
     );
 
+    UsageInsightsProjector.getIfInitialized()?.enqueueTaskCreate(newTask);
+
     return newTask;
   }
 
@@ -342,6 +345,7 @@ export class TaskRepository {
   ]);
 
   update(id: string, updates: Partial<Task>): void {
+    const before = this.findById(id);
     const normalizedUpdates: Partial<Task> = { ...updates };
     if (isActiveTaskStatus(normalizedUpdates.status)) {
       if (!Object.prototype.hasOwnProperty.call(normalizedUpdates, "completedAt")) {
@@ -400,6 +404,8 @@ export class TaskRepository {
 
     const stmt = this.db.prepare(`UPDATE tasks SET ${fields.join(", ")} WHERE id = ?`);
     stmt.run(...values);
+    const after = this.findById(id);
+    UsageInsightsProjector.getIfInitialized()?.enqueueTaskUpdate(before, after);
   }
 
   togglePin(id: string): Task | undefined {
@@ -613,11 +619,45 @@ export class TaskRepository {
       );
       clearTeamThoughtSource.run(taskId);
 
+      // Preserve cross-system/task analytics history while dropping the task row.
+      const clearIssueTaskId = this.db.prepare("UPDATE issues SET task_id = NULL WHERE task_id = ?");
+      clearIssueTaskId.run(taskId);
+
+      const clearHeartbeatRunTaskId = this.db.prepare(
+        "UPDATE heartbeat_runs SET task_id = NULL WHERE task_id = ?",
+      );
+      clearHeartbeatRunTaskId.run(taskId);
+
+      const clearSupervisorExchangeTaskId = this.db.prepare(
+        "UPDATE supervisor_exchanges SET linked_task_id = NULL WHERE linked_task_id = ?",
+      );
+      clearSupervisorExchangeTaskId.run(taskId);
+
+      const clearCouncilRunTaskId = this.db.prepare(
+        "UPDATE council_runs SET task_id = NULL WHERE task_id = ?",
+      );
+      clearCouncilRunTaskId.run(taskId);
+
+      const clearCouncilMemoTaskId = this.db.prepare(
+        "UPDATE council_memos SET task_id = NULL WHERE task_id = ?",
+      );
+      clearCouncilMemoTaskId.run(taskId);
+
+      const clearLlmCallEventTaskId = this.db.prepare(
+        "UPDATE llm_call_events SET task_id = NULL WHERE task_id = ?",
+      );
+      clearLlmCallEventTaskId.run(taskId);
+
       // Orphan child tasks so we can delete this parent
       const clearChildParent = this.db.prepare(
         "UPDATE tasks SET parent_task_id = NULL WHERE parent_task_id = ?",
       );
       clearChildParent.run(taskId);
+
+      const clearBranchFromTask = this.db.prepare(
+        "UPDATE tasks SET branch_from_task_id = NULL WHERE branch_from_task_id = ?",
+      );
+      clearBranchFromTask.run(taskId);
 
       // Delete task_subscriptions (ON DELETE CASCADE may not run before FK check in some SQLite configs)
       const deleteSubscriptions = this.db.prepare(
@@ -967,6 +1007,28 @@ export class TaskEventRepository {
       typeof newEvent.actor === "string" ? newEvent.actor : null,
       typeof newEvent.legacyType === "string" ? newEvent.legacyType : null,
     );
+
+    const effectiveType = String(
+      (typeof newEvent.legacyType === "string" && newEvent.legacyType) || newEvent.type || "",
+    );
+    if (
+      effectiveType === "skill_used" ||
+      effectiveType === "tool_call" ||
+      effectiveType === "tool_result" ||
+      effectiveType === "tool_error" ||
+      effectiveType === "tool_blocked" ||
+      effectiveType === "tool_warning" ||
+      effectiveType === "user_feedback"
+    ) {
+      try {
+        const row = this.db
+          .prepare("SELECT workspace_id FROM tasks WHERE id = ?")
+          .get(newEvent.taskId) as { workspace_id: string } | undefined;
+        UsageInsightsProjector.getIfInitialized()?.enqueueTaskEvent(row?.workspace_id, newEvent);
+      } catch {
+        // Best-effort cache invalidation only.
+      }
+    }
 
     return newEvent;
   }

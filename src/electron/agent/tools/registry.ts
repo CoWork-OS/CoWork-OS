@@ -57,7 +57,7 @@ import { GitTools } from "./git-tools";
 import { MemoryTools } from "./memory-tools";
 import { ChannelRepository } from "../../database/repositories";
 import { readFilesByPatterns } from "./read-files";
-import type { LLMTool } from "../llm/types";
+import type { LLMTool, LLMToolPromptRenderContext } from "../llm/types";
 import { SearchProviderFactory } from "../search";
 import { MCPClientManager } from "../../mcp/client/MCPClientManager";
 import { MCPSettingsManager } from "../../mcp/settings";
@@ -91,6 +91,7 @@ import {
   SkillApplicationTrigger,
   SkillContextDirectives,
 } from "../../../shared/types";
+import { parseLeadingSkillSlashCommand } from "../../../shared/skill-slash-commands";
 import {
   resolveModelPreferenceToModelKey,
   resolvePersonalityPreference,
@@ -113,6 +114,7 @@ import { QATools } from "./qa-tools";
 import { CitationTracker } from "../citation/CitationTracker";
 import { OrchestrationRepository } from "../OrchestrationRepository";
 import {
+  canonicalizeToolName as canonicalizeToolNameUtil,
   getToolSemantics as getToolSemanticsUtil,
   isArtifactGenerationToolName as isArtifactGenerationToolNameUtil,
 } from "../tool-semantics";
@@ -134,6 +136,16 @@ import {
 } from "../runtime/tool-middleware";
 import { evaluateToolPolicyPipeline } from "../runtime/ToolPolicyPipeline";
 import { ToolSearchService } from "../runtime/ToolSearchService";
+import {
+  getWorkerRoleSpec,
+  resolveDelegationWorkerRole,
+} from "../runtime/worker-role-registry";
+import {
+  TOOL_PROMPT_METADATA_VERSION,
+  renderCompactToolDescription,
+  renderToolForContext,
+  withToolPromptMetadataList,
+} from "./tool-prompting";
 
 function sanitizeFilename(raw: string, maxLen = 120): string {
   const base = path.basename(String(raw || "").trim() || "artifact");
@@ -155,6 +167,7 @@ function guessExtFromMime(mimeType?: string): string {
 }
 
 const MCP_PAYMENT_TOOL_NAME = "x402_fetch";
+const NETWORK_READ_TOOL_NAMES = new Set(["web_search", "web_fetch", "http_request"]);
 const MCP_PAYMENT_AMOUNT_PATHS = [
   ["amount"],
   ["maxAmount"],
@@ -503,6 +516,8 @@ export class ToolRegistry {
   private cachedToolDefinitionsKey: string | null = null;
   private cachedToolDefinitions: LLMTool[] | null = null;
   private toolDescriptionsCache = new Map<string, string>();
+  private resolvedSkillInvocations = new Map<string, SkillApplication>();
+  private skillInvocationSequence = 0;
   private readonly handlerRegistry = new ToolHandlerRegistry();
   private readonly executionMiddlewares: ToolExecutionMiddleware[];
   private taskListHandler?: {
@@ -669,6 +684,7 @@ export class ToolRegistry {
         builtinSettings,
         integrationState,
         infraState,
+        toolPrompting: TOOL_PROMPT_METADATA_VERSION,
         mcp: {
           toolNamePrefix: mcpSettings.toolNamePrefix || "mcp_",
           enabledServers: (mcpSettings.servers || [])
@@ -708,6 +724,7 @@ export class ToolRegistry {
   private buildToolDescriptionsCacheKey(
     visibleTools?: string[],
     options?: {
+      renderContext?: LLMToolPromptRenderContext;
       skillRoutingQuery?: string;
       skillShortlistSize?: number;
       skillLowConfidenceThreshold?: number;
@@ -723,6 +740,7 @@ export class ToolRegistry {
     }
     hash.update(
       JSON.stringify({
+        renderContext: options?.renderContext || null,
         skillShortlistSize: options?.skillShortlistSize ?? null,
         skillLowConfidenceThreshold: options?.skillLowConfidenceThreshold ?? null,
         skillTextBudgetChars: options?.skillTextBudgetChars ?? null,
@@ -734,9 +752,17 @@ export class ToolRegistry {
     return hash.digest("hex");
   }
 
+  renderToolsForContext(
+    tools: LLMTool[],
+    context: LLMToolPromptRenderContext,
+  ): LLMTool[] {
+    return tools.map((tool) => renderToolForContext(tool, context));
+  }
+
   private buildCompactToolDescriptions(
     visibleTools: string[],
     options?: {
+      renderContext?: LLMToolPromptRenderContext;
       skillRoutingQuery?: string;
       skillShortlistSize?: number;
       skillLowConfidenceThreshold?: number;
@@ -754,64 +780,34 @@ export class ToolRegistry {
       return normalized.length > maxChars ? `${normalized.slice(0, maxChars - 3)}...` : normalized;
     };
 
-    const routingHints: string[] = [];
-    if (visibleToolSet.has("glob")) {
-      routingHints.push("Use glob first for file/path discovery.");
-    }
-    if (visibleToolSet.has("grep")) {
-      routingHints.push("Use grep first for content search.");
-    }
-    if (visibleToolSet.has("edit_file")) {
-      routingHints.push("Prefer edit_file over write_file for targeted file changes.");
-    }
-    if (visibleToolSet.has("web_search") && visibleToolSet.has("web_fetch")) {
-      routingHints.push("Use web_search to discover pages, then web_fetch to read specific URLs.");
-    }
-    if (visibleToolSet.has("browser_navigate")) {
-      routingHints.push("Use browser tools only for interactive/JS-heavy pages or screenshots.");
-    }
-    if (visibleToolSet.has("create_diagram")) {
-      routingHints.push("Use create_diagram for diagrams/flowcharts instead of HTML files.");
-    }
-    if (visibleToolSet.has("request_user_input")) {
-      routingHints.push("Use request_user_input only when a required user choice blocks the plan.");
-    }
-    if (visibleToolSet.has("task_list_create") || visibleToolSet.has("task_list_update")) {
-      routingHints.push(
-        "For non-trivial multi-step execution work, create and maintain a session checklist with task_list_create/task_list_update.",
-      );
-    }
-    if (visibleToolSet.has("run_command")) {
-      routingHints.push("Use run_command for shell/test/build tasks instead of browser or web tools.");
-    }
-    if (
-      visibleToolSet.has("box_action") ||
-      visibleToolSet.has("dropbox_action") ||
-      visibleToolSet.has("onedrive_action") ||
-      visibleToolSet.has("google_drive_action") ||
-      visibleToolSet.has("sharepoint_action") ||
-      visibleToolSet.has("notion_action")
-    ) {
-      routingHints.push("When cloud storage providers are mentioned, prefer connector tools over local filesystem tools.");
-    }
-
     const orderedVisibleTools = visibleTools
       .map((toolName) => toolMap.get(toolName))
       .filter((tool): tool is LLMTool => Boolean(tool));
 
     const lines = orderedVisibleTools.map(
-      (tool) => `- ${tool.name}: ${compact(tool.description)}`,
+      (tool) =>
+        `- ${tool.name}: ${compact(
+          renderCompactToolDescription(
+            tool,
+            options?.renderContext || {
+              executionMode: "execute",
+              taskDomain: "general",
+              webSearchMode: "live",
+              shellEnabled: this.workspace.permissions.shell,
+              agentType: "main",
+              workerRole: null,
+              allowUserInput: true,
+            },
+          ),
+        )}`,
     );
 
     const sections: string[] = [];
-    if (routingHints.length > 0) {
-      sections.push(`Routing hints:\n- ${routingHints.join("\n- ")}`);
-    }
     if (lines.length > 0) {
       sections.push(`Available tools:\n${lines.join("\n")}`);
     }
 
-    if (visibleToolSet.has("use_skill")) {
+    if (visibleToolSet.has("Skill")) {
       const skillLoader = getCustomSkillLoader();
       const availableToolNames = new Set(orderedVisibleTools.map((tool) => tool.name));
       const resolvedSkillShortlistSize =
@@ -837,7 +833,7 @@ export class ToolRegistry {
         includePrereqBlockedSkills: true,
       });
       if (skillDescriptions) {
-        sections.push(`Custom Skills:\n${skillDescriptions}`);
+        sections.push(`Skills Available Through The Skill Tool:\n${skillDescriptions}`);
       }
     }
 
@@ -1345,10 +1341,11 @@ export class ToolRegistry {
     });
 
     const toolsWithRuntime = withRuntimeToolMetadataList(sortedTools);
-    this.validateToolSemanticsInvariant(toolsWithRuntime);
+    const toolsWithPrompting = withToolPromptMetadataList(toolsWithRuntime);
+    this.validateToolSemanticsInvariant(toolsWithPrompting);
     this.cachedToolDefinitionsKey = cacheKey;
-    this.cachedToolDefinitions = toolsWithRuntime.slice();
-    return toolsWithRuntime.slice();
+    this.cachedToolDefinitions = toolsWithPrompting.slice();
+    return toolsWithPrompting.slice();
   }
 
   getRuntimeMetadata(toolName: string) {
@@ -1374,13 +1371,17 @@ export class ToolRegistry {
     }
   }
 
-  private getApprovalTypeForTool(toolName: string): ApprovalType {
-    if (toolName === "run_command") return "run_command";
-    if (toolName === "delete_file") return "delete_file";
-    if (toolName.startsWith("mcp_")) return "external_service";
-    if (toolName.endsWith("_action") || toolName === "voice_call") return "external_service";
-    if (toolName.startsWith("computer_")) return "computer_use";
-    return "external_service";
+  private getApprovalTypeForTool(toolName: string): ApprovalType | null {
+    const canonicalToolName = canonicalizeToolNameUtil(toolName);
+    if (canonicalToolName === "Skill") return null;
+    if (canonicalToolName === "run_command") return "run_command";
+    if (canonicalToolName === "delete_file") return "delete_file";
+    if (canonicalToolName.startsWith("mcp_")) return "external_service";
+    if (canonicalToolName.endsWith("_action") || canonicalToolName === "voice_call")
+      return "external_service";
+    if (canonicalToolName.startsWith("computer_")) return "computer_use";
+    if (NETWORK_READ_TOOL_NAMES.has(canonicalToolName)) return null;
+    return null;
   }
 
   private toolHandlesApprovalInternally(toolName: string): boolean {
@@ -1442,7 +1443,7 @@ export class ToolRegistry {
           typeof permissionEvaluation === "function"
             ? () =>
                 permissionEvaluation.call(this.daemon, this.taskId, {
-                  approvalType,
+                  ...(approvalType ? { approvalType } : {}),
                   toolName: context.request.name,
                   details: {
                     tool: context.request.name,
@@ -1480,7 +1481,7 @@ export class ToolRegistry {
         const approved = await requester.call(
           this.daemon,
           this.taskId,
-          approvalType,
+          approvalType || "external_service",
           `Approve tool call: ${context.request.name}`,
           {
             tool: context.request.name,
@@ -1608,8 +1609,6 @@ export class ToolRegistry {
     register("edit_pdf_region", async ({ request }) => this.skillTools.editPdfRegion(request.input));
     register("create_presentation", async ({ request }) => this.skillTools.createPresentation(request.input));
     register("organize_folder", async ({ request }) => this.skillTools.organizeFolder(request.input));
-    register("skill_list", async ({ request }) => this.executeSkillList(request.input));
-    register("skill_get", async ({ request }) => this.executeSkillGet(request.input));
     register("skill_create", async ({ request }) => this.executeSkillCreate(request.input));
     register("skill_duplicate", async ({ request }) => this.executeSkillDuplicate(request.input));
     register("skill_update", async ({ request }) => this.executeSkillUpdate(request.input));
@@ -2082,7 +2081,7 @@ export class ToolRegistry {
     register("execute_code", async ({ request }) => this.executeCode(request.input));
     register("parse_document", async ({ request }) => this.parseDocument(request.input));
     register("acp_discover", async ({ request }) => this.acpDiscover(request.input));
-    register("use_skill", async ({ request }) => this.executeUseSkill(request.input));
+    register("Skill", async ({ request }) => this.executeSkillCommand(request.input));
     register("spawn_agent", async ({ request }) => this.spawnAgent(request.input), exclusiveSchedulerSpec);
     register("wait_for_agent", async ({ request }) => this.waitForAgent(request.input));
     register("orchestrate_agents", async ({ request }) => this.orchestrateAgents(request.input), exclusiveSchedulerSpec);
@@ -2490,9 +2489,21 @@ export class ToolRegistry {
     return currentTask?.agentConfig?.executionMode ?? "execute";
   }
 
+  private withImmediateTaskListReminder(state: SessionChecklistState): SessionChecklistState & {
+    immediateReminder?: string;
+  } {
+    if (!state.verificationNudgeNeeded || !state.nudgeReason) {
+      return state;
+    }
+    return {
+      ...state,
+      immediateReminder: `CHECKLIST REMINDER:\n- ${state.nudgeReason}`,
+    };
+  }
+
   private async taskListCreate(input: {
     items?: SessionChecklistToolItemInput[];
-  }): Promise<SessionChecklistState> {
+  }): Promise<SessionChecklistState & { immediateReminder?: string }> {
     const mode = await this.getTaskExecutionMode();
     if (mode !== "execute" && mode !== "verified" && mode !== "debug") {
       throw new Error(
@@ -2502,12 +2513,14 @@ export class ToolRegistry {
     if (!this.taskListHandler) {
       throw new Error("Session checklist tools are not available in this context.");
     }
-    return this.taskListHandler.create(Array.isArray(input?.items) ? input.items : []);
+    return this.withImmediateTaskListReminder(
+      this.taskListHandler.create(Array.isArray(input?.items) ? input.items : []),
+    );
   }
 
   private async taskListUpdate(input: {
     items?: SessionChecklistToolItemInput[];
-  }): Promise<SessionChecklistState> {
+  }): Promise<SessionChecklistState & { immediateReminder?: string }> {
     const mode = await this.getTaskExecutionMode();
     if (mode !== "execute" && mode !== "verified" && mode !== "debug") {
       throw new Error(
@@ -2517,7 +2530,9 @@ export class ToolRegistry {
     if (!this.taskListHandler) {
       throw new Error("Session checklist tools are not available in this context.");
     }
-    return this.taskListHandler.update(Array.isArray(input?.items) ? input.items : []);
+    return this.withImmediateTaskListReminder(
+      this.taskListHandler.update(Array.isArray(input?.items) ? input.items : []),
+    );
   }
 
   private async taskListList(): Promise<SessionChecklistState> {
@@ -2539,6 +2554,7 @@ export class ToolRegistry {
   getToolDescriptions(
     visibleTools?: string[],
     options?: {
+      renderContext?: LLMToolPromptRenderContext;
       skillRoutingQuery?: string;
       skillShortlistSize?: number;
       skillLowConfidenceThreshold?: number;
@@ -2647,11 +2663,9 @@ Skills:
 - generate_landing_page: Generate polished standalone HTML landing pages
 - generate_narration_audio: Generate MP3 narration from text using the configured voice service
 - organize_folder: Organize and structure files in folders
-- use_skill: Invoke a custom skill by ID to help accomplish tasks (see available skills below). Use explicit IDs for deterministic workflows ("Use the <skill id> skill."). If the skill writes files, use the "{artifactDir}" placeholder for deterministic workspace output.
+- Skill: Invoke a skill by ID when one clearly matches the task. If a matching skill exists, call Skill before continuing with other tools or drafting the final answer. Pass "skill" as the canonical skill ID and "args" as the raw argument string.
 
 Skill Management (create, modify, duplicate skills):
-- skill_list: List all skills with metadata (source, path, status)
-- skill_get: Get full JSON content of a skill by ID
 - skill_create: Create a new custom skill
 - skill_duplicate: Duplicate an existing skill with modifications (great for variations)
 - skill_update: Update an existing skill (managed/workspace only, not bundled)
@@ -2865,7 +2879,7 @@ Channel Message Log (Local Gateway):
 - set_agent_name: Set or change the assistant's name when the user wants to give you a name.
 - set_user_name: Store the user's name when they introduce themselves (e.g., "I'm Alice", "My name is Bob").`;
 
-    // Add custom skills available for use_skill
+    // Add skills available through the Skill tool
     const skillLoader = getCustomSkillLoader();
     const availableToolNames = new Set(this.getTools().map((tool) => tool.name));
     const resolvedSkillShortlistSize =
@@ -2893,7 +2907,7 @@ Channel Message Log (Local Gateway):
     if (skillDescriptions) {
       descriptions += `
 
-Custom Skills (invoke with use_skill tool):
+Skills Available Through The Skill Tool:
 ${skillDescriptions}`;
     }
 
@@ -3002,11 +3016,9 @@ ${skillDescriptions}`;
     if (name === "edit_pdf_region") return await this.skillTools.editPdfRegion(input);
     if (name === "create_presentation") return await this.skillTools.createPresentation(input);
     if (name === "organize_folder") return await this.skillTools.organizeFolder(input);
-    if (name === "use_skill") return await this.executeUseSkill(input);
+    if (name === "Skill") return await this.executeSkillCommand(input);
 
     // Skill management tools
-    if (name === "skill_list") return await this.executeSkillList(input);
-    if (name === "skill_get") return await this.executeSkillGet(input);
     if (name === "skill_create") return await this.executeSkillCreate(input);
     if (name === "skill_duplicate") return await this.executeSkillDuplicate(input);
     if (name === "skill_update") return await this.executeSkillUpdate(input);
@@ -3883,15 +3895,116 @@ ${skillDescriptions}`;
     await this.qaTools.execute("qa_cleanup", {}).catch(() => {});
   }
 
-  /**
-   * Execute the use_skill tool - invokes a custom skill by ID
-   */
-  private async executeUseSkill(input: {
-    skill_id: string;
+  private storeResolvedSkillInvocation(application: SkillApplication): string {
+    this.skillInvocationSequence += 1;
+    const invocationId = `skill-${this.taskId}-${this.skillInvocationSequence}`;
+    this.resolvedSkillInvocations.set(invocationId, application);
+    return invocationId;
+  }
+
+  takeResolvedSkillInvocation(invocationId: string): SkillApplication | null {
+    if (typeof invocationId !== "string" || invocationId.trim().length === 0) {
+      return null;
+    }
+    const application = this.resolvedSkillInvocations.get(invocationId) || null;
+    if (application) {
+      this.resolvedSkillInvocations.delete(invocationId);
+    }
+    return application;
+  }
+
+  private buildSkillRuntimeDescriptor(skill: CustomSkill) {
+    return getCustomSkillLoader().getRuntimeSkillDescriptor(skill);
+  }
+
+  private resolveSkillArgsToParameters(skill: CustomSkill, args: string): {
+    success: boolean;
     parameters?: Record<string, Any>;
+    error?: string;
+  } {
+    const trimmedArgs = String(args || "").trim();
+    if (!trimmedArgs) {
+      return { success: true, parameters: {} };
+    }
+
+    if (skill.id === "simplify" || skill.id === "batch") {
+      const parsed = parseLeadingSkillSlashCommand(`/${skill.id}${trimmedArgs ? ` ${trimmedArgs}` : ""}`);
+      if (!parsed.matched || parsed.error || !parsed.parsed) {
+        return {
+          success: false,
+          error:
+            parsed.error ||
+            `Invalid arguments for skill '${skill.id}'. Use slash-style arguments such as "${skill.id === "batch" ? "/batch <objective> --parallel 4" : "/simplify <objective> --scope current"}".`,
+        };
+      }
+
+      const parameters: Record<string, Any> = {};
+      if (parsed.parsed.objective) {
+        parameters.objective = parsed.parsed.objective;
+      }
+      if (parsed.parsed.flags.domain) {
+        parameters.domain = parsed.parsed.flags.domain;
+      }
+      if (parsed.parsed.flags.scope) {
+        parameters.scope = parsed.parsed.flags.scope;
+      }
+      if (typeof parsed.parsed.flags.parallel === "number") {
+        parameters.parallel = parsed.parsed.flags.parallel;
+      }
+      if (parsed.parsed.flags.external) {
+        parameters.external = parsed.parsed.flags.external;
+      }
+      return { success: true, parameters };
+    }
+
+    try {
+      const parsed = JSON.parse(trimmedArgs) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return { success: true, parameters: parsed as Record<string, Any> };
+      }
+    } catch {
+      // Fall through to heuristic raw-argument mapping.
+    }
+
+    if (!Array.isArray(skill.parameters) || skill.parameters.length === 0) {
+      return { success: true, parameters: {} };
+    }
+
+    const parameters: Record<string, Any> = {};
+    const exactPreferredName = ["objective", "input", "prompt", "query", "text"].find((name) =>
+      skill.parameters?.some((parameter) => parameter.name === name),
+    );
+    if (exactPreferredName) {
+      parameters[exactPreferredName] = trimmedArgs;
+      return { success: true, parameters };
+    }
+
+    if (skill.parameters.length === 1) {
+      parameters[skill.parameters[0].name] = trimmedArgs;
+      return { success: true, parameters };
+    }
+
+    const requiredParameters = skill.parameters.filter((parameter) => parameter.required);
+    if (requiredParameters.length === 1) {
+      parameters[requiredParameters[0].name] = trimmedArgs;
+      return { success: true, parameters };
+    }
+
+    parameters[skill.parameters[0].name] = trimmedArgs;
+    return { success: true, parameters };
+  }
+
+  /**
+   * Execute the Skill tool - invokes a skill by ID and stores its expanded runtime context
+   * for the executor to inject on the next turn.
+   */
+  private async executeSkillCommand(input: {
+    skill: string;
+    args?: string;
     trigger?: SkillApplicationTrigger;
   }): Promise<Any> {
-    const { skill_id, parameters = {} } = input;
+    const skill_id = String(input.skill || "").trim();
+    const rawArgs = String(input.args || "").trim();
     const trigger: SkillApplicationTrigger =
       input.trigger === "slash" ||
       input.trigger === "planner" ||
@@ -3904,19 +4017,20 @@ ${skillDescriptions}`;
 
     const skillLoader = getCustomSkillLoader();
     const skill = skillLoader.getSkill(skill_id);
+    const descriptor = skill ? this.buildSkillRuntimeDescriptor(skill) : null;
 
     if (!skill) {
       // List available skills to help the agent
-      const availableSkills = skillLoader.listModelInvocableSkills().map((s) => s.id);
+      const availableSkills = skillLoader.listRuntimeSkillDescriptors().map((entry) => entry.name);
       return {
         success: false,
         error: `Skill '${skill_id}' not found`,
         available_skills: availableSkills.slice(0, 20), // Show up to 20 skills
-        hint: "Use one of the available skill IDs listed above",
+        hint: "Use one of the listed skill IDs exposed through the Skill tool.",
       };
     }
 
-    if (isManualInvocation && skill.invocation?.userInvocable === false) {
+    if (isManualInvocation && descriptor?.userInvocable === false) {
       return {
         success: false,
         error: `Skill '${skill_id}' cannot be invoked manually`,
@@ -3925,7 +4039,7 @@ ${skillDescriptions}`;
     }
 
     // Check if skill can be invoked by model
-    if (isAutomaticInvocation && skill.invocation?.disableModelInvocation) {
+    if (isAutomaticInvocation && descriptor?.disableModelInvocation) {
       return {
         success: false,
         error: `Skill '${skill_id}' cannot be invoked automatically`,
@@ -4024,6 +4138,16 @@ ${skillDescriptions}`;
       };
     }
 
+    const parameterResolution = this.resolveSkillArgsToParameters(skill, rawArgs);
+    if (!parameterResolution.success) {
+      return {
+        success: false,
+        error: parameterResolution.error || `Invalid arguments for skill '${skill_id}'.`,
+      };
+    }
+
+    const parameters = parameterResolution.parameters || {};
+
     // Check for required parameters
     const artifactDir = path.join(
       this.workspace.path,
@@ -4055,6 +4179,7 @@ ${skillDescriptions}`;
         success: false,
         error: `Missing required parameters: ${missingParams.join(", ")}`,
         skill_id,
+        raw_args: rawArgs || undefined,
         parameters: skill.parameters?.map((p) => ({
           name: p.name,
           type: p.type,
@@ -4080,6 +4205,7 @@ ${skillDescriptions}`;
         skillId: skill_id,
         skillName: skill.name,
         trigger,
+        args: rawArgs || undefined,
         parameters,
         content: expandedPrompt,
         reason:
@@ -4096,18 +4222,16 @@ ${skillDescriptions}`;
         runtimeMode: BuiltinToolsSettingsManager.getCodexRuntimeMode(),
       });
 
+      const invocationId = this.storeResolvedSkillInvocation(skillApplication);
+
       return {
         success: true,
-        skill_id,
+        skill: skill_id,
         skill_name: skill.name,
-        skill_description: skill.description,
-        content: expandedPrompt,
-        context_messages: [{ role: "system", content: expandedPrompt }],
-        context_directives: contextDirectives,
+        message: `Loaded skill '${skill.name}' for this task.`,
         application_summary:
-          "Applied Codex runtime guidance as additive skill context for the current task.",
-        skill_application: skillApplication,
-        expanded_prompt: expandedPrompt,
+          "Loaded Codex runtime guidance as hidden skill context for the current task.",
+        skill_invocation_id: invocationId,
       };
     }
 
@@ -4135,6 +4259,7 @@ ${skillDescriptions}`;
       skillId: skill_id,
       skillName: skill.name,
       trigger,
+      args: rawArgs || undefined,
       parameters,
       content: expandedPrompt,
       reason:
@@ -4150,20 +4275,19 @@ ${skillDescriptions}`;
       message: `Using skill: ${skill.name}`,
       skillId: skill_id,
       parameters,
+      args: rawArgs || undefined,
     });
+
+    const invocationId = this.storeResolvedSkillInvocation(skillApplication);
 
     return {
       success: true,
-      skill_id,
+      skill: skill_id,
       skill_name: skill.name,
-      skill_description: skill.description,
-      content: expandedPrompt,
-      context_messages: [{ role: "system", content: expandedPrompt }],
-      context_directives: contextDirectives,
+      message: `Loaded skill '${skill.name}' for this task.`,
       application_summary:
-        `Applied skill "${skill.name}" as additive context for the current task.`,
-      skill_application: skillApplication,
-      expanded_prompt: expandedPrompt,
+        `Loaded skill "${skill.name}" as hidden context for the current task.`,
+      skill_invocation_id: invocationId,
     };
   }
 
@@ -4358,7 +4482,7 @@ ${skillDescriptions}`;
         success: false,
         error: `Skill '${skill_id}' not found`,
         available_skills: availableSkills.slice(0, 30),
-        hint: "Use skill_list to see all available skills",
+        hint: "Use one of the visible skill IDs from the Skill tool listing.",
       };
     }
 
@@ -4490,7 +4614,7 @@ ${skillDescriptions}`;
       return {
         success: false,
         error: `Source skill '${source_skill_id}' not found`,
-        hint: "Use skill_list to see available skills",
+        hint: "Use one of the visible skill IDs from the Skill tool listing.",
       };
     }
 
@@ -4579,7 +4703,7 @@ ${skillDescriptions}`;
       return {
         success: false,
         error: `Skill '${skill_id}' not found`,
-        hint: "Use skill_list to see available skills",
+        hint: "Use one of the visible skill IDs from the Skill tool listing.",
       };
     }
 
@@ -4639,7 +4763,7 @@ ${skillDescriptions}`;
       return {
         success: false,
         error: `Skill '${skill_id}' not found`,
-        hint: "Use skill_list to see available skills",
+        hint: "Use one of the visible skill IDs from the Skill tool listing.",
       };
     }
 
@@ -5405,66 +5529,41 @@ ${skillDescriptions}`;
         },
       },
       {
-        name: "use_skill",
+        name: "Skill",
         description:
-          "Use a custom skill by ID to help accomplish a task. Skills are pre-configured prompt templates " +
-          "that provide specialized capabilities. Use this when a skill matches what you need to do. " +
-          "The skill adds instructions and scoped runtime hints to the current task without replacing the original request.",
+          "Invoke a skill by ID when one clearly matches the task. If a matching skill exists, call Skill before using other tools or drafting the final answer. " +
+          "The selected skill is expanded lazily into hidden task context instead of replacing the user's request.",
         input_schema: {
           type: "object",
           properties: {
-            skill_id: {
+            skill: {
               type: "string",
               description:
-                'The ID of the skill to use (e.g., "git-commit", "code-review", "translate")',
+                'The canonical skill ID to invoke (for example "git-commit", "code-review", or "translate")',
             },
-            parameters: {
-              type: "object",
+            args: {
+              type: "string",
               description:
-                "Parameter values for the skill. Check skill description for required parameters.",
-              additionalProperties: true,
+                "Raw argument string for the skill. For multi-parameter skills, pass a JSON object string when plain text is ambiguous.",
             },
           },
-          required: ["skill_id"],
+          required: ["skill"],
+        },
+        runtime: {
+          concurrencyClass: "serial_only",
+          readOnly: false,
+          approvalKind: "none",
+          sideEffectLevel: "low",
+          interruptBehavior: "block",
+          deferLoad: false,
+          alwaysExpose: false,
+          resultKind: "generic",
+          supportsContextMutation: true,
+          capabilityTags: ["core"],
+          exposure: "conditional",
         },
       },
       // Skill Management Tools
-      {
-        name: "skill_list",
-        description:
-          "List all available skills with their metadata including source (bundled, managed, workspace), " +
-          "file paths, and status. Use this to discover what skills exist and where they are stored.",
-        input_schema: {
-          type: "object",
-          properties: {
-            source: {
-              type: "string",
-              enum: ["all", "bundled", "managed", "workspace"],
-              description: 'Filter skills by source. Default is "all".',
-            },
-            include_disabled: {
-              type: "boolean",
-              description: "Include disabled skills in the list. Default is true.",
-            },
-          },
-        },
-      },
-      {
-        name: "skill_get",
-        description:
-          "Get the full JSON content and metadata of a specific skill by ID. " +
-          "Returns the complete skill definition including prompt, parameters, and configuration.",
-        input_schema: {
-          type: "object",
-          properties: {
-            skill_id: {
-              type: "string",
-              description: "The ID of the skill to retrieve",
-            },
-          },
-          required: ["skill_id"],
-        },
-      },
       {
         name: "skill_create",
         description:
@@ -8637,17 +8736,159 @@ ${skillDescriptions}`;
     };
   }
 
-  private prepareSpawnAgentNode(input: {
+  private async getDelegationParentTask(): Promise<Task | null> {
+    if (typeof this.daemon.getTaskById !== "function") return null;
+    const task = await Promise.resolve(this.daemon.getTaskById(this.taskId));
+    return task || null;
+  }
+
+  private async getDelegationCurrentStepContext(): Promise<string | undefined> {
+    if (typeof this.daemon.getTaskEvents !== "function") return undefined;
+    const events = (await Promise.resolve(this.daemon.getTaskEvents(this.taskId))) as TaskEvent[] | undefined;
+    if (!Array.isArray(events) || events.length === 0) return undefined;
+
+    for (const event of [...events].reverse()) {
+      if (event.type !== "step_started") continue;
+      const step = event.payload?.step;
+      const description =
+        typeof step?.description === "string"
+          ? step.description.trim()
+          : typeof event.payload?.stepDescription === "string"
+            ? String(event.payload.stepDescription).trim()
+            : "";
+      if (description) return description;
+    }
+    return undefined;
+  }
+
+  private async getDelegationKnownFindings(): Promise<string | undefined> {
+    if (typeof this.daemon.getTaskEvents !== "function") return undefined;
+    const events = (await Promise.resolve(this.daemon.getTaskEvents(this.taskId))) as TaskEvent[] | undefined;
+    if (!Array.isArray(events) || events.length === 0) return undefined;
+
+    const findings: string[] = [];
+    for (const event of [...events].reverse()) {
+      if (findings.length >= 3) break;
+      if (event.type === "assistant_message") {
+        const message =
+          typeof event.payload?.message === "string"
+            ? event.payload.message.trim()
+            : typeof event.payload?.content === "string"
+              ? event.payload.content.trim()
+              : "";
+        if (message) {
+          findings.push(`Assistant context: ${message.slice(0, 240)}`);
+        }
+        continue;
+      }
+      if (event.type === "tool_result") {
+        const tool = typeof event.payload?.tool === "string" ? event.payload.tool.trim() : "";
+        const result = event.payload?.result;
+        const summary =
+          typeof result === "string"
+            ? result.trim()
+            : result && typeof result === "object" && typeof result.message === "string"
+              ? result.message.trim()
+              : "";
+        if (tool && summary) {
+          findings.push(`${tool}: ${summary.slice(0, 180)}`);
+        }
+      }
+    }
+
+    return findings.length > 0 ? findings.join("\n") : undefined;
+  }
+
+  private buildStructuredDelegationBrief(params: {
+    originalPrompt: string;
+    workerRole: WorkerRoleKind;
+    taskTitle: string;
+    parentTaskTitle?: string;
+    parentTaskPrompt?: string;
+    currentStepContext?: string;
+    knownFindings?: string;
+    extractionMode: boolean;
+  }): string {
+    const spec = getWorkerRoleSpec(params.workerRole);
+    const scopeOutByRole: Record<WorkerRoleKind, string> = {
+      researcher: "Do not modify project files or expand into implementation work.",
+      implementer: "Do not modify unrelated files or broaden the task beyond the assigned scope.",
+      verifier: "Do not change project files; verify independently and report only evidence-backed findings.",
+      synthesizer: "Do not reopen broad new research or unrelated implementation unless the supplied evidence is insufficient.",
+    };
+    const expectedDeliverableByRole: Record<WorkerRoleKind, string> = {
+      researcher: "A concise findings report with concrete file paths, commands, risks, and unresolved questions.",
+      implementer: "A completed implementation summary with exact changed files plus the verification commands or checks run.",
+      verifier: "A verification report that starts with VERDICT: PASS, FAIL, or PARTIAL and then cites the supporting evidence.",
+      synthesizer: "A consolidated artifact or summary that resolves predecessor outputs into one clear recommendation or deliverable.",
+    };
+    const evidenceRequirementsByRole: Record<WorkerRoleKind, string> = {
+      researcher: "Cite the files, commands, search results, or observations that support each material finding.",
+      implementer: "Report the concrete edits made and the tests, commands, or runtime checks that validate the change.",
+      verifier: "Include the command/output/file evidence behind the verdict and at least one adversarial probe.",
+      synthesizer: "Attribute the final synthesis to the upstream evidence or predecessor outputs that justify it.",
+    };
+
+    const lines = [
+      "STRUCTURED DELEGATION BRIEF",
+      "",
+      "Objective:",
+      params.originalPrompt.trim(),
+      "",
+      `Resolved worker role: ${spec.displayName} (${params.workerRole})`,
+      "",
+      "Parent task and current-step context:",
+      `- Parent task: ${params.parentTaskTitle || this.taskId}`,
+      params.parentTaskPrompt
+        ? `- Parent prompt: ${params.parentTaskPrompt.trim().slice(0, 320)}`
+        : "- Parent prompt: unavailable",
+      params.currentStepContext
+        ? `- Current step: ${params.currentStepContext}`
+        : "- Current step: unavailable",
+      "",
+      "Scope in:",
+      `- ${params.originalPrompt.trim()}`,
+      "",
+      "Scope out:",
+      `- ${scopeOutByRole[params.workerRole]}`,
+      ...(params.extractionMode
+        ? ["- Preserve the extraction-only contract; do not drift into unrelated edits or open-ended exploration."]
+        : []),
+      "",
+      "Known findings or evidence:",
+      params.knownFindings
+        ? params.knownFindings
+            .split("\n")
+            .filter(Boolean)
+            .map((line) => `- ${line}`)
+            .join("\n")
+        : "- None captured yet; gather evidence before concluding.",
+      "",
+      "Expected deliverable:",
+      `- ${expectedDeliverableByRole[params.workerRole]}`,
+      "",
+      "Evidence requirements:",
+      `- ${evidenceRequirementsByRole[params.workerRole]}`,
+      "",
+      "Completion contract:",
+      `- ${spec.completionContract}`,
+    ];
+
+    return lines.join("\n");
+  }
+
+  private async prepareSpawnAgentNode(input: {
     prompt: string;
     title?: string;
     model_preference?: string;
     capability_hint?: string;
     acp_agent_id?: string;
     personality?: string;
+    worker_role?: string;
     runtime?: SpawnAgentRuntimeMode;
     runtime_agent?: SpawnAgentRuntimeAgent;
     max_turns?: number;
-  }): {
+  }): Promise<{
     taskTitle: string;
     contractedPrompt: string;
     agentConfig: AgentConfig;
@@ -8657,7 +8898,7 @@ ${skillDescriptions}`;
     workerRole: WorkerRoleKind;
     extractionMode: boolean;
     externalRuntime?: AgentConfig["externalRuntime"];
-  } {
+  }> {
     const {
       prompt,
       title,
@@ -8665,6 +8906,7 @@ ${skillDescriptions}`;
       capability_hint,
       acp_agent_id,
       personality,
+      worker_role,
       runtime,
       runtime_agent,
       max_turns = 20,
@@ -8690,7 +8932,10 @@ ${skillDescriptions}`;
         ? undefined
         : (resolvePersonalityPreference(personality) ?? "concise");
     const extractionMode = phaseCEnabled && isExtractionLikePrompt(prompt);
-    const contractedPrompt = extractionMode ? applyExtractionOutputContract(prompt) : prompt;
+    const workerRole = resolveDelegationWorkerRole({
+      requestedRole: worker_role,
+      prompt,
+    });
 
     const agentConfig: AgentConfig = {
       maxTurns: normalizedMaxTurns,
@@ -8700,7 +8945,7 @@ ${skillDescriptions}`;
       runtime,
       runtime_agent,
       title,
-      prompt: contractedPrompt,
+      prompt,
       autonomousMode: agentConfig.autonomousMode === true,
       defaultCodexRuntimeMode: BuiltinToolsSettingsManager.getCodexRuntimeMode(),
     });
@@ -8722,6 +8967,21 @@ ${skillDescriptions}`;
 
     const taskTitle =
       title || `Sub-task: ${prompt.substring(0, 50)}${prompt.length > 50 ? "..." : ""}`;
+    const parentTask = await this.getDelegationParentTask();
+    const currentStepContext = await this.getDelegationCurrentStepContext();
+    const knownFindings = await this.getDelegationKnownFindings();
+    const delegatedPromptBody = extractionMode ? applyExtractionOutputContract(prompt) : prompt;
+    const structuredBrief = this.buildStructuredDelegationBrief({
+      originalPrompt: prompt,
+      workerRole,
+      taskTitle,
+      parentTaskTitle: parentTask?.title,
+      parentTaskPrompt: parentTask?.prompt,
+      currentStepContext,
+      knownFindings,
+      extractionMode,
+    });
+    const contractedPrompt = `${structuredBrief}\n\nDelegated request:\n${delegatedPromptBody}`;
 
     let dispatchTarget: "native_child_task" | "local_role" | "remote_acp" | "external_runtime" =
       externalRuntime ? "external_runtime" : "native_child_task";
@@ -8752,7 +9012,7 @@ ${skillDescriptions}`;
       dispatchTarget,
       assignedAgentRoleId,
       acpAgentId,
-      workerRole: "implementer",
+      workerRole,
       extractionMode,
       externalRuntime,
     };
@@ -8765,6 +9025,7 @@ ${skillDescriptions}`;
     capability_hint?: string;
     acp_agent_id?: string;
     personality?: string;
+    worker_role?: string;
     runtime?: SpawnAgentRuntimeMode;
     runtime_agent?: SpawnAgentRuntimeAgent;
     wait?: boolean;
@@ -8839,15 +9100,16 @@ ${skillDescriptions}`;
       };
     }
 
-    let prepared: ReturnType<ToolRegistry["prepareSpawnAgentNode"]>;
+    let prepared: Awaited<ReturnType<ToolRegistry["prepareSpawnAgentNode"]>>;
     try {
-      prepared = this.prepareSpawnAgentNode({
+      prepared = await this.prepareSpawnAgentNode({
         prompt,
         title: input.title,
         model_preference,
         capability_hint: input.capability_hint,
         acp_agent_id: input.acp_agent_id,
         personality,
+        worker_role: input.worker_role,
         runtime,
         runtime_agent,
         max_turns,
@@ -8871,6 +9133,7 @@ ${skillDescriptions}`;
       personality: personality,
       runtime: runtime || (prepared.externalRuntime ? "acpx" : "native"),
       runtimeAgent: prepared.externalRuntime?.agent,
+      workerRole: prepared.workerRole,
       maxTurns: normalizedMaxTurns,
       parentDepth: currentDepth,
       extractionMode: prepared.extractionMode,
@@ -9112,6 +9375,7 @@ ${skillDescriptions}`;
       model_preference?: string;
       capability_hint?: string;
       acp_agent_id?: string;
+      worker_role?: string;
     }>;
     timeout_seconds?: number;
   }): Promise<{
@@ -9169,13 +9433,14 @@ ${skillDescriptions}`;
       };
     }
 
-    const preparedNodes = tasks.map((task, index) => {
-      const prepared = this.prepareSpawnAgentNode({
+    const preparedNodes = await Promise.all(tasks.map(async (task, index) => {
+      const prepared = await this.prepareSpawnAgentNode({
         prompt: task.prompt,
         title: task.title,
         model_preference: task.model_preference,
         capability_hint: task.capability_hint,
         acp_agent_id: task.acp_agent_id,
+        worker_role: task.worker_role,
         max_turns: 20,
       });
       return {
@@ -9195,7 +9460,7 @@ ${skillDescriptions}`;
           metadata: { depth: currentDepth + 1 },
         },
       };
-    });
+    }));
 
     const snapshot = await this.daemon.createOrchestrationGraphRun({
       rootTaskId: this.taskId,
@@ -10776,6 +11041,12 @@ ${skillDescriptions}`;
               description:
                 'Personality for the spawned agent. "same" inherits from parent. Default: "concise"',
             },
+            worker_role: {
+              type: "string",
+              enum: ["auto", "researcher", "implementer", "verifier", "synthesizer"],
+              description:
+                'Optional worker role. "auto" infers from the prompt: research/read-only work -> researcher, checks/validation -> verifier, merge/summarize outputs -> synthesizer, everything else -> implementer.',
+            },
             runtime: {
               type: "string",
               enum: ["native", "acpx"],
@@ -10839,6 +11110,12 @@ ${skillDescriptions}`;
                     type: "string",
                     description:
                       "Optional ACP agent ID returned by acp_discover for this orchestration node.",
+                  },
+                  worker_role: {
+                    type: "string",
+                    enum: ["auto", "researcher", "implementer", "verifier", "synthesizer"],
+                    description:
+                      'Optional worker role override. "auto" infers the role from the task prompt.',
                   },
                 },
                 required: ["prompt"],

@@ -10,6 +10,7 @@ import {
   toOpenAICompatibleTools,
   fromOpenAICompatibleResponse,
 } from "./openai-compatible";
+import { buildOpenAIPromptCacheFields } from "./prompt-cache";
 
 export interface OpenAICompatibleProviderOptions {
   type: LLMProviderType;
@@ -42,6 +43,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
     const supportsImages = caps?.supportsImages === true;
     const messages = toOpenAICompatibleMessages(request.messages, request.system, {
       supportsImages,
+      systemBlocks: request.systemBlocks,
     });
     const tools = request.tools ? toOpenAICompatibleTools(request.tools) : undefined;
 
@@ -64,7 +66,13 @@ export class OpenAICompatibleProvider implements LLMProvider {
           model,
           messages,
           max_tokens: request.maxTokens,
-          ...(tools && { tools, tool_choice: "auto" }),
+          ...(tools && tools.length > 0
+            ? {
+                tools,
+                tool_choice: request.toolChoice || "auto",
+              }
+            : {}),
+          ...buildOpenAIPromptCacheFields(request.promptCache),
         }),
         signal: request.signal,
       });

@@ -7,6 +7,53 @@ import { MergeResult, PullRequestResult } from "../../shared/types";
  */
 export class GitService {
   /**
+   * List configured git remotes for a repository.
+   */
+  static async getRemotes(repoPath: string): Promise<Array<{ name: string; url: string }>> {
+    try {
+      const { stdout } = await GitService.exec(
+        ["config", "--get-regexp", "^remote\\..*\\.url$"],
+        repoPath,
+      );
+      return stdout
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line) => {
+          const firstSpace = line.indexOf(" ");
+          if (firstSpace <= 0) return null;
+          const key = line.slice(0, firstSpace).trim();
+          const url = line.slice(firstSpace + 1).trim();
+          const match = key.match(/^remote\.(.+)\.url$/);
+          if (!match || !url) return null;
+          return { name: match[1], url };
+        })
+        .filter((entry): entry is { name: string; url: string } => Boolean(entry));
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Normalize a GitHub remote URL into owner/repo form.
+   */
+  static normalizeGithubRepoIdentity(remoteUrl: string): string | null {
+    const value = remoteUrl.trim().replace(/\.git$/i, "");
+    const patterns = [
+      /^git@github\.com:(?<repo>[^/]+\/[^/]+)$/i,
+      /^ssh:\/\/git@github\.com\/(?<repo>[^/]+\/[^/]+)$/i,
+      /^https:\/\/github\.com\/(?<repo>[^/]+\/[^/]+)$/i,
+      /^http:\/\/github\.com\/(?<repo>[^/]+\/[^/]+)$/i,
+    ];
+    for (const pattern of patterns) {
+      const match = value.match(pattern);
+      const repo = match?.groups?.repo?.trim();
+      if (repo) return repo;
+    }
+    return null;
+  }
+
+  /**
    * Check if a directory is inside a git repository.
    */
   static async isGitRepo(dirPath: string): Promise<boolean> {

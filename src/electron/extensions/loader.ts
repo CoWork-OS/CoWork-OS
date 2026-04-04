@@ -11,6 +11,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { app } from "electron";
+import { getCapabilityBundleSecurityService } from "../security/capability-bundle-security";
 import {
   PluginManifest,
   Plugin,
@@ -23,6 +24,14 @@ import {
 
 /** Manifest filename */
 const MANIFEST_FILENAME = "cowork.plugin.json";
+const securityService = getCapabilityBundleSecurityService();
+
+function getUserExtensionsDir(): string {
+  const userDataPath =
+    app?.getPath?.("userData") ||
+    path.join(process.env.HOME || process.env.USERPROFILE || "", ".cowork");
+  return path.join(userDataPath, "extensions");
+}
 
 function normalizeLegacyAuthor(author?: string): string | undefined {
   if (typeof author !== "string") return author;
@@ -69,8 +78,7 @@ const getDefaultExtensionsDirs = (): string[] => {
   }
 
   // User extensions directory
-  const userDataPath = app?.getPath?.("userData") || path.join(process.env.HOME || process.env.USERPROFILE || "", ".cowork");
-  const userExtensionsDir = path.join(userDataPath, "extensions");
+  const userExtensionsDir = getUserExtensionsDir();
   if (fs.existsSync(userExtensionsDir)) {
     dirs.push(userExtensionsDir);
   }
@@ -165,6 +173,7 @@ function validateConfigSchema(schema: PluginConfigSchema): void {
 export async function discoverPlugins(dirs?: string[]): Promise<PluginDiscoveryResult[]> {
   const searchDirs = dirs || getDefaultExtensionsDirs();
   const results: PluginDiscoveryResult[] = [];
+  const userExtensionsDir = path.resolve(getUserExtensionsDir());
 
   for (const dir of searchDirs) {
     if (!fs.existsSync(dir)) {
@@ -191,9 +200,23 @@ export async function discoverPlugins(dirs?: string[]): Promise<PluginDiscoveryR
 
         if (validateManifest(manifest)) {
           const normalizedManifest = normalizeManifestBranding(manifest);
+          let securityReport = null;
+          if (path.resolve(dir) === userExtensionsDir) {
+            const inspection = await securityService.inspectPluginPackForDiscovery(
+              pluginDir,
+              normalizedManifest,
+              fs.existsSync(securityService.getPackReportPath(pluginDir)),
+              fs.existsSync(securityService.getPackReportPath(pluginDir)) ? "managed" : "unmanaged-local",
+            );
+            if (!inspection.allowed) {
+              continue;
+            }
+            securityReport = inspection.report;
+          }
           results.push({
             path: pluginDir,
             manifest: normalizedManifest,
+            securityReport,
           });
         }
       } catch (error) {

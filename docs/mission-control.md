@@ -9,7 +9,7 @@ Access it from **Settings** > **Mission Control**. For company-ops workflows, yo
 Mission Control now sits alongside two other operational entry points:
 
 - **Devices** for machine-level task routing and remote execution
-- **Settings > Automations** for queueing, scheduling, triggers, briefing, and self-improvement policies
+- **Settings > Automations** for queueing, scheduling, triggers, briefing, and subconscious policies
 - **Settings > Companies** for company graph editing and operator assignment
 
 ## Layout

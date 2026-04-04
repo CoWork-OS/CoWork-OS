@@ -15,21 +15,55 @@ export interface BuildToolResultEnvelopeParams {
   policyTrace?: ToolPolicyTrace;
   evidence?: ToolResultEvidence[];
   userSummary?: string;
+  modelReminder?: string;
   uiHints?: Record<string, unknown>;
   telemetry?: Record<string, unknown>;
 }
 
+function stringifyJsonResult(value: unknown): string {
+  try {
+    return JSON.stringify(value ?? {});
+  } catch {
+    return JSON.stringify({ value: String(value ?? "") });
+  }
+}
+
+function stringifyPayloadWithReminder(
+  value: unknown,
+  reminder: string,
+  stringField: "content" | "error",
+): string {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return stringifyJsonResult({
+      ...(value as Record<string, unknown>),
+      _modelReminder: reminder,
+    });
+  }
+  return stringifyJsonResult({
+    [stringField]: typeof value === "string" ? value : String(value ?? ""),
+    _modelReminder: reminder,
+  });
+}
+
 function stringifyModelPayload(params: BuildToolResultEnvelopeParams): string {
+  const reminder =
+    typeof params.modelReminder === "string" && params.modelReminder.trim().length > 0
+      ? params.modelReminder.trim()
+      : "";
   if (params.error) {
     const message = String((params.error as { message?: string })?.message || params.error || "");
-    return JSON.stringify({ error: message || "Tool execution failed" });
+    return reminder
+      ? stringifyPayloadWithReminder(message || "Tool execution failed", reminder, "error")
+      : JSON.stringify({ error: message || "Tool execution failed" });
   }
-  if (typeof params.result === "string") return params.result;
-  try {
-    return JSON.stringify(params.result ?? {});
-  } catch {
-    return JSON.stringify({ value: String(params.result ?? "") });
+  if (typeof params.result === "string") {
+    return reminder
+      ? stringifyPayloadWithReminder(params.result, reminder, "content")
+      : params.result;
   }
+  return reminder
+    ? stringifyPayloadWithReminder(params.result, reminder, "content")
+    : stringifyJsonResult(params.result);
 }
 
 function buildUserSummary(params: BuildToolResultEnvelopeParams): string {

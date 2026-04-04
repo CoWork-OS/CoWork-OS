@@ -724,7 +724,7 @@ export class ShellSessionManager {
       heredocMarker,
       ")",
       "eval \"$__COWORK_COMMAND\"",
-      "status=$?",
+      "__cowork_exit_code=$?",
       "printf '\\n__COWORK_STATE_START__\\n'",
       "printf '__COWORK_CWD__:%s\\n' \"$(pwd -P)\"",
       "printf '__COWORK_ALIASES_START__\\n'",
@@ -733,7 +733,7 @@ export class ShellSessionManager {
       "printf '__COWORK_ENV_START__\\n'",
       "env",
       "printf '__COWORK_ENV_END__\\n'",
-      `printf '__COWORK_DONE__:%s:%s\\n' ${quoteForPosixShell(commandId)} "$status"`,
+      `printf '__COWORK_DONE__:%s:%s\\n' ${quoteForPosixShell(commandId)} "$__cowork_exit_code"`,
     ].join("\n");
 
     return new Promise<ShellCommandResult>((resolve, reject) => {

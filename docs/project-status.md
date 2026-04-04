@@ -10,7 +10,7 @@ CoWork OS is a **security-first personal AI assistant platform** with multi-chan
 - **Managed Devices**: Operate local and remote CoWork machines from a dedicated Devices tab
 - **Automations Surface**: One settings group for queueing, scheduling, triggers, briefing, and subconscious reflection/dispatch
 - **Renderer Performance**: Sidebar and timeline virtualization in the `CoWork-OS/CoWork-OS` repo use `@chenglou/pretext` for text measurement and keep long task feeds responsive
-- **Security-First Design**: 4,500+ automated tests, configurable guardrails, layered permission rules, workspace-local policy files, and approval workflows
+- **Security-First Design**: 4,932 automated tests across 390 test files, configurable guardrails, layered permission rules, workspace-local policy files, and approval workflows
 - **Imported Capability Security**: managed skill and pack imports are staged, scanned, reported, and quarantined when blocked instead of being activated directly
 - **Multi-Provider Support**: 30+ LLM providers including free local models via Ollama
 - **Local-First Architecture**: Your data stays on your machine, BYOK model
@@ -486,7 +486,7 @@ Expected behavior:
 **CoWork OS is a production-ready, security-first personal AI assistant platform:**
 
 ### Core Strengths
-- **Security**: 4,500+ automated tests, configurable guardrails, layered permission rules, approval workflows, and brute-force protection
+- **Security**: 4,932 automated tests across 390 test files, configurable guardrails, layered permission rules, approval workflows, and brute-force protection
 - **Multi-Channel**: WhatsApp, Telegram, Discord, Slack, iMessage integration
 - **Multi-Provider**: 30+ LLM providers and compatible gateways, including Claude, GPT, Gemini, Bedrock, OpenRouter, and Ollama
 - **Local-First**: Your data stays on your machine, BYOK model

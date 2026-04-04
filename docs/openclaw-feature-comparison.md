@@ -14,7 +14,7 @@ Compared features:
 - Skill system
 - Skill standard
 - Autonomous skill creation
-- Skill self-improvement
+- Reflective learning loop
 - Skill security scanning
 - Session history search
 - Cross-session user modeling
@@ -24,8 +24,8 @@ Compared features:
 
 High level:
 
-- **OpenClaw** appears stronger on plain-markdown workspace memory, public skill registry/discovery, explicit session-history tooling, and cache-stable prompt design.
-- **CoWork OS** appears stronger on structured memory architecture, self-improvement loops, approval-gated skill creation, built-in governance/security controls, and now a shared turn kernel / tool scheduler / orchestration graph stack for delegated work.
+- **OpenClaw** appears stronger on plain-markdown workspace memory, public skill registry/discovery, and explicit session-history tooling.
+- **CoWork OS** appears stronger on structured memory architecture, the `Subconscious` reflective loop, approval-gated skill creation, built-in governance/security controls, and now a shared turn kernel / tool scheduler / orchestration graph stack for delegated work.
 - Some items in the screenshot are not first-class product terms in either repo, so a few rows are marked **Partial** or **Unclear**.
 
 ## Comparison Table
@@ -40,11 +40,11 @@ High level:
 | Skill system | Yes | Yes | Both repos clearly support reusable skills. |
 | Skill standard | Yes | Yes | CoWork OS has a documented skill quality specification. OpenClaw has a documented skill bundle structure centered on `SKILL.md` plus registry metadata. |
 | Autonomous skill creation | Partial, approval-gated | Partial / unclear | CoWork OS supports `skill_proposal.create` but requires approval before a skill is materialized. OpenClaw supports publish/install/discovery flows, but reviewed docs do not clearly show autonomous self-authoring by the agent. |
-| Skill self-improvement | Yes | Partial | CoWork OS has explicit self-improving-agent documentation, reinforcement loops, correction capture, and `memory_save`. OpenClaw has learning/self-improve references, but not as clearly productized in the reviewed sources. |
+| Reflective learning loop | Yes | Partial | CoWork OS has explicit subconscious-loop documentation, reinforcement loops, correction capture, and `memory_save`. OpenClaw has learning references, but not as clearly productized in the reviewed sources. |
 | Skill security scanning | Yes | Partial | CoWork OS documents skill validation/audit tooling. OpenClaw shows install gating and unsafe-skill reporting, but no equally explicit skill scan pipeline was found in the reviewed material. |
 | Session history search | Yes | Yes | CoWork OS supports persistent memory search and imported/global history retrieval. OpenClaw includes a dedicated sessions history tool. |
 | Cross-session user modeling | Yes | Partial | CoWork OS has relationship memory, user profile extraction, and adaptive style/personalization. OpenClaw has personal assistant and profile/persona concepts, but less explicit structured cross-session user modeling in the reviewed docs. |
-| Cache-stable memory | Partial | Yes | CoWork OS emphasizes unified memory and context compaction. OpenClaw explicitly documents cache-stable prompt behavior by keeping the time-zone section stable. |
+| Cache-stable memory | Yes | Yes | CoWork OS now documents provider-aware stable-prefix prompt caching driven by session-scoped prompt sections and persisted prompt-cache state. OpenClaw explicitly documents cache-stable prompt behavior by keeping the time-zone section stable. |
 
 ## Detailed Notes by Feature
 
@@ -100,7 +100,7 @@ This feature label is somewhat interpretation-dependent, so the comparison below
 **CoWork OS**
 
 - `docs/security-guide.md` documents sanitization, prompt/skill hardening, validation, and protections around memory/context injection.
-- `docs/self-improving-agent.md` mentions memory sanitization before prompt injection.
+- `docs/subconscious-loop.md` documents durable evidence, critique, winner selection, and target-scoped reflection.
 - Overall posture is governance-heavy: approvals, sandboxing, privacy-aware storage, and configurable guardrails.
 
 **OpenClaw**
@@ -147,17 +147,17 @@ Both repos clearly have a real skill system.
 - Supports creation/publishing in a broader ecosystem sense through ClawHub.
 - However, in the reviewed docs, I did not find clear evidence of autonomous agent-authored skill creation as a first-class governed runtime feature.
 
-### 9. Skill self-improvement
+### 9. Reflective learning loop
 
 **CoWork OS**
 
-- `docs/self-improving-agent.md` documents a multi-layered self-improvement architecture.
+- `docs/subconscious-loop.md` documents the reflective architecture and its learning substrate.
 - Includes correction capture, playbook reinforcement, user preference learning, and agent-initiated `memory_save`.
 
 **OpenClaw**
 
-- Repository search shows references to self-improve/learning/feedback.
-- But the reviewed docs do not present an equally explicit, centralized architecture page comparable to CoWork OS’s self-improving-agent design.
+- Repository search shows references to learning and feedback flows.
+- But the reviewed docs do not present an equally explicit, centralized architecture page comparable to CoWork OS's subconscious-loop design.
 
 ### 10. Skill security scanning
 
@@ -190,7 +190,7 @@ Both repos clearly have a real skill system.
 
 **CoWork OS**
 
-- `docs/relationship-agent-architecture.md` and `docs/self-improving-agent.md` document relationship memory, user profile extraction, commitment tracking, and personalization.
+- `docs/relationship-agent-architecture.md` and `docs/subconscious-loop.md` document relationship memory, user profile extraction, commitment tracking, and personalization.
 - README also describes Adaptive Style Engine and related evolving-intelligence behavior.
 
 **OpenClaw**
@@ -202,8 +202,9 @@ Both repos clearly have a real skill system.
 
 **CoWork OS**
 
-- CoWork OS clearly has compaction and memory durability features.
-- But I did not find the specific phrase or mechanism framed as “cache-stable memory” in the same explicit way.
+- `docs/providers.md` documents default-on provider-aware prompt caching with stable system sections, volatile turn sections, Anthropic auto mode, and OpenRouter Claude explicit breakpoints.
+- `docs/execution-runtime-model.md` documents stable-prefix prompt caching driven by session- vs turn-scoped prompt sections.
+- `docs/session-runtime.md` documents persisted prompt-cache state including `stablePrefixHash`, tool-schema hash, provider family, and invalidation reason.
 
 **OpenClaw**
 
@@ -213,8 +214,8 @@ Both repos clearly have a real skill system.
 
 If the goal is a feature-for-feature comparison against the provided list:
 
-- **CoWork OS leads** on structured memory architecture, self-improvement, user modeling, approval-gated skill creation, and skill validation/audit.
-- **OpenClaw leads** on explicit session-history tooling, public skill-registry/discovery workflows, simple workspace-native memory files, heartbeat-style nudges, and explicitly documented cache-stable prompt behavior.
+- **CoWork OS leads** on structured memory architecture, reflective learning, user modeling, approval-gated skill creation, and skill validation/audit.
+- **OpenClaw leads** on explicit session-history tooling, public skill-registry/discovery workflows, simple workspace-native memory files, and heartbeat-style nudges.
 - **Both** support core memory and skills, but they package these capabilities differently:
   - **CoWork OS** favors governance, structure, and production controls.
   - **OpenClaw** favors personal-assistant workflows, workspace-native simplicity, and extensible operator tooling.
@@ -225,9 +226,12 @@ If the goal is a feature-for-feature comparison against the provided list:
 
 - `README.md`
 - `docs/features.md`
+- `docs/providers.md`
 - `docs/context-compaction.md`
+- `docs/execution-runtime-model.md`
 - `docs/security-guide.md`
-- `docs/self-improving-agent.md`
+- `docs/subconscious-loop.md`
+- `docs/session-runtime.md`
 - `docs/skills-quality-spec.md`
 - `docs/integration-skill-bootstrap-lifecycle.md`
 - `docs/relationship-agent-architecture.md`

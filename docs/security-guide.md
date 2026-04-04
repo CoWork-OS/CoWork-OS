@@ -589,9 +589,9 @@ On macOS, shell commands execute within a `sandbox-exec` profile that:
 
 **Implementation**: `src/electron/agent/sandbox/runner.ts`
 
-### Skill Security
+### Imported Capability Security
 
-SkillHub includes multiple security measures to prevent attacks via malicious skills:
+Imported skills and imported plugin packs now pass through the same install-time security gate before activation.
 
 | Protection | Description |
 |------------|-------------|
@@ -600,6 +600,12 @@ SkillHub includes multiple security measures to prevent attacks via malicious sk
 | **Binary Name Sanitization** | Binary names in `requires.bins` must match `^[a-zA-Z0-9._-]+$` |
 | **Command Injection Prevention** | Shell metacharacters in binary names are blocked before `which` execution |
 | **Debounced Reloading** | Rapid skill reloads are debounced (100ms) to prevent race conditions |
+| **Staged Imports** | Imported skills and plugin packs are scanned before they are moved into active managed storage |
+| **Bundle Heuristics** | Imported `SKILL.md`, bundled scripts, plugin manifests, declarative connectors, and suspicious URLs are inspected for high-confidence malicious patterns |
+| **Package Malware Checks** | Detected `npx` / `uvx` package references can be checked against live package-malware intelligence |
+| **Quarantine Instead of Activate** | Imports with blocking findings are preserved in quarantine rather than registered into the active runtime |
+| **Persisted Scan Reports** | Managed imports store a security report for warning UX, review, and later integrity checks |
+| **Digest Enforcement** | If a managed imported bundle changes after install, CoWork can quarantine it again on the next load |
 
 **Rejected inputs (skill IDs)**:
 - `../../../etc/passwd` - Path traversal
@@ -611,9 +617,14 @@ SkillHub includes multiple security measures to prevent attacks via malicious sk
 - `$(whoami)` - Command substitution
 - `` `whoami` `` - Backtick execution
 
+Imported bundles that cannot be fully checked against network-backed intelligence are allowed to install only when the local scan is otherwise clean, and the UI surfaces that reduced-confidence state as a warning.
+
 **Implementation**:
 - `src/electron/agent/skill-registry.ts` (skill ID validation)
 - `src/electron/agent/skill-eligibility.ts` (binary name sanitization)
+- `src/electron/security/capability-bundle-security.ts` (bundle scanning, reports, digest verification, and quarantine)
+- `src/electron/extensions/pack-installer.ts` (pack install staging and scan gate)
+- `src/electron/extensions/loader.ts` (discovery-time integrity checks and quarantine enforcement)
 
 ### Running Security Tests
 
@@ -648,7 +659,7 @@ CoWork OS is designed with security in mind:
 | Policy system | Monotonic deny-wins precedence |
 | Gateway security | Context-aware tool isolation |
 | Concurrency | Mutex locks + idempotency guarantees |
-| Skill security | Input validation, path traversal protection, binary sanitization |
+| Imported capability security | Input validation, staged scanning, quarantine, persisted reports, and digest verification |
 
 **The security model is transparent and consent-based.** You remain in control of what the AI can do on your machine.
 

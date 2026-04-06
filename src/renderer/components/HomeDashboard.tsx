@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkBreaks from "remark-breaks";
+import remarkGfm from "remark-gfm";
 import {
   ArrowRight,
   Bot,
@@ -18,7 +21,13 @@ import {
 } from "lucide-react";
 import type { FileViewerResult } from "../../electron/preload";
 import { Task, Workspace } from "../../shared/types";
-import { getFileName, resolveTaskOutputSummaryFromTask } from "../utils/task-outputs";
+import {
+  formatOutputLocationLabel,
+  getFileName,
+  resolveTaskOutputSummaryFromTask,
+} from "../utils/task-outputs";
+import { buildCompletionOutputMessage } from "../utils/task-completion-ux";
+import { normalizeMarkdownForCollab } from "../utils/markdown-inline-lists";
 import { isActiveSessionStatus, isAutomatedSession, shouldShowTaskInSidebarSessions } from "./Sidebar";
 
 interface RecentHubFile {
@@ -55,6 +64,7 @@ interface HomeDashboardProps {
 
 interface CompanionSuggestion {
   id: string;
+  kind: "notification" | "suggestion";
   type: string;
   title: string;
   description: string;
@@ -72,7 +82,29 @@ interface CompanionSuggestion {
   notificationId?: string;
   read?: boolean;
   workspaceName?: string;
-  kind?: "notification" | "suggestion";
+}
+
+interface CompanionTaskResultItem {
+  id: string;
+  kind: "task_result";
+  title: string;
+  description: string;
+  createdAt: number;
+  sourceTaskId: string;
+  workspaceId?: string;
+  workspaceName?: string;
+  sourceEntity: string;
+  automationTag: string;
+  terminalLabel: string;
+  outputLabel?: string;
+  outputLocationLabel?: string;
+  outputCount?: number;
+}
+
+type CompanionInboxItem = CompanionSuggestion | CompanionTaskResultItem;
+
+function isCompanionTaskResultItem(item: CompanionInboxItem): item is CompanionTaskResultItem {
+  return item.kind === "task_result";
 }
 
 interface CompanionNotification {
@@ -88,6 +120,8 @@ interface CompanionNotification {
   recommendedDelivery?: "briefing" | "inbox" | "nudge";
   companionStyle?: "email" | "note";
 }
+
+const inboxMarkdownPlugins = [remarkGfm, remarkBreaks];
 
 function formatRelativeTime(timestamp?: number): string {
   if (!timestamp) return "Just now";
@@ -364,12 +398,11 @@ export function HomeDashboard({
   const [recentHubFiles, setRecentHubFiles] = useState<RecentHubFile[]>([]);
   const [automationLoadedCount, setAutomationLoadedCount] = useState(AUTOMATION_BATCH_SIZE);
   const [automationScrollTop, setAutomationScrollTop] = useState(0);
+  const [knownWorkspaces, setKnownWorkspaces] = useState<Workspace[]>([]);
   const [companionSuggestions, setCompanionSuggestions] = useState<CompanionSuggestion[]>([]);
   const [companionLoading, setCompanionLoading] = useState(false);
   const [companionError, setCompanionError] = useState<string | null>(null);
-  const [selectedCompanionSuggestionId, setSelectedCompanionSuggestionId] = useState<string | null>(
-    null,
-  );
+  const [selectedCompanionItemId, setSelectedCompanionItemId] = useState<string | null>(null);
   const automationInboxRef = useRef<HTMLDivElement>(null);
   const currentWorkspaceName = workspace?.name || "Workspace";
 
@@ -405,6 +438,7 @@ export function HomeDashboard({
         const visibleWorkspaces = (Array.isArray(loadedWorkspaces) ? loadedWorkspaces : []).filter(
           (item) => !String(item.id || "").startsWith("__temp_workspace__"),
         );
+        setKnownWorkspaces(visibleWorkspaces as Workspace[]);
 
         const notificationResults = await window.electronAPI.listNotifications();
         const companionNotifications = (Array.isArray(notificationResults)
@@ -506,7 +540,7 @@ export function HomeDashboard({
     try {
       await window.electronAPI.dismissSuggestion(workspaceId, id);
       setCompanionSuggestions((prev) => prev.filter((s) => s.id !== id));
-      setSelectedCompanionSuggestionId((current) => (current === id ? null : current));
+      setSelectedCompanionItemId((current) => (current === id ? null : current));
     } catch {
       // best-effort
     }
@@ -522,51 +556,22 @@ export function HomeDashboard({
         onCreateTask(suggestion.title, prompt);
       }
       setCompanionSuggestions((prev) => prev.filter((s) => s.id !== suggestion.id));
-      setSelectedCompanionSuggestionId(null);
+      setSelectedCompanionItemId(null);
     } catch {
       // best-effort
     }
   };
 
-  const companionInboxItems = useMemo(() => {
-    const urgencyRank: Record<NonNullable<CompanionSuggestion["urgency"]>, number> = {
-      high: 0,
-      medium: 1,
-      low: 2,
-    };
-
-    return [...companionSuggestions].sort((a, b) => {
-      const urgencyA = a.urgency ? urgencyRank[a.urgency] : 3;
-      const urgencyB = b.urgency ? urgencyRank[b.urgency] : 3;
-      if (urgencyA !== urgencyB) return urgencyA - urgencyB;
-      return (b.createdAt || 0) - (a.createdAt || 0);
-    });
-  }, [companionSuggestions]);
-
-  const selectedCompanionSuggestion = useMemo(() => {
-    if (companionInboxItems.length === 0) return null;
-    if (!selectedCompanionSuggestionId) return companionInboxItems[0];
-    return (
-      companionInboxItems.find((suggestion) => suggestion.id === selectedCompanionSuggestionId) ||
-      companionInboxItems[0]
-    );
-  }, [companionInboxItems, selectedCompanionSuggestionId]);
-
-  useEffect(() => {
-    if (companionInboxItems.length === 0) {
-      if (selectedCompanionSuggestionId !== null) {
-        setSelectedCompanionSuggestionId(null);
-      }
-      return;
+  const workspaceNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const item of knownWorkspaces) {
+      map.set(item.id, item.name);
     }
-
-    if (
-      !selectedCompanionSuggestionId ||
-      !companionInboxItems.some((suggestion) => suggestion.id === selectedCompanionSuggestionId)
-    ) {
-      setSelectedCompanionSuggestionId(companionInboxItems[0].id);
+    if (workspace?.id && workspace.name) {
+      map.set(workspace.id, workspace.name);
     }
-  }, [companionInboxItems, selectedCompanionSuggestionId]);
+    return map;
+  }, [knownWorkspaces, workspace?.id, workspace?.name]);
 
   useEffect(() => {
     if (!workspace?.id) return;
@@ -603,6 +608,80 @@ export function HomeDashboard({
     () => rootTasks.filter((task) => isAutomatedSession(task)),
     [rootTasks],
   );
+
+  const completedAutomationInboxItems = useMemo<CompanionTaskResultItem[]>(() => {
+    return automatedTasks
+      .filter((task) => task.status === "completed")
+      .map((task) => {
+        const outputSummary = resolveTaskOutputSummaryFromTask(task);
+        const outputLabel = outputSummary ? buildCompletionOutputMessage(outputSummary) : undefined;
+        const resultSummary =
+          task.resultSummary?.trim() || task.bestKnownOutcome?.resultSummary?.trim() || "";
+        const description = resultSummary
+          ? resultSummary
+          : outputLabel
+            ? `Completed with ${outputLabel}.`
+            : getAutomationPreview(task);
+        const status = getTaskStatusInfo(task);
+        return {
+          id: `task-result:${task.id}`,
+          kind: "task_result" as const,
+          title: `Automation completed: ${task.title}`,
+          description,
+          createdAt: task.completedAt || task.updatedAt || task.createdAt,
+          sourceTaskId: task.id,
+          workspaceId: task.workspaceId,
+          workspaceName: workspaceNameById.get(task.workspaceId) || currentWorkspaceName,
+          sourceEntity: getAutomationSender(task),
+          automationTag: getAutomationTag(task),
+          terminalLabel: status.label,
+          ...(outputLabel ? { outputLabel } : {}),
+          ...(outputSummary ? { outputLocationLabel: formatOutputLocationLabel(outputSummary) } : {}),
+          ...(outputSummary?.outputCount ? { outputCount: outputSummary.outputCount } : {}),
+        };
+      })
+      .sort((a, b) => b.createdAt - a.createdAt);
+  }, [automatedTasks, currentWorkspaceName, workspaceNameById]);
+
+  const companionInboxItems = useMemo(() => {
+    const urgencyRank: Record<NonNullable<CompanionSuggestion["urgency"]>, number> = {
+      high: 0,
+      medium: 1,
+      low: 2,
+    };
+
+    return [...companionSuggestions, ...completedAutomationInboxItems].sort((a, b) => {
+      const urgencyA = a.kind === "task_result" ? 3 : a.urgency ? urgencyRank[a.urgency] : 3;
+      const urgencyB = b.kind === "task_result" ? 3 : b.urgency ? urgencyRank[b.urgency] : 3;
+      if (urgencyA !== urgencyB) return urgencyA - urgencyB;
+      return (b.createdAt || 0) - (a.createdAt || 0);
+    });
+  }, [companionSuggestions, completedAutomationInboxItems]);
+
+  const selectedCompanionItem = useMemo<CompanionInboxItem | null>(() => {
+    if (companionInboxItems.length === 0) return null;
+    if (!selectedCompanionItemId) return companionInboxItems[0];
+    return (
+      companionInboxItems.find((item) => item.id === selectedCompanionItemId) ||
+      companionInboxItems[0]
+    );
+  }, [companionInboxItems, selectedCompanionItemId]);
+
+  useEffect(() => {
+    if (companionInboxItems.length === 0) {
+      if (selectedCompanionItemId !== null) {
+        setSelectedCompanionItemId(null);
+      }
+      return;
+    }
+
+    if (
+      !selectedCompanionItemId ||
+      !companionInboxItems.some((item) => item.id === selectedCompanionItemId)
+    ) {
+      setSelectedCompanionItemId(companionInboxItems[0].id);
+    }
+  }, [companionInboxItems, selectedCompanionItemId]);
 
   useEffect(() => {
     setAutomationLoadedCount(Math.min(automatedTasks.length, AUTOMATION_BATCH_SIZE));
@@ -748,7 +827,7 @@ export function HomeDashboard({
               <div>
                 <h3>Companion Inbox</h3>
                 <p>
-                  Email-style suggestions from heartbeat, memory, and cross-workspace signals.
+                  Suggestions, summaries, and completed outputs from the automation core.
                 </p>
               </div>
               <button
@@ -763,138 +842,182 @@ export function HomeDashboard({
                 <Mail size={14} /> Open inbox
               </button>
             </div>
-            {companionLoading ? (
+            {companionLoading && companionInboxItems.length === 0 ? (
               <div className="home-automation-inbox-empty">Loading companion inbox...</div>
-            ) : companionError ? (
+            ) : companionError && companionInboxItems.length === 0 ? (
               <div className="home-automation-inbox-empty">{companionError}</div>
-            ) : companionSuggestions.length === 0 ? (
+            ) : companionInboxItems.length === 0 ? (
               <div className="home-automation-inbox-empty">
-                No companion suggestions yet. When the system learns something useful, it will
-                surface here like an email inbox.
+                No automation messages yet. When heartbeat, subconscious, or memory produce
+                suggestions or completed work, they will surface here like an inbox.
               </div>
             ) : (
               <>
-                {selectedCompanionSuggestion && (
+                {selectedCompanionItem && (
                   <div className="home-automation-inbox-reader">
                     <div className="home-automation-inbox-reader-header">
                       <div className="home-automation-inbox-reader-from">
                         <span className="home-automation-inbox-pill">
-                          {selectedCompanionSuggestion.recommendedDelivery === "nudge"
+                          {isCompanionTaskResultItem(selectedCompanionItem)
+                            ? "Completed"
+                            : selectedCompanionItem.recommendedDelivery === "nudge"
                             ? "Nudge"
-                            : selectedCompanionSuggestion.companionStyle === "email"
+                            : selectedCompanionItem.companionStyle === "email"
                               ? "Inbox"
                               : "Companion"}
                         </span>
                         <div>
                           <strong>
-                            {selectedCompanionSuggestion.sourceEntity ||
-                              selectedCompanionSuggestion.workspaceName ||
+                            {selectedCompanionItem.sourceEntity ||
+                              selectedCompanionItem.workspaceName ||
                               "Heartbeat"}
                           </strong>
                           <span>to you</span>
                         </div>
                       </div>
                       <span className="home-automation-inbox-time">
-                        {formatRelativeTime(selectedCompanionSuggestion.createdAt)}
+                        {formatRelativeTime(selectedCompanionItem.createdAt)}
                       </span>
                     </div>
                     <div className="home-automation-inbox-reader-subject">
-                      Subject: {selectedCompanionSuggestion.title}
+                      Subject: {selectedCompanionItem.title}
                     </div>
-                    <p className="home-automation-inbox-reader-body">
-                      {selectedCompanionSuggestion.description}
-                    </p>
-                    {selectedCompanionSuggestion.actionPrompt && (
+                    <div className="home-automation-inbox-reader-body markdown-content">
+                      <ReactMarkdown remarkPlugins={inboxMarkdownPlugins}>
+                        {normalizeMarkdownForCollab(selectedCompanionItem.description || "")}
+                      </ReactMarkdown>
+                    </div>
+                    {!isCompanionTaskResultItem(selectedCompanionItem) &&
+                      selectedCompanionItem.actionPrompt && (
                       <div className="home-automation-inbox-reader-box">
                         <span>Suggested action</span>
-                        <p>{selectedCompanionSuggestion.actionPrompt}</p>
+                        <p>{selectedCompanionItem.actionPrompt}</p>
                       </div>
                     )}
+                    {isCompanionTaskResultItem(selectedCompanionItem) &&
+                      selectedCompanionItem.outputLabel && (
+                        <div className="home-automation-inbox-reader-box">
+                          <span>What came out of it</span>
+                          <p>
+                            {selectedCompanionItem.outputLabel}
+                            {selectedCompanionItem.outputLocationLabel
+                              ? ` in ${selectedCompanionItem.outputLocationLabel}`
+                              : ""}
+                          </p>
+                        </div>
+                      )}
                     <div className="home-automation-inbox-meta">
                       <span>
-                        {selectedCompanionSuggestion.urgency
-                          ? `Priority: ${selectedCompanionSuggestion.urgency}`
-                          : "Inbox item"}
+                        {isCompanionTaskResultItem(selectedCompanionItem)
+                          ? selectedCompanionItem.terminalLabel
+                          : selectedCompanionItem.urgency
+                            ? `Priority: ${selectedCompanionItem.urgency}`
+                            : "Inbox item"}
                       </span>
+                      {isCompanionTaskResultItem(selectedCompanionItem) && (
+                        <span>{selectedCompanionItem.automationTag}</span>
+                      )}
                       <span>
-                        {selectedCompanionSuggestion.workspaceScope === "all"
+                        {!isCompanionTaskResultItem(selectedCompanionItem) &&
+                        selectedCompanionItem.workspaceScope === "all"
                           ? "All workspaces"
-                          : selectedCompanionSuggestion.workspaceName || "Current workspace"}
+                          : selectedCompanionItem.workspaceName || "Current workspace"}
                       </span>
-                      {selectedCompanionSuggestion.sourceTaskId && <span>Related task available</span>}
+                      {isCompanionTaskResultItem(selectedCompanionItem) &&
+                        selectedCompanionItem.outputCount && (
+                          <span>
+                            {selectedCompanionItem.outputCount} output
+                            {selectedCompanionItem.outputCount === 1 ? "" : "s"}
+                          </span>
+                        )}
+                      {selectedCompanionItem.sourceTaskId && <span>Related task available</span>}
                     </div>
                     <div className="home-automation-inbox-actions">
-                      {selectedCompanionSuggestion.sourceTaskId && (
+                      {selectedCompanionItem.sourceTaskId && (
                         <button
                           type="button"
                           className="home-automation-inbox-action"
-                          onClick={() => onOpenTask(selectedCompanionSuggestion.sourceTaskId!)}
+                          onClick={() => {
+                            if (selectedCompanionItem.sourceTaskId) {
+                              onOpenTask(selectedCompanionItem.sourceTaskId);
+                            }
+                          }}
                         >
-                          Open related task
+                          {isCompanionTaskResultItem(selectedCompanionItem) ? "Open task" : "Open related task"}
                         </button>
                       )}
-                      <button
-                        type="button"
-                        className="home-automation-inbox-action primary"
-                        onClick={() => void handleActOnCompanionSuggestion(selectedCompanionSuggestion)}
-                        disabled={!selectedCompanionSuggestion.actionPrompt}
-                      >
-                        Act
-                      </button>
-                      <button
-                        type="button"
-                        className="home-automation-inbox-action"
-                        onClick={() =>
-                          void handleDismissCompanionSuggestion(selectedCompanionSuggestion.id)
-                        }
-                      >
-                        Dismiss
-                      </button>
+                      {!isCompanionTaskResultItem(selectedCompanionItem) && (
+                        <>
+                          <button
+                            type="button"
+                            className="home-automation-inbox-action primary"
+                            onClick={() => void handleActOnCompanionSuggestion(selectedCompanionItem)}
+                            disabled={!selectedCompanionItem.actionPrompt}
+                          >
+                            Act
+                          </button>
+                          <button
+                            type="button"
+                            className="home-automation-inbox-action"
+                            onClick={() => void handleDismissCompanionSuggestion(selectedCompanionItem.id)}
+                          >
+                            Dismiss
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
                 )}
                 <div className="home-automation-inbox-list">
-                  {companionInboxItems.map((suggestion) => (
+                  {companionInboxItems.map((item) => (
                     <button
-                      key={suggestion.id}
+                      key={item.id}
                       type="button"
                       className={`home-automation-inbox-item ${
-                        selectedCompanionSuggestion?.id === suggestion.id ? "selected" : ""
+                        selectedCompanionItem?.id === item.id ? "selected" : ""
                       }`}
-                      onClick={() => setSelectedCompanionSuggestionId(suggestion.id)}
+                      onClick={() => setSelectedCompanionItemId(item.id)}
                     >
                       <div className="home-automation-inbox-item-body">
                         <div className="home-automation-inbox-item-top">
                           <div className="home-automation-inbox-item-sender">
                             <span className="home-automation-inbox-pill">
-                              {suggestion.recommendedDelivery === "nudge"
+                              {isCompanionTaskResultItem(item)
+                                ? "Completed"
+                                : item.recommendedDelivery === "nudge"
                                 ? "Nudge"
-                                : suggestion.companionStyle === "email"
+                                : item.companionStyle === "email"
                                   ? "Inbox"
                                   : "Companion"}
                             </span>
                             <strong className="home-automation-inbox-item-sender-name">
-                              {suggestion.sourceEntity || suggestion.workspaceName || "Heartbeat"}
+                              {item.sourceEntity || item.workspaceName || "Heartbeat"}
                             </strong>
                           </div>
                           <span className="home-automation-inbox-time">
-                            {formatRelativeTime(suggestion.createdAt)}
+                            {formatRelativeTime(item.createdAt)}
                           </span>
                         </div>
-                        <div className="home-automation-inbox-item-subject">{suggestion.title}</div>
-                        <p className="home-automation-inbox-preview">{suggestion.description}</p>
+                        <div className="home-automation-inbox-item-subject">{item.title}</div>
+                        <p className="home-automation-inbox-preview">{item.description}</p>
                       </div>
                       <div className="home-automation-inbox-meta">
                         <span>
-                          {suggestion.urgency ? `Priority: ${suggestion.urgency}` : "Inbox item"}
+                          {isCompanionTaskResultItem(item)
+                            ? item.terminalLabel
+                            : item.urgency
+                              ? `Priority: ${item.urgency}`
+                              : "Inbox item"}
                         </span>
+                        {isCompanionTaskResultItem(item) && <span>{item.automationTag}</span>}
                         <span>
-                          {suggestion.workspaceScope === "all"
+                          {!isCompanionTaskResultItem(item) && item.workspaceScope === "all"
                             ? "All workspaces"
-                            : suggestion.workspaceName || "Current workspace"}
+                            : item.workspaceName || "Current workspace"}
                         </span>
-                        {suggestion.sourceTaskId && <span>Task linked</span>}
-                        {suggestion.read === false && <span>Unread</span>}
+                        {isCompanionTaskResultItem(item) && item.outputLabel && <span>{item.outputLabel}</span>}
+                        {item.sourceTaskId && <span>Task linked</span>}
+                        {!isCompanionTaskResultItem(item) && item.read === false && <span>Unread</span>}
                       </div>
                     </button>
                   ))}
@@ -908,7 +1031,7 @@ export function HomeDashboard({
                 <TimerReset size={20} />
               </div>
               <div className="home-auto-card-copy">
-                <strong>Scheduled tasks</strong>
+                <strong>Triggered Work</strong>
                 <span>{automationGroups.cron} recurring</span>
               </div>
             </button>
@@ -917,8 +1040,8 @@ export function HomeDashboard({
                 <Bot size={20} />
               </div>
               <div className="home-auto-card-copy">
-                <strong>Mission Control</strong>
-                <span>{automationGroups.heartbeat} automation reviews</span>
+                <strong>Core automation</strong>
+                <span>{automationGroups.heartbeat} heartbeat reviews</span>
               </div>
             </button>
             <button type="button" className="home-auto-card" onClick={onOpenEventTriggers}>
@@ -926,7 +1049,7 @@ export function HomeDashboard({
                 <Zap size={20} />
               </div>
               <div className="home-auto-card-copy">
-                <strong>Event triggers</strong>
+                <strong>Triggers</strong>
                 <span>{automationGroups.hook + automationGroups.api} triggers</span>
               </div>
             </button>
@@ -936,7 +1059,7 @@ export function HomeDashboard({
               </div>
               <div className="home-auto-card-copy">
                 <strong>Subconscious</strong>
-                <span>{automationGroups.improvement} active</span>
+                <span>{automationGroups.improvement} core runs</span>
               </div>
             </button>
           </div>

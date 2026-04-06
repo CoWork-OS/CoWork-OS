@@ -16,11 +16,12 @@ The zero-human-company workflow is a composition of existing CoWork OS subsystem
 
 - `Workspace Kit` provides durable company context in `.cowork/`
 - `Settings > Companies` provides the control surface for creating companies, editing the company graph, and linking operators
-- `Digital Twins` provide persistent operator roles
-- `Heartbeat v3` gives those roles cheap Pulse review plus selective Dispatch escalation
+- `Digital Twins` provide optional persistent operator personas
+- `Automation Profiles` attach always-on ownership to the selected operator roles
+- `Heartbeat v3` gives those operators cheap Pulse review plus selective Dispatch escalation
 - `Strategic Planner` turns goals and stalled work into managed issues
 - `Mission Control` lets you monitor agents, issues, runs, and tasks
-- `Subconscious` can continuously reflect across company workflows, then dispatch winning recommendations into tasks, briefings, mailbox automations, triggers, or code-change work
+- `Subconscious` can continuously reflect across company workflows, then dispatch winning recommendations into tasks, notifications, or code-change work
 - `Devices` can route execution to dedicated remote machines while the company graph and planner stay on the primary control surface
 
 Together, these create an operating loop where company goals become planner-managed issues, issues become tasks, and tasks are executed by role-specific agents with configurable autonomy.
@@ -46,11 +47,12 @@ These files are injected into agent context so operators reason from company sta
 Operator agents are implemented as `AgentRole` records with:
 
 - capability and tool settings
-- Heartbeat v3 configuration (`pulseEveryMinutes`, cooldown, budget, profile)
 - role-specific prompts
 - persisted optional `companyId` assignment
 - optional `autonomyPolicy`
-- optional proactive tasks embedded in the agent `soul`
+- optional twin/persona metadata embedded in the agent `soul`
+
+Always-on ownership now lives in a separate `AutomationProfile`, which carries cadence, cooldown, budget, active hours, and heartbeat profile for the chosen operator role.
 
 The venture/operator templates include:
 
@@ -110,7 +112,7 @@ Mission Control exposes the operating loop through:
 
 ### Digital Twins
 
-Digital twins are the main way to instantiate company operators. The ZHC workflow uses the same activation flow as any other twin, but swaps in venture/operator personas and company-oriented Heartbeat v3 behavior.
+Digital twins are the main way to instantiate company operators as persona presets. The ZHC workflow uses the same activation flow as any other twin, but swaps in venture/operator personas and company-aware prompts.
 
 When a twin is created from company context, CoWork OS now persists the company assignment on the resulting `AgentRole`. That lets the product consistently show:
 
@@ -118,6 +120,8 @@ When a twin is created from company context, CoWork OS now persists the company 
 - company-scoped operator sections in `Settings > Digital Twins`
 - linked operators in `Settings > Companies`
 - preselected company context when hopping into Mission Control
+
+If that role should become always-on, attach a separate automation profile after activation. This keeps persona choice separate from core cognition ownership.
 
 ### Settings > Companies
 
@@ -137,7 +141,7 @@ The ZHC setup depends heavily on `.cowork/` files. The workspace kit is the dura
 
 ### Heartbeat Maintenance
 
-`HEARTBEAT.md` is a recurring checklist input for Heartbeat v3. Operators and dispatchers can treat it as company-ops maintenance work without creating a second automation system, while observer twins stay awareness-only.
+`HEARTBEAT.md` is a recurring checklist input for Heartbeat v3. Automation-profile-backed operators can treat it as company-ops maintenance work without creating a second automation system, while persona-only roles stay on-demand.
 
 ### Mission Control
 
@@ -162,12 +166,12 @@ If your operator tasks need to run on another machine, use the Devices tab along
 
 ### Subconscious
 
-`Subconscious` is optional but complementary to the planner/operator stack. It can reflect on company workflow evidence across:
+`Subconscious` is optional but complementary to the planner/operator stack. It is part of the core automation runtime and can reflect on company workflow evidence across:
 
 - planner-created work
 - inbox and mailbox signals
 - scheduled tasks and briefings
-- event triggers
+- event-trigger evidence
 - git-backed code workspaces
 
 It works especially well when:
@@ -197,6 +201,7 @@ flowchart LR
     workspaceKit[WorkspaceKit]
     companies[CompaniesTab]
     digitalTwins[DigitalTwins]
+    automationProfiles[AutomationProfiles]
     heartbeat[HeartbeatV3]
     planner[StrategicPlanner]
     issues[CompanyIssues]
@@ -205,7 +210,8 @@ flowchart LR
 
     workspaceKit --> companies
     companies --> digitalTwins
-    digitalTwins --> heartbeat
+    digitalTwins --> automationProfiles
+    automationProfiles --> heartbeat
     workspaceKit --> planner
     companies --> planner
     planner --> issues
@@ -222,8 +228,9 @@ Operational sequence:
 2. You create or select the company shell in `Settings > Companies`.
 3. You activate operator agents from venture-oriented persona templates.
 4. Those twins are persisted with company assignment.
-5. Heartbeat v3 runs Pulse on each agent's cadence and Dispatches only when justified.
-6. The strategic planner reviews goals, projects, and open issues.
+5. You attach automation profiles to the operator roles that should become always-on.
+6. Heartbeat v3 runs only for those automation-profile participants and Dispatches only when justified.
+7. The strategic planner reviews goals, projects, and open issues.
 7. The planner creates or updates planner-managed issues.
 8. If auto-dispatch is enabled, issues become executable tasks.
 9. Agents execute the tasks through the normal runtime.
@@ -258,6 +265,8 @@ Operator roles can carry an `autonomyPolicy` that controls:
 - approval presets
 - allowed auto-approval types
 - whether user input is allowed
+
+Core-created automated tasks now inherit a real autonomy policy instead of only disabling prompts. Routine operator work can auto-approve common safe actions, while hard guardrails and workspace capability denials still remain enforced.
 - whether a worktree is required
 
 This is how "founder-edge" operation is modeled without making every task globally fully autonomous.
@@ -372,7 +381,7 @@ Expected result:
 - `Settings > Digital Twins` shows a `Company Operators` section for the selected company
 - planner-managed issues appear in `Ops`
 - linked tasks appear on the Mission Queue board
-- heartbeat agents begin surfacing work
+- automation-profile participants begin surfacing work
 - issue runs and task timelines become visible
 
 Optional next step:
@@ -388,7 +397,7 @@ For a more realistic founder-operated company shell, activate:
 - `Growth Operator`
 - `Customer Ops Lead`
 
-Suggested Pulse cadences for a live demo:
+Suggested starting automation-profile cadences for a live demo:
 
 - `Founder Office Operator`: 10 minutes
 - `Company Planner`: 15 minutes
@@ -446,7 +455,7 @@ Keep this short and current. This is the highest-signal "what matters now" doc f
 
 ### `HEARTBEAT.md`
 
-Use this as a recurring checklist for operator or dispatcher twins:
+Use this as a recurring checklist for operator roles that also participate in core automation:
 
 - review KPI drift
 - check stalled issues
@@ -465,7 +474,7 @@ Watch for:
 - company exists in `Settings > Companies`
 - operators are linked to the intended company
 - operators present in the agents list
-- heartbeat enabled with the intended profile
+- automation profiles attached to the intended operators
 - planner configured for the expected company
 - planner cycle successfully creating issues
 
@@ -477,12 +486,13 @@ Watch:
 - Feed for Pulse, Dispatch, and activity events
 - Ops for issue state, comments, and runs
 - linked tasks from planner-managed issues
+- core-harness summaries for completed automated work
 
 ### During Autonomy Tuning
 
 Tune:
 
-- Pulse cadence, cooldown, and daily dispatch budget
+- automation-profile cadence, cooldown, and daily dispatch budget
 - approval preset
 - operator mix
 - `HEARTBEAT.md` checklist quality

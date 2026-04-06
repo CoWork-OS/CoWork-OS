@@ -193,8 +193,8 @@ describeWithSqlite("SubconsciousLoopService", () => {
     const keys = new Set(targets.map((target) => target.key));
 
     expect(result.targetCount).toBeGreaterThanOrEqual(8);
-    expect(keys).toEqual(
-      expect.setContaining([
+    expect([...keys]).toEqual(
+      expect.arrayContaining([
         "global:brain",
         `workspace:${workspace.id}`,
         "code_workspace:github:CoWork-OS/CoWork-OS",
@@ -258,6 +258,98 @@ describeWithSqlite("SubconsciousLoopService", () => {
     expect(detail?.latestEvidence).toHaveLength(2);
   });
 
+  it("writes global brain artifacts to the user data directory when no workspace root exists", async () => {
+    const { SubconsciousLoopService } = await import("../SubconsciousLoopService");
+    const service = new SubconsciousLoopService(db);
+
+    const result = await service.refreshTargets();
+
+    expect(result.targetCount).toBeGreaterThanOrEqual(1);
+    expect(
+      fs.existsSync(path.join(tmpDir, ".cowork", "subconscious", "brain", "state.json")),
+    ).toBe(true);
+  });
+
+  it("excludes persona-template roles from agent_role targets and prunes stale twin targets", async () => {
+    const workspace = insertWorkspace("twins");
+    const now = Date.now();
+
+    db.prepare(
+      `INSERT INTO agent_roles (
+        id, name, display_name, capabilities, created_at, updated_at,
+        role_kind, is_active, heartbeat_enabled, last_heartbeat_at, heartbeat_status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "operator-role",
+      "operator-role",
+      "Operator Role",
+      "[]",
+      now,
+      now,
+      "custom",
+      1,
+      1,
+      now,
+      "active",
+    );
+
+    db.prepare(
+      `INSERT INTO agent_roles (
+        id, name, display_name, capabilities, created_at, updated_at,
+        role_kind, is_active, heartbeat_enabled, last_heartbeat_at, heartbeat_status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "twin-role",
+      "twin-qa-test-engineer",
+      "Twin QA Test Engineer",
+      "[]",
+      now,
+      now,
+      "persona_template",
+      1,
+      1,
+      now,
+      "active",
+    );
+
+    db.prepare(
+      `INSERT INTO subconscious_targets (
+        target_key, kind, workspace_id, ref_json, health, state, persistence, missed_run_policy,
+        backlog_count, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "agent_role:twin-role",
+      "agent_role",
+      workspace.id,
+      JSON.stringify({
+        key: "agent_role:twin-role",
+        kind: "agent_role",
+        agentRoleId: "twin-role",
+        workspaceId: workspace.id,
+        label: "twin-qa-test-engineer",
+      }),
+      "healthy",
+      "active",
+      "sessionOnly",
+      "catchUp",
+      0,
+      now,
+      now,
+    );
+
+    const { SubconsciousLoopService } = await import("../SubconsciousLoopService");
+    const service = new SubconsciousLoopService(db, { getGlobalRoot: () => workspace.path });
+
+    await service.refreshTargets();
+    const targets = service.listTargets();
+
+    expect(targets.some((target) => target.key === "agent_role:operator-role")).toBe(true);
+    expect(targets.some((target) => target.key === "agent_role:twin-role")).toBe(false);
+    expect(
+      db.prepare("SELECT 1 FROM subconscious_targets WHERE target_key = ?").get("agent_role:twin-role"),
+    ).toBeUndefined();
+  });
+
   it("writes durable artifacts and sqlite index rows for a code workspace run", async () => {
     const workspace = insertWorkspace("beta");
     initGitRepo(workspace.path, "https://github.com/CoWork-OS/CoWork-OS.git");
@@ -277,6 +369,7 @@ describeWithSqlite("SubconsciousLoopService", () => {
       ...DEFAULT_SUBCONSCIOUS_SETTINGS,
       enabled: true,
       autoRun: false,
+      trustedTargetKeys: ["code_workspace:github:CoWork-OS/CoWork-OS"],
     });
     await service.start({
       createTask,
@@ -328,5 +421,97 @@ describeWithSqlite("SubconsciousLoopService", () => {
     expect(counts.legacyCampaigns).toBe(0);
 
     await service.stop();
+  });
+
+  it("records a sleep outcome when a target has no fresh evidence worth acting on", async () => {
+    const workspace = insertWorkspace("gamma");
+    const { SubconsciousLoopService } = await import("../SubconsciousLoopService");
+    const service = new SubconsciousLoopService(db, { getGlobalRoot: () => workspace.path });
+    service.saveSettings({
+      ...DEFAULT_SUBCONSCIOUS_SETTINGS,
+      enabled: true,
+      autoRun: false,
+    });
+
+    await service.refreshTargets();
+    const run = await service.runNow(`workspace:${workspace.id}`);
+
+    expect(run).not.toBeNull();
+    expect(run?.outcome).toBe("sleep");
+    const detail = await service.getTargetDetail(`workspace:${workspace.id}`);
+    expect(detail?.journal.some((entry) => entry.kind === "sleep")).toBe(true);
+  });
+
+  it("clears session-only target state on restart while preserving durable targets", async () => {
+    const workspace = insertWorkspace("delta");
+    const now = Date.now();
+    db.prepare(
+      `INSERT INTO mailbox_events (
+        id, fingerprint, workspace_id, event_type, thread_id, provider, subject, summary_text, payload_json, created_at, last_seen_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(randomUUID(), "mailbox-fp", workspace.id, "message_received", "thread-2", "gmail", "Delta", "Follow up", "{}", now, now);
+
+    const { SubconsciousLoopService } = await import("../SubconsciousLoopService");
+    const first = new SubconsciousLoopService(db, { getGlobalRoot: () => workspace.path });
+    first.saveSettings({
+      ...DEFAULT_SUBCONSCIOUS_SETTINGS,
+      enabled: true,
+      autoRun: false,
+      durableTargetKinds: ["workspace"],
+    });
+    await first.refreshTargets();
+    expect(first.listTargets().some((target) => target.key === `mailbox_thread:thread-2`)).toBe(true);
+    first.stop();
+
+    const second = new SubconsciousLoopService(db, { getGlobalRoot: () => workspace.path });
+    second.saveSettings({
+      ...DEFAULT_SUBCONSCIOUS_SETTINGS,
+      enabled: true,
+      autoRun: false,
+      durableTargetKinds: ["workspace"],
+    });
+    await second.start({} as unknown as import("../../agent/daemon").AgentDaemon);
+
+    const targets = second.listTargets();
+    const mailbox = targets.find((target) => target.key === `mailbox_thread:thread-2`);
+    const workspaceTarget = targets.find((target) => target.key === `workspace:${workspace.id}`);
+
+    expect(mailbox?.persistence).toBe("sessionOnly");
+    expect(workspaceTarget?.persistence).toBe("durable");
+    second.stop();
+  });
+
+  it("distills journal entries into dream artifacts and memory index", async () => {
+    const workspace = insertWorkspace("epsilon");
+    initGitRepo(workspace.path, "https://github.com/CoWork-OS/CoWork-OS.git");
+    const now = Date.now();
+    db.prepare(
+      `INSERT INTO tasks (id, title, prompt, status, workspace_id, created_at, updated_at, failure_class)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run("task-dream", "Fix reflective drift", "Investigate", "failed", workspace.id, now, now, "verification_failed");
+
+    const { SubconsciousLoopService } = await import("../SubconsciousLoopService");
+    const service = new SubconsciousLoopService(db, { getGlobalRoot: () => workspace.path });
+    service.saveSettings({
+      ...DEFAULT_SUBCONSCIOUS_SETTINGS,
+      enabled: true,
+      autoRun: false,
+      dreamsEnabled: true,
+      dreamCadenceHours: 1,
+      trustedTargetKeys: ["code_workspace:github:CoWork-OS/CoWork-OS"],
+    });
+    await service.start({
+      createTask: vi.fn().mockResolvedValue({ id: "dispatch-task-2" }),
+      getWorktreeManager: vi.fn(() => ({
+        shouldUseWorktree: vi.fn().mockResolvedValue(true),
+      })),
+    } as unknown as import("../../agent/daemon").AgentDaemon);
+
+    await service.runNow("code_workspace:github:CoWork-OS/CoWork-OS");
+    const detail = await service.getTargetDetail("code_workspace:github:CoWork-OS/CoWork-OS");
+
+    expect(detail?.journal.length).toBeGreaterThan(0);
+    expect(detail?.dreams.length).toBeGreaterThan(0);
+    expect(detail?.memory.length).toBeGreaterThan(0);
   });
 });

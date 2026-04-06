@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { AgentRoleData, AgentCapability } from "../../electron/preload";
-import type { HeartbeatProfile } from "../../shared/types";
 import { TWIN_ICON_KEYS, resolveTwinIcon } from "../utils/twin-icons";
 
 // Alias for UI usage
@@ -65,15 +64,6 @@ const AUTONOMY_LEVELS = [
   },
   { value: "lead", label: "Lead", description: "Can delegate tasks to other agents" },
 ] as const;
-
-const HEARTBEAT_INTERVALS = [
-  { value: 5, label: "5 minutes" },
-  { value: 15, label: "15 minutes" },
-  { value: 30, label: "30 minutes" },
-  { value: 60, label: "1 hour" },
-  { value: 120, label: "2 hours" },
-  { value: 240, label: "4 hours" },
-];
 
 export function AgentRoleEditor({
   role,
@@ -367,102 +357,13 @@ export function AgentRoleEditor({
 
               <div className="heartbeat-section">
                 <div className="section-header">
-                  <h4>Background Automation</h4>
-                  <label className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={editedRole.heartbeatEnabled || false}
-                      onChange={(e) => handleChange("heartbeatEnabled", e.target.checked)}
-                    />
-                    <span className="toggle-slider"></span>
-                  </label>
+                  <h4>Core Automation</h4>
                 </div>
                 <p className="section-description">
-                  When enabled, this agent runs periodic background reviews for mentions, assigned
-                  work, and other operating signals.
+                  Heartbeat, subconscious, and memory are configured separately in Mission Control.
+                  Agent roles define operator identity and mandate, but they do not own core
+                  automation policy inline anymore.
                 </p>
-
-                {editedRole.heartbeatEnabled && (
-                  <div className="heartbeat-options">
-                    <div className="form-row">
-                      <label>Review Every</label>
-                      <select
-                        value={editedRole.pulseEveryMinutes || editedRole.heartbeatIntervalMinutes || 15}
-                        onChange={(e) =>
-                          handleChange("pulseEveryMinutes", parseInt(e.target.value))
-                        }
-                      >
-                        {HEARTBEAT_INTERVALS.map((interval) => (
-                          <option key={interval.value} value={interval.value}>
-                            {interval.label}
-                          </option>
-                        ))}
-                      </select>
-                      <span className="form-hint">Cheap review cadence for deterministic background checks</span>
-                    </div>
-
-                    <div className="form-row">
-                      <label>Stagger Offset (minutes)</label>
-                      <input
-                        type="number"
-                        value={editedRole.heartbeatStaggerOffset || 0}
-                        onChange={(e) =>
-                          handleChange("heartbeatStaggerOffset", parseInt(e.target.value) || 0)
-                        }
-                        min={0}
-                        max={60}
-                      />
-                      <span className="form-hint">
-                        Offset to stagger background reviews across multiple agents (0-60 minutes)
-                      </span>
-                    </div>
-
-                    <div className="form-row">
-                      <label>Profile</label>
-                      <select
-                        value={editedRole.heartbeatProfile || "observer"}
-                        onChange={(e) =>
-                          handleChange("heartbeatProfile", e.target.value as HeartbeatProfile)
-                        }
-                      >
-                        <option value="observer">Observer</option>
-                        <option value="operator">Operator</option>
-                        <option value="dispatcher">Dispatcher</option>
-                      </select>
-                      <span className="form-hint">
-                        Observer = awareness only, Operator = maintenance, Dispatcher = escalation
-                      </span>
-                    </div>
-
-                    <div className="form-row">
-                      <label>Escalation Cooldown (minutes)</label>
-                      <input
-                        type="number"
-                        value={editedRole.dispatchCooldownMinutes || 120}
-                        onChange={(e) =>
-                          handleChange("dispatchCooldownMinutes", parseInt(e.target.value) || 120)
-                        }
-                        min={0}
-                        max={1440}
-                      />
-                      <span className="form-hint">Minimum gap between escalations</span>
-                    </div>
-
-                    <div className="form-row">
-                      <label>Max Escalations / Day</label>
-                      <input
-                        type="number"
-                        value={editedRole.maxDispatchesPerDay || 6}
-                        onChange={(e) =>
-                          handleChange("maxDispatchesPerDay", parseInt(e.target.value) || 6)
-                        }
-                        min={0}
-                        max={100}
-                      />
-                      <span className="form-hint">Daily budget for task/runbook escalation</span>
-                    </div>
-                  </div>
-                )}
               </div>
             </div>
           )}

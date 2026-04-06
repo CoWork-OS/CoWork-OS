@@ -74,6 +74,24 @@ Default behavior depends on the selected permission mode:
 - `dont_ask` - allow anything not hard-blocked or explicitly denied
 - `bypass_permissions` - skip prompts and ask-rules, but still enforce hard guardrails, task restrictions, workspace capability gates, and explicit deny rules
 
+## Core Automation Defaults
+
+Always-on core automation does not rely on `bypass_permissions` by default.
+
+Instead, core-created automated tasks inherit an autonomy policy that:
+
+- disables interactive user-input pauses
+- auto-approves common automation-safe actions such as `run_command`
+- can also auto-approve `network_access` and `external_service` for trusted operator work
+- still preserves hard guardrails, workspace capability denials, and explicit deny rules
+
+This is the default posture for the Heartbeat/Subconscious core runtime because it keeps routine operator work flowing without turning the permission system off.
+
+In other words:
+
+- **core automation uses stronger allow rules**
+- **it does not skip the permission engine entirely**
+
 ## Denial Fallback
 
 Soft denials are not always the end of the story.
@@ -116,8 +134,11 @@ to wait for another approval prompt.
 `TaskExecutor` delegates permission decisions to the runtime and keeps only task bootstrap,
 finalization, and UI projection responsibilities.
 
+The always-on automation runtime layers on top of this by spawning tasks with explicit autonomy presets rather than depending on manual approval toggles.
+
 ## Related Docs
 
+- [Core Automation](core-automation.md)
 - [Security Guide](security-guide.md)
 - [Architecture](architecture.md)
 - [Session Runtime](session-runtime.md)

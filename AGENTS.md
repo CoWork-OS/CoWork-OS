@@ -40,6 +40,35 @@ When a user reports a failure, error, or unexpected behavior:
 - Use `npm run package` for standard local installer packaging after a full build.
 - On macOS distribution/signing flows, use `npm run package:mac`; it loads optional repo-root `.env.mac` (see `scripts/mac-notarize.env.example`) before running build + `electron-builder --mac --publish never`.
 
+## NPM Release Workflow
+
+- When asked to "publish a new release" or ship a new npm version, do **not** publish from a dirty working tree. Use a clean checkout or `git worktree`.
+- Do **not** rely on `prepack`/`npm publish` lifecycle hooks for correctness. This repo's `.npmrc` sets `ignore-scripts=true`, so a naive `npm pack`/`npm publish` can skip the build and ship a broken package.
+- Before any npm publish, explicitly run:
+  - `npm ci --no-audit --no-fund`
+  - `npm run build`
+- After building, create the tarball explicitly with `npm pack --ignore-scripts --silent`.
+- Verify the tarball contains the built desktop artifacts before publish. At minimum, it must contain:
+  - `package/dist/electron/electron/main.js`
+  - `package/dist/renderer/index.html`
+- Validate the packed tarball in a clean temp project before publish:
+  - install the tarball with `npm install --ignore-scripts --omit=optional --no-audit --no-fund <tarball>`
+  - run `npm run --prefix node_modules/cowork-os setup`
+  - fail if setup falls back into dependency bootstrap unexpectedly
+  - verify Electron can load `better-sqlite3`
+- For release candidates that touch database schema or migrations, also test an upgrade-path database, not just a fresh install. Specifically verify startup/migration succeeds against an older DB shape representative of the reported issue.
+- Publish from the clean built worktree with `npm publish --ignore-scripts` (plus `--otp=<code>` when npm 2FA requires it).
+- After publish, verify registry propagation with:
+  - `npm view cowork-os@<version> version`
+  - `npm view cowork-os@<version> dist.tarball`
+- When validating a Windows npm fix, prefer this recovery flow so old global installs do not interfere:
+  - `taskkill /F /IM electron.exe /IM node.exe 2>nul`
+  - `npm uninstall -g cowork-os`
+  - remove `%APPDATA%\\npm\\node_modules\\cowork-os` and related `cowork-*.cmd` launchers if they still exist
+  - `npm cache clean --force`
+  - `npm install -g cowork-os@<version>`
+- Do **not** advise users to delete their CoWork database/app-data directory for install or migration issues unless the user explicitly accepts data loss. Prefer shipping a migration fix.
+
 ## QA and Reliability Commands
 
 - Use `npm run kit:lint` to run workspace kit health checks from the CLI (human-readable by default, JSON export supported by the CLI).

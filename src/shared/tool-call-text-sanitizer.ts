@@ -9,6 +9,8 @@ const XML_TOOL_PATTERNS: RegExp[] = [
   /<tool_result\b[\s\S]*?<\/tool_result>/gi,
   /<tool\b[^>]*>[\s\S]*?<\/tool>/gi,
   /<function_call\b[\s\S]*?<\/function_call>/gi,
+  /<\/?(?:tool_call|tool_result|tool|function_call)\b[^>]*>/gi,
+  /<\/?[a-z0-9_-]+:(?:tool_call|tool_result|tool|function_call)\b[^>]*>/gi,
   /<tool_name>\s*[^<]+<\/tool_name>\s*<parameters>\s*[\s\S]*?<\/parameters>/gi,
   /<tool_name>\s*[^<]+<\/tool_name>/gi,
   /<parameters>\s*[\s\S]*?<\/parameters>/gi,

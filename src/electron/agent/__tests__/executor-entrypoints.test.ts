@@ -379,4 +379,45 @@ describe("TaskExecutor entrypoint guards", () => {
     expect(required).toEqual([".md"]);
     expect(executor.inferRequiredArtifactExtensions).not.toHaveBeenCalled();
   });
+
+  it("does not re-inject the same pre-finalization reminder in a follow-up loop", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+
+    const first = (TaskExecutor as Any).prototype.shouldInjectPreFinalizationReminder.call(
+      executor,
+      "\n\nPRE-FINALIZATION REMINDER:\n- Pending verification checklist items remain: Verify manuscript word count / completion state.",
+      null,
+    );
+    const second = (TaskExecutor as Any).prototype.shouldInjectPreFinalizationReminder.call(
+      executor,
+      "\n\nPRE-FINALIZATION REMINDER:\n- Pending verification checklist items remain: Verify manuscript word count / completion state.",
+      "\n\nPRE-FINALIZATION REMINDER:\n- Pending verification checklist items remain: Verify manuscript word count / completion state.",
+    );
+    const changed = (TaskExecutor as Any).prototype.shouldInjectPreFinalizationReminder.call(
+      executor,
+      "\n\nPRE-FINALIZATION REMINDER:\n- Pending verification checklist items remain: Confirm compiled manuscript file.",
+      "\n\nPRE-FINALIZATION REMINDER:\n- Pending verification checklist items remain: Verify manuscript word count / completion state.",
+    );
+
+    expect(first).toBe(true);
+    expect(second).toBe(false);
+    expect(changed).toBe(true);
+  });
+
+  it("deduplicates repeated tool-batch semantic summaries", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+
+    const summary = (TaskExecutor as Any).prototype.combineBatchSemanticSummaries.call(executor, [
+      { semanticSummary: "I've Verified The Chapter Set Is Complete. Now I'm Doing The Exa" },
+      { semanticSummary: "I've Verified The Chapter Set Is Complete. Now I'm Doing The Exa" },
+      { semanticSummary: "Count Text" },
+      { semanticSummary: "Count Text" },
+      { semanticSummary: "Read Chapters" },
+      { semanticSummary: "Count Text" },
+    ]);
+
+    expect(summary).toBe(
+      "I've Verified The Chapter Set Is Complete. Now I'm Doing The Exa · Count Text · Read Chapters",
+    );
+  });
 });

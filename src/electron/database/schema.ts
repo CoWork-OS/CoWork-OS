@@ -56,13 +56,13 @@ export class DatabaseManager {
 
     // Verify the replacement actually happened (paths should be different)
     if (oldDataPath === normalizedNewPath) {
-      console.log("[DatabaseManager] Cannot determine legacy path from:", newDataPath);
+      schemaLogger.warn("Cannot determine legacy path from:", newDataPath);
       return;
     }
 
     // Check if old directory exists
     if (!fs.existsSync(oldDataPath)) {
-      console.log("[DatabaseManager] No legacy directory found at:", oldDataPath);
+      schemaLogger.info("No legacy directory found at:", oldDataPath);
       return; // No legacy data to migrate
     }
 
@@ -78,16 +78,16 @@ export class DatabaseManager {
         if (markerData.version >= DatabaseManager.MIGRATION_VERSION) {
           return; // Already migrated with current or newer version
         }
-        console.log("[DatabaseManager] Re-running migration (version upgrade)...");
+        schemaLogger.info("Re-running migration (version upgrade)...");
       } catch {
         // Old format marker (just a date string) - re-run migration
-        console.log("[DatabaseManager] Re-running migration (old marker format)...");
+        schemaLogger.info("Re-running migration (old marker format)...");
       }
     }
 
-    console.log("[DatabaseManager] Migrating data from cowork-oss to cowork-os...");
-    console.log("[DatabaseManager] Old path:", oldDataPath);
-    console.log("[DatabaseManager] New path:", normalizedNewPath);
+    schemaLogger.info("Migrating data from cowork-oss to cowork-os...");
+    schemaLogger.info("Old path:", oldDataPath);
+    schemaLogger.info("New path:", normalizedNewPath);
 
     let migrationSuccessful = true;
     const migratedFiles: string[] = [];
@@ -102,18 +102,21 @@ export class DatabaseManager {
       // 1. Migrate database if old exists and new doesn't (or new is smaller)
       if (fs.existsSync(oldDbPath)) {
         const oldDbSize = fs.statSync(oldDbPath).size;
+        const oldDbHealthy = this.databasePassesIntegrityCheck(oldDbPath);
         const newDbExists = fs.existsSync(newDbPath);
         const newDbSize = newDbExists ? fs.statSync(newDbPath).size : 0;
+        const newDbHealthy = newDbExists ? this.databasePassesIntegrityCheck(newDbPath) : false;
 
-        // Copy if new doesn't exist, or old is significantly larger (has more data)
-        if (!newDbExists || oldDbSize > newDbSize) {
-          console.log(
-            `[DatabaseManager] Copying database (old: ${oldDbSize} bytes, new: ${newDbSize} bytes)...`,
+        if (!oldDbHealthy) {
+          schemaLogger.warn("Legacy database failed integrity_check, skipping copy:", oldDbPath);
+        } else if (!newDbExists || !newDbHealthy || oldDbSize > newDbSize) {
+          schemaLogger.info(
+            `Copying database (old: ${oldDbSize} bytes, new: ${newDbSize} bytes, newHealthy: ${newDbHealthy})...`,
           );
           fs.copyFileSync(oldDbPath, newDbPath);
           migratedFiles.push("cowork-os.db");
         } else {
-          console.log("[DatabaseManager] Database already exists and is larger, skipping...");
+          schemaLogger.info("Database already exists, passed integrity_check, and is not smaller. Skipping copy.");
         }
       }
 
@@ -142,7 +145,7 @@ export class DatabaseManager {
 
           // Copy if new doesn't exist, or old file is larger (has more data)
           if (!newExists || oldSize > newSize) {
-            console.log(
+            schemaLogger.info(
               `[DatabaseManager] Migrating ${file} (old: ${oldSize} bytes, new: ${newSize} bytes)...`,
             );
             fs.copyFileSync(oldFile, newFile);
@@ -165,7 +168,7 @@ export class DatabaseManager {
 
           // Copy if new doesn't exist, is empty, or has significantly fewer files
           if (!newDirExists || newDirCount === 0 || oldDirCount > newDirCount * 2) {
-            console.log(
+            schemaLogger.info(
               `[DatabaseManager] Migrating ${dir}/ (old: ${oldDirCount} files, new: ${newDirCount} files)...`,
             );
             this.copyDirectoryRecursive(oldDir, newDir);
@@ -183,17 +186,17 @@ export class DatabaseManager {
       };
       fs.writeFileSync(migrationMarker, JSON.stringify(markerData, null, 2));
 
-      console.log("[DatabaseManager] Migration completed successfully.");
-      console.log("[DatabaseManager] Migrated files:", migratedFiles);
-      console.log("[DatabaseManager] Migrated directories:", migratedDirs);
+      schemaLogger.info("Migration completed successfully.");
+      schemaLogger.info("Migrated files:", migratedFiles);
+      schemaLogger.info("Migrated directories:", migratedDirs);
     } catch (error) {
-      console.error("[DatabaseManager] Migration failed:", error);
+      schemaLogger.error("Migration failed:", error);
       migrationSuccessful = false;
       // Don't create marker if migration failed - allows retry on next startup
     }
 
     if (!migrationSuccessful) {
-      console.warn("[DatabaseManager] Migration incomplete - will retry on next startup");
+      schemaLogger.warn("Migration incomplete - will retry on next startup");
     }
   }
 
@@ -222,6 +225,28 @@ export class DatabaseManager {
       }
     } catch (error) {
       schemaLogger.warn("Failed to restrict database file permissions:", error);
+    }
+  }
+
+  private databasePassesIntegrityCheck(filePath: string): boolean {
+    if (!fs.existsSync(filePath)) {
+      return false;
+    }
+
+    let probe: Database.Database | null = null;
+    try {
+      probe = new Database(filePath, { readonly: true, fileMustExist: true });
+      const result = probe.prepare("PRAGMA integrity_check").pluck().get() as string | undefined;
+      return result === "ok";
+    } catch (error) {
+      schemaLogger.warn(`integrity_check failed for ${filePath}:`, error);
+      return false;
+    } finally {
+      try {
+        probe?.close();
+      } catch {
+        // Best-effort cleanup only.
+      }
     }
   }
 
@@ -681,12 +706,8 @@ export class DatabaseManager {
         ON task_events(timestamp DESC);
       CREATE INDEX IF NOT EXISTS idx_task_events_type_timestamp_task
         ON task_events(type, timestamp DESC, task_id);
-      CREATE INDEX IF NOT EXISTS idx_task_events_legacy_type_timestamp_task
-        ON task_events(legacy_type, timestamp DESC, task_id);
       CREATE INDEX IF NOT EXISTS idx_task_events_task_type_timestamp
         ON task_events(task_id, type, timestamp DESC);
-      CREATE INDEX IF NOT EXISTS idx_task_events_task_legacy_type_timestamp
-        ON task_events(task_id, legacy_type, timestamp DESC);
       CREATE INDEX IF NOT EXISTS idx_artifacts_task ON artifacts(task_id);
       CREATE INDEX IF NOT EXISTS idx_approvals_task ON approvals(task_id);
       CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status);
@@ -1376,7 +1397,7 @@ export class DatabaseManager {
       `);
     } catch (error) {
       // FTS5 might not be available in all SQLite builds
-      console.warn(
+      schemaLogger.warn(
         "[DatabaseManager] FTS5 initialization failed, full-text search will be disabled:",
         error,
       );
@@ -1398,7 +1419,7 @@ export class DatabaseManager {
         );
       `);
     } catch (error) {
-      console.warn(
+      schemaLogger.warn(
         "[DatabaseManager] Markdown FTS5 initialization failed, markdown full-text search will be limited:",
         error,
       );
@@ -1504,6 +1525,19 @@ export class DatabaseManager {
       this.db.exec("CREATE INDEX IF NOT EXISTS idx_task_events_task_seq ON task_events(task_id, seq)");
     } catch {
       // Index already exists, ignore
+    }
+
+    // These indexes depend on the timeline-v2 legacy_type column, so create them
+    // only after the migration above has had a chance to add the column on older DBs.
+    try {
+      this.db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_task_events_legacy_type_timestamp_task
+          ON task_events(legacy_type, timestamp DESC, task_id);
+        CREATE INDEX IF NOT EXISTS idx_task_events_task_legacy_type_timestamp
+          ON task_events(task_id, legacy_type, timestamp DESC);
+      `);
+    } catch {
+      // Column may still be unavailable on partially-corrupt DBs; a later repair can retry.
     }
 
     // Migration: Add pinned marker to tasks table
@@ -2123,7 +2157,114 @@ export class DatabaseManager {
         }
       }
     } catch (error) {
-      console.error("[DatabaseManager] Failed to migrate heartbeat policies:", error);
+      schemaLogger.error("Failed to migrate heartbeat policies:", error);
+    }
+
+    try {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS automation_profiles (
+          id TEXT PRIMARY KEY,
+          agent_role_id TEXT NOT NULL UNIQUE REFERENCES agent_roles(id) ON DELETE CASCADE,
+          enabled INTEGER NOT NULL DEFAULT 0,
+          cadence_minutes INTEGER NOT NULL DEFAULT 15,
+          stagger_offset_minutes INTEGER NOT NULL DEFAULT 0,
+          dispatch_cooldown_minutes INTEGER NOT NULL DEFAULT 120,
+          max_dispatches_per_day INTEGER NOT NULL DEFAULT 6,
+          profile TEXT NOT NULL DEFAULT 'observer',
+          active_hours TEXT,
+          heartbeat_status TEXT NOT NULL DEFAULT 'idle',
+          last_heartbeat_at INTEGER,
+          last_pulse_at INTEGER,
+          last_dispatch_at INTEGER,
+          heartbeat_last_pulse_result TEXT,
+          heartbeat_last_dispatch_kind TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_automation_profiles_enabled
+          ON automation_profiles(enabled, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_automation_profiles_agent_role
+          ON automation_profiles(agent_role_id);
+      `);
+    } catch {
+      // Table already exists, ignore
+    }
+
+    try {
+      const existingAutomationRoleIds = new Set(
+        (
+          this.db.prepare("SELECT agent_role_id FROM automation_profiles").all() as Array<{
+            agent_role_id?: string;
+          }>
+        )
+          .map((row) => (typeof row.agent_role_id === "string" ? row.agent_role_id : ""))
+          .filter(Boolean),
+      );
+      const policies = this.db.prepare(
+        `SELECT hp.*, ar.role_kind, ar.name,
+                ar.last_heartbeat_at, ar.last_pulse_at, ar.last_dispatch_at,
+                ar.heartbeat_status, ar.heartbeat_last_pulse_result, ar.heartbeat_last_dispatch_kind,
+                ar.created_at AS role_created_at, ar.updated_at AS role_updated_at
+         FROM heartbeat_policies hp
+         JOIN agent_roles ar ON ar.id = hp.agent_role_id`,
+      ).all() as Array<Record<string, unknown>>;
+      const insertAutomationProfile = this.db.prepare(
+        `INSERT INTO automation_profiles (
+          id, agent_role_id, enabled, cadence_minutes, stagger_offset_minutes,
+          dispatch_cooldown_minutes, max_dispatches_per_day, profile, active_hours,
+          heartbeat_status, last_heartbeat_at, last_pulse_at, last_dispatch_at,
+          heartbeat_last_pulse_result, heartbeat_last_dispatch_kind, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      const deleteTwinProfiles = this.db.prepare(
+        `DELETE FROM automation_profiles
+         WHERE agent_role_id IN (
+           SELECT id FROM agent_roles WHERE role_kind = 'persona_template'
+         )`,
+      );
+
+      deleteTwinProfiles.run();
+
+      for (const policy of policies) {
+        const agentRoleId =
+          typeof policy.agent_role_id === "string" ? policy.agent_role_id : "";
+        if (!agentRoleId || existingAutomationRoleIds.has(agentRoleId)) {
+          continue;
+        }
+        if (policy.role_kind === "persona_template") {
+          continue;
+        }
+        const createdAt = Number(policy.role_created_at || policy.created_at || Date.now());
+        const updatedAt = Number(policy.role_updated_at || policy.updated_at || Date.now());
+        insertAutomationProfile.run(
+          typeof crypto?.randomUUID === "function"
+            ? crypto.randomUUID()
+            : `${agentRoleId}-automation-profile`,
+          agentRoleId,
+          policy.enabled === 1 ? 1 : 0,
+          Number(policy.cadence_minutes || 15),
+          Number(policy.stagger_offset_minutes || 0),
+          Number(policy.dispatch_cooldown_minutes || 120),
+          Number(policy.max_dispatches_per_day || 6),
+          typeof policy.profile === "string" ? policy.profile : "observer",
+          typeof policy.active_hours === "string" ? policy.active_hours : null,
+          typeof policy.heartbeat_status === "string" ? policy.heartbeat_status : "idle",
+          Number(policy.last_heartbeat_at || 0) || null,
+          Number(policy.last_pulse_at || 0) || null,
+          Number(policy.last_dispatch_at || 0) || null,
+          typeof policy.heartbeat_last_pulse_result === "string"
+            ? policy.heartbeat_last_pulse_result
+            : null,
+          typeof policy.heartbeat_last_dispatch_kind === "string"
+            ? policy.heartbeat_last_dispatch_kind
+            : null,
+          createdAt,
+          updatedAt,
+        );
+      }
+    } catch (error) {
+      schemaLogger.error("Failed to migrate automation profiles:", error);
     }
 
     // Fix broken FK reference in tasks table caused by previous heartbeat_runs migration.
@@ -2137,8 +2278,8 @@ export class DatabaseManager {
         .get() as { sql?: string } | undefined;
 
       if (tasksSchema?.sql?.includes("heartbeat_runs_legacy")) {
-        console.log(
-          "[DatabaseManager] Fixing broken tasks FK reference (heartbeat_runs_legacy → heartbeat_runs)...",
+        schemaLogger.info(
+          "Fixing broken tasks FK reference (heartbeat_runs_legacy -> heartbeat_runs)...",
         );
         this.db.exec("PRAGMA foreign_keys = OFF");
         try {
@@ -2155,7 +2296,7 @@ export class DatabaseManager {
           this.db.exec(`INSERT INTO tasks_rebuild (${columns}) SELECT ${columns} FROM tasks`);
           this.db.exec("DROP TABLE tasks");
           this.db.exec("ALTER TABLE tasks_rebuild RENAME TO tasks");
-          console.log("[DatabaseManager] Fixed broken FK reference in tasks table.");
+          schemaLogger.info("Fixed broken FK reference in tasks table.");
         } catch (rebuildErr) {
           try {
             this.db.exec("DROP TABLE IF EXISTS tasks_rebuild");
@@ -2168,7 +2309,7 @@ export class DatabaseManager {
         }
       }
     } catch (error) {
-      console.error("[DatabaseManager] Failed to fix broken FK reference in tasks table:", error);
+      schemaLogger.error("Failed to fix broken FK reference in tasks table:", error);
     }
 
     try {
@@ -2297,7 +2438,7 @@ export class DatabaseManager {
         }
       }
     } catch (error) {
-      console.error("[DatabaseManager] Failed heartbeat_runs migration:", error);
+      schemaLogger.error("[DatabaseManager] Failed heartbeat_runs migration:", error);
     }
 
     const taskLinkageColumns = [
@@ -2862,6 +3003,27 @@ export class DatabaseManager {
 
     try {
       this.db.exec(`
+        CREATE TRIGGER IF NOT EXISTS prevent_automation_profile_delete_with_core_history
+        BEFORE DELETE ON automation_profiles
+        FOR EACH ROW
+        WHEN EXISTS (SELECT 1 FROM core_traces WHERE profile_id = OLD.id LIMIT 1)
+          OR EXISTS (SELECT 1 FROM core_memory_candidates WHERE profile_id = OLD.id LIMIT 1)
+          OR EXISTS (SELECT 1 FROM core_memory_distill_runs WHERE profile_id = OLD.id LIMIT 1)
+          OR EXISTS (SELECT 1 FROM core_failure_records WHERE profile_id = OLD.id LIMIT 1)
+          OR EXISTS (SELECT 1 FROM core_failure_clusters WHERE profile_id = OLD.id LIMIT 1)
+          OR EXISTS (SELECT 1 FROM core_eval_cases WHERE profile_id = OLD.id LIMIT 1)
+          OR EXISTS (SELECT 1 FROM core_harness_experiments WHERE profile_id = OLD.id LIMIT 1)
+          OR EXISTS (SELECT 1 FROM core_learnings_log WHERE profile_id = OLD.id LIMIT 1)
+        BEGIN
+          SELECT RAISE(ABORT, 'Cannot delete automation profile with preserved core history');
+        END;
+      `);
+    } catch (error) {
+      schemaLogger.warn("[DatabaseManager] Failed to install automation profile delete guard:", error);
+    }
+
+    try {
+      this.db.exec(`
         CREATE TABLE IF NOT EXISTS kg_entities (
           id TEXT PRIMARY KEY,
           workspace_id TEXT NOT NULL,
@@ -3092,6 +3254,14 @@ export class DatabaseManager {
           ref_json TEXT NOT NULL,
           health TEXT NOT NULL,
           state TEXT NOT NULL,
+          persistence TEXT NOT NULL DEFAULT 'durable',
+          missed_run_policy TEXT NOT NULL DEFAULT 'catchUp',
+          next_eligible_at INTEGER,
+          last_observed_at INTEGER,
+          last_action_at INTEGER,
+          expires_at INTEGER,
+          jitter_ms INTEGER,
+          last_meaningful_outcome TEXT,
           last_winner TEXT,
           last_run_at INTEGER,
           last_evidence_at INTEGER,
@@ -3121,6 +3291,12 @@ export class DatabaseManager {
           dispatch_status TEXT,
           blocked_reason TEXT,
           error TEXT,
+          confidence REAL,
+          risk_level TEXT,
+          evidence_sources_json TEXT,
+          evidence_freshness REAL,
+          permission_decision TEXT,
+          notification_intent TEXT,
           rejected_hypothesis_ids_json TEXT NOT NULL,
           started_at INTEGER NOT NULL,
           completed_at INTEGER,
@@ -3225,12 +3401,447 @@ export class DatabaseManager {
 
         CREATE INDEX IF NOT EXISTS idx_subconscious_dispatch_target
           ON subconscious_dispatch_records(target_key, created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS core_traces (
+          id TEXT PRIMARY KEY,
+          profile_id TEXT NOT NULL REFERENCES automation_profiles(id) ON DELETE CASCADE,
+          workspace_id TEXT,
+          target_key TEXT,
+          source_surface TEXT NOT NULL,
+          trace_kind TEXT NOT NULL,
+          status TEXT NOT NULL,
+          task_id TEXT,
+          heartbeat_run_id TEXT,
+          subconscious_run_id TEXT,
+          summary TEXT,
+          error TEXT,
+          started_at INTEGER NOT NULL,
+          completed_at INTEGER,
+          created_at INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_core_traces_profile
+          ON core_traces(profile_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_core_traces_workspace
+          ON core_traces(workspace_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_core_traces_target
+          ON core_traces(target_key, created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS core_trace_events (
+          id TEXT PRIMARY KEY,
+          trace_id TEXT NOT NULL REFERENCES core_traces(id) ON DELETE CASCADE,
+          phase TEXT NOT NULL,
+          event_type TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          details_json TEXT,
+          created_at INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_core_trace_events_trace
+          ON core_trace_events(trace_id, created_at ASC);
+
+        CREATE TABLE IF NOT EXISTS core_memory_candidates (
+          id TEXT PRIMARY KEY,
+          trace_id TEXT NOT NULL REFERENCES core_traces(id) ON DELETE CASCADE,
+          profile_id TEXT NOT NULL REFERENCES automation_profiles(id) ON DELETE CASCADE,
+          workspace_id TEXT,
+          scope_kind TEXT NOT NULL,
+          scope_ref TEXT NOT NULL,
+          candidate_type TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          details TEXT,
+          confidence REAL NOT NULL,
+          novelty_score REAL NOT NULL,
+          stability_score REAL NOT NULL,
+          status TEXT NOT NULL,
+          resolution TEXT,
+          source_run_id TEXT,
+          created_at INTEGER NOT NULL,
+          resolved_at INTEGER
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_core_memory_candidates_scope
+          ON core_memory_candidates(scope_kind, scope_ref, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_core_memory_candidates_status
+          ON core_memory_candidates(status, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_core_memory_candidates_profile
+          ON core_memory_candidates(profile_id, created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS core_memory_distill_runs (
+          id TEXT PRIMARY KEY,
+          profile_id TEXT NOT NULL REFERENCES automation_profiles(id) ON DELETE CASCADE,
+          workspace_id TEXT,
+          mode TEXT NOT NULL,
+          source_trace_count INTEGER NOT NULL DEFAULT 0,
+          candidate_count INTEGER NOT NULL DEFAULT 0,
+          accepted_count INTEGER NOT NULL DEFAULT 0,
+          pruned_count INTEGER NOT NULL DEFAULT 0,
+          status TEXT NOT NULL,
+          summary_json TEXT,
+          error TEXT,
+          started_at INTEGER NOT NULL,
+          completed_at INTEGER
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_core_memory_distill_runs_profile
+          ON core_memory_distill_runs(profile_id, started_at DESC);
+
+        CREATE TABLE IF NOT EXISTS core_memory_scope_state (
+          scope_kind TEXT NOT NULL,
+          scope_ref TEXT NOT NULL,
+          last_trace_at INTEGER,
+          last_distill_at INTEGER,
+          last_prune_at INTEGER,
+          stability_version INTEGER NOT NULL DEFAULT 1,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY (scope_kind, scope_ref)
+        );
+
+        CREATE TABLE IF NOT EXISTS core_failure_records (
+          id TEXT PRIMARY KEY,
+          trace_id TEXT NOT NULL REFERENCES core_traces(id) ON DELETE CASCADE,
+          profile_id TEXT NOT NULL REFERENCES automation_profiles(id) ON DELETE CASCADE,
+          workspace_id TEXT,
+          target_key TEXT,
+          category TEXT NOT NULL,
+          severity TEXT NOT NULL,
+          fingerprint TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          details TEXT,
+          status TEXT NOT NULL,
+          source_surface TEXT NOT NULL,
+          task_id TEXT,
+          created_at INTEGER NOT NULL,
+          resolved_at INTEGER
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_core_failure_records_profile
+          ON core_failure_records(profile_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_core_failure_records_trace
+          ON core_failure_records(trace_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_core_failure_records_fingerprint
+          ON core_failure_records(fingerprint, created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS core_failure_clusters (
+          id TEXT PRIMARY KEY,
+          profile_id TEXT NOT NULL REFERENCES automation_profiles(id) ON DELETE CASCADE,
+          workspace_id TEXT,
+          category TEXT NOT NULL,
+          fingerprint TEXT NOT NULL,
+          root_cause_summary TEXT NOT NULL,
+          status TEXT NOT NULL,
+          recurrence_count INTEGER NOT NULL DEFAULT 1,
+          linked_eval_case_id TEXT,
+          linked_experiment_id TEXT,
+          first_seen_at INTEGER NOT NULL,
+          last_seen_at INTEGER NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_core_failure_clusters_profile
+          ON core_failure_clusters(profile_id, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_core_failure_clusters_fingerprint
+          ON core_failure_clusters(fingerprint, updated_at DESC);
+
+        CREATE TABLE IF NOT EXISTS core_failure_cluster_members (
+          cluster_id TEXT NOT NULL REFERENCES core_failure_clusters(id) ON DELETE CASCADE,
+          failure_record_id TEXT NOT NULL REFERENCES core_failure_records(id) ON DELETE CASCADE,
+          created_at INTEGER NOT NULL,
+          PRIMARY KEY (cluster_id, failure_record_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS core_eval_cases (
+          id TEXT PRIMARY KEY,
+          profile_id TEXT NOT NULL REFERENCES automation_profiles(id) ON DELETE CASCADE,
+          workspace_id TEXT,
+          cluster_id TEXT NOT NULL REFERENCES core_failure_clusters(id) ON DELETE CASCADE,
+          title TEXT NOT NULL,
+          spec_json TEXT NOT NULL,
+          status TEXT NOT NULL,
+          pass_count INTEGER NOT NULL DEFAULT 0,
+          fail_count INTEGER NOT NULL DEFAULT 0,
+          last_run_at INTEGER,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_core_eval_cases_profile
+          ON core_eval_cases(profile_id, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_core_eval_cases_cluster
+          ON core_eval_cases(cluster_id, updated_at DESC);
+
+        CREATE TABLE IF NOT EXISTS core_eval_case_runs (
+          id TEXT PRIMARY KEY,
+          case_id TEXT NOT NULL REFERENCES core_eval_cases(id) ON DELETE CASCADE,
+          passed INTEGER NOT NULL,
+          summary TEXT NOT NULL,
+          details_json TEXT,
+          created_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS core_harness_experiments (
+          id TEXT PRIMARY KEY,
+          profile_id TEXT NOT NULL REFERENCES automation_profiles(id) ON DELETE CASCADE,
+          workspace_id TEXT,
+          cluster_id TEXT NOT NULL REFERENCES core_failure_clusters(id) ON DELETE CASCADE,
+          change_kind TEXT NOT NULL,
+          proposal_json TEXT NOT NULL,
+          status TEXT NOT NULL,
+          summary TEXT,
+          promoted_at INTEGER,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_core_harness_experiments_profile
+          ON core_harness_experiments(profile_id, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_core_harness_experiments_cluster
+          ON core_harness_experiments(cluster_id, updated_at DESC);
+
+        CREATE TABLE IF NOT EXISTS core_harness_experiment_runs (
+          id TEXT PRIMARY KEY,
+          experiment_id TEXT NOT NULL REFERENCES core_harness_experiments(id) ON DELETE CASCADE,
+          status TEXT NOT NULL,
+          baseline_json TEXT,
+          outcome_json TEXT,
+          gate_result_id TEXT,
+          summary TEXT,
+          created_at INTEGER NOT NULL,
+          started_at INTEGER,
+          completed_at INTEGER
+        );
+
+        CREATE TABLE IF NOT EXISTS core_regression_gate_results (
+          id TEXT PRIMARY KEY,
+          experiment_run_id TEXT NOT NULL REFERENCES core_harness_experiment_runs(id) ON DELETE CASCADE,
+          passed INTEGER NOT NULL,
+          target_improved INTEGER NOT NULL,
+          regressions_detected_json TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          details_json TEXT,
+          created_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS core_learnings_log (
+          id TEXT PRIMARY KEY,
+          profile_id TEXT NOT NULL REFERENCES automation_profiles(id) ON DELETE CASCADE,
+          workspace_id TEXT,
+          kind TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          details TEXT,
+          related_cluster_id TEXT,
+          related_experiment_id TEXT,
+          created_at INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_core_learnings_profile
+          ON core_learnings_log(profile_id, created_at DESC);
       `);
     } catch {
       // Table already exists
     }
 
+    try {
+      this.db.exec(`
+        INSERT OR IGNORE INTO core_traces (
+          id, profile_id, workspace_id, target_key, source_surface, trace_kind, status,
+          task_id, heartbeat_run_id, subconscious_run_id, summary, error, started_at, completed_at, created_at
+        )
+        SELECT
+          'hbtrace:' || r.id,
+          ap.id,
+          r.workspace_id,
+          CASE WHEN r.agent_role_id IS NOT NULL THEN 'agent_role:' || r.agent_role_id ELSE NULL END,
+          'heartbeat',
+          'pulse_cycle',
+          CASE
+            WHEN r.status = 'failed' THEN 'failed'
+            WHEN r.status = 'cancelled' THEN 'skipped'
+            WHEN r.status = 'running' THEN 'running'
+            ELSE 'completed'
+          END,
+          r.task_id,
+          r.id,
+          NULL,
+          COALESCE(r.summary, r.reason),
+          r.error,
+          COALESCE(r.started_at, r.created_at),
+          r.completed_at,
+          r.created_at
+        FROM heartbeat_runs r
+        JOIN automation_profiles ap ON ap.agent_role_id = r.agent_role_id;
+
+        INSERT OR IGNORE INTO core_trace_events (
+          id, trace_id, phase, event_type, summary, details_json, created_at
+        )
+        SELECT
+          'hbtrace-event:start:' || r.id,
+          'hbtrace:' || r.id,
+          'start',
+          'heartbeat.run_started',
+          COALESCE(r.reason, 'Heartbeat run started'),
+          NULL,
+          COALESCE(r.started_at, r.created_at)
+        FROM heartbeat_runs r
+        JOIN automation_profiles ap ON ap.agent_role_id = r.agent_role_id;
+
+        INSERT OR IGNORE INTO core_trace_events (
+          id, trace_id, phase, event_type, summary, details_json, created_at
+        )
+        SELECT
+          'hbtrace-event:complete:' || r.id,
+          'hbtrace:' || r.id,
+          CASE
+            WHEN r.status = 'failed' THEN 'error'
+            WHEN r.run_type = 'dispatch' THEN 'dispatch'
+            ELSE 'complete'
+          END,
+          CASE
+            WHEN r.status = 'failed' THEN 'heartbeat.run_failed'
+            WHEN r.run_type = 'dispatch' THEN 'heartbeat.dispatch_finished'
+            ELSE 'heartbeat.run_finished'
+          END,
+          COALESCE(r.summary, r.reason, 'Heartbeat run completed'),
+          NULL,
+          COALESCE(r.completed_at, r.updated_at, r.created_at)
+        FROM heartbeat_runs r
+        JOIN automation_profiles ap ON ap.agent_role_id = r.agent_role_id
+        WHERE r.status != 'running';
+
+        INSERT OR IGNORE INTO core_traces (
+          id, profile_id, workspace_id, target_key, source_surface, trace_kind, status,
+          task_id, heartbeat_run_id, subconscious_run_id, summary, error, started_at, completed_at, created_at
+        )
+        SELECT
+          'sctrace:' || r.id,
+          ap.id,
+          r.workspace_id,
+          r.target_key,
+          'subconscious',
+          'subconscious_cycle',
+          CASE
+            WHEN r.stage = 'failed' OR r.outcome = 'failed' THEN 'failed'
+            WHEN r.stage = 'blocked' THEN 'skipped'
+            WHEN r.stage = 'completed' THEN 'completed'
+            ELSE 'running'
+          END,
+          dr.task_id,
+          NULL,
+          r.id,
+          r.evidence_summary,
+          r.error,
+          r.started_at,
+          r.completed_at,
+          r.created_at
+        FROM subconscious_runs r
+        LEFT JOIN subconscious_dispatch_records dr ON dr.run_id = r.id
+        JOIN automation_profiles ap ON r.target_key = 'agent_role:' || ap.agent_role_id;
+
+        INSERT OR IGNORE INTO core_trace_events (
+          id, trace_id, phase, event_type, summary, details_json, created_at
+        )
+        SELECT
+          'sctrace-event:start:' || r.id,
+          'sctrace:' || r.id,
+          'start',
+          'subconscious.run_started',
+          COALESCE(r.evidence_summary, 'Subconscious run started'),
+          NULL,
+          r.started_at
+        FROM subconscious_runs r
+        JOIN automation_profiles ap ON r.target_key = 'agent_role:' || ap.agent_role_id;
+
+        INSERT OR IGNORE INTO core_trace_events (
+          id, trace_id, phase, event_type, summary, details_json, created_at
+        )
+        SELECT
+          'sctrace-event:complete:' || r.id,
+          'sctrace:' || r.id,
+          CASE
+            WHEN r.stage = 'failed' OR r.outcome = 'failed' THEN 'error'
+            WHEN r.dispatch_kind IS NOT NULL THEN 'dispatch'
+            ELSE 'complete'
+          END,
+          CASE
+            WHEN r.stage = 'failed' OR r.outcome = 'failed' THEN 'subconscious.run_failed'
+            WHEN r.dispatch_kind IS NOT NULL THEN 'subconscious.dispatch_finished'
+            ELSE 'subconscious.run_finished'
+          END,
+          COALESCE(r.evidence_summary, r.outcome, 'Subconscious run completed'),
+          NULL,
+          COALESCE(r.completed_at, r.created_at)
+        FROM subconscious_runs r
+        JOIN automation_profiles ap ON r.target_key = 'agent_role:' || ap.agent_role_id
+        WHERE r.stage IN ('completed', 'failed', 'blocked');
+
+        INSERT OR IGNORE INTO core_memory_scope_state (
+          scope_kind, scope_ref, last_trace_at, last_distill_at, last_prune_at, stability_version, updated_at
+        )
+        SELECT
+          'automation_profile',
+          ap.id,
+          MAX(ct.created_at),
+          NULL,
+          NULL,
+          1,
+          COALESCE(MAX(ct.created_at), CAST(strftime('%s','now') AS INTEGER) * 1000)
+        FROM automation_profiles ap
+        LEFT JOIN core_traces ct ON ct.profile_id = ap.id
+        GROUP BY ap.id;
+
+        INSERT OR IGNORE INTO core_failure_records (
+          id, trace_id, profile_id, workspace_id, target_key, category, severity, fingerprint,
+          summary, details, status, source_surface, task_id, created_at, resolved_at
+        )
+        SELECT
+          'core-failure:' || ct.id,
+          ct.id,
+          ct.profile_id,
+          ct.workspace_id,
+          ct.target_key,
+          CASE
+            WHEN LOWER(COALESCE(ct.summary, '') || ' ' || COALESCE(ct.error, '')) LIKE '%cooldown%' THEN 'cooldown_policy_mismatch'
+            WHEN LOWER(COALESCE(ct.summary, '') || ' ' || COALESCE(ct.error, '')) LIKE '%active hours%' THEN 'wake_timing'
+            WHEN LOWER(COALESCE(ct.summary, '') || ' ' || COALESCE(ct.error, '')) LIKE '%no evidence%' THEN 'subconscious_low_signal'
+            WHEN LOWER(COALESCE(ct.summary, '') || ' ' || COALESCE(ct.error, '')) LIKE '%duplicate%' THEN 'subconscious_duplication'
+            WHEN LOWER(COALESCE(ct.summary, '') || ' ' || COALESCE(ct.error, '')) LIKE '%budget%' THEN 'budget_policy_mismatch'
+            ELSE 'unknown'
+          END,
+          CASE WHEN ct.status = 'failed' THEN 'high' ELSE 'medium' END,
+          LOWER(COALESCE(ct.source_surface, '') || '::' || COALESCE(ct.trace_kind, '') || '::' || COALESCE(ct.target_key, '') || '::' || COALESCE(ct.summary, '') || '::' || COALESCE(ct.error, '')),
+          COALESCE(ct.summary, ct.error, 'Core runtime issue detected'),
+          ct.error,
+          CASE WHEN ct.status = 'completed' THEN 'clustered' ELSE 'open' END,
+          ct.source_surface,
+          ct.task_id,
+          COALESCE(ct.completed_at, ct.created_at),
+          CASE WHEN ct.status = 'completed' THEN COALESCE(ct.completed_at, ct.created_at) ELSE NULL END
+        FROM core_traces ct
+        WHERE ct.status IN ('failed', 'skipped')
+           OR LOWER(COALESCE(ct.summary, '') || ' ' || COALESCE(ct.error, '')) LIKE '%no evidence%'
+           OR LOWER(COALESCE(ct.summary, '') || ' ' || COALESCE(ct.error, '')) LIKE '%duplicate%'
+           OR LOWER(COALESCE(ct.summary, '') || ' ' || COALESCE(ct.error, '')) LIKE '%cooldown%';
+      `);
+    } catch (error) {
+      schemaLogger.error("[DatabaseManager] Failed core trace backfill:", error);
+    }
+
     for (const statement of [
+      "ALTER TABLE subconscious_targets ADD COLUMN persistence TEXT NOT NULL DEFAULT 'durable'",
+      "ALTER TABLE subconscious_targets ADD COLUMN missed_run_policy TEXT NOT NULL DEFAULT 'catchUp'",
+      "ALTER TABLE subconscious_targets ADD COLUMN next_eligible_at INTEGER",
+      "ALTER TABLE subconscious_targets ADD COLUMN last_observed_at INTEGER",
+      "ALTER TABLE subconscious_targets ADD COLUMN last_action_at INTEGER",
+      "ALTER TABLE subconscious_targets ADD COLUMN expires_at INTEGER",
+      "ALTER TABLE subconscious_targets ADD COLUMN jitter_ms INTEGER",
+      "ALTER TABLE subconscious_targets ADD COLUMN last_meaningful_outcome TEXT",
+      "ALTER TABLE subconscious_runs ADD COLUMN confidence REAL",
+      "ALTER TABLE subconscious_runs ADD COLUMN risk_level TEXT",
+      "ALTER TABLE subconscious_runs ADD COLUMN evidence_sources_json TEXT",
+      "ALTER TABLE subconscious_runs ADD COLUMN evidence_freshness REAL",
+      "ALTER TABLE subconscious_runs ADD COLUMN permission_decision TEXT",
+      "ALTER TABLE subconscious_runs ADD COLUMN notification_intent TEXT",
       "ALTER TABLE improvement_runs ADD COLUMN promotion_status TEXT DEFAULT 'idle'",
       "ALTER TABLE improvement_runs ADD COLUMN merge_result TEXT",
       "ALTER TABLE improvement_runs ADD COLUMN pull_request TEXT",
@@ -3263,7 +3874,7 @@ export class DatabaseManager {
         if (/duplicate column name|already exists/i.test(msg)) {
           continue; // Expected when column exists
         }
-        console.error("[DatabaseManager] Migration failed (schema may be inconsistent):", statement, msg);
+        schemaLogger.error("[DatabaseManager] Migration failed (schema may be inconsistent):", statement, msg);
         throw err;
       }
     }
@@ -3279,7 +3890,7 @@ export class DatabaseManager {
         if (/duplicate column name|already exists/i.test(msg)) {
           continue; // Expected when column exists
         }
-        console.error("[DatabaseManager] Migration failed (schema may be inconsistent):", statement, msg);
+        schemaLogger.error("[DatabaseManager] Migration failed (schema may be inconsistent):", statement, msg);
         throw err;
       }
     }
@@ -3421,7 +4032,7 @@ export class DatabaseManager {
         if (/duplicate column name|already exists/i.test(msg)) {
           continue;
         }
-        console.error("[DatabaseManager] Migration failed:", statement, msg);
+        schemaLogger.error("[DatabaseManager] Migration failed:", statement, msg);
       }
     }
 
@@ -3438,7 +4049,7 @@ export class DatabaseManager {
         if (/duplicate column name|already exists/i.test(msg)) {
           continue;
         }
-        console.error("[DatabaseManager] Migration failed:", statement, msg);
+        schemaLogger.error("[DatabaseManager] Migration failed:", statement, msg);
       }
     }
 
@@ -3942,7 +4553,7 @@ export class DatabaseManager {
         END;
       `);
     } catch (error) {
-      console.warn("[DatabaseManager] Knowledge Graph FTS5 initialization failed:", error);
+      schemaLogger.warn("[DatabaseManager] Knowledge Graph FTS5 initialization failed:", error);
     }
   }
 
@@ -4030,7 +4641,7 @@ export class DatabaseManager {
         }
       }
     } catch (error) {
-      console.warn("[DatabaseManager] Failed to seed knowledge graph types:", error);
+      schemaLogger.warn("[DatabaseManager] Failed to seed knowledge graph types:", error);
     }
   }
 
@@ -4174,7 +4785,7 @@ export class DatabaseManager {
         stmt.run(m.key, m.provider, m.display, m.input, m.output, m.cached, now);
       }
     } catch (error) {
-      console.warn("[DatabaseManager] Failed to seed LLM pricing:", error);
+      schemaLogger.warn("[DatabaseManager] Failed to seed LLM pricing:", error);
     }
   }
 

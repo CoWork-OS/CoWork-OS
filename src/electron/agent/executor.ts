@@ -144,6 +144,7 @@ import { InfraManager } from "../infra/infra-manager";
 import { InfraSettingsManager } from "../infra/infra-settings";
 import { buildBestKnownOutcome, mergeBestKnownOutcome } from "./outcome-policy";
 import { QueryOrchestrator } from "./orchestration/QueryOrchestrator";
+import { matchesExplicitSkillInvocationPhrase } from "./skill-invocation-utils";
 import {
   AcpxRuntimeRunner,
   AcpxRuntimeUnavailableError,
@@ -9172,6 +9173,27 @@ ${transcript}
     return `\n\nPRE-FINALIZATION REMINDER:\n${lines.join("\n")}`;
   }
 
+  private shouldInjectPreFinalizationReminder(
+    reminder: string,
+    lastInjectedReminder: string | null,
+  ): boolean {
+    const normalizedReminder = String(reminder || "").trim();
+    if (!normalizedReminder) return false;
+    return normalizedReminder !== String(lastInjectedReminder || "").trim();
+  }
+
+  private combineBatchSemanticSummaries(
+    batches: Array<{ semanticSummary?: string | null }>,
+  ): string {
+    const orderedUnique = new Set<string>();
+    for (const batch of batches) {
+      const summary = typeof batch?.semanticSummary === "string" ? batch.semanticSummary.trim() : "";
+      if (!summary) continue;
+      orderedUnique.add(summary);
+    }
+    return Array.from(orderedUnique.values()).join(" · ");
+  }
+
   private resolveStepExecutionContract(step: PlanStep): StepExecutionContract {
     const descriptionRaw = String(step.description || "");
     const description = descriptionRaw.toLowerCase();
@@ -17411,7 +17433,8 @@ You are continuing a previous conversation. The context from the previous conver
   }
 
   private normalizeSkillInvocationQuery(query: string): string {
-    return String(query || "")
+    const sanitized = sanitizeToolCallTextFromAssistant(String(query || "")).text;
+    return sanitized
       .toLowerCase()
       .replace(/[-_\s]+/g, " ")
       .trim();
@@ -17508,23 +17531,38 @@ You are continuing a previous conversation. The context from the previous conver
     return new RegExp(`(?:^|[^a-z0-9])${pattern}(?:$|[^a-z0-9])`, "i").test(normalizedQuery);
   }
 
+  private matchesExplicitSkillInvocationTarget(normalizedQuery: string, phrase: string): boolean {
+    const normalizedPhrase = this.normalizeSkillInvocationQuery(phrase);
+    return matchesExplicitSkillInvocationPhrase(
+      normalizedQuery,
+      normalizedPhrase,
+      (segment) => this.escapeSkillInvocationPattern(segment),
+    );
+  }
+
+  private skillHasRequiredInvocationParameters(skill: Any): boolean {
+    const parameters: Any[] = Array.isArray(skill?.parameters) ? skill.parameters : [];
+    return parameters.some(
+      (param: Any) =>
+        param &&
+        typeof param === "object" &&
+        param.required === true &&
+        param.default === undefined,
+    );
+  }
+
   private isExplicitSkillInvocation(query: string, skill: Any): boolean {
     const normalizedQuery = this.normalizeSkillInvocationQuery(query);
     if (!normalizedQuery) return false;
-
-    const activationCue = /\b(?:use|run|call|invoke|activate|apply|launch|start|enable|turn on|work on|help with|help me with)\b/;
-    const skillCue = /\bskill\b/;
-    if (!activationCue.test(normalizedQuery) && !skillCue.test(normalizedQuery)) {
-      return false;
-    }
 
     const skillId = String(skill?.id || "").trim();
     const skillName = String(skill?.name || "").trim();
     if (!skillId && !skillName) return false;
 
     return (
-      (skillId.length > 0 && this.queryContainsSkillInvocationPhrase(normalizedQuery, skillId)) ||
-      (skillName.length > 0 && this.queryContainsSkillInvocationPhrase(normalizedQuery, skillName))
+      (skillId.length > 0 && this.matchesExplicitSkillInvocationTarget(normalizedQuery, skillId)) ||
+      (skillName.length > 0 &&
+        this.matchesExplicitSkillInvocationTarget(normalizedQuery, skillName))
     );
   }
 
@@ -17536,10 +17574,10 @@ You are continuing a previous conversation. The context from the previous conver
     const skillName = String(skill?.name || "").trim();
     let score = 0;
 
-    if (skillId && this.queryContainsSkillInvocationPhrase(normalizedQuery, skillId)) {
+    if (skillId && this.matchesExplicitSkillInvocationTarget(normalizedQuery, skillId)) {
       score += 4;
     }
-    if (skillName && this.queryContainsSkillInvocationPhrase(normalizedQuery, skillName)) {
+    if (skillName && this.matchesExplicitSkillInvocationTarget(normalizedQuery, skillName)) {
       score += 3;
     }
     if (/\bskill\b/.test(normalizedQuery)) {
@@ -17613,6 +17651,18 @@ You are continuing a previous conversation. The context from the previous conver
     const skillId = String(candidate.id || "").trim();
     const skillName = String(candidate.name || skillId).trim();
     if (!skillId) {
+      return false;
+    }
+
+    if (this.skillHasRequiredInvocationParameters(candidate)) {
+      this.emitEvent("log", {
+        message:
+          `[skill-routing] skipped auto-applying explicitly requested skill '${skillId}' ` +
+          "because it requires parameters that cannot be inferred from plain-text invocation.",
+        taskId: this.task.id,
+        stepId: source === "step" ? this.currentStepId || undefined : undefined,
+        queryPreview: this.normalizeSkillInvocationQuery(query).slice(0, 160),
+      });
       return false;
     }
 
@@ -23285,10 +23335,7 @@ Return ONLY a JSON object:
             });
 
             toolResults.push(...scheduledOutcome.toolResults);
-            batchSemanticSummary = scheduledOutcome.batches
-              .map((batch) => batch.semanticSummary?.trim())
-              .filter((value): value is string => Boolean(value && value.length > 0))
-              .join(" · ");
+            batchSemanticSummary = this.combineBatchSemanticSummaries(scheduledOutcome.batches);
             this.recordSemanticSummary(batchSemanticSummary);
             this.emitEvent("log", {
               metric: "parallel_candidate_count",
@@ -26910,6 +26957,12 @@ Return ONLY a JSON object:
       return "model_capability";
     }
     if (
+      (error?.status === 404 || message.includes("404")) &&
+      message.includes("no endpoints found that support image input")
+    ) {
+      return "model_capability";
+    }
+    if (
       message.includes("timeout") ||
       message.includes("timed out") ||
       message.includes("network") ||
@@ -27434,6 +27487,7 @@ Return ONLY a JSON object:
     let consecutiveMaxTokenStops = 0;
     let followUpToolCallsLocked = false;
     let consecutiveSkippedToolOnlyTurns = 0;
+    let lastInjectedPreFinalizationReminder: string | null = null;
     // Varied failure detection: non-resetting per-tool failure counter (not reset on success)
     const persistentToolFailures = new Map<string, number>();
     let variedFailureNudgeInjected = false;
@@ -28623,10 +28677,7 @@ Return ONLY a JSON object:
               });
 
               toolResults.push(...scheduledOutcome.toolResults);
-              batchSemanticSummary = scheduledOutcome.batches
-                .map((batch) => batch.semanticSummary?.trim())
-                .filter((value): value is string => Boolean(value && value.length > 0))
-                .join(" · ");
+              batchSemanticSummary = this.combineBatchSemanticSummaries(scheduledOutcome.batches);
               this.recordSemanticSummary(batchSemanticSummary);
               this.emitEvent("log", {
                 metric: "parallel_candidate_count",
@@ -29002,7 +29053,13 @@ Return ONLY a JSON object:
 
         if (wantsToEnd) {
           const reminder = this.buildPreFinalizationReminder();
-          if (reminder) {
+          if (
+            this.shouldInjectPreFinalizationReminder(
+              reminder,
+              lastInjectedPreFinalizationReminder,
+            )
+          ) {
+            lastInjectedPreFinalizationReminder = reminder;
             messages.push({
               role: "user",
               content: [{ type: "text", text: this.sanitizeFallbackInstruction(reminder) }],

@@ -195,6 +195,7 @@ describe("isAutomatedSession", () => {
   it("treats scheduled and self-improvement tasks as automated", () => {
     expect(isAutomatedSession(createTask({ source: "cron" }))).toBe(true);
     expect(isAutomatedSession(createTask({ source: "improvement" }))).toBe(true);
+    expect(isAutomatedSession(createTask({ source: "subconscious" }))).toBe(true);
   });
 
   it("keeps webhook and generic api tasks out of the automated bucket", () => {

@@ -133,6 +133,26 @@ describe("TaskExecutor executeUnlocked retry semantics", () => {
 });
 
 describe("TaskExecutor provider failover retry semantics", () => {
+  it("preserves image-aware failover context when retrying without an explicit modality override", async () => {
+    const executor = createRetryExecutor() as Any;
+    executor.llmCallSequence = 0;
+    executor.providerRetryV2Enabled = false;
+    executor.providerFailoverRequiresImageInput = true;
+    executor.recordObservedOutputThroughput = vi.fn();
+    executor.ensureProviderFailoverSelectionsContext = vi.fn();
+
+    await executor.callLLMWithRetry(
+      vi.fn().mockResolvedValue({
+        content: [],
+        stopReason: "end_turn",
+        usage: { inputTokens: 1, outputTokens: 1 },
+      }),
+      "image-aware retry",
+    );
+
+    expect(executor.ensureProviderFailoverSelectionsContext).toHaveBeenCalledWith(true);
+  });
+
   it("switches to the next configured provider when a retryable LLM error occurs", async () => {
     const executor = createRetryExecutor();
     executor.llmCallSequence = 0;
@@ -228,6 +248,173 @@ describe("TaskExecutor provider failover retry semantics", () => {
         success: true,
       }),
     ]);
+  });
+
+  it("retries the next provider immediately after failover without backoff", async () => {
+    const executor = createRetryExecutor();
+    executor.llmCallSequence = 0;
+    executor.providerRetryV2Enabled = false;
+    executor.recordObservedOutputThroughput = vi.fn();
+    executor.provider = { type: "openai", createMessage: vi.fn() };
+    executor.modelId = "gpt-4o-mini";
+    executor.modelKey = "gpt-4o-mini";
+    executor.llmProfileUsed = "cheap";
+    executor.resolvedModelKey = "gpt-4o-mini";
+    executor.providerFailoverIndex = 0;
+    executor.providerFailoverSelections = [
+      {
+        providerType: "openai",
+        modelId: "gpt-4o-mini",
+        modelKey: "gpt-4o-mini",
+        llmProfileUsed: "cheap",
+        resolvedModelKey: "gpt-4o-mini",
+        modelSource: "provider_default",
+        warnings: [],
+      },
+      {
+        providerType: "anthropic",
+        modelId: "claude-sonnet-4-5-20250514",
+        modelKey: "sonnet-4-5",
+        llmProfileUsed: "cheap",
+        resolvedModelKey: "sonnet-4-5",
+        modelSource: "provider_default",
+        warnings: [],
+      },
+    ];
+    executor.lastRoutingState = {
+      currentProvider: "openai",
+      currentModel: "gpt-4o-mini",
+      activeProvider: "openai",
+      activeModel: "gpt-4o-mini",
+      routeReason: "automatic_execution",
+      fallbackChain: [],
+      fallbackOccurred: false,
+      manualOverride: false,
+      updatedAt: Date.now(),
+    };
+    executor.emitRoutingState = vi.fn((overrides?: Any) => {
+      executor.lastRoutingState = {
+        currentProvider: "openai",
+        currentModel: "gpt-4o-mini",
+        activeProvider: executor.provider.type,
+        activeModel: executor.modelId,
+        routeReason: overrides?.routeReason || "automatic_execution",
+        fallbackChain: overrides?.fallbackChain || [],
+        fallbackOccurred: overrides?.fallbackOccurred ?? false,
+        manualOverride: overrides?.manualOverride ?? false,
+        updatedAt: Date.now(),
+      };
+    });
+    executor.applyResolvedProviderSelection = vi.fn((selection: Any) => {
+      executor.provider = { type: selection.providerType, createMessage: vi.fn() };
+      executor.modelId = selection.modelId;
+      executor.modelKey = selection.modelKey;
+      executor.llmProfileUsed = selection.llmProfileUsed;
+      executor.resolvedModelKey = selection.resolvedModelKey;
+    });
+
+    const requestFn = vi.fn(async () => {
+      if (executor.provider.type === "openai") {
+        const error = new Error("rate limit exceeded");
+        (error as Any).status = 429;
+        throw error;
+      }
+      return {
+        content: [],
+        stopReason: "end_turn",
+        usage: { inputTokens: 10, outputTokens: 5 },
+      };
+    });
+
+    await (executor as Any).callLLMWithRetry(requestFn, "provider failover without delay");
+
+    const retryEvents = executor.emitEvent.mock.calls
+      .filter((call: Any[]) => call[0] === "llm_retry")
+      .map((call: Any[]) => call[1]);
+    expect(retryEvents).toEqual(
+      expect.arrayContaining([expect.objectContaining({ attempt: 1, delayMs: 0 })]),
+    );
+  });
+
+  it("retries the primary provider once before cross-provider failover on transient outages", async () => {
+    const executor = createRetryExecutor();
+    executor.llmCallSequence = 0;
+    executor.providerRetryV2Enabled = true;
+    executor.recordObservedOutputThroughput = vi.fn();
+    executor.provider = { type: "azure", createMessage: vi.fn() };
+    executor.modelId = "gpt-5.4";
+    executor.modelKey = "gpt-5.4";
+    executor.llmProfileUsed = "strong";
+    executor.resolvedModelKey = "gpt-5.4";
+    executor.providerFailoverIndex = 0;
+    executor.providerFailoverSelections = [
+      {
+        providerType: "azure",
+        modelId: "gpt-5.4",
+        modelKey: "gpt-5.4",
+        llmProfileUsed: "strong",
+        resolvedModelKey: "gpt-5.4",
+        modelSource: "provider_default",
+        warnings: [],
+      },
+      {
+        providerType: "openrouter",
+        modelId: "qwen/qwen3.6-plus:free",
+        modelKey: "qwen/qwen3.6-plus:free",
+        llmProfileUsed: "strong",
+        resolvedModelKey: "qwen/qwen3.6-plus:free",
+        modelSource: "provider_default",
+        warnings: [],
+      },
+    ];
+    executor.lastRoutingState = {
+      currentProvider: "azure",
+      currentModel: "gpt-5.4",
+      activeProvider: "azure",
+      activeModel: "gpt-5.4",
+      routeReason: "profile_routing",
+      fallbackChain: [],
+      fallbackOccurred: false,
+      manualOverride: false,
+      updatedAt: Date.now(),
+    };
+    executor.emitRoutingState = vi.fn((overrides?: Any) => {
+      executor.lastRoutingState = {
+        currentProvider: "azure",
+        currentModel: "gpt-5.4",
+        activeProvider: executor.provider.type,
+        activeModel: executor.modelId,
+        routeReason: overrides?.routeReason || "profile_routing",
+        fallbackChain: overrides?.fallbackChain || [],
+        fallbackOccurred: overrides?.fallbackOccurred ?? false,
+        manualOverride: overrides?.manualOverride ?? false,
+        updatedAt: Date.now(),
+      };
+    });
+    executor.applyResolvedProviderSelection = vi.fn((selection: Any) => {
+      executor.provider = { type: selection.providerType, createMessage: vi.fn() };
+      executor.modelId = selection.modelId;
+      executor.modelKey = selection.modelKey;
+      executor.llmProfileUsed = selection.llmProfileUsed;
+      executor.resolvedModelKey = selection.resolvedModelKey;
+    });
+
+    const requestFn = vi
+      .fn()
+      .mockRejectedValueOnce(Object.assign(new Error("fetch failed"), { code: "ECONNRESET" }))
+      .mockResolvedValueOnce({
+        content: [],
+        stopReason: "end_turn",
+        usage: { inputTokens: 10, outputTokens: 5 },
+      });
+
+    const response = await (executor as Any).callLLMWithRetry(requestFn, "provider outage retry");
+
+    expect(response.stopReason).toBe("end_turn");
+    expect(requestFn).toHaveBeenCalledTimes(2);
+    expect(executor.provider.type).toBe("azure");
+    expect(executor.providerFailoverIndex).toBe(0);
+    expect(executor.applyResolvedProviderSelection).not.toHaveBeenCalled();
   });
 
   it("uses the configured primary retry cooldown when failover activates", () => {
@@ -485,5 +672,126 @@ describe("TaskExecutor provider failover retry semantics", () => {
         success: true,
       }),
     ]);
+  });
+
+  it("fails over on retryable OpenRouter tool_choice route errors", async () => {
+    const executor = createRetryExecutor();
+    executor.llmCallSequence = 0;
+    executor.providerRetryV2Enabled = true;
+    executor.recordObservedOutputThroughput = vi.fn();
+    executor.provider = { type: "openrouter", createMessage: vi.fn() };
+    executor.modelId = "nvidia/nemotron-3-super-120b-a12b:free";
+    executor.modelKey = "nvidia/nemotron-3-super-120b-a12b:free";
+    executor.llmProfileUsed = "cheap";
+    executor.resolvedModelKey = "nvidia/nemotron-3-super-120b-a12b:free";
+    executor.providerFailoverIndex = 0;
+    executor.providerFailoverSelections = [
+      {
+        providerType: "openrouter",
+        modelId: "nvidia/nemotron-3-super-120b-a12b:free",
+        modelKey: "nvidia/nemotron-3-super-120b-a12b:free",
+        llmProfileUsed: "cheap",
+        resolvedModelKey: "nvidia/nemotron-3-super-120b-a12b:free",
+        modelSource: "provider_default",
+        warnings: [],
+      },
+      {
+        providerType: "openrouter",
+        modelId: "qwen/qwen3.6-plus:free",
+        modelKey: "qwen/qwen3.6-plus:free",
+        llmProfileUsed: "cheap",
+        resolvedModelKey: "qwen/qwen3.6-plus:free",
+        modelSource: "provider_default",
+        warnings: [],
+      },
+    ];
+    executor.lastRoutingState = {
+      currentProvider: "openrouter",
+      currentModel: "nvidia/nemotron-3-super-120b-a12b:free",
+      activeProvider: "openrouter",
+      activeModel: "nvidia/nemotron-3-super-120b-a12b:free",
+      routeReason: "automatic_execution",
+      fallbackChain: [],
+      fallbackOccurred: false,
+      manualOverride: false,
+      updatedAt: Date.now(),
+    };
+    executor.emitRoutingState = vi.fn((overrides?: Any) => {
+      executor.lastRoutingState = {
+        currentProvider: "openrouter",
+        currentModel: "nvidia/nemotron-3-super-120b-a12b:free",
+        activeProvider: executor.provider.type,
+        activeModel: executor.modelId,
+        routeReason: overrides?.routeReason || "automatic_execution",
+        fallbackChain: overrides?.fallbackChain || [],
+        fallbackOccurred: overrides?.fallbackOccurred ?? false,
+        manualOverride: overrides?.manualOverride ?? false,
+        updatedAt: Date.now(),
+      };
+    });
+    executor.applyResolvedProviderSelection = vi.fn((selection: Any) => {
+      executor.provider = { type: selection.providerType, createMessage: vi.fn() };
+      executor.modelId = selection.modelId;
+      executor.modelKey = selection.modelKey;
+      executor.llmProfileUsed = selection.llmProfileUsed;
+      executor.resolvedModelKey = selection.resolvedModelKey;
+    });
+
+    const requestFn = vi.fn(async () => {
+      if (executor.modelId === "nvidia/nemotron-3-super-120b-a12b:free") {
+        const error = new Error(
+          "OpenRouter API error: 404 Not Found - No endpoints found that support the provided 'tool_choice' value. To learn more about provider routing, visit: https://openrouter.ai/docs/guides/routing/provider-selection",
+        );
+        (error as Any).status = 404;
+        (error as Any).retryable = true;
+        throw error;
+      }
+      return {
+        content: [],
+        stopReason: "end_turn",
+        usage: { inputTokens: 10, outputTokens: 5 },
+      };
+    });
+
+    const response = await (executor as Any).callLLMWithRetry(
+      requestFn,
+      "provider tool-choice failover",
+    );
+
+    expect(response.stopReason).toBe("end_turn");
+    expect(requestFn).toHaveBeenCalledTimes(2);
+    expect(executor.modelId).toBe("qwen/qwen3.6-plus:free");
+    expect(executor.providerFailoverIndex).toBe(1);
+    expect(executor.lastRoutingState?.routeReason).toBe("model_capability");
+    expect(executor.lastRoutingState?.fallbackOccurred).toBe(true);
+    expect(executor.lastRoutingState?.fallbackChain).toEqual([
+      expect.objectContaining({
+        providerType: "openrouter",
+        modelKey: "nvidia/nemotron-3-super-120b-a12b:free",
+        reason: "model_capability",
+        success: false,
+      }),
+      expect.objectContaining({
+        providerType: "openrouter",
+        modelKey: "qwen/qwen3.6-plus:free",
+        success: true,
+      }),
+    ]);
+  });
+});
+
+describe("TaskExecutor planning warmup tool routing", () => {
+  it("skips planning warmup tools on OpenRouter failover routes", () => {
+    const executor = createRetryExecutor() as Any;
+    executor.provider = { type: "openrouter" };
+    executor.providerFailoverIndex = 1;
+    executor.getEffectivePromptCachingSettings = vi.fn().mockReturnValue({
+      mode: "auto",
+      surfaceCoverage: { executor: true },
+    });
+
+    expect(
+      executor.shouldWarmPlanningPromptCacheWithTools("openrouter-openai", "executor"),
+    ).toBe(false);
   });
 });

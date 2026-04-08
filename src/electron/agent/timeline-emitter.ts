@@ -30,6 +30,7 @@ interface StepOptions {
   groupId?: string;
   message?: string;
   legacyType?: EventType;
+  extraPayload?: Record<string, unknown>;
 }
 
 export class TimelineEmitter {
@@ -114,6 +115,7 @@ export class TimelineEmitter {
 
   startStep(step: StepDescriptor, options: StepOptions = {}): void {
     this.emit("timeline_step_started", {
+      ...(options.extraPayload || {}),
       stepId: step.id || `step:${this.taskId}`,
       step,
       groupId: options.groupId,
@@ -126,6 +128,7 @@ export class TimelineEmitter {
 
   updateStep(step: StepDescriptor, options: StepOptions = {}): void {
     this.emit("timeline_step_updated", {
+      ...(options.extraPayload || {}),
       stepId: step.id || `step:${this.taskId}`,
       step,
       groupId: options.groupId,
@@ -138,6 +141,7 @@ export class TimelineEmitter {
 
   finishStep(step: StepDescriptor, options: StepOptions = {}): void {
     this.emit("timeline_step_finished", {
+      ...(options.extraPayload || {}),
       stepId: step.id || `step:${this.taskId}`,
       step,
       groupId: options.groupId,
@@ -150,6 +154,7 @@ export class TimelineEmitter {
 
   failStep(step: StepDescriptor, reason: string, options: StepOptions = {}): void {
     this.emit("timeline_step_finished", {
+      ...(options.extraPayload || {}),
       stepId: step.id || `step:${this.taskId}`,
       step: {
         ...step,

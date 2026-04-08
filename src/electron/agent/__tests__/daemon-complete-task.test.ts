@@ -105,6 +105,10 @@ describe("AgentDaemon.completeTask", () => {
 
     expect(daemonLike.pendingApprovals.size).toBe(0);
     expect(daemonLike.approvalRepo.update).toHaveBeenCalledWith("approval-1", "denied");
+    expect(daemonLike.logEvent).toHaveBeenCalledWith("task-1", "approval_denied", {
+      approvalId: "approval-1",
+      reason: "task_ended",
+    });
     expect(rejected).toHaveBeenCalledWith(
       expect.objectContaining({
         message: "Task ended before the approval request was resolved.",

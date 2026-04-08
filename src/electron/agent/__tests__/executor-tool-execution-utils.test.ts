@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildNormalizedToolResult,
   getToolFailureReason,
   getToolInputValidationError,
+  isAdvisoryToolFailureResult,
   isEffectivelyIdempotentToolCall,
+  isHardToolFailure,
   normalizeToolFailureReason,
   preflightValidateAndRepairToolInput,
 } from "../executor-tool-execution-utils";
@@ -132,5 +135,47 @@ describe("tool failure normalization", () => {
     );
     expect(normalized.message).toBe("Division by zero");
     expect(normalized.kind).toBe("runtime");
+  });
+
+  it("does not classify non-blocking vision config failures as hard failures", () => {
+    expect(
+      isHardToolFailure(
+        "read_pdf_visual",
+        {
+          success: false,
+          error: "OpenAI API key not configured.",
+          nonBlocking: true,
+          recoverableFallback: true,
+        },
+        "OpenAI API key not configured.",
+      ),
+    ).toBe(false);
+  });
+
+  it("treats non-blocking fallback failures as advisory tool results", () => {
+    const normalized = buildNormalizedToolResult({
+      toolName: "read_pdf_visual",
+      toolUseId: "tool-1",
+      result: {
+        success: false,
+        error: "OpenAI API key not configured.",
+        nonBlocking: true,
+        recoverableFallback: true,
+        fallbackHint: "Use parse_document instead.",
+      },
+      rawResult: JSON.stringify({
+        success: false,
+        error: "OpenAI API key not configured.",
+        nonBlocking: true,
+        recoverableFallback: true,
+      }),
+      sanitizeToolResult: (_toolName, resultText) => resultText,
+      getToolFailureReason,
+    });
+
+    expect(isAdvisoryToolFailureResult({ success: false, nonBlocking: true })).toBe(true);
+    expect(normalized.resultIsError).toBe(true);
+    expect(normalized.toolResult.is_error).toBe(false);
+    expect(normalized.toolResult.content).toContain("\"nonBlocking\":true");
   });
 });

@@ -4,6 +4,7 @@ import { LLMTool } from "../llm/types";
 import { ChannelRepository } from "../../database/repositories";
 import { ChannelType } from "../../gateway/channels/types";
 import { getChannelLiveFetchProvider } from "../../gateway/channel-live-fetch";
+import { FileProvenanceRegistry } from "../../security/file-provenance-registry";
 
 type ChannelHistoryDirection = "incoming" | "outgoing" | "both";
 
@@ -591,6 +592,14 @@ export class ChannelTools {
 
     try {
       const files = await provider.downloadDiscordAttachment(chatId, messageId);
+      FileProvenanceRegistry.recordMany(
+        files.map((file) => file.path),
+        {
+          sourceKind: "channel_attachment",
+          trustLevel: "untrusted",
+          sourceLabel: `discord:${chatId}:${messageId}`,
+        },
+      );
 
       this.daemon.logEvent(this.taskId, "tool_result", {
         tool: "channel_download_discord_attachment",

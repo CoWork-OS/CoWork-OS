@@ -117,6 +117,15 @@ export type { RouterConfig } from "./router-helpers";
 
 type Any = any;
 
+function quoteSkillSlashValue(value: string): string {
+  const text = String(value ?? "");
+  if (!text.length) return '""';
+  if (!/[\s"'`\\]|^--?/.test(text)) {
+    return text;
+  }
+  return `"${text.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
 type MessageSecurityContext = {
   contextType?: "dm" | "group";
   deniedTools?: string[];
@@ -159,6 +168,8 @@ export class MessageRouter {
       requestingUserId?: string;
       requestingUserName?: string;
       lastChannelMessageId?: string;
+      progressMessageId?: string;
+      lastProgressMessageText?: string;
     }
   > = new Map();
 
@@ -332,12 +343,225 @@ export class MessageRouter {
     return normalized;
   }
 
+  /**
+   * External chat channels should not receive executor-internal telemetry.
+   * Keep assistant streaming/output, but drop runtime scaffolding such as
+   * planning logs, provider routing chatter, and step-by-step beacons.
+   */
+  private compactExternalChannelStatusUpdate(text: string): string | null {
+    const normalized = String(text || "").trim();
+    if (!normalized) {
+      return null;
+    }
+
+    if (
+      /^\[(planning|skill-routing|verified-mode)\]/i.test(normalized) ||
+      /^llm route selected:/i.test(normalized) ||
+      /^execution strategy active:/i.test(normalized) ||
+      /^llm provider updated mid-session:/i.test(normalized) ||
+      /^llm failover activated:/i.test(normalized) ||
+      /^execution prompt built$/i.test(normalized) ||
+      /^follow-up prompt built$/i.test(normalized) ||
+      /^processing follow-up message$/i.test(normalized) ||
+      /^execution_run_summary$/i.test(normalized) ||
+      /^resuming execution after user input$/i.test(normalized) ||
+      /^running\s+[a-z0-9_:-]+$/i.test(normalized) ||
+      /^running scraping session with \d+ steps$/i.test(normalized) ||
+      /^grep search:/i.test(normalized) ||
+      /^glob search:/i.test(normalized) ||
+      /^tool error\b/i.test(normalized) ||
+      normalized === "Analyzing task requirements..." ||
+      normalized === "timeline_step_updated" ||
+      normalized === "progress_update" ||
+      normalized === "All steps completed"
+    ) {
+      return null;
+    }
+
+    if (/^Creating execution plan \(model:[^)]+\)\.\.\.$/i.test(normalized)) {
+      return null;
+    }
+
+    if (/^Starting execution of \d+ steps$/i.test(normalized)) {
+      return null;
+    }
+
+    const executingStepMatch = /^Executing step \d+\/\d+:\s*(.+)$/i.exec(normalized);
+    if (executingStepMatch?.[1]) {
+      return null;
+    }
+
+    const completedStepMatch = /^Completed step [^:]+:\s*(.+)$/i.exec(normalized);
+    if (completedStepMatch?.[1]) {
+      return null;
+    }
+
+    const failedStepMatch = /^Step failed [^:]+:\s*(.+)$/i.exec(normalized);
+    if (failedStepMatch?.[1]) {
+      return null;
+    }
+
+    if (/^execution stopped at soft deadline;/i.test(normalized)) {
+      return null;
+    }
+
+    if (/^answer-first .*short-circuit/i.test(normalized)) {
+      return null;
+    }
+
+    if (normalized.includes("Key factual claims are missing evidence links")) {
+      return null;
+    }
+
+    if (
+      normalized.startsWith("{") &&
+      normalized.endsWith("}")
+    ) {
+      return null;
+    }
+
+    if (
+      normalized.includes("Auto-waived verification-only failed steps") ||
+      normalized.includes("Auto-waived budget-constrained failed steps") ||
+      normalized.includes("Auto-waived failed steps because the task already produced substantive outputs") ||
+      normalized.includes("Best-effort finalization: auto-waiving")
+    ) {
+      return null;
+    }
+
+    return normalized;
+  }
+
+  private curateExternalChannelStatusUpdate(text: string): string | null {
+    const normalized = String(text || "").trim();
+    if (!normalized) {
+      return null;
+    }
+
+    if (/^Creating execution plan \(model:[^)]+\)\.\.\.$/i.test(normalized)) {
+      return "Planning the work.";
+    }
+
+    if (/^Starting execution of \d+ steps$/i.test(normalized)) {
+      return "Starting execution.";
+    }
+
+    const executingStepMatch = /^Executing step \d+\/\d+:\s*(.+)$/i.exec(normalized);
+    if (executingStepMatch?.[1]) {
+      return `Working on: ${executingStepMatch[1].trim()}`;
+    }
+
+    const completedStepMatch = /^Completed step [^:]+:\s*(.+)$/i.exec(normalized);
+    if (completedStepMatch?.[1]) {
+      return `Completed: ${completedStepMatch[1].trim()}`;
+    }
+
+    const failedStepMatch = /^Step failed [^:]+:\s*(.+)$/i.exec(normalized);
+    if (failedStepMatch?.[1]) {
+      return `Step hit an issue: ${failedStepMatch[1].trim()}`;
+    }
+
+    if (
+      /^⏳ Temporary provider error\./i.test(normalized) ||
+      /^Transient provider error detected\./i.test(normalized)
+    ) {
+      return "Temporary provider issue detected. Retrying automatically.";
+    }
+
+    if (/^execution stopped at soft deadline;/i.test(normalized)) {
+      return "Time budget reached. Preparing the best available result.";
+    }
+
+    return this.compactExternalChannelStatusUpdate(normalized);
+  }
+
+  private getExternalProgressRelayMode(
+    channelType: ChannelType | undefined,
+    channelId?: string,
+  ): "minimal" | "curated" {
+    if (!channelType || !this.isTextOnlyChannel(channelType) || !channelId) {
+      return "minimal";
+    }
+    const channel = this.channelRepo.findById(channelId);
+    const configured = channel?.config as Record<string, unknown> | undefined;
+    return configured?.progressRelayMode === "curated" ? "curated" : "minimal";
+  }
+
+  private prepareTaskUpdateForChannel(
+    channelType: ChannelType | undefined,
+    channelId: string | undefined,
+    text: string,
+    isStreaming: boolean,
+  ): string | null {
+    const normalized = String(text || "").trim();
+    if (!normalized) {
+      return null;
+    }
+
+    // Streaming updates are assistant output; keep them verbatim.
+    if (isStreaming) {
+      return normalized;
+    }
+
+    if (this.isTextOnlyChannel(channelType)) {
+      if (this.getExternalProgressRelayMode(channelType, channelId) === "curated") {
+        return this.curateExternalChannelStatusUpdate(normalized);
+      }
+      return this.compactExternalChannelStatusUpdate(normalized);
+    }
+
+    return normalized;
+  }
+
+  private shouldUseEditableProgressRelay(
+    pending:
+      | {
+          adapter: ChannelAdapter;
+          channelId: string;
+        }
+      | undefined,
+  ): boolean {
+    if (!pending) return false;
+    return (
+      this.getExternalProgressRelayMode(pending.adapter.type, pending.channelId) === "curated" &&
+      typeof pending.adapter.editMessage === "function"
+    );
+  }
+
+  private async clearProgressRelayMessage(taskId: string): Promise<void> {
+    const pending = this.pendingTaskResponses.get(taskId);
+    if (!pending?.progressMessageId) {
+      return;
+    }
+    try {
+      if (typeof pending.adapter.deleteMessage === "function") {
+        await pending.adapter.deleteMessage(pending.chatId, pending.progressMessageId);
+      }
+    } catch (error) {
+      console.warn(`[MessageRouter] Failed to clear progress relay message for task ${taskId}:`, error);
+    } finally {
+      pending.progressMessageId = undefined;
+      pending.lastProgressMessageText = undefined;
+    }
+  }
+
   private isSimpleChannelToolNoise(text: string): boolean {
     const normalized = String(text || "")
       .trim()
       .toLowerCase();
     if (!normalized) {
       return false;
+    }
+
+    if (
+      normalized === "resuming execution after user input" ||
+      normalized.startsWith("grep search:") ||
+      normalized.startsWith("glob search:") ||
+      normalized.startsWith("tool error:") ||
+      /^running\s+[a-z0-9_:-]+$/.test(normalized) ||
+      /^running scraping session with \d+ steps$/.test(normalized)
+    ) {
+      return true;
     }
 
     if (
@@ -2340,6 +2564,17 @@ export class MessageRouter {
         );
         break;
 
+      case "/llm-wiki":
+        await this.handleSkillSlashCommand(
+          adapter,
+          message,
+          sessionId,
+          "/llm-wiki",
+          args,
+          securityContext,
+        );
+        break;
+
       case "/schedule":
         await this.handleScheduleCommand(
           adapter,
@@ -3981,7 +4216,7 @@ export class MessageRouter {
     );
   }
 
-  private getSkillSlashUsage(command: "/simplify" | "/batch"): string {
+  private getSkillSlashUsage(command: "/simplify" | "/batch" | "/llm-wiki"): string {
     if (command === "/simplify") {
       return (
         "Usage:\n" +
@@ -3989,6 +4224,17 @@ export class MessageRouter {
         "- `/simplify <objective>`\n" +
         "- `/simplify <objective> --domain auto|code|research|operations|writing|general`\n" +
         "- `/simplify <objective> --scope current|workspace|path`"
+      );
+    }
+
+    if (command === "/llm-wiki") {
+      return (
+        "Usage:\n" +
+        "- `/llm-wiki <objective>`\n" +
+        "- `/llm-wiki --mode lint --path research/wiki`\n" +
+        "- `/llm-wiki <objective> --mode auto|init|ingest|query|lint|refresh`\n" +
+        "- `/llm-wiki <objective> --path research/wiki`\n" +
+        "- `/llm-wiki <objective> --obsidian auto|on|off`"
       );
     }
 
@@ -4006,20 +4252,31 @@ export class MessageRouter {
   ): string {
     const parts: string[] = [`/${parsed.command}`];
     if (parsed.objective) {
-      parts.push(parsed.objective);
+      parts.push(quoteSkillSlashValue(parsed.objective));
     }
     if (parsed.flags.domain) {
-      parts.push("--domain", parsed.flags.domain);
+      parts.push("--domain", quoteSkillSlashValue(parsed.flags.domain));
     }
     if (parsed.command === "simplify" && parsed.flags.scope) {
-      parts.push("--scope", parsed.flags.scope);
+      parts.push("--scope", quoteSkillSlashValue(parsed.flags.scope));
     }
     if (parsed.command === "batch") {
       if (typeof parsed.flags.parallel === "number") {
         parts.push("--parallel", String(parsed.flags.parallel));
       }
       if (parsed.flags.external) {
-        parts.push("--external", parsed.flags.external);
+        parts.push("--external", quoteSkillSlashValue(parsed.flags.external));
+      }
+    }
+    if (parsed.command === "llm-wiki") {
+      if (parsed.flags.mode) {
+        parts.push("--mode", quoteSkillSlashValue(parsed.flags.mode));
+      }
+      if (parsed.flags.path) {
+        parts.push("--path", quoteSkillSlashValue(parsed.flags.path));
+      }
+      if (parsed.flags.obsidian) {
+        parts.push("--obsidian", quoteSkillSlashValue(parsed.flags.obsidian));
       }
     }
     return parts.join(" ").trim();
@@ -4029,7 +4286,7 @@ export class MessageRouter {
     adapter: ChannelAdapter,
     message: IncomingMessage,
     sessionId: string,
-    command: "/simplify" | "/batch",
+    command: "/simplify" | "/batch" | "/llm-wiki",
     args: string[],
     securityContext?: MessageSecurityContext,
   ): Promise<void> {
@@ -6688,57 +6945,27 @@ export class MessageRouter {
     }
 
     try {
-      const sendNow = async (
-        pendingEntry: typeof pending,
-        rawText: string,
-      ): Promise<void> => {
-        const isTextOnlyChannel = this.isTextOnlyChannel(
-          pendingEntry.adapter.type,
-        );
-        const msgCtx = this.getMessageContext();
-        const normalizedText = isTextOnlyChannel
-          ? this.normalizeSimpleChannelMessage(rawText, msgCtx)
-          : rawText;
-
-        // Split long updates for simple messaging channels to avoid silent drops.
-        if (isTextOnlyChannel) {
-          const chunks = this.splitMessage(normalizedText, 4000);
-          for (const chunk of chunks) {
-            await this.sendMessage(
-              pendingEntry.adapter.type,
-              {
-                chatId: pendingEntry.chatId,
-                text: chunk,
-                parseMode: "markdown",
-              },
-              pendingEntry.channelId,
-            );
-          }
-          return;
-        }
-
-        await this.sendMessage(
-          pendingEntry.adapter.type,
-          {
-            chatId: pendingEntry.chatId,
-            text: normalizedText,
-            parseMode: "markdown",
-          },
-          pendingEntry.channelId,
-        );
-      };
-
       const trimmed = (text || "").trim();
       if (!trimmed) {
         return;
       }
 
+      const preparedText = this.prepareTaskUpdateForChannel(
+        pending.adapter.type,
+        pending.channelId,
+        trimmed,
+        isStreaming,
+      );
+      if (!preparedText) {
+        return;
+      }
+
       if (
         this.isTextOnlyChannel(pending.adapter.type) &&
-        this.isSimpleChannelToolNoise(trimmed)
+        this.isSimpleChannelToolNoise(preparedText)
       ) {
         console.log(
-          `[MessageRouter] Suppressed noisy simple-channel update for task ${taskId}: ${trimmed.slice(0, 120)}`,
+          `[MessageRouter] Suppressed noisy simple-channel update for task ${taskId}: ${preparedText.slice(0, 120)}`,
         );
         return;
       }
@@ -6752,7 +6979,7 @@ export class MessageRouter {
       // Use draft streaming for Telegram when streaming content.
       if (isStreaming && pending.adapter instanceof TelegramAdapter) {
         this.telegramDraftStreamTouchedTasks.add(taskId);
-        await pending.adapter.updateDraftStream(pending.chatId, trimmed);
+        await pending.adapter.updateDraftStream(pending.chatId, preparedText);
         return;
       }
 
@@ -6765,7 +6992,7 @@ export class MessageRouter {
           lastSentAt: 0,
         };
 
-        existing.latestText = trimmed;
+        existing.latestText = preparedText;
 
         if (!existing.timeoutHandle) {
           const now = Date.now();
@@ -6788,7 +7015,9 @@ export class MessageRouter {
             const toSend = buffer.latestText;
             buffer.latestText = "";
 
-            sendNow(latestPending, toSend).catch((error) => {
+            this.sendPreparedTaskUpdate(latestPending, toSend, {
+              allowEditableProgressRelay: false,
+            }).catch((error) => {
               console.error("Error sending buffered task update:", error);
             });
           }, delay);
@@ -6798,10 +7027,92 @@ export class MessageRouter {
         return;
       }
 
-      await sendNow(pending, trimmed);
+      await this.sendPreparedTaskUpdate(pending, preparedText, {
+        allowEditableProgressRelay: true,
+      });
     } catch (error) {
       console.error("Error sending task update:", error);
     }
+  }
+
+  isPendingTaskTextOnlyChannel(taskId: string): boolean {
+    const pending = this.pendingTaskResponses.get(taskId);
+    if (!pending) return false;
+    return this.isTextOnlyChannel(pending.adapter.type);
+  }
+
+  private async sendPreparedTaskUpdate(
+    pendingEntry: NonNullable<MessageRouter["pendingTaskResponses"] extends Map<string, infer T> ? T : never>,
+    rawText: string,
+    options?: {
+      allowEditableProgressRelay?: boolean;
+    },
+  ): Promise<void> {
+    const isTextOnlyChannel = this.isTextOnlyChannel(
+      pendingEntry.adapter.type,
+    );
+    const msgCtx = this.getMessageContext();
+    const normalizedText = isTextOnlyChannel
+      ? this.normalizeSimpleChannelMessage(rawText, msgCtx)
+      : rawText;
+
+    if (
+      options?.allowEditableProgressRelay !== false &&
+      this.shouldUseEditableProgressRelay(pendingEntry)
+    ) {
+      if (pendingEntry.lastProgressMessageText === normalizedText) {
+        return;
+      }
+      if (
+        pendingEntry.progressMessageId &&
+        typeof pendingEntry.adapter.editMessage === "function"
+      ) {
+        await pendingEntry.adapter.editMessage(
+          pendingEntry.chatId,
+          pendingEntry.progressMessageId,
+          normalizedText,
+        );
+      } else {
+        pendingEntry.progressMessageId = await this.sendMessage(
+          pendingEntry.adapter.type,
+          {
+            chatId: pendingEntry.chatId,
+            text: normalizedText,
+            parseMode: "markdown",
+          },
+          pendingEntry.channelId,
+        );
+      }
+      pendingEntry.lastProgressMessageText = normalizedText;
+      return;
+    }
+
+    // Split long updates for simple messaging channels to avoid silent drops.
+    if (isTextOnlyChannel) {
+      const chunks = this.splitMessage(normalizedText, 4000);
+      for (const chunk of chunks) {
+        await this.sendMessage(
+          pendingEntry.adapter.type,
+          {
+            chatId: pendingEntry.chatId,
+            text: chunk,
+            parseMode: "markdown",
+          },
+          pendingEntry.channelId,
+        );
+      }
+      return;
+    }
+
+    await this.sendMessage(
+      pendingEntry.adapter.type,
+      {
+        chatId: pendingEntry.chatId,
+        text: normalizedText,
+        parseMode: "markdown",
+      },
+      pendingEntry.channelId,
+    );
   }
 
   private clearStreamingUpdate(taskId: string): void {
@@ -6829,7 +7140,16 @@ export class MessageRouter {
     const trimmed = (buffer.latestText || "").trim();
     if (!trimmed) return;
 
-    await this.sendTaskUpdate(taskId, trimmed, false);
+    const pending = this.pendingTaskResponses.get(taskId);
+    if (!pending) return;
+    await this.sendPreparedTaskUpdate(pending, trimmed, {
+      allowEditableProgressRelay: false,
+    });
+  }
+
+  async clearTransientTaskProgress(taskId: string): Promise<void> {
+    this.clearStreamingUpdate(taskId);
+    await this.clearProgressRelayMessage(taskId);
   }
 
   /**
@@ -6934,6 +7254,7 @@ export class MessageRouter {
     if (!pending) return;
 
     this.clearStreamingUpdate(taskId);
+    await this.clearProgressRelayMessage(taskId);
 
     try {
       const task = this.taskRepo.findById(taskId);
@@ -6949,7 +7270,9 @@ export class MessageRouter {
         pending.adapter.type === "whatsapp" ||
         pending.adapter.type === "imessage";
       const msgCtx = this.getMessageContext();
-      const message = getCompletionMessage(msgCtx, result, !isSimpleMessaging);
+      const trimmedResult = typeof result === "string" ? result.trim() : "";
+      const message =
+        trimmedResult || getCompletionMessage(msgCtx, undefined, !isSimpleMessaging);
       const normalizedMessage =
         pending.adapter.type === "whatsapp"
           ? this.normalizeSimpleChannelMessage(message, msgCtx)
@@ -6960,7 +7283,7 @@ export class MessageRouter {
         // Finalize the streaming draft with final message
         const finalizedMessageId = await pending.adapter.finalizeDraftStream(
           pending.chatId,
-          message,
+          normalizedMessage,
         );
         completionMessageId = finalizedMessageId || null;
         this.telegramDraftStreamTouchedTasks.delete(taskId);
@@ -6974,7 +7297,7 @@ export class MessageRouter {
               channelMessageId: finalizedMessageId,
               chatId: pending.chatId,
               direction: "outgoing",
-              content: message,
+              content: normalizedMessage,
               timestamp: Date.now(),
             });
           }
@@ -7188,6 +7511,7 @@ export class MessageRouter {
     if (!pending) return;
 
     this.clearStreamingUpdate(taskId);
+    await this.clearProgressRelayMessage(taskId);
 
     try {
       // Cancel any draft stream
@@ -7243,6 +7567,7 @@ export class MessageRouter {
     }
 
     this.clearStreamingUpdate(taskId);
+    await this.clearProgressRelayMessage(taskId);
 
     try {
       // Cancel any draft stream
@@ -7305,6 +7630,8 @@ export class MessageRouter {
     const isRoutedFromChild = route.routedTaskId !== taskId;
     const taskTitle = task?.title;
 
+    await this.clearTransientTaskProgress(route.routedTaskId);
+
     // Store approval for response handling
     this.pendingApprovals.set(approval.id, {
       taskId,
@@ -7331,16 +7658,10 @@ export class MessageRouter {
 
     // Format approval message
     let message = `🔐 *${this.getUiCopy("approvalRequiredTitle")}*\n\n`;
-    message += `**${approval.description}**\n\n`;
+    message += `**${this.compactExternalApprovalDescription(approval)}**\n\n`;
 
     if (isRoutedFromChild && taskTitle) {
       message += `Source task: *${taskTitle}*\n\n`;
-    }
-
-    if (approval.type === "run_command" && approval.details?.command) {
-      message += `\`\`\`\n${approval.details.command}\n\`\`\`\n\n`;
-    } else if (approval.details) {
-      message += `Details: ${JSON.stringify(approval.details, null, 2)}\n\n`;
     }
 
     if (contextType === "group" && route.requestingUserName) {
@@ -7362,7 +7683,7 @@ export class MessageRouter {
       try {
         await route.adapter.sendMessage({
           chatId: route.chatId,
-          text: message,
+          text: this.normalizeSimpleChannelMessage(message, this.getMessageContext()),
           parseMode: "markdown",
         });
       } catch (error) {
@@ -7394,6 +7715,45 @@ export class MessageRouter {
         console.error("Error sending approval request:", error);
       }
     }
+  }
+
+  clearPendingApproval(approvalId: string): void {
+    if (!approvalId) return;
+    this.pendingApprovals.delete(approvalId);
+  }
+
+  private compactExternalApprovalDescription(approval: Any): string {
+    const approvalType = String(approval?.type || "").trim().toLowerCase();
+    if (approvalType === "run_command") {
+      return "A shell command needs approval to continue.";
+    }
+    if (approvalType === "data_export") {
+      const domain =
+        approval?.details?.permissionPrompt?.securityContext?.exportTarget?.domain ||
+        approval?.details?.permissionPrompt?.securityContext?.exportTarget?.provider;
+      return domain
+        ? `A data export to ${domain} needs approval to continue.`
+        : "A data export needs approval to continue.";
+    }
+    if (approvalType === "delete") {
+      return "A delete action needs approval to continue.";
+    }
+    if (approvalType === "write_file" || approvalType === "file_write") {
+      return "A file change needs approval to continue.";
+    }
+
+    const rawDescription =
+      typeof approval?.description === "string" ? approval.description.trim() : "";
+    if (!rawDescription) {
+      return "Approval is required to continue.";
+    }
+
+    const singleLine = rawDescription.split(/\n+/)[0]?.replace(/\s+/g, " ").trim() || rawDescription;
+    if (/^review the shell command below before approving\.?$/i.test(singleLine)) {
+      return "A shell command needs approval to continue.";
+    }
+
+    return singleLine.length > 180 ? `${singleLine.slice(0, 177).trimEnd()}...` : singleLine;
   }
 
   /**

@@ -1,10 +1,10 @@
-# Release Notes 0.5.26
+# Release Notes 0.5.27
 
-This page summarizes the product and engineering changes included in `0.5.26`, following `v0.5.23`.
+This page summarizes the product and engineering changes included in `0.5.27`, following `v0.5.23`.
 
 ## Summary
 
-Release `0.5.26` is the biggest runtime and product consolidation since the last tagged release. It adds a new core automation and continual-learning layer, expands memory and recall workflows, introduces two bundled skills, and hardens the desktop/runtime release path. The broad theme is the same across the codebase: more of CoWork's always-on intelligence is now explicit, persisted, and visible in the UI instead of being scattered across legacy heartbeat, persona, and ad hoc task paths.
+Release `0.5.27` is the biggest runtime and product consolidation since the last tagged release. It adds a new core automation and continual-learning layer, expands memory and recall workflows, introduces two bundled skills, and hardens the desktop/runtime release path. The broad theme is the same across the codebase: more of CoWork's always-on intelligence is now explicit, persisted, and visible in the UI instead of being scattered across legacy heartbeat, persona, and ad hoc task paths.
 
 ## New Features
 
@@ -55,4 +55,4 @@ Release `0.5.26` is the biggest runtime and product consolidation since the last
 - [Manim Video](docs/skills/manim-video.md) - technical explainer video skill
 - [Memory Flow](docs/workspace-memory-flow.md) - current workspace memory architecture
 
-This page is the canonical high-level summary for the changes included in `0.5.26`.
+This page is the canonical high-level summary for the changes included in `0.5.27`.

@@ -7,10 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.5.26] - 2026-04-08
+## [0.5.27] - 2026-04-08
 
 ### Added
-- **Release notes for 0.5.26**: see [Release Notes 0.5.26](release-notes-0.5.26.md).
+- **Release notes for 0.5.27**: see [Release Notes 0.5.27](release-notes-0.5.27.md).
 - **Core automation profiles**: automation profiles now own the always-on runtime surface, replacing the older heartbeat-centric ownership path.
 - **Core automation pipelines**: the runtime now persists traces, failures, failure clusters, eval cases, harness experiments, learnings, memory candidates, regression gates, and memory-distill runs as first-class data.
 - **Memory distillation**: core memory distillation now has a dedicated service layer, scoped memory resolution, and supporting repositories.
@@ -914,8 +914,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | 0.1.0 | 2025-01-24 | First public release with core features |
 | 0.0.1 | 2025-01-20 | Initial development setup |
 
-[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.26...HEAD
-[0.5.26]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.5.26
+[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.27...HEAD
+[0.5.27]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.5.27
 [0.5.23]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.5.23
 [0.5.19]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.5.19
 [0.5.18]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.5.18

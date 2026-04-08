@@ -182,6 +182,9 @@ jobs:
 
           $setupLog = Join-Path $testDir "setup.log"
           npm run --prefix node_modules/cowork-os setup *>&1 | Tee-Object -FilePath $setupLog
+          if ($LASTEXITCODE -ne 0) {
+            throw "Setup failed with exit code $LASTEXITCODE. See setup.log for details."
+          }
 
           if (Select-String -Path $setupLog -Pattern '^\[cowork\] setup:bootstrap' -Quiet) {
             throw "Setup unexpectedly triggered dependency bootstrap fallback; electron should resolve from parent node_modules."

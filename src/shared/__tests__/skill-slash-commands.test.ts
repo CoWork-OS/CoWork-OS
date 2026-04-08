@@ -51,6 +51,77 @@ describe("skill slash command parsing", () => {
     expect(result.error).toContain("Missing objective for /batch");
   });
 
+  it("parses /llm-wiki with objective and flags", () => {
+    const result = parseLeadingSkillSlashCommand(
+      "/llm-wiki agent memory systems --mode ingest --path research/wiki/agents --obsidian on",
+    );
+    expect(result.matched).toBe(true);
+    expect(result.error).toBeUndefined();
+    expect(result.parsed?.command).toBe("llm-wiki");
+    expect(result.parsed?.objective).toBe("agent memory systems");
+    expect(result.parsed?.flags).toEqual({
+      mode: "ingest",
+      path: "research/wiki/agents",
+      obsidian: "on",
+    });
+  });
+
+  it("supports equals-style llm-wiki flags", () => {
+    const result = parseLeadingSkillSlashCommand(
+      "/llm-wiki agent memory systems --mode=ingest --path=research/wiki/agents --obsidian=on",
+    );
+    expect(result.matched).toBe(true);
+    expect(result.error).toBeUndefined();
+    expect(result.parsed?.command).toBe("llm-wiki");
+    expect(result.parsed?.objective).toBe("agent memory systems");
+    expect(result.parsed?.flags).toEqual({
+      mode: "ingest",
+      path: "research/wiki/agents",
+      obsidian: "on",
+    });
+  });
+
+  it("supports equals-style llm-wiki flags with quoted values", () => {
+    const result = parseLeadingSkillSlashCommand(
+      '/llm-wiki agent memory systems --mode=ingest --path="Research Vault/Agents" --obsidian=on',
+    );
+    expect(result.matched).toBe(true);
+    expect(result.error).toBeUndefined();
+    expect(result.parsed?.command).toBe("llm-wiki");
+    expect(result.parsed?.objective).toBe("agent memory systems");
+    expect(result.parsed?.flags).toEqual({
+      mode: "ingest",
+      path: "Research Vault/Agents",
+      obsidian: "on",
+    });
+  });
+
+  it("rejects /llm-wiki with no objective", () => {
+    const result = parseLeadingSkillSlashCommand("/llm-wiki");
+    expect(result.matched).toBe(true);
+    expect(result.error).toContain("Missing objective for /llm-wiki");
+  });
+
+  it("allows /llm-wiki maintenance modes without an objective", () => {
+    const lint = parseLeadingSkillSlashCommand('/llm-wiki --mode lint --path "Research Vault"');
+    expect(lint.matched).toBe(true);
+    expect(lint.error).toBeUndefined();
+    expect(lint.parsed?.objective).toBe("");
+    expect(lint.parsed?.flags).toEqual({
+      mode: "lint",
+      path: "Research Vault",
+    });
+
+    const init = parseLeadingSkillSlashCommand("/llm-wiki --mode init --path research/wiki");
+    expect(init.matched).toBe(true);
+    expect(init.error).toBeUndefined();
+    expect(init.parsed?.objective).toBe("");
+    expect(init.parsed?.flags).toEqual({
+      mode: "init",
+      path: "research/wiki",
+    });
+  });
+
   it("supports freeform objective text that contains --tokens", () => {
     const result = parseLeadingSkillSlashCommand("/batch migrate --all docs --parallel 2");
     expect(result.matched).toBe(true);
@@ -65,6 +136,20 @@ describe("skill slash command parsing", () => {
     expect(result.error).toBeUndefined();
     expect(result.parsed?.objective).toBe("migrate --all docs");
     expect(result.parsed?.flags.parallel).toBe(2);
+  });
+
+  it("supports equals-style batch flags", () => {
+    const result = parseLeadingSkillSlashCommand(
+      "/batch migrate docs --parallel=2 --domain=writing --external=confirm",
+    );
+    expect(result.matched).toBe(true);
+    expect(result.error).toBeUndefined();
+    expect(result.parsed?.objective).toBe("migrate docs");
+    expect(result.parsed?.flags).toEqual({
+      parallel: 2,
+      domain: "writing",
+      external: "confirm",
+    });
   });
 
   it("parses inline chain command", () => {
@@ -95,6 +180,18 @@ describe("skill slash command parsing", () => {
     expect(result.matched).toBe(true);
     expect(result.error).toBeUndefined();
     expect(result.parsed?.command).toBe("simplify");
+  });
+
+  it("parses inline llm-wiki chain", () => {
+    const result = parseInlineSkillSlashChain(
+      "Research agent security patterns then run /llm-wiki --mode refresh --obsidian auto",
+    );
+    expect(result.matched).toBe(true);
+    expect(result.error).toBeUndefined();
+    expect(result.baseText).toBe("Research agent security patterns");
+    expect(result.parsed?.command).toBe("llm-wiki");
+    expect(result.parsed?.flags.mode).toBe("refresh");
+    expect(result.parsed?.flags.obsidian).toBe("auto");
   });
 
   it("rejects multiple inline slash chains in one message", () => {

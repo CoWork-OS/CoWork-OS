@@ -6,10 +6,13 @@ import type {
   PermissionPromptDetails,
   PermissionRule,
   Plan,
+  QuotedAssistantMessage,
+  SensitiveSourceRef,
   SessionChecklistItem,
   SessionChecklistState,
   SessionChecklistToolItemInput,
   TaskDomain,
+  TaskFollowUpInput,
   Task,
   TaskEvent,
   VerificationEvidenceEntry,
@@ -115,6 +118,7 @@ export interface SessionRuntimePermissionState {
   temporaryGrants: Map<string, { grantedAt: number; expiresAt?: number }>;
   denialTracking: Map<string, SessionRuntimePermissionDenialState>;
   latestPromptContext: PermissionPromptDetails | null;
+  recentSensitiveSources: SensitiveSourceRef[];
 }
 
 export interface SessionRuntimeSnapshotV2 {
@@ -195,7 +199,7 @@ export interface SessionRuntimeSnapshotV2 {
     lastRetryReason: string | null;
   };
   queues: {
-    pendingFollowUps: Array<{ message: string; images?: ImageAttachment[] }>;
+    pendingFollowUps: TaskFollowUpInput[];
     stepFeedbackSignal:
       | {
           stepId: string;
@@ -214,6 +218,7 @@ export interface SessionRuntimeSnapshotV2 {
     temporaryGrants: Array<[string, { grantedAt: number; expiresAt?: number }]>;
     denialTracking: Array<[string, SessionRuntimePermissionDenialState]>;
     latestPromptContext: PermissionPromptDetails | null;
+    recentSensitiveSources: SensitiveSourceRef[];
   };
   verification: {
     verificationEvidenceEntries: VerificationEvidenceEntry[];
@@ -317,7 +322,7 @@ export interface SessionRuntimeState {
     lastRetryReason: string | null;
   };
   queues: {
-    pendingFollowUps: Array<{ message: string; images?: ImageAttachment[] }>;
+    pendingFollowUps: TaskFollowUpInput[];
     stepFeedbackSignal:
       | {
           stepId: string;
@@ -943,8 +948,12 @@ export class SessionRuntime {
     this.updateConversationHistory([...this.state.transcript.conversationHistory, message]);
   }
 
-  queueFollowUp(message: string, images?: ImageAttachment[]): void {
-    this.state.queues.pendingFollowUps.push({ message, images });
+  queueFollowUp(
+    message: string,
+    images?: ImageAttachment[],
+    quotedAssistantMessage?: QuotedAssistantMessage,
+  ): void {
+    this.state.queues.pendingFollowUps.push({ message, images, quotedAssistantMessage });
   }
 
   get hasPendingFollowUps(): boolean {
@@ -974,11 +983,11 @@ export class SessionRuntime {
     return signal;
   }
 
-  drainPendingFollowUp(): { message: string; images?: ImageAttachment[] } | undefined {
+  drainPendingFollowUp(): TaskFollowUpInput | undefined {
     return this.state.queues.pendingFollowUps.shift();
   }
 
-  drainAllPendingFollowUps(): Array<{ message: string; images?: ImageAttachment[] }> {
+  drainAllPendingFollowUps(): TaskFollowUpInput[] {
     const drained = [...this.state.queues.pendingFollowUps];
     this.state.queues.pendingFollowUps = [];
     return drained;
@@ -1988,6 +1997,7 @@ export class SessionRuntime {
           temporaryGrants: Array.from(this.state.permissions.temporaryGrants.entries()),
           denialTracking: Array.from(this.state.permissions.denialTracking.entries()),
           latestPromptContext: this.state.permissions.latestPromptContext,
+          recentSensitiveSources: [...this.state.permissions.recentSensitiveSources],
         },
         verification: {
           verificationEvidenceEntries: [...this.state.verification.verificationEvidenceEntries],
@@ -2361,6 +2371,9 @@ export class SessionRuntime {
     this.state.permissions.temporaryGrants = new Map(payload.permissions?.temporaryGrants || []);
     this.state.permissions.denialTracking = new Map(payload.permissions?.denialTracking || []);
     this.state.permissions.latestPromptContext = payload.permissions?.latestPromptContext || null;
+    this.state.permissions.recentSensitiveSources = Array.isArray(payload.permissions?.recentSensitiveSources)
+      ? payload.permissions.recentSensitiveSources
+      : [];
     this.state.verification.verificationEvidenceEntries =
       payload.verification.verificationEvidenceEntries || [];
     this.state.verification.nonBlockingVerificationFailedStepIds = new Set(
@@ -2457,6 +2470,7 @@ export class SessionRuntime {
       temporaryGrants: this.state.permissions.temporaryGrants,
       denialTracking: this.state.permissions.denialTracking,
       latestPromptContext: this.state.permissions.latestPromptContext,
+      recentSensitiveSources: this.state.permissions.recentSensitiveSources,
     };
   }
 
@@ -2494,6 +2508,23 @@ export class SessionRuntime {
 
   clearLatestPermissionPromptContext(): void {
     this.state.permissions.latestPromptContext = null;
+  }
+
+  recordSensitiveSourceRead(source: SensitiveSourceRef): void {
+    const normalizedPath = String(source?.path || "").trim();
+    if (!normalizedPath) return;
+    const next = {
+      ...source,
+      path: normalizedPath,
+      recordedAt: typeof source.recordedAt === "number" ? source.recordedAt : Date.now(),
+    };
+    const deduped = this.state.permissions.recentSensitiveSources.filter((item) => item.path !== next.path);
+    deduped.push(next);
+    this.state.permissions.recentSensitiveSources = deduped.slice(-12);
+  }
+
+  listRecentSensitiveSources(): SensitiveSourceRef[] {
+    return [...this.state.permissions.recentSensitiveSources];
   }
 
   addTemporaryPermissionGrant(key: string, opts?: { ttlMs?: number }): void {

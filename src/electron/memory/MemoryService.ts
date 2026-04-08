@@ -31,6 +31,7 @@ import {
 import { MarkdownMemoryIndexService } from "./MarkdownMemoryIndexService";
 import { MemoryTierService } from "./MemoryTierService";
 import type { CoreMemoryScopeKind } from "../../shared/types";
+import { MemoryFeaturesManager } from "../settings/memory-features-manager";
 
 // Privacy patterns to exclude - matches common sensitive data patterns
 const SENSITIVE_PATTERNS = [
@@ -779,6 +780,10 @@ export class MemoryService {
    */
   static getContextForInjection(workspaceId: string, taskPrompt: string): string {
     this.ensureInitialized();
+    const featureSettings = MemoryFeaturesManager.loadSettings();
+    if (featureSettings.defaultArchiveInjectionEnabled !== true) {
+      return "";
+    }
 
     const settings = this.settingsRepo.getOrCreate(workspaceId);
     if (!settings.enabled) {

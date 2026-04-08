@@ -98,4 +98,40 @@ describe("TimelineEmitter", () => {
       }),
     );
   });
+
+  it("preserves extra payload fields on step updates", () => {
+    const emit = vi.fn();
+    const timeline = createTimelineEmitter("task-1", emit);
+
+    timeline.updateStep(
+      {
+        id: "turn:task-1",
+        description: "Follow-up question",
+      },
+      {
+        actor: "user",
+        legacyType: "user_message",
+        message: "Follow-up question",
+        extraPayload: {
+          quotedAssistantMessage: {
+            eventId: "assistant-1",
+            message: "Quoted assistant reply",
+          },
+        },
+      },
+    );
+
+    expect(emit).toHaveBeenCalledWith(
+      "timeline_step_updated",
+      expect.objectContaining({
+        stepId: "turn:task-1",
+        legacyType: "user_message",
+        message: "Follow-up question",
+        quotedAssistantMessage: expect.objectContaining({
+          eventId: "assistant-1",
+          message: "Quoted assistant reply",
+        }),
+      }),
+    );
+  });
 });

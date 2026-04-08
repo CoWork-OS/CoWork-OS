@@ -128,4 +128,16 @@ describe("RelationshipMemoryService task history capture", () => {
     expect(scoped.some((entry) => entry.text.includes("Company-specific note"))).toBe(true);
     expect(scoped.some((entry) => entry.text.includes("Global contact note"))).toBe(true);
   });
+
+  it("captures lightweight commitment phrasing like 'I need to' without requiring reminder wording", () => {
+    RelationshipMemoryService.ingestUserMessage(
+      "I need to send the deployment recap tomorrow morning.",
+      "task-need-1",
+    );
+
+    const commitments = RelationshipMemoryService.listOpenCommitments(10);
+
+    expect(commitments).toHaveLength(1);
+    expect(commitments[0]?.text).toContain("I need to send the deployment recap tomorrow morning");
+  });
 });

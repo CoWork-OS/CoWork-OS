@@ -17,6 +17,12 @@ export function normalizeServerName(input: string): string {
 
 export function normalizePermissionScope(scope: PermissionRuleScope): PermissionRuleScope {
   switch (scope.kind) {
+    case "domain":
+      return {
+        kind: "domain",
+        domain: String(scope.domain || "").trim().toLowerCase(),
+        ...(scope.toolName ? { toolName: String(scope.toolName || "").trim() } : {}),
+      };
     case "path":
       return {
         kind: "path",
@@ -45,6 +51,8 @@ export function normalizePermissionScope(scope: PermissionRuleScope): Permission
 export function permissionScopeFingerprint(scope: PermissionRuleScope): string {
   const normalized = normalizePermissionScope(scope);
   switch (normalized.kind) {
+    case "domain":
+      return `domain:${normalized.toolName || "*"}:${normalized.domain}`;
     case "path":
       return `path:${normalized.toolName || "*"}:${normalized.path}`;
     case "command_prefix":
@@ -64,6 +72,10 @@ export function permissionRuleFingerprint(rule: Pick<PermissionRule, "effect" | 
 export function summarizePermissionScope(scope: PermissionRuleScope): string {
   const normalized = normalizePermissionScope(scope);
   switch (normalized.kind) {
+    case "domain":
+      return normalized.toolName
+        ? `${normalized.toolName} on domain ${normalized.domain}`
+        : `domain ${normalized.domain}`;
     case "path":
       return normalized.toolName
         ? `${normalized.toolName} on path ${normalized.path}`
@@ -81,6 +93,8 @@ export function summarizePermissionScope(scope: PermissionRuleScope): string {
 export function getPermissionScopeSpecificity(scope: PermissionRuleScope): number {
   const normalized = normalizePermissionScope(scope);
   switch (normalized.kind) {
+    case "domain":
+      return 4500 + normalized.domain.length + (normalized.toolName ? 1000 : 0);
     case "path":
       return 4000 + normalized.path.length + (normalized.toolName ? 1000 : 0);
     case "command_prefix":

@@ -4,7 +4,7 @@ This doc provides copy-paste prompts you can run to validate each flow end-to-en
 
 ## Ideas Panel
 
-The **Ideas** tab in the sidebar shows use case prompts that use built-in capabilities (channels, inbox, /inbox, /brief, /simplify, /batch, browser, file I/O). See [Ideas Capabilities](ideas-capabilities.md) for what’s supported. Advanced use cases (e.g. legal skills) require optional skills and are listed below as copy-paste prompts.
+The **Ideas** tab in the sidebar shows use case prompts that use built-in capabilities (channels, inbox, /inbox, /brief, /simplify, /batch, /llm-wiki, browser, file I/O). See [Ideas Capabilities](ideas-capabilities.md) for what’s supported. Advanced use cases (e.g. legal skills) require optional skills and are listed below as copy-paste prompts.
 
 ## Use Case Coverage (High Level)
 
@@ -31,7 +31,7 @@ Cowork OS supports these via:
 - Channels: Slack, iMessage, WhatsApp, Telegram, Email, etc.
 - Scheduling: `/schedule ...` and `schedule_task`
 - Inbox + briefing commands: `/inbox`, `/brief [morning|today|tomorrow|week]`
-- Slash skill workflows: `/simplify [objective] ...` for quality passes and `/batch <objective> ...` for parallelizable migration/transform workflows
+- Slash skill workflows: `/simplify [objective] ...` for quality passes, `/batch <objective> ...` for parallelizable migration/transform workflows, and `/llm-wiki <objective> ...` for persistent research vaults
 - Integrations: Notion, Gmail/Google Calendar (if configured), Apple Calendar/Reminders (macOS)
 - Web automation: browser tools (plus MCP puppeteer fallback for some sites)
 - Company-ops primitives: venture workspace kit, digital twin operators, strategic planner, and Mission Control ops monitoring
@@ -301,7 +301,7 @@ Never claim success without evidence.
 STOP before irreversible external actions and ask for confirmation.
 ```
 
-### 12) Deterministic Slash Workflows (`/simplify` and `/batch`)
+### 12) Deterministic Slash Workflows (`/simplify`, `/batch`, and `/llm-wiki`)
 
 Prompt:
 ```
@@ -321,6 +321,7 @@ Command variants:
 ```
 /simplify review this plan for clarity and edge-case coverage.
 /batch migrate markdown architecture docs to the new naming standard --parallel 4 --domain writing --external confirm
+/llm-wiki build a research vault for CoWork OS competitors --mode ingest --path research/wiki/competitors
 ```
 
 ### 13) Legal Deal Defense (Contract + Demand Letter + Counterpositions)
@@ -356,4 +357,41 @@ Use the legal-verified-research-memo skill with:
 - output_report_path: "artifacts/legal/research-memo.md"
 
 Require primary authority first and include a claim-level verification log.
+```
+
+### 14) Programmatic Technical Video (Manim)
+
+Prompt:
+```
+Use the manim-video skill to create a 75-second 3Blue1Brown-style explainer for gradient descent aimed at software engineers.
+
+Scaffold the project in this workspace.
+Create:
+- plan.md
+- script.py
+- concat.txt
+- render.sh
+- voiceover.md
+
+Render draft quality only if the local Manim prerequisites are satisfied.
+If dependencies are missing, stop after scaffolding and tell me exactly what is missing.
+```
+
+Prompt (algorithm visualization):
+```
+Use the manim-video skill to build a Manim animation that visualizes Dijkstra's algorithm step by step.
+
+Target audience: CS students.
+Keep it under 90 seconds.
+Prefer an algorithm-visualization structure with one clear idea per scene.
+Draft first, production later.
+```
+
+Prompt (architecture walkthrough):
+```
+Use the manim-video skill to create an animated architecture diagram for our request path:
+browser -> CDN -> API gateway -> app server -> database.
+
+Focus on clarity over visual density.
+Scaffold the local Manim project and produce a render checklist, but do not attempt production render until I review the draft plan.
 ```

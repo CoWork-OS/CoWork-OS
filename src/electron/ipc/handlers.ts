@@ -54,6 +54,8 @@ import { selectAgentsForTask } from "../agents/capabilityMatcher";
 import { TaskLabelRepository } from "../database/TaskLabelRepository";
 import { WorkingStateRepository } from "../agents/WorkingStateRepository";
 import { ContextPolicyManager } from "../gateway/context-policy";
+import { OnboardingProfileService } from "../onboarding/OnboardingProfileService";
+import type { ApplyOnboardingProfileRequest } from "../../shared/onboarding";
 import {
   IPC_CHANNELS,
   LLMSettingsData,
@@ -252,6 +254,7 @@ import {
 } from "../hooks";
 import { initializeHookAgentIngress } from "../hooks/agent-ingress";
 import { MemoryService } from "../memory/MemoryService";
+import { MemorySynthesizer } from "../memory/MemorySynthesizer";
 import { UserProfileService } from "../memory/UserProfileService";
 import { WORKSPACE_KIT_CONTRACTS } from "../context/kit-contracts";
 import {
@@ -290,6 +293,7 @@ import {
 } from "../utils/temp-workspace-lease";
 import { createLogger } from "../utils/logger";
 import { isApprovedImportFile } from "../security/file-import-approvals";
+import { FileProvenanceRegistry } from "../security/file-provenance-registry";
 
 type FileViewerRequestOptions = {
   workspacePath?: string;
@@ -519,7 +523,7 @@ export function setHeartbeatWakeSubmitter(
       try {
         await submitter(action);
       } catch (error) {
-        console.error("[Hooks] Failed to flush buffered wake action:", error);
+        logger.error("[Hooks] Failed to flush buffered wake action:", error);
       }
     }
   })();
@@ -1185,6 +1189,158 @@ export async function setupIpcHandlers(
     return { resolvedPath: null, attemptedPaths };
   };
 
+  const listFilesRecursiveSync = (
+    rootPath: string,
+    predicate?: (filePath: string) => boolean,
+  ): string[] => {
+    if (!fsSync.existsSync(rootPath)) return [];
+
+    const output: string[] = [];
+    const stack = [rootPath];
+    while (stack.length > 0) {
+      const current = stack.pop();
+      if (!current) continue;
+      const entries = fsSync.readdirSync(current, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(current, entry.name);
+        if (entry.isDirectory()) {
+          stack.push(fullPath);
+          continue;
+        }
+        if (!entry.isFile()) continue;
+        if (!predicate || predicate(fullPath)) {
+          output.push(fullPath);
+        }
+      }
+    }
+    return output;
+  };
+
+  const normalizeUiPath = (rawPath: string): string => rawPath.replace(/\\/g, "/");
+
+  const buildLlmWikiVaultEntry = (
+    filePath: string,
+    workspaceRoot: string,
+    section: "root" | "page" | "query" | "output" | "raw",
+  ) => {
+    const stat = fsSync.statSync(filePath);
+    const relativePath = normalizeUiPath(path.relative(workspaceRoot, filePath));
+    const baseName = path.basename(filePath);
+    const parentName = path.basename(path.dirname(filePath));
+    const name =
+      section === "raw" && /^capture\./i.test(baseName)
+        ? parentName
+        : section === "output" && /\.(md|svg)$/i.test(baseName)
+          ? baseName.replace(/\.(md|svg)$/i, "")
+          : baseName.replace(/\.md$/i, "");
+
+    return {
+      path: relativePath,
+      name,
+      section,
+      updatedAt: new Date(stat.mtimeMs).toISOString(),
+      mtimeMs: stat.mtimeMs,
+    };
+  };
+
+  const collectLlmWikiVaultSummary = (
+    workspacePath: string,
+    requestedVaultPath?: string,
+  ) => {
+    const workspaceRoot = path.resolve(normalizePotentialPath(workspacePath));
+    const rawVaultPath =
+      typeof requestedVaultPath === "string" && requestedVaultPath.trim().length > 0
+        ? requestedVaultPath
+        : "research/wiki";
+    const vaultPath = path.isAbsolute(rawVaultPath)
+      ? path.resolve(normalizePotentialPath(rawVaultPath))
+      : path.resolve(workspaceRoot, normalizePotentialPath(rawVaultPath));
+
+    if (!isPathWithinWorkspace(vaultPath, workspaceRoot)) {
+      throw new Error("Access denied: vault path is outside the workspace");
+    }
+
+    const displayPath = normalizeUiPath(path.relative(workspaceRoot, vaultPath)) || ".";
+    const emptySummary = {
+      exists: false,
+      vaultPath,
+      displayPath,
+      counts: {
+        pages: 0,
+        queries: 0,
+        rawSources: 0,
+        outputs: 0,
+      },
+      rootFiles: [],
+      recentPages: [],
+      recentQueries: [],
+      recentOutputs: [],
+      recentRawSources: [],
+    };
+
+    if (!fsSync.existsSync(vaultPath) || !fsSync.statSync(vaultPath).isDirectory()) {
+      return emptySummary;
+    }
+
+    const rootFiles = ["index.md", "inbox.md", "log.md", "SCHEMA.md"]
+      .map((relativePath) => path.join(vaultPath, relativePath))
+      .filter((filePath) => fsSync.existsSync(filePath) && fsSync.statSync(filePath).isFile())
+      .map((filePath) => buildLlmWikiVaultEntry(filePath, workspaceRoot, "root"));
+
+    const pageDirs = ["concepts", "entities", "projects", "comparisons", "maps"];
+    const pageFiles = pageDirs.flatMap((dirName) =>
+      listFilesRecursiveSync(path.join(vaultPath, dirName), (filePath) =>
+        filePath.toLowerCase().endsWith(".md"),
+      ),
+    );
+    const queryFiles = listFilesRecursiveSync(path.join(vaultPath, "queries"), (filePath) =>
+      filePath.toLowerCase().endsWith(".md"),
+    );
+    const outputFiles = listFilesRecursiveSync(path.join(vaultPath, "outputs"), (filePath) => {
+      const lower = filePath.toLowerCase();
+      return (lower.endsWith(".md") || lower.endsWith(".svg")) && !lower.endsWith(".meta.json");
+    });
+    const rawFiles = listFilesRecursiveSync(path.join(vaultPath, "raw"), (filePath) => {
+      const lower = filePath.toLowerCase();
+      const base = path.basename(lower);
+      return base !== "source.json" && !base.endsWith(".source.json");
+    });
+
+    const sortByMtimeDesc = (
+      left: { mtimeMs: number },
+      right: { mtimeMs: number },
+    ) => right.mtimeMs - left.mtimeMs;
+
+    return {
+      exists: true,
+      vaultPath,
+      displayPath,
+      counts: {
+        pages: pageFiles.length,
+        queries: queryFiles.length,
+        rawSources: rawFiles.length,
+        outputs: outputFiles.length,
+      },
+      rootFiles,
+      recentPages: pageFiles
+        .map((filePath) => buildLlmWikiVaultEntry(filePath, workspaceRoot, "page"))
+        .sort(sortByMtimeDesc)
+        .slice(0, 6),
+      recentQueries: queryFiles
+        .map((filePath) => buildLlmWikiVaultEntry(filePath, workspaceRoot, "query"))
+        .sort(sortByMtimeDesc)
+        .slice(0, 4),
+      recentOutputs: outputFiles
+        .map((filePath) => buildLlmWikiVaultEntry(filePath, workspaceRoot, "output"))
+        .sort(sortByMtimeDesc)
+        .slice(0, 4),
+      recentRawSources: rawFiles
+        .map((filePath) => buildLlmWikiVaultEntry(filePath, workspaceRoot, "raw"))
+        .sort(sortByMtimeDesc)
+        .slice(0, 4),
+    };
+  };
+
   const renderPdfFirstPageThumbnail = async (
     pdfPath: string,
   ): Promise<string | undefined> => {
@@ -1383,7 +1539,7 @@ export async function setupIpcHandlers(
         protectedWorkspaceIds: getActiveTempWorkspaceLeases(),
       });
     } catch (error) {
-      console.warn("Failed to prune temp workspaces:", error);
+      logger.warn("Failed to prune temp workspaces:", error);
     }
 
     return workspace;
@@ -1545,8 +1701,6 @@ export async function setupIpcHandlers(
   );
 
   // File viewer handler - read file content for in-app preview
-  // Note: This handler allows viewing any file on the system for convenience.
-  // File operations like open/showInFinder remain workspace-restricted.
   ipcMain.handle(
     IPC_CHANNELS.FILE_READ_FOR_VIEWER,
     async (_, data: { filePath: string } & FileViewerRequestOptions) => {
@@ -1559,8 +1713,14 @@ export async function setupIpcHandlers(
         includePdfBase64 = false,
       } = data;
 
+      if (!workspacePath || !workspacePath.trim()) {
+        throw new Error("Workspace path is required for file preview operations");
+      }
+
       const { resolvedPath, attemptedPaths } =
-        await resolveExistingPathForViewer(filePath, workspacePath);
+        await resolveExistingPathForViewer(filePath, workspacePath, {
+          requireWorkspaceContainment: true,
+        });
       if (!resolvedPath) {
         const attempted =
           attemptedPaths.length > 0
@@ -1918,6 +2078,27 @@ export async function setupIpcHandlers(
     },
   );
 
+  ipcMain.handle(
+    IPC_CHANNELS.LLM_WIKI_GET_VAULT_SUMMARY,
+    async (
+      _,
+      data: {
+        workspacePath: unknown;
+        vaultPath?: unknown;
+      },
+    ) => {
+      const payload = validateInput(
+        z.object({
+          workspacePath: z.string().trim().min(1),
+          vaultPath: z.string().trim().min(1).optional(),
+        }),
+        data,
+        "llm-wiki vault request",
+      );
+      return collectLlmWikiVaultSummary(payload.workspacePath, payload.vaultPath);
+    },
+  );
+
   // File import handler - copy selected files into the workspace for attachment use
   ipcMain.handle(
     IPC_CHANNELS.FILE_IMPORT_TO_WORKSPACE,
@@ -2025,6 +2206,13 @@ export async function setupIpcHandlers(
         const destination = path.join(targetRoot, uniqueName);
 
         await fs.copyFile(absolutePath, destination);
+        FileProvenanceRegistry.record({
+          path: destination,
+          workspaceId: workspace.id,
+          sourceKind: "user_imported_external",
+          trustLevel: "untrusted",
+          sourceLabel: path.basename(absolutePath),
+        });
 
         results.push({
           relativePath: path.relative(workspace.path, destination),
@@ -2129,6 +2317,13 @@ export async function setupIpcHandlers(
         }
 
         await fs.writeFile(destination, buffer);
+        FileProvenanceRegistry.record({
+          path: destination,
+          workspaceId: workspace.id,
+          sourceKind: "clipboard_or_drag_data",
+          trustLevel: "untrusted",
+          sourceLabel: rawName,
+        });
 
         results.push({
           relativePath: path.relative(workspace.path, destination),
@@ -2908,7 +3103,7 @@ export async function setupIpcHandlers(
           touchTempWorkspaceLease(workspace.id);
         }
       } catch (error) {
-        console.warn("Failed to update workspace last used time:", error);
+        logger.warn("Failed to update workspace last used time:", error);
       }
     }
     return workspace;
@@ -2985,7 +3180,7 @@ export async function setupIpcHandlers(
       try {
         workspaceRepo.updateLastUsedAt(workspaceId);
       } catch (error) {
-        console.warn("Failed to update workspace last used time:", error);
+        logger.warn("Failed to update workspace last used time:", error);
       }
     }
 
@@ -3005,7 +3200,7 @@ export async function setupIpcHandlers(
     } catch (error: unknown) {
       const errorMessage =
         error instanceof Error ? error.message : "Unknown error";
-      console.error("Failed to record mentioned agents:", error);
+      logger.error("Failed to record mentioned agents:", error);
       // Notify user of dispatch failure via activity feed
       const errorActivity = activityRepo.create({
         workspaceId: task.workspaceId,
@@ -3093,7 +3288,7 @@ export async function setupIpcHandlers(
           // Kick off the orchestrator (spawns child tasks for each item)
           void teamOrchestrator.tickRun(run.id, "auto_collaborative");
         } catch (error: Any) {
-          console.error(
+          logger.error(
             "[TASK_CREATE] Auto-collaborative setup failed:",
             error,
           );
@@ -3173,7 +3368,7 @@ export async function setupIpcHandlers(
           // Kick off orchestrator
           void teamOrchestrator.tickRun(run.id, "multi_llm_start");
         } catch (error: Any) {
-          console.error("[TASK_CREATE] Multi-LLM setup failed:", error);
+          logger.error("[TASK_CREATE] Multi-LLM setup failed:", error);
           try {
             await agentDaemon.startTask(task, validatedImages);
           } catch (startError: Any) {
@@ -3326,7 +3521,7 @@ export async function setupIpcHandlers(
     // task before this call returns, so do not force a stale "executing" write here.
     const resumed = await agentDaemon.resumeTask(validated);
     if (resumed) return;
-    console.warn(
+    logger.warn(
       `[IPC] TASK_RESUME ignored for task ${validated}: no active executor available to resume`,
     );
   });
@@ -3417,7 +3612,7 @@ export async function setupIpcHandlers(
       try {
         await agentDaemon.getWorktreeManager().cleanup(id, true);
       } catch (error) {
-        console.warn(`[TASK_DELETE] Worktree cleanup failed for ${id}:`, error);
+        logger.warn(`[TASK_DELETE] Worktree cleanup failed for ${id}:`, error);
       }
     }
 
@@ -3661,6 +3856,7 @@ export async function setupIpcHandlers(
         validated.taskId,
         validated.message,
         validatedImages,
+        validated.quotedAssistantMessage,
       );
       // If the message was queued for a running executor, the executor owns
       // the image data now — skip temp file cleanup so it can read them later.
@@ -3791,7 +3987,7 @@ export async function setupIpcHandlers(
 
   // Initialize custom skill loader
   customSkillLoader.initialize().catch((error) => {
-    console.error("[IPC] Failed to initialize custom skill loader:", error);
+    logger.error("[IPC] Failed to initialize custom skill loader:", error);
   });
 
   ipcMain.handle(IPC_CHANNELS.CUSTOM_SKILL_LIST, async () => {
@@ -4035,7 +4231,7 @@ export async function setupIpcHandlers(
         const pluginRegistry = getPluginRegistry();
         await pluginRegistry.discoverNewPlugins();
       } catch (error) {
-        console.warn(
+        logger.warn(
           "[IPC] Failed to refresh plugin registry after quarantine retry:",
           error,
         );
@@ -4571,7 +4767,7 @@ export async function setupIpcHandlers(
   // OpenAI OAuth handlers
   ipcMain.handle(IPC_CHANNELS.LLM_OPENAI_OAUTH_START, async () => {
     checkRateLimit(IPC_CHANNELS.LLM_OPENAI_OAUTH_START);
-    console.log("[IPC] Starting OpenAI OAuth flow with pi-ai SDK...");
+    logger.info("[IPC] Starting OpenAI OAuth flow with pi-ai SDK...");
 
     try {
       const oauth = new OpenAIOAuth();
@@ -4591,21 +4787,18 @@ export async function setupIpcHandlers(
       LLMProviderFactory.saveSettings(settings);
       LLMProviderFactory.clearCache();
 
-      console.log("[IPC] OpenAI OAuth successful!");
-      if (tokens.email) {
-        console.log("[IPC] Logged in as:", tokens.email);
-      }
+      logger.info("[IPC] OpenAI OAuth successful");
 
       return { success: true, email: tokens.email };
     } catch (error: Any) {
-      console.error("[IPC] OpenAI OAuth failed:", error.message);
+      logger.error("[IPC] OpenAI OAuth failed:", error.message);
       return { success: false, error: error.message };
     }
   });
 
   ipcMain.handle(IPC_CHANNELS.LLM_OPENAI_OAUTH_LOGOUT, async () => {
     checkRateLimit(IPC_CHANNELS.LLM_OPENAI_OAUTH_LOGOUT);
-    console.log("[IPC] Logging out of OpenAI OAuth...");
+    logger.info("[IPC] Logging out of OpenAI OAuth...");
 
     // Clear OAuth tokens from settings
     const settings = LLMProviderFactory.loadSettings();
@@ -4693,7 +4886,7 @@ export async function setupIpcHandlers(
     try {
       getXMentionBridgeService()?.triggerNow();
     } catch (error) {
-      console.warn(
+      logger.warn(
         "[X] Failed to trigger immediate mention bridge poll:",
         error,
       );
@@ -5085,6 +5278,7 @@ export async function setupIpcHandlers(
         validated.botToken!,
         validated.appToken!,
         validated.signingSecret,
+        validated.progressRelayMode,
         validated.securityMode || "pairing",
       );
       return toPublicChannel(channel);
@@ -5112,7 +5306,7 @@ export async function setupIpcHandlers(
       // Automatically enable and connect WhatsApp to start QR code generation
       // This is done asynchronously to not block the response
       gateway.enableWhatsAppWithQRForwarding(channel.id).catch((err) => {
-        console.error("Failed to enable WhatsApp channel:", err);
+        logger.error("Failed to enable WhatsApp channel:", err);
       });
 
       return toPublicChannel(channel, "connecting");
@@ -5136,7 +5330,7 @@ export async function setupIpcHandlers(
 
       // Automatically enable and connect iMessage
       gateway.enableChannel(channel.id).catch((err) => {
-        console.error("Failed to enable iMessage channel:", err);
+        logger.error("Failed to enable iMessage channel:", err);
       });
 
       return toPublicChannel(channel, "connecting");
@@ -5159,7 +5353,7 @@ export async function setupIpcHandlers(
 
       // Automatically enable and connect Signal
       gateway.enableChannel(channel.id).catch((err) => {
-        console.error("Failed to enable Signal channel:", err);
+        logger.error("Failed to enable Signal channel:", err);
       });
 
       return toPublicChannel(channel, "connecting");
@@ -5176,7 +5370,7 @@ export async function setupIpcHandlers(
 
       // Automatically enable and connect Mattermost
       gateway.enableChannel(channel.id).catch((err) => {
-        console.error("Failed to enable Mattermost channel:", err);
+        logger.error("Failed to enable Mattermost channel:", err);
       });
 
       return toPublicChannel(channel, "connecting");
@@ -5195,7 +5389,7 @@ export async function setupIpcHandlers(
 
       // Automatically enable and connect Matrix
       gateway.enableChannel(channel.id).catch((err) => {
-        console.error("Failed to enable Matrix channel:", err);
+        logger.error("Failed to enable Matrix channel:", err);
       });
 
       return toPublicChannel(channel, "connecting");
@@ -5213,7 +5407,7 @@ export async function setupIpcHandlers(
 
       // Automatically enable and connect Twitch
       gateway.enableChannel(channel.id).catch((err) => {
-        console.error("Failed to enable Twitch channel:", err);
+        logger.error("Failed to enable Twitch channel:", err);
       });
 
       return toPublicChannel(channel, "connecting");
@@ -5230,7 +5424,7 @@ export async function setupIpcHandlers(
 
       // Automatically enable and connect LINE
       gateway.enableChannel(channel.id).catch((err) => {
-        console.error("Failed to enable LINE channel:", err);
+        logger.error("Failed to enable LINE channel:", err);
       });
 
       return toPublicChannel(channel, "connecting");
@@ -5253,7 +5447,7 @@ export async function setupIpcHandlers(
 
       // Automatically enable and connect BlueBubbles
       gateway.enableChannel(channel.id).catch((err) => {
-        console.error("Failed to enable BlueBubbles channel:", err);
+        logger.error("Failed to enable BlueBubbles channel:", err);
       });
 
       return toPublicChannel(channel, "connecting");
@@ -5272,7 +5466,7 @@ export async function setupIpcHandlers(
       );
 
       gateway.enableChannel(channel.id).catch((err) => {
-        console.error("Failed to enable Feishu channel:", err);
+        logger.error("Failed to enable Feishu channel:", err);
       });
 
       return toPublicChannel(channel, "connecting");
@@ -5292,7 +5486,7 @@ export async function setupIpcHandlers(
       );
 
       gateway.enableChannel(channel.id).catch((err) => {
-        console.error("Failed to enable WeCom channel:", err);
+        logger.error("Failed to enable WeCom channel:", err);
       });
 
       return toPublicChannel(channel, "connecting");
@@ -5312,7 +5506,7 @@ export async function setupIpcHandlers(
       );
 
       gateway.enableChannel(channel.id).catch((err) => {
-        console.error("Failed to enable X channel:", err);
+        logger.error("Failed to enable X channel:", err);
       });
 
       return toPublicChannel(channel, "connecting");
@@ -5353,7 +5547,7 @@ export async function setupIpcHandlers(
 
       // Automatically enable and connect Email
       gateway.enableChannel(channel.id).catch((err) => {
-        console.error("Failed to enable Email channel:", err);
+        logger.error("Failed to enable Email channel:", err);
       });
 
       return toPublicChannel(channel, "connecting");
@@ -7003,7 +7197,7 @@ export async function setupIpcHandlers(
               })),
             );
           },
-          log: (...args: unknown[]) => console.log("[Briefing]", ...args),
+          log: (...args: unknown[]) => logger.info("[Briefing]", ...args),
         },
         db,
       );
@@ -8691,7 +8885,7 @@ async function setupHooksHandlers(agentDaemon: AgentDaemon): Promise<void> {
   const hookIngress = initializeHookAgentIngress(agentDaemon, {
     scope: "hooks",
     defaultTempWorkspaceKey: "default",
-    logger: (...args) => console.warn(...args),
+    logger: (...args) => logger.warn(...args),
   });
 
   // Initialize settings manager
@@ -8774,7 +8968,7 @@ async function setupHooksHandlers(agentDaemon: AgentDaemon): Promise<void> {
         void agentDaemon
           .sendMessage(action.taskId, action.message)
           .catch((err) => {
-            console.error("[Hooks] Failed to process task message:", err);
+            logger.error("[Hooks] Failed to process task message:", err);
           });
       },
       onApprovalRespond: async (action) => {
@@ -8809,7 +9003,7 @@ async function setupHooksHandlers(agentDaemon: AgentDaemon): Promise<void> {
             }
           } catch (err) {
             // Window may have been destroyed between check and send
-            console.warn("[Hooks] Failed to send event to window:", err);
+            logger.warn("[Hooks] Failed to send event to window:", err);
           }
         }
       },
@@ -8819,7 +9013,7 @@ async function setupHooksHandlers(agentDaemon: AgentDaemon): Promise<void> {
       await server.start();
       hooksServer = server;
     } catch (err) {
-      console.error("[Hooks] Failed to start hooks server:", err);
+      logger.error("[Hooks] Failed to start hooks server:", err);
       throw new Error(
         `Failed to start hooks server: ${err instanceof Error ? err.message : String(err)}`,
       );
@@ -8939,11 +9133,11 @@ async function setupHooksHandlers(agentDaemon: AgentDaemon): Promise<void> {
         const result = await startGmailWatcher(settings);
         if (!result.started) {
           gmailWatcherError = result.reason;
-          console.warn("[Hooks] Gmail watcher not started:", result.reason);
+          logger.warn("[Hooks] Gmail watcher not started:", result.reason);
         }
       } catch (err) {
         gmailWatcherError = err instanceof Error ? err.message : String(err);
-        console.error("[Hooks] Failed to start Gmail watcher:", err);
+        logger.error("[Hooks] Failed to start Gmail watcher:", err);
       }
     }
 
@@ -9017,11 +9211,11 @@ async function setupHooksHandlers(agentDaemon: AgentDaemon): Promise<void> {
     ) {
       const result = await startGmailWatcher(settings);
       if (!result.started) {
-        console.warn("[Hooks] Gmail watcher not started:", result.reason);
+        logger.warn("[Hooks] Gmail watcher not started:", result.reason);
       }
     }
   } catch (err) {
-    console.error("[Hooks] Auto-start failed:", err);
+    logger.error("[Hooks] Auto-start failed:", err);
     // Non-fatal: user can still start it manually from Settings.
   }
 
@@ -9164,14 +9358,14 @@ function broadcastPersonalitySettingsChanged(settings: Any): void {
         }
       } catch (err) {
         // Window may have been destroyed between check and send
-        console.warn(
+        logger.warn(
           "[Personality] Failed to send settings changed event to window:",
           err,
         );
       }
     }
   } catch (err) {
-    console.error("[Personality] Failed to broadcast settings changed:", err);
+    logger.error("[Personality] Failed to broadcast settings changed:", err);
   }
 }
 
@@ -9890,7 +10084,7 @@ function setupKitHandlers(
         if (!existingJob) {
           const res = await cron.add(spec.job);
           if (!res.ok) {
-            console.warn(
+            logger.warn(
               "[Kit] Failed to add scheduled job:",
               spec.job.name,
               res.error,
@@ -9940,7 +10134,7 @@ function setupKitHandlers(
 
         const res = await cron.update(existingJob.id, patch);
         if (!res.ok) {
-          console.warn(
+          logger.warn(
             "[Kit] Failed to update scheduled job:",
             spec.job.name,
             res.error,
@@ -9948,7 +10142,7 @@ function setupKitHandlers(
         }
       }
     } catch (error) {
-      console.warn("[Kit] Failed to ensure default scheduled jobs:", error);
+      logger.warn("[Kit] Failed to ensure default scheduled jobs:", error);
     }
   };
 
@@ -10024,6 +10218,38 @@ function setupKitHandlers(
       await ensureDefaultKitCronJobs(request.workspaceId, mode);
 
       return await computeStatus(request.workspaceId);
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.KIT_APPLY_ONBOARDING_PROFILE,
+    async (_event, request: ApplyOnboardingProfileRequest) => {
+      checkRateLimit(
+        IPC_CHANNELS.KIT_APPLY_ONBOARDING_PROFILE,
+        RATE_LIMIT_CONFIGS.limited,
+      );
+
+      if (!request?.data) {
+        throw new Error("Onboarding profile data is required");
+      }
+
+      OnboardingProfileService.applyGlobalProfile(request.data);
+
+      if (!request.workspaceId) {
+        return { success: true };
+      }
+
+      const workspacePath = getWorkspacePath(request.workspaceId);
+      await OnboardingProfileService.applyWorkspaceProfile(
+        request.workspaceId,
+        workspacePath,
+        request.data,
+      );
+
+      return {
+        success: true,
+        workspaceId: request.workspaceId,
+      };
     },
   );
 
@@ -10200,7 +10426,7 @@ function setupMemoryHandlers(): void {
       try {
         return MemoryService.getSettings(workspaceId);
       } catch (error) {
-        console.error("[Memory] Failed to get settings:", error);
+        logger.error("[Memory] Failed to get settings:", error);
         // Return default settings if service not initialized
         return {
           workspaceId,
@@ -10231,7 +10457,7 @@ function setupMemoryHandlers(): void {
         MemoryService.updateSettings(data.workspaceId, data.settings);
         return { success: true };
       } catch (error) {
-        console.error("[Memory] Failed to save settings:", error);
+        logger.error("[Memory] Failed to save settings:", error);
         throw error;
       }
     },
@@ -10242,10 +10468,14 @@ function setupMemoryHandlers(): void {
     try {
       return MemoryFeaturesManager.loadSettings();
     } catch (error) {
-      console.error("[MemoryFeatures] Failed to get settings:", error);
+      logger.error("[MemoryFeatures] Failed to get settings:", error);
       return {
         contextPackInjectionEnabled: true,
         heartbeatMaintenanceEnabled: true,
+        checkpointCaptureEnabled: true,
+        verbatimRecallEnabled: true,
+        wakeUpLayersEnabled: true,
+        temporalKnowledgeEnabled: true,
       };
     }
   });
@@ -10262,8 +10492,41 @@ function setupMemoryHandlers(): void {
         MemoryFeaturesManager.saveSettings(settings);
         return { success: true };
       } catch (error) {
-        console.error("[MemoryFeatures] Failed to save settings:", error);
+        logger.error("[MemoryFeatures] Failed to save settings:", error);
         throw error;
+      }
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MEMORY_FEATURES_GET_LAYER_PREVIEW,
+    async (_event, workspaceId: string) => {
+      try {
+        const previewDb = DatabaseManager.getInstance().getDatabase();
+        const previewWorkspaceRepo = new WorkspaceRepository(previewDb);
+        const previewTaskRepo = new TaskRepository(previewDb);
+        const workspace = previewWorkspaceRepo.findById(workspaceId);
+        if (!workspace?.path) {
+          return null;
+        }
+        const recentTask = previewTaskRepo.findByWorkspace(workspaceId, 1)[0];
+        const taskPrompt =
+          typeof recentTask?.prompt === "string" && recentTask.prompt.trim().length > 0
+            ? recentTask.prompt
+            : "Current workspace memory preview";
+        return MemorySynthesizer.buildLayerPreview(
+          workspaceId,
+          workspace.path,
+          taskPrompt,
+          {
+            tokenBudget: 1800,
+            includeWorkspaceKit: true,
+            agentRoleId: recentTask?.assignedAgentRoleId || null,
+          },
+        );
+      } catch (error) {
+        logger.error("[MemoryFeatures] Failed to build layer preview:", error);
+        return null;
       }
     },
   );
@@ -10275,7 +10538,7 @@ function setupMemoryHandlers(): void {
       try {
         return MemoryService.search(data.workspaceId, data.query, data.limit);
       } catch (error) {
-        console.error("[Memory] Failed to search:", error);
+        logger.error("[Memory] Failed to search:", error);
         return [];
       }
     },
@@ -10288,7 +10551,7 @@ function setupMemoryHandlers(): void {
       try {
         return MemoryService.getTimelineContext(data.memoryId, data.windowSize);
       } catch (error) {
-        console.error("[Memory] Failed to get timeline:", error);
+        logger.error("[Memory] Failed to get timeline:", error);
         return [];
       }
     },
@@ -10299,7 +10562,7 @@ function setupMemoryHandlers(): void {
     try {
       return MemoryService.getFullDetails(ids);
     } catch (error) {
-      console.error("[Memory] Failed to get details:", error);
+      logger.error("[Memory] Failed to get details:", error);
       return [];
     }
   });
@@ -10311,7 +10574,7 @@ function setupMemoryHandlers(): void {
       try {
         return MemoryService.getRecent(data.workspaceId, data.limit);
       } catch (error) {
-        console.error("[Memory] Failed to get recent:", error);
+        logger.error("[Memory] Failed to get recent:", error);
         return [];
       }
     },
@@ -10324,7 +10587,7 @@ function setupMemoryHandlers(): void {
       try {
         return MemoryService.getStats(workspaceId);
       } catch (error) {
-        console.error("[Memory] Failed to get stats:", error);
+        logger.error("[Memory] Failed to get stats:", error);
         return {
           count: 0,
           totalTokens: 0,
@@ -10342,7 +10605,7 @@ function setupMemoryHandlers(): void {
       MemoryService.clearWorkspace(workspaceId);
       return { success: true };
     } catch (error) {
-      console.error("[Memory] Failed to clear:", error);
+      logger.error("[Memory] Failed to clear:", error);
       throw error;
     }
   });
@@ -10354,7 +10617,7 @@ function setupMemoryHandlers(): void {
       try {
         return MemoryService.getImportedStats(workspaceId);
       } catch (error) {
-        console.error("[Memory] Failed to get imported stats:", error);
+        logger.error("[Memory] Failed to get imported stats:", error);
         return { count: 0, totalTokens: 0 };
       }
     },
@@ -10376,7 +10639,7 @@ function setupMemoryHandlers(): void {
           validated.offset,
         );
       } catch (error) {
-        console.error("[Memory] Failed to find imported:", error);
+        logger.error("[Memory] Failed to find imported:", error);
         return [];
       }
     },
@@ -10394,7 +10657,7 @@ function setupMemoryHandlers(): void {
         const deleted = MemoryService.deleteImported(workspaceId);
         return { success: true, deleted };
       } catch (error) {
-        console.error("[Memory] Failed to delete imported:", error);
+        logger.error("[Memory] Failed to delete imported:", error);
         throw error;
       }
     },
@@ -10419,7 +10682,7 @@ function setupMemoryHandlers(): void {
         );
         return { success };
       } catch (error) {
-        console.error("[Memory] Failed to delete imported entry:", error);
+        logger.error("[Memory] Failed to delete imported entry:", error);
         throw error;
       }
     },
@@ -10445,7 +10708,7 @@ function setupMemoryHandlers(): void {
         );
         return { success: Boolean(memory), memory };
       } catch (error) {
-        console.error(
+        logger.error(
           "[Memory] Failed to update imported memory prompt-recall state:",
           error,
         );
@@ -10458,7 +10721,7 @@ function setupMemoryHandlers(): void {
     try {
       return UserProfileService.getProfile();
     } catch (error) {
-      console.error("[Memory] Failed to get user profile:", error);
+      logger.error("[Memory] Failed to get user profile:", error);
       return { facts: [], updatedAt: Date.now() };
     }
   });
@@ -10473,7 +10736,7 @@ function setupMemoryHandlers(): void {
       try {
         return UserProfileService.addFact(request);
       } catch (error) {
-        console.error("[Memory] Failed to add user fact:", error);
+        logger.error("[Memory] Failed to add user fact:", error);
         throw error;
       }
     },
@@ -10489,7 +10752,7 @@ function setupMemoryHandlers(): void {
       try {
         return UserProfileService.updateFact(request);
       } catch (error) {
-        console.error("[Memory] Failed to update user fact:", error);
+        logger.error("[Memory] Failed to update user fact:", error);
         throw error;
       }
     },
@@ -10505,7 +10768,7 @@ function setupMemoryHandlers(): void {
       try {
         return { success: UserProfileService.deleteFact(id) };
       } catch (error) {
-        console.error("[Memory] Failed to delete user fact:", error);
+        logger.error("[Memory] Failed to delete user fact:", error);
         throw error;
       }
     },
@@ -10533,7 +10796,7 @@ function setupMemoryHandlers(): void {
           limit: data?.limit,
         });
       } catch (error) {
-        console.error("[Memory] Failed to list relationship memory:", error);
+        logger.error("[Memory] Failed to list relationship memory:", error);
         return [];
       }
     },
@@ -10566,7 +10829,7 @@ function setupMemoryHandlers(): void {
           dueAt: data.dueAt,
         });
       } catch (error) {
-        console.error("[Memory] Failed to update relationship memory:", error);
+        logger.error("[Memory] Failed to update relationship memory:", error);
         throw error;
       }
     },
@@ -10585,7 +10848,7 @@ function setupMemoryHandlers(): void {
         }
         return { success: RelationshipMemoryService.deleteItem(id) };
       } catch (error) {
-        console.error(
+        logger.error(
           "[Memory] Failed to delete relationship memory item:",
           error,
         );
@@ -10605,7 +10868,7 @@ function setupMemoryHandlers(): void {
         const result = RelationshipMemoryService.cleanupRecurringTaskHistory();
         return { success: true, ...result };
       } catch (error) {
-        console.error(
+        logger.error(
           "[Memory] Failed to cleanup recurring relationship history:",
           error,
         );
@@ -10624,7 +10887,7 @@ function setupMemoryHandlers(): void {
             : 25;
         return RelationshipMemoryService.listOpenCommitments(limit);
       } catch (error) {
-        console.error("[Memory] Failed to list open commitments:", error);
+        logger.error("[Memory] Failed to list open commitments:", error);
         return [];
       }
     },
@@ -10647,7 +10910,7 @@ function setupMemoryHandlers(): void {
             : "No commitments due soon.";
         return { items, reminderText };
       } catch (error) {
-        console.error("[Memory] Failed to list due soon commitments:", error);
+        logger.error("[Memory] Failed to list due soon commitments:", error);
         return { items: [], reminderText: "No commitments due soon." };
       }
     },
@@ -10657,7 +10920,7 @@ function setupMemoryHandlers(): void {
     try {
       return getAwarenessService().getConfig();
     } catch (error) {
-      console.error("[Awareness] Failed to get config:", error);
+      logger.error("[Awareness] Failed to get config:", error);
       throw error;
     }
   });
@@ -10677,7 +10940,7 @@ function setupMemoryHandlers(): void {
         );
         return getAwarenessService().saveConfig(validated as Any);
       } catch (error) {
-        console.error("[Awareness] Failed to save config:", error);
+        logger.error("[Awareness] Failed to save config:", error);
         throw error;
       }
     },
@@ -10689,7 +10952,7 @@ function setupMemoryHandlers(): void {
       try {
         return getAwarenessService().listBeliefs(workspaceId);
       } catch (error) {
-        console.error("[Awareness] Failed to list beliefs:", error);
+        logger.error("[Awareness] Failed to list beliefs:", error);
         return [];
       }
     },
@@ -10713,7 +10976,7 @@ function setupMemoryHandlers(): void {
           validated.patch || {},
         );
       } catch (error) {
-        console.error("[Awareness] Failed to update belief:", error);
+        logger.error("[Awareness] Failed to update belief:", error);
         throw error;
       }
     },
@@ -10729,7 +10992,7 @@ function setupMemoryHandlers(): void {
       try {
         return { success: getAwarenessService().deleteBelief(id) };
       } catch (error) {
-        console.error("[Awareness] Failed to delete belief:", error);
+        logger.error("[Awareness] Failed to delete belief:", error);
         throw error;
       }
     },
@@ -10741,7 +11004,7 @@ function setupMemoryHandlers(): void {
       try {
         return getAwarenessService().getSummary(workspaceId);
       } catch (error) {
-        console.error("[Awareness] Failed to get summary:", error);
+        logger.error("[Awareness] Failed to get summary:", error);
         throw error;
       }
     },
@@ -10753,7 +11016,7 @@ function setupMemoryHandlers(): void {
       try {
         return getAwarenessService().getSnapshot(workspaceId);
       } catch (error) {
-        console.error("[Awareness] Failed to get snapshot:", error);
+        logger.error("[Awareness] Failed to get snapshot:", error);
         throw error;
       }
     },
@@ -10765,7 +11028,7 @@ function setupMemoryHandlers(): void {
       try {
         return getAwarenessService().listEvents(data || {});
       } catch (error) {
-        console.error("[Awareness] Failed to list events:", error);
+        logger.error("[Awareness] Failed to list events:", error);
         return [];
       }
     },
@@ -10775,7 +11038,7 @@ function setupMemoryHandlers(): void {
     try {
       return getAutonomyEngine().getConfig();
     } catch (error) {
-      console.error("[Autonomy] Failed to get config:", error);
+      logger.error("[Autonomy] Failed to get config:", error);
       throw error;
     }
   });
@@ -10795,7 +11058,7 @@ function setupMemoryHandlers(): void {
         );
         return getAutonomyEngine().saveConfig(validated as Any);
       } catch (error) {
-        console.error("[Autonomy] Failed to save config:", error);
+        logger.error("[Autonomy] Failed to save config:", error);
         throw error;
       }
     },
@@ -10807,7 +11070,7 @@ function setupMemoryHandlers(): void {
       try {
         return getAutonomyEngine().getWorldModel(workspaceId);
       } catch (error) {
-        console.error("[Autonomy] Failed to get state:", error);
+        logger.error("[Autonomy] Failed to get state:", error);
         throw error;
       }
     },
@@ -10819,7 +11082,7 @@ function setupMemoryHandlers(): void {
       try {
         return getAutonomyEngine().listDecisions(workspaceId);
       } catch (error) {
-        console.error("[Autonomy] Failed to list decisions:", error);
+        logger.error("[Autonomy] Failed to list decisions:", error);
         return [];
       }
     },
@@ -10831,7 +11094,7 @@ function setupMemoryHandlers(): void {
       try {
         return getAutonomyEngine().listActions(workspaceId);
       } catch (error) {
-        console.error("[Autonomy] Failed to list actions:", error);
+        logger.error("[Autonomy] Failed to list actions:", error);
         return [];
       }
     },
@@ -10855,7 +11118,7 @@ function setupMemoryHandlers(): void {
           validated.patch || {},
         );
       } catch (error) {
-        console.error("[Autonomy] Failed to update decision:", error);
+        logger.error("[Autonomy] Failed to update decision:", error);
         throw error;
       }
     },
@@ -10871,7 +11134,7 @@ function setupMemoryHandlers(): void {
       try {
         return getAutonomyEngine().triggerEvaluation(workspaceId);
       } catch (error) {
-        console.error("[Autonomy] Failed to trigger evaluation:", error);
+        logger.error("[Autonomy] Failed to trigger evaluation:", error);
         throw error;
       }
     },
@@ -10919,7 +11182,7 @@ function setupMemoryHandlers(): void {
           activeImportAbort = null;
         }
       } catch (error) {
-        console.error("[Memory] ChatGPT import failed:", error);
+        logger.error("[Memory] ChatGPT import failed:", error);
         throw error;
       }
     },
@@ -10950,7 +11213,7 @@ function setupMemoryHandlers(): void {
       try {
         return MemoryService.importFromText(validated);
       } catch (error) {
-        console.error("[Memory] Text import failed:", error);
+        logger.error("[Memory] Text import failed:", error);
         throw error;
       }
     },
@@ -10999,7 +11262,7 @@ function setupMemoryHandlers(): void {
         timestamp,
       };
     } catch (error) {
-      console.error("[Migration] Failed to get status:", error);
+      logger.error("[Migration] Failed to get status:", error);
       return { migrated: false, notificationDismissed: true }; // Default to no notification on error
     }
   });
@@ -11016,7 +11279,7 @@ function setupMemoryHandlers(): void {
       logger.debug("[Migration] Notification dismissed");
       return { success: true };
     } catch (error) {
-      console.error("[Migration] Failed to dismiss notification:", error);
+      logger.error("[Migration] Failed to dismiss notification:", error);
       throw error;
     }
   });
@@ -11054,7 +11317,7 @@ function setupMemoryHandlers(): void {
         configSchema: p.manifest.configSchema,
       }));
     } catch (error) {
-      console.error("[Extensions] Failed to list:", error);
+      logger.error("[Extensions] Failed to list:", error);
       return [];
     }
   });
@@ -11080,7 +11343,7 @@ function setupMemoryHandlers(): void {
         configSchema: plugin.manifest.configSchema,
       };
     } catch (error) {
-      console.error("[Extensions] Failed to get:", error);
+      logger.error("[Extensions] Failed to get:", error);
       return null;
     }
   });
@@ -11092,7 +11355,7 @@ function setupMemoryHandlers(): void {
       await registry.enablePlugin(name);
       return { success: true };
     } catch (error: Any) {
-      console.error("[Extensions] Failed to enable:", error);
+      logger.error("[Extensions] Failed to enable:", error);
       return { success: false, error: error.message };
     }
   });
@@ -11104,7 +11367,7 @@ function setupMemoryHandlers(): void {
       await registry.disablePlugin(name);
       return { success: true };
     } catch (error: Any) {
-      console.error("[Extensions] Failed to disable:", error);
+      logger.error("[Extensions] Failed to disable:", error);
       return { success: false, error: error.message };
     }
   });
@@ -11116,7 +11379,7 @@ function setupMemoryHandlers(): void {
       await registry.reloadPlugin(name);
       return { success: true };
     } catch (error: Any) {
-      console.error("[Extensions] Failed to reload:", error);
+      logger.error("[Extensions] Failed to reload:", error);
       return { success: false, error: error.message };
     }
   });
@@ -11129,7 +11392,7 @@ function setupMemoryHandlers(): void {
         const registry = getPluginRegistry();
         return registry.getPluginConfig(name) || {};
       } catch (error) {
-        console.error("[Extensions] Failed to get config:", error);
+        logger.error("[Extensions] Failed to get config:", error);
         return {};
       }
     },
@@ -11144,7 +11407,7 @@ function setupMemoryHandlers(): void {
         await registry.setPluginConfig(data.name, data.config);
         return { success: true };
       } catch (error: Any) {
-        console.error("[Extensions] Failed to set config:", error);
+        logger.error("[Extensions] Failed to set config:", error);
         return { success: false, error: error.message };
       }
     },
@@ -11166,7 +11429,7 @@ function setupMemoryHandlers(): void {
         state: p.state,
       }));
     } catch (error) {
-      console.error("[Extensions] Failed to discover:", error);
+      logger.error("[Extensions] Failed to discover:", error);
       return [];
     }
   });
@@ -11190,7 +11453,7 @@ function setupMemoryHandlers(): void {
         startedAt: tunnelManager.startedAt?.getTime(),
       };
     } catch (error) {
-      console.error("[Tunnel] Failed to get status:", error);
+      logger.error("[Tunnel] Failed to get status:", error);
       return { status: "stopped" };
     }
   });
@@ -11206,7 +11469,7 @@ function setupMemoryHandlers(): void {
       const url = await tunnelManager.start();
       return { success: true, url };
     } catch (error: Any) {
-      console.error("[Tunnel] Failed to start:", error);
+      logger.error("[Tunnel] Failed to start:", error);
       return { success: false, error: error.message };
     }
   });
@@ -11220,7 +11483,7 @@ function setupMemoryHandlers(): void {
       }
       return { success: true };
     } catch (error: Any) {
-      console.error("[Tunnel] Failed to stop:", error);
+      logger.error("[Tunnel] Failed to stop:", error);
       return { success: false, error: error.message };
     }
   });
@@ -11238,7 +11501,7 @@ function setupMemoryHandlers(): void {
     try {
       return VoiceSettingsManager.loadSettings();
     } catch (error) {
-      console.error("[Voice] Failed to get settings:", error);
+      logger.error("[Voice] Failed to get settings:", error);
       throw error;
     }
   });
@@ -11252,7 +11515,7 @@ function setupMemoryHandlers(): void {
       voiceService.updateSettings(updated);
       return updated;
     } catch (error) {
-      console.error("[Voice] Failed to save settings:", error);
+      logger.error("[Voice] Failed to save settings:", error);
       throw error;
     }
   });
@@ -11263,7 +11526,7 @@ function setupMemoryHandlers(): void {
       const voiceService = getVoiceService();
       return voiceService.getState();
     } catch (error) {
-      console.error("[Voice] Failed to get state:", error);
+      logger.error("[Voice] Failed to get state:", error);
       throw error;
     }
   });
@@ -11279,7 +11542,7 @@ function setupMemoryHandlers(): void {
       }
       return { success: true, audioData: null };
     } catch (error: Any) {
-      console.error("[Voice] Failed to speak:", error);
+      logger.error("[Voice] Failed to speak:", error);
       return { success: false, error: error.message, audioData: null };
     }
   });
@@ -11291,7 +11554,7 @@ function setupMemoryHandlers(): void {
       voiceService.stopSpeaking();
       return { success: true };
     } catch (error: Any) {
-      console.error("[Voice] Failed to stop speaking:", error);
+      logger.error("[Voice] Failed to stop speaking:", error);
       return { success: false, error: error.message };
     }
   });
@@ -11307,7 +11570,7 @@ function setupMemoryHandlers(): void {
         const text = await voiceService.transcribe(audioBuffer);
         return { text };
       } catch (error: Any) {
-        console.error("[Voice] Failed to transcribe:", error);
+        logger.error("[Voice] Failed to transcribe:", error);
         return { text: "", error: error.message };
       }
     },
@@ -11319,7 +11582,7 @@ function setupMemoryHandlers(): void {
       const voiceService = getVoiceService();
       return await voiceService.getElevenLabsVoices();
     } catch (error: Any) {
-      console.error("[Voice] Failed to get ElevenLabs voices:", error);
+      logger.error("[Voice] Failed to get ElevenLabs voices:", error);
       return [];
     }
   });
@@ -11330,7 +11593,7 @@ function setupMemoryHandlers(): void {
       const voiceService = getVoiceService();
       return await voiceService.testElevenLabsConnection();
     } catch (error: Any) {
-      console.error("[Voice] Failed to test ElevenLabs:", error);
+      logger.error("[Voice] Failed to test ElevenLabs:", error);
       return { success: false, error: error.message };
     }
   });
@@ -11341,7 +11604,7 @@ function setupMemoryHandlers(): void {
       const voiceService = getVoiceService();
       return await voiceService.testOpenAIConnection();
     } catch (error: Any) {
-      console.error("[Voice] Failed to test OpenAI voice:", error);
+      logger.error("[Voice] Failed to test OpenAI voice:", error);
       return { success: false, error: error.message };
     }
   });
@@ -11352,7 +11615,7 @@ function setupMemoryHandlers(): void {
       const voiceService = getVoiceService();
       return await voiceService.testAzureConnection();
     } catch (error: Any) {
-      console.error("[Voice] Failed to test Azure OpenAI voice:", error);
+      logger.error("[Voice] Failed to test Azure OpenAI voice:", error);
       return { success: false, error: error.message };
     }
   });
@@ -11414,7 +11677,7 @@ function setupMemoryHandlers(): void {
 
   // Initialize voice service
   voiceService.initialize().catch((err) => {
-    console.error("[Voice] Failed to initialize:", err);
+    logger.error("[Voice] Failed to initialize:", err);
   });
 
   logger.debug("[Voice] Handlers initialized");

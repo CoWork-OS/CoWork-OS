@@ -13,14 +13,15 @@ import {
   ConverseCommand,
 } from "@aws-sdk/client-bedrock-runtime";
 import { fromIni } from "@aws-sdk/credential-provider-ini";
-import { Workspace } from "../../../shared/types";
+import { SensitiveSourceRef, Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { LLMTool, MODELS } from "../llm/types";
 import { LLMProviderFactory, type LLMSettings } from "../llm/provider-factory";
 import { downscaleImage } from "./image-utils";
 import { createLogger } from "../../utils/logger";
+import { buildSensitiveSourceRefForPath } from "../security/export-permission-context";
 
-type VisionProvider = "openai" | "anthropic" | "gemini" | "bedrock";
+type VisionProvider = "azure" | "openai" | "anthropic" | "gemini" | "bedrock";
 
 const DEFAULT_MAX_TOKENS = 900;
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024; // 20MB
@@ -44,6 +45,13 @@ function resolveAnthropicCredential(settings: LLMSettings): string | undefined {
     return apiKey || subscriptionToken;
   }
   return subscriptionToken || apiKey;
+}
+
+function normalizeAzureBaseEndpoint(endpoint: string): string {
+  const trimmed = endpoint.trim();
+  const idx = trimmed.indexOf("/openai/");
+  if (idx !== -1) return trimmed.slice(0, idx);
+  return trimmed.replace(/\/+$/, "");
 }
 
 function safeResolveWithinWorkspace(
@@ -82,6 +90,12 @@ function buildSetupHint(provider: VisionProvider): {
   target: string;
 } {
   switch (provider) {
+    case "azure":
+      return {
+        type: "open_settings",
+        label: "Set up Azure OpenAI",
+        target: "azure",
+      };
     case "openai":
       return {
         type: "open_settings",
@@ -273,7 +287,7 @@ export class VisionTools {
         description:
           "Analyze an image file from the workspace using a vision-capable LLM. " +
           "Use this for screenshots/photos: extract text, describe items, answer questions, or summarize what is shown. " +
-          "This may require an API key for OpenAI/Anthropic/Gemini.",
+          "This may require Azure OpenAI, OpenAI, Anthropic, Bedrock, or Gemini credentials.",
         input_schema: {
           type: "object",
           properties: {
@@ -289,7 +303,7 @@ export class VisionTools {
             },
             provider: {
               type: "string",
-              enum: ["openai", "anthropic", "gemini", "bedrock"],
+              enum: ["azure", "openai", "anthropic", "gemini", "bedrock"],
               description:
                 "Optional provider override (default: uses configured provider if vision-capable, otherwise falls back).",
             },
@@ -310,9 +324,9 @@ export class VisionTools {
         name: "read_pdf_visual",
         description:
           "Visually analyze a PDF document's layout, design, and content using a vision-capable LLM. " +
-          "Converts PDF pages to images and analyzes them in one step. Use this when you need to understand " +
-          "a PDF's visual layout, design, formatting, colors, or structure — not just its text content. " +
-          "For text-only extraction, use read_file instead.",
+          "Converts PDF pages to images and analyzes them in one step. Use this only when you need to understand " +
+          "a PDF's visual layout, design, formatting, colors, scanned/image-based content, or page appearance — not just its text content. " +
+          "For ordinary text PDFs, use read_file or parse_document instead.",
         input_schema: {
           type: "object",
           properties: {
@@ -332,7 +346,7 @@ export class VisionTools {
             },
             provider: {
               type: "string",
-              enum: ["openai", "anthropic", "gemini", "bedrock"],
+              enum: ["azure", "openai", "anthropic", "gemini", "bedrock"],
               description: "Optional vision provider override.",
             },
           },
@@ -349,7 +363,14 @@ export class VisionTools {
     model?: unknown;
     max_tokens?: unknown;
   }): Promise<
-    | { success: true; provider: VisionProvider; model: string; text: string }
+    | {
+        success: true;
+        provider: VisionProvider;
+        model: string;
+        text: string;
+        source_path: string;
+        provenance: SensitiveSourceRef;
+      }
     | {
         success: false;
         error: string;
@@ -411,6 +432,7 @@ export class VisionTools {
         error: `Image is too large (${stat.size} bytes). Max allowed is ${MAX_IMAGE_BYTES} bytes.`,
       };
     }
+    const provenance = buildSensitiveSourceRefForPath(this.workspace, absPath);
 
     // Check vision cache with request-specific key to avoid cross-prompt/page/provider contamination.
     const cacheKey = this.buildCacheKey({
@@ -470,10 +492,22 @@ export class VisionTools {
 
     // Store successful results in cache (keyed by file path + mtime).
     if (result.success) {
-      this.setCachedResult(cacheKey, result);
+      this.setCachedResult(cacheKey, {
+        ...result,
+        source_path: relPath,
+        provenance,
+      });
     }
 
-    return result;
+    if (!result.success) {
+      return result;
+    }
+
+    return {
+      ...result,
+      source_path: relPath,
+      provenance,
+    };
   }
 
   /**
@@ -495,6 +529,9 @@ export class VisionTools {
         success: false;
         error: string;
         retryable: boolean;
+        nonBlocking?: boolean;
+        recoverableFallback?: boolean;
+        fallbackHint?: string;
         actionHint?: { type: string; label: string; target: string };
       }
   > {
@@ -510,28 +547,43 @@ export class VisionTools {
     } = args;
 
     const settings = LLMProviderFactory.loadSettings();
+    const rawProviderType = String(
+      (settings as { providerType?: string }).providerType || "",
+    );
+    const normalizedProviderType =
+      rawProviderType === "amazon-bedrock" ? "bedrock" : rawProviderType;
+    const hasAzureVisionConfig = Boolean(
+      settings.azure?.apiKey?.trim() &&
+        settings.azure?.endpoint?.trim() &&
+        settings.azure?.deployment?.trim(),
+    );
+    const hasDirectOpenAIVisionConfig = Boolean(settings.openai?.apiKey?.trim());
+    const normalizedProviderOverride =
+      providerOverride === "openai" &&
+      normalizedProviderType === "azure" &&
+      hasAzureVisionConfig &&
+      !hasDirectOpenAIVisionConfig
+        ? "azure"
+        : providerOverride;
     const preferred =
-      providerOverride === "openai" ||
-      providerOverride === "anthropic" ||
-      providerOverride === "gemini" ||
-      providerOverride === "bedrock"
-        ? (providerOverride as VisionProvider)
+      normalizedProviderOverride === "azure" ||
+      normalizedProviderOverride === "openai" ||
+      normalizedProviderOverride === "anthropic" ||
+      normalizedProviderOverride === "gemini" ||
+      normalizedProviderOverride === "bedrock"
+        ? (normalizedProviderOverride as VisionProvider)
         : undefined;
 
     const tryOrder: VisionProvider[] = preferred
       ? [preferred]
       : (() => {
-          const rawProviderType = String(
-            (settings as { providerType?: string }).providerType || "",
-          );
-          const normalizedProviderType =
-            rawProviderType === "amazon-bedrock" ? "bedrock" : rawProviderType;
           const order: VisionProvider[] = [];
+          if (normalizedProviderType === "azure") order.push("azure");
           if (normalizedProviderType === "bedrock") order.push("bedrock");
           if (normalizedProviderType === "openai") order.push("openai");
           if (normalizedProviderType === "anthropic") order.push("anthropic");
           if (normalizedProviderType === "gemini") order.push("gemini");
-          order.push("bedrock", "openai", "anthropic", "gemini");
+          order.push("azure", "bedrock", "openai", "anthropic", "gemini");
           return order.filter((p, idx) => order.indexOf(p) === idx);
         })();
 
@@ -540,6 +592,36 @@ export class VisionTools {
 
     for (const provider of tryOrder) {
       try {
+        if (provider === "azure") {
+          const apiKey = settings.azure?.apiKey?.trim();
+          const endpoint = settings.azure?.endpoint?.trim();
+          const deployment = settings.azure?.deployment?.trim();
+          if (!apiKey || !endpoint || !deployment) {
+            lastError =
+              "Azure OpenAI vision requires apiKey, endpoint, and deployment to be configured.";
+            continue;
+          }
+          const model = modelOverride || deployment;
+          const text = await this.analyzeWithAzureOpenAI({
+            apiKey,
+            endpoint,
+            deployment,
+            apiVersion: settings.azure?.apiVersion?.trim(),
+            model,
+            prompt,
+            base64,
+            mimeType,
+            maxTokens,
+          });
+          this.daemon.logEvent(this.taskId, "tool_result", {
+            tool: toolName,
+            success: true,
+            provider,
+            model,
+          });
+          return { success: true, provider, model, text };
+        }
+
         if (provider === "openai") {
           const apiKey = settings.openai?.apiKey?.trim();
           if (!apiKey) {
@@ -652,15 +734,19 @@ export class VisionTools {
       }
     }
 
-    const fallbackProvider = preferred || "openai";
+    const fallbackProvider = preferred || tryOrder[0] || "openai";
     const actionHint = buildSetupHint(fallbackProvider);
 
     const fallbackError =
       lastError ||
-      "No vision-capable provider configured. Configure OpenAI/Anthropic/Gemini in Settings.";
+      "No vision-capable provider configured. Configure Azure OpenAI, OpenAI, Anthropic, Bedrock, or Gemini in Settings.";
     const retryable = this.shouldRetryVisionError(
       lastErrorRaw ?? fallbackError,
     );
+    const configurationMissing =
+      /not configured|does not support image analysis here yet|no vision-capable provider configured|vision requires/i.test(
+        fallbackError,
+      );
 
     if (emitToolError) {
       this.daemon.logEvent(this.taskId, "tool_error", {
@@ -674,6 +760,11 @@ export class VisionTools {
       success: false,
       error: fallbackError,
       retryable,
+      nonBlocking: configurationMissing,
+      recoverableFallback: configurationMissing,
+      fallbackHint: configurationMissing
+        ? "Vision analysis is unavailable. Continue with read_file or parse_document if the task can be completed from extracted text."
+        : undefined,
       actionHint,
     };
   }
@@ -688,6 +779,8 @@ export class VisionTools {
         success: true;
         pages: Array<{ page: number; analysis: string }>;
         pageCount: number;
+        source_path: string;
+        provenance: SensitiveSourceRef;
       }
     | { success: false; error: string }
   > {
@@ -734,6 +827,7 @@ export class VisionTools {
     } catch {
       return { success: false, error: `PDF not found: ${relPath}` };
     }
+    const provenance = buildSensitiveSourceRefForPath(this.workspace, absPath);
 
     // Parse and canonicalize page range up front so equivalent specs share cache entries.
     const { firstPage, lastPage } = this.parsePageRange(pagesSpec);
@@ -900,6 +994,8 @@ export class VisionTools {
         success: true as const,
         pages: results,
         pageCount: results.length,
+        source_path: relPath,
+        provenance,
       };
       // Cache the successful PDF analysis result.
       this.setCachedResult(cacheKey, pdfResult);
@@ -974,6 +1070,78 @@ export class VisionTools {
     });
 
     return response.choices?.[0]?.message?.content?.trim() || "";
+  }
+
+  private async analyzeWithAzureOpenAI(args: {
+    apiKey: string;
+    endpoint: string;
+    deployment: string;
+    apiVersion?: string;
+    model: string;
+    prompt: string;
+    base64: string;
+    mimeType: string;
+    maxTokens: number;
+  }): Promise<string> {
+    const base = normalizeAzureBaseEndpoint(args.endpoint);
+    const url =
+      `${base}/openai/deployments/${encodeURIComponent(args.deployment)}/chat/completions` +
+      `?api-version=${encodeURIComponent(args.apiVersion || "2024-12-01-preview")}`;
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "api-key": args.apiKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: args.model || args.deployment,
+        max_tokens: args.maxTokens,
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: args.prompt },
+              {
+                type: "image_url",
+                image_url: {
+                  url: `data:${args.mimeType};base64,${args.base64}`,
+                },
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => String(response.status));
+      throw new Error(`Azure OpenAI vision error ${response.status}: ${errorBody}`);
+    }
+
+    const data = (await response.json()) as {
+      choices?: Array<{
+        message?: {
+          content?:
+            | string
+            | Array<{
+                type?: string;
+                text?: string;
+              }>;
+        };
+      }>;
+    };
+    const content = data.choices?.[0]?.message?.content;
+    if (typeof content === "string") {
+      return content.trim();
+    }
+    if (Array.isArray(content)) {
+      return content
+        .map((item) => (typeof item?.text === "string" ? item.text : ""))
+        .join("\n")
+        .trim();
+    }
+    return "";
   }
 
   private async analyzeWithAnthropic(args: {

@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { OpenRouterProvider } from "../openrouter-provider";
+import {
+  OPENROUTER_DEFAULT_MODEL,
+  OpenRouterProvider,
+} from "../openrouter-provider";
 
 function countCacheMarkers(messages: Any[]): number {
   return messages.reduce((count, message) => {
@@ -57,6 +60,15 @@ describe("OpenRouterProvider attribution headers", () => {
         }),
       }),
     );
+  });
+
+  it("uses the shared OpenRouter default model when no model is configured", () => {
+    const provider = new OpenRouterProvider({
+      type: "openrouter",
+      openrouterApiKey: "test-key",
+    } as Any);
+
+    expect((provider as Any).defaultModel).toBe(OPENROUTER_DEFAULT_MODEL);
   });
 
   it("sends attribution headers for model discovery", async () => {
@@ -453,7 +465,7 @@ describe("OpenRouterProvider attribution headers", () => {
       providerMessage: "No endpoints found that support image input for model minimax/minimax-m2.5:free",
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("marks OpenRouter image-input 404s as retryable route failures", async () => {
@@ -512,6 +524,7 @@ describe("OpenRouterProvider attribution headers", () => {
   });
 
   it("caches runtime image-input 404s and fast-fails subsequent image requests for the same model", async () => {
+    const modelId = "acme/runtime-404-cache-test";
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url.endsWith("/models?output_modalities=all")) {
         return {
@@ -523,7 +536,7 @@ describe("OpenRouterProvider attribution headers", () => {
       }
 
       const body = init?.body ? JSON.parse(String(init.body)) : null;
-      expect(body.model).toBe("openai/gpt-4o");
+      expect(body.model).toBe(modelId);
       return {
         ok: false,
         status: 404,
@@ -537,12 +550,12 @@ describe("OpenRouterProvider attribution headers", () => {
 
     const provider = new OpenRouterProvider({
       type: "openrouter",
-      model: "openai/gpt-4o",
+      model: modelId,
       openrouterApiKey: "test-key",
     });
 
     const request = {
-      model: "openai/gpt-4o",
+      model: modelId,
       maxTokens: 32,
       system: "",
       messages: [
@@ -565,10 +578,160 @@ describe("OpenRouterProvider attribution headers", () => {
     await expect(provider.createMessage(request)).rejects.toMatchObject({
       status: 404,
       retryable: true,
-      providerMessage: "No endpoints found that support image input for model openai/gpt-4o",
+      providerMessage: `No endpoints found that support image input for model ${modelId}`,
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("backs off model capability discovery after a transient catalog failure", async () => {
+    const modelId = "acme/vision-retry-test";
+    let catalogCalls = 0;
+    let chatCalls = 0;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith("/models?output_modalities=all")) {
+        catalogCalls += 1;
+        if (catalogCalls === 1) {
+          return {
+            ok: false,
+            status: 503,
+            statusText: "Service Unavailable",
+            json: vi.fn().mockResolvedValue({}),
+          } as unknown as Response;
+        }
+        return {
+          ok: true,
+          json: vi.fn().mockResolvedValue({
+            data: [
+              {
+                id: modelId,
+                architecture: {
+                  input_modalities: ["text", "image"],
+                  output_modalities: ["text"],
+                },
+              },
+            ],
+          }),
+        } as unknown as Response;
+      }
+
+      chatCalls += 1;
+      return {
+        ok: true,
+        json: vi.fn().mockResolvedValue({
+          choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
+        }),
+      } as unknown as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const provider = new OpenRouterProvider({
+      type: "openrouter",
+      model: modelId,
+      openrouterApiKey: "test-key",
+    });
+
+    const request = {
+      model: modelId,
+      maxTokens: 32,
+      system: "",
+      messages: [
+        {
+          role: "user" as const,
+          content: [
+            { type: "text" as const, text: "Describe the image." },
+            { type: "image" as const, mimeType: "image/png", data: "AA==" },
+          ],
+        },
+      ],
+    };
+
+    await expect(provider.createMessage(request)).resolves.toMatchObject({
+      stopReason: "end_turn",
+    });
+    await expect(provider.createMessage(request)).resolves.toMatchObject({
+      stopReason: "end_turn",
+    });
+
+    expect(catalogCalls).toBe(1);
+    expect(chatCalls).toBe(2);
+  });
+
+  it("retries model capability discovery again after the cooldown window passes", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-07T10:00:00Z"));
+
+    const modelId = "acme/vision-retry-after-cooldown";
+    let catalogCalls = 0;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith("/models?output_modalities=all")) {
+        catalogCalls += 1;
+        if (catalogCalls === 1) {
+          return {
+            ok: false,
+            status: 503,
+            statusText: "Service Unavailable",
+            json: vi.fn().mockResolvedValue({}),
+          } as unknown as Response;
+        }
+        return {
+          ok: true,
+          json: vi.fn().mockResolvedValue({
+            data: [
+              {
+                id: modelId,
+                architecture: {
+                  input_modalities: ["text", "image"],
+                  output_modalities: ["text"],
+                },
+              },
+            ],
+          }),
+        } as unknown as Response;
+      }
+
+      return {
+        ok: true,
+        json: vi.fn().mockResolvedValue({
+          choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
+        }),
+      } as unknown as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const provider = new OpenRouterProvider({
+      type: "openrouter",
+      model: modelId,
+      openrouterApiKey: "test-key",
+    });
+
+    const request = {
+      model: modelId,
+      maxTokens: 32,
+      system: "",
+      messages: [
+        {
+          role: "user" as const,
+          content: [
+            { type: "text" as const, text: "Describe the image." },
+            { type: "image" as const, mimeType: "image/png", data: "AA==" },
+          ],
+        },
+      ],
+    };
+
+    await expect(provider.createMessage(request)).resolves.toMatchObject({
+      stopReason: "end_turn",
+    });
+
+    vi.advanceTimersByTime(5 * 60 * 1000 + 1);
+
+    await expect(provider.createMessage(request)).resolves.toMatchObject({
+      stopReason: "end_turn",
+    });
+
+    expect(catalogCalls).toBe(2);
+    vi.useRealTimers();
   });
 
   it("does not emit provider error logs for retryable OpenRouter route failures", async () => {
@@ -602,6 +765,58 @@ describe("OpenRouterProvider attribution headers", () => {
       }),
     ).rejects.toMatchObject({
       status: 400,
+      retryable: true,
+    });
+
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it("treats tool_choice capability route failures as retryable", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        statusText: "Not Found",
+        json: vi.fn().mockResolvedValue({
+          error: {
+            message:
+              "No endpoints found that support the provided 'tool_choice' value. To learn more about provider routing, visit: https://openrouter.ai/docs/guides/routing/provider-selection",
+          },
+        }),
+      } as unknown as Response),
+    );
+
+    const provider = new OpenRouterProvider({
+      type: "openrouter",
+      model: "nvidia/nemotron-3-super-120b-a12b:free",
+      openrouterApiKey: "test-key",
+    });
+
+    await expect(
+      provider.createMessage({
+        model: "nvidia/nemotron-3-super-120b-a12b:free",
+        maxTokens: 32,
+        system: "",
+        messages: [{ role: "user", content: "hello" }],
+        tools: [
+          {
+            name: "read_file",
+            description: "Read a file",
+            input_schema: {
+              type: "object",
+              properties: {
+                path: { type: "string" },
+              },
+              required: ["path"],
+            },
+          },
+        ],
+        toolChoice: "none",
+      }),
+    ).rejects.toMatchObject({
+      status: 404,
       retryable: true,
     });
 

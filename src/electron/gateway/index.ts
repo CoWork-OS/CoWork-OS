@@ -183,19 +183,9 @@ export class ChannelGateway {
       const message = typeof data.message === "string" ? data.message : "";
       const trimmed = message.trim();
       if (trimmed) {
-        // Keep the BEST (longest substantive) answer, not just the last one
-        // This prevents confused step messages from overwriting good answers
-        const existingMessage = lastMessages.get(data.taskId);
-        const isConfusedMessage =
-          trimmed.toLowerCase().includes("don't have") ||
-          trimmed.toLowerCase().includes("please provide") ||
-          trimmed.toLowerCase().includes("i cannot") ||
-          trimmed.toLowerCase().includes("not available");
-
-        // Only overwrite if new message is better (longer and not confused)
-        if (!existingMessage || (!isConfusedMessage && trimmed.length >= existingMessage.length)) {
-          lastMessages.set(data.taskId, trimmed);
-        }
+        // Mirror the latest assistant-visible text so completion fallbacks match
+        // what the user most recently saw in the GUI/channel transcript.
+        lastMessages.set(data.taskId, trimmed);
 
         // Stream updates to channel (router will debounce for channels that can't edit messages).
         this.router.sendTaskUpdate(data.taskId, trimmed, true);
@@ -250,15 +240,26 @@ export class ChannelGateway {
         typeof data.verificationVerdict === "string" ? data.verificationVerdict.trim() : "";
       const verificationReport =
         typeof data.verificationReport === "string" ? data.verificationReport.trim() : "";
-      const fallbackMessage = lastMessages.get(data.taskId) || messageResult || "";
+      const lastAssistantMessage = (lastMessages.get(data.taskId) || "").trim();
+      const fallbackMessage = lastAssistantMessage || messageResult || "";
+      const isTextOnlyChannel = this.router.isPendingTaskTextOnlyChannel(data.taskId);
       const summaryPieces = [resultSummary, semanticSummary].filter(
         (value): value is string => Boolean(value && value.length > 0),
       );
-      let result = summaryPieces.join("\n\n").trim();
-      if (!result) {
-        result = fallbackMessage;
+      let result = "";
+
+      if (isTextOnlyChannel) {
+        // Simple chat channels should show the actual assistant reply, not internal
+        // semantic run summaries that can look like planning debris.
+        result = fallbackMessage || resultSummary;
+      } else {
+        result = summaryPieces.join("\n\n").trim();
+        if (!result) {
+          result = fallbackMessage;
+        }
       }
-      if (verificationVerdict || verificationReport) {
+
+      if (!isTextOnlyChannel && (verificationVerdict || verificationReport)) {
         const verificationLines = [
           verificationVerdict ? `Verification: ${verificationVerdict}` : "",
           verificationReport ? verificationReport : "",
@@ -367,7 +368,7 @@ export class ChannelGateway {
     const onTaskPaused = async (data: { taskId: string; message?: string; reason?: string }) => {
       const explicit = typeof data.message === "string" ? data.message.trim() : "";
       try {
-        await this.router.flushStreamingUpdateForTask(data.taskId);
+        await this.router.clearTransientTaskProgress(data.taskId);
         if (explicit) {
           await this.router.finalizeDraftStreamForTask(data.taskId, explicit);
         }
@@ -509,6 +510,12 @@ export class ChannelGateway {
           return;
         case "approval_requested":
           onApprovalRequested({ taskId, approval: payload.approval });
+          return;
+        case "approval_granted":
+        case "approval_denied":
+          if (typeof payload.approvalId === "string" && payload.approvalId.trim().length > 0) {
+            this.router.clearPendingApproval(payload.approvalId);
+          }
           return;
         case "artifact_created":
         case "file_created":
@@ -820,6 +827,7 @@ export class ChannelGateway {
     botToken: string,
     appToken: string,
     signingSecret?: string,
+    progressRelayMode: "minimal" | "curated" = "minimal",
     securityMode: "open" | "allowlist" | "pairing" = "pairing",
   ): Promise<Channel> {
     // Create channel record
@@ -827,7 +835,7 @@ export class ChannelGateway {
       type: "slack",
       name,
       enabled: false, // Don't enable until tested
-      config: { botToken, appToken, signingSecret },
+      config: { botToken, appToken, signingSecret, progressRelayMode },
       securityConfig: {
         mode: securityMode,
         pairingCodeTTL: 300, // 5 minutes

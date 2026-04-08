@@ -68,6 +68,24 @@ The tool-prompt layer currently enriches the highest-impact tool families first:
 
 Descriptions are intentionally capped so provider tool arrays do not grow without bound.
 
+## Provenance-Aware Tool Results
+
+Execution is now provenance-aware as well as tool-aware.
+
+- file and document reads can attach source provenance to the result
+- imported files, drag-and-drop data, and channel attachments are treated as untrusted external content
+- when those sources are read, the returned content is prefixed with an explicit banner telling the model to treat it as data, not instructions
+- `SessionRuntime` keeps a rolling list of recent sensitive sources read during the task
+
+That provenance is then reused by the approval layer:
+
+- `http_request` can resolve to either `network_access` or `data_export` depending on request shape
+- `analyze_image` and `read_pdf_visual` are modeled as `data_export`
+- export-sensitive approval prompts can include the destination plus the direct source and recent-read security context
+
+This preserves the existing rich read/search workflow while making outbound transfer decisions aware
+of where the candidate content came from.
+
 ## Prompt Stack
 
 Execution prompts are assembled from named sections instead of a single monolithic string.
@@ -104,10 +122,32 @@ Examples of stable session-scoped sections:
 Examples of turn-scoped sections:
 
 - current time
-- transcript recall
-- memory recall
+- layered memory sections (`<cowork_hot_memory>`, `<cowork_structured_memory>`)
 - turn guidance
 - other step-specific or follow-up-specific context
+
+Recent transcript/session recall, verbatim quote recall, and topical memory packs are not injected by default. They stay tool-driven through `search_sessions`, `search_quotes`, `search_memories`, and `memory_topics_load`, so follow-up turns only pay that prompt cost when the agent explicitly asks for it.
+
+### Retry-aware recovery guidance
+
+Planning, execution, and follow-up turns can also receive an adaptive recovery block when the runtime is retrying or resuming meaningful unfinished work.
+
+That block is injected only when one of these is true:
+
+- transient retry count is non-zero
+- the task is on attempt `> 1`
+- a retry reason or recovery classification is available
+- verification checklist items are still pending
+
+The guidance tells the agent to continue from the last known good state, avoid repeating failed approaches blindly, and preserve unfinished verification work. It can include:
+
+- transient retry count and current attempt
+- last retry reason
+- last recovery classification
+- pending verification checklist titles
+- recent session/checkpoint snippets returned by `SessionRecallService.search(...)`
+
+Planning retries may also append a compact playbook context. Execution and follow-up turns skip that playbook add-on to avoid duplicating memory already supplied by the layered memory runtime.
 
 ### Provider-aware prompt caching
 
@@ -124,7 +164,7 @@ Current provider strategy:
 - **OpenAI / Azure OpenAI**: derive deterministic prompt-cache keys from the stable prefix so GPT routes can reuse cached prefixes across follow-ups and profile-based routing
 - **OpenRouter GPT-style routes**: keep the same stable-prefix partitioning and cache epoch tracking without Anthropic markers
 
-This is why dynamic sections such as current time, transcript recall, memory recall, and turn guidance are intentionally kept out of the stable prefix.
+This is why dynamic sections such as current time, layered memory sections, and turn guidance are intentionally kept out of the stable prefix. Explicit `L2/L3` recall stays outside the prefix until a tool call pulls it in for the current turn.
 
 ### Section budgeting
 

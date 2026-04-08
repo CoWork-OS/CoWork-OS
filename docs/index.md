@@ -39,8 +39,8 @@ hero:
       text: LLM Wiki
       link: /llm-wiki
     - theme: alt
-      text: Release Notes 0.5.29
-      link: /release-notes-0.5.29
+      text: Release Notes 0.5.30
+      link: /release-notes-0.5.30
     - theme: alt
       text: Heartbeat v3
       link: /heartbeat-v3
@@ -70,7 +70,7 @@ features:
     details: Visible learning progression after each task, unified recall across tasks/messages/files, persistent shell sessions, and live provider routing/fallback status.
   - title: Runtime Orchestration
     details: SessionRuntime owns task-session state, session checklists, visible-tool render caching, prompt-cache state, resume snapshots, and task projection while the turn kernel handles each active turn; sectioned prompts, stable-prefix prompt caching, graph-backed delegation, typed worker roles, semantic batch summaries, and terminal-state-safe resume logic keep execution, verification, and follow-up work coherent.
-  - title: Latest Release 0.5.29
+  - title: Latest Release 0.5.30
     details: Includes the new core automation and continual-learning layer, Karpathy-inspired `LLM Wiki` vaults, the bundled `manim-video` skill, expanded memory and recall services, and the latest runtime, security, and release-hardening updates.
   - title: Inbox Agent
     details: Local-first email triage with AI classification, action-needed and commitment queues, draft review, and resync-safe background sync.

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { evaluateToolPolicy, evaluateToolAvailability } from "../tool-policy-engine";
+import {
+  evaluateToolPolicy,
+  evaluateToolAvailability,
+  hasPdfVisualIntent,
+} from "../tool-policy-engine";
 
 describe("tool-policy-engine request_user_input gating", () => {
   it("denies all tools in chat mode", () => {
@@ -204,5 +208,34 @@ describe("evaluateToolAvailability run_applescript", () => {
       taskText: 'Write an AppleScript that tells Finder to open the Downloads folder.',
     });
     expect(r.decision).toBe("allow");
+  });
+});
+
+describe("evaluateToolAvailability read_pdf_visual", () => {
+  const baseCtx = {
+    taskText: "Read this PDF and summarize the argument in Turkish.",
+    taskDomain: "writing" as const,
+    taskIntent: "general" as const,
+    requiredTools: undefined as Iterable<string> | undefined,
+    recentlyUsedTools: undefined as Iterable<string> | undefined,
+  };
+
+  it("defers PDF visual analysis for ordinary text-reading tasks", () => {
+    const r = evaluateToolAvailability("read_pdf_visual", baseCtx);
+    expect(r.decision).toBe("defer");
+    expect(r.reason).toBe("pdf_visual_intent_missing");
+  });
+
+  it("allows PDF visual analysis for layout-focused tasks", () => {
+    const r = evaluateToolAvailability("read_pdf_visual", {
+      ...baseCtx,
+      taskText: "Inspect this PDF layout, formatting, and page design.",
+    });
+    expect(r.decision).toBe("allow");
+  });
+
+  it("detects explicit PDF visual intent", () => {
+    expect(hasPdfVisualIntent("Review the scanned PDF page layout and formatting.")).toBe(true);
+    expect(hasPdfVisualIntent("Read this PDF and summarize the text.")).toBe(false);
   });
 });

@@ -74,6 +74,7 @@ const LlmProfileSchema = z.enum(["strong", "cheap"]);
 const PermissionModeSchema = z.enum([
   "default",
   "plan",
+  "dangerous_only",
   "accept_edits",
   "dont_ask",
   "bypass_permissions",
@@ -86,6 +87,11 @@ const PermissionRuleScopeSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("path"),
     path: z.string().min(1).max(MAX_PATH_LENGTH),
+    toolName: z.string().min(1).max(200).optional(),
+  }),
+  z.object({
+    kind: z.literal("domain"),
+    domain: z.string().min(1).max(200),
     toolName: z.string().min(1).max(200).optional(),
   }),
   z.object({
@@ -362,6 +368,14 @@ export const TaskMessageSchema = z
     images: z
       .array(ImageAttachmentSchema)
       .max(MAX_IMAGES_PER_MESSAGE)
+      .optional(),
+    quotedAssistantMessage: z
+      .object({
+        eventId: z.string().min(1).max(200).optional(),
+        taskId: z.string().uuid().optional(),
+        message: z.string().min(1).max(MAX_PROMPT_LENGTH),
+        truncated: z.boolean().optional(),
+      })
       .optional(),
   })
   .superRefine((data, ctx) => {
@@ -1120,6 +1134,7 @@ export const AddSlackChannelSchema = z.object({
   botToken: z.string().min(1).max(500),
   appToken: z.string().min(1).max(500),
   signingSecret: z.string().max(500).optional(),
+  progressRelayMode: z.enum(["minimal", "curated"]).optional(),
   securityMode: SecurityModeSchema.optional(),
 });
 
@@ -1654,6 +1669,7 @@ export const ChannelConfigSchema = z
   .object({
     selfChatMode: z.boolean().optional(),
     supervisor: DiscordSupervisorConfigSchema.optional(),
+    progressRelayMode: z.enum(["minimal", "curated"]).optional(),
     responsePrefix: z.string().max(20).optional(),
     trustedGroupMemoryOptIn: z.boolean().optional(),
     researchChatIds: z.array(z.string().max(200)).max(50).optional(),

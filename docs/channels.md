@@ -7,10 +7,10 @@ CoWork OS supports 17 messaging channels. All channels share these common featur
 - Session management
 - Rate limiting
 - Inbound attachment persistence (files saved to `.cowork/inbox/attachments/`)
-- Chat commands: `/simplify`, `/batch`, `/schedule`, `/digest`, `/followups`, `/brief`
+- Chat commands: `/simplify`, `/batch`, `/llm-wiki`, `/schedule`, `/digest`, `/followups`, `/brief`
 - **Ambient mode**: Passively ingest all messages without responding; enable per-channel in settings
 - **Self-message capture**: Capture your own outgoing messages as context (`captureSelfMessages` on WhatsApp, iMessage, BlueBubbles)
-- **Per-channel routing policy**: Channels can restrict who can talk to the agent, which workspaces/roles they route into, and how group/server traffic is filtered
+- **Per-channel routing policy**: Channels can restrict who can talk to the agent, which workspaces/roles they route into, how group/server traffic is filtered, and how much mid-task progress is relayed back into the channel
 
 ### Common Bot Commands
 
@@ -26,6 +26,7 @@ These commands are available across all channels:
 | `/pair <code>` | Pair with code |
 | `/simplify [objective]` | Run simplify workflow on current/specified task context |
 | `/batch <objective>` | Run parallel batch workflow with safety policy controls |
+| `/llm-wiki <objective>` | Build or maintain a persistent research vault in the active workspace |
 | `/schedule <prompt>` | Schedule a recurring task |
 | `/digest [lookback]` | Digest of recent chat messages |
 | `/followups [lookback]` | Extract follow-ups/commitments |
@@ -33,12 +34,13 @@ These commands are available across all channels:
 
 ### Slash-Skill Notes
 
-- `/simplify` and `/batch` are bundled global skills (enabled by default), available in desktop and gateway channels.
-- Inline chaining is supported in normal messages: `... then run /simplify` and `... then run /batch ...`.
-- WhatsApp natural phrase mapping supports both commands (for example, `simplify this`, `run batch migrate docs`).
+- `/simplify`, `/batch`, and `/llm-wiki` are bundled global skills (enabled by default), available in desktop and gateway channels.
+- Inline chaining is supported in normal messages: `... then run /simplify`, `... then run /batch ...`, and `... then run /llm-wiki ...`.
+- WhatsApp natural phrase mapping supports all three commands, including research-vault phrasing for `llm-wiki`.
 - `/batch` external policy defaults to `confirm`; `none` blocks known external side-effect actions for the run.
+- `/llm-wiki` supports `--mode`, `--path`, and `--obsidian` flags, and allows objective-free maintenance runs for `init`, `lint`, and `refresh`.
 
-See [Universal `/simplify` and `/batch`](simplify-batch.md) for full syntax, policy behavior, and edge-case handling.
+See [Universal `/simplify` and `/batch`](simplify-batch.md) and [LLM Wiki](llm-wiki.md) for full syntax and behavior.
 
 ---
 
@@ -143,7 +145,7 @@ See [Supervisor Mode on Discord](supervisor-mode-discord.md).
 
 ## Slack
 
-Socket Mode integration with channel mentions and file uploads.
+Socket Mode integration with channel mentions, file uploads, and optional curated progress relays.
 
 ### Setup
 
@@ -161,6 +163,15 @@ CoWork can now keep more than one Slack installation active in the same profile:
 - add each Slack workspace as its own Slack channel entry
 - select the workspace inside Slack settings to test, toggle, revoke, or remove it
 - reply routing stays pinned to the originating Slack workspace so follow-ups go back to the correct installation
+
+### Progress Relay Modes
+
+Slack exposes a per-workspace **Progress Updates** setting:
+
+- **Minimal** - suppress most executor chatter and only relay compact status updates
+- **Curated middle steps** - convert selected planning and execution events into short human-readable updates while the task is running
+
+Curated mode keeps streaming assistant output separate from the transient relay. When Slack supports message editing, CoWork reuses a single progress message for non-streaming status updates and clears it when the task pauses for approval/input or reaches a terminal state.
 
 ---
 

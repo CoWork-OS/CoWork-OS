@@ -82,6 +82,10 @@ Skills can attach scoped runtime directives, but only additive ones:
 
 These directives can narrow or guide execution. They cannot redefine the task. There is no runtime field for "replace the task prompt" semantics.
 
+Example:
+
+- `manim-video` can add artifact expectations and project-scaffolding context for a local Manim workspace, but it still does not replace the user's original animation request.
+
 ### Reuse Guard
 
 If the same skill is already applied with the same parameters, the executor does not reapply it. Instead it emits a reuse event so repeated planner/model invocations do not keep stacking identical skill context.
@@ -164,7 +168,7 @@ The same principle applies after a skill is loaded: skill-expanded content shoul
 
 ## Slash Commands
 
-Slash commands remain deterministic. `/simplify` and `/batch` still map directly to `use_skill`, but the result is now applied additively.
+Slash commands remain deterministic. `/simplify`, `/batch`, and `/llm-wiki` still map directly to `use_skill`, but the result is now applied additively.
 
 That means:
 

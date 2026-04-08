@@ -44,6 +44,7 @@ import {
   isTempWorkspaceId,
   ImageAttachment,
   MultiLlmConfig,
+  QuotedAssistantMessage,
   ExecutionMode,
   TaskDomain,
   LlmProfile,
@@ -1830,12 +1831,17 @@ export function App() {
   // Handle workspace change - opens folder selection dialog directly
   const handleChangeWorkspace = async () => {
     try {
-      // Get list of existing workspaces for reference
-      const existingWorkspaces = await window.electronAPI.listWorkspaces();
+      const pickerDefaultPath =
+        currentWorkspace && !currentWorkspace.isTemp && !isTempWorkspaceId(currentWorkspace.id)
+          ? currentWorkspace.path
+          : undefined;
 
       // Open folder selection dialog
-      const folderPath = await window.electronAPI.selectFolder();
+      const folderPath = await window.electronAPI.selectFolder(pickerDefaultPath);
       if (!folderPath) return; // User cancelled
+
+      // Get list of existing workspaces for reference
+      const existingWorkspaces = await window.electronAPI.listWorkspaces();
 
       // Check if this folder is already a workspace
       const existingWorkspace = existingWorkspaces.find((w: Workspace) => w.path === folderPath);
@@ -2051,7 +2057,11 @@ export function App() {
     [],
   );
 
-  const handleSendMessage = async (message: string, images?: ImageAttachment[]) => {
+  const handleSendMessage = async (
+    message: string,
+    images?: ImageAttachment[],
+    quotedAssistantMessage?: QuotedAssistantMessage,
+  ) => {
     if (!selectedTaskId) return;
 
     try {
@@ -2079,10 +2089,15 @@ export function App() {
         await window.electronAPI?.deviceProxyRequest?.({
           deviceId: remoteTaskView.deviceId,
           method: "task.sendMessage",
-          params: { taskId: selectedTaskId, message, images },
+          params: { taskId: selectedTaskId, message, images, quotedAssistantMessage },
         });
       } else {
-        await window.electronAPI.sendMessage(selectedTaskId, message, images);
+        await window.electronAPI.sendMessage(
+          selectedTaskId,
+          message,
+          images,
+          quotedAssistantMessage,
+        );
       }
     } catch (error: unknown) {
       console.error("Failed to send message:", error);
@@ -2425,7 +2440,10 @@ export function App() {
   if (!onboardingCompleted) {
     return (
       <div className="app">
-        <Onboarding onComplete={handleOnboardingComplete} />
+        <Onboarding
+          onComplete={handleOnboardingComplete}
+          workspaceId={currentWorkspace?.id ?? null}
+        />
       </div>
     );
   }
@@ -2978,6 +2996,7 @@ export function App() {
                 }}
                 onSelectTask={handleSelectTaskFromShell}
                 onSendMessage={handleSendMessage}
+                onStartOnboarding={handleShowOnboarding}
                 onCreateTask={handleCreateTask}
                 onChangeWorkspace={handleChangeWorkspace}
                 onSelectWorkspace={(workspace) => setCurrentWorkspace(workspace)}

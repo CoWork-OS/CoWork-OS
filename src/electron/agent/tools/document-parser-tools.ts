@@ -11,9 +11,15 @@
 import * as fsSync from "fs";
 import * as fs from "fs/promises";
 import * as path from "path";
-import type { Workspace } from "../../../shared/types";
+import type { SensitiveSourceRef, Workspace } from "../../../shared/types";
+import type { AgentDaemon } from "../daemon";
 import type { LLMTool } from "../llm/types";
-import { extractPdfReviewData } from "../../utils/pdf-review";
+import { extractPdfText } from "../../utils/pdf-text";
+import {
+  buildSensitiveSourceRefForPath,
+  buildUntrustedContentBanner,
+  isUntrustedExternalSource,
+} from "../security/export-permission-context";
 
 export interface ParseDocumentInput {
   path: string;
@@ -31,24 +37,46 @@ export interface ParseDocumentResult {
   /** True if the output was truncated to max_chars */
   truncated: boolean;
   char_count: number;
+  pdf_extraction?: {
+    status: "complete" | "recovered" | "ocr" | "preview" | "empty";
+    mode: string;
+    used_fallback: boolean;
+    preview_limited: boolean;
+    note: string;
+    page_count: number;
+  };
+  provenance?: SensitiveSourceRef;
 }
 
 const DEFAULT_MAX_CHARS = 50_000;
+const PDF_MAX_PAGES = 16;
+const PDF_MAX_CHARS_PER_PAGE = 1_600;
+const PDF_MAX_OCR_PAGES = 4;
 
 export class DocumentParserTools {
-  constructor(private workspace: Workspace) {}
+  constructor(
+    private workspace: Workspace,
+    private daemon?: AgentDaemon,
+    private taskId?: string,
+  ) {}
 
   async parseDocument(input: ParseDocumentInput): Promise<ParseDocumentResult> {
     const filePath = this.resolveRequestedPath(input.path);
     const maxChars = Math.min(Math.max(input.max_chars ?? DEFAULT_MAX_CHARS, 100), 500_000);
     const format = input.format ?? "text";
     const ext = path.extname(filePath).toLowerCase().slice(1);
+    const provenance = buildSensitiveSourceRefForPath(this.workspace, filePath);
 
     let content = "";
+    let pdfExtraction: ParseDocumentResult["pdf_extraction"];
 
     switch (ext) {
       case "pdf":
-        content = await this.parsePdf(filePath);
+        {
+          const pdfResult = await this.parsePdf(filePath);
+          content = pdfResult.text;
+          pdfExtraction = pdfResult.pdf_extraction;
+        }
         break;
       case "docx":
         content = await this.parseDocx(filePath);
@@ -86,6 +114,13 @@ export class DocumentParserTools {
         }
     }
 
+    if (isUntrustedExternalSource(provenance)) {
+      if (this.daemon && this.taskId) {
+        this.daemon.recordSensitiveSourceRead(this.taskId, provenance);
+      }
+      content = buildUntrustedContentBanner(provenance) + content;
+    }
+
     const truncated = content.length > maxChars;
     const finalContent = truncated ? content.slice(0, maxChars) + "\n[Truncated]" : content;
 
@@ -95,6 +130,8 @@ export class DocumentParserTools {
       detected_type: ext || "unknown",
       truncated,
       char_count: finalContent.length,
+      provenance,
+      ...(pdfExtraction ? { pdf_extraction: pdfExtraction } : {}),
     };
   }
 
@@ -145,14 +182,27 @@ export class DocumentParserTools {
     );
   }
 
-  private async parsePdf(filePath: string): Promise<string> {
-    const review = await extractPdfReviewData(filePath, {
-      maxPages: 16,
-      maxCharsPerPage: 1600,
-      maxOcrPages: 4,
+  private async parsePdf(filePath: string): Promise<{
+    text: string;
+    pdf_extraction: NonNullable<ParseDocumentResult["pdf_extraction"]>;
+  }> {
+    const extracted = await extractPdfText(filePath, {
       includeOcr: true,
+      maxFallbackPages: PDF_MAX_PAGES,
+      maxFallbackCharsPerPage: PDF_MAX_CHARS_PER_PAGE,
+      maxFallbackOcrPages: PDF_MAX_OCR_PAGES,
     });
-    return review.content || "";
+    return {
+      text: extracted.text || "",
+      pdf_extraction: {
+        status: extracted.extractionStatus,
+        mode: extracted.extractionMode,
+        used_fallback: extracted.usedFallback,
+        preview_limited: extracted.previewLimited,
+        note: extracted.extractionNote,
+        page_count: extracted.pageCount,
+      },
+    };
   }
 
   private async parseDocx(filePath: string): Promise<string> {

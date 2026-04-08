@@ -1,6 +1,6 @@
 # Knowledge Graph System
 
-CoWork OS includes a built-in knowledge graph that provides structured entity and relationship memory for the agent. Unlike flat-text memory, the knowledge graph stores typed entities, directed relationships, and timestamped observations in a normalized SQLite schema with full-text search.
+CoWork OS includes a built-in knowledge graph that provides structured entity and relationship memory for the agent. Unlike flat-text memory, the knowledge graph stores typed entities, directed relationships, timestamped observations, and optional temporal validity windows in a normalized SQLite schema with full-text search.
 
 ## Architecture
 
@@ -61,7 +61,12 @@ Typed directed relationships between entities.
 
 Custom edge types are also supported.
 
-**Unique constraint:** `(workspace_id, source_entity_id, target_entity_id, edge_type)` prevents duplicate edges.
+Edges can also carry:
+
+- `valid_from`: when the relationship became true
+- `valid_to`: when the relationship stopped being current
+
+Current facts are protected by a partial unique index on `(workspace_id, source_entity_id, target_entity_id, edge_type)` where `valid_to IS NULL`. Historical edges are allowed, but overlapping intervals for the same directed relation are rejected.
 
 ### Observations (`kg_observations`)
 Timestamped facts or notes attached to entities. Append-only log that tracks changes and discoveries over time.
@@ -72,7 +77,7 @@ Timestamped facts or notes attached to entities. Append-only log that tracks cha
 Entity names and descriptions are indexed in an FTS5 virtual table with BM25 ranking. Auto-sync triggers keep the index updated on INSERT, UPDATE, and DELETE.
 
 ### Graph Traversal
-Neighbors can be retrieved up to 3 hops deep using iterative BFS traversal with optional edge type filtering. Subgraph queries return all entities and connecting edges for a given set of entity IDs.
+Neighbors can be retrieved up to 3 hops deep using iterative BFS traversal with optional edge type filtering. Subgraph queries return all entities and connecting edges for a given set of entity IDs. Both traversal paths can optionally filter by historical `as_of` timestamp, so the graph can answer “what was true then?” instead of only “what is true now?”
 
 ### LIKE Fallback
 If FTS5 is unavailable (rare SQLite builds), search falls back to `LIKE` pattern matching with confidence-based ranking.
@@ -109,25 +114,26 @@ KNOWLEDGE GRAPH (known entities and relationships):
 - [service] auth-service: Authentication microservice (->connects_to PostgreSQL)
 ```
 
-This context is available for injection into the agent's system prompt alongside playbook and memory context.
+This context is available for injection into the agent's system prompt alongside playbook and memory context. When temporal knowledge is enabled, task-context injection uses only currently valid edges by default.
 
-## Agent Tools (9)
+## Agent Tools (10)
 
 | Tool | Description |
 |------|-------------|
 | `kg_create_entity` | Create or update an entity with type, name, description, and properties |
 | `kg_update_entity` | Update an entity's description, properties, or confidence |
 | `kg_delete_entity` | Delete an entity (cascades to edges and observations) |
-| `kg_create_edge` | Create a typed relationship between two entities |
+| `kg_create_edge` | Create a typed relationship between two entities, optionally with `valid_from` / `valid_to` |
 | `kg_delete_edge` | Remove a relationship |
+| `kg_invalidate_edge` | Close an active relationship without deleting its history |
 | `kg_add_observation` | Append a timestamped observation to an entity |
 | `kg_search` | Full-text search with optional type filtering |
-| `kg_get_neighbors` | Get connected entities up to 3 hops deep |
-| `kg_get_subgraph` | Get entities and edges for a set of entity IDs |
+| `kg_get_neighbors` | Get connected entities up to 3 hops deep, optionally `as_of` a historical timestamp |
+| `kg_get_subgraph` | Get entities and edges for a set of entity IDs, optionally `as_of` a historical timestamp |
 
 ## Usage & Testing
 
-You can interact with the knowledge graph by giving the agent natural-language prompts. The agent has access to all 9 `kg_*` tools and will use them based on your request.
+You can interact with the knowledge graph by giving the agent natural-language prompts. The agent has access to all 10 `kg_*` tools and will use them based on your request.
 
 ### Creating Entities and Relationships
 
@@ -136,12 +142,14 @@ Try prompts like:
 - **"Create a knowledge graph of our project stack: we use React for the frontend, Node.js with Express for the backend, PostgreSQL for the database, and Redis for caching. The frontend depends on the backend, and the backend connects to both PostgreSQL and Redis."**
 - **"Add a person entity for Sarah — she's the tech lead who maintains the auth-service and the payments API."**
 - **"Track that we just upgraded from React 17 to React 18 and migrated from Webpack to Vite."** (creates entities + observations)
+- **"Track that Redis stopped being part of the stack last month without deleting the old history."** (uses `kg_invalidate_edge`)
 
 ### Searching and Querying
 
 - **"Search the knowledge graph for everything related to authentication."**
 - **"What technologies do we use? Search the knowledge graph."**
 - **"Show me all entities connected to the auth-service and what depends on it."** (uses `kg_get_neighbors`)
+- **"Show me what the backend graph looked like on January 15, 2026."** (uses `as_of`)
 
 ### Adding Observations
 
@@ -185,6 +193,6 @@ These auto-extracted entities appear with `confidence=0.85` and decay over time 
 | **Context injection** | Manual tool use | Auto-injected into task system prompts |
 | **Multi-workspace** | Single file | Per-workspace isolation |
 | **Privacy** | None | Inherits workspace memory privacy settings |
-| **Agent tools** | ~3 basic | 9 comprehensive tools |
+| **Agent tools** | ~3 basic | 10 comprehensive tools |
 | **Subgraph queries** | None | Multi-entity subgraph extraction |
 | **Cascade deletes** | Manual cleanup | Automatic via FK constraints + transactions |

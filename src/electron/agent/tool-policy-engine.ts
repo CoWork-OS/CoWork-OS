@@ -165,6 +165,10 @@ const ALWAYS_VISIBLE_TOOLS = new Set([
   "memory_save",
   "memory_curate",
   "memory_curated_read",
+  "supermemory_profile",
+  "supermemory_search",
+  "supermemory_remember",
+  "supermemory_forget",
   "system_info",
   "Skill",
 ]);
@@ -303,6 +307,10 @@ function inferToolExposureMetadata(
     toolName === "memory_save" ||
     toolName === "memory_curate" ||
     toolName === "memory_curated_read" ||
+    toolName === "supermemory_profile" ||
+    toolName === "supermemory_search" ||
+    toolName === "supermemory_remember" ||
+    toolName === "supermemory_forget" ||
     toolName.startsWith("scratchpad_")
   ) {
     return { lane: "memory", exposure: "always", overlapGroup: "memory" };

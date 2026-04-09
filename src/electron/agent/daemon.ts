@@ -468,6 +468,23 @@ export class AgentDaemon extends EventEmitter {
     this.teamOrchestrator = orchestrator;
   }
 
+  getTeamOrchestrator(): AgentTeamOrchestrator | null {
+    return this.teamOrchestrator;
+  }
+
+  private applyTaskWorkspaceOverrides(task: Task, workspace: Workspace): Workspace {
+    if (task.agentConfig?.shellAccess !== true || workspace.permissions.shell === true) {
+      return workspace;
+    }
+    return {
+      ...workspace,
+      permissions: {
+        ...workspace.permissions,
+        shell: true,
+      },
+    };
+  }
+
   /**
    * Apply agent role configuration to the task before execution.
    *
@@ -1036,6 +1053,11 @@ export class AgentDaemon extends EventEmitter {
       });
     }
 
+    if (await this.maybeLaunchCollaborativeTask(executionTask)) {
+      this.finishQueueSlot(executionTask.id);
+      return;
+    }
+
     const wasQueued = effectiveTask.status === "queued";
     if (wasQueued) {
       const isRetry = this.retryCounts.has(effectiveTask.id);
@@ -1056,7 +1078,7 @@ export class AgentDaemon extends EventEmitter {
     // === WORKTREE ISOLATION ===
     // If worktree isolation is enabled, create an isolated worktree for this task.
     // The executor gets a "virtual workspace" with the path swapped to the worktree directory.
-    let effectiveWorkspace = workspace;
+    let effectiveWorkspace = this.applyTaskWorkspaceOverrides(executionTask, workspace);
     const requiresWorktree = executionTask.agentConfig?.requireWorktree === true;
     const canUseWorktree = await this.worktreeManager.shouldUseWorktree(
       workspace.path,
@@ -1086,7 +1108,7 @@ export class AgentDaemon extends EventEmitter {
 
         // Create a virtual workspace pointing to the worktree
         effectiveWorkspace = {
-          ...workspace,
+          ...this.applyTaskWorkspaceOverrides(executionTask, workspace),
           path: worktreeInfo.worktreePath,
         };
 
@@ -1284,10 +1306,13 @@ export class AgentDaemon extends EventEmitter {
     const { task: effectiveTask } = this.applyAgentRoleOverrides(task);
 
     // Handle worktree workspace if applicable
-    let effectiveWorkspace = workspace;
+    let effectiveWorkspace = this.applyTaskWorkspaceOverrides(effectiveTask, workspace);
     if (task.worktreePath && task.worktreeStatus === "active") {
       if (fs.existsSync(task.worktreePath)) {
-        effectiveWorkspace = { ...workspace, path: task.worktreePath };
+        effectiveWorkspace = {
+          ...this.applyTaskWorkspaceOverrides(effectiveTask, workspace),
+          path: task.worktreePath,
+        };
       } else {
         console.warn(
           `[AgentDaemon] Worktree path ${task.worktreePath} no longer exists for task ${task.id}`,
@@ -1765,10 +1790,6 @@ export class AgentDaemon extends EventEmitter {
       signals: derived.route.signals,
     });
 
-    if (await this.maybeLaunchCollaborativeTask(task)) {
-      return this.taskRepo.findById(task.id) || task;
-    }
-
     // Start the task (will be queued if necessary)
     await this.startTask(task);
 
@@ -2140,6 +2161,29 @@ export class AgentDaemon extends EventEmitter {
     const teamMemberRepo = new AgentTeamMemberRepository(db);
     const teamRunRepo = new AgentTeamRunRepository(db);
     const teamItemRepo = new AgentTeamItemRepository(db);
+    const existingRun = teamRunRepo.findByRootTaskId(task.id);
+
+    if (existingRun) {
+      if (!teamRepo.findById(existingRun.teamId)) {
+        throw new Error(`Collaborative team not found for run ${existingRun.id}`);
+      }
+      const updatedRun =
+        existingRun.status !== "running"
+          ? teamRunRepo.update(existingRun.id, {
+              status: "running",
+              error: null,
+            })
+          : existingRun;
+      if (updatedRun && updatedRun !== existingRun) {
+        this.emitTeamRunEvent({
+          type: "team_run_updated",
+          timestamp: Date.now(),
+          run: updatedRun,
+        });
+      }
+      void this.teamOrchestrator.tickRun(existingRun.id, "daemon_existing_collab_run");
+      return true;
+    }
 
     if (task.agentConfig.multiLlmMode && task.agentConfig.multiLlmConfig) {
       const config = task.agentConfig.multiLlmConfig;
@@ -4772,6 +4816,10 @@ export class AgentDaemon extends EventEmitter {
       "search_sessions",
       "memory_topics_load",
       "memory_curated_read",
+      "supermemory_profile",
+      "supermemory_search",
+      "supermemory_remember",
+      "supermemory_forget",
       "scratchpad_read",
       "glob",
       "list_directory",

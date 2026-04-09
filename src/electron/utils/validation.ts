@@ -19,6 +19,7 @@ import {
   LLM_PROVIDER_TYPES,
   isTempWorkspaceId,
   PersonalityId,
+  TaskStatus,
 } from "../../shared/types";
 import { SUBCONSCIOUS_TARGET_KINDS } from "../../shared/subconscious";
 import { getUserDataDir } from "./user-data-dir";
@@ -158,6 +159,7 @@ export const AgentConfigSchema = z
     retainMemory: z.boolean().optional(),
     bypassQueue: z.boolean().optional(),
     allowUserInput: z.boolean().optional(),
+    shellAccess: z.boolean().optional(),
     requireWorktree: z.boolean().optional(),
     autoApproveTypes: z.array(z.string().min(1).max(200)).max(50).optional(),
     allowSharedContextMemory: z.boolean().optional(),
@@ -511,7 +513,26 @@ export const InputRequestResponseSchema = z.object({
 
 export const LLMProviderTypeSchema = z.enum(LLM_PROVIDER_TYPES);
 
+const ProviderFailoverSettingsSchema = {
+  fallbackProviders: z
+    .array(
+      z.object({
+        providerType: LLMProviderTypeSchema,
+        modelKey: z.string().max(200).optional(),
+      }),
+    )
+    .max(5)
+    .optional(),
+  failoverPrimaryRetryCooldownSeconds: z
+    .number()
+    .int()
+    .min(0)
+    .max(3600)
+    .optional(),
+} as const;
+
 const ProviderRoutingSettingsSchema = {
+  ...ProviderFailoverSettingsSchema,
   profileRoutingEnabled: z.boolean().optional(),
   strongModelKey: z.string().max(200).optional(),
   cheapModelKey: z.string().max(200).optional(),
@@ -1880,6 +1901,27 @@ export const CoreTraceListRequestSchema = z
     limit: z.number().int().min(1).max(500).optional(),
   })
   .strict();
+const TaskStatusSchema = z.enum([
+  "pending",
+  "queued",
+  "planning",
+  "executing",
+  "paused",
+  "blocked",
+  "completed",
+  "failed",
+  "cancelled",
+  "interrupted",
+] as const satisfies readonly TaskStatus[]);
+export const TaskTraceListRequestSchema = z
+  .object({
+    workspaceId: WorkspaceIdSchema.optional(),
+    status: z.union([TaskStatusSchema, z.literal("all")]).optional(),
+    query: z.string().max(1000).optional(),
+    limit: z.number().int().min(1).max(200).optional(),
+  })
+  .strict();
+export const TaskTraceGetRequestSchema = UUIDSchema;
 export const CoreMemoryCandidateListRequestSchema = z
   .object({
     profileId: UUIDSchema.optional(),

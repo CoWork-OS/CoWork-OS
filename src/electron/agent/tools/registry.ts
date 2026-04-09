@@ -1729,7 +1729,7 @@ export class ToolRegistry {
     register("memory_curated_read", async ({ request }) => this.memoryTools.readCurated(request.input), readParallelSchedulerSpec);
     register("supermemory_profile", async ({ request }) => this.supermemoryTools.profile(request.input), readParallelSchedulerSpec);
     register("supermemory_search", async ({ request }) => this.supermemoryTools.search(request.input), readParallelSchedulerSpec);
-    register("supermemory_remember", async ({ request }) => this.supermemoryTools.remember(request.input));
+    register("supermemory_remember", async ({ request }) => this.supermemoryTools.remember(request.input), exclusiveSchedulerSpec);
     register("supermemory_forget", async ({ request }) => this.supermemoryTools.forget(request.input), exclusiveSchedulerSpec);
     register("scratchpad_write", async ({ request }) => this.scratchpadTools.write(request.input));
     register("scratchpad_read", async ({ request }) => this.scratchpadTools.read(request.input));
@@ -2831,10 +2831,10 @@ System Tools:
 - memory_save: Save an observation, decision, insight, or error to workspace memory for future recall
 - memory_curate: Add, replace, or remove curated hot-memory facts that should stay prompt-visible
 - memory_curated_read: Inspect the current curated hot-memory entries
-- supermemory_profile: Fetch external Supermemory profile context for the current workspace/container
-- supermemory_search: Search external Supermemory memories and chunks
-- supermemory_remember: Store a durable external memory in Supermemory
-- supermemory_forget: Forget an outdated or incorrect Supermemory entry
+- supermemory_profile: Load the workspace-scoped external Supermemory profile and relevant facts
+- supermemory_search: Search external Supermemory memories for this workspace or approved container
+- supermemory_remember: Persist a high-signal fact into external Supermemory
+- supermemory_forget: Remove an outdated external Supermemory entry by ID or exact content
 ${hasAnyVisibleTools(
   "computer_screenshot",
   "computer_click",

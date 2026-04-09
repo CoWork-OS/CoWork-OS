@@ -38,6 +38,7 @@ When a user reports a failure, error, or unexpected behavior:
 ## Packaging Workflow
 
 - Use `npm run package` for standard local installer packaging after a full build.
+- `npm run package` also runs `scripts/release-artifact-names.mjs` and `scripts/release-artifact-names.mjs --check` to align and verify updater metadata artifact filenames in `release/`.
 - On macOS distribution/signing flows, use `npm run package:mac`; it loads optional repo-root `.env.mac` (see `scripts/mac-notarize.env.example`) before running build + `electron-builder --mac --publish never`.
 
 ## NPM Release Workflow
@@ -56,6 +57,7 @@ When a user reports a failure, error, or unexpected behavior:
   - run `npm run --prefix node_modules/cowork-os setup`
   - fail if setup falls back into dependency bootstrap unexpectedly
   - verify Electron can load `better-sqlite3`
+- Use `npm run release:smoke` for an end-to-end pre-publish check (`build` + tarball install/setup smoke validation).
 - For release candidates that touch database schema or migrations, also test an upgrade-path database, not just a fresh install. Specifically verify startup/migration succeeds against an older DB shape representative of the reported issue.
 - Publish from the clean built worktree with `npm publish --ignore-scripts` (plus `--otp=<code>` when npm 2FA requires it).
 - After publish, verify registry propagation with:

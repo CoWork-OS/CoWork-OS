@@ -537,6 +537,27 @@ DOCUMENT CREATION BEST PRACTICES:
     );
   });
 
+  it("does not treat filtering instructions about announcement posts as a risky release claim", async () => {
+    const executor = createExecuteHarness({
+      title: "Daily AI Agent Trends Research",
+      prompt:
+        "Research the latest AI agent trends from the last day and summarize key launches and funding updates.",
+      lastOutput:
+        "Defaults I’ll use unless you override them:\n- Lookback window: 7 days\n- Filter: ruthless on signal; rehashed benchmarks and thin announcement posts get dropped\n\nSend the topic and ClickUp destination to continue.",
+      planStepDescription: "Search the source set systematically",
+    });
+
+    await (executor as Any).execute();
+
+    expect(executor.daemon.updateTask).not.toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({
+        status: "failed",
+        error: expect.stringContaining("missing source validation"),
+      }),
+    );
+  });
+
   it("does not complete Daily AI Agent Trends reports when Reddit, X, and tech news coverage is incomplete", async () => {
     const executor = createExecuteHarness({
       title: "Daily AI Agent Trends Research",
@@ -754,6 +775,31 @@ DOCUMENT CREATION BEST PRACTICES:
         failureClass: "contract_error",
       }),
     );
+    expect(executor.daemon.updateTask).not.toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({ status: "failed" }),
+    );
+  });
+
+  it("pauses interruption resume when the final candidate is still a required-input request", async () => {
+    const executor = createExecuteHarness({
+      title: "You track a fast-moving technical field.",
+      prompt:
+        "Search the latest technical field sources and post the digest to ClickUp once the topic and destination are known.",
+      lastOutput:
+        "I can start the source sweep now; I’m only missing the topic.\n\nSend:\n1. the topic\n2. the ClickUp destination\n3. optionally, a non-default lookback window",
+      planStepDescription: "Search the source set systematically",
+    });
+    executor.plan = {
+      description: "Plan",
+      steps: [{ id: "1", description: "Done", status: "completed" }],
+    };
+
+    await (executor as Any).resumeAfterInterruptionUnlocked();
+
+    expect(executor.daemon.updateTaskStatus).toHaveBeenCalledWith("task-1", "paused");
+    expect((executor as Any).saveConversationSnapshot).toHaveBeenCalled();
+    expect(executor.daemon.completeTask).not.toHaveBeenCalled();
     expect(executor.daemon.updateTask).not.toHaveBeenCalledWith(
       "task-1",
       expect.objectContaining({ status: "failed" }),

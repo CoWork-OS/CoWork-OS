@@ -97,7 +97,7 @@
     "build:connectors": "concurrently -n salesforce,jira,hubspot,zendesk,servicenow,linear,asana,okta,resend,discord,google-workspace,figma,vercel,monday \"tsc -p connectors/salesforce-mcp/tsconfig.json\" \"tsc -p connectors/jira-mcp/tsconfig.json\" \"tsc -p connectors/hubspot-mcp/tsconfig.json\" \"tsc -p connectors/zendesk-mcp/tsconfig.json\" \"tsc -p connectors/servicenow-mcp/tsconfig.json\" \"tsc -p connectors/linear-mcp/tsconfig.json\" \"tsc -p connectors/asana-mcp/tsconfig.json\" \"tsc -p connectors/okta-mcp/tsconfig.json\" \"tsc -p connectors/resend-mcp/tsconfig.json\" \"tsc -p connectors/discord-mcp/tsconfig.json\" \"tsc -p connectors/google-workspace-mcp/tsconfig.json\" \"tsc -p connectors/figma-mcp/tsconfig.json\" \"tsc -p connectors/vercel-mcp/tsconfig.json\" \"tsc -p connectors/monday-mcp/tsconfig.json\"",
     "prepack": "npm run build",
     "release:smoke": "npm run build && node scripts/release-smoke-install.mjs",
-    "package": "npm run build && electron-builder --publish never",
+    "package": "npm run build && node scripts/run_electron_builder.mjs --publish never && node scripts/release-artifact-names.mjs && node scripts/release-artifact-names.mjs --check",
     "package:mac": "node scripts/package-mac-with-env.mjs",
     "fmt": "oxfmt --write src",
     "fmt:check": "oxfmt --check src",
@@ -126,7 +126,6 @@
     "@aws-sdk/client-bedrock": "^3.1009.0",
     "@aws-sdk/client-bedrock-runtime": "^3.1009.0",
     "@chenglou/pretext": "^0.0.3",
-    "@electron/rebuild": "^4.0.3",
     "@google/generative-ai": "^0.24.1",
     "@grammyjs/runner": "^2.0.3",
     "@grammyjs/transformer-throttler": "^1.2.1",
@@ -139,7 +138,6 @@
     "discord.js": "^14.25.1",
     "docx": "^9.5.2",
     "e2b": "^2.12.1",
-    "electron": "^40.4.1",
     "electron-updater": "^6.3.9",
     "ethers": "^6.16.0",
     "eventsource": "^4.1.0",
@@ -200,7 +198,9 @@
     "typescript": "^5.9.0",
     "vite": "^7.3.1",
     "vite-plugin-electron": "^0.29.0",
-    "vitest": "^4.0.18"
+    "vitest": "^4.0.18",
+    "electron": "^40.4.1",
+    "@electron/rebuild": "^4.0.3"
   },
   "build": {
     "appId": "com.cowork-os.app",

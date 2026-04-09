@@ -83,11 +83,11 @@ export interface HeartbeatStatusInfo {
 }
 
 export const BOARD_COLUMNS: MissionColumn[] = [
-  { id: "inbox", label: "INBOX", color: "#6b7280", boardColumn: "backlog" },
-  { id: "assigned", label: "ASSIGNED", color: "#f59e0b", boardColumn: "todo" },
-  { id: "in_progress", label: "IN PROGRESS", color: "#3b82f6", boardColumn: "in_progress" },
-  { id: "review", label: "REVIEW", color: "#8b5cf6", boardColumn: "review" },
-  { id: "done", label: "DONE", color: "#22c55e", boardColumn: "done" },
+  { id: "inbox", label: "Not started", color: "#91918e", boardColumn: "backlog" },
+  { id: "assigned", label: "Ready to start", color: "#f7b955", boardColumn: "todo" },
+  { id: "in_progress", label: "Working", color: "#529cca", boardColumn: "in_progress" },
+  { id: "review", label: "Needs review", color: "#b07cd8", boardColumn: "review" },
+  { id: "done", label: "Done", color: "#4db076", boardColumn: "done" },
 ];
 
 export const TERMINAL_TASK_STATUSES = new Set<Task["status"]>([

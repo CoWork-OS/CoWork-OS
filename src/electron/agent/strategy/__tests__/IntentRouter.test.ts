@@ -74,6 +74,22 @@ bounded_research=true
     expect(routed.intent).toBe("execution");
   });
 
+  it("routes iCloud Drive content listing questions to execution intent", () => {
+    const routed = IntentRouter.route("iCloud listing", "what files are in my iCloud Drive");
+    expect(routed.intent).toBe("execution");
+  });
+
+  it("routes live iCloud sync status questions on the current Mac to execution intent", () => {
+    const routed = IntentRouter.route(
+      "iCloud upload status",
+      "can you see whats being uploaded to icloud from my mac now?",
+    );
+
+    expect(routed.intent).toBe("execution");
+    expect(routed.conversationMode).toBe("task");
+    expect(routed.signals).toContain("live-cloud-sync-status");
+  });
+
   it("routes SSH connectivity troubleshooting prompts to execution in operations domain", () => {
     const prompt = [
       "This is the azure VM private address but I cannot connect to it",

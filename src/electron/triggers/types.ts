@@ -5,12 +5,15 @@
  * webhooks, and other events to auto-create tasks or send messages.
  */
 
+import type { AgentConfig } from "../../shared/types";
+
 export type TriggerSource =
   | "channel_message"
   | "email"
   | "mailbox_event"
   | "webhook"
   | "connector_event"
+  | "github_event"
   | "file_change"
   | "cron_event";
 
@@ -53,6 +56,8 @@ export interface TriggerAction {
     agentRoleId?: string;
     /** Workspace to create task in */
     workspaceId?: string;
+    /** Optional per-task agent restrictions or routing hints */
+    agentConfig?: AgentConfig;
   };
 }
 
@@ -96,6 +101,7 @@ export interface EventTriggerServiceDeps {
     title: string;
     prompt: string;
     workspaceId: string;
+    agentConfig?: AgentConfig;
   }) => Promise<{ id: string }>;
   deliverToChannel?: (params: {
     channelType: string;

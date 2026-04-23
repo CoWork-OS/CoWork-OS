@@ -51,6 +51,25 @@ describe("timeline v2 helpers", () => {
     expect(projected.payload.message).toBe("Task completed successfully");
   });
 
+  it("promotes legacy tool_error payload.error into timeline_error payload.message", () => {
+    const normalized = normalizeTaskEventToTimelineV2({
+      taskId: "task-tool-error",
+      type: "tool_error",
+      payload: {
+        tool: "click",
+        error: "ModuleNotFoundError: No module named 'Quartz'",
+      },
+      timestamp: 1_700_000_000_150,
+      eventId: "event-tool-error",
+      seq: 23,
+    });
+
+    expect(normalized.type).toBe("timeline_error");
+    expect(normalized.status).toBe("failed");
+    expect(normalized.legacyType).toBe("tool_error");
+    expect(normalized.payload.message).toBe("ModuleNotFoundError: No module named 'Quartz'");
+  });
+
   it("maps key legacy lifecycle events to timeline stages", () => {
     expect(inferTimelineStageForLegacyType("task_created")).toBe("DISCOVER");
     expect(inferTimelineStageForLegacyType("tool_call")).toBe("BUILD");

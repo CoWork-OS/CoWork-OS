@@ -4,7 +4,7 @@
  * Webhook ingress for wake and isolated agent runs.
  */
 
-import type { ChannelType } from "../../shared/types";
+import type { AgentConfig, ChannelType } from "../../shared/types";
 
 // ============ Hook Configuration ============
 
@@ -59,6 +59,7 @@ export interface HookMappingConfig {
     source?: string;
     type?: string;
   };
+  token?: string;
   action?: "wake" | "agent";
   wakeMode?: "now" | "next-heartbeat";
   name?: string;
@@ -69,9 +70,17 @@ export interface HookMappingConfig {
   allowUnsafeExternalContent?: boolean;
   channel?: HookMessageChannel;
   to?: string;
+  workspaceId?: string;
+  agentConfig?: AgentConfig;
   model?: string;
   thinking?: string;
   timeoutSeconds?: number;
+  metadata?: Record<string, string>;
+  response?: {
+    statusCode?: number;
+    message?: string;
+    includeTaskId?: boolean;
+  };
   transform?: {
     module: string;
     export?: string;
@@ -87,6 +96,7 @@ export interface HookMappingResolved {
   matchPath?: string;
   matchSource?: string;
   matchType?: string;
+  token?: string;
   action: "wake" | "agent";
   wakeMode?: "now" | "next-heartbeat";
   name?: string;
@@ -97,9 +107,17 @@ export interface HookMappingResolved {
   allowUnsafeExternalContent?: boolean;
   channel?: HookMessageChannel;
   to?: string;
+  workspaceId?: string;
+  agentConfig?: AgentConfig;
   model?: string;
   thinking?: string;
   timeoutSeconds?: number;
+  metadata?: Record<string, string>;
+  response?: {
+    statusCode?: number;
+    message?: string;
+    includeTaskId?: boolean;
+  };
   transform?: HookMappingTransformResolved;
 }
 
@@ -127,6 +145,13 @@ export interface AgentHookPayload {
   thinking?: string;
   timeoutSeconds?: number;
   workspaceId?: string;
+  agentConfig?: AgentConfig;
+  metadata?: Record<string, string>;
+  response?: {
+    statusCode?: number;
+    message?: string;
+    includeTaskId?: boolean;
+  };
 }
 
 export interface TaskMessageHookPayload {
@@ -157,9 +182,17 @@ export type HookAction =
       allowUnsafeExternalContent?: boolean;
       channel?: HookMessageChannel;
       to?: string;
+      workspaceId?: string;
+      agentConfig?: AgentConfig;
       model?: string;
       thinking?: string;
       timeoutSeconds?: number;
+      metadata?: Record<string, string>;
+      response?: {
+        statusCode?: number;
+        message?: string;
+        includeTaskId?: boolean;
+      };
     };
 
 export type HookMappingResult =

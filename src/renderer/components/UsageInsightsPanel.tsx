@@ -13,6 +13,7 @@ import {
 import type { Workspace } from "../../shared/types";
 import { formatUsageCount } from "./usageInsightsFormatting";
 import { UsageInsightsLlmSection } from "./UsageInsightsLlmSection";
+import { UsageInsightsOverview } from "./UsageInsightsOverview";
 import {
   DEFAULT_USAGE_INSIGHTS_PERIOD_PRESET,
   getVisibleUsageInsightsPeriodPresets,
@@ -635,6 +636,21 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
           </div>
         </div>
       </div>
+
+      {data && (
+        <UsageInsightsOverview
+          sessions={tm?.totalCreated ?? 0}
+          messages={em?.totalLlmCalls ?? 0}
+          totalTokens={em?.totalTokens ?? 0}
+          mostActiveHour={ap ? ap.mostActiveHour : null}
+          favoriteModel={
+            modelRows.length > 0
+              ? [...modelRows].sort((a, b) => b.calls - a.calls)[0]?.model ?? null
+              : null
+          }
+          requestsByDay={data.requestsByDay ?? []}
+        />
+      )}
 
       {/* Hero stats row */}
       {tm && (

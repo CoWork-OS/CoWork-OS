@@ -2,7 +2,7 @@ import path from "path";
 import * as fs from "fs/promises";
 import * as os from "os";
 import { AgentDaemon } from "../agent/daemon";
-import { Workspace } from "../../shared/types";
+import { AgentConfig, Workspace } from "../../shared/types";
 import { WorkspaceRepository } from "../database/repositories";
 import {
   createScopedTempWorkspaceIdentity,
@@ -29,6 +29,7 @@ export interface AgentIngressAction {
   thinking?: string;
   timeoutSeconds?: number;
   workspaceId?: string;
+  agentConfig?: AgentConfig;
 }
 
 export interface AgentIngressOptions {
@@ -142,6 +143,7 @@ export class HookAgentIngress {
         source: "hook",
         agentConfig: {
           allowUserInput: false,
+          ...(action.agentConfig || {}),
         },
       });
 

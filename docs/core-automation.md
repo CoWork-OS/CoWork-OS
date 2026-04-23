@@ -12,10 +12,19 @@ The core runtime is only:
 
 Everything else is a surrounding surface:
 
+- `Routines` are the top-level saved automation product, but not part of the always-on cognitive core
 - `Mission Control` is the cockpit for observing and configuring the core
 - `Triggers` are ingress and signal normalization only
 - `Devices` are execution routing only
 - `Digital Twins` are optional persona presets and are not part of core ownership
+
+`Routines` now sit above several lower-level engines:
+
+- schedule triggers compile into `Scheduled Tasks`
+- API triggers compile into `Webhooks`
+- event triggers compile into `Event Triggers`
+
+That makes `Routines` the main user-facing automation abstraction without redefining the actual core runtime boundary.
 
 ## Ownership Model
 

@@ -64,6 +64,30 @@ function asObject(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+function coerceNonEmptyText(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed.length > 0) return trimmed;
+  }
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const nested = value as Record<string, unknown>;
+    if (typeof nested.message === "string" && nested.message.trim().length > 0) {
+      return nested.message.trim();
+    }
+  }
+  return undefined;
+}
+
+function resolveTimelineErrorMessage(payload: Record<string, unknown>): string | undefined {
+  return (
+    coerceNonEmptyText(payload.message) ||
+    coerceNonEmptyText(payload.error) ||
+    coerceNonEmptyText(payload.reason) ||
+    coerceNonEmptyText(payload.display) ||
+    coerceNonEmptyText(payload.failureReason)
+  );
+}
+
 function deriveStepId(
   taskId: string,
   payload: Record<string, unknown>,
@@ -512,8 +536,17 @@ export function normalizeTaskEventToTimelineV2(params: {
 
     const maybeEvidenceRefs =
       rawType === "timeline_evidence_attached" ? toEvidenceRefs(payload, params.timestamp) : [];
-    const nextPayload =
+    const nextPayloadBase =
       maybeEvidenceRefs.length > 0 ? { ...payload, evidenceRefs: maybeEvidenceRefs } : payload;
+    const nextPayload =
+      rawType === "timeline_error"
+        ? {
+            ...nextPayloadBase,
+            ...(resolveTimelineErrorMessage(nextPayloadBase)
+              ? { message: resolveTimelineErrorMessage(nextPayloadBase) }
+              : {}),
+          }
+        : nextPayloadBase;
 
     return {
       id: eventId,
@@ -552,6 +585,12 @@ export function normalizeTaskEventToTimelineV2(params: {
   };
   if (timelineType === "timeline_evidence_attached") {
     nextPayload.evidenceRefs = toEvidenceRefs(payload, params.timestamp);
+  }
+  if (timelineType === "timeline_error") {
+    const resolvedMessage = resolveTimelineErrorMessage(nextPayload);
+    if (resolvedMessage) {
+      nextPayload.message = resolvedMessage;
+    }
   }
 
   return {

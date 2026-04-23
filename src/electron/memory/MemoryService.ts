@@ -89,6 +89,7 @@ type MemoryCaptureOrigin =
   | "task"
   | "heartbeat"
   | "tool"
+  | "chronicle"
   | "playbook"
   | "proactive"
   | "import"
@@ -1125,6 +1126,23 @@ export class MemoryService {
     memoryEvents.emit("memoryChanged", { type: "cleared", workspaceId });
   }
 
+  static deleteEntries(workspaceId: string, ids: string[]): number {
+    this.ensureInitialized();
+    const uniqueIds = [...new Set((ids || []).map((id) => String(id || "").trim()).filter(Boolean))];
+    let deleted = 0;
+    for (const id of uniqueIds) {
+      try {
+        deleted += this.memoryRepo.deleteByWorkspaceAndId(workspaceId, id);
+      } catch {
+        // best-effort delete
+      }
+    }
+    if (deleted > 0) {
+      memoryEvents.emit("memoryChanged", { type: "deleted", workspaceId });
+    }
+    return deleted;
+  }
+
   private static clearCompressionStateForWorkspace(workspaceId: string): void {
     this.compressionBudgetByWorkspace.delete(workspaceId);
     this.compressionDiagnosticsByWorkspace.delete(workspaceId);
@@ -1317,7 +1335,11 @@ export class MemoryService {
       return input.tokens >= MIN_TOKENS_FOR_OBSERVATION_COMPRESSION || input.priority === "high";
     }
 
-    if (input.type === "observation" || input.type === "insight") {
+    if (
+      input.type === "observation" ||
+      input.type === "insight" ||
+      input.type === "screen_context"
+    ) {
       return input.tokens >= MIN_TOKENS_FOR_OBSERVATION_COMPRESSION;
     }
 
@@ -1354,6 +1376,11 @@ export class MemoryService {
     if (type === "workflow_pattern") {
       return tokens >= 80 ? "normal" : "low";
     }
+    if (type === "screen_context") {
+      return tokens >= MIN_TOKENS_FOR_OBSERVATION_COMPRESSION || origin === "chronicle"
+        ? "normal"
+        : "low";
+    }
     if (origin === "heartbeat") {
       return tokens >= MIN_TOKENS_FOR_OBSERVATION_COMPRESSION ? "normal" : "low";
     }
@@ -1389,6 +1416,7 @@ export class MemoryService {
       type === "constraint" ||
       type === "timing_preference" ||
       type === "workflow_pattern" ||
+      type === "screen_context" ||
       type === "correction_rule" ||
       type === "summary"
     );

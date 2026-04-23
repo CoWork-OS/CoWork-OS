@@ -44,6 +44,7 @@ import {
   sanitizeTempWorkspaceKey,
 } from "../utils/temp-workspace-scope";
 import { getActiveTempWorkspaceLeases, touchTempWorkspaceLease } from "../utils/temp-workspace-lease";
+import { ChronicleCaptureService, ChronicleMemoryService, ChronicleSettingsManager } from "../chronicle";
 
 const LEGACY_SETTINGS_FILE = "tray-settings.json";
 
@@ -834,7 +835,9 @@ export class TrayManager {
           this.mainWindow?.webContents.send("tray:open-settings");
         },
       },
-      { type: "separator" },
+      ...(this.buildChronicleMenuItems().length > 0
+        ? [...this.buildChronicleMenuItems(), { type: "separator" as const }]
+        : []),
 
       // App controls
       {
@@ -897,18 +900,45 @@ export class TrayManager {
    * Get status text for the menu
    */
   private getStatusText(): string {
+    const chronicleSettings = ChronicleSettingsManager.loadSettings();
     const channels = this.gateway?.getChannels() || [];
     this.connectedChannels = channels.filter((c) => c.status === "connected").length;
 
     if (this.activeTaskCount > 0) {
-      return `Working on ${this.activeTaskCount} task${this.activeTaskCount > 1 ? "s" : ""}`;
+      return `${chronicleSettings.enabled && chronicleSettings.paused ? "Chronicle paused • " : ""}Working on ${this.activeTaskCount} task${this.activeTaskCount > 1 ? "s" : ""}`;
     }
 
     if (this.connectedChannels > 0) {
-      return `${this.connectedChannels} channel${this.connectedChannels > 1 ? "s" : ""} connected`;
+      return `${chronicleSettings.enabled && chronicleSettings.paused ? "Chronicle paused • " : ""}${this.connectedChannels} channel${this.connectedChannels > 1 ? "s" : ""} connected`;
+    }
+
+    if (chronicleSettings.enabled && chronicleSettings.paused) {
+      return "Chronicle paused";
     }
 
     return "Ready";
+  }
+
+  private buildChronicleMenuItems(): Electron.MenuItemConstructorOptions[] {
+    const chronicleSettings = ChronicleSettingsManager.loadSettings();
+    if (!chronicleSettings.enabled) {
+      return [];
+    }
+    return [
+      {
+        label: chronicleSettings.paused ? "Resume Chronicle" : "Pause Chronicle",
+        click: () => {
+          void this.toggleChroniclePause(!chronicleSettings.paused);
+        },
+      },
+    ];
+  }
+
+  private async toggleChroniclePause(paused: boolean): Promise<void> {
+    const next = ChronicleSettingsManager.saveSettings({ paused });
+    await ChronicleCaptureService.getInstance().applySettings(next);
+    ChronicleMemoryService.getInstance().applySettings(next);
+    this.updateContextMenu();
   }
 
   /**

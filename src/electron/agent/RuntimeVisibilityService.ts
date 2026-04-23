@@ -6,6 +6,7 @@ import {
 import { type ActivityRepository } from "../activity/ActivityRepository";
 import { MemoryService } from "../memory/MemoryService";
 import { KnowledgeGraphService } from "../knowledge-graph/KnowledgeGraphService";
+import { ChronicleObservationRepository } from "../chronicle";
 import { LLMProviderFactory, type LLMSettings } from "./llm/provider-factory";
 import type {
   EvidenceRef,
@@ -62,6 +63,8 @@ function sourceWeight(sourceType: UnifiedRecallSourceType): number {
       return 0.82;
     case "memory":
       return 0.8;
+    case "screen_context":
+      return 0.79;
     case "knowledge_graph":
       return 0.78;
     default:
@@ -96,7 +99,21 @@ export class RuntimeVisibilityService {
     sourceEventId?: string;
   }): TaskLearningProgress {
     const now = Date.now();
+    const hasScreenContextEvidence = (input.evidenceRefs || []).some(
+      (ref) => ref.sourceType === "screen_context",
+    );
     const steps: LearningProgressStep[] = [
+      {
+        stage: "screen_context_used",
+        status: hasScreenContextEvidence ? "done" : "skipped",
+        title: "Chronicle screen context used",
+        summary: hasScreenContextEvidence
+          ? "Chronicle supplied local screen context that was attached as task evidence."
+          : "This task did not promote Chronicle screen context.",
+        evidenceRefs: input.evidenceRefs || [],
+        createdAt: now,
+        details: { hasScreenContextEvidence },
+      },
       {
         stage: "memory_captured",
         status: input.memoryCaptured ? "done" : "skipped",
@@ -282,6 +299,49 @@ export class RuntimeVisibilityService {
           title: entity.entity.name,
           sourceLabel: "Knowledge graph",
           metadata: { entityType: entity.entity.entityTypeName, confidence: entity.entity.confidence },
+        });
+      }
+    }
+
+    if (workspaceId && query.workspacePath && sourceAllowed("screen_context")) {
+      for (const observation of ChronicleObservationRepository.searchSync(
+        query.workspacePath,
+        normalizedQuery,
+        limit * 2,
+      )) {
+        const snippet = truncate(
+          [
+            observation.appName,
+            observation.windowTitle,
+            observation.localTextSnippet || observation.query,
+          ]
+            .filter(Boolean)
+            .join(" - "),
+          260,
+        );
+        if (!matchesQuery(snippet)) continue;
+        addResult({
+          sourceType: "screen_context",
+          objectId: observation.id,
+          workspaceId: observation.workspaceId,
+          taskId: observation.taskId,
+          timestamp: observation.capturedAt,
+          rank: rankFrom("screen_context", observation.capturedAt, observation.confidence),
+          snippet,
+          title: observation.windowTitle || observation.appName || "Screen context",
+          sourceLabel: "Screen context",
+          metadata: {
+            appName: observation.appName,
+            windowTitle: observation.windowTitle,
+            imagePath: observation.imagePath,
+            confidence: observation.confidence,
+            usedFallback: observation.usedFallback,
+            provenance: observation.provenance,
+            destinationHints: observation.destinationHints,
+            sourceRef: observation.sourceRef || null,
+            memoryId: observation.memoryId || null,
+            memoryGeneratedAt: observation.memoryGeneratedAt || null,
+          },
         });
       }
     }

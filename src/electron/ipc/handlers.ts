@@ -1046,7 +1046,10 @@ export async function setupIpcHandlers(
   );
   agentMailRealtimeService.start();
   const contextPolicyManager = new ContextPolicyManager(db);
-  const managedSessionService = new ManagedSessionService(db, agentDaemon);
+  const getRoutineService = () => options?.getRoutineService?.() || null;
+  const managedSessionService = new ManagedSessionService(db, agentDaemon, {
+    getRoutineService,
+  });
   const agentTemplateService = new AgentTemplateService();
   const imageGenProfileService = new ImageGenProfileService();
   const emitTaskStatusEvent = (
@@ -4045,7 +4048,6 @@ export async function setupIpcHandlers(
   });
 
   // Agents Hub handlers
-  const getRoutineService = () => options?.getRoutineService?.() || null;
   const toManagedRoutinePayload = (
     input: ReturnType<ManagedSessionService["buildManagedAgentRoutineDefinition"]>,
     agentId: string,
@@ -4162,13 +4164,13 @@ export async function setupIpcHandlers(
     return managedSessionService.updateAgent(request.agentId, request);
   });
   ipcMain.handle(IPC_CHANNELS.MANAGED_AGENT_ARCHIVE_IPC, async (_, agentId: string) => {
-    return managedSessionService.archiveAgent(agentId) || null;
+    return (await managedSessionService.archiveAgent(agentId)) || null;
   });
   ipcMain.handle(IPC_CHANNELS.MANAGED_AGENT_PUBLISH_IPC, async (_, agentId: string) => {
-    return managedSessionService.publishAgent(agentId) || null;
+    return (await managedSessionService.publishAgent(agentId)) || null;
   });
   ipcMain.handle(IPC_CHANNELS.MANAGED_AGENT_SUSPEND_IPC, async (_, agentId: string) => {
-    return managedSessionService.suspendAgent(agentId) || null;
+    return (await managedSessionService.suspendAgent(agentId)) || null;
   });
   ipcMain.handle(IPC_CHANNELS.MANAGED_AGENT_ROUTINE_LIST_IPC, async (_, agentId: string) => {
     return managedSessionService.listManagedAgentRoutines(agentId);

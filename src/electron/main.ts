@@ -2254,7 +2254,7 @@ if (!gotTheLock) {
 
       // Start Control Plane if enabled (or force-enabled via flag/env)
       const cp = await startControlPlaneFromSettings({
-        deps: { agentDaemon, dbManager, channelGateway },
+        deps: { agentDaemon, dbManager, channelGateway, getRoutineService: () => routineService },
         forceEnable: FORCE_ENABLE_CONTROL_PLANE,
         onEvent: (event) => {
           try {
@@ -2334,10 +2334,11 @@ if (!gotTheLock) {
         agentDaemon,
         dbManager,
         channelGateway,
+        getRoutineService: () => routineService,
       });
       // Auto-start control plane if enabled (and register methods/bridge)
       await startControlPlaneFromSettings({
-        deps: { agentDaemon, dbManager, channelGateway },
+        deps: { agentDaemon, dbManager, channelGateway, getRoutineService: () => routineService },
       });
 
       // ── Gap features: triggers, briefing, file hub, web access ───────

@@ -41,6 +41,7 @@ import type { AgentConfig } from "../../shared/types";
 import type { AgentDaemon } from "../agent/daemon";
 import type { DatabaseManager } from "../database/schema";
 import type { ChannelGateway } from "../gateway";
+import type { RoutineService } from "../routines/service";
 import {
   ApprovalRepository,
   ArtifactRepository,
@@ -103,6 +104,7 @@ export interface ControlPlaneMethodDeps {
   agentDaemon: AgentDaemon;
   dbManager: DatabaseManager;
   channelGateway?: ChannelGateway;
+  getRoutineService?: () => RoutineService | null;
 }
 
 let controlPlaneDeps: ControlPlaneMethodDeps | null = null;
@@ -111,7 +113,9 @@ let managedSessionService: ManagedSessionService | null = null;
 
 function getManagedSessionService(deps: ControlPlaneMethodDeps): ManagedSessionService {
   if (!managedSessionService) {
-    managedSessionService = new ManagedSessionService(deps.dbManager.getDatabase(), deps.agentDaemon);
+    managedSessionService = new ManagedSessionService(deps.dbManager.getDatabase(), deps.agentDaemon, {
+      getRoutineService: deps.getRoutineService,
+    });
   }
   return managedSessionService;
 }
@@ -2806,7 +2810,7 @@ function registerTaskAndWorkspaceMethods(
   server.registerMethod(Methods.MANAGED_AGENT_ARCHIVE, async (client, params) => {
     requireScope(client, "admin");
     const { agentId } = sanitizeManagedAgentIdParams(params);
-    return { agent: managedSessions.archiveAgent(agentId) || null };
+    return { agent: (await managedSessions.archiveAgent(agentId)) || null };
   });
 
   server.registerMethod(Methods.MANAGED_AGENT_VERSION_LIST, async (client, params) => {

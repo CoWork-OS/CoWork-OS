@@ -459,7 +459,7 @@ describeWithSqlite("ManagedSessionService", () => {
     expect(attackerMembership).toBeUndefined();
   });
 
-  it("preserves authored Slack targets when suspending an agent while removing live routing", () => {
+  it("preserves authored Slack targets when suspending an agent while removing live routing", async () => {
     const workspace = insertWorkspace("suspend-slack");
     const environment = service.createEnvironment({
       name: "Slack env",
@@ -495,8 +495,8 @@ describeWithSqlite("ManagedSessionService", () => {
       },
     });
 
-    service.publishAgent(created.agent.id);
-    service.suspendAgent(created.agent.id);
+    await service.publishAgent(created.agent.id);
+    await service.suspendAgent(created.agent.id);
 
     const suspended = service.getAgent(created.agent.id);
     const studio = suspended?.currentVersion?.metadata?.studio as Any;
@@ -508,6 +508,94 @@ describeWithSqlite("ManagedSessionService", () => {
     expect(updatedChannel?.config?.allowedAgentRoleIds || []).not.toContain(
       studio?.legacyMirror?.agentRoleId,
     );
+  });
+
+  it("uses the routine service when suspending managed agent routines", async () => {
+    const workspace = insertWorkspace("suspend-routine-sync");
+    const environment = service.createEnvironment({
+      name: "Routine env",
+      config: { workspaceId: workspace.id },
+    });
+    const created = service.createAgent({
+      name: "Routine agent",
+      systemPrompt: "Run scheduled work.",
+      executionMode: "solo",
+      metadata: {
+        studio: {
+          defaultEnvironmentId: environment.id,
+        },
+      },
+    });
+    const routineId = "routine-sync-test";
+    const now = Date.now();
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS automation_routines (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        workspace_id TEXT NOT NULL,
+        prompt TEXT NOT NULL,
+        connectors_json TEXT NOT NULL,
+        triggers_json TEXT NOT NULL,
+        definition_json TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      )
+    `);
+    const definition = {
+      id: routineId,
+      name: "Daily routine",
+      enabled: true,
+      workspaceId: workspace.id,
+      instructions: "Run scheduled work.",
+      prompt: "Run scheduled work.",
+      executionTarget: {
+        kind: "managed_environment",
+        managedEnvironmentId: environment.id,
+      },
+      contextBindings: {
+        metadata: { managedAgentId: created.agent.id },
+      },
+      triggers: [{ id: "manual-trigger", type: "manual", enabled: true }],
+      outputs: [{ kind: "task_only" }],
+      approvalPolicy: { mode: "inherit" },
+      connectorPolicy: { mode: "prefer", connectorIds: [] },
+      connectors: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    db.prepare(
+      `INSERT INTO automation_routines
+       (id, name, enabled, workspace_id, prompt, connectors_json, triggers_json, definition_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      routineId,
+      definition.name,
+      1,
+      workspace.id,
+      definition.prompt,
+      "[]",
+      JSON.stringify(definition.triggers),
+      JSON.stringify(definition),
+      now,
+      now,
+    );
+    const updateRoutine = vi.fn(async (_routineId: string, patch: { enabled?: boolean }) => {
+      db.prepare("UPDATE automation_routines SET enabled = ?, updated_at = ? WHERE id = ?").run(
+        patch.enabled ? 1 : 0,
+        Date.now(),
+        _routineId,
+      );
+      return { ...definition, enabled: patch.enabled ?? definition.enabled };
+    });
+    const serviceWithRoutineSync = new ManagedSessionService(db, daemon, {
+      getRoutineService: () => ({ update: updateRoutine }) as Any,
+    });
+
+    await serviceWithRoutineSync.suspendAgent(created.agent.id);
+
+    expect(updateRoutine).toHaveBeenCalledWith(routineId, { enabled: false });
   });
 
   it("returns workpapers to viewers without requiring audit permission", async () => {
@@ -604,7 +692,7 @@ describeWithSqlite("ManagedSessionService", () => {
         },
       },
     });
-    service.publishAgent(created.agent.id);
+    await service.publishAgent(created.agent.id);
 
     const manualSession = await service.createSession({
       agentId: created.agent.id,

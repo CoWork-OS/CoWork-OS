@@ -72,6 +72,7 @@ import { MCPSettingsManager } from "../mcp/settings";
 import { ManagedAccountManager } from "../accounts/managed-account-manager";
 import { getVoiceService } from "../voice/VoiceService";
 import { ImageGenProfileService } from "./ImageGenProfileService";
+import type { RoutineService } from "../routines/service";
 import type { Routine, RoutineTrigger } from "../routines/types";
 import {
   ManagedAgentRepository,
@@ -586,6 +587,9 @@ export class ManagedSessionService {
   constructor(
     private readonly db: import("better-sqlite3").Database,
     private readonly agentDaemon: AgentDaemon,
+    private readonly options: {
+      getRoutineService?: () => RoutineService | null;
+    } = {},
   ) {
     this.ensureGovernanceSchema();
     this.taskRepo = new TaskRepository(db);
@@ -1041,7 +1045,7 @@ export class ManagedSessionService {
     return linkedRoutines;
   }
 
-  private setRoutineEnabled(routineId: string, enabled: boolean): void {
+  private setRoutineEnabledInDb(routineId: string, enabled: boolean): void {
     const row = this.db
       .prepare("SELECT * FROM automation_routines WHERE id = ?")
       .get(routineId) as Any | undefined;
@@ -1061,6 +1065,15 @@ export class ManagedSessionService {
          WHERE id = ?`,
       )
       .run(enabled ? 1 : 0, JSON.stringify(nextDefinition), nextDefinition.updatedAt, routineId);
+  }
+
+  private async setRoutineEnabled(routineId: string, enabled: boolean): Promise<void> {
+    const routineService = this.options.getRoutineService?.() || null;
+    if (routineService) {
+      const updated = await routineService.update(routineId, { enabled });
+      if (updated) return;
+    }
+    this.setRoutineEnabledInDb(routineId, enabled);
   }
 
   getRuntimeToolCatalog(agentId: string): ManagedAgentRuntimeToolCatalog {
@@ -1232,14 +1245,14 @@ export class ManagedSessionService {
     return { agent, version: syncedVersion };
   }
 
-  archiveAgent(agentId: string): ManagedAgent | undefined {
+  async archiveAgent(agentId: string): Promise<ManagedAgent | undefined> {
     const workspaceId = this.resolveWorkspaceIdForAgent(agentId);
     if (workspaceId) this.assertWorkspacePermission(workspaceId, "canPublishAgents");
     const agent = this.managedAgentRepo.update(agentId, { status: "archived" });
     if (!agent) return undefined;
     const routines = this.listManagedAgentRoutines(agentId);
     for (const routine of routines) {
-      this.setRoutineEnabled(routine.id, false);
+      await this.setRoutineEnabled(routine.id, false);
     }
     const detail = this.getAgent(agentId);
     if (detail?.currentVersion) {
@@ -1257,7 +1270,7 @@ export class ManagedSessionService {
     return agent;
   }
 
-  publishAgent(agentId: string): ManagedAgent | undefined {
+  async publishAgent(agentId: string): Promise<ManagedAgent | undefined> {
     const workspaceId = this.resolveWorkspaceIdForAgent(agentId);
     if (workspaceId) this.assertWorkspacePermission(workspaceId, "canPublishAgents");
     const agent = this.managedAgentRepo.update(agentId, { status: "active" });
@@ -1265,7 +1278,7 @@ export class ManagedSessionService {
     const detail = this.getAgent(agentId);
     const studio = detail?.currentVersion ? getStudioConfig(detail.currentVersion) : undefined;
     for (const routine of this.listManagedAgentRoutines(agentId)) {
-      this.setRoutineEnabled(routine.id, routine.trigger.enabled !== false);
+      await this.setRoutineEnabled(routine.id, routine.trigger.enabled !== false);
     }
     if (detail?.currentVersion) {
       this.syncLegacyMirror(agent, detail.currentVersion, studio);
@@ -1282,7 +1295,7 @@ export class ManagedSessionService {
     return agent;
   }
 
-  suspendAgent(agentId: string): ManagedAgent | undefined {
+  async suspendAgent(agentId: string): Promise<ManagedAgent | undefined> {
     const workspaceId = this.resolveWorkspaceIdForAgent(agentId);
     if (workspaceId) this.assertWorkspacePermission(workspaceId, "canPublishAgents");
     const agent = this.managedAgentRepo.update(agentId, { status: "suspended" });
@@ -1291,7 +1304,7 @@ export class ManagedSessionService {
     const currentVersion = detail?.currentVersion;
     const studio = currentVersion ? getStudioConfig(currentVersion) : undefined;
     for (const routine of this.listManagedAgentRoutines(agentId)) {
-      this.setRoutineEnabled(routine.id, false);
+      await this.setRoutineEnabled(routine.id, false);
     }
     if (currentVersion) {
       this.syncLegacyMirror(agent, currentVersion, studio);

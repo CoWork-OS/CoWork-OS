@@ -445,9 +445,14 @@ function persistUpdatedOpenAITokens(tokens: OpenAIOAuthTokens): void {
   LLMProviderFactory.clearCache();
 }
 
-async function resolveOpenAICodexAccessToken(
+interface OpenAICodexCredentials {
+  apiKey: string;
+  accessToken: string;
+}
+
+async function resolveOpenAICodexCredentials(
   settings: ReturnType<typeof LLMProviderFactory.loadSettings>,
-): Promise<string> {
+): Promise<OpenAICodexCredentials> {
   const accessToken = settings.openai?.accessToken?.trim();
   const refreshToken = settings.openai?.refreshToken?.trim();
   const tokenExpiresAt = settings.openai?.tokenExpiresAt;
@@ -471,7 +476,7 @@ async function resolveOpenAICodexAccessToken(
     ) {
       persistUpdatedOpenAITokens(newTokens);
     }
-    return apiKey;
+    return { apiKey, accessToken: newTokens?.access_token ?? accessToken };
   }
 
   if (
@@ -482,7 +487,7 @@ async function resolveOpenAICodexAccessToken(
     throw new Error("OpenAI OAuth token has expired. Sign in again in Settings.");
   }
 
-  return accessToken;
+  return { apiKey: accessToken, accessToken };
 }
 
 async function resolveOpenAICodexHostModel(): Promise<string> {
@@ -629,9 +634,10 @@ export class ImageGenerator {
             );
             continue;
           }
-          const accessToken = await resolveOpenAICodexAccessToken(settings);
+          const credentials = await resolveOpenAICodexCredentials(settings);
           return await this.generateWithOpenAICodex({
-            accessToken,
+            apiKey: credentials.apiKey,
+            accessToken: credentials.accessToken,
             model: normalizedChosenModel,
             prompt,
             filename,
@@ -1017,6 +1023,7 @@ export class ImageGenerator {
   }
 
   private async generateWithOpenAICodex(args: {
+    apiKey: string;
     accessToken: string;
     model: string;
     prompt: string;
@@ -1040,7 +1047,7 @@ export class ImageGenerator {
       const accountId = extractChatGPTAccountId(args.accessToken);
       const hostModel = await resolveOpenAICodexHostModel();
       const client = new OpenAI({
-        apiKey: args.accessToken,
+        apiKey: args.apiKey,
         baseURL: OPENAI_CODEX_BASE_URL,
         defaultHeaders: {
           "chatgpt-account-id": accountId,

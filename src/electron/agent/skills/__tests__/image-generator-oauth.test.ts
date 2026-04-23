@@ -108,7 +108,7 @@ describe("ImageGenerator OpenAI OAuth", () => {
       },
     } as Any);
     getApiKeyFromTokensMock.mockResolvedValue({
-      apiKey: refreshedAccessToken,
+      apiKey: "derived-api-key",
       newTokens: {
         access_token: refreshedAccessToken,
         refresh_token: "oauth-refresh-token-2",
@@ -135,7 +135,7 @@ describe("ImageGenerator OpenAI OAuth", () => {
     expect(fs.readFileSync(path.join(tempDir, "poster.png")).toString()).toBe("oauth-image");
 
     expect(openAIConfigs[0]).toMatchObject({
-      apiKey: refreshedAccessToken,
+      apiKey: "derived-api-key",
       baseURL: "https://chatgpt.com/backend-api/codex",
       defaultHeaders: expect.objectContaining({
         "chatgpt-account-id": "acct_test_oauth",

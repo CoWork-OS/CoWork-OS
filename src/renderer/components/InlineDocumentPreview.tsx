@@ -8,7 +8,7 @@ type InlineDocumentPreviewProps = {
   onOpenViewer?: (path: string) => void;
 };
 
-type SupportedDocumentType = "pdf" | "docx" | "markdown" | "text" | "code";
+type SupportedDocumentType = "pdf" | "docx" | "markdown" | "latex" | "text" | "code";
 
 const PREVIEW_MAX_CHARS = 1600;
 
@@ -30,7 +30,7 @@ function formatFileSize(bytes: number): string {
 }
 
 function isDocumentType(type: string): type is SupportedDocumentType {
-  return type === "pdf" || type === "docx" || type === "markdown" || type === "text" || type === "code";
+  return type === "pdf" || type === "docx" || type === "markdown" || type === "latex" || type === "text" || type === "code";
 }
 
 function htmlToText(html: string): string {
@@ -51,6 +51,8 @@ function getTypeLabel(type: SupportedDocumentType): string {
       return "Word";
     case "markdown":
       return "Markdown";
+    case "latex":
+      return "LaTeX";
     case "code":
       return "Code";
     case "text":

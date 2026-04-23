@@ -4,6 +4,7 @@ import path from "path";
 import { randomUUID } from "crypto";
 import { describe, expect, it, vi } from "vitest";
 import { DocumentTools } from "../document-tools";
+import { compileLatex } from "../../../utils/document-generators/latex-compiler";
 
 // Mock the generator modules since they depend on external packages
 vi.mock("../../../utils/document-generators/pdf-generator", () => ({
@@ -44,6 +45,18 @@ vi.mock("../../../utils/document-generators/html-page-generator", () => ({
     size: 11111,
   }),
 }));
+vi.mock("../../../utils/document-generators/latex-compiler", () => ({
+  compileLatex: vi.fn().mockResolvedValue({
+    success: true,
+    sourcePath: "/workspace/paper.tex",
+    pdfPath: "/workspace/paper.pdf",
+    path: "/workspace/paper.pdf",
+    logPath: "/workspace/paper.log",
+    engine: "tectonic",
+    size: 33333,
+    diagnostic: "ok",
+  }),
+}));
 vi.mock("../../../voice", () => ({
   getVoiceService: vi.fn(() => ({
     speak: vi.fn().mockResolvedValue(Buffer.from("audio")),
@@ -56,8 +69,9 @@ describe("DocumentTools", () => {
   it("getToolDefinitions returns all tool definitions", () => {
     const defs = DocumentTools.getToolDefinitions();
 
-    expect(defs).toHaveLength(6);
+    expect(defs).toHaveLength(7);
     const names = defs.map((d) => d.name);
+    expect(names).toContain("compile_latex");
     expect(names).toContain("generate_document");
     expect(names).toContain("generate_presentation");
     expect(names).toContain("generate_spreadsheet");
@@ -119,6 +133,57 @@ describe("DocumentTools", () => {
 
     // sanitizeFilename should strip path traversal via path.basename
     expect(result.success).toBe(true);
+  });
+
+  it("compileLatex calls the compiler and registers the PDF artifact with source metadata", async () => {
+    const registerArtifact = vi.fn();
+    const tools = new DocumentTools("/workspace", "task-1", registerArtifact);
+
+    const result = await tools.compileLatex({
+      sourcePath: "paper.tex",
+      outputPath: "paper.pdf",
+      engine: "auto",
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.path).toBe("/workspace/paper.pdf");
+    expect(compileLatex).toHaveBeenCalledWith({
+      workspacePath: "/workspace",
+      sourcePath: "paper.tex",
+      outputPath: "paper.pdf",
+      engine: "auto",
+    });
+    expect(registerArtifact).toHaveBeenCalledWith(
+      "task-1",
+      "/workspace/paper.pdf",
+      "application/pdf",
+      expect.objectContaining({
+        sourcePath: "/workspace/paper.tex",
+        logPath: "/workspace/paper.log",
+        engine: "tectonic",
+        type: "latex_pdf",
+      }),
+    );
+  });
+
+  it("compileLatex does not register an artifact when compilation fails", async () => {
+    vi.mocked(compileLatex).mockResolvedValueOnce({
+      success: false,
+      sourcePath: "/workspace/paper.tex",
+      pdfPath: "/workspace/paper.pdf",
+      path: "/workspace/paper.pdf",
+      logPath: "/workspace/paper.log",
+      error: "No LaTeX engine found",
+      diagnostic: "No LaTeX engine found",
+    } as Any);
+    const registerArtifact = vi.fn();
+    const tools = new DocumentTools("/workspace", "task-1", registerArtifact);
+
+    const result = await tools.compileLatex({ sourcePath: "paper.tex" });
+
+    expect(result.success).toBe(false);
+    expect(result.message).toContain("No LaTeX engine");
+    expect(registerArtifact).not.toHaveBeenCalled();
   });
 
   // ── generatePresentation ──────────────────────────────────────

@@ -159,6 +159,7 @@ export const AgentConfigSchema = z
     retainMemory: z.boolean().optional(),
     bypassQueue: z.boolean().optional(),
     allowUserInput: z.boolean().optional(),
+    chronicleMode: z.enum(["inherit", "enabled", "disabled"]).optional(),
     shellAccess: z.boolean().optional(),
     requireWorktree: z.boolean().optional(),
     autoApproveTypes: z.array(z.string().min(1).max(200)).max(50).optional(),
@@ -794,7 +795,13 @@ export const LLMSettingsSchema = z.object({
   customProviders: CustomProvidersSchema,
   imageGeneration: z
     .object({
+      defaultProvider: z
+        .enum(["openai", "openai-codex", "azure", "openrouter", "gemini"])
+        .optional(),
       defaultModel: z.enum(["gpt-image-1.5", "nano-banana-2"]).optional(),
+      backupProvider: z
+        .enum(["openai", "openai-codex", "azure", "openrouter", "gemini"])
+        .optional(),
       backupModel: z.enum(["gpt-image-1.5", "nano-banana-2"]).optional(),
     })
     .optional(),
@@ -926,6 +933,15 @@ export const GoogleWorkspaceSettingsSchema = z.object({
   scopes: z.array(z.string().max(200)).optional(),
   timeoutMs: z.number().int().min(1000).max(120000).optional(),
   loginHint: z.string().email().max(254).optional(),
+});
+
+export const AgentMailSettingsSchema = z.object({
+  enabled: z.boolean().default(false),
+  apiKey: z.string().max(4000).optional(),
+  baseUrl: z.string().url().max(500).optional(),
+  websocketUrl: z.string().url().max(500).optional(),
+  timeoutMs: z.number().int().min(1000).max(120000).optional(),
+  realtimeEnabled: z.boolean().optional(),
 });
 
 // ============ Dropbox Settings Schema ============
@@ -2738,8 +2754,10 @@ export const HookMappingSchema = z.object({
     .object({
       path: z.string().max(500).optional(),
       source: z.string().max(100).optional(),
+      type: z.string().max(100).optional(),
     })
     .optional(),
+  token: z.string().max(200).optional(),
   action: z.enum(["wake", "agent"]).optional(),
   wakeMode: z.enum(["now", "next-heartbeat"]).optional(),
   name: z.string().max(200).optional(),
@@ -2749,6 +2767,7 @@ export const HookMappingSchema = z.object({
   deliver: z.boolean().optional(),
   channel: HookMappingChannelSchema.optional(),
   to: z.string().max(100).optional(),
+  workspaceId: z.string().max(200).optional(),
   model: z.string().max(100).optional(),
   thinking: z.string().max(50).optional(),
   timeoutSeconds: z.number().int().min(1).max(3600).optional(),

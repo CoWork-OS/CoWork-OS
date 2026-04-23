@@ -96,6 +96,26 @@ describe("task output summary utilities", () => {
     expect(getPrimaryOutputFileName(summary)).toBe("final-report.pdf");
   });
 
+  it("derives output evidence from assistant media directives when file events are missing", () => {
+    const events: TaskEvent[] = [
+      makeEvent(
+        "timeline_step_updated",
+        {
+          legacyType: "assistant_message",
+          internal: true,
+          message:
+            'Rendered the clip.\n\n::video{path="artifacts/hyperframes-demo.mp4" title="HyperFrames Demo" muted=true loop=true}',
+        },
+        56,
+      ),
+    ];
+
+    const summary = deriveTaskOutputSummaryFromEvents(events);
+    expect(summary).not.toBeNull();
+    expect(summary?.created).toEqual(["artifacts/hyperframes-demo.mp4"]);
+    expect(summary?.primaryOutputPath).toBe("artifacts/hyperframes-demo.mp4");
+  });
+
   it("formats filename-only labels and output folder context", () => {
     expect(getFileName("artifacts/legal/negotiation-analysis")).toBe("negotiation-analysis");
     const nestedSummary = sanitizeTaskOutputSummary({

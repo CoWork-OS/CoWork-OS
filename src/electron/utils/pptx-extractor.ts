@@ -7,6 +7,22 @@ type PptxRelationship = {
   target: string;
 };
 
+export interface PptxExtractedSlide {
+  index: number;
+  title?: string;
+  text: string;
+  notes?: string;
+}
+
+export interface PptxStructuredExtract {
+  title?: string;
+  slideCount: number;
+  processedSlideCount: number;
+  slides: PptxExtractedSlide[];
+  metadata: string[];
+  truncationNotices: string[];
+}
+
 export interface PptxExtractOptions {
   maxSlidesToProcess?: number;
   textCandidateLimit?: number;
@@ -22,6 +38,47 @@ export async function extractPptxContentFromFile(
   filePath: string,
   options: PptxExtractOptions = {},
 ): Promise<string> {
+  const structured = await extractPptxStructuredContentFromFile(filePath, options);
+  const slideText = structured.slides
+    .filter((slide) => slide.text || slide.notes)
+    .map((slide) => {
+      const blocks = [`Slide ${slide.index}:\n${slide.text}`];
+      if (slide.notes) {
+        blocks.push(`\n[Presenter notes]\n${slide.notes}`);
+      }
+      return blocks.join("\n");
+    });
+
+  let allText = slideText.join("\n\n");
+  if (!allText) {
+    allText = "[No extractable slide text found in this PPTX file.]";
+  }
+
+  const metadataText =
+    structured.metadata.length > 0
+      ? `[PPTX Metadata]\n${structured.metadata.join("\n")}\n\n`
+      : "";
+  const summaryLine = `[PPTX Slides: ${
+    structured.processedSlideCount === structured.slideCount
+      ? structured.slideCount
+      : `${structured.processedSlideCount}/${structured.slideCount}`
+  }]\n\n`;
+  let resultText = `${summaryLine}${metadataText}${allText}`;
+  if (structured.truncationNotices.length > 0) {
+    resultText = `${resultText}\n\n[${structured.truncationNotices.join(" ")}]`;
+  }
+
+  if (options.outputCharLimit && resultText.length > options.outputCharLimit) {
+    resultText = `${resultText.slice(0, options.outputCharLimit)}\n\n[... Content truncated. Showing first ${Math.round(options.outputCharLimit / 1024)}KB of extracted text ...]`;
+  }
+
+  return resultText;
+}
+
+export async function extractPptxStructuredContentFromFile(
+  filePath: string,
+  options: PptxExtractOptions = {},
+): Promise<PptxStructuredExtract> {
   const maxSlidesToProcess = Math.max(
     1,
     options.maxSlidesToProcess ?? DEFAULT_MAX_SLIDES_TO_PROCESS,
@@ -30,10 +87,6 @@ export async function extractPptxContentFromFile(
     1024,
     options.textCandidateLimit ?? DEFAULT_TEXT_CANDIDATE_LIMIT,
   );
-  const outputCharLimit =
-    typeof options.outputCharLimit === "number" && Number.isFinite(options.outputCharLimit)
-      ? Math.max(1, Math.floor(options.outputCharLimit))
-      : undefined;
   const maxFileSizeBytes = Math.max(
     1024,
     options.maxFileSizeBytes ?? DEFAULT_MAX_PPTX_FILE_SIZE_BYTES,
@@ -60,7 +113,7 @@ export async function extractPptxContentFromFile(
       return aIndex - bIndex;
     });
 
-  const slideText: string[] = [];
+  const slides: PptxExtractedSlide[] = [];
   const truncationNotices: string[] = [];
   const maxSlides = Math.min(slideEntries.length, maxSlidesToProcess);
   const slidesToProcess = slideEntries.slice(0, maxSlides);
@@ -73,20 +126,19 @@ export async function extractPptxContentFromFile(
     processedSlideCount += 1;
 
     const match = entryName.match(/slide(\d+)\.xml$/i);
-    const slideNumber = match ? Number(match[1]) : slideText.length + 1;
+    const slideNumber = match ? Number(match[1]) : slides.length + 1;
     const relationships = await extractPptxSlideRelationships(zip, entryName);
     const xml = await file.async("string");
     const extracted = extractPptxContentFromXml(xml, relationships);
-    if (!extracted) continue;
-
     const notes = await extractPptxNotesFromZip(zip, relationships, slideNumber);
-    const blocks = [`Slide ${slideNumber}:\n${extracted}`];
-    if (notes) {
-      blocks.push(`\n[Presenter notes]\n${notes}`);
-    }
-    const blockText = blocks.join("\n");
-    slideText.push(blockText);
-    accumulatedLength += blockText.length;
+
+    slides.push({
+      index: slideNumber,
+      title: derivePptxSlideTitle(extracted),
+      text: extracted,
+      notes: notes || undefined,
+    });
+    accumulatedLength += extracted.length + (notes?.length ?? 0);
 
     if (accumulatedLength > textCandidateLimit) {
       truncationNotices.push(
@@ -102,23 +154,14 @@ export async function extractPptxContentFromFile(
     );
   }
 
-  let allText = slideText.join("\n\n");
-  if (!allText) {
-    allText = "[No extractable slide text found in this PPTX file.]";
-  }
-
-  const metadataText = metadata.length > 0 ? `[PPTX Metadata]\n${metadata.join("\n")}\n\n` : "";
-  const summaryLine = `[PPTX Slides: ${processedSlideCount === slideEntries.length ? slideEntries.length : `${processedSlideCount}/${slideEntries.length}`}]\n\n`;
-  let resultText = `${summaryLine}${metadataText}${allText}`;
-  if (truncationNotices.length > 0) {
-    resultText = `${resultText}\n\n[${truncationNotices.join(" ")}]`;
-  }
-
-  if (outputCharLimit && resultText.length > outputCharLimit) {
-    resultText = `${resultText.slice(0, outputCharLimit)}\n\n[... Content truncated. Showing first ${Math.round(outputCharLimit / 1024)}KB of extracted text ...]`;
-  }
-
-  return resultText;
+  return {
+    title: metadata.title,
+    slideCount: slideEntries.length,
+    processedSlideCount,
+    slides,
+    metadata: metadata.entries,
+    truncationNotices,
+  };
 }
 
 function decodePptxXmlText(value: string): string {
@@ -156,8 +199,11 @@ function extractPptxXmlField(xml: string, tagCandidates: string[], isDate = fals
   return "";
 }
 
-async function extractPptxMetadataFromZip(zip: JSZip): Promise<string[]> {
+async function extractPptxMetadataFromZip(
+  zip: JSZip,
+): Promise<{ title?: string; entries: string[] }> {
   const metadata: string[] = [];
+  let deckTitle = "";
 
   const coreFile = zip.file("docProps/core.xml");
   if (coreFile) {
@@ -171,7 +217,10 @@ async function extractPptxMetadataFromZip(zip: JSZip): Promise<string[]> {
     const description = extractPptxXmlField(coreXml, ["description"]);
 
     const values: string[] = [];
-    if (title) values.push(`Title: ${title}`);
+    if (title) {
+      deckTitle = title;
+      values.push(`Title: ${title}`);
+    }
     if (subject) values.push(`Subject: ${subject}`);
     if (creator) values.push(`Author: ${creator}`);
     if (created) values.push(`Created: ${created}`);
@@ -195,7 +244,21 @@ async function extractPptxMetadataFromZip(zip: JSZip): Promise<string[]> {
     if (values.length > 0) metadata.push(values.join(" | "));
   }
 
-  return metadata;
+  return { title: deckTitle || undefined, entries: metadata };
+}
+
+function derivePptxSlideTitle(text: string): string | undefined {
+  const line = text
+    .split("\n")
+    .map((candidate) => candidate.trim())
+    .find(
+      (candidate) =>
+        candidate.length > 0 &&
+        !candidate.startsWith("|") &&
+        !candidate.startsWith("[") &&
+        !candidate.startsWith("..."),
+    );
+  return line ? line.slice(0, 120) : undefined;
 }
 
 function parsePptxRelationshipsFromXml(

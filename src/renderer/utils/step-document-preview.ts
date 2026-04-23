@@ -5,7 +5,7 @@ const CREATION_STEP_PATTERN =
   /\b(create_document|create|created|generate|generated|write|wrote|produce|produced|export|exported|save|saved)\b/i;
 
 const DOCUMENT_PATH_PATTERN =
-  /(["'`])([^"'`\n]*?\.(?:docx|pdf))\1|((?:[A-Za-z]:[\\/])?[~./\\\w@%+-]+?\.(?:docx|pdf)\b)/gi;
+  /(["'`])([^"'`\n]*?\.(?:docx|pdf|tex))\1|((?:[A-Za-z]:[\\/])?[~./\\\w@%+-]+?\.(?:docx|pdf|tex)\b)/gi;
 
 function normalizeDocumentCandidate(candidate: string): string | null {
   const trimmed = candidate.trim();
@@ -13,7 +13,7 @@ function normalizeDocumentCandidate(candidate: string): string | null {
 
   const withoutLeadingWrapper = trimmed.replace(/^[([{]+/, "");
   const withoutTrailingPunctuation = withoutLeadingWrapper.replace(/[)\]}.;,!?]+$/g, "");
-  if (!/\.(docx|pdf)$/i.test(withoutTrailingPunctuation)) {
+  if (!/\.(docx|pdf|tex)$/i.test(withoutTrailingPunctuation)) {
     return null;
   }
   return withoutTrailingPunctuation;

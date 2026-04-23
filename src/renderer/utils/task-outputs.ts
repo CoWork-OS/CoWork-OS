@@ -1,4 +1,6 @@
 import { Task, TaskEvent, TaskOutputSummary } from "../../shared/types";
+import { getEffectiveTaskEventType } from "./task-event-compat";
+import { extractAssistantMediaDirectives } from "./assistant-media-directives";
 
 function normalizePath(raw: string): string {
   return raw.trim().replace(/\\/g, "/");
@@ -147,7 +149,8 @@ export function deriveTaskOutputSummaryFromEvents(events: TaskEvent[]): TaskOutp
   const modified = new Map<string, number>();
 
   for (const event of events) {
-    if (event.type === "file_created") {
+    const effectiveType = getEffectiveTaskEventType(event);
+    if (effectiveType === "file_created") {
       const path = event.payload?.path;
       if (!isNonEmptyString(path)) continue;
       if (event.payload?.type === "directory") continue;
@@ -155,7 +158,7 @@ export function deriveTaskOutputSummaryFromEvents(events: TaskEvent[]): TaskOutp
       continue;
     }
 
-    if (event.type === "artifact_created") {
+    if (effectiveType === "artifact_created") {
       const path = event.payload?.path;
       if (!isNonEmptyString(path)) continue;
       created.set(normalizePath(path), event.timestamp || Date.now());
@@ -169,10 +172,35 @@ export function deriveTaskOutputSummaryFromEvents(events: TaskEvent[]): TaskOutp
       continue;
     }
 
-    if (event.type === "file_modified") {
+    if (effectiveType === "file_modified") {
       const path = event.payload?.path || event.payload?.to || event.payload?.from;
       if (!isNonEmptyString(path)) continue;
       modified.set(normalizePath(path), event.timestamp || Date.now());
+      continue;
+    }
+
+    if (effectiveType === "assistant_message") {
+      const message = typeof event.payload?.message === "string" ? event.payload.message : "";
+      for (const directive of extractAssistantMediaDirectives(message)) {
+        created.set(normalizePath(directive.path), event.timestamp || Date.now());
+      }
+      continue;
+    }
+
+    if (effectiveType === "task_completed") {
+      const candidateTexts = [
+        event.payload?.resultSummary,
+        event.payload?.semanticSummary,
+        event.payload?.message,
+        event.payload?.bestKnownOutcome?.resultSummary,
+        event.payload?.bestKnownOutcome?.semanticSummary,
+      ];
+      for (const text of candidateTexts) {
+        if (typeof text !== "string" || text.trim().length === 0) continue;
+        for (const directive of extractAssistantMediaDirectives(text)) {
+          created.set(normalizePath(directive.path), event.timestamp || Date.now());
+        }
+      }
     }
   }
 

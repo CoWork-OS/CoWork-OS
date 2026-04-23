@@ -20,6 +20,8 @@ type PDFDocumentSurfaceProps = {
   selection: PdfRegionSelection | null;
   onSelectionChange: (selection: PdfRegionSelection | null) => void;
   readOnly?: boolean;
+  visiblePageIndex?: number | null;
+  onPageCountChange?: (pageCount: number) => void;
 };
 
 type DraftSelection = {
@@ -53,6 +55,8 @@ export function PDFDocumentSurface({
   selection,
   onSelectionChange,
   readOnly = false,
+  visiblePageIndex = null,
+  onPageCountChange,
 }: PDFDocumentSurfaceProps) {
   const pageCanvases = useRef<Array<HTMLCanvasElement | null>>([]);
   const pageLayers = useRef<Array<HTMLDivElement | null>>([]);
@@ -78,6 +82,9 @@ export function PDFDocumentSurface({
         ).toString();
         const loadingTask = pdfjs.getDocument({ data: base64ToUint8Array(pdfDataBase64) });
         const document = await loadingTask.promise;
+        if (!cancelled) {
+          onPageCountChange?.(document.numPages);
+        }
         cleanup = async () => {
           await loadingTask.destroy();
           if (typeof document.destroy === "function") {
@@ -150,7 +157,7 @@ export function PDFDocumentSurface({
       cancelled = true;
       if (cleanup) void cleanup();
     };
-  }, [pdfDataBase64]);
+  }, [onPageCountChange, pdfDataBase64]);
 
   const selectionStyle = useMemo(() => {
     const target = draftSelection || selection;
@@ -239,6 +246,7 @@ export function PDFDocumentSurface({
   return (
     <div className="pdf-document-surface">
       {pageRenders.map((page, pageIndex) => {
+        if (typeof visiblePageIndex === "number" && pageIndex !== visiblePageIndex) return null;
         const showSelection =
           (draftSelection && draftSelection.pageIndex === pageIndex) ||
           (selection && selection.pageIndex === pageIndex);

@@ -41,6 +41,11 @@ describe("step document preview helpers", () => {
     expect(extractDocumentPathFromText(text)).toBe("docs/spec.docx");
   });
 
+  it("extracts LaTeX source paths", () => {
+    const text = "Wrote `papers/codex-app-server-paper.tex` and compiled the PDF.";
+    expect(extractDocumentPathFromText(text)).toBe("papers/codex-app-server-paper.tex");
+  });
+
   it("trims trailing punctuation", () => {
     expect(extractDocumentPathFromText("Saved report.pdf, ready to share.")).toBe("report.pdf");
     expect(extractDocumentPathFromText("Saved report.docx.")).toBe("report.docx");

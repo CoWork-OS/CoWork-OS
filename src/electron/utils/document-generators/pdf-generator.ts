@@ -1,11 +1,12 @@
 /**
  * PDF Generator — converts markdown or structured sections into a styled PDF.
  *
- * Uses Puppeteer (already available for browser tools) to render HTML → PDF.
- * Falls back to a simple text-based PDF if Puppeteer is unavailable.
+ * Uses Playwright with a local Chromium-family browser to render HTML → PDF.
+ * Falls back to a styled HTML file if browser PDF rendering is unavailable.
  */
 
 import * as fs from "fs";
+import { execFileSync } from "node:child_process";
 
 interface PDFSection {
   heading?: string;
@@ -21,8 +22,82 @@ interface PDFOptions {
   landscape?: boolean;
 }
 
+function which(command: string): string | undefined {
+  try {
+    const output = execFileSync("which", [command], { encoding: "utf-8" }).trim();
+    return output || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function resolveBrowserExecutable(): string | undefined {
+  const envCandidates = [
+    process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,
+    process.env.CHROME_PATH,
+    process.env.BRAVE_PATH,
+    process.env.PUPPETEER_EXECUTABLE_PATH,
+  ]
+    .map((value) => value?.trim())
+    .filter((value): value is string => Boolean(value));
+
+  const platformCandidates =
+    process.platform === "darwin"
+      ? [
+          "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+          "/Applications/Chromium.app/Contents/MacOS/Chromium",
+          "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+          "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+        ]
+      : process.platform === "win32"
+        ? [
+            process.env.LOCALAPPDATA
+              ? `${process.env.LOCALAPPDATA}\\Google\\Chrome\\Application\\chrome.exe`
+              : "",
+            process.env.LOCALAPPDATA
+              ? `${process.env.LOCALAPPDATA}\\Chromium\\Application\\chrome.exe`
+              : "",
+            "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+            "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+            "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
+            "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+            "C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe",
+            "C:\\Program Files (x86)\\BraveSoftware\\Brave-Browser\\Application\\brave.exe",
+          ]
+        : [
+            "/usr/bin/google-chrome",
+            "/usr/bin/google-chrome-stable",
+            "/usr/bin/chromium",
+            "/usr/bin/chromium-browser",
+            "/usr/bin/microsoft-edge",
+            "/usr/bin/brave-browser",
+            "/snap/bin/chromium",
+            "/snap/bin/brave",
+          ];
+
+  const discovered =
+    process.platform === "win32"
+      ? []
+      : [
+          which("google-chrome"),
+          which("google-chrome-stable"),
+          which("chromium"),
+          which("chromium-browser"),
+          which("microsoft-edge"),
+          which("brave-browser"),
+        ].filter((value): value is string => Boolean(value));
+
+  for (const candidate of [...envCandidates, ...platformCandidates, ...discovered]) {
+    if (candidate && fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return undefined;
+}
+
 /**
- * Render markdown/sections to a styled HTML string, then use Puppeteer to
+ * Render markdown/sections to a styled HTML string, then use Playwright to
  * produce a PDF file.
  */
 export async function generatePDF(
@@ -31,47 +106,28 @@ export async function generatePDF(
 ): Promise<{ success: boolean; path: string; size: number }> {
   const html = buildHTML(options);
 
-  // Try Puppeteer first (available if browser tools are installed)
+  // Try Playwright first (available if browser tools are installed)
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const puppeteer = require("puppeteer-core") as Any;
-    // Attempt to find an available Chromium executable
-    const execPaths = [
-      ...(process.platform === "win32"
-        ? [
-            "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-            "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
-            process.env.LOCALAPPDATA
-              ? `${process.env.LOCALAPPDATA}\\Google\\Chrome\\Application\\chrome.exe`
-              : "",
-          ]
-        : [
-            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-            "/Applications/Chromium.app/Contents/MacOS/Chromium",
-          ]),
-      process.env.PUPPETEER_EXECUTABLE_PATH,
-    ].filter(Boolean) as string[];
+    const playwrightModule = (await import("playwright")) as Any;
+    const chromium =
+      playwrightModule.chromium ||
+      playwrightModule.default?.chromium ||
+      playwrightModule.playwright?.chromium;
+    const executablePath = resolveBrowserExecutable();
 
-    let executablePath: string | undefined;
-    for (const p of execPaths) {
-      if (fs.existsSync(p)) {
-        executablePath = p;
-        break;
-      }
-    }
-
-    if (executablePath) {
-      const browser = await puppeteer.launch({
+    if (chromium && executablePath) {
+      const browser = await chromium.launch({
         headless: true,
         executablePath,
         args: ["--no-sandbox", "--disable-setuid-sandbox"],
       });
       try {
         const page = await browser.newPage();
-        await page.setContent(html, { waitUntil: "networkidle0" });
+        await page.setContent(html, { waitUntil: "networkidle" });
+        await page.emulateMedia({ media: "screen" });
         await page.pdf({
           path: outputPath,
-          format: (options.format || "A4") as Any,
+          format: options.format || "A4",
           landscape: options.landscape || false,
           printBackground: true,
           margin: { top: "1cm", right: "1.5cm", bottom: "1cm", left: "1.5cm" },
@@ -84,7 +140,7 @@ export async function generatePDF(
       return { success: true, path: outputPath, size: stat.size };
     }
   } catch {
-    // Puppeteer not available, fall through to HTML file
+    // Playwright or a local browser is unavailable; fall through to HTML file.
   }
 
   // Fallback: write styled HTML (can be opened in any browser and printed to PDF)

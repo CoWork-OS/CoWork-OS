@@ -16,6 +16,7 @@ import { generatePPTX } from "../../utils/document-generators/pptx-generator";
 import { generateXLSX } from "../../utils/document-generators/xlsx-generator";
 import { generateEPUB } from "../../utils/document-generators/epub-generator";
 import { generateLandingPage } from "../../utils/document-generators/html-page-generator";
+import { compileLatex } from "../../utils/document-generators/latex-compiler";
 import { getVoiceService } from "../../voice";
 
 function sanitizeFilename(raw: string, maxLen = 80): string {
@@ -27,7 +28,12 @@ export class DocumentTools {
   constructor(
     private workspacePath: string,
     private taskId: string,
-    private registerArtifact?: (taskId: string, filePath: string, mimeType: string) => void,
+    private registerArtifact?: (
+      taskId: string,
+      filePath: string,
+      mimeType: string,
+      metadata?: Record<string, unknown>,
+    ) => void,
   ) {}
 
   setWorkspace(workspace: { path: string }): void {
@@ -38,6 +44,32 @@ export class DocumentTools {
 
   static getToolDefinitions(): LLMTool[] {
     return [
+      {
+        name: "compile_latex",
+        description:
+          "Compile a workspace .tex file into a PDF using a system LaTeX engine. " +
+          "Use this after writing LaTeX/TikZ source when the user asks for a compiled paper or PDF. " +
+          "Uses tectonic, latexmk, xelatex, lualatex, or pdflatex when installed.",
+        input_schema: {
+          type: "object" as const,
+          properties: {
+            sourcePath: {
+              type: "string",
+              description: 'Workspace-relative or absolute path to the .tex file (e.g. "paper.tex")',
+            },
+            outputPath: {
+              type: "string",
+              description: 'Optional workspace-contained PDF path (e.g. "paper.pdf")',
+            },
+            engine: {
+              type: "string",
+              enum: ["auto", "tectonic", "latexmk", "xelatex", "lualatex", "pdflatex"],
+              description: "Optional compiler preference. Defaults to auto.",
+            },
+          },
+          required: ["sourcePath"],
+        },
+      },
       {
         name: "generate_document",
         description:
@@ -261,6 +293,40 @@ export class DocumentTools {
   }
 
   // ── Tool execution ──────────────────────────────────────────────
+
+  async compileLatex(input: Any): Promise<Any> {
+    const result = await compileLatex({
+      workspacePath: this.workspacePath,
+      sourcePath: input.sourcePath,
+      outputPath: input.outputPath,
+      engine: input.engine || "auto",
+    });
+
+    if (result.success && this.registerArtifact) {
+      this.registerArtifact(this.taskId, result.pdfPath, "application/pdf", {
+        sourcePath: result.sourcePath,
+        logPath: result.logPath,
+        engine: result.engine,
+        type: "latex_pdf",
+      });
+    }
+
+    return {
+      success: result.success,
+      sourcePath: result.sourcePath,
+      pdfPath: result.pdfPath,
+      path: result.pdfPath,
+      logPath: result.logPath,
+      engine: result.engine,
+      size: result.size,
+      error: result.error,
+      diagnostic: result.diagnostic,
+      mimeType: "application/pdf",
+      message: result.success
+        ? `LaTeX compiled: ${path.basename(result.pdfPath)} (${formatBytes(result.size || 0)})`
+        : `LaTeX compile failed: ${result.error || result.diagnostic}`,
+    };
+  }
 
   async generateDocument(input: Any): Promise<Any> {
     const filename = sanitizeFilename(input.filename || "document.pdf");

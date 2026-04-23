@@ -6,6 +6,7 @@ import { FileViewerResult } from "../../electron/preload";
 import { useAgentContext } from "../hooks/useAgentContext";
 import { createVideoObjectUrl } from "../utils/videoPlayback";
 import { PDFDocumentSurface } from "./PDFDocumentSurface";
+import { PresentationViewer } from "./PresentationViewer";
 import { ThemeIcon } from "./ThemeIcon";
 import {
   AlertTriangleIcon,
@@ -97,6 +98,14 @@ export function FileViewer({ filePath, workspacePath, onClose }: FileViewerProps
     }
   };
 
+  const handleShowInFinder = async () => {
+    try {
+      await window.electronAPI.showInFinder(filePath, workspacePath);
+    } catch (err) {
+      console.error("Failed to show file:", err);
+    }
+  };
+
   // Format file size
   const formatSize = (bytes: number): string => {
     if (bytes < 1024) return `${bytes} B`;
@@ -117,6 +126,8 @@ export function FileViewer({ filePath, workspacePath, onClose }: FileViewerProps
         return <ThemeIcon emoji="📘" icon={<FileTextIcon size={16} />} />;
       case "pdf":
         return <ThemeIcon emoji="📕" icon={<FileTextIcon size={16} />} />;
+      case "latex":
+        return <ThemeIcon emoji="📄" icon={<FileTextIcon size={16} />} />;
       case "image":
         return <ThemeIcon emoji="🖼️" icon={<ImageIcon size={16} />} />;
       case "video":
@@ -145,6 +156,7 @@ export function FileViewer({ filePath, workspacePath, onClose }: FileViewerProps
         );
 
       case "code":
+      case "latex":
       case "text":
         return <pre className="file-viewer-code">{fileData.content}</pre>;
 
@@ -252,6 +264,17 @@ export function FileViewer({ filePath, workspacePath, onClose }: FileViewerProps
         );
 
       case "pptx":
+        if (fileData.presentationPreview) {
+          return (
+            <PresentationViewer
+              fileName={fileData.fileName}
+              sizeLabel={formatSize(fileData.size)}
+              preview={fileData.presentationPreview}
+              onOpenExternal={handleOpenExternal}
+              onShowInFinder={handleShowInFinder}
+            />
+          );
+        }
         return (
           <div className="file-viewer-placeholder">
             <span className="file-viewer-placeholder-icon">
@@ -330,7 +353,10 @@ export function FileViewer({ filePath, workspacePath, onClose }: FileViewerProps
   // Use portal to render at document body level (escapes parent container constraints)
   return createPortal(
     <div className="file-viewer-overlay" onClick={onClose}>
-      <div className="file-viewer-modal" onClick={(e) => e.stopPropagation()}>
+      <div
+        className={`file-viewer-modal ${fileData?.fileType === "pptx" ? "file-viewer-modal-presentation" : ""}`}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="file-viewer-header">
           <div className="file-viewer-title">
             <span className="file-viewer-icon">{getFileIcon(fileData?.fileType)}</span>

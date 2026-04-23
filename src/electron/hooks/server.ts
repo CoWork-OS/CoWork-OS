@@ -10,7 +10,7 @@ import crypto from "crypto";
 import {
   HooksConfig,
   HooksConfigResolved,
-  HookMappingResolved as _HookMappingResolved,
+  HookMappingResolved,
   HookMappingContext,
   HookAction as _HookAction,
   WakeHookPayload,
@@ -54,7 +54,14 @@ export interface HooksServerHandlers {
     thinking?: string;
     timeoutSeconds?: number;
     workspaceId?: string;
-  }) => Promise<{ taskId?: string }>;
+    agentConfig?: import("../../shared/types").AgentConfig;
+    metadata?: Record<string, string>;
+    response?: {
+      statusCode?: number;
+      message?: string;
+      includeTaskId?: boolean;
+    };
+  }) => Promise<{ taskId?: string; statusCode?: number; body?: Record<string, unknown> }>;
 
   /**
    * Handle a follow-up message to an existing task
@@ -252,6 +259,8 @@ export class HooksServer {
     // Extract the hook path after base
     const hookPath = url.pathname.slice(basePath.length).replace(/^\/+/, "").replace(/\/+$/, "");
 
+    const mappedToken = this.findMappedToken(hookPath, req.method || "GET");
+
     // Emit request event
     this.emitEvent({
       action: "request",
@@ -262,7 +271,7 @@ export class HooksServer {
 
     // Verify authentication
     const tokenResult = this.extractHookToken(req, url);
-    if (!this.verifyToken(tokenResult.token)) {
+    if (!this.verifyToken(tokenResult.token, mappedToken)) {
       this.sendJsonResponse(res, 401, { success: false, error: "Invalid or missing token" });
       return;
     }
@@ -362,13 +371,16 @@ export class HooksServer {
       thinking: body.thinking?.trim(),
       timeoutSeconds: body.timeoutSeconds,
       workspaceId: body.workspaceId?.trim(),
+      agentConfig: body.agentConfig,
+      metadata: body.metadata,
+      response: body.response,
     };
 
     if (this.handlers.onAgent) {
       try {
         const result = await this.handlers.onAgent(agentPayload);
         // Return 202 Accepted for async operation
-        this.sendJsonResponse(res, 202, { success: true, taskId: result.taskId });
+        this.sendJsonResponse(res, result.statusCode ?? 202, result.body ?? { success: true, taskId: result.taskId });
       } catch (error) {
         console.error("[HooksServer] Agent handler error:", error);
         this.sendJsonResponse(res, 500, { success: false, error: String(error) });
@@ -567,11 +579,24 @@ export class HooksServer {
             deliver: action.deliver,
             channel: action.channel,
             to: action.to,
+            workspaceId: action.workspaceId,
+            agentConfig: action.agentConfig,
             model: action.model,
             thinking: action.thinking,
             timeoutSeconds: action.timeoutSeconds,
+            metadata: action.metadata,
+            response: action.response,
           });
-          this.sendJsonResponse(res, 202, { success: true, taskId: result.taskId });
+          this.sendJsonResponse(
+            res,
+            result.statusCode ?? action.response?.statusCode ?? 202,
+            result.body ??
+              buildHookSuccessBody({
+                taskId: result.taskId,
+                message: action.response?.message,
+                includeTaskId: action.response?.includeTaskId,
+              }),
+          );
         } catch (error) {
           console.error("[HooksServer] Agent handler error:", error);
           this.sendJsonResponse(res, 500, { success: false, error: String(error) });
@@ -612,15 +637,28 @@ export class HooksServer {
   /**
    * Verify the provided token
    */
-  private verifyToken(provided: string | undefined): boolean {
-    if (!this.hooksConfig?.token) return false;
+  private verifyToken(provided: string | undefined, override?: string): boolean {
+    const expectedToken = override ?? this.hooksConfig?.token;
+    if (!expectedToken) return false;
     if (!provided) return false;
 
     // Use timing-safe comparison
-    const expected = Buffer.from(this.hooksConfig.token);
+    const expected = Buffer.from(expectedToken);
     const actual = Buffer.from(provided);
     if (expected.length !== actual.length) return false;
     return crypto.timingSafeEqual(expected, actual);
+  }
+
+  private findMappedToken(hookPath: string, method: string): string | undefined {
+    if (method.toUpperCase() !== "POST") return undefined;
+    const mapping = this.findMappingByPath(hookPath);
+    return mapping?.token;
+  }
+
+  private findMappingByPath(hookPath: string): HookMappingResolved | undefined {
+    if (!this.hooksConfig?.mappings?.length) return undefined;
+    const normalizedPath = hookPath.replace(/^\/+/, "").replace(/\/+$/, "");
+    return this.hooksConfig.mappings.find((mapping) => mapping.matchPath === normalizedPath);
   }
 
   /**
@@ -821,4 +859,19 @@ export class HooksServer {
       }
     }
   }
+}
+
+function buildHookSuccessBody(params: {
+  taskId?: string;
+  message?: string;
+  includeTaskId?: boolean;
+}): Record<string, unknown> {
+  const body: Record<string, unknown> = { success: true };
+  if (params.message) {
+    body.message = params.message;
+  }
+  if (params.includeTaskId ?? true) {
+    body.taskId = params.taskId;
+  }
+  return body;
 }

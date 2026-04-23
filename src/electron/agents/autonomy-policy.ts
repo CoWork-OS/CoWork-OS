@@ -18,6 +18,8 @@ function normalizeApprovalTypes(value: unknown): ApprovalType[] | undefined {
         entry === "run_command" ||
         entry === "external_service" ||
         entry === "network_access" ||
+        entry === "data_export" ||
+        entry === "computer_use" ||
         entry === "delete_file" ||
         entry === "delete_multiple" ||
         entry === "bulk_rename",

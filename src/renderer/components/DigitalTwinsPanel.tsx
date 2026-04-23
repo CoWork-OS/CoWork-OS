@@ -17,9 +17,13 @@ const COMPANY_OPERATOR_TEMPLATE_NAMES = [
 
 interface DigitalTwinsPanelProps {
   initialCompanyId?: string | null;
+  onOpenAgents?: () => void;
 }
 
-export function DigitalTwinsPanel({ initialCompanyId = null }: DigitalTwinsPanelProps) {
+export function DigitalTwinsPanel({
+  initialCompanyId = null,
+  onOpenAgents,
+}: DigitalTwinsPanelProps) {
   const [roles, setRoles] = useState<AgentRole[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -334,6 +338,10 @@ export function DigitalTwinsPanel({ initialCompanyId = null }: DigitalTwinsPanel
           </span>
           </div>
           <div className="dt-header-actions">
+            <button className="dt-btn dt-btn-secondary" onClick={onOpenAgents}>
+              <User size={14} strokeWidth={1.5} />
+              Open Agents Hub
+            </button>
             <button className="dt-btn dt-btn-secondary" onClick={handleCreateBlank}>
               <Plus size={14} strokeWidth={2} />
               New Agent
@@ -346,7 +354,8 @@ export function DigitalTwinsPanel({ initialCompanyId = null }: DigitalTwinsPanel
         </div>
         <p className="dt-subtitle">
           Create digital twins as optional persona presets or build custom agents. Core automation
-          lives in Mission Control and is intentionally separated from Twins.
+          lives in Mission Control and is intentionally separated from Twins. New managed agents
+          now live in the Agents hub.
         </p>
         {selectedCompany ? (
           <div className="dt-company-context">

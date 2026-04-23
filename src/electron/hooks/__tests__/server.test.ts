@@ -354,6 +354,44 @@ describe("HooksServer", () => {
       );
     });
 
+    it("accepts a route-specific token for mapped agent hooks and forwards workspaceId", async () => {
+      server.setHooksConfig({
+        enabled: true,
+        token: "test-secret-token",
+        path: "/hooks",
+        maxBodyBytes: 256 * 1024,
+        presets: [],
+        mappings: [
+          {
+            id: "routine-api",
+            token: "routine-token",
+            match: { path: "routines/test" },
+            action: "agent",
+            workspaceId: "ws-routine",
+            messageTemplate: "Routine payload: {{payload.text}}",
+          },
+        ],
+      });
+
+      const onAgent = vi.fn().mockResolvedValue({ taskId: "task-routine" });
+      server.setHandlers({ onAgent });
+
+      const response = await makeRequest(
+        "POST",
+        "/hooks/routines/test",
+        { text: "deploy alert" },
+        { Authorization: "Bearer routine-token" },
+      );
+
+      expect(response.statusCode).toBe(202);
+      expect(onAgent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: "Routine payload: deploy alert",
+          workspaceId: "ws-routine",
+        }),
+      );
+    });
+
     it("should call onTaskMessage handler", async () => {
       const onTaskMessage = vi.fn().mockResolvedValue(undefined);
       server.setHandlers({ onTaskMessage });

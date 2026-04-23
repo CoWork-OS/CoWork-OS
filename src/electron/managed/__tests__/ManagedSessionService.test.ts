@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AgentRoleRepository } from "../../agents/AgentRoleRepository";
-import { TaskEventRepository, TaskRepository } from "../../database/repositories";
+import { ChannelRepository, TaskEventRepository, TaskRepository } from "../../database/repositories";
 import { DatabaseManager } from "../../database/schema";
 import { MCPSettingsManager } from "../../mcp/settings";
 import { ManagedSessionService } from "../ManagedSessionService";
@@ -31,6 +31,8 @@ describeWithSqlite("ManagedSessionService", () => {
   let db: ReturnType<DatabaseManager["getDatabase"]>;
   let taskRepo: TaskRepository;
   let taskEventRepo: TaskEventRepository;
+  let channelRepo: ChannelRepository;
+  let roleRepo: AgentRoleRepository;
   let service: ManagedSessionService;
   let daemon: Any;
 
@@ -67,6 +69,8 @@ describeWithSqlite("ManagedSessionService", () => {
     db = manager.getDatabase();
     taskRepo = new TaskRepository(db);
     taskEventRepo = new TaskEventRepository(db);
+    channelRepo = new ChannelRepository(db);
+    roleRepo = new AgentRoleRepository(db);
 
     daemon = {
       startTask: vi.fn(async (task: Any) => {
@@ -222,6 +226,46 @@ describeWithSqlite("ManagedSessionService", () => {
     });
   });
 
+  it("reuses the managed agent mirror when saved metadata omits the mirror link", () => {
+    const workspace = insertWorkspace("mirror-link-save");
+    const environment = service.createEnvironment({
+      name: "Mirror link env",
+      config: { workspaceId: workspace.id },
+    });
+    const created = service.createAgent({
+      name: "Mirror Link Agent",
+      systemPrompt: "Version one.",
+      executionMode: "solo",
+      metadata: {
+        studio: {
+          defaultEnvironmentId: environment.id,
+          workflowBrief: "Handle mirrored work.",
+        },
+      },
+    });
+    const originalStudio = created.version.metadata?.studio as Any;
+    const { legacyMirror: _legacyMirror, ...studioWithoutLegacyMirror } = originalStudio;
+
+    const updated = service.updateAgent(created.agent.id, {
+      systemPrompt: "Version two.",
+      metadata: {
+        studio: {
+          ...studioWithoutLegacyMirror,
+          workflowBrief: "Handle updated mirrored work.",
+        },
+      },
+    });
+    const updatedStudio = updated.version.metadata?.studio as Any;
+    const mirroredRoles = roleRepo.findAll(true).filter((role) => {
+      const soul = JSON.parse(role.soul || "{}");
+      return soul.managedAgentId === created.agent.id;
+    });
+
+    expect(updatedStudio?.legacyMirror?.agentRoleId).toBe(originalStudio?.legacyMirror?.agentRoleId);
+    expect(mirroredRoles).toHaveLength(1);
+    expect(mirroredRoles[0]?.systemPrompt).toBe("Version two.");
+  });
+
   it("sanitizes bridged task event payloads before persisting managed session events", async () => {
     const workspace = insertWorkspace();
     const environment = service.createEnvironment({
@@ -347,5 +391,283 @@ describeWithSqlite("ManagedSessionService", () => {
       }),
     ).rejects.toThrow(/team-mode managed sessions/i);
     expect(daemon.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("enforces managed approval policy on direct sessions and mirrored agent roles", async () => {
+    const workspace = insertWorkspace("approval-session");
+    const environment = service.createEnvironment({
+      name: "Approval env",
+      config: { workspaceId: workspace.id },
+    });
+    const created = service.createAgent({
+      name: "Approval agent",
+      systemPrompt: "Handle approvals carefully.",
+      executionMode: "solo",
+      metadata: {
+        studio: {
+          approvalPolicy: {
+            autoApproveReadOnly: true,
+            requireApprovalFor: ["send email", "edit spreadsheet"],
+            escalationChannel: "#ops-approvals",
+          },
+        },
+      },
+    });
+
+    const session = await service.createSession({
+      agentId: created.agent.id,
+      environmentId: environment.id,
+      title: "Approval run",
+      initialEvent: {
+        type: "user.message",
+        content: [{ type: "text", text: "Run the workflow." }],
+      },
+    });
+
+    const backingTask = taskRepo.findById(session.backingTaskId!);
+    expect(backingTask?.agentConfig?.allowUserInput).toBe(true);
+    expect(backingTask?.agentConfig?.pauseForRequiredDecision).toBe(true);
+    expect(backingTask?.agentConfig?.autoApproveTypes).toEqual(["network_access"]);
+
+    const roleRepo = new AgentRoleRepository(db);
+    const mirroredRole = roleRepo.findAll(false).find((role) => role.displayName === "Approval agent");
+    expect(mirroredRole).toBeTruthy();
+    const soul = JSON.parse(mirroredRole!.soul || "{}");
+    expect(soul.autonomyPolicy).toMatchObject({
+      preset: "manual",
+      allowUserInput: true,
+      pauseForRequiredDecision: true,
+      autoApproveTypes: ["network_access"],
+    });
+  });
+
+  it("does not mint admin access for arbitrary principals when reading workspace permissions", () => {
+    const workspace = insertWorkspace("rbac");
+
+    const snapshot = service.getMyWorkspacePermissions(workspace.id, "attacker-user");
+    const attackerMembership = db
+      .prepare(
+        `SELECT role
+         FROM agent_workspace_memberships
+         WHERE workspace_id = ? AND principal_id = ?`,
+      )
+      .get(workspace.id, "attacker-user") as { role?: string } | undefined;
+
+    expect(snapshot.principalId).toBe("local-user");
+    expect(snapshot.role).toBe("admin");
+    expect(snapshot.canManageMemberships).toBe(true);
+    expect(attackerMembership).toBeUndefined();
+  });
+
+  it("preserves authored Slack targets when suspending an agent while removing live routing", () => {
+    const workspace = insertWorkspace("suspend-slack");
+    const environment = service.createEnvironment({
+      name: "Slack env",
+      config: { workspaceId: workspace.id },
+    });
+    const channel = channelRepo.create({
+      type: "slack",
+      name: "Support Slack",
+      enabled: true,
+      status: "connected",
+      config: {},
+      securityConfig: { mode: "pairing" },
+    });
+    const created = service.createAgent({
+      name: "Slacky",
+      systemPrompt: "Handle Slack work.",
+      executionMode: "solo",
+      metadata: {
+        studio: {
+          deployment: { surfaces: ["slack"] },
+          defaultEnvironmentId: environment.id,
+          channelTargets: [
+            {
+              channelType: "slack",
+              channelId: channel.id,
+              channelName: channel.name,
+              enabled: true,
+              progressRelayMode: "curated",
+              securityMode: "allowlist",
+            },
+          ],
+        },
+      },
+    });
+
+    service.publishAgent(created.agent.id);
+    service.suspendAgent(created.agent.id);
+
+    const suspended = service.getAgent(created.agent.id);
+    const studio = suspended?.currentVersion?.metadata?.studio as Any;
+    const updatedChannel = channelRepo.findById(channel.id);
+
+    expect(studio?.channelTargets).toHaveLength(1);
+    expect(studio?.channelTargets?.[0]?.channelId).toBe(channel.id);
+    expect(updatedChannel?.config?.defaultAgentRoleId).toBeUndefined();
+    expect(updatedChannel?.config?.allowedAgentRoleIds || []).not.toContain(
+      studio?.legacyMirror?.agentRoleId,
+    );
+  });
+
+  it("returns workpapers to viewers without requiring audit permission", async () => {
+    const workspace = insertWorkspace("viewer-workpaper");
+    const environment = service.createEnvironment({
+      name: "Viewer env",
+      config: { workspaceId: workspace.id },
+    });
+    const created = service.createAgent({
+      name: "Viewer agent",
+      systemPrompt: "Generate a workpaper.",
+      executionMode: "solo",
+      metadata: {
+        studio: {
+          defaultEnvironmentId: environment.id,
+        },
+      },
+    });
+    const session = await service.createSession({
+      agentId: created.agent.id,
+      environmentId: environment.id,
+      title: "Viewer session",
+    });
+
+    service.updateWorkspaceMembership({
+      workspaceId: workspace.id,
+      principalId: "local-user",
+      role: "viewer",
+    });
+
+    const workpaper = service.getSessionWorkpaper(session.id);
+
+    expect(workpaper.sessionId).toBe(session.id);
+    expect(workpaper.auditTrail).toEqual([]);
+  });
+
+  it("reuses the source agent role when converting personas into managed agents", () => {
+    const workspace = insertWorkspace("convert-role");
+    const role = roleRepo.create({
+      name: "support-pilot",
+      displayName: "Support Pilot",
+      description: "Answer support questions.",
+      roleKind: "custom",
+      capabilities: ["research", "communicate"],
+      systemPrompt: "Help customers.",
+    });
+
+    const converted = service.convertAgentRoleToManagedAgent({
+      agentRoleId: role.id,
+      workspaceId: workspace.id,
+    });
+    const detail = service.getAgent(converted.agent.id);
+    const studio = detail?.currentVersion?.metadata?.studio as Any;
+    const managedRoles = roleRepo.findAll(true).filter((candidate) => {
+      const soul = JSON.parse(candidate.soul || "{}");
+      return soul.managedAgentId === converted.agent.id;
+    });
+
+    expect(studio?.legacyMirror?.agentRoleId).toBe(role.id);
+    expect(managedRoles).toHaveLength(1);
+    expect(managedRoles[0]?.id).toBe(role.id);
+  });
+
+  it("only reports Slack deployment run health from Slack-backed routine runs", async () => {
+    const workspace = insertWorkspace("slack-health");
+    const environment = service.createEnvironment({
+      name: "Slack health env",
+      config: { workspaceId: workspace.id },
+    });
+    const channel = channelRepo.create({
+      type: "slack",
+      name: "Ops Slack",
+      enabled: true,
+      status: "connected",
+      config: {},
+      securityConfig: { mode: "pairing" },
+    });
+    const created = service.createAgent({
+      name: "Health agent",
+      systemPrompt: "Do health checks.",
+      executionMode: "solo",
+      metadata: {
+        studio: {
+          deployment: { surfaces: ["slack"] },
+          defaultEnvironmentId: environment.id,
+          channelTargets: [
+            {
+              channelType: "slack",
+              channelId: channel.id,
+              channelName: channel.name,
+              enabled: true,
+            },
+          ],
+        },
+      },
+    });
+    service.publishAgent(created.agent.id);
+
+    const manualSession = await service.createSession({
+      agentId: created.agent.id,
+      environmentId: environment.id,
+      title: "Manual run",
+    });
+    db.prepare("UPDATE managed_sessions SET status = ?, completed_at = ?, updated_at = ? WHERE id = ?").run(
+      "completed",
+      Date.now(),
+      Date.now(),
+      manualSession.id,
+    );
+
+    const health = service.getSlackDeploymentHealth(created.agent.id);
+
+    expect(health.lastSuccessfulRoutedRunId).toBeUndefined();
+    expect(health.lastSuccessfulRoutedRunAt).toBeUndefined();
+    expect(health.lastDeploymentError).toBeUndefined();
+  });
+
+  it("derives unique agent users from recorded requester identities instead of hard-coding one", async () => {
+    const workspace = insertWorkspace("agent-insights");
+    const environment = service.createEnvironment({
+      name: "Insights env",
+      config: { workspaceId: workspace.id },
+    });
+    const created = service.createAgent({
+      name: "Insights agent",
+      systemPrompt: "Track usage.",
+      executionMode: "solo",
+      metadata: {
+        studio: {
+          defaultEnvironmentId: environment.id,
+        },
+      },
+    });
+
+    const first = await service.createSession({
+      agentId: created.agent.id,
+      environmentId: environment.id,
+      title: "First run",
+    });
+    taskEventRepo.create({
+      taskId: first.backingTaskId!,
+      timestamp: Date.now(),
+      type: "task_status",
+      payload: { requestingUserId: "alice" },
+    });
+
+    const second = await service.createSession({
+      agentId: created.agent.id,
+      environmentId: environment.id,
+      title: "Second run",
+    });
+    taskEventRepo.create({
+      taskId: second.backingTaskId!,
+      timestamp: Date.now(),
+      type: "task_status",
+      payload: { requestingUserId: "bob" },
+    });
+
+    const insights = service.getAgentInsights(created.agent.id);
+
+    expect(insights.uniqueUsers).toBe(2);
   });
 });

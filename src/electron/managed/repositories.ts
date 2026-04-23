@@ -181,6 +181,23 @@ export class ManagedAgentVersionRepository {
     return rows.map((row) => this.mapRow(row));
   }
 
+  updateMetadata(
+    agentId: string,
+    version: number,
+    metadata: Record<string, unknown> | undefined,
+  ): ManagedAgentVersion | undefined {
+    this.db
+      .prepare(
+        `
+        UPDATE managed_agent_versions
+        SET metadata_json = ?
+        WHERE agent_id = ? AND version = ?
+      `,
+      )
+      .run(metadata ? JSON.stringify(metadata) : null, agentId, version);
+    return this.find(agentId, version);
+  }
+
   private mapRow(row: Any): ManagedAgentVersion {
     return {
       agentId: String(row.agent_id ?? ""),

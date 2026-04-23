@@ -6,6 +6,7 @@
 
 import path from "path";
 import { pathToFileURL } from "url";
+import type { AgentConfig } from "../../shared/types";
 import {
   HooksConfig,
   HookMappingConfig,
@@ -34,9 +35,17 @@ type HookTransformResult = Partial<{
   allowUnsafeExternalContent: boolean;
   channel: HookMessageChannel;
   to: string;
+  workspaceId: string;
+  agentConfig: AgentConfig;
   model: string;
   thinking: string;
   timeoutSeconds: number;
+  metadata: Record<string, string>;
+  response: {
+    statusCode?: number;
+    message?: string;
+    includeTaskId?: boolean;
+  };
 }> | null;
 
 type HookTransformFn = (
@@ -164,6 +173,7 @@ function normalizeHookMapping(
     matchPath,
     matchSource,
     matchType,
+    token: mapping.token?.trim() || undefined,
     action,
     wakeMode,
     name: mapping.name,
@@ -174,9 +184,13 @@ function normalizeHookMapping(
     allowUnsafeExternalContent: mapping.allowUnsafeExternalContent,
     channel: mapping.channel,
     to: mapping.to,
+    workspaceId: mapping.workspaceId,
+    agentConfig: mapping.agentConfig,
     model: mapping.model,
     thinking: mapping.thinking,
     timeoutSeconds: mapping.timeoutSeconds,
+    metadata: mapping.metadata,
+    response: mapping.response,
     transform,
   };
 }
@@ -231,9 +245,13 @@ function buildActionFromMapping(
       allowUnsafeExternalContent: mapping.allowUnsafeExternalContent,
       channel: mapping.channel,
       to: renderOptional(mapping.to, ctx),
+      workspaceId: renderOptional(mapping.workspaceId, ctx),
+      agentConfig: mapping.agentConfig,
       model: renderOptional(mapping.model, ctx),
       thinking: renderOptional(mapping.thinking, ctx),
       timeoutSeconds: mapping.timeoutSeconds,
+      metadata: mapping.metadata,
+      response: mapping.response,
     },
   };
 }
@@ -278,9 +296,13 @@ function mergeAction(
         : baseAgent?.allowUnsafeExternalContent,
     channel: override.channel ?? baseAgent?.channel,
     to: override.to ?? baseAgent?.to,
+    workspaceId: override.workspaceId ?? baseAgent?.workspaceId,
+    agentConfig: override.agentConfig ?? baseAgent?.agentConfig,
     model: override.model ?? baseAgent?.model,
     thinking: override.thinking ?? baseAgent?.thinking,
     timeoutSeconds: override.timeoutSeconds ?? baseAgent?.timeoutSeconds,
+    metadata: override.metadata ?? baseAgent?.metadata,
+    response: override.response ?? baseAgent?.response,
   });
 }
 
@@ -373,6 +395,9 @@ function renderTemplate(template: string, ctx: HookMappingContext): string {
  */
 function resolveTemplateExpr(expr: string, ctx: HookMappingContext): unknown {
   if (expr === "path") return ctx.path;
+  if (expr === "payload") return ctx.payload;
+  if (expr === "headers") return ctx.headers;
+  if (expr === "query") return Object.fromEntries(ctx.url.searchParams.entries());
   if (expr === "now") return new Date().toISOString();
   if (expr.startsWith("headers.")) {
     return getByPath(ctx.headers, expr.slice("headers.".length));

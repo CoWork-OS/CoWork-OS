@@ -166,6 +166,7 @@ export class EventTriggerService {
             prompt,
             workspaceId:
               cfg.workspaceId || trigger.workspaceId || this.deps.getDefaultWorkspaceId(),
+            agentConfig: cfg.agentConfig,
           });
           historyEntry.taskId = result.id;
           historyEntry.actionResult = "task_created";

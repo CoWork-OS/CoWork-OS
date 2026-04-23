@@ -87,8 +87,13 @@ export class PlaybookService {
     planSummary: string,
     toolsUsed: string[],
     errorMessage?: string,
+    destinationHints: string[] = [],
   ): Promise<void> {
     const toolsList = toolsUsed.length > 0 ? toolsUsed.slice(0, 10).join(", ") : "none";
+    const destinationsLine =
+      destinationHints.length > 0
+        ? `Preferred destinations: ${destinationHints.slice(0, 4).join(", ")}`
+        : null;
 
     let content: string;
     if (outcome === "success") {
@@ -96,8 +101,11 @@ export class PlaybookService {
         `[PLAYBOOK] Task succeeded: "${taskTitle}"`,
         `Approach: ${planSummary.slice(0, 300)}`,
         `Key tools: ${toolsList}`,
+        destinationsLine,
         `Original request: ${taskPrompt.slice(0, 200)}`,
-      ].join("\n");
+      ]
+        .filter((line): line is string => Boolean(line))
+        .join("\n");
     } else {
       const category = this.classifyError(errorMessage || "");
       content = [
@@ -106,8 +114,11 @@ export class PlaybookService {
         `Attempted approach: ${planSummary.slice(0, 300)}`,
         `Error: ${errorMessage?.slice(0, 200) || "Unknown"}`,
         `Lesson: The approach of using ${toolsList} did not work for this type of request. Error type: ${category}.`,
+        destinationsLine,
         `Original request: ${taskPrompt.slice(0, 200)}`,
-      ].join("\n");
+      ]
+        .filter((line): line is string => Boolean(line))
+        .join("\n");
     }
 
     try {
@@ -174,6 +185,7 @@ export class PlaybookService {
     workspaceId: string,
     taskPrompt: string,
     toolsUsed: string[],
+    destinationHints: string[] = [],
   ): Promise<void> {
     try {
       const results = MemoryService.search(workspaceId, taskPrompt, 20);
@@ -193,8 +205,13 @@ export class PlaybookService {
           `[PLAYBOOK] Reinforced pattern: "${cleaned}"`,
           `This approach was confirmed successful again.`,
           `Tools: ${toolsList}`,
+          destinationHints.length > 0
+            ? `Preferred destinations: ${destinationHints.slice(0, 4).join(", ")}`
+            : null,
           `Original request: ${taskPrompt.slice(0, 150)}`,
-        ].join("\n");
+        ]
+          .filter((line): line is string => Boolean(line))
+          .join("\n");
         await MemoryService.capture(workspaceId, undefined, "insight", reinforcement);
       }
       // Emit event for PlaybookSkillPromoter to pick up

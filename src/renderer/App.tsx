@@ -736,6 +736,7 @@ export function App() {
   const [approveAllSessionWarningOpen, setApproveAllSessionWarningOpen] = useState(false);
   const [unseenOutputTaskIds, setUnseenOutputTaskIds] = useState<string[]>([]);
   const [unseenCompletedTaskIds, setUnseenCompletedTaskIds] = useState<string[]>([]);
+  const [isInitialTaskListLoading, setIsInitialTaskListLoading] = useState(true);
   const [rightPanelHighlight, setRightPanelHighlight] = useState<{
     taskId: string;
     path: string;
@@ -2213,10 +2214,12 @@ export function App() {
   const hasMoreTasksRef = useRef(false);
 
   const loadTasks = async () => {
+    setIsInitialTaskListLoading(true);
     if (!window.electronAPI?.listTasks) {
       setTasks([]);
       setHasMoreTasks(false);
       hasMoreTasksRef.current = false;
+      setIsInitialTaskListLoading(false);
       return;
     }
     try {
@@ -2235,6 +2238,8 @@ export function App() {
       taskOffsetRef.current = loadedTasks.length;
     } catch (error) {
       console.error("Failed to load tasks:", error);
+    } finally {
+      setIsInitialTaskListLoading(false);
     }
   };
 
@@ -2848,6 +2853,9 @@ export function App() {
     (taskId: string | null) => {
       clearRemoteTaskView();
       setSelectedTaskId(taskId);
+      if (taskId) {
+        setUnseenCompletedTaskIds((prev) => removeTaskId(prev, taskId));
+      }
       setCurrentView("main");
     },
     [clearRemoteTaskView],
@@ -3410,6 +3418,7 @@ export function App() {
                 isMissionControlActive={currentView === "missionControl"}
                 isHealthActive={currentView === "health"}
                 isDevicesActive={currentView === "devices"}
+                isLoadingSessions={isInitialTaskListLoading}
                 completionAttentionTaskIds={unseenCompletedTaskIds}
                 onSelectTask={handleSelectTaskFromShell}
                 onOpenHome={() => setCurrentView("home")}

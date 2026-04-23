@@ -96,11 +96,12 @@ function buildParallelGroupTitle(group: ParallelGroupProjection, isActive: boole
 export function ParallelGroupFeed({
   group,
   timeLabel,
-  formatTime,
+  formatTime: _formatTime,
   showConnectorAbove = false,
   showConnectorBelow = false,
   defaultExpanded = false,
 }: ParallelGroupFeedProps) {
+  void _formatTime;
   const singleLane = group.lanes.length === 1 ? group.lanes[0] : null;
   const isActive =
     group.status === "in_progress" || group.lanes.some((lane) => lane.status === "in_progress");
@@ -131,9 +132,6 @@ export function ParallelGroupFeed({
           <div className="parallel-group-feed-lane-title" title={groupTitle}>
             {groupTitle}
           </div>
-          <div className="parallel-group-feed-lane-time">
-            {formatTime(singleLane.startedAt || group.startedAt) || timeLabel}
-          </div>
         </div>
       </div>
     );
@@ -153,6 +151,7 @@ export function ParallelGroupFeed({
       title={title}
       titleTooltip={groupTitle}
       timeLabel={timeLabel}
+      hideTime
       indicator={indicator}
       showConnectorAbove={showConnectorAbove}
       showConnectorBelow={showConnectorBelow}
@@ -171,7 +170,6 @@ export function ParallelGroupFeed({
                 <div className="parallel-group-feed-lane-title" title={lane.title}>
                   {lane.title}
                 </div>
-                <div className="parallel-group-feed-lane-time">{formatTime(lane.startedAt)}</div>
               </div>
             ))}
           </div>

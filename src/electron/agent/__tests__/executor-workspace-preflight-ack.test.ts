@@ -173,6 +173,32 @@ describe("TaskExecutor workspace preflight acknowledgement", () => {
     expect(pauseForUserInput).not.toHaveBeenCalled();
   });
 
+  it("keeps shell-intent parsing aligned with the UI shortcut phrases", () => {
+    expect(
+      (TaskExecutor as Any).prototype.classifyShellPermissionDecision.call({}, "enable shell"),
+    ).toBe("enable_shell");
+    expect(
+      (TaskExecutor as Any).prototype.classifyShellPermissionDecision.call(
+        {},
+        "continue without shell",
+      ),
+    ).toBe("continue_without_shell");
+  });
+
+  it("tells the model not to call shell disabled when another policy layer blocks it", () => {
+    const instruction = (TaskExecutor as Any).prototype.buildExecutionRequiredFollowUpInstruction.call(
+      {},
+      {
+        attemptedExecutionTool: true,
+        lastExecutionError: 'Tool "run_command" blocked by policy: blocked by workspace or gateway policy',
+        shellEnabled: true,
+      },
+    );
+
+    expect(instruction).toContain("Shell is already enabled for this workspace");
+    expect(instruction).toContain("Do not describe this as shell being off");
+  });
+
   it("does not pause for internal app/tool change intent in temporary workspace", () => {
     const pauseForUserInput = vi.fn();
     const fakeThis: Any = {

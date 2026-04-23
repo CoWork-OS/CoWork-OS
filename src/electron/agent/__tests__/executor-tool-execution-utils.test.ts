@@ -191,4 +191,42 @@ describe("tool failure normalization", () => {
     expect(normalized.toolResult.is_error).toBe(false);
     expect(normalized.toolResult.content).toContain("\"nonBlocking\":true");
   });
+
+  it("compacts computer-use screenshot payloads and attaches companion image content", () => {
+    const normalized = buildNormalizedToolResult({
+      toolName: "screenshot",
+      toolUseId: "tool-visual-1",
+      result: {
+        captureId: "cap_123",
+        imageBase64: "ZmFrZQ==",
+        mediaType: "image/png",
+        width: 640,
+        height: 480,
+        scaleFactor: 2,
+        action: "screenshot",
+        target: {
+          appName: "Calculator",
+          windowTitle: "",
+          windowId: 99,
+        },
+      },
+      rawResult: JSON.stringify({
+        captureId: "cap_123",
+        imageBase64: "ZmFrZQ==",
+        mediaType: "image/png",
+      }),
+      sanitizeToolResult: (_toolName, resultText) => resultText,
+      getToolFailureReason,
+    });
+
+    expect(normalized.resultIsError).toBe(false);
+    expect(normalized.toolResult.is_error).toBe(false);
+    expect(normalized.toolResult.content).toContain('"captureId":"cap_123"');
+    expect(normalized.toolResult.content).toContain('"imageAttached":true');
+    expect(normalized.toolResult.content).not.toContain("ZmFrZQ==");
+    expect(normalized.toolResult.companion_user_content).toEqual([
+      expect.objectContaining({ type: "text" }),
+      { type: "image", data: "ZmFrZQ==", mimeType: "image/png" },
+    ]);
+  });
 });

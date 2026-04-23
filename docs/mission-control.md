@@ -9,7 +9,7 @@ Access it from **Settings** > **Mission Control**. For company-ops workflows, yo
 Mission Control now sits alongside the other operational entry points:
 
 - **Devices** for machine-level task routing and remote execution
-- **Settings > Automations** for core automation, queueing, scheduling, triggers, briefing, and subconscious policies
+- **Settings > Automations** for routines, core automation, queueing, scheduling, triggers, briefing, and subconscious policies
 - **Settings > Companies** for company graph editing and operator assignment
 
 ## Layout
@@ -129,10 +129,16 @@ Click any task card to see its full details:
 
 Task details now surface the new runtime visibility signals that used to live only in background services:
 
-- **What Cowork learned**: the completion card shows memory captured, playbook reinforcement, skill proposal state, evidence links, and the next action when a human review is needed
-- **Unified recall**: task detail search spans tasks, messages, files, workspace notes, memory entries, and knowledge-graph context from one surface
+- **What Cowork learned**: the completion card shows memory captured, playbook reinforcement, skill proposal state, evidence links, Chronicle-backed `screen_context` evidence when used, and the next action when a human review is needed
+- **Unified recall**: task detail search spans tasks, messages, files, workspace notes, memory entries, Chronicle `screen_context`, and knowledge-graph context from one surface
 - **Shell session status**: long-lived shell sessions show when cwd/env/alias state is being retained or reset, so operator workflows are easier to trust
 - **Model routing status**: the active provider/model, route reason, and fallback transitions are visible in the task UI and settings surfaces
+
+Chronicle now shows up in three places inside task detail:
+
+- a learning-progress step named **Chronicle screen context used**
+- `screen_context` evidence refs when a task promoted recent-screen context
+- unified recall hits for promoted observations and any linked `screen_context` memory
 
 These signals are also mirrored into the live feed so Mission Control stays the primary desktop control plane for understanding what the runtime is doing.
 

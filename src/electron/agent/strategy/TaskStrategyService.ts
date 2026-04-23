@@ -633,6 +633,7 @@ export class TaskStrategyService {
         "web_search",
         "web_fetch",
         "generate_document",
+        "compile_latex",
         "generate_spreadsheet",
         "generate_presentation",
         "Skill",

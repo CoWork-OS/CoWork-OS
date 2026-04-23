@@ -60,13 +60,19 @@ The tool-prompt layer currently enriches the highest-impact tool families first:
 - `web_search`
 - `web_fetch`
 - browser navigation/content/text/screenshot tools
+- `screen_context_resolve`
 - `request_user_input`
 - `task_list_create`
 - `task_list_update`
 - `create_diagram`
+- `compile_latex`
 - `qa_run`
 
 Descriptions are intentionally capped so provider tool arrays do not grow without bound.
+
+`screen_context_resolve` is the recent-screen context path for vague on-screen references. Its prompt guidance tells the model to try Chronicle's local recent-screen buffer before escalating to explicit screenshot requests or re-planning around missing context. Returned OCR or on-screen text is provenance-tagged as untrusted screen text, and tool visibility can still be suppressed by the dedicated built-in `chronicle` category or per-task `chronicleMode` controls.
+
+`compile_latex` is the source-first PDF path for explicit LaTeX, TeX, TikZ, `.tex`, and "write a paper and compile PDF" requests. The executor guidance tells the model to write the `.tex` source with file tools first, then compile that source with `compile_latex`, instead of using the markdown/HTML-backed `generate_document` path.
 
 ## Provenance-Aware Tool Results
 

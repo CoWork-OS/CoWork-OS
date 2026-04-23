@@ -5,7 +5,7 @@
  * Uses the system's ssh command to establish port forwarding.
  */
 
-import { spawn, ChildProcess } from "child_process";
+import { spawn, spawnSync, ChildProcess } from "child_process";
 import { EventEmitter } from "events";
 import * as fs from "fs";
 import * as path from "path";
@@ -234,9 +234,48 @@ export class SSHTunnelManager extends EventEmitter {
         this.lastError = `SSH key file not found: ${this.config.keyPath}`;
         return false;
       }
+
+      // Preflight only malformed keys. Passphrase-protected keys may still
+      // authenticate non-interactively through ssh-agent or Keychain.
+      const keyCheck = this.inspectPrivateKey(keyPath);
+      if (keyCheck.error) {
+        this.lastError = keyCheck.error;
+        return false;
+      }
     }
 
     return true;
+  }
+
+  /**
+   * Synchronously probe a private key file with `ssh-keygen -y -P ""`.
+   * - exit 0 → key is unencrypted and parseable
+   * - non-zero with "passphrase" → key is encrypted; let ssh-agent handle it
+   * - non-zero with "invalid format" → key is malformed
+   * - any other failure (ssh-keygen missing, unknown error) → return {} and
+   *   let the real ssh connection surface the error.
+   */
+  private inspectPrivateKey(keyPath: string): { error?: string } {
+    try {
+      const result = spawnSync("ssh-keygen", ["-y", "-P", "", "-f", keyPath], {
+        encoding: "utf8",
+      });
+      if (result.error || result.status === 0) {
+        return {};
+      }
+      const stderr = (result.stderr || "").toString();
+      if (/passphrase/i.test(stderr)) {
+        return {};
+      }
+      if (/invalid format|not a valid|unknown key type/i.test(stderr)) {
+        return {
+          error: `SSH key "${this.config.keyPath}" is not a valid private key (ssh-keygen: ${stderr.trim().split("\n")[0]}).`,
+        };
+      }
+      return {};
+    } catch {
+      return {};
+    }
   }
 
   private async doConnect(): Promise<void> {
@@ -283,8 +322,9 @@ export class SSHTunnelManager extends EventEmitter {
           // Check for authentication failures
           if (this.isAuthFailure(stderrBuffer)) {
             clearTimeout(connectionTimeout);
-            const error = new Error("SSH authentication failed");
-            this.lastError = error.message;
+            const detail = this.parseSSHError(stderrBuffer) || "SSH authentication failed";
+            const error = new Error(detail);
+            this.lastError = detail;
             this.setState("error");
             this.sshProcess?.kill("SIGTERM");
             reject(error);
@@ -411,32 +451,60 @@ export class SSHTunnelManager extends EventEmitter {
     return (
       output.includes("Permission denied") ||
       output.includes("Authentication failed") ||
-      output.includes("Too many authentication failures")
+      output.includes("Too many authentication failures") ||
+      output.includes("All configured authentication methods failed")
     );
   }
 
   private parseSSHError(output: string): string | null {
-    // Extract meaningful error messages from SSH output
-    const errorPatterns = [
-      /Permission denied.*$/m,
+    // Ordered most-specific first. Auth-related patterns come before the
+    // generic "Permission denied" so we surface the real cause (e.g. bad
+    // passphrase on the key file) instead of the downstream symptom.
+    const errorPatterns: RegExp[] = [
+      /Load key [^\n]+: (?:incorrect passphrase|bad passphrase)[^\n]*/i,
+      /Load key [^\n]+: invalid format[^\n]*/i,
+      /no such identity:[^\n]+/,
+      /Unable to negotiate[^\n]+/,
+      /no matching host key type found[^\n]*/,
+      /no mutual signature algorithm[^\n]*/,
+      /All configured authentication methods failed/,
+      /Too many authentication failures/,
+      /Permission denied[^\n]*/,
+      /Authentication failed/,
       /Connection refused/,
       /Connection timed out/,
       /No route to host/,
-      /Could not resolve hostname/,
+      /Could not resolve hostname[^\n]*/,
       /Host key verification failed/,
       /Connection closed by remote host/,
       /Network is unreachable/,
       /Address already in use/,
     ];
 
+    let primary: string | null = null;
     for (const pattern of errorPatterns) {
       const match = output.match(pattern);
       if (match) {
-        return match[0];
+        primary = match[0].trim();
+        break;
       }
     }
 
-    return null;
+    // OpenSSH -v prints one of these lines each time the server advertises
+    // its accepted auth methods. The last one is the most informative —
+    // e.g. "publickey,password" tells the user the server will accept a
+    // password, which this client currently can't send.
+    const methodsMatches = [
+      ...output.matchAll(/Authentications that can continue:\s*([^\r\n]+)/g),
+    ];
+    const methods = methodsMatches.length
+      ? methodsMatches[methodsMatches.length - 1][1].trim()
+      : null;
+
+    if (primary && methods) {
+      return `${primary} (server accepts: ${methods})`;
+    }
+    return primary;
   }
 
   private async waitForLocalPort(): Promise<void> {

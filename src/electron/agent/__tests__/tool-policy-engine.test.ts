@@ -84,7 +84,7 @@ describe("tool-policy-engine request_user_input gating", () => {
   });
 });
 
-describe("evaluateToolAvailability computer_*", () => {
+describe("evaluateToolAvailability computer_use", () => {
   const baseCtx = {
     taskText: "open the ios simulator and tap the run button",
     taskDomain: "auto" as const,
@@ -93,14 +93,14 @@ describe("evaluateToolAvailability computer_*", () => {
     recentlyUsedTools: undefined as Iterable<string> | undefined,
   };
 
-  it("allows computer_click when native GUI intent is present", () => {
-    const r = evaluateToolAvailability("computer_click", baseCtx);
+  it("allows click when native GUI intent is present", () => {
+    const r = evaluateToolAvailability("click", baseCtx);
     expect(r.decision).toBe("allow");
     expect(r.metadata.overlapGroup).toBe("computer_use");
   });
 
-  it("defers computer_screenshot without desktop intent", () => {
-    const r = evaluateToolAvailability("computer_screenshot", {
+  it("defers screenshot without desktop intent", () => {
+    const r = evaluateToolAvailability("screenshot", {
       ...baseCtx,
       taskText: "summarize this readme",
     });
@@ -109,7 +109,7 @@ describe("evaluateToolAvailability computer_*", () => {
   });
 
   it("allows computer tools in operations domain", () => {
-    const r = evaluateToolAvailability("computer_type", {
+    const r = evaluateToolAvailability("type_text", {
       ...baseCtx,
       taskText: "hello",
       taskDomain: "operations",
@@ -117,24 +117,24 @@ describe("evaluateToolAvailability computer_*", () => {
     expect(r.decision).toBe("allow");
   });
 
-  it("allows computer_click for native desktop app prompts like Calculator", () => {
-    const r = evaluateToolAvailability("computer_click", {
+  it("allows click for native desktop app prompts like Calculator", () => {
+    const r = evaluateToolAvailability("click", {
       ...baseCtx,
       taskText: "Open Calculator and click 7 + 5, then tell me the result.",
     });
     expect(r.decision).toBe("allow");
   });
 
-  it("allows computer_type for native app creation flows like Notes", () => {
-    const r = evaluateToolAvailability("computer_type", {
+  it("allows type_text for native app creation flows like Notes", () => {
+    const r = evaluateToolAvailability("type_text", {
       ...baseCtx,
       taskText: "Open Notes and create a note called Test Note.",
     });
     expect(r.decision).toBe("allow");
   });
 
-  it("still allows computer_click when browser-ish text appears elsewhere in the prompt context", () => {
-    const r = evaluateToolAvailability("computer_click", {
+  it("still allows click when browser-ish text appears elsewhere in the prompt context", () => {
+    const r = evaluateToolAvailability("click", {
       ...baseCtx,
       taskText:
         "Open Calculator and click 7 + 5, then tell me the result.\n" +
@@ -146,13 +146,40 @@ describe("evaluateToolAvailability computer_*", () => {
     expect(r.decision).toBe("allow");
   });
 
-  it("defers computer_click for ordinary website tasks", () => {
-    const r = evaluateToolAvailability("computer_click", {
+  it("defers click for ordinary website tasks", () => {
+    const r = evaluateToolAvailability("click", {
       ...baseCtx,
       taskText: "Open https://example.com and click the sign in button.",
     });
     expect(r.decision).toBe("defer");
     expect(r.reason).toBe("computer_use_intent_missing");
+  });
+
+  it("allows screen_context_resolve for vague on-screen references", () => {
+    const r = evaluateToolAvailability("screen_context_resolve", {
+      ...baseCtx,
+      taskText: "why is this failing on screen",
+    });
+    expect(r.decision).toBe("allow");
+    expect(r.metadata.overlapGroup).toBe("chronicle");
+  });
+
+  it("allows screen_context_resolve for side-of-screen references", () => {
+    const r = evaluateToolAvailability("screen_context_resolve", {
+      ...baseCtx,
+      taskText: "what is this on the right side",
+    });
+    expect(r.decision).toBe("allow");
+    expect(r.metadata.overlapGroup).toBe("chronicle");
+  });
+
+  it("defers screen_context_resolve for ordinary repo-only prompts", () => {
+    const r = evaluateToolAvailability("screen_context_resolve", {
+      ...baseCtx,
+      taskText: "summarize this readme",
+    });
+    expect(r.decision).toBe("defer");
+    expect(r.reason).toBe("screen_context_intent_missing");
   });
 });
 

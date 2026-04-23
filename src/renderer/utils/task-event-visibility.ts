@@ -1,5 +1,6 @@
 import type { EventType, TaskEvent, TaskStatus } from "../../shared/types";
-import { getEffectiveTaskEventType } from "./task-event-compat";
+import { getEffectiveTaskEventType, getTimelineErrorText } from "./task-event-compat";
+import { hasAssistantMediaDirective } from "./assistant-media-directives";
 
 export const IMPORTANT_EVENT_TYPES: EventType[] = [
   "task_created",
@@ -174,6 +175,9 @@ export function isImportantTaskEvent(event: TaskEvent): boolean {
 }
 
 function getEventMessage(event: TaskEvent): string {
+  if (event.type === "timeline_error") {
+    return getTimelineErrorText(event);
+  }
   const raw = typeof event.payload?.message === "string" ? event.payload.message.trim() : "";
   return raw;
 }
@@ -298,7 +302,8 @@ function isLowValueVerboseLifecycleEvent(event: TaskEvent): boolean {
     }
     if (effectiveType === "assistant_message") {
       const payload = asObject(event.payload);
-      return payload.internal === true;
+      const message = typeof payload.message === "string" ? payload.message : "";
+      return payload.internal === true && !hasAssistantMediaDirective(message);
     }
     return true;
   }

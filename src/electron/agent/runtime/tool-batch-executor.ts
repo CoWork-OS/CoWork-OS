@@ -36,6 +36,22 @@ export class ToolBatchExecutor {
       content: toolResults,
     });
 
+    const latestCompanionContent =
+      [...toolResults]
+        .reverse()
+        .find(
+          (toolResult) =>
+            Array.isArray(toolResult.companion_user_content) &&
+            toolResult.companion_user_content.length > 0,
+        )?.companion_user_content || null;
+
+    if (latestCompanionContent) {
+      messages.push({
+        role: "user",
+        content: latestCompanionContent,
+      });
+    }
+
     if (typeof trailingUserMessage === "string" && trailingUserMessage.trim().length > 0) {
       messages.push({
         role: "user",

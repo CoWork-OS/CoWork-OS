@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { TaskEvent } from "../../../shared/types";
-import { getEffectiveTaskEventType } from "../task-event-compat";
+import { getEffectiveTaskEventType, getTimelineErrorText } from "../task-event-compat";
 
 function makeEvent(
   type: TaskEvent["type"],
@@ -77,5 +77,18 @@ describe("getEffectiveTaskEventType", () => {
         }),
       ),
     ).toBe("step_completed");
+  });
+});
+
+describe("getTimelineErrorText", () => {
+  it("falls back to payload.error for timeline_error events", () => {
+    expect(
+      getTimelineErrorText(
+        makeEvent("timeline_error", {
+          legacyType: "tool_error",
+          error: "The controlled window \"Calculator\" is no longer available.",
+        }),
+      ),
+    ).toBe('The controlled window "Calculator" is no longer available.');
   });
 });

@@ -228,11 +228,24 @@ describe("task event visibility helpers", () => {
       ),
       makeEvent(
         "timeline_step_updated",
+        {
+          legacyType: "assistant_message",
+          message: '::video{path="artifacts/hyperframes-demo.mp4" title="HyperFrames Demo"}',
+          internal: true,
+        },
+        { id: "assistant-preview", timestamp: t0 + 9500 },
+      ),
+      makeEvent(
+        "timeline_step_updated",
         { legacyType: "assistant_message", message: "OK", internal: true },
         { id: "assistant-internal", timestamp: t0 + 10000 },
       ),
     ]);
-    expect(filtered.map((e) => e.id)).toEqual(["user-visible", "assistant-visible"]);
+    expect(filtered.map((e) => e.id)).toEqual([
+      "user-visible",
+      "assistant-visible",
+      "assistant-preview",
+    ]);
   });
 
   it("hides timeline_step_finished events but keeps task cancellation", () => {

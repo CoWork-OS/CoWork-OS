@@ -356,6 +356,7 @@ export class AgentDaemon extends EventEmitter {
   private timelineErrorsByTask: Map<string, Set<string>> = new Map();
   private knownPlanStepIdsByTask: Map<string, Set<string>> = new Map();
   private evidenceRefsByTask: Map<string, Map<string, EvidenceRef>> = new Map();
+  private mediaPreviewMessagesByTask: Map<string, Set<string>> = new Map();
   private lastKnownLlmProviderByTask: Map<string, string> = new Map();
   private timelineMetrics = {
     totalEvents: 0,
@@ -3655,6 +3656,64 @@ export class AgentDaemon extends EventEmitter {
     if (typeof persistTranscriptArtifacts === "function") {
       void persistTranscriptArtifacts.call(this, taskId, timelineEvent, legacyType, legacyPayload);
     }
+    this.maybeEmitAssistantMediaPreview(taskId, type, payloadObj);
+  }
+
+  private maybeEmitAssistantMediaPreview(
+    taskId: string,
+    type: string,
+    payload: Record<string, unknown>,
+  ): void {
+    if (type !== "file_created" && type !== "artifact_created" && type !== "timeline_artifact_emitted") {
+      return;
+    }
+
+    const rawPath = typeof payload.path === "string" ? payload.path.trim() : "";
+    if (!rawPath) return;
+    const isUrl = /^(https?:\/\/|file:\/\/)/i.test(rawPath);
+    const task = this.taskRepo.findById(taskId);
+    const workspace =
+      task && typeof task.workspaceId === "string"
+        ? this.workspaceRepo.findById(task.workspaceId)
+        : undefined;
+    const workspacePath =
+      workspace && typeof workspace.path === "string" && workspace.path.trim().length > 0
+        ? workspace.path.trim()
+        : "";
+    const normalizedPath =
+      !isUrl && !path.isAbsolute(rawPath) && workspacePath ? path.resolve(workspacePath, rawPath) : rawPath;
+
+    const mimeType = typeof payload.mimeType === "string" ? payload.mimeType.trim().toLowerCase() : "";
+    const extension = path.extname(rawPath).toLowerCase();
+    const isPreviewableVideo =
+      mimeType === "video/mp4" ||
+      mimeType === "video/webm" ||
+      extension === ".mp4" ||
+      extension === ".webm" ||
+      payload.type === "video";
+    if (!isPreviewableVideo) return;
+
+    const dedupeKey = `video:${normalizedPath}`;
+    let emittedForTask = this.mediaPreviewMessagesByTask.get(taskId);
+    if (!emittedForTask) {
+      emittedForTask = new Set<string>();
+      this.mediaPreviewMessagesByTask.set(taskId, emittedForTask);
+    }
+    if (emittedForTask.has(dedupeKey)) return;
+    emittedForTask.add(dedupeKey);
+
+    const title =
+      typeof payload.label === "string" && payload.label.trim().length > 0
+        ? payload.label.trim()
+        : path.basename(rawPath) || "Generated video";
+    const quote = (value: string): string => JSON.stringify(value);
+    const message = `Preview ready.\n\n::video{path=${quote(rawPath)} title=${quote(title)}}`;
+
+    this.logEvent(taskId, "assistant_message", {
+      message,
+      internal: true,
+      generatedBy: "media_preview",
+    });
   }
 
   private normalizeProviderTypeValue(value: unknown): string | null {
@@ -4383,6 +4442,10 @@ export class AgentDaemon extends EventEmitter {
       existing.set(ref.evidenceId, ref);
     }
     this.evidenceRefsByTask.set(taskId, existing);
+  }
+
+  getEvidenceRefsForTask(taskId: string): EvidenceRef[] {
+    return Array.from((this.evidenceRefsByTask.get(taskId) || new Map()).values());
   }
 
   private persistTimelineEvent(
@@ -7787,6 +7850,8 @@ export class AgentDaemon extends EventEmitter {
     if (!workspace) {
       throw new Error(`Workspace ${effectiveTask.workspaceId} not found`);
     }
+
+    this.taskRepo.touch(taskId);
 
     if (!cached) {
       // Task executor not in memory - need to recreate it

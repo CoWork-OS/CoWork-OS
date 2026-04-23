@@ -5,6 +5,7 @@ import { createHash } from "crypto";
 import mermaid from "mermaid";
 import {
   ApprovalType,
+  EvidenceRef,
   SessionChecklistState,
   SessionChecklistToolItemInput,
   Workspace,
@@ -113,6 +114,12 @@ import { ComputerUseTools } from "./computer-use-tools";
 import { BatchImageTools } from "./batch-image-tools";
 import { ScratchpadTools } from "./scratchpad-tools";
 import { QATools } from "./qa-tools";
+import {
+  ChronicleCaptureService,
+  ChronicleMemoryService,
+  ChronicleObservationRepository,
+  ChronicleSettingsManager,
+} from "../../chronicle";
 import { CitationTracker } from "../citation/CitationTracker";
 import { OrchestrationRepository } from "../OrchestrationRepository";
 import {
@@ -120,6 +127,7 @@ import {
   getToolSemantics as getToolSemanticsUtil,
   isArtifactGenerationToolName as isArtifactGenerationToolNameUtil,
 } from "../tool-semantics";
+import { isComputerUseToolName } from "../../../shared/computer-use-contract";
 import { writeKitFileWithSnapshot } from "../../context/kit-revisions";
 import { getACPRegistry } from "../../acp";
 import { RemoteAgentInvoker } from "../../acp/remote-invoker";
@@ -575,8 +583,8 @@ export class ToolRegistry {
     this.scrapingTools = new ScrapingTools(workspace, daemon, taskId);
     this.memoryTools = new MemoryTools(workspace, daemon, taskId);
     this.supermemoryTools = new SupermemoryTools(workspace, daemon, taskId);
-    this.documentTools = new DocumentTools(workspace.path, taskId, (tid, fp, mime) =>
-      daemon.logEvent(tid, "artifact_created", { path: fp, mimeType: mime }),
+    this.documentTools = new DocumentTools(workspace.path, taskId, (tid, fp, mime, metadata = {}) =>
+      daemon.logEvent(tid, "artifact_created", { path: fp, mimeType: mime, ...metadata }),
     );
     this.scratchpadTools = new ScratchpadTools(taskId, workspace.path);
     this.qaTools = new QATools(workspace, daemon, taskId);
@@ -691,6 +699,7 @@ export class ToolRegistry {
         headless: isHeadlessMode(),
         deepWorkMode: this._deepWorkMode,
         builtinSettings,
+        chronicleSettings: ChronicleSettingsManager.loadSettings(),
         integrationState,
         infraState,
         toolPrompting: TOOL_PROMPT_METADATA_VERSION,
@@ -1045,6 +1054,22 @@ export class ToolRegistry {
     return this.shellTools.killProcess(force);
   }
 
+  private deriveChronicleDestinationHints(input: {
+    appName?: string;
+    windowTitle?: string;
+    localTextSnippet?: string;
+  }): string[] {
+    const haystack = `${input.appName || ""} ${input.windowTitle || ""} ${input.localTextSnippet || ""}`.toLowerCase();
+    const hints = new Set<string>();
+    if (/\bgoogle docs?|docs\.google|drive\b/.test(haystack)) hints.add("google_doc");
+    if (/\bslack\b/.test(haystack)) hints.add("slack_dm");
+    if (/\b(vscode|cursor|finder|xcode|repo|github)\b/.test(haystack)) hints.add("repo_file");
+    if (/\b(dropbox|box|sharepoint|drive folder|onedrive)\b/.test(haystack)) {
+      hints.add("drive_folder");
+    }
+    return Array.from(hints).slice(0, 4);
+  }
+
   /**
    * Check if a tool is allowed based on security policy
    */
@@ -1173,6 +1198,39 @@ export class ToolRegistry {
 
     // Always add system tools (they enable broader system interaction)
     allTools.push(...SystemTools.getToolDefinitions({ headless }));
+
+    const chronicleSettings = ChronicleSettingsManager.loadSettings();
+    if (
+      chronicleSettings.enabled &&
+      !headless &&
+      !this.gatewayContext &&
+      ChronicleCaptureService.getInstance().canExposeTool()
+    ) {
+      allTools.push({
+        name: "screen_context_resolve",
+        description:
+          "Resolve vague on-screen references like 'this', 'that', 'latest draft', or 'why is this failing?' using Chronicle's local recent-screen buffer. Returns ranked local screen matches and only falls back to a fresh local screenshot when passive context is weak. Screen-derived text is returned as untrusted context.",
+        input_schema: {
+          type: "object",
+          properties: {
+            query: {
+              type: "string",
+              description: "The current request or vague on-screen reference to resolve.",
+            },
+            limit: {
+              type: "number",
+              description: "Maximum number of ranked screen-context matches to return.",
+            },
+            useFallback: {
+              type: "boolean",
+              description:
+                "Whether to capture a fresh local screenshot when the passive Chronicle match is weak.",
+            },
+          },
+          required: ["query"],
+        },
+      });
+    }
 
     // Computer use tools (native mouse/keyboard/screenshot — macOS only, not headless)
     allTools.push(...ComputerUseTools.getToolDefinitions({ headless }));
@@ -1378,6 +1436,10 @@ export class ToolRegistry {
     );
   }
 
+  getApprovalType(toolName: string, input?: Any): ApprovalType | null {
+    return this.getApprovalTypeForTool(toolName, input);
+  }
+
   getMcpServerName(toolName: string): string | null {
     const settings = MCPSettingsManager.loadSettings();
     const prefix = settings.toolNamePrefix || "mcp_";
@@ -1426,7 +1488,7 @@ export class ToolRegistry {
     if (canonicalToolName.startsWith("mcp_")) return "external_service";
     if (canonicalToolName.endsWith("_action") || canonicalToolName === "voice_call")
       return "external_service";
-    if (canonicalToolName.startsWith("computer_")) return "computer_use";
+    if (isComputerUseToolName(canonicalToolName)) return "computer_use";
     if (NETWORK_READ_TOOL_NAMES.has(canonicalToolName)) return null;
     return null;
   }
@@ -1439,7 +1501,7 @@ export class ToolRegistry {
       toolName === "mcp_x402_fetch" ||
       toolName.endsWith("_action") ||
       toolName === "voice_call" ||
-      toolName.startsWith("computer_")
+      isComputerUseToolName(toolName)
     );
   }
 
@@ -1756,6 +1818,80 @@ export class ToolRegistry {
     register("read_clipboard", async () => this.systemTools.readClipboard());
     register("write_clipboard", async ({ request }) => this.systemTools.writeClipboard(request.input.text));
     register("take_screenshot", async ({ request }) => this.systemTools.takeScreenshot(request.input));
+    register(
+      "screen_context_resolve",
+      async ({ request }) => {
+        const query = typeof request.input?.query === "string" ? request.input.query : "";
+        const limit =
+          typeof request.input?.limit === "number" && Number.isFinite(request.input.limit)
+            ? Math.max(1, Math.min(5, Math.round(request.input.limit)))
+            : 3;
+        const matches = await ChronicleCaptureService.getInstance().queryRecentContext({
+          query,
+          limit,
+          useFallback: request.input?.useFallback !== false,
+        });
+
+        const evidenceRefs: EvidenceRef[] = [];
+        const persistedResults = await Promise.all(
+          matches.map(async (match) => {
+            try {
+              const record = await ChronicleObservationRepository.promote(this.workspace.path, {
+                workspaceId: this.workspace.id,
+                taskId: this.taskId,
+                query,
+                observation: match,
+                destinationHints: this.deriveChronicleDestinationHints(match),
+              });
+              if (!record) {
+                return match;
+              }
+              const generatedMemory = await ChronicleMemoryService.getInstance().notePromotedObservation(
+                this.workspace.path,
+                record,
+              );
+              evidenceRefs.push({
+                evidenceId: record.id,
+                sourceType: "screen_context",
+                sourceUrlOrPath: record.imagePath,
+                snippet: [record.appName, record.windowTitle, record.localTextSnippet]
+                  .filter(Boolean)
+                  .join(" - ")
+                  .slice(0, 240),
+                capturedAt: record.capturedAt,
+              });
+              return {
+                ...match,
+                observationId: record.id,
+                imagePath: record.imagePath,
+                sourceRef: record.sourceRef,
+                provenance: record.provenance,
+                ...(generatedMemory ? { memoryId: generatedMemory.id } : {}),
+              };
+            } catch {
+              return match;
+            }
+          }),
+        );
+
+        if (evidenceRefs.length > 0) {
+          this.daemon.logEvent(this.taskId, "timeline_evidence_attached", {
+            evidenceRefs,
+            status: "completed",
+            actor: "agent",
+            message: `Attached ${evidenceRefs.length} Chronicle screen-context evidence reference(s)`,
+            legacyType: "citations_collected",
+          });
+        }
+
+        return {
+          success: true,
+          results: persistedResults,
+          usedFallback: persistedResults.some((result) => result.usedFallback),
+        };
+      },
+      readParallelSchedulerSpec,
+    );
     register("open_application", async ({ request }) => this.systemTools.openApplication(request.input.appName));
     register("open_url", async ({ request }) => this.systemTools.openUrl(request.input.url));
     register("open_path", async ({ request }) => this.systemTools.openPath(request.input.path));
@@ -1773,39 +1909,78 @@ export class ToolRegistry {
     );
     register("analyze_image", async ({ request }) => this.visionTools.analyzeImage(request.input));
     register("read_pdf_visual", async ({ request }) => this.visionTools.readPdfVisual(request.input));
-    register("computer_screenshot", async () => this.computerUseTools.takeScreenshot(), serialSchedulerSpec);
     register(
-      "computer_move_mouse",
+      "screenshot",
       async ({ request }) =>
-        this.computerUseTools.moveMouse(request.input.x, request.input.y),
+        this.computerUseTools.screenshot({
+          app: request.input.app,
+          windowTitle: request.input.windowTitle,
+        }),
       serialSchedulerSpec,
     );
-    register("computer_click", async ({ request }) => {
-      if (request.input.action === "drag") {
-        return await this.computerUseTools.drag(
+    register(
+      "click",
+      async ({ request }) =>
+        this.computerUseTools.click(
           request.input.x,
           request.input.y,
-          request.input.toX,
-          request.input.toY,
-        );
-      }
-      if (request.input.action === "scroll") {
-        return await this.computerUseTools.scroll(
+          request.input.button,
+          request.input.captureId,
+        ),
+      serialSchedulerSpec,
+    );
+    register(
+      "double_click",
+      async ({ request }) =>
+        this.computerUseTools.doubleClick(
           request.input.x,
           request.input.y,
-          request.input.direction,
-          request.input.amount,
-        );
-      }
-      return await this.computerUseTools.click(
-        request.input.x,
-        request.input.y,
-        request.input.button,
-        request.input.clickType,
-      );
-    }, serialSchedulerSpec);
-    register("computer_type", async ({ request }) => this.computerUseTools.typeText(request.input.text), serialSchedulerSpec);
-    register("computer_key", async ({ request }) => this.computerUseTools.pressKeys(request.input.keys), serialSchedulerSpec);
+          request.input.captureId,
+        ),
+      serialSchedulerSpec,
+    );
+    register(
+      "move_mouse",
+      async ({ request }) =>
+        this.computerUseTools.moveMouse(
+          request.input.x,
+          request.input.y,
+          request.input.captureId,
+        ),
+      serialSchedulerSpec,
+    );
+    register(
+      "drag",
+      async ({ request }) => this.computerUseTools.drag(request.input.path, request.input.captureId),
+      serialSchedulerSpec,
+    );
+    register(
+      "scroll",
+      async ({ request }) =>
+        this.computerUseTools.scroll(
+          request.input.x,
+          request.input.y,
+          request.input.scrollX,
+          request.input.scrollY,
+          request.input.captureId,
+        ),
+      serialSchedulerSpec,
+    );
+    register(
+      "type_text",
+      async ({ request }) => this.computerUseTools.typeText(request.input.text),
+      serialSchedulerSpec,
+    );
+    register(
+      "keypress",
+      async ({ request }) => this.computerUseTools.pressKeys(request.input.keys),
+      serialSchedulerSpec,
+    );
+    register(
+      "wait",
+      async ({ request }) => this.computerUseTools.wait(request.input.ms),
+      serialSchedulerSpec,
+    );
     register("batch_image_process", async ({ request }) => this.batchImageTools.batchProcess(request.input));
     register("schedule_task", async ({ request }) => this.cronTools.executeAction(request.input));
     registerPredicate(
@@ -1940,6 +2115,7 @@ export class ToolRegistry {
       this.mentionTools.completeMention(request.input.mentionId),
     );
     register("generate_document", async ({ request }) => this.documentTools.generateDocument(request.input));
+    register("compile_latex", async ({ request }) => this.documentTools.compileLatex(request.input));
     register("generate_presentation", async ({ request }) =>
       this.documentTools.generatePresentation(request.input),
     );
@@ -2727,6 +2903,7 @@ Skills:
 - generate_spreadsheet: Generate XLSX spreadsheets from structured sheets
 - create_document: Create Word/PDF (only when user explicitly requests DOCX or PDF — otherwise use write_file with .md)
 - generate_document: Generate PDF documents from markdown/sections
+- compile_latex: Compile a workspace .tex file into PDF using a system LaTeX engine
 - edit_document: Edit/append content to existing DOCX files
 - create_presentation: Create PowerPoint presentations
 - generate_presentation: Generate PPTX presentations from structured slides
@@ -2862,20 +3039,31 @@ ${hasAnyVisibleTools(
 - supermemory_forget: Remove an outdated external Supermemory entry by ID or exact content`
   : ""}
 ${hasAnyVisibleTools(
-  "computer_screenshot",
-  "computer_click",
-  "computer_type",
-  "computer_key",
-  "computer_move_mouse",
+  "screenshot",
+  "click",
+  "double_click",
+  "move_mouse",
+  "drag",
+  "scroll",
+  "type_text",
+  "keypress",
+  "wait",
 )
   ? `
 
+Chronicle Screen Context:
+- screen_context_resolve: Resolve vague references like "this", "that", "same doc", or "why is this failing?" from the local recent-screen buffer without sending screenshots to external providers
+
 Computer Use Tools (macOS native GUI, preferred over run_applescript for normal app interaction):
-- computer_screenshot: Inspect the visible screen in a native app or simulator before acting
-- computer_click: Click/drag/scroll visible UI in native apps like Calculator, Notes, Finder, System Settings, Xcode, and Simulator
-- computer_type: Type into the focused native app field using real keyboard input
-- computer_key: Press Return, Escape, Cmd shortcuts, and other keys in a native app
-- computer_move_mouse: Hover or position the cursor before other computer_* actions`
+- screenshot: Capture the current controlled native app window first; retarget with app/windowTitle when switching windows
+- click: Click inside the latest controlled-window screenshot using window-relative coordinates
+- double_click: Double-click inside the latest controlled-window screenshot
+- move_mouse: Move the pointer within the current controlled window without clicking
+- drag: Drag through a screenshot-relative path inside the current controlled window
+- scroll: Scroll inside the current controlled window using screenshot-relative coordinates
+- type_text: Type into the currently focused native app control
+- keypress: Press key chords like Return, Escape, or Cmd shortcuts in the current controlled window
+- wait: Pause briefly, then refresh the controlled-window screenshot`
   : ""}
 
 Scheduling:
@@ -3285,25 +3473,29 @@ ${skillDescriptions}`;
     if (name === "run_applescript") return await this.systemTools.runAppleScript(input.script);
 
     // Computer use tools (CUA)
-    if (name === "computer_screenshot") return await this.computerUseTools.takeScreenshot();
-    if (name === "computer_move_mouse")
-      return await this.computerUseTools.moveMouse(input.x, input.y);
-    if (name === "computer_click") {
-      if (input.action === "drag") {
-        return await this.computerUseTools.drag(input.x, input.y, input.toX, input.toY);
-      }
-      if (input.action === "scroll") {
-        return await this.computerUseTools.scroll(
-          input.x,
-          input.y,
-          input.direction,
-          input.amount,
-        );
-      }
-      return await this.computerUseTools.click(input.x, input.y, input.button, input.clickType);
-    }
-    if (name === "computer_type") return await this.computerUseTools.typeText(input.text);
-    if (name === "computer_key") return await this.computerUseTools.pressKeys(input.keys);
+    if (name === "screenshot")
+      return await this.computerUseTools.screenshot({
+        app: input.app,
+        windowTitle: input.windowTitle,
+      });
+    if (name === "click")
+      return await this.computerUseTools.click(input.x, input.y, input.button, input.captureId);
+    if (name === "double_click")
+      return await this.computerUseTools.doubleClick(input.x, input.y, input.captureId);
+    if (name === "move_mouse")
+      return await this.computerUseTools.moveMouse(input.x, input.y, input.captureId);
+    if (name === "drag") return await this.computerUseTools.drag(input.path, input.captureId);
+    if (name === "scroll")
+      return await this.computerUseTools.scroll(
+        input.x,
+        input.y,
+        input.scrollX,
+        input.scrollY,
+        input.captureId,
+      );
+    if (name === "type_text") return await this.computerUseTools.typeText(input.text);
+    if (name === "keypress") return await this.computerUseTools.pressKeys(input.keys);
+    if (name === "wait") return await this.computerUseTools.wait(input.ms);
 
     // Batch image processing
     if (name === "batch_image_process") return await this.batchImageTools.batchProcess(input);
@@ -3422,6 +3614,7 @@ ${skillDescriptions}`;
 
     // Document generation tools
     if (name === "generate_document") return await this.documentTools.generateDocument(input);
+    if (name === "compile_latex") return await this.documentTools.compileLatex(input);
     if (name === "generate_presentation")
       return await this.documentTools.generatePresentation(input);
     if (name === "generate_spreadsheet") return await this.documentTools.generateSpreadsheet(input);

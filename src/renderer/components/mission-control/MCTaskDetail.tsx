@@ -23,6 +23,7 @@ const UNIFIED_RECALL_SOURCES: Array<{ value: UnifiedRecallSourceType; label: str
   { value: "file", label: "Files" },
   { value: "workspace_note", label: "Workspace notes" },
   { value: "memory", label: "Memory" },
+  { value: "screen_context", label: "Screen context" },
   { value: "knowledge_graph", label: "Knowledge graph" },
 ];
 
@@ -43,7 +44,14 @@ function statusTone(status: string): string {
 }
 
 function renderEvidenceLabel(ref: EvidenceRef): string {
-  const prefix = ref.sourceType === "file" ? "File" : ref.sourceType === "url" ? "Link" : "Evidence";
+  const prefix =
+    ref.sourceType === "file"
+      ? "File"
+      : ref.sourceType === "url"
+        ? "Link"
+        : ref.sourceType === "screen_context"
+          ? "Screen context"
+          : "Evidence";
   return ref.snippet ? `${prefix}: ${ref.snippet}` : `${prefix}: ${ref.sourceUrlOrPath}`;
 }
 
@@ -450,7 +458,7 @@ export function MCTaskDetail({ data, taskId }: MCTaskDetailProps) {
         <div className="mc-v2-section-header">
           <h4>Search everything</h4>
           <span className="mc-v2-section-hint">
-            Tasks, messages, files, workspace notes, memory, and knowledge graph.
+            Tasks, messages, files, workspace notes, memory, screen context, and knowledge graph.
           </span>
         </div>
         <form
@@ -512,7 +520,7 @@ export function MCTaskDetail({ data, taskId }: MCTaskDetailProps) {
           <div className="mc-v2-empty">
             {recallLoading
               ? "Searching Cowork memory..."
-              : "Search everything to pull a single unified result list across tasks, messages, files, notes, memory, and the knowledge graph."}
+              : "Search everything to pull a single unified result list across tasks, messages, files, notes, memory, screen context, and the knowledge graph."}
           </div>
         )}
       </div>

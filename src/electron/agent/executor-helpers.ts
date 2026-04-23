@@ -665,6 +665,7 @@ export class ToolCallDeduplicator {
 
     // 0. Exclude stateful browser tools from duplicate detection
     const statefulTools = [
+      "screenshot",
       "browser_get_content",
       "browser_screenshot",
       "browser_get_text",

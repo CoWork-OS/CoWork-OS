@@ -4,6 +4,7 @@ import type { MissionControlData, MCTab } from "./useMissionControlData";
 
 interface MCTopBarProps {
   data: MissionControlData;
+  onOpenAgents?: () => void;
 }
 
 const TABS: { id: MCTab; label: string; requiresCompany?: boolean }[] = [
@@ -14,7 +15,7 @@ const TABS: { id: MCTab; label: string; requiresCompany?: boolean }[] = [
   { id: "ops", label: "Operations", requiresCompany: true },
 ];
 
-export function MCTopBar({ data }: MCTopBarProps) {
+export function MCTopBar({ data, onOpenAgents }: MCTopBarProps) {
   const {
     workspaces, selectedWorkspaceId, setSelectedWorkspaceId,
     companies, selectedCompanyId, setSelectedCompanyId,
@@ -76,6 +77,9 @@ export function MCTopBar({ data }: MCTopBarProps) {
             disabled={!supportsWorkspaceReports}
           >
             {agentContext.getUiCopy("mcStandupButton")}
+          </button>
+          <button className="mc-v2-icon-btn" onClick={onOpenAgents}>
+            Agents Hub
           </button>
           <span style={{ fontSize: 13, fontWeight: 500, fontFamily: "var(--font-mono)", color: "var(--color-text-primary)" }}>
             {currentTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}

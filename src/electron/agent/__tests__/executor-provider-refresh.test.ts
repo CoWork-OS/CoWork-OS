@@ -367,7 +367,7 @@ describe("TaskExecutor provider refresh", () => {
     );
   });
 
-  it("only passes stream callbacks for Azure chat mode", async () => {
+  it("passes stream callbacks for Azure chat and execute modes", async () => {
     const makeExecutor = (providerType: string, executionMode: string) => {
       const provider = {
         type: providerType,
@@ -420,7 +420,9 @@ describe("TaskExecutor provider refresh", () => {
       1000,
       "Test operation",
     );
-    expect((azureExecute.provider.createMessage as Any).mock.calls[0][0].onStreamProgress).toBeUndefined();
+    expect((azureExecute.provider.createMessage as Any).mock.calls[0][0].onStreamProgress).toEqual(
+      expect.any(Function),
+    );
 
     const openaiChat = makeExecutor("openai", "chat");
     await openaiChat.executor.createMessageWithTimeout(
@@ -434,5 +436,61 @@ describe("TaskExecutor provider refresh", () => {
       "Test operation",
     );
     expect((openaiChat.provider.createMessage as Any).mock.calls[0][0].onStreamProgress).toBeUndefined();
+  });
+
+  it("forwards Azure execute stream text into llm_streaming events", async () => {
+    const provider = {
+      type: "azure",
+      createMessage: vi.fn(async (request: Any) => {
+        request.onStreamProgress?.({
+          inputTokens: 11,
+          outputTokens: 7,
+          outputChars: 28,
+          elapsedMs: 240,
+          streaming: true,
+          text: "Checking the repo state first.",
+        });
+        return { content: [], usage: undefined };
+      }),
+    };
+
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = {
+      id: "task-stream-text",
+      title: "Stream text test",
+      agentConfig: {},
+    };
+    executor.provider = provider;
+    executor.modelId = "gpt-4o";
+    executor.abortController = new AbortController();
+    executor.cancelled = false;
+    executor.taskCompleted = false;
+    executor.emitEvent = vi.fn();
+    executor.logTag = "[Executor:test]";
+    executor.getCumulativeInputTokens = vi.fn(() => 3);
+    executor.getCumulativeOutputTokens = vi.fn(() => 5);
+    executor.refreshProviderIfSettingsChanged = vi.fn();
+    executor.getEffectiveExecutionMode = vi.fn().mockReturnValue("execute");
+
+    await executor.createMessageWithTimeout(
+      {
+        model: "gpt-4o",
+        maxTokens: 32,
+        system: "test",
+        messages: [],
+      },
+      1000,
+      "Test operation",
+    );
+
+    expect(executor.emitEvent).toHaveBeenCalledWith(
+      "llm_streaming",
+      expect.objectContaining({
+        text: "Checking the repo state first.",
+        streaming: true,
+        totalInputTokens: 14,
+        totalOutputTokens: 12,
+      }),
+    );
   });
 });

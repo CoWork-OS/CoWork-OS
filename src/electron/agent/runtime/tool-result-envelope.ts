@@ -153,6 +153,7 @@ function buildDefaultEvidence(params: BuildToolResultEnvelopeParams): ToolResult
   const artifactTool =
     params.toolName === "generate_image" ||
     params.toolName === "generate_video" ||
+    params.toolName === "compile_latex" ||
     params.toolName === "generate_document" ||
     params.toolName === "generate_presentation" ||
     params.toolName === "generate_spreadsheet" ||

@@ -1,5 +1,9 @@
 import { truncateToolResult } from "./context-manager";
-import type { LLMToolResult } from "./llm";
+import type {
+  LLMImageMimeType,
+  LLMToolResult,
+  LLMToolResultCompanionContent,
+} from "./llm";
 import { canonicalizeToolName } from "./tool-semantics";
 
 export interface NormalizedToolFailureReason {
@@ -215,6 +219,83 @@ function prependRunCommandTerminationContext(sanitizedResult: string, result: An
   return contextPrefix ? contextPrefix + sanitizedResult : sanitizedResult;
 }
 
+function normalizeImageMimeType(value: unknown): LLMImageMimeType | null {
+  switch (String(value || "").trim().toLowerCase()) {
+    case "image/png":
+    case "image/jpeg":
+    case "image/gif":
+    case "image/webp":
+      return String(value || "").trim().toLowerCase() as LLMImageMimeType;
+    default:
+      return null;
+  }
+}
+
+function buildComputerUseCompanionContent(
+  toolName: string,
+  result: Any,
+): { compactResult: string; companionUserContent: LLMToolResultCompanionContent[] } | null {
+  if (!result || typeof result !== "object") {
+    return null;
+  }
+
+  const imageBase64 = typeof result.imageBase64 === "string" ? result.imageBase64.trim() : "";
+  const captureId = typeof result.captureId === "string" ? result.captureId.trim() : "";
+  const mediaType = normalizeImageMimeType(result.mediaType);
+  if (!imageBase64 || !captureId || !mediaType) {
+    return null;
+  }
+
+  const action = typeof result.action === "string" && result.action.trim() ? result.action.trim() : toolName;
+  const appName =
+    typeof result?.target?.appName === "string" && result.target.appName.trim()
+      ? result.target.appName.trim()
+      : undefined;
+  const windowTitle =
+    typeof result?.target?.windowTitle === "string" && result.target.windowTitle.trim()
+      ? result.target.windowTitle.trim()
+      : undefined;
+  const note = typeof result.note === "string" && result.note.trim() ? result.note.trim() : undefined;
+
+  const compactResult = JSON.stringify({
+    ok: true,
+    tool: toolName,
+    action,
+    captureId,
+    mediaType,
+    width: Number.isFinite(result.width) ? result.width : undefined,
+    height: Number.isFinite(result.height) ? result.height : undefined,
+    scaleFactor: Number.isFinite(result.scaleFactor) ? result.scaleFactor : undefined,
+    target: {
+      appName,
+      windowTitle,
+      windowId: Number.isFinite(result?.target?.windowId) ? result.target.windowId : undefined,
+    },
+    imageAttached: true,
+    ...(note ? { note } : {}),
+  });
+
+  const companionText =
+    `Latest controlled-window screenshot after ${action}. ` +
+    `Use only this newest screenshot for the next computer-use action. ` +
+    `captureId=${captureId}.` +
+    (appName ? ` App=${appName}.` : "") +
+    (windowTitle ? ` Window=${windowTitle}.` : "") +
+    (note ? ` Note=${note}` : "");
+
+  return {
+    compactResult,
+    companionUserContent: [
+      { type: "text", text: companionText.trim() },
+      {
+        type: "image",
+        data: imageBase64,
+        mimeType: mediaType,
+      },
+    ],
+  };
+}
+
 export function buildNormalizedToolResult(opts: {
   toolName: string;
   toolUseId: string;
@@ -237,6 +318,7 @@ export function buildNormalizedToolResult(opts: {
     ? normalizeToolFailureReason(opts.result, "Tool execution failed")
     : null;
   const toolFailureReason = normalizedFailure?.message || "";
+  const companion = !resultIsError ? buildComputerUseCompanionContent(opts.toolName, opts.result) : null;
 
   return {
     toolResult: {
@@ -250,8 +332,9 @@ export function buildNormalizedToolResult(opts: {
             ...(normalizedFailure?.code ? { code: normalizedFailure.code } : {}),
             ...(opts.result?.url ? { url: opts.result.url } : {}),
           })
-        : sanitizedResult,
+        : companion?.compactResult || sanitizedResult,
       is_error: resultIsError && !advisoryFallbackFailure,
+      ...(companion ? { companion_user_content: companion.companionUserContent } : {}),
     },
     resultIsError,
     toolFailureReason,
@@ -539,6 +622,9 @@ export function getToolInputValidationError(toolName: string, input: Any): strin
     if (toolName === "generate_document" && !input?.markdown && !input?.sections) {
       return "generate_document requires markdown or sections";
     }
+  }
+  if (toolName === "compile_latex") {
+    if (!input?.sourcePath) return "compile_latex requires a sourcePath";
   }
   if (toolName === "write_file") {
     if (typeof input?.path !== "string" || input.path.trim().length === 0)

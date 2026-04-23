@@ -1317,6 +1317,29 @@ relationship_memory:
     });
   });
 
+  it("uses the last assistant explanation when finalizing a required-decision pause", () => {
+    executor = createExecutorWithStubs([textResponse("done")], {});
+    (executor as Any).daemon.updateTaskStatus = vi.fn();
+    (executor as Any).lastAwaitingUserInputReasonCode = "required_decision";
+    (executor as Any).lastAssistantText =
+      "Please choose the required input file path:\n1) inputs/demand-letter.txt\n2) inputs/buyer-demand-letter.txt\nReply with 1 or 2.";
+    (executor as Any).lastAssistantOutput = (executor as Any).lastAssistantText;
+    (executor as Any).lastNonVerificationOutput = "required_decision";
+    (executor as Any).buildResultSummary = vi.fn().mockReturnValue("required_decision");
+    (executor as Any).getContentFallback = vi.fn().mockReturnValue("required_decision");
+
+    (executor as Any).pauseForOutstandingRequiredDecision();
+
+    expect((executor as Any).daemon.logEvent).toHaveBeenCalledWith(
+      "task-1",
+      "task_paused",
+      expect.objectContaining({
+        message: expect.stringContaining("Please choose the required input file path"),
+        reason: "required_decision",
+      }),
+    );
+  });
+
   it("planning guidance tells the model to collect missing user-specific facts", () => {
     executor = createExecutorWithStubs([], {});
 

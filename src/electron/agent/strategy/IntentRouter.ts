@@ -289,7 +289,7 @@ export class IntentRouter {
       "execution",
       3,
       "needs-tool-inspection",
-      /\b(my screen|my display|screenshot|on screen|disk space|storage|battery|cpu|memory|ram|running apps?|running process|installed|clipboard|weather|temperature|stock price|exchange rate|current time|what time)\b/i.test(
+      /\b(my screen|my display|screenshot|on screen|latest draft|same doc|what is this|why is this failing|the failing one|disk space|storage|battery|cpu|memory|ram|running apps?|running process|installed|clipboard|weather|temperature|stock price|exchange rate|current time|what time)\b/i.test(
         lower,
       ),
     );

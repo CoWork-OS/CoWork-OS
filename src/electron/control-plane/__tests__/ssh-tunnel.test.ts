@@ -7,8 +7,10 @@ import { EventEmitter } from "events";
 
 // Mock child_process
 const mockSpawn = vi.fn();
+const mockSpawnSync = vi.fn();
 vi.mock("child_process", () => ({
   spawn: (...args: unknown[]) => mockSpawn(...args),
+  spawnSync: (...args: unknown[]) => mockSpawnSync(...args),
 }));
 
 // Mock fs
@@ -85,6 +87,7 @@ describe("SSHTunnelManager", () => {
     vi.clearAllMocks();
     vi.useFakeTimers();
     mockSpawn.mockReturnValue(createMockProcess());
+    mockSpawnSync.mockReturnValue({ status: 0, stderr: "", stdout: "" });
   });
 
   afterEach(() => {
@@ -234,6 +237,29 @@ describe("SSHTunnelManager", () => {
           "18789:127.0.0.1:18789",
           "testuser@test-host.example.com",
         ]),
+        expect.any(Object),
+      );
+
+      manager.disconnect();
+    });
+
+    it("should let encrypted keys reach ssh so ssh-agent can authenticate", async () => {
+      mockSpawnSync.mockReturnValue({
+        status: 255,
+        stdout: "",
+        stderr: 'Enter passphrase for "/Users/test/.ssh/id_rsa":',
+      });
+
+      manager = new SSHTunnelManager({
+        ...defaultConfig,
+        keyPath: "~/.ssh/id_rsa",
+      });
+
+      manager.connect().catch(() => {});
+
+      expect(mockSpawn).toHaveBeenCalledWith(
+        "ssh",
+        expect.arrayContaining(["-i", expect.stringContaining(".ssh/id_rsa")]),
         expect.any(Object),
       );
 

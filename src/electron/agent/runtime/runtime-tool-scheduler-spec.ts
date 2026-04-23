@@ -2,6 +2,7 @@ import type {
   RuntimeToolConcurrencyClass,
   RuntimeToolMetadata,
 } from "../../../shared/types";
+import { isComputerUseToolName } from "../../../shared/computer-use-contract";
 import {
   canonicalizeToolName,
   isArtifactGenerationToolName,
@@ -216,7 +217,7 @@ function inferSchedulerConcurrencyClass(
     toolName.startsWith("browser_") ||
     toolName.startsWith("qa_") ||
     toolName.startsWith("canvas_") ||
-    toolName.startsWith("computer_")
+    isComputerUseToolName(toolName)
   ) {
     return "serial_only";
   }
@@ -250,7 +251,7 @@ function inferSchedulerReadOnly(
   if (
     toolName.startsWith("browser_") ||
     toolName.startsWith("canvas_") ||
-    toolName.startsWith("computer_")
+    isComputerUseToolName(toolName)
   ) {
     return runtime?.readOnly ?? false;
   }
@@ -265,7 +266,7 @@ function inferSchedulerIdempotent(toolName: string, readOnly: boolean): boolean 
   if (
     toolName.startsWith("browser_") ||
     toolName.startsWith("canvas_") ||
-    toolName.startsWith("computer_")
+    isComputerUseToolName(toolName)
   ) {
     return false;
   }
@@ -309,7 +310,7 @@ function inferSchedulerScopeKeys(
       },
     ];
   }
-  if (toolName.startsWith("computer_")) {
+  if (isComputerUseToolName(toolName)) {
     return [{ kind: "computer_device", key: "default" }];
   }
   if (toolName === "run_command" || toolName === "run_applescript") {

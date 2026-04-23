@@ -120,6 +120,7 @@ function inferBatchFamilyLabel(toolNames: string[]): string {
     "edit_file",
     "create_document",
     "generate_document",
+    "compile_latex",
     "create_spreadsheet",
     "generate_spreadsheet",
     "create_presentation",

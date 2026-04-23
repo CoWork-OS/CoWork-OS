@@ -15,6 +15,7 @@ import {
   hasTaskOutputs,
   resolvePreferredTaskOutputSummary,
 } from "./task-outputs";
+import { hasAssistantMediaDirective } from "./assistant-media-directives";
 import {
   filterVerboseTimelineNoise,
   shouldShowTaskEventInSummaryMode,
@@ -117,6 +118,7 @@ function shouldRevealInternalAssistantMessageInVerbose(event: TaskEvent): boolea
   const message = typeof payload.message === "string" ? payload.message.trim() : "";
   const stepDescription = getAssistantStepDescription(event);
   if (!message) return false;
+  if (hasAssistantMediaDirective(message)) return true;
   if (isVerificationStepDescription(stepDescription)) return false;
   if (/^ok[\s.!?]*$/i.test(message) || message.length <= 12) return false;
   return true;
@@ -126,7 +128,8 @@ function isVerificationNoiseEvent(event: TaskEvent): boolean {
   const effectiveType = getEffectiveTaskEventType(event);
   const payload = asObject(event.payload);
   if (effectiveType === "assistant_message") {
-    return payload.internal === true;
+    const message = typeof payload.message === "string" ? payload.message : "";
+    return payload.internal === true && !hasAssistantMediaDirective(message);
   }
 
   if (

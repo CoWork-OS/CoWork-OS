@@ -58,4 +58,33 @@ describe("deriveSharedTaskEventUiState action blocks", () => {
     expect(initialBlock?.blockId).toBe("action-block:step-1");
     expect(grownBlock?.blockId).toBe(initialBlock?.blockId);
   });
+
+  it("keeps internal assistant media directives visible and exposes them as files", () => {
+    const shared = deriveSharedTaskEventUiState({
+      rawEvents: [
+        makeEvent("assistant-preview", 200, "timeline_step_updated", {
+          legacyType: "assistant_message",
+          internal: true,
+          message:
+            'Rendered.\n\n::video{path="artifacts/hyperframes-demo.mp4" title="HyperFrames Demo" muted=true loop=true}',
+        }),
+        makeEvent("task-complete", 300, "task_completed", {
+          resultSummary: "Completed without output summary metadata.",
+        }),
+      ],
+      task: {
+        id: "task-1",
+        status: "completed",
+      } as Any,
+      workspace: {
+        id: "workspace-1",
+        path: "/workspace",
+      } as Any,
+      verboseSteps: false,
+    });
+
+    expect(shared.filteredEvents.map((event) => event.id)).toContain("assistant-preview");
+    expect(shared.outputSummary?.primaryOutputPath).toBe("artifacts/hyperframes-demo.mp4");
+    expect(shared.files.map((file) => file.path)).toContain("artifacts/hyperframes-demo.mp4");
+  });
 });

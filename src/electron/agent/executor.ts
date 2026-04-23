@@ -48,6 +48,7 @@ import {
 import { resolveModelPreferenceToModelKey } from "../../shared/agent-preferences";
 import { isVerificationStepDescription } from "../../shared/plan-utils";
 import { formatProviderErrorForDisplay } from "../../shared/provider-error-format";
+import { classifyShellPermissionDecision } from "../../shared/shell-permission-intents";
 import {
   parseInlineSkillSlashChain,
   parseLeadingSkillSlashCommand,
@@ -137,6 +138,7 @@ import { UserProfileService } from "../memory/UserProfileService";
 import { KnowledgeGraphService } from "../knowledge-graph/KnowledgeGraphService";
 import { MemorySynthesizer } from "../memory/MemorySynthesizer";
 import { TranscriptStore } from "../memory/TranscriptStore";
+import { ChronicleObservationRepository } from "../chronicle";
 import { IntentRouter } from "./strategy/IntentRouter";
 import { TaskStrategyService } from "./strategy/TaskStrategyService";
 import { CitationTracker } from "./citation/CitationTracker";
@@ -928,6 +930,20 @@ export class TaskExecutor {
     if (TaskExecutor.RESULT_SUMMARY_PLACEHOLDERS.has(trimmed.toLowerCase())) return false;
     if (trimmed.length < TaskExecutor.MIN_RESULT_SUMMARY_LENGTH) return false;
     return true;
+  }
+
+  private isLowSignalPauseMessage(text: string | null | undefined): boolean {
+    const trimmed = String(text || "").trim();
+    if (!trimmed) return true;
+    const lower = trimmed.toLowerCase();
+    return (
+      lower === "required_decision" ||
+      lower === "required_decision_followup" ||
+      lower === "input_request" ||
+      lower === "paused - awaiting user input" ||
+      lower === "waiting for structured user input." ||
+      lower === "task is waiting for required input before it can continue."
+    );
   }
 
   private getRecoveredFailureStepIdSet(): Set<string> {
@@ -4571,12 +4587,18 @@ ${transcript}
   }
 
   private buildToolRegistry(workspace: Workspace): ToolRegistry {
+    const toolRestrictions = [
+      ...(this.task.agentConfig?.toolRestrictions || []),
+      ...(this.task.agentConfig?.chronicleMode === "disabled"
+        ? ["screen_context_resolve"]
+        : []),
+    ];
     const registry = new ToolRegistry(
       workspace,
       this.daemon,
       this.task.id,
       this.task.agentConfig?.gatewayContext,
-      this.task.agentConfig?.toolRestrictions,
+      toolRestrictions,
     );
     registry.setWorkspacePathAliasPolicy(this.getEffectiveWorkspacePathAliasPolicy());
     registry.setWebSearchDomainPolicy({
@@ -6762,8 +6784,7 @@ ${transcript}
 
     const effectiveProvider = phaseRouting?.provider ?? this.provider;
     const effectiveModelId = phaseRouting?.modelId ?? this.modelId;
-    const shouldStream =
-      effectiveProvider.type === "azure" && this.getEffectiveExecutionMode() === "chat";
+    const shouldStream = effectiveProvider.type === "azure";
     const onStreamProgress: StreamProgressCallback | undefined = shouldStream
       ? (progress) => {
           if (this.cancelled || this.taskCompleted) return;
@@ -6774,6 +6795,7 @@ ${transcript}
             streaming: progress.streaming,
             totalInputTokens: this.getCumulativeInputTokens() + progress.inputTokens,
             totalOutputTokens: this.getCumulativeOutputTokens() + progress.outputTokens,
+            ...(typeof progress.text === "string" ? { text: progress.text } : {}),
           });
         }
       : undefined;
@@ -8474,6 +8496,7 @@ ${transcript}
       canonical === "canvas_push" ||
       canonical === "create_document" ||
       canonical === "generate_document" ||
+      canonical === "compile_latex" ||
       canonical === "create_spreadsheet" ||
       canonical === "generate_spreadsheet" ||
       canonical === "create_presentation" ||
@@ -9091,6 +9114,18 @@ ${transcript}
     );
   }
 
+  private descriptionHasScreenContextIntent(description: string): boolean {
+    const desc = String(description || "").toLowerCase();
+    return (
+      /\b(right side|left side|top right|top left|bottom right|bottom left)\b/.test(desc) ||
+      /\b(on screen|onscreen|current screen|visible screen|same doc|latest draft|failing one)\b/.test(
+        desc,
+      ) ||
+      /\b(what is this|what's this|why is this failing)\b/.test(desc) ||
+      /^(this|that)\??$/.test(desc.trim())
+    );
+  }
+
   private shouldEnforceAnalysisOnlyMutationGuard(step: PlanStep): boolean {
     const desc = String(step.description || "").toLowerCase();
     if (!desc.trim()) return false;
@@ -9123,6 +9158,7 @@ ${transcript}
     const knownTools = [
       "create_document",
       "generate_document",
+      "compile_latex",
       "create_spreadsheet",
       "generate_spreadsheet",
       "create_presentation",
@@ -9332,6 +9368,7 @@ ${transcript}
 
     const structuredInputIntent =
       executionMode === "plan" &&
+      !this.descriptionHasScreenContextIntent(desc) &&
       !this.stepAllowsOptionalStructuredInput(desc) &&
       (/\b(ask|collect|gather|clarify|confirm)\b[\s\S]{0,60}\b(user|preferences?|inputs?|choices?|options?|requirements?|constraints?)\b/.test(
         desc,
@@ -9342,6 +9379,10 @@ ${transcript}
         ));
     if (structuredInputIntent) {
       required.add(canonicalizeToolNameUtil("request_user_input"));
+    }
+
+    if (this.descriptionHasScreenContextIntent(desc)) {
+      addRequiredToolIfKnown("screen_context_resolve");
     }
 
     return required;
@@ -9591,6 +9632,7 @@ ${transcript}
         !summaryCue) ||
       hasExistingOnlyWriteVerificationTarget ||
       requiredTools.has("create_document") ||
+      requiredTools.has("compile_latex") ||
       requiredTools.has("create_spreadsheet") ||
       requiredTools.has("create_presentation") ||
       requiredTools.has("get_video_generation_job") ||
@@ -9630,6 +9672,8 @@ ${transcript}
       artifactKind = "canvas";
     } else if (requiredTools.has("create_diagram") || inlineDiagramIntent) {
       artifactKind = "diagram";
+    } else if (requiredTools.has("compile_latex")) {
+      artifactKind = "file";
     } else if (requiredTools.has("create_document") || /\b(docx|pdf|word document)\b/.test(description)) {
       artifactKind = "document";
     } else if (requiredTools.has("create_spreadsheet") || requiredTools.has("create_presentation")) {
@@ -9643,6 +9687,7 @@ ${transcript}
       const hasSpecializedArtifactTool =
         requiredTools.has("create_document") ||
         requiredTools.has("generate_document") ||
+        requiredTools.has("compile_latex") ||
         requiredTools.has("create_spreadsheet") ||
         requiredTools.has("generate_spreadsheet") ||
         requiredTools.has("create_presentation") ||
@@ -11097,6 +11142,7 @@ ${transcript}
     try {
       const planSummary = this.plan?.steps?.map((s) => s.description).join("; ") || "";
       const toolsUsed = [...new Set(this.toolResultMemory.map((t) => t.tool))].slice(0, 10);
+      const destinationHints = this.deriveWorkflowDestinationHints(toolsUsed);
       const captureResult = await PlaybookService.captureOutcome(
         this.workspace.id,
         this.task.id,
@@ -11106,6 +11152,7 @@ ${transcript}
         planSummary,
         toolsUsed,
         errorMessage,
+        destinationHints,
       ).then(
         () => true,
         () => false,
@@ -11124,6 +11171,7 @@ ${transcript}
           this.workspace.id,
           this.getExecutionTaskPrompt(),
           toolsUsed,
+          destinationHints,
         )
           .then(() => {
             playbookReinforced = true;
@@ -11195,7 +11243,10 @@ ${transcript}
               reason: skillProposal.reason,
             }
           : undefined,
-        evidenceRefs: [],
+        evidenceRefs:
+          typeof (this.daemon as Any)?.getEvidenceRefsForTask === "function"
+            ? (this.daemon as Any).getEvidenceRefsForTask(this.task.id)
+            : [],
       });
       this.emitEvent("learning_progress", learningProgress);
     } catch {
@@ -11205,6 +11256,27 @@ ${transcript}
 
   private isCanvasPlaceholderHtml(content: string): boolean {
     return isCanvasPlaceholderHtmlUtil(content);
+  }
+
+  private deriveWorkflowDestinationHints(toolsUsed: string[]): string[] {
+    const hints = new Set<string>();
+    for (const tool of toolsUsed) {
+      if (tool === "google_drive_action") hints.add("google_doc");
+      if (tool === "mailbox_action") hints.add("slack_dm");
+      if (tool === "write_file" || tool === "edit_file") hints.add("repo_file");
+      if (tool === "dropbox_action" || tool === "box_action" || tool === "sharepoint_action") {
+        hints.add("drive_folder");
+      }
+    }
+    for (const observation of ChronicleObservationRepository.listByTaskSync(
+      this.workspace.path,
+      this.task.id,
+    )) {
+      for (const hint of observation.destinationHints || []) {
+        hints.add(hint);
+      }
+    }
+    return Array.from(hints).slice(0, 4);
   }
 
   private sanitizeForCanvasText(raw: string): string {
@@ -11773,6 +11845,7 @@ ${transcript}
       "edit_file",
       "create_document",
       "generate_document",
+      "compile_latex",
       "create_spreadsheet",
       "generate_spreadsheet",
       "create_presentation",
@@ -12006,6 +12079,32 @@ ${transcript}
     forcedToolName?: string;
     forcedInput?: Any;
   } {
+    const nativeGuiStepGuard = this.getCurrentStepNativeGuiGuard();
+    if (
+      nativeGuiStepGuard.nativeGuiIntent &&
+      opts.toolName === "run_command" &&
+      !nativeGuiStepGuard.explicitShellIntent
+    ) {
+      return {
+        blockedResult: {
+          error:
+            'Native GUI step detected. Do not use "run_command" here. Stay on the computer-use lane with screenshot/click/double_click/move_mouse/drag/scroll/type_text/keypress/wait.',
+        },
+      };
+    }
+    if (
+      nativeGuiStepGuard.nativeGuiIntent &&
+      opts.toolName === "run_applescript" &&
+      !nativeGuiStepGuard.explicitAppleScriptIntent
+    ) {
+      return {
+        blockedResult: {
+          error:
+            'Native GUI step detected. Do not use "run_applescript" here unless AppleScript was explicitly requested. Stay on the computer-use lane and use the latest screenshot result.',
+        },
+      };
+    }
+
     const decision = evaluateAgentPolicyHook({
       policy: this.agentPolicyConfig,
       hook: "on_pre_tool_use",
@@ -12725,6 +12824,7 @@ ${transcript}
     const always = new Set<string>([
       "revise_plan",
       "request_user_input",
+      "screen_context_resolve",
       "scratchpad_write",
       "scratchpad_read",
       "task_history",
@@ -12766,6 +12866,7 @@ ${transcript}
       "rename_file",
       "create_document",
       "generate_document",
+      "compile_latex",
       "create_spreadsheet",
       "generate_spreadsheet",
       "create_presentation",
@@ -12797,16 +12898,31 @@ ${transcript}
           ? verification
           : analysis;
 
+    const nativeGuiGuard = this.getNativeGuiGuardForStepText(stepText);
+    if (nativeGuiGuard.nativeGuiIntent) {
+      if (!nativeGuiGuard.explicitShellIntent) {
+        analysis.delete("run_command");
+        mutation.delete("run_command");
+        verification.delete("run_command");
+      }
+      if (!nativeGuiGuard.explicitAppleScriptIntent) {
+        analysis.delete("run_applescript");
+        mutation.delete("run_applescript");
+        verification.delete("run_applescript");
+      }
+    }
+
     for (const requiredTool of stepContract.requiredTools.values()) {
       base.add(requiredTool);
     }
 
-    if (taskDomain === "operations") {
+    if (taskDomain === "operations" && !nativeGuiGuard.nativeGuiIntent) {
       base.add("run_command");
     }
     if (taskDomain === "writing") {
       base.add("create_document");
       base.add("generate_document");
+      base.add("compile_latex");
     }
     if (taskDomain === "media") {
       base.add("generate_video");
@@ -12816,15 +12932,68 @@ ${transcript}
     if (hasPdfVisualIntent(String(stepText || "").toLowerCase())) {
       base.add("read_pdf_visual");
     }
+    if (this.descriptionHasScreenContextIntent(String(stepText || "").toLowerCase())) {
+      base.add("screen_context_resolve");
+    }
     if (hasNativeDesktopGuiIntent(String(stepText || "").toLowerCase())) {
       base.add("open_application");
-      base.add("computer_screenshot");
-      base.add("computer_click");
-      base.add("computer_type");
-      base.add("computer_key");
-      base.add("computer_move_mouse");
+      base.add("screenshot");
+      base.add("click");
+      base.add("double_click");
+      base.add("move_mouse");
+      base.add("drag");
+      base.add("scroll");
+      base.add("type_text");
+      base.add("keypress");
+      base.add("wait");
     }
     return base;
+  }
+
+  private getNativeGuiGuardForStepText(stepText?: string): {
+    nativeGuiIntent: boolean;
+    explicitShellIntent: boolean;
+    explicitAppleScriptIntent: boolean;
+  } {
+    const normalizedStepText = String(stepText || "").toLowerCase();
+    const nativeGuiIntent = hasNativeDesktopGuiIntent(normalizedStepText);
+    const explicitShellIntent =
+      /\b(shell|terminal|command line|cli|bash|zsh|fish|powershell|cmd(?:\.exe)?|run command)\b/i.test(
+        normalizedStepText,
+      ) || /\bosascript\b/i.test(normalizedStepText);
+    const explicitAppleScriptIntent =
+      /\b(applescript|osascript|script editor|apple script|tell application|system events)\b/i.test(
+        normalizedStepText,
+      );
+    return {
+      nativeGuiIntent,
+      explicitShellIntent,
+      explicitAppleScriptIntent,
+    };
+  }
+
+  private getCurrentStepNativeGuiGuard(): {
+    nativeGuiIntent: boolean;
+    explicitShellIntent: boolean;
+    explicitAppleScriptIntent: boolean;
+  } {
+    if (!this.currentStepId || !Array.isArray(this.plan?.steps)) {
+      return {
+        nativeGuiIntent: false,
+        explicitShellIntent: false,
+        explicitAppleScriptIntent: false,
+      };
+    }
+    const step = this.plan.steps.find((candidate) => candidate.id === this.currentStepId);
+    if (!step) {
+      return {
+        nativeGuiIntent: false,
+        explicitShellIntent: false,
+        explicitAppleScriptIntent: false,
+      };
+    }
+    const stepText = `${this.task.title || ""}\n${step.description || ""}\n${this.getExecutionTaskPrompt()}\n${this.lastUserMessage || ""}\n${this.lastAssistantOutput || ""}`;
+    return this.getNativeGuiGuardForStepText(stepText);
   }
 
   private applyStepScopedToolPolicy(tools: Any[]): Any[] {
@@ -13688,37 +13857,8 @@ You are continuing a previous conversation. The context from the previous conver
     return canonicalToolName === "run_command" || canonicalToolName === "run_applescript";
   }
 
-  private classifyShellPermissionDecision(
-    text: string,
-  ): "enable_shell" | "continue_without_shell" | "unknown" {
-    const lower = String(text || "")
-      .toLowerCase()
-      .trim();
-    if (!lower) return "unknown";
-
-    if (/^(?:yes|yep|yeah|sure|ok|okay|please do|do it)[.!]?$/.test(lower)) {
-      return "enable_shell";
-    }
-    if (/^(?:no|nope|nah)[.!]?$/.test(lower)) {
-      return "continue_without_shell";
-    }
-    if (
-      /\b(?:enable|turn on|allow|grant)\b[\s\S]{0,20}\bshell\b/.test(lower) ||
-      /\bshell\b[\s\S]{0,20}\b(?:enable|enabled|on|allow|grant)\b/.test(lower)
-    ) {
-      return "enable_shell";
-    }
-    if (
-      /\b(?:continue|proceed|go ahead|move on)\b/.test(lower) ||
-      /\bwithout shell\b/.test(lower) ||
-      /\b(?:don['’]?t|do not)\s+enable\s+shell\b/.test(lower) ||
-      /\bbest effort\b/.test(lower) ||
-      /\blimited\b/.test(lower)
-    ) {
-      return "continue_without_shell";
-    }
-
-    return "unknown";
+  private classifyShellPermissionDecision(text: string): "enable_shell" | "continue_without_shell" | "unknown" {
+    return classifyShellPermissionDecision(text);
   }
 
   private preflightShellExecutionCheck(): boolean {
@@ -13752,12 +13892,18 @@ You are continuing a previous conversation. The context from the previous conver
     const errorHint = opts.lastExecutionError
       ? `Latest execution error: ${opts.lastExecutionError.slice(0, 220)}`
       : "";
+    const policyBlockerHint =
+      opts.shellEnabled &&
+      /\bblocked by workspace or gateway policy\b/i.test(opts.lastExecutionError)
+        ? "Shell is already enabled for this workspace, but the command was still denied by another policy layer. Do not describe this as shell being off; report the exact policy blocker."
+        : "";
 
     return [
       "Execution is not complete yet.",
       "You must actually run commands to complete this request, not only write files or provide guidance.",
       blockerHint,
       errorHint,
+      policyBlockerHint,
       opts.attemptedExecutionTool
         ? "Retry with a concrete execution path now. If blocked by permissions/credentials, state the exact blocker and request only that missing input."
         : "Use run_command (or a viable fallback) now to execute the workflow end-to-end.",
@@ -14663,6 +14809,12 @@ You are continuing a previous conversation. The context from the previous conver
     this.emitEvent("log", { message: "Analyzing task requirements..." });
 
     const prompt = this.getContractPrompt().toLowerCase();
+    const isLatexPdfTask =
+      /\b(latex|tex|tikz)\b/.test(prompt) ||
+      /\.tex\b/.test(prompt) ||
+      (/\b(write|create|generate|produce|draft|prepare)\b/.test(prompt) &&
+        /\b(paper|article|report|document)\b/.test(prompt) &&
+        /\bcompile(?:d)?\s+(?:pdf|document)|pdf\b/.test(prompt));
 
     // Exclusion patterns: code/development tasks should NOT trigger document hints
     const isCodeTask =
@@ -14714,7 +14866,13 @@ You are continuing a previous conversation. The context from the previous conver
     try {
       // If the task mentions modifying documents or specific files, list workspace contents
       // Only trigger for non-code tasks with explicit document file mentions
-      if (isDocumentModification || (!isCodeTask && mentionsSpecificFile)) {
+      if (isLatexPdfTask) {
+        taskType = "latex_document_creation";
+        additionalContext += `LATEX PDF WORKFLOW:
+1. Write the editable source as a .tex file with write_file.
+2. Compile that source with compile_latex. Do not use create_document/generate_document for LaTeX/TikZ output.
+3. If compile_latex reports no installed TeX engine, keep the .tex source and explain that tectonic, latexmk, xelatex, lualatex, or pdflatex must be installed before retrying.`;
+      } else if (isDocumentModification || (!isCodeTask && mentionsSpecificFile)) {
         taskType = "document_modification";
 
         // List workspace to find relevant files
@@ -17362,6 +17520,7 @@ You are continuing a previous conversation. The context from the previous conver
     return (
       toolName === "create_document" ||
       toolName === "generate_document" ||
+      toolName === "compile_latex" ||
       toolName === "create_directory" ||
       toolName === "write_file" ||
       toolName === "copy_file" ||
@@ -18008,14 +18167,20 @@ You are continuing a previous conversation. The context from the previous conver
   }
 
   private getOutstandingRequiredDecisionCandidate(): string {
-    return (
-      this.buildResultSummary() ||
-      this.getContentFallback() ||
-      this.lastNonVerificationOutput ||
-      this.lastAssistantOutput ||
-      this.lastAssistantText ||
-      ""
-    );
+    const candidates = [
+      this.buildResultSummary(),
+      this.getContentFallback(),
+      this.lastNonVerificationOutput,
+      this.lastAssistantOutput,
+      this.lastAssistantText,
+    ];
+    for (const candidate of candidates) {
+      const trimmed = String(candidate || "").trim();
+      if (!this.isUsefulResultSummaryCandidate(trimmed)) continue;
+      if (this.isLowSignalPauseMessage(trimmed)) continue;
+      return trimmed;
+    }
+    return "";
   }
 
   private finalCandidateNeedsUserInput(): boolean {
@@ -21154,7 +21319,7 @@ PLANNING RULES:
 
 RESILIENCE RULES:
 - Do not stop at "cannot be done" when fallbacks exist.
- - Fallback chain: available tools -> custom skills -> MCP/API connectors -> browser automation (browser_*) for websites -> run_command for CLI/local commands -> computer_* for native macOS GUI tasks -> run_applescript only as an explicit AppleScript path or low-level fallback.
+- Fallback chain: available tools -> custom skills -> MCP/API connectors -> browser automation (browser_*) for websites -> run_command for CLI/local commands -> screenshot/click/type_text/keypress and related computer-use tools for native macOS GUI tasks -> run_applescript only as an explicit AppleScript path or low-level fallback.
 - Ask the user only when blocked by permissions/credentials/policy or missing required path after search.
 
 WORKSPACE + PATH DISCOVERY:
@@ -27382,6 +27547,7 @@ Return ONLY a JSON object:
             toolName === "edit_file" ||
             toolName === "create_document" ||
             toolName === "generate_document" ||
+            toolName === "compile_latex" ||
             toolName === "create_spreadsheet" ||
             toolName === "generate_spreadsheet" ||
             toolName === "create_presentation" ||
@@ -29369,6 +29535,8 @@ Return ONLY a JSON object:
       const decision = this.classifyShellPermissionDecision(message);
       if (decision === "continue_without_shell") {
         this.allowExecutionWithoutShell = true;
+        executionMessage =
+          "Please continue without shell access and use the limited best-effort path.";
       } else if (decision === "enable_shell") {
         this.allowExecutionWithoutShell = false;
         if (!this.workspace.permissions.shell) {
@@ -29396,6 +29564,7 @@ Return ONLY a JSON object:
               : `Shell access enabled in-memory for workspace "${nextWorkspace.name}" after user confirmation (persistence unavailable).`,
           });
         }
+        executionMessage = "Please continue with shell access enabled for this workspace.";
       }
     }
 

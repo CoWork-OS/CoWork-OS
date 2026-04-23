@@ -15,6 +15,7 @@ import { AgentPerformanceReviewViewer } from "../AgentPerformanceReviewViewer";
 
 interface MissionControlPanelProps {
   onClose?: () => void;
+  onOpenAgents?: () => void;
   initialCompanyId?: string | null;
   /** When opening from Inbox Agent (or elsewhere), focus this issue in Ops. */
   initialIssueId?: string | null;
@@ -22,6 +23,7 @@ interface MissionControlPanelProps {
 
 export function MissionControlPanel({
   onClose: _onClose,
+  onOpenAgents,
   initialCompanyId = null,
   initialIssueId = null,
 }: MissionControlPanelProps) {
@@ -66,7 +68,7 @@ export function MissionControlPanel({
 
   return (
     <div className="mc-v2">
-      <MCTopBar data={data} />
+      <MCTopBar data={data} onOpenAgents={onOpenAgents} />
 
       <div className="mc-v2-body">
         <div className="mc-v2-tab-content">

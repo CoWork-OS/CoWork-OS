@@ -5,6 +5,7 @@ import {
   ToolDecision,
   type RuntimeToolMetadata,
 } from "../../shared/types";
+import { isComputerUseToolName } from "../../shared/computer-use-contract";
 
 export type ToolLane =
   | "core"
@@ -105,6 +106,7 @@ const INTEGRATION_TOOLS = new Set([
 const ARTIFACT_TOOLS = new Set([
   "create_document",
   "generate_document",
+  "compile_latex",
   "create_spreadsheet",
   "generate_spreadsheet",
   "create_presentation",
@@ -132,6 +134,7 @@ const CONDITIONAL_SYSTEM_TOOLS = new Set([
   "get_env",
   "get_app_paths",
   "run_applescript",
+  "screen_context_resolve",
 ]);
 
 const ALWAYS_VISIBLE_TOOLS = new Set([
@@ -199,6 +202,8 @@ const SYSTEM_INTENT_PATTERN =
 /** Native / full-desktop control — last resort after MCP, browser, and shell. */
 const COMPUTER_USE_INTENT_PATTERN =
   /\b(computer use|desktop automation|native app|native macos|macos app|control my (mac|screen|desktop)|not in browser|gui only|ios simulator|simulator|xcode|system preferences|menu bar)\b/i;
+const SCREEN_CONTEXT_INTENT_PATTERN =
+  /\b(failing one|on screen|latest draft|same doc|what is this|why is this failing|screen context|right side|left side|top right|top left|bottom right|bottom left)\b/i;
 const EXPLICIT_APPLESCRIPT_INTENT_PATTERN =
   /\b(applescript|osascript|script editor|apple script|tell application|system events)\b/i;
 const NATIVE_APP_REFERENCE_PATTERN =
@@ -317,9 +322,13 @@ function inferToolExposureMetadata(
     return { lane: "memory", exposure: "always", overlapGroup: "memory" };
   }
   if (CONDITIONAL_SYSTEM_TOOLS.has(toolName)) {
-    return { lane: "system", exposure: "conditional", overlapGroup: "system_interaction" };
+    return {
+      lane: "system",
+      exposure: "conditional",
+      overlapGroup: toolName === "screen_context_resolve" ? "chronicle" : "system_interaction",
+    };
   }
-  if (toolName.startsWith("computer_")) {
+  if (isComputerUseToolName(toolName)) {
     return { lane: "system", exposure: "conditional", overlapGroup: "computer_use" };
   }
   if (toolName === "web_search" || toolName === "web_fetch" || toolName === "http_request") {
@@ -418,7 +427,17 @@ export function evaluateToolAvailability(
           ? { decision: "allow", metadata }
           : { decision: "defer", reason: "system_intent_missing", metadata };
       }
-      if (normalizedToolName.startsWith("computer_")) {
+      if (normalizedToolName === "screen_context_resolve") {
+        const trimmedTaskText = taskText.trim();
+        const barePointerReference = /^(this|that)\??$/i.test(trimmedTaskText);
+        return hasNativeDesktopGuiIntent(taskText) ||
+          barePointerReference ||
+          SCREEN_CONTEXT_INTENT_PATTERN.test(taskText) ||
+          SYSTEM_INTENT_PATTERN.test(taskText)
+          ? { decision: "allow", metadata: { ...metadata, overlapGroup: "chronicle" } }
+          : { decision: "defer", reason: "screen_context_intent_missing", metadata };
+      }
+      if (isComputerUseToolName(normalizedToolName)) {
         return hasNativeDesktopGuiIntent(taskText) || ctx.taskDomain === "operations"
           ? { decision: "allow", metadata }
           : { decision: "defer", reason: "computer_use_intent_missing", metadata };
@@ -475,11 +494,15 @@ const ALWAYS_MUTATING = new Set([
   "domain_dns_delete",
   "x402_fetch",
   "execute_code",
-  "computer_click",
-  "computer_type",
-  "computer_key",
-  "computer_move_mouse",
-  "computer_screenshot",
+  "click",
+  "double_click",
+  "move_mouse",
+  "drag",
+  "scroll",
+  "type_text",
+  "keypress",
+  "wait",
+  "screenshot",
 ]);
 
 const MUTATING_PREFIXES = [

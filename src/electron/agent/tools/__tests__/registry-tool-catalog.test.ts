@@ -287,7 +287,7 @@ describe("ToolRegistry tool catalog versioning", () => {
     expect((registry as Any).getApprovalTypeForTool("read_pdf_visual")).toBe("data_export");
     expect((registry as Any).getApprovalTypeForTool("mcp_fetch_issue")).toBe("external_service");
     expect((registry as Any).getApprovalTypeForTool("notion_action")).toBe("external_service");
-    expect((registry as Any).getApprovalTypeForTool("computer_click")).toBe("computer_use");
+    expect((registry as Any).getApprovalTypeForTool("click")).toBe("computer_use");
   });
 
   it("renders rollout tool descriptions from the shared tool-prompt metadata", () => {

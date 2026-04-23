@@ -10,6 +10,7 @@ import type {
   PermissionRuleScope,
   Workspace,
 } from "../../../shared/types";
+import { isComputerUseToolName } from "../../../shared/computer-use-contract";
 import { GuardrailManager } from "../../guardrails/guardrail-manager";
 import {
   getPermissionScopeSpecificity,
@@ -495,10 +496,14 @@ export class PermissionEngine {
       "open_path",
       "show_in_folder",
       "write_clipboard",
-      "computer_click",
-      "computer_type",
-      "computer_key",
-      "computer_move_mouse",
+      "click",
+      "double_click",
+      "move_mouse",
+      "drag",
+      "scroll",
+      "type_text",
+      "keypress",
+      "wait",
     ].includes(canonicalToolName);
   }
 
@@ -507,7 +512,7 @@ export class PermissionEngine {
     if (approvalType === "computer_use") return true;
     if (canonicalToolName.startsWith("browser_")) return true;
     if (canonicalToolName.startsWith("canvas_")) return true;
-    if (canonicalToolName.startsWith("computer_")) return true;
+    if (isComputerUseToolName(canonicalToolName)) return true;
     return NON_WORKSPACE_SYSTEM_TOOLS.has(canonicalToolName);
   }
 

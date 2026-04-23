@@ -3,6 +3,17 @@ import { FileOperationTracker, ToolCallDeduplicator, ToolFailureTracker } from "
 import { TaskExecutor } from "../executor";
 
 describe("ToolCallDeduplicator read-history invalidation", () => {
+  it("does not dedupe repeated screenshot calls", () => {
+    const dedupe = new ToolCallDeduplicator(2, 60_000, 2, 20);
+
+    dedupe.recordCall("screenshot", { app: "Calculator" }, '{"captureId":"cap_1"}');
+    dedupe.recordCall("screenshot", { app: "Calculator" }, '{"captureId":"cap_2"}');
+
+    expect(dedupe.checkDuplicate("screenshot", { app: "Calculator" })).toEqual(
+      expect.objectContaining({ isDuplicate: false }),
+    );
+  });
+
   it("clears read/list duplicate history while preserving write history", () => {
     const dedupe = new ToolCallDeduplicator(2, 60_000, 4, 20);
 

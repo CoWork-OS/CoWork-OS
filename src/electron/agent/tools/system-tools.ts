@@ -1384,7 +1384,7 @@ export class SystemTools {
         description:
           "Execute exact AppleScript / osascript code on macOS. " +
           "Use this when the user explicitly asks for AppleScript, or as a low-level fallback " +
-          "after computer_* tools cannot complete a specific native GUI step. " +
+          "after screenshot/click/type_text/keypress-style computer-use tools cannot complete a specific native GUI step. " +
           "Do not prefer this first for ordinary native app interaction. Only available on macOS.",
         input_schema: {
           type: "object",

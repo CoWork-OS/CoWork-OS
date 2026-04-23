@@ -257,10 +257,11 @@ export function isTerminalTaskStatus(status: Task["status"]): boolean {
 
 export function resolveMissionColumnForTask(task: Pick<Task, "status" | "boardColumn" | "assignedAgentRoleId">): MissionColumn["id"] {
   if (isTerminalTaskStatus(task.status)) return "done";
-  const col = task.boardColumn;
+  const col: Task["boardColumn"] | undefined = task.boardColumn;
+  const isTerminalBoardColumn = col === "done" || col === "review";
   if (col === "done") return "done";
   if (col === "review") return "review";
-  if ((task.status === "planning" || task.status === "executing") && col !== "done" && col !== "review") {
+  if ((task.status === "planning" || task.status === "executing") && !isTerminalBoardColumn) {
     return "in_progress";
   }
   if (col === "in_progress") return "in_progress";

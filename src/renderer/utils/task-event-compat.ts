@@ -2,6 +2,23 @@ import type { TaskEvent } from "../../shared/types";
 
 type TaskEventLike = Pick<TaskEvent, "type" | "legacyType" | "status" | "payload">;
 
+function asObject(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function coerceNonEmptyText(value: unknown): string {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed.length > 0) return trimmed;
+  }
+  const obj = asObject(value);
+  if (obj && typeof obj.message === "string" && obj.message.trim().length > 0) {
+    return obj.message.trim();
+  }
+  return "";
+}
+
 function isLikelyTaskCompletionPayload(payload: Record<string, unknown> | null): boolean {
   if (!payload) return false;
 
@@ -61,4 +78,17 @@ export function getEffectiveTaskEventType(event: TaskEventLike): string {
     default:
       return "progress_update";
   }
+}
+
+export function getTimelineErrorText(event: Pick<TaskEvent, "type" | "payload">): string {
+  if (event.type !== "timeline_error") return "";
+  const payload = asObject(event.payload);
+  if (!payload) return "";
+  return (
+    coerceNonEmptyText(payload.message) ||
+    coerceNonEmptyText(payload.error) ||
+    coerceNonEmptyText(payload.reason) ||
+    coerceNonEmptyText(payload.display) ||
+    coerceNonEmptyText(payload.failureReason)
+  );
 }

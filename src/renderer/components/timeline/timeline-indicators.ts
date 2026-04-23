@@ -102,7 +102,18 @@ export function resolveTimelineIndicator(
   }
 
   if (event.type === "timeline_error") {
-    return { icon: AlertTriangle, tone: "error", label: "Timeline error" };
+    const payload = asObject(event.payload);
+    const legacyType =
+      typeof event.legacyType === "string"
+        ? event.legacyType
+        : typeof payload.legacyType === "string"
+          ? payload.legacyType
+          : "";
+    return {
+      icon: AlertTriangle,
+      tone: "error",
+      label: legacyType === "tool_error" ? "Tool error" : "Error",
+    };
   }
 
   if (effectiveType === "verification_started") {

@@ -12,6 +12,8 @@ Every task completion now emits a standardized learning event that can show:
 - playbook reinforcement or no-op
 - skill proposal created, approved, rejected, or pending review
 - evidence links behind each step
+- Chronicle-backed `screen_context` evidence when a task used recent-screen context
+- a dedicated **Chronicle screen context used** learning-progress step
 - next action when human review is needed
 - semantic tool-batch labels and verifier verdict/report fields when the task completed through the delegated runtime
 
@@ -26,6 +28,7 @@ Recall now behaves like one search surface instead of several separate searches.
 - files
 - workspace notes
 - memory entries
+- screen context
 - knowledge-graph context
 
 Results are normalized into one envelope with source type, object id, timestamp, rank, and snippet. The same ranking and dedup logic powers both the UI and prompt/context injection so operator search and runtime recall stay aligned.
@@ -74,7 +77,7 @@ Operator Runtime Visibility is an observability and operator-experience upgrade,
 
 CoWork OS still centers on:
 
-- desktop control plane (including **macOS computer use**: governed `computer_*` sessions with overlay, **Esc** abort, and per-app consent — see [Computer use (macOS)](computer-use.md))
+- desktop control plane (including **macOS computer use**: governed `screenshot`/`click`/`type_text` sessions with helper-targeted permissions and **Esc** abort — see [Computer use (macOS)](computer-use.md))
 - channels and inbox
 - devices and remote execution
 - governed automation and approvals
@@ -82,9 +85,17 @@ CoWork OS still centers on:
 
 The new surfaces make the runtime easier to trust and understand without changing the underlying product model.
 
+Chronicle is part of this visibility story:
+
+- it does **not** create a second memory subsystem
+- it makes recent-screen evidence inspectable when it influenced a task
+- it keeps passive raw frames local and ephemeral, while promoted task-used observations appear as normal runtime evidence and recall
+- when background Chronicle memory generation is enabled, the resulting `screen_context` memories stay visible through the same memory and recall surfaces instead of a Chronicle-only UI
+
 ## Related docs
 
 - [Computer use (macOS)](computer-use.md)
+- [Chronicle](chronicle.md)
 - [Features](features.md)
 - [Skills Runtime Model](skills-runtime-model.md)
 - [Mission Control](mission-control.md)

@@ -18,7 +18,7 @@ function stableStringify(value: unknown): string {
 function isPackagingRelatedToolCall(toolName: string, input: unknown): boolean {
   const normalizedToolName = String(toolName || "").trim().toLowerCase();
   if (
-    /^(create_document|generate_document|generate_epub|nano-pdf|nano_pdf)$/i.test(
+    /^(create_document|generate_document|compile_latex|generate_epub|nano-pdf|nano_pdf)$/i.test(
       normalizedToolName,
     )
   ) {

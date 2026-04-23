@@ -90,6 +90,12 @@ bounded_research=true
     expect(routed.signals).toContain("live-cloud-sync-status");
   });
 
+  it("routes vague latest-draft screen-context prompts to execution intent", () => {
+    const routed = IntentRouter.route("Draft sync", "sync the latest draft from the same doc");
+    expect(routed.intent).toBe("execution");
+    expect(routed.signals).toContain("needs-tool-inspection");
+  });
+
   it("routes SSH connectivity troubleshooting prompts to execution in operations domain", () => {
     const prompt = [
       "This is the azure VM private address but I cannot connect to it",

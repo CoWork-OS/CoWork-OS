@@ -234,7 +234,7 @@ describe("PermissionEngine", () => {
 
     expect(
       evaluate({
-        toolName: "computer_screenshot",
+        toolName: "screenshot",
         approvalType: "computer_use",
         mode: "dangerous_only",
       }).decision,
@@ -435,7 +435,7 @@ describe("PermissionEngine", () => {
 
     expect(
       evaluate({
-        toolName: "computer_screenshot",
+        toolName: "screenshot",
         mode: "accept_edits",
         approvalType: "computer_use",
       }).decision,

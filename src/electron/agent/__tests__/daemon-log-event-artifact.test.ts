@@ -7,6 +7,7 @@ import { LLM_PROVIDER_TYPES } from "../../../shared/types";
 function createDaemonLike() {
   let seq = 0;
   return {
+    logEvent: (AgentDaemon.prototype as Any).logEvent,
     taskRepo: {
       findById: vi.fn().mockReturnValue({
         id: "task-1",
@@ -39,6 +40,7 @@ function createDaemonLike() {
     trackEvidenceRefs: vi.fn(),
     persistTimelineEvent: vi.fn(),
     activeTasks: new Map(),
+    mediaPreviewMessagesByTask: new Map(),
     lastKnownLlmProviderByTask: new Map(),
     normalizeProviderTypeValue: (AgentDaemon.prototype as Any).normalizeProviderTypeValue,
     getProviderTypeFromLogMessage: (AgentDaemon.prototype as Any).getProviderTypeFromLogMessage,
@@ -49,6 +51,7 @@ function createDaemonLike() {
     resolveTaskLlmProviderType: (AgentDaemon.prototype as Any).resolveTaskLlmProviderType,
     maybeEnrichLlmTelemetryPayload: (AgentDaemon.prototype as Any).maybeEnrichLlmTelemetryPayload,
     normalizeArtifactEventPayload: (AgentDaemon.prototype as Any).normalizeArtifactEventPayload,
+    maybeEmitAssistantMediaPreview: (AgentDaemon.prototype as Any).maybeEmitAssistantMediaPreview,
   } as Any;
 }
 
@@ -78,6 +81,37 @@ describe("AgentDaemon.logEvent artifact normalization", () => {
     const [timelineEvent] = (daemonLike.persistTimelineEvent as Any).mock.calls[0];
     expect(timelineEvent.payload.path).toBe("https://example.com/report.pdf");
     expect(timelineEvent.payload.label).toBe("https://example.com/report.pdf");
+  });
+
+  it("emits an internal assistant video preview bubble once for previewable video files", () => {
+    const daemonLike = createDaemonLike();
+
+    AgentDaemon.prototype.logEvent.call(daemonLike, "task-1", "file_created", {
+      path: "artifacts/hyperframes-demo.mp4",
+      type: "video",
+      mimeType: "video/mp4",
+    });
+
+    expect((daemonLike.persistTimelineEvent as Any).mock.calls).toHaveLength(2);
+
+    const [fileEvent, fileOptions] = (daemonLike.persistTimelineEvent as Any).mock.calls[0];
+    expect(fileEvent.type).toBe("timeline_artifact_emitted");
+    expect(fileOptions.legacyType).toBe("file_created");
+
+    const [assistantEvent, assistantOptions] = (daemonLike.persistTimelineEvent as Any).mock.calls[1];
+    expect(assistantEvent.type).toBe("timeline_step_updated");
+    expect(assistantEvent.payload.legacyType).toBe("assistant_message");
+    expect(assistantEvent.payload.internal).toBe(true);
+    expect(String(assistantEvent.payload.message)).toContain("::video{");
+    expect(String(assistantEvent.payload.message)).toContain('path="artifacts/hyperframes-demo.mp4"');
+    expect(assistantOptions.legacyType).toBe("assistant_message");
+
+    AgentDaemon.prototype.logEvent.call(daemonLike, "task-1", "artifact_created", {
+      path: "/workspace/artifacts/hyperframes-demo.mp4",
+      mimeType: "video/mp4",
+    });
+
+    expect((daemonLike.persistTimelineEvent as Any).mock.calls).toHaveLength(3);
   });
 
   it("backfills llm_usage providerType from route logs for every registered provider", () => {

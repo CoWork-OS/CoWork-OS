@@ -6,8 +6,8 @@ import { Readable } from "stream";
 
 const MEDIA_SCHEME = "media";
 const TOKEN_TTL_MS = 60 * 60 * 1000;
-const ALLOWED_MIME_TYPES = new Set(["video/mp4", "video/webm"]);
-const ALLOWED_EXTENSIONS = new Set([".mp4", ".webm"]);
+const ALLOWED_MIME_TYPES = new Set(["video/mp4", "video/webm", "audio/mpeg", "audio/mp3", "audio/wav"]);
+const ALLOWED_EXTENSIONS = new Set([".mp4", ".webm", ".mp3", ".wav"]);
 
 type MediaTokenRecord = {
   resolvedPath: string;

@@ -5,6 +5,7 @@ interface StepFeedProps {
   title: ReactNode;
   titleTooltip?: string;
   timeLabel: string;
+  hideTime?: boolean;
   indicator: TimelineIndicatorSpec;
   showConnectorAbove?: boolean;
   showConnectorBelow?: boolean;
@@ -19,6 +20,7 @@ export function StepFeed({
   title,
   titleTooltip,
   timeLabel,
+  hideTime = false,
   indicator,
   showConnectorAbove = false,
   showConnectorBelow = false,
@@ -85,7 +87,7 @@ export function StepFeed({
               {title}
             </div>
           </div>
-          <div className="event-time">{timeLabel}</div>
+          {!hideTime && <div className="event-time">{timeLabel}</div>}
         </div>
         {visibleExpanded && details}
       </div>

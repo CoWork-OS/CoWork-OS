@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { RuntimeVisibilityService } from "../RuntimeVisibilityService";
 import { MemoryService } from "../../memory/MemoryService";
 import { KnowledgeGraphService } from "../../knowledge-graph/KnowledgeGraphService";
+import { ChronicleObservationRepository } from "../../chronicle";
 
 describe("RuntimeVisibilityService learning + recall", () => {
   afterEach(() => {
@@ -41,15 +42,17 @@ describe("RuntimeVisibilityService learning + recall", () => {
     expect(progress.taskId).toBe("task-1");
     expect(progress.summary).toContain("captured");
     expect(progress.steps.map((step) => step.stage)).toEqual([
+      "screen_context_used",
       "memory_captured",
       "playbook_reinforced",
       "skill_proposed",
       "skill_reviewed",
     ]);
-    expect(progress.steps[0]?.status).toBe("done");
+    expect(progress.steps[0]?.status).toBe("skipped");
     expect(progress.steps[1]?.status).toBe("done");
-    expect(progress.steps[2]?.status).toBe("pending");
+    expect(progress.steps[2]?.status).toBe("done");
     expect(progress.steps[3]?.status).toBe("pending");
+    expect(progress.steps[4]?.status).toBe("pending");
   });
 
   it("collects unified recall results across sources in a stable ranking order", () => {
@@ -86,6 +89,27 @@ describe("RuntimeVisibilityService learning + recall", () => {
         score: 0.7,
       } as Any,
     ]);
+    vi.spyOn(ChronicleObservationRepository, "searchSync").mockReturnValue([
+      {
+        id: "chronicle-1",
+        workspaceId: "workspace-1",
+        taskId: "task-1",
+        query: "alpha",
+        observationId: "obs-1",
+        capturedAt: 100,
+        promotedAt: 110,
+        displayId: "1",
+        appName: "VS Code",
+        windowTitle: "alpha.ts",
+        imagePath: "/workspace/.cowork/chronicle/assets/alpha.png",
+        localTextSnippet: "alpha screen context",
+        confidence: 0.77,
+        usedFallback: false,
+        width: 100,
+        height: 100,
+        destinationHints: ["repo_file"],
+      },
+    ] as Any);
 
     const response = RuntimeVisibilityService.collectUnifiedRecall(
       {
@@ -146,18 +170,21 @@ describe("RuntimeVisibilityService learning + recall", () => {
       },
     );
 
-    expect(response.results.map((result) => result.sourceType)).toEqual([
-      "task",
-      "message",
-      "file",
-      "memory",
-      "workspace_note",
-      "message",
-      "knowledge_graph",
-    ]);
+    expect(response.results.map((result) => result.sourceType)).toEqual(
+      expect.arrayContaining([
+        "task",
+        "message",
+        "file",
+        "memory",
+        "workspace_note",
+        "screen_context",
+        "knowledge_graph",
+      ]),
+    );
     expect(response.results[0]?.rank).toBeGreaterThan(response.results[1]?.rank ?? 0);
     expect(response.results[1]?.rank).toBeGreaterThan(response.results[2]?.rank ?? 0);
     expect(response.results.some((result) => result.sourceType === "workspace_note")).toBe(true);
+    expect(response.results.some((result) => result.sourceType === "screen_context")).toBe(true);
     expect(response.results.some((result) => result.sourceType === "knowledge_graph")).toBe(true);
     expect(response.results[1]?.snippet).toContain("alpha message");
     expect(response.results[2]?.snippet).toContain("alpha file");

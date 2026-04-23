@@ -135,6 +135,7 @@ export interface LLMImageContent {
 }
 
 export type LLMContent = LLMToolUse | LLMTextContent | LLMImageContent;
+export type LLMToolResultCompanionContent = LLMTextContent | LLMImageContent;
 
 /** Per-provider image capability limits */
 export interface LLMProviderImageCaps {
@@ -204,6 +205,7 @@ export interface LLMToolResult {
   tool_use_id: string;
   content: string;
   is_error?: boolean;
+  companion_user_content?: LLMToolResultCompanionContent[];
 }
 
 export interface LLMMessage {
@@ -255,6 +257,7 @@ export interface StreamProgress {
   elapsedMs: number;
   /** `true` while still streaming; `false` on the final event. */
   streaming: boolean;
+  text?: string;
 }
 
 export type StreamProgressCallback = (progress: StreamProgress) => void;

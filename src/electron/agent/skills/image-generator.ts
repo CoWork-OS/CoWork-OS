@@ -1,14 +1,17 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as mimetypes from "mime-types";
+import OpenAI from "openai";
 import { Workspace } from "../../../shared/types";
 import { getOpenRouterAttributionHeaders } from "../llm/openrouter-attribution";
+import { OpenAIOAuth, OpenAIOAuthTokens } from "../llm/openai-oauth";
+import { loadPiAiModule } from "../llm/pi-ai-loader";
 import { LLMProviderFactory } from "../llm/provider-factory";
 
 /**
  * Image generation provider types
  */
-export type ImageProvider = "gemini" | "openai" | "azure" | "openrouter";
+export type ImageProvider = "gemini" | "openai" | "openai-codex" | "azure" | "openrouter";
 
 /**
  * Image generation model types
@@ -30,6 +33,7 @@ export type ImageModel =
  * Image size options
  */
 export type ImageSize = "1K" | "2K";
+type OpenAIImageSize = "auto" | "1024x1024" | "1024x1536" | "1536x1024";
 
 /**
  * Image generation request
@@ -83,6 +87,19 @@ const GEMINI_MODEL_MAP: Record<
   "nano-banana-2": "gemini-3.1-flash-image-preview",
 };
 
+const OPENAI_CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex";
+const OPENAI_CODEX_IMAGE_INSTRUCTIONS =
+  "You are an assistant that must fulfill image generation requests by using the image_generation tool when provided.";
+const OPENAI_CODEX_PREFERRED_HOST_MODELS = [
+  "gpt-5.4",
+  "gpt-5.3",
+  "gpt-5.2",
+  "gpt-5.1",
+  "gpt-5.1-codex-max",
+  "gpt-5.1-codex-mini",
+] as const;
+const OPENAI_CODEX_RESPONSES_IMAGE_MODELS = new Set(["gpt-image-1", "gpt-image-1.5"]);
+
 function buildSetupHint(provider: ImageProvider): { type: string; label: string; target: string } {
   if (provider === "gemini")
     return { type: "open_settings", label: "Set up Gemini API key", target: "gemini" };
@@ -90,6 +107,9 @@ function buildSetupHint(provider: ImageProvider): { type: string; label: string;
     return { type: "open_settings", label: "Set up Azure OpenAI", target: "azure" };
   if (provider === "openrouter")
     return { type: "open_settings", label: "Set up OpenRouter API key", target: "openrouter" };
+  if (provider === "openai-codex") {
+    return { type: "open_settings", label: "Sign in to OpenAI OAuth", target: "openai" };
+  }
   return { type: "open_settings", label: "Set up OpenAI API key", target: "openai" };
 }
 
@@ -221,10 +241,21 @@ export function inferImageProviderFromText(text: string): ImageProvider | null {
   const t = (text || "").toLowerCase();
   if (!t.trim()) return null;
   if (t.includes("azure openai") || /\bazure\b/.test(t)) return "azure";
+  if (t.includes("codex auth") || t.includes("openai oauth") || t.includes("chatgpt oauth"))
+    return "openai-codex";
   if (t.includes("openrouter")) return "openrouter";
   if (t.includes("gemini")) return "gemini";
   if (t.includes("openai")) return "openai";
   return null;
+}
+
+function hasOpenAIOAuthTokens(
+  settings: ReturnType<typeof LLMProviderFactory.loadSettings>,
+): boolean {
+  return Boolean(
+    settings.openai?.accessToken?.trim() &&
+      (settings.openai?.authMethod === "oauth" || settings.openai?.refreshToken?.trim()),
+  );
 }
 
 function getConfiguredImageProviders(
@@ -242,6 +273,8 @@ function getConfiguredImageProviders(
   const openaiKey = settings.openai?.apiKey?.trim();
   if (openaiKey) providers.push("openai");
 
+  if (hasOpenAIOAuthTokens(settings)) providers.push("openai-codex");
+
   const openrouterKey = settings.openrouter?.apiKey?.trim();
   if (openrouterKey) providers.push("openrouter");
 
@@ -255,37 +288,68 @@ function sortProvidersByDefaultPreference(providers: ImageProvider[]): ImageProv
   const priority: Record<ImageProvider, number> = {
     azure: 0,
     openai: 1,
-    openrouter: 2,
-    gemini: 3,
+    "openai-codex": 2,
+    openrouter: 3,
+    gemini: 4,
   };
   return [...providers].sort((a, b) => (priority[a] ?? 99) - (priority[b] ?? 99));
 }
 
 type ImageModelPreset = "gpt-image-1.5" | "nano-banana-2";
 
+function getCompatibleImageModelPreset(
+  provider: ImageProvider,
+  preset?: ImageModelPreset,
+): ImageModelPreset | undefined {
+  if (!preset) return undefined;
+  if (preset === "nano-banana-2") return provider === "gemini" ? preset : undefined;
+  if (preset === "gpt-image-1.5") return provider === "gemini" ? undefined : preset;
+  return undefined;
+}
+
+function pushConfiguredImageRoute(
+  order: Array<{ provider: ImageProvider; modelPreset?: ImageModelPreset }>,
+  configured: ImageProvider[],
+  provider: ImageProvider | undefined,
+  modelPreset?: ImageModelPreset,
+): void {
+  if (!provider || !configured.includes(provider)) return;
+  if (order.some((entry) => entry.provider === provider)) return;
+  order.push({
+    provider,
+    modelPreset: getCompatibleImageModelPreset(provider, modelPreset),
+  });
+}
+
 /** Build provider order from settings.imageGeneration (default + backup). */
 function buildProviderOrderFromImageSettings(
   settings: ReturnType<typeof LLMProviderFactory.loadSettings>,
 ): Array<{ provider: ImageProvider; modelPreset?: ImageModelPreset }> {
   const img = settings.imageGeneration;
+  const defaultProvider = img?.defaultProvider;
   const defaultPreset = img?.defaultModel;
+  const backupProvider = img?.backupProvider;
   const backupPreset = img?.backupModel;
   const configured = getConfiguredImageProviders(settings);
 
   const order: Array<{ provider: ImageProvider; modelPreset?: ImageModelPreset }> = [];
 
-  if (defaultPreset === "gpt-image-1.5") {
-    for (const p of ["azure", "openai", "openrouter"] as ImageProvider[]) {
+  pushConfiguredImageRoute(order, configured, defaultProvider, defaultPreset);
+
+  if (!defaultProvider && defaultPreset === "gpt-image-1.5") {
+    for (const p of ["azure", "openai", "openai-codex", "openrouter"] as ImageProvider[]) {
       if (configured.includes(p)) order.push({ provider: p, modelPreset: "gpt-image-1.5" });
     }
   }
-  if (defaultPreset === "nano-banana-2" && configured.includes("gemini")) {
+  if (!defaultProvider && defaultPreset === "nano-banana-2" && configured.includes("gemini")) {
     order.push({ provider: "gemini", modelPreset: "nano-banana-2" });
   }
 
-  if (backupPreset && backupPreset !== defaultPreset) {
+  pushConfiguredImageRoute(order, configured, backupProvider, backupPreset);
+
+  if (!backupProvider && backupPreset && backupPreset !== defaultPreset) {
     if (backupPreset === "gpt-image-1.5") {
-      for (const p of ["azure", "openai", "openrouter"] as ImageProvider[]) {
+      for (const p of ["azure", "openai", "openai-codex", "openrouter"] as ImageProvider[]) {
         if (configured.includes(p) && !order.some((o) => o.provider === p))
           order.push({ provider: p, modelPreset: "gpt-image-1.5" });
       }
@@ -328,6 +392,8 @@ export function selectImageProviderOrder(args: {
         ? "azure"
         : configured.includes("openai")
           ? "openai"
+          : configured.includes("openai-codex")
+            ? "openai-codex"
           : configured.includes("openrouter")
             ? "openrouter"
             : null
@@ -339,12 +405,97 @@ export function selectImageProviderOrder(args: {
     for (const p of configured) {
       if (!legacyOrder.includes(p)) legacyOrder.push(p);
     }
-    for (const p of ["gemini", "openai", "azure", "openrouter"] as ImageProvider[]) {
+    for (const p of [
+      "gemini",
+      "openai",
+      "openai-codex",
+      "azure",
+      "openrouter",
+    ] as ImageProvider[]) {
       if (!legacyOrder.includes(p)) legacyOrder.push(p);
     }
   }
   const deduped = legacyOrder.filter((p, idx) => legacyOrder.indexOf(p) === idx);
   return deduped.map((provider) => ({ provider }));
+}
+
+function extractChatGPTAccountId(token: string): string {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) throw new Error("invalid_token");
+    const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+    const accountId = payload?.["https://api.openai.com/auth"]?.chatgpt_account_id;
+    if (typeof accountId !== "string" || !accountId.trim()) throw new Error("missing_account_id");
+    return accountId.trim();
+  } catch {
+    throw new Error("Failed to extract ChatGPT account ID from OpenAI OAuth token");
+  }
+}
+
+function persistUpdatedOpenAITokens(tokens: OpenAIOAuthTokens): void {
+  const settings = LLMProviderFactory.loadSettings();
+  settings.openai = {
+    ...settings.openai,
+    accessToken: tokens.access_token,
+    refreshToken: tokens.refresh_token,
+    tokenExpiresAt: tokens.expires_at,
+    authMethod: "oauth",
+  };
+  LLMProviderFactory.saveSettings(settings);
+  LLMProviderFactory.clearCache();
+}
+
+async function resolveOpenAICodexAccessToken(
+  settings: ReturnType<typeof LLMProviderFactory.loadSettings>,
+): Promise<string> {
+  const accessToken = settings.openai?.accessToken?.trim();
+  const refreshToken = settings.openai?.refreshToken?.trim();
+  const tokenExpiresAt = settings.openai?.tokenExpiresAt;
+
+  if (!accessToken) {
+    throw new Error("OpenAI OAuth is not configured");
+  }
+
+  if (refreshToken) {
+    const { apiKey, newTokens } = await OpenAIOAuth.getApiKeyFromTokens({
+      access_token: accessToken,
+      refresh_token: refreshToken,
+      expires_at:
+        typeof tokenExpiresAt === "number" && Number.isFinite(tokenExpiresAt) ? tokenExpiresAt : 0,
+    });
+    if (
+      newTokens &&
+      (newTokens.access_token !== accessToken ||
+        newTokens.refresh_token !== refreshToken ||
+        newTokens.expires_at !== tokenExpiresAt)
+    ) {
+      persistUpdatedOpenAITokens(newTokens);
+    }
+    return apiKey;
+  }
+
+  if (
+    typeof tokenExpiresAt === "number" &&
+    Number.isFinite(tokenExpiresAt) &&
+    Date.now() > tokenExpiresAt - 5 * 60 * 1000
+  ) {
+    throw new Error("OpenAI OAuth token has expired. Sign in again in Settings.");
+  }
+
+  return accessToken;
+}
+
+async function resolveOpenAICodexHostModel(): Promise<string> {
+  try {
+    const { getModels } = await loadPiAiModule();
+    const availableModelIds = new Set(getModels("openai-codex").map((model) => model.id));
+    for (const candidate of OPENAI_CODEX_PREFERRED_HOST_MODELS) {
+      if (availableModelIds.has(candidate)) return candidate;
+    }
+    return [...availableModelIds][0] || "gpt-5.1";
+  } catch {
+    return "gpt-5.1";
+  }
 }
 
 /**
@@ -401,7 +552,7 @@ export class ImageGenerator {
         images: [],
         model: normalizeOpenAIImageModel(modelOverride) || "gpt-image-1.5",
         error:
-          "No image generation provider configured. Configure Gemini/OpenAI/Azure/OpenRouter in Settings.",
+          "No image generation provider configured. Configure Gemini/OpenAI/Azure/OpenRouter/OpenAI OAuth in Settings.",
         actionHint: buildSetupHint("openai"),
       };
     }
@@ -438,10 +589,7 @@ export class ImageGenerator {
           const apiKey = settings.openai?.apiKey?.trim();
           if (!apiKey) {
             if (configuredProviders.includes("openai")) {
-              considerError(
-                "openai",
-                "OpenAI API key not configured (OpenAI OAuth sign-in does not support image generation here yet).",
-              );
+              considerError("openai", "OpenAI API key not configured.");
             }
             continue;
           }
@@ -453,6 +601,38 @@ export class ImageGenerator {
           return await this.generateWithOpenAI({
             apiKey,
             model: chosenModel,
+            prompt,
+            filename,
+            imageSize,
+            numberOfImages,
+          });
+        }
+
+        if (provider === "openai-codex") {
+          if (!hasOpenAIOAuthTokens(settings)) {
+            if (configuredProviders.includes("openai-codex")) {
+              considerError("openai-codex", "OpenAI OAuth is not connected.");
+            }
+            continue;
+          }
+          const chosenModel =
+            resolveOpenAIModelOverride(modelOverride) ||
+            (modelPreset === "gpt-image-1.5" ? "gpt-image-1.5" : null) ||
+            inferOpenAIImageModelFromText(prompt) ||
+            "gpt-image-1.5";
+          const normalizedChosenModel = normalizeOpenAIImageModel(chosenModel) || chosenModel;
+          if (!OPENAI_CODEX_RESPONSES_IMAGE_MODELS.has(normalizedChosenModel.toLowerCase())) {
+            considerError(
+              "openai-codex",
+              "OpenAI OAuth image generation supports GPT Image models in the Responses tool path (for example gpt-image-1.5).",
+              normalizedChosenModel,
+            );
+            continue;
+          }
+          const accessToken = await resolveOpenAICodexAccessToken(settings);
+          return await this.generateWithOpenAICodex({
+            accessToken,
+            model: normalizedChosenModel,
             prompt,
             filename,
             imageSize,
@@ -589,13 +769,13 @@ export class ImageGenerator {
       {
         id: "gpt-image-1.5",
         name: "OpenAI GPT Image 1.5",
-        description: "OpenAI Images API model (newer)",
+        description: "OpenAI GPT Image model (API key, Azure/OpenRouter, or OpenAI OAuth)",
         modelId: "gpt-image-1.5",
       },
     ];
   }
 
-  private mapOpenAIImageSize(size: ImageSize): string {
+  private mapOpenAIImageSize(size: ImageSize): OpenAIImageSize {
     // OpenAI image models support "auto" and a fixed set of sizes depending on model.
     // Use conservative defaults; "2K" maps to auto (larger output when supported).
     if (size === "2K") return "auto";
@@ -832,6 +1012,132 @@ export class ImageGenerator {
         model: args.model,
         error: error?.message || "Failed to generate image",
         actionHint: buildSetupHint("openai"),
+      };
+    }
+  }
+
+  private async generateWithOpenAICodex(args: {
+    accessToken: string;
+    model: string;
+    prompt: string;
+    filename?: string;
+    imageSize: ImageSize;
+    numberOfImages: number;
+  }): Promise<ImageGenerationResult> {
+    const baseFilename = args.filename || `generated_${Date.now()}`;
+    const outputDir = this.workspace.path;
+    const size = this.mapOpenAIImageSize(args.imageSize);
+    const writtenPaths: string[] = [];
+    const cleanupWrittenImages = async () => {
+      await Promise.all(
+        writtenPaths.map((filePath) => fs.promises.unlink(filePath).catch(() => undefined)),
+      );
+    };
+
+    try {
+      console.log(`[ImageGenerator] Generating image with openai-codex (${args.model})`);
+
+      const accountId = extractChatGPTAccountId(args.accessToken);
+      const hostModel = await resolveOpenAICodexHostModel();
+      const client = new OpenAI({
+        apiKey: args.accessToken,
+        baseURL: OPENAI_CODEX_BASE_URL,
+        defaultHeaders: {
+          "chatgpt-account-id": accountId,
+          "OpenAI-Beta": "responses=experimental",
+          originator: "cowork-os",
+        },
+      });
+
+      const images: ImageGenerationResult["images"] = [];
+      const n = Math.min(args.numberOfImages, 4);
+
+      for (let i = 0; i < n; i++) {
+        let imageBase64: string | null = null;
+        const stream = client.responses.stream({
+          model: hostModel,
+          store: false,
+          instructions: OPENAI_CODEX_IMAGE_INSTRUCTIONS,
+          input: [
+            {
+              type: "message",
+              role: "user",
+              content: [{ type: "input_text", text: args.prompt }],
+            },
+          ],
+          tools: [
+            {
+              type: "image_generation",
+              model: args.model,
+              size,
+              output_format: "png",
+              background: "opaque",
+              partial_images: 1,
+              ...(args.model === "gpt-image-1.5" ? { action: "generate" } : {}),
+            },
+          ],
+          tool_choice: {
+            type: "allowed_tools",
+            mode: "required",
+            tools: [{ type: "image_generation" }],
+          },
+        });
+
+        for await (const event of stream) {
+          if (event.type === "response.output_item.done" && event.item.type === "image_generation_call") {
+            if (typeof event.item.result === "string" && event.item.result) {
+              imageBase64 = event.item.result;
+            }
+          } else if (event.type === "response.image_generation_call.partial_image") {
+            if (typeof event.partial_image_b64 === "string" && event.partial_image_b64) {
+              imageBase64 = event.partial_image_b64;
+            }
+          }
+        }
+
+        const finalResponse = await stream.finalResponse();
+        for (const item of finalResponse.output || []) {
+          if (item.type === "image_generation_call" && typeof item.result === "string" && item.result) {
+            imageBase64 = item.result;
+          }
+        }
+
+        if (!imageBase64) {
+          await cleanupWrittenImages();
+          return {
+            success: false,
+            images: [],
+            provider: "openai-codex",
+            model: args.model,
+            error: "No images were returned by OpenAI OAuth image generation.",
+            actionHint: buildSetupHint("openai-codex"),
+          };
+        }
+
+        const imageBuffer = Buffer.from(imageBase64, "base64");
+        const imageName = n > 1 ? `${baseFilename}_${i + 1}.png` : `${baseFilename}.png`;
+        const outputPath = path.join(outputDir, imageName);
+        await fs.promises.writeFile(outputPath, imageBuffer);
+        writtenPaths.push(outputPath);
+        const stats = await fs.promises.stat(outputPath);
+        images.push({
+          path: outputPath,
+          filename: imageName,
+          mimeType: "image/png",
+          size: stats.size,
+        });
+      }
+
+      return { success: true, images, provider: "openai-codex", model: args.model };
+    } catch (error: Any) {
+      await cleanupWrittenImages();
+      return {
+        success: false,
+        images: [],
+        provider: "openai-codex",
+        model: args.model,
+        error: error?.message || "Failed to generate image",
+        actionHint: buildSetupHint("openai-codex"),
       };
     }
   }

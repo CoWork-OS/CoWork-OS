@@ -63,4 +63,47 @@ describe("selectImageProviderOrder", () => {
 
     expect(order[0]?.provider).toBe("azure");
   });
+
+  it("includes openai-codex when OpenAI OAuth is configured", () => {
+    const order = selectImageProviderOrder({
+      settings: {
+        providerType: "openai",
+        modelKey: "x",
+        openai: {
+          accessToken: "oauth-access-token",
+          refreshToken: "oauth-refresh-token",
+          authMethod: "oauth",
+        },
+        openrouter: { apiKey: "or" },
+      } as Any,
+      prompt: "make a poster",
+      providerOverride: "auto",
+    });
+
+    expect(order[0]?.provider).toBe("openai-codex");
+    expect(order.map((entry) => entry.provider)).toContain("openrouter");
+  });
+
+  it("honors an explicit OpenAI OAuth image provider when API key auth is also configured", () => {
+    const order = selectImageProviderOrder({
+      settings: {
+        providerType: "openai",
+        modelKey: "x",
+        openai: {
+          apiKey: "openai-api-key",
+          accessToken: "oauth-access-token",
+          refreshToken: "oauth-refresh-token",
+          authMethod: "oauth",
+        },
+        imageGeneration: {
+          defaultProvider: "openai-codex",
+          defaultModel: "gpt-image-1.5",
+        },
+      } as Any,
+      prompt: "make a poster",
+      providerOverride: "auto",
+    });
+
+    expect(order[0]).toEqual({ provider: "openai-codex", modelPreset: "gpt-image-1.5" });
+  });
 });

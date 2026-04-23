@@ -831,7 +831,9 @@ export interface LLMSettings {
   customProviders?: Record<string, CustomProviderConfig>;
   /** Text-to-image model selection. Default tried first; backup used on failure. */
   imageGeneration?: {
+    defaultProvider?: "openai" | "openai-codex" | "azure" | "openrouter" | "gemini";
     defaultModel?: "gpt-image-1.5" | "nano-banana-2";
+    backupProvider?: "openai" | "openai-codex" | "azure" | "openrouter" | "gemini";
     backupModel?: "gpt-image-1.5" | "nano-banana-2";
   };
   /** Text-to-video generation settings. Provider-specific config + routing. */

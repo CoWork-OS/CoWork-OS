@@ -11,6 +11,7 @@ import {
   Code,
   ArrowDownToLine,
   MousePointer2,
+  History,
 } from "lucide-react";
 
 interface ToolCategoryConfig {
@@ -30,6 +31,7 @@ interface BuiltinToolsSettingsData {
     skill: ToolCategoryConfig;
     shell: ToolCategoryConfig;
     image: ToolCategoryConfig;
+    chronicle: ToolCategoryConfig;
     computer_use: ToolCategoryConfig;
   };
   toolOverrides: Record<string, { enabled: boolean; priority?: "high" | "normal" | "low" }>;
@@ -92,6 +94,11 @@ const CATEGORY_INFO: Record<
     icon: <Image {...IC} />,
     description: "Generate images using AI (requires Gemini API)",
   },
+  chronicle: {
+    name: "Chronicle",
+    icon: <History {...IC} />,
+    description: "Passive local screen-context disambiguation and recall",
+  },
   computer_use: {
     name: "Computer Use (macOS)",
     icon: <MousePointer2 {...IC} />,
@@ -110,6 +117,7 @@ const CATEGORY_ORDER: CategoryKey[] = [
   "skill",
   "shell",
   "image",
+  "chronicle",
   "computer_use",
 ];
 
@@ -407,8 +415,8 @@ export function BuiltinToolsSettings() {
                     <div className="builtin-tool-advanced-text">
                       <div className="builtin-tool-advanced-label">Approval mode</div>
                       <div className="builtin-tool-advanced-hint">
-                        Per command asks each time. Single bundle asks once and reuses approval for
-                        safe commands in this task.
+                        Single bundle is the lower-noise option. It asks once and reuses approval
+                        for safe commands in this task.
                       </div>
                     </div>
                     <select
@@ -422,7 +430,7 @@ export function BuiltinToolsSettings() {
                       disabled={!config.enabled}
                     >
                       <option value="per_command">Per command</option>
-                      <option value="single_bundle">Single approval bundle</option>
+                      <option value="single_bundle">Single approval bundle (Recommended)</option>
                     </select>
                   </div>
 

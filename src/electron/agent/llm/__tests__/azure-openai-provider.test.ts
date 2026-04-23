@@ -300,6 +300,36 @@ describe("AzureOpenAIProvider", () => {
     expect(body.stream).toBe(true);
   });
 
+  it("parses streamed chat-completions tool calls into tool_use blocks", async () => {
+    mockFetch.mockResolvedValue(
+      createStreamingResponse([
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"screenshot","arguments":"{\\"app\\":\\"Cal"}}]}}]}\n\n',
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"type":"function","function":{"arguments":"culator\\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":4,"completion_tokens":2}}\n\n',
+        "data: [DONE]\n\n",
+      ]),
+    );
+
+    const provider = new AzureOpenAIProvider(baseConfig);
+    const response = await provider.createMessage({
+      model: "gpt-4o",
+      maxTokens: 20,
+      system: "system prompt",
+      messages: [{ role: "user", content: "hi" }],
+      onStreamProgress: vi.fn(),
+    });
+
+    expect(response.content).toEqual([
+      {
+        type: "tool_use",
+        id: "call_1",
+        name: "screenshot",
+        input: { app: "Calculator" },
+      },
+    ]);
+    expect(response.stopReason).toBe("tool_use");
+    expect(response.usage).toEqual({ inputTokens: 4, outputTokens: 2 });
+  });
+
   it("falls back to Responses API when chat completions are unsupported", async () => {
     mockFetch
       .mockResolvedValueOnce(
@@ -545,6 +575,53 @@ describe("AzureOpenAIProvider", () => {
     expect(JSON.parse(secondOptions.body).stream).toBe(true);
     const [, thirdOptions] = mockFetch.mock.calls[2];
     expect(JSON.parse(thirdOptions.body).stream).toBe(true);
+  });
+
+  it("parses streamed Responses API tool calls into tool_use blocks", async () => {
+    mockFetch
+      .mockResolvedValueOnce(
+        createErrorResponse(400, "Bad Request", {
+          error: {
+            message: "The chatCompletion operation does not work with the specified model.",
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        createErrorResponse(400, "Bad Request", {
+          error: {
+            message: "The chatCompletion operation does not work with the specified model.",
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        createStreamingResponse([
+          'data: {"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","call_id":"call_1","name":"screenshot","arguments":""}}\n\n',
+          'data: {"type":"response.function_call_arguments.delta","item_id":"call_1","delta":"{\\"app\\":\\"Cal"}\n\n',
+          'data: {"type":"response.function_call_arguments.done","item_id":"call_1","arguments":"{\\"app\\":\\"Calculator\\"}"}\n\n',
+          'data: {"type":"response.completed","response":{"output":[{"type":"function_call","call_id":"call_1","name":"screenshot","arguments":"{\\"app\\":\\"Calculator\\"}"}],"usage":{"input_tokens":6,"output_tokens":2}}}\n\n',
+          "data: [DONE]\n\n",
+        ]),
+      );
+
+    const provider = new AzureOpenAIProvider(baseConfig);
+    const response = await provider.createMessage({
+      model: "gpt-5.2-codex",
+      maxTokens: 20,
+      system: "system prompt",
+      messages: [{ role: "user", content: "hi" }],
+      onStreamProgress: vi.fn(),
+    });
+
+    expect(response.content).toEqual([
+      {
+        type: "tool_use",
+        id: "call_1",
+        name: "screenshot",
+        input: { app: "Calculator" },
+      },
+    ]);
+    expect(response.stopReason).toBe("tool_use");
+    expect(response.usage).toEqual({ inputTokens: 6, outputTokens: 2 });
   });
 
   it("throws a descriptive error on API failures", async () => {

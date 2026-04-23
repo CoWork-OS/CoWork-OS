@@ -15,6 +15,7 @@ import { LLMTool } from "../llm/types";
  * Supports multiple backends depending on what's configured in Settings:
  * - Gemini (image generation)
  * - OpenAI (gpt-image-* / dall-e-*)
+ * - OpenAI OAuth via Codex/ChatGPT (gpt-image-* through the Responses image_generation tool)
  * - Azure OpenAI (deployment-based)
  *
  * If multiple are configured, the tool prefers the configured default provider,
@@ -106,10 +107,11 @@ export class ImageTools {
     return [
       {
         name: "generate_image",
-        description: `Generate an image from a text description using AI. CoWork OS will pick the best configured provider by default (Gemini/OpenAI/Azure/OpenRouter), unless you specify a provider/model.
+        description: `Generate an image from a text description using AI. CoWork OS will pick the best configured provider by default (Gemini/OpenAI/OpenAI OAuth/Azure/OpenRouter), unless you specify a provider/model.
 
 Providers/models:
 - OpenAI: gpt-image-1, gpt-image-1.5, dall-e-3, dall-e-2 (also accepts "gpt-1.5" alias)
+- OpenAI (Codex auth): gpt-image-1, gpt-image-1.5 via ChatGPT/Codex OAuth
 - Azure OpenAI: model maps to a deployment name (configured in Settings)
 - OpenRouter: gpt-image-1.5 via openai/gpt-image-1.5
 - Gemini: nano-banana-2 (gemini-3.1-flash-image-preview), gemini-image-pro, gemini-image-fast
@@ -125,7 +127,7 @@ The generated images are saved to the workspace folder.`,
             },
             provider: {
               type: "string",
-              enum: ["auto", "gemini", "openai", "azure", "openrouter"],
+              enum: ["auto", "gemini", "openai", "openai-codex", "azure", "openrouter"],
               description:
                 'Optional provider override. "auto" uses the configured default with fallbacks (default: auto).',
             },

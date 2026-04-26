@@ -183,6 +183,9 @@ const SESSION_CHECKLIST_TOOLS = new Set([
   "task_list_list",
 ]);
 
+const CHECKLIST_EXECUTION_INTENT_PATTERN =
+  /\b(build|create|edit|fix|implement|modify|refactor|migrate|deploy|install|configure|test|verify|write|generate|ship|workflow|long-running|end-to-end)\b/i;
+
 const INTEGRATION_INTENT_PATTERN =
   /\b(gmail|google drive|google calendar|calendar|notion|box|dropbox|onedrive|sharepoint|slack|jira|linear|hubspot|salesforce|asana|discord|zendesk|servicenow|okta|resend|connector|integration|crm|inbox|email|drive|cloud storage|mcp)\b/i;
 const BROWSER_INTENT_PATTERN =
@@ -377,6 +380,23 @@ export function evaluateToolAvailability(
     return hasPdfVisualIntent(taskText)
       ? { decision: "allow", metadata }
       : { decision: "defer", reason: "pdf_visual_intent_missing", metadata };
+  }
+
+  if (SESSION_CHECKLIST_TOOLS.has(normalizedToolName)) {
+    const mode = ctx.executionMode || "execute";
+    const intent = String(ctx.taskIntent || "").toLowerCase();
+    if (mode !== "execute" && mode !== "verified" && mode !== "debug") {
+      return { decision: "defer", reason: "checklist_execute_mode_required", metadata };
+    }
+    if (["advice", "planning", "thinking", "chat"].includes(intent)) {
+      return { decision: "defer", reason: "checklist_substantial_execution_required", metadata };
+    }
+    if (intent === "workflow" || intent === "deep_work") {
+      return { decision: "allow", metadata };
+    }
+    return CHECKLIST_EXECUTION_INTENT_PATTERN.test(taskText)
+      ? { decision: "allow", metadata }
+      : { decision: "defer", reason: "checklist_substantial_execution_required", metadata };
   }
 
   switch (metadata.lane) {

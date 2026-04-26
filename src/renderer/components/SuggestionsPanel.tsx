@@ -155,6 +155,22 @@ export function SuggestionsPanel({
     }
   };
 
+  const handleSnooze = async (id: string) => {
+    const targetWorkspaceId =
+      suggestions.find((suggestion) => suggestion.id === id)?.workspaceId || workspaceId;
+    if (!isValidWorkspaceId(targetWorkspaceId)) return;
+    try {
+      await window.electronAPI.snoozeSuggestion(
+        targetWorkspaceId,
+        id,
+        Date.now() + 24 * 60 * 60 * 1000,
+      );
+      setSuggestions((prev) => prev.filter((s) => s.id !== id));
+    } catch {
+      // best-effort
+    }
+  };
+
   const handleAct = async (suggestion: ProactiveSuggestion) => {
     const targetWorkspaceId = suggestion.workspaceId || workspaceId;
     if (!isValidWorkspaceId(targetWorkspaceId) || !suggestion.actionPrompt) return;
@@ -173,7 +189,7 @@ export function SuggestionsPanel({
     <div style={{ padding: 24, maxWidth: 720 }}>
       <div style={{ marginBottom: 16 }}>
         <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: "var(--text-primary)" }}>
-          Proactive Suggestions
+          Workflow Intelligence Suggestions
         </h3>
         <p
           style={{
@@ -183,9 +199,8 @@ export function SuggestionsPanel({
             lineHeight: 1.4,
           }}
         >
-          AI-generated suggestions based on your task patterns, goals, and knowledge graph. They
-          learn from when you act on them, surface during lower-noise windows, and can be bundled
-          into daily briefings when now is not the right time.
+          Reviewable next actions based on memory, heartbeat signals, and recent workflow patterns.
+          Acting, editing, snoozing, or dismissing them tunes what appears next.
         </p>
       </div>
 
@@ -391,6 +406,20 @@ export function SuggestionsPanel({
                       </button>
                     )}
                     <button
+                      onClick={() => handleSnooze(s.id)}
+                      style={{
+                        padding: "5px 12px",
+                        borderRadius: 5,
+                        border: "1px solid var(--border-color, #e5e7eb)",
+                        background: "transparent",
+                        color: "var(--text-secondary)",
+                        fontSize: 12,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Snooze
+                    </button>
+                    <button
                       onClick={() => handleDismiss(s.id)}
                       style={{
                         padding: "5px 12px",
@@ -419,7 +448,7 @@ export function SuggestionsPanel({
                 textAlign: "center",
               }}
             >
-              Suggestions expire after 7 days. Dismiss suggestions you don't need.
+              Suggestions expire after 7 days. Snooze or dismiss suggestions you do not need now.
             </div>
           )}
         </>

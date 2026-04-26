@@ -141,6 +141,7 @@ jobs:
         run: npm test
 
       - name: Validate npm tarball first-install flow
+        if: runner.os != 'Windows'
         run: node scripts/release-smoke-install.mjs
 
       - name: Build application

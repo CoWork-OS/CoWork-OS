@@ -111,7 +111,7 @@ describe("LLMProviderFactory custom provider config resolution", () => {
     expect(modelId).toBe("us.anthropic.claude-opus-4-6-20260115-v1:0");
   });
 
-  it("uses cached custom-provider models when available", () => {
+  it("keeps cached custom-provider models and adds documented models", () => {
     const modelStatus = LLMProviderFactory.getProviderModelStatus({
       providerType: "minimax-portal",
       modelKey: "sonnet-3-5",
@@ -136,17 +136,14 @@ describe("LLMProviderFactory custom provider config resolution", () => {
     } as Any);
 
     expect(modelStatus.currentModel).toBe("MiniMax-M2.5");
-    expect(modelStatus.models).toEqual([
-      {
-        key: "MiniMax-M2.5",
-        displayName: "MiniMax M2.5",
-        description: "MiniMax Portal model",
-      },
-      {
-        key: "MiniMax-M2.1",
-        displayName: "MiniMax M2.1",
-        description: "MiniMax Portal model",
-      },
+    expect(modelStatus.models.map((model) => model.key)).toEqual([
+      "MiniMax-M2.5",
+      "MiniMax-M2.1",
+      "MiniMax-M2.7",
+      "MiniMax-M2.7-highspeed",
+      "MiniMax-M2.5-highspeed",
+      "MiniMax-M2.1-highspeed",
+      "MiniMax-M2",
     ]);
   });
 
@@ -170,13 +167,23 @@ describe("LLMProviderFactory custom provider config resolution", () => {
         description: "MiniMax Portal model",
       },
       {
-        key: "MiniMax-M2.1",
-        displayName: "MiniMax-M2.1",
+        key: "MiniMax-M2.7",
+        displayName: "MiniMax-M2.7",
+        description: "MiniMax Portal model",
+      },
+      {
+        key: "MiniMax-M2.7-highspeed",
+        displayName: "MiniMax-M2.7-highspeed",
         description: "MiniMax Portal model",
       },
       {
         key: "MiniMax-M2.5-highspeed",
         displayName: "MiniMax-M2.5-highspeed",
+        description: "MiniMax Portal model",
+      },
+      {
+        key: "MiniMax-M2.1",
+        displayName: "MiniMax-M2.1",
         description: "MiniMax Portal model",
       },
       {
@@ -192,5 +199,34 @@ describe("LLMProviderFactory custom provider config resolution", () => {
     ]);
 
     expect(saveSpy).toHaveBeenCalled();
+  });
+
+  it("adds documented Z.AI coding-plan models to partial refresh results", async () => {
+    vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue({
+      providerType: "zai",
+      modelKey: "sonnet-3-5",
+      customProviders: {
+        zai: {
+          apiKey: "zai-test",
+          baseUrl: "https://api.z.ai/api/paas/v4",
+          model: "glm-4.7",
+        },
+      },
+    } as Any);
+    vi.spyOn(LLMProviderFactory, "saveSettings").mockImplementation(() => {});
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: [{ id: "glm-4.7" }] }),
+    } as Response);
+
+    const models = await LLMProviderFactory.getCustomProviderModels("zai");
+
+    expect(models.map((model) => model.key)).toEqual([
+      "glm-4.7",
+      "GLM-5.1",
+      "GLM-5-Turbo",
+      "GLM-5V-Turbo",
+      "glm-4.5-air",
+    ]);
   });
 });

@@ -63,6 +63,13 @@ export const CUSTOM_PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     name: "Z.AI",
     compatibility: "openai",
     defaultModel: "glm-4.7",
+    knownModels: [
+      "GLM-5.1",
+      "GLM-5-Turbo",
+      "GLM-5V-Turbo",
+      "glm-4.7",
+      "glm-4.5-air",
+    ],
     apiKeyLabel: "API Key",
     apiKeyPlaceholder: "zai-...",
     requiresBaseUrl: true,
@@ -141,6 +148,8 @@ export const CUSTOM_PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     baseUrl: "https://api.minimax.io/v1",
     defaultModel: "MiniMax-M2.1",
     knownModels: [
+      "MiniMax-M2.7",
+      "MiniMax-M2.7-highspeed",
       "MiniMax-M2.5",
       "MiniMax-M2.5-highspeed",
       "MiniMax-M2.1",
@@ -157,6 +166,8 @@ export const CUSTOM_PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     baseUrl: "https://api.minimax.io/anthropic",
     defaultModel: "MiniMax-M2.1",
     knownModels: [
+      "MiniMax-M2.7",
+      "MiniMax-M2.7-highspeed",
       "MiniMax-M2.5",
       "MiniMax-M2.5-highspeed",
       "MiniMax-M2.1",

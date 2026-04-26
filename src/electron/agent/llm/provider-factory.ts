@@ -381,6 +381,30 @@ function getKnownCustomProviderModels(
   }));
 }
 
+function mergeCustomProviderModels(
+  entry: ProviderCatalogEntry,
+  ...modelGroups: Array<CachedModelInfo[] | undefined>
+): CachedModelInfo[] {
+  const merged: CachedModelInfo[] = [];
+  const seen = new Set<string>();
+
+  for (const group of modelGroups) {
+    for (const model of group || []) {
+      const key = model.key?.trim();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      merged.push({
+        ...model,
+        displayName: model.displayName || key,
+        description:
+          model.description || entry.description || `${entry.name} model`,
+      });
+    }
+  }
+
+  return merged;
+}
+
 function getCustomProviderConfig(
   customProviders: Record<string, CustomProviderConfig> | undefined,
   providerType: LLMProviderType,
@@ -2431,13 +2455,20 @@ export class LLMProviderFactory {
                 },
               ]
             : [];
+      const modelList = mergeCustomProviderModels(
+        customEntry,
+        cachedModels,
+        getKnownCustomProviderModels(customEntry),
+      );
       return {
         currentModel,
-        models: attachMetadata(ensureCurrentModel(
-          cachedModels,
-          currentModel,
-          customEntry.description || `${customEntry.name} model`,
-        )),
+        models: attachMetadata(
+          ensureCurrentModel(
+            modelList,
+            currentModel,
+            customEntry.description || `${customEntry.name} model`,
+          ),
+        ),
       };
     }
 
@@ -3992,19 +4023,30 @@ export class LLMProviderFactory {
       entry.baseUrl ||
       "";
     const documentedModels = getKnownCustomProviderModels(entry);
-    const fallbackCachedModels = Array.from(
-      new Set(
-        [
-          existingConfig.model?.trim(),
-          entry.defaultModel?.trim(),
-          ...documentedModels.map((model) => model.key),
-        ].filter(Boolean),
-      ),
-    ).map((modelId) => ({
-      key: modelId!,
-      displayName: modelId!,
-      description: entry.description || `${entry.name} model`,
-    }));
+    const selectedModel = existingConfig.model?.trim();
+    const defaultModel = entry.defaultModel?.trim();
+    const fallbackCachedModels = mergeCustomProviderModels(
+      entry,
+      selectedModel
+        ? [
+            {
+              key: selectedModel,
+              displayName: selectedModel,
+              description: entry.description || `${entry.name} model`,
+            },
+          ]
+        : undefined,
+      documentedModels,
+      defaultModel
+        ? [
+            {
+              key: defaultModel,
+              displayName: defaultModel,
+              description: entry.description || `${entry.name} model`,
+            },
+          ]
+        : undefined,
+    );
 
     // MiniMax documents its supported model IDs, but the Anthropic-compatible
     // endpoint does not expose a usable public /models listing endpoint.
@@ -4017,7 +4059,7 @@ export class LLMProviderFactory {
       updatedSettings.customProviders = {
         ...updatedSettings.customProviders,
         [resolvedProviderType]: {
-          ...(updatedSettings.customProviders?.[resolvedProviderType] || {}),
+          ...updatedSettings.customProviders?.[resolvedProviderType],
           cachedModels: fallbackCachedModels,
         },
       };
@@ -4026,7 +4068,11 @@ export class LLMProviderFactory {
     }
 
     if (!baseUrl) {
-      return existingConfig.cachedModels || fallbackCachedModels;
+      return mergeCustomProviderModels(
+        entry,
+        existingConfig.cachedModels,
+        fallbackCachedModels,
+      );
     }
 
     const provider =
@@ -4047,18 +4093,22 @@ export class LLMProviderFactory {
           });
 
     const models = await provider.getAvailableModels();
-    const cachedModels = models.map((model) => ({
-      key: model.id,
-      displayName: model.name || model.id,
-      description: entry.description || `${entry.name} model`,
-    }));
+    const cachedModels = mergeCustomProviderModels(
+      entry,
+      models.map((model) => ({
+        key: model.id,
+        displayName: model.name || model.id,
+        description: entry.description || `${entry.name} model`,
+      })),
+      fallbackCachedModels,
+    );
 
     if (cachedModels.length > 0) {
       const updatedSettings = this.loadSettings();
       updatedSettings.customProviders = {
         ...updatedSettings.customProviders,
         [resolvedProviderType]: {
-          ...(updatedSettings.customProviders?.[resolvedProviderType] || {}),
+          ...updatedSettings.customProviders?.[resolvedProviderType],
           cachedModels,
         },
       };
@@ -4071,7 +4121,7 @@ export class LLMProviderFactory {
       updatedSettings.customProviders = {
         ...updatedSettings.customProviders,
         [resolvedProviderType]: {
-          ...(updatedSettings.customProviders?.[resolvedProviderType] || {}),
+          ...updatedSettings.customProviders?.[resolvedProviderType],
           cachedModels: fallbackCachedModels,
         },
       };
@@ -4079,6 +4129,10 @@ export class LLMProviderFactory {
       return fallbackCachedModels;
     }
 
-    return existingConfig.cachedModels || [];
+    return mergeCustomProviderModels(
+      entry,
+      existingConfig.cachedModels,
+      fallbackCachedModels,
+    );
   }
 }

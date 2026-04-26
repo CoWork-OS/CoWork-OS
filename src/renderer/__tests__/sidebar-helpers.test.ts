@@ -2,13 +2,16 @@
  * Tests for sidebar pinning/visibility helper functions
  */
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Task } from "../../shared/types";
 import {
   compareTasksByPinAndRecency,
   countHiddenFailedSessions,
   filterTaskTreeBySearch,
   flattenVisibleTaskRows,
+  formatRelativeShort,
+  getSidebarDateGroup,
+  getSidebarSessionTitle,
   isActiveSessionStatus,
   isAutomatedSession,
   isAwaitingSessionStatus,
@@ -33,6 +36,10 @@ const createTask = (overrides: Partial<Task>): Task => {
   };
 };
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 describe("compareTasksByPinAndRecency", () => {
   it("sorts pinned tasks before unpinned tasks", () => {
     const tasks = [
@@ -54,6 +61,28 @@ describe("compareTasksByPinAndRecency", () => {
 
     const sorted = tasks.sort(compareTasksByPinAndRecency).map((task) => task.id);
     expect(sorted).toEqual(["older-recently-active", "newer-created"]);
+  });
+});
+
+describe("formatRelativeShort", () => {
+  it("uses mo for month-old sidebar timestamps while keeping minutes as m", () => {
+    const now = new Date("2026-04-24T12:00:00.000Z").getTime();
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+
+    expect(formatRelativeShort(now - 1 * 60 * 1000)).toBe("1m");
+    expect(formatRelativeShort(now - 30 * 24 * 60 * 60 * 1000)).toBe("1mo");
+    expect(formatRelativeShort(now - 60 * 24 * 60 * 60 * 1000)).toBe("2mo");
+  });
+});
+
+describe("getSidebarDateGroup", () => {
+  it("labels pinned sessions separately from date groups", () => {
+    const now = new Date("2026-04-24T12:00:00.000Z");
+    const createdAt = new Date("2026-03-24T12:00:00.000Z").getTime();
+
+    expect(getSidebarDateGroup({ createdAt, pinned: true }, now)).toBe("Pinned");
+    expect(getSidebarDateGroup({ createdAt, pinned: false }, now)).toBe("Earlier");
   });
 });
 
@@ -199,6 +228,39 @@ describe("flattenVisibleTaskRows", () => {
 describe("normalizeSidebarSessionSearch", () => {
   it("normalizes case and repeated whitespace", () => {
     expect(normalizeSidebarSessionSearch("  Draft   Launch Plan  ")).toBe("draft launch plan");
+  });
+});
+
+describe("getSidebarSessionTitle", () => {
+  it("uses a meaningful task title when present", () => {
+    const title = getSidebarSessionTitle({
+      task: createTask({ title: "Draft launch plan", prompt: "Fallback prompt" }),
+    });
+
+    expect(title).toBe("Draft launch plan");
+  });
+
+  it("falls back to the user prompt when the task title is blank", () => {
+    const title = getSidebarSessionTitle({
+      task: createTask({
+        title: "   ",
+        userPrompt: "Summarize the enterprise renewal risks",
+        prompt: "Decorated prompt",
+      }),
+    });
+
+    expect(title).toBe("Summarize the enterprise renewal risks");
+  });
+
+  it("replaces generic session titles with a useful prompt preview", () => {
+    const title = getSidebarSessionTitle({
+      task: createTask({
+        title: "New Session",
+        rawPrompt: "System context\n\nUser request:\nCreate a customer follow-up checklist",
+      }),
+    });
+
+    expect(title).toBe("Create a customer follow-up checklist");
   });
 });
 

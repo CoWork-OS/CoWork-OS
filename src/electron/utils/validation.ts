@@ -799,11 +799,52 @@ export const LLMSettingsSchema = z.object({
       defaultProvider: z
         .enum(["openai", "openai-codex", "azure", "openrouter", "gemini"])
         .optional(),
-      defaultModel: z.enum(["gpt-image-1.5", "nano-banana-2"]).optional(),
+      defaultModel: z.enum(["gpt-image-2", "gpt-image-1.5", "nano-banana-2"]).optional(),
       backupProvider: z
         .enum(["openai", "openai-codex", "azure", "openrouter", "gemini"])
         .optional(),
-      backupModel: z.enum(["gpt-image-1.5", "nano-banana-2"]).optional(),
+      backupModel: z.enum(["gpt-image-2", "gpt-image-1.5", "nano-banana-2"]).optional(),
+      timeouts: z
+        .object({
+          openai: z.number().min(30).max(1800).optional(),
+          openaiCodex: z.number().min(30).max(1800).optional(),
+          azure: z.number().min(30).max(1800).optional(),
+          openrouter: z.number().min(30).max(1800).optional(),
+          gemini: z.number().min(30).max(1800).optional(),
+        })
+        .optional(),
+      openai: z
+        .object({
+          apiKey: z.string().max(500).optional(),
+          model: z.string().max(200).optional(),
+        })
+        .optional(),
+      azure: z
+        .object({
+          imageApiKey: z.string().max(500).optional(),
+          imageEndpoint: z.string().max(500).optional(),
+          imageDeployment: z.string().max(200).optional(),
+          imageApiVersion: z.string().max(100).optional(),
+        })
+        .optional(),
+      gemini: z
+        .object({
+          apiKey: z.string().max(500).optional(),
+          model: z.enum(["nano-banana-2"]).optional(),
+        })
+        .optional(),
+      openrouter: z
+        .object({
+          apiKey: z.string().max(500).optional(),
+          baseUrl: z.string().max(500).optional(),
+          model: z.string().max(200).optional(),
+        })
+        .optional(),
+      openaiCodex: z
+        .object({
+          model: z.string().max(200).optional(),
+        })
+        .optional(),
     })
     .optional(),
   videoGeneration: VideoGenerationSettingsSchema,

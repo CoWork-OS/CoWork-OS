@@ -330,7 +330,7 @@ function getTaskStatusInfo(task: Task): { icon: "live" | "complete" | "paused"; 
   if (isActiveSessionStatus(task.status)) {
     if (task.source === "cron") return { icon: "live", label: "Scheduled run" };
     if (task.source === "improvement" || task.source === "subconscious") {
-      return { icon: "live", label: "Subconscious loop" };
+      return { icon: "live", label: "Workflow Intelligence run" };
     }
     return { icon: "live", label: "Working" };
   }
@@ -351,7 +351,7 @@ function getTaskTone(task: Task): "live" | "queued" | "done" | "attention" {
 function getAutomationSender(task: Task): string {
   if (task.heartbeatRunId) return "Heartbeat";
   if (task.source === "cron") return "Scheduled task";
-  if (task.source === "improvement" || task.source === "subconscious") return "Subconscious";
+  if (task.source === "improvement" || task.source === "subconscious") return "Workflow Intelligence";
   if (task.source === "hook") return "Event trigger";
   if (task.source === "api") return "API";
   return "Manual";
@@ -371,7 +371,7 @@ function getAutomationPreview(task: Task): string {
 function getAutomationTag(task: Task): string {
   if (task.heartbeatRunId) return "Companion";
   if (task.source === "cron") return "Recurring";
-  if (task.source === "improvement" || task.source === "subconscious") return "Subconscious";
+  if (task.source === "improvement" || task.source === "subconscious") return "Workflow Intelligence";
   if (task.source === "hook") return "Triggered";
   if (task.source === "api") return "API";
   return "Manual";
@@ -534,6 +534,23 @@ export function HomeDashboard({
     if (!workspaceId) return;
     try {
       await window.electronAPI.dismissSuggestion(workspaceId, id);
+      setCompanionSuggestions((prev) => prev.filter((s) => s.id !== id));
+      setSelectedCompanionItemId((current) => (current === id ? null : current));
+    } catch {
+      // best-effort
+    }
+  };
+
+  const handleSnoozeCompanionSuggestion = async (id: string) => {
+    const suggestion = companionSuggestions.find((item) => item.id === id);
+    const workspaceId = suggestion?.workspaceId || workspace?.id;
+    if (!workspaceId) return;
+    try {
+      await window.electronAPI.snoozeSuggestion(
+        workspaceId,
+        id,
+        Date.now() + 24 * 60 * 60 * 1000,
+      );
       setCompanionSuggestions((prev) => prev.filter((s) => s.id !== id));
       setSelectedCompanionItemId((current) => (current === id ? null : current));
     } catch {
@@ -843,7 +860,7 @@ export function HomeDashboard({
               <div className="home-automation-inbox-empty">{companionError}</div>
             ) : companionInboxItems.length === 0 ? (
               <div className="home-automation-inbox-empty">
-                No automation messages yet. When heartbeat, subconscious, or memory produce
+                No automation messages yet. When heartbeat, reflection, or memory produce
                 suggestions or completed work, they will surface here like an inbox.
               </div>
             ) : (
@@ -954,6 +971,13 @@ export function HomeDashboard({
                           <button
                             type="button"
                             className="home-automation-inbox-action"
+                            onClick={() => void handleSnoozeCompanionSuggestion(selectedCompanionItem.id)}
+                          >
+                            Snooze
+                          </button>
+                          <button
+                            type="button"
+                            className="home-automation-inbox-action"
                             onClick={() => void handleDismissCompanionSuggestion(selectedCompanionItem.id)}
                           >
                             Dismiss
@@ -1053,7 +1077,7 @@ export function HomeDashboard({
                 <Sparkles size={20} />
               </div>
               <div className="home-auto-card-copy">
-                <strong>Subconscious</strong>
+                <strong>Workflow Intelligence</strong>
                 <span>{automationGroups.improvement} core runs</span>
               </div>
             </button>

@@ -327,7 +327,10 @@ export class IntentRouter {
       4,
       "image-creation-intent",
       /\b(draw|paint|illustrate|render|sketch)\b.*\b(in|of|a|an|the)\b/.test(lower) ||
-        /\b(create|generate|make)\s+(?:an?\s+)?(?:image|picture|photo|illustration)\s+(?:of|with)\b/i.test(
+        /\b(create|generate|make)\s+(?:an?\s+)?(?:image|picture|photo|illustration)\s+(?:of|with|about|for|on|explaining?)\b/i.test(
+          lower,
+        ) ||
+        /\b(create|generate|make)\s+(?:an?\s+)?(?:infographic|poster)(?:\s+image)?\b/i.test(
           lower,
         ),
     );

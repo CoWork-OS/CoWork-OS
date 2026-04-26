@@ -1,5 +1,46 @@
 import { describe, expect, it, vi } from "vitest";
-import { EmailClient } from "../email-client";
+import { EmailClient, type EmailMessage } from "../email-client";
+
+const iso88599Overrides: Record<string, number> = {
+  Ğ: 0xd0,
+  İ: 0xdd,
+  Ş: 0xde,
+  ğ: 0xf0,
+  ı: 0xfd,
+  ş: 0xfe,
+};
+
+function encodeIso88599Text(value: string): string {
+  const bytes = Array.from(value).map((char) => {
+    const override = iso88599Overrides[char];
+    if (override !== undefined) return override;
+    const code = char.charCodeAt(0);
+    if (code > 0xff) throw new Error(`Unsupported ISO-8859-9 test character: ${char}`);
+    return code;
+  });
+  return Buffer.from(bytes).toString("latin1");
+}
+
+function parseEmailResponse(
+  client: EmailClient,
+  response: string,
+  uid: number,
+): EmailMessage | null {
+  return getTestAccess(client).parseEmailResponse(response, uid);
+}
+
+type EmailClientTestAccess = EmailClient & {
+  parseEmailResponse(response: string, uid: number): EmailMessage | null;
+  connectImap(): Promise<void>;
+  selectMailbox(): Promise<void>;
+  disconnectImap(): Promise<void>;
+  imapCommand(command: string): Promise<string>;
+  fetchEmail(uid: number): Promise<EmailMessage | null>;
+};
+
+function getTestAccess(client: EmailClient): EmailClientTestAccess {
+  return client as unknown as EmailClientTestAccess;
+}
 
 describe("EmailClient MIME parsing", () => {
   it("decodes multipart Outlook-style bodies without leaking MIME boundaries", () => {
@@ -49,7 +90,7 @@ describe("EmailClient MIME parsing", () => {
       pollInterval: 30000,
     });
 
-    const email = (client as any).parseEmailResponse(response, 23);
+    const email = parseEmailResponse(client, response, 23);
 
     expect(email).toBeTruthy();
     expect(email?.subject).toBe("Microsoft hesabınıza yeni uygulamalar bağlandı");
@@ -105,7 +146,7 @@ describe("EmailClient MIME parsing", () => {
       pollInterval: 30000,
     });
 
-    const email = (client as any).parseEmailResponse(response, 24);
+    const email = parseEmailResponse(client, response, 24);
 
     expect(email?.text).toContain("user**@msn.com");
     expect(email?.text).toContain("Bu erişim iznini siz vermediyseniz");
@@ -145,12 +186,97 @@ describe("EmailClient MIME parsing", () => {
       pollInterval: 30000,
     });
 
-    const email = (client as any).parseEmailResponse(response, 25);
+    const email = parseEmailResponse(client, response, 25);
 
     expect(email?.subject).toBe("Alterações aos Termos e Condições");
     expect(email?.text).toContain("Alterações aos Termos e Condições");
     expect(email?.text).toContain("utilizadores existentes na OLX");
     expect(email?.text).not.toContain("Ã");
+  });
+
+  it("preserves non-UTF8 IMAP literals until charset-aware body decoding", () => {
+    const encodedSubject = Buffer.from(
+      "E-Postanızın Güncelliğini Doğrulayınız",
+      "utf8",
+    ).toString("base64");
+    const headerText =
+      `From: Garanti BBVA <no-reply@example.com>\r\n` +
+      `To: <user@msn.com>\r\n` +
+      `Subject: =?UTF-8?B?${encodedSubject}?=\r\n` +
+      `Date: Sun, 29 Mar 2026 22:02:00 +0000\r\n` +
+      `Message-ID: <msg-4@example.com>\r\n` +
+      `Content-Type: text/html; charset=iso-8859-9\r\n` +
+      `Content-Transfer-Encoding: 8bit\r\n` +
+      `\r\n`;
+    const html = `<h1>E-Postanızın Güncelliğini Doğrulayınız</h1><p>güvenliğiniz için lütfen doğrulayınız.</p>`;
+    const bodyText = encodeIso88599Text(html);
+
+    const response =
+      `* 26 FETCH (FLAGS () BODY[HEADER] {${Buffer.byteLength(headerText)}}\r\n` +
+      headerText +
+      ` BODY[TEXT] {${Buffer.byteLength(bodyText, "latin1")}}\r\n` +
+      bodyText +
+      ` UID 26)\r\nA6 OK FETCH completed.\r\n`;
+
+    const client = new EmailClient({
+      imapHost: "imap-mail.outlook.com",
+      imapPort: 993,
+      imapSecure: true,
+      smtpHost: "smtp-mail.outlook.com",
+      smtpPort: 587,
+      smtpSecure: false,
+      email: "user@msn.com",
+      password: "test-password",
+      mailbox: "INBOX",
+      pollInterval: 30000,
+    });
+
+    const email = parseEmailResponse(client, response, 26);
+
+    expect(email?.html).toContain("E-Postanızın Güncelliğini Doğrulayınız");
+    expect(email?.text).toContain("güvenliğiniz için lütfen doğrulayınız");
+    expect(email?.text).not.toContain("�");
+  });
+
+  it("falls back to Turkish single-byte decoding when a body is mislabeled as utf-8", () => {
+    const headerText =
+      `From: Garanti BBVA <no-reply@example.com>\r\n` +
+      `To: <user@msn.com>\r\n` +
+      `Subject: E-Postanızın Güncelliğini Doğrulayınız\r\n` +
+      `Date: Sun, 29 Mar 2026 22:02:00 +0000\r\n` +
+      `Message-ID: <msg-5@example.com>\r\n` +
+      `Content-Type: text/plain; charset=utf-8\r\n` +
+      `Content-Transfer-Encoding: quoted-printable\r\n` +
+      `\r\n`;
+    const bodyText =
+      `E-Postan=FDz=FDn g=FCncelleme do=F0rulamas=FD\r\n` +
+      `G=FCvenli=F0iniz i=E7in l=FCtfen do=F0rulay=FDn=FDz.\r\n`;
+
+    const response =
+      `* 27 FETCH (FLAGS () BODY[HEADER] {${Buffer.byteLength(headerText)}}\r\n` +
+      headerText +
+      ` BODY[TEXT] {${Buffer.byteLength(bodyText)}}\r\n` +
+      bodyText +
+      ` UID 27)\r\nA7 OK FETCH completed.\r\n`;
+
+    const client = new EmailClient({
+      imapHost: "imap-mail.outlook.com",
+      imapPort: 993,
+      imapSecure: true,
+      smtpHost: "smtp-mail.outlook.com",
+      smtpPort: 587,
+      smtpSecure: false,
+      email: "user@msn.com",
+      password: "test-password",
+      mailbox: "INBOX",
+      pollInterval: 30000,
+    });
+
+    const email = parseEmailResponse(client, response, 27);
+
+    expect(email?.text).toContain("E-Postanızın güncelleme doğrulaması");
+    expect(email?.text).toContain("Güvenliğiniz için lütfen doğrulayınız");
+    expect(email?.text).not.toContain("�");
   });
 
   it("fetches recent emails from all UIDs instead of unread-only search", async () => {
@@ -167,13 +293,14 @@ describe("EmailClient MIME parsing", () => {
       pollInterval: 30000,
     });
 
-    const connectSpy = vi.spyOn(client as any, "connectImap").mockResolvedValue(undefined);
-    const selectSpy = vi.spyOn(client as any, "selectMailbox").mockResolvedValue(undefined);
-    const disconnectSpy = vi.spyOn(client as any, "disconnectImap").mockResolvedValue(undefined);
+    const clientAccess = getTestAccess(client);
+    const connectSpy = vi.spyOn(clientAccess, "connectImap").mockResolvedValue(undefined);
+    const selectSpy = vi.spyOn(clientAccess, "selectMailbox").mockResolvedValue(undefined);
+    const disconnectSpy = vi.spyOn(clientAccess, "disconnectImap").mockResolvedValue(undefined);
     const commandSpy = vi
-      .spyOn(client as any, "imapCommand")
+      .spyOn(clientAccess, "imapCommand")
       .mockResolvedValue("* SEARCH 11 12 13 14\r\nA1 OK SEARCH completed.\r\n");
-    const fetchSpy = vi.spyOn(client as any, "fetchEmail").mockImplementation(async (uid: number) => ({
+    const fetchSpy = vi.spyOn(clientAccess, "fetchEmail").mockImplementation(async (uid: number) => ({
       uid,
       messageId: `msg-${uid}`,
       from: { address: "sender@example.com" },

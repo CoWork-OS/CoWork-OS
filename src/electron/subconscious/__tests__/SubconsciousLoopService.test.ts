@@ -538,6 +538,70 @@ describeWithSqlite("SubconsciousLoopService", () => {
     expect(after).toBeGreaterThan(Date.now());
   });
 
+  it("does not start a duplicate catch-up run on restart without newer evidence", async () => {
+    const workspace = insertWorkspace("restart-catchup");
+    initGitRepo(workspace.path, "https://github.com/CoWork-OS/CoWork-OS.git");
+    const now = Date.now();
+    db.prepare(
+      `INSERT INTO tasks (id, title, prompt, status, workspace_id, created_at, updated_at, failure_class)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run("task-restart", "Fix restart noise", "Investigate", "failed", workspace.id, now, now, "verification_failed");
+
+    const targetKey = "code_workspace:github:CoWork-OS/CoWork-OS";
+    const { SubconsciousLoopService } = await import("../SubconsciousLoopService");
+    const firstCreateTask = vi.fn().mockResolvedValue({ id: "dispatch-task-restart-1" });
+    const getWorktreeManager = vi.fn(() => ({
+      shouldUseWorktree: vi.fn().mockResolvedValue(true),
+    }));
+    const first = new SubconsciousLoopService(db, { getGlobalRoot: () => workspace.path });
+    first.saveSettings({
+      ...DEFAULT_SUBCONSCIOUS_SETTINGS,
+      enabled: true,
+      autoRun: false,
+      catchUpOnRestart: true,
+      trustedTargetKeys: [targetKey],
+    });
+    await first.start({
+      createTask: firstCreateTask,
+      getWorktreeManager,
+    } as unknown as import("../../agent/daemon").AgentDaemon);
+
+    const firstRun = await first.runNow(targetKey);
+    expect(firstRun).not.toBeNull();
+    expect(firstCreateTask).toHaveBeenCalledTimes(1);
+    first.stop();
+
+    db.prepare("UPDATE subconscious_targets SET next_eligible_at = ? WHERE target_key = ?").run(
+      Date.now() - 1000,
+      targetKey,
+    );
+    const runCountBeforeRestart = Number(
+      (db.prepare("SELECT COUNT(*) AS count FROM subconscious_runs").get() as Any).count,
+    );
+
+    const secondCreateTask = vi.fn().mockResolvedValue({ id: "dispatch-task-restart-2" });
+    const second = new SubconsciousLoopService(db, { getGlobalRoot: () => workspace.path });
+    second.saveSettings({
+      ...DEFAULT_SUBCONSCIOUS_SETTINGS,
+      enabled: true,
+      autoRun: true,
+      catchUpOnRestart: true,
+      trustedTargetKeys: [targetKey],
+    });
+    await second.start({
+      createTask: secondCreateTask,
+      getWorktreeManager,
+    } as unknown as import("../../agent/daemon").AgentDaemon);
+
+    const runCountAfterRestart = Number(
+      (db.prepare("SELECT COUNT(*) AS count FROM subconscious_runs").get() as Any).count,
+    );
+
+    expect(secondCreateTask).not.toHaveBeenCalled();
+    expect(runCountAfterRestart).toBe(runCountBeforeRestart);
+    second.stop();
+  });
+
   it("clears session-only target state on restart while preserving durable targets", async () => {
     const workspace = insertWorkspace("delta");
     const now = Date.now();

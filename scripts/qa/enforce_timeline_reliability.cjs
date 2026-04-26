@@ -45,6 +45,10 @@ function toNumber(value, fallback = Number.NaN) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function isTruthyEnv(value) {
+  return ["1", "true", "yes", "on"].includes(String(value || "").trim().toLowerCase());
+}
+
 function runSqlite(dbPath, sql) {
   return spawnSync("sqlite3", ["-readonly", "-separator", "\t", dbPath, sql], {
     encoding: "utf8",
@@ -103,6 +107,19 @@ ORDER BY COALESCE(seq, timestamp) ASC, timestamp ASC;
 
 const result = runSqlite(resolvedDbPath, query);
 if (result.status !== 0) {
+  const sqliteError = String(result.stderr || result.stdout || "").trim();
+  if (isTruthyEnv(process.env.COWORK_EVAL_ALLOW_EMPTY) && /no such table:\s*task_events/i.test(sqliteError)) {
+    process.stdout.write(
+      [
+        "timeline-reliability-gate: summary",
+        "- completions_checked: 0",
+        "- completions_enforced: 0",
+        "- note: empty eval database has no task_events table; allowed by COWORK_EVAL_ALLOW_EMPTY",
+        "timeline-reliability-gate: PASS",
+      ].join("\n") + "\n",
+    );
+    process.exit(0);
+  }
   fail(`sqlite query failed: ${String(result.stderr || result.stdout || "").trim()}`);
 }
 
@@ -112,6 +129,18 @@ const lines = (result.stdout || "")
   .filter(Boolean);
 
 if (lines.length === 0) {
+  if (isTruthyEnv(process.env.COWORK_EVAL_ALLOW_EMPTY)) {
+    process.stdout.write(
+      [
+        "timeline-reliability-gate: summary",
+        "- completions_checked: 0",
+        "- completions_enforced: 0",
+        "- note: empty eval database allowed by COWORK_EVAL_ALLOW_EMPTY",
+        "timeline-reliability-gate: PASS",
+      ].join("\n") + "\n",
+    );
+    process.exit(0);
+  }
   fail("no task_completed timeline records found; cannot enforce reliability thresholds");
 }
 

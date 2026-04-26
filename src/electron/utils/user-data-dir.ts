@@ -3,6 +3,11 @@ import path from "path";
 
 const PROFILE_DIR_NAME = "profiles";
 const DEFAULT_PROFILE_ID = "default";
+const DEFAULT_ELECTRON_USER_DATA_DIR_NAME = "cowork-os";
+
+export function getStableElectronUserDataRoot(appDataPath: string): string {
+  return path.join(appDataPath, DEFAULT_ELECTRON_USER_DATA_DIR_NAME);
+}
 
 function expandPath(input: string): string {
   const trimmed = input.trim();
@@ -33,9 +38,8 @@ function getElectronDefaultUserDataRoot(): string | null {
     if (app?.getPath) {
       const appDataPath =
         typeof app.getPath === "function" ? String(app.getPath("appData") || "") : "";
-      const appName = typeof app.getName === "function" ? String(app.getName() || "") : "";
-      if (appDataPath && appName) {
-        return path.join(appDataPath, appName);
+      if (appDataPath) {
+        return getStableElectronUserDataRoot(appDataPath);
       }
       return app.getPath("userData");
     }

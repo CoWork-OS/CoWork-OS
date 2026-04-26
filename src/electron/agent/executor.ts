@@ -955,9 +955,16 @@ export class TaskExecutor {
     return String(text || "").replace(/\s+/g, " ").trim().toLowerCase().slice(0, 1000);
   }
 
+  private getAddressedRequiredDecisionPromptSet(): Set<string> {
+    if (!(this.addressedRequiredDecisionPrompts instanceof Set)) {
+      this.addressedRequiredDecisionPrompts = new Set();
+    }
+    return this.addressedRequiredDecisionPrompts;
+  }
+
   private hasUserAddressedRequiredDecision(text: string): boolean {
     const key = this.getRequiredDecisionPromptKey(text);
-    return key.length > 0 && this.addressedRequiredDecisionPrompts.has(key);
+    return key.length > 0 && this.getAddressedRequiredDecisionPromptSet().has(key);
   }
 
   private markRequiredDecisionAddressedByUserInput(): void {
@@ -968,7 +975,7 @@ export class TaskExecutor {
 
     const key = this.getRequiredDecisionPromptKey(this.lastRequiredDecisionPrompt);
     if (key) {
-      this.addressedRequiredDecisionPrompts.add(key);
+      this.getAddressedRequiredDecisionPromptSet().add(key);
     }
     this.lastAwaitingUserInputReasonCode = null;
     this.lastPauseReason = null;

@@ -1,6 +1,6 @@
 {
   "name": "cowork-os",
-  "version": "0.5.35",
+  "version": "0.5.40",
   "description": "CoWork OS - Local-first AI operating system for macOS and Windows",
   "overrides": {
     "@whiskeysockets/baileys": {
@@ -127,6 +127,7 @@
     "@aws-sdk/client-bedrock": "^3.1009.0",
     "@aws-sdk/client-bedrock-runtime": "^3.1009.0",
     "@chenglou/pretext": "^0.0.3",
+    "@electron/rebuild": "^4.0.4",
     "@google/generative-ai": "^0.24.1",
     "@grammyjs/runner": "^2.0.3",
     "@grammyjs/transformer-throttler": "^1.2.1",
@@ -190,7 +191,6 @@
     "@typescript-eslint/parser": "^8.53.1",
     "@vitejs/plugin-react": "^5.1.2",
     "@vitest/coverage-v8": "^4.0.18",
-    "@electron/rebuild": "^4.0.3",
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
     "electron-builder": "^26.7.0",

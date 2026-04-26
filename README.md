@@ -22,7 +22,7 @@
 <p align="center">
   <a href="docs/getting-started.md">Getting Started</a> &middot;
   <a href="docs/showcase.md">Use Cases</a> &middot;
-  <a href="docs/release-notes-0.5.35.md">Release Notes 0.5.35</a> &middot;
+  <a href="docs/release-notes-0.5.40.md">Release Notes 0.5.40</a> &middot;
   <a href="docs/integration-skill-bootstrap-lifecycle.md">Platform Updates</a> &middot;
   <a href="docs/">Documentation</a> &middot;
   <a href="CHANGELOG.md">Changelog</a> &middot;
@@ -62,7 +62,7 @@
 - **Provider-aware prompt caching** — Prompt caching is on by default for supported routes. CoWork keeps stable system sections cacheable, keeps volatile turn context out of the cached prefix, uses Anthropic automatic caching when available, falls back to explicit Claude breakpoints on OpenRouter, and derives stable OpenAI-family cache keys for GPT routes such as Azure `gpt-5.4` / `gpt-5.4-mini`.
 - **Usage Insights** — Dashboard showing task stats, cost/token tracking by model, activity heatmaps, top skills, per-pack analytics, per-persona success/retry metrics, and task-result satisfaction signals.
 - **ChatGPT History Import** — Import your full ChatGPT conversation history. CoWork OS instantly knows your preferences, past projects, and context — no cold start. All data stays encrypted on your machine and never leaves it.
-- **Computer use (macOS)** — Native desktop control via `computer_*` tools with a single active session, safety overlay, **Esc** to abort, per-app session consent (not per click), and a Settings onboarding panel for Accessibility + Screen Recording. Prefer browser and shell tools for web and repo work; computer use is routed as a last-resort lane in policy and planning guidance. **Documentation:** [docs/computer-use.md](docs/computer-use.md).
+- **Computer use (macOS)** — Native desktop control via `screenshot`, `click`, `type_text`, `keypress`, and related tools with helper-targeted Accessibility + Screen Recording permissions, single-session sequential execution, **Esc** to abort, screenshot-relative coordinates, and stale-`captureId` protection. Prefer browser and shell tools for web and repo work; computer use is routed as a last-resort lane in policy and planning guidance. **Documentation:** [docs/computer-use.md](docs/computer-use.md).
 - **Security-first** — Approval workflows, sandboxed execution, configurable guardrails, encrypted storage, and a verified suite of 4,932 automated tests across 390 test files.
 - **Structured guidance** — In plan-mode flows, the agent can pause with short multiple-choice prompts instead of ambiguous free-text follow-ups.
 - **Runtime resilience** — Main interactive tasks run without an implicit turn window, while explicit turn caps, lifetime safety fuses, context-overflow recovery, and safe path normalization keep long-running work moving without silent file drift.
@@ -86,7 +86,7 @@ See [Workflow Intelligence](docs/workflow-intelligence.md), [Core Automation](do
 
 ### Latest Release
 
-**`0.5.35`** packages Managed Agents and Managed Sessions, optional Supermemory integration, the Task Trace Debugger, the bundled `novelist` skill, explicit-only main-task turn budgets, and the latest renderer, briefing, and release-hardening updates into the latest release. Start with [Release Notes 0.5.35](docs/release-notes-0.5.35.md), then [Features](docs/features.md), [Getting Started](docs/getting-started.md), [Channels](docs/channels.md), and the [Changelog](CHANGELOG.md).
+**`0.5.40`** packages Chronicle desktop screen context, Workflow Intelligence, routines, AgentMail, the expanded Inbox Agent, Managed Agents Hub improvements, multi-provider image generation, rich PPTX previews, LaTeX/PDF artifacts, and the bundled `kami` and `taste-skill` workflows into the latest release. Start with [Release Notes 0.5.40](docs/release-notes-0.5.40.md), then [Features](docs/features.md), [Getting Started](docs/getting-started.md), [Channels](docs/channels.md), and the [Changelog](CHANGELOG.md).
 
 ## Quick Start
 

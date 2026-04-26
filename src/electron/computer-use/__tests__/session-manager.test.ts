@@ -60,7 +60,7 @@ describe("ComputerUseSessionManager", () => {
     const sm = ComputerUseSessionManager.getInstance();
     sm.acquire("task-a", makeDaemon());
     await sm.abortSession("task-a");
-    const pm = sm.acquire("task-b", makeDaemon());
-    expect(pm.getSessionId()).toBeDefined();
+    sm.acquire("task-b", makeDaemon());
+    expect(sm.getActiveTaskId()).toBe("task-b");
   });
 });

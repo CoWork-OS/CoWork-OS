@@ -376,6 +376,69 @@ describe("AzureOpenAIProvider", () => {
     expect(body.reasoning).toEqual({ effort: "xhigh" });
   });
 
+  it("falls back to Responses API when chat completions reject tools with reasoning effort", async () => {
+    const unsupportedToolsWithReasoning = {
+      error: {
+        message:
+          "Function tools with reasoning_effort are not supported for gpt-5.5 in /v1/chat/completions. Please use /v1/responses instead.",
+      },
+    };
+    mockFetch
+      .mockResolvedValueOnce(
+        createErrorResponse(400, "Bad Request", unsupportedToolsWithReasoning),
+      )
+      .mockResolvedValueOnce(
+        createErrorResponse(400, "Bad Request", unsupportedToolsWithReasoning),
+      )
+      .mockResolvedValueOnce(
+        createOkResponse({
+          output: [{ type: "message", content: [{ type: "output_text", text: "planned" }] }],
+          usage: { input_tokens: 11, output_tokens: 5 },
+        }),
+      );
+
+    const provider = new AzureOpenAIProvider(baseConfig);
+    const response = await provider.createMessage({
+      model: "gpt-5.5",
+      maxTokens: 20,
+      system: "system prompt",
+      messages: [{ role: "user", content: "hi" }],
+      tools: [
+        {
+          name: "write_file",
+          description: "Write a file",
+          input_schema: {
+            type: "object",
+            properties: {
+              path: { type: "string" },
+              content: { type: "string" },
+            },
+            required: ["path", "content"],
+          },
+        },
+      ],
+      toolChoice: "none",
+    });
+
+    expect(response.content).toEqual([{ type: "text", text: "planned" }]);
+    expect(response.usage).toEqual({ inputTokens: 11, outputTokens: 5 });
+
+    const [firstUrl, firstOptions] = mockFetch.mock.calls[0];
+    const [secondUrl, secondOptions] = mockFetch.mock.calls[1];
+    const [responsesUrl, responsesOptions] = mockFetch.mock.calls[2];
+    expect(firstUrl).toContain("/chat/completions?api-version=2024-05-01");
+    expect(secondUrl).toContain("/chat/completions?api-version=2024-05-01");
+    expect(JSON.parse(firstOptions.body).reasoning_effort).toBe("xhigh");
+    expect(JSON.parse(secondOptions.body).reasoning_effort).toBe("high");
+    expect(responsesUrl).toBe("https://example.openai.azure.com/openai/v1/responses");
+
+    const responsesBody = JSON.parse(responsesOptions.body);
+    expect(responsesBody.model).toBe("gpt-5.5");
+    expect(responsesBody.reasoning).toEqual({ effort: "xhigh" });
+    expect(responsesBody.tools).toHaveLength(1);
+    expect(responsesBody.tool_choice).toBe("none");
+  });
+
   it("sends prompt_cache_key with stable instructions and volatile system input on Responses fallback", async () => {
     mockFetch
       .mockResolvedValueOnce(

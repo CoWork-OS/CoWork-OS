@@ -1,4 +1,4 @@
-# I Gave CoWork OS A Subconscious, And Now It Self-Improves 24/7 | Full Guide
+# I Gave CoWork OS Workflow Intelligence, And Now It Learns From Reviewable Work | Full Guide
 
 Most people hear "continual learning" and immediately think:
 
@@ -12,15 +12,16 @@ In other words:
 
 we did not build a vague "self-improving AI" story.
 
-We gave CoWork OS a real subconscious and a governed learning loop around it.
+We gave CoWork OS Workflow Intelligence: a governed loop that turns memory, heartbeat signals, reflection, and user-reviewed suggestions into durable learning.
 
 That loop now runs through the always-on core:
 
-- `Memory`
-- `Heartbeat`
-- `Subconscious`
+- `Memory` as the source of truth
+- `Heartbeat` as the scheduler
+- internal `Reflection` as the evaluator
+- reviewable `Suggestions` as the user-facing output
 
-And that is what lets CoWork OS improve 24/7 without turning the whole product into an opaque autopilot.
+And that is what lets CoWork OS improve without turning the whole product into an opaque autopilot.
 
 For CoWork OS, continual learning happens across three layers:
 
@@ -38,7 +39,7 @@ That means:
 
 - we do **not** assume per-user weight updates are the main path to improvement
 - we **do** treat execution traces as the raw material for improvement
-- we **do** turn those traces into memory, failure clusters, eval cases, gated experiments, and promoted learnings
+- we **do** turn those traces into memory candidates, failure clusters, eval cases, gated experiments, promoted learnings, and better-ranked suggestions
 - we keep that loop visible in Mission Control instead of hiding it behind vague “the agent gets smarter” language
 
 In practice, CoWork OS's continual-learning story is:
@@ -82,7 +83,7 @@ Harness learning is how the runtime itself improves.
 In CoWork OS, that means improving the operating system around the model:
 
 - automation policy
-- subconscious settings
+- workflow-intelligence settings
 - failure handling
 - eval coverage
 - runtime routing and guardrails
@@ -93,7 +94,8 @@ The always-on core runtime is strict:
 
 - `Memory`
 - `Heartbeat`
-- `Subconscious`
+- `Reflection`
+- `Suggestions`
 
 Everything else is a surrounding surface:
 
@@ -116,7 +118,7 @@ In CoWork OS, context learning includes:
 - hot-path memory capture
 - offline memory distillation
 - scoped memory by workspace/profile/target
-- subconscious journals and dream artifacts
+- workflow-intelligence journals and reflection artifacts
 - promoted learnings from experiments and failures
 
 This is the layer where the runtime becomes more useful over time without needing to retrain the base model.
@@ -135,8 +137,9 @@ A trace is not just a final answer. It is the execution path:
 
 - what signals arrived
 - what Heartbeat noticed
-- what Subconscious hypothesized
+- what Reflection evaluated
 - what was dispatched
+- what suggestion the user acted on, edited, snoozed, dismissed, or ignored
 - what succeeded or failed
 - what approval posture applied
 - what outcome the operator actually got
@@ -161,7 +164,7 @@ That means the learning loop is attached to:
 
 This avoids a common product mistake where every surface tries to own cognition at once.
 
-Digital Twins stay opt-in and visible, but they do not own Heartbeat, Subconscious, or Memory state.
+Digital Twins stay opt-in and visible, but they do not own Heartbeat, Workflow Intelligence, or Memory state.
 
 ### 2. Memory is updated on both the hot path and the offline path
 
@@ -221,7 +224,7 @@ The harness loop is gated:
 In the current implementation, promotion is narrow and explicit:
 
 - automation-profile changes can be promoted
-- subconscious-setting changes can be promoted
+- workflow-intelligence-setting changes can be promoted
 - memory-policy experiments are still review-only
 
 This is the right shape for a production runtime. It lets the system improve, but only within bounded surfaces that operators can inspect.
@@ -278,7 +281,7 @@ if everything owns learning, nothing stays legible.
 
 That is why CoWork OS made the hard cut:
 
-- `Memory + Heartbeat + Subconscious` are the core runtime
+- `Workflow Intelligence` is the core runtime: Memory, Heartbeat, internal Reflection, and reviewable Suggestions
 - Mission Control observes and configures that runtime
 - Triggers only normalize ingress
 - Devices only route execution
@@ -332,6 +335,6 @@ That is the real learning loop in CoWork OS.
 
 - [Core Automation](core-automation.md)
 - [Heartbeat v3](heartbeat-v3.md)
-- [Subconscious Reflective Loop](subconscious-loop.md)
+- [Workflow Intelligence](workflow-intelligence.md)
 - [Mission Control](mission-control.md)
 - [Features](features.md)

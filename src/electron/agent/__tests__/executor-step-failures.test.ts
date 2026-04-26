@@ -5,7 +5,7 @@
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
-import { TaskExecutor } from "../executor";
+import { AwaitingUserInputError, TaskExecutor } from "../executor";
 import type { LLMResponse } from "../llm";
 
 vi.mock("electron", () => ({
@@ -160,6 +160,7 @@ function createExecutorWithStubs(responses: LLMResponse[], toolResults: Record<s
     logEvent: vi.fn(),
     getTaskEvents: vi.fn().mockReturnValue([]),
     updateTask: vi.fn(),
+    updateTaskStatus: vi.fn(),
   };
   applyExecutorFieldDefaults(executor);
   executor.contextManager = {
@@ -272,7 +273,7 @@ function createExecutorWithStubs(responses: LLMResponse[], toolResults: Record<s
   executor.abortController = new AbortController();
 
   return executor as TaskExecutor & {
-    daemon: { logEvent: ReturnType<typeof vi.fn> };
+    daemon: { logEvent: ReturnType<typeof vi.fn>; updateTaskStatus: ReturnType<typeof vi.fn> };
     toolRegistry: { executeTool: ReturnType<typeof vi.fn> };
   };
 }
@@ -295,6 +296,7 @@ function createExecutorWithLLMHandler(handler: (messages: Any[]) => LLMResponse)
     logEvent: vi.fn(),
     getTaskEvents: vi.fn().mockReturnValue([]),
     updateTask: vi.fn(),
+    updateTaskStatus: vi.fn(),
   };
   applyExecutorFieldDefaults(executor);
   executor.contextManager = {
@@ -1336,6 +1338,46 @@ relationship_memory:
       expect.objectContaining({
         message: expect.stringContaining("Please choose the required input file path"),
         reason: "required_decision",
+      }),
+    );
+  });
+
+  it("does not render internal user-action reason codes as pause messages", async () => {
+    executor = createExecutorWithStubs([], {});
+    const step: Any = {
+      id: "verify-release",
+      description: "Verify the release event",
+      status: "pending",
+    };
+    const userMessage =
+      "I could not fetch the deployment safety page needed to verify the release. Reply with whether I should continue using the available OpenAI announcement or stop here.";
+
+    (executor as Any).plan = { steps: [step] };
+    (executor as Any).preflightWorkspaceCheck = vi.fn().mockReturnValue(false);
+    (executor as Any).maybeRealignLowAlignmentStep = vi.fn().mockResolvedValue(false);
+    (executor as Any).maybeDecomposeComplexStep = vi.fn().mockResolvedValue(false);
+    (executor as Any).executeStep = vi.fn().mockRejectedValue(
+      new AwaitingUserInputError("user_action_required_failure", {
+        reasonCode: "user_action_required_failure",
+        userMessage,
+      }),
+    );
+
+    await (executor as Any).executePlan();
+
+    expect((executor as Any).daemon.logEvent).toHaveBeenCalledWith(
+      "task-1",
+      "task_paused",
+      expect.objectContaining({
+        message: userMessage,
+        reason: "user_action_required_failure",
+      }),
+    );
+    expect((executor as Any).daemon.logEvent).not.toHaveBeenCalledWith(
+      "task-1",
+      "task_paused",
+      expect.objectContaining({
+        message: "user_action_required_failure",
       }),
     );
   });

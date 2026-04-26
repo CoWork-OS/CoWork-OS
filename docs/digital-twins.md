@@ -6,7 +6,7 @@ A persona template now bundles prompt/personality defaults, recommended skills, 
 
 Access from **Settings** > **Digital Twins** or **Mission Control** > **Add Digital Twin**. For company-ops workflows, you can also open Digital Twins from **Settings** > **Companies** to create operators in company context. Digital twins can also be activated through [Plugin Packs](plugin-packs.md) — 7 of the 10 bundled packs link directly to a persona template.
 
-Digital Twins are intentionally separate from the core automation runtime. See [Core Automation](core-automation.md) and [Heartbeat v3](heartbeat-v3.md) for the architecture source of truth.
+Digital Twins are intentionally separate from the core automation runtime. See [Workflow Intelligence](workflow-intelligence.md), [Core Automation](core-automation.md), and [Heartbeat v3](heartbeat-v3.md) for the architecture source of truth.
 
 ---
 
@@ -25,12 +25,12 @@ A JSON blueprint defining a digital twin. Each template specifies:
 
 ### Relation To Core Automation
 
-Digital Twins are not direct heartbeat or subconscious owners.
+Digital Twins are not direct heartbeat or Workflow Intelligence owners.
 
 That means:
 
 - Twin activation does not automatically create an automation profile
-- Twin templates do not own heartbeat cadence, cooldown, budget, or subconscious target state
+- Twin templates do not own heartbeat cadence, cooldown, budget, or workflow-intelligence target state
 - Mission Control can still show the role, but core automation is attached separately through automation profiles
 
 If you want a twin-backed operator to become always-on, activate the template first, then attach a separate automation profile to that role.
@@ -161,7 +161,7 @@ What activation does **not** create:
 
 - an automation profile
 - heartbeat ownership
-- subconscious target ownership
+- workflow-intelligence target ownership
 - memory distillation policy
 
 ---
@@ -175,7 +175,7 @@ Once activated, a twin mainly operates as a role/persona surface plus an on-dema
 If a twin-backed role also has an automation profile, it can participate in:
 
 - Heartbeat v3 review
-- Subconscious reflective runs
+- Workflow Intelligence reflection and suggestions
 - core traces and learnings
 - Mission Control core-harness monitoring
 
@@ -347,7 +347,7 @@ AgentRole (SQLite)
     ↓ optional attach
 AutomationProfile (SQLite)
     ↓
-Heartbeat v3 + Subconscious + Memory
+Workflow Intelligence
     ↓
 Mission Control + Task system + Run records
 ```

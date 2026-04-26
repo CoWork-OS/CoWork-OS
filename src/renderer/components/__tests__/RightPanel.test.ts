@@ -6,6 +6,7 @@ import {
   RightPanel,
   getProgressSectionMaterialSignature,
   getQueueSectionMaterialSignature,
+  getVisibleProgressSteps,
 } from "../RightPanel";
 
 describe("RightPanel checklist rendering", () => {
@@ -262,6 +263,33 @@ describe("RightPanel checklist rendering", () => {
     });
 
     expect(signatureA).toBe(signatureB);
+  });
+
+  it("compacts long progress plans around the current work", () => {
+    const planSteps = [
+      { id: "step-1", description: "Completed step 1", status: "completed" },
+      { id: "step-2", description: "Completed step 2", status: "completed" },
+      { id: "step-3", description: "Completed step 3", status: "completed" },
+      { id: "step-4", description: "Current step", status: "in_progress" },
+      { id: "step-5", description: "Pending step 5", status: "pending" },
+      { id: "step-6", description: "Pending step 6", status: "pending" },
+      { id: "step-7", description: "Pending step 7", status: "pending" },
+      { id: "step-8", description: "Pending step 8", status: "pending" },
+      { id: "step-9", description: "Pending step 9", status: "pending" },
+      { id: "step-10", description: "Pending step 10", status: "pending" },
+    ] as Any;
+
+    const visible = getVisibleProgressSteps(planSteps);
+
+    expect(visible.map((step) => step.description)).toEqual([
+      "1 completed step",
+      "Completed step 2",
+      "Completed step 3",
+      "Current step",
+      "Pending step 5",
+      "Pending step 6",
+      "4 planned steps",
+    ]);
   });
 
   it("changes the queue material signature only when queue content changes", () => {

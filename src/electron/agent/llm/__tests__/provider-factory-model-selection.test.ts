@@ -166,6 +166,40 @@ describe("LLMProviderFactory model selection persistence", () => {
     );
     expect(updatedBedrock.bedrock?.model).toBe("us.anthropic.claude-opus-4-6-20260115-v1:0");
   });
+
+  it("can switch provider and model in one global selection", () => {
+    const settings: LLMSettings = {
+      providerType: "anthropic",
+      modelKey: "sonnet-4-5",
+      openai: { model: "gpt-4o-mini" },
+    };
+
+    const updated = LLMProviderFactory.applyModelSelection(
+      settings,
+      "gpt-4o",
+      "openai",
+    );
+
+    expect(updated.providerType).toBe("openai");
+    expect(updated.openai?.model).toBe("gpt-4o");
+    expect(updated.modelKey).toBe("sonnet-4-5");
+  });
+
+  it("stores Azure reasoning effort without changing unsupported provider request config", () => {
+    const settings: LLMSettings = {
+      providerType: "azure",
+      modelKey: "sonnet-4-5",
+      azure: { deployment: "gpt-5-deployment" },
+    };
+
+    const updated = LLMProviderFactory.applyReasoningEffortSelection(
+      settings,
+      "azure",
+      "high",
+    );
+
+    expect(updated.azure?.reasoningEffort).toBe("high");
+  });
 });
 
 describe("LLMProviderFactory profile-based task model routing", () => {

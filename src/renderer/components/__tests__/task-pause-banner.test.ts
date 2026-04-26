@@ -33,6 +33,19 @@ describe("TaskPauseBanner", () => {
     expect(markup).toContain("Type anything below to continue");
   });
 
+  it("hides internal user-action reason codes and explains the decision needed", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(TaskPauseBanner, {
+        message: "user_action_required_failure",
+        reasonCode: "user_action_required_failure",
+      }),
+    );
+
+    expect(markup).toContain("I need your decision to continue.");
+    expect(markup).toContain("Reply with what you want me to do next");
+    expect(markup).not.toContain("user_action_required_failure");
+  });
+
   it("renders markdown formatting in the details content", () => {
     const markup = renderToStaticMarkup(
       React.createElement(TaskPauseBannerDetailsContent, {

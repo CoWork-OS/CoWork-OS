@@ -30,7 +30,9 @@ import { MailboxAutomationRegistry } from "./MailboxAutomationRegistry";
 import { AgentMailClient } from "../agentmail/AgentMailClient";
 import { AgentMailAdminService } from "../agentmail/AgentMailAdminService";
 import { mailboxLlmQuickReplies, mailboxLlmSimilarThreadIds } from "./mailbox-inbox-product-llm";
+import { mergeMailboxCapabilities, resolveMailboxProviderBackend } from "./MailboxProviderClient";
 import { getMailboxForwardingServiceInstance } from "./mailbox-forwarding-singleton";
+import { parsePdfBuffer } from "../utils/pdf-parser";
 import {
   ChannelPreferenceSummary,
   ContactIdentity,
@@ -49,6 +51,15 @@ import {
   MailboxCommitment,
   MailboxCommitmentState,
   MailboxContactMemory,
+  MailboxAskInput,
+  MailboxAskResult,
+  MailboxAttachmentRecord,
+  MailboxAttachmentSummary,
+  MailboxClientState,
+  MailboxComposeDraft,
+  MailboxComposeDraftInput,
+  MailboxComposeDraftPatch,
+  MailboxDomainCategory,
   MailboxDigest,
   MailboxDigestSnapshot,
   MailboxDraftOptions,
@@ -78,21 +89,35 @@ import {
   MailboxProposalStatus,
   MailboxProposalType,
   MailboxProvider,
+  MailboxProviderBackend,
+  MailboxProviderCapability,
+  MailboxQueuedAction,
   MailboxResearchResult,
+  MailboxFolder,
+  MailboxIdentity,
+  MailboxLabel,
+  MailboxOutgoingMessage,
   MailboxReclassifyInput,
   MailboxReclassifyResult,
+  MailboxRecipientInput,
+  MailboxSignature,
   MailboxSummaryCard,
+  MailboxSyncHealth,
   MailboxSyncResult,
   MailboxSyncStatus,
   MailboxSyncProgress,
+  MailboxSenderCleanupDigest,
   MailboxThreadCategory,
   MailboxThreadDetail,
   MailboxThreadListItem,
   MailboxThreadSortOrder,
   MailboxThreadMailboxView,
+  MailboxTodayBucket,
+  MailboxTodayDigest,
   RelationshipTimelineEvent,
   RelationshipTimelineQuery,
   getMailboxNoReplySender,
+  normalizeMailboxEmailAddress,
   stripMailboxSummaryHtmlArtifacts,
 } from "../../shared/mailbox";
 import { MICROSOFT_EMAIL_DEFAULT_TENANT } from "../../shared/microsoft-email";
@@ -106,8 +131,108 @@ type MailboxAccountRow = {
   display_name: string | null;
   status: "connected" | "degraded" | "disconnected";
   capabilities_json: string | null;
+  sync_cursor?: string | null;
   last_synced_at: number | null;
   classification_initial_batch_at: number | null;
+};
+
+type MailboxFolderRow = {
+  id: string;
+  account_id: string;
+  provider_folder_id: string;
+  name: string;
+  role: MailboxFolder["role"];
+  unread_count: number | null;
+  total_count: number | null;
+  created_at: number;
+  updated_at: number;
+};
+
+type MailboxLabelRow = {
+  id: string;
+  account_id: string;
+  provider_label_id: string;
+  name: string;
+  color: string | null;
+  unread_count: number | null;
+  total_count: number | null;
+  created_at: number;
+  updated_at: number;
+};
+
+type MailboxIdentityRow = {
+  id: string;
+  account_id: string;
+  provider_identity_id: string | null;
+  email: string;
+  display_name: string | null;
+  signature_id: string | null;
+  is_default: number;
+  created_at: number;
+  updated_at: number;
+};
+
+type MailboxSignatureRow = {
+  id: string;
+  account_id: string;
+  name: string;
+  body_html: string | null;
+  body_text: string;
+  is_default: number;
+  created_at: number;
+  updated_at: number;
+};
+
+type MailboxComposeDraftRow = {
+  id: string;
+  account_id: string;
+  thread_id: string | null;
+  provider_draft_id: string | null;
+  mode: MailboxComposeDraft["mode"];
+  status: MailboxComposeDraft["status"];
+  subject: string;
+  body_text: string;
+  body_html: string | null;
+  to_json: string | null;
+  cc_json: string | null;
+  bcc_json: string | null;
+  identity_id: string | null;
+  signature_id: string | null;
+  attachments_json: string | null;
+  scheduled_at: number | null;
+  send_after: number | null;
+  latest_error: string | null;
+  created_at: number;
+  updated_at: number;
+};
+
+type MailboxOutgoingMessageRow = {
+  id: string;
+  draft_id: string | null;
+  account_id: string;
+  status: MailboxOutgoingMessage["status"];
+  provider_message_id: string | null;
+  scheduled_at: number | null;
+  send_after: number | null;
+  latest_error: string | null;
+  created_at: number;
+  updated_at: number;
+};
+
+type MailboxQueuedActionRow = {
+  id: string;
+  account_id: string | null;
+  thread_id: string | null;
+  draft_id: string | null;
+  action_type: MailboxQueuedAction["type"];
+  status: MailboxQueuedAction["status"];
+  payload_json: string | null;
+  attempts: number;
+  next_attempt_at: number | null;
+  latest_error: string | null;
+  undo_of_action_id: string | null;
+  created_at: number;
+  updated_at: number;
 };
 
 type MailboxThreadRow = {
@@ -120,6 +245,9 @@ type MailboxThreadRow = {
   participants_json: string | null;
   labels_json: string | null;
   category: MailboxThreadCategory;
+  today_bucket: MailboxTodayBucket;
+  domain_category: MailboxDomainCategory;
+  classification_rationale: string | null;
   priority_score: number;
   urgency_score: number;
   needs_reply: number;
@@ -162,6 +290,24 @@ type MailboxMessageRow = {
 type MailboxMessageMetadata = {
   imapUid?: number;
   rfcMessageId?: string;
+};
+
+type MailboxAttachmentRow = {
+  id: string;
+  thread_id: string;
+  message_id: string;
+  provider: MailboxProvider;
+  provider_message_id: string;
+  provider_attachment_id: string | null;
+  filename: string;
+  mime_type: string | null;
+  size: number | null;
+  extraction_status: MailboxAttachmentSummary["extractionStatus"];
+  extraction_error: string | null;
+  text_content?: string | null;
+  extraction_mode?: string | null;
+  created_at: number;
+  updated_at: number;
 };
 
 type MailboxSummaryRow = {
@@ -305,6 +451,8 @@ type ScheduleSuggestion = {
 
 type MailboxClassificationResult = {
   category: MailboxThreadCategory;
+  todayBucket: MailboxTodayBucket;
+  domainCategory: MailboxDomainCategory;
   needsReply: boolean;
   priorityScore: number;
   urgencyScore: number;
@@ -338,6 +486,14 @@ type MailboxClassificationSnapshot = {
   }>;
 };
 
+type NormalizedMailboxAttachment = {
+  id: string;
+  providerAttachmentId?: string;
+  filename: string;
+  mimeType?: string;
+  size?: number;
+};
+
 type DraftStyleProfile = {
   greeting?: string;
   signoff?: string;
@@ -354,9 +510,16 @@ type MailboxCipherState = {
   machineId: string | null;
 };
 
+type MailboxServiceOptions = {
+  autoSync?: boolean;
+};
+
 const MAILBOX_CIPHER_PREFIX = "mbox:";
 const MAILBOX_CIPHER_SALT = "cowork-mailbox-content-v1";
 const MAILBOX_MACHINE_ID_FILE = ".cowork-machine-id";
+const MAILBOX_AUTO_SYNC_INTERVAL_MS = 2 * 60 * 1000;
+const MAILBOX_AUTO_SYNC_INITIAL_DELAY_MS = 30 * 1000;
+const MAILBOX_AUTO_SYNC_LIMIT = 25;
 
 let mailboxCipherState: MailboxCipherState | null = null;
 
@@ -511,6 +674,7 @@ type NormalizedThreadInput = {
     snippet: string;
     body: string;
     bodyHtml?: string;
+    attachments?: NormalizedMailboxAttachment[];
     receivedAt: number;
     unread: boolean;
   }>;
@@ -909,6 +1073,30 @@ function extractGmailHtml(payload: Any): string {
   return "";
 }
 
+function extractGmailAttachments(payload: Any, messageId: string): NormalizedMailboxAttachment[] {
+  const attachments: NormalizedMailboxAttachment[] = [];
+  const visit = (part: Any): void => {
+    if (!part || typeof part !== "object") return;
+    const filename = asString(part.filename);
+    const body = asObject(part.body);
+    const attachmentId = asString(body?.attachmentId);
+    if (filename && attachmentId) {
+      const idSeed = `${messageId}:${attachmentId}:${filename}`;
+      attachments.push({
+        id: `gmail-attachment:${sha256(idSeed).slice(0, 24)}`,
+        providerAttachmentId: attachmentId,
+        filename,
+        mimeType: asString(part.mimeType) || undefined,
+        size: asNumber(body?.size) ?? undefined,
+      });
+    }
+    const parts = Array.isArray(part.parts) ? part.parts : [];
+    for (const child of parts) visit(child);
+  };
+  visit(payload);
+  return attachments;
+}
+
 function uniqueParticipants(participants: MailboxParticipant[]): MailboxParticipant[] {
   const byEmail = new Map<string, MailboxParticipant>();
   for (const participant of participants) {
@@ -1099,11 +1287,14 @@ function priorityBandFromScore(score: number): MailboxPriorityBand {
   return "low";
 }
 
-const MAILBOX_CLASSIFIER_PROMPT_VERSION = "v2";
+const MAILBOX_CLASSIFIER_PROMPT_VERSION = "v3";
 const MAILBOX_CLASSIFIER_MAX_BATCH = 50;
 const MAILBOX_CLASSIFIER_MAX_MESSAGES = 6;
 const MAILBOX_CLASSIFIER_MAX_TOKENS = 1400;
 const MAILBOX_CLASSIFIER_MIN_CONFIDENCE = 0.45;
+const MAILBOX_ATTACHMENT_TEXT_MAX_BYTES = 12 * 1024 * 1024;
+const MAILBOX_ATTACHMENT_TEXT_MAX_CHARS = 24000;
+const MAILBOX_ASK_MAX_TOKENS = 900;
 
 function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
@@ -1117,6 +1308,109 @@ function clampScore(value: number): number {
 function clampConfidence(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(1, value));
+}
+
+function buildMailboxFtsQuery(query: string): string {
+  return query
+    .split(/\s+/)
+    .map((token) => token.replace(/["']/g, "").trim())
+    .filter((token) => token.length >= 2)
+    .slice(0, 8)
+    .map((token) => `"${token}"`)
+    .join(" OR ");
+}
+
+function isSupportedMailboxAttachment(filename: string, mimeType?: string | null): boolean {
+  const lower = filename.toLowerCase();
+  const type = (mimeType || "").toLowerCase();
+  return (
+    type.startsWith("text/") ||
+    type === "application/pdf" ||
+    type === "text/html" ||
+    type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+    /\.(txt|md|markdown|csv|json|html|htm|pdf|docx)$/i.test(lower)
+  );
+}
+
+const VALID_MAILBOX_TODAY_BUCKETS: MailboxTodayBucket[] = [
+  "needs_action",
+  "happening_today",
+  "good_to_know",
+  "more_to_browse",
+];
+
+const VALID_MAILBOX_DOMAIN_CATEGORIES: MailboxDomainCategory[] = [
+  "travel",
+  "packages",
+  "receipts",
+  "bills",
+  "shopping",
+  "newsletters",
+  "events",
+  "finance",
+  "customer",
+  "hiring",
+  "approvals",
+  "ops",
+  "personal",
+  "other",
+];
+
+function normalizeTodayBucket(value: unknown, fallback: MailboxTodayBucket): MailboxTodayBucket {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return VALID_MAILBOX_TODAY_BUCKETS.includes(normalized as MailboxTodayBucket)
+    ? (normalized as MailboxTodayBucket)
+    : fallback;
+}
+
+function normalizeDomainCategory(value: unknown, fallback: MailboxDomainCategory): MailboxDomainCategory {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return VALID_MAILBOX_DOMAIN_CATEGORIES.includes(normalized as MailboxDomainCategory)
+    ? (normalized as MailboxDomainCategory)
+    : fallback;
+}
+
+function deriveDomainCategoryFromText(text: string, category?: MailboxThreadCategory): MailboxDomainCategory {
+  const haystack = text.toLowerCase();
+  if (/\b(flight|boarding|hotel|airbnb|reservation|itinerary|train|rental car|trip)\b/.test(haystack)) return "travel";
+  if (/\b(package|delivered|delivery|shipment|tracking|ups|fedex|usps|dhl)\b/.test(haystack)) return "packages";
+  if (/\b(receipt|invoice|paid|payment confirmation|order confirmation|tax receipt)\b/.test(haystack)) return "receipts";
+  if (/\b(bill|statement|due|autopay|utility|subscription renewal)\b/.test(haystack)) return "bills";
+  if (/\b(order|cart|sale|discount|promo code|shop|purchase)\b/.test(haystack)) return "shopping";
+  if (/\b(newsletter|digest|roundup|unsubscribe|weekly update)\b/.test(haystack)) return "newsletters";
+  if (category === "calendar" || /\b(meeting|webinar|event|calendar|invite|rsvp|appointment)\b/.test(haystack)) return "events";
+  if (/\b(bank|finance|portfolio|payroll|expense|reimbursement|stripe|quickbooks)\b/.test(haystack)) return "finance";
+  if (/\b(customer|client|support|ticket|renewal|contract|account)\b/.test(haystack)) return "customer";
+  if (/\b(candidate|interview|recruit|resume|offer|hiring)\b/.test(haystack)) return "hiring";
+  if (/\b(approve|approval|sign off|review required|permission)\b/.test(haystack)) return "approvals";
+  if (/\b(incident|deploy|ops|outage|status page|alert|server|production)\b/.test(haystack)) return "ops";
+  if (category === "personal") return "personal";
+  return "other";
+}
+
+function deriveTodayBucket(params: {
+  category: MailboxThreadCategory;
+  domainCategory: MailboxDomainCategory;
+  needsReply: boolean;
+  priorityScore: number;
+  urgencyScore: number;
+  cleanupCandidate: boolean;
+  handled: boolean;
+  text: string;
+}): MailboxTodayBucket {
+  if (params.needsReply || params.priorityScore >= 60 || params.urgencyScore >= 60) return "needs_action";
+  const text = params.text.toLowerCase();
+  if (
+    params.category === "calendar" ||
+    ["travel", "packages", "bills", "events"].includes(params.domainCategory) ||
+    /\b(today|tomorrow|tonight|overdue|due|arriving|delivered|starts?|appointment)\b/.test(text)
+  ) {
+    return "happening_today";
+  }
+  if (params.cleanupCandidate || params.handled || ["newsletters", "shopping"].includes(params.domainCategory)) {
+    return "more_to_browse";
+  }
+  return "good_to_know";
 }
 
 function mailboxClassificationFingerprint(snapshot: MailboxClassificationSnapshot): string {
@@ -1157,6 +1451,23 @@ function mailboxClassificationFallback(
 ): MailboxClassificationResult {
   return {
     category: "other",
+    todayBucket: deriveTodayBucket({
+      category: "other",
+      domainCategory: deriveDomainCategoryFromText(
+        `${snapshot.subject} ${snapshot.snippet} ${snapshot.messages.map((message) => message.body).join(" ")}`,
+        "other",
+      ),
+      needsReply: false,
+      priorityScore: clampScore(snapshot.unreadCount > 0 ? 25 : 5),
+      urgencyScore: clampScore(snapshot.unreadCount > 0 ? 10 : 0),
+      cleanupCandidate: false,
+      handled: snapshot.unreadCount === 0,
+      text: `${snapshot.subject} ${snapshot.snippet}`,
+    }),
+    domainCategory: deriveDomainCategoryFromText(
+      `${snapshot.subject} ${snapshot.snippet} ${snapshot.messages.map((message) => message.body).join(" ")}`,
+      "other",
+    ),
     needsReply: false,
     priorityScore: clampScore(snapshot.unreadCount > 0 ? 25 : 5),
     urgencyScore: clampScore(snapshot.unreadCount > 0 ? 10 : 0),
@@ -1260,8 +1571,12 @@ export class MailboxService {
   private contactIdentityService: ContactIdentityService;
   private syncInFlight = false;
   private syncProgress: MailboxSyncProgress | null = null;
+  private autoSyncTimer: ReturnType<typeof setInterval> | null = null;
+  private autoSyncInitialTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastAutoSyncAttemptAt = 0;
+  private mailboxSearchIndexBackfillAttempted = false;
 
-  constructor(private db: Database.Database) {
+  constructor(private db: Database.Database, options: MailboxServiceOptions = {}) {
     this.channelRepo = new ChannelRepository(db);
     this.taskRepo = new TaskRepository(db);
     this.workspaceRepo = new WorkspaceRepository(db);
@@ -1269,6 +1584,9 @@ export class MailboxService {
     this.controlPlaneCore = new ControlPlaneCoreService(db);
     this.contactIdentityService = new ContactIdentityService(db);
     setMailboxServiceInstance(this);
+    if (options.autoSync === true && process.env.NODE_ENV !== "test") {
+      this.startAutoSyncLoop();
+    }
   }
 
   isAvailable(): boolean {
@@ -1278,6 +1596,49 @@ export class MailboxService {
       this.hasEmailChannel() ||
       Boolean(agentMailSettings.enabled && agentMailSettings.apiKey)
     );
+  }
+
+  private startAutoSyncLoop(): void {
+    if (this.autoSyncTimer) return;
+    const run = () => {
+      void this.runAutoSyncIfDue();
+    };
+    this.autoSyncInitialTimer = setTimeout(run, MAILBOX_AUTO_SYNC_INITIAL_DELAY_MS);
+    this.autoSyncInitialTimer.unref?.();
+    this.autoSyncTimer = setInterval(run, MAILBOX_AUTO_SYNC_INTERVAL_MS);
+    this.autoSyncTimer.unref?.();
+  }
+
+  private async runAutoSyncIfDue(): Promise<void> {
+    const now = Date.now();
+    if (this.syncInFlight) return;
+    if (now - this.lastAutoSyncAttemptAt < MAILBOX_AUTO_SYNC_INTERVAL_MS - 1_000) return;
+    if (!this.isAvailable()) return;
+
+    const status = await this.getSyncStatus();
+    if (
+      status.connected &&
+      status.lastSyncedAt &&
+      now - status.lastSyncedAt < MAILBOX_AUTO_SYNC_INTERVAL_MS
+    ) {
+      return;
+    }
+
+    this.lastAutoSyncAttemptAt = now;
+    try {
+      mailboxLogger.info("Mailbox autosync starting", {
+        accountCount: status.accounts.length,
+        lastSyncedAt: status.lastSyncedAt || null,
+      });
+      const result = await this.sync(MAILBOX_AUTO_SYNC_LIMIT);
+      mailboxLogger.info("Mailbox autosync complete", {
+        accountCount: result.accounts.length,
+        syncedThreads: result.syncedThreads,
+        syncedMessages: result.syncedMessages,
+      });
+    } catch (error) {
+      mailboxLogger.warn("Mailbox autosync failed:", error);
+    }
   }
 
   private getAgentMailClient(): AgentMailClient {
@@ -1298,7 +1659,7 @@ export class MailboxService {
   async getSyncStatus(): Promise<MailboxSyncStatus> {
     const accountRows = this.db
       .prepare(
-        `SELECT id, provider, address, display_name, status, capabilities_json, classification_initial_batch_at, last_synced_at
+        `SELECT id, provider, address, display_name, status, capabilities_json, sync_cursor, classification_initial_batch_at, last_synced_at
          FROM mailbox_accounts
          ORDER BY updated_at DESC`,
       )
@@ -1375,6 +1736,175 @@ export class MailboxService {
                   : ""
         }`,
     };
+  }
+
+  async getMailboxClientState(): Promise<MailboxClientState> {
+    const status = await this.getSyncStatus();
+    return {
+      accounts: status.accounts,
+      syncHealth: this.getMailboxSyncHealth(status.accounts),
+      folders: this.listMailboxFolders(),
+      labels: this.listMailboxLabels(),
+      identities: this.listMailboxIdentities(),
+      signatures: this.listMailboxSignatures(),
+      composeDrafts: this.listMailboxComposeDrafts(),
+      queuedActions: this.listMailboxQueuedActions(),
+      outgoing: this.listMailboxOutgoingMessages(),
+      settings: this.getMailboxClientSettings(),
+    };
+  }
+
+  async createMailboxDraft(input: MailboxComposeDraftInput): Promise<MailboxComposeDraft> {
+    const accountId = this.resolveComposeAccountId(input.accountId, input.threadId);
+    const now = Date.now();
+    const seedThread = input.threadId ? await this.getThread(input.threadId) : null;
+    const recipients =
+      input.to ||
+      (input.mode === "new"
+        ? []
+        : this.buildReplyRecipients(seedThread, input.mode === "reply_all"));
+    const subject =
+      input.subject?.trim() ||
+      (seedThread?.subject
+        ? input.mode === "forward"
+          ? this.prefixMailboxSubject(seedThread.subject, "Fwd:")
+          : this.prefixMailboxSubject(seedThread.subject, "Re:")
+        : "");
+    const id = randomUUID();
+    this.db
+      .prepare(
+        `INSERT INTO mailbox_compose_drafts
+          (id, account_id, thread_id, provider_draft_id, mode, status, subject, body_text, body_html, to_json, cc_json, bcc_json, identity_id, signature_id, attachments_json, scheduled_at, send_after, latest_error, metadata_json, created_at, updated_at)
+         VALUES (?, ?, ?, NULL, ?, 'local', ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        accountId,
+        input.threadId || null,
+        input.mode,
+        subject,
+        input.bodyText || "",
+        input.bodyHtml || null,
+        JSON.stringify(this.normalizeRecipients(recipients)),
+        JSON.stringify(this.normalizeRecipients(input.cc || [])),
+        JSON.stringify(this.normalizeRecipients(input.bcc || [])),
+        input.identityId || null,
+        input.signatureId || null,
+        JSON.stringify([]),
+        JSON.stringify({ source: "mailbox_compose" }),
+        now,
+        now,
+      );
+    return this.getMailboxComposeDraft(id)!;
+  }
+
+  async updateMailboxDraft(draftId: string, patch: MailboxComposeDraftPatch): Promise<MailboxComposeDraft> {
+    const draft = this.getMailboxComposeDraft(draftId);
+    if (!draft) throw new Error("Mailbox compose draft not found");
+    const next = {
+      subject: patch.subject ?? draft.subject,
+      bodyText: patch.bodyText ?? draft.bodyText,
+      bodyHtml: patch.bodyHtml === undefined ? draft.bodyHtml : patch.bodyHtml || undefined,
+      to: patch.to ?? draft.to,
+      cc: patch.cc ?? draft.cc,
+      bcc: patch.bcc ?? draft.bcc,
+      identityId: patch.identityId === undefined ? draft.identityId : patch.identityId || undefined,
+      signatureId: patch.signatureId === undefined ? draft.signatureId : patch.signatureId || undefined,
+      scheduledAt: patch.scheduledAt === undefined ? draft.scheduledAt : patch.scheduledAt || undefined,
+    };
+    this.db
+      .prepare(
+        `UPDATE mailbox_compose_drafts
+         SET subject = ?, body_text = ?, body_html = ?, to_json = ?, cc_json = ?, bcc_json = ?,
+             identity_id = ?, signature_id = ?, scheduled_at = ?, updated_at = ?
+         WHERE id = ?`,
+      )
+      .run(
+        next.subject,
+        next.bodyText,
+        next.bodyHtml || null,
+        JSON.stringify(this.normalizeRecipients(next.to)),
+        JSON.stringify(this.normalizeRecipients(next.cc)),
+        JSON.stringify(this.normalizeRecipients(next.bcc)),
+        next.identityId || null,
+        next.signatureId || null,
+        next.scheduledAt || null,
+        Date.now(),
+        draftId,
+      );
+    return this.getMailboxComposeDraft(draftId)!;
+  }
+
+  async sendMailboxDraft(draftId: string): Promise<MailboxOutgoingMessage> {
+    const draft = this.getMailboxComposeDraft(draftId);
+    if (!draft) throw new Error("Mailbox compose draft not found");
+    if (!draft.to.length && !draft.cc.length && !draft.bcc.length) {
+      throw new Error("Add at least one recipient before sending.");
+    }
+    const settings = this.getMailboxClientSettings();
+    const now = Date.now();
+    const sendAfter = Math.max(draft.scheduledAt || 0, now + settings.sendDelaySeconds * 1000);
+    const outgoingId = randomUUID();
+    this.db
+      .prepare(
+        `INSERT INTO mailbox_outgoing_messages
+          (id, draft_id, account_id, status, provider_message_id, scheduled_at, send_after, latest_error, metadata_json, created_at, updated_at)
+         VALUES (?, ?, ?, 'queued', NULL, ?, ?, NULL, ?, ?, ?)`,
+      )
+      .run(outgoingId, draft.id, draft.accountId, draft.scheduledAt || null, sendAfter, JSON.stringify({ undoable: true }), now, now);
+    this.db
+      .prepare("UPDATE mailbox_compose_drafts SET status = ?, send_after = ?, updated_at = ? WHERE id = ?")
+      .run(draft.scheduledAt ? "scheduled" : "queued", sendAfter, now, draft.id);
+    this.enqueueMailboxAction({
+      accountId: draft.accountId,
+      threadId: draft.threadId,
+      draftId: draft.id,
+      type: "send",
+      payload: { outgoingId, sendAfter },
+      nextAttemptAt: sendAfter,
+    });
+    return this.getMailboxOutgoingMessage(outgoingId)!;
+  }
+
+  async scheduleMailboxSend(draftId: string, scheduledAt: number): Promise<MailboxComposeDraft> {
+    if (!Number.isFinite(scheduledAt) || scheduledAt <= Date.now()) {
+      throw new Error("Scheduled send time must be in the future.");
+    }
+    return this.updateMailboxDraft(draftId, { scheduledAt });
+  }
+
+  async discardMailboxDraft(draftId: string): Promise<boolean> {
+    const now = Date.now();
+    const result = this.db
+      .prepare("UPDATE mailbox_compose_drafts SET status = 'discarded', updated_at = ? WHERE id = ? AND status != 'sent'")
+      .run(now, draftId);
+    this.db
+      .prepare("UPDATE mailbox_queued_actions SET status = 'cancelled', updated_at = ? WHERE draft_id = ? AND status IN ('queued', 'failed')")
+      .run(now, draftId);
+    this.db
+      .prepare("UPDATE mailbox_outgoing_messages SET status = 'cancelled', updated_at = ? WHERE draft_id = ? AND status IN ('queued', 'failed')")
+      .run(now, draftId);
+    return result.changes > 0;
+  }
+
+  async undoMailboxAction(actionId: string): Promise<MailboxQueuedAction> {
+    const existing = this.getMailboxQueuedAction(actionId);
+    if (!existing) throw new Error("Mailbox action not found");
+    const now = Date.now();
+    if (existing.type === "send" && existing.draftId) {
+      await this.discardMailboxDraft(existing.draftId);
+    }
+    this.db
+      .prepare("UPDATE mailbox_queued_actions SET status = 'cancelled', updated_at = ? WHERE id = ? AND status IN ('queued', 'failed')")
+      .run(now, actionId);
+    return this.enqueueMailboxAction({
+      accountId: existing.accountId,
+      threadId: existing.threadId,
+      draftId: existing.draftId,
+      type: "undo",
+      payload: { actionId, actionType: existing.type },
+      undoOfActionId: actionId,
+    });
   }
 
   async listMailboxEvents(
@@ -1712,10 +2242,15 @@ export class MailboxService {
         proposalCount: 0,
         commitmentCount: 0,
         draftCount: 0,
+        composeDraftCount: 0,
+        queuedActionCount: 0,
+        failedActionCount: 0,
+        scheduledSendCount: 0,
         overdueCommitmentCount: 0,
         sensitiveThreadCount: 0,
         eventCount: 0,
         classificationPendingCount: 0,
+        syncHealth: [],
         recentEventTypes: [],
       };
     }
@@ -1805,6 +2340,11 @@ export class MailboxService {
          FROM mailbox_accounts`,
       )
       .get() as { last_synced_at: number | null };
+    const clientState = await this.getMailboxClientState();
+    const queuedActionCount = clientState.queuedActions.filter((action) => action.status === "queued").length;
+    const failedActionCount = clientState.queuedActions.filter((action) => action.status === "failed").length;
+    const composeDraftCount = clientState.composeDrafts.filter((draft) => draft.status !== "sent").length;
+    const scheduledSendCount = clientState.composeDrafts.filter((draft) => draft.status === "scheduled").length;
 
     return {
       workspaceId: resolvedWorkspaceId,
@@ -1816,12 +2356,448 @@ export class MailboxService {
       proposalCount: proposalCountRow.count || 0,
       commitmentCount: commitmentCountRow.count || 0,
       draftCount: draftCountRow.count || 0,
+      composeDraftCount,
+      queuedActionCount,
+      failedActionCount,
+      scheduledSendCount,
       overdueCommitmentCount: overdueCommitmentCountRow.count || 0,
       sensitiveThreadCount: counts.sensitive_thread_count || 0,
       eventCount: eventCountRow.count || 0,
       classificationPendingCount: counts.classification_pending_count || 0,
       lastSyncedAt: lastSyncedRow.last_synced_at || undefined,
+      syncHealth: clientState.syncHealth,
       recentEventTypes: recentEventRows.map((row) => ({ type: row.event_type, count: row.count })),
+    };
+  }
+
+  async getMailboxTodayDigest(input: { limitPerBucket?: number } = {}): Promise<MailboxTodayDigest> {
+    const limitPerBucket = Math.min(Math.max(input.limitPerBucket ?? 8, 1), 20);
+    const labels: Record<MailboxTodayBucket, string> = {
+      needs_action: "Needs action",
+      happening_today: "Happening today",
+      good_to_know: "Good to know",
+      more_to_browse: "More to browse",
+    };
+    const buckets = await Promise.all(
+      VALID_MAILBOX_TODAY_BUCKETS.map(async (bucket) => ({
+        bucket,
+        label: labels[bucket],
+        count: this.countThreadsByTodayBucket(bucket),
+        threads: await this.listThreads({ todayBucket: bucket, mailboxView: "inbox", sortBy: "priority", limit: limitPerBucket }),
+      })),
+    );
+    const domainRows = this.db
+      .prepare(
+        `SELECT domain_category, COUNT(*) AS count
+         FROM mailbox_threads
+         WHERE local_inbox_hidden = 0
+         GROUP BY domain_category
+         ORDER BY count DESC`,
+      )
+      .all() as Array<{ domain_category: MailboxDomainCategory; count: number }>;
+    const clientState = await this.getMailboxClientState();
+    return {
+      buckets,
+      domainCounts: domainRows.map((row) => ({
+        category: normalizeDomainCategory(row.domain_category, "other"),
+        count: row.count,
+      })),
+      syncHealth: clientState.syncHealth,
+      queuedActionCount: clientState.queuedActions.filter((action) => action.status === "queued").length,
+      failedActionCount: clientState.queuedActions.filter((action) => action.status === "failed").length,
+      composeDraftCount: clientState.composeDrafts.filter((draft) => draft.status !== "sent").length,
+      scheduledSendCount: clientState.composeDrafts.filter((draft) => draft.status === "scheduled").length,
+      generatedAt: Date.now(),
+    };
+  }
+
+  private countThreadsByTodayBucket(bucket: MailboxTodayBucket): number {
+    const inboxVisibleFilter = this.buildInboxVisibleThreadFilter();
+    const row = this.db
+      .prepare(`SELECT COUNT(*) AS count FROM mailbox_threads WHERE today_bucket = ? AND ${inboxVisibleFilter.sql}`)
+      .get(bucket, ...inboxVisibleFilter.params) as { count: number } | undefined;
+    return row?.count || 0;
+  }
+
+  async getMailboxSenderCleanupDigest(input: { limit?: number } = {}): Promise<MailboxSenderCleanupDigest> {
+    const limit = Math.min(Math.max(input.limit ?? 8, 1), 25);
+    const rows = this.db
+      .prepare(
+        `SELECT
+           LOWER(COALESCE(m.from_email, '')) AS email,
+           MAX(m.from_name) AS name,
+           COUNT(DISTINCT t.id) AS thread_count,
+           SUM(t.unread_count) AS unread_count,
+           SUM(CASE WHEN t.cleanup_candidate = 1 THEN 1 ELSE 0 END) AS cleanup_count,
+           SUM(CASE WHEN t.needs_reply = 1 THEN 1 ELSE 0 END) AS needs_reply_count,
+           MAX(t.last_message_at) AS last_message_at
+         FROM mailbox_messages m
+         JOIN mailbox_threads t ON t.id = m.thread_id
+         WHERE m.direction = 'incoming'
+           AND m.from_email IS NOT NULL
+           AND t.local_inbox_hidden = 0
+         GROUP BY LOWER(m.from_email)
+         HAVING thread_count >= 2 OR cleanup_count > 0
+         ORDER BY cleanup_count DESC, thread_count DESC, last_message_at DESC
+         LIMIT ?`,
+      )
+      .all(limit) as Array<{
+      email: string;
+      name: string | null;
+      thread_count: number;
+      unread_count: number | null;
+      cleanup_count: number | null;
+      needs_reply_count: number | null;
+      last_message_at: number;
+    }>;
+    const senders = rows.map((row) => {
+      const threadRows = this.db
+        .prepare(
+          `SELECT DISTINCT t.*
+           FROM mailbox_threads t
+           JOIN mailbox_messages m ON m.thread_id = t.id
+           WHERE LOWER(m.from_email) = ?
+             AND t.local_inbox_hidden = 0
+           ORDER BY t.cleanup_candidate DESC, t.last_message_at DESC
+           LIMIT 4`,
+        )
+        .all(row.email) as MailboxThreadRow[];
+      const cleanupCount = row.cleanup_count || 0;
+      return {
+        email: row.email,
+        name: row.name || undefined,
+        threadCount: row.thread_count,
+        unreadCount: row.unread_count || 0,
+        cleanupCandidateCount: cleanupCount,
+        needsReplyCount: row.needs_reply_count || 0,
+        estimatedWeeklyReduction: Math.max(cleanupCount, Math.ceil(row.thread_count / 4)),
+        lastMessageAt: row.last_message_at,
+        suggestedAction: cleanupCount > 0 ? "cleanup_local" as const : row.unread_count ? "mark_read" as const : "archive" as const,
+        threads: threadRows.map((thread) => this.mapThreadRow(thread, this.getSummaryForThread(thread.id))),
+      };
+    });
+    return { generatedAt: Date.now(), senders };
+  }
+
+  async askMailbox(input: MailboxAskInput): Promise<MailboxAskResult> {
+    const query = input.query.trim();
+    if (!query) {
+      return { query, results: [], usedLlm: false };
+    }
+    await this.extractCandidateAttachmentsForAsk(query);
+    const limit = Math.min(Math.max(input.limit ?? 8, 1), 20);
+    const rows = this.searchMailboxRows(query, limit);
+    const results: MailboxAskResult["results"] = [];
+    const seenThreads = new Set<string>();
+    for (const row of rows) {
+      const thread = await this.getThread(row.thread_id);
+      if (!thread || seenThreads.has(thread.id)) continue;
+      seenThreads.add(thread.id);
+      const attachment = row.attachment_id ? this.getMailboxAttachment(row.attachment_id, true) : undefined;
+      results.push({
+        thread,
+        matchedAttachment: attachment || undefined,
+        snippet: normalizeWhitespace(row.snippet || thread.summary?.summary || thread.snippet, 260),
+        score: row.score,
+      });
+      if (results.length >= limit) break;
+    }
+    if (!results.length) {
+      const fallback = await this.listThreads({ query, mailboxView: "all", limit });
+      for (const thread of fallback) {
+        results.push({ thread, snippet: thread.summary?.summary || thread.snippet, score: 0 });
+      }
+    }
+
+    if (input.includeAnswer === false || !results.length) {
+      return { query, results, usedLlm: false };
+    }
+    const answer = await this.generateMailboxAskAnswer(query, results);
+    return {
+      query,
+      results,
+      answer: answer.answer,
+      usedLlm: answer.usedLlm,
+      error: answer.error,
+    };
+  }
+
+  private searchMailboxRows(query: string, limit: number): Array<{
+    thread_id: string;
+    attachment_id: string | null;
+    snippet: string;
+    score: number;
+  }> {
+    this.ensureMailboxSearchIndexBackfilled();
+    const ftsQuery = buildMailboxFtsQuery(query);
+    if (ftsQuery) {
+      try {
+        return this.db
+          .prepare(
+            `SELECT thread_id, attachment_id, snippet(mailbox_search_fts, 7, '[', ']', ' … ', 16) AS snippet, bm25(mailbox_search_fts) AS score
+             FROM mailbox_search_fts
+             WHERE mailbox_search_fts MATCH ?
+             ORDER BY score ASC
+             LIMIT ?`,
+          )
+          .all(ftsQuery, Math.max(limit * 3, 12)) as Array<{
+          thread_id: string;
+          attachment_id: string | null;
+          snippet: string;
+          score: number;
+        }>;
+      } catch {
+        // Fall back below.
+      }
+    }
+    const needle = `%${query.toLowerCase()}%`;
+    return this.db
+      .prepare(
+        `SELECT DISTINCT t.id AS thread_id, ma.id AS attachment_id,
+                COALESCE(ma.filename, t.snippet) AS snippet,
+                0 AS score
+         FROM mailbox_threads t
+         LEFT JOIN mailbox_messages m ON m.thread_id = t.id
+         LEFT JOIN mailbox_attachments ma ON ma.thread_id = t.id
+         LEFT JOIN mailbox_attachment_text mat ON mat.attachment_id = ma.id
+         WHERE LOWER(t.subject || ' ' || t.snippet || ' ' || COALESCE(m.body_text, '') || ' ' || COALESCE(ma.filename, '') || ' ' || COALESCE(mat.text_content, '')) LIKE ?
+         ORDER BY t.last_message_at DESC
+         LIMIT ?`,
+      )
+      .all(needle, Math.max(limit * 3, 12)) as Array<{
+      thread_id: string;
+      attachment_id: string | null;
+      snippet: string;
+      score: number;
+    }>;
+  }
+
+  private async generateMailboxAskAnswer(
+    query: string,
+    results: MailboxAskResult["results"],
+  ): Promise<{ answer?: string; usedLlm: boolean; error?: string }> {
+    const modelSelection = this.chooseMailboxClassifierModel();
+    if (!modelSelection) {
+      return { usedLlm: false };
+    }
+    const workspaceId = this.resolveDefaultWorkspaceId() || "";
+    const provider = LLMProviderFactory.createProvider();
+    try {
+      const response = await provider.createMessage({
+        model: modelSelection.modelId,
+        maxTokens: MAILBOX_ASK_MAX_TOKENS,
+        system: "Answer mailbox questions from the supplied local evidence. Be concise. If evidence is weak, say what matched instead of guessing.",
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  query,
+                  evidence: results.slice(0, 8).map((result) => ({
+                    subject: result.thread.subject,
+                    sender: result.thread.participants[0],
+                    snippet: result.snippet,
+                    attachment: result.matchedAttachment
+                      ? {
+                          filename: result.matchedAttachment.filename,
+                          text: result.matchedAttachment.text?.slice(0, 1200),
+                        }
+                      : undefined,
+                  })),
+                }),
+              },
+            ],
+          },
+        ],
+      });
+      recordLlmCallSuccess(
+        {
+          workspaceId,
+          sourceKind: "mailbox_ask",
+          sourceId: query.slice(0, 120),
+          providerType: provider.type,
+          modelKey: modelSelection.modelKey,
+          modelId: modelSelection.modelId,
+        },
+        response.usage,
+      );
+      return {
+        usedLlm: true,
+        answer: normalizeWhitespace(response.content.map((block) => (block.type === "text" ? block.text : "")).join("\n"), 900),
+      };
+    } catch (error) {
+      recordLlmCallError(
+        {
+          workspaceId,
+          sourceKind: "mailbox_ask",
+          sourceId: query.slice(0, 120),
+          providerType: provider.type,
+          modelKey: modelSelection.modelKey,
+          modelId: modelSelection.modelId,
+        },
+        error,
+      );
+      return { usedLlm: false, error: "Could not generate an AI answer. Showing local matches instead." };
+    }
+  }
+
+  private async extractCandidateAttachmentsForAsk(query: string): Promise<void> {
+    const needle = `%${query.toLowerCase()}%`;
+    const broadAttachmentQuery = /\b(invoice|contract|receipt|pdf|docx|attachment|file)\b/i.test(query);
+    const rows = this.db
+      .prepare(
+        `SELECT *
+         FROM mailbox_attachments
+         WHERE extraction_status IN ('not_indexed', 'error')
+           AND (? = 1 OR LOWER(filename) LIKE ?)
+         ORDER BY updated_at DESC
+         LIMIT 3`,
+      )
+      .all(broadAttachmentQuery ? 1 : 0, needle) as MailboxAttachmentRow[];
+    for (const row of rows) {
+      if (!isSupportedMailboxAttachment(row.filename, row.mime_type)) continue;
+      try {
+        await this.extractMailboxAttachmentText(row.id);
+      } catch {
+        // Search should not fail because one attachment cannot be extracted.
+      }
+    }
+  }
+
+  getMailboxAttachment(attachmentId: string, includeText = false): MailboxAttachmentRecord | null {
+    const row = this.db
+      .prepare(
+        `SELECT ma.*, mat.text_content, mat.extraction_mode
+         FROM mailbox_attachments ma
+         LEFT JOIN mailbox_attachment_text mat ON mat.attachment_id = ma.id
+         WHERE ma.id = ?`,
+      )
+      .get(attachmentId) as MailboxAttachmentRow | undefined;
+    if (!row) return null;
+    return this.mapAttachmentRow(row, includeText);
+  }
+
+  async extractMailboxAttachmentText(attachmentId: string): Promise<MailboxAttachmentRecord> {
+    const row = this.db
+      .prepare(`SELECT * FROM mailbox_attachments WHERE id = ?`)
+      .get(attachmentId) as MailboxAttachmentRow | undefined;
+    if (!row) {
+      throw new Error("Attachment not found");
+    }
+    const now = Date.now();
+    if (!isSupportedMailboxAttachment(row.filename, row.mime_type)) {
+      this.db
+        .prepare(`UPDATE mailbox_attachments SET extraction_status = 'unsupported', extraction_error = NULL, updated_at = ? WHERE id = ?`)
+        .run(now, attachmentId);
+      const unsupported = this.getMailboxAttachment(attachmentId, true);
+      if (!unsupported) throw new Error("Attachment not found");
+      return unsupported;
+    }
+    if (row.size && row.size > MAILBOX_ATTACHMENT_TEXT_MAX_BYTES) {
+      this.db
+        .prepare(`UPDATE mailbox_attachments SET extraction_status = 'error', extraction_error = ?, updated_at = ? WHERE id = ?`)
+        .run("Attachment is too large for local text extraction.", now, attachmentId);
+      const tooLarge = this.getMailboxAttachment(attachmentId, true);
+      if (!tooLarge) throw new Error("Attachment not found");
+      return tooLarge;
+    }
+
+    try {
+      this.db
+        .prepare(`UPDATE mailbox_attachments SET extraction_status = 'pending', extraction_error = NULL, updated_at = ? WHERE id = ?`)
+        .run(now, attachmentId);
+      const bytes = await this.fetchMailboxAttachmentBytes(row);
+      const extracted = await this.extractTextFromAttachmentBytes(row, bytes);
+      const text = normalizeWhitespace(extracted.text, MAILBOX_ATTACHMENT_TEXT_MAX_CHARS);
+      this.db
+        .prepare(
+          `INSERT INTO mailbox_attachment_text (attachment_id, text_content, extraction_mode, extracted_at)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(attachment_id) DO UPDATE SET
+             text_content = excluded.text_content,
+             extraction_mode = excluded.extraction_mode,
+             extracted_at = excluded.extracted_at`,
+        )
+        .run(attachmentId, encryptMailboxValue(text), extracted.mode, Date.now());
+      this.db
+        .prepare(`UPDATE mailbox_attachments SET extraction_status = 'indexed', extraction_error = NULL, updated_at = ? WHERE id = ?`)
+        .run(Date.now(), attachmentId);
+      this.upsertAttachmentSearchIndex(attachmentId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.db
+        .prepare(`UPDATE mailbox_attachments SET extraction_status = 'error', extraction_error = ?, updated_at = ? WHERE id = ?`)
+        .run(normalizeWhitespace(message, 240), Date.now(), attachmentId);
+    }
+    const updated = this.getMailboxAttachment(attachmentId, true);
+    if (!updated) throw new Error("Attachment not found");
+    return updated;
+  }
+
+  private async fetchMailboxAttachmentBytes(row: MailboxAttachmentRow): Promise<Buffer> {
+    if (row.provider !== "gmail") {
+      throw new Error("Attachment text extraction is currently available for Gmail attachments.");
+    }
+    if (!row.provider_attachment_id) {
+      throw new Error("Gmail attachment id is missing.");
+    }
+    const settings = GoogleWorkspaceSettingsManager.loadSettings();
+    const result = await gmailRequest(settings, {
+      method: "GET",
+      path: `/users/me/messages/${encodeURIComponent(row.provider_message_id)}/attachments/${encodeURIComponent(row.provider_attachment_id)}`,
+    });
+    const data = asString(result.data?.data);
+    if (!data) {
+      throw new Error("Gmail did not return attachment data.");
+    }
+    const normalized = data.replace(/-/g, "+").replace(/_/g, "/");
+    return Buffer.from(normalized, "base64");
+  }
+
+  private async extractTextFromAttachmentBytes(
+    row: MailboxAttachmentRow,
+    bytes: Buffer,
+  ): Promise<{ text: string; mode: string }> {
+    const filename = row.filename.toLowerCase();
+    const mimeType = (row.mime_type || "").toLowerCase();
+    if (mimeType === "application/pdf" || filename.endsWith(".pdf")) {
+      const parsed = await parsePdfBuffer(bytes);
+      return { text: parsed.text || "", mode: "pdf-parse" };
+    }
+    if (
+      mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+      filename.endsWith(".docx")
+    ) {
+      const mammoth = await import("mammoth");
+      const result = await mammoth.extractRawText({ buffer: bytes });
+      return { text: result.value || "", mode: "mammoth-docx" };
+    }
+    const raw = bytes.toString("utf8");
+    return {
+      text: mimeType === "text/html" || /\.(html|htm)$/i.test(filename) ? stripHtml(raw) : raw,
+      mode: mimeType === "text/html" || /\.(html|htm)$/i.test(filename) ? "html-text" : "plain-text",
+    };
+  }
+
+  private mapAttachmentRow(row: MailboxAttachmentRow, includeText = false): MailboxAttachmentRecord {
+    return {
+      id: row.id,
+      threadId: row.thread_id,
+      messageId: row.message_id,
+      provider: row.provider,
+      providerMessageId: row.provider_message_id,
+      providerAttachmentId: row.provider_attachment_id || undefined,
+      filename: row.filename,
+      mimeType: row.mime_type || undefined,
+      size: row.size ?? undefined,
+      extractionStatus: row.extraction_status || "not_indexed",
+      extractionError: row.extraction_error || undefined,
+      extractionMode: row.extraction_mode || undefined,
+      text: includeText ? decryptMailboxValue(row.text_content || "") || undefined : undefined,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
     };
   }
 
@@ -2073,6 +3049,15 @@ export class MailboxService {
   }
 
   async sync(limit = 25): Promise<MailboxSyncResult> {
+    if (this.syncInFlight) {
+      const status = await this.getSyncStatus();
+      return {
+        accounts: status.accounts,
+        syncedThreads: 0,
+        syncedMessages: 0,
+        lastSyncedAt: status.lastSyncedAt || Date.now(),
+      };
+    }
     this.syncInFlight = true;
     this.updateSyncProgress({
       phase: "fetching",
@@ -2230,7 +3215,8 @@ export class MailboxService {
       address: address || inboxId,
       displayName,
       status: "connected",
-      capabilities: ["archive", "trash", "mark_read", "label", "send_draft", "sync", "realtime"],
+      capabilities: ["archive", "trash", "mark_read", "mark_unread", "labels", "send", "provider_drafts", "sync", "realtime"],
+      backend: "agentmail",
       lastSyncedAt: Date.now(),
     };
   }
@@ -2590,6 +3576,53 @@ export class MailboxService {
       conditions.push("category = ?");
       values.push(input.category);
     }
+    if (input.todayBucket && input.todayBucket !== "all") {
+      conditions.push("today_bucket = ?");
+      values.push(input.todayBucket);
+    }
+    if (input.domainCategory && input.domainCategory !== "all") {
+      conditions.push("domain_category = ?");
+      values.push(input.domainCategory);
+    }
+    if (input.folderId) {
+      conditions.push(
+        `(labels_json LIKE ? OR metadata_json LIKE ?)`,
+      );
+      values.push(`%"${input.folderId}"%`, `%"folderId":"${input.folderId}"%`);
+    }
+    if (input.labelId) {
+      conditions.push(
+        `(labels_json LIKE ? OR metadata_json LIKE ?)`,
+      );
+      values.push(`%"${input.labelId}"%`, `%"labelId":"${input.labelId}"%`);
+    }
+    if (input.scheduledOnly) {
+      conditions.push(
+        `EXISTS (
+          SELECT 1 FROM mailbox_compose_drafts mcd
+          WHERE mcd.thread_id = mailbox_threads.id
+            AND mcd.status = 'scheduled'
+        )`,
+      );
+    }
+    if (input.draftOnly) {
+      conditions.push(
+        `EXISTS (
+          SELECT 1 FROM mailbox_compose_drafts mcd
+          WHERE mcd.thread_id = mailbox_threads.id
+            AND mcd.status NOT IN ('discarded', 'sent')
+        )`,
+      );
+    }
+    if (input.queuedOnly) {
+      conditions.push(
+        `EXISTS (
+          SELECT 1 FROM mailbox_queued_actions mqa
+          WHERE mqa.thread_id = mailbox_threads.id
+            AND mqa.status IN ('queued', 'running', 'failed')
+        )`,
+      );
+    }
     const mailboxView: MailboxThreadMailboxView = input.mailboxView || "inbox";
     if (mailboxView === "inbox") {
       const inboxVisibleFilter = this.buildInboxVisibleThreadFilter();
@@ -2650,6 +3683,19 @@ export class MailboxService {
       conditions.push("cleanup_candidate = ?");
       values.push(input.cleanupCandidate ? 1 : 0);
     }
+    if (typeof input.hasAttachment === "boolean") {
+      conditions.push(
+        input.hasAttachment
+          ? `EXISTS (SELECT 1 FROM mailbox_attachments ma WHERE ma.thread_id = mailbox_threads.id)`
+          : `NOT EXISTS (SELECT 1 FROM mailbox_attachments ma WHERE ma.thread_id = mailbox_threads.id)`,
+      );
+    }
+    const attachmentQuery = input.attachmentQuery?.trim();
+    if (attachmentQuery) {
+      conditions.push(
+        `EXISTS (SELECT 1 FROM mailbox_attachments ma WHERE ma.thread_id = mailbox_threads.id)`,
+      );
+    }
     const savedViewId = input.savedViewId?.trim();
     if (savedViewId) {
       conditions.push(
@@ -2667,7 +3713,8 @@ export class MailboxService {
       sortBy === "recent"
         ? "last_message_at DESC, priority_score DESC, urgency_score DESC"
         : "priority_score DESC, urgency_score DESC, last_message_at DESC";
-    const limitClause = queryText ? "" : " LIMIT ?";
+    const hasPostFilters = Boolean(queryText || attachmentQuery);
+    const limitClause = hasPostFilters ? "" : " LIMIT ?";
     const rows = this.db
       .prepare(
         `SELECT
@@ -2680,6 +3727,9 @@ export class MailboxService {
            participants_json,
            labels_json,
            category,
+           today_bucket,
+           domain_category,
+           classification_rationale,
            priority_score,
            urgency_score,
            needs_reply,
@@ -2696,11 +3746,13 @@ export class MailboxService {
          ${conditions.length ? `WHERE ${conditions.join(" AND ")}` : ""}
          ORDER BY ${orderBy}${limitClause}`,
       )
-      .all(...(queryText ? values : [...values, limit])) as MailboxThreadRow[];
+      .all(...(hasPostFilters ? values : [...values, limit])) as MailboxThreadRow[];
 
-    const filteredRows = queryText
-      ? rows.filter((row) => this.threadMatchesQuery(row, queryText))
-      : rows;
+    const filteredRows = rows.filter((row) => {
+      if (queryText && !this.threadMatchesQuery(row, queryText)) return false;
+      if (attachmentQuery && !this.threadMatchesAttachmentQuery(row.id, attachmentQuery)) return false;
+      return true;
+    });
 
     return filteredRows
       .slice(0, limit)
@@ -2720,6 +3772,9 @@ export class MailboxService {
            participants_json,
            labels_json,
            category,
+           today_bucket,
+           domain_category,
+           classification_rationale,
            priority_score,
            urgency_score,
            needs_reply,
@@ -3374,6 +4429,9 @@ export class MailboxService {
            participants_json,
            labels_json,
            category,
+           today_bucket,
+           domain_category,
+           classification_rationale,
            priority_score,
            urgency_score,
            needs_reply,
@@ -3425,6 +4483,9 @@ export class MailboxService {
            participants_json,
            labels_json,
            category,
+           today_bucket,
+           domain_category,
+           classification_rationale,
            priority_score,
            urgency_score,
            needs_reply,
@@ -3748,6 +4809,9 @@ export class MailboxService {
       case "cleanup_local":
         this.applyLocalCleanup(thread);
         break;
+      case "mark_done":
+        await this.applyMarkDone(thread);
+        break;
       case "archive":
         await this.applyArchive(thread);
         break;
@@ -3757,12 +4821,72 @@ export class MailboxService {
       case "mark_read":
         await this.applyMarkRead(thread);
         break;
+      case "mark_unread":
+        await this.applyMarkUnread(thread);
+        break;
+      case "move":
+        if (!input.folderId) throw new Error("Missing folder for move action");
+        this.enqueueMailboxAction({
+          accountId: thread.accountId,
+          threadId: thread.id,
+          type: "move",
+          payload: { folderId: input.folderId },
+        });
+        break;
       case "label":
         if (!input.label) throw new Error("Missing label for label action");
         await this.applyLabel(thread, input.label);
         break;
+      case "remove_label":
+        if (!input.label && !input.labelId) throw new Error("Missing label for remove label action");
+        this.enqueueMailboxAction({
+          accountId: thread.accountId,
+          threadId: thread.id,
+          type: "remove_label",
+          payload: { label: input.label, labelId: input.labelId },
+        });
+        break;
+      case "snooze":
+        if (!input.snoozeUntil) throw new Error("Missing snooze time");
+        this.enqueueMailboxAction({
+          accountId: thread.accountId,
+          threadId: thread.id,
+          type: "snooze",
+          payload: { snoozeUntil: input.snoozeUntil },
+          nextAttemptAt: input.snoozeUntil,
+        });
+        this.db.prepare("UPDATE mailbox_threads SET handled = 1, updated_at = ? WHERE id = ?").run(Date.now(), thread.id);
+        break;
+      case "waiting_on":
+        this.enqueueMailboxAction({
+          accountId: thread.accountId,
+          threadId: thread.id,
+          type: "waiting_on",
+          payload: { commitmentId: input.commitmentId },
+        });
+        this.db
+          .prepare("UPDATE mailbox_threads SET needs_reply = 0, handled = 1, today_bucket = 'good_to_know', updated_at = ? WHERE id = ?")
+          .run(Date.now(), thread.id);
+        break;
+      case "undo":
+        if (!input.actionId) throw new Error("Missing action id for undo");
+        await this.undoMailboxAction(input.actionId);
+        break;
+      case "send_message":
+        await this.applySendMessage(thread, {
+          mode: input.messageMode || "reply",
+          to: input.messageTo || [],
+          cc: input.messageCc || [],
+          bcc: input.messageBcc || [],
+          subject: input.messageSubject,
+          body: input.messageBody,
+        });
+        break;
       case "send_draft":
-        await this.applySendDraft(thread, input.draftId);
+        await this.applySendDraft(thread, input.draftId, {
+          subject: input.draftSubject,
+          body: input.draftBody,
+        });
         break;
       case "discard_draft":
         await this.applyDiscardDraft(thread, input.draftId);
@@ -3805,8 +4929,11 @@ export class MailboxService {
       input.type === "archive" ||
       input.type === "trash" ||
       input.type === "mark_read" ||
+      input.type === "mark_unread" ||
+      input.type === "mark_done" ||
       input.type === "label" ||
       input.type === "cleanup_local" ||
+      input.type === "send_message" ||
       input.type === "send_draft"
     ) {
       this.recordMailboxTriageFeedback(threadId, input.type);
@@ -3850,7 +4977,8 @@ export class MailboxService {
       address: emailAddress.toLowerCase(),
       displayName: emailAddress,
       status: "connected",
-      capabilities: ["threads", "labels", "drafts", "archive", "trash", "schedule"],
+      capabilities: ["sync", "provider_search", "realtime", "send", "provider_drafts", "reply_all", "forward", "attachments_download", "attachments_upload", "archive", "trash", "mark_read", "mark_unread", "labels", "undo_send"],
+      backend: "gmail_api",
       lastSyncedAt: now,
     });
 
@@ -4050,9 +5178,10 @@ export class MailboxService {
         const snippet = normalizeWhitespace(asString(message?.snippet) || body || subject, 260);
         const fromEmail = normalizeEmailAddress(fromRaw);
         const direction = fromEmail === accountEmail ? "outgoing" : "incoming";
+        const providerMessageId = asString(message?.id) || randomUUID();
         return {
-          id: `gmail-message:${asString(message?.id) || randomUUID()}`,
-          providerMessageId: asString(message?.id) || randomUUID(),
+          id: `gmail-message:${providerMessageId}`,
+          providerMessageId,
           direction,
           from: fromEmail
             ? {
@@ -4067,6 +5196,7 @@ export class MailboxService {
           snippet,
           body,
           bodyHtml,
+          attachments: extractGmailAttachments(payload, providerMessageId),
           receivedAt: Number.isFinite(internalDate) ? internalDate : Date.now(),
           unread: Array.isArray(message?.labelIds) ? message.labelIds.includes("UNREAD") : false,
         };
@@ -4662,6 +5792,10 @@ export class MailboxService {
            classification_updated_at,
            classification_error,
            classification_json /* raw LLM response — debug/replay only, not used in runtime logic */
+           ,
+           today_bucket,
+           domain_category,
+           classification_rationale
          FROM mailbox_threads
          WHERE id = ?`,
       )
@@ -4685,6 +5819,9 @@ export class MailboxService {
           classification_error: string | null;
           /** Raw LLM JSON response — stored for debugging/replay only; not used in runtime logic. */
           classification_json: string | null;
+          today_bucket: MailboxTodayBucket;
+          domain_category: MailboxDomainCategory;
+          classification_rationale: string | null;
         }
       | undefined;
     const isNewThread = !existing;
@@ -4707,12 +5844,24 @@ export class MailboxService {
       thread.snippet,
       ...thread.messages.map((message) => message.bodyHtml ? stripHtml(message.bodyHtml) : message.body),
     ]);
+    const baseText = `${thread.subject} ${thread.snippet} ${thread.messages.map((message) => message.body).join(" ")}`;
+    const fallbackDomainCategory = deriveDomainCategoryFromText(baseText, classificationValues?.category || thread.category);
+    const fallbackTodayBucket = deriveTodayBucket({
+      category: classificationValues?.category || thread.category,
+      domainCategory: fallbackDomainCategory,
+      needsReply: Boolean(classificationValues?.needs_reply ?? thread.needsReply),
+      priorityScore: classificationValues?.priority_score ?? thread.priorityScore,
+      urgencyScore: classificationValues?.urgency_score ?? thread.urgencyScore,
+      cleanupCandidate: Boolean(classificationValues?.cleanup_candidate ?? thread.cleanupCandidate),
+      handled: Boolean(classificationValues?.handled ?? thread.handled),
+      text: baseText,
+    });
 
     this.db
       .prepare(
         `INSERT INTO mailbox_threads
-          (id, account_id, provider_thread_id, provider, subject, snippet, participants_json, labels_json, category, priority_score, urgency_score, needs_reply, stale_followup, cleanup_candidate, handled, local_inbox_hidden, unread_count, message_count, last_message_at, last_synced_at, classification_state, classification_fingerprint, classification_model_key, classification_prompt_version, classification_confidence, classification_updated_at, classification_error, classification_json, sensitive_content_json, metadata_json, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          (id, account_id, provider_thread_id, provider, subject, snippet, participants_json, labels_json, category, today_bucket, domain_category, classification_rationale, priority_score, urgency_score, needs_reply, stale_followup, cleanup_candidate, handled, local_inbox_hidden, unread_count, message_count, last_message_at, last_synced_at, classification_state, classification_fingerprint, classification_model_key, classification_prompt_version, classification_confidence, classification_updated_at, classification_error, classification_json, sensitive_content_json, metadata_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            account_id = excluded.account_id,
            provider_thread_id = excluded.provider_thread_id,
@@ -4722,6 +5871,9 @@ export class MailboxService {
            participants_json = excluded.participants_json,
            labels_json = excluded.labels_json,
            category = excluded.category,
+           today_bucket = excluded.today_bucket,
+           domain_category = excluded.domain_category,
+           classification_rationale = excluded.classification_rationale,
            priority_score = excluded.priority_score,
            urgency_score = excluded.urgency_score,
            needs_reply = excluded.needs_reply,
@@ -4755,6 +5907,9 @@ export class MailboxService {
         JSON.stringify(thread.participants),
         JSON.stringify(thread.labels),
         classificationValues?.category || thread.category,
+        classificationValues?.today_bucket || fallbackTodayBucket,
+        classificationValues?.domain_category || fallbackDomainCategory,
+        classificationValues?.classification_rationale || null,
         classificationValues?.priority_score ?? thread.priorityScore,
         classificationValues?.urgency_score ?? thread.urgencyScore,
         classificationValues?.needs_reply ?? (thread.needsReply ? 1 : 0),
@@ -4831,6 +5986,8 @@ export class MailboxService {
           now,
           now,
         );
+      this.upsertMessageSearchIndex(thread, message);
+      this.upsertMessageAttachments(thread, message, now);
     }
 
     this.upsertPrimaryContact(thread);
@@ -4863,6 +6020,180 @@ export class MailboxService {
       shouldClassify,
       isNewThread,
     };
+  }
+
+  private upsertMessageSearchIndex(thread: NormalizedThreadInput, message: NormalizedMailboxMessage): void {
+    try {
+      this.db
+        .prepare(`DELETE FROM mailbox_search_fts WHERE record_type = 'message' AND record_id = ?`)
+        .run(message.id);
+      this.db
+        .prepare(
+          `INSERT INTO mailbox_search_fts
+             (record_type, record_id, thread_id, message_id, attachment_id, subject, sender, body, attachment_filename, attachment_text)
+           VALUES ('message', ?, ?, ?, NULL, ?, ?, ?, '', '')`,
+        )
+        .run(
+          message.id,
+          thread.id,
+          message.id,
+          message.subject || thread.subject,
+          [message.from?.name, message.from?.email].filter(Boolean).join(" "),
+          `${message.snippet || ""}\n${message.bodyHtml ? stripHtml(message.bodyHtml) : message.body || ""}`,
+        );
+    } catch {
+      // FTS is optional; mailbox search falls back to row scanning.
+    }
+  }
+
+  private ensureMailboxSearchIndexBackfilled(): void {
+    if (this.mailboxSearchIndexBackfillAttempted) return;
+    this.mailboxSearchIndexBackfillAttempted = true;
+
+    try {
+      const messageRows = this.db
+        .prepare(
+          `SELECT
+             m.id,
+             m.thread_id,
+             m.from_name,
+             m.from_email,
+             m.subject,
+             m.snippet,
+             m.body_text,
+             m.body_html,
+             t.subject AS thread_subject
+           FROM mailbox_messages m
+           INNER JOIN mailbox_threads t ON t.id = m.thread_id
+           WHERE NOT EXISTS (
+             SELECT 1
+             FROM mailbox_search_fts f
+             WHERE f.record_type = 'message'
+               AND f.record_id = m.id
+           )`,
+        )
+        .all() as Array<
+        Pick<
+          MailboxMessageRow,
+          "id" | "thread_id" | "from_name" | "from_email" | "subject" | "snippet" | "body_text" | "body_html"
+        > & { thread_subject: string }
+      >;
+      const insertMessage = this.db.prepare(
+        `INSERT INTO mailbox_search_fts
+           (record_type, record_id, thread_id, message_id, attachment_id, subject, sender, body, attachment_filename, attachment_text)
+         VALUES ('message', ?, ?, ?, NULL, ?, ?, ?, '', '')`,
+      );
+      for (const row of messageRows) {
+        const bodyHtml = decryptMailboxValue(row.body_html || "");
+        const bodyText = decryptMailboxValue(row.body_text || "");
+        insertMessage.run(
+          row.id,
+          row.thread_id,
+          row.id,
+          row.subject || row.thread_subject,
+          [row.from_name, row.from_email].filter(Boolean).join(" "),
+          `${row.snippet || ""}\n${bodyHtml ? stripHtml(bodyHtml) : bodyText || ""}`,
+        );
+      }
+
+      const attachmentRows = this.db
+        .prepare(
+          `SELECT ma.*, mat.text_content, mat.extraction_mode
+           FROM mailbox_attachments ma
+           INNER JOIN mailbox_attachment_text mat ON mat.attachment_id = ma.id
+           WHERE NOT EXISTS (
+             SELECT 1
+             FROM mailbox_search_fts f
+             WHERE f.record_type = 'attachment'
+               AND f.record_id = ma.id
+           )`,
+        )
+        .all() as MailboxAttachmentRow[];
+      for (const row of attachmentRows) {
+        this.upsertAttachmentSearchIndex(row.id);
+      }
+    } catch {
+      // FTS is optional; mailbox search falls back to row scanning.
+    }
+  }
+
+  private upsertMessageAttachments(thread: NormalizedThreadInput, message: NormalizedMailboxMessage, now: number): void {
+    const nextAttachments = message.attachments || [];
+    const nextIds = new Set(nextAttachments.map((attachment) => attachment.id));
+    const existingRows = this.db
+      .prepare(`SELECT id FROM mailbox_attachments WHERE message_id = ?`)
+      .all(message.id) as Array<{ id: string }>;
+    for (const existing of existingRows) {
+      if (nextIds.has(existing.id)) continue;
+      try {
+        this.db.prepare(`DELETE FROM mailbox_search_fts WHERE record_type = 'attachment' AND record_id = ?`).run(existing.id);
+      } catch {
+        // Optional FTS table may be unavailable.
+      }
+      this.db.prepare(`DELETE FROM mailbox_attachment_text WHERE attachment_id = ?`).run(existing.id);
+      this.db.prepare(`DELETE FROM mailbox_attachments WHERE id = ?`).run(existing.id);
+    }
+
+    for (const attachment of nextAttachments) {
+      this.db
+        .prepare(
+          `INSERT INTO mailbox_attachments
+            (id, thread_id, message_id, provider, provider_message_id, provider_attachment_id, filename, mime_type, size, extraction_status, extraction_error, metadata_json, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'not_indexed', NULL, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET
+             thread_id = excluded.thread_id,
+             message_id = excluded.message_id,
+             provider = excluded.provider,
+             provider_message_id = excluded.provider_message_id,
+             provider_attachment_id = excluded.provider_attachment_id,
+             filename = excluded.filename,
+             mime_type = excluded.mime_type,
+             size = excluded.size,
+             metadata_json = excluded.metadata_json,
+             updated_at = excluded.updated_at`,
+        )
+        .run(
+          attachment.id,
+          thread.id,
+          message.id,
+          thread.provider,
+          message.providerMessageId,
+          attachment.providerAttachmentId || null,
+          attachment.filename,
+          attachment.mimeType || null,
+          attachment.size ?? null,
+          JSON.stringify({ source: "mailbox_sync" }),
+          now,
+          now,
+        );
+      this.upsertAttachmentSearchIndex(attachment.id);
+    }
+  }
+
+  private upsertAttachmentSearchIndex(attachmentId: string): void {
+    const row = this.db
+      .prepare(
+        `SELECT ma.*, mat.text_content, mat.extraction_mode
+         FROM mailbox_attachments ma
+         LEFT JOIN mailbox_attachment_text mat ON mat.attachment_id = ma.id
+         WHERE ma.id = ?`,
+      )
+      .get(attachmentId) as MailboxAttachmentRow | undefined;
+    if (!row) return;
+    try {
+      this.db
+        .prepare(`DELETE FROM mailbox_search_fts WHERE record_type = 'attachment' AND record_id = ?`)
+        .run(row.id);
+      this.db
+        .prepare(
+          `INSERT INTO mailbox_search_fts
+             (record_type, record_id, thread_id, message_id, attachment_id, subject, sender, body, attachment_filename, attachment_text)
+           VALUES ('attachment', ?, ?, ?, ?, '', '', '', ?, ?)`,
+        )
+        .run(row.id, row.thread_id, row.message_id, row.id, row.filename, decryptMailboxValue(row.text_content || ""));
+    } catch {
+      // FTS is optional.
+    }
   }
 
   private buildClassificationSnapshot(
@@ -4934,8 +6265,21 @@ export class MailboxService {
       if (confidence < MAILBOX_CLASSIFIER_MIN_CONFIDENCE) {
         return null;
       }
+      const domainCategory = normalizeDomainCategory(parsed.domainCategory, "other");
+      const todayBucket = normalizeTodayBucket(parsed.todayBucket, deriveTodayBucket({
+        category: validCategory,
+        domainCategory,
+        needsReply: parsed.needsReply === true,
+        priorityScore: clampScore(Number(parsed.priorityScore ?? 0)),
+        urgencyScore: clampScore(Number(parsed.urgencyScore ?? 0)),
+        cleanupCandidate: parsed.cleanupCandidate === true,
+        handled: parsed.handled === true,
+        text: `${parsed.rationale || ""} ${Array.isArray(parsed.labels) ? parsed.labels.join(" ") : ""}`,
+      }));
       return {
         category: validCategory,
+        todayBucket,
+        domainCategory,
         needsReply: parsed.needsReply === true,
         priorityScore: clampScore(Number(parsed.priorityScore ?? 0)),
         urgencyScore: clampScore(Number(parsed.urgencyScore ?? 0)),
@@ -4994,9 +6338,11 @@ export class MailboxService {
     const system = [
       "You classify inbox threads for triage.",
       "Return compact strict JSON only with this shape:",
-      '{ "category": "priority|calendar|follow_up|promotions|updates|personal|other", "needsReply": boolean, "priorityScore": number, "urgencyScore": number, "staleFollowup": boolean, "cleanupCandidate": boolean, "handled": boolean, "confidence": number, "rationale": string, "labels": string[] }',
+      '{ "category": "priority|calendar|follow_up|promotions|updates|personal|other", "todayBucket": "needs_action|happening_today|good_to_know|more_to_browse", "domainCategory": "travel|packages|receipts|bills|shopping|newsletters|events|finance|customer|hiring|approvals|ops|personal|other", "needsReply": boolean, "priorityScore": number, "urgencyScore": number, "staleFollowup": boolean, "cleanupCandidate": boolean, "handled": boolean, "confidence": number, "rationale": string, "labels": string[] }',
       "Use unreadCount only as a weak signal. Do not mark a thread as needsReply for receipts, security alerts, verification codes, password resets, onboarding, or automated account notifications unless the sender explicitly asks the user to respond.",
       "Treat priority as business urgency, not sender importance.",
+      "Use todayBucket as a daily attention lane: needs_action for response/approval/high urgency, happening_today for dated travel/package/bill/event items, good_to_know for useful updates, more_to_browse for newsletters/promotions/low-value cleanup.",
+      "Use domainCategory to describe the thread's life/work domain, not its priority.",
       "Keep scores in the 0 to 100 range and confidence in the 0 to 1 range.",
       "Prefer false negatives over false positives for needsReply.",
       "Keep rationale under 160 characters and labels under 6 items.",
@@ -5090,6 +6436,9 @@ export class MailboxService {
       .prepare(
         `UPDATE mailbox_threads
          SET category = ?,
+             today_bucket = ?,
+             domain_category = ?,
+             classification_rationale = ?,
              priority_score = ?,
              urgency_score = ?,
              needs_reply = ?,
@@ -5110,6 +6459,9 @@ export class MailboxService {
       )
       .run(
         result.category,
+        result.todayBucket,
+        result.domainCategory,
+        result.rationale || null,
         clampScore(result.priorityScore),
         clampScore(result.urgencyScore),
         result.needsReply ? 1 : 0,
@@ -5124,6 +6476,8 @@ export class MailboxService {
         rawJson || JSON.stringify(result),
         JSON.stringify({
           priorityBand: priorityBandFromScore(result.priorityScore),
+          todayBucket: result.todayBucket,
+          domainCategory: result.domainCategory,
           classification: {
             state: "classified",
             modelKey,
@@ -5203,6 +6557,8 @@ export class MailboxService {
       evidenceRefs: [threadId, ...detail.messages.slice(-2).map((message) => message.id)],
       payload: {
         category: result.category,
+        todayBucket: result.todayBucket,
+        domainCategory: result.domainCategory,
         needsReply: result.needsReply,
         priorityScore: result.priorityScore,
         urgencyScore: result.urgencyScore,
@@ -5698,6 +7054,9 @@ export class MailboxService {
            participants_json,
            labels_json,
            category,
+           today_bucket,
+           domain_category,
+           classification_rationale,
            priority_score,
            urgency_score,
            needs_reply,
@@ -6196,6 +7555,34 @@ export class MailboxService {
       .run(Date.now(), thread.id);
   }
 
+  private async applyMarkDone(thread: MailboxThreadDetail | (MailboxThreadListItem & { messages: MailboxMessage[] })): Promise<void> {
+    const now = Date.now();
+    const openCommitments = this.db
+      .prepare(
+        `SELECT id
+         FROM mailbox_commitments
+         WHERE thread_id = ?
+           AND state IN ('suggested', 'accepted')`,
+      )
+      .all(thread.id) as Array<{ id: string }>;
+    for (const commitment of openCommitments) {
+      await this.updateCommitmentState(commitment.id, "done");
+    }
+    this.db
+      .prepare(
+        `UPDATE mailbox_threads
+         SET needs_reply = 0,
+             stale_followup = 0,
+             handled = 1,
+             today_bucket = CASE WHEN today_bucket = 'needs_action' THEN 'good_to_know' ELSE today_bucket END,
+             updated_at = ?
+         WHERE id = ?`,
+      )
+      .run(now, thread.id);
+    this.updateProposalStatusByThreadAndType(thread.id, "reply", "applied");
+    this.updateProposalStatusByThreadAndType(thread.id, "follow_up", "dismissed");
+  }
+
   private async applyTrash(thread: MailboxThreadDetail | (MailboxThreadListItem & { messages: MailboxMessage[] })): Promise<void> {
     if (thread.provider === "gmail") {
       const settings = GoogleWorkspaceSettingsManager.loadSettings();
@@ -6282,6 +7669,72 @@ export class MailboxService {
     this.db.prepare("UPDATE mailbox_messages SET is_unread = 0 WHERE thread_id = ?").run(thread.id);
     this.db
       .prepare("UPDATE mailbox_threads SET unread_count = 0, handled = CASE WHEN needs_reply = 0 THEN 1 ELSE handled END, updated_at = ? WHERE id = ?")
+      .run(Date.now(), thread.id);
+  }
+
+  private async applyMarkUnread(thread: MailboxThreadDetail | (MailboxThreadListItem & { messages: MailboxMessage[] })): Promise<void> {
+    const latestMessage = [...thread.messages].sort((a, b) => b.receivedAt - a.receivedAt)[0];
+    if (thread.provider === "gmail") {
+      const settings = GoogleWorkspaceSettingsManager.loadSettings();
+      await gmailRequest(settings, {
+        method: "POST",
+        path: `/users/me/threads/${encodeURIComponent(thread.providerThreadId)}/modify`,
+        body: {
+          addLabelIds: ["UNREAD"],
+        },
+      });
+    } else if (thread.provider === "agentmail") {
+      const account = this.parseAgentMailAccountId(thread.accountId);
+      if (!account || !latestMessage) {
+        throw new Error("Unable to resolve AgentMail message for mark_unread.");
+      }
+      await this.getAgentMailClient().updateMessage(account.inboxId, latestMessage.providerMessageId, {
+        removeLabels: ["read"],
+        addLabels: ["unread"],
+      });
+    } else {
+      const channel = this.channelRepo.findByType("email");
+      if (!channel) throw new Error("Email channel is not configured");
+      const cfg = (channel.config as Any) || {};
+      if (asString(cfg.protocol) === "loom") {
+        const loomBaseUrl = asString(cfg.loomBaseUrl);
+        const accessToken = asString(cfg.loomAccessToken);
+        const identity = asString(cfg.loomIdentity) || loomBaseUrl;
+        if (!loomBaseUrl || !accessToken || !identity) {
+          throw new Error("LOOM email channel is missing mailbox credentials.");
+        }
+        const mailbox = asString(cfg.loomMailboxFolder) || "INBOX";
+        const client = new LoomEmailClient({
+          baseUrl: loomBaseUrl,
+          accessTokenProvider: () => accessToken,
+          identity,
+          folder: assertSafeLoomMailboxFolder(mailbox),
+          pollInterval: asNumber(cfg.loomPollInterval) ?? 30000,
+          verbose: process.env.NODE_ENV === "development",
+        });
+        const uid = Number(latestMessage?.providerMessageId);
+        if (!Number.isFinite(uid)) {
+          throw new Error("Unable to resolve LOOM UID for mark_unread");
+        }
+        await client.markAsUnread(uid);
+      } else {
+        const client = this.createStandardEmailClient(channel.id, cfg);
+        const uid = await this.resolveImapUidForMarkRead(thread.id, client);
+        if (uid === null || !Number.isFinite(uid)) {
+          throw new Error("Unable to resolve IMAP UID for mark_unread");
+        }
+        await client.markAsUnread(uid);
+      }
+    }
+
+    const targetMessageId = latestMessage?.id || null;
+    if (targetMessageId) {
+      this.db
+        .prepare("UPDATE mailbox_messages SET is_unread = CASE WHEN id = ? THEN 1 ELSE is_unread END, updated_at = ? WHERE thread_id = ?")
+        .run(targetMessageId, Date.now(), thread.id);
+    }
+    this.db
+      .prepare("UPDATE mailbox_threads SET unread_count = 1, handled = 0, updated_at = ? WHERE id = ?")
       .run(Date.now(), thread.id);
   }
 
@@ -6423,6 +7876,7 @@ export class MailboxService {
   private async applySendDraft(
     thread: MailboxThreadDetail | (MailboxThreadListItem & { messages: MailboxMessage[] }),
     draftId?: string,
+    override?: { subject?: string; body?: string },
   ): Promise<void> {
     const drafts = this.getDraftsForThread(thread.id);
     const draft = draftId ? drafts.find((entry) => entry.id === draftId) : drafts[0];
@@ -6431,17 +7885,32 @@ export class MailboxService {
     const recipient = thread.participants[0]?.email;
     if (!recipient) throw new Error("No recipient found for draft");
 
+    const subject = override?.subject?.trim() || draft.subject;
+    const body = override?.body ?? draft.body;
+
+    if (subject !== draft.subject || body !== draft.body) {
+      this.db
+        .prepare(
+          `UPDATE mailbox_drafts
+           SET subject = ?,
+               body_text = ?,
+               updated_at = ?
+           WHERE id = ?`,
+        )
+        .run(subject, body, Date.now(), draft.id);
+    }
+
     if (thread.provider === "gmail") {
       const settings = GoogleWorkspaceSettingsManager.loadSettings();
       const stripCRLF = (v: string) => v.replace(/[\r\n]/g, "");
       const raw = Buffer.from(
         [
           `To: ${stripCRLF(recipient)}`,
-          `Subject: ${stripCRLF(draft.subject)}`,
+          `Subject: ${stripCRLF(subject)}`,
           "MIME-Version: 1.0",
           'Content-Type: text/plain; charset="UTF-8"',
           "",
-          draft.body,
+          body,
         ].join("\r\n"),
       )
         .toString("base64")
@@ -6465,8 +7934,8 @@ export class MailboxService {
         throw new Error("Unable to resolve AgentMail reply target.");
       }
       await this.getAgentMailClient().replyAllMessage(account.inboxId, latestInbound.providerMessageId, {
-        text: draft.body,
-        subject: draft.subject,
+        text: body,
+        subject,
       });
     } else {
       const channel = this.channelRepo.findByType("email");
@@ -6475,12 +7944,117 @@ export class MailboxService {
       const client = this.createStandardEmailClient(channel.id, cfg);
       await client.sendEmail({
         to: recipient,
-        subject: draft.subject,
-        text: draft.body,
+        subject,
+        text: body,
       });
     }
 
+    this.db
+      .prepare("DELETE FROM mailbox_drafts WHERE id = ?")
+      .run(draft.id);
+    this.db
+      .prepare(
+        `UPDATE mailbox_threads
+         SET needs_reply = 0,
+             handled = 1,
+             today_bucket = CASE WHEN today_bucket = 'needs_action' THEN 'good_to_know' ELSE today_bucket END,
+             updated_at = ?
+         WHERE id = ?`,
+      )
+      .run(Date.now(), thread.id);
     this.updateProposalStatusByThreadAndType(thread.id, "reply", "applied");
+  }
+
+  private async applySendMessage(
+    thread: MailboxThreadDetail | (MailboxThreadListItem & { messages: MailboxMessage[] }),
+    input: {
+      mode: "reply" | "reply_all" | "forward";
+      to: string[];
+      cc: string[];
+      bcc: string[];
+      subject?: string;
+      body?: string;
+    },
+  ): Promise<void> {
+    const to = this.normalizeRecipientEmails(input.to);
+    const cc = this.normalizeRecipientEmails(input.cc);
+    const bcc = this.normalizeRecipientEmails(input.bcc);
+    const allRecipients = [...to, ...cc, ...bcc];
+    if (!allRecipients.length) throw new Error("Add at least one recipient before sending.");
+
+    const body = input.body || "";
+    if (!body.trim()) throw new Error("Write a message before sending.");
+
+    const subject =
+      input.subject?.trim() ||
+      this.prefixMailboxSubject(thread.subject, input.mode === "forward" ? "Fwd:" : "Re:");
+
+    if (thread.provider === "gmail") {
+      const settings = GoogleWorkspaceSettingsManager.loadSettings();
+      const stripCRLF = (value: string) => value.replace(/[\r\n]/g, "");
+      const headers = [
+        `To: ${to.map(stripCRLF).join(", ")}`,
+        cc.length ? `Cc: ${cc.map(stripCRLF).join(", ")}` : null,
+        bcc.length ? `Bcc: ${bcc.map(stripCRLF).join(", ")}` : null,
+        `Subject: ${stripCRLF(subject)}`,
+        "MIME-Version: 1.0",
+        'Content-Type: text/plain; charset="UTF-8"',
+      ].filter((entry): entry is string => Boolean(entry));
+      const raw = Buffer.from([...headers, "", body].join("\r\n"))
+        .toString("base64")
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=+$/, "");
+      await gmailRequest(settings, {
+        method: "POST",
+        path: "/users/me/messages/send",
+        body: {
+          raw,
+          threadId: input.mode === "forward" ? undefined : thread.providerThreadId,
+        },
+      });
+    } else if (thread.provider === "agentmail") {
+      if (input.mode === "forward") {
+        throw new Error("Manual forward is not available for AgentMail threads yet.");
+      }
+      const account = this.parseAgentMailAccountId(thread.accountId);
+      const latestInbound = [...thread.messages]
+        .filter((message) => message.direction === "incoming")
+        .sort((a, b) => b.receivedAt - a.receivedAt)[0];
+      if (!account || !latestInbound) {
+        throw new Error("Unable to resolve AgentMail reply target.");
+      }
+      await this.getAgentMailClient().replyAllMessage(account.inboxId, latestInbound.providerMessageId, {
+        text: body,
+        subject,
+      });
+    } else {
+      const channel = this.channelRepo.findByType("email");
+      if (!channel) throw new Error("Email channel is not configured");
+      const cfg = (channel.config as Any) || {};
+      const client = this.createStandardEmailClient(channel.id, cfg);
+      await client.sendEmail({
+        to,
+        cc,
+        bcc,
+        subject,
+        text: body,
+      });
+    }
+
+    if (input.mode !== "forward") {
+      this.db
+        .prepare(
+          `UPDATE mailbox_threads
+           SET needs_reply = 0,
+               handled = 1,
+               today_bucket = CASE WHEN today_bucket = 'needs_action' THEN 'good_to_know' ELSE today_bucket END,
+               updated_at = ?
+           WHERE id = ?`,
+        )
+        .run(Date.now(), thread.id);
+      this.updateProposalStatusByThreadAndType(thread.id, "reply", "applied");
+    }
   }
 
   private async applyDiscardDraft(
@@ -6715,14 +8289,471 @@ export class MailboxService {
     });
   }
 
+  private getMailboxSyncHealth(accounts: MailboxAccount[]): MailboxSyncHealth[] {
+    const queueRows = this.db
+      .prepare(
+        `SELECT account_id, status, COUNT(*) AS count
+         FROM mailbox_queued_actions
+         GROUP BY account_id, status`,
+      )
+      .all() as Array<{ account_id: string | null; status: string; count: number }>;
+    const draftRows = this.db
+      .prepare(
+        `SELECT account_id, status, COUNT(*) AS count
+         FROM mailbox_compose_drafts
+         WHERE status NOT IN ('discarded', 'sent')
+         GROUP BY account_id, status`,
+      )
+      .all() as Array<{ account_id: string; status: string; count: number }>;
+
+    return accounts.map((account) => {
+      const queuedActionCount = queueRows
+        .filter((row) => row.account_id === account.id && row.status === "queued")
+        .reduce((sum, row) => sum + row.count, 0);
+      const failedActionCount = queueRows
+        .filter((row) => row.account_id === account.id && row.status === "failed")
+        .reduce((sum, row) => sum + row.count, 0);
+      const draftCount = draftRows
+        .filter((row) => row.account_id === account.id)
+        .reduce((sum, row) => sum + row.count, 0);
+      const scheduledSendCount = draftRows
+        .filter((row) => row.account_id === account.id && row.status === "scheduled")
+        .reduce((sum, row) => sum + row.count, 0);
+      const backend = account.backend || "imap_smtp";
+      return {
+        accountId: account.id,
+        provider: account.provider,
+        backend,
+        status: account.status,
+        capabilities: account.capabilities,
+        lastSyncedAt: account.lastSyncedAt,
+        queuedActionCount,
+        failedActionCount,
+        draftCount,
+        scheduledSendCount,
+        statusLabel:
+          account.status === "connected"
+            ? `${backend.replace("_", " ")} connected`
+            : account.status === "degraded"
+              ? `${backend.replace("_", " ")} needs attention`
+              : "Reconnect mailbox",
+      };
+    });
+  }
+
+  private listMailboxFolders(): MailboxFolder[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, account_id, provider_folder_id, name, role, unread_count, total_count, created_at, updated_at
+         FROM mailbox_folders
+         ORDER BY account_id, role, name`,
+      )
+      .all() as MailboxFolderRow[];
+    const persisted = rows.map((row) => this.mapMailboxFolderRow(row));
+    const existingKeys = new Set(persisted.map((folder) => `${folder.accountId}:${folder.role}`));
+    const synthetic: MailboxFolder[] = [];
+    const accounts = this.db
+      .prepare(`SELECT id, provider, address, display_name, status, capabilities_json, sync_cursor, classification_initial_batch_at, last_synced_at FROM mailbox_accounts`)
+      .all() as MailboxAccountRow[];
+    const standard: Array<{ role: MailboxFolder["role"]; name: string }> = [
+      { role: "inbox", name: "Inbox" },
+      { role: "sent", name: "Sent" },
+      { role: "drafts", name: "Drafts" },
+      { role: "scheduled", name: "Scheduled" },
+      { role: "archive", name: "Archive" },
+      { role: "trash", name: "Trash" },
+      { role: "spam", name: "Spam" },
+    ];
+    const now = Date.now();
+    for (const account of accounts) {
+      for (const folder of standard) {
+        if (existingKeys.has(`${account.id}:${folder.role}`)) continue;
+        synthetic.push({
+          id: `${account.id}:${folder.role}`,
+          accountId: account.id,
+          providerFolderId: folder.role,
+          name: folder.name,
+          role: folder.role,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+    }
+    return [...persisted, ...synthetic];
+  }
+
+  private listMailboxLabels(): MailboxLabel[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, account_id, provider_label_id, name, color, unread_count, total_count, created_at, updated_at
+         FROM mailbox_labels
+         ORDER BY account_id, name`,
+      )
+      .all() as MailboxLabelRow[];
+    return rows.map((row) => this.mapMailboxLabelRow(row));
+  }
+
+  private listMailboxIdentities(): MailboxIdentity[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, account_id, provider_identity_id, email, display_name, signature_id, is_default, created_at, updated_at
+         FROM mailbox_identities
+         ORDER BY account_id, is_default DESC, email`,
+      )
+      .all() as MailboxIdentityRow[];
+    const identities = rows.map((row) => this.mapMailboxIdentityRow(row));
+    const existingAccounts = new Set(identities.map((identity) => identity.accountId));
+    const accounts = this.db
+      .prepare(`SELECT id, provider, address, display_name, status, capabilities_json, sync_cursor, classification_initial_batch_at, last_synced_at FROM mailbox_accounts`)
+      .all() as MailboxAccountRow[];
+    const now = Date.now();
+    return [
+      ...identities,
+      ...accounts
+        .filter((account) => !existingAccounts.has(account.id))
+        .map((account) => ({
+          id: `${account.id}:default`,
+          accountId: account.id,
+          email: account.address,
+          displayName: account.display_name || undefined,
+          isDefault: true,
+          createdAt: now,
+          updatedAt: now,
+        })),
+    ];
+  }
+
+  private listMailboxSignatures(): MailboxSignature[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, account_id, name, body_html, body_text, is_default, created_at, updated_at
+         FROM mailbox_signatures
+         ORDER BY account_id, is_default DESC, name`,
+      )
+      .all() as MailboxSignatureRow[];
+    return rows.map((row) => this.mapMailboxSignatureRow(row));
+  }
+
+  private listMailboxComposeDrafts(): MailboxComposeDraft[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, account_id, thread_id, provider_draft_id, mode, status, subject, body_text, body_html,
+                to_json, cc_json, bcc_json, identity_id, signature_id, attachments_json, scheduled_at,
+                send_after, latest_error, created_at, updated_at
+         FROM mailbox_compose_drafts
+         WHERE status != 'discarded'
+         ORDER BY updated_at DESC
+         LIMIT 100`,
+      )
+      .all() as MailboxComposeDraftRow[];
+    return rows.map((row) => this.mapMailboxComposeDraftRow(row));
+  }
+
+  private listMailboxQueuedActions(): MailboxQueuedAction[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, account_id, thread_id, draft_id, action_type, status, payload_json, attempts, next_attempt_at,
+                latest_error, undo_of_action_id, created_at, updated_at
+         FROM mailbox_queued_actions
+         WHERE status IN ('queued', 'running', 'failed')
+         ORDER BY updated_at DESC
+         LIMIT 100`,
+      )
+      .all() as MailboxQueuedActionRow[];
+    return rows.map((row) => this.mapMailboxQueuedActionRow(row));
+  }
+
+  private listMailboxOutgoingMessages(): MailboxOutgoingMessage[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, draft_id, account_id, status, provider_message_id, scheduled_at, send_after, latest_error, created_at, updated_at
+         FROM mailbox_outgoing_messages
+         WHERE status IN ('queued', 'running', 'failed')
+         ORDER BY updated_at DESC
+         LIMIT 100`,
+      )
+      .all() as MailboxOutgoingMessageRow[];
+    return rows.map((row) => this.mapMailboxOutgoingMessageRow(row));
+  }
+
+  private getMailboxClientSettings(): MailboxClientState["settings"] {
+    const row = this.db
+      .prepare(
+        `SELECT remote_content_policy, send_delay_seconds, sync_recent_days, attachment_cache, notifications
+         FROM mailbox_client_settings
+         WHERE id = 'default'`,
+      )
+      .get() as
+      | {
+          remote_content_policy: MailboxClientState["settings"]["remoteContentPolicy"];
+          send_delay_seconds: number;
+          sync_recent_days: number;
+          attachment_cache: MailboxClientState["settings"]["attachmentCache"];
+          notifications: MailboxClientState["settings"]["notifications"];
+        }
+      | undefined;
+    return {
+      remoteContentPolicy: row?.remote_content_policy || "load",
+      sendDelaySeconds: Number.isFinite(row?.send_delay_seconds) ? row!.send_delay_seconds : 30,
+      syncRecentDays: Number.isFinite(row?.sync_recent_days) ? row!.sync_recent_days : 30,
+      attachmentCache: row?.attachment_cache || "metadata_on_demand",
+      notifications: row?.notifications || "needs_reply",
+    };
+  }
+
+  private getMailboxComposeDraft(draftId: string): MailboxComposeDraft | null {
+    const row = this.db
+      .prepare(
+        `SELECT id, account_id, thread_id, provider_draft_id, mode, status, subject, body_text, body_html,
+                to_json, cc_json, bcc_json, identity_id, signature_id, attachments_json, scheduled_at,
+                send_after, latest_error, created_at, updated_at
+         FROM mailbox_compose_drafts
+         WHERE id = ?`,
+      )
+      .get(draftId) as MailboxComposeDraftRow | undefined;
+    return row ? this.mapMailboxComposeDraftRow(row) : null;
+  }
+
+  private getMailboxOutgoingMessage(id: string): MailboxOutgoingMessage | null {
+    const row = this.db
+      .prepare(
+        `SELECT id, draft_id, account_id, status, provider_message_id, scheduled_at, send_after, latest_error, created_at, updated_at
+         FROM mailbox_outgoing_messages
+         WHERE id = ?`,
+      )
+      .get(id) as MailboxOutgoingMessageRow | undefined;
+    return row ? this.mapMailboxOutgoingMessageRow(row) : null;
+  }
+
+  private getMailboxQueuedAction(actionId: string): MailboxQueuedAction | null {
+    const row = this.db
+      .prepare(
+        `SELECT id, account_id, thread_id, draft_id, action_type, status, payload_json, attempts, next_attempt_at,
+                latest_error, undo_of_action_id, created_at, updated_at
+         FROM mailbox_queued_actions
+         WHERE id = ?`,
+      )
+      .get(actionId) as MailboxQueuedActionRow | undefined;
+    return row ? this.mapMailboxQueuedActionRow(row) : null;
+  }
+
+  private enqueueMailboxAction(input: {
+    accountId?: string;
+    threadId?: string;
+    draftId?: string;
+    type: MailboxQueuedAction["type"];
+    payload: Record<string, unknown>;
+    nextAttemptAt?: number;
+    undoOfActionId?: string;
+  }): MailboxQueuedAction {
+    const now = Date.now();
+    const id = randomUUID();
+    this.db
+      .prepare(
+        `INSERT INTO mailbox_queued_actions
+          (id, account_id, thread_id, draft_id, action_type, status, payload_json, attempts, next_attempt_at, latest_error, undo_of_action_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'queued', ?, 0, ?, NULL, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        input.accountId || null,
+        input.threadId || null,
+        input.draftId || null,
+        input.type,
+        JSON.stringify(input.payload || {}),
+        input.nextAttemptAt || Date.now(),
+        input.undoOfActionId || null,
+        now,
+        now,
+      );
+    return this.getMailboxQueuedAction(id)!;
+  }
+
+  private resolveComposeAccountId(accountId?: string, threadId?: string): string {
+    if (accountId) return accountId;
+    if (threadId) {
+      const row = this.db.prepare("SELECT account_id FROM mailbox_threads WHERE id = ?").get(threadId) as
+        | { account_id: string }
+        | undefined;
+      if (row?.account_id) return row.account_id;
+    }
+    const firstAccount = this.db
+      .prepare("SELECT id FROM mailbox_accounts ORDER BY updated_at DESC LIMIT 1")
+      .get() as { id: string } | undefined;
+    if (!firstAccount?.id) throw new Error("Connect a mailbox account before composing.");
+    return firstAccount.id;
+  }
+
+  private buildReplyRecipients(thread: MailboxThreadDetail | null, replyAll: boolean): MailboxRecipientInput[] {
+    if (!thread) return [];
+    const latestIncoming = [...thread.messages].reverse().find((message) => message.direction === "incoming");
+    const recipients = new Map<string, MailboxRecipientInput>();
+    const add = (participant?: MailboxParticipant) => {
+      if (!participant?.email) return;
+      const normalized = normalizeMailboxEmailAddress(participant.email);
+      if (!normalized) return;
+      recipients.set(normalized, { email: participant.email, name: participant.name });
+    };
+    add(latestIncoming?.from || thread.participants[0]);
+    if (replyAll && latestIncoming) {
+      for (const participant of latestIncoming.to) add(participant);
+      for (const participant of latestIncoming.cc) add(participant);
+    }
+    return Array.from(recipients.values());
+  }
+
+  private prefixMailboxSubject(subject: string, prefix: string): string {
+    const trimmed = subject.trim();
+    return trimmed.toLowerCase().startsWith(prefix.toLowerCase()) ? trimmed : `${prefix} ${trimmed}`;
+  }
+
+  private normalizeRecipients(recipients: MailboxRecipientInput[]): MailboxRecipientInput[] {
+    return recipients
+      .map((recipient) => ({
+        email: normalizeMailboxEmailAddress(recipient.email),
+        name: recipient.name?.trim() || undefined,
+      }))
+      .filter((recipient) => recipient.email.includes("@"));
+  }
+
+  private normalizeRecipientEmails(recipients: string[]): string[] {
+    return Array.from(
+      new Set(
+        recipients
+          .flatMap((recipient) => recipient.split(/[,\n;]/))
+          .map((recipient) => normalizeMailboxEmailAddress(recipient))
+          .filter((recipient) => recipient.includes("@")),
+      ),
+    );
+  }
+
+  private mapMailboxFolderRow(row: MailboxFolderRow): MailboxFolder {
+    return {
+      id: row.id,
+      accountId: row.account_id,
+      providerFolderId: row.provider_folder_id,
+      name: row.name,
+      role: row.role,
+      unreadCount: row.unread_count ?? undefined,
+      totalCount: row.total_count ?? undefined,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  private mapMailboxLabelRow(row: MailboxLabelRow): MailboxLabel {
+    return {
+      id: row.id,
+      accountId: row.account_id,
+      providerLabelId: row.provider_label_id,
+      name: row.name,
+      color: row.color || undefined,
+      unreadCount: row.unread_count ?? undefined,
+      totalCount: row.total_count ?? undefined,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  private mapMailboxIdentityRow(row: MailboxIdentityRow): MailboxIdentity {
+    return {
+      id: row.id,
+      accountId: row.account_id,
+      providerIdentityId: row.provider_identity_id || undefined,
+      email: row.email,
+      displayName: row.display_name || undefined,
+      signatureId: row.signature_id || undefined,
+      isDefault: Boolean(row.is_default),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  private mapMailboxSignatureRow(row: MailboxSignatureRow): MailboxSignature {
+    return {
+      id: row.id,
+      accountId: row.account_id,
+      name: row.name,
+      bodyHtml: row.body_html || undefined,
+      bodyText: row.body_text,
+      isDefault: Boolean(row.is_default),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  private mapMailboxComposeDraftRow(row: MailboxComposeDraftRow): MailboxComposeDraft {
+    return {
+      id: row.id,
+      accountId: row.account_id,
+      mode: row.mode,
+      status: row.status,
+      threadId: row.thread_id || undefined,
+      providerDraftId: row.provider_draft_id || undefined,
+      subject: row.subject,
+      bodyText: row.body_text,
+      bodyHtml: row.body_html || undefined,
+      to: parseJsonArray<MailboxRecipientInput>(row.to_json),
+      cc: parseJsonArray<MailboxRecipientInput>(row.cc_json),
+      bcc: parseJsonArray<MailboxRecipientInput>(row.bcc_json),
+      identityId: row.identity_id || undefined,
+      signatureId: row.signature_id || undefined,
+      attachments: parseJsonArray<MailboxComposeDraft["attachments"][number]>(row.attachments_json),
+      scheduledAt: row.scheduled_at || undefined,
+      sendAfter: row.send_after || undefined,
+      latestError: row.latest_error || undefined,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  private mapMailboxOutgoingMessageRow(row: MailboxOutgoingMessageRow): MailboxOutgoingMessage {
+    return {
+      id: row.id,
+      draftId: row.draft_id || undefined,
+      accountId: row.account_id,
+      status: row.status,
+      providerMessageId: row.provider_message_id || undefined,
+      scheduledAt: row.scheduled_at || undefined,
+      sendAfter: row.send_after || undefined,
+      latestError: row.latest_error || undefined,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  private mapMailboxQueuedActionRow(row: MailboxQueuedActionRow): MailboxQueuedAction {
+    return {
+      id: row.id,
+      accountId: row.account_id || undefined,
+      threadId: row.thread_id || undefined,
+      draftId: row.draft_id || undefined,
+      type: row.action_type,
+      status: row.status,
+      payload: parseJsonObject(row.payload_json),
+      attempts: row.attempts,
+      nextAttemptAt: row.next_attempt_at || undefined,
+      latestError: row.latest_error || undefined,
+      undoOfActionId: row.undo_of_action_id || undefined,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
   private mapAccountRow(row: MailboxAccountRow): MailboxAccount {
+    const storedCapabilities = parseJsonArray<string>(row.capabilities_json);
+    const backend = resolveMailboxProviderBackend({
+      provider: row.provider,
+      capabilities: storedCapabilities,
+    });
     return {
       id: row.id,
       provider: row.provider,
       address: row.address,
       displayName: row.display_name || undefined,
       status: row.status,
-      capabilities: parseJsonArray<string>(row.capabilities_json),
+      capabilities: mergeMailboxCapabilities(storedCapabilities, backend),
+      backend,
       lastSyncedAt: row.last_synced_at || undefined,
       classificationInitialBatchAt: row.classification_initial_batch_at || undefined,
     };
@@ -6744,6 +8775,21 @@ export class MailboxService {
       .join(" ")
       .toLowerCase();
     if (threadText.includes(needle)) return true;
+    const attachmentRows = this.db
+      .prepare(
+        `SELECT ma.filename, mat.text_content
+         FROM mailbox_attachments ma
+         LEFT JOIN mailbox_attachment_text mat ON mat.attachment_id = ma.id
+         WHERE ma.thread_id = ?`,
+      )
+      .all(row.id) as Array<{ filename: string; text_content: string | null }>;
+    if (
+      attachmentRows.some((attachment) =>
+        `${attachment.filename} ${decryptMailboxValue(attachment.text_content || "")}`.toLowerCase().includes(needle),
+      )
+    ) {
+      return true;
+    }
 
     return this.getMessagesForThread(row.id).some((message) => {
       const messageText = [
@@ -6766,6 +8812,23 @@ export class MailboxService {
     });
   }
 
+  private threadMatchesAttachmentQuery(threadId: string, query: string): boolean {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return true;
+
+    const attachmentRows = this.db
+      .prepare(
+        `SELECT ma.filename, mat.text_content
+         FROM mailbox_attachments ma
+         LEFT JOIN mailbox_attachment_text mat ON mat.attachment_id = ma.id
+         WHERE ma.thread_id = ?`,
+      )
+      .all(threadId) as Array<{ filename: string; text_content: string | null }>;
+    return attachmentRows.some((attachment) =>
+      `${attachment.filename} ${decryptMailboxValue(attachment.text_content || "")}`.toLowerCase().includes(needle),
+    );
+  }
+
   private mapThreadRow(row: MailboxThreadRow, summary?: MailboxSummaryCard | null): MailboxThreadListItem {
     const sensitiveContent = this.readThreadSensitiveContent(row);
     return {
@@ -6778,6 +8841,8 @@ export class MailboxService {
       participants: parseJsonArray<MailboxParticipant>(row.participants_json),
       labels: parseJsonArray<string>(row.labels_json),
       category: row.category,
+      todayBucket: normalizeTodayBucket(row.today_bucket, "more_to_browse"),
+      domainCategory: normalizeDomainCategory(row.domain_category, "other"),
       priorityBand: priorityBandFromScore(row.priority_score),
       priorityScore: row.priority_score,
       urgencyScore: row.urgency_score,
@@ -6790,8 +8855,36 @@ export class MailboxService {
       lastMessageAt: row.last_message_at,
       hasSensitiveContent: sensitiveContent.hasSensitiveContent,
       summary: summary ?? undefined,
+      attachments: this.getAttachmentSummariesForThread(row.id),
       classificationState: row.classification_state,
     };
+  }
+
+  private getAttachmentSummariesForThread(threadId: string, limit = 6): MailboxAttachmentSummary[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, message_id, filename, mime_type, size, extraction_status
+         FROM mailbox_attachments
+         WHERE thread_id = ?
+         ORDER BY updated_at DESC
+         LIMIT ?`,
+      )
+      .all(threadId, Math.min(Math.max(limit, 1), 20)) as Array<{
+      id: string;
+      message_id: string;
+      filename: string;
+      mime_type: string | null;
+      size: number | null;
+      extraction_status: MailboxAttachmentSummary["extractionStatus"];
+    }>;
+    return rows.map((row) => ({
+      id: row.id,
+      messageId: row.message_id,
+      filename: row.filename,
+      mimeType: row.mime_type || undefined,
+      size: row.size ?? undefined,
+      extractionStatus: row.extraction_status || "not_indexed",
+    }));
   }
 
   private mapMessageRow(row: MailboxMessageRow): MailboxMessage {

@@ -66,6 +66,17 @@ export class CoreMemoryCandidateService {
       );
     }
 
+    if (normalized.includes("correct") || normalized.includes("rejected") || normalized.includes("invalidated")) {
+      pushCandidate(
+        "correction",
+        "Workflow intelligence should adjust a prior assumption",
+        trace.summary || "The run produced a correction or invalidated a previous path.",
+        0.78,
+        0.58,
+        0.7,
+      );
+    }
+
     if (normalized.includes("outside active hours") || normalized.includes("cooldown")) {
       pushCandidate(
         "constraint",
@@ -104,12 +115,37 @@ export class CoreMemoryCandidateService {
       (normalized.includes("dispatch") || normalized.includes("suggest"))
     ) {
       pushCandidate(
-        "project_state",
-        "Core automation is tracking an active line of work",
-        trace.summary || "Subconscious produced a meaningful recommendation or dispatch.",
+        "open_loop",
+        "Workflow intelligence surfaced a reviewable next action",
+        trace.summary || "Reflection produced a recommendation for the user to review.",
+        0.78,
+        0.46,
+        0.66,
+      );
+    }
+
+    if (
+      trace.traceKind === "subconscious_cycle" &&
+      (normalized.includes("no fresh evidence") || normalized.includes("slept"))
+    ) {
+      pushCandidate(
+        "ignored_noise",
+        "Workflow intelligence should ignore low-signal context like this",
+        trace.summary || "Reflection found no fresh evidence worth surfacing.",
+        0.76,
+        0.44,
         0.72,
-        0.38,
-        0.61,
+      );
+    }
+
+    if (normalized.includes("recurring") || normalized.includes("cadence") || normalized.includes("every ")) {
+      pushCandidate(
+        "recurring_task",
+        "This workflow may be recurring",
+        trace.summary || "The trace suggests a repeated workflow or cadence.",
+        0.76,
+        0.52,
+        0.62,
       );
     }
 

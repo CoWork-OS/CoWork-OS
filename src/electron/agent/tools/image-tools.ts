@@ -23,6 +23,8 @@ import { LLMTool } from "../llm/types";
  */
 export class ImageTools {
   private imageGenerator: ImageGenerator;
+  private imageGenerationRequestSignatures = new Set<string>();
+  private duplicateImageGenerationBlockLogged = false;
 
   constructor(
     private workspace: Workspace,
@@ -44,17 +46,42 @@ export class ImageTools {
   /**
    * Generate an image from a text prompt
    */
-  async generateImage(input: {
-    prompt: string;
-    provider?: ImageProvider | "auto";
-    model?: ImageModel;
-    filename?: string;
-    imageSize?: ImageSize;
-    numberOfImages?: number;
-  }): Promise<ImageGenerationResult> {
+  async generateImage(
+    input: {
+      prompt: string;
+      provider?: ImageProvider | "auto";
+      model?: ImageModel;
+      filename?: string;
+      imageSize?: ImageSize;
+      numberOfImages?: number;
+    },
+    options?: { signal?: AbortSignal },
+  ): Promise<ImageGenerationResult> {
     if (!this.workspace.permissions.write) {
       throw new Error("Write permission not granted for image generation");
     }
+
+    const requestSignature = this.getImageGenerationRequestSignature(input);
+    if (this.imageGenerationRequestSignatures.has(requestSignature)) {
+      const error =
+        "generate_image has already been attempted with the same request in this task. CoWork OS blocks repeated identical image generation calls to prevent duplicate outputs.";
+      if (!this.duplicateImageGenerationBlockLogged) {
+        this.duplicateImageGenerationBlockLogged = true;
+        this.daemon.logEvent(this.taskId, "error", {
+          action: "generate_image",
+          error,
+        });
+      }
+      return {
+        success: false,
+        images: [],
+        ...(input.provider && input.provider !== "auto" ? { provider: input.provider } : {}),
+        model: input.model || "image-generation",
+        error,
+      };
+    }
+
+    this.imageGenerationRequestSignatures.add(requestSignature);
 
     const result = await this.imageGenerator.generate({
       prompt: input.prompt,
@@ -63,6 +90,19 @@ export class ImageTools {
       filename: input.filename,
       imageSize: input.imageSize || "1K",
       numberOfImages: input.numberOfImages || 1,
+      signal: options?.signal,
+      onProgress: (event) => {
+        this.daemon.logEvent(this.taskId, "progress_update", {
+          action: "generate_image",
+          provider: event.provider,
+          model: event.model,
+          timeoutMs: event.timeoutMs,
+          fallbackModel: event.fallbackModel,
+          message: event.message,
+          status: "in_progress",
+          actor: "agent",
+        });
+      },
     });
 
     // Log events for generated images
@@ -91,6 +131,22 @@ export class ImageTools {
     }
 
     return result;
+  }
+
+  private getImageGenerationRequestSignature(input: {
+    prompt: string;
+    provider?: ImageProvider | "auto";
+    model?: ImageModel;
+    imageSize?: ImageSize;
+    numberOfImages?: number;
+  }): string {
+    return JSON.stringify({
+      prompt: String(input.prompt || "").replace(/\s+/g, " ").trim().toLowerCase(),
+      provider: input.provider || "auto",
+      model: input.model || "",
+      imageSize: input.imageSize || "1K",
+      numberOfImages: input.numberOfImages || 1,
+    });
   }
 
   /**

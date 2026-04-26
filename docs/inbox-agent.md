@@ -1,143 +1,202 @@
 # Inbox Agent
 
-Inbox Agent is the local-first inbox workspace in CoWork OS. It keeps mail cached in the app, lets you review sent and received conversations side by side, and turns email into structured work instead of a long scroll of threads.
+Inbox Agent is CoWork OS's local-first, agent-assisted email workspace. It is designed to be more than a mailbox viewer: it keeps recent mail cached locally, syncs in the background, classifies work into action lanes, lets you reply or forward like a normal email client, and turns important threads into tasks, automations, Mission Control issues, and relationship memory.
 
-It is no longer just a mailbox viewer. The inbox now feeds a mailbox event pipeline that updates Knowledge Graph, Heartbeat v3, triggers, playbooks, Mission Control, and the daily briefing whenever sync, classification, summarization, draft generation, commitment extraction, handoff, or actions happen.
+The current product shape is:
+
+- **Classic inbox remains available** as the familiar three-pane mailbox.
+- **Today mode is the agent-first working mode** for deciding what needs attention now.
+- **Ask Mailbox and Agent Rail sit beside the thread** so search, cleanup, commitments, drafts, and handoff actions are close to the message.
+- **Provider state is authoritative** for read/unread and supported server actions; the local database is the cache plus agent metadata.
 
 ## What It Does
 
-Inbox Agent helps you move from "read everything" to "act on the few items that matter":
+Inbox Agent helps you move from "read everything" to "act on what matters":
 
-- classify threads into `Unread`, `Action Needed`, `Suggested Actions`, and `Open Commitments`
-- keep `Inbox`, `Sent`, and `All` views separate so outbound mail does not clutter the inbox
-- show sent-mail content as thread content when you open a sent conversation
-- sort by `Recent` or `Priority`
-- multi-select threads for bulk archive, trash, mark-read, and cleanup flows
-- generate thread summaries and draft replies before anything is sent
-- extract commitments, edit commitment details, and track follow-up tasks
+- sync Gmail and IMAP/SMTP mail into a local encrypted cache, then keep it fresh with background autosync
+- classify threads into `Unread`, `Needs reply`, `Suggested actions`, and `Open commitments`
+- group the current inbox into Today lanes: `Needs action`, `Happening today`, `Good to know`, and `More to browse`
+- classify practical domains such as travel, packages, receipts, bills, shopping, newsletters, work, personal, and finance
+- keep `Inbox`, `Sent`, and `All` views separate so outbound mail does not clutter received mail
+- make unread mail visually distinct and update read/unread state through the provider when capability is available
+- search local mailbox evidence with Mailbox Ask, including attachment metadata and extracted attachment text when indexed
+- generate AI summaries and AI reply drafts, while keeping drafts editable before send
+- send a manual reply, reply-all, or forward without requiring an AI-generated draft
+- extract commitments, edit commitment details, and mark already-handled threads done
+- roll up noisy senders into a sender cleanup center
+- show attachment chips and fetch/extract attachment text only on demand
 - resolve contact identities across email, Slack, Teams, WhatsApp, Signal, iMessage, and CRM-linked handles
-- expose a unified relationship timeline and channel recommendation in the research rail
-- reply directly via Slack, Teams, WhatsApp, Signal, or iMessage when the linked contact is more active there
+- reply via a linked non-email channel when that channel is a better target
 - hand off a thread into Mission Control as a company issue and wake the recommended operator
-- create inbox automations and reminders from the thread or current filter
-- flag sensitive content so users can review outbound actions more carefully
-- keep synced mail visible locally so a restart does not blank the inbox
-
-## Why It Is Useful
-
-The main advantage of Inbox Agent is speed without losing context:
-
-- **Less manual triage** - important threads are surfaced directly instead of forcing you to scan the full mailbox
-- **Fewer missed replies** - action-needed mail is separated from newsletters and system notifications
-- **Clear next steps** - every thread can move toward a draft, a task, a commitment, or dismissal
-- **Local-first persistence** - inbox state is stored in the local database and survives app restarts
-- **Safer outbound mail** - generated drafts and sent-mail review stay visible before you confirm external actions
-- **Better contact memory** - repeated conversations enrich contact intelligence and relationship context over time
-- **Cross-system handoff** - inbox events can feed briefings, Heartbeat, triggers, playbooks, and the Knowledge Graph
-- **Unified identity** - manual search/link in Settings can attach Slack, Teams, WhatsApp, Signal, iMessage, or CRM handles to the right person
-- **Mission Control bridge** - important threads can become company issues with mailbox evidence and operator wake-up
-- **Automation hooks** - inbox rules, scheduled patrols, and remind-later flows can create tasks, wake agents, and schedule reviews
+- create inbox automations, reminders, scheduled review patrols, and Gmail forwarding automations
+- emit mailbox events into Knowledge Graph, Heartbeat, triggers, playbooks, Mission Control, and daily briefings
 
 ## Core Surfaces
 
-| Surface | What It Does |
-|---------|--------------|
-| Metric cards | Show unread mail, action-needed mail, suggested actions, and open commitments at a glance. |
+| Surface | Current Behavior |
+|---------|------------------|
+| Classic mode | Three-pane mailbox with filters, thread list, detail pane, and Agent Rail. |
+| Today mode | Groups current threads into `Needs action`, `Happening today`, `Good to know`, and `More to browse`. |
+| Inbox pulse | Shows unread, needs-reply, suggested-action, and open-commitment counts. |
 | View filters | Switch between `Inbox`, `Sent`, and `All`. |
+| Category filters | Filter by priority, calendar, follow-up, promotions, updates, and saved views. |
+| Domain filters | Filter by domains such as travel, packages, receipts, bills, newsletters, shopping, work, and all domains. |
 | Sort controls | Toggle between `Recent` and `Priority`. |
-| Thread groups | Group threads by reply pressure, priority, or everything else when no narrow filter is active. |
-| Thread list | Browse the mailbox with selection, bulk actions, and live filter/sort updates. |
-| Thread detail | Inspect the full conversation, including received and sent message sections, summary, drafts, and commitments. |
-| Agent rail | Run cleanup, follow-up, thread prep, todo extraction, scheduling, inbox automation, and intel refresh actions. |
-| Reply rail | Send a reply through the contact’s active channel when Slack, Teams, WhatsApp, Signal, or iMessage is a better fit than email. |
-| Mission Control handoff | Turn a thread into a company issue, choose an operator, and wake them with mailbox context. |
-| Research rail | Review identity resolution, linked channels, recent subjects, unified relationship timeline, channel preference, and follow-up signals. |
+| Thread cards | Show sender, subject, snippet, account, message count, priority/cleanup chips, attachment chips, and stronger unread styling. |
+| Thread detail | Shows subject, participants, provider/account chips, AI summary, manual compose, editable AI draft, attachments, received/sent messages, and commitments. |
+| Agent Rail | Cleanup, follow-up, reply, forward, mark done, prep thread, extract todos, schedule, refresh intel, handoff, quick replies, snippets, automations, and quick actions. |
+| Mailbox Ask | Searches local FTS and evidence; can return ranked threads and attachment matches, with LLM summaries when configured. |
+| Sender cleanup | Ranks noisy senders by recent volume, cleanup candidates, read/action rate signals, and estimated weekly reduction. |
+| Client readiness | Shows provider backends, capabilities, folders, labels, identities, signatures, compose drafts, queued actions, failed actions, and sync health. |
+| Mission Control handoff | Turns a thread into a company issue with mailbox evidence and an operator wake-up. |
+| Research rail | Shows contact identity, linked channels, relationship timeline, recent subjects, and preferred channel hints. |
 
-## Typical Workflow
+## Normal Email Client Actions
 
-1. Open Inbox Agent and let it load the cached mailbox from the local database.
-2. Review the metric cards to decide whether to focus on unread, action-needed, suggested actions, or commitments.
-3. Switch between `Inbox`, `Sent`, and `All` if you want to isolate received mail from outbound mail.
-4. Sort by `Recent` when you want the newest messages first, or `Priority` when you want the highest-signal threads first.
-5. Open a thread and inspect the message body, summary, and related context.
-6. Use `Prep thread` to generate a concise summary, extract commitments, and draft a response.
-7. Switch to `Reply via` when the contact is more active on Slack, Teams, WhatsApp, Signal, or iMessage.
-8. Turn important threads into Mission Control issues when they need a company-level operator handoff.
-9. Send the draft, discard it, or turn commitments into follow-up tasks.
-10. Edit commitment details inline when the due date, title, or owner needs correction.
-11. Use `Refresh intel` when a thread changed and you want the summary, commitment extraction, identity links, and contact signals refreshed together.
-12. Use bulk selection when you want to clear low-value mail faster.
+Inbox Agent supports direct email handling in the selected thread:
 
-## Actions In Practice
+- **Reply** opens a manual composer with the latest inbound sender prefilled.
+- **Reply all** includes the latest inbound sender plus other non-self recipients.
+- **Forward** opens a manual composer with a forwarded-message block and no prefilled recipient.
+- **Cc/Bcc** are supported in the manual composer.
+- **Send** routes through the connected provider path: Gmail API for Gmail, AgentMail reply-all for AgentMail replies, and SMTP for IMAP/SMTP accounts.
+- **AI draft send** sends the edited subject/body visible in the draft card, not the original generated text.
+- **After send**, reply-needed state and the draft card are cleared for replies. Forwarding does not mark the original thread as handled.
 
-- **Cleanup** - suggests low-value mail that can be archived or handled in bulk
-- **Follow-up** - surfaces stale threads that still need a response
-- **Prep thread** - prepares the thread for action by summarizing it and drafting a reply
-- **Extract todos** - finds commitments and turns them into trackable follow-up items
-- **Schedule** - proposes or creates calendar time for the thread when a meeting is needed
-- **Reply via channel** - sends the reply through the contact’s linked Slack, Teams, WhatsApp, Signal, or iMessage target when that channel is more active
-- **Handoff** - creates a Mission Control issue, attaches the mailbox evidence, assigns the operator, and wakes them
-- **Identity search and link** - manually search for handles or CRM records and attach them to the right contact identity
-- **Refresh intel** - re-runs the thread analysis and contact intelligence for the selected conversation
-- **Remind later** - snoozes a thread by creating a timed follow-up task
-- **Automation rule / schedule** - create inbox-native rules or patrol schedules from a thread or filter
-- **Auto-forward** - create a Gmail forwarding automation from the selected thread to route matching attachments to another mailbox
-- **Bulk archive / trash / mark read** - clears multiple threads at once
+Current compose boundary:
+
+- The replacement-grade compose/outbox schema and IPC APIs exist for provider-backed drafts, scheduled send, undo send, and queued sends.
+- The visible thread-level manual composer currently sends directly through the existing provider path.
+- A full background outbox worker that drains queued compose drafts into Gmail API, Microsoft Graph, or SMTP is still a future provider execution pass.
+
+## Read, Unread, Done, And Commitments
+
+`Unread` is a provider-backed message state. When supported, `Mark read` and `Mark unread` update the server mailbox, then reconcile local cache state. Gmail requires the Gmail modify scope for read-state changes.
+
+`Needs reply` is an agent classification. It can be cleared when:
+
+- you send a reply from Inbox Agent
+- you use `Mark done` after handling the thread elsewhere
+- the thread is reclassified and no longer needs a reply
+
+`Open commitments` are extracted follow-up items, not the same thing as unread mail. If a commitment was already handled, use `Mark done` on the thread or update the commitment state in the commitments section.
+
+## Autosync And Local Cache
+
+Inbox Agent loads cached mail immediately on startup and refreshes in the background. Autosync runs periodically while the app is open and syncs a bounded recent batch so the inbox behaves more like a normal mail client without blocking the UI.
+
+Sync principles:
+
+- provider state is the source of truth for read/unread, archive/trash, sent mail, and supported labels/folders
+- local state stores cached message content, classification, Today/domain buckets, summaries, commitments, drafts, attachment metadata, and automation state
+- ordinary listing is never blocked by attachment text extraction or LLM classification
+- the UI can show "syncing", queued, failed, and reconnect states separately from cached mail
+
+## Attachments And Ask
+
+Attachment handling is local-first and on demand:
+
+- sync stores attachment metadata such as filename, MIME type, size, provider message id, and provider attachment id
+- attachment bytes are not downloaded during ordinary sync
+- text extraction runs only when Ask/search needs attachment text or the user explicitly opens/extracts an attachment result
+- extracted text is cached locally for later search
+- supported extraction targets include PDF, DOCX, HTML, and plain text-like files where provider fetch support exists
+- failures and unsupported types are recorded without breaking inbox listing
+
+Mailbox Ask uses local retrieval first. When an LLM provider is configured, it can add a concise answer over the ranked evidence. Without an LLM, Ask still returns ranked local results.
+
+## Voice Input
+
+The inbox has two voice entry points:
+
+- the microphone next to `Search threads...` fills the search box and reloads matching threads
+- `Speak reply` in the reply area appends dictated text into the reply composer without sending
+
+Desktop behavior:
+
+- Electron does not rely on Chromium's Web Speech service because it can request microphone permission but still fail when the speech-recognition backend is unavailable
+- desktop transcription uses the configured OpenAI or Azure speech-to-text provider in `Settings > Voice`
+- if provider transcription is not configured, the mic button shows a configuration message instead of a generic "service unavailable" error
+
+## Provider Support
+
+| Provider | Current Status |
+|----------|----------------|
+| Gmail | First-class sync, classification, attachment metadata, read/unread, archive/trash where modify scope is granted, Gmail API send for replies, Mailbox Ask, and Gmail forwarding automations. |
+| IMAP/SMTP | Sync/read through IMAP and send through SMTP. Read/unread support depends on account connection and provider capability. Archive/trash/labels are more limited than Gmail. |
+| AgentMail | AgentMail sync and reply-all support for AgentMail threads. Manual forwarding is not yet available for AgentMail threads. |
+| Outlook / Microsoft Graph | Represented in the provider model and capability surface. Dedicated Microsoft Graph mail execution is still planned; existing Outlook-style accounts currently use IMAP/SMTP fallback where configured. |
+
+## Replacement Client Foundation
+
+Inbox Agent now includes the foundation for a replacement-grade email client:
+
+- `MailboxProviderClient` capability mapping for Gmail API, Microsoft Graph, IMAP/SMTP, and AgentMail
+- schema for folders, labels, identities, signatures, provider drafts, compose drafts, outgoing messages, queued actions, sync cursors, client settings, attachment metadata, and action state
+- shared types and IPC/preload APIs for client state, compose draft creation/update/send/schedule/discard, undo action, Today digest, sender cleanup digest, Ask, and attachment extraction
+- list filters for Today bucket, domain category, folder, label, draft, scheduled, queued, attachment presence, and attachment query
+- digest metadata for sync health, queued action counts, failed action counts, compose drafts, and scheduled sends
+- action audit/event emission for applied actions and downstream automation hooks
+
+Current replacement-client gap:
+
+- native new-mail compose, provider-backed draft save/update, attachment upload, full outgoing queue draining, Microsoft Graph execution, folder/label navigation, and notification preferences still need the next implementation passes before Inbox Agent can fully replace every email-client workflow.
 
 ## Gmail Forwarding Automations
 
-Inbox Agent can create native Gmail forwarding automations from the selected thread with `Auto-forward…`.
+Inbox Agent can create native Gmail forwarding automations from the selected thread with `Auto-forward...`.
 
 What the flow does:
 
 - creates a mailbox automation with sender/domain filters, optional subject keywords, attachment extension filters, and a target recipient
-- stores the selected Gmail `providerThreadId` so thread-created automations stay scoped to that Gmail conversation instead of widening to the whole mailbox
-- supports `dry-run` mode first so you can label and audit candidate messages before enabling real sends
-- reconstructs and sends a new MIME email with the matched attachments instead of relying on Google Apps Script forwarding
-
-Current behavior:
-
-- **Gmail only** - the forwarding automation currently depends on Gmail API search, label mutation, attachment fetch, and send flows
-- **Attachment-driven** - the built-in thread action currently defaults to PDF forwarding, but the underlying automation supports configurable attachment extension and filename keyword filters
-- **Persistent scan watermark** - recurring runs track the last successful scan time and search with overlap, so a short app restart, laptop sleep, or delayed timer does not permanently drop matching mail
-- **Per-message dedupe** - already-sent messages are tracked in the local database by automation id and Gmail message id, so later mail in the same thread can still be evaluated independently
-- **Thread labels are status cues, not hard suppression** - candidate / rejected / forwarded Gmail labels are still applied for operator visibility, but they are not used as permanent search exclusions because later messages in the same thread may still qualify
+- stores the selected Gmail `providerThreadId` so thread-created automations stay scoped to that Gmail conversation
+- supports `dry-run` mode first so candidate messages can be labeled and audited before enabling real sends
+- reconstructs and sends a new MIME email with matched attachments instead of relying on Google Apps Script forwarding
+- tracks per-message dedupe and a persistent scan watermark so recurring runs survive app restarts and laptop sleep
 
 Operational notes:
 
-- `Run now` evaluates the automation immediately and then recomputes the next scheduled run from the current time
-- a successful non-dry-run execution advances the stored scan watermark; dry-run keeps the watermark unchanged so you can repeatedly inspect the same candidate set
-- thread-created automations keep the CoWork `threadId` for UI association and the Gmail `providerThreadId` for execution scoping
 - Gmail modify scope is required because the automation creates labels, updates thread labels, fetches attachments, and sends mail
+- candidate, rejected, and forwarded Gmail labels are status cues, not permanent search exclusions
+- dry-run keeps the scan watermark unchanged so the same candidate set can be inspected repeatedly
 
 ## Event Pipeline
 
-Every meaningful mailbox action emits a normalized mailbox event. Those events can be consumed by other parts of the system without special-case wiring.
-
-Mailbox events currently drive:
+Every meaningful mailbox action emits a normalized mailbox event. Events currently drive:
 
 - Knowledge Graph enrichment for people, organizations, projects, and observations
-- Heartbeat signal submission for stale threads, open loops, and cleanup candidates
+- Heartbeat signals for stale threads, open loops, cleanup candidates, and mailbox health
 - trigger evaluation for downstream actions
 - playbook capture for repeated inbox patterns
-- briefing summaries so the daily brief can show mailbox health
-- unified identity and relationship timeline updates across email, Slack, Teams, WhatsApp, Signal, iMessage, and CRM-linked handles
+- daily briefing summaries
+- unified identity and relationship timeline updates across email and linked channels
 - Mission Control handoff records so inbox-originated issues stay traceable
 
-## Notes
+## Privacy And Safety
 
-- `Unread` remains provider-backed and deterministic.
-- `Action Needed`, `Suggested Actions`, and `Open Commitments` are AI-assisted surfaces.
-- Sent mail is shown as content when you select a sent thread, not hidden behind a separate abstraction.
-- The reply picker prefers the most recently active linked channel and only offers real conversation targets.
-- Identity search and linking stay conservative: exact matches auto-link, ambiguous matches require review.
-- Mission Control handoffs remain inbox-owned at the source, even after operator assignment.
-- Sending, archiving, trashing, marking read, and scheduling are still gated by the connected mailbox/calendar provider.
+- Mailbox bodies, summaries, excerpts, and attachment text stay in the local database.
+- Attachment bytes are fetched on demand, not during ordinary sync.
+- Scripts and unsafe active content in email HTML remain blocked.
+- Remote images may load according to the product setting, but active content is not executed.
 - Sensitive-content detection is surfaced as a warning and metadata cue, not a hard block.
-- The inbox can re-sync in the background while still showing cached mail immediately.
+- Sending, archiving, trashing, marking read/unread, scheduling, and forwarding remain gated by provider permissions.
+- Automatic destructive or send actions require explicit future rules; agent suggestions do not silently execute bulk/destructive actions.
 
-For a higher-level overview of the product surface, see [Features](features.md). For copy-paste prompts that exercise inbox workflows, see [Use Cases](use-cases.md).
+## Typical Workflow
 
-### Product plan (saved views, quick replies, snippets, MC links)
+1. Open Inbox Agent and let cached mail appear immediately.
+2. Use Classic mode for a familiar thread list or Today mode for the agent-first action lanes.
+3. Filter by view, category, saved view, domain, account, or search.
+4. Open a thread and review summary, message content, attachments, commitments, and the Agent Rail.
+5. Use `Reply`, `Reply all`, or `Forward` for normal manual email.
+6. Use `Prep thread` or `Draft a reply with AI` when you want agent help, then edit the generated draft before sending.
+7. Use `Mark done` when you handled the email elsewhere and want it removed from Needs reply/Open commitments.
+8. Use Mailbox Ask for evidence-backed search across threads and attachment text.
+9. Use Sender cleanup or bulk selection to clear noisy senders.
+10. Hand off company-level issues to Mission Control when email becomes operational work.
 
-Implementation notes for the inbox roadmap (saved views / label-similar preview, quick-reply suggestions, snippets, triage feedback, Mission Control deep links, and weekly review schedules) live in [inbox-agent-product-plan-implementation.md](inbox-agent-product-plan-implementation.md).
+## Related Docs
+
+- [Features](features.md) for the broader product feature index
+- [Use Cases](use-cases.md) for copy-paste inbox workflow prompts
+- [Inbox Agent Product Plan](inbox-agent-product-plan-implementation.md) for roadmap and implementation slices

@@ -124,7 +124,12 @@ export class AzureOpenAIProvider implements LLMProvider {
   private isChatCompletionUnsupported(errorData: Any): boolean {
     const message = errorData?.error?.message || "";
     return (
-      /chatcompletion/i.test(message) && /(does not work|not supported|unsupported)/i.test(message)
+      (/chatcompletion/i.test(message) &&
+        /(does not work|not supported|unsupported)/i.test(message)) ||
+      (/\/v1\/responses/i.test(message) &&
+        (/\/v1\/chat\/completions/i.test(message) ||
+          /chat completions?/i.test(message) ||
+          /please use/i.test(message)))
     );
   }
 

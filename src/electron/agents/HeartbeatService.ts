@@ -30,7 +30,7 @@ import {
 } from "./heartbeat-maintenance";
 import { HeartbeatSignalStore, type SubmitHeartbeatSignalInput } from "./HeartbeatSignalStore";
 import { HeartbeatRunRepository } from "./HeartbeatRunRepository";
-import { HeartbeatPulseEngine, getSignalStrength } from "./HeartbeatPulseEngine";
+import { HeartbeatPulseEngine, getSignalStrength, type HeartbeatPulseDecision } from "./HeartbeatPulseEngine";
 import { HeartbeatDispatchEngine } from "./HeartbeatDispatchEngine";
 import type { MemoryCaptureOptions } from "../memory/MemoryService";
 import { AutomationProfileRepository } from "./AutomationProfileRepository";
@@ -129,6 +129,12 @@ export interface HeartbeatServiceDeps {
     recommendedDelivery?: "briefing" | "inbox" | "nudge";
     companionStyle?: "email" | "note";
   }) => Promise<void>;
+  runWorkflowReflection?: (params: {
+    workspaceId?: string;
+    reason: string;
+    signalCount: number;
+    heartbeatRunId: string;
+  }) => Promise<{ id?: string; outcome?: string } | null>;
   captureMemory?: (
     workspaceId: string,
     taskId: string | undefined,
@@ -599,6 +605,35 @@ export class HeartbeatService extends EventEmitter {
             agent.heartbeatPolicy?.maxDispatchesPerDay || agent.maxDispatchesPerDay || 6,
         };
 
+        const reflectionRun = await this.maybeRunWorkflowReflection({
+          agent,
+          workspaceId,
+          decision,
+          pendingMentions,
+          assignedTasks,
+          relevantActivities,
+          heartbeatRunId: pulseRun.id,
+        });
+        if (reflectionRun) {
+          result = {
+            ...result,
+            reflectionRunId: reflectionRun.id,
+            reflectionOutcome: reflectionRun.outcome,
+          };
+          if (coreTrace) {
+            this.deps.coreTraceService?.appendPhaseEvent(
+              coreTrace.id,
+              "decision",
+              "heartbeat.reflection_triggered",
+              "Heartbeat triggered workflow reflection from accumulated signals.",
+              {
+                reflectionRunId: reflectionRun.id,
+                reflectionOutcome: reflectionRun.outcome,
+              },
+            );
+          }
+        }
+
         if (decision.kind === "deferred") {
           if (coreTrace) {
             this.deps.coreTraceService?.appendPhaseEvent(
@@ -923,6 +958,40 @@ export class HeartbeatService extends EventEmitter {
       lastPulseResult: result.pulseOutcome,
     });
     this.timers.delete(agent.id);
+  }
+
+  private async maybeRunWorkflowReflection(params: {
+    agent: AgentRole;
+    workspaceId?: string;
+    decision: HeartbeatPulseDecision;
+    pendingMentions: number;
+    assignedTasks: number;
+    relevantActivities: number;
+    heartbeatRunId: string;
+  }): Promise<{ id?: string; outcome?: string } | null> {
+    if (!this.deps.runWorkflowReflection) return null;
+    const actionableSignalCount =
+      params.decision.signalCount +
+      params.pendingMentions +
+      params.decision.dueChecklistCount +
+      params.decision.dueProactiveCount;
+    const shouldReflect =
+      params.decision.kind !== "idle" ||
+      actionableSignalCount >= 2 ||
+      params.relevantActivities >= 3 ||
+      params.assignedTasks >= 2;
+    if (!shouldReflect) return null;
+    try {
+      return await this.deps.runWorkflowReflection({
+        workspaceId: params.workspaceId,
+        reason: params.decision.reason,
+        signalCount: actionableSignalCount,
+        heartbeatRunId: params.heartbeatRunId,
+      });
+    } catch (error) {
+      console.warn("[HeartbeatService] Workflow reflection failed:", error);
+      return null;
+    }
   }
 
   private getDeferredStateForAgent(agentRoleId: string) {

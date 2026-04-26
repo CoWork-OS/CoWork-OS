@@ -341,7 +341,7 @@ describe("task event visibility helpers", () => {
     const filtered = filterVerboseTimelineNoise([
       makeEvent(
         "timeline_group_started",
-        { stage: "FIX", groupLabel: "Adapting to changes" },
+        { stage: "FIX", groupLabel: "Adjusting the plan" },
         { id: "fix-start", timestamp: 1000, groupId: "stage:fix" },
       ),
       makeEvent(

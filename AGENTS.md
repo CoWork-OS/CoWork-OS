@@ -2,7 +2,7 @@
 
 ## Failure Triage
 
-When a user reports a failure, error, or unexpected behavior:
+When a user reports a failure, error, or unexpected behavior that likely involves runtime/app behavior:
 
 1. Check development logs first, if available.
 2. Read `logs/dev-latest.log` for the most recent captured run.
@@ -10,6 +10,7 @@ When a user reports a failure, error, or unexpected behavior:
 4. If needed, inspect the newest timestamped file in `logs/dev-*.log` for full context.
 5. Quote relevant error lines with timestamps when summarizing findings.
 6. If logs are missing, state that clearly and continue with other diagnostics.
+7. If the request is not failure/debug related (for example docs, refactors, or feature questions), skip log triage unless the user explicitly asks for log analysis.
 
 ## Dev Log Availability
 
@@ -37,7 +38,7 @@ When a user reports a failure, error, or unexpected behavior:
 - Use `npm run build:daemon` to isolate daemon TypeScript build failures.
 - Use `npm run build:connectors` to isolate connector TypeScript build failures.
 - `npm run build:healthkit-bridge` is a no-op on non-macOS platforms (`[healthkit-bridge] Skipping build on non-macOS platform.`).
-- On macOS, `npm run build:healthkit-bridge` attempts an Xcode app build first and falls back to SwiftPM packaging if the app bundle is not produced.
+- On macOS, `npm run build:healthkit-bridge` uses SwiftPM packaging by default; set `COWORK_HEALTHKIT_USE_XCODE_BUILD=1` (with a configured development team) to attempt an Xcode app build first, then fall back to SwiftPM if no app bundle is produced.
 - For macOS signing/provisioning overrides during `build:healthkit-bridge`, use `COWORK_HEALTHKIT_DEVELOPMENT_TEAM` and `COWORK_HEALTHKIT_PROVISIONING_PROFILE` if needed.
 - `build:healthkit-bridge` also accepts `DEVELOPMENT_TEAM` and `HEALTHKIT_BRIDGE_PROVISIONING_PROFILE` as fallback environment variable names.
 
@@ -46,6 +47,7 @@ When a user reports a failure, error, or unexpected behavior:
 - Use `npm run package` for standard local installer packaging after a full build.
 - `npm run package` also runs `scripts/release-artifact-names.mjs` and `scripts/release-artifact-names.mjs --check` to align and verify updater metadata artifact filenames in `release/`.
 - On macOS distribution/signing flows, use `npm run package:mac`; it loads optional repo-root `.env.mac` (see `scripts/mac-notarize.env.example`) before running build + `electron-builder --mac --publish never`.
+- Packaging icons are now sourced from `build/icon.png` (macOS) and `build/icon.ico` (Windows); update those files for release branding changes.
 - Packaged builds now include skill asset folders via `resources/skills/**/assets/**`; place runtime skill media under each skill's `assets/` directory.
 
 ## NPM Release Workflow
@@ -110,8 +112,11 @@ When a user reports a failure, error, or unexpected behavior:
 ## Setup Commands
 
 - Use `npm run setup` for workstation setup; it chains native rebuild/install safeguards.
+- `npm run setup` retries `setup:native` when the native step is killed (SIGKILL/OOM style failures); tune retry count with `COWORK_SETUP_NATIVE_OUTER_ATTEMPTS` (default `6`).
+- A successful `npm run setup` run attempts to install git hooks automatically; if that step fails, rerun `npm run hooks:install`.
 - Use `npm run hooks:install` to (re)install local git hooks from `.githooks/` when setup hooks are missing or outdated.
 - Use `npm run setup:native` to isolate native module/driver setup issues.
 - Use `npm run setup:server` for server-only dependency/bootstrap flows (for example Linux VPS daemon/connectors).
+- `npm run setup:server` runs `npm install` followed by `npm rebuild --ignore-scripts=false better-sqlite3` to ensure native SQLite bindings are rebuilt for the host.
 - `npm install` triggers `postinstall` (`scripts/codesign_electron_dev.mjs`) to dev-sign local `node_modules` Electron on macOS when available.
 - If local dev codesigning needs overrides, use `COWORK_CODESIGN_IDENTITY` to pin an identity or `COWORK_CODESIGN_SKIP=1` to skip.

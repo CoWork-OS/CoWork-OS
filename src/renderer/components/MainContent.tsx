@@ -10,6 +10,7 @@ import {
   Children,
   startTransition,
 } from "react";
+import type { MouseEvent as ReactMouseEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
@@ -20,6 +21,9 @@ import {
   TaskEvent,
   Workspace,
   LLMModelInfo,
+  LLMProviderInfo,
+  LLMProviderType,
+  LLMReasoningEffort,
   CustomSkill,
   EventType,
   DEFAULT_QUIRKS,
@@ -34,7 +38,13 @@ import {
   InputRequest,
   QuotedAssistantMessage,
   PermissionMode,
+  ProactiveSuggestion,
+  UserProfile,
 } from "../../shared/types";
+import {
+  getLlmModelReasoningEfforts,
+  LLM_REASONING_EFFORT_OPTIONS,
+} from "../../shared/llm-model-selection";
 import { parseLeadingSkillSlashCommand } from "../../shared/skill-slash-commands";
 import {
   ONBOARDING_COMMAND_OPTIONS,
@@ -96,6 +106,7 @@ import {
 import { sanitizeToolCallTextFromAssistant } from "../../shared/tool-call-text-sanitizer";
 import { formatProviderErrorForDisplay } from "../../shared/provider-error-format";
 import { buildApprovalCommandPreview } from "../../shared/approval-command-preview";
+import { formatTimelineActivityLabel } from "../../shared/timeline-v2";
 import {
   deriveSharedTaskEventUiState,
   type BaseTimelineItem,
@@ -121,15 +132,19 @@ import {
   PenLine,
   LayoutGrid,
   Film,
+  Clock,
+  X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { InlineHtmlPreview } from "./InlineHtmlPreview";
 import { InlineVideoPreview } from "./InlineVideoPreview";
+import { MarkdownImagePreview } from "./MarkdownImagePreview";
 import { ReplayControlsBar } from "./ReplayControls";
 import { DebugSessionPanel } from "./DebugSessionPanel";
 import { TaskPauseBanner } from "./TaskPauseBanner";
 import type { ReplayControls } from "../hooks/useReplayMode";
 import { useVirtualList } from "../hooks/useVirtualList";
+import { useTaskDuration } from "../hooks/useTaskDuration";
 
 const CODE_PREVIEWS_EXPANDED_KEY = "cowork:codePreviewsExpanded";
 const TASK_TITLE_MAX_LENGTH = 50;
@@ -162,6 +177,303 @@ const TERMINAL_WORK_EVENT_TYPES = new Set<EventType | "task_paused" | "task_canc
   "task_cancelled",
   "follow_up_completed",
 ]);
+const WELCOME_TASK_SUGGESTION_LIMIT = 5;
+const WELCOME_SUGGESTION_TEXT_MAX = 96;
+
+type WelcomeTaskSuggestionSource = "heartbeat" | "memory" | "insight";
+type WelcomeTaskSuggestionModule =
+  | "Memory"
+  | "Heartbeat"
+  | "Reflection"
+  | "Recent work"
+  | "Inbox"
+  | "Project";
+
+interface WelcomeTaskSuggestion {
+  id: string;
+  title: string;
+  description?: string;
+  whyNow: string;
+  prompt: string;
+  confidence?: number;
+  evidence?: string[];
+  source: WelcomeTaskSuggestionSource;
+  modules: WelcomeTaskSuggestionModule[];
+  priority: number;
+  createdAt?: number;
+  feedback?: {
+    kind: "proactive";
+    workspaceId: string;
+    suggestionId: string;
+  };
+}
+
+interface ActiveWelcomeSuggestionDraft {
+  workspaceId: string;
+  suggestionId: string;
+  originalPrompt: string;
+}
+
+function normalizeSuggestionText(value: unknown): string {
+  return typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+}
+
+function truncateSuggestionText(value: string, maxLength = WELCOME_SUGGESTION_TEXT_MAX): string {
+  const text = normalizeSuggestionText(value);
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function getRecordString(record: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const value = normalizeSuggestionText(record[key]);
+    if (value) return value;
+  }
+  return "";
+}
+
+function getRecordNumber(record: Record<string, unknown>, keys: string[]): number | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+  }
+  return undefined;
+}
+
+function isConcreteMemorySignal(value: string): boolean {
+  const text = normalizeSuggestionText(value);
+  if (text.length < 24) return false;
+  if (/^[{[]/.test(text)) return false;
+  if (/^(none|unknown|not set|n\/a|no context|no memory)$/i.test(text)) return false;
+  if (/^(ready to help|i can help|ask me anything)/i.test(text)) return false;
+  return true;
+}
+
+function formatProfileFactSignal(fact: UserProfile["facts"][number]): string | null {
+  const value = normalizeSuggestionText(fact.value);
+  if (!isConcreteMemorySignal(value)) return null;
+  if (typeof fact.confidence === "number" && fact.confidence < 0.45 && !fact.pinned) {
+    return null;
+  }
+  const label =
+    fact.category === "goal"
+      ? "Goal"
+      : fact.category === "work"
+        ? "Work"
+        : fact.category === "preference"
+          ? "Preference"
+          : fact.category === "constraint"
+            ? "Constraint"
+            : "Memory";
+  return `${label}: ${truncateSuggestionText(value, 360)}`;
+}
+
+function getRecentMemorySignal(item: unknown): string | null {
+  const record = asRecord(item);
+  if (!record) return null;
+  const text = getRecordString(record, ["summary", "content", "snippet", "text", "value"]);
+  if (!isConcreteMemorySignal(text)) return null;
+  const type = getRecordString(record, ["type"]);
+  const prefix = type ? `Recent ${type.replace(/_/g, " ")}` : "Recent work";
+  return `${prefix}: ${truncateSuggestionText(text, 360)}`;
+}
+
+function buildEvidencePrompt(args: {
+  opening: string;
+  evidence: string[];
+  instruction: string;
+}): string {
+  const evidenceLines = args.evidence.map((item, index) => `${index + 1}. ${item}`).join("\n");
+  return `${args.opening}\n\nRemembered context:\n${evidenceLines}\n\n${args.instruction}`;
+}
+
+function formatWelcomeModules(modules: WelcomeTaskSuggestionModule[]): WelcomeTaskSuggestionModule[] {
+  return Array.from(new Set(modules)).slice(0, 3);
+}
+
+function modulesForProactiveSuggestion(suggestion: ProactiveSuggestion): WelcomeTaskSuggestionModule[] {
+  const modules: WelcomeTaskSuggestionModule[] = ["Heartbeat"];
+  if (suggestion.suggestionClass === "memory" || suggestion.type === "reverse_prompt") {
+    modules.push("Memory");
+  }
+  if (
+    suggestion.suggestionClass === "open_loop" ||
+    suggestion.suggestionClass === "urgent" ||
+    suggestion.sourceSignals?.some((signal) => /mail|inbox|reply/i.test(signal))
+  ) {
+    modules.push("Inbox");
+  }
+  if (/^workflow intelligence:|^continuity:|^reflection:|^subconscious:/i.test(suggestion.title)) {
+    modules.push("Reflection");
+  }
+  if (suggestion.sourceTaskId) modules.push("Recent work");
+  return formatWelcomeModules(modules);
+}
+
+function whyNowForProactiveSuggestion(suggestion: ProactiveSuggestion): string {
+  if (suggestion.urgency === "high") return "A current signal looks urgent enough to review now.";
+  if (suggestion.suggestionClass === "open_loop") return "Memory found an open loop that may need closure.";
+  if (suggestion.suggestionClass === "memory") return "This is based on remembered goals or preferences.";
+  if (suggestion.suggestionClass === "urgent") return "Recent activity suggests this should not wait.";
+  if (suggestion.sourceSignals?.length) {
+    return `Triggered by ${suggestion.sourceSignals.length} recent signal(s).`;
+  }
+  return truncateSuggestionText(suggestion.description || "Recent context suggests this may be useful.", 120);
+}
+
+function buildHeartbeatWelcomeSuggestion(
+  suggestion: ProactiveSuggestion,
+  index: number,
+): WelcomeTaskSuggestion | null {
+  const prompt = normalizeSuggestionText(suggestion.actionPrompt || suggestion.description);
+  const rawTitle = normalizeSuggestionText(suggestion.title || prompt);
+  const title = rawTitle.replace(/^(workflow intelligence|subconscious|reflection|continuity):\s*/i, "");
+  if (!title || !prompt) return null;
+
+  const urgencyBoost =
+    suggestion.urgency === "high" ? 30 : suggestion.urgency === "medium" ? 15 : 0;
+  return {
+    id: `heartbeat:${suggestion.id}`,
+    title: truncateSuggestionText(title),
+    description: truncateSuggestionText(suggestion.description, 120),
+    whyNow: whyNowForProactiveSuggestion(suggestion),
+    prompt,
+    confidence: suggestion.confidence,
+    evidence: suggestion.sourceSignals,
+    source: "heartbeat",
+    modules: modulesForProactiveSuggestion(suggestion),
+    priority: 300 + urgencyBoost + Math.round((suggestion.confidence || 0) * 100) - index,
+    createdAt: suggestion.createdAt,
+    feedback: suggestion.workspaceId
+      ? {
+          kind: "proactive",
+          workspaceId: suggestion.workspaceId,
+          suggestionId: suggestion.id,
+        }
+      : undefined,
+  };
+}
+
+function buildMemoryCommitmentSuggestion(
+  item: unknown,
+  index: number,
+): WelcomeTaskSuggestion | null {
+  const record = asRecord(item);
+  if (!record) return null;
+  const text = getRecordString(record, ["text", "title", "summary", "description"]);
+  if (!text) return null;
+  const dueAt = getRecordNumber(record, ["dueAt", "due_at", "dueDate"]);
+  const dueText = dueAt
+    ? ` Due ${new Date(dueAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}.`
+    : "";
+  return {
+    id: `memory:commitment:${getRecordString(record, ["id"]) || index}`,
+    title: truncateSuggestionText(text),
+    description: dueText.trim() || "Open commitment",
+    whyNow: dueText.trim() || "Memory has this as an open commitment.",
+    prompt: `Help me make progress on this commitment: ${text}.${dueText} Start by identifying the next concrete action and any message or artifact I should prepare.`,
+    source: "memory",
+    modules: ["Memory"],
+    priority: 260 - index,
+    createdAt: getRecordNumber(record, ["createdAt", "updatedAt"]),
+  };
+}
+
+function buildProfileWelcomeSuggestion(
+  profile: UserProfile | null,
+  recentMemories: unknown[],
+): WelcomeTaskSuggestion | null {
+  if (!profile) return null;
+  const factSignals = (Array.isArray(profile.facts) ? profile.facts : [])
+    .filter((fact) =>
+      ["goal", "work", "preference", "constraint"].includes(fact.category) || fact.pinned,
+    )
+    .sort(
+      (a, b) =>
+        Number(b.pinned) - Number(a.pinned) ||
+        b.lastUpdatedAt - a.lastUpdatedAt ||
+        b.confidence - a.confidence,
+    )
+    .map(formatProfileFactSignal)
+    .filter((value): value is string => Boolean(value));
+  const profileSummary = normalizeSuggestionText(profile.summary);
+  const summary = isConcreteMemorySignal(profileSummary)
+    ? `Profile summary: ${truncateSuggestionText(profileSummary, 360)}`
+    : null;
+  const recentSignals = recentMemories
+    .map(getRecentMemorySignal)
+    .filter((value): value is string => Boolean(value));
+  const evidence = Array.from(
+    new Set([summary, ...factSignals, ...recentSignals].filter((value): value is string => Boolean(value))),
+  ).slice(0, 6);
+  if (evidence.length < 2) return null;
+  return {
+    id: "memory:profile-focus",
+    title: "Use memory to choose the next priority",
+    description: truncateSuggestionText(evidence[0], 120),
+    whyNow: `${evidence.length} remembered signals can narrow what to do next.`,
+    prompt: buildEvidencePrompt({
+      opening: "Use the remembered context below to recommend the best next task for me.",
+      evidence,
+      instruction:
+        "Give me 3 concrete options that directly reference this context, explain the tradeoffs, and recommend one. Do not start the task or ask whether to proceed; end with the recommendation so I can choose in a follow-up. If the context is not enough, ask one focused clarifying question instead of giving generic advice.",
+    }),
+    evidence,
+    source: "memory",
+    modules: recentSignals.length ? ["Memory", "Recent work"] : ["Memory"],
+    priority: 120,
+    createdAt: profile.updatedAt,
+  };
+}
+
+function buildRecentMemorySuggestion(item: unknown, index: number): WelcomeTaskSuggestion | null {
+  const record = asRecord(item);
+  if (!record) return null;
+  const text = getRecordString(record, ["summary", "content", "snippet", "text", "value"]);
+  if (!text) return null;
+  const evidence = [`Recent work: ${text}`];
+  return {
+    id: `memory:recent:${getRecordString(record, ["id"]) || index}`,
+    title: "Pick up a recent thread",
+    description: truncateSuggestionText(text, 120),
+    whyNow: "Recent work left context that may be worth continuing.",
+    prompt: buildEvidencePrompt({
+      opening: "Pick up from this recent memory and suggest the most useful next step.",
+      evidence,
+      instruction:
+        "Explain why this is the right next step and name any tradeoffs. Do not start the task or ask whether to proceed; end with the recommendation so I can choose in a follow-up.",
+    }),
+    evidence,
+    source: "memory",
+    modules: ["Memory", "Recent work"],
+    priority: 90 - index,
+    createdAt: getRecordNumber(record, ["updatedAt", "createdAt"]),
+  };
+}
+
+function dedupeWelcomeTaskSuggestions(
+  suggestions: WelcomeTaskSuggestion[],
+): WelcomeTaskSuggestion[] {
+  const seen = new Set<string>();
+  const out: WelcomeTaskSuggestion[] = [];
+  for (const suggestion of suggestions.sort((a, b) => {
+    if (b.priority !== a.priority) return b.priority - a.priority;
+    return (b.createdAt || 0) - (a.createdAt || 0);
+  })) {
+    const key = normalizeSuggestionText(`${suggestion.source}:${suggestion.title}`).toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(suggestion);
+    if (out.length >= WELCOME_TASK_SUGGESTION_LIMIT) break;
+  }
+  return out;
+}
 
 type GeneratedInlinePreviewKind = "image" | "video" | "html" | "spreadsheet" | "presentation";
 
@@ -370,13 +682,108 @@ const isLowSignalPauseMessage = (
   if (!trimmed) return true;
   const lower = trimmed.toLowerCase();
   if (reasonCode && lower === String(reasonCode).trim().toLowerCase()) return true;
+  if (
+    /^required_decision/.test(String(reasonCode || "").trim().toLowerCase()) &&
+    /\b(best next task|recommend(?:ed|ation)?.{0,80}next task)\b/.test(lower)
+  ) {
+    return true;
+  }
   return (
     lower === "required_decision" ||
     lower === "required_decision_followup" ||
     lower === "input_request" ||
+    lower === "skill_parameters" ||
+    lower === "user_action_required_failure" ||
+    lower === "user_action_required_tool" ||
+    lower === "user_action_required_disabled" ||
+    lower === "shell_permission_required" ||
+    lower === "shell_permission_still_disabled" ||
+    lower === "missing_required_workspace_artifact" ||
     lower === "paused - awaiting user input" ||
     lower === "waiting for structured user input."
   );
+};
+
+const getPayloadString = (payload: Any, key: string): string => {
+  const value = payload?.[key];
+  return typeof value === "string" ? value.trim() : "";
+};
+
+const getFailureEventText = (event: TaskEvent): string => {
+  const payload = event.payload || {};
+  const direct = [
+    getPayloadString(payload, "message"),
+    getPayloadString(payload, "error"),
+    getPayloadString(payload, "reason"),
+    getPayloadString(payload, "summary"),
+    getPayloadString(payload, "title"),
+    getPayloadString(payload, "stepDescription"),
+  ].find((value) => value.length > 0);
+  if (direct) return direct;
+
+  const result = payload.result && typeof payload.result === "object" ? payload.result : null;
+  const resultError = result && typeof (result as Any).error === "string" ? (result as Any).error.trim() : "";
+  if (resultError) return resultError;
+
+  const input = payload.input && typeof payload.input === "object" ? payload.input : null;
+  const url = input && typeof (input as Any).url === "string" ? (input as Any).url.trim() : "";
+  const path = input && typeof (input as Any).path === "string" ? (input as Any).path.trim() : "";
+  const tool = getPayloadString(payload, "tool");
+  if (tool && (url || path)) return `${tool} failed for ${url || path}`;
+  if (url || path) return url || path;
+
+  const step = payload.step && typeof payload.step === "object" ? payload.step : null;
+  return step && typeof (step as Any).description === "string"
+    ? (step as Any).description.trim()
+    : "";
+};
+
+const eventLooksFailed = (event: TaskEvent): boolean => {
+  const effectiveType = getEffectiveTaskEventType(event);
+  const payload = event.payload || {};
+  if (
+    /^(failed|error|blocked)$/i.test(String(event.status || "")) ||
+    /^(failed|error|blocked)$/i.test(String(payload.status || "")) ||
+    payload.success === false
+  ) {
+    return true;
+  }
+  if (payload.error || payload.isError === true || payload.is_error === true) return true;
+  if (typeof effectiveType === "string" && /(?:failed|error)$/i.test(effectiveType)) return true;
+  if (event.type === "timeline_step_finished" && event.status === "failed") return true;
+  return false;
+};
+
+const cleanFailureTextForPause = (text: string): string => {
+  const cleaned = text
+    .replace(/^Fetched\s+/i, "")
+    .replace(/^Tool\s+["']?([^"']+)["']?\s+failed:\s*/i, "$1 failed: ")
+    .trim();
+  return cleaned.length > 180 ? `${cleaned.slice(0, 177).trimEnd()}...` : cleaned;
+};
+
+const buildPauseDecisionFallbackFromRecentEvents = (
+  events: TaskEvent[],
+  latestPauseEvent?: TaskEvent,
+): string => {
+  if (events.length === 0) return "";
+  const pauseIndex = latestPauseEvent
+    ? events.findIndex((event) => event.id === latestPauseEvent.id)
+    : events.length;
+  const endIndex = pauseIndex >= 0 ? pauseIndex : events.length;
+
+  for (let i = Math.min(endIndex - 1, events.length - 1); i >= Math.max(0, endIndex - 30); i -= 1) {
+    const event = events[i];
+    if (!eventLooksFailed(event)) continue;
+    const failureText = cleanFailureTextForPause(getFailureEventText(event));
+    if (!failureText) continue;
+    return (
+      `I paused because the last step hit a blocker: ${failureText}. ` +
+      "Reply with whether I should continue using the information already gathered, try another source/approach, or stop the task."
+    );
+  }
+
+  return "";
 };
 
 const getAssistantOrCompletionText = (event: TaskEvent | null | undefined): string => {
@@ -1977,6 +2384,14 @@ const buildMarkdownComponents = (options: {
       </div>
     ),
     a: MarkdownLink,
+    img: ({ src, alt, title }: Any) => (
+      <MarkdownImagePreview
+        src={typeof src === "string" ? src : ""}
+        alt={typeof alt === "string" ? alt : ""}
+        title={typeof title === "string" ? title : undefined}
+        workspacePath={workspacePath}
+      />
+    ),
     p: ({ children, ...props }: Any) => <p {...props}>{replaceCitationsInChildren(children)}</p>,
     li: ({ children, ...props }: Any) => <li {...props}>{replaceCitationsInChildren(children)}</li>,
   };
@@ -1988,58 +2403,150 @@ const userMarkdownPlugins = [remarkGfm, remarkBreaks];
 interface ModelDropdownProps {
   models: LLMModelInfo[];
   selectedModel: string;
-  onModelChange: (model: string) => void;
+  selectedProvider: LLMProviderType;
+  selectedReasoningEffort?: LLMReasoningEffort;
+  providers?: LLMProviderInfo[];
+  onModelChange: (selection: {
+    providerType?: LLMProviderType;
+    modelKey: string;
+    reasoningEffort?: LLMReasoningEffort;
+  }) => void;
   onOpenSettings?: (tab?: SettingsTab) => void;
 }
 
 function ModelDropdown({
   models,
   selectedModel,
+  selectedProvider,
+  selectedReasoningEffort,
+  providers = [],
   onModelChange,
   onOpenSettings,
 }: ModelDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const [highlightedIndex, setHighlightedIndex] = useState(0);
+  const [activeProviderMenu, setActiveProviderMenu] =
+    useState<LLMProviderType | null>(null);
+  const [providerModelCache, setProviderModelCache] = useState<
+    Record<string, LLMModelInfo[]>
+  >({});
+  const [loadingProviderModels, setLoadingProviderModels] = useState<
+    string | null
+  >(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const listRef = useRef<HTMLDivElement>(null);
 
-  const selectedModelInfo = models.find((m) => m.key === selectedModel);
-
-  const filteredModels = models.filter(
-    (model) =>
-      model.displayName.toLowerCase().includes(search.toLowerCase()) ||
-      model.key.toLowerCase().includes(search.toLowerCase()) ||
-      model.description.toLowerCase().includes(search.toLowerCase()),
-  );
-
-  // Reset highlighted index when search changes
   useEffect(() => {
-    setHighlightedIndex(0);
-  }, [search]);
+    setProviderModelCache((prev) => ({
+      ...prev,
+      [selectedProvider]: models,
+    }));
+  }, [models, selectedProvider]);
 
-  // Scroll highlighted option into view
-  useEffect(() => {
-    if (isOpen && listRef.current) {
-      const highlightedEl = listRef.current.querySelector(`[data-index="${highlightedIndex}"]`);
-      if (highlightedEl) {
-        highlightedEl.scrollIntoView({ block: "nearest" });
-      }
-    }
-  }, [highlightedIndex, isOpen]);
-
-  // Close on click outside
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setIsOpen(false);
         setSearch("");
+        setActiveProviderMenu(null);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  const configuredProviders = useMemo(() => {
+    const seen = new Set<string>();
+    const list = providers.filter((provider) => provider.configured);
+    const currentProvider = providers.find((provider) => provider.type === selectedProvider);
+    if (currentProvider && !list.some((provider) => provider.type === currentProvider.type)) {
+      list.unshift(currentProvider);
+    }
+    return list.filter((provider) => {
+      if (seen.has(provider.type)) return false;
+      seen.add(provider.type);
+      return true;
+    });
+  }, [providers, selectedProvider]);
+
+  const currentProviderModels = providerModelCache[selectedProvider] || models;
+  const selectedModelInfo =
+    currentProviderModels.find((model) => model.key === selectedModel) ||
+    models.find((model) => model.key === selectedModel);
+  const selectedModelLabel = selectedModelInfo?.displayName || selectedModel || "Select Model";
+  const currentProviderLabel =
+    configuredProviders.find((provider) => provider.type === selectedProvider)?.name ||
+    selectedProvider;
+
+  const selectedReasoningEfforts =
+    selectedModelInfo?.reasoningEfforts ||
+    getLlmModelReasoningEfforts(selectedProvider, selectedModel);
+  const effectiveReasoningEffort =
+    selectedReasoningEffort &&
+    selectedReasoningEfforts.includes(selectedReasoningEffort)
+      ? selectedReasoningEffort
+      : undefined;
+
+  const normalizedSearch = search.trim().toLowerCase();
+  const filteredModels = currentProviderModels.filter((model) => {
+    if (!normalizedSearch) return true;
+    return (
+      model.displayName.toLowerCase().includes(normalizedSearch) ||
+      model.key.toLowerCase().includes(normalizedSearch) ||
+      model.description.toLowerCase().includes(normalizedSearch)
+    );
+  });
+
+  const otherProviders = configuredProviders.filter(
+    (provider) => provider.type !== selectedProvider,
+  );
+
+  const loadProviderModels = useCallback(async (providerType: LLMProviderType) => {
+    if (providerModelCache[providerType]) return;
+    try {
+      setLoadingProviderModels(providerType);
+      const providerModels = await window.electronAPI.getProviderModels(providerType);
+      setProviderModelCache((prev) => ({
+        ...prev,
+        [providerType]: providerModels || [],
+      }));
+    } catch (error) {
+      console.error("Failed to load provider models:", error);
+      setProviderModelCache((prev) => ({
+        ...prev,
+        [providerType]: [],
+      }));
+    } finally {
+      setLoadingProviderModels((current) =>
+        current === providerType ? null : current,
+      );
+    }
+  }, [providerModelCache]);
+
+  const selectModel = (
+    providerType: LLMProviderType,
+    modelKey: string,
+    modelInfo?: LLMModelInfo,
+  ) => {
+    const reasoningEfforts =
+      modelInfo?.reasoningEfforts ||
+      getLlmModelReasoningEfforts(providerType, modelKey);
+    const reasoningEffort =
+      selectedReasoningEffort && reasoningEfforts.includes(selectedReasoningEffort)
+        ? selectedReasoningEffort
+        : reasoningEfforts.includes("medium")
+          ? "medium"
+          : reasoningEfforts[0];
+
+    onModelChange({
+      providerType,
+      modelKey,
+      ...(reasoningEffort ? { reasoningEffort } : {}),
+    });
+    setIsOpen(false);
+    setSearch("");
+    setActiveProviderMenu(null);
+  };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (!isOpen) {
@@ -2051,39 +2558,25 @@ function ModelDropdown({
     }
 
     switch (e.key) {
-      case "ArrowDown":
-        e.preventDefault();
-        setHighlightedIndex((i) => Math.min(i + 1, filteredModels.length - 1));
-        break;
-      case "ArrowUp":
-        e.preventDefault();
-        setHighlightedIndex((i) => Math.max(i - 1, 0));
-        break;
       case "Enter":
         e.preventDefault();
-        if (filteredModels[highlightedIndex]) {
-          onModelChange(filteredModels[highlightedIndex].key);
-          setIsOpen(false);
-          setSearch("");
+        if (filteredModels[0]) {
+          selectModel(selectedProvider, filteredModels[0].key, filteredModels[0]);
         }
         break;
       case "Escape":
         e.preventDefault();
         setIsOpen(false);
         setSearch("");
+        setActiveProviderMenu(null);
         break;
     }
-  };
-
-  const handleSelect = (modelKey: string) => {
-    onModelChange(modelKey);
-    setIsOpen(false);
-    setSearch("");
   };
 
   const handleOpenProviders = () => {
     setIsOpen(false);
     setSearch("");
+    setActiveProviderMenu(null);
     onOpenSettings?.("llm");
   };
 
@@ -2095,6 +2588,8 @@ function ModelDropdown({
           setIsOpen(!isOpen);
           if (!isOpen) {
             setTimeout(() => inputRef.current?.focus(), 0);
+          } else {
+            setActiveProviderMenu(null);
           }
         }}
         onKeyDown={handleKeyDown}
@@ -2112,7 +2607,16 @@ function ModelDropdown({
           <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z" />
           <path d="M18 14l1 3 3 1-3 1-1 3-1-3-3-1 3-1 1-3z" />
         </svg>
-        <span>{selectedModelInfo?.displayName || "Select Model"}</span>
+        <span>{selectedModelLabel}</span>
+        {effectiveReasoningEffort && (
+          <span className="model-selector-effort">
+            {
+              LLM_REASONING_EFFORT_OPTIONS.find(
+                (option) => option.value === effectiveReasoningEffort,
+              )?.label
+            }
+          </span>
+        )}
         <svg
           width="12"
           height="12"
@@ -2127,6 +2631,41 @@ function ModelDropdown({
       </button>
       {isOpen && (
         <div className="model-dropdown">
+          {selectedReasoningEfforts.length > 0 && (
+            <div className="model-dropdown-section">
+              <div className="model-dropdown-section-label">Intelligence</div>
+              {LLM_REASONING_EFFORT_OPTIONS.filter((option) =>
+                selectedReasoningEfforts.includes(option.value),
+              ).map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`model-dropdown-item compact ${option.value === effectiveReasoningEffort ? "selected" : ""}`}
+                  onClick={() =>
+                    onModelChange({
+                      providerType: selectedProvider,
+                      modelKey: selectedModel,
+                      reasoningEffort: option.value,
+                    })
+                  }
+                >
+                  <span className="model-dropdown-item-name">{option.label}</span>
+                  {option.value === effectiveReasoningEffort && (
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                    >
+                      <path d="M20 6L9 17l-5-5" />
+                    </svg>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="model-dropdown-search">
             <svg
               width="14"
@@ -2145,21 +2684,22 @@ function ModelDropdown({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Search models..."
+              placeholder={`Search ${currentProviderLabel} models...`}
               autoFocus
             />
           </div>
-          <div ref={listRef} className="model-dropdown-list">
+          <div className="model-dropdown-section-label model-dropdown-provider-label">
+            {currentProviderLabel}
+          </div>
+          <div className="model-dropdown-list">
             {filteredModels.length === 0 ? (
               <div className="model-dropdown-no-results">No models found</div>
             ) : (
-              filteredModels.map((model, index) => (
+              filteredModels.map((model) => (
                 <button
                   key={model.key}
-                  data-index={index}
-                  className={`model-dropdown-item ${model.key === selectedModel ? "selected" : ""} ${index === highlightedIndex ? "highlighted" : ""}`}
-                  onClick={() => handleSelect(model.key)}
-                  onMouseEnter={() => setHighlightedIndex(index)}
+                  className={`model-dropdown-item ${model.key === selectedModel ? "selected" : ""}`}
+                  onClick={() => selectModel(selectedProvider, model.key, model)}
                 >
                   <div className="model-dropdown-item-content">
                     <span className="model-dropdown-item-name">{model.displayName}</span>
@@ -2181,13 +2721,80 @@ function ModelDropdown({
               ))
             )}
           </div>
+          {otherProviders.length > 0 && (
+            <div className="model-dropdown-section model-dropdown-other-providers">
+              <div className="model-dropdown-section-label">Other providers</div>
+              {otherProviders.map((provider) => {
+                const providerModels = providerModelCache[provider.type] || [];
+                const isActive = activeProviderMenu === provider.type;
+                return (
+                  <div
+                    key={provider.type}
+                    className="model-dropdown-provider-row"
+                    onMouseEnter={() => {
+                      setActiveProviderMenu(provider.type);
+                      void loadProviderModels(provider.type);
+                    }}
+                  >
+                    <button
+                      type="button"
+                      className={`model-dropdown-item compact ${isActive ? "highlighted" : ""}`}
+                      onClick={() => {
+                        setActiveProviderMenu(isActive ? null : provider.type);
+                        void loadProviderModels(provider.type);
+                      }}
+                    >
+                      <span className="model-dropdown-item-name">{provider.name}</span>
+                      <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                      >
+                        <path d="M9 18l6-6-6-6" />
+                      </svg>
+                    </button>
+                    {isActive && (
+                      <div className="model-dropdown-submenu">
+                        {loadingProviderModels === provider.type ? (
+                          <div className="model-dropdown-no-results">Loading models...</div>
+                        ) : providerModels.length === 0 ? (
+                          <div className="model-dropdown-no-results">No models found</div>
+                        ) : (
+                          providerModels.map((model) => (
+                            <button
+                              key={model.key}
+                              type="button"
+                              className="model-dropdown-item"
+                              onClick={() => selectModel(provider.type, model.key, model)}
+                            >
+                              <div className="model-dropdown-item-content">
+                                <span className="model-dropdown-item-name">
+                                  {model.displayName}
+                                </span>
+                                <span className="model-dropdown-item-desc">
+                                  {model.description}
+                                </span>
+                              </div>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
           <div className="model-dropdown-footer">
             <button
               type="button"
               className="model-dropdown-provider-btn"
               onClick={handleOpenProviders}
             >
-              Change provider
+              Model settings
             </button>
           </div>
         </div>
@@ -3216,9 +3823,15 @@ interface MainContentProps {
   onOpenBrowserView?: (url?: string) => void;
   onViewTaskOutputs?: (taskId: string, primaryOutputPath?: string) => void;
   selectedModel: string;
+  selectedProvider: LLMProviderType;
+  selectedReasoningEffort?: LLMReasoningEffort;
   availableModels: LLMModelInfo[];
-  onModelChange: (model: string) => void;
-  availableProviders?: Array<{ type: string; name: string; configured: boolean }>;
+  onModelChange: (selection: {
+    providerType?: LLMProviderType;
+    modelKey: string;
+    reasoningEffort?: LLMReasoningEffort;
+  }) => void;
+  availableProviders?: LLMProviderInfo[];
   uiDensity?: "focused" | "full" | "power";
   rendererPerfLoggingEnabled?: boolean;
   remoteSession?: { deviceId: string; deviceName: string } | null;
@@ -3312,11 +3925,11 @@ export function getBootstrapProgressTitle(task: Task | null | undefined): string
     case "planning":
       return "Planning the approach";
     case "executing":
-      return "Getting started";
+      return "Thinking";
     case "interrupted":
       return "Resuming work";
     default:
-      return "Working on your request";
+      return "Thinking";
   }
 }
 
@@ -4090,7 +4703,7 @@ const TaskConversationRenderedRows = memo(function TaskConversationRenderedRows(
         <StepFeed
           title={
             <span className="thinking-title" aria-label={bootstrapProgressTitle}>
-              Thinking
+              {bootstrapProgressTitle}
               <span className="thinking-ellipsis" aria-hidden="true">
                 <span>.</span>
                 <span>.</span>
@@ -4778,7 +5391,12 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                   const lastStepLabelRaw = lastVisibleRenderEvent
                     ? renderEventTitle(lastVisibleRenderEvent, workspace?.path, setViewerFilePath, agentContext, { summaryMode: !verboseSteps })
                     : undefined;
-                  const lastStepLabel = typeof lastStepLabelRaw === "string" ? lastStepLabelRaw : undefined;
+                  const lastStepLabel =
+                    isActive && typeof lastStepLabelRaw === "string" ? lastStepLabelRaw : undefined;
+                  const isFinishedActionBlockTask =
+                    task.status === "completed" || task.status === "failed" || task.status === "cancelled";
+                  const actionBlockDurationMs =
+                    isLatestActionBlock && (isTaskWorking || isFinishedActionBlockTask) ? 0 : durationMs;
                   return (
                     <Fragment key={item.blockId}>
                       <ActionBlock
@@ -4786,7 +5404,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                         summary={summary}
                         stepCount={stepCount}
                         toolCallCount={toolCallCount}
-                        durationMs={durationMs}
+                        durationMs={actionBlockDurationMs}
                         outputTokens={outputTokens}
                         isActive={isActive}
                         expanded={expanded}
@@ -5079,6 +5697,9 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                 // Render user messages as chat bubbles on the right
                 if (isUserMessage) {
                   if (event.id === initialPromptEventId) {
+                    if (!commandOutputsAfterEvent || commandOutputsAfterEvent.length === 0) {
+                      return null;
+                    }
                     return (
                       <Fragment key={event.id || `event-${item.eventIndex}`}>
                         {renderCommandOutputs(commandOutputsAfterEvent)}
@@ -5213,23 +5834,6 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                               )}
                               {task.status === "interrupted" && task.terminalStatus === "resume_available" && (
                                 <span className="chat-status">Interrupted - resume available</span>
-                              )}
-                              {isTaskWorking && (
-                                <span className="chat-status executing">
-                                  <svg
-                                    className="spinner"
-                                    width="14"
-                                    height="14"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                  >
-                                    <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
-                                    <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
-                                  </svg>
-                                  {agentContext.getMessage("taskWorking")}
-                                </span>
                               )}
                             </div>
                           )}
@@ -5720,6 +6324,8 @@ function MainContentComponent({
   onOpenBrowserView,
   onViewTaskOutputs,
   selectedModel,
+  selectedProvider,
+  selectedReasoningEffort,
   availableModels,
   onModelChange,
   availableProviders = [],
@@ -5755,6 +6361,8 @@ function MainContentComponent({
   // Agent personality context for personalized messages
   const agentContext = useAgentContext();
   const [inputValue, setInputValue] = useState("");
+  const [activeWelcomeSuggestionDraft, setActiveWelcomeSuggestionDraft] =
+    useState<ActiveWelcomeSuggestionDraft | null>(null);
   const [quotedAssistantMessage, setQuotedAssistantMessage] = useState<QuotedAssistantMessage | null>(
     null,
   );
@@ -6071,6 +6679,7 @@ function MainContentComponent({
   const [viewerFilePath, setViewerFilePath] = useState<string | null>(null);
   const [llmWikiVaultSummary, setLlmWikiVaultSummary] = useState<LlmWikiVaultSummary | null>(null);
   const [llmWikiVaultLoading, setLlmWikiVaultLoading] = useState(false);
+  const [welcomeTaskSuggestions, setWelcomeTaskSuggestions] = useState<WelcomeTaskSuggestion[]>([]);
   // Extract citations from task events for inline badge rendering
   const citations = useMemo(() => {
     const reversed = [...events].reverse();
@@ -6204,6 +6813,96 @@ function MainContentComponent({
       cancelled = true;
     };
   }, [workspace?.id, workspace?.isTemp, workspace?.path]);
+
+  useEffect(() => {
+    if (task) {
+      setWelcomeTaskSuggestions([]);
+      setActiveWelcomeSuggestionDraft(null);
+      return;
+    }
+
+    let cancelled = false;
+    const validWorkspaceId =
+      workspace?.id && !workspace.isTemp && !isTempWorkspaceId(workspace.id)
+        ? workspace.id
+        : undefined;
+
+    const loadWelcomeTaskSuggestions = async () => {
+      const [
+        rawSuggestions,
+        dueSoonCommitments,
+        profile,
+        recentMemories,
+      ] = await Promise.all([
+        (async () => {
+          if (validWorkspaceId) {
+            return window.electronAPI.listSuggestions(validWorkspaceId).catch(() => []);
+          }
+          const workspaces = await window.electronAPI
+            .listWorkspaces()
+            .catch(() => [] as Workspace[]);
+          const workspaceIds = workspaces
+            .filter((item) => !item.isTemp && !isTempWorkspaceId(item.id))
+            .map((item) => item.id)
+            .slice(0, 8);
+          if (workspaceIds.length === 0) return [];
+          const result = await window.electronAPI
+            .listSuggestionsForWorkspaces(workspaceIds)
+            .catch(() => []);
+          return result.flatMap((entry) => entry.suggestions || []);
+        })(),
+        window.electronAPI.getDueSoonCommitments(96).catch(() => ({ items: [] })),
+        window.electronAPI.getUserProfile().catch(() => null as UserProfile | null),
+        validWorkspaceId
+          ? window.electronAPI
+              .getRecentMemories({ workspaceId: validWorkspaceId, limit: 3 })
+              .catch(() => [])
+          : Promise.resolve([]),
+      ]);
+
+      const collected: WelcomeTaskSuggestion[] = [];
+      const proactiveSuggestions = Array.isArray(rawSuggestions)
+        ? (rawSuggestions as ProactiveSuggestion[])
+        : [];
+      proactiveSuggestions
+        .filter((suggestion) => !suggestion.dismissed && !suggestion.actedOn)
+        .slice(0, 6)
+        .forEach((suggestion, index) => {
+          const item = buildHeartbeatWelcomeSuggestion(suggestion, index);
+          if (item) collected.push(item);
+        });
+
+      const commitmentItems = Array.isArray(dueSoonCommitments?.items)
+        ? dueSoonCommitments.items
+        : [];
+      commitmentItems.slice(0, 3).forEach((item, index) => {
+        const suggestion = buildMemoryCommitmentSuggestion(item, index);
+        if (suggestion) collected.push(suggestion);
+      });
+
+      const normalizedRecentMemories = Array.isArray(recentMemories) ? recentMemories : [];
+      const profileSuggestion = buildProfileWelcomeSuggestion(profile, normalizedRecentMemories);
+      if (profileSuggestion) collected.push(profileSuggestion);
+
+      normalizedRecentMemories.slice(0, 2).forEach((item, index) => {
+        const suggestion = buildRecentMemorySuggestion(item, index);
+        if (suggestion) collected.push(suggestion);
+      });
+
+      if (!cancelled) {
+        setWelcomeTaskSuggestions(dedupeWelcomeTaskSuggestions(collected));
+      }
+    };
+
+    void loadWelcomeTaskSuggestions().catch((error) => {
+      console.error("Failed to load welcome task suggestions:", error);
+      if (!cancelled) setWelcomeTaskSuggestions([]);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [task, workspace?.id, workspace?.isTemp]);
 
   const markdownComponents = useMemo(
     () =>
@@ -6529,24 +7228,22 @@ function MainContentComponent({
     [task, currentStep],
   );
 
-  // Extract latest streaming progress for the live token counter
-  const streamingProgress = useMemo(() => {
-    if (!task || !isTaskWorking) return null;
-    for (let i = events.length - 1; i >= 0; i--) {
-      const e = events[i];
-      if (e.taskId !== task.id) continue;
-      const isStreamingEvent =
-        (e.type === "timeline_step_updated" && e.payload?.legacyType === "llm_streaming") ||
-        e.type === "llm_streaming";
-      if (isStreamingEvent && e.payload?.streaming === true) {
-        // Only show if the event is recent (within 2s)
-        return Date.now() - e.timestamp <= 2000 ? e.payload : null;
-      }
-      // Any non-streaming event means streaming has ended
-      if (!isStreamingEvent) return null;
-    }
-    return null;
-  }, [task, events, isTaskWorking]);
+  const isTaskFinished =
+    task?.status === "completed" || task?.status === "failed" || task?.status === "cancelled";
+  const liveWorkStartedAt = task ? (latestUserMessageTimestamp ?? task.createdAt) : Date.now();
+  const liveWorkCompletedAt = isTaskFinished
+    ? (task?.completedAt ?? task?.updatedAt)
+    : task?.completedAt;
+  const liveWorkDuration = useTaskDuration(
+    liveWorkStartedAt,
+    liveWorkCompletedAt,
+    Boolean(task && isTaskWorking),
+  );
+  const workDurationLabel = isTaskWorking
+    ? `Working for ${liveWorkDuration}`
+    : isTaskFinished
+      ? `Worked for ${liveWorkDuration}`
+      : "Activity";
 
   const continuationStatusChip = useMemo(() => {
     if (!task || !isTaskWorking) return null;
@@ -7733,7 +8430,8 @@ function MainContentComponent({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mentionContainerRef = useRef<HTMLDivElement>(null);
   const mentionDropdownRef = useRef<HTMLDivElement>(null);
-  const placeholderMeasureRef = useRef<HTMLSpanElement>(null);
+  const placeholderTextRef = useRef<HTMLSpanElement>(null);
+  const cliInputWrapperRef = useRef<HTMLDivElement>(null);
   const [cursorLeft, setCursorLeft] = useState<number>(0);
 
   // Auto-resize textarea; prefer direct event-path resizing to avoid an extra
@@ -7788,20 +8486,25 @@ function MainContentComponent({
       ? rotatingPlaceholders[rotatingIndex % rotatingPlaceholders.length]
       : personalityPlaceholder;
 
-  // Calculate cursor position based on placeholder text width
-  useEffect(() => {
-    if (placeholderMeasureRef.current) {
-      // Measure the placeholder text width
-      const measureEl = placeholderMeasureRef.current;
-      measureEl.textContent = placeholder;
-      // Get the width and add offset for: padding (16px) + prompt (~$ = ~24px) + gap (10px)
-      const padding = 16; // wrapper left padding
-      const promptWidth = 24; // ~$ prompt width
-      const gap = 10;
-      const textWidth = measureEl.offsetWidth;
-      setCursorLeft(padding + promptWidth + gap + textWidth);
-    }
-  }, [placeholder]);
+  // Keep the empty-state cursor attached to the rendered placeholder instead of
+  // relying on theme-specific padding and prompt-width constants.
+  useLayoutEffect(() => {
+    if (inputValue) return;
+
+    const updatePlaceholderCursor = () => {
+      const placeholderEl = placeholderTextRef.current;
+      const wrapperEl = cliInputWrapperRef.current;
+      if (!placeholderEl || !wrapperEl) return;
+
+      const placeholderRect = placeholderEl.getBoundingClientRect();
+      const wrapperRect = wrapperEl.getBoundingClientRect();
+      setCursorLeft(placeholderRect.left - wrapperRect.left + placeholderRect.width + 1);
+    };
+
+    updatePlaceholderCursor();
+    window.addEventListener("resize", updatePlaceholderCursor);
+    return () => window.removeEventListener("resize", updatePlaceholderCursor);
+  }, [inputValue, placeholder]);
 
   // Check if user is near the bottom of the scroll container
   const isNearBottom = useCallback((element: HTMLElement, threshold = 100) => {
@@ -8239,8 +8942,36 @@ function MainContentComponent({
         onSendMessage(message, imagePayload, quotedAssistantMessage ?? undefined);
       }
 
+      const submittedWelcomeSuggestionDraft = activeWelcomeSuggestionDraft;
+      if (submittedWelcomeSuggestionDraft && trimmedInput) {
+        const feedback = async () => {
+          if (
+            normalizeSuggestionText(trimmedInput) !==
+            normalizeSuggestionText(submittedWelcomeSuggestionDraft.originalPrompt)
+          ) {
+            await window.electronAPI
+              .editSuggestion(
+                submittedWelcomeSuggestionDraft.workspaceId,
+                submittedWelcomeSuggestionDraft.suggestionId,
+                trimmedInput,
+              )
+              .catch(() => {
+                // Best effort; still record that the suggestion led to a sent task.
+              });
+          }
+          await window.electronAPI.actOnSuggestion(
+            submittedWelcomeSuggestionDraft.workspaceId,
+            submittedWelcomeSuggestionDraft.suggestionId,
+          );
+        };
+        void feedback().catch(() => {
+          // Best effort; the task was already sent.
+        });
+      }
+
       pendingProgrammaticResizeRef.current = true;
       setInputValue("");
+      setActiveWelcomeSuggestionDraft(null);
       setQuotedAssistantMessage(null);
       setPendingAttachments([]);
       setMentionOpen(false);
@@ -8743,6 +9474,142 @@ function MainContentComponent({
   const handleQuickAction = (action: string) => {
     pendingProgrammaticResizeRef.current = true;
     setInputValue(action);
+    setActiveWelcomeSuggestionDraft(null);
+  };
+
+  const handleWelcomeTaskSuggestion = (suggestion: WelcomeTaskSuggestion) => {
+    handleQuickAction(suggestion.prompt);
+    setActiveWelcomeSuggestionDraft(
+      suggestion.feedback?.kind === "proactive"
+        ? {
+            workspaceId: suggestion.feedback.workspaceId,
+            suggestionId: suggestion.feedback.suggestionId,
+            originalPrompt: suggestion.prompt,
+          }
+        : null,
+    );
+    setWelcomeTaskSuggestions((current) => current.filter((item) => item.id !== suggestion.id));
+    window.setTimeout(() => {
+      textareaRef.current?.focus();
+      const position = suggestion.prompt.length;
+      textareaRef.current?.setSelectionRange(position, position);
+    }, 0);
+  };
+
+  const handleDismissWelcomeTaskSuggestion = (
+    event: ReactMouseEvent<HTMLButtonElement>,
+    suggestion: WelcomeTaskSuggestion,
+  ) => {
+    event.stopPropagation();
+    setWelcomeTaskSuggestions((current) => current.filter((item) => item.id !== suggestion.id));
+    if (activeWelcomeSuggestionDraft?.suggestionId === suggestion.feedback?.suggestionId) {
+      setActiveWelcomeSuggestionDraft(null);
+    }
+    if (suggestion.feedback?.kind === "proactive") {
+      void window.electronAPI
+        .dismissSuggestion(suggestion.feedback.workspaceId, suggestion.feedback.suggestionId)
+        .catch(() => {
+          // Best effort; local dismissal already keeps the row out of this welcome screen.
+        });
+    }
+  };
+
+  const handleSnoozeWelcomeTaskSuggestion = (
+    event: ReactMouseEvent<HTMLButtonElement>,
+    suggestion: WelcomeTaskSuggestion,
+  ) => {
+    event.stopPropagation();
+    setWelcomeTaskSuggestions((current) => current.filter((item) => item.id !== suggestion.id));
+    if (activeWelcomeSuggestionDraft?.suggestionId === suggestion.feedback?.suggestionId) {
+      setActiveWelcomeSuggestionDraft(null);
+    }
+    if (suggestion.feedback?.kind === "proactive") {
+      void window.electronAPI
+        .snoozeSuggestion(
+          suggestion.feedback.workspaceId,
+          suggestion.feedback.suggestionId,
+          Date.now() + 24 * 60 * 60 * 1000,
+        )
+        .catch(() => {
+          // Best effort; local snooze already keeps the row out of this welcome screen.
+        });
+    }
+  };
+
+  const renderWelcomeTaskSuggestions = () => {
+    if (welcomeTaskSuggestions.length === 0) return null;
+    return (
+      <section className="welcome-next-actions" aria-label="Next actions">
+        <div className="welcome-next-actions-header">
+          <span className="welcome-next-actions-title">Next actions</span>
+        </div>
+        <div className="welcome-next-actions-list">
+        {welcomeTaskSuggestions.map((suggestion) => {
+          const Icon =
+            suggestion.source === "memory"
+              ? ListTodo
+              : suggestion.source === "insight"
+                ? Sparkles
+                : MessageCircle;
+          const title = [suggestion.title, suggestion.whyNow, suggestion.description]
+            .concat(suggestion.evidence?.slice(0, 3) || [])
+            .filter(Boolean)
+            .join("\n");
+          const metaChips = [
+            ...formatWelcomeModules(suggestion.modules),
+            typeof suggestion.confidence === "number"
+              ? `${Math.round(suggestion.confidence * 100)}%`
+              : null,
+            suggestion.evidence?.length ? `${suggestion.evidence.length} signals` : null,
+          ].filter((value): value is string => Boolean(value));
+          return (
+            <div
+              key={suggestion.id}
+              className={`welcome-next-action suggestion-${suggestion.source}`}
+            >
+              <button
+                type="button"
+                className="welcome-next-action-main"
+                onClick={() => handleWelcomeTaskSuggestion(suggestion)}
+                title={title}
+              >
+                <Icon className="welcome-next-action-icon" size={16} aria-hidden="true" />
+                <span className="welcome-next-action-copy">
+                  <span className="welcome-next-action-title">{suggestion.title}</span>
+                  <span className="welcome-next-action-why">{suggestion.whyNow}</span>
+                </span>
+                <span className="welcome-next-action-modules" aria-hidden="true">
+                  {metaChips.slice(0, 4).map((module) => (
+                    <span key={module} className="welcome-next-action-module">
+                      {module}
+                    </span>
+                  ))}
+                </span>
+              </button>
+              <button
+                type="button"
+                className="welcome-next-action-snooze"
+                onClick={(event) => handleSnoozeWelcomeTaskSuggestion(event, suggestion)}
+                aria-label={`Snooze ${suggestion.title}`}
+                title="Snooze for a day"
+              >
+                <Clock size={14} aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className="welcome-next-action-dismiss"
+                onClick={(event) => handleDismissWelcomeTaskSuggestion(event, suggestion)}
+                aria-label={`Dismiss ${suggestion.title}`}
+                title="Dismiss"
+              >
+                <X size={14} aria-hidden="true" />
+              </button>
+            </div>
+          );
+        })}
+        </div>
+      </section>
+    );
   };
 
   const formatVaultUpdatedAt = useCallback((updatedAt: string) => {
@@ -8947,8 +9814,13 @@ function MainContentComponent({
       return pauseMessage;
     }
     const assistantFallback = getAssistantOrCompletionText(lastAssistantMessage);
-    return assistantFallback || pauseMessage;
-  }, [effectivePauseReasonCode, lastAssistantMessage, latestPauseEvent]);
+    if (assistantFallback && !isLowSignalPauseMessage(assistantFallback, effectivePauseReasonCode)) {
+      return assistantFallback;
+    }
+    const eventFallback = buildPauseDecisionFallbackFromRecentEvents(events, latestPauseEvent);
+    if (eventFallback) return eventFallback;
+    return isLowSignalPauseMessage(pauseMessage, effectivePauseReasonCode) ? "" : pauseMessage;
+  }, [effectivePauseReasonCode, events, lastAssistantMessage, latestPauseEvent]);
   const latestApprovalEvent = useMemo(() => {
     for (let i = events.length - 1; i >= 0; i -= 1) {
       const event = events[i];
@@ -9338,16 +10210,12 @@ function MainContentComponent({
                 </div>
               )}
               {renderModeSuggestionBar()}
-              <div className="cli-input-wrapper">
+              <div className="cli-input-wrapper" ref={cliInputWrapperRef}>
                 <span className="cli-input-prompt">~$</span>
-                <span
-                  ref={placeholderMeasureRef}
-                  className="cli-placeholder-measure"
-                  aria-hidden="true"
-                />
                 <div className="mention-autocomplete-wrapper" ref={mentionContainerRef}>
                   {!inputValue && (
                     <span
+                      ref={placeholderTextRef}
                       className={`cli-rotating-placeholder${placeholderFading ? " fading" : ""}`}
                       aria-hidden="true"
                     >
@@ -9356,7 +10224,9 @@ function MainContentComponent({
                   )}
                   <textarea
                     ref={textareaRef}
-                    className="welcome-input cli-input input-textarea"
+                    className={`welcome-input cli-input input-textarea${
+                      !inputValue ? " input-textarea-empty-placeholder" : ""
+                    }`}
                     value={inputValue}
                     onChange={handleInputChange}
                     onKeyDown={handleKeyDown}
@@ -9736,6 +10606,9 @@ function MainContentComponent({
                       <ModelDropdown
                         models={availableModels}
                         selectedModel={selectedModel}
+                        selectedProvider={selectedProvider}
+                        selectedReasoningEffort={selectedReasoningEffort}
+                        providers={availableProviders}
                         onModelChange={onModelChange}
                         onOpenSettings={onOpenSettings}
                       />
@@ -9776,7 +10649,10 @@ function MainContentComponent({
                                 key={m.key}
                                 className={`model-label-dropdown-item ${m.key === selectedModel ? "active" : ""}`}
                                 onClick={() => {
-                                  onModelChange(m.key);
+                                  onModelChange({
+                                    providerType: selectedProvider,
+                                    modelKey: m.key,
+                                  });
                                   setShowModelDropdownFromLabel(false);
                                 }}
                               >
@@ -10340,6 +11216,7 @@ function MainContentComponent({
                 </div>
               </div>
             )}
+            {renderWelcomeTaskSuggestions()}
           </div>
         </div>
 
@@ -10459,56 +11336,6 @@ function MainContentComponent({
           </div>
         )}
       </div>
-      {!isChatTask && isTaskWorking && (
-        <div className="main-header-status">
-          <span className="chat-status executing">
-            <svg
-              className="spinner"
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
-              <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
-            </svg>
-            {streamingProgress ? (
-              <span className="streaming-stats">
-                {agentContext.getMessage("taskWorking")}
-                <span className="streaming-separator"> · </span>
-                <span className="streaming-token-up" title="Input tokens">
-                  ↑{formatTokenCount(streamingProgress.totalInputTokens)}
-                </span>{" "}
-                <span className="streaming-token-down" title="Output tokens">
-                  ↓{formatTokenCount(streamingProgress.totalOutputTokens)}
-                </span>
-                <span className="streaming-separator"> · </span>
-                <span className="streaming-elapsed">
-                  {formatStreamElapsed(streamingProgress.elapsedMs)}
-                </span>
-              </span>
-            ) : (
-              agentContext.getMessage("taskWorking")
-            )}
-          </span>
-          {continuationStatusChip && (
-            <span className="header-continuation-chip" title="Adaptive continuation status">
-              <span>{continuationStatusChip.window}</span>
-              {continuationStatusChip.progress && (
-                <span className="header-continuation-chip-sep">·</span>
-              )}
-              {continuationStatusChip.progress && <span>{continuationStatusChip.progress}</span>}
-              {continuationStatusChip.loopRisk && (
-                <span className="header-continuation-chip-sep">·</span>
-              )}
-              {continuationStatusChip.loopRisk && <span>{continuationStatusChip.loopRisk}</span>}
-            </span>
-          )}
-        </div>
-      )}
-
       {/* Body */}
       <div className="main-body" ref={mainBodyRef} onScroll={handleScroll}>
         <div className="task-content">
@@ -10542,9 +11369,30 @@ function MainContentComponent({
           )}
 
           {/* Timeline controls - show right after original prompt */}
-          {hasNonConversationEvents && (
+          {(hasNonConversationEvents || isTaskWorking || isTaskFinished) && (
             <div className="timeline-controls">
-              <span className="timeline-controls-label">Activity</span>
+              <div className="timeline-controls-status">
+                <span
+                  className={`timeline-controls-label ${
+                    isTaskWorking || isTaskFinished ? "with-duration" : ""
+                  }`}
+                >
+                  {workDurationLabel}
+                </span>
+                {isTaskWorking && continuationStatusChip && (
+                  <span className="header-continuation-chip" title="Adaptive continuation status">
+                    <span>{continuationStatusChip.window}</span>
+                    {continuationStatusChip.progress && (
+                      <span className="header-continuation-chip-sep">·</span>
+                    )}
+                    {continuationStatusChip.progress && <span>{continuationStatusChip.progress}</span>}
+                    {continuationStatusChip.loopRisk && (
+                      <span className="header-continuation-chip-sep">·</span>
+                    )}
+                    {continuationStatusChip.loopRisk && <span>{continuationStatusChip.loopRisk}</span>}
+                  </span>
+                )}
+              </div>
               <div className="timeline-controls-actions">
                 <button
                   type="button"
@@ -10927,7 +11775,10 @@ function MainContentComponent({
                           key={m.key}
                           className={`model-label-dropdown-item ${m.key === selectedModel ? "active" : ""}`}
                           onClick={() => {
-                            onModelChange(m.key);
+                            onModelChange({
+                              providerType: selectedProvider,
+                              modelKey: m.key,
+                            });
                             setShowModelDropdownFromLabel(false);
                           }}
                         >
@@ -11037,6 +11888,9 @@ function MainContentComponent({
                 <ModelDropdown
                   models={availableModels}
                   selectedModel={selectedModel}
+                  selectedProvider={selectedProvider}
+                  selectedReasoningEffort={selectedReasoningEffort}
+                  providers={availableProviders}
                   onModelChange={onModelChange}
                   onOpenSettings={onOpenSettings}
                 />
@@ -11409,6 +12263,8 @@ function areMainContentPropsEqual(prev: MainContentProps, next: MainContentProps
     getMainContentInputRequestSignature(prev.inputRequest) ===
       getMainContentInputRequestSignature(next.inputRequest) &&
     prev.selectedModel === next.selectedModel &&
+    prev.selectedProvider === next.selectedProvider &&
+    prev.selectedReasoningEffort === next.selectedReasoningEffort &&
     prev.availableModels === next.availableModels &&
     prev.availableProviders === next.availableProviders &&
     prev.uiDensity === next.uiDensity &&
@@ -11419,22 +12275,6 @@ function areMainContentPropsEqual(prev: MainContentProps, next: MainContentProps
 }
 
 export const MainContent = memo(MainContentComponent, areMainContentPropsEqual);
-
-function formatTokenCount(count: number): string {
-  if (!Number.isFinite(count) || count < 0) return "0";
-  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
-  if (count >= 10_000) return `${Math.round(count / 1_000)}k`;
-  if (count >= 1_000) return `${(count / 1_000).toFixed(1)}k`;
-  return count.toLocaleString();
-}
-
-function formatStreamElapsed(ms: number): string {
-  const seconds = Math.max(0, Math.floor(ms / 1000));
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  const remainingSeconds = seconds % 60;
-  return `${minutes}m${String(remainingSeconds).padStart(2, "0")}s`;
-}
 
 function formatSignedScore(value: number): string {
   if (!Number.isFinite(value)) return "0.00";
@@ -11510,7 +12350,7 @@ function humanizeTimelineMessage(message: string): string {
   if (/^Starting execution of \d+ steps$/i.test(m)) return "Starting the work";
   const executingStepMatch = /^Executing step \d+\/\d+:\s*(.+)$/i.exec(m);
   if (executingStepMatch?.[1]) {
-    return `Working on: ${condenseStepText(executingStepMatch[1])}`;
+    return formatTimelineActivityLabel(executingStepMatch[1]);
   }
   const completedStepMatch = /^Completed step [^:]+:\s*(.+)$/i.exec(m);
   if (completedStepMatch?.[1]) {
@@ -11866,10 +12706,10 @@ function renderEventTitle(
     case "plan_created":
       return getMessage("planCreated", msgCtx);
     case "step_started":
-      return getMessage(
-        "stepStarted",
-        msgCtx,
-        sanitizeToolCallTextFromAssistant(getStepStartedDetail()).text || "Getting started...",
+      return (
+        formatTimelineActivityLabel(
+          sanitizeToolCallTextFromAssistant(getStepStartedDetail()).text || "Getting started...",
+        ) || "Getting started"
       );
     case "step_completed":
       return getMessage(

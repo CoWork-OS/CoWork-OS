@@ -60,7 +60,16 @@ const getSpeechRecognitionCtor = (): BrowserSpeechRecognitionCtor | null => {
   return speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition || null;
 };
 
-const isLocalSpeechRecognitionSupported = (): boolean => getSpeechRecognitionCtor() !== null;
+const isElectronRenderer = (): boolean => /Electron/i.test(navigator.userAgent);
+
+const isLocalSpeechRecognitionSupported = (): boolean =>
+  getSpeechRecognitionCtor() !== null && !isElectronRenderer();
+
+const voiceNotConfiguredMessage = (): string =>
+  isElectronRenderer()
+    ? "Voice search needs OpenAI or Azure transcription configured in Settings > Voice."
+    : "Voice transcription is not configured. Configure a speech-to-text provider in Settings > Voice.";
+
 const LOCAL_RECOGNITION_FATAL_ERRORS = new Set([
   "not-allowed",
   "service-not-allowed",
@@ -77,7 +86,7 @@ const mapSpeechRecognitionError = (errorCode?: string): string => {
     case "no-speech":
       return "No speech was detected. Try speaking again.";
     case "network":
-      return "Speech recognition service is unavailable right now. Try again.";
+      return "System speech recognition is unavailable in this desktop build. Configure OpenAI or Azure transcription in Settings > Voice.";
     case "aborted":
       return "Speech recognition was interrupted. Please try again.";
     default:
@@ -381,6 +390,9 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
     try {
       const settings = await refreshVoiceConfiguration();
       if (!settings) {
+        const errorMessage = voiceNotConfiguredMessage();
+        setError(errorMessage);
+        onError?.(errorMessage);
         onNotConfigured?.();
         return;
       }
@@ -421,6 +433,9 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
       }
 
       if (!providerConfigured) {
+        const errorMessage = voiceNotConfiguredMessage();
+        setError(errorMessage);
+        onError?.(errorMessage);
         onNotConfigured?.();
         return;
       }

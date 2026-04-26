@@ -85,14 +85,16 @@ export class SubconsciousSettingsManager {
               SUBCONSCIOUS_TARGET_KINDS.includes(kind as (typeof SUBCONSCIOUS_TARGET_KINDS)[number]),
             )
           : [...DEFAULT_SUBCONSCIOUS_SETTINGS.durableTargetKinds],
-      catchUpOnRestart: input.catchUpOnRestart !== false,
+      catchUpOnRestart: input.catchUpOnRestart === true,
       journalingEnabled: input.journalingEnabled !== false,
       dreamsEnabled: input.dreamsEnabled !== false,
       dreamCadenceHours: Math.min(Math.max(Math.round(input.dreamCadenceHours || 24), 1), 24 * 30),
       autonomyMode:
         input.autonomyMode === "recommendation_first" || input.autonomyMode === "strong_autonomy"
           ? input.autonomyMode
-          : "balanced_autopilot",
+          : input.autonomyMode === "balanced_autopilot"
+            ? input.autonomyMode
+            : "recommendation_first",
       trustedTargetKeys: Array.isArray(input.trustedTargetKeys)
         ? input.trustedTargetKeys.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
         : [],
@@ -115,7 +117,7 @@ export class SubconsciousSettingsManager {
             : undefined,
       },
       dispatchDefaults: {
-        autoDispatch: input.dispatchDefaults?.autoDispatch !== false,
+        autoDispatch: input.dispatchDefaults?.autoDispatch === true,
         defaultKinds: {
           ...DEFAULT_SUBCONSCIOUS_SETTINGS.dispatchDefaults.defaultKinds,
           ...(input.dispatchDefaults?.defaultKinds || {}),

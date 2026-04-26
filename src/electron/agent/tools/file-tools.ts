@@ -22,6 +22,10 @@ import {
   shouldUseManagedAutomatedOutput,
 } from "../managed-output-paths";
 import {
+  ensureCoWorkPrivatePathsExcluded,
+  isCoWorkPrivateGeneratedPath,
+} from "../workspace-private-paths";
+import {
   buildSensitiveSourceRefForPath,
   buildUntrustedContentBanner,
   isUntrustedExternalSource,
@@ -68,13 +72,16 @@ export class FileTools {
     private workspace: Workspace,
     private daemon: AgentDaemon,
     private taskId: string,
-  ) {}
+  ) {
+    ensureCoWorkPrivatePathsExcluded(workspace.path);
+  }
 
   /**
    * Update the workspace for this tool
    */
   setWorkspace(workspace: Workspace): void {
     this.workspace = workspace;
+    ensureCoWorkPrivatePathsExcluded(workspace.path);
   }
 
   setWorkspacePathAliasPolicy(policy: WorkspacePathAliasPolicy | undefined): void {
@@ -552,6 +559,7 @@ export class FileTools {
     }
 
     const redirectedPath = buildManagedAutomatedOutputPath(this.taskId, workspaceRelative);
+    ensureCoWorkPrivatePathsExcluded(this.workspace.path);
     this.daemon.logEvent(this.taskId, "log", {
       message: `Redirected automated task output to managed zone: ${workspaceRelative} -> ${redirectedPath}`,
       source: "managed_output_policy",
@@ -1147,6 +1155,9 @@ export class FileTools {
 
     const redirected = await this.maybeRedirectAutomatedOutputPath(relativePath);
     const requestedPath = redirected.requestedPath;
+    if (isCoWorkPrivateGeneratedPath(requestedPath)) {
+      ensureCoWorkPrivatePathsExcluded(this.workspace.path);
+    }
 
     this.checkPermission("write");
     const fullPath = this.resolvePath(requestedPath, "write");
@@ -1411,6 +1422,9 @@ export class FileTools {
 
     const redirected = await this.maybeRedirectAutomatedOutputPath(destPath);
     const requestedDestPath = redirected.requestedPath;
+    if (isCoWorkPrivateGeneratedPath(requestedDestPath)) {
+      ensureCoWorkPrivatePathsExcluded(this.workspace.path);
+    }
 
     this.checkPermission("read");
     this.checkPermission("write");
@@ -1544,6 +1558,9 @@ export class FileTools {
 
     const redirected = await this.maybeRedirectAutomatedOutputPath(relativePath);
     const requestedPath = redirected.requestedPath;
+    if (isCoWorkPrivateGeneratedPath(requestedPath)) {
+      ensureCoWorkPrivatePathsExcluded(this.workspace.path);
+    }
 
     this.checkPermission("write");
     const fullPath = this.resolvePath(requestedPath, "write");

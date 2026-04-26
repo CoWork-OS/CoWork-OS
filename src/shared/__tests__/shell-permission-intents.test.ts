@@ -20,5 +20,7 @@ describe("classifyShellPermissionDecision", () => {
 
   it("returns unknown for unrelated text", () => {
     expect(classifyShellPermissionDecision("show me the logs")).toBe("unknown");
+    expect(classifyShellPermissionDecision("continue")).toBe("unknown");
+    expect(classifyShellPermissionDecision("please continue")).toBe("unknown");
   });
 });

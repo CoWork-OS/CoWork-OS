@@ -119,6 +119,7 @@ export class AppearanceManager {
    */
   static loadSettings(): AppearanceSettings {
     if (this.cachedSettings) {
+      syncDevLogSettingsFile(this.cachedSettings.devRunLoggingEnabled === true);
       return this.cachedSettings;
     }
 
@@ -180,6 +181,7 @@ export class AppearanceManager {
     }
 
     this.cachedSettings = settings;
+    syncDevLogSettingsFile(settings.devRunLoggingEnabled === true);
 
     // Persist defaults for newly added fields so they survive future saves
     if (needsWrite && SecureSettingsRepository.isInitialized()) {
@@ -206,7 +208,7 @@ export class AppearanceManager {
   /**
    * Save settings to encrypted database
    */
-  static saveSettings(settings: AppearanceSettings): void {
+  static saveSettings(settings: Partial<AppearanceSettings>): void {
     try {
       if (!SecureSettingsRepository.isInitialized()) {
         throw new Error("SecureSettingsRepository not initialized");

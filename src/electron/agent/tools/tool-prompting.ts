@@ -201,9 +201,9 @@ const TOOL_PROMPT_METADATA_BY_NAME: Record<string, LLMToolPromptMetadata> = {
   })),
   task_list_create: createPromptMetadata(() => ({
     appendDescription:
-      "Use for non-trivial multi-step execution work. Track implementation and verification items explicitly so the task does not finish without objective checks.",
+      "Use only for non-trivial execution that changes artifacts/state or spans a long workflow. Do not use for basic questions, read-only research, advice, or plan-only responses.",
     compactDescription:
-      "Create a session checklist for non-trivial execution work. Include verification coverage before finishing.",
+      "Create a checklist only for substantial execution work; skip it for basic/read-only answers.",
   })),
   task_list_update: createPromptMetadata(() => ({
     appendDescription:

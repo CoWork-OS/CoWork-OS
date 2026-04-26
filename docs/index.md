@@ -18,6 +18,9 @@ hero:
       text: Core Automation
       link: /core-automation
     - theme: alt
+      text: Workflow Intelligence
+      link: /workflow-intelligence
+    - theme: alt
       text: 24/7 Learning Guide
       link: /continual-learning-in-cowork
     - theme: alt
@@ -48,8 +51,8 @@ hero:
       text: Supermemory
       link: /supermemory
     - theme: alt
-      text: Release Notes 0.5.35
-      link: /release-notes-0.5.35
+      text: Release Notes 0.5.40
+      link: /release-notes-0.5.40
     - theme: alt
       text: Heartbeat v3
       link: /heartbeat-v3
@@ -87,20 +90,20 @@ features:
     details: SessionRuntime owns task-session state, session checklists, visible-tool render caching, prompt-cache state, resume snapshots, and task projection while the turn kernel handles each active turn; sectioned prompts, stable-prefix prompt caching, graph-backed delegation, typed worker roles, semantic batch summaries, and terminal-state-safe resume logic keep execution, verification, and follow-up work coherent.
   - title: Managed Agents
     details: Versioned managed agents, reusable local environments, and durable managed sessions now sit on top of the existing task runtime through the control plane, while Mission Control and task surfaces observe the same backing tasks and team runs.
-  - title: Latest Release 0.5.35
-    details: Includes Managed Agents and Managed Sessions, optional Supermemory integration, the Task Trace Debugger, the bundled `novelist` skill, explicit-only turn-budget controls, and the latest renderer, briefing, and release-hardening updates.
+  - title: Latest Release 0.5.40
+    details: Includes Chronicle desktop screen context, Workflow Intelligence, routines, AgentMail, the expanded Inbox Agent, Managed Agents Hub improvements, multi-provider image generation, rich PPTX previews, LaTeX/PDF artifacts, and the bundled `kami` and `taste-skill` workflows.
   - title: Inbox Agent
-    details: Local-first email triage with AI classification, action-needed and commitment queues, draft review, and resync-safe background sync.
+    details: Local-first email workspace with Classic and Today modes, AI triage, Mailbox Ask, manual reply/reply-all/forward, editable AI drafts, commitment queues, sender cleanup, attachment indexing, and resync-safe background sync.
   - title: Managed Devices
     details: Connect local and remote CoWork nodes, inspect device summaries, browse remote workspaces, and launch tasks against selected machines from one Devices tab.
   - title: Core Automation
-    details: Memory, Heartbeat, and Subconscious now form a strict always-on core owned by automation profiles, with Mission Control as the cockpit and Digital Twins kept optional.
+    details: Workflow Intelligence now forms the strict always-on core: Memory is the source of truth, Heartbeat schedules reflection, Suggestions are reviewable outputs, and Mission Control remains the cockpit.
   - title: Automations
     details: The automations surface now separates core automation from trigger ingress, device routing, schedules, webhooks, and optional twin features.
   - title: Heartbeat V3
     details: Default two-lane background automation with cheap Pulse checks, selective Dispatch escalation, signal compression, automation-profile ownership, and truthful Mission Control state.
-  - title: 139 Built-in Skills
-    details: Document creation, web research, code generation, image analysis, and specialized bundled workflows such as `llm-wiki` for persistent research vaults, `manim-video` for technical animation, and `kami` for editorial PDFs and slide decks. Extensible via custom skills, ClawHub installs, external skill imports, and optional read-only external skill directories, with staged scanning and warning/quarantine handling for managed imports.
+  - title: 140 Built-in Skills
+    details: Document creation, web research, code generation, image analysis, and specialized bundled workflows such as `llm-wiki` for persistent research vaults, `manim-video` for technical animation, `kami` for editorial PDFs and slide decks, and `taste-skill` for high-agency frontend design. Extensible via custom skills, ClawHub installs, external skill imports, and optional read-only external skill directories, with staged scanning and warning/quarantine handling for managed imports.
   - title: LaTeX PDF Artifacts
     details: Source-first `.tex` workflows compile with installed system TeX engines and render paired source/PDF artifact workbenches in task output surfaces.
   - title: Additive Skill Routing

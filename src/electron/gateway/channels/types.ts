@@ -522,7 +522,7 @@ export interface EmailConfig extends ChannelConfig {
   mailbox?: string;
   /** Poll interval in ms for IMAP IDLE fallback (default: 30000) */
   pollInterval?: number;
-  /** Mark emails as read after processing (default: true) */
+  /** Mark emails as read after processing (default: false) */
   markAsRead?: boolean;
   /** Response prefix for bot replies */
   responsePrefix?: string;
@@ -553,13 +553,16 @@ export interface EmailTransportClient {
   startReceiving(): Promise<void>;
   stopReceiving(): Promise<void>;
   sendEmail(options: {
-    to: string;
+    to: string | string[];
+    cc?: string | string[];
+    bcc?: string | string[];
     subject: string;
     text: string;
     inReplyTo?: string;
     references?: string[];
   }): Promise<string>;
   markAsRead(uid: number): Promise<void>;
+  markAsUnread?(uid: number): Promise<void>;
   getEmail?(): string;
   on(event: "message", listener: (message: unknown) => void): this;
   on(event: "error", listener: (error: Error) => void): this;

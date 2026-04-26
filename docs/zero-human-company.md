@@ -21,7 +21,7 @@ The zero-human-company workflow is a composition of existing CoWork OS subsystem
 - `Heartbeat v3` gives those operators cheap Pulse review plus selective Dispatch escalation
 - `Strategic Planner` turns goals and stalled work into managed issues
 - `Mission Control` lets you monitor agents, issues, runs, and tasks
-- `Subconscious` can continuously reflect across company workflows, then dispatch winning recommendations into tasks, notifications, or code-change work
+- `Workflow Intelligence` can continuously reflect across company workflows, then surface reviewable suggestions or trusted low-risk tasks
 - `Devices` can route execution to dedicated remote machines while the company graph and planner stay on the primary control surface
 
 Together, these create an operating loop where company goals become planner-managed issues, issues become tasks, and tasks are executed by role-specific agents with configurable autonomy.
@@ -164,9 +164,9 @@ If your operator tasks need to run on another machine, use the Devices tab along
 - inspect remote task history without losing company context
 - attach files from remote workspaces when dispatching company tasks
 
-### Subconscious
+### Workflow Intelligence
 
-`Subconscious` is optional but complementary to the planner/operator stack. It is part of the core automation runtime and can reflect on company workflow evidence across:
+`Workflow Intelligence` is optional but complementary to the planner/operator stack. It is part of the core automation runtime and can reflect on company workflow evidence across:
 
 - planner-created work
 - inbox and mailbox signals
@@ -581,4 +581,4 @@ That produces the clearest "company operating system" demo.
 - [Features](features.md)
 - [Getting Started](getting-started.md)
 - [Use Cases](use-cases.md)
-- [Subconscious Reflective Loop](subconscious-loop.md)
+- [Workflow Intelligence](workflow-intelligence.md)

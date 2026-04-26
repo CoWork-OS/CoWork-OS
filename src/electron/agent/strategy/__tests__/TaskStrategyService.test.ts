@@ -46,6 +46,58 @@ describe("TaskStrategyService deriveLlmProfile", () => {
     );
     expect(strategy.llmProfileHint).toBe("strong");
   });
+
+  it("keeps simple image generation to one quality pass", () => {
+    const strategy = TaskStrategyService.derive(
+      makeRoute({ intent: "execution", signals: ["image-creation-intent"], domain: "creative" }),
+      undefined,
+      {
+        title: "Create image",
+        prompt: "create an image of a snow leopard",
+      },
+    );
+
+    expect(strategy.qualityPasses).toBe(1);
+  });
+
+  it("keeps infographic image generation to one quality pass", () => {
+    const strategy = TaskStrategyService.derive(
+      makeRoute({ intent: "execution", signals: ["image-creation-intent"], domain: "creative" }),
+      undefined,
+      {
+        title: "Create infographic",
+        prompt: "create an infographic image explaining snow leopards",
+      },
+    );
+
+    expect(strategy.qualityPasses).toBe(1);
+  });
+
+  it("keeps app avatar image generation to one quality pass", () => {
+    const strategy = TaskStrategyService.derive(
+      makeRoute({ intent: "execution", signals: ["image-creation-intent"], domain: "creative" }),
+      undefined,
+      {
+        title: "Create avatar",
+        prompt: "generate an image of a cool avatar of a snow leopard for cowork os app",
+      },
+    );
+
+    expect(strategy.qualityPasses).toBe(1);
+  });
+
+  it("keeps grounded infographic image generation to one quality pass", () => {
+    const strategy = TaskStrategyService.derive(
+      makeRoute({ intent: "execution", signals: ["image-creation-intent"], domain: "creative" }),
+      undefined,
+      {
+        title: "Create infographic",
+        prompt: "create an infographic about cowork os",
+      },
+    );
+
+    expect(strategy.qualityPasses).toBe(1);
+  });
 });
 
 describe("TaskStrategyService getRelevantToolSet", () => {
@@ -84,7 +136,95 @@ describe("TaskStrategyService decoratePrompt", () => {
 
     expect(executionPrompt).toContain("checklist_contract:");
     expect(executionPrompt).toContain("task_list_create");
+    expect(executionPrompt).toContain("Do not create a checklist for basic questions");
     expect(planningPrompt).not.toContain("checklist_contract:");
+  });
+
+  it("adds direct completion guidance for simple image generation", () => {
+    const route = makeRoute({
+      intent: "execution",
+      signals: ["image-creation-intent"],
+      domain: "creative",
+    });
+    const strategy = TaskStrategyService.derive(route, undefined, {
+      title: "Create image",
+      prompt: "create an image of a snow leopard",
+    });
+    const prompt = TaskStrategyService.decoratePrompt(
+      "create an image of a snow leopard",
+      route,
+      strategy,
+      "",
+    );
+
+    expect(prompt).toContain("image_generation_contract:");
+    expect(prompt).toContain("call generate_image once");
+    expect(prompt).toContain("Do not search files");
+  });
+
+  it("adds direct completion guidance for infographic image generation", () => {
+    const route = makeRoute({
+      intent: "execution",
+      signals: ["image-creation-intent"],
+      domain: "creative",
+    });
+    const strategy = TaskStrategyService.derive(route, undefined, {
+      title: "Create infographic",
+      prompt: "create an infographic image explaining snow leopards",
+    });
+    const prompt = TaskStrategyService.decoratePrompt(
+      "create an infographic image explaining snow leopards",
+      route,
+      strategy,
+      "",
+    );
+
+    expect(prompt).toContain("image_generation_contract:");
+    expect(prompt).toContain("call generate_image once");
+  });
+
+  it("keeps direct image guidance when strategy context is already present", () => {
+    const rawPrompt = 'generate an image of a cool avatar of a snow leopard for "cowork os" app';
+    const decoratedPrompt = `${rawPrompt}
+
+[AGENT_STRATEGY_CONTEXT_V1]
+image_generation_contract:
+- Do not run analyze_image unless explicitly requested.
+[/AGENT_STRATEGY_CONTEXT_V1]`;
+    const route = makeRoute({
+      intent: "execution",
+      signals: ["image-creation-intent"],
+      domain: "creative",
+    });
+    const strategy = TaskStrategyService.derive(route, undefined, {
+      title: "Create avatar",
+      prompt: decoratedPrompt,
+    });
+
+    expect(strategy.qualityPasses).toBe(1);
+    expect(strategy.autoReportEnabled).toBe(false);
+  });
+
+  it("allows bounded context gathering for grounded infographic requests", () => {
+    const route = makeRoute({
+      intent: "execution",
+      signals: ["image-creation-intent"],
+      domain: "creative",
+    });
+    const strategy = TaskStrategyService.derive(route, undefined, {
+      title: "Create infographic",
+      prompt: "create an infographic about cowork os",
+    });
+    const prompt = TaskStrategyService.decoratePrompt(
+      "create an infographic about cowork os",
+      route,
+      strategy,
+      "",
+    );
+
+    expect(prompt).toContain("gather only the information needed");
+    expect(prompt).toContain("call generate_image once");
+    expect(prompt).not.toContain("Do not search files");
   });
 });
 

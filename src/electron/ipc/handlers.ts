@@ -795,6 +795,22 @@ rateLimiter.configure(
   RATE_LIMIT_CONFIGS.standard,
 );
 rateLimiter.configure(
+  IPC_CHANNELS.SUGGESTIONS_DISMISS,
+  RATE_LIMIT_CONFIGS.limited,
+);
+rateLimiter.configure(
+  IPC_CHANNELS.SUGGESTIONS_SNOOZE,
+  RATE_LIMIT_CONFIGS.limited,
+);
+rateLimiter.configure(
+  IPC_CHANNELS.SUGGESTIONS_EDIT,
+  RATE_LIMIT_CONFIGS.limited,
+);
+rateLimiter.configure(
+  IPC_CHANNELS.SUGGESTIONS_ACT,
+  RATE_LIMIT_CONFIGS.limited,
+);
+rateLimiter.configure(
   IPC_CHANNELS.LLM_SAVE_SETTINGS,
   RATE_LIMIT_CONFIGS.limited,
 );
@@ -1038,7 +1054,7 @@ export async function setupIpcHandlers(
     artifactRepo,
     agentDaemon,
   );
-  const mailboxService = new MailboxService(db);
+  const mailboxService = new MailboxService(db, { autoSync: true });
   const agentMailRealtimeService = new AgentMailRealtimeService(db, mailboxService);
   const agentMailAdminService = new AgentMailAdminService(
     db,
@@ -2448,6 +2464,11 @@ export async function setupIpcHandlers(
     return mailboxService.getSyncStatus();
   });
 
+  ipcMain.handle(IPC_CHANNELS.MAILBOX_CLIENT_STATE, async (event) => {
+    assertTrustedMailboxSender(event);
+    return mailboxService.getMailboxClientState();
+  });
+
   ipcMain.handle(
     IPC_CHANNELS.MAILBOX_SYNC,
     async (event, data?: { limit?: number }) => {
@@ -2487,6 +2508,14 @@ export async function setupIpcHandlers(
           typeof data?.cleanupCandidate === "boolean"
             ? data.cleanupCandidate
             : undefined,
+        todayBucket:
+          typeof data?.todayBucket === "string" ? data.todayBucket : undefined,
+        domainCategory:
+          typeof data?.domainCategory === "string" ? data.domainCategory : undefined,
+        hasAttachment:
+          typeof data?.hasAttachment === "boolean" ? data.hasAttachment : undefined,
+        attachmentQuery:
+          typeof data?.attachmentQuery === "string" ? data.attachmentQuery : undefined,
         sortBy:
           data?.sortBy === "recent"
             ? "recent"
@@ -2632,6 +2661,114 @@ export async function setupIpcHandlers(
     return mailboxService.getMailboxDigest(
       typeof data?.workspaceId === "string" ? data.workspaceId : undefined,
     );
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MAILBOX_TODAY_DIGEST, async (event, data?: Any) => {
+    assertTrustedMailboxSender(event);
+    return mailboxService.getMailboxTodayDigest({
+      limitPerBucket: typeof data?.limitPerBucket === "number" ? data.limitPerBucket : undefined,
+    });
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MAILBOX_SENDER_CLEANUP_DIGEST, async (event, data?: Any) => {
+    assertTrustedMailboxSender(event);
+    return mailboxService.getMailboxSenderCleanupDigest({
+      limit: typeof data?.limit === "number" ? data.limit : undefined,
+    });
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MAILBOX_ASK, async (event, data?: Any) => {
+    assertTrustedMailboxSender(event);
+    return mailboxService.askMailbox({
+      query: typeof data?.query === "string" ? data.query : "",
+      limit: typeof data?.limit === "number" ? data.limit : undefined,
+      includeAnswer: typeof data?.includeAnswer === "boolean" ? data.includeAnswer : undefined,
+    });
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MAILBOX_ATTACHMENT_EXTRACT_TEXT, async (event, data?: Any) => {
+    assertTrustedMailboxSender(event);
+    const attachmentId = typeof data?.attachmentId === "string" ? data.attachmentId : "";
+    if (!attachmentId) throw new Error("Missing mailbox attachment id");
+    return mailboxService.extractMailboxAttachmentText(attachmentId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MAILBOX_CREATE_DRAFT, async (event, data?: Any) => {
+    assertTrustedMailboxSender(event);
+    return mailboxService.createMailboxDraft({
+      accountId: typeof data?.accountId === "string" ? data.accountId : undefined,
+      threadId: typeof data?.threadId === "string" ? data.threadId : undefined,
+      mode:
+        data?.mode === "reply" || data?.mode === "reply_all" || data?.mode === "forward"
+          ? data.mode
+          : "new",
+      subject: typeof data?.subject === "string" ? data.subject : undefined,
+      bodyText: typeof data?.bodyText === "string" ? data.bodyText : undefined,
+      bodyHtml: typeof data?.bodyHtml === "string" ? data.bodyHtml : undefined,
+      to: Array.isArray(data?.to) ? data.to : undefined,
+      cc: Array.isArray(data?.cc) ? data.cc : undefined,
+      bcc: Array.isArray(data?.bcc) ? data.bcc : undefined,
+      identityId: typeof data?.identityId === "string" ? data.identityId : undefined,
+      signatureId: typeof data?.signatureId === "string" ? data.signatureId : undefined,
+    });
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MAILBOX_UPDATE_DRAFT, async (event, data?: Any) => {
+    assertTrustedMailboxSender(event);
+    const draftId = typeof data?.draftId === "string" ? data.draftId : "";
+    if (!draftId) throw new Error("Missing mailbox draft id");
+    return mailboxService.updateMailboxDraft(draftId, {
+      subject: typeof data?.patch?.subject === "string" ? data.patch.subject : undefined,
+      bodyText: typeof data?.patch?.bodyText === "string" ? data.patch.bodyText : undefined,
+      bodyHtml:
+        typeof data?.patch?.bodyHtml === "string" || data?.patch?.bodyHtml === null
+          ? data.patch.bodyHtml
+          : undefined,
+      to: Array.isArray(data?.patch?.to) ? data.patch.to : undefined,
+      cc: Array.isArray(data?.patch?.cc) ? data.patch.cc : undefined,
+      bcc: Array.isArray(data?.patch?.bcc) ? data.patch.bcc : undefined,
+      identityId:
+        typeof data?.patch?.identityId === "string" || data?.patch?.identityId === null
+          ? data.patch.identityId
+          : undefined,
+      signatureId:
+        typeof data?.patch?.signatureId === "string" || data?.patch?.signatureId === null
+          ? data.patch.signatureId
+          : undefined,
+      scheduledAt:
+        typeof data?.patch?.scheduledAt === "number" || data?.patch?.scheduledAt === null
+          ? data.patch.scheduledAt
+          : undefined,
+    });
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MAILBOX_SEND_DRAFT, async (event, data?: Any) => {
+    assertTrustedMailboxSender(event);
+    const draftId = typeof data?.draftId === "string" ? data.draftId : "";
+    if (!draftId) throw new Error("Missing mailbox draft id");
+    return mailboxService.sendMailboxDraft(draftId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MAILBOX_SCHEDULE_SEND, async (event, data?: Any) => {
+    assertTrustedMailboxSender(event);
+    const draftId = typeof data?.draftId === "string" ? data.draftId : "";
+    const scheduledAt = typeof data?.scheduledAt === "number" ? data.scheduledAt : 0;
+    if (!draftId) throw new Error("Missing mailbox draft id");
+    return mailboxService.scheduleMailboxSend(draftId, scheduledAt);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MAILBOX_DISCARD_COMPOSE_DRAFT, async (event, data?: Any) => {
+    assertTrustedMailboxSender(event);
+    const draftId = typeof data?.draftId === "string" ? data.draftId : "";
+    if (!draftId) throw new Error("Missing mailbox draft id");
+    return mailboxService.discardMailboxDraft(draftId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MAILBOX_UNDO_ACTION, async (event, data?: Any) => {
+    assertTrustedMailboxSender(event);
+    const actionId = typeof data?.actionId === "string" ? data.actionId : "";
+    if (!actionId) throw new Error("Missing mailbox action id");
+    return mailboxService.undoMailboxAction(actionId);
   });
 
   ipcMain.handle(
@@ -3065,11 +3202,43 @@ export async function setupIpcHandlers(
           typeof data?.threadId === "string" ? data.threadId : undefined,
         type: data?.type,
         label: typeof data?.label === "string" ? data.label : undefined,
+        folderId:
+          typeof data?.folderId === "string" ? data.folderId : undefined,
+        labelId:
+          typeof data?.labelId === "string" ? data.labelId : undefined,
+        snoozeUntil:
+          typeof data?.snoozeUntil === "number" ? data.snoozeUntil : undefined,
         draftId: typeof data?.draftId === "string" ? data.draftId : undefined,
+        draftSubject:
+          typeof data?.draftSubject === "string"
+            ? data.draftSubject
+            : undefined,
+        draftBody:
+          typeof data?.draftBody === "string" ? data.draftBody : undefined,
+        messageMode:
+          data?.messageMode === "reply" ||
+          data?.messageMode === "reply_all" ||
+          data?.messageMode === "forward"
+            ? data.messageMode
+            : undefined,
+        messageTo:
+          Array.isArray(data?.messageTo) ? data.messageTo : undefined,
+        messageCc:
+          Array.isArray(data?.messageCc) ? data.messageCc : undefined,
+        messageBcc:
+          Array.isArray(data?.messageBcc) ? data.messageBcc : undefined,
+        messageSubject:
+          typeof data?.messageSubject === "string"
+            ? data.messageSubject
+            : undefined,
+        messageBody:
+          typeof data?.messageBody === "string" ? data.messageBody : undefined,
         commitmentId:
           typeof data?.commitmentId === "string"
             ? data.commitmentId
             : undefined,
+        actionId:
+          typeof data?.actionId === "string" ? data.actionId : undefined,
       });
     },
   );
@@ -4981,12 +5150,33 @@ export async function setupIpcHandlers(
   );
 
   // Set the current model (persists selection across sessions)
-  ipcMain.handle(IPC_CHANNELS.LLM_SET_MODEL, async (_, modelKey: string) => {
+  ipcMain.handle(IPC_CHANNELS.LLM_SET_MODEL, async (_, selection: string | {
+    providerType?: string;
+    modelKey: string;
+    reasoningEffort?: "low" | "medium" | "high" | "extra_high";
+  }) => {
+    const modelKey =
+      typeof selection === "string" ? selection : selection?.modelKey;
+    if (typeof modelKey !== "string" || !modelKey.trim()) {
+      throw new Error("modelKey is required");
+    }
     const settings = LLMProviderFactory.loadSettings();
-    const updatedSettings = LLMProviderFactory.applyModelSelection(
+    const providerType =
+      typeof selection === "string"
+        ? settings.providerType
+        : (selection.providerType as Any) || settings.providerType;
+    let updatedSettings = LLMProviderFactory.applyModelSelection(
       settings,
-      modelKey,
+      modelKey.trim(),
+      providerType,
     );
+    if (typeof selection !== "string" && selection.reasoningEffort) {
+      updatedSettings = LLMProviderFactory.applyReasoningEffortSelection(
+        updatedSettings,
+        providerType,
+        selection.reasoningEffort,
+      );
+    }
     LLMProviderFactory.saveSettings(updatedSettings);
     return { success: true };
   });
@@ -8049,6 +8239,65 @@ export async function setupIpcHandlers(
       const success = ProactiveSuggestionsService.dismiss(
         validatedWorkspaceId,
         validatedSuggestionId,
+      );
+      return { success };
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.SUGGESTIONS_SNOOZE,
+    async (_, workspaceId: string, suggestionId: string, snoozedUntil: number) => {
+      checkRateLimit(IPC_CHANNELS.SUGGESTIONS_SNOOZE);
+      const validatedWorkspaceId = validateInput(
+        WorkspaceIdSchema,
+        workspaceId,
+        "workspace ID",
+      );
+      const validatedSuggestionId = validateInput(
+        UUIDSchema,
+        suggestionId,
+        "suggestion ID",
+      );
+      const validatedSnoozedUntil =
+        typeof snoozedUntil === "number" && Number.isFinite(snoozedUntil)
+          ? Math.max(Date.now(), snoozedUntil)
+          : Date.now() + 24 * 60 * 60 * 1000;
+      const { ProactiveSuggestionsService } =
+        await import("../agent/ProactiveSuggestionsService");
+      const success = ProactiveSuggestionsService.snooze(
+        validatedWorkspaceId,
+        validatedSuggestionId,
+        validatedSnoozedUntil,
+      );
+      return { success };
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.SUGGESTIONS_EDIT,
+    async (_, workspaceId: string, suggestionId: string, editedPrompt: string) => {
+      checkRateLimit(IPC_CHANNELS.SUGGESTIONS_EDIT);
+      const validatedWorkspaceId = validateInput(
+        WorkspaceIdSchema,
+        workspaceId,
+        "workspace ID",
+      );
+      const validatedSuggestionId = validateInput(
+        UUIDSchema,
+        suggestionId,
+        "suggestion ID",
+      );
+      const validatedEditedPrompt = validateInput(
+        z.string().trim().min(1).max(4000),
+        editedPrompt,
+        "edited suggestion prompt",
+      );
+      const { ProactiveSuggestionsService } =
+        await import("../agent/ProactiveSuggestionsService");
+      const success = ProactiveSuggestionsService.recordEditedAction(
+        validatedWorkspaceId,
+        validatedSuggestionId,
+        validatedEditedPrompt,
       );
       return { success };
     },

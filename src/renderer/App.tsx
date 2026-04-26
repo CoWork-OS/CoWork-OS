@@ -60,6 +60,8 @@ import {
   TaskDomain,
   LlmProfile,
   PermissionMode,
+  LLMProviderType,
+  LLMReasoningEffort,
 } from "../shared/types";
 import { TASK_EVENT_STATUS_MAP } from "../shared/task-event-status-map";
 import { applyPersistedLanguage } from "./i18n";
@@ -96,6 +98,7 @@ import {
   deriveSharedTaskEventUiState,
   type SharedTaskEventUiState,
 } from "./utils/task-event-derived";
+import { deriveReplayTaskSnapshot } from "./utils/task-replay-state";
 import {
   hydrateSelectedTaskEvents,
   mergeTaskEventsByIdentity,
@@ -193,6 +196,8 @@ type SelectedTaskWorkspaceViewProps = {
   childEvents: TaskEvent[];
   activeInputRequest: InputRequest | null;
   selectedModel: string;
+  selectedProvider: LLMProviderType;
+  selectedReasoningEffort?: LLMReasoningEffort;
   availableModels: LLMModelInfo[];
   availableProviders: LLMProviderInfo[];
   uiDensity: UiDensity;
@@ -240,7 +245,11 @@ type SelectedTaskWorkspaceViewProps = {
   onViewTaskOutputs: (taskId: string, primaryOutputPath?: string) => void;
   onCancelTaskById: (taskId: string) => Promise<void>;
   onHighlightConsumed: () => void;
-  onModelChange: (modelKey: string) => void;
+  onModelChange: (selection: {
+    providerType?: LLMProviderType;
+    modelKey: string;
+    reasoningEffort?: LLMReasoningEffort;
+  }) => void;
 };
 
 function getAppTaskSignature(task: Task | undefined): string {
@@ -264,6 +273,8 @@ const SelectedTaskWorkspaceView = memo(function SelectedTaskWorkspaceView({
   childEvents,
   activeInputRequest,
   selectedModel,
+  selectedProvider,
+  selectedReasoningEffort,
   availableModels,
   availableProviders,
   uiDensity,
@@ -319,6 +330,8 @@ const SelectedTaskWorkspaceView = memo(function SelectedTaskWorkspaceView({
         onOpenBrowserView={onOpenBrowserView}
         onViewTaskOutputs={onViewTaskOutputs}
         selectedModel={selectedModel}
+        selectedProvider={selectedProvider}
+        selectedReasoningEffort={selectedReasoningEffort}
         availableModels={availableModels}
         onModelChange={onModelChange}
         availableProviders={availableProviders}
@@ -362,6 +375,8 @@ const SelectedTaskWorkspaceView = memo(function SelectedTaskWorkspaceView({
   prev.childEvents === next.childEvents &&
   getInputRequestSignature(prev.activeInputRequest) === getInputRequestSignature(next.activeInputRequest) &&
   prev.selectedModel === next.selectedModel &&
+  prev.selectedProvider === next.selectedProvider &&
+  prev.selectedReasoningEffort === next.selectedReasoningEffort &&
   prev.availableModels === next.availableModels &&
   prev.availableProviders === next.availableProviders &&
   prev.uiDensity === next.uiDensity &&
@@ -517,6 +532,18 @@ function appendRendererTaskEvents(
   return nextEvents;
 }
 
+function isImmediateTaskAttentionEvent(event: TaskEvent): boolean {
+  return (
+    event.type === "task_paused" ||
+    event.type === "approval_requested" ||
+    event.type === "input_request_created"
+  );
+}
+
+function isShellPermissionPauseReason(reasonCode: string | null | undefined): boolean {
+  return reasonCode === "shell_permission_required" || reasonCode === "shell_permission_still_disabled";
+}
+
 function mergeUniqueTaskEvents(existing: TaskEvent[], incoming: TaskEvent[]): TaskEvent[] {
   return mergeTaskEventsByIdentity(existing, incoming);
 }
@@ -645,6 +672,7 @@ export function App() {
   const [settingsTab, setSettingsTab] = useState<
     | "appearance"
     | "llm"
+    | "image"
     | "search"
     | "telegram"
     | "slack"
@@ -708,6 +736,10 @@ export function App() {
 
   // Model selection state
   const [selectedModel, setSelectedModel] = useState<string>("opus-4-5");
+  const [selectedProvider, setSelectedProvider] =
+    useState<LLMProviderType>("anthropic");
+  const [selectedReasoningEffort, setSelectedReasoningEffort] =
+    useState<LLMReasoningEffort | undefined>(undefined);
   const [sessionModelOverride, setSessionModelOverride] = useState<string>("");
   const [availableModels, setAvailableModels] = useState<LLMModelInfo[]>([]);
   const [availableProviders, setAvailableProviders] = useState<LLMProviderInfo[]>([]);
@@ -771,6 +803,7 @@ export function App() {
   const pendingToolEventsFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastBatchableAppendAtRef = useRef(0);
   const terminalEventRefreshInFlightRef = useRef<Set<string>>(new Set());
+  const latestAttentionEventByTaskIdRef = useRef<Map<string, TaskEvent>>(new Map());
   /** Tracks output paths we've already shown completion toast for (suppresses repeat toasts on follow-ups) */
   const completionToastNotifiedPathsRef = useRef<Map<string, Set<string>>>(new Map());
 
@@ -923,6 +956,8 @@ export function App() {
       const config = await window.electronAPI.getLLMConfigStatus();
       if (!config) return;
       setSelectedModel(config.currentModel);
+      setSelectedProvider(config.currentProvider);
+      setSelectedReasoningEffort(config.currentReasoningEffort);
       setSessionModelOverride("");
       setAvailableModels(config.models);
       setAvailableProviders(config.providers);
@@ -1475,6 +1510,19 @@ export function App() {
           ? rawEvent.timestamp
           : Date.now();
       taskLastEventTimestampRef.current.set(event.taskId, eventTimestamp);
+      if (isImmediateTaskAttentionEvent(event)) {
+        latestAttentionEventByTaskIdRef.current.set(event.taskId, event);
+      } else if (
+        event.type === "task_resumed" ||
+        event.type === "approval_granted" ||
+        event.type === "approval_denied" ||
+        event.type === "input_request_resolved" ||
+        event.type === "input_request_dismissed" ||
+        event.type === "task_completed" ||
+        event.type === "task_cancelled"
+      ) {
+        latestAttentionEventByTaskIdRef.current.delete(event.taskId);
+      }
       // Update task status based on event type
       // Check if this is a new task we don't know about (e.g., sub-agent created)
       const isNewTask = !tasksRef.current.some((t) => t.id === event.taskId);
@@ -2048,7 +2096,8 @@ export function App() {
 
     const requestedTaskId = selectedTaskId;
     let cancelled = false;
-    setEvents([]);
+    const latestAttentionEvent = latestAttentionEventByTaskIdRef.current.get(requestedTaskId);
+    setEvents(latestAttentionEvent ? [latestAttentionEvent] : []);
 
     const loadHistoricalEvents = async () => {
       try {
@@ -2475,6 +2524,36 @@ export function App() {
       selectedTask,
     ],
   );
+  const rightPanelReplayTask = useMemo(
+    () =>
+      replayControls.isReplayMode
+        ? deriveReplayTaskSnapshot(selectedTask, replayControls.replayEvents)
+        : selectedTask,
+    [replayControls.isReplayMode, replayControls.replayEvents, selectedTask],
+  );
+  const rightPanelEvents = replayControls.isReplayMode ? replayControls.replayEvents : events;
+  const rightPanelSharedTaskEventUi = useMemo(
+    () => {
+      if (!replayControls.isReplayMode) return sharedTaskEventUi;
+      return measureRendererPerf("App.rightPanelReplayTaskEventUi", rendererPerfLoggingEnabled, () =>
+        deriveSharedTaskEventUiState({
+          rawEvents: replayControls.replayEvents,
+          task: rightPanelReplayTask,
+          workspace: currentWorkspace,
+          verboseSteps: false,
+        }),
+      );
+    },
+    [
+      currentWorkspace?.id,
+      currentWorkspace?.path,
+      replayControls.isReplayMode,
+      replayControls.replayEvents,
+      rendererPerfLoggingEnabled,
+      rightPanelReplayTask,
+      sharedTaskEventUi,
+    ],
+  );
   const rightPanelChildTasks = remoteTaskView ? [] : childTasks;
   const rightPanelHasActiveChildren = useMemo(
     () =>
@@ -2500,26 +2579,27 @@ export function App() {
   );
   const rightPanelInput = useMemo(
     () => ({
-      task: selectedTask,
+      task: rightPanelReplayTask,
       workspace: currentWorkspace,
-      events,
-      sharedTaskEventUi,
-      hasActiveChildren: rightPanelHasActiveChildren,
-      runningTasks: rightPanelRunningTasks,
-      queuedTasks: rightPanelQueuedTasks,
-      queueStatus,
-      highlightOutputPath: rightPanelHighlightPath,
+      events: rightPanelEvents,
+      sharedTaskEventUi: rightPanelSharedTaskEventUi,
+      hasActiveChildren: replayControls.isReplayMode ? false : rightPanelHasActiveChildren,
+      runningTasks: replayControls.isReplayMode ? [] : rightPanelRunningTasks,
+      queuedTasks: replayControls.isReplayMode ? [] : rightPanelQueuedTasks,
+      queueStatus: replayControls.isReplayMode ? null : queueStatus,
+      highlightOutputPath: replayControls.isReplayMode ? null : rightPanelHighlightPath,
     }),
     [
       currentWorkspace,
-      events,
       queueStatus,
+      replayControls.isReplayMode,
       rightPanelHasActiveChildren,
       rightPanelHighlightPath,
+      rightPanelEvents,
       rightPanelQueuedTasks,
+      rightPanelReplayTask,
       rightPanelRunningTasks,
-      selectedTask,
-      sharedTaskEventUi,
+      rightPanelSharedTaskEventUi,
     ],
   );
   const deferredRightPanelInput = useDeferredValue(rightPanelInput);
@@ -2604,7 +2684,18 @@ export function App() {
         );
       }
 
-      const shellPermissionDecision = classifyShellPermissionDecision(message);
+      const selectedTask = tasksRef.current.find((task) => task.id === selectedTaskId);
+      const latestAttentionEvent = latestAttentionEventByTaskIdRef.current.get(selectedTaskId);
+      const latestAttentionReason =
+        typeof latestAttentionEvent?.payload?.reason === "string"
+          ? latestAttentionEvent.payload.reason
+          : undefined;
+      const isShellPermissionPause =
+        isShellPermissionPauseReason(selectedTask?.awaitingUserInputReasonCode) ||
+        isShellPermissionPauseReason(latestAttentionReason);
+      const shellPermissionDecision = isShellPermissionPause
+        ? classifyShellPermissionDecision(message)
+        : "unknown";
       let nextMessage = message;
 
       if (
@@ -2766,12 +2857,38 @@ export function App() {
     }
   };
 
-  const handleModelChange = (modelKey: string) => {
+  const handleModelChange = async (selection: {
+    providerType?: LLMProviderType;
+    modelKey: string;
+    reasoningEffort?: LLMReasoningEffort;
+  }) => {
+    const modelKey = selection.modelKey.trim();
+    if (!modelKey) return;
+    const providerType = selection.providerType || selectedProvider;
     setSelectedModel(modelKey);
-    setSessionModelOverride(modelKey.trim());
-    // Session-only override: do not persist to provider settings here.
-    // The selected model is attached as task agentConfig.modelKey on task creation.
-    // Provider defaults still come from persisted settings until the user explicitly changes this.
+    setSelectedProvider(providerType);
+    setSelectedReasoningEffort(selection.reasoningEffort);
+    setSessionModelOverride("");
+    try {
+      await window.electronAPI?.setLLMModel?.({
+        providerType,
+        modelKey,
+        ...(selection.reasoningEffort
+          ? { reasoningEffort: selection.reasoningEffort }
+          : {}),
+      });
+      await loadLLMConfig();
+    } catch (error) {
+      console.error("Failed to save LLM model selection:", error);
+      addToast({
+        type: "error",
+        title: "Model not saved",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Could not update the default model.",
+      });
+    }
     // When model changes during a task, clear the current task to start fresh
     if (selectedTaskId) {
       setSelectedTaskId(null);
@@ -3055,7 +3172,7 @@ export function App() {
         <div className="title-bar-left">
           <button
             type="button"
-            className="title-bar-btn"
+            className="title-bar-btn title-bar-sidebar-toggle"
             onClick={() => setLeftSidebarCollapsed(!leftSidebarCollapsed)}
             title={leftSidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
             aria-label={leftSidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
@@ -3607,6 +3724,8 @@ export function App() {
                 childEvents={childEvents}
                 activeInputRequest={activeInputRequest}
                 selectedModel={selectedModel}
+                selectedProvider={selectedProvider}
+                selectedReasoningEffort={selectedReasoningEffort}
                 availableModels={availableModels}
                 availableProviders={availableProviders}
                 uiDensity={uiDensity}

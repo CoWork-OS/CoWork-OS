@@ -66,6 +66,12 @@ describe("AgentDaemon automated task model selection", () => {
     ).toBe(false);
     expect(
       daemonLike.shouldResumeTaskOnStartup({
+        title: "Subconscious: workspace",
+        source: "subconscious",
+      }),
+    ).toBe(false);
+    expect(
+      daemonLike.shouldResumeTaskOnStartup({
         title: "User task",
         source: "manual",
       }),

@@ -8,7 +8,7 @@ CoWork OS is a **security-first personal AI assistant platform** with multi-chan
 
 - **Personal AI Gateway**: Connect your AI assistant to WhatsApp, Telegram, Discord, Slack, and iMessage
 - **Managed Devices**: Operate local and remote CoWork machines from a dedicated Devices tab
-- **Automations Surface**: One settings group for queueing, scheduling, triggers, briefing, and subconscious reflection/dispatch
+- **Automations Surface**: One settings group for queueing, scheduling, triggers, briefing, and Workflow Intelligence suggestions/reflection
 - **Renderer Performance**: Sidebar and timeline virtualization in the `CoWork-OS/CoWork-OS` repo use `@chenglou/pretext` for text measurement and keep long task feeds responsive
 - **Security-First Design**: 4,932 automated tests across 390 test files, configurable guardrails, layered permission rules, workspace-local policy files, and approval workflows
 - **Imported Capability Security**: managed skill and pack imports are staged, scanned, reported, and quarantined when blocked instead of being activated directly
@@ -218,7 +218,7 @@ CoWork OS is a **security-first personal AI assistant platform** with multi-chan
 - [x] Worktree Settings - Git worktree configuration UI
 - [x] Devices tab - saved remote devices, remote task feed, remote workspace browser, remote file picker
 - [x] Companies tab - company shell setup, goals, projects, issues, linked operators
-- [x] Subconscious settings - cadence, target kinds, last winner visibility, namespaced backlog, and dispatch history
+- [x] Workflow Intelligence settings - heartbeat-triggered reflection, target kinds, last winner visibility, namespaced backlog, suggestion output, and dispatch history
 
 #### Settings UI
 - [x] LLM provider configuration
@@ -230,7 +230,7 @@ CoWork OS is a **security-first personal AI assistant platform** with multi-chan
 - [x] Update settings
 - [x] Guardrail settings (budgets, limits)
 - [x] Queue settings (concurrency)
-- [x] Automations settings group (queue, subconscious, scheduled, hooks, triggers, briefing)
+- [x] Automations settings group (queue, Workflow Intelligence, scheduled, hooks, triggers, briefing)
 - [x] Custom Skills management
 - [x] Quarantined Imports sections for skills and plugin packs with report, retry scan, and removal actions
 - [x] Personality settings (styles, personas, quirks)

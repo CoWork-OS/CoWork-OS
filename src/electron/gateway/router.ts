@@ -72,6 +72,7 @@ import {
   parseLeadingSkillSlashCommand,
   type ParsedSkillSlashCommand,
 } from "../../shared/skill-slash-commands";
+import { formatTimelineActivityLabel } from "../../shared/timeline-v2";
 import { DEFAULT_QUIRKS } from "../../shared/types";
 import { formatChatTranscriptForPrompt } from "./chat-transcript";
 import { evaluateWorkspaceRouterRules } from "./router-rules";
@@ -448,7 +449,7 @@ export class MessageRouter {
 
     const executingStepMatch = /^Executing step \d+\/\d+:\s*(.+)$/i.exec(normalized);
     if (executingStepMatch?.[1]) {
-      return `Working on: ${executingStepMatch[1].trim()}`;
+      return formatTimelineActivityLabel(executingStepMatch[1]);
     }
 
     const completedStepMatch = /^Completed step [^:]+:\s*(.+)$/i.exec(normalized);

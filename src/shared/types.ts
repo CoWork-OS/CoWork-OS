@@ -3898,6 +3898,9 @@ export type CoreMemoryCandidateType =
   | "project_state"
   | "watch_item"
   | "open_loop"
+  | "correction"
+  | "recurring_task"
+  | "ignored_noise"
   | "invalidates_prior";
 
 export type CoreMemoryCandidateStatus =
@@ -5652,6 +5655,8 @@ export interface HeartbeatResult {
   signalCount?: number;
   dueProactiveCount?: number;
   checklistDueCount?: number;
+  reflectionRunId?: string;
+  reflectionOutcome?: string;
   cooldownUntil?: number;
   dispatchesToday?: number;
   maxDispatchesPerDay?: number;
@@ -6251,6 +6256,7 @@ export interface ProactiveSuggestion {
   sourceSignals?: string[];
   recommendedDelivery?: "briefing" | "inbox" | "nudge";
   companionStyle?: "email" | "note";
+  snoozedUntil?: number;
   createdAt: number;
   expiresAt: number;
   dismissed: boolean;
@@ -6291,11 +6297,22 @@ export const IPC_CHANNELS = {
   DOCUMENT_START_EDIT_TASK: "document:startEditTask",
   SHELL_OPEN_EXTERNAL: "shell:openExternal",
   MAILBOX_GET_SYNC_STATUS: "mailbox:getSyncStatus",
+  MAILBOX_CLIENT_STATE: "mailbox:clientState",
   MAILBOX_SYNC: "mailbox:sync",
   MAILBOX_LIST_THREADS: "mailbox:listThreads",
   MAILBOX_GET_THREAD: "mailbox:getThread",
   MAILBOX_LIST_EVENTS: "mailbox:listEvents",
   MAILBOX_GET_DIGEST: "mailbox:getDigest",
+  MAILBOX_TODAY_DIGEST: "mailbox:todayDigest",
+  MAILBOX_SENDER_CLEANUP_DIGEST: "mailbox:senderCleanupDigest",
+  MAILBOX_ASK: "mailbox:ask",
+  MAILBOX_ATTACHMENT_EXTRACT_TEXT: "mailbox:attachmentExtractText",
+  MAILBOX_CREATE_DRAFT: "mailbox:createDraft",
+  MAILBOX_UPDATE_DRAFT: "mailbox:updateDraft",
+  MAILBOX_SEND_DRAFT: "mailbox:sendDraft",
+  MAILBOX_SCHEDULE_SEND: "mailbox:scheduleSend",
+  MAILBOX_DISCARD_COMPOSE_DRAFT: "mailbox:discardComposeDraft",
+  MAILBOX_UNDO_ACTION: "mailbox:undoAction",
   MAILBOX_SUMMARIZE_THREAD: "mailbox:summarizeThread",
   MAILBOX_GENERATE_DRAFT: "mailbox:generateDraft",
   MAILBOX_EXTRACT_COMMITMENTS: "mailbox:extractCommitments",
@@ -7202,6 +7219,8 @@ export const IPC_CHANNELS = {
   SUGGESTIONS_REFRESH: "suggestions:refresh",
   SUGGESTIONS_REFRESH_FOR_WORKSPACES: "suggestions:refreshForWorkspaces",
   SUGGESTIONS_DISMISS: "suggestions:dismiss",
+  SUGGESTIONS_SNOOZE: "suggestions:snooze",
+  SUGGESTIONS_EDIT: "suggestions:edit",
   SUGGESTIONS_ACT: "suggestions:act",
 
   // Self-improvement loop
@@ -7375,6 +7394,7 @@ export interface CachedModelInfo {
   description: string;
   contextLength?: number; // For OpenRouter models
   size?: number; // For Ollama models (in bytes)
+  reasoningEfforts?: LLMReasoningEffort[];
 }
 
 export interface CustomProviderConfig {
@@ -7389,6 +7409,7 @@ export interface CustomProviderConfig {
   cheapModelKey?: string;
   automatedTaskModelKey?: string;
   preferStrongForVerification?: boolean;
+  reasoningEffort?: LLMReasoningEffort;
 }
 
 export interface ProviderFailoverSettings {
@@ -7406,6 +7427,7 @@ export interface ProviderRoutingSettings {
   /** Optional dedicated model for automated tasks (cron, improvement, heartbeat). When set, overrides cheap model for these tasks. */
   automatedTaskModelKey?: string;
   preferStrongForVerification?: boolean;
+  reasoningEffort?: LLMReasoningEffort;
 }
 
 export interface LLMProviderFallbackConfig {
@@ -7413,7 +7435,8 @@ export interface LLMProviderFallbackConfig {
   modelKey?: string;
 }
 
-export type AzureReasoningEffort = "low" | "medium" | "high" | "extra_high";
+export type LLMReasoningEffort = "low" | "medium" | "high" | "extra_high";
+export type AzureReasoningEffort = LLMReasoningEffort;
 
 export type PromptCacheSurface =
   | "executor"
@@ -7526,12 +7549,44 @@ export interface LLMSettingsData {
   imageGeneration?: {
     /** Primary provider route. Leave unset for automatic provider selection. */
     defaultProvider?: "openai" | "openai-codex" | "azure" | "openrouter" | "gemini";
-    /** Primary model: gpt-image-1.5 (OpenAI/Azure/OpenRouter) or nano-banana-2 (Gemini/Vertex) */
-    defaultModel?: "gpt-image-1.5" | "nano-banana-2";
+    /** Primary model: GPT Image (OpenAI/Azure/OpenRouter) or nano-banana-2 (Gemini) */
+    defaultModel?: "gpt-image-2" | "gpt-image-1.5" | "nano-banana-2";
     /** Fallback provider route. Leave unset for automatic provider fallback. */
     backupProvider?: "openai" | "openai-codex" | "azure" | "openrouter" | "gemini";
     /** Fallback model when default fails */
-    backupModel?: "gpt-image-1.5" | "nano-banana-2";
+    backupModel?: "gpt-image-2" | "gpt-image-1.5" | "nano-banana-2";
+    /** Provider attempt timeouts in seconds. Defaults to 300 seconds per provider. */
+    timeouts?: {
+      openai?: number;
+      openaiCodex?: number;
+      azure?: number;
+      openrouter?: number;
+      gemini?: number;
+    };
+    openai?: {
+      apiKey?: string;
+      model?: string;
+    };
+    azure?: {
+      /** Dedicated API key for image generation (overrides the main Azure chat API key if set) */
+      imageApiKey?: string;
+      /** Dedicated endpoint for image generation (overrides the main Azure chat endpoint if set) */
+      imageEndpoint?: string;
+      imageDeployment?: string;
+      imageApiVersion?: string;
+    };
+    gemini?: {
+      apiKey?: string;
+      model?: "nano-banana-2";
+    };
+    openrouter?: {
+      apiKey?: string;
+      baseUrl?: string;
+      model?: string;
+    };
+    openaiCodex?: {
+      model?: string;
+    };
   };
   /** Text-to-video generation settings. Provider-specific config + routing. */
   videoGeneration?: {
@@ -7601,11 +7656,13 @@ export interface LLMModelInfo {
   key: string;
   displayName: string;
   description: string;
+  reasoningEfforts?: LLMReasoningEffort[];
 }
 
 export interface LLMConfigStatus {
   currentProvider: LLMProviderType;
   currentModel: string;
+  currentReasoningEffort?: LLMReasoningEffort;
   providers: LLMProviderInfo[];
   models: LLMModelInfo[];
   routing?: LLMRoutingRuntimeState;

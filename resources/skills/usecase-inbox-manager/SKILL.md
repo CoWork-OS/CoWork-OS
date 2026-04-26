@@ -1,19 +1,19 @@
 ---
 name: usecase-inbox-manager
-description: "Triage inbox, draft replies, and suggest cleanup automations with strict confirmation gates."
+description: "Triage Inbox Agent Today lanes, search mailbox evidence, prepare manual or AI-assisted replies, and suggest cleanup automations with strict confirmation gates."
 ---
 
 # Inbox Manager
 
 ## Purpose
 
-Triage inbox, draft replies, and suggest cleanup automations with strict confirmation gates.
+Triage Inbox Agent Today lanes, search mailbox evidence, prepare manual or AI-assisted replies, and suggest cleanup automations with strict confirmation gates.
 
 ## Routing
 
-- Use when: Use when the user asks to triage inbox, draft replies, and suggest cleanup automations with strict confirmation gates.
+- Use when: Use when the user asks to triage Inbox Agent, review Today lanes, search mailbox evidence, draft or manually prepare replies/forwards, and suggest cleanup automations with strict confirmation gates.
 - Do not use when: Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.
-- Outputs: Outcome from Inbox Manager: prioritized inbox plan, safe draft replies, and explicit next-step actions.
+- Outputs: Outcome from Inbox Manager: prioritized Today-lane plan, evidence-backed mailbox findings, safe reply/forward drafts, cleanup recommendations, and explicit next-step actions.
 - Success criteria: Produces actionable inbox triage with clear confirmation boundaries and no fabricated tool-side behavior.
 
 ## Trigger Examples
@@ -44,4 +44,4 @@ Triage inbox, draft replies, and suggest cleanup automations with strict confirm
 ## Runtime Prompt
 
 - Current runtime prompt length: 1236 characters.
-- Runtime prompt is defined directly in `../usecase-inbox-manager.json`. 
+- Runtime prompt is defined directly in `../usecase-inbox-manager.json`.

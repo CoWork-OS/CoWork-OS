@@ -204,7 +204,7 @@ describe("isTaskActivelyWorking", () => {
 
   it("uses task status to label bootstrap progress", () => {
     expect(getBootstrapProgressTitle(makeTask({ status: "planning" }))).toBe("Planning the approach");
-    expect(getBootstrapProgressTitle(makeTask({ status: "executing" }))).toBe("Getting started");
+    expect(getBootstrapProgressTitle(makeTask({ status: "executing" }))).toBe("Thinking");
     expect(getBootstrapProgressTitle(makeTask({ status: "interrupted" }))).toBe("Resuming work");
   });
 
@@ -227,7 +227,7 @@ describe("isTaskActivelyWorking", () => {
 
     expect(state.activeStreamText).toBe("I'm checking the repo and runtime state first.");
     expect(state.isStreaming).toBe(true);
-    expect(state.recentUpdates).toEqual(["Working on: Inspect repository"]);
+    expect(state.recentUpdates).toEqual(["Inspecting repository"]);
   });
 
   it("falls back to recent user-facing progress updates when no reasoning stream is active", () => {
@@ -257,7 +257,7 @@ describe("isTaskActivelyWorking", () => {
     expect(state.isStreaming).toBe(false);
     expect(state.recentUpdates).toEqual([
       "Understanding the request",
-      "Working on: Inspect repository",
+      "Inspecting repository",
     ]);
   });
 
@@ -285,7 +285,7 @@ describe("isTaskActivelyWorking", () => {
     expect(state.activeStreamText).toBe("");
     expect(state.isStreaming).toBe(false);
     expect(state.recentUpdates).toEqual([
-      "Working on: Inspect repository",
+      "Inspecting repository",
       "I’m checking the scaffolded Kami slide project first.",
     ]);
   });

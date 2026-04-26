@@ -1,6 +1,6 @@
 ---
 title: "Reflective Learning Systems"
-description: How CoWork OS positions its reflective learning stack and subconscious automation model against adjacent agent ecosystems.
+description: How CoWork OS positions Workflow Intelligence and its reflective learning stack against adjacent agent ecosystems.
 ---
 
 # Reflective Learning Systems
@@ -12,7 +12,7 @@ This page focuses on the learning-system shape that matters for CoWork OS today:
 CoWork OS combines two layers:
 
 - a durable learning substrate for memory, feedback, playbooks, profiles, and relationship context
-- a `Subconscious` reflective loop that turns fresh evidence into hypotheses, critique, a winning recommendation, and a next-step backlog
+- `Workflow Intelligence`, which turns fresh evidence into hypotheses, critique, a winning recommendation, reviewable suggestions, and durable memory candidates
 
 That gives the product a stronger operating shape than a one-shot "improve yourself" prompt chain.
 
@@ -21,11 +21,11 @@ That gives the product a stronger operating shape than a one-shot "improve yours
 | Area | CoWork OS |
 |---|---|
 | Durable evidence | Workspace artifacts plus indexed SQLite summaries |
-| Stable workflow identity | `SubconsciousTargetRef` across workspace, mailbox, schedule, trigger, briefing, and code targets |
-| Reflective stages | Evidence -> hypotheses -> critique -> winner -> backlog -> dispatch |
-| Output shape | Winner, rejected paths, backlog, dispatch record |
+| Stable workflow identity | Workflow-intelligence targets across workspace, mailbox, schedule, trigger, briefing, and code targets |
+| Reflective stages | Evidence -> hypotheses -> critique -> winner -> backlog -> suggestion/action |
+| Output shape | Winner, rejected paths, backlog, suggestion, feedback memory |
 | Coordination model | Global brain with namespaced target histories |
-| Dispatch behavior | Immediate dispatch when mapped, recommendation-only completion otherwise |
+| Dispatch behavior | Reviewable suggestion by default; guarded auto-create only when policy, trust, and risk allow it |
 | Code execution | Downstream executor with worktree isolation and verification |
 | Safety boundary | Existing executor approvals and policies, not a separate reflective gate |
 
@@ -43,7 +43,7 @@ That product shape is what lets background automation compound instead of repeat
 
 ## Related Docs
 
-- [Subconscious Reflective Loop](subconscious-loop.md)
+- [Workflow Intelligence](workflow-intelligence.md)
 - [Features](features.md)
 - [Zero-Human Company Ops](zero-human-company.md)
 - [Reliability Flywheel](reliability-flywheel.md)

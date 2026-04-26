@@ -13,10 +13,17 @@ import {
   shell,
   Notification,
   nativeTheme,
+  Menu,
+  screen,
+  nativeImage,
+  type BrowserWindowConstructorOptions,
 } from "electron";
 import mime from "mime-types";
 import { DatabaseManager } from "./database/schema";
-import { SecureSettingsRepository } from "./database/SecureSettingsRepository";
+import {
+  SecureSettingsRepository,
+  type SettingsCategory,
+} from "./database/SecureSettingsRepository";
 import {
   setupIpcHandlers,
   getHooksServer,
@@ -266,6 +273,22 @@ const TRANSIENT_MAIN_PROCESS_ERROR_RE =
   /(ECONNRESET|ETIMEDOUT|EPIPE|ENOTFOUND|ENETUNREACH|EHOSTUNREACH|socket hang up|Timed Out|Connection Closed)/i;
 let processErrorGuardsInstalled = false;
 const STARTER_AUTOMATION_ROLE_NAMES = ["assistant", "project_manager"];
+const MAIN_WINDOW_STATE_FILE = "main-window-state.json";
+const MAIN_WINDOW_MIN_WIDTH = 1200;
+const MAIN_WINDOW_MIN_HEIGHT = 800;
+const MAIN_WINDOW_DEFAULT_WIDTH = 1600;
+const MAIN_WINDOW_DEFAULT_HEIGHT = 1000;
+const APP_DISPLAY_NAME = "CoWork OS";
+let startupUserDataDir: string | null = null;
+
+interface MainWindowState {
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  isMaximized?: boolean;
+  isFullScreen?: boolean;
+}
 
 function normalizeTwinCoreBoundary(): void {
   const db = dbManager.getDatabase();
@@ -547,6 +570,314 @@ function getDevServerUrl(): string {
   return `http://127.0.0.1:${port}`;
 }
 
+function applyStableUserDataPath(): string {
+  const resolvedUserDataDir = getUserDataDir();
+  const defaultUserDataDir = app.getPath("userData");
+  if (path.resolve(defaultUserDataDir) !== path.resolve(resolvedUserDataDir)) {
+    try {
+      fsSync.mkdirSync(resolvedUserDataDir, { recursive: true });
+      app.setPath("userData", resolvedUserDataDir);
+      logger.info(`Using userData directory: ${resolvedUserDataDir}`);
+    } catch (error) {
+      logger.warn("Failed to apply userData directory:", error);
+    }
+  }
+  startupUserDataDir = resolvedUserDataDir;
+  return resolvedUserDataDir;
+}
+
+function getMainWindowStatePath(): string {
+  return path.join(getUserDataDir(), MAIN_WINDOW_STATE_FILE);
+}
+
+function readMainWindowState(): MainWindowState | null {
+  try {
+    const raw = fsSync.readFileSync(getMainWindowStatePath(), "utf8");
+    const parsed = JSON.parse(raw) as MainWindowState;
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function isFinitePositiveNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+function isWindowBoundsOnScreen(bounds: Electron.Rectangle): boolean {
+  return screen.getAllDisplays().some((display) => {
+    const area = display.workArea;
+    const horizontalOverlap =
+      bounds.x < area.x + area.width && bounds.x + bounds.width > area.x;
+    const verticalOverlap =
+      bounds.y < area.y + area.height && bounds.y + bounds.height > area.y;
+    return horizontalOverlap && verticalOverlap;
+  });
+}
+
+function getInitialMainWindowBounds(): Pick<
+  BrowserWindowConstructorOptions,
+  "x" | "y" | "width" | "height"
+> & {
+  isMaximized: boolean;
+  isFullScreen: boolean;
+} {
+  const saved = readMainWindowState();
+  const width = Math.max(
+    MAIN_WINDOW_MIN_WIDTH,
+    Math.round(
+      isFinitePositiveNumber(saved?.width)
+        ? saved.width
+        : MAIN_WINDOW_DEFAULT_WIDTH,
+    ),
+  );
+  const height = Math.max(
+    MAIN_WINDOW_MIN_HEIGHT,
+    Math.round(
+      isFinitePositiveNumber(saved?.height)
+        ? saved.height
+        : MAIN_WINDOW_DEFAULT_HEIGHT,
+    ),
+  );
+  const x = typeof saved?.x === "number" ? Math.round(saved.x) : undefined;
+  const y = typeof saved?.y === "number" ? Math.round(saved.y) : undefined;
+
+  if (
+    x !== undefined &&
+    y !== undefined &&
+    isWindowBoundsOnScreen({ x, y, width, height })
+  ) {
+    return {
+      x,
+      y,
+      width,
+      height,
+      isMaximized: saved?.isMaximized === true,
+      isFullScreen: saved?.isFullScreen === true,
+    };
+  }
+
+  return {
+    width: MAIN_WINDOW_DEFAULT_WIDTH,
+    height: MAIN_WINDOW_DEFAULT_HEIGHT,
+    isMaximized: false,
+    isFullScreen: false,
+  };
+}
+
+function writeMainWindowState(window: BrowserWindow): void {
+  if (window.isDestroyed()) {
+    return;
+  }
+  try {
+    const bounds = window.getBounds();
+    const state: MainWindowState = {
+      x: bounds.x,
+      y: bounds.y,
+      width: bounds.width,
+      height: bounds.height,
+      isMaximized: window.isMaximized(),
+      isFullScreen: window.isFullScreen(),
+    };
+    const statePath = getMainWindowStatePath();
+    fsSync.mkdirSync(path.dirname(statePath), { recursive: true });
+    fsSync.writeFileSync(statePath, JSON.stringify(state, null, 2));
+  } catch (error) {
+    logger.warn("Failed to save main window state:", error);
+  }
+}
+
+function installMainWindowStatePersistence(window: BrowserWindow): void {
+  let saveTimer: NodeJS.Timeout | null = null;
+  const scheduleSave = () => {
+    if (saveTimer) {
+      clearTimeout(saveTimer);
+    }
+    saveTimer = setTimeout(() => {
+      saveTimer = null;
+      writeMainWindowState(window);
+    }, 400);
+  };
+
+  window.on("move", scheduleSave);
+  window.on("resize", scheduleSave);
+  window.on("maximize", scheduleSave);
+  window.on("unmaximize", scheduleSave);
+  window.on("enter-full-screen", scheduleSave);
+  window.on("leave-full-screen", scheduleSave);
+  window.on("close", () => {
+    if (saveTimer) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
+    }
+    writeMainWindowState(window);
+  });
+}
+
+function installNativeApplicationMenu(): void {
+  if (process.platform !== "darwin") {
+    return;
+  }
+
+  app.setAboutPanelOptions({
+    applicationName: APP_DISPLAY_NAME,
+    applicationVersion: app.getVersion(),
+    copyright: "CoWork OS Contributors",
+  });
+
+  const sendToMainWindow = (channel: string) => {
+    if (!revealWindow(mainWindow)) {
+      return;
+    }
+    mainWindow?.webContents.send(channel);
+  };
+
+  const template: Electron.MenuItemConstructorOptions[] = [
+    {
+      label: APP_DISPLAY_NAME,
+      submenu: [
+        { role: "about" },
+        { type: "separator" },
+        {
+          label: "Settings...",
+          accelerator: "Command+,",
+          click: () => sendToMainWindow("tray:open-settings"),
+        },
+        { type: "separator" },
+        { role: "services" },
+        { type: "separator" },
+        { role: "hide" },
+        { role: "hideOthers" },
+        { role: "unhide" },
+        { type: "separator" },
+        { role: "quit" },
+      ],
+    },
+    {
+      label: "File",
+      submenu: [
+        {
+          label: "New Task",
+          accelerator: "Command+N",
+          click: () => sendToMainWindow("tray:new-task"),
+        },
+        { role: "close" },
+      ],
+    },
+    {
+      label: "Edit",
+      submenu: [
+        { role: "undo" },
+        { role: "redo" },
+        { type: "separator" },
+        { role: "cut" },
+        { role: "copy" },
+        { role: "paste" },
+        { role: "pasteAndMatchStyle" },
+        { role: "delete" },
+        { role: "selectAll" },
+      ],
+    },
+    {
+      label: "View",
+      submenu: [
+        { role: "reload" },
+        { role: "forceReload" },
+        { role: "toggleDevTools" },
+        { type: "separator" },
+        { role: "resetZoom" },
+        { role: "zoomIn" },
+        { role: "zoomOut" },
+        { type: "separator" },
+        { role: "togglefullscreen" },
+      ],
+    },
+    {
+      label: "Window",
+      submenu: [
+        { role: "minimize" },
+        { role: "zoom" },
+        { type: "separator" },
+        { role: "front" },
+      ],
+    },
+    {
+      role: "help",
+      submenu: [
+        {
+          label: "CoWork OS on GitHub",
+          click: () =>
+            shell.openExternal("https://github.com/CoWork-OS/CoWork-OS"),
+        },
+      ],
+    },
+  ];
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+function getDesktopIconPath(): string | undefined {
+  const candidates =
+    process.platform === "win32"
+      ? ["build/icon.ico", "build/icon.png"]
+      : ["build/icon.png"];
+
+  for (const candidate of candidates) {
+    const resolved = path.join(app.getAppPath(), candidate);
+    if (fsSync.existsSync(resolved)) {
+      return resolved;
+    }
+  }
+  return undefined;
+}
+
+function installDevelopmentBranding(): void {
+  if (process.platform === "darwin") {
+    const iconPath = getDesktopIconPath();
+    if (iconPath) {
+      try {
+        const icon = nativeImage.createFromPath(iconPath);
+        if (icon.isEmpty()) {
+          logger.warn(`Development Dock icon is empty: ${iconPath}`);
+        } else {
+          app.dock?.setIcon(icon);
+          logger.info(`Development Dock icon set: ${iconPath}`);
+        }
+      } catch (error) {
+        logger.warn("Failed to set development Dock icon:", error);
+      }
+    } else {
+      logger.warn("Development Dock icon not found in build assets");
+    }
+  }
+}
+
+const RESETTABLE_SECURE_SETTINGS_CATEGORIES: SettingsCategory[] = [
+  "subconscious-migration-v1",
+  "autonomy-chief-of-staff",
+  "awareness-state",
+  "webaccess",
+];
+
+function healResettableSecureSettings(): void {
+  if (!SecureSettingsRepository.isInitialized()) {
+    return;
+  }
+
+  const repository = SecureSettingsRepository.getInstance();
+  for (const category of RESETTABLE_SECURE_SETTINGS_CATEGORIES) {
+    const status = repository.checkHealth(category, { logErrors: false });
+    if (status === "decryption_failed" || status === "checksum_mismatch") {
+      const didDelete = repository.delete(category);
+      if (didDelete) {
+        logger.warn(
+          `Reset corrupted secure settings category ${category} (${status}); defaults will be recreated.`,
+        );
+      }
+    }
+  }
+}
+
 function toErrorMessage(reason: unknown): string {
   if (reason instanceof Error) {
     return `${reason.name}: ${reason.message}`;
@@ -615,6 +946,8 @@ app.commandLine.appendSwitch("ignore-gpu-blocklist");
 registerCanvasScheme();
 registerMediaScheme();
 
+applyStableUserDataPath();
+
 // Ensure only one CoWork OS instance runs at a time.
 // Without this, a second instance can mark in-flight tasks as "orphaned" (failed) and contend on the DB.
 const gotTheLock = app.requestSingleInstanceLock();
@@ -651,6 +984,12 @@ if (!gotTheLock) {
   function createWindow() {
     const isMac = process.platform === "darwin";
     let useMacVibrancy = isMac && !nativeTheme.prefersReducedTransparency;
+    const {
+      isMaximized: shouldStartMaximized,
+      isFullScreen: shouldStartFullScreen,
+      ...initialWindowBounds
+    } = getInitialMainWindowBounds();
+    let rendererRecoveryAttempts = 0;
 
     // Determine initial background color when the window should be opaque.
     let windowBgColor = "#1a1a1c";
@@ -669,12 +1008,15 @@ if (!gotTheLock) {
     }
 
     mainWindow = new BrowserWindow({
-      width: 1600,
-      height: 1000,
-      minWidth: 1200,
-      minHeight: 800,
-      center: true,
+      ...initialWindowBounds,
+      minWidth: MAIN_WINDOW_MIN_WIDTH,
+      minHeight: MAIN_WINDOW_MIN_HEIGHT,
+      center:
+        initialWindowBounds.x === undefined ||
+        initialWindowBounds.y === undefined,
+      icon: getDesktopIconPath(),
       titleBarStyle: isMac ? "hiddenInset" : "hidden",
+      ...(isMac ? { trafficLightPosition: { x: 18, y: 18 } } : {}),
       ...(useMacVibrancy
         ? {
             vibrancy: "under-window" as const,
@@ -695,11 +1037,24 @@ if (!gotTheLock) {
       },
     });
 
-    // Load the app
-    if (process.env.NODE_ENV === "development") {
-      mainWindow.loadURL(getDevServerUrl());
-      mainWindow.webContents.openDevTools();
-    } else {
+    if (shouldStartMaximized) {
+      mainWindow.maximize();
+    }
+    if (shouldStartFullScreen) {
+      mainWindow.setFullScreen(true);
+    }
+    installMainWindowStatePersistence(mainWindow);
+
+    const loadMainWindowContent = () => {
+      if (!mainWindow || mainWindow.isDestroyed()) {
+        return;
+      }
+      if (process.env.NODE_ENV === "development") {
+        mainWindow.loadURL(getDevServerUrl());
+        mainWindow.webContents.openDevTools();
+        return;
+      }
+
       const rendererDir = path.join(__dirname, "../../renderer");
       const rendererIndex = path.join(rendererDir, "index.html");
 
@@ -737,15 +1092,52 @@ if (!gotTheLock) {
       } else {
         mainWindow.loadFile(rendererIndex);
       }
-    }
+    };
+
+    // Load the app
+    loadMainWindowContent();
 
     mainWindow.on("closed", () => {
       mainWindow = null;
     });
 
-    mainWindow.webContents.on("did-finish-load", () => {});
+    mainWindow.on("unresponsive", () => {
+      logger.warn("Main window became unresponsive");
+    });
 
-    mainWindow.webContents.on("render-process-gone", (_event, details) => {});
+    mainWindow.on("responsive", () => {
+      logger.info("Main window became responsive again");
+    });
+
+    mainWindow.webContents.on("did-finish-load", () => {
+      rendererRecoveryAttempts = 0;
+    });
+
+    mainWindow.webContents.on(
+      "did-fail-load",
+      (_event, errorCode, errorDescription, validatedURL) => {
+        logger.warn(
+          `Main window failed to load (${errorCode}): ${errorDescription} ${validatedURL}`,
+        );
+      },
+    );
+
+    mainWindow.webContents.on("render-process-gone", (_event, details) => {
+      logger.error(
+        `Main renderer process gone: reason=${details.reason}, exitCode=${details.exitCode}`,
+      );
+      if (
+        details.reason !== "clean-exit" &&
+        mainWindow &&
+        !mainWindow.isDestroyed() &&
+        rendererRecoveryAttempts < 1
+      ) {
+        rendererRecoveryAttempts += 1;
+        setTimeout(() => {
+          loadMainWindowContent();
+        }, 750);
+      }
+    });
 
     // Open external links in the system browser instead of inside the app
     mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -783,23 +1175,13 @@ if (!gotTheLock) {
     };
     let pluginStartupSummary = { loaded: 0, enabled: 0 };
 
-    const resolvedUserDataDir = getUserDataDir();
+    const resolvedUserDataDir = startupUserDataDir || applyStableUserDataPath();
     const activeProfileId = getActiveProfileId();
-    const defaultUserDataDir = app.getPath("userData");
-    if (
-      path.resolve(defaultUserDataDir) !== path.resolve(resolvedUserDataDir)
-    ) {
-      try {
-        await fs.mkdir(resolvedUserDataDir, { recursive: true });
-        app.setPath("userData", resolvedUserDataDir);
-        logger.info(`Using userData directory: ${resolvedUserDataDir}`);
-      } catch (error) {
-        logger.warn("Failed to apply userData directory:", error);
-      }
-    }
     if (hasNonDefaultProfile()) {
       logger.info(`Active profile: ${activeProfileId}`);
     }
+    installDevelopmentBranding();
+    installNativeApplicationMenu();
 
     // Set up Content Security Policy for production builds
     if (process.env.NODE_ENV !== "development") {
@@ -876,6 +1258,7 @@ if (!gotTheLock) {
     // This MUST be done before provider factories so they can migrate legacy settings
     new SecureSettingsRepository(dbManager.getDatabase());
     logger.info("SecureSettingsRepository initialized");
+    healResettableSecureSettings();
     {
       const workspaceRepo = new WorkspaceRepository(dbManager.getDatabase());
       const repairs = healMovedDesktopWorkspacePaths(
@@ -1947,6 +2330,10 @@ if (!gotTheLock) {
             workspaceId,
             suggestion,
           ),
+        runWorkflowReflection: async ({ workspaceId }) => {
+          const run = await subconsciousLoopService?.runFromHeartbeat(workspaceId);
+          return run ? { id: run.id, outcome: run.outcome } : null;
+        },
         addNotification: async (params) => {
           const notificationService = getNotificationService();
           await notificationService?.add(params);
@@ -2298,6 +2685,7 @@ if (!gotTheLock) {
 
     // Create window
     createWindow();
+    installDevelopmentBranding();
 
     // Initialize gateway with main window reference
     if (mainWindow) {

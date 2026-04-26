@@ -108,4 +108,20 @@ describe("TaskExecutor getToolTimeoutMs", () => {
     expect(timeoutMs).toBe(300_000);
     timeoutSpy.mockRestore();
   });
+
+  it("gives image generation enough time to avoid retrying slow provider calls", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = { agentConfig: { deepWorkMode: false } };
+
+    const timeoutSpy = vi
+      .spyOn(BuiltinToolsSettingsManager, "getToolTimeoutMs")
+      .mockReturnValue(null);
+
+    const timeoutMs = executor.getToolTimeoutMs("generate_image", {
+      prompt: "snow leopard avatar",
+    });
+
+    expect(timeoutMs).toBe(600_000);
+    timeoutSpy.mockRestore();
+  });
 });

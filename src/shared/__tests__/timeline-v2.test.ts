@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { TaskEvent } from "../types";
 import {
+  formatTimelineActivityLabel,
   inferTimelineStageForLegacyType,
   inferTimelineSubStageLabel,
   normalizeTaskEventToTimelineV2,
@@ -9,6 +10,14 @@ import {
 } from "../timeline-v2";
 
 describe("timeline v2 helpers", () => {
+  it("formats internal activity labels for user-facing progress", () => {
+    expect(formatTimelineActivityLabel("DISCOVER")).toBe("Discovering");
+    expect(formatTimelineActivityLabel("BUILD")).toBe("Building");
+    expect(formatTimelineActivityLabel("FIX")).toBe("Fixing issues");
+    expect(formatTimelineActivityLabel("Inspect repository")).toBe("Inspecting repository");
+    expect(formatTimelineActivityLabel("Working on: BUILD")).toBe("Building");
+  });
+
   it("normalizes legacy step events into timeline step lifecycle events", () => {
     const normalized = normalizeTaskEventToTimelineV2({
       taskId: "task-1",

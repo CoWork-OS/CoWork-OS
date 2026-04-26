@@ -346,6 +346,14 @@ describe("ToolRegistry tool catalog versioning", () => {
   });
 
   it("includes the tool_search meta tool and returns deferred matches", () => {
+    mockMcpState.version = 2;
+    mockMcpState.tools = [
+      {
+        name: "search_docs",
+        description: "Search project docs",
+        inputSchema: { type: "object", properties: {}, required: [] },
+      },
+    ];
     const registry = new ToolRegistry(createWorkspace(), createDaemon(), "task-tool-search");
     const deferredTools = registry.getDeferredTools();
     const target = deferredTools[0];

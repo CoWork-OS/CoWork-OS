@@ -149,8 +149,15 @@ import type {
   ContactIdentityReplyTarget,
   ContactIdentitySearchResult,
   MailboxApplyActionInput,
+  MailboxAskInput,
+  MailboxAskResult,
+  MailboxAttachmentRecord,
   MailboxAutomationRecord,
   MailboxAutomationStatus,
+  MailboxClientState,
+  MailboxComposeDraft,
+  MailboxComposeDraftInput,
+  MailboxComposeDraftPatch,
   MailboxForwardRecipe,
   MailboxRuleRecipe,
   MailboxScheduleRecipe,
@@ -166,6 +173,8 @@ import type {
   MailboxMissionControlHandoffRecord,
   MailboxMissionControlHandoffRequest,
   MailboxQuickReplySuggestionsResult,
+  MailboxOutgoingMessage,
+  MailboxQueuedAction,
   MailboxSavedViewPreviewResult,
   MailboxSavedViewRecord,
   MailboxSnippetRecord,
@@ -175,8 +184,10 @@ import type {
   MailboxSummaryCard,
   MailboxSyncResult,
   MailboxSyncStatus,
+  MailboxSenderCleanupDigest,
   MailboxThreadDetail,
   MailboxThreadListItem,
+  MailboxTodayDigest,
   RelationshipTimelineEvent,
   RelationshipTimelineQuery,
 } from "../shared/mailbox";
@@ -1897,6 +1908,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   startDocumentEditTask: (data: DocumentEditRequest) =>
     ipcRenderer.invoke(IPC_CHANNELS.DOCUMENT_START_EDIT_TASK, data),
   getMailboxSyncStatus: () => ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_GET_SYNC_STATUS),
+  getMailboxClientState: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_CLIENT_STATE) as Promise<MailboxClientState>,
   syncMailbox: (limit?: number) => ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_SYNC, { limit }),
   listMailboxThreads: (query?: MailboxListThreadsInput) =>
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_LIST_THREADS, query),
@@ -1941,6 +1954,26 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_AUTOMATION_RUN_FORWARD, id) as Promise<string>,
   getMailboxDigest: (workspaceId?: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_GET_DIGEST, { workspaceId }) as Promise<MailboxDigestSnapshot>,
+  getMailboxTodayDigest: (input?: { limitPerBucket?: number }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_TODAY_DIGEST, input || {}) as Promise<MailboxTodayDigest>,
+  getMailboxSenderCleanupDigest: (input?: { limit?: number }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_SENDER_CLEANUP_DIGEST, input || {}) as Promise<MailboxSenderCleanupDigest>,
+  askMailbox: (input: MailboxAskInput) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_ASK, input) as Promise<MailboxAskResult>,
+  extractMailboxAttachmentText: (attachmentId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_ATTACHMENT_EXTRACT_TEXT, { attachmentId }) as Promise<MailboxAttachmentRecord>,
+  createMailboxDraft: (input: MailboxComposeDraftInput) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_CREATE_DRAFT, input) as Promise<MailboxComposeDraft>,
+  updateMailboxDraft: (draftId: string, patch: MailboxComposeDraftPatch) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_UPDATE_DRAFT, { draftId, patch }) as Promise<MailboxComposeDraft>,
+  sendMailboxDraft: (draftId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_SEND_DRAFT, { draftId }) as Promise<MailboxOutgoingMessage>,
+  scheduleMailboxSend: (draftId: string, scheduledAt: number) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_SCHEDULE_SEND, { draftId, scheduledAt }) as Promise<MailboxComposeDraft>,
+  discardMailboxDraft: (draftId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_DISCARD_COMPOSE_DRAFT, { draftId }) as Promise<boolean>,
+  undoMailboxAction: (actionId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_UNDO_ACTION, { actionId }) as Promise<MailboxQueuedAction>,
   summarizeMailboxThread: (threadId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_SUMMARIZE_THREAD, { threadId }),
   generateMailboxDraft: (threadId: string, options?: MailboxDraftOptions) =>
@@ -2391,7 +2424,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
   testLLMProvider: (config: Any) => ipcRenderer.invoke(IPC_CHANNELS.LLM_TEST_PROVIDER, config),
   getLLMModels: () => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_MODELS),
   getLLMConfigStatus: () => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_CONFIG_STATUS),
-  setLLMModel: (modelKey: string) => ipcRenderer.invoke(IPC_CHANNELS.LLM_SET_MODEL, modelKey),
+  setLLMModel: (
+    selection:
+      | string
+      | {
+          providerType?: LLMProviderType;
+          modelKey: string;
+          reasoningEffort?: "low" | "medium" | "high" | "extra_high";
+        },
+  ) => ipcRenderer.invoke(IPC_CHANNELS.LLM_SET_MODEL, selection),
   getProviderModels: (providerType: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_PROVIDER_MODELS, providerType),
   getAnthropicModels: (credentials?: {
@@ -4058,6 +4099,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.SUGGESTIONS_REFRESH_FOR_WORKSPACES, workspaceIds),
   dismissSuggestion: (workspaceId: string, suggestionId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.SUGGESTIONS_DISMISS, workspaceId, suggestionId),
+  snoozeSuggestion: (workspaceId: string, suggestionId: string, snoozedUntil: number) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SUGGESTIONS_SNOOZE, workspaceId, suggestionId, snoozedUntil),
+  editSuggestion: (workspaceId: string, suggestionId: string, editedPrompt: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SUGGESTIONS_EDIT, workspaceId, suggestionId, editedPrompt),
   actOnSuggestion: (workspaceId: string, suggestionId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.SUGGESTIONS_ACT, workspaceId, suggestionId),
 
@@ -4276,6 +4321,7 @@ export interface ElectronAPI {
   }) => Promise<DocumentVersionEntry[]>;
   startDocumentEditTask: (data: DocumentEditRequest) => Promise<Any>;
   getMailboxSyncStatus: () => Promise<MailboxSyncStatus>;
+  getMailboxClientState: () => Promise<MailboxClientState>;
   syncMailbox: (limit?: number) => Promise<MailboxSyncResult>;
   listMailboxThreads: (query?: MailboxListThreadsInput) => Promise<MailboxThreadListItem[]>;
   getMailboxThread: (threadId: string) => Promise<MailboxThreadDetail | null>;
@@ -4305,6 +4351,16 @@ export interface ElectronAPI {
   deleteMailboxForward: (id: string) => Promise<boolean>;
   runMailboxForward: (id: string) => Promise<string>;
   getMailboxDigest: (workspaceId?: string) => Promise<MailboxDigestSnapshot>;
+  getMailboxTodayDigest: (input?: { limitPerBucket?: number }) => Promise<MailboxTodayDigest>;
+  getMailboxSenderCleanupDigest: (input?: { limit?: number }) => Promise<MailboxSenderCleanupDigest>;
+  askMailbox: (input: MailboxAskInput) => Promise<MailboxAskResult>;
+  extractMailboxAttachmentText: (attachmentId: string) => Promise<MailboxAttachmentRecord>;
+  createMailboxDraft: (input: MailboxComposeDraftInput) => Promise<MailboxComposeDraft>;
+  updateMailboxDraft: (draftId: string, patch: MailboxComposeDraftPatch) => Promise<MailboxComposeDraft>;
+  sendMailboxDraft: (draftId: string) => Promise<MailboxOutgoingMessage>;
+  scheduleMailboxSend: (draftId: string, scheduledAt: number) => Promise<MailboxComposeDraft>;
+  discardMailboxDraft: (draftId: string) => Promise<boolean>;
+  undoMailboxAction: (actionId: string) => Promise<MailboxQueuedAction>;
   summarizeMailboxThread: (threadId: string) => Promise<MailboxSummaryCard | null>;
   generateMailboxDraft: (
     threadId: string,
@@ -4621,20 +4677,39 @@ export interface ElectronAPI {
   getLLMConfigStatus: () => Promise<{
     currentProvider: LLMProviderType;
     currentModel: string;
+    currentReasoningEffort?: "low" | "medium" | "high" | "extra_high";
     providers: Array<{
       type: LLMProviderType;
       name: string;
       configured: boolean;
       source?: string;
     }>;
-    models: Array<{ key: string; displayName: string; description: string }>;
+    models: Array<{
+      key: string;
+      displayName: string;
+      description: string;
+      reasoningEfforts?: Array<"low" | "medium" | "high" | "extra_high">;
+    }>;
   }>;
   getLLMRoutingStatus: () => Promise<LLMRoutingRuntimeState>;
   onLLMRoutingEvent: (callback: (event: LLMRoutingRuntimeState) => void) => () => void;
-  setLLMModel: (modelKey: string) => Promise<{ success: boolean }>;
+  setLLMModel: (
+    selection:
+      | string
+      | {
+          providerType?: LLMProviderType;
+          modelKey: string;
+          reasoningEffort?: "low" | "medium" | "high" | "extra_high";
+        },
+  ) => Promise<{ success: boolean }>;
   getProviderModels: (
     providerType: string,
-  ) => Promise<Array<{ key: string; displayName: string; description: string }>>;
+  ) => Promise<Array<{
+    key: string;
+    displayName: string;
+    description: string;
+    reasoningEfforts?: Array<"low" | "medium" | "high" | "extra_high">;
+  }>>;
   getAnthropicModels: (credentials?: {
     apiKey?: string;
     subscriptionToken?: string;
@@ -6655,6 +6730,16 @@ export interface ElectronAPI {
   refreshSuggestions: (workspaceId: string) => Promise<{ success: boolean }>;
   refreshSuggestionsForWorkspaces: (workspaceIds: string[]) => Promise<{ success: boolean }>;
   dismissSuggestion: (workspaceId: string, suggestionId: string) => Promise<{ success: boolean }>;
+  snoozeSuggestion: (
+    workspaceId: string,
+    suggestionId: string,
+    snoozedUntil: number,
+  ) => Promise<{ success: boolean }>;
+  editSuggestion: (
+    workspaceId: string,
+    suggestionId: string,
+    editedPrompt: string,
+  ) => Promise<{ success: boolean }>;
   actOnSuggestion: (
     workspaceId: string,
     suggestionId: string,

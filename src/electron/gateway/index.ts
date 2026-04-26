@@ -370,6 +370,7 @@ export class ChannelGateway {
       try {
         await this.router.clearTransientTaskProgress(data.taskId);
         if (explicit) {
+          await this.router.flushStreamingUpdateForTask(data.taskId);
           await this.router.finalizeDraftStreamForTask(data.taskId, explicit);
         }
       } catch {

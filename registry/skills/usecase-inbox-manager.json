@@ -1,10 +1,10 @@
 {
   "id": "usecase-inbox-manager",
   "name": "Inbox Manager",
-  "description": "Triage inbox, draft replies, and suggest cleanup automations with strict confirmation gates.",
+  "description": "Triage Inbox Agent Today lanes, search mailbox evidence, prepare manual or AI-assisted replies, and suggest cleanup automations with strict confirmation gates.",
   "icon": "📥",
   "category": "Use Cases",
-  "prompt": "Inbox manager workflow.\n\nGoal\n- Turn inbox overload into a prioritized action plan with safe draft automation.\n\nInputs\n- Mode: {{mode}}\n- Message limit: {{message_limit}}\n- Time window: {{time_window}}\n- Output format: {{output_format}}\n\nSteps\n1) Collect inbox data (prefer gmail_action, fallback to email_imap_unread, fallback to Email channel history).\n2) Pull up to {{message_limit}} messages in window \"{{time_window}}\".\n3) Classify each item into: urgent, today, this-week, no-action.\n4) Extract:\n   - Reply-needed messages\n   - Cleanup candidates (newsletter/promotions)\n   - Commitments/follow-ups that should become reminders\n5) Produce output in \"{{output_format}}\" including:\n   - Priority triage table\n   - Draft replies for high-priority items\n   - Suggested unsubscribe/archive actions\n   - Suggested recurring automations (for example morning triage, newsletter digest)\n6) STOP BEFORE EXECUTING EXTERNAL ACTIONS.\n   - Do not send, archive, label, delete, unsubscribe, or contact anyone until I explicitly confirm.\n\nMode behavior:\n- triage: maximize sorting and prioritization accuracy.\n- autopilot: include stronger cleanup + drafting recommendations.\n- followups: focus on commitments and messages that require response.\n",
+  "prompt": "Inbox manager workflow.\n\nGoal\n- Turn Inbox Agent into a prioritized action plan with safe manual or AI-assisted email actions.\n\nInputs\n- Mode: {{mode}}\n- Message limit: {{message_limit}}\n- Time window: {{time_window}}\n- Output format: {{output_format}}\n\nSteps\n1) Use Inbox Agent surfaces first: Today lanes, Inbox/Sent/All views, Mailbox Ask, sender cleanup, saved/domain filters, and open commitments.\n2) Pull up to {{message_limit}} messages in window \"{{time_window}}\" when direct mailbox data is needed. Prefer Gmail/Inbox Agent data; fall back to IMAP unread or Email channel history only when needed.\n3) Classify each item into Today buckets: Needs action, Happening today, Good to know, More to browse. Also capture urgency, domain, unread/read state, needs-reply state, cleanup candidacy, and open commitments.\n4) Extract:\n   - Reply-needed messages\n   - Manual reply/reply-all/forward opportunities\n   - AI draft opportunities that require editable review before send\n   - Cleanup candidates by sender/domain\n   - Commitments/follow-ups that should become reminders or mark-done candidates\n   - Attachment or invoice/contract evidence that should be found with Mailbox Ask\n5) Produce output in \"{{output_format}}\" including:\n   - Today-lane triage table\n   - Recommended manual replies/forwards or editable AI draft notes for high-priority items\n   - Suggested archive/trash/mark-read/mark-done actions\n   - Suggested recurring automations such as morning triage, newsletter digest, sender cleanup, or review schedules\n6) STOP BEFORE EXECUTING EXTERNAL ACTIONS.\n   - Do not send, archive, trash, label, mark read/unread, mark done, unsubscribe, forward, or contact anyone until I explicitly confirm.\n\nMode behavior:\n- triage: maximize sorting and prioritization accuracy.\n- autopilot: include stronger cleanup, Ask, and drafting recommendations while preserving confirmation gates.\n- followups: focus on commitments, needs-reply threads, waiting loops, and mark-done candidates.\n",
   "parameters": [
     {
       "name": "mode",
@@ -47,9 +47,9 @@
   "enabled": true,
   "metadata": {
     "routing": {
-      "useWhen": "Use when the user asks to triage inbox, draft replies, and suggest cleanup automations with strict confirmation gates.",
+      "useWhen": "Use when the user asks to triage Inbox Agent, review Today lanes, search mailbox evidence, draft or manually prepare replies/forwards, and suggest cleanup automations with strict confirmation gates.",
       "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
-      "outputs": "Outcome from Inbox Manager: prioritized inbox plan, safe draft replies, and explicit next-step actions.",
+      "outputs": "Outcome from Inbox Manager: prioritized Today-lane plan, evidence-backed mailbox findings, safe reply/forward drafts, cleanup recommendations, and explicit next-step actions.",
       "successCriteria": "Produces actionable inbox triage with clear confirmation boundaries and no fabricated tool-side behavior.",
       "examples": {
         "positive": [

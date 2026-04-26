@@ -761,6 +761,9 @@ export class TaskExecutor {
   private toolUsageCounts: Map<string, number> = new Map();
   private successfulToolUsageCounts: Map<string, number> = new Map();
   private taskHadAnyToolSuccess = false;
+  private simpleImageGenerationAttempted = false;
+  private simpleImageGenerationCompleted = false;
+  private simpleImageGenerationFailed = false;
   private toolUsageEventsSinceDecay = 0;
   private toolSelectionEpoch = 0;
   private availableToolsCacheKey: string | null = null;
@@ -808,6 +811,8 @@ export class TaskExecutor {
   private readonly shouldPauseForQuestions: boolean;
   private readonly shouldPauseForRequiredDecision: boolean;
   private lastAwaitingUserInputReasonCode: string | null = null;
+  private lastRequiredDecisionPrompt: string | null = null;
+  private addressedRequiredDecisionPrompts: Set<string> = new Set();
   private lastRetryReason: string | null = null;
   private lastRecoveryClass: "user_blocker" | "local_runtime" | "provider_quota" | "external_unknown" | null =
     null;
@@ -944,6 +949,38 @@ export class TaskExecutor {
       lower === "waiting for structured user input." ||
       lower === "task is waiting for required input before it can continue."
     );
+  }
+
+  private getRequiredDecisionPromptKey(text: string | null | undefined): string {
+    return String(text || "").replace(/\s+/g, " ").trim().toLowerCase().slice(0, 1000);
+  }
+
+  private getAddressedRequiredDecisionPromptSet(): Set<string> {
+    if (!(this.addressedRequiredDecisionPrompts instanceof Set)) {
+      this.addressedRequiredDecisionPrompts = new Set();
+    }
+    return this.addressedRequiredDecisionPrompts;
+  }
+
+  private hasUserAddressedRequiredDecision(text: string): boolean {
+    const key = this.getRequiredDecisionPromptKey(text);
+    return key.length > 0 && this.getAddressedRequiredDecisionPromptSet().has(key);
+  }
+
+  private markRequiredDecisionAddressedByUserInput(): void {
+    const reason = String(this.lastAwaitingUserInputReasonCode || this.lastPauseReason || "")
+      .trim()
+      .toLowerCase();
+    if (!/^required_decision/.test(reason)) return;
+
+    const key = this.getRequiredDecisionPromptKey(this.lastRequiredDecisionPrompt);
+    if (key) {
+      this.getAddressedRequiredDecisionPromptSet().add(key);
+    }
+    this.lastAwaitingUserInputReasonCode = null;
+    this.lastPauseReason = null;
+    this.task.awaitingUserInputReasonCode = undefined;
+    this.daemon.updateTask(this.task.id, { awaitingUserInputReasonCode: undefined });
   }
 
   private getRecoveredFailureStepIdSet(): Set<string> {
@@ -2713,6 +2750,13 @@ export class TaskExecutor {
       .trim()
       .toLowerCase();
     if (!desc) return false;
+
+    const hasWorkVerbBeforeVerification =
+      /^(?:gather|collect|research|find|compile|draft|write|create|generate|summarize|prepare|assemble|choose|decide|select|design|build|implement|update|edit|fix)\b[\s\S]{0,80}\b(?:verify|verification)\b/.test(
+        desc,
+      );
+    if (hasWorkVerbBeforeVerification) return false;
+
     if (desc.startsWith("verify")) return true;
     if (desc.startsWith("verification")) return true;
     if (desc.startsWith("review")) {
@@ -8083,8 +8127,8 @@ ${transcript}
 
     if (toolName === "generate_image") {
       // Remote image generation can take longer than typical tool calls (model latency + image download).
-      // Keep this comfortably above the default 30s while still bounded by the step timeout.
-      return normalizedSettingsTimeout ?? clampToStepTimeout(180 * 1000);
+      // Keep this above common provider latency so slow generations are not mistaken for failed calls.
+      return normalizedSettingsTimeout ?? clampToStepTimeout(10 * 60 * 1000);
     }
 
     if (toolName === "analyze_image") {
@@ -8174,41 +8218,56 @@ ${transcript}
     ) {
       this.streamingToolExecutor.discard();
     }
-    const coordinated = await withTimeout(
-      this.toolExecutionCoordinator.executeTool(
-        toolName,
-        input as Any,
-        {
-          taskId: this.task.id,
-          stepId: this.currentStepId || undefined,
-          phase: "step",
-          targetPaths: undefined,
-          followUp: false,
-          toolPolicyContext: this.getToolPolicyContext(),
-          emitEvent: (type, payload) => this.emitEvent(type, payload),
-          beginHeartbeat: (name, timeoutMs, rawInput) =>
-            this.beginToolExecutionHeartbeat(name, timeoutMs, rawInput) || undefined,
-          timeoutMsResolver: () => toolTimeoutMs,
-          workspaceRecovery: async (args) =>
-            this.tryWorkspaceBoundaryRecovery({
-              toolName: args.toolName,
-              input: args.input,
-              errorMessage: args.errorMessage,
-              toolTimeoutMs: args.toolTimeoutMs,
-              ...(args.stepId ? { stepId: args.stepId } : {}),
-              ...(args.targetPaths ? { targetPaths: args.targetPaths } : {}),
-              ...(args.followUp ? { followUp: args.followUp } : {}),
-            }),
-        },
-        `${toolName}:${Date.now()}`,
-      ),
-      toolTimeoutMs,
-      `Tool ${toolName}`,
-    );
-    if (coordinated.error) {
-      throw coordinated.error;
+    const parentSignal = this.abortController.signal;
+    const toolAbort = new AbortController();
+    const onParentAbort = () => toolAbort.abort();
+    if (parentSignal.aborted) {
+      toolAbort.abort();
+    } else {
+      parentSignal.addEventListener("abort", onParentAbort, { once: true });
     }
-    return coordinated;
+
+    try {
+      const coordinated = await withTimeout(
+        this.toolExecutionCoordinator.executeTool(
+          toolName,
+          input as Any,
+          {
+            taskId: this.task.id,
+            stepId: this.currentStepId || undefined,
+            phase: "step",
+            targetPaths: undefined,
+            followUp: false,
+            toolPolicyContext: this.getToolPolicyContext(),
+            signal: toolAbort.signal,
+            emitEvent: (type, payload) => this.emitEvent(type, payload),
+            beginHeartbeat: (name, timeoutMs, rawInput) =>
+              this.beginToolExecutionHeartbeat(name, timeoutMs, rawInput) || undefined,
+            timeoutMsResolver: () => toolTimeoutMs,
+            workspaceRecovery: async (args) =>
+              this.tryWorkspaceBoundaryRecovery({
+                toolName: args.toolName,
+                input: args.input,
+                errorMessage: args.errorMessage,
+                toolTimeoutMs: args.toolTimeoutMs,
+                ...(args.stepId ? { stepId: args.stepId } : {}),
+                ...(args.targetPaths ? { targetPaths: args.targetPaths } : {}),
+                ...(args.followUp ? { followUp: args.followUp } : {}),
+              }),
+          },
+          `${toolName}:${Date.now()}`,
+        ),
+        toolTimeoutMs,
+        `Tool ${toolName}`,
+        () => toolAbort.abort(),
+      );
+      if (coordinated.error) {
+        throw coordinated.error;
+      }
+      return coordinated;
+    } finally {
+      parentSignal.removeEventListener("abort", onParentAbort);
+    }
   }
 
   /**
@@ -10127,6 +10186,108 @@ ${transcript}
 
   private shouldRequireExecutionEvidence(): boolean {
     return shouldRequireExecutionEvidenceUtil(this.task.title, this.getContractPrompt());
+  }
+
+  private getImageGenerationTaskText(): string {
+    return [
+      this.task.rawPrompt,
+      this.task.userPrompt,
+      this.task.title,
+      this.task.prompt,
+    ]
+      .map((value) =>
+        typeof value === "string" ? normalizePromptForContractsUtil(value).trim() : "",
+      )
+      .filter((value) => value.length > 0)
+      .join("\n")
+      .toLowerCase();
+  }
+
+  private hasTextToImageGenerationIntent(taskText: string): boolean {
+    return (
+      /\b(draw|paint|illustrate|render|sketch)\b.*\b(in|of|with|a|an|the)\b/.test(taskText) ||
+      /\b(create|generate|make)\s+(?:an?\s+)?(?:image|picture|photo|illustration)\s+(?:of|with|about|for|on|explaining?)\b/.test(
+        taskText,
+      ) ||
+      /\b(create|generate|make)\s+(?:an?\s+)?(?:infographic|poster)(?:\s+image)?\b/.test(
+        taskText,
+      )
+    );
+  }
+
+  private hasNonImageGenerationWorkIntent(taskText: string): boolean {
+    return /\b(edit|modify|change|update|retouch|inpaint|remove|replace|analy[sz]e|describe|review|compare|inspect|website|webapp|code|component|page|ui|screenshot)\b/.test(
+      taskText,
+    );
+  }
+
+  private imageGenerationNeedsPromptGrounding(taskText: string): boolean {
+    const asksForExplainerVisual =
+      /\b(infographic|visual guide|explainer|diagram|poster|one[-\s]?pager)\b/.test(taskText);
+    if (!asksForExplainerVisual) return false;
+    return /\b(cowork os|co-?work os|our app|this app|the app|our product|this product|company|brand|platform|service)\b/.test(
+      taskText,
+    );
+  }
+
+  private isTerminalImageGenerationTask(): boolean {
+    const taskText = this.getImageGenerationTaskText();
+    if (!taskText.trim()) return false;
+    if (!this.hasTextToImageGenerationIntent(taskText)) return false;
+    return !this.hasNonImageGenerationWorkIntent(taskText);
+  }
+
+  private imageTaskExplicitlyRequestsSemanticImageAnalysis(): boolean {
+    const taskText = this.getImageGenerationTaskText();
+    return /\b(analy[sz]e|verify|review|inspect|compare|critique|check)\b/.test(taskText);
+  }
+
+  private isSimpleImageGenerationTask(): boolean {
+    const taskText = this.getImageGenerationTaskText();
+    if (!taskText.trim()) return false;
+    if (!this.hasTextToImageGenerationIntent(taskText)) return false;
+    if (this.imageGenerationNeedsPromptGrounding(taskText)) return false;
+
+    const hasAppAssetIntent =
+      /\b(?:avatar|icon|logo|mascot|badge|profile picture|profile image|brand mark|app asset)\b/.test(
+        taskText,
+      );
+    const hasAppWorkIntent =
+      /\b(?:app|application)\b/.test(taskText) && !hasAppAssetIntent;
+    const hasNonImageWorkIntent = this.hasNonImageGenerationWorkIntent(taskText);
+    return !hasAppWorkIntent && !hasNonImageWorkIntent;
+  }
+
+  private isSimpleImageGenerationAllowedTool(toolName: string): boolean {
+    return canonicalizeToolNameUtil(toolName) === "generate_image";
+  }
+
+  private buildSimpleImageGenerationBlockedToolResult(
+    toolName: string,
+    toolUseId: string,
+    reason: "non_image_tool" | "already_attempted" | "already_completed" | "already_failed",
+  ): LLMToolResult {
+    const messages: Record<typeof reason, string> = {
+      non_image_tool:
+        "This image-generation task may only gather prompt context, call generate_image once, then finish. Do not create checklists or run subjective image review tools.",
+      already_attempted:
+        "generate_image has already been attempted for this image-generation task. Do not retry or use fallback tools; provide the final status now.",
+      already_completed:
+        "The requested image has already been generated. Do not call more tools; finish now.",
+      already_failed:
+        "Image generation already failed for this image-generation task. Do not retry or use fallback tools; report the failure now.",
+    };
+    return {
+      type: "tool_result",
+      tool_use_id: toolUseId,
+      content: JSON.stringify({
+        error: messages[reason],
+        blocked: true,
+        reason: `simple_image_generation_${reason}`,
+        tool: toolName,
+      }),
+      is_error: true,
+    };
   }
 
   private promptRequestsArtifactOutput(): boolean {
@@ -12279,6 +12440,36 @@ ${transcript}
       .trim();
   }
 
+  private getPlanningStepCountRule(): string {
+    const executionMode = this.getEffectiveExecutionMode();
+    const taskIntent = String(this.task.agentConfig?.taskIntent || "").toLowerCase();
+    const taskPrompt = String(this.getExecutionTaskPrompt() || this.getContractPrompt() || "");
+    const compactIntent =
+      executionMode === "plan" ||
+      executionMode === "analyze" ||
+      taskIntent === "advice" ||
+      taskIntent === "planning" ||
+      taskIntent === "thinking";
+    const workflowIntent =
+      this.task.agentConfig?.deepWorkMode === true ||
+      taskIntent === "workflow" ||
+      taskIntent === "deep_work" ||
+      taskPrompt.length > 1200;
+
+    if (workflowIntent) {
+      return "- Create a plan with 4-7 specific steps, each with one concrete objective.";
+    }
+
+    if (compactIntent) {
+      return [
+        "- Create the smallest useful plan: 1-3 high-level steps for plan/advice/analyze tasks.",
+        "- Use a single step when the answer can be produced directly after bounded evidence gathering.",
+      ].join("\n");
+    }
+
+    return "- Create a plan with 2-5 specific steps, each with one concrete objective.";
+  }
+
   private buildQuotedAssistantContextMessage(
     message: string,
     quotedAssistantMessage?: QuotedAssistantMessage,
@@ -13001,6 +13192,21 @@ ${transcript}
   }
 
   private applyStepScopedToolPolicy(tools: Any[]): Any[] {
+    if (this.isSimpleImageGenerationTask()) {
+      return tools.filter((tool) => this.isSimpleImageGenerationAllowedTool(String(tool.name || "")));
+    }
+
+    if (this.isTerminalImageGenerationTask()) {
+      return tools.filter((tool) => {
+        const name = canonicalizeToolNameUtil(String(tool.name || ""));
+        return (
+          name !== "analyze_image" &&
+          name !== "read_pdf_visual" &&
+          !name.startsWith("task_list_")
+        );
+      });
+    }
+
     if (this.reliabilityV2DisableStepToolScoping) {
       return tools;
     }
@@ -15170,6 +15376,69 @@ You are continuing a previous conversation. The context from the previous conver
     });
     this.updateConversationHistory([...this.conversationHistory, ...pauseHistory]);
     this.saveConversationSnapshot();
+  }
+
+  private isLowSignalUserInputPauseText(
+    message: string | null | undefined,
+    reasonCode?: string,
+  ): boolean {
+    const lower = String(message || "").trim().toLowerCase();
+    if (!lower) return true;
+    if (reasonCode && lower === String(reasonCode).trim().toLowerCase()) return true;
+    return (
+      lower === "awaiting user input" ||
+      lower === "paused - awaiting user input" ||
+      lower === "required_decision" ||
+      lower === "required_decision_followup" ||
+      lower === "input_request" ||
+      lower === "skill_parameters" ||
+      lower === "user_action_required_failure" ||
+      lower === "user_action_required_tool" ||
+      lower === "user_action_required_disabled" ||
+      lower === "shell_permission_required" ||
+      lower === "shell_permission_still_disabled" ||
+      lower === "missing_required_workspace_artifact"
+    );
+  }
+
+  private getAwaitingUserInputPauseMessage(error: AwaitingUserInputError, step?: PlanStep): string {
+    const reasonCode = error.reasonCode || this.lastAwaitingUserInputReasonCode || "";
+    const candidates = [
+      error.userMessage,
+      this.isLowSignalUserInputPauseText(error.message, reasonCode) ? "" : error.message,
+      this.getOutstandingRequiredDecisionCandidate(),
+      this.lastNonVerificationOutput,
+      this.lastAssistantOutput,
+      this.lastAssistantText,
+    ];
+
+    for (const candidate of candidates) {
+      const value = String(candidate || "").trim();
+      if (!value || this.isLowSignalUserInputPauseText(value, reasonCode)) continue;
+      return value;
+    }
+
+    if (reasonCode === "skill_parameters") {
+      return "I need one more detail before I can continue. Reply with the requested value below.";
+    }
+    if (
+      reasonCode === "shell_permission_required" ||
+      reasonCode === "shell_permission_still_disabled"
+    ) {
+      return "Shell access is needed before I can continue. Enable shell access, or continue without it using a limited path.";
+    }
+    if (reasonCode === "missing_required_workspace_artifact") {
+      return "I need the missing workspace file or artifact before I can continue. Attach it or tell me where to find it.";
+    }
+    if (
+      reasonCode === "user_action_required_failure" ||
+      reasonCode === "user_action_required_tool"
+    ) {
+      const stepContext = step?.description ? ` while working on: ${step.description}` : "";
+      return `I hit a blocker that needs your decision${stepContext}. Reply with what you want me to do next, or stop the task.`;
+    }
+
+    return "I need your input before I can continue. Reply below with the decision or missing detail, or stop the task.";
   }
 
   private preflightWorkspaceCheck(): boolean {
@@ -18182,6 +18451,7 @@ You are continuing a previous conversation. The context from the previous conver
       const trimmed = String(candidate || "").trim();
       if (!this.isUsefulResultSummaryCandidate(trimmed)) continue;
       if (this.isLowSignalPauseMessage(trimmed)) continue;
+      if (this.hasUserAddressedRequiredDecision(trimmed)) continue;
       return trimmed;
     }
     return "";
@@ -18209,6 +18479,7 @@ You are continuing a previous conversation. The context from the previous conver
       this.getOutstandingRequiredDecisionCandidate() ||
       "Task is waiting for required input before it can continue.";
     this.waitingForUserInput = true;
+    this.lastRequiredDecisionPrompt = message;
     this.lastPauseReason = this.lastAwaitingUserInputReasonCode || "required_decision";
     if (!this.lastAwaitingUserInputReasonCode) {
       this.lastAwaitingUserInputReasonCode = "required_decision";
@@ -21215,6 +21486,25 @@ You are continuing a previous conversation. The context from the previous conver
    * Create execution plan using LLM
    */
   private async createPlan(): Promise<void> {
+    if (this.isSimpleImageGenerationTask()) {
+      this.plan = {
+        description: "Generate requested image",
+        steps: [
+          {
+            id: "1",
+            description: "Generate the requested image and share the resulting file.",
+            kind: "primary",
+            status: "pending",
+          },
+        ],
+      };
+      this.emitEvent("log", {
+        message: "Using direct one-step plan for simple image generation.",
+      });
+      this.emitEvent("plan_created", { plan: this.plan });
+      return;
+    }
+
     const planStrongRouting =
       !this.hasExplicitTaskRouteOverride() &&
       !(this.task.agentConfig?.llmProfileForced === true && this.task.agentConfig?.llmProfile === "cheap");
@@ -21314,7 +21604,7 @@ Canvas policy:
 - If you decide to call canvas_push, always provide a complete HTML document in content.
 
 PLANNING RULES:
-- Create a plan with 3-7 specific steps, each with one concrete objective.
+${this.getPlanningStepCountRule()}
 - Use specific file names/paths when known.
 - ${shouldRequirePlanVerificationStep ? "Include one final verification step for non-trivial tasks. Verification steps MUST use only objective, machine-checkable criteria: file existence, section/keyword presence, structural requirements, format validity. NEVER use subjective quality criteria (e.g. 'clearly written', 'comprehensive', 'actionable', 'well-structured')." : "Skip dedicated verification steps unless the user explicitly asks for verification."}
 - Avoid redundant review/verify steps and repeated file reads.
@@ -21992,6 +22282,21 @@ Return ONLY a JSON object:
         continue;
       }
 
+      if (
+        this.isTerminalImageGenerationTask() &&
+        (this.simpleImageGenerationCompleted || this.simpleImageGenerationFailed)
+      ) {
+        const reason = this.simpleImageGenerationCompleted
+          ? "Simple image-generation task already produced the requested output."
+          : "Simple image-generation task already attempted image generation and failed.";
+        step.status = "skipped";
+        step.completedAt = Date.now();
+        step.error = reason;
+        this.emitEvent("step_skipped", { step, reason });
+        index++;
+        continue;
+      }
+
       // Wait if paused
       while (this.paused && !this.cancelled) {
         await new Promise((resolve) => setTimeout(resolve, 100));
@@ -22055,15 +22360,38 @@ Return ONLY a JSON object:
         await this.executeStep(step);
         clearTimeout(stepSoftTimeoutId);
         clearTimeout(stepTimeoutId);
+        if (
+          this.isTerminalImageGenerationTask() &&
+          (this.simpleImageGenerationCompleted || this.simpleImageGenerationFailed)
+        ) {
+          const reason = this.simpleImageGenerationCompleted
+            ? "Skipped after the requested image was generated."
+            : "Skipped after the single allowed image-generation attempt failed.";
+          const now = Date.now();
+          for (let i = index + 1; i < this.plan.steps.length; i += 1) {
+            const remainingStep = this.plan.steps[i];
+            if (remainingStep.status === "pending" || remainingStep.status === "in_progress") {
+              remainingStep.status = "skipped";
+              remainingStep.completedAt = now;
+              remainingStep.error = reason;
+              this.emitEvent("step_skipped", { step: remainingStep, reason });
+            }
+          }
+          index = this.plan.steps.length;
+        }
       } catch (error: Any) {
         clearTimeout(stepSoftTimeoutId);
         clearTimeout(stepTimeoutId);
 
         if (error instanceof AwaitingUserInputError) {
           this.waitingForUserInput = true;
+          const reasonCode = error.reasonCode || this.lastAwaitingUserInputReasonCode || undefined;
+          const pauseMessage = this.getAwaitingUserInputPauseMessage(error, step);
+          this.lastPauseReason = reasonCode || null;
           this.daemon.updateTaskStatus(this.task.id, "paused");
           this.emitEvent("task_paused", {
-            message: error.message,
+            message: pauseMessage,
+            reason: reasonCode,
             stepId: step.id,
             stepDescription: step.description,
           });
@@ -23783,6 +24111,7 @@ Return ONLY a JSON object:
         // Handle tool calls
         const toolResults: LLMToolResult[] = [];
         let batchSemanticSummary = "";
+        let simpleImageGenerationStopAfterTool = false;
         const mutationStarvationToolGateActive = mutationStarvationToolGateTurnsRemaining > 0;
         const forceFinalizeWithoutTools =
           this.guardrailPhaseAEnabled && responseHasToolUse && remainingTurnsAfterResponse <= 0;
@@ -23819,6 +24148,67 @@ Return ONLY a JSON object:
                 this.summarizeToolBatch("step", reports, assistantText || step.description),
               prepareCall: async (scheduledCall) => {
                 const content = scheduledCall.toolUse as Any;
+                const canonicalRequestedToolName = canonicalizeToolNameUtil(
+                  String(content.name || ""),
+                );
+
+                const simpleImageGenerationTask = this.isSimpleImageGenerationTask();
+                const terminalImageGenerationTask =
+                  simpleImageGenerationTask || this.isTerminalImageGenerationTask();
+                const requestedGenerateImage =
+                  this.isSimpleImageGenerationAllowedTool(canonicalRequestedToolName);
+                const requestedSemanticImageAnalysis =
+                  canonicalRequestedToolName === "analyze_image" ||
+                  canonicalRequestedToolName === "read_pdf_visual";
+                const requestedTaskListTool = canonicalRequestedToolName.startsWith("task_list_");
+
+                if (terminalImageGenerationTask) {
+                  let blockReason:
+                    | "non_image_tool"
+                    | "already_attempted"
+                    | "already_completed"
+                    | "already_failed"
+                    | null = null;
+                  if (this.simpleImageGenerationCompleted) {
+                    blockReason = "already_completed";
+                  } else if (this.simpleImageGenerationFailed) {
+                    blockReason = "already_failed";
+                  } else if (simpleImageGenerationTask && !requestedGenerateImage) {
+                    blockReason = "non_image_tool";
+                  } else if (
+                    !simpleImageGenerationTask &&
+                    (requestedSemanticImageAnalysis || requestedTaskListTool) &&
+                    !this.imageTaskExplicitlyRequestsSemanticImageAnalysis()
+                  ) {
+                    blockReason = "non_image_tool";
+                  } else if (requestedGenerateImage && this.simpleImageGenerationAttempted) {
+                    blockReason = "already_attempted";
+                  }
+                  if (blockReason) {
+                    skippedToolCallsByPolicy += 1;
+                    this.emitEvent("tool_blocked", {
+                      tool: content.name,
+                      reason: `simple_image_generation_${blockReason}`,
+                      message:
+                        "Image-generation tasks are limited to one generate_image call and cannot run subjective image review unless explicitly requested.",
+                    });
+                    return {
+                      status: "immediate" as const,
+                      call: scheduledCall,
+                      effectiveToolName: content.name,
+                      outcome: {
+                        toolResult: this.buildSimpleImageGenerationBlockedToolResult(
+                          String(content.name || ""),
+                          String(content.id || ""),
+                          blockReason,
+                        ),
+                      },
+                    };
+                  }
+                  if (requestedGenerateImage) {
+                    this.simpleImageGenerationAttempted = true;
+                  }
+                }
 
                 if (forceFinalizeWithoutTools) {
                   skippedToolCallsByPolicy += 1;
@@ -24785,6 +25175,13 @@ Return ONLY a JSON object:
                       if (rawOutcome.error) {
                         const failureMessage =
                           (rawOutcome.error as Any)?.message || "Tool execution failed";
+                        if (
+                          this.isTerminalImageGenerationTask() &&
+                          canonicalContentName === "generate_image"
+                        ) {
+                          this.simpleImageGenerationFailed = true;
+                          simpleImageGenerationStopAfterTool = true;
+                        }
                         this.releaseBatchCreatedPathReservation(
                           batchCreatedPaths,
                           content.name,
@@ -24965,6 +25362,17 @@ Return ONLY a JSON object:
                         this.taskHadAnyToolSuccess = true;
                         successfulToolNames.add(canonicalContentName);
                         this.recordToolResult(content.name, result, content.input);
+                        if (
+                          this.isTerminalImageGenerationTask() &&
+                          canonicalContentName === "generate_image"
+                        ) {
+                          this.simpleImageGenerationCompleted = true;
+                          simpleImageGenerationStopAfterTool = true;
+                          foundNewImage = true;
+                          stepSucceededWithFileMutation = true;
+                          this.lastAssistantOutput = "Created the requested image.";
+                          this.lastAssistantText = "Created the requested image.";
+                        }
                         if (
                           content.name === "browser_navigate" ||
                           content.name === "browser_go_back" ||
@@ -25197,6 +25605,15 @@ Return ONLY a JSON object:
                         }
                       }
 
+                      if (
+                        !toolSucceeded &&
+                        this.isTerminalImageGenerationTask() &&
+                        canonicalContentName === "generate_image"
+                      ) {
+                        this.simpleImageGenerationFailed = true;
+                        simpleImageGenerationStopAfterTool = true;
+                      }
+
                       if (content.name === "run_command" && !toolSucceeded) {
                         hadRunCommandFailure = true;
                       } else if (hadRunCommandFailure && toolSucceeded) {
@@ -25389,6 +25806,17 @@ Return ONLY a JSON object:
             });
 
             toolResults.push(...scheduledOutcome.toolResults);
+            if (
+              this.isSimpleImageGenerationTask() &&
+              this.simpleImageGenerationAttempted &&
+              !this.simpleImageGenerationCompleted &&
+              scheduledOutcome.toolResults.some((result) => result.is_error)
+            ) {
+              this.simpleImageGenerationFailed = true;
+              simpleImageGenerationStopAfterTool = true;
+              lastToolErrorReason =
+                lastToolErrorReason || "Tool generate_image failed or was unavailable.";
+            }
             batchSemanticSummary = this.combineBatchSemanticSummaries(scheduledOutcome.batches);
             this.recordSemanticSummary(batchSemanticSummary);
             this.emitEvent("log", {
@@ -26786,16 +27214,39 @@ Return ONLY a JSON object:
           );
         }
 
-        if (toolResults.length > 0) {
-          this.getToolBatchExecutor().appendOrderedToolResults(
-            messages,
-            toolResults,
-            forceFinalizeWithoutTools
-              ? "Turn budget exhausted for further tool calls. Provide the best possible final response using existing evidence only."
-              : undefined,
-          );
+          if (toolResults.length > 0) {
+            this.getToolBatchExecutor().appendOrderedToolResults(
+              messages,
+              toolResults,
+              simpleImageGenerationStopAfterTool
+                ? this.simpleImageGenerationCompleted
+                  ? "The requested image was generated. Do not call tools again; finish now."
+                  : "The single allowed image-generation attempt failed. Do not retry or use fallback tools; report the failure now."
+                : forceFinalizeWithoutTools
+                  ? "Turn budget exhausted for further tool calls. Provide the best possible final response using existing evidence only."
+                  : undefined,
+            );
 
-          if (skippedToolCallsByPolicy > 0) {
+            if (simpleImageGenerationStopAfterTool) {
+              if (this.simpleImageGenerationCompleted) {
+                step.status = "completed";
+                step.completedAt = Date.now();
+                this.emitEvent("step_completed", { step });
+              } else {
+                step.status = "failed";
+                step.error = lastToolErrorReason || "Image generation failed.";
+                step.completedAt = Date.now();
+                this.emitEvent("step_failed", {
+                  step,
+                  reason: step.error,
+                });
+              }
+              continueLoop = false;
+              state.messages = messages;
+              return { continueLoop, emptyResponseCount };
+            }
+
+            if (skippedToolCallsByPolicy > 0) {
             consecutiveSkippedToolOnlyTurns = updateSkippedToolOnlyTurnStreakUtil({
               skippedToolCalls: skippedToolCallsByPolicy,
               hasTextInThisResponse,
@@ -27281,6 +27732,7 @@ Return ONLY a JSON object:
           logger.info(`${this.logTag} Assistant asked a question, pausing for user input`);
           awaitingUserInput = true;
           awaitingUserInputReason = "required_decision";
+          this.lastRequiredDecisionPrompt = assistantText || null;
           this.emitEvent("awaiting_user_input", {
             stepId: step.id,
             stepDescription: step.description,
@@ -27796,7 +28248,15 @@ Return ONLY a JSON object:
           stepId: step.id,
           reason: "awaiting_user_input",
         });
-        throw new AwaitingUserInputError(awaitingUserInputReason || "Awaiting user input");
+        const reasonCode = awaitingUserInputReason || undefined;
+        const pauseSignal = new AwaitingUserInputError(
+          awaitingUserInputReason || "Awaiting user input",
+          { reasonCode },
+        );
+        throw new AwaitingUserInputError(pauseSignal.message, {
+          reasonCode,
+          userMessage: this.getAwaitingUserInputPauseMessage(pauseSignal, step),
+        });
       }
 
       const shouldPauseForFailureDerivedUserInput =
@@ -27819,7 +28279,10 @@ Return ONLY a JSON object:
           stepId: step.id,
           reason: "awaiting_user_input",
         });
-        throw new AwaitingUserInputError(awaitingUserInputReason);
+        throw new AwaitingUserInputError(awaitingUserInputReason, {
+          reasonCode: awaitingUserInputReason,
+          userMessage: lastFailureReason || undefined,
+        });
       }
 
       if (stepHadWebSearchCall) {
@@ -29619,6 +30082,7 @@ Return ONLY a JSON object:
       if (this.lastPauseReason?.startsWith("workspace_")) {
         this.workspacePreflightAcknowledged = true;
       }
+      this.markRequiredDecisionAddressedByUserInput();
       this.task.prompt = `${this.task.prompt}\n\nUSER UPDATE:\n${executionMessage}`;
     }
     this.toolRegistry.setCanvasSessionCutoff(shouldStartNewCanvasSession ? Date.now() : null);
@@ -31411,6 +31875,7 @@ Return ONLY a JSON object:
           );
           this.waitingForUserInput = true;
           pausedForUserInput = true;
+          this.lastRequiredDecisionPrompt = assistantText || null;
           this.emitEvent("awaiting_user_input", {
             reasonCode: "required_decision_followup",
             followUp: true,

@@ -159,7 +159,7 @@ export function setupImprovementHandlers(service: SubconsciousLoopService): void
         cadenceMinutes: validated.intervalMinutes,
         dispatchDefaults: {
           ...current.dispatchDefaults,
-          autoDispatch: validated.autoRun,
+          autoDispatch: false,
         },
         perExecutorPolicy: {
           ...current.perExecutorPolicy,

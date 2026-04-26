@@ -309,6 +309,32 @@ describe("readFilesByPatterns", () => {
     expect(fs.existsSync(path.join(tmpDir, "editor-startup-checklist.md"))).toBe(false);
   });
 
+  it("adds CoWork scratch paths to the local git exclude file instead of .gitignore", () => {
+    const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-read-files-git-"));
+    try {
+      fs.mkdirSync(path.join(repoDir, ".git", "info"), { recursive: true });
+      fs.writeFileSync(path.join(repoDir, ".git", "info", "exclude"), "# existing excludes\n", "utf-8");
+      const gitWorkspace: Workspace = {
+        ...workspace,
+        path: repoDir,
+        isTemp: false,
+      };
+      const daemon = {
+        logEvent: vi.fn(),
+        requestApproval: vi.fn(),
+      } as Any;
+
+      new FileTools(gitWorkspace, daemon, "task-git");
+
+      const exclude = fs.readFileSync(path.join(repoDir, ".git", "info", "exclude"), "utf-8");
+      expect(exclude).toContain(".cowork/tmp/");
+      expect(exclude).toContain(".cowork/automated-outputs/");
+      expect(fs.existsSync(path.join(repoDir, ".gitignore"))).toBe(false);
+    } finally {
+      fs.rmSync(repoDir, { recursive: true, force: true });
+    }
+  });
+
   it("keeps manual task writes at the requested workspace path", async () => {
     const daemon = {
       logEvent: vi.fn(),

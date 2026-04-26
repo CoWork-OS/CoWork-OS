@@ -37,6 +37,7 @@ import {
   Lightbulb,
   RefreshCw,
   MessageSquare,
+  Image as ImageIcon,
   Smile,
   ShieldCheck as ShieldCheckIcon,
   MessagesSquare,
@@ -145,6 +146,7 @@ type SettingsTab =
   | "voice"
   | "aimodels"
   | "llm"
+  | "image"
   | "search"
   | "telegram"
   | "slack"
@@ -508,7 +510,7 @@ type SidebarItem = {
 type SidebarSearchTarget = {
   tab?: SettingsTab;
   secondaryChannel?: SecondaryChannel;
-  aiModelsSubTab?: "llm" | "video" | "search";
+  aiModelsSubTab?: "llm" | "image" | "video" | "search";
   automationsSubTab?:
     | "routines"
     | "queue"
@@ -796,6 +798,21 @@ const sidebarSearchEntries: Partial<Record<SettingsTab, SidebarSearchEntry[]>> =
       },
       {
         terms: [
+          "image model",
+          "image generation",
+          "text to image",
+          "text-to-image",
+          "gpt-image",
+          "gpt image",
+          "nano-banana",
+          "nano banana",
+          "draw image",
+          "create image",
+        ],
+        target: { tab: "aimodels", aiModelsSubTab: "image" },
+      },
+      {
+        terms: [
           "video",
           "video model",
           "sora",
@@ -837,7 +854,14 @@ const sidebarSearchEntries: Partial<Record<SettingsTab, SidebarSearchEntry[]>> =
         target: { tab: "automations", automationsSubTab: "council" },
       },
       {
-        terms: ["subconscious", "reflection", "background reflection"],
+        terms: [
+          "workflow intelligence",
+          "continuity",
+          "reflection",
+          "workflow insights",
+          "background reflection",
+          "subconscious",
+        ],
         target: { tab: "automations", automationsSubTab: "subconscious" },
       },
       {
@@ -982,7 +1006,9 @@ export function Settings({
       ? "system"
       : initialTab === "skillhub"
         ? "skills"
-        : initialTab === "llm" || initialTab === "search"
+        : initialTab === "llm" ||
+            initialTab === "image" ||
+            initialTab === "search"
           ? "aimodels"
           : [
                 "queue",
@@ -1010,8 +1036,14 @@ export function Settings({
     "custom" | "store"
   >(initialTab === "skillhub" ? "store" : "custom");
   const [activeAIModelsSubTab, setActiveAIModelsSubTab] = useState<
-    "llm" | "video" | "search"
-  >(initialTab === "search" ? "search" : "llm");
+    "llm" | "image" | "video" | "search"
+  >(
+    initialTab === "search"
+      ? "search"
+      : initialTab === "image"
+        ? "image"
+        : "llm",
+  );
   const [activeAutomationsSubTab, setActiveAutomationsSubTab] = useState<
     "routines" | "queue" | "subconscious" | "scheduled" | "hooks" | "triggers" | "council"
   >(
@@ -1209,18 +1241,40 @@ export function Settings({
   const [openaiOAuthLoading, setOpenaiOAuthLoading] = useState(false);
 
   type ImageGenProvider = "openai" | "openai-codex" | "azure" | "openrouter" | "gemini";
+  type ImageGenModel = "gpt-image-2" | "gpt-image-1.5" | "nano-banana-2";
 
   // Image generation (text-to-image) state
   const [imageGenDefaultProvider, setImageGenDefaultProvider] = useState<ImageGenProvider | "">(
     "",
   );
-  const [imageGenDefaultModel, setImageGenDefaultModel] = useState<
-    "gpt-image-1.5" | "nano-banana-2" | ""
-  >("");
+  const [imageGenDefaultModel, setImageGenDefaultModel] = useState<ImageGenModel | "">("");
   const [imageGenBackupProvider, setImageGenBackupProvider] = useState<ImageGenProvider | "">("");
-  const [imageGenBackupModel, setImageGenBackupModel] = useState<
-    "gpt-image-1.5" | "nano-banana-2" | ""
-  >("");
+  const [imageGenBackupModel, setImageGenBackupModel] = useState<ImageGenModel | "">("");
+  const [imageOpenAIApiKey, setImageOpenAIApiKey] = useState("");
+  const [imageOpenAIModel, setImageOpenAIModel] = useState("gpt-image-2");
+  const [imageAzureApiKey, setImageAzureApiKey] = useState("");
+  const [imageAzureEndpoint, setImageAzureEndpoint] = useState("");
+  const [imageAzureDeployment, setImageAzureDeployment] = useState("");
+  const [imageAzureApiVersion, setImageAzureApiVersion] = useState(
+    "2024-02-15-preview",
+  );
+  const [imageGeminiApiKey, setImageGeminiApiKey] = useState("");
+  const [imageGeminiModel, setImageGeminiModel] =
+    useState<"nano-banana-2">("nano-banana-2");
+  const [imageOpenRouterApiKey, setImageOpenRouterApiKey] = useState("");
+  const [imageOpenRouterBaseUrl, setImageOpenRouterBaseUrl] = useState(
+    "https://openrouter.ai/api/v1",
+  );
+  const [imageOpenRouterModel, setImageOpenRouterModel] = useState(
+    "openai/gpt-image-2",
+  );
+  const [imageOpenAICodexModel, setImageOpenAICodexModel] =
+    useState("gpt-image-2");
+  const [imageOpenAITimeoutSeconds, setImageOpenAITimeoutSeconds] = useState("300");
+  const [imageOpenAICodexTimeoutSeconds, setImageOpenAICodexTimeoutSeconds] = useState("300");
+  const [imageAzureTimeoutSeconds, setImageAzureTimeoutSeconds] = useState("300");
+  const [imageOpenRouterTimeoutSeconds, setImageOpenRouterTimeoutSeconds] = useState("300");
+  const [imageGeminiTimeoutSeconds, setImageGeminiTimeoutSeconds] = useState("300");
 
   // Video generation state
   const [videoDefaultProvider, setVideoDefaultProvider] = useState<
@@ -2275,6 +2329,30 @@ export function Settings({
       } else {
         setImageGenBackupModel("");
       }
+      const ig = loadedSettings.imageGeneration;
+      setImageOpenAIApiKey(ig?.openai?.apiKey ?? "");
+      setImageOpenAIModel(ig?.openai?.model ?? "gpt-image-2");
+      setImageAzureApiKey(ig?.azure?.imageApiKey ?? "");
+      setImageAzureEndpoint(ig?.azure?.imageEndpoint ?? "");
+      setImageAzureDeployment(ig?.azure?.imageDeployment ?? "");
+      setImageAzureApiVersion(
+        ig?.azure?.imageApiVersion ?? "2024-02-15-preview",
+      );
+      setImageGeminiApiKey(ig?.gemini?.apiKey ?? "");
+      setImageGeminiModel(ig?.gemini?.model ?? "nano-banana-2");
+      setImageOpenRouterApiKey(ig?.openrouter?.apiKey ?? "");
+      setImageOpenRouterBaseUrl(
+        ig?.openrouter?.baseUrl ?? "https://openrouter.ai/api/v1",
+      );
+      setImageOpenRouterModel(
+        ig?.openrouter?.model ?? "openai/gpt-image-2",
+      );
+      setImageOpenAICodexModel(ig?.openaiCodex?.model ?? "gpt-image-2");
+      setImageOpenAITimeoutSeconds(String(ig?.timeouts?.openai ?? 300));
+      setImageOpenAICodexTimeoutSeconds(String(ig?.timeouts?.openaiCodex ?? 300));
+      setImageAzureTimeoutSeconds(String(ig?.timeouts?.azure ?? 300));
+      setImageOpenRouterTimeoutSeconds(String(ig?.timeouts?.openrouter ?? 300));
+      setImageGeminiTimeoutSeconds(String(ig?.timeouts?.gemini ?? 300));
 
       // Video generation settings
       const vg = loadedSettings.videoGeneration;
@@ -3147,6 +3225,11 @@ export function Settings({
         subscriptionToken: anthropicSubscriptionToken || undefined,
         authMethod: anthropicAuthMethod,
       };
+      const imageTimeoutSeconds = (value: string): number | undefined => {
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
+        return Math.min(1800, Math.max(30, Math.round(parsed)));
+      };
 
       // Always save settings for ALL providers to preserve API keys and model selections
       // when switching between providers
@@ -3273,12 +3356,58 @@ export function Settings({
           imageGenDefaultProvider ||
           imageGenDefaultModel ||
           imageGenBackupProvider ||
-          imageGenBackupModel
+          imageGenBackupModel ||
+          imageOpenAIApiKey ||
+          imageOpenAIModel ||
+          imageAzureApiKey ||
+          imageAzureEndpoint ||
+          imageAzureDeployment ||
+          imageAzureApiVersion ||
+          imageGeminiApiKey ||
+          imageGeminiModel ||
+          imageOpenRouterApiKey ||
+          imageOpenRouterBaseUrl ||
+          imageOpenRouterModel ||
+          imageOpenAICodexModel ||
+          imageOpenAITimeoutSeconds ||
+          imageOpenAICodexTimeoutSeconds ||
+          imageAzureTimeoutSeconds ||
+          imageOpenRouterTimeoutSeconds ||
+          imageGeminiTimeoutSeconds
             ? {
                 defaultProvider: imageGenDefaultProvider || undefined,
                 defaultModel: imageGenDefaultModel || undefined,
                 backupProvider: imageGenBackupProvider || undefined,
                 backupModel: imageGenBackupModel || undefined,
+                timeouts: {
+                  openai: imageTimeoutSeconds(imageOpenAITimeoutSeconds),
+                  openaiCodex: imageTimeoutSeconds(imageOpenAICodexTimeoutSeconds),
+                  azure: imageTimeoutSeconds(imageAzureTimeoutSeconds),
+                  openrouter: imageTimeoutSeconds(imageOpenRouterTimeoutSeconds),
+                  gemini: imageTimeoutSeconds(imageGeminiTimeoutSeconds),
+                },
+                openai: {
+                  apiKey: imageOpenAIApiKey || undefined,
+                  model: imageOpenAIModel || undefined,
+                },
+                azure: {
+                  imageApiKey: imageAzureApiKey || undefined,
+                  imageEndpoint: imageAzureEndpoint || undefined,
+                  imageDeployment: imageAzureDeployment || undefined,
+                  imageApiVersion: imageAzureApiVersion || undefined,
+                },
+                gemini: {
+                  apiKey: imageGeminiApiKey || undefined,
+                  model: imageGeminiModel || undefined,
+                },
+                openrouter: {
+                  apiKey: imageOpenRouterApiKey || undefined,
+                  baseUrl: imageOpenRouterBaseUrl || undefined,
+                  model: imageOpenRouterModel || undefined,
+                },
+                openaiCodex: {
+                  model: imageOpenAICodexModel || undefined,
+                },
               }
             : undefined,
         videoGeneration: {
@@ -3499,6 +3628,40 @@ export function Settings({
     }
   };
 
+  const renderModelSettingsActions = (options?: {
+    includeProviderActions?: boolean;
+  }) => (
+    <div className="settings-actions">
+      {options?.includeProviderActions && (
+        <>
+          <button
+            className="button-secondary"
+            onClick={handleTestConnection}
+            disabled={loading || testing || resettingCredentials}
+          >
+            {testing ? "Testing..." : "Test Connection"}
+          </button>
+          <button
+            className="button-secondary"
+            onClick={handleResetProviderCredentials}
+            disabled={loading || saving || testing || resettingCredentials}
+          >
+            {resettingCredentials
+              ? "Resetting..."
+              : "Reset Provider Credentials"}
+          </button>
+        </>
+      )}
+      <button
+        className="button-primary"
+        onClick={handleSave}
+        disabled={loading || saving || resettingCredentials}
+      >
+        {saving ? "Saving..." : "Save Settings"}
+      </button>
+    </div>
+  );
+
   const currentProviderType = settings.providerType as LLMProviderType;
   const resolvedProviderType = resolveCustomProviderId(currentProviderType);
   const selectedCustomProvider = CUSTOM_PROVIDER_MAP.get(resolvedProviderType);
@@ -3546,6 +3709,79 @@ export function Settings({
     providerModelOptionsByType,
   ]);
 
+  const activeImageTab = imageGenDefaultProvider || "openai";
+
+  const imageProviders = [
+    {
+      type: "openai" as const,
+      name: "OpenAI Image",
+      icon: <CircleDot {...S} />,
+    },
+    { type: "azure" as const, name: "Azure Image", icon: <Cloud {...S} /> },
+    { type: "gemini" as const, name: "Gemini Image", icon: <Star {...S} /> },
+    {
+      type: "openrouter" as const,
+      name: "OpenRouter",
+      icon: <Globe {...S} />,
+    },
+    {
+      type: "openai-codex" as const,
+      name: "OpenAI OAuth",
+      icon: <Sparkles {...S} />,
+    },
+  ];
+
+  const getImageProviderModel = (provider: ImageGenProvider): ImageGenModel =>
+    provider === "gemini" ? "nano-banana-2" : "gpt-image-2";
+
+  const getImageModelLabel = (model: ImageGenModel): string =>
+    model === "nano-banana-2"
+      ? "nano-banana-2 (Gemini 3.1 Flash Image)"
+      : model;
+
+  const renderImageTimeoutField = (
+    value: string,
+    onChange: (value: string) => void,
+  ) => (
+    <>
+      <label className="settings-label" style={{ marginTop: "8px" }}>
+        Timeout before fallback (seconds)
+      </label>
+      <input
+        className="settings-input"
+        type="number"
+        min="30"
+        max="1800"
+        step="1"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      <p className="settings-hint">
+        The next image provider or deployment is tried only after this timeout.
+      </p>
+    </>
+  );
+
+  const selectImageDefaultProvider = (provider: ImageGenProvider) => {
+    setImageGenDefaultProvider(provider);
+    const compatibleModel = getImageProviderModel(provider);
+    if (
+      imageGenDefaultModel &&
+      imageGenDefaultModel !== compatibleModel
+    ) {
+      setImageGenDefaultModel(compatibleModel);
+    }
+  };
+
+  const selectImageBackupProvider = (provider: ImageGenProvider | "") => {
+    setImageGenBackupProvider(provider);
+    if (!provider) return;
+    const compatibleModel = getImageProviderModel(provider);
+    if (imageGenBackupModel && imageGenBackupModel !== compatibleModel) {
+      setImageGenBackupModel(compatibleModel);
+    }
+  };
+
   const activeVideoTab = videoDefaultProvider || "openai";
 
   const videoProviders = [
@@ -3563,6 +3799,291 @@ export function Settings({
     },
     { type: "kling" as const, name: "Kling", icon: <Zap {...S} /> },
   ];
+
+  const renderImagePanel = () => (
+    <div className="llm-provider-panel">
+      <div className="llm-provider-header">
+        <h2>Image Provider</h2>
+        <p className="settings-description">
+          Choose which service to use for image generation. The selected
+          provider will be used by the image creation tool.
+        </p>
+      </div>
+      <div className="llm-provider-tabs">
+        {imageProviders.map((provider) => (
+          <button
+            key={provider.type}
+            type="button"
+            className={`llm-provider-tab ${activeImageTab === provider.type ? "active" : ""}`}
+            onClick={() => selectImageDefaultProvider(provider.type)}
+          >
+            {provider.icon}
+            <span className="llm-provider-tab-label">{provider.name}</span>
+          </button>
+        ))}
+      </div>
+      <div className="llm-provider-content">
+        {activeImageTab === "openai" && (
+          <div className="settings-section">
+            <h3>OpenAI GPT Image</h3>
+            <p className="settings-hint">
+              Optionally use a dedicated API key for image generation. Leave
+              blank to reuse the OpenAI API key from AI Model.
+            </p>
+            <label className="settings-label">
+              API Key (image-specific, optional)
+            </label>
+            <input
+              className="settings-input"
+              type="password"
+              placeholder="Leave blank to use the OpenAI API key"
+              value={imageOpenAIApiKey}
+              onChange={(e) => setImageOpenAIApiKey(e.target.value)}
+            />
+            <label className="settings-label">Default model</label>
+            <select
+              className="settings-select"
+              value={imageOpenAIModel}
+              onChange={(e) => {
+                setImageOpenAIModel(e.target.value);
+                setImageGenDefaultModel(
+                  e.target.value === "gpt-image-2" ? "gpt-image-2" : "gpt-image-1.5",
+                );
+              }}
+            >
+              <option value="gpt-image-2">gpt-image-2</option>
+              <option value="gpt-image-1.5">gpt-image-1.5</option>
+              <option value="gpt-image-1">gpt-image-1</option>
+              <option value="dall-e-3">dall-e-3</option>
+              <option value="dall-e-2">dall-e-2</option>
+            </select>
+            {renderImageTimeoutField(imageOpenAITimeoutSeconds, setImageOpenAITimeoutSeconds)}
+          </div>
+        )}
+
+        {activeImageTab === "azure" && (
+          <div className="settings-section">
+            <h3>Azure OpenAI Image</h3>
+            <p className="settings-hint">
+              Optionally use a dedicated Azure resource for image generation.
+              Leave credentials blank to reuse the Azure chat credentials from
+              AI Model.
+            </p>
+            <label className="settings-label">
+              API Key (image-specific, optional)
+            </label>
+            <input
+              className="settings-input"
+              type="password"
+              placeholder="Leave blank to use the Azure chat API key"
+              value={imageAzureApiKey}
+              onChange={(e) => setImageAzureApiKey(e.target.value)}
+            />
+            <label className="settings-label" style={{ marginTop: "8px" }}>
+              Endpoint (image-specific, optional)
+            </label>
+            <input
+              className="settings-input"
+              type="text"
+              placeholder="Leave blank to use the Azure chat endpoint"
+              value={imageAzureEndpoint}
+              onChange={(e) => setImageAzureEndpoint(e.target.value)}
+            />
+            <label className="settings-label" style={{ marginTop: "8px" }}>
+              Image deployment name
+            </label>
+            <input
+              className="settings-input"
+              type="text"
+              placeholder="e.g. gpt-image-2"
+              value={imageAzureDeployment}
+              onChange={(e) => {
+                setImageAzureDeployment(e.target.value);
+                setImageGenDefaultModel(
+                  e.target.value.trim().toLowerCase() === "gpt-image-2"
+                    ? "gpt-image-2"
+                    : "gpt-image-1.5",
+                );
+              }}
+            />
+            <label className="settings-label" style={{ marginTop: "8px" }}>
+              API version
+            </label>
+            <input
+              className="settings-input"
+              type="text"
+              placeholder="2024-02-15-preview"
+              value={imageAzureApiVersion}
+              onChange={(e) => setImageAzureApiVersion(e.target.value)}
+            />
+            {renderImageTimeoutField(imageAzureTimeoutSeconds, setImageAzureTimeoutSeconds)}
+          </div>
+        )}
+
+        {activeImageTab === "gemini" && (
+          <div className="settings-section">
+            <h3>Gemini Image</h3>
+            <p className="settings-hint">
+              Optionally use a dedicated Gemini API key for image generation.
+              Leave blank to reuse the Gemini API key from AI Model.
+            </p>
+            <label className="settings-label">
+              API Key (image-specific, optional)
+            </label>
+            <input
+              className="settings-input"
+              type="password"
+              placeholder="Leave blank to use the Gemini API key"
+              value={imageGeminiApiKey}
+              onChange={(e) => setImageGeminiApiKey(e.target.value)}
+            />
+            <label className="settings-label">Default model</label>
+            <select
+              className="settings-select"
+              value={imageGeminiModel}
+              onChange={(e) => {
+                setImageGeminiModel(e.target.value as "nano-banana-2");
+                setImageGenDefaultModel("nano-banana-2");
+              }}
+            >
+              <option value="nano-banana-2">
+                nano-banana-2 (Gemini 3.1 Flash Image)
+              </option>
+            </select>
+            {renderImageTimeoutField(imageGeminiTimeoutSeconds, setImageGeminiTimeoutSeconds)}
+          </div>
+        )}
+
+        {activeImageTab === "openrouter" && (
+          <div className="settings-section">
+            <h3>OpenRouter Image</h3>
+            <p className="settings-hint">
+              Optionally use dedicated OpenRouter credentials for image
+              generation. Leave blank to reuse OpenRouter settings from AI
+              Model.
+            </p>
+            <label className="settings-label">
+              API Key (image-specific, optional)
+            </label>
+            <input
+              className="settings-input"
+              type="password"
+              placeholder="Leave blank to use the OpenRouter API key"
+              value={imageOpenRouterApiKey}
+              onChange={(e) => setImageOpenRouterApiKey(e.target.value)}
+            />
+            <label className="settings-label" style={{ marginTop: "8px" }}>
+              Base URL
+            </label>
+            <input
+              className="settings-input"
+              type="text"
+              placeholder="https://openrouter.ai/api/v1"
+              value={imageOpenRouterBaseUrl}
+              onChange={(e) => setImageOpenRouterBaseUrl(e.target.value)}
+            />
+            <label className="settings-label">Default model</label>
+            <input
+              className="settings-input"
+              type="text"
+              placeholder="openai/gpt-image-2"
+              value={imageOpenRouterModel}
+              onChange={(e) => {
+                setImageOpenRouterModel(e.target.value);
+                setImageGenDefaultModel(
+                  e.target.value.toLowerCase().includes("gpt-image-2")
+                    ? "gpt-image-2"
+                    : "gpt-image-1.5",
+                );
+              }}
+            />
+            {renderImageTimeoutField(imageOpenRouterTimeoutSeconds, setImageOpenRouterTimeoutSeconds)}
+          </div>
+        )}
+
+        {activeImageTab === "openai-codex" && (
+          <div className="settings-section">
+            <h3>OpenAI OAuth Image</h3>
+            <p className="settings-hint">
+              Uses the OpenAI OAuth connection configured in AI Model.
+            </p>
+            <label className="settings-label">Default model</label>
+            <select
+              className="settings-select"
+              value={imageOpenAICodexModel}
+              onChange={(e) => {
+                setImageOpenAICodexModel(e.target.value);
+                setImageGenDefaultModel(
+                  e.target.value === "gpt-image-2" ? "gpt-image-2" : "gpt-image-1.5",
+                );
+              }}
+            >
+              <option value="gpt-image-2">gpt-image-2</option>
+              <option value="gpt-image-1.5">gpt-image-1.5</option>
+              <option value="gpt-image-1">gpt-image-1</option>
+            </select>
+            {renderImageTimeoutField(
+              imageOpenAICodexTimeoutSeconds,
+              setImageOpenAICodexTimeoutSeconds,
+            )}
+          </div>
+        )}
+
+        <div className="settings-section" style={{ marginTop: "16px" }}>
+          <label className="settings-label">Fallback provider</label>
+          <p className="settings-hint">
+            If the selected provider fails, fall back to this one.
+          </p>
+          <select
+            className="settings-select"
+            value={imageGenBackupProvider}
+            onChange={(e) =>
+              selectImageBackupProvider(
+                (e.target.value || "") as ImageGenProvider | "",
+              )
+            }
+          >
+            <option value="">None</option>
+            {imageProviders.map((provider) => (
+              <option key={provider.type} value={provider.type}>
+                {provider.name}
+              </option>
+            ))}
+          </select>
+          {imageGenBackupProvider && (
+            <>
+              <label className="settings-label" style={{ marginTop: "8px" }}>
+                Fallback model
+              </label>
+              <select
+                className="settings-select"
+                value={
+                  imageGenBackupModel ===
+                  getImageProviderModel(imageGenBackupProvider)
+                    ? imageGenBackupModel
+                    : ""
+                }
+                onChange={(e) =>
+                  setImageGenBackupModel(
+                    (e.target.value || "") as ImageGenModel | "",
+                  )
+                }
+              >
+                <option value="">Auto (recommended)</option>
+                <option value={getImageProviderModel(imageGenBackupProvider)}>
+                  {getImageModelLabel(
+                    getImageProviderModel(imageGenBackupProvider),
+                  )}
+                </option>
+              </select>
+            </>
+          )}
+        </div>
+
+        {renderModelSettingsActions()}
+      </div>
+    </div>
+  );
 
   const renderVideoPanel = () => (
     <div className="llm-provider-panel">
@@ -3950,6 +4471,8 @@ export function Settings({
             <option value="kling">Kling</option>
           </select>
         </div>
+
+        {renderModelSettingsActions()}
       </div>
     </div>
   );
@@ -6376,95 +6899,6 @@ export function Settings({
           </div>
         </div>
 
-        <div className="settings-section">
-          <h3>Image Generation (Text-to-Image)</h3>
-          <p className="settings-description">
-            Default and backup model for prompts like &quot;draw a snow
-            leopard&quot; or &quot;create an image of...&quot;. The agent will
-            try the default first, then fall back to the backup if it fails.
-          </p>
-          <div className="settings-subsection" style={{ marginTop: "8px" }}>
-            <label className="settings-label">Default provider</label>
-            <select
-              className="settings-select"
-              value={imageGenDefaultProvider}
-              onChange={(e) =>
-                setImageGenDefaultProvider((e.target.value || "") as ImageGenProvider | "")
-              }
-            >
-              <option value="">Auto (best configured)</option>
-              <option value="azure">Azure OpenAI</option>
-              <option value="openai">OpenAI API key</option>
-              <option value="openai-codex">OpenAI OAuth</option>
-              <option value="openrouter">OpenRouter</option>
-              <option value="gemini">Gemini</option>
-            </select>
-          </div>
-          <div className="settings-subsection" style={{ marginTop: "8px" }}>
-            <label className="settings-label">Default model</label>
-            <select
-              className="settings-select"
-              value={imageGenDefaultModel}
-              onChange={(e) =>
-                setImageGenDefaultModel(
-                  (e.target.value || "") as
-                    | "gpt-image-1.5"
-                    | "nano-banana-2"
-                    | "",
-                )
-              }
-            >
-              <option value="">Auto (best configured)</option>
-              <option value="gpt-image-1.5">
-                gpt-image-1.5 (OpenAI / OpenAI OAuth / Azure / OpenRouter)
-              </option>
-              <option value="nano-banana-2">
-                nano-banana-2 (Gemini 3.1 Flash Image)
-              </option>
-            </select>
-          </div>
-          <div className="settings-subsection" style={{ marginTop: "8px" }}>
-            <label className="settings-label">Backup provider</label>
-            <select
-              className="settings-select"
-              value={imageGenBackupProvider}
-              onChange={(e) =>
-                setImageGenBackupProvider((e.target.value || "") as ImageGenProvider | "")
-              }
-            >
-              <option value="">Auto fallback</option>
-              <option value="azure">Azure OpenAI</option>
-              <option value="openai">OpenAI API key</option>
-              <option value="openai-codex">OpenAI OAuth</option>
-              <option value="openrouter">OpenRouter</option>
-              <option value="gemini">Gemini</option>
-            </select>
-          </div>
-          <div className="settings-subsection" style={{ marginTop: "8px" }}>
-            <label className="settings-label">Backup model</label>
-            <select
-              className="settings-select"
-              value={imageGenBackupModel}
-              onChange={(e) =>
-                setImageGenBackupModel(
-                  (e.target.value || "") as
-                    | "gpt-image-1.5"
-                    | "nano-banana-2"
-                    | "",
-                )
-              }
-            >
-              <option value="">None</option>
-              <option value="gpt-image-1.5">
-                gpt-image-1.5 (OpenAI / OpenAI OAuth / Azure / OpenRouter)
-              </option>
-              <option value="nano-banana-2">
-                nano-banana-2 (Gemini 3.1 Flash Image)
-              </option>
-            </select>
-          </div>
-        </div>
-
         {testResult && (
           <div
             className={`test-result ${testResult.success ? "success" : "error"}`}
@@ -6515,31 +6949,7 @@ export function Settings({
           </div>
         )}
 
-        <div className="settings-actions">
-          <button
-            className="button-secondary"
-            onClick={handleTestConnection}
-            disabled={loading || testing || resettingCredentials}
-          >
-            {testing ? "Testing..." : "Test Connection"}
-          </button>
-          <button
-            className="button-secondary"
-            onClick={handleResetProviderCredentials}
-            disabled={loading || saving || testing || resettingCredentials}
-          >
-            {resettingCredentials
-              ? "Resetting..."
-              : "Reset Provider Credentials"}
-          </button>
-          <button
-            className="button-primary"
-            onClick={handleSave}
-            disabled={loading || saving || resettingCredentials}
-          >
-            {saving ? "Saving..." : "Save Settings"}
-          </button>
-        </div>
+        {renderModelSettingsActions({ includeProviderActions: true })}
       </div>
     </div>
   );
@@ -6781,7 +7191,8 @@ export function Settings({
                 <div className="more-channels-header">
                   <h2>AI & Models</h2>
                   <p className="settings-description">
-                    Configure AI model, video model, and web search
+                    Configure AI model, image model, video model, and web
+                    search
                   </p>
                 </div>
                 <div className="more-channels-tabs">
@@ -6791,6 +7202,13 @@ export function Settings({
                   >
                     <Layers {...S} />
                     <span>AI Model</span>
+                  </button>
+                  <button
+                    className={`more-channels-tab ${activeAIModelsSubTab === "image" ? "active" : ""}`}
+                    onClick={() => setActiveAIModelsSubTab("image")}
+                  >
+                    <ImageIcon {...S} />
+                    <span>Image Model</span>
                   </button>
                   <button
                     className={`more-channels-tab ${activeAIModelsSubTab === "video" ? "active" : ""}`}
@@ -6809,6 +7227,7 @@ export function Settings({
                 </div>
                 <div className="more-channels-content">
                   {activeAIModelsSubTab === "llm" && renderLLMPanel()}
+                  {activeAIModelsSubTab === "image" && renderImagePanel()}
                   {activeAIModelsSubTab === "video" && renderVideoPanel()}
                   {activeAIModelsSubTab === "search" && <SearchSettings />}
                 </div>
@@ -6820,8 +7239,8 @@ export function Settings({
                 <div className="more-channels-header">
                   <h2>Automations</h2>
                   <p className="settings-description">
-                    Routines first, then queueing, core reflection, and the lower-level automation
-                    engines that routines compile into
+                    Routines first, then queueing, workflow intelligence, and the lower-level automation engines
+                    that routines compile into
                   </p>
                 </div>
                 <div className="more-channels-tabs">
@@ -6852,7 +7271,7 @@ export function Settings({
                         {key === "routines" && "Routines"}
                         {key === "queue" && "Task Queue"}
                         {key === "council" && "R&D Council"}
-                        {key === "subconscious" && "Subconscious"}
+                        {key === "subconscious" && "Workflow Intelligence"}
                         {key === "scheduled" && "Scheduled Tasks"}
                         {key === "hooks" && "Webhooks"}
                         {key === "triggers" && "Event Triggers"}

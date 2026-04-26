@@ -25,8 +25,87 @@ export const TIMELINE_EVENT_TYPES: readonly TimelineEventType[] = [
 
 const TIMELINE_EVENT_SET = new Set<string>(TIMELINE_EVENT_TYPES);
 
+const TIMELINE_STAGE_ACTIVITY_LABELS: Record<TimelineStage, string> = {
+  DISCOVER: "Discovering",
+  BUILD: "Building",
+  VERIFY: "Checking results",
+  FIX: "Fixing issues",
+  DELIVER: "Preparing final response",
+};
+
+const ACTIVITY_VERB_LABELS: Record<string, string> = {
+  add: "Adding",
+  adapt: "Adapting",
+  analyze: "Analyzing",
+  apply: "Applying",
+  build: "Building",
+  check: "Checking",
+  configure: "Configuring",
+  continue: "Continuing",
+  create: "Creating",
+  delete: "Deleting",
+  discover: "Discovering",
+  ensure: "Ensuring",
+  fetch: "Fetching",
+  fix: "Fixing",
+  generate: "Generating",
+  implement: "Implementing",
+  inspect: "Inspecting",
+  install: "Installing",
+  load: "Loading",
+  modify: "Modifying",
+  open: "Opening",
+  parse: "Parsing",
+  plan: "Planning",
+  prepare: "Preparing",
+  read: "Reading",
+  refactor: "Refactoring",
+  remove: "Removing",
+  review: "Reviewing",
+  run: "Running",
+  search: "Searching",
+  start: "Starting",
+  summarize: "Summarizing",
+  test: "Testing",
+  update: "Updating",
+  verify: "Checking",
+  write: "Writing",
+};
+
 export function isTimelineEventType(value: unknown): value is TimelineEventType {
   return typeof value === "string" && TIMELINE_EVENT_SET.has(value);
+}
+
+export function formatTimelineActivityLabel(raw: string, maxLength = 72): string {
+  let text = String(raw || "").trim();
+  if (!text) return "";
+
+  text = text.replace(/^["\u201c\u201d'`]+/, "").replace(/["\u201c\u201d'`]+$/, "");
+  const quotedLead = text.match(/^["\u201c\u201d'`]([^"\u201c\u201d'`]{3,})["\u201c\u201d'`]/);
+  if (quotedLead?.[1]) {
+    text = quotedLead[1].trim();
+  }
+  text = (text.split(/(?<=[.!?])\s+|\s+[\u2014\u2013-]\s+/)[0] || text).trim();
+  text = text.replace(/^Working on:\s*/i, "").trim();
+
+  const upper = text.toUpperCase();
+  if (upper in TIMELINE_STAGE_ACTIVITY_LABELS) {
+    return TIMELINE_STAGE_ACTIVITY_LABELS[upper as TimelineStage];
+  }
+
+  if (/ing\b/i.test(text.split(/\s+/, 1)[0] || "")) {
+    return text.length > maxLength ? `${text.slice(0, maxLength - 3).trimEnd()}...` : text;
+  }
+
+  const imperative = /^([A-Za-z]+)(\b[\s\S]*)$/.exec(text);
+  if (imperative?.[1]) {
+    const replacement = ACTIVITY_VERB_LABELS[imperative[1].toLowerCase()];
+    if (replacement) {
+      text = `${replacement}${imperative[2] || ""}`;
+    }
+  }
+
+  return text.length > maxLength ? `${text.slice(0, maxLength - 3).trimEnd()}...` : text;
 }
 
 function coerceEventStatus(value: unknown): TimelineEventStatus | undefined {
@@ -398,7 +477,7 @@ export function inferTimelineSubStageLabel(type: EventType): string | undefined 
       return "Adjusting approach";
     case "execution_mode_auto_promoted":
     case "required_tool_inference_decision":
-      return "Adapting to changes";
+      return "Adjusting the plan";
     // Verification-related
     case "verification_failed":
     case "verification_checklist_evaluated":

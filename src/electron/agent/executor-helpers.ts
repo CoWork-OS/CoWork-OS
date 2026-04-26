@@ -23,9 +23,14 @@ import {
 // ===== Custom Error =====
 
 export class AwaitingUserInputError extends Error {
-  constructor(message: string) {
+  reasonCode?: string;
+  userMessage?: string;
+
+  constructor(message: string, opts?: { reasonCode?: string; userMessage?: string }) {
     super(message);
     this.name = "AwaitingUserInputError";
+    this.reasonCode = opts?.reasonCode;
+    this.userMessage = opts?.userMessage;
   }
 }
 

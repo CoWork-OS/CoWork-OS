@@ -1238,6 +1238,7 @@ export class AgentDaemon extends EventEmitter {
     const title = String(task.title || "").trim();
     const source = String(task.source || "manual").trim().toLowerCase();
     if (source === "hook") return false;
+    if (source === "subconscious") return false;
     if (task.parentTaskId) return false;
     if (task.agentType === "sub" || task.agentType === "parallel") return false;
     if (task.agentConfig?.collaborativeMode || task.agentConfig?.multiLlmMode) return false;

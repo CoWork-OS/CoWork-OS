@@ -28,7 +28,7 @@ In practice, that means:
 - it can chat with you like a normal assistant
 - it can execute multi-step tasks using tools such as files, shell, browser automation, and connectors
 - it can run across desktop, messaging channels, or a headless control plane
-- it can keep background systems running through Memory, Heartbeat, Scheduled Tasks, Daily Briefing, and Subconscious
+- it can keep background systems running through Memory, Heartbeat, Workflow Intelligence, Scheduled Tasks, and Daily Briefing
 - it keeps approvals, guardrails, encrypted settings, and workspace boundaries in the product instead of expecting you to bolt them on later
 
 If ChatGPT feels like “ask a smart model a question,” CoWork OS is closer to “give an operator a job, tools, memory, and rules.”
@@ -109,7 +109,7 @@ You can add:
 - Scheduled Tasks for time-based workflows
 - Event Triggers and Webhooks for inbound events
 - Heartbeat for periodic checks
-- Subconscious for reflective follow-up and dispatch
+- Workflow Intelligence for reviewable next actions and reflective follow-up
 
 That changes the relationship. You stop using it only when you remember to ask, and start using it as a system that keeps watch.
 

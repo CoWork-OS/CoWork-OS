@@ -72,12 +72,14 @@ async function renameIfNeeded(fromName, toName) {
 
 async function alignEntry(entry, allFiles) {
   const desiredName = entry.name;
-  if (allFiles.some((file) => file.name === desiredName)) {
+  const existing = allFiles.find((file) => file.name === desiredName);
+  if (existing && (entry.size == null || existing.size === entry.size)) {
     return;
   }
 
   const desiredExt = path.extname(desiredName);
   const candidates = allFiles.filter((file) => {
+    if (file.name === desiredName) return false;
     if (file.name.endsWith(".blockmap")) return false;
     if (path.extname(file.name) !== desiredExt) return false;
     if (entry.size != null && file.size !== entry.size) return false;

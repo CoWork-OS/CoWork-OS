@@ -183,6 +183,41 @@ describe("evaluateToolAvailability computer_use", () => {
   });
 });
 
+describe("evaluateToolAvailability session checklist", () => {
+  const baseCtx = {
+    taskText: "summarize the latest release reactions",
+    taskDomain: "general" as const,
+    taskIntent: "execution" as const,
+    executionMode: "execute" as const,
+    requiredTools: undefined as Iterable<string> | undefined,
+    recentlyUsedTools: undefined as Iterable<string> | undefined,
+  };
+
+  it("defers checklist tools for ordinary read-only answer work", () => {
+    const r = evaluateToolAvailability("task_list_create", baseCtx);
+    expect(r.decision).toBe("defer");
+    expect(r.reason).toBe("checklist_substantial_execution_required");
+  });
+
+  it("allows checklist tools for substantial execution work", () => {
+    const r = evaluateToolAvailability("task_list_create", {
+      ...baseCtx,
+      taskText: "Implement the settings migration and verify it with tests.",
+    });
+    expect(r.decision).toBe("allow");
+  });
+
+  it("keeps checklist tools hidden in plan mode", () => {
+    const r = evaluateToolAvailability("task_list_create", {
+      ...baseCtx,
+      executionMode: "plan",
+      taskText: "Plan the migration approach.",
+    });
+    expect(r.decision).toBe("defer");
+    expect(r.reason).toBe("checklist_execute_mode_required");
+  });
+});
+
 describe("evaluateToolAvailability open_application", () => {
   const baseCtx = {
     taskText: "Open Calculator and show me the 159th Fibonacci number.",

@@ -9,6 +9,14 @@ const ROOT = path.resolve(import.meta.dirname, "..");
 const PACKAGE_JSON_PATH = path.join(ROOT, "package.json");
 const ELECTRON_DEPS = ["electron", "@electron/rebuild"];
 
+function isFalseEnv(value) {
+  return ["0", "false", "no", "off"].includes(String(value || "").trim().toLowerCase());
+}
+
+function isMacBuild(args) {
+  return args.some((arg) => arg === "--mac" || arg.startsWith("--mac="));
+}
+
 function readPackageJson() {
   return JSON.parse(fs.readFileSync(PACKAGE_JSON_PATH, "utf8"));
 }
@@ -17,7 +25,7 @@ function writePackageJson(pkg) {
   fs.writeFileSync(PACKAGE_JSON_PATH, `${JSON.stringify(pkg, null, 2)}\n`);
 }
 
-function preparePackageJsonForElectronBuilder() {
+function preparePackageJsonForElectronBuilder(args) {
   const pkg = readPackageJson();
   pkg.dependencies = pkg.dependencies || {};
   pkg.devDependencies = pkg.devDependencies || {};
@@ -29,6 +37,23 @@ function preparePackageJsonForElectronBuilder() {
       delete pkg.dependencies[dep];
       changed = true;
     }
+  }
+
+  if (isMacBuild(args) && process.env.COWORK_MAC_UNSIGNED === "1") {
+    pkg.build = pkg.build || {};
+    pkg.build.mac = pkg.build.mac || {};
+    pkg.build.mac.identity = null;
+    pkg.build.mac.notarize = false;
+    pkg.build.mac.gatekeeperAssess = false;
+    process.env.CSC_IDENTITY_AUTO_DISCOVERY = "false";
+    changed = true;
+  } else if (isMacBuild(args) && isFalseEnv(process.env.CSC_IDENTITY_AUTO_DISCOVERY)) {
+    pkg.build = pkg.build || {};
+    pkg.build.mac = pkg.build.mac || {};
+    pkg.build.mac.identity = null;
+    pkg.build.mac.notarize = false;
+    pkg.build.mac.gatekeeperAssess = false;
+    changed = true;
   }
 
   if (changed) {
@@ -58,8 +83,9 @@ function main() {
   let status = 1;
 
   try {
-    preparePackageJsonForElectronBuilder();
-    status = runElectronBuilder(process.argv.slice(2));
+    const args = process.argv.slice(2);
+    preparePackageJsonForElectronBuilder(args);
+    status = runElectronBuilder(args);
   } finally {
     fs.writeFileSync(PACKAGE_JSON_PATH, originalPackageJson);
   }

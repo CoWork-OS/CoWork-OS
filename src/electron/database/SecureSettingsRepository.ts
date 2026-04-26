@@ -221,7 +221,10 @@ export class SecureSettingsRepository {
    * Load settings with detailed status information
    * Use this when you need to distinguish between "not found" vs "corrupted" vs "decryption failed"
    */
-  loadWithStatus<T extends object>(category: SettingsCategory): LoadResult<T> {
+  loadWithStatus<T extends object>(
+    category: SettingsCategory,
+    options: { logErrors?: boolean } = {},
+  ): LoadResult<T> {
     const row = this.findByCategory(category);
     if (!row) {
       return { status: "not_found" };
@@ -233,9 +236,11 @@ export class SecureSettingsRepository {
       // Verify checksum to detect tampering
       const checksum = this.computeChecksum(decrypted);
       if (checksum !== row.checksum) {
-        console.error(
-          `[SecureSettingsRepository] Checksum mismatch for category: ${category}. Data may be corrupted.`,
-        );
+        if (options.logErrors !== false) {
+          console.error(
+            `[SecureSettingsRepository] Checksum mismatch for category: ${category}. Data may be corrupted.`,
+          );
+        }
         return {
           status: "checksum_mismatch",
           error: "Data integrity check failed. Settings may be corrupted.",
@@ -248,10 +253,12 @@ export class SecureSettingsRepository {
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      console.error(
-        `[SecureSettingsRepository] Failed to decrypt settings for category: ${category}`,
-        error,
-      );
+      if (options.logErrors !== false) {
+        console.error(
+          `[SecureSettingsRepository] Failed to decrypt settings for category: ${category}`,
+          error,
+        );
+      }
 
       // Detect specific failure modes
       if (errorMessage.includes("OS encryption was used but is no longer available")) {
@@ -273,8 +280,11 @@ export class SecureSettingsRepository {
    * Check if settings can be decrypted (health check)
    * Returns the status without exposing the actual data
    */
-  checkHealth(category: SettingsCategory): LoadStatus {
-    return this.loadWithStatus(category).status;
+  checkHealth(
+    category: SettingsCategory,
+    options: { logErrors?: boolean } = {},
+  ): LoadStatus {
+    return this.loadWithStatus(category, options).status;
   }
 
   /**

@@ -117,6 +117,24 @@ bounded_research=true
     expect(routed.intent).toBe("execution");
   });
 
+  it("routes infographic image prompts as image creation", () => {
+    const routed = IntentRouter.route(
+      "Create infographic",
+      "create an infographic image explaining snow leopards",
+    );
+    expect(routed.intent).toBe("execution");
+    expect(routed.signals).toContain("image-creation-intent");
+  });
+
+  it("routes app avatar image prompts as image creation", () => {
+    const routed = IntentRouter.route(
+      "Create avatar",
+      "generate an image of a cool avatar of a snow leopard for cowork os app",
+    );
+    expect(routed.intent).toBe("execution");
+    expect(routed.signals).toContain("image-creation-intent");
+  });
+
   it("routes explicit skill activation prompts to execution", () => {
     const routed = IntentRouter.route(
       "Novel task",

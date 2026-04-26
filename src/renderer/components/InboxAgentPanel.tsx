@@ -1,5 +1,7 @@
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   AlertCircle,
   Archive,
@@ -7,6 +9,7 @@ import {
   CheckSquare,
   ChevronDown,
   Clock,
+  Forward,
   Inbox,
   MailSearch,
   MailOpen,
@@ -22,21 +25,25 @@ import {
 } from "lucide-react";
 import {
   MailboxActionProposal,
+  MailboxAskResult,
   MailboxAutomationRecord,
+  MailboxClientState,
   MailboxCommitment,
   MailboxCompanyCandidate,
+  MailboxDomainCategory,
   MailboxForwardRecipe,
   MailboxDigestSnapshot,
   MailboxConditionOperator,
   MailboxMissionControlHandoffPreview,
   MailboxMissionControlHandoffRecord,
   MailboxPriorityBand,
-  MailboxSavedViewRecord,
+  MailboxSenderCleanupDigest,
   MailboxSnippetRecord,
   MailboxSyncStatus,
   MailboxThreadDetail,
   MailboxThreadListItem,
   MailboxThreadMailboxView,
+  MailboxTodayDigest,
   getMailboxNoReplySender,
   stripMailboxSummaryHtmlArtifacts,
 } from "../../shared/mailbox";
@@ -47,12 +54,17 @@ import { useVoiceInput } from "../hooks/useVoiceInput";
 
 type QueueMode = "cleanup" | "follow_up" | null;
 type ThreadSortOrder = "recent" | "priority";
+type InboxMode = "classic" | "today";
 const MAILBOX_AUTO_SYNC_MAX_AGE_MS = 15 * 60 * 1000;
+const MAILBOX_AUTO_SYNC_INTERVAL_MS = 2 * 60 * 1000;
+const MAILBOX_AUTO_SYNC_LIMIT = 25;
 const MAILBOX_CLASSIFICATION_WARNING_KEY = "mailboxClassificationWarningAcknowledged";
 const MAILBOX_SERVER_ACTION_WARNING_KEY = "mailboxServerActionWarningAcknowledged";
 const ALL_MAILBOX_ACCOUNTS_FILTER = "__all__";
 type FocusFilter = "unread" | "needsReply" | "queue" | "commitments" | null;
 type ThreadMailboxView = MailboxThreadMailboxView;
+type DomainFilter = MailboxDomainCategory | "all" | "work";
+type ManualComposeMode = "reply" | "reply_all" | "forward";
 type ThreadGroup = {
   id: string;
   label: string;
@@ -173,6 +185,53 @@ function formatEmailBody(raw: string): string {
         return url;
       }
     });
+}
+
+function htmlToEmailPreviewText(html: string): string {
+  if (!html.trim()) return "";
+  if (typeof DOMParser !== "undefined") {
+    try {
+      const parsed = new DOMParser().parseFromString(html, "text/html");
+      return (parsed.body.textContent || "").replace(/\s+/g, " ").trim();
+    } catch {
+      // Fall back to the lightweight tag strip below.
+    }
+  }
+  return html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getMailboxMessageDisplayText(
+  message: Pick<MailboxThreadDetail["messages"][number], "body" | "bodyHtml" | "snippet">,
+): string {
+  return formatEmailBody(message.body || (message.bodyHtml ? htmlToEmailPreviewText(message.bodyHtml) : "") || message.snippet);
+}
+
+function isShortMailboxThread(messages: MailboxThreadDetail["messages"]): boolean {
+  const text = messages.map(getMailboxMessageDisplayText).join("\n").trim();
+  if (!text) return false;
+  const nonEmptyLines = text.split("\n").filter((line) => line.trim().length > 0);
+  return text.length <= 280 && nonEmptyLines.length <= 4;
+}
+
+function splitMailboxRecipients(value: string): string[] {
+  return value
+    .split(/[,\n;]/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function prefixMailboxSubject(subject: string, prefix: "Re:" | "Fwd:"): string {
+  const trimmed = subject.trim();
+  return trimmed.toLowerCase().startsWith(prefix.toLowerCase()) ? trimmed : `${prefix} ${trimmed}`;
 }
 
 // ─── sub-components ───────────────────────────────────────────────────────────
@@ -438,18 +497,20 @@ function IconBtn({
   title,
   active,
   disabled,
+  size = 32,
 }: {
   onClick: () => void;
   icon: React.ReactNode;
   title?: string;
   active?: boolean;
   disabled?: boolean;
+  size?: number;
 }) {
   const [hovered, setHovered] = useState(false);
   const interactive = !disabled;
   const buttonStyle: CSSProperties = {
-    width: 32,
-    height: 32,
+    width: size,
+    height: size,
     borderRadius: "var(--radius-sm, 8px)",
     display: "grid",
     placeItems: "center",
@@ -510,7 +571,10 @@ export type InboxAgentPanelProps = {
 export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
   const { onOpenMissionControlIssue } = props;
   const [status, setStatus] = useState<MailboxSyncStatus | null>(null);
+  const [mailboxClientState, setMailboxClientState] = useState<MailboxClientState | null>(null);
   const [digest, setDigest] = useState<MailboxDigestSnapshot | null>(null);
+  const [todayDigest, setTodayDigest] = useState<MailboxTodayDigest | null>(null);
+  const [senderCleanupDigest, setSenderCleanupDigest] = useState<MailboxSenderCleanupDigest | null>(null);
   const [threads, setThreads] = useState<MailboxThreadListItem[]>([]);
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
   const [selectedThreadIds, setSelectedThreadIds] = useState<string[]>([]);
@@ -526,6 +590,14 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
   const [messageSortOrder, setMessageSortOrder] = useState<"newest" | "oldest">("newest");
   const [threadSortOrder, setThreadSortOrder] = useState<ThreadSortOrder>("recent");
   const [mailboxView, setMailboxView] = useState<ThreadMailboxView>("inbox");
+  const [inboxMode, setInboxMode] = useState<InboxMode>("classic");
+  const [clientReadinessOpen, setClientReadinessOpen] = useState(false);
+  const [clientReadinessFocused, setClientReadinessFocused] = useState(false);
+  const [domainFilter, setDomainFilter] = useState<DomainFilter>("all");
+  const [domainFiltersOpen, setDomainFiltersOpen] = useState(false);
+  const [askQuery, setAskQuery] = useState("");
+  const [askResult, setAskResult] = useState<MailboxAskResult | null>(null);
+  const [askBusy, setAskBusy] = useState(false);
   const [selectedAccountId, setSelectedAccountId] = useState<string>(ALL_MAILBOX_ACCOUNTS_FILTER);
   const [googleWorkspaceEnabled, setGoogleWorkspaceEnabled] = useState(false);
   const [googleWorkspaceScopes, setGoogleWorkspaceScopes] = useState<string[] | null>(null);
@@ -546,6 +618,15 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
   const [replyChannelType, setReplyChannelType] = useState<"slack" | "teams" | "whatsapp" | "signal" | "imessage" | null>(null);
   const [replyTargetHandleId, setReplyTargetHandleId] = useState<string | null>(null);
   const [replyMessage, setReplyMessage] = useState("");
+  const [editableDraftId, setEditableDraftId] = useState<string | null>(null);
+  const [editableDraftSubject, setEditableDraftSubject] = useState("");
+  const [editableDraftBody, setEditableDraftBody] = useState("");
+  const [manualComposeMode, setManualComposeMode] = useState<ManualComposeMode | null>(null);
+  const [manualComposeTo, setManualComposeTo] = useState("");
+  const [manualComposeCc, setManualComposeCc] = useState("");
+  const [manualComposeBcc, setManualComposeBcc] = useState("");
+  const [manualComposeSubject, setManualComposeSubject] = useState("");
+  const [manualComposeBody, setManualComposeBody] = useState("");
   const [classificationWarningAcknowledged, setClassificationWarningAcknowledged] = useState(() =>
     typeof window !== "undefined" &&
       window.localStorage.getItem(MAILBOX_CLASSIFICATION_WARNING_KEY) === "1",
@@ -555,8 +636,6 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
       window.localStorage.getItem(MAILBOX_SERVER_ACTION_WARNING_KEY) === "1",
   );
 
-  const [savedViews, setSavedViews] = useState<MailboxSavedViewRecord[]>([]);
-  const [selectedSavedViewId, setSelectedSavedViewId] = useState<string | null>(null);
   const [snippets, setSnippets] = useState<MailboxSnippetRecord[]>([]);
   const [quickReplySuggestions, setQuickReplySuggestions] = useState<string[]>([]);
   const [labelSimilarOpen, setLabelSimilarOpen] = useState(false);
@@ -573,19 +652,23 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
   const [snippetModalOpen, setSnippetModalOpen] = useState(false);
   const [snippetShortcutDraft, setSnippetShortcutDraft] = useState("");
   const [snippetBodyDraft, setSnippetBodyDraft] = useState("");
+  const autoSyncInFlightRef = useRef(false);
+  const autoMarkReadInFlightRef = useRef<Set<string>>(new Set());
+  const selectedThreadIdRef = useRef<string | null>(null);
+  selectedThreadIdRef.current = selectedThreadId;
 
-  const loadSavedViewsAndSnippets = async () => {
-    const [views, snip] = await Promise.all([
-      window.electronAPI.listMailboxSavedViews().catch(() => []),
-      window.electronAPI.listMailboxSnippets().catch(() => []),
-    ]);
-    setSavedViews(views);
+  const loadSnippets = async () => {
+    const snip = await window.electronAPI.listMailboxSnippets().catch(() => []);
     setSnippets(snip);
   };
 
   const loadStatus = async () => {
-    const next = await window.electronAPI.getMailboxSyncStatus();
+    const [next, clientState] = await Promise.all([
+      window.electronAPI.getMailboxSyncStatus(),
+      window.electronAPI.getMailboxClientState().catch(() => null),
+    ]);
     setStatus(next);
+    setMailboxClientState(clientState);
   };
 
   const loadMissionControlOptions = async () => {
@@ -598,8 +681,14 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
   };
 
   const loadDigest = async () => {
-    const next = await window.electronAPI.getMailboxDigest().catch(() => null);
+    const [next, today, senders] = await Promise.all([
+      window.electronAPI.getMailboxDigest().catch(() => null),
+      window.electronAPI.getMailboxTodayDigest({ limitPerBucket: 8 }).catch(() => null),
+      window.electronAPI.getMailboxSenderCleanupDigest({ limit: 6 }).catch(() => null),
+    ]);
     setDigest(next);
+    setTodayDigest(today);
+    setSenderCleanupDigest(senders);
   };
 
   const loadAutomations = async (threadId?: string) => {
@@ -613,6 +702,7 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
     accountId?: string | undefined;
     query?: string;
     category?: string;
+    domainFilter?: DomainFilter;
     mailboxView?: ThreadMailboxView | undefined;
     focusFilter?: FocusFilter | undefined;
     sortBy?: ThreadSortOrder | undefined;
@@ -625,12 +715,15 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
     const nextSort = hasSortBy ? opts?.sortBy ?? threadSortOrder : threadSortOrder;
     const hasAccountId = opts && Object.prototype.hasOwnProperty.call(opts, "accountId");
     const nextAccountId = hasAccountId ? opts?.accountId ?? selectedAccountId : selectedAccountId;
+    const hasDomainFilter = opts && Object.prototype.hasOwnProperty.call(opts, "domainFilter");
+    const nextDomainFilter = hasDomainFilter ? opts?.domainFilter ?? domainFilter : domainFilter;
+    const workDomains: MailboxDomainCategory[] = ["customer", "hiring", "approvals", "ops", "finance"];
     const list = await window.electronAPI.listMailboxThreads({
       accountId: nextAccountId !== ALL_MAILBOX_ACCOUNTS_FILTER ? nextAccountId : undefined,
       query: opts?.query ?? query,
       category: (opts?.category as Any) ?? category,
+      domainCategory: nextDomainFilter !== "all" && nextDomainFilter !== "work" ? nextDomainFilter : undefined,
       mailboxView: nextMailboxView,
-      savedViewId: selectedSavedViewId || undefined,
       unreadOnly: nextFocus === "unread" ? true : undefined,
       needsReply: nextFocus === "needsReply" ? true : undefined,
       hasSuggestedProposal: nextFocus === "queue" ? true : undefined,
@@ -638,10 +731,13 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
       sortBy: nextSort,
       limit: 40,
     });
-    setThreads(list);
-    setSelectedThreadIds((current) => current.filter((id) => list.some((thread) => thread.id === id)));
+    const filteredList = nextDomainFilter === "work"
+      ? list.filter((thread) => workDomains.includes(thread.domainCategory))
+      : list;
+    setThreads(filteredList);
+    setSelectedThreadIds((current) => current.filter((id) => filteredList.some((thread) => thread.id === id)));
     setSelectedThreadId((current) =>
-      current && list.some((thread) => thread.id === current) ? current : (list[0]?.id || null),
+      current && filteredList.some((thread) => thread.id === current) ? current : (filteredList[0]?.id || null),
     );
   };
 
@@ -752,6 +848,12 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
   const selectedThreadAccount = selectedThread
     ? mailboxAccountById.get(selectedThread.accountId) || null
     : null;
+  const selectedThreadOpenCommitments = useMemo(
+    () => selectedThread?.commitments.filter((commitment) => commitment.state === "suggested" || commitment.state === "accepted") || [],
+    [selectedThread?.commitments],
+  );
+  const selectedThreadCanMarkDone = Boolean(selectedThread?.needsReply || selectedThreadOpenCommitments.length > 0);
+  const activeGeneratedDraft = selectedThread?.drafts[0] || null;
 
   const gmailScopesKnown = googleWorkspaceScopes !== null;
   const gmailModifyScopeGranted =
@@ -775,14 +877,70 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
   }, [selectedBulkThreadIds, selectedThread, threads]);
   const bulkSelectionHasGmailThread = selectedBulkThreads.some((thread) => thread.provider === "gmail");
   const bulkSelectionHasNonGmailThread = selectedBulkThreads.some((thread) => thread.provider !== "gmail");
+  const bulkSelectionHasUnreadThread = selectedBulkThreads.some((thread) => thread.unreadCount > 0);
+  const bulkReadStateAction = bulkSelectionHasUnreadThread ? "mark_read" : "mark_unread";
   const bulkArchiveTrashDisabledReason = bulkSelectionHasNonGmailThread
     ? "Archive and Trash are currently supported only for Gmail threads."
     : bulkSelectionHasGmailThread && gmailCleanupDisabledReason
       ? gmailCleanupDisabledReason
       : null;
-  const bulkMarkReadDisabledReason = bulkSelectionHasGmailThread && gmailCleanupDisabledReason
+  const bulkReadStateDisabledReason = bulkSelectionHasGmailThread && gmailCleanupDisabledReason
     ? gmailCleanupDisabledReason
     : null;
+
+  const markThreadReadAfterOpen = async (thread: Pick<MailboxThreadListItem, "id" | "provider" | "unreadCount">) => {
+    if (thread.unreadCount <= 0 || autoMarkReadInFlightRef.current.has(thread.id)) return;
+    if (thread.provider === "gmail" && !gmailCleanupActionsEnabled) {
+      setError(gmailCleanupDisabledReason || "Reconnect Google Workspace to mark Gmail threads as read.");
+      return;
+    }
+
+    autoMarkReadInFlightRef.current.add(thread.id);
+    setThreads((current) =>
+      current.map((entry) => (entry.id === thread.id ? { ...entry, unreadCount: 0 } : entry)),
+    );
+    setSelectedThread((current) =>
+      current?.id === thread.id
+        ? {
+            ...current,
+            unreadCount: 0,
+            messages: current.messages.map((message) => ({ ...message, unread: false })),
+          }
+        : current,
+    );
+    setDigest((current) =>
+      current ? { ...current, unreadCount: Math.max(0, current.unreadCount - thread.unreadCount) } : current,
+    );
+    setStatus((current) =>
+      current ? { ...current, unreadCount: Math.max(0, current.unreadCount - thread.unreadCount) } : current,
+    );
+
+    try {
+      await window.electronAPI.applyMailboxAction({ threadId: thread.id, type: "mark_read" });
+      await Promise.all([loadStatus(), loadDigest(), loadThreads()]);
+      if (selectedThreadIdRef.current === thread.id) {
+        await loadThread(thread.id);
+      }
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : String(nextError));
+      await Promise.all([
+        loadStatus().catch(() => undefined),
+        loadDigest().catch(() => undefined),
+        loadThreads().catch(() => undefined),
+      ]);
+      if (selectedThreadIdRef.current === thread.id) {
+        await loadThread(thread.id).catch(() => undefined);
+      }
+    } finally {
+      autoMarkReadInFlightRef.current.delete(thread.id);
+    }
+  };
+
+  const openThread = (thread: MailboxThreadListItem) => {
+    selectedThreadIdRef.current = thread.id;
+    setSelectedThreadId(thread.id);
+    void markThreadReadAfterOpen(thread);
+  };
 
   const clearThreadSelection = () => {
     setSelectedThreadIds([]);
@@ -838,7 +996,7 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
         const nextStatus = await window.electronAPI.getMailboxSyncStatus();
         setStatus(nextStatus);
         await loadDigest();
-        await loadSavedViewsAndSnippets();
+        await loadSnippets();
         await loadThreads();
         await loadAutomations();
         const shouldAutoSync =
@@ -848,7 +1006,7 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
             !nextStatus.lastSyncedAt ||
             Date.now() - nextStatus.lastSyncedAt > MAILBOX_AUTO_SYNC_MAX_AGE_MS);
         if (shouldAutoSync) {
-          void syncMailboxWithProgress();
+          void syncMailboxInBackground();
         }
       } catch (nextError) {
         setError(nextError instanceof Error ? nextError.message : String(nextError));
@@ -864,11 +1022,26 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
     setReplyChannelType(null);
     setReplyTargetHandleId(null);
     setReplyMessage("");
+    closeManualCompose();
     void loadThread(selectedThreadId);
     if (handoffPanelOpen) {
       void loadHandoffContext(selectedThreadId);
     }
   }, [selectedThreadId]);
+
+  useEffect(() => {
+    const draft = selectedThread?.drafts[0] || null;
+    if (!draft) {
+      setEditableDraftId(null);
+      setEditableDraftSubject("");
+      setEditableDraftBody("");
+      return;
+    }
+    if (editableDraftId === draft.id) return;
+    setEditableDraftId(draft.id);
+    setEditableDraftSubject(draft.subject);
+    setEditableDraftBody(draft.body);
+  }, [selectedThread?.drafts, editableDraftId]);
 
   useEffect(() => {
     if (!selectedThread?.id) {
@@ -909,7 +1082,7 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
       }
     });
     return unsubscribe;
-  }, [selectedThreadId, query, category, mailboxView, focusFilter, threadSortOrder, selectedAccountId, selectedSavedViewId]);
+  }, [selectedThreadId, query, category, domainFilter, mailboxView, focusFilter, threadSortOrder, selectedAccountId]);
 
   useEffect(() => {
     if (!handoffPanelOpen || !handoffCompanyId) return;
@@ -947,6 +1120,27 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
     onError: (message) => setError(message),
   });
 
+  const replyVoice = useVoiceInput({
+    transcriptionMode: "local_preferred",
+    onTranscript: (text) => {
+      if (selectedThreadReplyTargets.length > 0 && !replyChannelType) {
+        const target = selectedThreadReplyTargets[0];
+        setReplyTargetHandleId(target.handleId);
+        setReplyChannelType(
+          target.channelType === "slack" ||
+            target.channelType === "teams" ||
+            target.channelType === "whatsapp" ||
+            target.channelType === "signal" ||
+            target.channelType === "imessage"
+            ? target.channelType
+            : null,
+        );
+      }
+      setReplyMessage((current) => (current.trim() ? `${current.trim()}\n\n${text.trim()}` : text.trim()));
+    },
+    onError: (message) => setError(message),
+  });
+
   const pulseCards = useMemo(
     () => [
       {
@@ -972,6 +1166,25 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
     ],
     [digest, status],
   );
+
+  const replacementReadiness = useMemo(() => {
+    const accounts = mailboxClientState?.accounts || [];
+    const capabilities = new Set(accounts.flatMap((account) => account.capabilities || []));
+    const queued = mailboxClientState?.queuedActions.filter((action) => action.status === "queued").length || 0;
+    const failed = mailboxClientState?.queuedActions.filter((action) => action.status === "failed").length || 0;
+    const drafts = mailboxClientState?.composeDrafts.filter((draft) => draft.status !== "sent").length || 0;
+    return {
+      accountCount: accounts.length,
+      providerBackends: Array.from(new Set((mailboxClientState?.syncHealth || []).map((entry) => entry.backend))),
+      folderCount: mailboxClientState?.folders.length || 0,
+      canSend: capabilities.has("send"),
+      canDraft: capabilities.has("provider_drafts"),
+      canOrganize: capabilities.has("labels") || capabilities.has("folders"),
+      queued,
+      failed,
+      drafts,
+    };
+  }, [mailboxClientState]);
 
   const runAction = async (work: () => Promise<void>) => {
     setBusy(true);
@@ -1043,6 +1256,38 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
     [getThreadDetailForDraft],
   );
 
+  const syncMailboxInBackground = async () => {
+    if (autoSyncInFlightRef.current) return;
+    autoSyncInFlightRef.current = true;
+    try {
+      const currentStatus = await window.electronAPI.getMailboxSyncStatus();
+      setStatus(currentStatus);
+      if (!currentStatus.connected || currentStatus.syncInFlight) return;
+      const stale =
+        !currentStatus.lastSyncedAt ||
+        Date.now() - currentStatus.lastSyncedAt >= MAILBOX_AUTO_SYNC_INTERVAL_MS;
+      if (!stale) return;
+      await window.electronAPI.syncMailbox(MAILBOX_AUTO_SYNC_LIMIT);
+      await Promise.all([loadStatus(), loadDigest(), loadThreads()]);
+      const nextId = selectedThreadId;
+      if (nextId) {
+        await loadThread(nextId);
+      }
+    } catch {
+      // Background sync should never interrupt inbox work. Manual sync still reports errors.
+      await loadStatus().catch(() => undefined);
+    } finally {
+      autoSyncInFlightRef.current = false;
+    }
+  };
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      void syncMailboxInBackground();
+    }, MAILBOX_AUTO_SYNC_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [selectedThreadId, query, category, domainFilter, mailboxView, focusFilter, threadSortOrder, selectedAccountId]);
+
   const syncMailboxWithProgress = async () => {
     setBusy(true);
     setError(null);
@@ -1050,7 +1295,7 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
       void loadStatus();
     }, 600);
     try {
-      await window.electronAPI.syncMailbox(25);
+      await window.electronAPI.syncMailbox(MAILBOX_AUTO_SYNC_LIMIT);
       await Promise.all([loadStatus(), loadDigest(), loadThreads()]);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : String(nextError));
@@ -1076,8 +1321,8 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
     setClassificationWarningAcknowledged(true);
   };
 
-  const confirmServerMailboxAction = (type: "archive" | "trash" | "mark_read", threadCount = 1): boolean => {
-    if (type === "mark_read" || mailboxServerActionWarningAcknowledged) {
+  const confirmServerMailboxAction = (type: "archive" | "trash" | "mark_read" | "mark_unread", threadCount = 1): boolean => {
+    if (type === "mark_read" || type === "mark_unread" || mailboxServerActionWarningAcknowledged) {
       return true;
     }
     const actionLabel = type === "archive" ? "archive" : "trash";
@@ -1160,15 +1405,15 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
     });
   };
 
-  const handleThreadAction = async (type: "archive" | "trash" | "mark_read") => {
+  const handleThreadAction = async (type: "archive" | "trash" | "mark_read" | "mark_unread" | "mark_done") => {
     if (!selectedThread) return;
-    if (!confirmServerMailboxAction(type, 1)) return;
+    if (type !== "mark_done" && !confirmServerMailboxAction(type, 1)) return;
     await runAction(async () => {
       await window.electronAPI.applyMailboxAction({
         threadId: selectedThread.id,
         type,
       });
-      await reloadAll(type === "mark_read" ? selectedThread.id : undefined);
+      await reloadAll(type === "archive" || type === "trash" ? undefined : selectedThread.id);
     });
   };
 
@@ -1176,7 +1421,9 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
     if (!selectedThread) return "";
     const draftBody = selectedThread.drafts[0]?.body?.trim();
     if (draftBody) return draftBody;
-    const summary = stripMailboxSummaryHtmlArtifacts(selectedThread.summary?.summary || "");
+    const summary = isShortMailboxThread(selectedThread.messages)
+      ? ""
+      : stripMailboxSummaryHtmlArtifacts(selectedThread.summary?.summary || "");
     if (summary) {
       return `Thanks for the update. I reviewed the thread and will follow up shortly.\n\nContext: ${summary.slice(0, 300)}`;
     }
@@ -1208,11 +1455,98 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
     });
   };
 
-  const handleBulkThreadAction = async (type: "archive" | "trash" | "mark_read") => {
+  const openManualCompose = (mode: ManualComposeMode) => {
+    if (!selectedThread) return;
+    const latestIncoming = [...selectedThread.messages]
+      .reverse()
+      .find((message) => message.direction === "incoming") || selectedThread.messages[selectedThread.messages.length - 1];
+    const ownEmail = selectedThreadAccount?.address?.trim().toLowerCase() || "";
+    const recipientMap = new Map<string, string>();
+    const addRecipient = (participant?: { email?: string; name?: string }) => {
+      const email = participant?.email?.trim();
+      if (!email) return;
+      const normalized = email.toLowerCase();
+      if (normalized === ownEmail) return;
+      recipientMap.set(normalized, participant?.name ? `${participant.name} <${email}>` : email);
+    };
+
+    if (mode === "reply" || mode === "reply_all") {
+      addRecipient(latestIncoming?.from || selectedThread.participants[0]);
+      if (mode === "reply_all" && latestIncoming) {
+        latestIncoming.to.forEach(addRecipient);
+      }
+      const ccMap = new Map<string, string>();
+      if (mode === "reply_all" && latestIncoming) {
+        latestIncoming.cc.forEach((participant) => {
+          const email = participant.email?.trim();
+          if (!email || email.toLowerCase() === ownEmail) return;
+          ccMap.set(email.toLowerCase(), participant.name ? `${participant.name} <${email}>` : email);
+        });
+      }
+      setManualComposeTo(Array.from(recipientMap.values()).join(", "));
+      setManualComposeCc(Array.from(ccMap.values()).join(", "));
+      setManualComposeBody("");
+      setManualComposeSubject(prefixMailboxSubject(selectedThread.subject, "Re:"));
+    } else {
+      const source = latestIncoming || selectedThread.messages[selectedThread.messages.length - 1];
+      setManualComposeTo("");
+      setManualComposeCc("");
+      setManualComposeBody(
+        source
+          ? `\n\n---------- Forwarded message ---------\nFrom: ${source.from?.name || source.from?.email || "Unknown"}${source.from?.email && source.from?.name ? ` <${source.from.email}>` : ""}\nDate: ${formatFullTime(source.receivedAt)}\nSubject: ${source.subject || selectedThread.subject}\n\n${source.body}`
+          : "",
+      );
+      setManualComposeSubject(prefixMailboxSubject(selectedThread.subject, "Fwd:"));
+    }
+    setManualComposeMode(mode);
+    setManualComposeBcc("");
+  };
+
+  const closeManualCompose = () => {
+    setManualComposeMode(null);
+    setManualComposeTo("");
+    setManualComposeCc("");
+    setManualComposeBcc("");
+    setManualComposeSubject("");
+    setManualComposeBody("");
+  };
+
+  const sendManualCompose = async () => {
+    if (!selectedThread || !manualComposeMode) return;
+    await runAction(async () => {
+      await window.electronAPI.applyMailboxAction({
+        threadId: selectedThread.id,
+        type: "send_message",
+        messageMode: manualComposeMode,
+        messageTo: splitMailboxRecipients(manualComposeTo),
+        messageCc: splitMailboxRecipients(manualComposeCc),
+        messageBcc: splitMailboxRecipients(manualComposeBcc),
+        messageSubject: manualComposeSubject.trim(),
+        messageBody: manualComposeBody,
+      });
+      const mode = manualComposeMode;
+      closeManualCompose();
+      if (mode !== "forward") {
+        setSelectedThread((current) =>
+          current?.id === selectedThread.id
+            ? {
+                ...current,
+                needsReply: false,
+                handled: true,
+                todayBucket: current.todayBucket === "needs_action" ? "good_to_know" : current.todayBucket,
+              }
+            : current,
+        );
+      }
+      await reloadAll(selectedThread.id);
+    });
+  };
+
+  const handleBulkThreadAction = async (type: "archive" | "trash" | "mark_read" | "mark_unread") => {
     if (!selectedBulkThreadIds.length) return;
-    if (type === "mark_read") {
-      if (bulkMarkReadDisabledReason) {
-        setError(bulkMarkReadDisabledReason);
+    if (type === "mark_read" || type === "mark_unread") {
+      if (bulkReadStateDisabledReason) {
+        setError(bulkReadStateDisabledReason);
         return;
       }
     } else {
@@ -1231,7 +1565,7 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
         await window.electronAPI.applyMailboxAction({ threadId, type });
       }
       clearThreadSelection();
-      await reloadAll(type === "mark_read" ? selectedBulkThreadIds[0] : undefined);
+      await reloadAll(type === "mark_read" || type === "mark_unread" ? selectedBulkThreadIds[0] : undefined);
     });
   };
 
@@ -1397,7 +1731,9 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
   const runThreadWorkflow = async () => {
     if (!selectedThread) return;
     await runAction(async () => {
-      await window.electronAPI.summarizeMailboxThread(selectedThread.id);
+      if (!isShortMailboxThread(selectedThread.messages)) {
+        await window.electronAPI.summarizeMailboxThread(selectedThread.id);
+      }
       await window.electronAPI.extractMailboxCommitments(selectedThread.id);
       if (selectedThread.needsReply) {
         await generateDraftForThread(selectedThread.id, {
@@ -1416,7 +1752,9 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
   const refreshThreadIntel = async () => {
     if (!selectedThread) return;
     await runAction(async () => {
-      await window.electronAPI.summarizeMailboxThread(selectedThread.id);
+      if (!isShortMailboxThread(selectedThread.messages)) {
+        await window.electronAPI.summarizeMailboxThread(selectedThread.id);
+      }
       await window.electronAPI.reclassifyMailboxThread(selectedThread.id);
       await window.electronAPI.extractMailboxCommitments(selectedThread.id);
       await window.electronAPI.researchMailboxContact(selectedThread.id);
@@ -1460,6 +1798,24 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
     });
   };
 
+  const runMailboxAsk = async () => {
+    const q = askQuery.trim();
+    if (!q) return;
+    setAskBusy(true);
+    setError(null);
+    try {
+      const result = await window.electronAPI.askMailbox({ query: q, limit: 8 });
+      setAskResult(result);
+      if (result.results[0]?.thread.id) {
+        setSelectedThreadId(result.results[0].thread.id);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Mailbox Ask failed.");
+    } finally {
+      setAskBusy(false);
+    }
+  };
+
   const categories = [
     { id: "all", label: "All" },
     { id: "priority", label: "Priority" },
@@ -1469,6 +1825,17 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
     { id: "updates", label: "Updates" },
   ] as const;
 
+  const domainFilters = [
+    { id: "all" as const, label: "All domains" },
+    { id: "travel" as const, label: "Travel" },
+    { id: "packages" as const, label: "Packages" },
+    { id: "receipts" as const, label: "Receipts" },
+    { id: "bills" as const, label: "Bills" },
+    { id: "newsletters" as const, label: "Newsletters" },
+    { id: "shopping" as const, label: "Shopping" },
+    { id: "work" as const, label: "Work" },
+  ] as const;
+
   const sortedThreadMessages = useMemo(() => {
     const messages = selectedThread?.messages || [];
     const compare = messageSortOrder === "newest"
@@ -1476,6 +1843,10 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
       : (a: MailboxThreadDetail["messages"][number], b: MailboxThreadDetail["messages"][number]) => a.receivedAt - b.receivedAt;
     return [...messages].sort(compare);
   }, [selectedThread?.messages, messageSortOrder]);
+  const selectedThreadIsShort = useMemo(
+    () => (selectedThread ? isShortMailboxThread(selectedThread.messages) : false),
+    [selectedThread?.messages],
+  );
 
   const displayedThreads = useMemo(() => {
     const compare =
@@ -1495,10 +1866,27 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
 
   const threadGroups = useMemo<ThreadGroup[]>(() => {
     if (!displayedThreads.length) return [];
+    if (inboxMode === "today") {
+      const labels: Record<string, { label: string; description: string }> = {
+        needs_action: { label: "Needs action", description: "Replies, approvals, and urgent threads" },
+        happening_today: { label: "Happening today", description: "Dated travel, packages, bills, and events" },
+        good_to_know: { label: "Good to know", description: "Useful updates that do not need immediate action" },
+        more_to_browse: { label: "More to browse", description: "Newsletters, promotions, and low-priority mail" },
+      };
+      return (["needs_action", "happening_today", "good_to_know", "more_to_browse"] as const)
+        .map((bucket) => ({
+          id: bucket,
+          label: labels[bucket].label,
+          description: labels[bucket].description,
+          threads: displayedThreads.filter((thread) => thread.todayBucket === bucket),
+        }))
+        .filter((group) => group.threads.length > 0);
+    }
     const hasNarrowFilter = Boolean(
       query.trim() ||
       focusFilter ||
       category !== "all" ||
+      domainFilter !== "all" ||
       mailboxView !== "inbox" ||
       selectedAccountId !== ALL_MAILBOX_ACCOUNTS_FILTER,
     );
@@ -1536,7 +1924,7 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
       });
     }
     return groups;
-  }, [category, displayedThreads, focusFilter, mailboxView, query, selectedAccountId]);
+  }, [category, displayedThreads, domainFilter, focusFilter, inboxMode, mailboxView, query, selectedAccountId]);
 
   useEffect(() => {
     if (selectedAccountId === ALL_MAILBOX_ACCOUNTS_FILTER) return;
@@ -1644,6 +2032,11 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
   const renderMessageCard = (message: MailboxThreadDetail["messages"][number]) => {
     const isOutgoing = message.direction === "outgoing";
     const hasHtml = Boolean(message.bodyHtml);
+    const bodyText = getMailboxMessageDisplayText(message);
+    const nonEmptyLines = bodyText.split("\n").filter((line) => line.trim().length > 0);
+    const renderCompactText = bodyText.trim().length > 0 &&
+      bodyText.length <= 280 &&
+      nonEmptyLines.length <= 4;
 
     const messageHeader = (
       <div
@@ -1671,7 +2064,7 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
       </div>
     );
 
-    if (hasHtml) {
+    if (hasHtml && !renderCompactText) {
       return (
         <article key={message.id} style={{ marginBottom: "14px" }}>
           {messageHeader}
@@ -1693,57 +2086,39 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
       <article
         key={message.id}
         style={{
-          marginBottom: "10px",
+          marginBottom: "12px",
           display: "flex",
-          flexDirection: isOutgoing ? "row-reverse" : "row",
-          gap: "8px",
-          alignItems: "flex-start",
+          flexDirection: "column",
+          alignItems: isOutgoing ? "flex-end" : "stretch",
         }}
       >
-        {!isOutgoing && <Avatar name={message.from?.name} email={message.from?.email} size={28} />}
+        {messageHeader}
         <div
           style={{
-            maxWidth: "100%",
-            width: "100%",
-            padding: "10px 14px",
+            alignSelf: isOutgoing ? "flex-end" : "flex-start",
+            maxWidth: isOutgoing ? "min(72ch, 100%)" : "min(72ch, calc(100% - 36px))",
+            width: "fit-content",
+            marginLeft: isOutgoing ? 0 : "36px",
+            padding: bodyText.length <= 80 && !bodyText.includes("\n") ? "8px 12px" : "10px 13px",
             borderRadius: isOutgoing
-              ? "var(--radius-lg, 14px) var(--radius-sm, 8px) var(--radius-lg, 14px) var(--radius-lg, 14px)"
-              : "var(--radius-sm, 8px) var(--radius-lg, 14px) var(--radius-lg, 14px) var(--radius-lg, 14px)",
-            background: isOutgoing ? "var(--color-accent-subtle)" : "var(--color-bg-secondary)",
-            border: `1px solid ${isOutgoing ? "var(--color-accent)" : "var(--color-border-subtle)"}`,
+              ? "var(--radius-md, 10px) var(--radius-sm, 8px) var(--radius-md, 10px) var(--radius-md, 10px)"
+              : "var(--radius-sm, 8px) var(--radius-md, 10px) var(--radius-md, 10px) var(--radius-md, 10px)",
+            background: isOutgoing ? "var(--color-accent-subtle)" : "var(--color-bg-elevated)",
+            border: `1px solid ${isOutgoing ? "rgba(124, 92, 191, 0.24)" : "var(--color-border-subtle)"}`,
+            boxShadow: "0 1px 2px rgba(15, 23, 42, 0.04)",
           }}
         >
           <div
             style={{
-              display: "flex",
-              justifyContent: "space-between",
-              gap: "12px",
-              marginBottom: "5px",
-            }}
-          >
-            <strong
-              style={{
-                fontSize: "0.78rem",
-                color: isOutgoing ? "var(--color-accent)" : "var(--color-text-secondary)",
-              }}
-            >
-              {isOutgoing ? "You" : message.from?.name || message.from?.email || "Unknown"}
-            </strong>
-            <span style={{ fontSize: "0.68rem", color: "var(--color-text-muted)", flexShrink: 0 }}>
-              {formatTime(message.receivedAt)}
-            </span>
-          </div>
-          <div
-            style={{
               fontSize: "0.84rem",
-              lineHeight: 1.6,
+              lineHeight: bodyText.length <= 80 && !bodyText.includes("\n") ? 1.45 : 1.6,
               color: "var(--color-text-primary)",
               whiteSpace: "pre-wrap",
               overflowWrap: "break-word",
               wordBreak: "break-word",
             }}
           >
-            {formatEmailBody(message.body || message.snippet)}
+            {bodyText}
           </div>
         </div>
       </article>
@@ -1787,83 +2162,140 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
         {/* Header */}
         <div
           style={{
-            padding: "14px 16px 12px",
+            padding: "12px 14px 10px",
             borderBottom: "1px solid var(--color-border-subtle)",
           }}
         >
           <div
             style={{
-              display: "flex",
+              display: "grid",
+              gridTemplateColumns: "30px minmax(0, 1fr) auto",
               alignItems: "center",
-              justifyContent: "space-between",
+              columnGap: "9px",
               marginBottom: "12px",
             }}
           >
-            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <div
+              style={{
+                width: 30,
+                height: 30,
+                borderRadius: "var(--radius-sm, 8px)",
+                display: "grid",
+                placeItems: "center",
+                background: "var(--color-accent-subtle)",
+                color: "var(--color-accent)",
+              }}
+            >
+              <Inbox size={15} />
+            </div>
+            <div style={{ minWidth: 0 }}>
               <div
                 style={{
-                  width: 34,
-                  height: 34,
-                  borderRadius: "var(--radius-md, 10px)",
-                  display: "grid",
-                  placeItems: "center",
-                  background: "var(--color-accent-subtle)",
-                  color: "var(--color-accent)",
-                  flexShrink: 0,
+                  fontSize: "0.88rem",
+                  fontWeight: 750,
+                  color: "var(--color-text-primary)",
+                  lineHeight: 1.12,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
                 }}
               >
-                <Inbox size={17} />
+                Inbox Agent
               </div>
-              <div>
-                <div
-                  style={{
-                    fontSize: "0.92rem",
-                    fontWeight: 700,
-                    color: "var(--color-text-primary)",
-                    lineHeight: 1.2,
-                  }}
-                >
-                  Inbox Agent
-                </div>
-                <div style={{ fontSize: "0.73rem", color: "var(--color-text-muted)", marginTop: "2px" }}>
-                  {status?.statusLabel || "Mailbox intelligence"}
-                </div>
+              <div
+                title={status?.statusLabel || "Mailbox intelligence"}
+                style={{
+                  fontSize: "0.66rem",
+                  color: "var(--color-text-muted)",
+                  marginTop: "3px",
+                  lineHeight: 1.25,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {status?.statusLabel || "Mailbox intelligence"}
               </div>
             </div>
-            <div style={{ display: "flex", gap: "6px" }}>
+            <div style={{ display: "flex", gap: "5px", justifySelf: "end" }}>
               <IconBtn
                 onClick={() => void syncMailboxWithProgress()}
                 icon={<RefreshCcw size={13} style={busy ? { animation: "spin 1s linear infinite" } : {}} />}
                 title="Sync mailbox"
+                size={30}
               />
               <IconBtn
                 onClick={() => void reclassifyMailboxBackfill()}
                 icon={<Sparkles size={13} />}
                 title="Reclassify backlog"
                 disabled={busy || !status?.accounts[0]?.id}
+                size={30}
               />
             </div>
           </div>
 
           <div
             style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: "8px",
-              marginBottom: "12px",
+              display: "grid",
+              gap: "6px",
+              marginBottom: "10px",
+              padding: "7px",
+              borderRadius: "var(--radius-md, 10px)",
+              border: "1px solid var(--color-border-subtle)",
+              background: "var(--color-bg-secondary)",
             }}
           >
+            <div
+              role="tablist"
+              aria-label="Inbox mode"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "4px",
+                flexWrap: "wrap",
+              }}
+            >
+              {[
+                { id: "classic" as const, label: "Classic" },
+                { id: "today" as const, label: "Today" },
+              ].map((mode) => {
+                const active = inboxMode === mode.id;
+                return (
+                  <button
+                    key={mode.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => setInboxMode(mode.id)}
+                    style={{
+                      minHeight: 25,
+                      padding: "3px 9px",
+                      borderRadius: "999px",
+                      border: active
+                        ? "1px solid var(--color-accent)"
+                        : "1px solid var(--color-border-subtle)",
+                      background: active ? "var(--color-accent-subtle)" : "var(--color-bg-elevated)",
+                      color: active ? "var(--color-accent)" : "var(--color-text-secondary)",
+                      fontSize: "0.66rem",
+                      fontWeight: active ? 750 : 600,
+                      cursor: "pointer",
+                      fontFamily: "var(--font-ui)",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {mode.label}
+                  </button>
+                );
+              })}
+            </div>
             <div
               role="tablist"
               aria-label="Mailbox folder"
               style={{
                 display: "flex",
-                padding: "3px",
-                gap: "2px",
-                borderRadius: "11px",
-                background: "var(--color-bg-secondary)",
-                border: "1px solid var(--color-border-subtle)",
-                boxSizing: "border-box",
+                alignItems: "center",
+                gap: "4px",
+                flexWrap: "wrap",
               }}
             >
               {[
@@ -1880,73 +2312,29 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
                     aria-selected={active}
                     onClick={() => {
                       setMailboxView(view.id);
-                      setSelectedSavedViewId(null);
                       void loadThreads({ mailboxView: view.id });
                     }}
                     style={{
-                      flex: 1,
-                      minWidth: 0,
-                      padding: "6px 6px",
-                      borderRadius: "8px",
-                      fontSize: "0.7rem",
-                      fontWeight: active ? 600 : 500,
-                      border: "none",
-                      background: active ? "var(--color-bg-elevated)" : "transparent",
-                      color: active ? "var(--color-text-primary)" : "var(--color-text-muted)",
+                      minHeight: 25,
+                      padding: "3px 9px",
+                      borderRadius: "999px",
+                      fontSize: "0.66rem",
+                      fontWeight: active ? 750 : 600,
+                      border: active
+                        ? "1px solid var(--color-accent)"
+                        : "1px solid var(--color-border-subtle)",
+                      background: active ? "var(--color-accent-subtle)" : "var(--color-bg-elevated)",
+                      color: active ? "var(--color-accent)" : "var(--color-text-secondary)",
                       cursor: "pointer",
-                      transition: "background 0.14s ease, color 0.14s ease, box-shadow 0.14s ease",
+                      transition: "background 0.12s ease, border-color 0.12s ease",
                       fontFamily: "var(--font-ui)",
-                      boxShadow: active ? "0 1px 2px rgba(0,0,0,0.06)" : "none",
+                      whiteSpace: "nowrap",
                     }}
                   >
                     {view.label}
                   </button>
                 );
               })}
-            </div>
-
-            <div style={{ width: "100%" }}>
-              <label
-                style={{
-                  fontSize: "0.68rem",
-                  color: "var(--color-text-muted)",
-                  display: "block",
-                  marginBottom: "4px",
-                }}
-              >
-                Saved view
-              </label>
-              <select
-                aria-label="Saved inbox view"
-                value={selectedSavedViewId || ""}
-                onChange={(event) => {
-                  const next = event.target.value;
-                  setSelectedSavedViewId(next || null);
-                  void loadThreads();
-                }}
-                style={{
-                  width: "100%",
-                  margin: 0,
-                  padding: "7px 10px",
-                  borderRadius: "10px",
-                  border: "1px solid var(--color-border-subtle)",
-                  background: "var(--color-bg-secondary)",
-                  fontSize: "0.72rem",
-                  fontWeight: 500,
-                  fontFamily: "var(--font-ui)",
-                  color: "var(--color-text-primary)",
-                  cursor: "pointer",
-                  boxSizing: "border-box",
-                  lineHeight: 1.25,
-                }}
-              >
-                <option value="">None</option>
-                {savedViews.map((view) => (
-                  <option key={view.id} value={view.id}>
-                    {view.name}
-                  </option>
-                ))}
-              </select>
             </div>
 
             {mailboxAccounts.length > 1 && (
@@ -1962,14 +2350,15 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
                   style={{
                     width: "100%",
                     margin: 0,
-                    padding: "7px 32px 7px 10px",
-                    borderRadius: "10px",
+                    minHeight: 25,
+                    padding: "3px 28px 3px 9px",
+                    borderRadius: "999px",
                     border: "1px solid var(--color-border-subtle)",
-                    background: "var(--color-bg-secondary)",
-                    fontSize: "0.72rem",
-                    fontWeight: 500,
+                    background: "var(--color-bg-elevated)",
+                    fontSize: "0.66rem",
+                    fontWeight: 600,
                     fontFamily: "var(--font-ui)",
-                    color: "var(--color-text-primary)",
+                    color: "var(--color-text-secondary)",
                     cursor: "pointer",
                     appearance: "none",
                     WebkitAppearance: "none",
@@ -1986,11 +2375,11 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
                   ))}
                 </select>
                 <ChevronDown
-                  size={14}
+                  size={13}
                   aria-hidden
                   style={{
                     position: "absolute",
-                    right: "10px",
+                    right: "9px",
                     top: "50%",
                     transform: "translateY(-50%)",
                     pointerEvents: "none",
@@ -2111,6 +2500,202 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
             </div>
           </div>
 
+          {mailboxClientState && (
+            <div
+              style={{
+                marginBottom: "8px",
+                padding: clientReadinessOpen ? "9px 10px" : "8px 10px",
+                borderRadius: "var(--radius-md, 12px)",
+                background: clientReadinessOpen ? "var(--color-bg-elevated)" : "var(--color-bg-secondary)",
+                border: `1px solid ${clientReadinessFocused ? "rgba(124, 92, 191, 0.32)" : "var(--color-border-subtle)"}`,
+                boxShadow: clientReadinessFocused ? "0 0 0 2px rgba(124, 92, 191, 0.10)" : "none",
+                transition: "border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease",
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setClientReadinessOpen((current) => !current)}
+                onFocus={() => setClientReadinessFocused(true)}
+                onBlur={() => setClientReadinessFocused(false)}
+                aria-expanded={clientReadinessOpen}
+                style={{
+                  width: "100%",
+                  border: "none",
+                  background: "transparent",
+                  padding: 0,
+                  display: "grid",
+                  gridTemplateColumns: "minmax(0, 1fr) auto",
+                  alignItems: "center",
+                  gap: "10px",
+                  cursor: "pointer",
+                  fontFamily: "var(--font-ui)",
+                  textAlign: "left",
+                  outline: "none",
+                }}
+              >
+                <span style={{ minWidth: 0, paddingLeft: "4px", overflow: "visible" }}>
+                  <span
+                    style={{
+                      display: "block",
+                      fontSize: "0.66rem",
+                      fontWeight: 800,
+                      letterSpacing: "0.06em",
+                      textTransform: "uppercase",
+                      color: "var(--color-text-muted)",
+                      lineHeight: 1.1,
+                    }}
+                  >
+                    Client readiness
+                  </span>
+                  {!clientReadinessOpen && (
+                    <span
+                      style={{
+                        display: "block",
+                        marginTop: "4px",
+                        fontSize: "0.74rem",
+                        color: "var(--color-text-muted)",
+                        paddingLeft: "1px",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        lineHeight: 1.2,
+                      }}
+                    >
+                      {replacementReadiness.accountCount || 0} accounts · {replacementReadiness.folderCount || 0} folders · {replacementReadiness.queued} queued
+                    </span>
+                  )}
+                </span>
+                <span
+                  style={{
+                    width: 24,
+                    height: 24,
+                    borderRadius: "999px",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                    background: clientReadinessOpen ? "var(--color-bg-secondary)" : "var(--color-bg-elevated)",
+                    border: "1px solid var(--color-border-subtle)",
+                    color: "var(--color-text-muted)",
+                  }}
+                >
+                  <ChevronDown
+                    size={13}
+                    style={{
+                      display: "block",
+                      color: "currentColor",
+                      transform: clientReadinessOpen ? "rotate(180deg)" : "rotate(0deg)",
+                      transition: "transform 0.15s ease",
+                    }}
+                  />
+                </span>
+              </button>
+              {clientReadinessOpen && (
+                <>
+                  <div style={{ display: "grid", gap: "5px", marginTop: "7px" }}>
+                    {[
+                      { label: "Accounts", value: replacementReadiness.accountCount || 0 },
+                      { label: "Folders", value: replacementReadiness.folderCount || 0 },
+                      { label: "Drafts", value: replacementReadiness.drafts },
+                      { label: "Queued", value: replacementReadiness.failed ? `${replacementReadiness.queued} · ${replacementReadiness.failed} failed` : replacementReadiness.queued },
+                    ].map((item) => (
+                      <div
+                        key={item.label}
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          gap: "8px",
+                          fontSize: "0.76rem",
+                          color: "var(--color-text-secondary)",
+                        }}
+                      >
+                        <span>{item.label}</span>
+                        <strong style={{ color: "var(--color-text-primary)" }}>{item.value}</strong>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", marginTop: "7px" }}>
+                    {[
+                      { label: "Send", active: replacementReadiness.canSend },
+                      { label: "Drafts", active: replacementReadiness.canDraft },
+                      { label: "Organize", active: replacementReadiness.canOrganize },
+                    ].map((chip) => (
+                      <span
+                        key={chip.label}
+                        style={{
+                          borderRadius: "999px",
+                          padding: "2px 7px",
+                          fontSize: "0.68rem",
+                          fontWeight: 700,
+                          color: chip.active ? "var(--color-accent)" : "var(--color-text-muted)",
+                          background: chip.active ? "var(--color-accent-subtle)" : "var(--color-bg-secondary)",
+                          border: "1px solid var(--color-border-subtle)",
+                        }}
+                      >
+                        {chip.label}
+                      </span>
+                    ))}
+                  </div>
+                  {replacementReadiness.providerBackends.length > 0 && (
+                    <div
+                      style={{
+                        marginTop: "6px",
+                        fontSize: "0.68rem",
+                        color: "var(--color-text-muted)",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                      title={replacementReadiness.providerBackends.join(", ")}
+                    >
+                      {replacementReadiness.providerBackends.join(" + ")}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
+          {inboxMode === "today" && todayDigest && (
+            <div
+              style={{
+                marginBottom: "8px",
+                display: "grid",
+                gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                gap: "4px",
+              }}
+            >
+              {todayDigest.buckets.map((bucket) => (
+                <div
+                  key={bucket.bucket}
+                  style={{
+                    padding: "7px 8px",
+                    borderRadius: "var(--radius-sm, 8px)",
+                    border: "1px solid var(--color-border-subtle)",
+                    background: "var(--color-bg-secondary)",
+                    minWidth: 0,
+                  }}
+                >
+                  <div style={{ fontSize: "0.95rem", fontWeight: 800, color: "var(--color-text-primary)" }}>
+                    {bucket.count}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: "0.58rem",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.06em",
+                      color: "var(--color-text-muted)",
+                      fontWeight: 700,
+                      lineHeight: 1.1,
+                    }}
+                  >
+                    {bucket.label}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
           {status &&
             !classificationWarningAcknowledged &&
             (status.classificationPendingCount > 0 || !status.lastSyncedAt) && (
@@ -2197,11 +2782,11 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
                   title={bulkArchiveTrashDisabledReason || undefined}
                 />
                 <ActionBtn
-                  onClick={() => void handleBulkThreadAction("mark_read")}
+                  onClick={() => void handleBulkThreadAction(bulkReadStateAction)}
                   icon={<MailOpen size={11} />}
-                  label="Mark read"
-                  disabled={busy || Boolean(bulkMarkReadDisabledReason)}
-                  title={bulkMarkReadDisabledReason || undefined}
+                  label={bulkReadStateAction === "mark_read" ? "Mark read" : "Mark unread"}
+                  disabled={busy || Boolean(bulkReadStateDisabledReason)}
+                  title={bulkReadStateDisabledReason || undefined}
                 />
                 <ActionBtn
                   onClick={() => void handleBulkThreadAction("trash")}
@@ -2267,110 +2852,393 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
             />
           </div>
 
-          {/* Categories (horizontal scroll) + compact sort segment — one row */}
+          <div style={{ display: "flex", gap: "6px", marginBottom: "6px" }}>
+            <div style={{ position: "relative", flex: 1 }}>
+              <Sparkles
+                size={13}
+                style={{
+                  position: "absolute",
+                  left: 10,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  color: "var(--color-text-muted)",
+                  pointerEvents: "none",
+                }}
+              />
+              <input
+                value={askQuery}
+                onChange={(e) => setAskQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void runMailboxAsk();
+                }}
+                placeholder="Ask your mailbox…"
+                style={{
+                  width: "100%",
+                  boxSizing: "border-box",
+                  padding: "7px 10px 7px 28px",
+                  borderRadius: "var(--radius-sm, 8px)",
+                  border: "1px solid var(--color-border)",
+                  background: "var(--color-bg-input)",
+                  color: "var(--color-text-primary)",
+                  fontSize: "0.78rem",
+                  outline: "none",
+                  fontFamily: "var(--font-ui)",
+                }}
+              />
+            </div>
+            <IconBtn
+              onClick={() => void runMailboxAsk()}
+              icon={askBusy ? <RefreshCcw size={13} style={{ animation: "spin 1s linear infinite" }} /> : <Sparkles size={13} />}
+              title="Ask mailbox"
+              disabled={askBusy || !askQuery.trim()}
+            />
+          </div>
+
+          {askResult && (
+            <div
+              style={{
+                marginBottom: "8px",
+                padding: "9px 10px",
+                borderRadius: "var(--radius-md, 10px)",
+                border: "1px solid var(--color-border-subtle)",
+                background: "var(--color-bg-secondary)",
+                fontSize: "0.72rem",
+                color: "var(--color-text-secondary)",
+                lineHeight: 1.45,
+                position: "relative",
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setAskResult(null)}
+                aria-label="Close mailbox answer"
+                title="Close"
+                style={{
+                  position: "absolute",
+                  top: "7px",
+                  right: "7px",
+                  width: 22,
+                  height: 22,
+                  borderRadius: "999px",
+                  border: "1px solid var(--color-border-subtle)",
+                  background: "var(--color-bg-elevated)",
+                  color: "var(--color-text-muted)",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                  padding: 0,
+                }}
+              >
+                <X size={12} />
+              </button>
+              {askResult.answer ? (
+                <div
+                  className="markdown-content"
+                  style={
+                    {
+                      "--color-text": "var(--color-text-primary)",
+                      paddingRight: "22px",
+                    } as CSSProperties
+                  }
+                >
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      p: ({ children }) => <p style={{ margin: "0 0 6px" }}>{children}</p>,
+                      strong: ({ children }) => (
+                        <strong style={{ color: "var(--color-text-primary)", fontWeight: 700 }}>
+                          {children}
+                        </strong>
+                      ),
+                      code: ({ children }) => (
+                        <code
+                          style={{
+                            fontFamily: "var(--font-ui)",
+                            fontSize: "0.95em",
+                            background: "transparent",
+                            padding: 0,
+                            color: "var(--color-text-primary)",
+                          }}
+                        >
+                          {children}
+                        </code>
+                      ),
+                      a: ({ href, children }) => (
+                        <a
+                          href={href}
+                          onClick={(event) => event.preventDefault()}
+                          style={{ color: "var(--color-accent)", textDecoration: "none" }}
+                        >
+                          {children}
+                        </a>
+                      ),
+                    }}
+                  >
+                    {askResult.answer}
+                  </ReactMarkdown>
+                </div>
+              ) : (
+                <span style={{ display: "block", paddingRight: "22px" }}>
+                  {askResult.results.length} mailbox result{askResult.results.length === 1 ? "" : "s"} matched.
+                </span>
+              )}
+              {askResult.results.length > 1 && (
+                <div
+                  style={{
+                    marginTop: "9px",
+                    paddingTop: "8px",
+                    borderTop: "1px solid var(--color-border-subtle)",
+                    display: "grid",
+                    gap: "5px",
+                  }}
+                >
+                  {askResult.results.map((result, index) => {
+                    const sender = result.thread.participants[0];
+                    const active = selectedThreadId === result.thread.id;
+                    return (
+                      <button
+                        key={`${result.thread.id}-${index}`}
+                        type="button"
+                        onClick={() => openThread(result.thread)}
+                        style={{
+                          width: "100%",
+                          border: `1px solid ${active ? "rgba(124, 92, 191, 0.34)" : "var(--color-border-subtle)"}`,
+                          borderRadius: "var(--radius-sm, 8px)",
+                          background: active ? "var(--color-accent-subtle)" : "var(--color-bg-elevated)",
+                          color: "var(--color-text-secondary)",
+                          padding: "7px 8px",
+                          cursor: "pointer",
+                          textAlign: "left",
+                          fontFamily: "var(--font-ui)",
+                          display: "grid",
+                          gap: "2px",
+                        }}
+                      >
+                        <span
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: "8px",
+                            minWidth: 0,
+                          }}
+                        >
+                          <strong
+                            style={{
+                              color: "var(--color-text-primary)",
+                              fontSize: "0.72rem",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {index + 1}. {result.thread.subject || "Untitled email"}
+                          </strong>
+                          <span style={{ fontSize: "0.64rem", color: "var(--color-text-muted)", flexShrink: 0 }}>
+                            {formatTime(result.thread.lastMessageAt)}
+                          </span>
+                        </span>
+                        <span
+                          style={{
+                            fontSize: "0.66rem",
+                            color: "var(--color-text-muted)",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {sender?.name || sender?.email || "Unknown sender"}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Filters */}
           <div
             style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
+              display: "grid",
+              gap: "6px",
               marginBottom: "8px",
-              minWidth: 0,
+              padding: "7px",
+              borderRadius: "var(--radius-md, 10px)",
+              border: "1px solid var(--color-border-subtle)",
+              background: "var(--color-bg-secondary)",
             }}
           >
             <div
-              aria-label="Filter by category"
-              style={
-                {
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "4px",
-                  flexWrap: "nowrap",
-                  overflowX: "auto",
-                  flex: 1,
-                  minWidth: 0,
-                  scrollbarWidth: "thin",
-                  paddingBottom: "2px",
-                  WebkitOverflowScrolling: "touch",
-                } as CSSProperties
-              }
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                minWidth: 0,
+              }}
             >
-              {categories.map((cat) => {
-                const active = category === cat.id;
+              <div
+                aria-label="Filter by category"
+                style={
+                  {
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "4px",
+                    flex: 1,
+                    minWidth: 0,
+                    overflowX: "auto",
+                    scrollbarWidth: "none",
+                    WebkitOverflowScrolling: "touch",
+                  } as CSSProperties
+                }
+              >
+                {categories.map((cat) => {
+                  const active = category === cat.id;
+                  return (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => {
+                        setCategory(cat.id as Any);
+                        void loadThreads({ category: cat.id });
+                      }}
+                      style={{
+                        minHeight: 25,
+                        padding: "3px 8px",
+                        borderRadius: "999px",
+                        fontSize: "0.66rem",
+                        fontWeight: active ? 750 : 600,
+                        border: active
+                          ? "1px solid var(--color-accent)"
+                          : "1px solid var(--color-border-subtle)",
+                        background: active ? "var(--color-accent-subtle)" : "var(--color-bg-elevated)",
+                        color: active ? "var(--color-accent)" : "var(--color-text-secondary)",
+                        cursor: "pointer",
+                        transition: "background 0.12s ease, border-color 0.12s ease",
+                        fontFamily: "var(--font-ui)",
+                        flexShrink: 0,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {cat.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <div
+                role="group"
+                aria-label="Sort threads"
+                style={{
+                  display: "inline-flex",
+                  flexShrink: 0,
+                  padding: "2px",
+                  borderRadius: "999px",
+                  border: "1px solid var(--color-border-subtle)",
+                  background: "var(--color-bg-elevated)",
+                }}
+              >
+                {[
+                  { id: "recent" as const, label: "Recent" },
+                  { id: "priority" as const, label: "Priority" },
+                ].map((sort) => {
+                  const active = threadSortOrder === sort.id;
+                  return (
+                    <button
+                      key={sort.id}
+                      type="button"
+                      onClick={() => {
+                        setThreadSortOrder(sort.id);
+                        void loadThreads({ sortBy: sort.id });
+                      }}
+                      style={{
+                        minHeight: 23,
+                        padding: "3px 8px",
+                        fontSize: "0.66rem",
+                        fontWeight: active ? 750 : 600,
+                        border: "none",
+                        borderRadius: "999px",
+                        background: active ? "var(--color-accent-subtle)" : "transparent",
+                        color: active ? "var(--color-accent)" : "var(--color-text-secondary)",
+                        cursor: "pointer",
+                        transition: "background 0.12s ease, color 0.12s ease",
+                        fontFamily: "var(--font-ui)",
+                        whiteSpace: "nowrap",
+                      }}
+                      aria-pressed={active}
+                    >
+                      {sort.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div
+              aria-label="Filter by domain"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "4px",
+                flexWrap: "wrap",
+                minWidth: 0,
+              }}
+            >
+              {(domainFiltersOpen || domainFilter !== "all"
+                ? domainFilters
+                : domainFilters.filter((filter) => filter.id === "all" || filter.id === "work" || filter.id === "receipts")
+              ).map((filter) => {
+                const active = domainFilter === filter.id;
                 return (
                   <button
-                    key={cat.id}
+                    key={filter.id}
                     type="button"
                     onClick={() => {
-                      setCategory(cat.id as Any);
-                      void loadThreads({ category: cat.id });
+                      setDomainFilter(filter.id);
+                      void loadThreads({ domainFilter: filter.id });
                     }}
                     style={{
-                      padding: "3px 9px",
+                      minHeight: 25,
+                      padding: "3px 8px",
                       borderRadius: "999px",
-                      fontSize: "0.72rem",
-                      fontWeight: active ? 700 : 500,
+                      fontSize: "0.65rem",
+                      fontWeight: active ? 750 : 600,
                       border: active
                         ? "1px solid var(--color-accent)"
                         : "1px solid var(--color-border-subtle)",
-                      background: active ? "var(--color-accent-subtle)" : "transparent",
+                      background: active ? "var(--color-accent-subtle)" : "var(--color-bg-elevated)",
                       color: active ? "var(--color-accent)" : "var(--color-text-secondary)",
                       cursor: "pointer",
-                      transition: "background 0.12s ease, border-color 0.12s ease",
+                      whiteSpace: "nowrap",
                       fontFamily: "var(--font-ui)",
                       flexShrink: 0,
-                      whiteSpace: "nowrap",
                     }}
                   >
-                    {cat.label}
+                    {filter.label}
                   </button>
                 );
               })}
-            </div>
-            <div
-              role="group"
-              aria-label="Sort threads"
-              style={{
-                display: "flex",
-                flexShrink: 0,
-                borderRadius: "var(--radius-sm, 8px)",
-                border: "1px solid var(--color-border-subtle)",
-                overflow: "hidden",
-                background: "var(--color-bg-secondary)",
-              }}
-            >
-              {[
-                { id: "recent" as const, label: "Recent" },
-                { id: "priority" as const, label: "Priority" },
-              ].map((sort, sortIndex) => {
-                const active = threadSortOrder === sort.id;
-                return (
-                  <button
-                    key={sort.id}
-                    type="button"
-                    onClick={() => {
-                      setThreadSortOrder(sort.id);
-                      void loadThreads({ sortBy: sort.id });
-                    }}
-                    style={{
-                      padding: "4px 8px",
-                      fontSize: "0.72rem",
-                      fontWeight: active ? 700 : 600,
-                      border: "none",
-                      borderLeft:
-                        sortIndex > 0 ? "1px solid var(--color-border-subtle)" : "none",
-                      background: active ? "var(--color-accent-subtle)" : "transparent",
-                      color: active ? "var(--color-accent)" : "var(--color-text-secondary)",
-                      cursor: "pointer",
-                      transition: "background 0.12s ease, color 0.12s ease",
-                      fontFamily: "var(--font-ui)",
-                      whiteSpace: "nowrap",
-                    }}
-                    aria-pressed={active}
-                  >
-                    {sort.label}
-                  </button>
-                );
-              })}
+              <button
+                type="button"
+                onClick={() => setDomainFiltersOpen((current) => !current)}
+                aria-expanded={domainFiltersOpen}
+                style={{
+                  minHeight: 25,
+                  padding: "3px 8px",
+                  borderRadius: "999px",
+                  fontSize: "0.65rem",
+                  fontWeight: 650,
+                  border: "1px solid var(--color-border-subtle)",
+                  background: "var(--color-bg-elevated)",
+                  color: "var(--color-text-muted)",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                  fontFamily: "var(--font-ui)",
+                  flexShrink: 0,
+                }}
+              >
+                {domainFiltersOpen ? "Less" : "More"}
+              </button>
             </div>
           </div>
 
@@ -2477,6 +3345,7 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
                     const selectedForBulk = selectedThreadIds.includes(thread.id);
                     const badge = priorityBadge(thread.priorityBand);
                     const sender = thread.participants[0];
+                    const unread = thread.unreadCount > 0;
                     const accountLabel =
                       mailboxAccountById.get(thread.accountId)
                         ? formatMailboxAccountLabel(mailboxAccountById.get(thread.accountId)!)
@@ -2485,27 +3354,35 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
                     return (
                       <button
                         key={thread.id}
-                        onClick={() => setSelectedThreadId(thread.id)}
+                        onClick={() => openThread(thread)}
                         style={{
                           width: "100%",
                           textAlign: "left",
-                          padding: "12px 12px 11px",
+                          padding: unread ? "12px 12px 11px 16px" : "12px 12px 11px",
                           borderRadius: "var(--radius-md, 10px)",
                           border: selected
                             ? "1px solid var(--color-accent)"
                             : selectedForBulk
                               ? "1px solid rgba(34, 211, 238, 0.5)"
-                              : "1px solid var(--color-border-subtle)",
+                              : unread
+                                ? "1px solid rgba(14, 165, 233, 0.55)"
+                                : "1px solid var(--color-border-subtle)",
                           background: selected
                             ? "linear-gradient(180deg, rgba(34, 211, 238, 0.12) 0%, var(--color-bg-elevated) 100%)"
                             : selectedForBulk
                               ? "rgba(34, 211, 238, 0.08)"
-                              : "var(--color-bg-elevated)",
+                              : unread
+                                ? "linear-gradient(90deg, rgba(14, 165, 233, 0.18) 0%, rgba(240, 249, 255, 0.86) 42%, var(--color-bg-elevated) 100%)"
+                                : "var(--color-bg-elevated)",
                           color: "var(--color-text-primary)",
                           cursor: "pointer",
                           transition: "all 0.12s ease",
                           display: "block",
                           fontFamily: "var(--font-ui)",
+                          position: "relative",
+                          boxShadow: unread
+                            ? "0 8px 22px rgba(14, 165, 233, 0.12), 0 0 0 1px rgba(14, 165, 233, 0.12) inset"
+                            : "none",
                         }}
                         onMouseEnter={(e) => {
                           if (!selected) {
@@ -2514,10 +3391,26 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
                         }}
                         onMouseLeave={(e) => {
                           if (!selected && !selectedForBulk) {
-                            (e.currentTarget as HTMLElement).style.background = "var(--color-bg-elevated)";
+                            (e.currentTarget as HTMLElement).style.background = unread
+                              ? "linear-gradient(90deg, rgba(14, 165, 233, 0.18) 0%, rgba(240, 249, 255, 0.86) 42%, var(--color-bg-elevated) 100%)"
+                              : "var(--color-bg-elevated)";
                           }
                         }}
                       >
+                        {unread && (
+                          <span
+                            aria-hidden
+                            style={{
+                              position: "absolute",
+                              left: 0,
+                              top: 12,
+                              bottom: 12,
+                              width: 4,
+                              borderRadius: "0 999px 999px 0",
+                              background: "#0284c7",
+                            }}
+                          />
+                        )}
                         <div style={{ display: "flex", alignItems: "flex-start", gap: "8px" }}>
                           <input
                             type="checkbox"
@@ -2544,30 +3437,73 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
                               <span
                                 style={{
                                   fontSize: "0.8rem",
-                                  fontWeight: thread.unreadCount > 0 ? 700 : 600,
-                                  color: "var(--color-text-secondary)",
+                                  fontWeight: unread ? 800 : 600,
+                                  color: unread ? "var(--color-text-primary)" : "var(--color-text-secondary)",
                                   overflow: "hidden",
                                   textOverflow: "ellipsis",
                                   whiteSpace: "nowrap",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "6px",
+                                  minWidth: 0,
                                 }}
                               >
+                                {unread && (
+                                  <span
+                                    aria-hidden
+                                    style={{
+                                      width: 8,
+                                      height: 8,
+                                      borderRadius: "50%",
+                                      background: "#0284c7",
+                                      flexShrink: 0,
+                                      boxShadow: "0 0 0 3px rgba(14, 165, 233, 0.14)",
+                                    }}
+                                  />
+                                )}
                                 {sender?.name || sender?.email || "Unknown"}
                               </span>
-                              <span
+                              <div
                                 style={{
-                                  fontSize: "0.68rem",
-                                  color: "var(--color-text-muted)",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "6px",
                                   flexShrink: 0,
                                 }}
                               >
-                                {formatTime(thread.lastMessageAt)}
-                              </span>
+                                {unread && (
+                                  <span
+                                    style={{
+                                      fontSize: "0.6rem",
+                                      fontWeight: 800,
+                                      letterSpacing: 0,
+                                      textTransform: "uppercase",
+                                      padding: "2px 6px",
+                                      borderRadius: "999px",
+                                      background: "#0284c7",
+                                      color: "#fff",
+                                      lineHeight: 1.2,
+                                    }}
+                                  >
+                                    {thread.unreadCount > 1 ? `${thread.unreadCount} new` : "New"}
+                                  </span>
+                                )}
+                                <span
+                                  style={{
+                                    fontSize: "0.68rem",
+                                    color: unread ? "var(--color-text-primary)" : "var(--color-text-muted)",
+                                    fontWeight: unread ? 700 : 500,
+                                  }}
+                                >
+                                  {formatTime(thread.lastMessageAt)}
+                                </span>
+                              </div>
                             </div>
                             <div
                               style={{
                                 fontSize: "0.84rem",
-                                fontWeight: thread.unreadCount > 0 ? 700 : 600,
-                                color: "var(--color-text-primary)",
+                                fontWeight: unread ? 800 : 500,
+                                color: unread ? "var(--color-text-primary)" : "var(--color-text-secondary)",
                                 overflow: "hidden",
                                 textOverflow: "ellipsis",
                                 whiteSpace: "nowrap",
@@ -2589,7 +3525,7 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
                               <span
                                 style={{
                                   fontSize: "0.74rem",
-                                  color: "var(--color-text-muted)",
+                                  color: unread ? "var(--color-text-secondary)" : "var(--color-text-muted)",
                                   overflow: "hidden",
                                   textOverflow: "ellipsis",
                                   whiteSpace: "nowrap",
@@ -2632,18 +3568,23 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
                               >
                                 {thread.messageCount} msg{thread.messageCount === 1 ? "" : "s"}
                               </span>
-                              {thread.unreadCount > 0 && (
+                              {!!thread.attachments?.length && (
                                 <span
                                   style={{
                                     fontSize: "0.64rem",
                                     padding: "2px 6px",
                                     borderRadius: "999px",
-                                    background: "rgba(34, 211, 238, 0.12)",
-                                    color: "var(--color-accent)",
-                                    border: "1px solid rgba(34, 211, 238, 0.16)",
+                                    background: "rgba(99,102,241,0.10)",
+                                    color: "var(--color-text-muted)",
+                                    border: "1px solid rgba(99,102,241,0.18)",
+                                    maxWidth: "140px",
+                                    overflow: "hidden",
+                                    textOverflow: "ellipsis",
+                                    whiteSpace: "nowrap",
                                   }}
+                                  title={thread.attachments.map((attachment) => attachment.filename).join(", ")}
                                 >
-                                  {thread.unreadCount} unread
+                                  {thread.attachments.length} attachment{thread.attachments.length === 1 ? "" : "s"}
                                 </span>
                               )}
                               {thread.needsReply && (
@@ -2831,7 +3772,7 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
                   >
                     {selectedThread.messageCount} message{selectedThread.messageCount === 1 ? "" : "s"}
                   </span>
-                  {selectedThread.commitments.length > 0 && (
+                  {selectedThreadOpenCommitments.length > 0 && (
                     <span
                       style={{
                         padding: "3px 8px",
@@ -2840,9 +3781,9 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
                         color: "var(--color-text-secondary)",
                         fontSize: "0.68rem",
                         border: "1px solid var(--color-border-subtle)",
-                      }}
-                    >
-                      {selectedThread.commitments.length} commitment{selectedThread.commitments.length === 1 ? "" : "s"}
+                    }}
+                  >
+                      {selectedThreadOpenCommitments.length} open commitment{selectedThreadOpenCommitments.length === 1 ? "" : "s"}
                     </span>
                   )}
                   {selectedThread.sensitiveContent?.hasSensitiveContent && (
@@ -2874,16 +3815,18 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
                   }
                   active={messageSortOrder === "newest"}
                 />
-                <IconBtn
-                  onClick={() =>
-                    runAction(async () => {
-                      await window.electronAPI.summarizeMailboxThread(selectedThread.id);
-                      await loadThread(selectedThread.id);
-                    })
-                  }
-                  icon={<Sparkles size={13} />}
-                  title="Summarize thread with AI"
-                />
+                {!selectedThreadIsShort && (
+                  <IconBtn
+                    onClick={() =>
+                      runAction(async () => {
+                        await window.electronAPI.summarizeMailboxThread(selectedThread.id);
+                        await loadThread(selectedThread.id);
+                      })
+                    }
+                    icon={<Sparkles size={13} />}
+                    title="Summarize thread with AI"
+                  />
+                )}
                 <IconBtn
                   onClick={() => void reclassifySelectedThread()}
                   icon={<RefreshCcw size={13} />}
@@ -2897,6 +3840,18 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
                   disabled={busy}
                 />
                 <IconBtn
+                  onClick={() => openManualCompose("reply")}
+                  icon={<Reply size={13} />}
+                  title="Reply"
+                  disabled={busy}
+                />
+                <IconBtn
+                  onClick={() => openManualCompose("forward")}
+                  icon={<Forward size={13} />}
+                  title="Forward"
+                  disabled={busy}
+                />
+                <IconBtn
                   onClick={() =>
                     runAction(async () => {
                       await generateDraftForThread(selectedThread.id, {
@@ -2907,7 +3862,7 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
                       await loadThread(selectedThread.id);
                     })
                   }
-                  icon={<Reply size={13} />}
+                  icon={<Sparkles size={13} />}
                   title="Draft a reply with AI"
                 />
               </div>
@@ -2944,7 +3899,7 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
           )}
 
           {/* AI summary card */}
-          {selectedThread?.summary && (
+          {selectedThread?.summary && !selectedThreadIsShort && (
             <div
               style={{
                 padding: "14px 16px",
@@ -2994,8 +3949,168 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
             </div>
           )}
 
+          {/* Manual compose */}
+          {selectedThread && manualComposeMode && (
+            <div
+              style={{
+                padding: "14px 16px",
+                borderRadius: "var(--radius-lg, 14px)",
+                background: "rgba(14,165,233,0.06)",
+                border: "1px solid rgba(14,165,233,0.22)",
+                marginBottom: "14px",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: "12px",
+                  marginBottom: "10px",
+                }}
+              >
+                <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                  {(["reply", "reply_all", "forward"] as ManualComposeMode[]).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => openManualCompose(mode)}
+                      style={{
+                        border: manualComposeMode === mode ? "1px solid rgba(14,165,233,0.65)" : "1px solid var(--color-border-subtle)",
+                        background: manualComposeMode === mode ? "rgba(14,165,233,0.14)" : "var(--color-bg-secondary)",
+                        color: manualComposeMode === mode ? "#0369a1" : "var(--color-text-secondary)",
+                        borderRadius: "999px",
+                        padding: "5px 9px",
+                        fontSize: "0.72rem",
+                        fontWeight: 700,
+                        cursor: "pointer",
+                        fontFamily: "var(--font-ui)",
+                      }}
+                    >
+                      {mode === "reply_all" ? "Reply all" : mode === "forward" ? "Forward" : "Reply"}
+                    </button>
+                  ))}
+                </div>
+                <div style={{ display: "flex", gap: "8px", flexShrink: 0 }}>
+                  <ActionBtn
+                    onClick={closeManualCompose}
+                    icon={<X size={13} />}
+                    label="Close"
+                    disabled={busy}
+                  />
+                  <ActionBtn
+                    onClick={() => void sendManualCompose()}
+                    icon={<Send size={13} />}
+                    label={manualComposeMode === "forward" ? "Forward" : "Send"}
+                    variant="primary"
+                    disabled={
+                      busy ||
+                      !manualComposeBody.trim() ||
+                      splitMailboxRecipients(manualComposeTo).length +
+                        splitMailboxRecipients(manualComposeCc).length +
+                        splitMailboxRecipients(manualComposeBcc).length === 0
+                    }
+                  />
+                </div>
+              </div>
+              <div style={{ display: "grid", gap: "8px" }}>
+                <input
+                  aria-label="To"
+                  placeholder="To"
+                  value={manualComposeTo}
+                  onChange={(event) => setManualComposeTo(event.target.value)}
+                  style={{
+                    width: "100%",
+                    boxSizing: "border-box",
+                    border: "1px solid rgba(14,165,233,0.18)",
+                    background: "rgba(255,255,255,0.72)",
+                    borderRadius: "var(--radius-sm, 8px)",
+                    padding: "8px 10px",
+                    fontFamily: "var(--font-ui)",
+                    color: "var(--color-text-primary)",
+                    outline: "none",
+                  }}
+                />
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "8px" }}>
+                  <input
+                    aria-label="Cc"
+                    placeholder="Cc"
+                    value={manualComposeCc}
+                    onChange={(event) => setManualComposeCc(event.target.value)}
+                    style={{
+                      width: "100%",
+                      boxSizing: "border-box",
+                      border: "1px solid rgba(14,165,233,0.18)",
+                      background: "rgba(255,255,255,0.72)",
+                      borderRadius: "var(--radius-sm, 8px)",
+                      padding: "8px 10px",
+                      fontFamily: "var(--font-ui)",
+                      color: "var(--color-text-primary)",
+                      outline: "none",
+                    }}
+                  />
+                  <input
+                    aria-label="Bcc"
+                    placeholder="Bcc"
+                    value={manualComposeBcc}
+                    onChange={(event) => setManualComposeBcc(event.target.value)}
+                    style={{
+                      width: "100%",
+                      boxSizing: "border-box",
+                      border: "1px solid rgba(14,165,233,0.18)",
+                      background: "rgba(255,255,255,0.72)",
+                      borderRadius: "var(--radius-sm, 8px)",
+                      padding: "8px 10px",
+                      fontFamily: "var(--font-ui)",
+                      color: "var(--color-text-primary)",
+                      outline: "none",
+                    }}
+                  />
+                </div>
+                <input
+                  aria-label="Subject"
+                  placeholder="Subject"
+                  value={manualComposeSubject}
+                  onChange={(event) => setManualComposeSubject(event.target.value)}
+                  style={{
+                    width: "100%",
+                    boxSizing: "border-box",
+                    border: "1px solid rgba(14,165,233,0.18)",
+                    background: "rgba(255,255,255,0.72)",
+                    borderRadius: "var(--radius-sm, 8px)",
+                    padding: "8px 10px",
+                    fontFamily: "var(--font-ui)",
+                    fontWeight: 600,
+                    color: "var(--color-text-primary)",
+                    outline: "none",
+                  }}
+                />
+                <textarea
+                  aria-label="Message"
+                  placeholder="Write your message..."
+                  value={manualComposeBody}
+                  onChange={(event) => setManualComposeBody(event.target.value)}
+                  style={{
+                    width: "100%",
+                    minHeight: manualComposeMode === "forward" ? "240px" : "180px",
+                    boxSizing: "border-box",
+                    border: "1px solid rgba(14,165,233,0.18)",
+                    background: "rgba(255,255,255,0.72)",
+                    borderRadius: "var(--radius-sm, 8px)",
+                    padding: "10px 12px",
+                    fontFamily: "var(--font-ui)",
+                    color: "var(--color-text-primary)",
+                    lineHeight: 1.5,
+                    resize: "vertical",
+                    outline: "none",
+                  }}
+                />
+              </div>
+            </div>
+          )}
+
           {/* Draft preview */}
-          {selectedThread?.drafts[0] && (
+          {selectedThread && activeGeneratedDraft && (
             <div
               style={{
                 padding: "14px 16px",
@@ -3009,11 +4124,12 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
                 style={{
                   display: "flex",
                   justifyContent: "space-between",
-                  alignItems: "center",
+                  alignItems: "flex-start",
                   marginBottom: "10px",
+                  gap: "12px",
                 }}
               >
-                <div>
+                <div style={{ minWidth: 0, flex: 1 }}>
                   <div
                     style={{
                       fontSize: "0.72rem",
@@ -3026,15 +4142,24 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
                   >
                     Draft ready
                   </div>
-                  <div
+                  <input
+                    aria-label="Draft subject"
+                    value={editableDraftSubject}
+                    onChange={(event) => setEditableDraftSubject(event.target.value)}
                     style={{
+                      width: "100%",
+                      boxSizing: "border-box",
+                      border: "1px solid rgba(217,119,6,0.18)",
+                      background: "rgba(255,255,255,0.72)",
+                      borderRadius: "var(--radius-sm, 8px)",
+                      padding: "7px 9px",
                       fontWeight: 600,
                       fontSize: "0.86rem",
                       color: "var(--color-text-primary)",
+                      fontFamily: "var(--font-ui)",
+                      outline: "none",
                     }}
-                  >
-                    {selectedThread.drafts[0].subject}
-                  </div>
+                  />
                 </div>
                 <div style={{ display: "flex", gap: "8px", flexShrink: 0 }}>
                   <ActionBtn
@@ -3042,9 +4167,12 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
                       runAction(async () => {
                         await window.electronAPI.applyMailboxAction({
                           threadId: selectedThread.id,
-                          draftId: selectedThread.drafts[0].id,
+                          draftId: activeGeneratedDraft.id,
                           type: "discard_draft",
                         });
+                        setEditableDraftId(null);
+                        setEditableDraftSubject("");
+                        setEditableDraftBody("");
                         await reloadAll(selectedThread.id);
                       })
                     }
@@ -3055,17 +4183,35 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
                   <ActionBtn
                     onClick={() =>
                       runAction(async () => {
+                        const sentDraftId = activeGeneratedDraft.id;
                         await window.electronAPI.applyMailboxAction({
                           threadId: selectedThread.id,
-                          draftId: selectedThread.drafts[0].id,
+                          draftId: sentDraftId,
+                          draftSubject: editableDraftSubject.trim() || activeGeneratedDraft.subject,
+                          draftBody: editableDraftBody,
                           type: "send_draft",
                         });
+                        setEditableDraftId(null);
+                        setEditableDraftSubject("");
+                        setEditableDraftBody("");
+                        setSelectedThread((current) =>
+                          current?.id === selectedThread.id
+                            ? {
+                                ...current,
+                                drafts: current.drafts.filter((draft) => draft.id !== sentDraftId),
+                                needsReply: false,
+                                handled: true,
+                                todayBucket: current.todayBucket === "needs_action" ? "good_to_know" : current.todayBucket,
+                              }
+                            : current,
+                        );
                         await reloadAll(selectedThread.id);
                       })
                     }
                     icon={<Reply size={13} />}
                     label="Send"
                     variant="primary"
+                    disabled={busy || !editableDraftBody.trim()}
                   />
                 </div>
               </div>
@@ -3085,9 +4231,15 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
                   Sensitive content detected. Review carefully before sending or automating this thread.
                 </div>
               )}
-              <pre
+              <textarea
+                aria-label="Draft body"
+                value={editableDraftBody}
+                onChange={(event) => setEditableDraftBody(event.target.value)}
                 style={{
                   margin: 0,
+                  width: "100%",
+                  minHeight: "180px",
+                  boxSizing: "border-box",
                   whiteSpace: "pre-wrap",
                   overflowWrap: "break-word",
                   wordBreak: "break-word",
@@ -3096,12 +4248,57 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
                   lineHeight: 1.6,
                   color: "var(--color-text-secondary)",
                   background: "rgba(0,0,0,0.04)",
+                  border: "1px solid rgba(217,119,6,0.16)",
                   borderRadius: "var(--radius-sm, 8px)",
                   padding: "10px 12px",
+                  resize: "vertical",
+                  outline: "none",
                 }}
-              >
-                {selectedThread.drafts[0].body}
-              </pre>
+              />
+            </div>
+          )}
+
+          {!!selectedThread?.attachments?.length && (
+            <div
+              style={{
+                padding: "12px",
+                borderRadius: "var(--radius-lg, 14px)",
+                background: "var(--color-bg-secondary)",
+                border: "1px solid var(--color-border-subtle)",
+                marginBottom: "14px",
+              }}
+            >
+              <SectionLabel>Attachments</SectionLabel>
+              <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                {selectedThread.attachments.map((attachment) => (
+                  <button
+                    key={attachment.id}
+                    type="button"
+                    onClick={() =>
+                      runAction(async () => {
+                        await window.electronAPI.extractMailboxAttachmentText(attachment.id);
+                        await loadThread(selectedThread.id);
+                      })
+                    }
+                    style={{
+                      border: "1px solid var(--color-border-subtle)",
+                      background: "var(--color-bg-elevated)",
+                      color: "var(--color-text-secondary)",
+                      borderRadius: "999px",
+                      padding: "5px 8px",
+                      fontSize: "0.7rem",
+                      cursor: "pointer",
+                      maxWidth: "100%",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                    title={attachment.extractionStatus === "indexed" ? "Text indexed" : "Extract text for mailbox search"}
+                  >
+                    {attachment.filename}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 
@@ -3216,6 +4413,25 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
               icon={<Reply size={13} />}
               label="Follow-up"
               disabled={busy}
+            />
+            <ActionBtn
+              onClick={() => openManualCompose("reply")}
+              icon={<Reply size={13} />}
+              label="Reply"
+              disabled={busy || !selectedThread}
+            />
+            <ActionBtn
+              onClick={() => openManualCompose("forward")}
+              icon={<Forward size={13} />}
+              label="Forward"
+              disabled={busy || !selectedThread}
+            />
+            <ActionBtn
+              onClick={() => void handleThreadAction("mark_done")}
+              icon={<CheckSquare size={13} />}
+              label="Mark done"
+              disabled={busy || !selectedThreadCanMarkDone}
+              title="Clear Needs reply and close open commitments after you handled this outside Cowork."
             />
             <ActionBtn
               onClick={() => void runThreadWorkflow()}
@@ -3356,10 +4572,10 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
                 {selectedThread.summary?.suggestedNextAction ||
                   (selectedThread.drafts[0]
                     ? "Review the draft, then send or discard."
-                    : selectedThread.needsReply
-                      ? "Draft a response and check the commitments."
-                      : selectedThread.commitments.length
-                        ? "Review the commitments and decide what to accept."
+                      : selectedThread.needsReply
+                        ? "Draft a response and check the commitments."
+                      : selectedThreadOpenCommitments.length
+                        ? "Mark done when these commitments are already handled."
                         : "Review the thread and decide whether it can be archived.")
                 }
               </div>
@@ -3419,6 +4635,88 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
                   Sensitive content detected. Review before forwarding or automating this thread.
                 </div>
               )}
+            </div>
+          )}
+
+          {!!senderCleanupDigest?.senders.length && (
+            <div style={{ marginBottom: "14px" }}>
+              <SectionLabel>Sender cleanup</SectionLabel>
+              <div style={{ display: "grid", gap: "6px", marginTop: "6px" }}>
+                {senderCleanupDigest.senders.slice(0, 4).map((sender) => (
+                  <button
+                    key={sender.email}
+                    type="button"
+                    onClick={() => {
+                      const first = sender.threads[0];
+                      if (first) setSelectedThreadId(first.id);
+                    }}
+                    style={{
+                      width: "100%",
+                      boxSizing: "border-box",
+                      border: "1px solid var(--color-border-subtle)",
+                      background: "var(--color-bg-secondary)",
+                      borderRadius: "var(--radius-sm, 8px)",
+                      padding: "9px 10px",
+                      cursor: "pointer",
+                      textAlign: "left",
+                      fontFamily: "var(--font-ui)",
+                      display: "grid",
+                      gridTemplateColumns: "minmax(0, 1fr) auto",
+                      alignItems: "center",
+                      gap: "10px",
+                    }}
+                  >
+                    <div style={{ minWidth: 0 }}>
+                      <span
+                        style={{
+                          display: "block",
+                          minWidth: 0,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                          fontSize: "0.78rem",
+                          fontWeight: 700,
+                          color: "var(--color-text-primary)",
+                          lineHeight: 1.25,
+                        }}
+                      >
+                        {sender.name || sender.email}
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "flex-end",
+                        gap: "3px",
+                        minWidth: "92px",
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: "0.68rem",
+                          fontWeight: 700,
+                          color: "var(--color-text-primary)",
+                          lineHeight: 1,
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        -{sender.estimatedWeeklyReduction}/week
+                      </span>
+                      <span
+                        style={{
+                          fontSize: "0.66rem",
+                          color: "var(--color-text-muted)",
+                          lineHeight: 1.15,
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {sender.threadCount} threads · {sender.cleanupCandidateCount} cleanup
+                      </span>
+                    </div>
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 
@@ -3550,6 +4848,12 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
                       }}
                     />
                     <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", marginTop: "10px" }}>
+                      <ActionBtn
+                        onClick={() => void replyVoice.toggleRecording()}
+                        icon={replyVoice.state === "recording" ? <MicOff size={11} /> : <Mic size={11} />}
+                        label={replyVoice.state === "recording" ? "Stop voice" : "Speak reply"}
+                        disabled={busy || replyVoice.state === "processing"}
+                      />
                       <ActionBtn
                         onClick={() => void sendReplyViaChannel()}
                         icon={<Send size={11} />}
@@ -3843,21 +5147,7 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
                   label="Label similar…"
                   disabled={busy || !selectedThread}
                 />
-                <ActionBtn
-                  onClick={() =>
-                    runAction(async () => {
-                      if (!selectedSavedViewId) {
-                        setError("Select a saved view in the sidebar first.");
-                        return;
-                      }
-                      await window.electronAPI.createMailboxSavedViewReviewSchedule(selectedSavedViewId);
-                      await loadAutomations(selectedThread?.id);
-                    })
-                  }
-                  icon={<Calendar size={13} />}
-                  label="Weekly view review"
-                  disabled={busy || !selectedSavedViewId}
-                />
+                <div />
               </div>
               <div style={{ marginBottom: "10px" }}>
                 <SectionLabel>Snippets</SectionLabel>
@@ -4032,12 +5322,18 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
               <SectionLabel>Quick Actions</SectionLabel>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" }}>
                 <ActionBtn
-                  onClick={() => void handleThreadAction("mark_read")}
+                  onClick={() => void handleThreadAction("mark_done")}
+                  icon={<CheckSquare size={13} />}
+                  label="Mark done"
+                  disabled={busy || !selectedThreadCanMarkDone}
+                  title="Clear Needs reply and close open commitments after you handled this outside Cowork."
+                />
+                <ActionBtn
+                  onClick={() => void handleThreadAction(selectedThread.unreadCount > 0 ? "mark_read" : "mark_unread")}
                   icon={<MailOpen size={13} />}
-                  label="Mark read"
+                  label={selectedThread.unreadCount > 0 ? "Mark read" : "Mark unread"}
                   disabled={
                     busy ||
-                    selectedThread.unreadCount === 0 ||
                     (selectedThread.provider === "gmail" && !gmailCleanupActionsEnabled)
                   }
                   title={
@@ -4433,7 +5729,7 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
           {/* Commitments */}
           {!!selectedThread?.commitments.length && (
             <div style={{ marginBottom: "16px" }}>
-              <SectionLabel>Open Commitments</SectionLabel>
+              <SectionLabel>Commitments</SectionLabel>
               {selectedThread.commitments.map((commitment) => (
                 <div
                   key={commitment.id}
@@ -5005,7 +6301,7 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
                         threadIds: labelSimilarPreviewIds,
                         showInInbox: labelSimilarShowInInbox,
                       });
-                      await loadSavedViewsAndSnippets();
+                      await loadSnippets();
                       setLabelSimilarOpen(false);
                     } finally {
                       setLabelSimilarBusy(false);
@@ -5134,7 +6430,7 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
                   if (!shortcut || !body) return;
                   void runAction(async () => {
                     await window.electronAPI.upsertMailboxSnippet({ shortcut, body });
-                    await loadSavedViewsAndSnippets();
+                    await loadSnippets();
                     setSnippetModalOpen(false);
                   });
                 }}

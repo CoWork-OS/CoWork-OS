@@ -22,7 +22,7 @@
 <p align="center">
   <a href="docs/getting-started.md">Getting Started</a> &middot;
   <a href="docs/showcase.md">Use Cases</a> &middot;
-  <a href="docs/release-notes-0.5.35.md">Release Notes 0.5.35</a> &middot;
+  <a href="docs/release-notes-0.5.40.md">Release Notes 0.5.40</a> &middot;
   <a href="docs/integration-skill-bootstrap-lifecycle.md">Platform Updates</a> &middot;
   <a href="docs/">Documentation</a> &middot;
   <a href="CHANGELOG.md">Changelog</a> &middot;
@@ -36,9 +36,9 @@
 
 ### Why CoWork OS?
 
-- **Inbox Agent** — local-first email triage with AI classification, action-needed / suggested-actions / commitments views, draft handling, follow-up creation, and background sync.
-- **Core Automation Runtime** — Always-on cognition is now a strict core made of Memory, Heartbeat, and Subconscious, owned by automation profiles for generic operator agents rather than by persona templates or device/trigger state.
-- **Digital Twin Personas** — Pre-built opt-in persona presets for every role. Twins stay visible and activatable, but they no longer own heartbeat, subconscious, or memory runtime state.
+- **Inbox Agent** — local-first email workspace with Classic and Today modes, AI triage, Mailbox Ask, manual reply/reply-all/forward, editable AI drafts, sender cleanup, commitments, and background sync.
+- **Workflow Intelligence** — Always-on cognition is now framed as one reviewable loop: Memory is the source of truth, Heartbeat schedules reflection, Reflection evaluates evidence internally, and Suggestions are the user-facing output.
+- **Digital Twin Personas** — Pre-built opt-in persona presets for every role. Twins stay visible and activatable, but they no longer own heartbeat, workflow-intelligence, or memory runtime state.
 - **Zero-Human Company Ops** — Configure CoWork OS as a founder-directed autonomous company shell with venture workspace kits, automation-profile-backed operator agents, strategic planner loops, and Mission Control ops monitoring.
 - **Managed Devices** — Run and inspect tasks across saved remote machines from a dedicated Devices tab with connection controls, summaries, remote task feeds, and remote file attachment picking.
 - **Automations Control Center** — A single Automations section now separates Core Automation, Triggered Work, Remote/Device Work, and optional Twin surfaces instead of blending them into one runtime.
@@ -62,7 +62,7 @@
 - **Provider-aware prompt caching** — Prompt caching is on by default for supported routes. CoWork keeps stable system sections cacheable, keeps volatile turn context out of the cached prefix, uses Anthropic automatic caching when available, falls back to explicit Claude breakpoints on OpenRouter, and derives stable OpenAI-family cache keys for GPT routes such as Azure `gpt-5.4` / `gpt-5.4-mini`.
 - **Usage Insights** — Dashboard showing task stats, cost/token tracking by model, activity heatmaps, top skills, per-pack analytics, per-persona success/retry metrics, and task-result satisfaction signals.
 - **ChatGPT History Import** — Import your full ChatGPT conversation history. CoWork OS instantly knows your preferences, past projects, and context — no cold start. All data stays encrypted on your machine and never leaves it.
-- **Computer use (macOS)** — Native desktop control via `computer_*` tools with a single active session, safety overlay, **Esc** to abort, per-app session consent (not per click), and a Settings onboarding panel for Accessibility + Screen Recording. Prefer browser and shell tools for web and repo work; computer use is routed as a last-resort lane in policy and planning guidance. **Documentation:** [docs/computer-use.md](docs/computer-use.md).
+- **Computer use (macOS)** — Native desktop control via `screenshot`, `click`, `type_text`, `keypress`, and related tools with helper-targeted Accessibility + Screen Recording permissions, single-session sequential execution, **Esc** to abort, screenshot-relative coordinates, and stale-`captureId` protection. Prefer browser and shell tools for web and repo work; computer use is routed as a last-resort lane in policy and planning guidance. **Documentation:** [docs/computer-use.md](docs/computer-use.md).
 - **Security-first** — Approval workflows, sandboxed execution, configurable guardrails, encrypted storage, and a verified suite of 4,932 automated tests across 390 test files.
 - **Structured guidance** — In plan-mode flows, the agent can pause with short multiple-choice prompts instead of ambiguous free-text follow-ups.
 - **Runtime resilience** — Main interactive tasks run without an implicit turn window, while explicit turn caps, lifetime safety fuses, context-overflow recovery, and safe path normalization keep long-running work moving without silent file drift.
@@ -82,11 +82,11 @@ Stable workflow entry points for the newest high-impact capabilities.
 - **Programmatic technical video** — bundled `manim-video` skill for Manim CE explainers, equation walkthroughs, algorithm visualizations, and animated architecture/data stories. [Learn more](docs/skills/manim-video.md)
 - **High-agency frontend design** — bundled `taste-skill` for stricter anti-slop frontend work with stronger layout variance, typography, motion, and implementation rules.
 
-See [Core Automation](docs/core-automation.md), [I Gave CoWork OS A Subconscious, And Now It Self-Improves 24/7 | Full Guide](docs/continual-learning-in-cowork.md), [Features](docs/features.md), [Heartbeat v3](docs/heartbeat-v3.md), [Providers](docs/providers.md), and [Plugin Packs](docs/plugin-packs.md) for current runtime details.
+See [Workflow Intelligence](docs/workflow-intelligence.md), [Core Automation](docs/core-automation.md), [I Gave CoWork OS Workflow Intelligence, And Now It Learns From Reviewable Work | Full Guide](docs/continual-learning-in-cowork.md), [Features](docs/features.md), [Heartbeat v3](docs/heartbeat-v3.md), [Providers](docs/providers.md), and [Plugin Packs](docs/plugin-packs.md) for current runtime details.
 
 ### Latest Release
 
-**`0.5.35`** packages Managed Agents and Managed Sessions, optional Supermemory integration, the Task Trace Debugger, the bundled `novelist` skill, explicit-only main-task turn budgets, and the latest renderer, briefing, and release-hardening updates into the latest release. Start with [Release Notes 0.5.35](docs/release-notes-0.5.35.md), then [Features](docs/features.md), [Getting Started](docs/getting-started.md), [Channels](docs/channels.md), and the [Changelog](CHANGELOG.md).
+**`0.5.40`** packages Chronicle desktop screen context, Workflow Intelligence, routines, AgentMail, the expanded Inbox Agent, Managed Agents Hub improvements, multi-provider image generation, rich PPTX previews, LaTeX/PDF artifacts, and the bundled `kami` and `taste-skill` workflows into the latest release. Start with [Release Notes 0.5.40](docs/release-notes-0.5.40.md), then [Features](docs/features.md), [Getting Started](docs/getting-started.md), [Channels](docs/channels.md), and the [Changelog](CHANGELOG.md).
 
 ## Quick Start
 
@@ -100,6 +100,7 @@ Download the latest release from [GitHub Releases](https://github.com/CoWork-OS/
 | **Windows** | `.exe` (NSIS installer) | Run the installer and follow the prompts |
 
 > **macOS first launch:** The app is currently unsigned. On first open, macOS will block it — go to **System Settings > Privacy & Security > Open Anyway**, or run: `xattr -dr com.apple.quarantine "/Applications/CoWork OS.app"`
+> Release maintainers can create this fallback build with `npm run package:mac:unsigned`; signed/notarized builds require an explicit `.env.mac` signing identity.
 
 > **Windows first launch:** Windows SmartScreen may show a warning for unrecognized apps. Click **More info** > **Run anyway** to proceed.
 
@@ -173,7 +174,7 @@ It works in desktop and gateway channels, supports inline chaining, and writes i
 
 Operator Runtime Visibility makes the runtime's learning and routing visible: task detail surfaces now show the learning progression, unified recall spans tasks/messages/files/workspace notes/memory/KG, shell sessions preserve operator state, and live routing/fallback events are surfaced in Mission Control and the task UI. [Learn more](docs/operator-runtime-visibility.md)
 
-`Subconscious` runs now use the same runtime with stricter safeguards: they start only after memory services are initialized, write durable target-scoped artifacts under `.cowork/subconscious/`, auto-dispatch across mapped workflows, require isolated git worktrees for code-change dispatch by default, and skip non-git workspaces when isolation is required. See [Subconscious Reflective Loop](docs/subconscious-loop.md) and [Troubleshooting](docs/troubleshooting.md#subconscious-startup-warnings-in-development).
+Workflow Intelligence reflections now use the same runtime with stricter safeguards: they start only after memory services are initialized, write durable target-scoped artifacts under `.cowork/subconscious/` for compatibility, default to reviewable suggestions, learn from act/edit/snooze/dismiss/ignore feedback, require isolated git worktrees for trusted code-change auto-create paths, and skip non-git workspaces when isolation is required. See [Workflow Intelligence](docs/workflow-intelligence.md) and [Troubleshooting](docs/troubleshooting.md#workflow-intelligence-startup-warnings-in-development).
 
 ### Output Completion UX
 
@@ -208,7 +209,7 @@ The Devices tab turns CoWork OS into a multi-machine control surface. Save and r
 
 ### Automations
 
-Automations are now organized around a hard boundary: `Memory + Heartbeat + Subconscious` form the core runtime, while `Routines` are the main saved-automation product layered on top of lower-level execution surfaces. `Scheduled Tasks`, `Webhooks`, and `Event Triggers` still exist, but they now also serve as advanced or compiled backends for routines rather than competing first-class automation concepts. The home dashboard and routines panel surface recent automation runs so you can monitor background systems without hunting through tabs. [Learn more](docs/core-automation.md)
+Automations are now organized around a hard boundary: **Workflow Intelligence** is the always-on cognitive loop, while `Routines` are the main saved-automation product layered on top of lower-level execution surfaces. `Scheduled Tasks`, `Webhooks`, and `Event Triggers` still exist, but they now also serve as advanced or compiled backends for routines rather than competing first-class automation concepts. The home dashboard, welcome-screen Next actions, and routines panel surface recent automation suggestions/runs so you can monitor background systems without hunting through tabs. [Learn more](docs/core-automation.md)
 
 ### Zero-Human Company Ops
 
@@ -216,7 +217,7 @@ CoWork OS can be configured as a founder-operated autonomous company shell: vent
 
 ### Digital Twin Personas
 
-Role-specific AI twins that handle cognitive overhead as optional persona presets. Pick a template (Software Engineer, Engineering Manager, Product Manager, VP, Founder Office Operator, Company Planner, and more), customize it, and activate it as a role preset with recommended skills and prompt/personality defaults. Twins can be linked to a company for company-aware operations, but they no longer own heartbeat or subconscious policy directly. [Learn more](docs/digital-twins.md)
+Role-specific AI twins that handle cognitive overhead as optional persona presets. Pick a template (Software Engineer, Engineering Manager, Product Manager, VP, Founder Office Operator, Company Planner, and more), customize it, and activate it as a role preset with recommended skills and prompt/personality defaults. Twins can be linked to a company for company-aware operations, but they no longer own heartbeat or Workflow Intelligence policy directly. [Learn more](docs/digital-twins.md)
 
 ### Live Canvas & Build Mode
 
@@ -228,15 +229,18 @@ Unified AI gateway across 17 channels with security modes, rate limiting, ambien
 
 ### Inbox Agent
 
-Local-first inbox workspace that turns email into an action queue. It keeps cached mail visible on restart, syncs in the background, and surfaces the right next step for each thread: triage, draft, cleanup, commitment tracking, and scheduling. [Learn more](docs/inbox-agent.md)
+Local-first inbox workspace that turns email into an action queue while preserving normal email-client controls. It keeps cached mail visible on restart, syncs in the background, supports manual reply/reply-all/forward, and surfaces the right next step for each thread: triage, draft, cleanup, commitment tracking, and scheduling. [Learn more](docs/inbox-agent.md)
 
-- **Action cards**: Unread, Action Needed, Suggested Actions, Open Commitments
-- **Mailbox views**: Inbox, Sent, All, plus Recent/Priority sorting
-- **Workflow buttons**: Cleanup, Follow-up, Prep thread, Extract todos, Schedule, Refresh intel
+- **Classic + Today modes**: use the familiar three-pane inbox or the Today lanes for Needs action, Happening today, Good to know, and More to browse
+- **Action cards**: Unread, Needs reply, Suggested Actions, Open Commitments
+- **Mailbox views**: Inbox, Sent, All, plus Recent/Priority sorting, saved views, account filters, and practical domain filters
+- **Normal email actions**: manual Reply, Reply all, Forward, To/Cc/Bcc, editable subject/body, and provider-backed send
+- **AI draft handling**: generated replies are editable before send, and sent drafts disappear after successful send
+- **Mailbox Ask**: search local mailbox evidence and indexed attachment text, with LLM summaries when configured
+- **Workflow buttons**: Cleanup, Follow-up, Reply, Forward, Mark done, Prep thread, Extract todos, Schedule, Refresh intel
 - **Gmail auto-forwarding**: create forwarding automations from a Gmail thread with dry-run support, attachment filters, per-message dedupe, and thread-scoped execution
-- **Draft handling**: Send or discard generated replies before anything is posted externally
-- **Commitment tracking**: Accept commitments into real follow-up tasks, then mark them done or dismiss them
-- **Background sync**: Load from the local database immediately and refresh in the background without blanking the inbox on restart
+- **Commitment tracking**: accept commitments into real follow-up tasks, mark already-handled threads done, or dismiss items
+- **Background sync**: load from the local database immediately and refresh in the background without blanking the inbox on restart
 
 ### Infrastructure
 
@@ -457,7 +461,8 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
 | [LLM Wiki](docs/llm-wiki.md) | First-class research vault workflow, slash syntax, vault layout, analyzer outputs, and Obsidian-friendly knowledge-base behavior |
 | [Kami Skill](docs/skills/kami.md) | Bundled editorial document workflow for resumes, one-pagers, white papers, diagrams, and slide decks |
 | [manim-video Skill](docs/skills/manim-video.md) | Bundled Manim CE workflow for technical animation, project scaffolding, and draft-to-production render flow |
-| [Core Automation](docs/core-automation.md) | Runtime boundary for Memory + Heartbeat + Subconscious, automation profiles, and the core harness |
+| [Workflow Intelligence](docs/workflow-intelligence.md) | Memory + Heartbeat + Reflection + Suggestions model, reviewable outputs, and feedback learning |
+| [Core Automation](docs/core-automation.md) | Runtime boundary for Workflow Intelligence, automation profiles, and the core harness |
 | [Heartbeat v3](docs/heartbeat-v3.md) | Default two-lane heartbeat architecture, signals, Pulse, Dispatch, and automation-profile-backed operator semantics |
 | [Security Guide](docs/security-guide.md) | Security model and best practices |
 | [Enterprise Connectors](docs/enterprise-connectors.md) | MCP connector development |
@@ -467,7 +472,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
 | [Knowledge Graph](docs/knowledge-graph.md) | Structured entity/relationship memory |
 | [Context Compaction](docs/context-compaction.md) | Proactive session compaction with structured summaries and chat-history summarization |
 | [Mission Control](docs/mission-control.md) | Agent orchestration dashboard |
-| [Subconscious Loop](docs/subconscious-loop.md) | Architecture and operating model for the core reflective evidence -> hypotheses -> critique -> winner -> backlog -> dispatch loop |
+| [Subconscious Loop](docs/subconscious-loop.md) | Compatibility redirect for the former name of Workflow Intelligence |
 | [Zero-Human Company Ops](docs/zero-human-company.md) | Founder-directed company planning, operators, and Mission Control ops workflows |
 | [Plugin Packs](docs/plugin-packs.md) | Plugin platform, Customize panel, and Plugin Store |
 | [Skill Store & External Skills](docs/skill-store-and-external-skills.md) | ClawHub support, external skill imports, and managed-skill install flows |

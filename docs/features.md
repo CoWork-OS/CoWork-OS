@@ -41,7 +41,7 @@
 - **Permission Engine**: layered tool approvals combine explicit modes, per-tool/path/command-prefix/MCP-server rules, session grants, workspace-local rules, profile rules, and hard guardrails; `dangerous_only` adds a lower-friction mode that still prompts on destructive, privacy-sensitive, side-effecting, or ambiguous actions.
 - **Live Terminal**: Shell commands run in a real-time terminal view — see output as it happens, stop execution, or provide interactive input (e.g. `y`/`n` prompts)
 - **Dynamic Re-Planning**: Agent can revise its plan mid-execution
-- **139 Built-in Skills**: GitHub, Slack, Notion, Spotify, Apple Notes, Unity, Unreal, Terraform, Kubernetes, financial analysis, and more. Bundled workflows now include [LLM Wiki](llm-wiki.md) for persistent research vaults, [manim-video](skills/manim-video.md) for deterministic technical animation, and [kami](skills/kami.md) for editorial PDFs and slide decks. Optional CLI-based skills (e.g. [aurl](skills/aurl.md) for OpenAPI/GraphQL APIs) appear when the binary is installed.
+- **140 Built-in Skills**: GitHub, Slack, Notion, Spotify, Apple Notes, Unity, Unreal, Terraform, Kubernetes, financial analysis, and more. Bundled workflows now include [LLM Wiki](llm-wiki.md) for persistent research vaults, [manim-video](skills/manim-video.md) for deterministic technical animation, [kami](skills/kami.md) for editorial PDFs and slide decks, and `taste-skill` for high-agency frontend design. Optional CLI-based skills (e.g. [aurl](skills/aurl.md) for OpenAPI/GraphQL APIs) appear when the binary is installed.
 - **Additive Skill Runtime**: Skills can still be proactively shortlisted from task semantics, but they now apply as additive context and scoped runtime directives. They never replace the original task prompt. See [Skills Runtime Model](skills-runtime-model.md).
 - **Chat Mode**: Direct LLM chat with no tools, no step timeline, same-session follow-ups, chat-only streaming for supported providers, and a fixed high output budget for explicit `executionMode: "chat"` sessions. See [Chat Mode](chat-mode.md).
 - **Document Creation**: Excel, Word, PDF, PowerPoint with professional formatting, first-class LaTeX/TikZ `.tex` -> PDF compilation when a system TeX engine is installed, plus the bundled [kami](skills/kami.md) workflow for editorial PDFs, resumes, one-pagers, and slide decks
@@ -133,21 +133,25 @@ See [Chronicle](chronicle.md) for setup, testing, privacy, and contributor detai
 
 ### Inbox Agent
 
-Local-first inbox workspace for email triage, follow-up, task capture, cross-channel identity, and operator handoff.
+Local-first inbox workspace for email triage, normal email handling, follow-up, task capture, cross-channel identity, and operator handoff.
 
-- **Live inbox surfaces**: `Unread`, `Action Needed`, `Suggested Actions`, and `Open Commitments`
-- **Mailbox views**: `Inbox`, `Sent`, and `All`, with `Recent` and `Priority` sorting
-- **Action rail**: cleanup, follow-up, thread prep, todo extraction, scheduling, and intel refresh
+- **Classic + Today modes**: the familiar three-pane inbox remains available, while Today groups work into `Needs action`, `Happening today`, `Good to know`, and `More to browse`
+- **Live inbox surfaces**: `Unread`, `Needs reply`, `Suggested Actions`, and `Open Commitments`
+- **Mailbox views**: `Inbox`, `Sent`, and `All`, with `Recent` and `Priority` sorting, saved views, account filters, and domain filters
+- **Normal email actions**: manual reply, reply-all, forward, To/Cc/Bcc, editable subject/body, and provider-backed send
+- **AI draft review**: generated replies can be edited before sending, and the draft card clears after successful send
+- **Mailbox Ask**: search local thread evidence, attachment filenames, and on-demand indexed attachment text, with LLM summaries when configured
+- **Action rail**: cleanup, follow-up, reply, forward, mark done, thread prep, todo extraction, scheduling, and intel refresh
 - **Thread visibility**: received and sent message content are both shown in the thread detail view
 - **Cross-channel replies**: reply directly via linked Slack, Teams, WhatsApp, Signal, or iMessage targets when email is not the best channel
 - **Unified identity**: manual search/link in Settings can attach Slack, Teams, WhatsApp, Signal, iMessage, and CRM handles to one contact identity
 - **Relationship timeline**: the research rail merges email and channel history into one relationship timeline with channel preference hints
 - **Mission Control handoff**: threads can be turned into company issues, assigned to an operator, and woken from the inbox
-- **Inbox automations**: rules, reminder cadences, and patrol schedules can create tasks, wake agents, and schedule review flows
-- **Gmail auto-forwarding**: create a forwarding automation from a Gmail thread with dry-run support, attachment filters, thread scoping, per-message dedupe, and watermark-based polling that survives downtime
-- **Commitment handling**: accepted commitments become real follow-up tasks that can later be marked done or dismissed
-- **Event pipeline**: mailbox sync, triage, draft, and action events feed Knowledge Graph, Heartbeat, triggers, playbooks, and briefing
-- **Safer review**: sensitive-content warnings and draft review keep outbound actions visible before anything leaves the app
+- **Sender cleanup**: noisy senders are ranked by volume, cleanup candidates, and estimated weekly reduction
+- **Inbox automations**: rules, reminder cadences, patrol schedules, and Gmail forwarding automations can create tasks, wake agents, and schedule review flows
+- **Commitment handling**: accepted commitments become real follow-up tasks; already-handled threads can be marked done
+- **Event pipeline**: mailbox sync, triage, draft, send, and action events feed Knowledge Graph, Heartbeat, triggers, playbooks, and briefing
+- **Safer review**: sensitive-content warnings, editable drafts, blocked scripts, and provider-permission gates keep outbound actions visible before anything leaves the app
 - **Local persistence**: cached mail remains visible after restart while background sync refreshes new mail
 
 See the full workflow guide in [Inbox Agent](inbox-agent.md).
@@ -170,9 +174,9 @@ See [Remote Access](remote-access.md) for connection patterns and [Mission Contr
 Automation features are now grouped together in `Settings > Automations`:
 
 - **Routines**: the primary automation abstraction for saved instructions, execution target, triggers, outputs, approval policy, connector policy, and recent runs
-- **Core automation**: `Memory + Heartbeat + Subconscious` form one always-on runtime owned by automation profiles
+- **Workflow Intelligence**: Memory, Heartbeat, internal Reflection, and reviewable Suggestions form one always-on runtime owned by automation profiles
 - **Task Queue**: concurrency, queueing, and background execution policy
-- **Subconscious**: reflective automation with target-scoped evidence, hypotheses, critique, winner selection, backlog, and dispatch
+- **Workflow Intelligence settings**: target-scoped evidence, hypotheses, critique, winner selection, suggestion dispatch, feedback learning, and guarded auto-create policy
 - **Scheduled Tasks**: recurring time-based task execution; now also used as a compiled backend for routine schedule triggers
 - **Webhooks**: inbound automation entry points; now also used as a compiled backend for routine API triggers
 - **Event Triggers**: condition-based actions triggered by channel, webhook, or runtime events; now also used as a compiled backend for routine event triggers
@@ -217,7 +221,7 @@ Current product stance:
 
 - use `Routines` first when you want one automation object with observability and policy
 - use `Scheduled Tasks`, `Webhooks`, or `Event Triggers` directly only when you intentionally want the lower-level surface
-- treat `Heartbeat` and `Subconscious` as the always-on cognitive runtime, not as routine triggers
+- treat `Workflow Intelligence` as the always-on cognitive runtime, not as a routine trigger
 
 ### Zero-Human Company Ops
 
@@ -242,19 +246,23 @@ This workflow is designed for "human-directed, agent-operated" execution:
 
 See [Zero-Human Company Operations](zero-human-company.md) for architecture, setup recipe, monitoring flow, and example operating models.
 
-### Subconscious
+### Workflow Intelligence
 
-`Subconscious` is the primary reflective automation layer in CoWork OS:
+`Workflow Intelligence` is the primary always-on cognition layer in CoWork OS:
 
-- **Global coordinator, namespaced targets**: one brain ranks work globally while each workflow target keeps its own history, winner, backlog, and dispatch stream
+- **Memory as source of truth**: reflection outputs become memory candidates such as preferences, workflow patterns, open loops, corrections, recurring tasks, and ignored noise
+- **Heartbeat as scheduler**: Heartbeat decides when accumulated signals justify reflection
+- **Reviewable suggestions first**: useful outcomes appear as Next actions under the welcome message box, in the automation inbox, and in the Suggestions panel
+- **Global coordinator, namespaced targets**: one coordinator ranks work globally while each workflow target keeps its own history, winner, backlog, and dispatch stream
 - **Stable target identities**: supports core-owned targets such as `global`, `workspace`, `agent_role`, `code_workspace`, and `pull_request`
-- **Fixed reflective pipeline**: collect evidence, generate 3-5 hypotheses, critique them, synthesize one winner, write backlog, and dispatch immediately when an executor exists
-- **Durable artifacts plus SQLite indexing**: files are written under `.cowork/subconscious/` and indexed for UI/search/filtering
-- **Automatic downstream execution**: dispatch kinds include `task`, `suggestion`, `notify`, and `code_change_task`
-- **Recommendation-only success path**: if no executor mapping exists, the run still completes with a winner, rejected paths, and next-step backlog
+- **Fixed reflective pipeline**: collect evidence, generate 3-5 hypotheses, critique them, synthesize one winner, write backlog, and create a suggestion by default
+- **Feedback learning**: act/edit/snooze/dismiss/ignore responses update memory and future scoring
+- **Durable artifacts plus SQLite indexing**: compatibility files are written under `.cowork/subconscious/` and indexed for UI/search/filtering
+- **Guarded downstream execution**: auto-created tasks require explicit policy, low risk, clear scope, and trusted or repeatedly accepted patterns
+- **Recommendation-only success path**: if no executor mapping exists or policy does not allow autonomy, the run still completes with a reviewable suggestion or deferred recommendation
 - **No maintainer-only enrollment gate**: safety remains enforced by the existing executor approval and capability policies
 
-See [Subconscious Reflective Loop](subconscious-loop.md) for the architecture and operational guidance.
+See [Workflow Intelligence](workflow-intelligence.md) for the architecture and operational guidance.
 
 ### Core Harness
 
@@ -537,7 +545,7 @@ CoWork OS still keeps a multi-layered learning stack under the reflective loop. 
 - **Retry-aware reuse**: retries can reuse playbook patterns during planning, recent session recall during planning/execution/follow-ups, and pending verification checklist state instead of restarting cold
 - **`/learn` skill**: manually teach the agent insights, corrections, preferences, or rules
 
-These layers feed the `Subconscious` loop and the normal task runtime. See [Subconscious Reflective Loop](subconscious-loop.md) for the full architecture guide.
+These layers feed `Workflow Intelligence` and the normal task runtime. See [Workflow Intelligence](workflow-intelligence.md) for the full architecture guide.
 
 ### Evolving Agent Intelligence
 

@@ -9,7 +9,7 @@ Access it from **Settings** > **Mission Control**. For company-ops workflows, yo
 Mission Control now sits alongside the other operational entry points:
 
 - **Devices** for machine-level task routing and remote execution
-- **Settings > Automations** for routines, core automation, queueing, scheduling, triggers, briefing, and subconscious policies
+- **Settings > Automations** for routines, core automation, queueing, scheduling, triggers, briefing, and Workflow Intelligence policies
 - **Settings > Companies** for company graph editing and operator assignment
 
 ## Layout
@@ -60,7 +60,7 @@ Configure agent roles with:
 - Autonomy level (lead / specialist / intern)
 - link-out to the attached automation profile when the role participates in the always-on core
 
-Heartbeat and subconscious ownership no longer live directly in the general role editor. Core-runtime settings are managed through the dedicated automation surfaces.
+Heartbeat and Workflow Intelligence ownership no longer live directly in the general role editor. Core-runtime settings are managed through the dedicated automation surfaces.
 
 ---
 
@@ -174,7 +174,7 @@ It surfaces:
 - proposed and gated experiments
 - promoted learnings
 
-This is the main monitoring surface for the `trace -> failure mining -> clustering -> eval -> experiment -> learning` loop behind Heartbeat and Subconscious.
+This is the main monitoring surface for the `trace -> failure mining -> clustering -> eval -> experiment -> learning` loop behind Heartbeat and Workflow Intelligence.
 
 ---
 

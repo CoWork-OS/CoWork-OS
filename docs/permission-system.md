@@ -96,7 +96,7 @@ Instead, core-created automated tasks inherit an autonomy policy that:
 - does not auto-approve `data_export`
 - still preserves hard guardrails, workspace capability denials, and explicit deny rules
 
-This is the default posture for the Heartbeat/Subconscious core runtime because it keeps routine operator work flowing without turning the permission system off.
+This is the default posture for the Workflow Intelligence core runtime because it keeps routine operator work flowing without turning the permission system off.
 
 In other words:
 

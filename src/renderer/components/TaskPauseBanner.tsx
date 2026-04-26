@@ -13,6 +13,61 @@ type TaskPauseBannerProps = {
   onContinueWithoutShell?: (() => void | Promise<void>) | undefined;
 };
 
+const LOW_SIGNAL_REASON_CODES = new Set([
+  "required_decision",
+  "required_decision_followup",
+  "input_request",
+  "skill_parameters",
+  "user_action_required_failure",
+  "user_action_required_tool",
+  "user_action_required_disabled",
+  "shell_permission_required",
+  "shell_permission_still_disabled",
+  "missing_required_workspace_artifact",
+]);
+
+function isLowSignalPauseMessage(message: string, reasonCode?: string | null): boolean {
+  const lower = message.trim().toLowerCase();
+  if (!lower) return true;
+  if (reasonCode && lower === reasonCode.trim().toLowerCase()) return true;
+  return LOW_SIGNAL_REASON_CODES.has(lower) || lower === "paused - awaiting user input";
+}
+
+function getPauseBannerCopy(reasonCode?: string | null): { title: string; instruction: string } {
+  if (
+    reasonCode === "shell_permission_required" ||
+    reasonCode === "shell_permission_still_disabled"
+  ) {
+    return {
+      title: "Shell access is needed to continue.",
+      instruction:
+        "Enable shell to let me run commands, or continue without it and I’ll use a limited path.",
+    };
+  }
+  if (reasonCode === "skill_parameters") {
+    return {
+      title: "Skill needs one more detail.",
+      instruction: "Reply below with the requested value, or stop this task here.",
+    };
+  }
+  if (reasonCode === "missing_required_workspace_artifact") {
+    return {
+      title: "A required file is missing.",
+      instruction: "Attach the missing file or tell me where to find it, or stop this task here.",
+    };
+  }
+  if (reasonCode === "user_action_required_failure" || reasonCode === "user_action_required_tool") {
+    return {
+      title: "I need your decision to continue.",
+      instruction: "Reply with what you want me to do next, or stop this task here.",
+    };
+  }
+  return {
+    title: "Quick check-in - I'm at a decision point.",
+    instruction: "Type anything below to continue, or stop this task here.",
+  };
+}
+
 export function TaskPauseBannerDetailsContent({
   message,
   markdownComponents,
@@ -43,18 +98,29 @@ export function TaskPauseBanner({
   );
   const detailsTitleId = useId();
   const normalizedMessage = typeof message === "string" ? message.trim() : "";
-  const preview = useMemo(() => buildPauseBannerPreview(normalizedMessage), [normalizedMessage]);
-  const waitingForSkillParameter = reasonCode === "skill_parameters";
+  const displayMessage = isLowSignalPauseMessage(normalizedMessage, reasonCode)
+    ? ""
+    : normalizedMessage;
+  const preview = useMemo(() => buildPauseBannerPreview(displayMessage), [displayMessage]);
+  const copy = getPauseBannerCopy(reasonCode);
+  const title =
+    displayMessage &&
+    reasonCode !== "shell_permission_required" &&
+    reasonCode !== "shell_permission_still_disabled" &&
+    reasonCode !== "skill_parameters" &&
+    reasonCode !== "missing_required_workspace_artifact"
+      ? "I need your decision to continue."
+      : copy.title;
   const waitingForShellPermission =
     reasonCode === "shell_permission_required" || reasonCode === "shell_permission_still_disabled";
 
   useEffect(() => {
     setShowDetails(false);
-  }, [normalizedMessage]);
+  }, [displayMessage]);
 
   useEffect(() => {
     setPendingAction(null);
-  }, [reasonCode, normalizedMessage]);
+  }, [reasonCode, displayMessage]);
 
   useEffect(() => {
     if (!showDetails) return undefined;
@@ -86,25 +152,13 @@ export function TaskPauseBanner({
     <>
       <div className="task-status-banner task-status-banner-paused">
         <div className="task-status-banner-content">
-          <strong>
-            {waitingForShellPermission
-              ? "Shell access is needed to continue."
-              : waitingForSkillParameter
-              ? "Skill needs one more detail."
-              : "Quick check-in - I'm at a decision point."}
-          </strong>
-          {normalizedMessage && (
+          <strong>{title}</strong>
+          {displayMessage && (
             <span className="task-status-banner-detail task-status-banner-summary">
               {preview.summary}
             </span>
           )}
-          <span className="task-status-banner-detail">
-            {waitingForShellPermission
-              ? "Enable shell to let me run commands, or continue without it and I’ll use a limited path."
-              : waitingForSkillParameter
-              ? "Reply below with the requested value, or stop this task here."
-              : "Type anything below to continue, or stop this task here."}
-          </span>
+          <span className="task-status-banner-detail">{copy.instruction}</span>
         </div>
         {(waitingForShellPermission || preview.showDetails || onStopTask) && (
           <div className="task-status-banner-actions">

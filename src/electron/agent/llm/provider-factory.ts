@@ -44,10 +44,12 @@ import {
   CUSTOM_PROVIDER_IDS,
   type ProviderCatalogEntry,
 } from "../../../shared/llm-provider-catalog";
+import { withLlmModelSelectionMetadata } from "../../../shared/llm-model-selection";
 import { resolveModelPreferenceToModelKey } from "../../../shared/agent-preferences";
 import type {
   AgentConfig,
   CustomProviderConfig,
+  LLMReasoningEffort,
   LlmProfile,
   LLMProviderFallbackConfig,
   PromptCachingSettings,
@@ -730,6 +732,7 @@ export interface CachedModelInfo {
   // Additional fields for provider-specific info
   contextLength?: number; // For OpenRouter models
   size?: number; // For Ollama models (in bytes)
+  reasoningEfforts?: LLMReasoningEffort[];
 }
 
 interface ProviderRoutingSettings {
@@ -740,6 +743,7 @@ interface ProviderRoutingSettings {
   cheapModelKey?: string;
   automatedTaskModelKey?: string;
   preferStrongForVerification?: boolean;
+  reasoningEffort?: LLMReasoningEffort;
 }
 
 /**
@@ -832,9 +836,38 @@ export interface LLMSettings {
   /** Text-to-image model selection. Default tried first; backup used on failure. */
   imageGeneration?: {
     defaultProvider?: "openai" | "openai-codex" | "azure" | "openrouter" | "gemini";
-    defaultModel?: "gpt-image-1.5" | "nano-banana-2";
+    defaultModel?: "gpt-image-2" | "gpt-image-1.5" | "nano-banana-2";
     backupProvider?: "openai" | "openai-codex" | "azure" | "openrouter" | "gemini";
-    backupModel?: "gpt-image-1.5" | "nano-banana-2";
+    backupModel?: "gpt-image-2" | "gpt-image-1.5" | "nano-banana-2";
+    timeouts?: {
+      openai?: number;
+      openaiCodex?: number;
+      azure?: number;
+      openrouter?: number;
+      gemini?: number;
+    };
+    openai?: {
+      apiKey?: string;
+      model?: string;
+    };
+    azure?: {
+      imageApiKey?: string;
+      imageEndpoint?: string;
+      imageDeployment?: string;
+      imageApiVersion?: string;
+    };
+    gemini?: {
+      apiKey?: string;
+      model?: "nano-banana-2";
+    };
+    openrouter?: {
+      apiKey?: string;
+      baseUrl?: string;
+      model?: string;
+    };
+    openaiCodex?: {
+      model?: string;
+    };
   };
   /** Text-to-video generation settings. Provider-specific config + routing. */
   videoGeneration?: {
@@ -1229,7 +1262,10 @@ export class LLMProviderFactory {
   > &
     Pick<
       ProviderRoutingSettings,
-      "strongModelKey" | "cheapModelKey" | "automatedTaskModelKey"
+      | "strongModelKey"
+      | "cheapModelKey"
+      | "automatedTaskModelKey"
+      | "reasoningEffort"
     > {
     const configured = this.getProviderRoutingSettingsNode(
       settings,
@@ -1252,6 +1288,7 @@ export class LLMProviderFactory {
         undefined,
       automatedTaskModelKey:
         normalizeModelKey(configured?.automatedTaskModelKey) || undefined,
+      reasoningEffort: configured?.reasoningEffort,
       preferStrongForVerification:
         configured?.preferStrongForVerification !== false,
     };
@@ -2233,12 +2270,18 @@ export class LLMProviderFactory {
   static getConfigStatus(): {
     currentProvider: LLMProviderType;
     currentModel: string;
+    currentReasoningEffort?: LLMReasoningEffort;
     providers: Array<{
       type: LLMProviderType;
       name: string;
       configured: boolean;
     }>;
-    models: Array<{ key: string; displayName: string; description: string }>;
+    models: Array<{
+      key: string;
+      displayName: string;
+      description: string;
+      reasoningEfforts?: LLMReasoningEffort[];
+    }>;
     routing?: {
       currentProvider: LLMProviderType;
       currentModel: string;
@@ -2278,6 +2321,7 @@ export class LLMProviderFactory {
     return {
       currentProvider: settings.providerType,
       currentModel,
+      currentReasoningEffort: routingSettings.reasoningEffort,
       providers: this.getAvailableProviders(),
       models: modelStatus.models,
       routing: {
@@ -2322,6 +2366,8 @@ export class LLMProviderFactory {
     models: CachedModelInfo[];
   } {
     const resolvedProviderType = resolveCustomProviderId(settings.providerType);
+    const attachMetadata = (models: CachedModelInfo[]) =>
+      withLlmModelSelectionMetadata(settings.providerType, models);
     const customEntry = CUSTOM_PROVIDER_MAP.get(resolvedProviderType as Any);
     const ensureCurrentModel = (
       modelList: CachedModelInfo[],
@@ -2387,11 +2433,11 @@ export class LLMProviderFactory {
             : [];
       return {
         currentModel,
-        models: ensureCurrentModel(
+        models: attachMetadata(ensureCurrentModel(
           cachedModels,
           currentModel,
           customEntry.description || `${customEntry.name} model`,
-        ),
+        )),
       };
     }
 
@@ -2415,7 +2461,7 @@ export class LLMProviderFactory {
               }));
         return {
           currentModel,
-          models: ensureCurrentModel(modelList, currentModel),
+          models: attachMetadata(ensureCurrentModel(modelList, currentModel)),
         };
       }
 
@@ -2431,7 +2477,7 @@ export class LLMProviderFactory {
               }));
         return {
           currentModel,
-          models: ensureCurrentModel(modelList, currentModel),
+          models: attachMetadata(ensureCurrentModel(modelList, currentModel)),
         };
       }
 
@@ -2449,7 +2495,7 @@ export class LLMProviderFactory {
               }));
         return {
           currentModel,
-          models: ensureCurrentModel(modelList, currentModel),
+          models: attachMetadata(ensureCurrentModel(modelList, currentModel)),
         };
       }
 
@@ -2492,7 +2538,7 @@ export class LLMProviderFactory {
               ];
         return {
           currentModel,
-          models: ensureCurrentModel(modelList, currentModel),
+          models: attachMetadata(ensureCurrentModel(modelList, currentModel)),
         };
       }
 
@@ -2507,7 +2553,7 @@ export class LLMProviderFactory {
         }));
         return {
           currentModel,
-          models: ensureCurrentModel(modelList, currentModel),
+          models: attachMetadata(ensureCurrentModel(modelList, currentModel)),
         };
       }
 
@@ -2544,7 +2590,7 @@ export class LLMProviderFactory {
             ];
         return {
           currentModel,
-          models: ensureCurrentModel(modelList, currentModel),
+          models: attachMetadata(ensureCurrentModel(modelList, currentModel)),
         };
       }
 
@@ -2560,7 +2606,7 @@ export class LLMProviderFactory {
               }));
         return {
           currentModel,
-          models: ensureCurrentModel(modelList, currentModel),
+          models: attachMetadata(ensureCurrentModel(modelList, currentModel)),
         };
       }
 
@@ -2614,7 +2660,7 @@ export class LLMProviderFactory {
               ];
         return {
           currentModel,
-          models: ensureCurrentModel(modelList, currentModel),
+          models: attachMetadata(ensureCurrentModel(modelList, currentModel)),
         };
       }
 
@@ -2630,7 +2676,7 @@ export class LLMProviderFactory {
               }));
         return {
           currentModel,
-          models: ensureCurrentModel(modelList, currentModel),
+          models: attachMetadata(ensureCurrentModel(modelList, currentModel)),
         };
       }
 
@@ -2646,7 +2692,7 @@ export class LLMProviderFactory {
               }));
         return {
           currentModel,
-          models: ensureCurrentModel(modelList, currentModel),
+          models: attachMetadata(ensureCurrentModel(modelList, currentModel)),
         };
       }
 
@@ -2662,7 +2708,7 @@ export class LLMProviderFactory {
               }));
         return {
           currentModel,
-          models: ensureCurrentModel(modelList, currentModel),
+          models: attachMetadata(ensureCurrentModel(modelList, currentModel)),
         };
       }
 
@@ -2680,11 +2726,11 @@ export class LLMProviderFactory {
               ];
         return {
           currentModel,
-          models: ensureCurrentModel(
+          models: attachMetadata(ensureCurrentModel(
             modelList,
             currentModel,
             "Selected Pi model",
-          ),
+          )),
         };
       }
 
@@ -2705,7 +2751,7 @@ export class LLMProviderFactory {
               : [];
         return {
           currentModel,
-          models: ensureCurrentModel(modelList, currentModel),
+          models: attachMetadata(ensureCurrentModel(modelList, currentModel)),
         };
       }
 
@@ -2718,7 +2764,7 @@ export class LLMProviderFactory {
         }));
         return {
           currentModel,
-          models: ensureCurrentModel(modelList, currentModel),
+          models: attachMetadata(ensureCurrentModel(modelList, currentModel)),
         };
       }
     }
@@ -2730,9 +2776,11 @@ export class LLMProviderFactory {
   static applyModelSelection(
     settings: LLMSettings,
     modelKey: string,
+    providerTypeOverride?: LLMProviderType,
   ): LLMSettings {
-    const updated: LLMSettings = { ...settings };
-    const resolvedProviderType = resolveCustomProviderId(settings.providerType);
+    const providerType = providerTypeOverride || settings.providerType;
+    const updated: LLMSettings = { ...settings, providerType };
+    const resolvedProviderType = resolveCustomProviderId(providerType);
 
     if (CUSTOM_PROVIDER_IDS.has(resolvedProviderType as Any)) {
       const existing = settings.customProviders?.[resolvedProviderType] || {};
@@ -2746,7 +2794,7 @@ export class LLMProviderFactory {
       return updated;
     }
 
-    switch (settings.providerType) {
+    switch (providerType) {
       case "gemini":
         updated.gemini = { ...settings.gemini, model: modelKey };
         break;
@@ -2834,6 +2882,78 @@ export class LLMProviderFactory {
     }
 
     return updated;
+  }
+
+  static applyReasoningEffortSelection(
+    settings: LLMSettings,
+    providerType: LLMProviderType,
+    reasoningEffort?: LLMReasoningEffort,
+  ): LLMSettings {
+    if (!reasoningEffort) return settings;
+
+    if (providerType === "azure") {
+      return {
+        ...settings,
+        azure: {
+          ...settings.azure,
+          reasoningEffort,
+        },
+      };
+    }
+
+    const resolvedProviderType = resolveCustomProviderId(providerType);
+    if (CUSTOM_PROVIDER_IDS.has(resolvedProviderType as Any)) {
+      const existing = settings.customProviders?.[resolvedProviderType] || {};
+      return {
+        ...settings,
+        customProviders: {
+          ...settings.customProviders,
+          [resolvedProviderType]: {
+            ...existing,
+            reasoningEffort,
+          },
+        },
+      };
+    }
+
+    const patchProviderRouting = <K extends keyof LLMSettings>(
+      key: K,
+    ): LLMSettings => ({
+      ...settings,
+      [key]: {
+        ...(settings[key] as Record<string, unknown> | undefined),
+        reasoningEffort,
+      },
+    });
+
+    switch (providerType) {
+      case "anthropic":
+        return patchProviderRouting("anthropic");
+      case "bedrock":
+        return patchProviderRouting("bedrock");
+      case "ollama":
+        return patchProviderRouting("ollama");
+      case "gemini":
+        return patchProviderRouting("gemini");
+      case "openrouter":
+        return patchProviderRouting("openrouter");
+      case "openai":
+        return patchProviderRouting("openai");
+      case "azure-anthropic":
+        return patchProviderRouting("azureAnthropic");
+      case "groq":
+        return patchProviderRouting("groq");
+      case "xai":
+        return patchProviderRouting("xai");
+      case "kimi":
+        return patchProviderRouting("kimi");
+      case "pi":
+        return patchProviderRouting("pi");
+      case "openai-compatible":
+        return patchProviderRouting("openaiCompatible");
+      default:
+        return settings;
+    }
   }
 
   /**

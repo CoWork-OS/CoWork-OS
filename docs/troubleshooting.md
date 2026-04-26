@@ -4,6 +4,12 @@
 
 CoWork OS is currently distributed as an unsigned build. On first launch, use **System Settings > Privacy & Security > Open Anyway** once.
 
+Release maintainers can create the unsigned macOS DMG/ZIP with:
+
+```bash
+npm run package:mac:unsigned
+```
+
 Terminal fallback:
 
 ```bash
@@ -51,6 +57,49 @@ If **screenshots fail or time out**, grant **Screen Recording** for the helper p
 If the agent **never uses** the computer-use tools, confirm **Settings → Tools → Built-in tools** includes the **computer use** category, and phrase tasks as **native app / window / dialog** work (not pure browser or CLI tasks).
 
 See the full guide: [Computer use (macOS)](computer-use.md).
+
+## Inbox Agent issues
+
+Inbox Agent uses a local cache plus provider-backed actions. When debugging mailbox behavior, first capture a current development log:
+
+```bash
+npm run dev:log
+```
+
+Then inspect:
+
+```bash
+logs/dev-latest.log
+```
+
+### New mail does not appear immediately
+
+Inbox Agent autosyncs in the background, but it is not a push-only mail client yet. It loads cached mail immediately, then periodically refreshes a bounded recent batch. If a new message is missing:
+
+1. Wait for the next autosync interval.
+2. Use the refresh button in Inbox Agent to force a sync.
+3. Check `logs/dev-latest.log` for `Mailbox autosync starting` and `Mailbox autosync complete`.
+4. Confirm the account still shows connected sync health.
+
+### Unread count or unread styling looks wrong
+
+Unread is provider-backed. Opening a thread may mark it read when provider permissions allow it. For Gmail, read/unread mutation requires the Gmail modify scope. If the app cannot mutate provider state, reconnect Google Workspace with the requested Gmail scopes or use the provider mailbox directly.
+
+### Mark read / unread / archive / trash says "Not connected"
+
+The visible action is enabled only when the app has enough local context, but the provider mutation can still fail if the account token or channel connection expired. Reconnect the mailbox integration, then retry. Gmail server actions require Google Workspace to be enabled; IMAP/SMTP accounts have more limited server action support.
+
+### Microphone next to Search threads fails after permission is allowed
+
+The desktop app does not rely on Chromium's Web Speech service because it can request microphone permission but still fail when the speech-recognition backend is unavailable. Configure OpenAI or Azure speech-to-text in **Settings > Voice**. After that, Inbox Agent voice search and `Speak reply` use provider transcription.
+
+### AI draft does not disappear after send
+
+Generated drafts are removed after a successful provider send. If the draft remains, check the visible error banner and the log for the provider send failure. The edited draft subject/body are saved before send, so a failed send should preserve your edits for retry.
+
+### Startup fails with a missing mailbox column
+
+Mailbox schema migrations should add classification, Today/domain, attachment, and replacement-client columns automatically. If startup reports a missing column such as `today_bucket`, do not delete the app database. Capture `logs/dev-latest.log` and verify the schema migration path before trying destructive recovery.
 
 ## PPTX previews only show text or speaker notes
 
@@ -280,7 +329,7 @@ Notes:
 - A failed compile should still keep the editable `.tex` source as the durable artifact.
 - Successful compiles show a paired artifact workbench with Summary, `.tex source`, and PDF tabs.
 
-## Subconscious startup warnings in development
+## Workflow Intelligence startup warnings in development
 
 If `npm run dev` or `npm run dev:log` shows warnings like:
 
@@ -290,7 +339,7 @@ If `npm run dev` or `npm run dev:log` shows warnings like:
 [Main] Failed to initialize SubconsciousLoopService: SqliteError: FOREIGN KEY constraint failed
 ```
 
-those messages come from the `Subconscious` reflective loop, not from the main Electron boot path itself.
+those messages come from the Workflow Intelligence reflection service, not from the main Electron boot path itself. The log may still mention `SubconsciousLoopService` because that is the legacy internal service name.
 
 ### What the warnings mean
 
@@ -302,21 +351,21 @@ those messages come from the `Subconscious` reflective loop, not from the main E
 
 `SqliteError: no such column: workspace_id`
 
-- An earlier build queried legacy rows with an outdated column assumption during subconscious target collection.
+- An earlier build queried legacy rows with an outdated column assumption during workflow-intelligence target collection.
 - Startup could continue, but `SubconsciousLoopService` would fail to initialize.
 
 `SqliteError: FOREIGN KEY constraint failed`
 
-- An earlier migration path could fail while rekeying legacy improvement records into subconscious target history.
+- An earlier migration path could fail while rekeying legacy improvement records into workflow-intelligence target history.
 - This was a migration bug, not a sign that the feature requires manual owner enrollment or a separate approval step.
 
 ### Current fix
 
 Current builds harden the startup path in several places:
 
-1. `SubconsciousLoopService` starts after memory services are initialized.
+1. `SubconsciousLoopService` starts after memory services are initialized. This is the internal service behind Workflow Intelligence.
 2. Code dispatch only targets real git-backed repositories, and canonical code targets resolve from the repository remote instead of from transient workspace noise.
-3. Legacy improvement rows are migrated into subconscious target state without breaking foreign keys.
+3. Legacy improvement rows are migrated into workflow-intelligence target state without breaking foreign keys.
 4. Worktree settings persist in secure settings so code dispatch can still require isolation after restart.
 5. Recommendation-only runs still complete successfully when a target has no valid executor mapping.
 
@@ -349,7 +398,7 @@ Check:
 3. git worktree support is enabled
 4. the repository is usable from the app runtime environment
 
-If you use non-git workspaces, `Subconscious` can still run on task, mailbox, schedule, trigger, and briefing targets. Only code-change dispatch requires the git/worktree path.
+If you use non-git workspaces, Workflow Intelligence can still run on task, mailbox, schedule, trigger, and briefing targets. Only code-change auto-create requires the git/worktree path.
 
 ### If you still see SQLite initialization errors
 
@@ -357,11 +406,11 @@ Capture a fresh log and compare the relative timestamps for:
 
 - `MemoryService` initialization
 - `SubconsciousLoopService initialized`
-- the first subconscious target refresh or run line
+- the first workflow-intelligence target refresh or run line
 
 If initialization still fails on a current build, inspect the local database migration path before looking at renderer or approval code.
 
 See also:
 
 - [Development Guide](development.md)
-- [Subconscious Reflective Loop](subconscious-loop.md)
+- [Workflow Intelligence](workflow-intelligence.md)

@@ -29,8 +29,56 @@ export interface DerivedTaskStrategy {
 
 export const STRATEGY_CONTEXT_OPEN = "[AGENT_STRATEGY_CONTEXT_V1]";
 export const STRATEGY_CONTEXT_CLOSE = "[/AGENT_STRATEGY_CONTEXT_V1]";
+const STRATEGY_CONTEXT_BLOCK_REGEX =
+  /\[AGENT_STRATEGY_CONTEXT_V1\][\s\S]*?\[\/AGENT_STRATEGY_CONTEXT_V1\]/g;
 
 export class TaskStrategyService {
+  private static hasTextToImageGenerationIntent(lower: string): boolean {
+    return (
+      /\b(draw|paint|illustrate|render|sketch)\b.*\b(in|of|with|a|an|the)\b/.test(lower) ||
+      /\b(create|generate|make)\s+(?:an?\s+)?(?:image|picture|photo|illustration)\s+(?:of|with|about|for|on|explaining?)\b/.test(
+        lower,
+      ) ||
+      /\b(create|generate|make)\s+(?:an?\s+)?(?:infographic|poster)(?:\s+image)?\b/.test(lower)
+    );
+  }
+
+  private static imageGenerationNeedsPromptGrounding(lower: string): boolean {
+    const asksForExplainerVisual =
+      /\b(infographic|visual guide|explainer|diagram|poster|one[-\s]?pager)\b/.test(lower);
+    if (!asksForExplainerVisual) return false;
+    return /\b(cowork os|co-?work os|our app|this app|the app|our product|this product|company|brand|platform|service)\b/.test(
+      lower,
+    );
+  }
+
+  private static isTerminalImageGenerationTask(text: string): boolean {
+    const lower = String(text || "").replace(STRATEGY_CONTEXT_BLOCK_REGEX, "").toLowerCase();
+    if (!lower.trim()) return false;
+    if (!this.hasTextToImageGenerationIntent(lower)) return false;
+    return !/\b(edit|modify|change|update|retouch|inpaint|remove|replace|analy[sz]e|describe|review|compare|inspect|website|webapp|code|component|page|ui|screenshot)\b/.test(
+      lower,
+    );
+  }
+
+  private static isSimpleImageGenerationTask(text: string): boolean {
+    const lower = String(text || "").replace(STRATEGY_CONTEXT_BLOCK_REGEX, "").toLowerCase();
+    if (!lower.trim()) return false;
+    if (!this.hasTextToImageGenerationIntent(lower)) return false;
+    if (this.imageGenerationNeedsPromptGrounding(lower)) return false;
+
+    const hasAppAssetIntent =
+      /\b(?:avatar|icon|logo|mascot|badge|profile picture|profile image|brand mark|app asset)\b/.test(
+        lower,
+      );
+    const hasAppWorkIntent = /\b(?:app|application)\b/.test(lower) && !hasAppAssetIntent;
+    const hasNonImageWorkIntent =
+      /\b(edit|modify|change|update|retouch|inpaint|remove|replace|analy[sz]e|describe|review|compare|inspect|website|webapp|code|component|page|ui|screenshot)\b/.test(
+        lower,
+      );
+    return !hasAppWorkIntent && !hasNonImageWorkIntent;
+  }
+
   private static inferArtifactKindFromTaskText(text: string): "none" | "canvas" | "document" | "file" {
     if (!text) return "none";
     if (/\b(canvas|artifact)\b/.test(text)) return "canvas";
@@ -218,6 +266,8 @@ export class TaskStrategyService {
 
     const base = defaults[route.intent];
     const taskText = `${taskContext?.title || ""}\n${taskContext?.prompt || ""}`.toLowerCase();
+    const simpleImageGenerationTask = this.isSimpleImageGenerationTask(taskText);
+    const terminalImageGenerationTask = this.isTerminalImageGenerationTask(taskText);
     const artifactCreationSignal =
       /\b(create|build|make|implement|scaffold|generate|start building|start build)\b/.test(taskText) &&
       /\b(website|web page|webapp|frontend|landing page|app|application|project|repo|repository|codebase|distro|distribution|iso|image|artifact|file|files|workspace|requirements\.md|config)\b/.test(
@@ -308,7 +358,8 @@ export class TaskStrategyService {
           : base.conversationMode,
       executionMode,
       taskDomain,
-      qualityPasses: existing?.qualityPasses ?? base.qualityPasses,
+      qualityPasses:
+        existing?.qualityPasses ?? (terminalImageGenerationTask ? 1 : base.qualityPasses),
       answerFirst: base.answerFirst,
       boundedResearch: base.boundedResearch,
       timeoutFinalizeBias: base.timeoutFinalizeBias,
@@ -511,10 +562,29 @@ export class TaskStrategyService {
     if (["execution", "mixed", "workflow", "deep_work"].includes(route.intent)) {
       lines.push(
         "checklist_contract:",
-        "- For non-trivial multi-step execution tasks, create a session checklist with task_list_create.",
+        "- Create a session checklist only for non-trivial execution that changes artifacts/state or spans a long workflow.",
+        "- Do not create a checklist for basic questions, read-only research, advice, or plan-only responses.",
+        "- When a checklist is warranted, create it with task_list_create.",
         "- Maintain the checklist during execution with task_list_update and keep at most one item in_progress.",
         "- Mark checklist progress immediately when work starts or completes.",
         "- Before final completion, add and run a verification checklist item when verification is appropriate.",
+      );
+    }
+
+    const imageTaskText = `${text}\n${route.signals.join(" ")}`;
+    if (this.isSimpleImageGenerationTask(imageTaskText)) {
+      lines.push(
+        "image_generation_contract:",
+        "- For a simple text-to-image request, call generate_image once, share the generated output, and finish.",
+        "- Do not search files, use scratchpad, ask for art direction, or run analyze_image unless the user explicitly asks for those extra steps.",
+        "- Do not add subjective review/verification steps after a successful image file is created.",
+      );
+    } else if (this.isTerminalImageGenerationTask(imageTaskText)) {
+      lines.push(
+        "image_generation_contract:",
+        "- For a grounded image or infographic request, gather only the information needed to write the image prompt.",
+        "- Then call generate_image once with a concrete prompt for the image model, share the generated output, and finish.",
+        "- Do not run analyze_image or subjective quality checks after a successful image file is created unless the user explicitly asked for image review.",
       );
     }
 
@@ -535,8 +605,17 @@ export class TaskStrategyService {
       lines.push(
         "debug_contract:",
         "- You are in debug mode: form hypotheses, add minimal instrumentation, collect runtime evidence before large speculative fixes.",
+        "- Put temporary repro scripts, logs, diagnostics, screenshots, and intermediate files under `.cowork/tmp/`; keep real source/test changes at their intended project paths.",
         "- Prefer targeted edits; use request_user_input for structured reproduce/confirm checkpoints when needed.",
         "- Remove temporary debug instrumentation (markers containing cowork-debug) before finishing.",
+      );
+    }
+
+    if (strategy.taskDomain === "code" && strategy.executionMode !== "debug") {
+      lines.push(
+        "coding_workspace_hygiene:",
+        "- Put temporary scratch files, repro scripts, generated diagnostics, and intermediate outputs under `.cowork/tmp/` so they stay local to this checkout.",
+        "- Keep actual implementation, tests, and requested project artifacts at their intended repository paths.",
       );
     }
 

@@ -81,7 +81,7 @@ export class EmailAdapter implements ChannelAdapter {
       smtpSecure: config.smtpSecure ?? false,
       mailbox: config.mailbox ?? "INBOX",
       pollInterval: config.pollInterval ?? 30000,
-      markAsRead: config.markAsRead ?? true,
+      markAsRead: config.markAsRead ?? false,
       deduplicationEnabled: config.deduplicationEnabled ?? true,
       loomMailboxFolder: config.loomMailboxFolder ?? "INBOX",
       loomPollInterval: config.loomPollInterval ?? config.pollInterval ?? 30000,

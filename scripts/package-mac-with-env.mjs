@@ -1,8 +1,12 @@
 #!/usr/bin/env node
 /**
  * Runs `npm run build` then `electron-builder --mac` after loading optional
- * `.env.mac` from the repo root (gitignored). Use this for signed + notarized
- * DMG/ZIP so Gatekeeper accepts downloads.
+ * `.env.mac` from the repo root (gitignored).
+ *
+ * By default this creates the unsigned DMG/ZIP used for public fallback builds.
+ * It disables certificate auto-discovery so a local personal Developer ID is not
+ * picked up accidentally. To produce a signed + notarized build, configure
+ * CSC_NAME or CSC_LINK in `.env.mac`.
  *
  * Copy `scripts/mac-notarize.env.example` → `.env.mac` and fill in secrets.
  *
@@ -26,9 +30,28 @@ function log(msg) {
   process.stdout.write(`[package:mac] ${msg}\n`);
 }
 
+function isTrueEnv(value) {
+  return ["1", "true", "yes", "on"].includes(String(value || "").trim().toLowerCase());
+}
+
+function hasExplicitSigningIdentity() {
+  return Boolean(process.env.CSC_NAME || process.env.CSC_LINK);
+}
+
+function configureSigningMode() {
+  if (isTrueEnv(process.env.COWORK_MAC_UNSIGNED) || !hasExplicitSigningIdentity()) {
+    process.env.COWORK_MAC_UNSIGNED = "1";
+    process.env.CSC_IDENTITY_AUTO_DISCOVERY = "false";
+    log("Unsigned macOS packaging enabled; Developer ID auto-discovery is disabled.");
+    return;
+  }
+
+  log("Signed macOS packaging enabled from explicit signing identity.");
+}
+
 function loadDotEnvMac() {
   if (!existsSync(ENV_MAC)) {
-    log("No .env.mac found — using current shell env only (see scripts/mac-notarize.env.example).");
+    log("No .env.mac found — using unsigned macOS packaging.");
     return;
   }
   const text = readFileSync(ENV_MAC, "utf8");
@@ -65,6 +88,7 @@ function run(cmd, args) {
 }
 
 loadDotEnvMac();
+configureSigningMode();
 log("Running npm run build …");
 const build = spawnSync("npm", ["run", "build"], {
   cwd: ROOT,

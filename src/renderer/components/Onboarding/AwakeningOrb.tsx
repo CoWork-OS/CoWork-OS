@@ -8,15 +8,7 @@ export function AwakeningOrb({ state, audioLevel = 0 }: AwakeningOrbProps) {
   const orbClasses = [
     "onboarding-orb",
     state === "awakening" && "awakening",
-    state === "listening" && "listening",
-    state === "transitioning" && "transitioning",
-  ]
-    .filter(Boolean)
-    .join(" ");
-
-  const heartlineClasses = [
-    "onboarding-heartline",
-    state === "awakening" && "awakening",
+    state === "breathing" && "breathing",
     state === "listening" && "listening",
     state === "transitioning" && "transitioning",
   ]
@@ -40,30 +32,6 @@ export function AwakeningOrb({ state, audioLevel = 0 }: AwakeningOrbProps) {
 
   return (
     <div className="onboarding-orb-container">
-      <div className={heartlineClasses} aria-hidden="true">
-        <svg viewBox="0 0 320 80" preserveAspectRatio="none">
-          <g className="onboarding-heartline-scroll">
-            <path
-              className="onboarding-heartline-segment onboarding-heartline-segment-muted"
-              d="M0 40 H66 L86 40 L98 22 L118 58 L140 8 L158 40 H194 L206 50 L222 24 L244 58 L264 24 L278 40 H320"
-            />
-            <path
-              className="onboarding-heartline-segment onboarding-heartline-segment-muted"
-              d="M0 40 H66 L86 40 L98 22 L118 58 L140 8 L158 40 H194 L206 50 L222 24 L244 58 L264 24 L278 40 H320"
-              transform="translate(320 0)"
-            />
-            <path
-              className="onboarding-heartline-segment onboarding-heartline-segment-bright"
-              d="M0 40 H66 L86 40 L98 22 L118 58 L140 8 L158 40 H194 L206 50 L222 24 L244 58 L264 24 L278 40 H320"
-            />
-            <path
-              className="onboarding-heartline-segment onboarding-heartline-segment-bright"
-              d="M0 40 H66 L86 40 L98 22 L118 58 L140 8 L158 40 H194 L206 50 L222 24 L244 58 L264 24 L278 40 H320"
-              transform="translate(320 0)"
-            />
-          </g>
-        </svg>
-      </div>
       <div className={orbClasses} style={orbStyle} />
       <div className={`onboarding-waveform ${showWaveform ? "active" : ""}`}>
         <div className="onboarding-waveform-ring" />

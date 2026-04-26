@@ -402,7 +402,7 @@ Current architecture note:
 
 - Digital Twin templates are persona presets, not core automation owners
 - Always-on cadence now belongs to attached automation profiles
-- Heartbeat and Subconscious scheduling should be reasoned about through the core automation docs, not through twin-local routine metadata
+- Heartbeat and Workflow Intelligence scheduling should be reasoned about through the core automation docs, not through twin-local routine metadata
 
 This section remains only as migration context for older integrations that still read legacy role-local routine hints.
 

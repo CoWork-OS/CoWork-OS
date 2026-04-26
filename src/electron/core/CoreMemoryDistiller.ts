@@ -189,7 +189,9 @@ export class CoreMemoryDistiller {
       MemoryFeaturesManager.loadSettings().autoPromoteToCuratedMemoryEnabled === true &&
       (candidate.candidateType === "preference" ||
         candidate.candidateType === "constraint" ||
-        candidate.candidateType === "pattern");
+        candidate.candidateType === "pattern" ||
+        candidate.candidateType === "correction" ||
+        candidate.candidateType === "recurring_task");
     if (shouldPromoteToCurated) {
       const curatedEntry = await CuratedMemoryService.upsertDistilledEntry({
         workspaceId,
@@ -212,6 +214,12 @@ export class CoreMemoryDistiller {
         return "constraint" as const;
       case "pattern":
         return "workflow_pattern" as const;
+      case "correction":
+        return "correction_rule" as const;
+      case "recurring_task":
+        return "workflow_pattern" as const;
+      case "ignored_noise":
+        return "observation" as const;
       default:
         return "observation" as const;
     }
@@ -224,6 +232,10 @@ export class CoreMemoryDistiller {
       case "constraint":
         return "constraint" as const;
       case "pattern":
+        return "workflow_rule" as const;
+      case "correction":
+        return "workflow_rule" as const;
+      case "recurring_task":
         return "workflow_rule" as const;
       default:
         return "project_fact" as const;

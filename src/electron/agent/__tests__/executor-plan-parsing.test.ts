@@ -110,6 +110,192 @@ describe("TaskExecutor plan parsing", () => {
     expect(executor.refreshProviderIfSettingsChanged).toHaveBeenCalledWith("strong");
   });
 
+  it("uses a direct one-step plan for simple image generation prompts", async () => {
+    const response = {
+      usage: { inputTokens: 1, outputTokens: 2 },
+      content: [
+        { type: "text", text: '{"description":"P","steps":[{"id":"1","description":"Do the thing"}]}' },
+      ],
+    };
+    const executor = createPlanExecutor(response);
+    executor.task.title = "Create image";
+    executor.task.prompt = "create an image of a snow leopard";
+    executor.task.rawPrompt = "create an image of a snow leopard";
+
+    await executor.createPlan();
+
+    expect(executor.callLLMWithRetry).not.toHaveBeenCalled();
+    expect(executor.plan.steps).toHaveLength(1);
+    expect(executor.plan.steps[0].description).toBe(
+      "Generate the requested image and share the resulting file.",
+    );
+  });
+
+  it("uses a direct one-step plan for infographic image generation prompts", async () => {
+    const executor = createPlanExecutor({
+      usage: { inputTokens: 1, outputTokens: 2 },
+      content: [
+        { type: "text", text: '{"description":"P","steps":[{"id":"1","description":"Do the thing"}]}' },
+      ],
+    });
+    executor.task.title = "Create infographic";
+    executor.task.prompt = "create an infographic image explaining snow leopards";
+    executor.task.rawPrompt = "create an infographic image explaining snow leopards";
+
+    await executor.createPlan();
+
+    expect(executor.callLLMWithRetry).not.toHaveBeenCalled();
+    expect(executor.plan.steps).toHaveLength(1);
+  });
+
+  it("offers only generate_image tools for simple image generation prompts", () => {
+    const executor = createPlanExecutor({
+      usage: { inputTokens: 1, outputTokens: 2 },
+      content: [],
+    });
+    executor.task.title = "Create infographic";
+    executor.task.prompt = "create an infographic image explaining snow leopards";
+    executor.task.rawPrompt = "create an infographic image explaining snow leopards";
+
+    const scoped = executor.applyStepScopedToolPolicy([
+      { name: "generate_image" },
+      { name: "write_file" },
+      { name: "web_search" },
+      { name: "task_list_create" },
+    ]);
+
+    expect(scoped.map((tool: Any) => tool.name)).toEqual(["generate_image"]);
+  });
+
+  it("uses the simple image path for app avatar image prompts", async () => {
+    const executor = createPlanExecutor({
+      usage: { inputTokens: 1, outputTokens: 2 },
+      content: [
+        { type: "text", text: '{"description":"P","steps":[{"id":"1","description":"Do the thing"}]}' },
+      ],
+    });
+    const prompt = "generate an image of a cool avatar of a snow leopard for cowork os app";
+    executor.task.title = "Create avatar";
+    executor.task.prompt = prompt;
+    executor.task.rawPrompt = prompt;
+
+    await executor.createPlan();
+
+    expect(executor.callLLMWithRetry).not.toHaveBeenCalled();
+    expect(executor.plan.steps).toHaveLength(1);
+    expect(
+      executor
+        .applyStepScopedToolPolicy([
+          { name: "generate_image" },
+          { name: "write_file" },
+          { name: "task_list_create" },
+        ])
+        .map((tool: Any) => tool.name),
+    ).toEqual(["generate_image"]);
+  });
+
+  it("keeps the simple image path when task prompt includes strategy context", async () => {
+    const executor = createPlanExecutor({
+      usage: { inputTokens: 1, outputTokens: 2 },
+      content: [
+        { type: "text", text: '{"description":"P","steps":[{"id":"1","description":"Do the thing"}]}' },
+      ],
+    });
+    const rawPrompt = 'generate an image of a cool avatar of a snow leopard for "cowork os" app';
+    executor.task.title = "Create snow leopard avatar";
+    executor.task.rawPrompt = undefined;
+    executor.task.userPrompt = undefined;
+    executor.task.prompt = `${rawPrompt}
+
+[AGENT_STRATEGY_CONTEXT_V1]
+image_generation_contract:
+- For a simple text-to-image request, call generate_image once, share the generated output, and finish.
+- Do not search files, use scratchpad, ask for art direction, or run analyze_image unless the user explicitly asks for those extra steps.
+[/AGENT_STRATEGY_CONTEXT_V1]`;
+
+    await executor.createPlan();
+
+    expect(executor.callLLMWithRetry).not.toHaveBeenCalled();
+    expect(executor.plan.steps).toHaveLength(1);
+    expect(
+      executor
+        .applyStepScopedToolPolicy([
+          { name: "generate_image" },
+          { name: "analyze_image" },
+          { name: "write_file" },
+          { name: "web_search" },
+        ])
+        .map((tool: Any) => tool.name),
+    ).toEqual(["generate_image"]);
+  });
+
+  it("does not use the direct image path for grounded infographic prompts", async () => {
+    const executor = createPlanExecutor({
+      usage: { inputTokens: 1, outputTokens: 2 },
+      content: [
+        {
+          type: "text",
+          text: '{"description":"P","steps":[{"id":"1","description":"Research CoWork OS context"},{"id":"2","description":"Generate the infographic image"}]}',
+        },
+      ],
+    });
+    const prompt = "create an infographic about cowork os";
+    executor.task.title = "Create CoWork OS infographic";
+    executor.task.prompt = prompt;
+    executor.task.rawPrompt = prompt;
+
+    await executor.createPlan();
+
+    expect(executor.callLLMWithRetry).toHaveBeenCalled();
+    expect(executor.plan.steps).toHaveLength(2);
+    expect(
+      executor
+        .applyStepScopedToolPolicy([
+          { name: "generate_image" },
+          { name: "web_search" },
+          { name: "read_file" },
+          { name: "task_list_create" },
+          { name: "analyze_image" },
+        ])
+        .map((tool: Any) => tool.name),
+    ).toEqual(["generate_image", "web_search", "read_file"]);
+  });
+
+  it("does not classify gather-and-verify work steps as verification checkpoints", () => {
+    const executor = createPlanExecutor({
+      usage: { inputTokens: 1, outputTokens: 2 },
+      content: [],
+    });
+
+    expect(executor.descriptionIndicatesVerification("Gather and verify core facts")).toBe(false);
+    expect(executor.descriptionIndicatesVerification("Verify: generated image file exists")).toBe(
+      true,
+    );
+  });
+
+  it("uses compact step-count guidance for plan and advice tasks", () => {
+    const executor = createPlanExecutor({
+      usage: { inputTokens: 1, outputTokens: 2 },
+      content: [],
+    });
+    executor.task.agentConfig = { executionMode: "plan", taskIntent: "advice" };
+    executor.getEffectiveExecutionMode = vi.fn().mockReturnValue("plan");
+    executor.getExecutionTaskPrompt = vi.fn().mockReturnValue("What are the tradeoffs?");
+
+    expect(executor.getPlanningStepCountRule()).toContain("1-3 high-level steps");
+  });
+
+  it("keeps broader step-count guidance for deep workflows", () => {
+    const executor = createPlanExecutor({
+      usage: { inputTokens: 1, outputTokens: 2 },
+      content: [],
+    });
+    executor.task.agentConfig = { deepWorkMode: true, taskIntent: "deep_work" };
+    executor.getExecutionTaskPrompt = vi.fn().mockReturnValue("Run the full migration workflow.");
+
+    expect(executor.getPlanningStepCountRule()).toContain("4-7 specific steps");
+  });
+
   it("does not force strong profile for execution plan when a task model override is set", async () => {
     const response = {
       usage: { inputTokens: 1, outputTokens: 2 },

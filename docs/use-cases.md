@@ -165,6 +165,38 @@ If the thread references a person or project, suggest what should be updated in 
 Do not send, archive, or delete anything. Ask me what action to take next.
 ```
 
+### 7A.1) Inbox Today Mode Review
+
+Prompt:
+```
+Open Inbox Agent and switch to Today mode.
+Review Needs action, Happening today, Good to know, and More to browse.
+For each lane, summarize the top threads and explain why they belong there.
+Do not archive, mark done, send, or trash anything. Ask me which lane to work through first.
+```
+
+### 7A.2) Ask Mailbox Evidence Search
+
+Prompt:
+```
+Use Ask Mailbox to find the invoice, receipt, contract, or attachment I mention below.
+Search local mailbox evidence first, including attachment filenames and indexed attachment text.
+If attachment text is not indexed yet, explain which result needs extraction before relying on it.
+Return a concise answer plus the evidence threads.
+
+Query: <describe what to find>
+```
+
+### 7A.3) Manual Reply Or Forward
+
+Prompt:
+```
+Open the selected Inbox Agent thread.
+Use the manual email composer, not an AI-generated draft.
+Prepare a reply, reply-all, or forward with To/Cc/Bcc, subject, and body filled in.
+STOP before sending so I can review the exact message.
+```
+
 ### 7B) Inbox Commitments And Follow-Ups
 
 Prompt:

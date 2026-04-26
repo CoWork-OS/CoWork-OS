@@ -558,7 +558,7 @@ Seven of the seventeen bundled packs link to [Digital Twin Personas](digital-twi
 | QA & Testing | QA/Test Engineer | Test coverage reporting, regression review, flaky-test detection |
 | Technical Writing | Technical Writer | Doc freshness review, style consistency checks, link verification |
 
-Pack activation exposes the linked twin as an optional persona preset. It does not auto-enroll that role into heartbeat, subconscious, or memory ownership.
+Pack activation exposes the linked twin as an optional persona preset. It does not auto-enroll that role into heartbeat, Workflow Intelligence, or memory ownership.
 
 ### Activation Flow
 

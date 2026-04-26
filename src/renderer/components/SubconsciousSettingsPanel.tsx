@@ -169,7 +169,7 @@ export function SubconsciousSettingsPanel(props?: {
       setBusy(true);
       const saved = await window.electronAPI.saveSubconsciousSettings(next);
       setSettings(saved);
-      setMessage("Subconscious settings saved.");
+      setMessage("Workflow Intelligence settings saved.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
     } finally {
@@ -219,7 +219,7 @@ export function SubconsciousSettingsPanel(props?: {
 
   const resetHistory = async () => {
     const confirmed = window.confirm(
-      "Delete subconscious target history, hypotheses, critiques, decisions, backlog, and dispatch records?",
+      "Delete workflow intelligence history, hypotheses, critiques, decisions, backlog, and dispatch records?",
     );
     if (!confirmed) return;
     try {
@@ -233,7 +233,7 @@ export function SubconsciousSettingsPanel(props?: {
         result.deleted.decisions +
         result.deleted.backlogItems +
         result.deleted.dispatchRecords;
-      setMessage(`Reset subconscious history. Removed ${total} record(s).`);
+      setMessage(`Reset workflow intelligence history. Removed ${total} record(s).`);
       await load();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
@@ -243,7 +243,7 @@ export function SubconsciousSettingsPanel(props?: {
   };
 
   if (loading) {
-    return <div className="sc-loading">Loading subconscious settings...</div>;
+    return <div className="sc-loading">Loading workflow intelligence settings...</div>;
   }
 
   return (
@@ -251,10 +251,10 @@ export function SubconsciousSettingsPanel(props?: {
       {/* Header */}
       <div>
         <div className="sc-header">
-          <h2 className="sc-title">Subconscious</h2>
+          <h2 className="sc-title">Workflow Intelligence</h2>
         </div>
         <p className="sc-subtitle">
-          Reflective automation for evidence, hypotheses, critique, winners, backlog, and dispatch across every workflow.
+          Memory, heartbeat, and reflection working together to surface useful next actions across workflows.
         </p>
       </div>
 
@@ -263,10 +263,10 @@ export function SubconsciousSettingsPanel(props?: {
       {/* Status cards */}
       <div className="sc-status-row">
         <div className="sc-status-card">
-          <div className="sc-status-label">Global Brain</div>
+          <div className="sc-status-label">Workflow Intelligence</div>
           <div className="sc-status-value">{brain?.status || "idle"}</div>
           <div className="sc-status-meta">
-            Cadence: every {settings.cadenceMinutes} minute(s) | {settings.autonomyMode.replace(/_/g, " ")}
+            Triggered by heartbeat | {settings.autonomyMode.replace(/_/g, " ")}
           </div>
         </div>
         <div className="sc-status-card">
@@ -275,9 +275,9 @@ export function SubconsciousSettingsPanel(props?: {
           <div className="sc-status-meta">Active runs: {brain?.activeRunCount || 0}</div>
         </div>
         <div className="sc-status-card">
-          <div className="sc-status-label">Latest Run / Dream</div>
+          <div className="sc-status-label">Latest Run / Reflection</div>
           <div className="sc-status-value" style={{ fontSize: 16 }}>{formatTimestamp(brain?.lastRunAt)}</div>
-          <div className="sc-status-meta">Dream: {formatTimestamp(brain?.lastDreamAt)}</div>
+          <div className="sc-status-meta">Reflection: {formatTimestamp(brain?.lastDreamAt)}</div>
         </div>
       </div>
 
@@ -315,7 +315,7 @@ export function SubconsciousSettingsPanel(props?: {
               disabled={busy}
               onChange={(event) => void saveSettings({ enabled: event.target.checked })}
             />
-            <span>Enable Subconscious</span>
+            <span>Enable Workflow Intelligence</span>
           </label>
           <label className="sc-checkbox">
             <input
@@ -324,7 +324,7 @@ export function SubconsciousSettingsPanel(props?: {
               disabled={busy}
               onChange={(event) => void saveSettings({ autoRun: event.target.checked })}
             />
-            <span>Auto-run on cadence</span>
+            <span>Heartbeat-triggered reflection</span>
           </label>
           <label className="sc-checkbox">
             <input
@@ -340,7 +340,7 @@ export function SubconsciousSettingsPanel(props?: {
                 })
               }
             />
-            <span>Auto-dispatch winners</span>
+            <span>Auto-create after trusted patterns</span>
           </label>
           <label className="sc-checkbox">
             <input
@@ -358,7 +358,7 @@ export function SubconsciousSettingsPanel(props?: {
               disabled={busy}
               onChange={(event) => void saveSettings({ dreamsEnabled: event.target.checked })}
             />
-            <span>Dream distillation</span>
+            <span>Reflection distillation</span>
           </label>
           <label className="sc-checkbox">
             <input
@@ -367,10 +367,10 @@ export function SubconsciousSettingsPanel(props?: {
               disabled={busy}
               onChange={(event) => void saveSettings({ catchUpOnRestart: event.target.checked })}
             />
-            <span>Catch up on restart</span>
+            <span>Catch up on restart through heartbeat</span>
           </label>
           <label className="sc-input-group">
-            <span className="sc-input-label">Cadence (minutes)</span>
+            <span className="sc-input-label">Heartbeat review window (minutes)</span>
             <input
               type="number"
               min={15}
@@ -383,7 +383,7 @@ export function SubconsciousSettingsPanel(props?: {
             />
           </label>
           <label className="sc-input-group">
-            <span className="sc-input-label">Dream cadence (hours)</span>
+            <span className="sc-input-label">Synthesis cadence (hours)</span>
             <input
               type="number"
               min={1}
@@ -520,7 +520,7 @@ export function SubconsciousSettingsPanel(props?: {
           Refresh Evidence
         </button>
         <button className="sc-btn primary" disabled={busy} onClick={() => void runNow()}>
-          Run Global Brain
+          Run Global Reflection
         </button>
         <button
           className="sc-btn"
@@ -596,7 +596,7 @@ export function SubconsciousSettingsPanel(props?: {
                       void saveSettings({ trustedTargetKeys: next });
                     }}
                   />
-                  <span>Trusted for autonomous dispatch</span>
+                  <span>Trusted for auto-create</span>
                 </label>
                 <div>
                   <div className="sc-detail-section-title">Benefit summary</div>
@@ -703,7 +703,7 @@ export function SubconsciousSettingsPanel(props?: {
             </div>
 
             <div className="sc-card">
-              <div className="sc-card-title">Memory Index</div>
+              <div className="sc-card-title">Learning Candidates</div>
               {detail?.memory.length ? (
                 <ul className="sc-detail-list">
                   {detail.memory.slice(0, 8).map((item) => (
@@ -713,7 +713,7 @@ export function SubconsciousSettingsPanel(props?: {
                   ))}
                 </ul>
               ) : (
-                <div className="sc-detail-empty">No distilled memories yet.</div>
+                <div className="sc-detail-empty">No learning candidates yet.</div>
               )}
             </div>
           </div>
@@ -747,7 +747,7 @@ export function SubconsciousSettingsPanel(props?: {
             </div>
 
             <div className="sc-card">
-              <div className="sc-card-title">Dreams</div>
+              <div className="sc-card-title">Reflections</div>
               {detail?.dreams.length ? (
                 <ul className="sc-detail-list">
                   {detail.dreams.slice(0, 5).map((dream) => (
@@ -757,7 +757,7 @@ export function SubconsciousSettingsPanel(props?: {
                   ))}
                 </ul>
               ) : (
-                <div className="sc-detail-empty">No dream distillations yet.</div>
+                <div className="sc-detail-empty">No reflection distillations yet.</div>
               )}
             </div>
           </div>

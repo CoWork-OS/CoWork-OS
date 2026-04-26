@@ -1,10 +1,11 @@
 # Heartbeat V3
 
-Heartbeat v3 is the default heartbeat system in CoWork OS. It is one leg of the core automation runtime:
+Heartbeat v3 is the scheduling and signal-readiness layer inside Workflow Intelligence:
 
-- `Memory`
-- `Heartbeat`
-- `Subconscious`
+- `Memory` is the source of truth.
+- `Heartbeat` decides when enough fresh signal exists.
+- `Reflection` evaluates evidence internally.
+- `Suggestions` are the default user-facing output.
 
 It replaces the older queue-first heartbeat internals with a two-lane pipeline designed around three goals, in order:
 
@@ -13,6 +14,8 @@ It replaces the older queue-first heartbeat internals with a two-lane pipeline d
 3. Simpler runtime behavior
 
 The key design change is that not every wake is treated as potential task work anymore.
+
+Heartbeat owns the "when should we think?" decision. Reflection no longer runs its own independent interval loop for normal operation; Heartbeat triggers it when Pulse results or accumulated signals justify another evaluation.
 
 ## Two-Lane Model
 
@@ -142,7 +145,7 @@ Heartbeat v3 centers these operator-facing states:
 
 The healthy state is often quiet. A low-cost series of `idle` or `deferred` pulses is expected.
 
-Mission Control also shows the downstream `Core Harness` that learns from heartbeat and subconscious traces through failure clusters, living evals, experiments, and learnings.
+Mission Control also shows the downstream `Core Harness` that learns from heartbeat and workflow-intelligence traces through failure clusters, living evals, experiments, and learnings.
 
 ## Ambient Monitoring
 
@@ -166,9 +169,9 @@ Legacy `heartbeatIntervalMinutes` may still exist as a compatibility fallback, b
 
 ## Practical Reading
 
-- Use Heartbeat v3 when you want cheap continuous awareness with selective escalation.
+- Use Heartbeat v3 when you want cheap continuous awareness with selective escalation into suggestions or trusted work.
 - Use `observer` for roles that should stay cheap and quiet.
 - Use `operator` or `dispatcher` for automation-profile-backed operators that should actively review and escalate.
 - Keep exact-time or device-routed work in scheduler, trigger, or device surfaces instead of stretching heartbeat into a general control plane.
 
-See also [Core Automation](core-automation.md), [Subconscious Reflective Loop](subconscious-loop.md), and [Mission Control](mission-control.md).
+See also [Workflow Intelligence](workflow-intelligence.md), [Core Automation](core-automation.md), and [Mission Control](mission-control.md).

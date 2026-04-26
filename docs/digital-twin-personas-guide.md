@@ -4,10 +4,10 @@ Digital Twin Personas are role presets for CoWork agents. A twin gives you a str
 
 This guide covers what twins are for, how they relate to the new core automation model, the built-in persona families, and how to design custom templates that stay aligned with the hard split between:
 
-- core runtime: `Memory + Heartbeat + Subconscious`
+- core runtime: `Workflow Intelligence` (`Memory + Heartbeat + Reflection + Suggestions`)
 - product surfaces: Mission Control, Triggers, Devices, and Digital Twins
 
-Use [Core Automation](core-automation.md), [Heartbeat v3](heartbeat-v3.md), and [Subconscious Loop](subconscious-loop.md) as the runtime source of truth.
+Use [Workflow Intelligence](workflow-intelligence.md), [Core Automation](core-automation.md), and [Heartbeat v3](heartbeat-v3.md) as the runtime source of truth.
 
 ---
 
@@ -25,7 +25,7 @@ A Digital Twin does not define:
 
 - heartbeat cadence
 - dispatch budget
-- subconscious target ownership
+- workflow-intelligence target ownership
 - memory distillation policy
 - trigger ownership
 - device ownership
@@ -60,7 +60,7 @@ If a team wants a twin-backed role to participate in the core runtime, the inten
 1. Activate the persona template.
 2. Review the created role prompt, skills, and company linkage.
 3. Attach an automation profile separately.
-4. Monitor Heartbeat, Subconscious, and Memory from Mission Control.
+4. Monitor Heartbeat, Workflow Intelligence, and Memory from Mission Control.
 
 This keeps persona selection separate from cognition ownership.
 

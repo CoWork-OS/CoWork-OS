@@ -22,11 +22,12 @@ export function classifyShellPermissionDecision(text: string): ShellPermissionDe
     return "enable_shell";
   }
   if (
-    /\b(?:continue|proceed|go ahead|move on)\b/.test(lower) ||
+    /\b(?:continue|proceed|go ahead|move on)\b[\s\S]{0,40}\b(?:without shell|no shell|limited|best effort)\b/.test(
+      lower,
+    ) ||
     /\bwithout shell\b/.test(lower) ||
     /\b(?:don['’]?t|do not)\s+enable\s+shell\b/.test(lower) ||
-    /\bbest effort\b/.test(lower) ||
-    /\blimited\b/.test(lower)
+    /\blimited\s+best\s+effort\b/.test(lower)
   ) {
     return "continue_without_shell";
   }

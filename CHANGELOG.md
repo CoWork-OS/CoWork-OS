@@ -7,13 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.40] - 2026-04-26
+
 ### Added
+- **Release notes for 0.5.40**: see [Release Notes 0.5.40](docs/release-notes-0.5.40.md).
+- **Chronicle Desktop Research Preview**: opt-in recent-screen context for vague desktop references, with consent-gated passive capture, pause/resume controls, per-task toggles, observation management, promoted `screen_context` evidence, and optional linked background memory generation.
+- **Workflow Intelligence docs and product framing**: added the canonical Workflow Intelligence architecture guide and kept the former Subconscious page as a compatibility redirect.
+- **Routines**: documented and surfaced the routines-first automation model with schedule, API, connector, channel, mailbox, GitHub, and manual triggers; execution targets; outputs; run history; and lower-level Scheduled Tasks/Webhooks/Event Triggers as compiled backends.
+- **AgentMail and expanded Inbox Agent workflows**: added AgentMail configuration/realtime support and documented Inbox Agent Classic/Today modes, Mailbox Ask, attachment search, manual reply/reply-all/forward, editable AI drafts, sender cleanup, commitments, and Gmail forwarding automations.
+- **Managed Agents Hub improvements**: managed agents now include templates, role/profile conversion, runtime tool catalogs, routines, governance, insights, audit history, Slack health, workpapers, and image-generation profiles.
+- **Multi-provider image generation**: image settings now cover OpenAI, OpenAI Codex/OAuth, Azure, OpenRouter, and Gemini providers with default/backup routing, model selection, timeouts, and provider-attempt progress.
 - **LaTeX/PDF artifact workflow docs**: documented the new `compile_latex` source-first workflow across README, feature, use-case, architecture, runtime, troubleshooting, development, showcase, status, ideas, changelog, and docs index surfaces.
+- **Bundled `kami` skill**: added a new editorial-document workflow for resumes, one-pagers, white papers, letters, portfolios, diagrams, and slide decks, with workspace-local scaffolding, PDF/PPTX render helpers, and related docs.
 - **Bundled `taste-skill` frontend workflow**: CoWork OS now ships `taste-skill` as a global bundled skill for high-agency frontend design with stricter anti-slop layout, typography, motion, dependency, and responsive-implementation rules.
 - **Rich PPTX artifact previews**: PowerPoint outputs now open in an in-app presentation viewer with slide thumbnails, navigation, zoom, extracted slide text, and speaker notes. Visual slide images are cached when local `soffice` + `pdftoppm` are available and fall back to text-only previews otherwise.
 
 ### Changed
+- **Workflow Intelligence concept refresh**: updated README, feature, getting-started, Mission Control, Heartbeat, core automation, digital twin, company-ops, troubleshooting, and status docs to describe Memory as source of truth, Heartbeat as scheduler, Reflection as internal evaluation, and Suggestions as the reviewable user-facing output.
 - **Bundled-skill docs**: README, features, skill-store, and related status/comparison docs now reflect the bundled `taste-skill` addition and the built-in skill count increase to 140.
+- **Computer use runtime and docs**: macOS computer use now documents helper-targeted permissions, normalized tool names, screenshot-relative coordinates, fresh `captureId` validation, single-session sequential execution, Esc abort, and clearer Chronicle-vs-GUI-control boundaries.
+- **Artifact and settings surfaces**: task outputs, Files, timeline details, AI model settings, Automations, Memory Hub, Tools, and integration settings were updated for presentation previews, LaTeX/PDF pairs, image providers, routines, Chronicle, and AgentMail.
+- **Developer and packaging guidance**: documented focused build commands, Oxfmt/Oxlint/type-check commands, staged skills-check strictness, Kami validation, PPTX preview dependencies, LaTeX troubleshooting, dev-start Electron repair, skill assets, computer-use resources, and refreshed app icons.
+
+### Fixed
+- **Mailbox autosync**: autosync is scoped to the singleton IPC service instead of starting from every `MailboxService` instance.
+- **Mailbox search and attachments**: upgraded mailboxes now backfill FTS before trusting search results, and attachment-content filters search decrypted extracted text.
+- **Suggestion feedback**: welcome suggestions are recorded as acted-on only after prompt submission.
+- **Image generation dedupe**: duplicate protection blocks identical repeated image requests without blocking distinct prompts in the same task.
+- **Image OAuth and managed routines**: fixed derived Codex API key usage for OAuth image generation and synchronized managed routine lifecycle through the routines service.
+- **Runtime reliability**: tightened workflow-intelligence evidence gating, restart/catch-up behavior, hook token scoping, private workspace path exclusions, Azure streaming/tool-call parsing, sidebar/session loading, task replay state, and task pause messaging.
 
 ## [0.5.35] - 2026-04-12
 
@@ -1368,7 +1390,8 @@ This release is the first recommended Windows install baseline for normal users 
 | 0.1.0 | 2025-01-24 | First public release with core features |
 | 0.0.1 | 2025-01-20 | Initial development setup |
 
-[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.35...HEAD
+[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.40...HEAD
+[0.5.40]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.35...v0.5.40
 [0.5.35]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.5.35
 [0.5.34]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.5.34
 [0.5.23]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.5.23

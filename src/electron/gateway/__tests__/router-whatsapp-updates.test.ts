@@ -367,7 +367,7 @@ describe("MessageRouter external channel task updates", () => {
       1,
       "chat-1",
       "slack-msg-1",
-      "Working on: Inspect the codebase",
+      "Inspecting the codebase",
     );
     expect(adapter.editMessage).toHaveBeenNthCalledWith(
       2,

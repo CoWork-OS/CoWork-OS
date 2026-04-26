@@ -4,11 +4,12 @@ CoWork OS now treats always-on automation as a strict core runtime, not a blende
 
 ## Core Boundary
 
-The core runtime is only:
+The core runtime is **Workflow Intelligence**:
 
-- `Memory`
-- `Heartbeat`
-- `Subconscious`
+- `Memory` is the source of truth.
+- `Heartbeat` owns scheduling and signal readiness.
+- `Reflection` evaluates evidence internally.
+- `Suggestions` are the default user-facing output.
 
 Everything else is a surrounding surface:
 
@@ -40,19 +41,19 @@ An automation profile is attached to a generic operator agent role and stores:
 - active hours
 - heartbeat profile
 
-Digital Twin roles do not own automation profiles and do not create heartbeat or subconscious state when activated.
+Digital Twin roles do not own automation profiles and do not create heartbeat or workflow-intelligence state when activated.
 
 ## Cognition Path
 
 The intended flow is:
 
-`signal or evidence -> heartbeat -> subconscious -> decision -> downstream surface`
+`signal or evidence -> Heartbeat -> Reflection -> Suggestion -> user response -> Memory`
 
-Downstream surfaces can create visible work, but they do not become cognition owners themselves.
+Downstream surfaces can create visible work, but they do not become cognition owners themselves. User response to suggestions is part of the loop: acting reinforces a workflow pattern, editing captures a correction, and snooze/dismiss/ignore lowers similar future suggestions.
 
 ## Core Targets
 
-Direct subconscious ownership is intentionally narrow:
+Direct reflection target ownership is intentionally narrow:
 
 - `global`
 - `workspace`
@@ -68,7 +69,7 @@ Mission Control is the main control surface for the core runtime. It should be r
 
 - automation profile state
 - heartbeat runs
-- subconscious runs
+- workflow-intelligence/reflection runs
 - core traces
 - failure clusters
 - eval cases
@@ -93,12 +94,13 @@ This gives the always-on runtime a narrow improvement loop centered on operator 
 
 ## Approval Model
 
-Core-created automated tasks now inherit a real autonomy policy instead of only `allowUserInput: false`.
+Core-created automated tasks now inherit a real autonomy policy instead of only `allowUserInput: false`. Workflow Intelligence is review-first by default: it creates suggestions unless explicit policy, low risk, clear scope, and trusted or repeatedly accepted patterns justify auto-create.
 
 The default posture is:
 
-- autonomous execution for routine operator work
-- auto-approval for common automation-safe actions such as shell commands and trusted network/external-service operations
+- reviewable suggestions for new or uncertain patterns
+- autonomous execution only for trusted routine operator work
+- auto-approval only for common automation-safe actions such as shell commands and trusted network/external-service operations
 - hard guardrails, workspace capability denials, and explicit dangerous actions still remain enforced
 
-See [Heartbeat v3](heartbeat-v3.md), [Subconscious Reflective Loop](subconscious-loop.md), [Mission Control](mission-control.md), and [Permission System](permission-system.md).
+See [Workflow Intelligence](workflow-intelligence.md), [Heartbeat v3](heartbeat-v3.md), [Mission Control](mission-control.md), and [Permission System](permission-system.md).

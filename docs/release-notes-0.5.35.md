@@ -20,6 +20,7 @@ Release `0.5.35` expands CoWork's durable runtime model in three visible directi
 - **Clearer runtime ownership and telemetry**: runtime/session docs and telemetry now distinguish explicit capped runs from default-unbounded execution more clearly, which makes Mission Control, support, and debugging output more truthful. [Learn more](session-runtime.md)
 - **Renderer task-event playback**: task-event handling now batches, throttles, derives replacement state more aggressively, and includes perf-oriented fixture coverage so larger task histories remain smoother to browse and replay.
 - **Mission Control and settings surfaces**: Mission Control board actions, labels, and card summaries were refreshed, and Settings/Memory Hub now expose Supermemory controls, trace-debugger settings, and provider-specific failover controls more cleanly.
+- **Workflow Intelligence documentation**: the former Subconscious concept is now documented as Workflow Intelligence: Memory as source of truth, Heartbeat as scheduler, Reflection as internal evaluation, and Suggestions as the reviewable user-facing output. [Learn more](workflow-intelligence.md)
 - **Briefing quality**: daily briefings now prioritize higher-signal context and filter low-signal automation noise more aggressively, so summary output stays closer to what operators actually need.
 - **Provider failover configuration**: the LLM stack and settings surface now support provider-specific failover chains and clearer failover behavior.
 - **Release validation**: packaging guidance and artifact checks now better enforce consistent release filenames and local installer validation.
@@ -43,6 +44,7 @@ Release `0.5.35` expands CoWork's durable runtime model in three visible directi
 - [Changelog](changelog.md) - full version history
 - [Managed Agents](managed-agents.md) - managed agent lifecycle and runtime model
 - [Supermemory](supermemory.md) - external memory integration
+- [Workflow Intelligence](workflow-intelligence.md) - always-on memory, heartbeat, reflection, suggestions, and feedback learning
 - [Execution Runtime](execution-runtime-model.md) - task execution and turn-budget behavior
 - [Session Runtime](session-runtime.md) - ownership and task-session state model
 

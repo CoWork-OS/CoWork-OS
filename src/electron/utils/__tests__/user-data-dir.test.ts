@@ -84,6 +84,13 @@ describe("getUserDataDir", () => {
     expect(result).toBe(expected);
   });
 
+  it("uses stable cowork-os Electron userData regardless of display app name", async () => {
+    const { getStableElectronUserDataRoot } = await import("../user-data-dir");
+    expect(getStableElectronUserDataRoot("/Users/test/Library/Application Support")).toBe(
+      "/Users/test/Library/Application Support/cowork-os",
+    );
+  });
+
   it("env var takes priority over argv", async () => {
     process.env.COWORK_USER_DATA_DIR = "/from/env";
     process.argv = ["node", "app", "--user-data-dir", "/from/argv"];

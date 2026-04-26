@@ -18,7 +18,24 @@ const MIN_RECURRING_COUNT = 3;
 const SURFACE_COOLDOWN_MS = 6 * 60 * 60 * 1000;
 const MAX_TELEMETRY_EVENTS = 1000;
 
-type SuggestionTelemetryEventType = "created" | "surfaced" | "dismissed" | "acted_on";
+type SuggestionTelemetryEventType =
+  | "created"
+  | "surfaced"
+  | "dismissed"
+  | "snoozed"
+  | "edited"
+  | "ignored"
+  | "acted_on";
+
+interface SuggestionFeedbackStats {
+  actedOn: number;
+  dismissed: number;
+  snoozed: number;
+  edited: number;
+  ignored: number;
+  surfaced: number;
+  lastAt: number;
+}
 
 interface SuggestionTelemetryEvent {
   workspaceId: string;
@@ -31,8 +48,10 @@ interface SuggestionTelemetryEvent {
 interface PersistedSuggestionState {
   dismissed: string[];
   actedOn: string[];
+  snoozedUntil: Record<string, number>;
   surfacedAt: Record<string, number>;
   telemetryEvents: SuggestionTelemetryEvent[];
+  feedbackByKey?: Record<string, SuggestionFeedbackStats>;
 }
 
 // ─── Follow-Up Templates ──────────────────────────────────────────
@@ -184,8 +203,10 @@ const ACTION_KEYWORDS =
 export class ProactiveSuggestionsService {
   private static dismissedIds: Set<string> = new Set();
   private static actedOnIds: Set<string> = new Set();
+  private static snoozedUntil: Map<string, number> = new Map();
   private static surfacedAt: Map<string, number> = new Map();
   private static telemetryEvents: SuggestionTelemetryEvent[] = [];
+  private static feedbackByKey: Map<string, SuggestionFeedbackStats> = new Map();
   private static loaded = false;
   /**
    * Tracks titles generated within the current generateAll() cycle for cross-generator dedup.
@@ -231,8 +252,10 @@ export class ProactiveSuggestionsService {
       if (data) {
         this.dismissedIds = new Set(data.dismissed || []);
         this.actedOnIds = new Set(data.actedOn || []);
+        this.snoozedUntil = new Map(Object.entries(data.snoozedUntil || {}));
         this.surfacedAt = new Map(Object.entries(data.surfacedAt || {}));
         this.telemetryEvents = Array.isArray(data.telemetryEvents) ? data.telemetryEvents : [];
+        this.feedbackByKey = new Map(Object.entries(data.feedbackByKey || {}));
       }
     } catch {
       // best-effort
@@ -246,8 +269,10 @@ export class ProactiveSuggestionsService {
       repo.save("proactive-suggestions-state", {
         dismissed: [...this.dismissedIds].slice(-200), // cap stored IDs
         actedOn: [...this.actedOnIds].slice(-200),
+        snoozedUntil: Object.fromEntries(this.snoozedUntil),
         surfacedAt: Object.fromEntries(this.surfacedAt),
         telemetryEvents: this.telemetryEvents.slice(-MAX_TELEMETRY_EVENTS),
+        feedbackByKey: Object.fromEntries(this.feedbackByKey),
       });
     } catch {
       // best-effort
@@ -284,8 +309,12 @@ export class ProactiveSuggestionsService {
         const parsed = this.parseSuggestion(r.snippet, r.id, r.createdAt, originWorkspaceId);
         if (!parsed) continue;
         if (parsed.expiresAt < now) continue;
+        if ((parsed.snoozedUntil || 0) > now) continue;
         if (this.dismissedIds.has(parsed.id)) continue;
         if (this.actedOnIds.has(parsed.id)) continue;
+        if (opts?.recordSurface !== false) {
+          this.maybeRecordIgnoredSuggestion(originWorkspaceId, parsed, now);
+        }
         suggestions.push(parsed);
       }
 
@@ -294,7 +323,8 @@ export class ProactiveSuggestionsService {
           suggestion,
           score:
             suggestion.confidence +
-            this.getTimingAdjustment(suggestion.workspaceId || workspaceId, suggestion),
+            this.getTimingAdjustment(suggestion.workspaceId || workspaceId, suggestion) +
+            this.getFeedbackAdjustment(suggestion.workspaceId || workspaceId, suggestion),
         }))
         .sort((a, b) => b.score - a.score)
         .map((entry) => entry.suggestion);
@@ -323,6 +353,36 @@ export class ProactiveSuggestionsService {
     this.loadDismissed();
     this.dismissedIds.add(suggestionId);
     this.recordTelemetry(workspaceId, suggestionId, "dismissed");
+    const suggestion = this.findSuggestionById(workspaceId, suggestionId);
+    if (suggestion) {
+      this.recordSuggestionFeedback(workspaceId, suggestion, "dismissed");
+      this.captureSuggestionFeedbackMemory(workspaceId, suggestion, "dismissed");
+    }
+    this.saveDismissed();
+    return true;
+  }
+
+  static snooze(workspaceId: string, suggestionId: string, snoozedUntil: number): boolean {
+    this.loadDismissed();
+    const until = Number.isFinite(snoozedUntil) ? snoozedUntil : Date.now() + 24 * 60 * 60 * 1000;
+    this.snoozedUntil.set(suggestionId, until);
+    this.recordTelemetry(workspaceId, suggestionId, "snoozed");
+    const suggestion = this.findSuggestionById(workspaceId, suggestionId);
+    if (suggestion) {
+      this.recordSuggestionFeedback(workspaceId, suggestion, "snoozed");
+      this.captureSuggestionFeedbackMemory(workspaceId, suggestion, "snoozed");
+    }
+    this.saveDismissed();
+    return true;
+  }
+
+  static recordEditedAction(workspaceId: string, suggestionId: string, editedPrompt: string): boolean {
+    this.loadDismissed();
+    const suggestion = this.findSuggestionById(workspaceId, suggestionId);
+    if (!suggestion) return false;
+    this.recordTelemetry(workspaceId, suggestionId, "edited");
+    this.recordSuggestionFeedback(workspaceId, suggestion, "edited");
+    this.captureSuggestionFeedbackMemory(workspaceId, suggestion, "edited", editedPrompt);
     this.saveDismissed();
     return true;
   }
@@ -342,6 +402,8 @@ export class ProactiveSuggestionsService {
 
         this.actedOnIds.add(suggestionId);
         this.recordTelemetry(workspaceId, suggestionId, "acted_on");
+        this.recordSuggestionFeedback(workspaceId, parsed, "acted_on");
+        this.captureSuggestionFeedbackMemory(workspaceId, parsed, "acted_on");
         this.saveDismissed();
         return parsed.actionPrompt || null;
       }
@@ -797,6 +859,7 @@ export class ProactiveSuggestionsService {
         expiresAt: Date.now() + SEVEN_DAYS_MS,
         dismissed: false,
         actedOn: false,
+        snoozedUntil: this.snoozedUntil.get(id),
       };
     } catch {
       return null;
@@ -843,6 +906,7 @@ export class ProactiveSuggestionsService {
         companionStyle: data.companionStyle === "email" ? "email" : data.companionStyle === "note" ? "note" : undefined,
         createdAt,
         expiresAt: createdAt + SEVEN_DAYS_MS,
+        snoozedUntil: this.snoozedUntil.get(data.id || memoryId),
         dismissed: this.dismissedIds.has(data.id || memoryId),
         actedOn: this.actedOnIds.has(data.id || memoryId),
       };
@@ -921,6 +985,135 @@ export class ProactiveSuggestionsService {
     if (save) {
       this.saveDismissed();
     }
+  }
+
+  private static findSuggestionById(workspaceId: string, suggestionId: string): ProactiveSuggestion | null {
+    try {
+      const results = MemoryService.search(workspaceId, SUGGESTION_MARKER, 50);
+      for (const r of results) {
+        if (r.type !== "insight" || !r.snippet.includes(SUGGESTION_MARKER)) continue;
+        const parsed = this.parseSuggestion(r.snippet, r.id, r.createdAt, workspaceId);
+        if (parsed?.id === suggestionId) return parsed;
+      }
+    } catch {
+      // best-effort
+    }
+    return null;
+  }
+
+  private static getSuggestionFeedbackKey(workspaceId: string, suggestion: ProactiveSuggestion): string {
+    const titleKey = this.normalizeTitle(suggestion.title || suggestion.description || "suggestion");
+    return [
+      workspaceId,
+      suggestion.suggestionClass || suggestion.type || "general",
+      suggestion.sourceEntity || suggestion.sourceTaskId || titleKey,
+      titleKey,
+    ].join("::");
+  }
+
+  private static recordSuggestionFeedback(
+    workspaceId: string,
+    suggestion: ProactiveSuggestion,
+    action: "acted_on" | "dismissed" | "snoozed" | "edited" | "ignored",
+  ): void {
+    const key = this.getSuggestionFeedbackKey(workspaceId, suggestion);
+    const current = this.feedbackByKey.get(key) || {
+      actedOn: 0,
+      dismissed: 0,
+      snoozed: 0,
+      edited: 0,
+      ignored: 0,
+      surfaced: 0,
+      lastAt: 0,
+    };
+    current.actedOn ||= 0;
+    current.dismissed ||= 0;
+    current.snoozed ||= 0;
+    current.edited ||= 0;
+    current.ignored ||= 0;
+    current.surfaced ||= 0;
+    if (action === "acted_on") current.actedOn += 1;
+    if (action === "dismissed") current.dismissed += 1;
+    if (action === "snoozed") current.snoozed += 1;
+    if (action === "edited") current.edited += 1;
+    if (action === "ignored") current.ignored += 1;
+    current.lastAt = Date.now();
+    this.feedbackByKey.set(key, current);
+  }
+
+  private static captureSuggestionFeedbackMemory(
+    workspaceId: string,
+    suggestion: ProactiveSuggestion,
+    action: "acted_on" | "dismissed" | "snoozed" | "edited" | "ignored",
+    editedPrompt?: string,
+  ): void {
+    const actionLabel =
+      action === "acted_on"
+        ? "accepted"
+        : action === "edited"
+          ? "edited"
+          : action === "ignored"
+            ? "ignored"
+          : action === "snoozed"
+            ? "snoozed"
+            : "dismissed";
+    const type =
+      action === "acted_on"
+        ? "workflow_pattern"
+        : action === "edited"
+          ? "correction_rule"
+          : "observation";
+    const content = [
+      `[suggestion-feedback:${action}] ${actionLabel} suggestion "${suggestion.title}".`,
+      `Class: ${suggestion.suggestionClass || suggestion.type || "general"}.`,
+      suggestion.sourceEntity ? `Source: ${suggestion.sourceEntity}.` : "",
+      suggestion.actionPrompt ? `Suggested action: ${suggestion.actionPrompt}` : "",
+      editedPrompt ? `Edited action: ${editedPrompt}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+    const captureResult = MemoryService.capture(workspaceId, undefined, type, content, false, {
+      origin: "proactive",
+      batchKey: `suggestion-feedback:${this.normalizeTitle(suggestion.title) || suggestion.id}`,
+      priority: action === "acted_on" || action === "edited" ? "high" : "normal",
+      batchable: false,
+      signalFamily:
+        action === "acted_on"
+          ? "accepted_suggestion"
+          : action === "edited"
+            ? "edited_suggestion"
+            : "ignored_noise",
+    });
+    if (captureResult && typeof captureResult.catch === "function") {
+      void captureResult.catch(() => {
+        // best-effort learning signal
+      });
+    }
+  }
+
+  private static getFeedbackAdjustment(workspaceId: string, suggestion: ProactiveSuggestion): number {
+    const stats = this.feedbackByKey.get(this.getSuggestionFeedbackKey(workspaceId, suggestion));
+    if (!stats) return 0;
+    const positive = Math.min(0.45, stats.actedOn * 0.15 + (stats.edited || 0) * 0.08);
+    const negative = Math.min(0.45, stats.dismissed * 0.16 + stats.snoozed * 0.1 + (stats.ignored || 0) * 0.08);
+    return positive - negative;
+  }
+
+  private static maybeRecordIgnoredSuggestion(
+    workspaceId: string,
+    suggestion: ProactiveSuggestion,
+    at: number,
+  ): void {
+    const surfacedAt = this.surfacedAt.get(suggestion.id) || 0;
+    if (!surfacedAt || at - surfacedAt < 24 * 60 * 60 * 1000) return;
+    const alreadyRecorded = this.telemetryEvents.some(
+      (event) => event.suggestionId === suggestion.id && event.type === "ignored",
+    );
+    if (alreadyRecorded) return;
+    this.recordTelemetry(workspaceId, suggestion.id, "ignored", at, false);
+    this.recordSuggestionFeedback(workspaceId, suggestion, "ignored");
+    this.captureSuggestionFeedbackMemory(workspaceId, suggestion, "ignored");
+    this.saveDismissed();
   }
 
   private static getTimingAdjustment(

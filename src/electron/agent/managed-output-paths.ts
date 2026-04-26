@@ -1,8 +1,9 @@
 import * as path from "path";
 import type { Task } from "../../shared/types";
 import { isAutomatedTaskLike } from "../../shared/automated-task-detection";
+import { COWORK_AUTOMATED_OUTPUT_ROOT } from "./workspace-private-paths";
 
-export const MANAGED_AUTOMATED_OUTPUT_ROOT = ".cowork/automated-outputs";
+export const MANAGED_AUTOMATED_OUTPUT_ROOT = COWORK_AUTOMATED_OUTPUT_ROOT;
 
 export function shouldUseManagedAutomatedOutput(task: Task | null | undefined): boolean {
   return isAutomatedTaskLike(task);

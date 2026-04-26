@@ -240,11 +240,66 @@ function repairUtf8Mojibake(text: string): string {
   }
 }
 
+function countReplacementCharacters(text: string): number {
+  return (text.match(/\uFFFD/g) || []).length;
+}
+
+function decodeWithTextDecoder(buffer: Buffer, charset: string): string | null {
+  try {
+    return new TextDecoder(charset).decode(buffer);
+  } catch {
+    return null;
+  }
+}
+
+function isValidUtf8(buffer: Buffer): boolean {
+  try {
+    new TextDecoder("utf-8", { fatal: true }).decode(buffer);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function decodeLegacyFallback(
+  buffer: Buffer,
+  previousText: string,
+  options?: { requireInvalidUtf8?: boolean },
+): string {
+  if (options?.requireInvalidUtf8 && isValidUtf8(buffer)) return previousText;
+
+  const previousReplacementCount = countReplacementCharacters(previousText);
+  if (previousReplacementCount === 0) return previousText;
+
+  const candidates = ["windows-1254", "iso-8859-9", "windows-1252", "iso-8859-1"];
+  let best = previousText;
+  let bestScore =
+    previousReplacementCount * 10 +
+    countUtf8MojibakeHints(previousText) * 2;
+
+  for (const charset of candidates) {
+    const decoded = decodeWithTextDecoder(buffer, charset);
+    if (!decoded) continue;
+
+    const repaired = repairUtf8Mojibake(decoded);
+    const score =
+      countReplacementCharacters(repaired) * 10 +
+      countUtf8MojibakeHints(repaired) * 2;
+    if (score < bestScore) {
+      best = repaired;
+      bestScore = score;
+    }
+  }
+
+  return best;
+}
+
 function decodeMimeBuffer(buffer: Buffer, charset?: string): string {
   const normalizedCharset = (charset || "utf-8").toLowerCase().replace(/^x-/, "");
 
   if (normalizedCharset === "utf-8" || normalizedCharset === "utf8") {
-    return repairUtf8Mojibake(buffer.toString("utf8"));
+    const decoded = repairUtf8Mojibake(buffer.toString("utf8"));
+    return decodeLegacyFallback(buffer, decoded, { requireInvalidUtf8: true });
   }
 
   if (
@@ -255,7 +310,8 @@ function decodeMimeBuffer(buffer: Buffer, charset?: string): string {
     normalizedCharset === "windows-1252" ||
     normalizedCharset === "cp1252"
   ) {
-    return repairUtf8Mojibake(buffer.toString("latin1"));
+    const decoded = repairUtf8Mojibake(buffer.toString("latin1"));
+    return decodeLegacyFallback(buffer, decoded);
   }
 
   // Use TextDecoder for all other charsets (ISO-8859-9/Turkish, Windows-1254,
@@ -285,9 +341,15 @@ function extractImapLiteral(response: string, section: "HEADER" | "TEXT"): strin
   if (!Number.isFinite(literalLength) || literalLength < 0) return "";
 
   const literalStart = startIndex + literalMatch[0].length;
-  const byteStart = Buffer.byteLength(response.slice(0, literalStart), "utf8");
-  const buffer = Buffer.from(response, "utf8");
-  return buffer.subarray(byteStart, byteStart + literalLength).toString("utf8");
+  const responseEncoding: BufferEncoding = /[^\u0000-\u00ff]/.test(response) ? "utf8" : "latin1";
+  const byteStart = Buffer.byteLength(response.slice(0, literalStart), responseEncoding);
+  const buffer = Buffer.from(response, responseEncoding);
+  const literal = buffer.subarray(byteStart, byteStart + literalLength);
+
+  // Headers are mostly ASCII plus RFC 2047 encoded words, and parsing them as
+  // UTF-8 keeps existing non-encoded UTF-8 headers readable. Body literals must
+  // stay byte-preserving until part-level charset decoding runs.
+  return literal.toString(section === "HEADER" ? "utf8" : "latin1");
 }
 
 /**
@@ -512,7 +574,9 @@ export class EmailClient extends EventEmitter {
         });
 
         this.imapSocket.on("data", (data) => {
-          this.handleImapData(data.toString());
+          // Preserve raw IMAP literal bytes. MIME part charsets are decoded
+          // after BODY literals are extracted.
+          this.handleImapData(data.toString("latin1"));
         });
 
         this.imapSocket.once("connect", async () => {
@@ -1032,6 +1096,8 @@ export class EmailClient extends EventEmitter {
    */
   async sendEmail(options: {
     to: string | string[];
+    cc?: string | string[];
+    bcc?: string | string[];
     subject: string;
     text?: string;
     html?: string;
@@ -1044,6 +1110,23 @@ export class EmailClient extends EventEmitter {
       const toAddresses = (Array.isArray(options.to) ? options.to : [options.to]).map(
         sanitizeHeaderValue,
       );
+      const ccAddresses = (options.cc
+        ? Array.isArray(options.cc)
+          ? options.cc
+          : [options.cc]
+        : []
+      ).map(sanitizeHeaderValue);
+      const bccAddresses = (options.bcc
+        ? Array.isArray(options.bcc)
+          ? options.bcc
+          : [options.bcc]
+        : []
+      ).map(sanitizeHeaderValue);
+      const envelopeRecipients = [...toAddresses, ...ccAddresses, ...bccAddresses].filter(Boolean);
+      if (envelopeRecipients.length === 0) {
+        reject(new Error("At least one recipient is required"));
+        return;
+      }
       const messageId = `<${Date.now()}.${Math.random().toString(36).substring(2)}@${this.options.smtpHost}>`;
 
       // Build email
@@ -1060,6 +1143,9 @@ export class EmailClient extends EventEmitter {
         "MIME-Version: 1.0",
         "Content-Type: text/plain; charset=UTF-8",
       ];
+      if (ccAddresses.length > 0) {
+        headers.splice(2, 0, `Cc: ${ccAddresses.join(", ")}`);
+      }
 
       if (options.inReplyTo) {
         headers.push(`In-Reply-To: <${sanitizeHeaderValue(options.inReplyTo)}>`);
@@ -1096,99 +1182,123 @@ export class EmailClient extends EventEmitter {
 
         let step = 0;
         let responseBuffer = "";
+        let supportsStartTls = false;
+        let startTlsComplete = this.options.smtpSecure;
+        let rcptIndex = 0;
+        let timeout: NodeJS.Timeout | undefined;
 
-        socket.on("data", (data) => {
-          responseBuffer += data.toString();
+        const attachSmtpHandlers = (activeSocket: net.Socket | tls.TLSSocket) => {
+          activeSocket.on("error", (error) => {
+            reject(error);
+          });
 
-          // Check for complete response
-          if (!responseBuffer.includes("\r\n")) return;
+          activeSocket.on("close", () => {
+            if (timeout) clearTimeout(timeout);
+          });
 
-          const lines = responseBuffer.split("\r\n");
-          responseBuffer = lines.pop() || "";
+          activeSocket.on("data", (data) => {
+            responseBuffer += data.toString();
 
-          for (const line of lines) {
-            if (this.options.verbose) {
-              console.log("SMTP <", line);
-            }
+            // Check for complete response
+            if (!responseBuffer.includes("\r\n")) return;
 
-            const code = parseInt(line.substring(0, 3), 10);
+            const lines = responseBuffer.split("\r\n");
+            responseBuffer = lines.pop() || "";
 
-            // Handle multi-line responses
-            if (line[3] === "-") continue;
+            for (const line of lines) {
+              if (this.options.verbose) {
+                console.log("SMTP <", line);
+              }
 
-            if (code >= 400) {
-              socket.destroy();
-              reject(new Error(`SMTP error: ${line}`));
-              return;
-            }
+              const code = parseInt(line.substring(0, 3), 10);
+              if (/STARTTLS/i.test(line)) {
+                supportsStartTls = true;
+              }
 
-            step++;
-            switch (step) {
-              case 1: // After greeting
-                socket.write(`EHLO ${this.options.smtpHost}\r\n`);
-                break;
-              case 2: // After EHLO
-                if (!this.options.smtpSecure && line.includes("STARTTLS")) {
-                  socket.write("STARTTLS\r\n");
-                } else {
-                  socket.write(authCommand);
-                }
-                break;
-              case 3: // After STARTTLS or AUTH
-                if (line.includes("220") && !this.options.smtpSecure) {
-                  // Upgrade to TLS
-                  const servername = net.isIP(this.options.smtpHost)
-                    ? undefined
-                    : this.options.smtpHost;
-                  const tlsSocket = tls.connect({
-                    socket: socket as net.Socket,
-                    host: this.options.smtpHost,
-                    servername,
-                    ca: getSystemCA(),
-                    rejectUnauthorized: true,
-                  });
-                  socket = tlsSocket;
+              // Handle multi-line responses
+              if (line[3] === "-") continue;
+
+              if (code >= 400) {
+                socket.destroy();
+                reject(new Error(`SMTP error: ${line}`));
+                return;
+              }
+
+              step++;
+              switch (step) {
+                case 1: // After greeting
+                  supportsStartTls = false;
                   socket.write(`EHLO ${this.options.smtpHost}\r\n`);
-                  step = 1;
-                } else if (code === 334 && this.options.authMethod === "oauth") {
-                  // Some SMTP servers still send a continuation challenge even when the
-                  // XOAUTH2 initial client response is included on the AUTH line.
-                  socket.write("\r\n");
-                  step = 2;
-                } else {
-                  socket.write(`MAIL FROM:<${this.options.email}>\r\n`);
-                }
-                break;
-              case 4: // After MAIL FROM
-                socket.write(`RCPT TO:<${toAddresses[0]}>\r\n`);
-                break;
-              case 5: // After RCPT TO
-                socket.write("DATA\r\n");
-                break;
-              case 6: // After DATA
-                socket.write(email);
-                break;
-              case 7: // After email sent
-                socket.write("QUIT\r\n");
-                socket.end();
-                resolve(messageId.replace(/[<>]/g, ""));
-                break;
+                  break;
+                case 2: // After EHLO
+                  if (!startTlsComplete && supportsStartTls) {
+                    socket.write("STARTTLS\r\n");
+                  } else {
+                    socket.write(authCommand);
+                  }
+                  break;
+                case 3: // After STARTTLS or AUTH
+                  if (line.includes("220") && !startTlsComplete) {
+                    // Upgrade to TLS
+                    const servername = net.isIP(this.options.smtpHost)
+                      ? undefined
+                      : this.options.smtpHost;
+                    const tlsSocket = tls.connect({
+                      socket: socket as net.Socket,
+                      host: this.options.smtpHost,
+                      servername,
+                      ca: getSystemCA(),
+                      rejectUnauthorized: true,
+                    });
+                    socket = tlsSocket;
+                    startTlsComplete = true;
+                    supportsStartTls = false;
+                    responseBuffer = "";
+                    step = 0;
+                    attachSmtpHandlers(tlsSocket);
+                    tlsSocket.once("secureConnect", () => {
+                      tlsSocket.write(`EHLO ${this.options.smtpHost}\r\n`);
+                      step = 1;
+                    });
+                  } else if (code === 334 && this.options.authMethod === "oauth") {
+                    // Some SMTP servers still send a continuation challenge even when the
+                    // XOAUTH2 initial client response is included on the AUTH line.
+                    socket.write("\r\n");
+                    step = 2;
+                  } else {
+                    socket.write(`MAIL FROM:<${this.options.email}>\r\n`);
+                  }
+                  break;
+                case 4: // After MAIL FROM
+                  socket.write(`RCPT TO:<${envelopeRecipients[rcptIndex++]}>\r\n`);
+                  break;
+                case 5: // After RCPT TO
+                  if (rcptIndex < envelopeRecipients.length) {
+                    socket.write(`RCPT TO:<${envelopeRecipients[rcptIndex++]}>\r\n`);
+                    step = 4;
+                  } else {
+                    socket.write("DATA\r\n");
+                  }
+                  break;
+                case 6: // After DATA
+                  socket.write(email);
+                  break;
+                case 7: // After email sent
+                  socket.write("QUIT\r\n");
+                  socket.end();
+                  resolve(messageId.replace(/[<>]/g, ""));
+                  break;
+              }
             }
-          }
-        });
+          });
+        };
 
-        socket.on("error", (error) => {
-          reject(error);
-        });
+        attachSmtpHandlers(socket);
 
-        const timeout = setTimeout(() => {
+        timeout = setTimeout(() => {
           socket.destroy();
           reject(new Error("SMTP connection timeout"));
         }, 30000);
-
-        socket.on("close", () => {
-          clearTimeout(timeout);
-        });
       };
 
       connectSmtp();
@@ -1199,7 +1309,29 @@ export class EmailClient extends EventEmitter {
    * Mark email as read
    */
   async markAsRead(uid: number): Promise<void> {
-    await this.imapCommand(`UID STORE ${uid} +FLAGS (\\Seen)`);
+    await this.withSelectedMailbox(() => this.imapCommand(`UID STORE ${uid} +FLAGS (\\Seen)`));
+  }
+
+  /**
+   * Mark email as unread
+   */
+  async markAsUnread(uid: number): Promise<void> {
+    await this.withSelectedMailbox(() => this.imapCommand(`UID STORE ${uid} -FLAGS (\\Seen)`));
+  }
+
+  private async withSelectedMailbox<T>(operation: () => Promise<T>): Promise<T> {
+    const needsConnection = !this.imapSocket || this.imapSocket.destroyed;
+    if (!needsConnection) {
+      return operation();
+    }
+
+    try {
+      await this.connectImap();
+      await this.selectMailbox();
+      return await operation();
+    } finally {
+      await this.disconnectImap();
+    }
   }
 
   /**

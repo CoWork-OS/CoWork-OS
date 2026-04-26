@@ -14,6 +14,7 @@ export interface ToolInvocationContext {
   targetPaths?: string[];
   followUp?: boolean;
   toolPolicyContext?: ToolPolicyContext;
+  signal?: AbortSignal;
   emitEvent?: (type: string, payload: Any) => void;
   beginHeartbeat?: (toolName: string, toolTimeoutMs: number, input: unknown) => (() => void) | void;
   timeoutMsResolver?: (toolName: string, input: unknown) => number;

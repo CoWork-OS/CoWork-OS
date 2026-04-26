@@ -18,7 +18,7 @@ interface AgentRoleInfo {
   icon?: string;
 }
 
-function formatRelativeShort(timestamp?: number): string {
+export function formatRelativeShort(timestamp?: number): string {
   if (!timestamp) return "";
   const diff = Date.now() - timestamp;
   const minutes = Math.max(1, Math.round(diff / 60000));
@@ -30,7 +30,7 @@ function formatRelativeShort(timestamp?: number): string {
   const weeks = Math.round(days / 7);
   if (weeks < 4) return `${weeks}w`;
   const months = Math.round(days / 30);
-  if (months < 12) return `${Math.max(1, months)}m`;
+  if (months < 12) return `${Math.max(1, months)}mo`;
   const years = Math.round(days / 365);
   return `${Math.max(1, years)}y`;
 }
@@ -146,6 +146,17 @@ export function compareTasksByPinAndRecency(a: Task, b: Task): number {
   return b.createdAt - a.createdAt;
 }
 
+export function getSidebarDateGroup(task: Pick<Task, "createdAt" | "pinned">, now = new Date()): string {
+  if (task.pinned) return "Pinned";
+
+  const date = new Date(task.createdAt);
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const yesterday = new Date(today.getTime() - 86400000);
+  if (date >= today) return "Today";
+  if (date >= yesterday) return "Yesterday";
+  return "Earlier";
+}
+
 function areStringSetsEqual(left: ReadonlySet<string>, right: ReadonlySet<string>): boolean {
   if (left.size !== right.size) return false;
   for (const value of left) {
@@ -218,13 +229,66 @@ export interface TaskTreeNode {
   displayTitle?: string;
 }
 
+const GENERIC_SESSION_TITLES = new Set([
+  "new session",
+  "new task",
+  "untitled",
+  "untitled session",
+  "untitled task",
+]);
+
+function normalizeSidebarTitleCandidate(value?: string | null): string {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  const userRequestMatch = trimmed.match(/(?:^|\n)User request:\s*([\s\S]+)/i);
+  return (userRequestMatch?.[1] || trimmed).replace(/\s+/g, " ").trim();
+}
+
+function isGenericSidebarTitle(value: string): boolean {
+  return GENERIC_SESSION_TITLES.has(normalizeSidebarSessionSearch(value));
+}
+
+export function getSidebarSessionTitle(node: Pick<TaskTreeNode, "displayTitle" | "task">): string {
+  const primaryCandidates = [node.displayTitle, node.task.title];
+  for (const candidate of primaryCandidates) {
+    const normalized = normalizeSidebarTitleCandidate(candidate);
+    if (normalized && !isGenericSidebarTitle(normalized)) return normalized;
+  }
+
+  const fallbackCandidates = [
+    node.task.userPrompt,
+    node.task.rawPrompt,
+    node.task.prompt,
+    node.task.semanticSummary,
+    node.task.resultSummary,
+    node.task.bestKnownOutcome?.resultSummary,
+    node.task.branchLabel,
+    ...primaryCandidates,
+  ];
+  for (const candidate of fallbackCandidates) {
+    const normalized = normalizeSidebarTitleCandidate(candidate);
+    if (normalized) return normalized;
+  }
+
+  return "Untitled session";
+}
+
 export function normalizeSidebarSessionSearch(value: string): string {
   return stripAllEmojis(value).toLocaleLowerCase().replace(/\s+/g, " ").trim();
 }
 
 function getTaskTreeNodeSearchText(node: TaskTreeNode): string {
   return normalizeSidebarSessionSearch(
-    [node.displayTitle, node.task.title, node.task.prompt, node.task.id]
+    [
+      getSidebarSessionTitle(node),
+      node.displayTitle,
+      node.task.title,
+      node.task.userPrompt,
+      node.task.rawPrompt,
+      node.task.prompt,
+      node.task.id,
+    ]
       .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
       .join(" "),
   );
@@ -419,17 +483,6 @@ export function Sidebar({
     inboxUnreadCount > 0
       ? `Inbox (${inboxUnreadCount > 99 ? "99+" : inboxUnreadCount})`
       : "Inbox";
-
-  // Helper to get date group for a timestamp
-  const getDateGroup = useCallback((timestamp: number): string => {
-    const now = new Date();
-    const date = new Date(timestamp);
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const yesterday = new Date(today.getTime() - 86400000);
-    if (date >= today) return "Today";
-    if (date >= yesterday) return "Yesterday";
-    return "Earlier";
-  }, []);
 
   // Build task tree from flat list
   const taskTree = useMemo(() => {
@@ -665,7 +718,7 @@ export function Sidebar({
         isLast: boolean;
       }>
     >((acc, node, index) => {
-      const group = getDateGroup(node.task.createdAt);
+      const group = getSidebarDateGroup(node.task);
       const previousGroup = acc.length > 0 ? acc[acc.length - 1].group : "";
       const isLast = index === filteredTaskTree.length - 1;
       acc.push({
@@ -677,7 +730,7 @@ export function Sidebar({
       });
       return acc;
     }, []);
-  }, [getDateGroup, filteredTaskTree, uiDensity]);
+  }, [filteredTaskTree, uiDensity]);
 
   const virtualizedTaskRows = useMemo(
     () => flattenVisibleTaskRows(filteredTaskTree, effectiveCollapsedTasks),
@@ -1162,6 +1215,8 @@ export function Sidebar({
       !isChatSession &&
       selectedTaskId !== task.id &&
       completionAttentionSet.has(task.id);
+    const isAwaitingSession = isAwaitingSessionStatus(task.status);
+    const sessionTitle = getSidebarSessionTitle(node);
 
     return (
       <div
@@ -1187,9 +1242,11 @@ export function Sidebar({
             {depth === 0 ? String(rootIndex + 1).padStart(2, "0") : "··"}
           </span>
 
-          <span className={`cli-task-status ${getStatusClass(task.status, showCompletionAttention)}`}>
-            {getStatusIndicator(task.status, showCompletionAttention)}
-          </span>
+          {!isAwaitingSession && (
+            <span className={`cli-task-status ${getStatusClass(task.status, showCompletionAttention)}`}>
+              {getStatusIndicator(task.status, showCompletionAttention)}
+            </span>
+          )}
 
           {task.pinned && (
             <span className="cli-task-pinned" title="Pinned">
@@ -1243,15 +1300,15 @@ export function Sidebar({
                 onClick={(e) => e.stopPropagation()}
               />
             ) : (
-              <div className="cli-task-title-row">
+              <div className={`cli-task-title-row ${isAwaitingSession ? "cli-task-title-row-awaiting" : ""}`}>
                 <span
                   className={`cli-task-title ${isSubAgent && task.assignedAgentRoleId ? "cli-task-title-with-agent" : ""}`}
-                  title={task.title}
+                  title={sessionTitle}
                 >
                   {isSubAgent && task.assignedAgentRoleId
                     ? (() => {
                         const role = agentRoles.get(task.assignedAgentRoleId!);
-                        const full = node.displayTitle || task.title;
+                        const full = sessionTitle;
                         const fullNoEmoji = stripAllEmojis(full);
                         const truncated =
                           fullNoEmoji.length > 28 ? fullNoEmoji.slice(0, 25) + "..." : fullNoEmoji;
@@ -1269,9 +1326,9 @@ export function Sidebar({
                           </>
                         );
                       })()
-                    : (node.displayTitle || task.title)}
+                    : sessionTitle}
                 </span>
-                {isAwaitingSessionStatus(task.status) && (
+                {isAwaitingSession && (
                   <span className="cli-task-awaiting-badge">Awaiting response</span>
                 )}
                 {hasChildren && !hasSessionSearch && (
@@ -1283,9 +1340,11 @@ export function Sidebar({
                     {isCollapsed ? "▸" : "▾"}
                   </button>
                 )}
-                <span className="cli-task-time" aria-hidden="true">
-                  {formatRelativeShort(task.updatedAt || task.createdAt)}
-                </span>
+                {!isAwaitingSession && (
+                  <span className="cli-task-time" aria-hidden="true">
+                    {formatRelativeShort(task.updatedAt || task.createdAt)}
+                  </span>
+                )}
               </div>
             )}
           </div>
@@ -1300,7 +1359,7 @@ export function Sidebar({
                 aria-haspopup="menu"
                 aria-expanded={menuOpenTaskId === task.id}
                 aria-controls={`task-menu-${task.id}`}
-                aria-label={`Session actions for ${task.title}`}
+                aria-label={`Session actions for ${sessionTitle}`}
                 onClick={(e) => handleMenuToggle(e, task.id)}
                 onKeyDown={(e) => handleMenuButtonKeyDown(e, task.id)}
                 ref={(el) => {

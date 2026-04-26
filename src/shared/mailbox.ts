@@ -1,7 +1,90 @@
-export type MailboxProvider = "gmail" | "imap" | "agentmail";
+export type MailboxProvider = "gmail" | "imap" | "outlook_graph" | "agentmail";
 
 export type MailboxThreadSortOrder = "priority" | "recent";
 export type MailboxThreadMailboxView = "inbox" | "sent" | "all";
+
+export type MailboxProviderCapability =
+  | "sync"
+  | "provider_search"
+  | "realtime"
+  | "send"
+  | "provider_drafts"
+  | "reply_all"
+  | "forward"
+  | "attachments_download"
+  | "attachments_upload"
+  | "archive"
+  | "trash"
+  | "mark_read"
+  | "mark_unread"
+  | "labels"
+  | "folders"
+  | "move"
+  | "snooze"
+  | "undo_send";
+
+export type MailboxProviderBackend = "gmail_api" | "microsoft_graph" | "imap_smtp" | "agentmail";
+
+export type MailboxQueuedActionStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
+
+export type MailboxQueuedActionType =
+  | "send"
+  | "archive"
+  | "trash"
+  | "mark_read"
+  | "mark_unread"
+  | "move"
+  | "apply_label"
+  | "remove_label"
+  | "snooze"
+  | "waiting_on"
+  | "undo";
+
+export type MailboxComposeMode = "new" | "reply" | "reply_all" | "forward";
+
+export type MailboxComposeDraftStatus =
+  | "local"
+  | "provider"
+  | "queued"
+  | "scheduled"
+  | "sending"
+  | "sent"
+  | "discarded"
+  | "failed";
+
+export type MailboxRemoteContentPolicy = "load" | "block" | "ask";
+
+export type MailboxFolderRole =
+  | "inbox"
+  | "sent"
+  | "drafts"
+  | "scheduled"
+  | "archive"
+  | "trash"
+  | "spam"
+  | "custom";
+
+export type MailboxTodayBucket =
+  | "needs_action"
+  | "happening_today"
+  | "good_to_know"
+  | "more_to_browse";
+
+export type MailboxDomainCategory =
+  | "travel"
+  | "packages"
+  | "receipts"
+  | "bills"
+  | "shopping"
+  | "newsletters"
+  | "events"
+  | "finance"
+  | "customer"
+  | "hiring"
+  | "approvals"
+  | "ops"
+  | "personal"
+  | "other";
 
 export type MailboxThreadCategory =
   | "priority"
@@ -96,9 +179,72 @@ export interface MailboxAccount {
   address: string;
   displayName?: string;
   status: "connected" | "degraded" | "disconnected";
-  capabilities: string[];
+  capabilities: MailboxProviderCapability[];
+  backend?: MailboxProviderBackend;
   lastSyncedAt?: number;
   classificationInitialBatchAt?: number;
+}
+
+export interface MailboxSyncHealth {
+  accountId: string;
+  provider: MailboxProvider;
+  backend: MailboxProviderBackend;
+  status: "connected" | "degraded" | "disconnected";
+  capabilities: MailboxProviderCapability[];
+  lastSyncedAt?: number;
+  syncCursor?: string;
+  queuedActionCount: number;
+  failedActionCount: number;
+  draftCount: number;
+  scheduledSendCount: number;
+  statusLabel: string;
+}
+
+export interface MailboxFolder {
+  id: string;
+  accountId: string;
+  providerFolderId: string;
+  name: string;
+  role: MailboxFolderRole;
+  unreadCount?: number;
+  totalCount?: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface MailboxLabel {
+  id: string;
+  accountId: string;
+  providerLabelId: string;
+  name: string;
+  color?: string;
+  unreadCount?: number;
+  totalCount?: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface MailboxIdentity {
+  id: string;
+  accountId: string;
+  email: string;
+  displayName?: string;
+  providerIdentityId?: string;
+  isDefault: boolean;
+  signatureId?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface MailboxSignature {
+  id: string;
+  accountId: string;
+  name: string;
+  bodyHtml?: string;
+  bodyText: string;
+  isDefault: boolean;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface MailboxSyncStatus {
@@ -347,6 +493,15 @@ export interface MailboxMessage {
   unread: boolean;
 }
 
+export interface MailboxAttachmentSummary {
+  id: string;
+  messageId: string;
+  filename: string;
+  mimeType?: string;
+  size?: number;
+  extractionStatus: "not_indexed" | "pending" | "indexed" | "error" | "unsupported";
+}
+
 export interface MailboxThreadListItem {
   id: string;
   accountId: string;
@@ -357,6 +512,8 @@ export interface MailboxThreadListItem {
   participants: MailboxParticipant[];
   labels: string[];
   category: MailboxThreadCategory;
+  todayBucket: MailboxTodayBucket;
+  domainCategory: MailboxDomainCategory;
   priorityBand: MailboxPriorityBand;
   priorityScore: number;
   urgencyScore: number;
@@ -369,6 +526,7 @@ export interface MailboxThreadListItem {
   lastMessageAt: number;
   hasSensitiveContent?: boolean;
   summary?: MailboxSummaryCard;
+  attachments?: MailboxAttachmentSummary[];
   classificationState?: MailboxClassificationState;
 }
 
@@ -578,17 +736,85 @@ export interface MailboxDigest {
   proposalCount: number;
   commitmentCount: number;
   draftCount: number;
+  composeDraftCount?: number;
+  queuedActionCount?: number;
+  failedActionCount?: number;
+  scheduledSendCount?: number;
   overdueCommitmentCount: number;
   sensitiveThreadCount: number;
   eventCount: number;
   classificationPendingCount: number;
   lastSyncedAt?: number;
+  syncHealth?: MailboxSyncHealth[];
   recentEventTypes: Array<{ type: MailboxEventType; count: number }>;
 }
 
 export interface MailboxDigestSnapshot extends MailboxDigest {
   workspaceId: string;
   generatedAt: number;
+}
+
+export interface MailboxTodayDigest {
+  buckets: Array<{
+    bucket: MailboxTodayBucket;
+    label: string;
+    count: number;
+    threads: MailboxThreadListItem[];
+  }>;
+  domainCounts: Array<{ category: MailboxDomainCategory; count: number }>;
+  syncHealth?: MailboxSyncHealth[];
+  queuedActionCount?: number;
+  failedActionCount?: number;
+  composeDraftCount?: number;
+  scheduledSendCount?: number;
+  generatedAt: number;
+}
+
+export interface MailboxAttachmentRecord extends MailboxAttachmentSummary {
+  threadId: string;
+  provider: MailboxProvider;
+  providerMessageId: string;
+  providerAttachmentId?: string;
+  text?: string;
+  extractionMode?: string;
+  extractionError?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface MailboxAskInput {
+  query: string;
+  limit?: number;
+  includeAnswer?: boolean;
+}
+
+export interface MailboxAskResult {
+  query: string;
+  answer?: string;
+  results: Array<{
+    thread: MailboxThreadListItem;
+    matchedAttachment?: MailboxAttachmentRecord;
+    snippet: string;
+    score: number;
+  }>;
+  usedLlm: boolean;
+  error?: string;
+}
+
+export interface MailboxSenderCleanupDigest {
+  generatedAt: number;
+  senders: Array<{
+    email: string;
+    name?: string;
+    threadCount: number;
+    unreadCount: number;
+    cleanupCandidateCount: number;
+    needsReplyCount: number;
+    estimatedWeeklyReduction: number;
+    lastMessageAt: number;
+    suggestedAction: "cleanup_local" | "archive" | "mark_read";
+    threads: MailboxThreadListItem[];
+  }>;
 }
 
 export interface MailboxSnippetRecord {
@@ -635,7 +861,14 @@ export interface MailboxListThreadsInput {
   accountId?: string;
   query?: string;
   category?: MailboxThreadCategory | "all";
+  todayBucket?: MailboxTodayBucket | "all";
+  domainCategory?: MailboxDomainCategory | "all";
   mailboxView?: MailboxThreadMailboxView;
+  folderId?: string;
+  labelId?: string;
+  scheduledOnly?: boolean;
+  draftOnly?: boolean;
+  queuedOnly?: boolean;
   /** When set, only threads linked to this saved view are returned. */
   savedViewId?: string;
   unreadOnly?: boolean;
@@ -643,6 +876,8 @@ export interface MailboxListThreadsInput {
   hasSuggestedProposal?: boolean;
   hasOpenCommitment?: boolean;
   cleanupCandidate?: boolean;
+  hasAttachment?: boolean;
+  attachmentQuery?: string;
   sortBy?: MailboxThreadSortOrder;
   limit?: number;
 }
@@ -652,6 +887,113 @@ export interface MailboxSyncResult {
   syncedThreads: number;
   syncedMessages: number;
   lastSyncedAt: number;
+}
+
+export interface MailboxRecipientInput {
+  name?: string;
+  email: string;
+}
+
+export interface MailboxComposeDraft {
+  id: string;
+  accountId: string;
+  mode: MailboxComposeMode;
+  status: MailboxComposeDraftStatus;
+  threadId?: string;
+  providerDraftId?: string;
+  subject: string;
+  bodyText: string;
+  bodyHtml?: string;
+  to: MailboxRecipientInput[];
+  cc: MailboxRecipientInput[];
+  bcc: MailboxRecipientInput[];
+  identityId?: string;
+  signatureId?: string;
+  attachments: Array<{
+    id: string;
+    filename: string;
+    mimeType?: string;
+    size?: number;
+  }>;
+  scheduledAt?: number;
+  sendAfter?: number;
+  latestError?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface MailboxComposeDraftInput {
+  accountId?: string;
+  threadId?: string;
+  mode: MailboxComposeMode;
+  subject?: string;
+  bodyText?: string;
+  bodyHtml?: string;
+  to?: MailboxRecipientInput[];
+  cc?: MailboxRecipientInput[];
+  bcc?: MailboxRecipientInput[];
+  identityId?: string;
+  signatureId?: string;
+}
+
+export interface MailboxComposeDraftPatch {
+  subject?: string;
+  bodyText?: string;
+  bodyHtml?: string;
+  to?: MailboxRecipientInput[];
+  cc?: MailboxRecipientInput[];
+  bcc?: MailboxRecipientInput[];
+  identityId?: string;
+  signatureId?: string;
+  scheduledAt?: number | null;
+}
+
+export interface MailboxOutgoingMessage {
+  id: string;
+  draftId?: string;
+  accountId: string;
+  status: MailboxQueuedActionStatus;
+  providerMessageId?: string;
+  scheduledAt?: number;
+  sendAfter?: number;
+  latestError?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface MailboxQueuedAction {
+  id: string;
+  accountId?: string;
+  threadId?: string;
+  draftId?: string;
+  type: MailboxQueuedActionType;
+  status: MailboxQueuedActionStatus;
+  payload: Record<string, unknown>;
+  attempts: number;
+  nextAttemptAt?: number;
+  latestError?: string;
+  undoOfActionId?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface MailboxClientState {
+  accounts: MailboxAccount[];
+  syncHealth: MailboxSyncHealth[];
+  folders: MailboxFolder[];
+  labels: MailboxLabel[];
+  identities: MailboxIdentity[];
+  signatures: MailboxSignature[];
+  composeDrafts: MailboxComposeDraft[];
+  queuedActions: MailboxQueuedAction[];
+  outgoing: MailboxOutgoingMessage[];
+  settings: {
+    remoteContentPolicy: MailboxRemoteContentPolicy;
+    sendDelaySeconds: number;
+    syncRecentDays: number;
+    attachmentCache: "metadata_on_demand" | "recent_cache" | "never_cache";
+    notifications: "all" | "priority" | "needs_reply" | "off";
+  };
 }
 
 export interface MailboxReclassifyResult {
@@ -689,17 +1031,37 @@ export interface MailboxApplyActionInput {
   threadId?: string;
   type:
     | "cleanup_local"
+    | "mark_done"
     | "archive"
     | "trash"
     | "mark_read"
+    | "mark_unread"
+    | "move"
     | "label"
+    | "remove_label"
+    | "snooze"
+    | "waiting_on"
+    | "undo"
+    | "send_message"
     | "send_draft"
     | "discard_draft"
     | "schedule_event"
     | "dismiss_proposal";
   label?: string;
+  folderId?: string;
+  labelId?: string;
+  snoozeUntil?: number;
   draftId?: string;
+  draftSubject?: string;
+  draftBody?: string;
+  messageMode?: Extract<MailboxComposeMode, "reply" | "reply_all" | "forward">;
+  messageTo?: string[];
+  messageCc?: string[];
+  messageBcc?: string[];
+  messageSubject?: string;
+  messageBody?: string;
   commitmentId?: string;
+  actionId?: string;
 }
 
 /**

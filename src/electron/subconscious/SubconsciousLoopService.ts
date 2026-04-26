@@ -11,6 +11,7 @@ import { CoreMemoryDistiller } from "../core/CoreMemoryDistiller";
 import { CoreLearningPipelineService } from "../core/CoreLearningPipelineService";
 import { CoreTraceService } from "../core/CoreTraceService";
 import { WorkspaceRepository } from "../database/repositories";
+import { MemoryService } from "../memory/MemoryService";
 import { getCronStorePath, loadCronStoreSync } from "../cron/store";
 import type { EventTriggerService } from "../triggers/EventTriggerService";
 import { GitService } from "../git/GitService";
@@ -32,7 +33,6 @@ import {
   type SubconsciousDecision,
   type SubconsciousDispatchKind,
   type SubconsciousDispatchRecord,
-  type SubconsciousDispatchStatus,
   type SubconsciousDreamArtifact,
   type SubconsciousEvidence,
   type SubconsciousHealth,
@@ -87,6 +87,15 @@ interface SubconsciousLoopServiceDeps {
   coreMemoryCandidateService?: CoreMemoryCandidateService;
   coreMemoryDistiller?: CoreMemoryDistiller;
   coreLearningPipelineService?: CoreLearningPipelineService;
+}
+
+interface ReflectionPolicyEvaluation {
+  confidence: number;
+  riskLevel: SubconsciousRiskLevel;
+  evidenceSources: string[];
+  evidenceFreshness: number;
+  permissionDecision: SubconsciousPermissionDecision;
+  notificationIntent?: SubconsciousNotificationIntent;
 }
 
 function now(): number {
@@ -283,7 +292,6 @@ export class SubconsciousLoopService {
   private readonly latestEvidenceByTarget = new Map<string, SubconsciousEvidence[]>();
   private readonly lastNotificationByIntent = new Map<string, number>();
   private agentDaemon: AgentDaemon | null = null;
-  private intervalHandle?: ReturnType<typeof setInterval>;
   private brainStatus: SubconsciousBrainSummary["status"] = "idle";
   private started = false;
   private lastDreamAt?: number;
@@ -325,25 +333,15 @@ export class SubconsciousLoopService {
     this.normalizeLegacyOutcomeVocabulary();
     this.pruneSessionOnlyState();
     await this.refreshTargets();
-    await this.maybeRunDream();
-    this.resetInterval();
     logger.info("Service started", {
       enabled: this.getSettings().enabled,
       autoRun: this.getSettings().autoRun,
       cadenceMinutes: this.getSettings().cadenceMinutes,
       targetCount: this.targetRepo.list().length,
     });
-    const settings = this.getSettings();
-    if (settings.enabled && settings.autoRun) {
-      await this.runNow();
-    }
   }
 
   stop(): void {
-    if (this.intervalHandle) {
-      clearInterval(this.intervalHandle);
-      this.intervalHandle = undefined;
-    }
     this.started = false;
     this.agentDaemon = null;
     this.brainStatus = "idle";
@@ -355,7 +353,6 @@ export class SubconsciousLoopService {
 
   saveSettings(settings: SubconsciousSettings): SubconsciousSettings {
     SubconsciousSettingsManager.saveSettings(settings);
-    this.resetInterval();
     return this.getSettings();
   }
 
@@ -655,6 +652,13 @@ export class SubconsciousLoopService {
       const dispatchKind = this.resolveDispatchKind(target.target, evidence);
       const backlog = this.materializeBacklog(target.key, decision, dispatchKind);
       const policy = this.evaluatePolicy(target, decision, evidence, dispatchKind);
+      const autoDispatchAllowed = this.shouldAutoDispatchDecision({
+        settings,
+        target,
+        dispatchKind,
+        policy,
+        evidence,
+      });
       this.runRepo.update(run.id, {
         confidence: policy.confidence,
         riskLevel: policy.riskLevel,
@@ -664,9 +668,7 @@ export class SubconsciousLoopService {
         notificationIntent: policy.notificationIntent,
       });
       const placeholderDispatch =
-        settings.dispatchDefaults.autoDispatch &&
-        dispatchKind &&
-        policy.permissionDecision === "allowed"
+        autoDispatchAllowed && dispatchKind
           ? ({
               id: randomUUID(),
               runId: run.id,
@@ -697,15 +699,11 @@ export class SubconsciousLoopService {
           ? "suggest"
           : policy.permissionDecision === "escalated"
             ? "defer"
-            : dispatchKind
+            : autoDispatchAllowed && dispatchKind
               ? "dispatch"
               : "suggest";
       let finalStage: SubconsciousRunStage = "completed";
-      if (
-        settings.dispatchDefaults.autoDispatch &&
-        dispatchKind &&
-        policy.permissionDecision === "allowed"
-      ) {
+      if (autoDispatchAllowed && dispatchKind) {
         run = await this.advanceRun(run.id, { stage: "dispatching" });
         if (coreTrace) {
           this.deps.coreTraceService?.appendPhaseEvent(
@@ -732,6 +730,12 @@ export class SubconsciousLoopService {
           if (dispatchRecord.status === "failed") {
             finalStage = "failed";
           }
+        }
+      } else {
+        dispatchRecord = await this.dispatchSuggestionForReview(target.target, decision, evidence);
+        if (dispatchRecord) {
+          this.dispatchRepo.create(dispatchRecord);
+          outcome = dispatchRecord.status === "skipped" ? "defer" : "suggest";
         }
       }
 
@@ -829,6 +833,20 @@ export class SubconsciousLoopService {
       });
       return this.runRepo.findById(run.id) || null;
     }
+  }
+
+  async runFromHeartbeat(workspaceId?: string): Promise<SubconsciousRun | null> {
+    const settings = this.getSettings();
+    if (!settings.enabled || !settings.autoRun) return null;
+    await this.refreshTargets();
+    const target = this.pickTargetForRun(workspaceId);
+    if (!target) {
+      logger.info("Heartbeat-triggered reflection skipped: no eligible target", {
+        workspaceId: workspaceId || null,
+      });
+      return null;
+    }
+    return this.runNow(target.key);
   }
 
   private resolveAutomationProfileForTarget(target: SubconsciousTargetRef) {
@@ -934,7 +952,7 @@ export class SubconsciousLoopService {
   getImprovementEligibility(): ImprovementEligibility {
     return {
       eligible: true,
-      reason: "Subconscious is generally available.",
+      reason: "Workflow Intelligence is generally available.",
       enrolled: true,
       checks: {
         unpackagedApp: true,
@@ -955,7 +973,7 @@ export class SubconsciousLoopService {
       readiness: "ready",
       readinessReason: target.lastWinner || undefined,
       title: target.target.label,
-      summary: target.lastWinner || "Subconscious target awaiting review.",
+      summary: target.lastWinner || "Workflow intelligence target awaiting review.",
       severity: target.health === "blocked" ? 0.9 : target.health === "watch" ? 0.6 : 0.3,
       recurrenceCount: this.latestEvidenceByTarget.get(target.key)?.length || 0,
       fixabilityScore: 0.8,
@@ -1120,14 +1138,7 @@ export class SubconsciousLoopService {
     decision: SubconsciousDecision,
     evidence: SubconsciousEvidence[],
     dispatchKind?: SubconsciousDispatchKind,
-  ): {
-    confidence: number;
-    riskLevel: SubconsciousRiskLevel;
-    evidenceSources: string[];
-    evidenceFreshness: number;
-    permissionDecision: SubconsciousPermissionDecision;
-    notificationIntent?: SubconsciousNotificationIntent;
-  } {
+  ): ReflectionPolicyEvaluation {
     const settings = this.getSettings();
     const evidenceSources = uniqueBy(evidence.map((item) => item.type), (value) => value);
     const newestEvidenceAt = Math.max(...evidence.map((item) => item.createdAt), 0);
@@ -1198,12 +1209,43 @@ export class SubconsciousLoopService {
     return now() - lastNotifiedAt >= policy.throttleMinutes * 60 * 1000;
   }
 
+  private shouldAutoDispatchDecision(input: {
+    settings: SubconsciousSettings;
+    target: SubconsciousTargetSummary;
+    dispatchKind?: SubconsciousDispatchKind;
+    policy: ReflectionPolicyEvaluation;
+    evidence: SubconsciousEvidence[];
+  }): boolean {
+    if (!input.settings.dispatchDefaults.autoDispatch) return false;
+    if (!input.dispatchKind) return false;
+    if (input.policy.permissionDecision !== "allowed") return false;
+    if (input.policy.riskLevel !== "low") return false;
+    const workspaceId = input.target.target.workspaceId;
+    if (!workspaceId) return false;
+    if (input.settings.trustedTargetKeys.includes(input.target.key)) return true;
+    const acceptedPatternCount = this.countAcceptedSuggestionPatterns(workspaceId);
+    const hasClearScope =
+      input.target.target.kind === "workspace" ||
+      input.target.target.kind === "pull_request" ||
+      input.target.target.kind === "code_workspace";
+    return acceptedPatternCount >= 2 && hasClearScope && input.evidence.length <= 8;
+  }
+
+  private countAcceptedSuggestionPatterns(workspaceId: string): number {
+    try {
+      return MemoryService.search(workspaceId, "[suggestion-feedback:acted_on]", 20).length;
+    } catch {
+      return 0;
+    }
+  }
+
   private async notifyForRun(
     target: SubconsciousTargetRef,
     run: SubconsciousRun,
     decision?: SubconsciousDecision,
     dispatchRecord?: SubconsciousDispatchRecord | null,
   ): Promise<void> {
+    if (dispatchRecord?.kind === "suggestion") return;
     if (!run.notificationIntent || !this.shouldNotify(run.notificationIntent)) return;
     this.lastNotificationByIntent.set(run.notificationIntent, now());
     await this.appendJournal({
@@ -1218,10 +1260,10 @@ export class SubconsciousLoopService {
       type: run.outcome === "failed" ? "warning" : "info",
       title:
         run.notificationIntent === "input_needed"
-          ? "Subconscious needs input"
+          ? "Workflow Intelligence needs input"
           : run.notificationIntent === "completed_while_away"
-            ? "Subconscious completed work while you were away"
-            : "Subconscious took action",
+            ? "Workflow Intelligence completed work while you were away"
+            : "Workflow Intelligence took action",
       message: `${target.label}: ${decision?.winnerSummary || run.evidenceSummary}`,
       workspaceId: target.workspaceId,
       taskId: dispatchRecord?.taskId,
@@ -1324,34 +1366,21 @@ export class SubconsciousLoopService {
         : `Global brain reviewed ${journal.length} journal entries.`,
       memoryUpdates,
     };
-    await this.artifactStore.writeMemoryIndex(target || null, memoryUpdates);
     await this.artifactStore.writeDreamArtifact(target || null, artifact);
     await this.appendJournal({
       targetKey: target?.key,
       kind: "dream",
-      summary: target ? `Dream distilled ${target.label}.` : "Dream distilled the global brain.",
+      summary: target ? `Reflection distilled ${target.label}.` : "Reflection distilled workflow intelligence.",
       details: digest.join(" | "),
     });
     this.lastDreamAt = artifact.createdAt;
     await this.artifactStore.writeBrainState(this.getBrainSummary(), this.targetRepo.list());
-    logger.info("Dream distilled", {
+    logger.info("Reflection distilled", {
       targetKey: target?.key || null,
       digestCount: artifact.digest.length,
       backlogProposalCount: artifact.backlogProposals.length,
       memoryUpdateCount: artifact.memoryUpdates.length,
     });
-  }
-
-  private resetInterval(): void {
-    if (this.intervalHandle) {
-      clearInterval(this.intervalHandle);
-      this.intervalHandle = undefined;
-    }
-    const settings = this.getSettings();
-    if (!settings.enabled || !settings.autoRun) return;
-    this.intervalHandle = setInterval(() => {
-      void this.runNow();
-    }, settings.cadenceMinutes * 60 * 1000);
   }
 
   private resolveGlobalRoot(): string {
@@ -1965,20 +1994,25 @@ export class SubconsciousLoopService {
     );
   }
 
-  private pickTargetForRun(): SubconsciousTargetSummary | undefined {
+  private listEligibleTargetsForRun(workspaceId?: string): SubconsciousTargetSummary[] {
     const currentTime = now();
-    const targets = this.targetRepo
+    return this.targetRepo
       .list()
       .filter((target) => target.key !== "global:brain")
+      .filter((target) => !workspaceId || !target.target.workspaceId || target.target.workspaceId === workspaceId)
       .filter((target) => !target.expiresAt || target.expiresAt > currentTime)
       .filter((target) => !target.nextEligibleAt || target.nextEligibleAt <= currentTime)
-      .filter((target) => this.isTargetActionable(target));
-    return targets.sort((a, b) => {
-      const priorityA = this.scoreTargetForRun(a);
-      const priorityB = this.scoreTargetForRun(b);
-      if (priorityB !== priorityA) return priorityB - priorityA;
-      return (b.lastEvidenceAt || 0) - (a.lastEvidenceAt || 0);
-    })[0];
+      .filter((target) => this.isTargetActionable(target))
+      .sort((a, b) => {
+        const priorityA = this.scoreTargetForRun(a);
+        const priorityB = this.scoreTargetForRun(b);
+        if (priorityB !== priorityA) return priorityB - priorityA;
+        return (b.lastEvidenceAt || 0) - (a.lastEvidenceAt || 0);
+      });
+  }
+
+  private pickTargetForRun(workspaceId?: string): SubconsciousTargetSummary | undefined {
+    return this.listEligibleTargetsForRun(workspaceId)[0];
   }
 
   private generateHypotheses(
@@ -2191,6 +2225,40 @@ export class SubconsciousLoopService {
     return undefined;
   }
 
+  private async dispatchSuggestionForReview(
+    target: SubconsciousTargetRef,
+    decision: SubconsciousDecision,
+    evidence: SubconsciousEvidence[],
+  ): Promise<SubconsciousDispatchRecord | null> {
+    const policy = this.getSettings().perExecutorPolicy.suggestion;
+    if (policy && policy.enabled === false) {
+      return this.skippedDispatch(decision, target, "suggestion", "Suggestion policy is disabled.");
+    }
+    const workspace = await this.resolveDispatchWorkspace(target);
+    const workspaceId = workspace?.id || target.workspaceId || this.resolveDefaultWorkspace()?.id;
+    if (!workspaceId) {
+      return this.skippedDispatch(decision, target, "suggestion", "Suggestion dispatch needs a workspace.");
+    }
+    const suggestion = await ProactiveSuggestionsService.createCompanionSuggestion(workspaceId, {
+      title: `Workflow Intelligence: ${target.label}`,
+      description: decision.winnerSummary,
+      actionPrompt: decision.recommendation,
+      confidence: 0.72,
+      suggestionClass: "open_loop",
+      sourceEntity: target.key,
+      sourceSignals: Array.from(new Set(evidence.map((item) => item.type))).slice(0, 5),
+      recommendedDelivery: "inbox",
+      companionStyle: "note",
+    });
+    if (!suggestion) {
+      return this.skippedDispatch(decision, target, "suggestion", "Suggestion deduplicated or unavailable.");
+    }
+    return this.completedDispatch(decision, target, "suggestion", {
+      externalRefId: suggestion.id,
+      summary: `Created review suggestion ${suggestion.id}.`,
+    });
+  }
+
   private async dispatchDecision(
     target: SubconsciousTargetRef,
     decision: SubconsciousDecision,
@@ -2227,7 +2295,7 @@ export class SubconsciousLoopService {
             return this.skippedDispatch(decision, target, dispatchKind, "Task dispatch is unavailable.");
           }
           const task = await this.agentDaemon.createTask({
-            title: `Subconscious: ${target.label}`,
+            title: `Workflow Intelligence: ${target.label}`,
             prompt,
             workspaceId,
             source: "subconscious",
@@ -2243,10 +2311,15 @@ export class SubconsciousLoopService {
             return this.skippedDispatch(decision, target, dispatchKind, "Suggestion dispatch needs a workspace.");
           }
           const suggestion = await ProactiveSuggestionsService.createCompanionSuggestion(workspaceId, {
-            title: `Subconscious: ${target.label}`,
+            title: `Workflow Intelligence: ${target.label}`,
             description: decision.winnerSummary,
             actionPrompt: decision.recommendation,
             confidence: 0.78,
+            suggestionClass: "general",
+            sourceEntity: target.key,
+            sourceSignals: Array.from(new Set(evidence.map((item) => item.type))).slice(0, 5),
+            recommendedDelivery: "inbox",
+            companionStyle: "note",
           });
           if (!suggestion) {
             return this.skippedDispatch(decision, target, dispatchKind, "Suggestion deduplicated or unavailable.");
@@ -2259,12 +2332,12 @@ export class SubconsciousLoopService {
         case "notify": {
           await this.deps.notify?.({
             type: "info",
-            title: `Subconscious: ${target.label}`,
+            title: `Workflow Intelligence: ${target.label}`,
             message: decision.winnerSummary,
             workspaceId,
           });
           return this.completedDispatch(decision, target, dispatchKind, {
-            summary: "Delivered a notification-only subconscious outcome.",
+            summary: "Delivered a notification-only workflow intelligence outcome.",
           });
         }
         case "code_change_task": {
@@ -2289,7 +2362,7 @@ export class SubconsciousLoopService {
             }
           }
           const task = await this.agentDaemon.createTask({
-            title: `Subconscious code change: ${target.label}`,
+            title: `Workflow Intelligence code change: ${target.label}`,
             prompt: `${prompt}\n\nOperate with worktree isolation, strict review, and verification.`,
             workspaceId,
             source: "subconscious",

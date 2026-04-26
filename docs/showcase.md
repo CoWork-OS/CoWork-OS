@@ -680,19 +680,22 @@ Start your day with an AI-generated executive brief covering calendar, inbox, ta
 
 ### Inbox Management
 
-Triage email in the Inbox Agent workspace, draft responses, identify cleanup opportunities, and manage follow-ups automatically.
+Triage email in the Inbox Agent workspace, work Today lanes, ask mailbox questions, send normal replies or forwards, identify cleanup opportunities, and manage follow-ups automatically.
 
 **What it handles:**
-- Unread, Action Needed, Suggested Actions, and Open Commitments at a glance
-- Inbox / Sent / All views plus Recent / Priority sorting
-- Response drafting for priority messages, with send-or-discard review
-- Cleanup suggestions for newsletters and promotional mail
+- Classic inbox plus Today lanes for Needs action, Happening today, Good to know, and More to browse
+- Unread, Needs reply, Suggested Actions, and Open Commitments at a glance
+- Inbox / Sent / All views plus Recent / Priority sorting, saved views, account filters, and domain chips
+- Manual reply, reply-all, and forward with To/Cc/Bcc, subject, and editable body
+- Editable AI-generated replies with explicit send/discard review
+- Mailbox Ask over local threads, attachment filenames, and indexed attachment text
+- Sender cleanup suggestions for newsletters, promotions, and noisy senders
 - Follow-up reminder creation and real commitment tracking
-- Schedule creation and thread intelligence refresh when the conversation needs more context
+- Provider-backed read/unread where supported, background autosync, and thread intelligence refresh
 
 **Example prompt:**
 ```
-/inbox autopilot 180
+Open Inbox Agent, switch to Today mode, and show what needs action before I start replying.
 ```
 
 See [Inbox Agent](inbox-agent.md) for the full feature workflow.

@@ -1616,7 +1616,11 @@ export class ToolRegistry {
     return [policyMiddleware];
   }
 
-  private executeWithRegisteredHandler(name: string, input: Any): Promise<Any> {
+  private executeWithRegisteredHandler(
+    name: string,
+    input: Any,
+    runtime?: Record<string, unknown>,
+  ): Promise<Any> {
     const handler = composeToolMiddleware(
       (context: ToolExecutionContext) => this.handlerRegistry.execute(name, context),
       this.executionMiddlewares,
@@ -1625,6 +1629,7 @@ export class ToolRegistry {
       request: {
         name,
         input,
+        runtime,
       },
     });
   }
@@ -1899,7 +1904,12 @@ export class ToolRegistry {
     register("get_env", async ({ request }) => this.systemTools.getEnvVariable(request.input.name));
     register("get_app_paths", async () => this.systemTools.getAppPaths());
     register("run_applescript", async ({ request }) => this.systemTools.runAppleScript(request.input.script), exclusiveSchedulerSpec);
-    register("generate_image", async ({ request }) => this.imageTools.generateImage(request.input));
+    register("generate_image", async ({ request }) =>
+      this.imageTools.generateImage(request.input, {
+        signal:
+          request.runtime?.signal instanceof AbortSignal ? request.runtime.signal : undefined,
+      }),
+    );
     register("generate_video", async ({ request }) => this.videoTools.generateVideo(request.input));
     register("get_video_generation_job", async ({ request }) =>
       this.videoTools.getVideoGenerationJob(request.input),
@@ -3138,7 +3148,7 @@ Channel Message Log (Local Gateway):
 		Plan Control:
 		- revise_plan: Modify remaining plan steps when obstacles are encountered or new information discovered
 		- request_user_input: Ask the user a structured multiple-choice question set (plan or debug mode) and wait for selection.
-		- task_list_create: Create the initial ordered session checklist for non-trivial execution work. Fails if a checklist already exists.
+		- task_list_create: Create the initial ordered session checklist only for substantial execution work that changes artifacts/state or spans a long workflow. Fails if a checklist already exists.
 		- task_list_update: Replace the full ordered session checklist state while preserving supplied item ids.
 		- task_list_list: Read the current session checklist and whether a verification nudge is active.
 		- task_history: Query recent task history/messages (use for "what did we talk about yesterday?")
@@ -3200,7 +3210,7 @@ ${skillDescriptions}`;
     runtime?: Record<string, unknown>,
   ): Promise<{ result: Any; policyTrace?: Any }> {
     if (this.handlerRegistry.has(name)) {
-      return await this.executeWithRegisteredHandler(name, input);
+      return await this.executeWithRegisteredHandler(name, input, runtime);
     }
     const result = await this.executeTool(name, input, runtime);
     return { result };
@@ -3208,7 +3218,7 @@ ${skillDescriptions}`;
 
   async executeTool(name: string, input: Any, _runtime?: Record<string, unknown>): Promise<Any> {
     if (this.handlerRegistry.has(name)) {
-      const execution = await this.executeWithRegisteredHandler(name, input);
+      const execution = await this.executeWithRegisteredHandler(name, input, _runtime);
       return execution?.result ?? execution;
     }
     // Optional workspace-local policy hook (.cowork/policy/tools.monty).
@@ -3435,7 +3445,10 @@ ${skillDescriptions}`;
     if (name === "git_merge_to_base") return await this.gitTools.gitMergeToBase();
 
     // Image tools
-    if (name === "generate_image") return await this.imageTools.generateImage(input);
+    if (name === "generate_image")
+      return await this.imageTools.generateImage(input, {
+        signal: _runtime?.signal instanceof AbortSignal ? _runtime.signal : undefined,
+      });
 
     // Video tools
     if (name === "generate_video") return await this.videoTools.generateVideo(input);
@@ -5500,7 +5513,8 @@ ${skillDescriptions}`;
       },
       {
         name: "write_file",
-        description: "Write content to a file in the workspace (creates or overwrites)",
+        description:
+          "Write content to a file in the workspace (creates or overwrites). For temporary scratch files, repro scripts, diagnostics, or intermediate outputs, write under .cowork/tmp/ so they remain local to the checkout.",
         input_schema: {
           type: "object",
           properties: {
@@ -10763,8 +10777,9 @@ ${skillDescriptions}`;
       {
         name: "task_list_create",
         description:
-          "Create the initial ordered session checklist for multi-step execution work. " +
-          "Fails if a session checklist already exists. Use this to establish lightweight execution discipline for the current task.",
+          "Create the initial ordered session checklist for non-trivial execution work that changes artifacts/state or spans a long workflow. " +
+          "Do not use for basic questions, read-only research, advice, or plan-only responses. " +
+          "Fails if a session checklist already exists.",
         input_schema: {
           type: "object",
           properties: {

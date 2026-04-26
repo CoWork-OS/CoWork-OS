@@ -2,6 +2,26 @@
 
 This document satisfies the product-planning deliverables: Phase 1 UX requirements, cross-system signal mapping, chosen first implementation slice, and success metrics. It complements [inbox-agent.md](inbox-agent.md) and the roadmap plan (do not edit the plan file in `.cursor/plans/`).
 
+## Current Implementation Status
+
+Inbox Agent has moved past the original saved-view slice into the email-client replacement foundation. The current working system includes:
+
+- Classic three-pane mode plus Today lanes for `Needs action`, `Happening today`, `Good to know`, and `More to browse`
+- richer classifier fields: `todayBucket` and `domainCategory`
+- domain chips for travel, packages, receipts, bills, newsletters, shopping, work, and all domains
+- Mailbox Ask over local mailbox evidence and on-demand indexed attachment text
+- sender cleanup digest and cleanup center
+- attachment metadata capture during Gmail sync and on-demand text extraction for supported file types
+- autosync with cached mail shown immediately on startup
+- provider-backed read/unread actions where supported
+- `Mark done` for threads already handled outside CoWork OS
+- editable AI-generated draft replies
+- manual reply, reply-all, and forward from the thread detail view without requiring AI draft generation
+- direct provider send through Gmail API, AgentMail reply-all, or SMTP depending on account type
+- replacement-client schema/types/IPC for folders, labels, identities, signatures, compose drafts, outgoing messages, queued actions, sync health, and client settings
+
+The remaining replacement-client gaps are native new-mail compose, provider-backed draft persistence in the visible UI, attachment upload, full outgoing queue draining, Microsoft Graph mail execution, folder/label navigation, notifications, and broader provider reconciliation.
+
 ## 1. Phase 1 UX Requirements
 
 ### AI auto-labels and saved views
@@ -44,11 +64,11 @@ This document satisfies the product-planning deliverables: Phase 1 UX requiremen
 | Triage feedback | Issue updates if linked | Refine trigger conditions over time | Lower noise if user consistently dismisses class | — | Reinforce entity confidence | Reinforcement signals |
 | Quick reply / snippet usage | — | — | — | Usage counts in productivity metrics | — | Style / template preferences |
 
-Mailbox events (`thread_classified`, `mission_control_handoff_created`, etc.) continue to flow through [MailboxAutomationHub](../electron/mailbox/MailboxAutomationHub.ts) as today.
+Mailbox events (`thread_classified`, `mission_control_handoff_created`, etc.) continue to flow through [MailboxAutomationHub](../src/electron/mailbox/MailboxAutomationHub.ts) as today.
 
-## 3. First Implementation Slice (chosen)
+## 3. First Implementation Slice (completed foundation)
 
-Smallest set that improves **perception** and **differentiation** without rewriting the mailbox:
+The original smallest set that improves **perception** and **differentiation** without rewriting the mailbox:
 
 1. **Saved views** — DB + list/filter + create from “label similar” preview.
 2. **Quick reply suggestions** — LLM-backed chips in thread detail.
@@ -56,6 +76,17 @@ Smallest set that improves **perception** and **differentiation** without rewrit
 4. **Triage feedback** — Record rows on key actions (foundation for learning).
 5. **Mission Control back-link** — Handoff records in thread detail with **Open in Mission Control** (company + issue).
 6. **Saved view → automation bridge** — Create a **scheduled review** task for the view (reminder patrol) using existing mailbox schedule APIs.
+
+Additional implemented slices since then:
+
+7. **Today mode** — Classifier-backed Today buckets with lane-specific grouping.
+8. **Domain categories** — Life/work domain classification and filtering.
+9. **Ask Mailbox** — Local retrieval with optional LLM summary and attachment evidence.
+10. **Attachment indexing** — Metadata during sync, bytes/text on demand.
+11. **Sender cleanup** — Noisy sender ranking with estimated weekly reduction.
+12. **Manual email compose** — Reply, reply-all, and forward from the thread detail view.
+13. **Editable AI drafts** — Generated draft subject/body can be edited before send.
+14. **Autosync and read-state polish** — Background refresh, clearer unread cards, provider-backed mark read/unread where supported.
 
 ## 4. Success Metrics
 

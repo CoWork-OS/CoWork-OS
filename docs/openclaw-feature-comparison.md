@@ -25,7 +25,7 @@ Compared features:
 High level:
 
 - **OpenClaw** appears stronger on plain-markdown workspace memory and public skill registry/discovery.
-- **CoWork OS** appears stronger on structured memory architecture, the `Subconscious` reflective loop, approval-gated skill creation, built-in governance/security controls, and now a shared turn kernel / tool scheduler / orchestration graph stack for delegated work.
+- **CoWork OS** appears stronger on structured memory architecture, Workflow Intelligence, approval-gated skill creation, built-in governance/security controls, and now a shared turn kernel / tool scheduler / orchestration graph stack for delegated work.
 - Some items in the screenshot are not first-class product terms in either repo, so a few rows are marked **Partial** or **Unclear**.
 
 ## Comparison Table
@@ -40,7 +40,7 @@ High level:
 | Skill system | Yes | Yes | Both repos clearly support reusable skills. |
 | Skill standard | Yes | Yes | CoWork OS has a documented skill quality specification. OpenClaw has a documented skill bundle structure centered on `SKILL.md` plus registry metadata. |
 | Autonomous skill creation | Partial, approval-gated | Partial / unclear | CoWork OS supports `skill_proposal.create` but requires approval before a skill is materialized. OpenClaw supports publish/install/discovery flows, but reviewed docs do not clearly show autonomous self-authoring by the agent. |
-| Reflective learning loop | Yes | Partial | CoWork OS has explicit subconscious-loop documentation, reinforcement loops, correction capture, and `memory_save`. OpenClaw has learning references, but not as clearly productized in the reviewed sources. |
+| Reflective learning loop | Yes | Partial | CoWork OS has explicit Workflow Intelligence documentation, reinforcement loops, correction capture, and `memory_save`. OpenClaw has learning references, but not as clearly productized in the reviewed sources. |
 | Skill security scanning | Yes | Partial | CoWork OS documents skill validation/audit tooling. OpenClaw shows install gating and unsafe-skill reporting, but no equally explicit skill scan pipeline was found in the reviewed material. |
 | Session history search | Yes | Yes | CoWork OS supports explicit recent-run recall through `search_sessions` plus archive/global retrieval. OpenClaw includes a dedicated sessions history tool. |
 | Cross-session user modeling | Yes | Partial | CoWork OS has relationship memory, user profile extraction, and adaptive style/personalization. OpenClaw has personal assistant and profile/persona concepts, but less explicit structured cross-session user modeling in the reviewed docs. |
@@ -100,7 +100,7 @@ This feature label is somewhat interpretation-dependent, so the comparison below
 **CoWork OS**
 
 - `docs/security-guide.md` documents sanitization, prompt/skill hardening, validation, and protections around memory/context injection.
-- `docs/subconscious-loop.md` documents durable evidence, critique, winner selection, and target-scoped reflection.
+- `docs/workflow-intelligence.md` documents durable evidence, critique, winner selection, target-scoped reflection, reviewable suggestions, and feedback learning.
 - Overall posture is governance-heavy: approvals, sandboxing, privacy-aware storage, and configurable guardrails.
 
 **OpenClaw**
@@ -151,13 +151,13 @@ Both repos clearly have a real skill system.
 
 **CoWork OS**
 
-- `docs/subconscious-loop.md` documents the reflective architecture and its learning substrate.
+- `docs/workflow-intelligence.md` documents the reflective architecture and its learning substrate.
 - Includes correction capture, playbook reinforcement, user preference learning, and agent-initiated `memory_save`.
 
 **OpenClaw**
 
 - Repository search shows references to learning and feedback flows.
-- But the reviewed docs do not present an equally explicit, centralized architecture page comparable to CoWork OS's subconscious-loop design.
+- But the reviewed docs do not present an equally explicit, centralized architecture page comparable to CoWork OS's Workflow Intelligence design.
 
 ### 10. Skill security scanning
 
@@ -190,7 +190,7 @@ Both repos clearly have a real skill system.
 
 **CoWork OS**
 
-- `docs/relationship-agent-architecture.md` and `docs/subconscious-loop.md` document relationship memory, user profile extraction, commitment tracking, and personalization.
+- `docs/relationship-agent-architecture.md` and `docs/workflow-intelligence.md` document relationship memory, user profile extraction, commitment tracking, and personalization.
 - README also describes Adaptive Style Engine and related evolving-intelligence behavior.
 
 **OpenClaw**
@@ -230,7 +230,7 @@ If the goal is a feature-for-feature comparison against the provided list:
 - `docs/context-compaction.md`
 - `docs/execution-runtime-model.md`
 - `docs/security-guide.md`
-- `docs/subconscious-loop.md`
+- `docs/workflow-intelligence.md`
 - `docs/session-runtime.md`
 - `docs/skills-quality-spec.md`
 - `docs/integration-skill-bootstrap-lifecycle.md`

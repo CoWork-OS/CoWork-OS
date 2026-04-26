@@ -108,7 +108,7 @@ Once the app opens, the most important places to know are:
 
 - **Home**: quick launch plus recent sessions and recent automation activity
 - **Devices**: manage the local machine and saved remote CoWork nodes, run remote tasks, and inspect remote task history
-- **Settings > Automations**: Task Queue, Subconscious, Scheduled Tasks, Webhooks, Event Triggers, and Daily Briefing
+- **Settings > Automations**: Task Queue, Workflow Intelligence, Scheduled Tasks, Webhooks, Event Triggers, and Daily Briefing
 - **Settings > Profiles**: create, switch, export, and import isolated app profiles
 - **Settings > Companies**: company shell setup, goals, projects, issues, planner state, and linked operators
 - **Mission Control**: company and operator monitoring, Kanban board, feed, and Ops view
@@ -181,7 +181,7 @@ Recommended order:
 2. **Routines**: create one safe routine with a manual or schedule trigger.
 3. **Daily Briefing**: enable a daily summary if you want background context generation.
 4. **Webhooks / Event Triggers**: connect inbound automation only after you have a stable workspace and provider setup, and only when you need the lower-level surfaces directly.
-5. **Subconscious**: enable the reflective loop once you have at least one stable workflow target. Code-change dispatch works best on git-backed workspaces where worktrees are available.
+5. **Workflow Intelligence**: enable reviewable Next actions once you have at least one stable workflow target. Code-change auto-create works best on trusted git-backed workspaces where worktrees are available.
 
 Rule of thumb:
 

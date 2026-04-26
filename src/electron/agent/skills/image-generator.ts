@@ -24,6 +24,7 @@ export type ImageProvider = "gemini" | "openai" | "openai-codex" | "azure" | "op
 export type ImageModel =
   | "gpt-image-1"
   | "gpt-image-1.5"
+  | "gpt-image-2"
   | "dall-e-3"
   | "dall-e-2"
   // Allow future models without code changes
@@ -54,6 +55,17 @@ export interface ImageGenerationRequest {
   filename?: string;
   imageSize?: ImageSize;
   numberOfImages?: number;
+  /** Internal cancellation signal from the task executor. */
+  signal?: AbortSignal;
+  /** Internal progress hook for timeline-visible provider transitions. */
+  onProgress?: (event: {
+    type: "image_generation_attempt" | "image_generation_fallback";
+    provider: ImageProvider;
+    model: string;
+    message: string;
+    timeoutMs?: number;
+    fallbackModel?: string;
+  }) => void;
 }
 
 /**
@@ -72,6 +84,98 @@ export interface ImageGenerationResult {
   textResponse?: string;
   error?: string;
   actionHint?: { type: string; label: string; target: string };
+}
+
+function throwIfImageGenerationAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw new Error("Image generation cancelled");
+  }
+}
+
+const DEFAULT_IMAGE_PROVIDER_TIMEOUT_SECONDS = 300;
+const MIN_IMAGE_PROVIDER_TIMEOUT_SECONDS = 30;
+const MAX_IMAGE_PROVIDER_TIMEOUT_SECONDS = 30 * 60;
+
+function formatImageGenerationError(error: unknown): string {
+  const err = error as Any;
+  const message =
+    typeof err?.message === "string" && err.message.trim()
+      ? err.message.trim()
+      : String(error || "").trim() || "Failed to generate image";
+  const cause = err?.cause as Any;
+  const causeParts = [
+    typeof cause?.code === "string" ? cause.code : "",
+    typeof cause?.message === "string" ? cause.message : "",
+  ].filter((value) => value.trim().length > 0);
+  return causeParts.length > 0 ? `${message}: ${causeParts.join(" - ")}` : message;
+}
+
+function isTransientImageProviderError(error: string | undefined): boolean {
+  const lower = String(error || "").toLowerCase();
+  return (
+    lower.includes("fetch failed") ||
+    lower.includes("network") ||
+    lower.includes("timeout") ||
+    lower.includes("timed out") ||
+    lower.includes("econnreset") ||
+    lower.includes("etimedout") ||
+    lower.includes("und_err") ||
+    lower.includes("socket") ||
+    lower.includes("temporarily unavailable") ||
+    lower.includes("service unavailable") ||
+    lower.includes("gateway")
+  );
+}
+
+function imageProviderTimeoutKey(
+  provider: ImageProvider,
+): "openai" | "openaiCodex" | "azure" | "openrouter" | "gemini" {
+  return provider === "openai-codex" ? "openaiCodex" : provider;
+}
+
+function normalizeImageProviderTimeoutSeconds(value: unknown): number | undefined {
+  const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  if (!Number.isFinite(n) || n <= 0) return undefined;
+  return Math.min(
+    MAX_IMAGE_PROVIDER_TIMEOUT_SECONDS,
+    Math.max(MIN_IMAGE_PROVIDER_TIMEOUT_SECONDS, Math.round(n)),
+  );
+}
+
+function getImageProviderTimeoutMs(
+  settings: ReturnType<typeof LLMProviderFactory.loadSettings>,
+  provider: ImageProvider,
+): number {
+  const key = imageProviderTimeoutKey(provider);
+  const configured = normalizeImageProviderTimeoutSeconds(settings.imageGeneration?.timeouts?.[key]);
+  return (configured ?? DEFAULT_IMAGE_PROVIDER_TIMEOUT_SECONDS) * 1000;
+}
+
+async function runWithImageProviderTimeout<T>(
+  parentSignal: AbortSignal | undefined,
+  timeoutMs: number,
+  run: (signal: AbortSignal) => Promise<T>,
+): Promise<{ result: T; timedOut: boolean }> {
+  const controller = new AbortController();
+  let timedOut = false;
+  const onParentAbort = () => controller.abort();
+  if (parentSignal?.aborted) {
+    controller.abort();
+  } else {
+    parentSignal?.addEventListener("abort", onParentAbort, { once: true });
+  }
+
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+
+  try {
+    return { result: await run(controller.signal), timedOut };
+  } finally {
+    clearTimeout(timer);
+    parentSignal?.removeEventListener("abort", onParentAbort);
+  }
 }
 
 /**
@@ -98,7 +202,11 @@ const OPENAI_CODEX_PREFERRED_HOST_MODELS = [
   "gpt-5.1-codex-max",
   "gpt-5.1-codex-mini",
 ] as const;
-const OPENAI_CODEX_RESPONSES_IMAGE_MODELS = new Set(["gpt-image-1", "gpt-image-1.5"]);
+const OPENAI_CODEX_RESPONSES_IMAGE_MODELS = new Set([
+  "gpt-image-1",
+  "gpt-image-1.5",
+  "gpt-image-2",
+]);
 
 function buildSetupHint(provider: ImageProvider): { type: string; label: string; target: string } {
   if (provider === "gemini")
@@ -137,6 +245,7 @@ function normalizeOpenAIImageModel(model?: string): string | undefined {
   const m = raw.toLowerCase();
   // Accept common aliases users mention conversationally
   if (m === "gpt-1.5" || m === "gpt1.5") return "gpt-image-1.5";
+  if (m === "gpt-2" || m === "gpt2") return "gpt-image-2";
   if (m === "gpt-1" || m === "gpt1") return "gpt-image-1";
   if (m === "dalle-3") return "dall-e-3";
   if (m === "dalle-2") return "dall-e-2";
@@ -146,12 +255,20 @@ function normalizeOpenAIImageModel(model?: string): string | undefined {
 function inferOpenAIImageModelFromText(text: string): string | null {
   const t = (text || "").toLowerCase();
   if (!t.trim()) return null;
+  if (t.includes("gpt-image-2") || t.includes("gpt-2") || t.includes("gpt2"))
+    return "gpt-image-2";
   if (t.includes("gpt-image-1.5") || t.includes("gpt-1.5") || t.includes("gpt1.5"))
     return "gpt-image-1.5";
   if (t.includes("gpt-image-1") || t.includes("gpt-1") || t.includes("gpt1")) return "gpt-image-1";
   if (t.includes("dall-e-3") || t.includes("dalle-3")) return "dall-e-3";
   if (t.includes("dall-e-2") || t.includes("dalle-2")) return "dall-e-2";
   return null;
+}
+
+function normalizeOpenRouterImageModel(model?: string): string | undefined {
+  const normalized = normalizeOpenAIImageModel(model);
+  if (!normalized) return undefined;
+  return normalized.includes("/") ? normalized : `openai/${normalized}`;
 }
 
 function uniqStrings(values: Array<string | undefined | null>): string[] {
@@ -174,10 +291,26 @@ function looksLikeKnownImageModelId(name: string): boolean {
   return n.startsWith("gpt-image-") || n.startsWith("dall-e-") || n.startsWith("dalle-");
 }
 
+/**
+ * Normalize Azure endpoint variants users paste into Settings to the resource base URL.
+ * e.g. "https://foo.openai.azure.com/openai/v1/videos" -> "https://foo.openai.azure.com"
+ * e.g. "https://foo.openai.azure.com/openai/deployments/x/images/generations" -> "https://foo.openai.azure.com"
+ */
+function normalizeAzureImageBaseEndpoint(endpoint: string): string {
+  const trimmed = endpoint.trim().replace(/\/+$/, "");
+  const idx = trimmed.indexOf("/openai/");
+  if (idx !== -1) return trimmed.slice(0, idx);
+  return trimmed;
+}
+
 function getAzureConfiguredDeployments(
   settings: ReturnType<typeof LLMProviderFactory.loadSettings>,
 ): string[] {
-  return uniqStrings([settings.azure?.deployment, ...(settings.azure?.deployments || [])]);
+  return uniqStrings([
+    settings.imageGeneration?.azure?.imageDeployment,
+    settings.azure?.deployment,
+    ...(settings.azure?.deployments || []),
+  ]);
 }
 
 function getAzureImageDeployments(
@@ -194,6 +327,7 @@ function selectAzureImageDeployments(args: {
   settings: ReturnType<typeof LLMProviderFactory.loadSettings>;
   modelOverride?: string;
   prompt: string;
+  allowFallback?: boolean;
 }): string[] {
   const all = getAzureConfiguredDeployments(args.settings);
   const imageDeployments = getAzureImageDeployments(args.settings);
@@ -213,14 +347,13 @@ function selectAzureImageDeployments(args: {
     if (match) {
       // Only accept known configured deployments; if it's not image-capable we still accept it
       // as an explicit override (user knows what they're doing).
-      return uniqStrings([match, ...imageDeployments]);
+      return args.allowFallback ? uniqStrings([match, ...imageDeployments]) : [match];
     }
     if (
       looksLikeImageDeployment(override) ||
       isOpenAIImageModel(normalizeOpenAIImageModel(override))
     ) {
-      // If user typed a model-like name not in config, try it once then fall back to configured image deployments.
-      return uniqStrings([override, ...imageDeployments]);
+      return args.allowFallback ? uniqStrings([override, ...imageDeployments]) : [override];
     }
     // Non-image overrides (like text model deployments) are almost certainly accidental for image generation.
     // fall through
@@ -265,20 +398,21 @@ function getConfiguredImageProviders(
 
   const azureImageDeployments = getAzureImageDeployments(settings);
   const azureOk =
-    !!settings.azure?.apiKey?.trim() &&
-    !!settings.azure?.endpoint?.trim() &&
+    !!(settings.imageGeneration?.azure?.imageApiKey?.trim() || settings.azure?.apiKey?.trim()) &&
+    !!(settings.imageGeneration?.azure?.imageEndpoint?.trim() || settings.azure?.endpoint?.trim()) &&
     azureImageDeployments.length > 0;
   if (azureOk) providers.push("azure");
 
-  const openaiKey = settings.openai?.apiKey?.trim();
+  const openaiKey = settings.imageGeneration?.openai?.apiKey?.trim() || settings.openai?.apiKey?.trim();
   if (openaiKey) providers.push("openai");
 
   if (hasOpenAIOAuthTokens(settings)) providers.push("openai-codex");
 
-  const openrouterKey = settings.openrouter?.apiKey?.trim();
+  const openrouterKey =
+    settings.imageGeneration?.openrouter?.apiKey?.trim() || settings.openrouter?.apiKey?.trim();
   if (openrouterKey) providers.push("openrouter");
 
-  const geminiKey = settings.gemini?.apiKey?.trim();
+  const geminiKey = settings.imageGeneration?.gemini?.apiKey?.trim() || settings.gemini?.apiKey?.trim();
   if (geminiKey) providers.push("gemini");
 
   return providers;
@@ -295,7 +429,7 @@ function sortProvidersByDefaultPreference(providers: ImageProvider[]): ImageProv
   return [...providers].sort((a, b) => (priority[a] ?? 99) - (priority[b] ?? 99));
 }
 
-type ImageModelPreset = "gpt-image-1.5" | "nano-banana-2";
+type ImageModelPreset = "gpt-image-2" | "gpt-image-1.5" | "nano-banana-2";
 
 function getCompatibleImageModelPreset(
   provider: ImageProvider,
@@ -303,7 +437,8 @@ function getCompatibleImageModelPreset(
 ): ImageModelPreset | undefined {
   if (!preset) return undefined;
   if (preset === "nano-banana-2") return provider === "gemini" ? preset : undefined;
-  if (preset === "gpt-image-1.5") return provider === "gemini" ? undefined : preset;
+  if (preset === "gpt-image-2" || preset === "gpt-image-1.5")
+    return provider === "gemini" ? undefined : preset;
   return undefined;
 }
 
@@ -336,9 +471,12 @@ function buildProviderOrderFromImageSettings(
 
   pushConfiguredImageRoute(order, configured, defaultProvider, defaultPreset);
 
-  if (!defaultProvider && defaultPreset === "gpt-image-1.5") {
+  if (
+    !defaultProvider &&
+    (defaultPreset === "gpt-image-2" || defaultPreset === "gpt-image-1.5")
+  ) {
     for (const p of ["azure", "openai", "openai-codex", "openrouter"] as ImageProvider[]) {
-      if (configured.includes(p)) order.push({ provider: p, modelPreset: "gpt-image-1.5" });
+      if (configured.includes(p)) order.push({ provider: p, modelPreset: defaultPreset });
     }
   }
   if (!defaultProvider && defaultPreset === "nano-banana-2" && configured.includes("gemini")) {
@@ -348,10 +486,10 @@ function buildProviderOrderFromImageSettings(
   pushConfiguredImageRoute(order, configured, backupProvider, backupPreset);
 
   if (!backupProvider && backupPreset && backupPreset !== defaultPreset) {
-    if (backupPreset === "gpt-image-1.5") {
+    if (backupPreset === "gpt-image-2" || backupPreset === "gpt-image-1.5") {
       for (const p of ["azure", "openai", "openai-codex", "openrouter"] as ImageProvider[]) {
         if (configured.includes(p) && !order.some((o) => o.provider === p))
-          order.push({ provider: p, modelPreset: "gpt-image-1.5" });
+          order.push({ provider: p, modelPreset: backupPreset });
       }
     } else if (backupPreset === "nano-banana-2" && configured.includes("gemini")) {
       if (!order.some((o) => o.provider === "gemini"))
@@ -516,6 +654,8 @@ export class ImageGenerator {
     const filename = request.filename;
     const imageSize = request.imageSize || "1K";
     const numberOfImages = request.numberOfImages || 1;
+    const signal = request.signal;
+    const onProgress = request.onProgress;
 
     const settings = LLMProviderFactory.loadSettings();
     const configuredProviders = getConfiguredImageProviders(settings);
@@ -550,6 +690,22 @@ export class ImageGenerator {
         bestErrorRef.current = { provider, model, error, actionHint };
       }
     };
+    const emitProviderFallback = (
+      provider: ImageProvider,
+      model: string,
+      timeoutMs: number,
+      nextEntry?: { provider: ImageProvider; modelPreset?: ImageModelPreset },
+    ) => {
+      if (!nextEntry || signal?.aborted) return;
+      onProgress?.({
+        type: "image_generation_fallback",
+        provider,
+        model,
+        timeoutMs,
+        fallbackModel: nextEntry.modelPreset || nextEntry.provider,
+        message: `${provider} image generation timed out after ${Math.round(timeoutMs / 1000)}s; falling back to ${nextEntry.provider}${nextEntry.modelPreset ? ` (${nextEntry.modelPreset})` : ""}.`,
+      });
+    };
 
     if (providerOrder.length === 0) {
       return {
@@ -562,11 +718,15 @@ export class ImageGenerator {
       };
     }
 
-    for (const entry of providerOrder) {
+    for (let providerIndex = 0; providerIndex < providerOrder.length; providerIndex += 1) {
+      const entry = providerOrder[providerIndex];
+      const nextProviderEntry = providerOrder[providerIndex + 1];
       const { provider, modelPreset } = entry;
       try {
         if (provider === "gemini") {
-          const apiKey = settings.gemini?.apiKey?.trim();
+          const providerTimeoutMs = getImageProviderTimeoutMs(settings, provider);
+          const apiKey =
+            settings.imageGeneration?.gemini?.apiKey?.trim() || settings.gemini?.apiKey?.trim();
           if (!apiKey) {
             if (configuredProviders.includes("gemini")) {
               considerError("gemini", "Gemini API key not configured.");
@@ -574,24 +734,42 @@ export class ImageGenerator {
             continue;
           }
           const chosen: "gemini-image-fast" | "gemini-image-pro" | "nano-banana-2" =
-            modelPreset === "nano-banana-2"
+            settings.imageGeneration?.gemini?.model === "nano-banana-2"
               ? "nano-banana-2"
-              : modelOverride === "gemini-image-fast" || modelOverride === "gemini-image-pro"
-                ? (modelOverride as Any)
-                : "gemini-image-pro";
+              : modelPreset === "nano-banana-2"
+                ? "nano-banana-2"
+                : modelOverride === "gemini-image-fast" || modelOverride === "gemini-image-pro"
+                  ? (modelOverride as Any)
+                  : "gemini-image-pro";
           const modelId = GEMINI_MODEL_MAP[chosen];
-          return await this.generateWithGemini({
-            apiKey,
-            modelId,
-            prompt,
-            filename,
-            imageSize,
-            numberOfImages,
+          onProgress?.({
+            type: "image_generation_attempt",
+            provider,
+            model: modelId,
+            timeoutMs: providerTimeoutMs,
+            message: `Trying Gemini image model ${modelId} (timeout ${Math.round(providerTimeoutMs / 1000)}s).`,
           });
+          const attempt = await runWithImageProviderTimeout(signal, providerTimeoutMs, (attemptSignal) =>
+            this.generateWithGemini({
+              apiKey,
+              modelId,
+              prompt,
+              filename,
+              imageSize,
+              numberOfImages,
+              signal: attemptSignal,
+            }),
+          );
+          if (attempt.result.success || !attempt.timedOut) return attempt.result;
+          considerError(provider, attempt.result.error || "Gemini image generation timed out.", modelId);
+          emitProviderFallback(provider, modelId, providerTimeoutMs, nextProviderEntry);
+          continue;
         }
 
         if (provider === "openai") {
-          const apiKey = settings.openai?.apiKey?.trim();
+          const providerTimeoutMs = getImageProviderTimeoutMs(settings, provider);
+          const apiKey =
+            settings.imageGeneration?.openai?.apiKey?.trim() || settings.openai?.apiKey?.trim();
           if (!apiKey) {
             if (configuredProviders.includes("openai")) {
               considerError("openai", "OpenAI API key not configured.");
@@ -599,21 +777,38 @@ export class ImageGenerator {
             continue;
           }
           const chosenModel =
+            resolveOpenAIModelOverride(settings.imageGeneration?.openai?.model) ||
             resolveOpenAIModelOverride(modelOverride) ||
+            (modelPreset === "gpt-image-2" ? "gpt-image-2" : null) ||
             (modelPreset === "gpt-image-1.5" ? "gpt-image-1.5" : null) ||
             inferOpenAIImageModelFromText(prompt) ||
             "gpt-image-1.5";
-          return await this.generateWithOpenAI({
-            apiKey,
+          onProgress?.({
+            type: "image_generation_attempt",
+            provider,
             model: chosenModel,
-            prompt,
-            filename,
-            imageSize,
-            numberOfImages,
+            timeoutMs: providerTimeoutMs,
+            message: `Trying OpenAI image model ${chosenModel} (timeout ${Math.round(providerTimeoutMs / 1000)}s).`,
           });
+          const attempt = await runWithImageProviderTimeout(signal, providerTimeoutMs, (attemptSignal) =>
+            this.generateWithOpenAI({
+              apiKey,
+              model: chosenModel,
+              prompt,
+              filename,
+              imageSize,
+              numberOfImages,
+              signal: attemptSignal,
+            }),
+          );
+          if (attempt.result.success || !attempt.timedOut) return attempt.result;
+          considerError(provider, attempt.result.error || "OpenAI image generation timed out.", chosenModel);
+          emitProviderFallback(provider, chosenModel, providerTimeoutMs, nextProviderEntry);
+          continue;
         }
 
         if (provider === "openai-codex") {
+          const providerTimeoutMs = getImageProviderTimeoutMs(settings, provider);
           if (!hasOpenAIOAuthTokens(settings)) {
             if (configuredProviders.includes("openai-codex")) {
               considerError("openai-codex", "OpenAI OAuth is not connected.");
@@ -621,7 +816,9 @@ export class ImageGenerator {
             continue;
           }
           const chosenModel =
+            resolveOpenAIModelOverride(settings.imageGeneration?.openaiCodex?.model) ||
             resolveOpenAIModelOverride(modelOverride) ||
+            (modelPreset === "gpt-image-2" ? "gpt-image-2" : null) ||
             (modelPreset === "gpt-image-1.5" ? "gpt-image-1.5" : null) ||
             inferOpenAIImageModelFromText(prompt) ||
             "gpt-image-1.5";
@@ -635,25 +832,55 @@ export class ImageGenerator {
             continue;
           }
           const credentials = await resolveOpenAICodexCredentials(settings);
-          return await this.generateWithOpenAICodex({
-            apiKey: credentials.apiKey,
-            accessToken: credentials.accessToken,
+          onProgress?.({
+            type: "image_generation_attempt",
+            provider,
             model: normalizedChosenModel,
-            prompt,
-            filename,
-            imageSize,
-            numberOfImages,
+            timeoutMs: providerTimeoutMs,
+            message: `Trying OpenAI OAuth image model ${normalizedChosenModel} (timeout ${Math.round(providerTimeoutMs / 1000)}s).`,
           });
+          const attempt = await runWithImageProviderTimeout(signal, providerTimeoutMs, (attemptSignal) =>
+            this.generateWithOpenAICodex({
+              apiKey: credentials.apiKey,
+              accessToken: credentials.accessToken,
+              model: normalizedChosenModel,
+              prompt,
+              filename,
+              imageSize,
+              numberOfImages,
+              signal: attemptSignal,
+            }),
+          );
+          if (attempt.result.success || !attempt.timedOut) return attempt.result;
+          considerError(
+            provider,
+            attempt.result.error || "OpenAI OAuth image generation timed out.",
+            normalizedChosenModel,
+          );
+          emitProviderFallback(provider, normalizedChosenModel, providerTimeoutMs, nextProviderEntry);
+          continue;
         }
 
         if (provider === "azure") {
-          const apiKey = settings.azure?.apiKey?.trim();
-          const endpoint = settings.azure?.endpoint?.trim();
-          const apiVersion = settings.azure?.apiVersion?.trim() || "2024-02-15-preview";
+          const providerTimeoutMs = getImageProviderTimeoutMs(settings, provider);
+          const apiKey =
+            settings.imageGeneration?.azure?.imageApiKey?.trim() || settings.azure?.apiKey?.trim();
+          const endpoint =
+            settings.imageGeneration?.azure?.imageEndpoint?.trim() ||
+            settings.azure?.endpoint?.trim();
+          const apiVersion =
+            settings.imageGeneration?.azure?.imageApiVersion?.trim() ||
+            settings.azure?.apiVersion?.trim() ||
+            "2024-02-15-preview";
+          const azureModelOverride =
+            settings.imageGeneration?.azure?.imageDeployment?.trim() ||
+            (modelPreset === "gpt-image-2" ? "gpt-image-2" : null) ||
+            (modelPreset === "gpt-image-1.5" ? "gpt-image-1.5" : modelOverride);
           const deploymentsToTry = selectAzureImageDeployments({
             settings,
-            modelOverride: modelPreset === "gpt-image-1.5" ? "gpt-image-1.5" : modelOverride,
+            modelOverride: azureModelOverride,
             prompt,
+            allowFallback: true,
           });
 
           if (!apiKey || !endpoint || deploymentsToTry.length === 0) {
@@ -667,21 +894,54 @@ export class ImageGenerator {
           }
 
           let azureLast: ImageGenerationResult | null = null;
-          for (const deployment of deploymentsToTry) {
-            const result = await this.generateWithAzureOpenAI({
-              apiKey,
-              endpoint,
-              apiVersion,
-              deployment,
-              prompt,
-              filename,
-              imageSize,
-              numberOfImages,
+          let azureTimedOut = false;
+          for (let i = 0; i < deploymentsToTry.length; i += 1) {
+            const deployment = deploymentsToTry[i];
+            const nextDeployment = deploymentsToTry[i + 1];
+            onProgress?.({
+              type: "image_generation_attempt",
+              provider,
+              model: deployment,
+              timeoutMs: providerTimeoutMs,
+              fallbackModel: nextDeployment,
+              message: `Trying Azure image deployment ${deployment} (timeout ${Math.round(providerTimeoutMs / 1000)}s).`,
             });
-            if (result.success) {
-              return result;
+            const attempt = await runWithImageProviderTimeout(signal, providerTimeoutMs, (attemptSignal) =>
+              this.generateWithAzureOpenAI({
+                apiKey,
+                endpoint,
+                apiVersion,
+                deployment,
+                prompt,
+                filename,
+                imageSize,
+                numberOfImages,
+                signal: attemptSignal,
+              }),
+            );
+            if (attempt.result.success) {
+              return attempt.result;
             }
-            azureLast = result;
+            azureLast = attempt.result;
+            azureTimedOut = attempt.timedOut;
+            const shouldTryNextDeployment =
+              nextDeployment &&
+              !signal?.aborted &&
+              (attempt.timedOut || isTransientImageProviderError(attempt.result.error));
+            if (shouldTryNextDeployment) {
+              onProgress?.({
+                type: "image_generation_fallback",
+                provider,
+                model: deployment,
+                timeoutMs: providerTimeoutMs,
+                fallbackModel: nextDeployment,
+                message: attempt.timedOut
+                  ? `Azure image deployment ${deployment} timed out after ${Math.round(providerTimeoutMs / 1000)}s; falling back to ${nextDeployment}.`
+                  : `Azure image deployment ${deployment} failed with a transient provider error (${attempt.result.error || "unknown error"}); falling back to ${nextDeployment}.`,
+              });
+              continue;
+            }
+            break;
           }
 
           considerError(
@@ -689,13 +949,21 @@ export class ImageGenerator {
             azureLast?.error || "Azure OpenAI image generation failed",
             azureLast?.model,
           );
+          if (azureTimedOut && azureLast?.model) {
+            emitProviderFallback("azure", azureLast.model, providerTimeoutMs, nextProviderEntry);
+          }
           continue;
         }
 
         if (provider === "openrouter") {
-          const apiKey = settings.openrouter?.apiKey?.trim();
+          const providerTimeoutMs = getImageProviderTimeoutMs(settings, provider);
+          const apiKey =
+            settings.imageGeneration?.openrouter?.apiKey?.trim() ||
+            settings.openrouter?.apiKey?.trim();
           const baseUrl = (
-            settings.openrouter?.baseUrl?.trim() || "https://openrouter.ai/api/v1"
+            settings.imageGeneration?.openrouter?.baseUrl?.trim() ||
+            settings.openrouter?.baseUrl?.trim() ||
+            "https://openrouter.ai/api/v1"
           ).replace(/\/+$/, "");
           if (!apiKey) {
             if (configuredProviders.includes("openrouter")) {
@@ -703,28 +971,46 @@ export class ImageGenerator {
             }
             continue;
           }
+          const configuredOpenRouterModel = normalizeOpenRouterImageModel(
+            settings.imageGeneration?.openrouter?.model,
+          );
           const openaiModel =
             resolveOpenAIModelOverride(modelOverride) ||
+            (modelPreset === "gpt-image-2" ? "gpt-image-2" : null) ||
             (modelPreset === "gpt-image-1.5" ? "gpt-image-1.5" : null) ||
             inferOpenAIImageModelFromText(prompt) ||
             "gpt-image-1.5";
-          const openRouterModel = `openai/${openaiModel}`;
-          const result = await this.generateWithOpenRouter({
-            apiKey,
-            baseUrl,
+          const openRouterModel = configuredOpenRouterModel || `openai/${openaiModel}`;
+          onProgress?.({
+            type: "image_generation_attempt",
+            provider,
             model: openRouterModel,
-            prompt,
-            filename,
-            imageSize,
-            numberOfImages,
+            timeoutMs: providerTimeoutMs,
+            message: `Trying OpenRouter image model ${openRouterModel} (timeout ${Math.round(providerTimeoutMs / 1000)}s).`,
           });
-          if (result.success) return result;
+          const attempt = await runWithImageProviderTimeout(signal, providerTimeoutMs, (attemptSignal) =>
+            this.generateWithOpenRouter({
+              apiKey,
+              baseUrl,
+              model: openRouterModel,
+              prompt,
+              filename,
+              imageSize,
+              numberOfImages,
+              signal: attemptSignal,
+            }),
+          );
+          if (attempt.result.success) return attempt.result;
           considerError(
             "openrouter",
-            result.error || "OpenRouter image generation failed",
-            result.model,
+            attempt.result.error || "OpenRouter image generation failed",
+            attempt.result.model,
           );
-          continue;
+          if (attempt.timedOut) {
+            emitProviderFallback(provider, openRouterModel, providerTimeoutMs, nextProviderEntry);
+            continue;
+          }
+          return attempt.result;
         }
       } catch (error: Any) {
         considerError(provider, error?.message || String(error));
@@ -773,6 +1059,12 @@ export class ImageGenerator {
         modelId: "gpt-image-1",
       },
       {
+        id: "gpt-image-2",
+        name: "OpenAI GPT Image 2",
+        description: "OpenAI GPT Image model (API key, Azure/OpenRouter, or OpenAI OAuth)",
+        modelId: "gpt-image-2",
+      },
+      {
         id: "gpt-image-1.5",
         name: "OpenAI GPT Image 1.5",
         description: "OpenAI GPT Image model (API key, Azure/OpenRouter, or OpenAI OAuth)",
@@ -795,6 +1087,7 @@ export class ImageGenerator {
     filename?: string;
     imageSize: ImageSize;
     numberOfImages: number;
+    signal?: AbortSignal;
   }): Promise<ImageGenerationResult> {
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${args.modelId}:generateContent`;
     const baseFilename = args.filename || `generated_${Date.now()}`;
@@ -810,9 +1103,11 @@ export class ImageGenerator {
       let textResponse: string | undefined;
 
       for (let imageIndex = 0; imageIndex < Math.min(args.numberOfImages, 4); imageIndex++) {
+        throwIfImageGenerationAborted(args.signal);
         const response = await fetch(`${endpoint}?key=${args.apiKey}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          signal: args.signal,
           body: JSON.stringify({
             contents: [{ role: "user", parts: [{ text: args.prompt }] }],
             generationConfig: {
@@ -858,6 +1153,7 @@ export class ImageGenerator {
 
         const parts = data.candidates?.[0]?.content?.parts || [];
         for (const part of parts) {
+          throwIfImageGenerationAborted(args.signal);
           if (part.text) {
             textResponse = part.text;
           }
@@ -915,6 +1211,7 @@ export class ImageGenerator {
     filename?: string;
     imageSize: ImageSize;
     numberOfImages: number;
+    signal?: AbortSignal;
   }): Promise<ImageGenerationResult> {
     const baseFilename = args.filename || `generated_${Date.now()}`;
     const outputDir = this.workspace.path;
@@ -925,6 +1222,7 @@ export class ImageGenerator {
 
       const images: ImageGenerationResult["images"] = [];
       const n = Math.min(args.numberOfImages, 4);
+      throwIfImageGenerationAborted(args.signal);
 
       const response = await fetch("https://api.openai.com/v1/images/generations", {
         method: "POST",
@@ -932,6 +1230,7 @@ export class ImageGenerator {
           "Content-Type": "application/json",
           Authorization: `Bearer ${args.apiKey}`,
         },
+        signal: args.signal,
         body: JSON.stringify({
           model: args.model,
           prompt: args.prompt,
@@ -966,6 +1265,7 @@ export class ImageGenerator {
       const data = (await response.json()) as Any;
       const items: Any[] = Array.isArray(data?.data) ? data.data : [];
       for (let i = 0; i < items.length; i++) {
+        throwIfImageGenerationAborted(args.signal);
         const b64 = items[i]?.b64_json || items[i]?.b64 || items[i]?.base64;
         const url = items[i]?.url;
         if (b64 && typeof b64 === "string") {
@@ -983,8 +1283,9 @@ export class ImageGenerator {
           continue;
         }
         if (url && typeof url === "string") {
-          const dl = await fetch(url);
+          const dl = await fetch(url, { signal: args.signal });
           if (!dl.ok) continue;
+          throwIfImageGenerationAborted(args.signal);
           const arrayBuffer = await dl.arrayBuffer();
           const buf = Buffer.from(arrayBuffer);
           const mimeType = dl.headers.get("content-type") || "image/png";
@@ -1030,6 +1331,7 @@ export class ImageGenerator {
     filename?: string;
     imageSize: ImageSize;
     numberOfImages: number;
+    signal?: AbortSignal;
   }): Promise<ImageGenerationResult> {
     const baseFilename = args.filename || `generated_${Date.now()}`;
     const outputDir = this.workspace.path;
@@ -1060,6 +1362,7 @@ export class ImageGenerator {
       const n = Math.min(args.numberOfImages, 4);
 
       for (let i = 0; i < n; i++) {
+        throwIfImageGenerationAborted(args.signal);
         let imageBase64: string | null = null;
         const stream = client.responses.stream({
           model: hostModel,
@@ -1088,9 +1391,10 @@ export class ImageGenerator {
             mode: "required",
             tools: [{ type: "image_generation" }],
           },
-        });
+        } as Any, args.signal ? ({ signal: args.signal } as Any) : undefined);
 
         for await (const event of stream) {
+          throwIfImageGenerationAborted(args.signal);
           if (event.type === "response.output_item.done" && event.item.type === "image_generation_call") {
             if (typeof event.item.result === "string" && event.item.result) {
               imageBase64 = event.item.result;
@@ -1103,6 +1407,7 @@ export class ImageGenerator {
         }
 
         const finalResponse = await stream.finalResponse();
+        throwIfImageGenerationAborted(args.signal);
         for (const item of finalResponse.output || []) {
           if (item.type === "image_generation_call" && typeof item.result === "string" && item.result) {
             imageBase64 = item.result;
@@ -1124,6 +1429,7 @@ export class ImageGenerator {
         const imageBuffer = Buffer.from(imageBase64, "base64");
         const imageName = n > 1 ? `${baseFilename}_${i + 1}.png` : `${baseFilename}.png`;
         const outputPath = path.join(outputDir, imageName);
+        throwIfImageGenerationAborted(args.signal);
         await fs.promises.writeFile(outputPath, imageBuffer);
         writtenPaths.push(outputPath);
         const stats = await fs.promises.stat(outputPath);
@@ -1158,11 +1464,12 @@ export class ImageGenerator {
     filename?: string;
     imageSize: ImageSize;
     numberOfImages: number;
+    signal?: AbortSignal;
   }): Promise<ImageGenerationResult> {
     const baseFilename = args.filename || `generated_${Date.now()}`;
     const outputDir = this.workspace.path;
     const size = this.mapOpenAIImageSize(args.imageSize);
-    const endpoint = args.endpoint.replace(/\/+$/, "");
+    const endpoint = normalizeAzureImageBaseEndpoint(args.endpoint);
     const deployment = encodeURIComponent(args.deployment);
     const apiVersion = encodeURIComponent(args.apiVersion);
     const url = `${endpoint}/openai/deployments/${deployment}/images/generations?api-version=${apiVersion}`;
@@ -1172,6 +1479,7 @@ export class ImageGenerator {
 
       const images: ImageGenerationResult["images"] = [];
       const n = Math.min(args.numberOfImages, 4);
+      throwIfImageGenerationAborted(args.signal);
 
       const response = await fetch(url, {
         method: "POST",
@@ -1179,6 +1487,7 @@ export class ImageGenerator {
           "Content-Type": "application/json",
           "api-key": args.apiKey,
         },
+        signal: args.signal,
         body: JSON.stringify({
           prompt: args.prompt,
           n,
@@ -1216,6 +1525,7 @@ export class ImageGenerator {
       const data = (await response.json()) as Any;
       const items: Any[] = Array.isArray(data?.data) ? data.data : [];
       for (let i = 0; i < items.length; i++) {
+        throwIfImageGenerationAborted(args.signal);
         const b64 = items[i]?.b64_json || items[i]?.b64 || items[i]?.base64;
         const url = items[i]?.url;
         if (b64 && typeof b64 === "string") {
@@ -1233,8 +1543,9 @@ export class ImageGenerator {
           continue;
         }
         if (url && typeof url === "string") {
-          const dl = await fetch(url);
+          const dl = await fetch(url, { signal: args.signal });
           if (!dl.ok) continue;
+          throwIfImageGenerationAborted(args.signal);
           const arrayBuffer = await dl.arrayBuffer();
           const buf = Buffer.from(arrayBuffer);
           const mimeType = dl.headers.get("content-type") || "image/png";
@@ -1261,12 +1572,18 @@ export class ImageGenerator {
 
       return { success: true, images, provider: "azure", model: args.deployment };
     } catch (error: Any) {
+      const errorMessage = formatImageGenerationError(error);
+      console.error("[ImageGenerator] Azure images/generations request failed:", {
+        deployment: args.deployment,
+        apiVersion: args.apiVersion,
+        message: errorMessage,
+      });
       return {
         success: false,
         images: [],
         provider: "azure",
         model: args.deployment,
-        error: error?.message || "Failed to generate image",
+        error: errorMessage,
         actionHint: buildSetupHint("azure"),
       };
     }
@@ -1280,6 +1597,7 @@ export class ImageGenerator {
     filename?: string;
     imageSize: ImageSize;
     numberOfImages: number;
+    signal?: AbortSignal;
   }): Promise<ImageGenerationResult> {
     const baseFilename = args.filename || `generated_${Date.now()}`;
     const outputDir = this.workspace.path;
@@ -1295,6 +1613,7 @@ export class ImageGenerator {
         image_config: { image_size: args.imageSize },
       };
 
+      throwIfImageGenerationAborted(args.signal);
       const response = await fetch(url, {
         method: "POST",
         headers: {
@@ -1302,6 +1621,7 @@ export class ImageGenerator {
           Authorization: `Bearer ${args.apiKey}`,
           ...getOpenRouterAttributionHeaders(),
         },
+        signal: args.signal,
         body: JSON.stringify(body),
       });
 
@@ -1333,6 +1653,7 @@ export class ImageGenerator {
       const n = Math.min(args.numberOfImages, imageItems.length || 4);
 
       for (let i = 0; i < imageItems.length && images.length < n; i++) {
+        throwIfImageGenerationAborted(args.signal);
         const item = imageItems[i];
         const dataUrl =
           item?.image_url?.url || item?.imageUrl?.url || (typeof item === "string" ? item : null);

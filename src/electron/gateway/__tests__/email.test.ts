@@ -114,7 +114,7 @@ describe("EmailAdapter", () => {
       expect(config.mailbox).toBe("INBOX");
     });
 
-    it("should enable markAsRead by default", () => {
+    it("should leave messages unread by default", () => {
       const adapterDefault = new EmailAdapter({
         enabled: true,
         email: "bot@example.com",
@@ -123,7 +123,7 @@ describe("EmailAdapter", () => {
         smtpHost: "smtp.example.com",
       });
       const config = (adapterDefault as Any).config;
-      expect(config.markAsRead).toBe(true);
+      expect(config.markAsRead).toBe(false);
     });
 
     it("should default protocol to imap-smtp", () => {

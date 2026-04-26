@@ -1132,6 +1132,9 @@ export class DatabaseManager {
         participants_json TEXT,
         labels_json TEXT,
         category TEXT NOT NULL DEFAULT 'other',
+        today_bucket TEXT NOT NULL DEFAULT 'more_to_browse',
+        domain_category TEXT NOT NULL DEFAULT 'other',
+        classification_rationale TEXT,
         priority_score REAL NOT NULL DEFAULT 0,
         urgency_score REAL NOT NULL DEFAULT 0,
         needs_reply INTEGER NOT NULL DEFAULT 0,
@@ -1177,6 +1180,157 @@ export class DatabaseManager {
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL,
         FOREIGN KEY (thread_id) REFERENCES mailbox_threads(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS mailbox_attachments (
+        id TEXT PRIMARY KEY,
+        thread_id TEXT NOT NULL,
+        message_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        provider_message_id TEXT NOT NULL,
+        provider_attachment_id TEXT,
+        filename TEXT NOT NULL,
+        mime_type TEXT,
+        size INTEGER,
+        extraction_status TEXT NOT NULL DEFAULT 'not_indexed',
+        extraction_error TEXT,
+        metadata_json TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY (thread_id) REFERENCES mailbox_threads(id),
+        FOREIGN KEY (message_id) REFERENCES mailbox_messages(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS mailbox_attachment_text (
+        attachment_id TEXT PRIMARY KEY,
+        text_content TEXT NOT NULL,
+        extraction_mode TEXT NOT NULL,
+        extracted_at INTEGER NOT NULL,
+        FOREIGN KEY (attachment_id) REFERENCES mailbox_attachments(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS mailbox_folders (
+        id TEXT PRIMARY KEY,
+        account_id TEXT NOT NULL,
+        provider_folder_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'custom',
+        unread_count INTEGER,
+        total_count INTEGER,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(account_id, provider_folder_id),
+        FOREIGN KEY (account_id) REFERENCES mailbox_accounts(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS mailbox_labels (
+        id TEXT PRIMARY KEY,
+        account_id TEXT NOT NULL,
+        provider_label_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        color TEXT,
+        unread_count INTEGER,
+        total_count INTEGER,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(account_id, provider_label_id),
+        FOREIGN KEY (account_id) REFERENCES mailbox_accounts(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS mailbox_identities (
+        id TEXT PRIMARY KEY,
+        account_id TEXT NOT NULL,
+        provider_identity_id TEXT,
+        email TEXT NOT NULL,
+        display_name TEXT,
+        signature_id TEXT,
+        is_default INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY (account_id) REFERENCES mailbox_accounts(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS mailbox_signatures (
+        id TEXT PRIMARY KEY,
+        account_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        body_html TEXT,
+        body_text TEXT NOT NULL,
+        is_default INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY (account_id) REFERENCES mailbox_accounts(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS mailbox_compose_drafts (
+        id TEXT PRIMARY KEY,
+        account_id TEXT NOT NULL,
+        thread_id TEXT,
+        provider_draft_id TEXT,
+        mode TEXT NOT NULL,
+        status TEXT NOT NULL,
+        subject TEXT NOT NULL,
+        body_text TEXT NOT NULL,
+        body_html TEXT,
+        to_json TEXT NOT NULL,
+        cc_json TEXT NOT NULL,
+        bcc_json TEXT NOT NULL,
+        identity_id TEXT,
+        signature_id TEXT,
+        attachments_json TEXT,
+        scheduled_at INTEGER,
+        send_after INTEGER,
+        latest_error TEXT,
+        metadata_json TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY (account_id) REFERENCES mailbox_accounts(id),
+        FOREIGN KEY (thread_id) REFERENCES mailbox_threads(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS mailbox_outgoing_messages (
+        id TEXT PRIMARY KEY,
+        draft_id TEXT,
+        account_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        provider_message_id TEXT,
+        scheduled_at INTEGER,
+        send_after INTEGER,
+        latest_error TEXT,
+        metadata_json TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY (draft_id) REFERENCES mailbox_compose_drafts(id),
+        FOREIGN KEY (account_id) REFERENCES mailbox_accounts(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS mailbox_queued_actions (
+        id TEXT PRIMARY KEY,
+        account_id TEXT,
+        thread_id TEXT,
+        draft_id TEXT,
+        action_type TEXT NOT NULL,
+        status TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        next_attempt_at INTEGER,
+        latest_error TEXT,
+        undo_of_action_id TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY (account_id) REFERENCES mailbox_accounts(id),
+        FOREIGN KEY (thread_id) REFERENCES mailbox_threads(id),
+        FOREIGN KEY (draft_id) REFERENCES mailbox_compose_drafts(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS mailbox_client_settings (
+        id TEXT PRIMARY KEY,
+        remote_content_policy TEXT NOT NULL DEFAULT 'load',
+        send_delay_seconds INTEGER NOT NULL DEFAULT 30,
+        sync_recent_days INTEGER NOT NULL DEFAULT 30,
+        attachment_cache TEXT NOT NULL DEFAULT 'metadata_on_demand',
+        notifications TEXT NOT NULL DEFAULT 'needs_reply',
+        updated_at INTEGER NOT NULL
       );
 
       CREATE TABLE IF NOT EXISTS mailbox_summaries (
@@ -1503,6 +1657,18 @@ export class DatabaseManager {
       CREATE INDEX IF NOT EXISTS idx_mailbox_threads_priority ON mailbox_threads(priority_score DESC, urgency_score DESC, last_message_at DESC);
       CREATE INDEX IF NOT EXISTS idx_mailbox_threads_flags ON mailbox_threads(needs_reply, cleanup_candidate, stale_followup);
       CREATE INDEX IF NOT EXISTS idx_mailbox_messages_thread ON mailbox_messages(thread_id, received_at);
+      CREATE INDEX IF NOT EXISTS idx_mailbox_attachments_thread ON mailbox_attachments(thread_id, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_mailbox_attachments_message ON mailbox_attachments(message_id);
+      CREATE INDEX IF NOT EXISTS idx_mailbox_attachments_status ON mailbox_attachments(extraction_status, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_mailbox_folders_account ON mailbox_folders(account_id, role, name);
+      CREATE INDEX IF NOT EXISTS idx_mailbox_labels_account ON mailbox_labels(account_id, name);
+      CREATE INDEX IF NOT EXISTS idx_mailbox_identities_account ON mailbox_identities(account_id, is_default DESC);
+      CREATE INDEX IF NOT EXISTS idx_mailbox_signatures_account ON mailbox_signatures(account_id, is_default DESC);
+      CREATE INDEX IF NOT EXISTS idx_mailbox_compose_drafts_account ON mailbox_compose_drafts(account_id, status, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_mailbox_compose_drafts_thread ON mailbox_compose_drafts(thread_id, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_mailbox_outgoing_status ON mailbox_outgoing_messages(status, send_after, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_mailbox_queued_actions_status ON mailbox_queued_actions(status, next_attempt_at, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_mailbox_queued_actions_thread ON mailbox_queued_actions(thread_id, updated_at DESC);
       CREATE INDEX IF NOT EXISTS idx_mailbox_drafts_thread ON mailbox_drafts(thread_id, updated_at DESC);
       CREATE INDEX IF NOT EXISTS idx_mailbox_proposals_thread ON mailbox_action_proposals(thread_id, status, proposal_type);
       CREATE INDEX IF NOT EXISTS idx_mailbox_commitments_thread ON mailbox_commitments(thread_id, state, due_at);
@@ -1545,6 +1711,7 @@ export class DatabaseManager {
     // Initialize FTS5 for memory search (separate exec to handle if not supported)
     this.initializeMemoryFTS();
     this.initializeMarkdownMemoryFTS();
+    this.initializeMailboxSearchFTS();
     // Run migrations for task-retry tracking columns (SQLite ALTER TABLE ADD COLUMN is safe if column exists)
     this.runMigrations();
     this.initializeKnowledgeGraphFTS();
@@ -1611,6 +1778,30 @@ export class DatabaseManager {
     } catch (error) {
       schemaLogger.warn(
         "[DatabaseManager] Markdown FTS5 initialization failed, markdown full-text search will be limited:",
+        error,
+      );
+    }
+  }
+
+  private initializeMailboxSearchFTS() {
+    try {
+      this.db.exec(`
+        CREATE VIRTUAL TABLE IF NOT EXISTS mailbox_search_fts USING fts5(
+          record_type UNINDEXED,
+          record_id UNINDEXED,
+          thread_id UNINDEXED,
+          message_id UNINDEXED,
+          attachment_id UNINDEXED,
+          subject,
+          sender,
+          body,
+          attachment_filename,
+          attachment_text
+        );
+      `);
+    } catch (error) {
+      schemaLogger.warn(
+        "[DatabaseManager] Mailbox FTS5 initialization failed, mailbox search will use fallback matching:",
         error,
       );
     }
@@ -4441,6 +4632,9 @@ export class DatabaseManager {
       "ALTER TABLE mailbox_threads ADD COLUMN classification_updated_at INTEGER",
       "ALTER TABLE mailbox_threads ADD COLUMN classification_error TEXT",
       "ALTER TABLE mailbox_threads ADD COLUMN classification_json TEXT",
+      "ALTER TABLE mailbox_threads ADD COLUMN today_bucket TEXT NOT NULL DEFAULT 'more_to_browse'",
+      "ALTER TABLE mailbox_threads ADD COLUMN domain_category TEXT NOT NULL DEFAULT 'other'",
+      "ALTER TABLE mailbox_threads ADD COLUMN classification_rationale TEXT",
     ];
     for (const migration of mailboxThreadMigrations) {
       try {
@@ -4452,6 +4646,13 @@ export class DatabaseManager {
     try {
       this.db.exec(
         "UPDATE mailbox_threads SET classification_state = 'backfill_pending' WHERE classification_state = 'pending' AND classification_updated_at IS NULL",
+      );
+    } catch {
+      // Ignore migration update failures
+    }
+    try {
+      this.db.exec(
+        "UPDATE mailbox_threads SET classification_state = 'backfill_pending' WHERE classification_state = 'classified' AND (classification_prompt_version IS NULL OR classification_prompt_version != 'v3')",
       );
     } catch {
       // Ignore migration update failures
@@ -4504,6 +4705,163 @@ export class DatabaseManager {
         );
         CREATE INDEX IF NOT EXISTS idx_mailbox_events_workspace ON mailbox_events(workspace_id, created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_mailbox_events_thread ON mailbox_events(thread_id, created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS mailbox_attachments (
+          id TEXT PRIMARY KEY,
+          thread_id TEXT NOT NULL,
+          message_id TEXT NOT NULL,
+          provider TEXT NOT NULL,
+          provider_message_id TEXT NOT NULL,
+          provider_attachment_id TEXT,
+          filename TEXT NOT NULL,
+          mime_type TEXT,
+          size INTEGER,
+          extraction_status TEXT NOT NULL DEFAULT 'not_indexed',
+          extraction_error TEXT,
+          metadata_json TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          FOREIGN KEY (thread_id) REFERENCES mailbox_threads(id),
+          FOREIGN KEY (message_id) REFERENCES mailbox_messages(id)
+        );
+        CREATE TABLE IF NOT EXISTS mailbox_attachment_text (
+          attachment_id TEXT PRIMARY KEY,
+          text_content TEXT NOT NULL,
+          extraction_mode TEXT NOT NULL,
+          extracted_at INTEGER NOT NULL,
+          FOREIGN KEY (attachment_id) REFERENCES mailbox_attachments(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_mailbox_threads_today_bucket ON mailbox_threads(today_bucket, last_message_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_mailbox_threads_domain_category ON mailbox_threads(domain_category, last_message_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_mailbox_attachments_thread ON mailbox_attachments(thread_id, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_mailbox_attachments_message ON mailbox_attachments(message_id);
+        CREATE INDEX IF NOT EXISTS idx_mailbox_attachments_status ON mailbox_attachments(extraction_status, updated_at DESC);
+
+        CREATE TABLE IF NOT EXISTS mailbox_folders (
+          id TEXT PRIMARY KEY,
+          account_id TEXT NOT NULL,
+          provider_folder_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          role TEXT NOT NULL DEFAULT 'custom',
+          unread_count INTEGER,
+          total_count INTEGER,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          UNIQUE(account_id, provider_folder_id),
+          FOREIGN KEY (account_id) REFERENCES mailbox_accounts(id)
+        );
+        CREATE TABLE IF NOT EXISTS mailbox_labels (
+          id TEXT PRIMARY KEY,
+          account_id TEXT NOT NULL,
+          provider_label_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          color TEXT,
+          unread_count INTEGER,
+          total_count INTEGER,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          UNIQUE(account_id, provider_label_id),
+          FOREIGN KEY (account_id) REFERENCES mailbox_accounts(id)
+        );
+        CREATE TABLE IF NOT EXISTS mailbox_identities (
+          id TEXT PRIMARY KEY,
+          account_id TEXT NOT NULL,
+          provider_identity_id TEXT,
+          email TEXT NOT NULL,
+          display_name TEXT,
+          signature_id TEXT,
+          is_default INTEGER NOT NULL DEFAULT 0,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          FOREIGN KEY (account_id) REFERENCES mailbox_accounts(id)
+        );
+        CREATE TABLE IF NOT EXISTS mailbox_signatures (
+          id TEXT PRIMARY KEY,
+          account_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          body_html TEXT,
+          body_text TEXT NOT NULL,
+          is_default INTEGER NOT NULL DEFAULT 0,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          FOREIGN KEY (account_id) REFERENCES mailbox_accounts(id)
+        );
+        CREATE TABLE IF NOT EXISTS mailbox_compose_drafts (
+          id TEXT PRIMARY KEY,
+          account_id TEXT NOT NULL,
+          thread_id TEXT,
+          provider_draft_id TEXT,
+          mode TEXT NOT NULL,
+          status TEXT NOT NULL,
+          subject TEXT NOT NULL,
+          body_text TEXT NOT NULL,
+          body_html TEXT,
+          to_json TEXT NOT NULL,
+          cc_json TEXT NOT NULL,
+          bcc_json TEXT NOT NULL,
+          identity_id TEXT,
+          signature_id TEXT,
+          attachments_json TEXT,
+          scheduled_at INTEGER,
+          send_after INTEGER,
+          latest_error TEXT,
+          metadata_json TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          FOREIGN KEY (account_id) REFERENCES mailbox_accounts(id),
+          FOREIGN KEY (thread_id) REFERENCES mailbox_threads(id)
+        );
+        CREATE TABLE IF NOT EXISTS mailbox_outgoing_messages (
+          id TEXT PRIMARY KEY,
+          draft_id TEXT,
+          account_id TEXT NOT NULL,
+          status TEXT NOT NULL,
+          provider_message_id TEXT,
+          scheduled_at INTEGER,
+          send_after INTEGER,
+          latest_error TEXT,
+          metadata_json TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          FOREIGN KEY (draft_id) REFERENCES mailbox_compose_drafts(id),
+          FOREIGN KEY (account_id) REFERENCES mailbox_accounts(id)
+        );
+        CREATE TABLE IF NOT EXISTS mailbox_queued_actions (
+          id TEXT PRIMARY KEY,
+          account_id TEXT,
+          thread_id TEXT,
+          draft_id TEXT,
+          action_type TEXT NOT NULL,
+          status TEXT NOT NULL,
+          payload_json TEXT NOT NULL,
+          attempts INTEGER NOT NULL DEFAULT 0,
+          next_attempt_at INTEGER,
+          latest_error TEXT,
+          undo_of_action_id TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          FOREIGN KEY (account_id) REFERENCES mailbox_accounts(id),
+          FOREIGN KEY (thread_id) REFERENCES mailbox_threads(id),
+          FOREIGN KEY (draft_id) REFERENCES mailbox_compose_drafts(id)
+        );
+        CREATE TABLE IF NOT EXISTS mailbox_client_settings (
+          id TEXT PRIMARY KEY,
+          remote_content_policy TEXT NOT NULL DEFAULT 'load',
+          send_delay_seconds INTEGER NOT NULL DEFAULT 30,
+          sync_recent_days INTEGER NOT NULL DEFAULT 30,
+          attachment_cache TEXT NOT NULL DEFAULT 'metadata_on_demand',
+          notifications TEXT NOT NULL DEFAULT 'needs_reply',
+          updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_mailbox_folders_account ON mailbox_folders(account_id, role, name);
+        CREATE INDEX IF NOT EXISTS idx_mailbox_labels_account ON mailbox_labels(account_id, name);
+        CREATE INDEX IF NOT EXISTS idx_mailbox_identities_account ON mailbox_identities(account_id, is_default DESC);
+        CREATE INDEX IF NOT EXISTS idx_mailbox_signatures_account ON mailbox_signatures(account_id, is_default DESC);
+        CREATE INDEX IF NOT EXISTS idx_mailbox_compose_drafts_account ON mailbox_compose_drafts(account_id, status, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_mailbox_compose_drafts_thread ON mailbox_compose_drafts(thread_id, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_mailbox_outgoing_status ON mailbox_outgoing_messages(status, send_after, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_mailbox_queued_actions_status ON mailbox_queued_actions(status, next_attempt_at, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_mailbox_queued_actions_thread ON mailbox_queued_actions(thread_id, updated_at DESC);
 
         CREATE TABLE IF NOT EXISTS mailbox_automations (
           id TEXT PRIMARY KEY,

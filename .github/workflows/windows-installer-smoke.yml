@@ -1,0 +1,105 @@
+name: Windows Installer Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_version:
+        description: "Expected package version"
+        required: true
+        default: "0.5.40"
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Build and smoke Windows installer
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Force HTTPS for GitHub git dependencies
+        shell: bash
+        run: |
+          git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Verify release version
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          if ($version -ne "${{ inputs.expected_version }}") {
+            throw "Expected version ${{ inputs.expected_version }}, found $version"
+          }
+
+      - name: Validate npm tarball first-install flow
+        run: node scripts/release-smoke-install.mjs
+
+      - name: Package Windows installer
+        run: npm run package
+
+      - name: Verify installer artifacts
+        shell: pwsh
+        run: |
+          node scripts/release-artifact-names.mjs --check
+          $installer = Get-ChildItem -Path release -Filter "*.exe" | Select-Object -First 1
+          if (-not $installer) {
+            throw "No Windows installer was produced in release/."
+          }
+          if ($installer.Length -lt 100MB) {
+            throw "Installer is unexpectedly small: $($installer.Length) bytes"
+          }
+          "installer=$($installer.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Installer: $($installer.FullName)"
+
+      - name: Install silently
+        shell: pwsh
+        run: |
+          $installDir = Join-Path $env:LOCALAPPDATA "Programs\CoWork OS"
+          if (Test-Path $installDir) {
+            Remove-Item -Recurse -Force $installDir
+          }
+          $process = Start-Process -FilePath $env:installer -ArgumentList "/S" -Wait -PassThru
+          if ($process.ExitCode -ne 0) {
+            throw "Installer exited with code $($process.ExitCode)"
+          }
+          $appExe = Join-Path $installDir "CoWork OS.exe"
+          if (-not (Test-Path $appExe)) {
+            throw "Installed app executable not found at $appExe"
+          }
+          "app_exe=$appExe" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Installed app: $appExe"
+
+      - name: Launch installed app briefly
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath $env:app_exe -PassThru
+          Start-Sleep -Seconds 20
+          if ($process.HasExited) {
+            throw "Installed app exited during smoke launch with code $($process.ExitCode)"
+          }
+          Stop-Process -Id $process.Id -Force
+
+      - name: Uninstall silently
+        if: always()
+        shell: pwsh
+        run: |
+          $uninstaller = Join-Path $env:LOCALAPPDATA "Programs\CoWork OS\Uninstall CoWork OS.exe"
+          if (Test-Path $uninstaller) {
+            $process = Start-Process -FilePath $uninstaller -ArgumentList "/S" -Wait -PassThru
+            if ($process.ExitCode -ne 0) {
+              throw "Uninstaller exited with code $($process.ExitCode)"
+            }
+          }

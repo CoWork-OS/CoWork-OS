@@ -326,6 +326,16 @@ export class LoomEmailClient extends EventEmitter {
     });
   }
 
+  async markAsUnread(uid: number): Promise<void> {
+    const threadId = this.threadByUid.get(uid);
+    if (!threadId) return;
+
+    await this.request(`/v1/mailbox/threads/${encodeURIComponent(threadId)}/state`, {
+      method: "PATCH",
+      body: { seen: false },
+    });
+  }
+
   getEmail(): string {
     return this.identity || "loom://identity@local";
   }

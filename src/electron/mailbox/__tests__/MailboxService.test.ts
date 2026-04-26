@@ -454,6 +454,134 @@ describeWithSqlite("MailboxService", () => {
     expect(detail?.research?.nextSteps?.length).toBeGreaterThan(0);
   });
 
+  it("filters Today/domain buckets and includes attachment metadata in mailbox search", async () => {
+    db.prepare(
+      `UPDATE mailbox_threads
+       SET today_bucket = ?, domain_category = ?
+       WHERE id = ?`,
+    ).run("needs_action", "customer", "gmail-thread:alpha");
+
+    db.prepare(
+      `INSERT INTO mailbox_attachments
+        (id, thread_id, message_id, provider, provider_message_id, provider_attachment_id, filename, mime_type, size, extraction_status, extraction_error, metadata_json, created_at, updated_at)
+       VALUES (?, ?, (SELECT id FROM mailbox_messages WHERE thread_id = ? LIMIT 1), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "att-alpha-contract",
+      "gmail-thread:alpha",
+      "gmail-thread:alpha",
+      "gmail",
+      "m-1",
+      "gmail-att-1",
+      "launch-contract.pdf",
+      "application/pdf",
+      1200,
+      "not_indexed",
+      null,
+      JSON.stringify({}),
+      now,
+      now,
+    );
+
+    const todayMatches = await service.listThreads({ todayBucket: "needs_action" });
+    expect(todayMatches.map((thread) => thread.id)).toContain("gmail-thread:alpha");
+    expect(todayMatches[0]?.todayBucket).toBe("needs_action");
+    expect(todayMatches[0]?.domainCategory).toBe("customer");
+    expect(todayMatches[0]?.attachments?.[0]?.filename).toBe("launch-contract.pdf");
+
+    const attachmentMatches = await service.listThreads({ attachmentQuery: "contract" });
+    expect(attachmentMatches.map((thread) => thread.id)).toContain("gmail-thread:alpha");
+
+    const fetchAttachmentBytesSpy = vi
+      .spyOn(service as Any, "fetchMailboxAttachmentBytes")
+      .mockResolvedValue(Buffer.from("ignored"));
+    const extractAttachmentTextSpy = vi
+      .spyOn(service as Any, "extractTextFromAttachmentBytes")
+      .mockResolvedValue({ text: "Executed renewal clause for the launch agreement.", mode: "plain-text" });
+
+    await service.extractMailboxAttachmentText("att-alpha-contract");
+
+    const attachmentTextMatches = await service.listThreads({ attachmentQuery: "renewal clause" });
+    expect(attachmentTextMatches.map((thread) => thread.id)).toContain("gmail-thread:alpha");
+
+    fetchAttachmentBytesSpy.mockRestore();
+    extractAttachmentTextSpy.mockRestore();
+  });
+
+  it("builds sender cleanup and mailbox ask results from local evidence", async () => {
+    db.prepare(
+      `INSERT INTO mailbox_threads
+        (id, account_id, provider_thread_id, provider, subject, snippet, participants_json, labels_json, category, today_bucket, domain_category, priority_score, urgency_score, needs_reply, stale_followup, cleanup_candidate, handled, unread_count, message_count, last_message_at, last_synced_at, metadata_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "gmail-thread:newsletter",
+      "gmail:test@example.com",
+      "newsletter",
+      "gmail",
+      "Weekly product digest",
+      "A digest you can clean up.",
+      JSON.stringify([{ email: "news@example.com", name: "News" }]),
+      JSON.stringify([]),
+      "updates",
+      "more_to_browse",
+      "newsletters",
+      5,
+      0,
+      0,
+      0,
+      1,
+      1,
+      0,
+      1,
+      now - 2000,
+      now,
+      JSON.stringify({}),
+      now,
+      now,
+    );
+    db.prepare(
+      `INSERT INTO mailbox_messages
+        (id, thread_id, provider_message_id, direction, from_name, from_email, to_json, cc_json, bcc_json, subject, snippet, body_text, received_at, is_unread, metadata_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      randomUUID(),
+      "gmail-thread:newsletter",
+      "m-news",
+      "incoming",
+      "News",
+      "news@example.com",
+      JSON.stringify([{ email: "test@example.com", name: "Test User" }]),
+      JSON.stringify([]),
+      JSON.stringify([]),
+      "Weekly product digest",
+      "A digest you can clean up.",
+      "Weekly product updates and links.",
+      now - 2000,
+      0,
+      JSON.stringify({}),
+      now,
+      now,
+    );
+    db.prepare(
+      `INSERT INTO mailbox_search_fts
+         (record_type, record_id, thread_id, message_id, attachment_id, subject, sender, body, attachment_filename, attachment_text)
+       VALUES ('message', ?, ?, ?, NULL, ?, ?, ?, '', '')`,
+    ).run(
+      "stale-newsletter-fts",
+      "gmail-thread:newsletter",
+      "m-news",
+      "Launch plan digest",
+      "news@example.com",
+      "An unrelated launch plan mention already present in the FTS table.",
+    );
+
+    const senderDigest = await service.getMailboxSenderCleanupDigest({ limit: 5 });
+    expect(senderDigest.senders.some((sender) => sender.email === "news@example.com")).toBe(true);
+
+    const ask = await service.askMailbox({ query: "launch plan", includeAnswer: false });
+    expect(ask.results.map((result) => result.thread.id)).toContain("gmail-thread:alpha");
+    expect(ask.usedLlm).toBe(false);
+  });
+
   it("filters threads by suggested proposals and open commitments", async () => {
     await service.summarizeThread("gmail-thread:alpha");
     await service.extractCommitments("gmail-thread:alpha");

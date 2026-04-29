@@ -10,6 +10,7 @@ import type { CustomSkill, SkillRegistryEntry, SkillSearchResult } from "../../.
 // Track file system operations
 let mockFiles: Map<string, string> = new Map();
 let mockDirs: Set<string> = new Set();
+let mockRmSyncThrowOnceFor: string | null = null;
 
 function normalizePath(value: string): string {
   const normalized = value.replace(/\\/g, "/").replace(/\/+/g, "/");
@@ -78,6 +79,28 @@ function movePath(source: string, destination: string): void {
 function pathExists(value: string): boolean {
   const normalized = normalizePath(value);
   return mockDirs.has(normalized) || mockFiles.has(normalized);
+}
+
+function removeMockPath(target: string): void {
+  const normalized = normalizePath(target);
+  if (mockRmSyncThrowOnceFor && normalized.includes(mockRmSyncThrowOnceFor)) {
+    mockRmSyncThrowOnceFor = null;
+    const error = new Error(`EPERM, Permission denied: ${target}`) as NodeJS.ErrnoException;
+    error.code = "EPERM";
+    throw error;
+  }
+
+  mockFiles.delete(normalized);
+  for (const filePath of Array.from(mockFiles.keys())) {
+    if (filePath.startsWith(`${normalized}/`)) {
+      mockFiles.delete(filePath);
+    }
+  }
+  for (const dirPath of Array.from(mockDirs)) {
+    if (dirPath === normalized || dirPath.startsWith(`${normalized}/`)) {
+      mockDirs.delete(dirPath);
+    }
+  }
 }
 
 function listDirEntries(dir: string): Array<{ name: string; isDirectory: boolean }> {
@@ -241,19 +264,9 @@ vi.mock("fs", () => ({
     unlinkSync: vi.fn().mockImplementation((p: string) => {
       mockFiles.delete(normalizePath(p));
     }),
+    chmodSync: vi.fn(),
     rmSync: vi.fn().mockImplementation((target: string) => {
-      const normalized = normalizePath(target);
-      mockFiles.delete(normalized);
-      for (const filePath of Array.from(mockFiles.keys())) {
-        if (filePath.startsWith(`${normalized}/`)) {
-          mockFiles.delete(filePath);
-        }
-      }
-      for (const dirPath of Array.from(mockDirs)) {
-        if (dirPath === normalized || dirPath.startsWith(`${normalized}/`)) {
-          mockDirs.delete(dirPath);
-        }
-      }
+      removeMockPath(target);
     }),
   },
   existsSync: vi.fn().mockImplementation((p: string) => pathExists(p)),
@@ -337,19 +350,9 @@ vi.mock("fs", () => ({
   unlinkSync: vi.fn().mockImplementation((p: string) => {
     mockFiles.delete(normalizePath(p));
   }),
+  chmodSync: vi.fn(),
   rmSync: vi.fn().mockImplementation((target: string) => {
-    const normalized = normalizePath(target);
-    mockFiles.delete(normalized);
-    for (const filePath of Array.from(mockFiles.keys())) {
-      if (filePath.startsWith(`${normalized}/`)) {
-        mockFiles.delete(filePath);
-      }
-    }
-    for (const dirPath of Array.from(mockDirs)) {
-      if (dirPath === normalized || dirPath.startsWith(`${normalized}/`)) {
-        mockDirs.delete(dirPath);
-      }
-    }
+    removeMockPath(target);
   }),
 }));
 
@@ -391,6 +394,7 @@ describe("SkillRegistry", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockFiles.clear();
+    mockRmSyncThrowOnceFor = null;
     mockDirs = new Set(["/", "/mock", "/mock/skills", "/mock/user", "/mock/user/data"]);
     mockFetch.mockReset();
     resetSkillRegistry();
@@ -636,6 +640,17 @@ describe("SkillRegistry", () => {
     });
 
     it("installs a skill bundle from a git repository", async () => {
+      const result = await registry.installFromGit("https://github.com/example/skill-repo");
+
+      expect(result.success).toBe(true);
+      expect(result.skill?.id).toBe("git-imported-skill");
+      expect(mockFiles.has(managedPath("git-imported-skill.json"))).toBe(true);
+      expect(mockFiles.has(managedPath("git-imported-skill/SKILL.md"))).toBe(true);
+    });
+
+    it("does not fail a git install when temporary clone cleanup hits EPERM once", async () => {
+      mockRmSyncThrowOnceFor = ".tmp-skill-repo-";
+
       const result = await registry.installFromGit("https://github.com/example/skill-repo");
 
       expect(result.success).toBe(true);

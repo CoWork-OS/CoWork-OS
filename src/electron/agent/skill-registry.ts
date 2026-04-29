@@ -388,6 +388,59 @@ export class SkillRegistry {
     return path.join(this.managedSkillsDir, `.tmp-${safeHint}-${nonce}`);
   }
 
+  private makeWritableRecursive(targetPath: string): void {
+    const stat = fs.lstatSync(targetPath);
+    if (stat.isSymbolicLink()) {
+      return;
+    }
+
+    if (typeof fs.chmodSync === "function") {
+      fs.chmodSync(targetPath, stat.isDirectory() ? 0o700 : 0o600);
+    }
+
+    if (!stat.isDirectory()) {
+      return;
+    }
+
+    for (const entry of fs.readdirSync(targetPath, { withFileTypes: true })) {
+      this.makeWritableRecursive(path.join(targetPath, entry.name));
+    }
+  }
+
+  private removeTempDir(tempDir: string): void {
+    if (!fs.existsSync(tempDir)) {
+      return;
+    }
+
+    try {
+      fs.rmSync(tempDir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 100,
+      });
+      return;
+    } catch (firstError) {
+      try {
+        this.makeWritableRecursive(tempDir);
+        fs.rmSync(tempDir, {
+          recursive: true,
+          force: true,
+          maxRetries: 5,
+          retryDelay: 100,
+        });
+      } catch (retryError) {
+        console.warn(
+          "[SkillRegistry] Failed to clean up temporary skill import directory:",
+          tempDir,
+          retryError instanceof Error ? retryError.message : retryError,
+          "initial error:",
+          firstError instanceof Error ? firstError.message : firstError,
+        );
+      }
+    }
+  }
+
   private isSkillMetadataFile(fileName: string): boolean {
     const lower = fileName.toLowerCase();
     return lower.endsWith(".security.json") || lower === "build-mode.json";
@@ -766,9 +819,7 @@ export class SkillRegistry {
         security: { state: "failed" },
       };
     } finally {
-      if (fs.existsSync(stageDir)) {
-        fs.rmSync(stageDir, { recursive: true, force: true });
-      }
+      this.removeTempDir(stageDir);
     }
   }
 
@@ -1487,9 +1538,7 @@ export class SkillRegistry {
         security: { state: "failed" },
       };
     } finally {
-      if (fs.existsSync(tempDir)) {
-        fs.rmSync(tempDir, { recursive: true, force: true });
-      }
+      this.removeTempDir(tempDir);
     }
   }
 
@@ -1547,9 +1596,7 @@ export class SkillRegistry {
         const skill = this.importSkillBundle(tempDir, normalizedUrl);
         return await this.installImportedSkill(skill, { sourceDir: tempDir, source: "url" });
       } finally {
-        if (fs.existsSync(tempDir)) {
-          fs.rmSync(tempDir, { recursive: true, force: true });
-        }
+        this.removeTempDir(tempDir);
       }
     } catch (error) {
       return {
@@ -1615,9 +1662,7 @@ export class SkillRegistry {
         security: { state: "failed" },
       };
     } finally {
-      if (fs.existsSync(tempDir)) {
-        fs.rmSync(tempDir, { recursive: true, force: true });
-      }
+      this.removeTempDir(tempDir);
     }
   }
 

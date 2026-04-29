@@ -77,6 +77,8 @@ import { TASK_EVENT_BRIDGE_ALLOWLIST } from "./task-event-bridge-contract";
 import { registerControlPlaneCoreMethods } from "./registerControlPlaneCoreMethods";
 import { registerStrategicPlannerMethods } from "./registerStrategicPlannerMethods";
 import { getStrategicPlannerService } from "./StrategicPlannerService";
+import { registerSymphonyMethods } from "./registerSymphonyMethods";
+import { getSymphonyService } from "./SymphonyService";
 import {
   getFleetConnectionManager,
   initFleetConnectionManager,
@@ -2446,6 +2448,11 @@ function registerCompanyOpsMethods(server: ControlPlaneServer, deps: ControlPlan
   registerStrategicPlannerMethods({
     server,
     plannerService: getStrategicPlannerService(),
+    requireScope,
+  });
+  registerSymphonyMethods({
+    server,
+    getSymphonyService,
     requireScope,
   });
 }

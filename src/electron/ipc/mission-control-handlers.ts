@@ -18,6 +18,12 @@ import {
   CompanyOutputContract,
   CompanyOutputFeedItem,
   CompanyReviewQueueItem,
+  SymphonyConfigUpdate,
+  MissionControlBrief,
+  MissionControlItem,
+  MissionControlItemEvidence,
+  MissionControlListRequest,
+  MissionControlScopeRequest,
 } from "../../shared/types";
 import type { Issue } from "../../shared/types";
 import { AgentRoleRepository } from "../agents/AgentRoleRepository";
@@ -36,6 +42,7 @@ import { validateInput, UUIDSchema } from "../utils/validation";
 import { createLogger } from "../utils/logger";
 import { ControlPlaneCoreService } from "../control-plane/ControlPlaneCoreService";
 import { StrategicPlannerService } from "../control-plane/StrategicPlannerService";
+import { SymphonyService } from "../control-plane/SymphonyService";
 import { AgentCompaniesService } from "../control-plane/AgentCompaniesService";
 import { SubconsciousRunRepository } from "../subconscious/SubconsciousRepositories";
 import { CoreMemoryCandidateRepository } from "../core/CoreMemoryCandidateRepository";
@@ -51,6 +58,7 @@ import { CoreEvalCaseService } from "../core/CoreEvalCaseService";
 import { CoreHarnessExperimentService } from "../core/CoreHarnessExperimentService";
 import { CoreHarnessExperimentRunner } from "../core/CoreHarnessExperimentRunner";
 import { CoreLearningsService } from "../core/CoreLearningsService";
+import { MissionControlIntelligenceService } from "../mission-control/MissionControlIntelligenceService";
 import {
   AutomationProfileAttachRequestSchema,
   AutomationProfileCreateRequestSchema,
@@ -203,6 +211,7 @@ export interface MissionControlDeps {
   standupService: StandupReportService;
   heartbeatService: HeartbeatService;
   getPlannerService: () => StrategicPlannerService | null;
+  getSymphonyService: () => SymphonyService | null;
   getMainWindow: () => BrowserWindow | null;
   coreTraceService: CoreTraceService;
   coreMemoryDistiller: CoreMemoryDistiller;
@@ -230,6 +239,7 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
   const coreFailureClusterRepo = new CoreFailureClusterRepository(db);
   const coreMemoryCandidateRepo = new CoreMemoryCandidateRepository(db);
   const coreMemoryDistillRunRepo = new CoreMemoryDistillRunRepository(db);
+  const missionControlIntelligence = new MissionControlIntelligenceService(db);
   const agentCompanies = new AgentCompaniesService(db, core, agentRoleRepo);
   const taskRepo = new TaskRepository(db);
   const activityRepo = new ActivityRepository(db);
@@ -240,6 +250,44 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
     }
     return service;
   };
+  const requireSymphonyService = (): SymphonyService => {
+    const service = deps.getSymphonyService();
+    if (!service) {
+      throw new Error("Symphony service is unavailable");
+    }
+    return service;
+  };
+
+  // ============ Mission Control Intelligence Handlers ============
+
+  ipcMain.handle(
+    IPC_CHANNELS.MISSION_CONTROL_GET_BRIEF,
+    async (_, request?: MissionControlScopeRequest): Promise<MissionControlBrief> => {
+      return missionControlIntelligence.getBrief(request || {});
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MISSION_CONTROL_LIST_ITEMS,
+    async (_, request?: MissionControlListRequest): Promise<MissionControlItem[]> => {
+      return missionControlIntelligence.listItems(request || {});
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MISSION_CONTROL_GET_ITEM_EVIDENCE,
+    async (_, itemId: string): Promise<MissionControlItemEvidence[]> => {
+      return missionControlIntelligence.getEvidence(requireString(itemId, "Mission Control item ID"));
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MISSION_CONTROL_REFRESH,
+    async (_, request?: MissionControlScopeRequest): Promise<MissionControlBrief> => {
+      checkRateLimit(IPC_CHANNELS.MISSION_CONTROL_REFRESH);
+      return missionControlIntelligence.refresh(request || {});
+    },
+  );
 
   // ============ Heartbeat Handlers ============
 
@@ -619,6 +667,11 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
 
   // Forward heartbeat events to renderer
   heartbeatService.on("heartbeat", (event) => {
+    try {
+      missionControlIntelligence.recordHeartbeatEvent(event);
+    } catch (error) {
+      logger.warn("Failed to project heartbeat event into Mission Control:", error);
+    }
     if (event.type === "no_work" && event.result?.silent) {
       return;
     }
@@ -1418,6 +1471,32 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
       return requirePlannerService().listRuns({ companyId: validated, limit: params.limit });
     },
   );
+
+  ipcMain.handle(IPC_CHANNELS.MC_SYMPHONY_GET_CONFIG, async () => {
+    return requireSymphonyService().getConfig();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MC_SYMPHONY_STATUS, async () => {
+    return requireSymphonyService().getStatus();
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.MC_SYMPHONY_UPDATE_CONFIG,
+    async (_, updates: SymphonyConfigUpdate) => {
+      checkRateLimit(IPC_CHANNELS.MC_SYMPHONY_UPDATE_CONFIG);
+      return requireSymphonyService().updateConfig(updates || {});
+    },
+  );
+
+  ipcMain.handle(IPC_CHANNELS.MC_SYMPHONY_RUN, async () => {
+    checkRateLimit(IPC_CHANNELS.MC_SYMPHONY_RUN);
+    return requireSymphonyService().runOnce("manual");
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MC_SYMPHONY_PAUSE, async () => {
+    checkRateLimit(IPC_CHANNELS.MC_SYMPHONY_PAUSE);
+    return requireSymphonyService().updateConfig({ enabled: false });
+  });
 
   logger.debug("Handlers initialized");
 }

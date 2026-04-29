@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildClaudeCredentialInput,
+  resolveOpenAIReasoningEffort,
+  resolveOpenAITextVerbosity,
   resolveClaudeAuthMethod,
   selectClaudeModelKey,
 } from "../settings-llm-helpers";
@@ -38,5 +40,22 @@ describe("settings-llm-helpers", () => {
         apiKey: "sk-ant-api-key",
       }),
     ).toBe("api_key");
+  });
+
+  it("loads OpenAI GPT-5.5 control defaults and saved values", () => {
+    expect(resolveOpenAIReasoningEffort()).toBe("medium");
+    expect(resolveOpenAITextVerbosity()).toBe("medium");
+    expect(
+      resolveOpenAIReasoningEffort({
+        model: "gpt-5.5",
+        reasoningEffort: "xhigh",
+      }),
+    ).toBe("xhigh");
+    expect(
+      resolveOpenAITextVerbosity({
+        model: "gpt-5.5",
+        textVerbosity: "low",
+      }),
+    ).toBe("low");
   });
 });

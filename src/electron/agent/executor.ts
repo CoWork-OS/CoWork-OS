@@ -113,7 +113,11 @@ import { PermissionSettingsManager } from "../security/permission-settings-manag
 import { PersonalityManager } from "../settings/personality-manager";
 import { detectContextMode } from "./context-mode-detector";
 import { calculateCost, formatCost } from "./llm/pricing";
-import { loadImageFromFile, validateImageForProvider } from "./llm/image-utils";
+import {
+  getProviderImageCaps,
+  loadImageFromFile,
+  validateImageForProvider,
+} from "./llm/image-utils";
 import {
   areSystemBlocksEquivalent,
   computePromptCacheKey,
@@ -275,6 +279,7 @@ import {
   inferRequiredArtifactExtensions as inferRequiredArtifactExtensionsUtil,
   normalizePromptForContracts as normalizePromptForContractsUtil,
   promptRequestsArtifactOutput as promptRequestsArtifactOutputUtil,
+  promptRequestsPresentationArtifactOutput as promptRequestsPresentationArtifactOutputUtil,
   responseDirectlyAddressesPrompt as responseDirectlyAddressesPromptUtil,
   responseHasDecisionSignal as responseHasDecisionSignalUtil,
   responseHasReasonedConclusionSignal as responseHasReasonedConclusionSignalUtil,
@@ -499,7 +504,14 @@ type StepVerificationMode =
   | "canvas_session"
   | "browser_session"
   | "artifact_file";
-type StepArtifactKind = "none" | "document" | "canvas" | "file" | "diagram";
+type StepArtifactKind =
+  | "none"
+  | "document"
+  | "spreadsheet"
+  | "presentation"
+  | "canvas"
+  | "file"
+  | "diagram";
 type VerificationArtifactPathRole =
   | "inspect_existing"
   | "optional_output_inline"
@@ -8594,6 +8606,26 @@ ${transcript}
     return false;
   }
 
+  private requiredMutationToolContractNeedsArtifactEvidence(
+    stepContract: StepExecutionContract,
+  ): boolean {
+    for (const toolName of stepContract.requiredTools.values()) {
+      const canonical = canonicalizeToolNameUtil(toolName);
+      if (
+        canonical === "create_document" ||
+        canonical === "compile_latex" ||
+        canonical === "create_spreadsheet" ||
+        canonical === "create_presentation" ||
+        canonical === "generate_video" ||
+        canonical === "get_video_generation_job" ||
+        canonical === "edit_document"
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   private getPendingRequiredMutationTools(
     stepContract: StepExecutionContract,
     requiredToolsSucceeded: Set<string>,
@@ -9108,6 +9140,18 @@ ${transcript}
     });
   }
 
+  private planContainsPptxArtifactStep(steps: PlanStep[]): boolean {
+    return steps.some((step) => {
+      const desc = String(step?.description || "").toLowerCase();
+      if (!desc.trim()) return false;
+      const hasPresentationTarget =
+        /\.pptx\b/.test(desc) ||
+        /\b(presentation file|powerpoint|pptx|slide deck|pitch deck)\b/.test(desc);
+      if (!hasPresentationTarget) return false;
+      return /\b(create|generate|write|save|produce|export|build|make|deliver)\b/.test(desc);
+    });
+  }
+
   private buildTaskArtifactFilename(extension: string): string {
     const source = String(this.task?.title || this.getContractPrompt() || "task_output")
       .toLowerCase()
@@ -9121,6 +9165,11 @@ ${transcript}
   private buildXlsxArtifactPlanStepDescription(): string {
     const filename = this.buildTaskArtifactFilename(".xlsx");
     return `Create the final Excel workbook \`${filename}\` containing the researched spreadsheet data, with clear headers and rows.`;
+  }
+
+  private buildPptxArtifactPlanStepDescription(): string {
+    const filename = this.buildTaskArtifactFilename(".pptx");
+    return `Create the final PowerPoint presentation \`${filename}\` with the completed slide content.`;
   }
 
   private ensureRequiredPlanSteps(plan: Plan): Plan {
@@ -9141,6 +9190,17 @@ ${transcript}
       nextPlan.steps.push({
         id: String(nextPlan.steps.length + 1),
         description: this.buildXlsxArtifactPlanStepDescription(),
+        kind: "primary",
+        status: "pending",
+      });
+    }
+    if (
+      requiredArtifactExtensions.includes(".pptx") &&
+      !this.planContainsPptxArtifactStep(nextPlan.steps)
+    ) {
+      nextPlan.steps.push({
+        id: String(nextPlan.steps.length + 1),
+        description: this.buildPptxArtifactPlanStepDescription(),
         kind: "primary",
         status: "pending",
       });
@@ -9713,6 +9773,13 @@ ${transcript}
     const requiredTools = this.extractRequiredToolsFromStepDescription(description);
     const verificationMode = this.resolveVerificationModeForStep(step);
     const verificationStep = this.isVerificationStep(step);
+    const taskPresentationArtifactIntent = this.taskRequestsPresentationArtifactOutput();
+    const presentationArtifactIntent =
+      !verificationStep &&
+      this.stepRequestsPresentationArtifactOutput(description, taskPresentationArtifactIntent);
+    if (presentationArtifactIntent) {
+      requiredTools.add(canonicalizeToolNameUtil("create_presentation"));
+    }
     const verificationPathDecisions = this.getVerificationArtifactPathDecisions(step);
     const hasExistingOnlyWriteVerificationTarget = verificationPathDecisions.some(
       (decision) => decision.role === "existing_only_write" && decision.exists,
@@ -9768,6 +9835,9 @@ ${transcript}
     }
     const targetPaths = this.extractStepPathCandidates(step);
     const requiredExtensions = new Set<string>(extractArtifactExtensionsFromText(description));
+    if (presentationArtifactIntent || taskPresentationArtifactIntent) {
+      requiredExtensions.add(".pptx");
+    }
     if (this.isSinglePlanStepForTaskArtifactOutput(step)) {
       for (const extension of this.buildCompletionContract().requiredArtifactExtensions) {
         requiredExtensions.add(extension);
@@ -9788,8 +9858,10 @@ ${transcript}
       artifactKind = "file";
     } else if (requiredTools.has("create_document") || /\b(docx|pdf|word document)\b/.test(description)) {
       artifactKind = "document";
-    } else if (requiredTools.has("create_spreadsheet") || requiredTools.has("create_presentation")) {
-      artifactKind = "file";
+    } else if (requiredTools.has("create_spreadsheet")) {
+      artifactKind = "spreadsheet";
+    } else if (requiredTools.has("create_presentation")) {
+      artifactKind = "presentation";
     } else if (requiresArtifactEvidence || requiredTools.has("write_file") || requiredTools.has("edit_file")) {
       artifactKind = "file";
     }
@@ -10263,6 +10335,9 @@ ${transcript}
         taskText,
       ) ||
       /\b(create|generate|make)\s+(?:an?\s+)?(?:infographic|poster)(?:\s+image)?\b/.test(
+        taskText,
+      ) ||
+      /\b(create|generate|make|produce|design|render)\s+(?:(?:a|an|the|some|me|us|one|two|three|four|five|several|new)\s+)?(?:(?!\b(?:with|using|containing|including|mentioning|that)\b)[\w-]+\s+){0,5}(?:image|picture|photo|photograph|illustration|render|rendering|artwork|drawing|painting|visual|graphic|poster|infographic|icon|logo|avatar|wallpaper|banner|portrait|thumbnail|mockup)s?\b/.test(
         taskText,
       )
     );
@@ -10745,6 +10820,29 @@ ${transcript}
       requiresDecisionSignal: this.promptRequestsDecision(),
       isWatchSkipRecommendationTask: this.promptIsWatchSkipRecommendationTask(),
     });
+  }
+
+  private taskRequestsPresentationArtifactOutput(): boolean {
+    return promptRequestsPresentationArtifactOutputUtil(this.task.title, this.getContractPrompt());
+  }
+
+  private stepRequestsPresentationArtifactOutput(
+    description: string,
+    taskPresentationArtifactIntent = this.taskRequestsPresentationArtifactOutput(),
+  ): boolean {
+    const desc = String(description || "").toLowerCase();
+    if (!desc.trim()) return false;
+    if (descriptionHasReadOnlyIntent(desc) && !descriptionHasWriteIntent(desc)) return false;
+
+    const stepPresentationCreation = promptRequestsPresentationArtifactOutputUtil("", desc);
+    if (stepPresentationCreation) return true;
+
+    const slideAuthoringStep =
+      taskPresentationArtifactIntent &&
+      descriptionHasWriteIntent(desc) &&
+      /\b(slides?|slide\s+outline|outline|deck|presentation|powerpoint|pptx)\b/.test(desc);
+
+    return slideAuthoringStep;
   }
 
   private responseHasDecisionSignal(text: string): boolean {
@@ -13568,6 +13666,16 @@ You are continuing a previous conversation. The context from the previous conver
     logger.info(`Workspace updated for task ${this.task.id}, permissions:`, workspace.permissions);
   }
 
+  updateTaskAgentConfig(agentConfig: AgentConfig | undefined): void {
+    this.task = {
+      ...this.task,
+      agentConfig,
+    };
+    if (this._runtime) {
+      this._runtime.setPermissionMode(this.getDefaultPermissionMode());
+    }
+  }
+
   /**
    * Verify success criteria for verification loop
    * @returns Object with success status and message
@@ -14827,6 +14935,44 @@ You are continuing a previous conversation. The context from the previous conver
           {
             description:
               "After the first successful diagram mutation, continue refining the same inline diagram and complete the original step requirements.",
+            kind: "recovery",
+          },
+        ],
+      };
+    }
+
+    if (stepContract.artifactKind === "presentation") {
+      return {
+        templateId: "write_recovery:create_presentation",
+        steps: [
+          {
+            description:
+              `Write-recovery (required): use create_presentation or generate_presentation now for "${step.description}". ` +
+              `Create a minimal valid slide deck for "${contractTarget}" first, then refine it to satisfy the original step.`,
+            kind: "recovery",
+          },
+          {
+            description:
+              "After the first successful presentation mutation, continue refining the same deck and complete the original step requirements.",
+            kind: "recovery",
+          },
+        ],
+      };
+    }
+
+    if (stepContract.artifactKind === "spreadsheet") {
+      return {
+        templateId: "write_recovery:create_spreadsheet",
+        steps: [
+          {
+            description:
+              `Write-recovery (required): use create_spreadsheet or generate_spreadsheet now for "${step.description}". ` +
+              `Create a minimal valid workbook for "${contractTarget}" first, then refine it to satisfy the original step.`,
+            kind: "recovery",
+          },
+          {
+            description:
+              "After the first successful spreadsheet mutation, continue refining the same workbook and complete the original step requirements.",
             kind: "recovery",
           },
         ],
@@ -17311,7 +17457,8 @@ You are continuing a previous conversation. The context from the previous conver
   }
 
   private buildDeterministicWorkflowHint(contract: StepExecutionContract): string {
-    if (!this.isStrictLengthArtifactTask()) return "";
+    const strictLengthArtifactTask = this.isStrictLengthArtifactTask();
+    if (!strictLengthArtifactTask && contract.artifactKind !== "presentation") return "";
     if (contract.artifactKind === "document") {
       return (
         "\n\nSTRICT ARTIFACT WORKFLOW (REQUIRED):\n" +
@@ -17330,6 +17477,15 @@ You are continuing a previous conversation. The context from the previous conver
         "3) Push full content via canvas_push.\n" +
         "4) Verify interaction path using canvas evidence.\n" +
         "Do not treat this as image-file generation unless screenshots are explicitly requested."
+      );
+    }
+    if (contract.artifactKind === "presentation") {
+      return (
+        "\n\nPRESENTATION WORKFLOW (REQUIRED):\n" +
+        "1) Draft the slide titles and bullets.\n" +
+        "2) Create the .pptx with create_presentation or generate_presentation.\n" +
+        "3) Verify the presentation artifact exists.\n" +
+        "Do not use browser screenshots as a substitute for the PowerPoint artifact."
       );
     }
     return "";
@@ -23959,6 +24115,8 @@ Return ONLY a JSON object:
         );
         const hasRequiredMutationToolContractForIteration =
           this.hasRequiredMutationToolContract(stepContract);
+        const requiredMutationToolContractNeedsArtifactEvidenceForIteration =
+          this.requiredMutationToolContractNeedsArtifactEvidence(stepContract);
         const pendingRequiredMutationToolsForIteration = this.getPendingRequiredMutationTools(
           stepContract,
           requiredToolsSucceeded,
@@ -24044,7 +24202,8 @@ Return ONLY a JSON object:
           const mutationSatisfied =
             stepSucceededWithFileMutation || stepSucceededWithCanvasMutation || bootstrapMutationSucceeded;
           const mutationSatisfiedForNudge = hasRequiredMutationToolContractForIteration
-            ? !hasPendingRequiredMutationToolsForIteration
+            ? !hasPendingRequiredMutationToolsForIteration &&
+              (!requiredMutationToolContractNeedsArtifactEvidenceForIteration || mutationSatisfied)
             : mutationSatisfied;
           const stopReasonToolUseStreakThreshold =
             stepContract.mode === "mutation_required" && !mutationSatisfiedForNudge
@@ -24130,7 +24289,9 @@ Return ONLY a JSON object:
           stepSucceededWithCanvasMutation ||
           bootstrapMutationSucceeded;
         const mutationSatisfiedForAssistantText = hasRequiredMutationToolContractForIteration
-          ? !hasPendingRequiredMutationToolsForIteration
+          ? !hasPendingRequiredMutationToolsForIteration &&
+            (!requiredMutationToolContractNeedsArtifactEvidenceForIteration ||
+              mutationSatisfiedAfterAssistantText)
           : mutationSatisfiedAfterAssistantText;
         const priorMutationReuseAfterAssistantText = this.trySatisfyMutationContractByPriorMutation({
           step,
@@ -24426,7 +24587,11 @@ Return ONLY a JSON object:
 
                 const mutationSatisfiedAtToolGate =
                   hasRequiredMutationToolContractForIteration
-                    ? !hasPendingRequiredMutationToolsForIteration
+                    ? !hasPendingRequiredMutationToolsForIteration &&
+                      (!requiredMutationToolContractNeedsArtifactEvidenceForIteration ||
+                        stepSucceededWithFileMutation ||
+                        stepSucceededWithCanvasMutation ||
+                        bootstrapMutationSucceeded)
                     : stepSucceededWithFileMutation ||
                       stepSucceededWithCanvasMutation ||
                       bootstrapMutationSucceeded;
@@ -26100,7 +26265,11 @@ Return ONLY a JSON object:
 
             const mutationSatisfiedAtToolGate =
               hasRequiredMutationToolContractForIteration
-                ? !hasPendingRequiredMutationToolsForIteration
+                ? !hasPendingRequiredMutationToolsForIteration &&
+                  (!requiredMutationToolContractNeedsArtifactEvidenceForIteration ||
+                    stepSucceededWithFileMutation ||
+                    stepSucceededWithCanvasMutation ||
+                    bootstrapMutationSucceeded)
                 : stepSucceededWithFileMutation ||
                   stepSucceededWithCanvasMutation ||
                   bootstrapMutationSucceeded;
@@ -27643,12 +27812,15 @@ Return ONLY a JSON object:
           stepSucceededWithFileMutation || stepSucceededWithCanvasMutation || bootstrapMutationSucceeded;
         const hasRequiredMutationToolContractAtCheckpoint =
           this.hasRequiredMutationToolContract(stepContract);
+        const requiredMutationToolContractNeedsArtifactEvidenceAtCheckpoint =
+          this.requiredMutationToolContractNeedsArtifactEvidence(stepContract);
         const pendingRequiredMutationToolsAtCheckpoint = this.getPendingRequiredMutationTools(
           stepContract,
           requiredToolsSucceeded,
         );
         const mutationSatisfiedForCheckpoint = hasRequiredMutationToolContractAtCheckpoint
-          ? pendingRequiredMutationToolsAtCheckpoint.length === 0
+          ? pendingRequiredMutationToolsAtCheckpoint.length === 0 &&
+            (!requiredMutationToolContractNeedsArtifactEvidenceAtCheckpoint || mutationSatisfied)
           : mutationSatisfied;
         const requiredMutationAttemptedForCheckpoint = hasRequiredMutationToolContractAtCheckpoint
           ? this.hasAttemptedRequiredMutationTool(stepContract, requiredToolsAttempted)
@@ -28140,12 +28312,15 @@ Return ONLY a JSON object:
       });
       const hasRequiredMutationToolContractFinal =
         this.hasRequiredMutationToolContract(stepContract);
+      const requiredMutationToolContractNeedsArtifactEvidenceFinal =
+        this.requiredMutationToolContractNeedsArtifactEvidence(stepContract);
       const pendingRequiredMutationToolsFinal = this.getPendingRequiredMutationTools(
         stepContract,
         requiredToolsSucceeded,
       );
       const mutationSatisfiedForFinal = hasRequiredMutationToolContractFinal
-        ? pendingRequiredMutationToolsFinal.length === 0
+        ? pendingRequiredMutationToolsFinal.length === 0 &&
+          (!requiredMutationToolContractNeedsArtifactEvidenceFinal || mutationSatisfied)
         : mutationSatisfied;
       const satisfiedByPriorMutation = !mutationSatisfiedForFinal && priorMutationReuse.satisfied;
 
@@ -29091,6 +29266,18 @@ Return ONLY a JSON object:
     }
 
     const providerType = this.provider.type;
+    const providerCaps = getProviderImageCaps(providerType);
+    if (!providerCaps.supportsImages) {
+      const message =
+        "I can't analyze attached images with the current model. Switch to an image-capable model/provider and resend the image.";
+      logger.warn(`[TaskExecutor] ${message} Current provider: ${providerType}`);
+      this.emitEvent("assistant_message", { message });
+      this.emitEvent("log", {
+        message: `Image skipped: current provider "${providerType}" does not support image input.`,
+      });
+      return message;
+    }
+
     const validImages: LLMContent[] = [];
 
     for (const img of images) {

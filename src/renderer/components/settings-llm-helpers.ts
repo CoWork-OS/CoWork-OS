@@ -1,4 +1,8 @@
-import type { LLMSettingsData } from "../../shared/types";
+import type {
+  LLMSettingsData,
+  OpenAIReasoningEffort,
+  LLMTextVerbosity,
+} from "../../shared/types";
 
 export interface ClaudeCredentialInput {
   apiKey?: string;
@@ -60,4 +64,20 @@ export function selectClaudeModelKey(
   }
 
   return providerModels[0]?.key || currentModelKey || "sonnet-4-5";
+}
+
+export function resolveOpenAIReasoningEffort(
+  openai?: LLMSettingsData["openai"] | null,
+): OpenAIReasoningEffort {
+  const value = openai?.reasoningEffort;
+  return value === "low" || value === "medium" || value === "high" || value === "xhigh"
+    ? value
+    : "medium";
+}
+
+export function resolveOpenAITextVerbosity(
+  openai?: LLMSettingsData["openai"] | null,
+): LLMTextVerbosity {
+  const value = openai?.textVerbosity;
+  return value === "low" || value === "medium" || value === "high" ? value : "medium";
 }

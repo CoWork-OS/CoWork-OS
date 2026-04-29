@@ -112,6 +112,7 @@ import {
   UpdateUserFactRequest,
   isTempWorkspaceId,
   AgentConfig,
+  LLMReasoningEffort,
   LLM_PROVIDER_TYPES,
   PdfReviewSummary,
   TaskLearningProgress,
@@ -4486,12 +4487,16 @@ export async function setupIpcHandlers(
     const validated = validateInput(TaskMessageSchema, data, "task message");
     const validatedImages = validated.images;
     try {
-      const result = await agentDaemon.sendMessage(
-        validated.taskId,
-        validated.message,
-        validatedImages,
-        validated.quotedAssistantMessage,
-      );
+	      const result = await agentDaemon.sendMessage(
+	        validated.taskId,
+	        validated.message,
+	        validatedImages,
+	        validated.quotedAssistantMessage,
+	        {
+	          ...(validated.permissionMode ? { permissionMode: validated.permissionMode } : {}),
+	          ...(validated.shellAccess !== undefined ? { shellAccess: validated.shellAccess } : {}),
+	        },
+	      );
       // If the message was queued for a running executor, the executor owns
       // the image data now — skip temp file cleanup so it can read them later.
       if (!result.queued) {
@@ -5509,7 +5514,7 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.LLM_SET_MODEL, async (_, selection: string | {
     providerType?: string;
     modelKey: string;
-    reasoningEffort?: "low" | "medium" | "high" | "extra_high";
+    reasoningEffort?: LLMReasoningEffort;
   }) => {
     const modelKey =
       typeof selection === "string" ? selection : selection?.modelKey;

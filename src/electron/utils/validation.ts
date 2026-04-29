@@ -495,6 +495,8 @@ export const ApprovalResponseSchema = z
 export const PermissionSettingsSchema = z.object({
   version: z.literal(1),
   defaultMode: PermissionModeSchema,
+  defaultShellEnabled: z.boolean().default(false),
+  defaultPermissionAccess: z.enum(["default", "full"]).default("default"),
   rules: z.array(PermissionRuleSchema).default([]),
 });
 
@@ -594,6 +596,8 @@ export const OpenAISettingsSchema = z
   .object({
     apiKey: z.string().max(500).optional(),
     model: z.string().max(200).optional(),
+    reasoningEffort: z.enum(["low", "medium", "high", "xhigh"]).optional(),
+    textVerbosity: z.enum(["low", "medium", "high"]).optional(),
     // OAuth tokens (alternative to API key)
     accessToken: z.string().max(2000).optional(),
     refreshToken: z.string().max(2000).optional(),

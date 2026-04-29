@@ -5,9 +5,9 @@
 When a user reports a failure, error, or unexpected behavior that likely involves runtime/app behavior:
 
 1. Check development logs first, if available.
-2. Read `logs/dev-latest.log` for the most recent captured run.
-3. If `logs/dev-latest.log` is missing or stale for the current repro, run `npm run dev:log` to capture a fresh run.
-4. If needed, inspect the newest timestamped file in `logs/dev-*.log` for full context.
+2. Read `logs/dev-latest.log` for the most recent captured human-readable run, or `logs/dev-latest.jsonl` when structured fields help.
+3. If `logs/dev-latest.log` / `logs/dev-latest.jsonl` are missing or stale for the current repro, run `npm run dev:log` to capture a fresh run.
+4. If needed, inspect the newest timestamped `logs/dev-*.log` / `logs/dev-*.jsonl` pair for full context.
 5. Quote relevant error lines with timestamps when summarizing findings.
 6. If logs are missing, state that clearly and continue with other diagnostics.
 7. If the request is not failure/debug related (for example docs, refactors, or feature questions), skip log triage unless the user explicitly asks for log analysis.
@@ -16,6 +16,9 @@ When a user reports a failure, error, or unexpected behavior that likely involve
 
 - Log capture is controlled by **Settings -> Appearance -> Developer logging** (default off).
 - A forced capture run can be started with `npm run dev:log`.
+- Captured runs write redacted text logs, structured JSONL logs, latest-run mirrors, and a `logs/dev-runs.json` manifest.
+- Default cleanup keeps the last 14 days, always keeps the newest 20 runs, and caps retained `dev-*.log` / `dev-*.jsonl` files at 100 MB.
+- Local cleanup overrides: `COWORK_DEV_LOG_RETENTION_DAYS`, `COWORK_DEV_LOG_MIN_RUNS`, and `COWORK_DEV_LOG_MAX_MB`.
 - Optional local toggle state may exist at `.cowork/dev-log-settings.json`.
 
 ## Dev Startup Commands
@@ -25,7 +28,7 @@ When a user reports a failure, error, or unexpected behavior that likely involve
 - `npm run dev:start` auto-selects an available localhost dev-server port (starting from `COWORK_DEV_SERVER_PORT`, default `5173`) and exports `COWORK_DEV_SERVER_URL` for Electron startup.
 - `npm run dev:start` now checks Electron runtime readiness and, when the package exists but the binary is missing, runs `scripts/setup_native_driver.mjs` automatically before launching.
 - If that repair still fails and logs report a missing Electron binary, run `npm run setup:native` (or `npm run setup`) and retry `npm run dev`.
-- Use `npm run dev:log` to force timestamped capture to `logs/dev-*.log` and `logs/dev-latest.log`.
+- Use `npm run dev:log` to force timestamped capture to `logs/dev-*.log`, `logs/dev-*.jsonl`, `logs/dev-latest.log`, and `logs/dev-latest.jsonl`.
 - Use `npm run dev:electron` (or the wrappers that call it) when starting Electron manually; it clears `ELECTRON_RUN_AS_NODE` to avoid renderer env pollution.
 - Avoid using `npm run dev:react` alone for desktop debugging; it skips Electron preload APIs and can produce misleading behavior.
 
@@ -47,6 +50,8 @@ When a user reports a failure, error, or unexpected behavior that likely involve
 - Use `npm run package` for standard local installer packaging after a full build.
 - `npm run package` also runs `scripts/release-artifact-names.mjs` and `scripts/release-artifact-names.mjs --check` to align and verify updater metadata artifact filenames in `release/`.
 - On macOS distribution/signing flows, use `npm run package:mac`; it loads optional repo-root `.env.mac` (see `scripts/mac-notarize.env.example`) before running build + `electron-builder --mac --publish never`.
+- Use `npm run package:mac:unsigned` to force an unsigned macOS fallback build (sets `COWORK_MAC_UNSIGNED=1` and disables certificate auto-discovery).
+- `npm run package:mac` also respects `CSC_IDENTITY_AUTO_DISCOVERY=false`; when set, packaging uses unsigned macOS fallback settings (`identity: null`, notarization off, Gatekeeper assess off).
 - Packaging icons are now sourced from `build/icon.png` (macOS) and `build/icon.ico` (Windows); update those files for release branding changes.
 - Packaged builds now include skill asset folders via `resources/skills/**/assets/**`; place runtime skill media under each skill's `assets/` directory.
 
@@ -54,6 +59,7 @@ When a user reports a failure, error, or unexpected behavior that likely involve
 
 - When asked to "publish a new release" or ship a new npm version, do **not** publish from a dirty working tree. Use a clean checkout or `git worktree`.
 - Do **not** rely on `prepack`/`npm publish` lifecycle hooks for correctness. This repo's `.npmrc` sets `ignore-scripts=true`, so a naive `npm pack`/`npm publish` can skip the build and ship a broken package.
+- `prepack` currently maps to `npm run build`, but with `ignore-scripts=true` it may not run during `npm pack`/`npm publish`; treat explicit `npm run build` as mandatory.
 - Before any npm publish, explicitly run:
   - `npm ci --no-audit --no-fund`
   - `npm run build`
@@ -112,6 +118,7 @@ When a user reports a failure, error, or unexpected behavior that likely involve
 ## Setup Commands
 
 - Use `npm run setup` for workstation setup; it chains native rebuild/install safeguards.
+- `npm run setup` bootstraps dependencies with `npm install --ignore-scripts --no-audit --no-fund` when Electron is missing from local/parent `node_modules`.
 - `npm run setup` retries `setup:native` when the native step is killed (SIGKILL/OOM style failures); tune retry count with `COWORK_SETUP_NATIVE_OUTER_ATTEMPTS` (default `6`).
 - A successful `npm run setup` run attempts to install git hooks automatically; if that step fails, rerun `npm run hooks:install`.
 - Use `npm run hooks:install` to (re)install local git hooks from `.githooks/` when setup hooks are missing or outdated.

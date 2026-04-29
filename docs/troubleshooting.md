@@ -205,7 +205,7 @@ See [Web Page Artifacts](web-page-artifacts.md) for the expected sidebar/fullscr
 
 ## Browser workbench does not open for website testing
 
-Interactive browser-use prompts should open a visible browser workbench in the right sidebar. This is different from web page artifacts: generated `.html` files use the artifact iframe viewer, while live URLs use the browser workbench.
+Interactive browser-use prompts should open a visible browser workbench in the right sidebar. This is different from web page artifacts: generated `.html` files use the artifact iframe viewer, while live URLs use the browser workbench. See [Browser Workbench](browser-workbench.md) for the expected controls, cursor overlay, screenshots, and annotation behavior.
 
 If a task like "go to example.com and test the application as a normal user" does not open the sidebar browser:
 
@@ -214,6 +214,12 @@ If a task like "go to example.com and test the application as a normal user" doe
 3. If the task explicitly requested `force_headless`, `profile`, `browser_channel`, or `debugger_url`, the tool will use the Playwright/Chrome fallback path instead of the embedded workbench. The legacy `headless` flag alone should not bypass the visible workbench for normal site testing.
 4. If the site requires an existing signed-in Chrome session, use `browser_attach` explicitly. The embedded browser uses a persistent workspace profile and does not silently reuse system Chrome cookies.
 5. Capture a fresh dev log and check for `browserWorkbench:openRequest`, `browserWorkbench:register`, or browser tool errors if the sidebar never appears.
+
+If the sidebar opens but browser actions are hard to follow:
+
+1. Confirm the task is using visible `browser_*` tools rather than external Chrome attach or forced headless mode. Cursor movement is only rendered for the visible in-app webview.
+2. Confirm the Browser Workbench is still open for the selected task. Cursor events are scoped to `{ taskId, sessionId }`.
+3. If screenshots or annotation fail, check that the task has an active workspace folder; captures are saved into the workspace before they can be attached back to the agent.
 
 For a fresh repro log:
 

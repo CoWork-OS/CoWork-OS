@@ -83,6 +83,21 @@ describe("kit-status", () => {
         "",
       ].join("\n"),
     );
+    writeFile(
+      kitPath(tmpDir, "DESIGN.md"),
+      [
+        "---",
+        "name: Test Design System",
+        "colors:",
+        '  primary: "#22d3ee"',
+        "---",
+        "",
+        "# Design System",
+        "",
+        "- Use project tokens for UI work",
+        "",
+      ].join("\n"),
+    );
 
     const agentsPath = kitPath(tmpDir, "AGENTS.md");
     writeKitFileWithSnapshot(
@@ -128,6 +143,7 @@ describe("kit-status", () => {
     const tools = status.files.find((entry) => entry.relPath === path.join(".cowork", "TOOLS.md"));
     const agents = status.files.find((entry) => entry.relPath === path.join(".cowork", "AGENTS.md"));
     const bootstrap = status.files.find((entry) => entry.relPath === path.join(".cowork", "BOOTSTRAP.md"));
+    const design = status.files.find((entry) => entry.relPath === path.join(".cowork", "DESIGN.md"));
 
     expect(tools?.exists).toBe(true);
     expect(tools?.stale).toBe(true);
@@ -136,6 +152,8 @@ describe("kit-status", () => {
 
     expect(agents?.revisionCount).toBe(1);
     expect(bootstrap?.specialHandling).toBe("bootstrap");
+    expect(design?.specialHandling).toBe("design-system");
+    expect(design?.issues).toEqual([]);
     expect(status.lintWarningCount).toBeGreaterThan(0);
     expect(status.lintErrorCount).toBeGreaterThan(0);
     expect(status.onboarding?.bootstrapPresent).toBe(true);

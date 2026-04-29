@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import {
   ChevronLeft,
   ChevronRight,
@@ -8,7 +9,7 @@ import {
 } from "lucide-react";
 import type { FileViewerResult } from "../../electron/preload";
 
-type PresentationPreview = NonNullable<
+export type PresentationPreview = NonNullable<
   NonNullable<FileViewerResult["data"]>["presentationPreview"]
 >;
 
@@ -18,6 +19,9 @@ type PresentationViewerProps = {
   preview: PresentationPreview;
   onOpenExternal: () => void;
   onShowInFinder: () => void;
+  showExternalActions?: boolean;
+  extraActions?: ReactNode;
+  className?: string;
 };
 
 const ZOOM_LEVELS = [75, 100, 125, 150] as const;
@@ -28,15 +32,20 @@ export function PresentationViewer({
   preview,
   onOpenExternal,
   onShowInFinder,
+  showExternalActions = true,
+  extraActions,
+  className,
 }: PresentationViewerProps) {
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
   const [zoom, setZoom] = useState<(typeof ZOOM_LEVELS)[number]>(100);
   const slides = preview.slides;
   const activeSlide = slides[activeSlideIndex] || slides[0] || null;
   const renderedCount = useMemo(
-    () => slides.filter((slide) => Boolean(slide.imageDataUrl)).length,
+    () => slides.filter((slide) => Boolean(slide.imageUrl || slide.imageDataUrl)).length,
     [slides],
   );
+  const getSlideImageSource = (slide: PresentationPreview["slides"][number] | null | undefined) =>
+    slide?.imageUrl || slide?.imageDataUrl || "";
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -56,7 +65,11 @@ export function PresentationViewer({
   const subtitle = [
     `${preview.slideCount} slide${preview.slideCount === 1 ? "" : "s"}`,
     sizeLabel,
-    preview.renderStatus === "rendered" ? `${renderedCount} rendered` : "Text preview",
+    preview.renderStatus === "rendered" || preview.renderStatus === "cached"
+      ? `${renderedCount} rendered`
+      : preview.renderStatus === "rendering"
+        ? "Rendering previews"
+        : "Text preview",
   ]
     .filter(Boolean)
     .join(" • ");
@@ -64,9 +77,10 @@ export function PresentationViewer({
   const goBack = () => setActiveSlideIndex((current) => Math.max(0, current - 1));
   const goForward = () =>
     setActiveSlideIndex((current) => Math.min(slides.length - 1, current + 1));
+  const slideWidthPercent = zoom;
 
   return (
-    <div className="presentation-viewer">
+    <div className={`presentation-viewer${className ? ` ${className}` : ""}`}>
       <aside className="presentation-viewer-sidebar" aria-label="Slides">
         <div className="presentation-viewer-file">
           <div className="presentation-viewer-file-name" title={fileName}>
@@ -84,8 +98,8 @@ export function PresentationViewer({
               title={`Slide ${slide.index}`}
             >
               <span className="presentation-viewer-thumb-number">{slide.index}</span>
-              {slide.imageDataUrl ? (
-                <img src={slide.imageDataUrl} alt={`Slide ${slide.index}`} />
+              {getSlideImageSource(slide) ? (
+                <img src={getSlideImageSource(slide)} alt={`Slide ${slide.index}`} />
               ) : (
                 <span className="presentation-viewer-thumb-text">
                   {slide.title || slide.text || "Blank slide"}
@@ -138,35 +152,40 @@ export function PresentationViewer({
                 ))}
               </select>
             </label>
-            <button
-              type="button"
-              className="presentation-viewer-icon-btn"
-              onClick={onShowInFinder}
-              title="Show in Finder"
-            >
-              <FolderOpen size={16} />
-            </button>
-            <button
-              type="button"
-              className="presentation-viewer-icon-btn"
-              onClick={onOpenExternal}
-              title="Open in external app"
-            >
-              <ExternalLink size={16} />
-            </button>
+            {extraActions}
+            {showExternalActions && (
+              <>
+                <button
+                  type="button"
+                  className="presentation-viewer-icon-btn"
+                  onClick={onShowInFinder}
+                  title="Show in Finder"
+                >
+                  <FolderOpen size={16} />
+                </button>
+                <button
+                  type="button"
+                  className="presentation-viewer-icon-btn"
+                  onClick={onOpenExternal}
+                  title="Open in external app"
+                >
+                  <ExternalLink size={16} />
+                </button>
+              </>
+            )}
           </div>
         </div>
 
         <div className="presentation-viewer-slide-stage">
-          {activeSlide?.imageDataUrl ? (
+          {getSlideImageSource(activeSlide) ? (
             <img
-              src={activeSlide.imageDataUrl}
+              src={getSlideImageSource(activeSlide)}
               alt={`Slide ${activeSlide.index}`}
               className="presentation-viewer-slide-image"
-              style={{ width: `${zoom}%` }}
+              style={{ width: `${slideWidthPercent}%` }}
             />
           ) : (
-            <div className="presentation-viewer-slide-text" style={{ width: `${zoom}%` }}>
+            <div className="presentation-viewer-slide-text" style={{ width: `${slideWidthPercent}%` }}>
               <div className="presentation-viewer-slide-text-kicker">
                 Slide {activeSlide?.index ?? 0}
               </div>
@@ -181,7 +200,7 @@ export function PresentationViewer({
           <pre>{activeSlide?.notes || "No speaker notes"}</pre>
         </div>
 
-        {preview.renderStatus !== "rendered" && preview.renderMessage ? (
+        {preview.renderStatus !== "rendered" && preview.renderStatus !== "cached" && preview.renderMessage ? (
           <div className="presentation-viewer-render-note">{preview.renderMessage}</div>
         ) : null}
       </section>

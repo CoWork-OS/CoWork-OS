@@ -57,6 +57,9 @@ hero:
       text: Web Page Artifacts
       link: /web-page-artifacts
     - theme: alt
+      text: Browser Workbench
+      link: /browser-workbench
+    - theme: alt
       text: Chronicle
       link: /chronicle
     - theme: alt
@@ -116,6 +119,8 @@ features:
     details: Task-created PPTX decks render as compact artifact cards and open into a persisted resizable right-sidebar viewer with thumbnails, slide navigation, zoom, fast text-first loading, cached rendered images, speaker notes, external actions, and fullscreen follow-up context; legacy PowerPoint formats keep external-app/folder actions.
   - title: Web Page Artifacts
     details: Generated HTML/HTM files and built React output entrypoints render as compact artifact cards and open into a persisted resizable right-sidebar sandboxed iframe preview with browser/folder/copy actions and fullscreen follow-up context; React-style projects without build output show a build-output-needed state instead of auto-starting a dev server.
+  - title: Browser Workbench
+    details: Interactive browser-use tasks open a visible right-sidebar browser by default, with shared agent/user page state, functional navigation controls, screenshots, annotation, fullscreen follow-up context, and visible cursor movement during agent clicks, fills, reads, scrolls, and navigation.
   - title: Chronicle
     details: Opt-in desktop recent-screen context for vague on-screen references, with Memory Hub controls, local passive capture, `screen_context` recall, pause/resume, and Mission Control evidence.
   - title: Optional Supermemory

@@ -8,7 +8,7 @@ type InlineDocumentPreviewProps = {
   onOpenViewer?: (path: string) => void;
 };
 
-type SupportedDocumentType = "pdf" | "docx" | "markdown" | "latex" | "text" | "code";
+type SupportedDocumentType = "pdf" | "docx" | "document" | "markdown" | "latex" | "text" | "code";
 
 const PREVIEW_MAX_CHARS = 1600;
 
@@ -30,7 +30,7 @@ function formatFileSize(bytes: number): string {
 }
 
 function isDocumentType(type: string): type is SupportedDocumentType {
-  return type === "pdf" || type === "docx" || type === "markdown" || type === "latex" || type === "text" || type === "code";
+  return type === "pdf" || type === "docx" || type === "document" || type === "markdown" || type === "latex" || type === "text" || type === "code";
 }
 
 function htmlToText(html: string): string {
@@ -48,6 +48,7 @@ function getTypeLabel(type: SupportedDocumentType): string {
     case "pdf":
       return "PDF";
     case "docx":
+    case "document":
       return "Word";
     case "markdown":
       return "Markdown";
@@ -65,9 +66,10 @@ function getPreviewText(data: {
   fileType: SupportedDocumentType;
   content: string | null;
   htmlContent?: string;
+  documentPreview?: { text: string; htmlContent?: string };
 }): string {
-  if (data.fileType === "docx") {
-    return htmlToText(data.htmlContent || "");
+  if (data.fileType === "docx" || data.fileType === "document") {
+    return data.documentPreview?.text || htmlToText(data.documentPreview?.htmlContent || data.htmlContent || "");
   }
   return data.content || "";
 }
@@ -123,6 +125,7 @@ export function InlineDocumentPreview({
             fileType: docType,
             content: response.data.content,
             htmlContent: response.data.htmlContent,
+            documentPreview: response.data.documentPreview,
           }).replace(/\r\n/g, "\n"),
         );
       } catch (e: unknown) {

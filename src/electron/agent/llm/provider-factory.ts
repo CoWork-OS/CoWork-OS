@@ -57,7 +57,6 @@ import type {
 import { getUserDataDir } from "../../utils/user-data-dir";
 import { getSafeStorage } from "../../utils/safe-storage";
 import { createLogger } from "../../utils/logger";
-import { loadPiAiModule } from "./pi-ai-loader";
 import { ModelCapabilityRegistry } from "./ModelCapabilityRegistry";
 import { normalizePromptCachingSettings } from "./prompt-cache";
 
@@ -810,12 +809,16 @@ export interface LLMSettings {
   openai?: {
     apiKey?: string;
     model?: string;
+    reasoningEffort?: "low" | "medium" | "high" | "xhigh";
+    textVerbosity?: "low" | "medium" | "high";
     // OAuth tokens (alternative to API key)
     accessToken?: string;
     refreshToken?: string;
     tokenExpiresAt?: number;
+    accountId?: string;
+    email?: string;
     authMethod?: "api_key" | "oauth";
-  } & ProviderRoutingSettings;
+  } & Omit<ProviderRoutingSettings, "reasoningEffort">;
   azure?: {
     apiKey?: string;
     endpoint?: string;
@@ -1861,7 +1864,8 @@ export class LLMProviderFactory {
           settings.ollama?.model,
           settings.gemini?.model,
           settings.openrouter?.model,
-          settings.openai?.model,
+          settings.openai?.model ||
+            (settings.openai?.authMethod === "oauth" ? "gpt-5.5" : undefined),
           azureDeployment,
           azureAnthropicDeployment,
           settings.groq?.model,
@@ -1907,11 +1911,33 @@ export class LLMProviderFactory {
       openaiApiKey:
         normalizeSecret(overrideConfig?.openaiApiKey) ||
         settings.openai?.apiKey,
+      openaiReasoningEffort:
+        overrideConfig?.openaiReasoningEffort ||
+        settings.openai?.reasoningEffort ||
+        "medium",
+      openaiTextVerbosity:
+        overrideConfig?.openaiTextVerbosity ||
+        settings.openai?.textVerbosity ||
+        "medium",
       openaiAccessToken:
         normalizeSecret(overrideConfig?.openaiAccessToken) ||
         settings.openai?.accessToken,
       openaiRefreshToken: settings.openai?.refreshToken,
       openaiTokenExpiresAt: settings.openai?.tokenExpiresAt,
+      openaiOAuthTokenUpdater: overrideConfig?.openaiOAuthTokenUpdater || (async (tokens) => {
+        const latestSettings = this.loadSettings();
+        latestSettings.openai = {
+          ...latestSettings.openai,
+          accessToken: tokens.access_token,
+          refreshToken: tokens.refresh_token,
+          tokenExpiresAt: tokens.expires_at,
+          accountId: tokens.accountId,
+          email: tokens.email,
+          authMethod: "oauth",
+        };
+        this.saveSettings(latestSettings);
+        this.clearCache();
+      }),
       // Azure OpenAI config - from settings only
       azureApiKey:
         normalizeSecret(overrideConfig?.azureApiKey) || settings.azure?.apiKey,
@@ -2531,10 +2557,38 @@ export class LLMProviderFactory {
       }
 
       case "openai": {
-        const currentModel = settings.openai?.model || "gpt-4o-mini";
-        const modelList =
-          settings.cachedOpenAIModels && settings.cachedOpenAIModels.length > 0
-            ? settings.cachedOpenAIModels
+        const currentModel =
+          settings.openai?.model ||
+          (settings.openai?.authMethod === "oauth" ? "gpt-5.5" : "gpt-4o-mini");
+        const defaultOpenAIModels =
+          settings.openai?.authMethod === "oauth"
+            ? [
+                {
+                  key: "gpt-5.5",
+                  displayName: "GPT-5.5",
+                  description: "Latest ChatGPT/Codex subscription model",
+                },
+                {
+                  key: "gpt-5.4",
+                  displayName: "GPT-5.4",
+                  description: "Current Codex model for ChatGPT subscription access",
+                },
+                {
+                  key: "gpt-5.4-mini",
+                  displayName: "GPT-5.4 Mini",
+                  description: "Fast GPT-5.4 model for ChatGPT subscription access",
+                },
+                {
+                  key: "gpt-5.4-nano",
+                  displayName: "GPT-5.4 Nano",
+                  description: "Fastest GPT-5.4 model for ChatGPT subscription access",
+                },
+                {
+                  key: "gpt-5.3-codex-spark",
+                  displayName: "GPT-5.3 Codex Spark",
+                  description: "Entitlement-dependent Codex Spark model",
+                },
+              ]
             : [
                 {
                   key: "gpt-4o",
@@ -2567,6 +2621,10 @@ export class LLMProviderFactory {
                   description: "Fast reasoning model",
                 },
               ];
+        const modelList =
+          settings.cachedOpenAIModels && settings.cachedOpenAIModels.length > 0
+            ? settings.cachedOpenAIModels
+            : defaultOpenAIModels;
         return {
           currentModel,
           models: attachMetadata(ensureCurrentModel(modelList, currentModel)),
@@ -3603,34 +3661,45 @@ export class LLMProviderFactory {
     if (accessToken && refreshToken && !key) {
       console.log("[OpenAI] Using OAuth - fetching models from pi-ai SDK...");
       try {
-        const { getModels } = await loadPiAiModule();
-        const piAiModels = getModels("openai-codex");
-        const models = piAiModels.map((m) => ({
-          id: m.id,
-          name: m.name || this.formatOpenAIModelName(m.id),
-          description: this.getOpenAIModelDescription(m.id),
-        }));
-
-        // Sort by priority (ChatGPT internal models)
-        models.sort((a, b) => {
-          const priority = (id: string) => {
-            if (id.includes("5.1-codex-mini")) return 0;
-            if (id.includes("5.1-codex-max")) return 1;
-            if (id === "gpt-5.1") return 2;
-            if (id.includes("5.3-codex")) return 3;
-            if (id.includes("5.2-codex")) return 3;
-            if (id === "gpt-5.2") return 4;
-            return 5;
-          };
-          return priority(a.id) - priority(b.id);
+        const provider = new OpenAIProvider({
+          type: "openai",
+          model: "",
+          openaiAccessToken: accessToken,
+          openaiRefreshToken: refreshToken,
+          openaiTokenExpiresAt: settings.openai?.tokenExpiresAt,
         });
-
+        const models = await provider.getAvailableModels();
         console.log(`[OpenAI] Found ${models.length} models via pi-ai SDK`);
         return models;
       } catch (error) {
         console.error("[OpenAI] Failed to get models from pi-ai SDK:", error);
         // Return ChatGPT-specific defaults for OAuth users
         return [
+          {
+            id: "gpt-5.5",
+            name: "GPT-5.5",
+            description: "Latest ChatGPT/Codex subscription model",
+          },
+          {
+            id: "gpt-5.4",
+            name: "GPT-5.4",
+            description: "Current Codex model for ChatGPT subscription access",
+          },
+          {
+            id: "gpt-5.4-mini",
+            name: "GPT-5.4 Mini",
+            description: "Fast GPT-5.4 model for ChatGPT subscription access",
+          },
+          {
+            id: "gpt-5.4-nano",
+            name: "GPT-5.4 Nano",
+            description: "Fastest GPT-5.4 model for ChatGPT subscription access",
+          },
+          {
+            id: "gpt-5.3-codex-spark",
+            name: "GPT-5.3 Codex Spark",
+            description: "Entitlement-dependent Codex Spark model",
+          },
           {
             id: "gpt-5.1-codex-mini",
             name: "GPT-5.1 Codex Mini",

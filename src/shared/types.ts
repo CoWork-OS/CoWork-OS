@@ -79,6 +79,92 @@ export interface MemoryFeaturesSettings {
   defaultArchiveInjectionEnabled?: boolean;
   /** Promote only explicit/high-signal facts into curated memory. */
   autoPromoteToCuratedMemoryEnabled?: boolean;
+  /** Store structured sidecar metadata for archive memories. */
+  structuredObservationsEnabled?: boolean;
+  /** Expose index -> timeline -> details memory recall tools. */
+  progressiveRecallToolsEnabled?: boolean;
+  /** Show the Memory Hub observation inspector. */
+  memoryInspectorEnabled?: boolean;
+}
+
+export type MemoryObservationPrivacyState = "normal" | "private" | "redacted" | "suppressed";
+export type MemoryObservationGeneratedBy = "capture" | "migration" | "manual";
+export type MemoryObservationMigrationStatus = "current" | "backfilled" | "failed";
+
+export interface MemoryObservationMetadata {
+  memoryId: string;
+  workspaceId: string;
+  taskId?: string;
+  origin: string;
+  observationType: string;
+  title: string;
+  subtitle?: string;
+  narrative: string;
+  facts: string[];
+  concepts: string[];
+  filesRead: string[];
+  filesModified: string[];
+  tools: string[];
+  sourceEventIds: string[];
+  contentHash: string;
+  captureReason: string;
+  privacyState: MemoryObservationPrivacyState;
+  generatedBy: MemoryObservationGeneratedBy;
+  migrationStatus: MemoryObservationMigrationStatus;
+  createdAt: number;
+  updatedAt: number;
+  memoryCreatedAt: number;
+  summary?: string;
+  content?: string;
+  tokens?: number;
+  estimatedDetailTokens?: number;
+}
+
+export interface MemoryObservationSearchQuery {
+  workspaceId: string;
+  query?: string;
+  limit?: number;
+  offset?: number;
+  observationTypes?: string[];
+  origins?: string[];
+  privacyStates?: MemoryObservationPrivacyState[];
+  dateStart?: number;
+  dateEnd?: number;
+}
+
+export interface MemoryObservationSearchResult {
+  memoryId: string;
+  workspaceId: string;
+  taskId?: string;
+  title: string;
+  subtitle?: string;
+  snippet: string;
+  observationType: string;
+  origin: string;
+  sourceLabel: string;
+  privacyState: MemoryObservationPrivacyState;
+  concepts: string[];
+  filesRead: string[];
+  filesModified: string[];
+  tools: string[];
+  sourceEventIds: string[];
+  createdAt: number;
+  rank: number;
+  estimatedDetailTokens: number;
+}
+
+export interface MemoryObservationTimelineEntry extends MemoryObservationSearchResult {
+  isAnchor?: boolean;
+}
+
+export interface MemoryObservationBackfillStatus {
+  total: number;
+  processed: number;
+  failed: number;
+  pending: number;
+  running: boolean;
+  lastRunAt?: number;
+  lastError?: string;
 }
 
 export type SupermemorySearchMode = "hybrid" | "memories";
@@ -523,7 +609,7 @@ export interface WorkspaceKitFileStatus {
   stale?: boolean;
   issues?: WorkspaceKitIssue[];
   revisionCount?: number;
-  specialHandling?: "bootstrap" | "heartbeat";
+  specialHandling?: "bootstrap" | "heartbeat" | "design-system";
 }
 
 export interface WorkspaceKitStatus {
@@ -1252,6 +1338,8 @@ export interface PersistedPermissionRule extends PermissionRule {
 export interface PermissionSettingsData {
   version: 1;
   defaultMode: PermissionMode;
+  defaultShellEnabled: boolean;
+  defaultPermissionAccess: "default" | "full";
   rules: PermissionRule[];
 }
 
@@ -1369,6 +1457,9 @@ export type ToolType =
   | "memory_save"
   | "memory_curate"
   | "memory_curated_read"
+  | "memory_search_index"
+  | "memory_timeline"
+  | "memory_details"
   | "supermemory_profile"
   | "supermemory_search"
   | "supermemory_remember"
@@ -1567,6 +1658,9 @@ export const TOOL_GROUPS = {
     "memory_save",
     "memory_curate",
     "memory_curated_read",
+    "memory_search_index",
+    "memory_timeline",
+    "memory_details",
     "supermemory_profile",
     "supermemory_search",
     "supermemory_remember",
@@ -1676,6 +1770,9 @@ export const TOOL_RISK_LEVELS: Record<ToolType, ToolRiskLevel> = {
   memory_save: "write",
   memory_curate: "write",
   memory_curated_read: "read",
+  memory_search_index: "read",
+  memory_timeline: "read",
+  memory_details: "read",
   supermemory_profile: "network",
   supermemory_search: "network",
   supermemory_remember: "network",
@@ -2135,7 +2232,7 @@ export interface Task {
   branchLabel?: string; // Human label for the branch shown in UI/debug surfaces
   resumeStrategy?: "snapshot" | "checkpoint" | "transcript"; // Preferred resume source
   // Origin source for distinguishing how the task was created
-  source?: "manual" | "cron" | "hook" | "api" | "improvement" | "subconscious";
+  source?: "manual" | "cron" | "hook" | "api" | "improvement" | "subconscious" | "symphony";
   // Strategy/routing controls
   strategyLock?: boolean; // When true, do not re-route intent at runtime
   budgetProfile?: "balanced" | "strict" | "aggressive";
@@ -6287,8 +6384,11 @@ export const IPC_CHANNELS = {
   WINDOW_IS_MAXIMIZED: "window:isMaximized",
   RENDERER_PERF_LOG: "renderer:perfLog",
   FILE_OPEN: "file:open",
+  FILE_OPEN_WITH_APP: "file:openWithApp",
   FILE_SHOW_IN_FINDER: "file:showInFinder",
   FILE_READ_FOR_VIEWER: "file:readForViewer",
+  FILE_UPDATE_SPREADSHEET: "file:updateSpreadsheet",
+  FILE_UPDATE_DOCUMENT: "file:updateDocument",
   LLM_WIKI_GET_VAULT_SUMMARY: "llmWiki:getVaultSummary",
   FILE_IMPORT_TO_WORKSPACE: "file:importToWorkspace",
   FILE_IMPORT_DATA_TO_WORKSPACE: "file:importDataToWorkspace",
@@ -6420,6 +6520,10 @@ export const IPC_CHANNELS = {
   CORE_MEMORY_REVIEW_CANDIDATE: "coreMemory:reviewCandidate",
   CORE_MEMORY_LIST_DISTILL_RUNS: "coreMemory:listDistillRuns",
   CORE_MEMORY_RUN_DISTILL_NOW: "coreMemory:runDistillNow",
+  MISSION_CONTROL_GET_BRIEF: "missionControl:getBrief",
+  MISSION_CONTROL_LIST_ITEMS: "missionControl:listItems",
+  MISSION_CONTROL_GET_ITEM_EVIDENCE: "missionControl:getItemEvidence",
+  MISSION_CONTROL_REFRESH: "missionControl:refresh",
 
   // Mission Control - Task Subscriptions
   SUBSCRIPTION_LIST: "subscription:list",
@@ -6478,6 +6582,11 @@ export const IPC_CHANNELS = {
   MC_PLANNER_UPDATE_CONFIG: "missionControl:plannerUpdateConfig",
   MC_PLANNER_RUN: "missionControl:plannerRun",
   MC_PLANNER_LIST_RUNS: "missionControl:plannerListRuns",
+  MC_SYMPHONY_GET_CONFIG: "missionControl:symphonyGetConfig",
+  MC_SYMPHONY_UPDATE_CONFIG: "missionControl:symphonyUpdateConfig",
+  MC_SYMPHONY_STATUS: "missionControl:symphonyStatus",
+  MC_SYMPHONY_RUN: "missionControl:symphonyRun",
+  MC_SYMPHONY_PAUSE: "missionControl:symphonyPause",
 
   // Mission Control - Agent Performance Reviews
   REVIEW_GENERATE: "review:generate",
@@ -7115,6 +7224,15 @@ export const IPC_CHANNELS = {
   MEMORY_GET_STATS: "memory:getStats",
   MEMORY_CLEAR: "memory:clear",
   MEMORY_EVENT: "memory:event",
+  MEMORY_OBSERVATIONS_SEARCH: "memoryObservations:search",
+  MEMORY_OBSERVATIONS_TIMELINE: "memoryObservations:timeline",
+  MEMORY_OBSERVATIONS_DETAILS: "memoryObservations:details",
+  MEMORY_OBSERVATIONS_UPDATE: "memoryObservations:update",
+  MEMORY_OBSERVATIONS_DELETE: "memoryObservations:delete",
+  MEMORY_OBSERVATIONS_REDACT: "memoryObservations:redact",
+  MEMORY_OBSERVATIONS_PROMOTE: "memoryObservations:promote",
+  MEMORY_OBSERVATIONS_REBUILD_METADATA: "memoryObservations:rebuildMetadata",
+  MEMORY_OBSERVATIONS_BACKFILL_STATUS: "memoryObservations:backfillStatus",
   MEMORY_IMPORT_CHATGPT: "memory:importChatGPT",
   MEMORY_IMPORT_CHATGPT_PROGRESS: "memory:importChatGPTProgress",
   MEMORY_IMPORT_CHATGPT_CANCEL: "memory:importChatGPTCancel",
@@ -7436,7 +7554,9 @@ export interface LLMProviderFallbackConfig {
 }
 
 export type LLMReasoningEffort = "low" | "medium" | "high" | "extra_high";
-export type AzureReasoningEffort = LLMReasoningEffort;
+export type OpenAIReasoningEffort = "low" | "medium" | "high" | "xhigh";
+export type AzureReasoningEffort = "low" | "medium" | "high" | "extra_high";
+export type LLMTextVerbosity = "low" | "medium" | "high";
 
 export type PromptCacheSurface =
   | "executor"
@@ -7494,12 +7614,16 @@ export interface LLMSettingsData {
   openai?: {
     apiKey?: string;
     model?: string;
+    reasoningEffort?: OpenAIReasoningEffort;
+    textVerbosity?: LLMTextVerbosity;
     // OAuth tokens (alternative to API key)
     accessToken?: string;
     refreshToken?: string;
     tokenExpiresAt?: number;
+    accountId?: string;
+    email?: string;
     authMethod?: "api_key" | "oauth";
-  } & ProviderRoutingSettings;
+  } & Omit<ProviderRoutingSettings, "reasoningEffort">;
   azure?: {
     apiKey?: string;
     endpoint?: string;
@@ -11440,6 +11564,75 @@ export interface StrategicPlannerConfigUpdate {
   lastRunAt?: number | null;
 }
 
+export type SymphonyRuntimeMode = "native" | "acpx";
+
+export type SymphonyRunStatus = "idle" | "running" | "blocked" | "error";
+
+export interface SymphonyWorkflowDefinition {
+  path: string;
+  config: Record<string, unknown>;
+  promptTemplate: string;
+  loadedAt: number;
+  error?: string;
+}
+
+export interface SymphonyConfig {
+  enabled: boolean;
+  workspaceId?: string;
+  workflowPath?: string;
+  activeStatuses: Issue["status"][];
+  terminalStatuses: Issue["status"][];
+  maxConcurrentIssueRuns: number;
+  approvalPreset: AutonomyPolicyPreset;
+  runtimeMode: SymphonyRuntimeMode;
+  runtimeAgent?: ExternalRuntimeAgent;
+  handoffStatus: Issue["status"];
+  maxRetries: number;
+  retryBaseDelayMs: number;
+  pollIntervalMs: number;
+  createdAt: number;
+  updatedAt: number;
+  lastRunAt?: number;
+}
+
+export interface SymphonyConfigUpdate {
+  enabled?: boolean;
+  workspaceId?: string | null;
+  workflowPath?: string | null;
+  activeStatuses?: Issue["status"][];
+  terminalStatuses?: Issue["status"][];
+  maxConcurrentIssueRuns?: number;
+  approvalPreset?: AutonomyPolicyPreset;
+  runtimeMode?: SymphonyRuntimeMode;
+  runtimeAgent?: ExternalRuntimeAgent | null;
+  handoffStatus?: Issue["status"];
+  maxRetries?: number;
+  retryBaseDelayMs?: number;
+  pollIntervalMs?: number;
+  lastRunAt?: number | null;
+}
+
+export interface SymphonyStatusIssueRef {
+  issueId: string;
+  title: string;
+  status: Issue["status"];
+  taskId?: string;
+  runId?: string;
+  retryCount?: number;
+  retryDueAt?: number;
+  lastDispatchAt?: number;
+}
+
+export interface SymphonyStatus {
+  state: SymphonyRunStatus;
+  config: SymphonyConfig;
+  workflow: SymphonyWorkflowDefinition;
+  activeRuns: SymphonyStatusIssueRef[];
+  retryQueue: SymphonyStatusIssueRef[];
+  latestDispatches: SymphonyStatusIssueRef[];
+  lastError?: string;
+}
+
 export interface StrategicPlannerRun {
   id: string;
   companyId: string;
@@ -11557,6 +11750,103 @@ export interface CompanyCommandCenterSummary {
   reviewQueue: CompanyReviewQueueItem[];
   executionMap: CompanyExecutionMapItem[];
   plannerRuns: StrategicPlannerRun[];
+}
+
+export type MissionControlCategory =
+  | "attention"
+  | "work"
+  | "reviews"
+  | "learnings"
+  | "awareness"
+  | "evidence";
+
+export type MissionControlSeverity =
+  | "action_needed"
+  | "monitor_only"
+  | "successful"
+  | "failed";
+
+export type MissionControlEvidenceSource =
+  | "activity_feed"
+  | "heartbeat_run"
+  | "heartbeat_event"
+  | "heartbeat_signal"
+  | "task"
+  | "mention"
+  | "company_output"
+  | "subconscious_run"
+  | "subconscious_decision"
+  | "subconscious_dispatch"
+  | "core_memory_candidate"
+  | "core_memory_distill_run"
+  | "core_learning"
+  | "awareness_event";
+
+export interface MissionControlScopeRequest {
+  workspaceId?: string | null;
+  companyId?: string | null;
+  agentRoleId?: string | null;
+}
+
+export interface MissionControlListRequest extends MissionControlScopeRequest {
+  categories?: MissionControlCategory[];
+  severities?: MissionControlSeverity[];
+  limit?: number;
+}
+
+export interface MissionControlItem {
+  id: string;
+  fingerprint: string;
+  category: MissionControlCategory;
+  severity: MissionControlSeverity;
+  title: string;
+  summary: string;
+  decision?: string;
+  nextStep?: string;
+  agentRoleId?: string;
+  agentName?: string;
+  workspaceId?: string;
+  workspaceName?: string;
+  companyId?: string;
+  companyName?: string;
+  taskId?: string;
+  issueId?: string;
+  runId?: string;
+  timestamp: number;
+  updatedAt: number;
+  evidenceCount: number;
+}
+
+export interface MissionControlItemEvidence {
+  id: string;
+  itemId: string;
+  sourceType: MissionControlEvidenceSource;
+  sourceId?: string;
+  title: string;
+  summary?: string;
+  payload?: Record<string, unknown>;
+  timestamp: number;
+}
+
+export interface MissionControlBriefSection {
+  title: string;
+  items: MissionControlItem[];
+}
+
+export interface MissionControlBrief {
+  generatedAt: number;
+  attentionCount: number;
+  activeWorkCount: number;
+  reviewCount: number;
+  learningCount: number;
+  awarenessCount: number;
+  evidenceCount: number;
+  latestDecisions: MissionControlItem[];
+  learningChanges: MissionControlItem[];
+  awarenessClusters: MissionControlItem[];
+  activeWork: MissionControlItem[];
+  upcomingReviews: MissionControlItem[];
+  sections: MissionControlBriefSection[];
 }
 
 export interface StrategicPlannerRunRequest {

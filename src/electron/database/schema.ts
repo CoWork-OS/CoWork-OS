@@ -697,6 +697,47 @@ export class DatabaseManager {
         payload TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS mission_control_items (
+        id TEXT PRIMARY KEY,
+        fingerprint TEXT NOT NULL UNIQUE,
+        category TEXT NOT NULL,
+        severity TEXT NOT NULL,
+        title TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        decision TEXT,
+        next_step TEXT,
+        agent_role_id TEXT,
+        agent_name TEXT,
+        workspace_id TEXT,
+        workspace_name TEXT,
+        company_id TEXT,
+        company_name TEXT,
+        task_id TEXT,
+        issue_id TEXT,
+        run_id TEXT,
+        timestamp INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_mission_control_items_scope
+        ON mission_control_items(workspace_id, company_id, timestamp DESC);
+      CREATE INDEX IF NOT EXISTS idx_mission_control_items_category
+        ON mission_control_items(category, severity, timestamp DESC);
+
+      CREATE TABLE IF NOT EXISTS mission_control_item_evidence (
+        id TEXT PRIMARY KEY,
+        item_id TEXT NOT NULL,
+        source_type TEXT NOT NULL,
+        source_id TEXT,
+        title TEXT NOT NULL,
+        summary TEXT,
+        payload_json TEXT,
+        timestamp INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_mission_control_evidence_item
+        ON mission_control_item_evidence(item_id, timestamp DESC);
+
       CREATE TABLE IF NOT EXISTS company_package_sources (
         id TEXT PRIMARY KEY,
         company_id TEXT REFERENCES companies(id) ON DELETE CASCADE,
@@ -1047,6 +1088,33 @@ export class DatabaseManager {
         FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
       );
 
+      CREATE TABLE IF NOT EXISTS memory_observation_metadata (
+        memory_id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        task_id TEXT,
+        origin TEXT NOT NULL DEFAULT 'unknown',
+        observation_type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        subtitle TEXT,
+        narrative TEXT NOT NULL,
+        facts TEXT NOT NULL DEFAULT '[]',
+        concepts TEXT NOT NULL DEFAULT '[]',
+        files_read TEXT NOT NULL DEFAULT '[]',
+        files_modified TEXT NOT NULL DEFAULT '[]',
+        tools TEXT NOT NULL DEFAULT '[]',
+        source_event_ids TEXT NOT NULL DEFAULT '[]',
+        content_hash TEXT NOT NULL,
+        capture_reason TEXT NOT NULL DEFAULT 'memory_capture',
+        privacy_state TEXT NOT NULL DEFAULT 'normal',
+        generated_by TEXT NOT NULL DEFAULT 'capture',
+        migration_status TEXT NOT NULL DEFAULT 'current',
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE,
+        FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
+        FOREIGN KEY (task_id) REFERENCES tasks(id)
+      );
+
       -- Per-workspace memory settings
       CREATE TABLE IF NOT EXISTS memory_settings (
         workspace_id TEXT PRIMARY KEY,
@@ -1075,6 +1143,14 @@ export class DatabaseManager {
       CREATE INDEX IF NOT EXISTS idx_memory_embeddings_workspace ON memory_embeddings(workspace_id);
       CREATE INDEX IF NOT EXISTS idx_memory_summaries_workspace ON memory_summaries(workspace_id);
       CREATE INDEX IF NOT EXISTS idx_memory_summaries_period ON memory_summaries(time_period, period_start);
+      CREATE INDEX IF NOT EXISTS idx_memory_observation_workspace_created
+        ON memory_observation_metadata(workspace_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_observation_type
+        ON memory_observation_metadata(workspace_id, observation_type, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_observation_hash
+        ON memory_observation_metadata(workspace_id, content_hash, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_observation_privacy
+        ON memory_observation_metadata(workspace_id, privacy_state, created_at DESC);
 
       -- Workspace Markdown Memory Index (for kit notes, docs, and other durable markdown context)
       CREATE TABLE IF NOT EXISTS memory_markdown_files (
@@ -1759,6 +1835,68 @@ export class DatabaseManager {
         error,
       );
     }
+
+    try {
+      this.db.exec(`
+        CREATE VIRTUAL TABLE IF NOT EXISTS memory_observation_metadata_fts USING fts5(
+          title,
+          subtitle,
+          narrative,
+          facts,
+          concepts,
+          files_read,
+          files_modified,
+          tools,
+          content='memory_observation_metadata',
+          content_rowid='rowid'
+        );
+
+        CREATE TRIGGER IF NOT EXISTS memory_observation_metadata_fts_insert
+        AFTER INSERT ON memory_observation_metadata BEGIN
+          INSERT INTO memory_observation_metadata_fts(
+            rowid, title, subtitle, narrative, facts, concepts, files_read, files_modified, tools
+          )
+          VALUES (
+            NEW.rowid, NEW.title, NEW.subtitle, NEW.narrative, NEW.facts, NEW.concepts,
+            NEW.files_read, NEW.files_modified, NEW.tools
+          );
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS memory_observation_metadata_fts_delete
+        AFTER DELETE ON memory_observation_metadata BEGIN
+          INSERT INTO memory_observation_metadata_fts(
+            memory_observation_metadata_fts, rowid, title, subtitle, narrative, facts, concepts, files_read, files_modified, tools
+          )
+          VALUES (
+            'delete', OLD.rowid, OLD.title, OLD.subtitle, OLD.narrative, OLD.facts, OLD.concepts,
+            OLD.files_read, OLD.files_modified, OLD.tools
+          );
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS memory_observation_metadata_fts_update
+        AFTER UPDATE ON memory_observation_metadata BEGIN
+          INSERT INTO memory_observation_metadata_fts(
+            memory_observation_metadata_fts, rowid, title, subtitle, narrative, facts, concepts, files_read, files_modified, tools
+          )
+          VALUES (
+            'delete', OLD.rowid, OLD.title, OLD.subtitle, OLD.narrative, OLD.facts, OLD.concepts,
+            OLD.files_read, OLD.files_modified, OLD.tools
+          );
+          INSERT INTO memory_observation_metadata_fts(
+            rowid, title, subtitle, narrative, facts, concepts, files_read, files_modified, tools
+          )
+          VALUES (
+            NEW.rowid, NEW.title, NEW.subtitle, NEW.narrative, NEW.facts, NEW.concepts,
+            NEW.files_read, NEW.files_modified, NEW.tools
+          );
+        END;
+      `);
+    } catch (error) {
+      schemaLogger.warn(
+        "[DatabaseManager] Observation metadata FTS5 initialization failed:",
+        error,
+      );
+    }
   }
 
   private initializeMarkdownMemoryFTS() {
@@ -2226,6 +2364,53 @@ export class DatabaseManager {
       // Table already exists, ignore
     }
 
+    try {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS mission_control_items (
+          id TEXT PRIMARY KEY,
+          fingerprint TEXT NOT NULL UNIQUE,
+          category TEXT NOT NULL,
+          severity TEXT NOT NULL,
+          title TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          decision TEXT,
+          next_step TEXT,
+          agent_role_id TEXT,
+          agent_name TEXT,
+          workspace_id TEXT,
+          workspace_name TEXT,
+          company_id TEXT,
+          company_name TEXT,
+          task_id TEXT,
+          issue_id TEXT,
+          run_id TEXT,
+          timestamp INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_mission_control_items_scope
+          ON mission_control_items(workspace_id, company_id, timestamp DESC);
+        CREATE INDEX IF NOT EXISTS idx_mission_control_items_category
+          ON mission_control_items(category, severity, timestamp DESC);
+
+        CREATE TABLE IF NOT EXISTS mission_control_item_evidence (
+          id TEXT PRIMARY KEY,
+          item_id TEXT NOT NULL,
+          source_type TEXT NOT NULL,
+          source_id TEXT,
+          title TEXT NOT NULL,
+          summary TEXT,
+          payload_json TEXT,
+          timestamp INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_mission_control_evidence_item
+          ON mission_control_item_evidence(item_id, timestamp DESC);
+      `);
+    } catch {
+      // Table already exists, ignore
+    }
+
     // Migration: Create agent_mentions table for inter-agent communication
     try {
       this.db.exec(`
@@ -2479,6 +2664,69 @@ export class DatabaseManager {
     }
 
     // ============ Mission Control Migrations ============
+
+    try {
+      const missionControlForeignKeys = [
+        ...(this.db
+          .prepare("PRAGMA foreign_key_list(mission_control_items)")
+          .all() as Array<unknown>),
+        ...(this.db
+          .prepare("PRAGMA foreign_key_list(mission_control_item_evidence)")
+          .all() as Array<unknown>),
+      ];
+
+      if (missionControlForeignKeys.length > 0) {
+        this.db.exec(`
+          DROP TABLE IF EXISTS mission_control_item_evidence;
+          DROP TABLE IF EXISTS mission_control_items;
+        `);
+      }
+
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS mission_control_items (
+          id TEXT PRIMARY KEY,
+          fingerprint TEXT NOT NULL UNIQUE,
+          category TEXT NOT NULL,
+          severity TEXT NOT NULL,
+          title TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          decision TEXT,
+          next_step TEXT,
+          agent_role_id TEXT,
+          agent_name TEXT,
+          workspace_id TEXT,
+          workspace_name TEXT,
+          company_id TEXT,
+          company_name TEXT,
+          task_id TEXT,
+          issue_id TEXT,
+          run_id TEXT,
+          timestamp INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_mission_control_items_scope
+          ON mission_control_items(workspace_id, company_id, timestamp DESC);
+        CREATE INDEX IF NOT EXISTS idx_mission_control_items_category
+          ON mission_control_items(category, severity, timestamp DESC);
+
+        CREATE TABLE IF NOT EXISTS mission_control_item_evidence (
+          id TEXT PRIMARY KEY,
+          item_id TEXT NOT NULL,
+          source_type TEXT NOT NULL,
+          source_id TEXT,
+          title TEXT NOT NULL,
+          summary TEXT,
+          payload_json TEXT,
+          timestamp INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_mission_control_evidence_item
+          ON mission_control_item_evidence(item_id, timestamp DESC);
+      `);
+    } catch (error) {
+      schemaLogger.warn("[DatabaseManager] Mission Control projection migration failed:", error);
+    }
 
     // Migration: Add heartbeat and autonomy columns to agent_roles
     const missionControlColumns = [

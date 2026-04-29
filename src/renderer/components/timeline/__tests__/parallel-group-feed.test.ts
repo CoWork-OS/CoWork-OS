@@ -55,6 +55,68 @@ describe("ParallelGroupFeed", () => {
     expect(markup).toContain("Searching the web");
   });
 
+  it("renders an image generation frame while generate_image is running", () => {
+    const markup = render(
+      React.createElement(ParallelGroupFeed, {
+        group: makeGroup({
+          lanes: [
+            {
+              laneKey: "use-1",
+              toolUseId: "use-1",
+              toolName: "generate_image",
+              toolCallIndex: 1,
+              title: "Using generate_image",
+              status: "in_progress",
+              startedAt: 1001,
+            },
+            {
+              laneKey: "use-2",
+              toolUseId: "use-2",
+              toolName: "task_history",
+              toolCallIndex: 2,
+              title: "Loaded task history",
+              status: "completed",
+              startedAt: 1002,
+            },
+          ],
+        }),
+        timeLabel: "12:01",
+        formatTime: () => "12:01",
+      }),
+    );
+
+    expect(markup).toContain("Using generate_image");
+    expect(markup).toContain("parallel-group-feed-image-frame");
+    expect(markup).toContain('aria-label="Generating image"');
+  });
+
+  it("does not render the image generation frame after generate_image completes", () => {
+    const markup = render(
+      React.createElement(ParallelGroupFeed, {
+        group: makeGroup({
+          status: "completed",
+          lanes: [
+            {
+              laneKey: "use-1",
+              toolUseId: "use-1",
+              toolName: "generate_image",
+              toolCallIndex: 1,
+              title: "Generated image",
+              status: "completed",
+              startedAt: 1001,
+              finishedAt: 1200,
+            },
+          ],
+        }),
+        timeLabel: "12:03",
+        formatTime: () => "12:03",
+      }),
+    );
+
+    expect(markup).toContain("Generated image");
+    expect(markup).not.toContain("parallel-group-feed-image-frame");
+  });
+
   it("renders completed groups collapsed by default", () => {
     const markup = render(
       React.createElement(ParallelGroupFeed, {

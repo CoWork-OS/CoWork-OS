@@ -18,16 +18,21 @@ import type {
   CoreLearningsEntry,
   Goal,
   HeartbeatEvent,
-  HeartbeatDispatchKind,
   HeartbeatRun,
   HeartbeatRunEvent,
-  HeartbeatSignal,
-  HeartbeatSignalFamily,
   Issue,
   IssueComment,
+  MissionControlBrief,
+  MissionControlCategory,
+  MissionControlItem,
+  MissionControlItemEvidence,
+  MissionControlSeverity,
   Project,
   StrategicPlannerConfig,
   StrategicPlannerRun,
+  SymphonyConfig,
+  SymphonyConfigUpdate,
+  SymphonyStatus,
   Task,
   Workspace,
 } from "../../../shared/types";
@@ -115,7 +120,7 @@ export const AUTONOMY_BADGES: Record<string, { label: string; color: string }> =
 
 export type FeedItem = {
   id: string;
-  type: "comments" | "tasks" | "status";
+  type: "comments" | "tasks" | "status" | MissionControlCategory;
   agentId?: string;
   agentName: string;
   content: string;
@@ -129,7 +134,9 @@ type MissionControlHeartbeatEvent = HeartbeatEvent & {
   rendererEventId: string;
 };
 
-export type MCTab = "overview" | "agents" | "board" | "feed" | "ops";
+export type MissionControlCategoryFilter = "all" | MissionControlCategory;
+export type MissionControlSeverityFilter = "all" | MissionControlSeverity;
+export type MCTab = "overview" | "agents" | "board" | "intelligence" | "feed" | "ops";
 export type OpsSubTab = "overview" | "operators" | "outputs" | "execution" | "planner" | "harness";
 export type DetailPanelView =
   | { kind: "task"; taskId: string }
@@ -150,57 +157,6 @@ function normalizeMissionControlAgent(agent: AgentRole): AgentRole {
     ...agent,
     displayName: normalizeMissionControlAgentDisplayName(agent.displayName),
   };
-}
-
-function formatHeartbeatSignalFamily(signalFamily?: HeartbeatSignalFamily): string {
-  switch (signalFamily) {
-    case "urgent_interrupt":
-      return "urgent interrupt";
-    case "focus_state":
-      return "focus state";
-    case "open_loop_pressure":
-      return "open loop";
-    case "correction_learning":
-      return "correction";
-    case "memory_drift":
-      return "memory";
-    case "cross_workspace_patterns":
-      return "cross-workspace";
-    case "suggestion_aging":
-      return "stale suggestion";
-    case "awareness_signal":
-      return "awareness";
-    case "maintenance":
-      return "maintenance";
-    case "mentions":
-      return "mention";
-    case "assigned_tasks":
-      return "assigned task";
-    default:
-      return "heartbeat";
-  }
-}
-
-function formatHeartbeatDispatchKind(dispatchKind?: HeartbeatDispatchKind): string {
-  switch (dispatchKind) {
-    case "task":
-      return "task";
-    case "suggestion":
-      return "suggestion";
-    case "runbook":
-      return "runbook";
-    case "cron_handoff":
-      return "handoff";
-    default:
-      return "dispatch";
-  }
-}
-
-function formatHeartbeatSignalText(signal?: HeartbeatSignal): string {
-  if (!signal) return "heartbeat signal";
-  const reason = signal.reason?.trim();
-  if (reason) return reason;
-  return `${formatHeartbeatSignalFamily(signal.signalFamily)} signal`;
 }
 
 export function getTaskPriorityMeta(priority?: number): TaskPriorityMeta {
@@ -317,8 +273,16 @@ export function useMissionControlData(
   // ── Planner ──
   const [plannerConfig, setPlannerConfig] = useState<StrategicPlannerConfig | null>(null);
   const [plannerRuns, setPlannerRuns] = useState<StrategicPlannerRun[]>([]);
+  const [symphonyConfig, setSymphonyConfig] = useState<SymphonyConfig | null>(null);
+  const [symphonyStatus, setSymphonyStatus] = useState<SymphonyStatus | null>(null);
+  const [symphonySaving, setSymphonySaving] = useState(false);
+  const [symphonyRunning, setSymphonyRunning] = useState(false);
   const [selectedPlannerRunId, setSelectedPlannerRunId] = useState<string | null>(null);
   const [commandCenterSummary, setCommandCenterSummary] = useState<CompanyCommandCenterSummary | null>(null);
+  const [missionControlBrief, setMissionControlBrief] = useState<MissionControlBrief | null>(null);
+  const [missionControlItems, setMissionControlItems] = useState<MissionControlItem[]>([]);
+  const [missionControlEvidence, setMissionControlEvidence] = useState<Record<string, MissionControlItemEvidence[]>>({});
+  const [expandedMissionControlItems, setExpandedMissionControlItems] = useState<Record<string, boolean>>({});
   const [coreFailureRecords, setCoreFailureRecords] = useState<CoreFailureRecord[]>([]);
   const [coreFailureClusters, setCoreFailureClusters] = useState<CoreFailureCluster[]>([]);
   const [coreEvalCases, setCoreEvalCases] = useState<CoreEvalCase[]>([]);
@@ -335,7 +299,8 @@ export function useMissionControlData(
   const [opsSubTab, setOpsSubTab] = useState<OpsSubTab>("overview");
   const [detailPanel, setDetailPanel] = useState<DetailPanelView>(null);
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
-  const [feedFilter, setFeedFilter] = useState<"all" | "tasks" | "comments" | "status">("all");
+  const [feedFilter, setFeedFilter] = useState<MissionControlCategoryFilter>("all");
+  const [feedSeverityFilter, setFeedSeverityFilter] = useState<MissionControlSeverityFilter>("all");
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
 
@@ -356,11 +321,20 @@ export function useMissionControlData(
   // ── Refs for stable subscriptions ──
   const tasksRef = useRef<Task[]>([]);
   const workspaceIdRef = useRef<string | null>(null);
+  const selectedCompanyIdRef = useRef<string | null>(null);
+  const selectedAgentRef = useRef<string | null>(null);
+  const feedFilterRef = useRef<MissionControlCategoryFilter>("all");
+  const feedSeverityFilterRef = useRef<MissionControlSeverityFilter>("all");
+  const hasLoadedInitialDataRef = useRef(false);
   const visibleWorkspaceIdsRef = useRef<Set<string>>(new Set());
   const agentContext = useAgentContext();
 
   useEffect(() => { tasksRef.current = tasks; }, [tasks]);
   useEffect(() => { workspaceIdRef.current = selectedWorkspaceId; }, [selectedWorkspaceId]);
+  useEffect(() => { selectedCompanyIdRef.current = selectedCompanyId; }, [selectedCompanyId]);
+  useEffect(() => { selectedAgentRef.current = selectedAgent; }, [selectedAgent]);
+  useEffect(() => { feedFilterRef.current = feedFilter; }, [feedFilter]);
+  useEffect(() => { feedSeverityFilterRef.current = feedSeverityFilter; }, [feedSeverityFilter]);
   useEffect(() => { setCommentText(""); }, [detailPanel]);
   useEffect(() => {
     if (!selectedWorkspaceId) return;
@@ -436,6 +410,21 @@ export function useMissionControlData(
     } finally { setPlannerLoading(false); }
   }, []);
 
+  const loadSymphonyData = useCallback(async () => {
+    try {
+      const [config, status] = await Promise.all([
+        window.electronAPI.getSymphonyConfig(),
+        window.electronAPI.getSymphonyStatus(),
+      ]);
+      setSymphonyConfig(config);
+      setSymphonyStatus(status);
+    } catch (err) {
+      logger.error("Failed to load Symphony data:", err);
+      setSymphonyConfig(null);
+      setSymphonyStatus(null);
+    }
+  }, []);
+
   const loadCompanyOps = useCallback(async (companyId: string) => {
     try {
       const [g, p, i] = await Promise.all([
@@ -460,6 +449,53 @@ export function useMissionControlData(
       setCommandCenterSummary(null);
     }
   }, []);
+
+  const buildMissionControlScope = useCallback((workspaceId?: string | null) => ({
+    workspaceId: workspaceId && workspaceId !== ALL_WORKSPACES_ID ? workspaceId : null,
+    companyId: selectedCompanyIdRef.current || null,
+    agentRoleId: selectedAgentRef.current || null,
+  }), []);
+
+  const loadMissionControlIntelligence = useCallback(async (workspaceId?: string | null) => {
+    try {
+      const scope = buildMissionControlScope(workspaceId ?? workspaceIdRef.current);
+      const categoryFilter = feedFilterRef.current;
+      const severityFilter = feedSeverityFilterRef.current;
+      const brief = await window.electronAPI.refreshMissionControl(scope);
+      const items = await window.electronAPI.listMissionControlItems({
+        ...scope,
+        categories: categoryFilter === "all" ? undefined : [categoryFilter],
+        severities: severityFilter === "all" ? undefined : [severityFilter],
+        limit: 100,
+      });
+      setMissionControlBrief(brief);
+      setMissionControlItems(items);
+    } catch (err) {
+      logger.error("Failed to load Mission Control intelligence:", err);
+      setMissionControlBrief(null);
+      setMissionControlItems([]);
+    }
+  }, [buildMissionControlScope]);
+
+  const loadMissionControlEvidence = useCallback(async (itemId: string) => {
+    try {
+      const evidence = await window.electronAPI.getMissionControlItemEvidence(itemId);
+      setMissionControlEvidence((prev) => ({ ...prev, [itemId]: evidence }));
+    } catch (err) {
+      logger.error("Failed to load Mission Control evidence:", err);
+      setMissionControlEvidence((prev) => ({ ...prev, [itemId]: [] }));
+    }
+  }, []);
+
+  const toggleMissionControlEvidence = useCallback((itemId: string) => {
+    setExpandedMissionControlItems((prev) => {
+      const nextExpanded = !prev[itemId];
+      if (nextExpanded && !missionControlEvidence[itemId]) {
+        void loadMissionControlEvidence(itemId);
+      }
+      return { ...prev, [itemId]: nextExpanded };
+    });
+  }, [loadMissionControlEvidence, missionControlEvidence]);
 
   const loadCoreHarnessData = useCallback(async (workspaceId: string | null) => {
     try {
@@ -572,11 +608,13 @@ export function useMissionControlData(
   }, []);
 
   const loadData = useCallback(async (workspaceId: string) => {
+    const showBlockingLoader = !hasLoadedInitialDataRef.current;
     try {
-      setLoading(true);
+      if (showBlockingLoader) setLoading(true);
       const [result] = await Promise.all([
         loadWorkspaceScopedData(workspaceId, workspaces),
         loadCoreHarnessData(workspaceId),
+        loadMissionControlIntelligence(workspaceId),
       ]);
       setAgents(result.loadedAgents);
       setHeartbeatStatuses(result.statuses);
@@ -585,8 +623,11 @@ export function useMissionControlData(
       setActivities(result.loadedActivities);
       setMentions(result.loadedMentions);
     } catch (err) { logger.error("Failed to load mission control data:", err); }
-    finally { setLoading(false); }
-  }, [loadCoreHarnessData, loadWorkspaceScopedData, workspaces]);
+    finally {
+      hasLoadedInitialDataRef.current = true;
+      if (showBlockingLoader) setLoading(false);
+    }
+  }, [loadCoreHarnessData, loadMissionControlIntelligence, loadWorkspaceScopedData, workspaces]);
 
   const handleManualRefresh = useCallback(async () => {
     if (!selectedWorkspaceId && !selectedCompanyId) return;
@@ -596,6 +637,7 @@ export function useMissionControlData(
         const [result] = await Promise.all([
           loadWorkspaceScopedData(selectedWorkspaceId, workspaces),
           loadCoreHarnessData(selectedWorkspaceId),
+          loadMissionControlIntelligence(selectedWorkspaceId),
         ]);
         setHeartbeatStatuses(result.statuses);
         setTasks(result.loadedTasks);
@@ -607,14 +649,17 @@ export function useMissionControlData(
         await loadPlannerData(selectedCompanyId);
         await loadCompanyOps(selectedCompanyId);
         await loadCommandCenterSummary(selectedCompanyId);
+        await loadMissionControlIntelligence(selectedWorkspaceId);
       }
+      await loadSymphonyData();
     } catch (err) { logger.error("Failed to refresh:", err); }
     finally { setIsRefreshing(false); }
-  }, [loadCommandCenterSummary, loadCompanyOps, loadCoreHarnessData, loadPlannerData, loadWorkspaceScopedData, selectedCompanyId, selectedWorkspaceId, workspaces]);
+  }, [loadCommandCenterSummary, loadCompanyOps, loadCoreHarnessData, loadMissionControlIntelligence, loadPlannerData, loadSymphonyData, loadWorkspaceScopedData, selectedCompanyId, selectedWorkspaceId, workspaces]);
 
   // ── Effects: Load on selection change ──
   useEffect(() => { loadWorkspaces(); }, [loadWorkspaces]);
   useEffect(() => { loadCompanies(); }, [loadCompanies]);
+  useEffect(() => { void loadSymphonyData(); }, [loadSymphonyData]);
   useEffect(() => { if (selectedWorkspaceId) loadData(selectedWorkspaceId); }, [selectedWorkspaceId, loadData]);
 
   useEffect(() => {
@@ -622,6 +667,7 @@ export function useMissionControlData(
       void loadPlannerData(selectedCompanyId);
       void loadCompanyOps(selectedCompanyId);
       void loadCommandCenterSummary(selectedCompanyId);
+      void loadMissionControlIntelligence(selectedWorkspaceId);
     } else {
       setPlannerConfig(null); setPlannerRuns([]); setCommandCenterSummary(null);
       setGoals([]); setProjects([]); setIssues([]);
@@ -629,7 +675,11 @@ export function useMissionControlData(
       setIssueComments([]); setIssueRuns([]); setRunEvents([]);
     }
     setSelectedGoalFilter("all"); setSelectedProjectFilter("all");
-  }, [selectedCompanyId, loadCommandCenterSummary, loadCompanyOps, loadPlannerData]);
+  }, [selectedCompanyId, selectedWorkspaceId, loadCommandCenterSummary, loadCompanyOps, loadMissionControlIntelligence, loadPlannerData]);
+
+  useEffect(() => {
+    if (selectedWorkspaceId) void loadMissionControlIntelligence(selectedWorkspaceId);
+  }, [feedFilter, feedSeverityFilter, selectedAgent, selectedWorkspaceId, loadMissionControlIntelligence]);
 
   useEffect(() => {
     if (!initialCompanyId) return;
@@ -651,6 +701,20 @@ export function useMissionControlData(
 
   // ── Event subscriptions (stable, empty deps) ──
   useEffect(() => {
+    const refreshMissionControlSnapshot = () => {
+      const workspaceId = workspaceIdRef.current && workspaceIdRef.current !== ALL_WORKSPACES_ID
+        ? workspaceIdRef.current
+        : null;
+      const companyId = selectedCompanyIdRef.current || null;
+      void window.electronAPI.refreshMissionControl({ workspaceId, companyId })
+        .then(async (brief) => {
+          const items = await window.electronAPI.listMissionControlItems({ workspaceId, companyId, limit: 100 });
+          setMissionControlBrief(brief);
+          setMissionControlItems(items);
+        })
+        .catch(() => {});
+    };
+
     const isWorkspaceVisible = (workspaceId?: string | null) => {
       if (!workspaceId) return false;
       if (workspaceIdRef.current === ALL_WORKSPACES_ID) {
@@ -686,6 +750,7 @@ export function useMissionControlData(
           };
         }),
       );
+      refreshMissionControlSnapshot();
     });
 
     const unsubActivities = window.electronAPI.onActivityEvent((event) => {
@@ -693,6 +758,7 @@ export function useMissionControlData(
         case "created":
           if (isWorkspaceVisible(event.activity?.workspaceId)) {
             setActivities((prev) => [event.activity!, ...prev].slice(0, 200));
+            refreshMissionControlSnapshot();
           }
           break;
         case "read":
@@ -719,7 +785,10 @@ export function useMissionControlData(
     const unsubMentions = window.electronAPI.onMentionEvent((event) => {
       if (!event.mention || !isWorkspaceVisible(event.mention.workspaceId)) return;
       switch (event.type) {
-        case "created": setMentions((prev) => [event.mention!, ...prev]); break;
+        case "created":
+          setMentions((prev) => [event.mention!, ...prev]);
+          refreshMissionControlSnapshot();
+          break;
         case "acknowledged": case "completed": case "dismissed":
           setMentions((prev) => prev.map((m) => m.id === event.mention!.id ? event.mention! : m));
           break;
@@ -985,6 +1054,34 @@ export function useMissionControlData(
     finally { setPlannerRunning(false); }
   }, [handleManualRefresh, loadCompanyOps, loadPlannerData, selectedCompanyId, selectedWorkspaceId]);
 
+  const handleSymphonyConfigChange = useCallback(async (updates: SymphonyConfigUpdate) => {
+    try {
+      setSymphonySaving(true);
+      const next = await window.electronAPI.updateSymphonyConfig(updates);
+      setSymphonyConfig(next);
+      setSymphonyStatus(await window.electronAPI.getSymphonyStatus());
+    } catch (err) {
+      logger.error("Failed to update Symphony config:", err);
+    } finally {
+      setSymphonySaving(false);
+    }
+  }, []);
+
+  const handleRunSymphony = useCallback(async () => {
+    try {
+      setSymphonyRunning(true);
+      const status = await window.electronAPI.runSymphony();
+      setSymphonyStatus(status);
+      setSymphonyConfig(status.config);
+      if (selectedCompanyId) await loadCompanyOps(selectedCompanyId);
+      if (selectedWorkspaceId) await handleManualRefresh();
+    } catch (err) {
+      logger.error("Failed to run Symphony:", err);
+    } finally {
+      setSymphonyRunning(false);
+    }
+  }, [handleManualRefresh, loadCompanyOps, selectedCompanyId, selectedWorkspaceId]);
+
   // ── Comment action ──
   const handlePostComment = useCallback(async () => {
     if (!detailPanel || detailPanel.kind !== "task") return;
@@ -1145,109 +1242,18 @@ export function useMissionControlData(
 
   // ── Feed items ──
   const feedItems = useMemo(() => {
-    const formatHeartbeatEventContent = (event: HeartbeatEvent): string => {
-      switch (event.type) {
-        case "work_found":
-          return agentContext.getUiCopy("mcHeartbeatFound", {
-            mentions: event.result?.pendingMentions || 0,
-            tasks: event.result?.assignedTasks || 0,
-          });
-        case "signal_received":
-          return `received signal: ${formatHeartbeatSignalText(event.signal)}`;
-        case "signal_merged": {
-          const mergeCount = event.signal?.mergedCount && event.signal.mergedCount > 1
-            ? ` (${event.signal.mergedCount}x)`
-            : "";
-          return `merged repeated signal: ${formatHeartbeatSignalText(event.signal)}${mergeCount}`;
-        }
-        case "pulse_started":
-          return "started background review";
-        case "pulse_completed":
-          return event.result?.triggerReason
-            ? `completed background review: ${event.result.triggerReason}`
-            : "completed background review";
-        case "pulse_deferred":
-          return event.result?.deferredReason || event.deferred?.reason
-            ? `deferred background review: ${event.result?.deferredReason || event.deferred?.reason}`
-            : "deferred background review";
-        case "dispatch_started":
-          return `started ${formatHeartbeatDispatchKind(event.dispatchKind)} dispatch`;
-        case "dispatch_completed":
-          return event.result?.taskCreated
-            ? `completed ${formatHeartbeatDispatchKind(event.dispatchKind)} dispatch and created a task`
-            : `completed ${formatHeartbeatDispatchKind(event.dispatchKind)} dispatch`;
-        case "dispatch_skipped":
-          return event.result?.triggerReason
-            ? `skipped ${formatHeartbeatDispatchKind(event.dispatchKind)} dispatch: ${event.result.triggerReason}`
-            : `skipped ${formatHeartbeatDispatchKind(event.dispatchKind)} dispatch`;
-        case "wake_queued":
-          return event.wake?.text ? `queued wake: ${event.wake.text}` : "queued background review wake";
-        case "wake_coalesced":
-          return event.wake?.text ? `coalesced wake: ${event.wake.text}` : "coalesced repeated wake";
-        case "wake_queue_saturated":
-          return "dropped wake because the queue was saturated";
-        case "wake_immediate_deferred":
-          return "deferred immediate wake until the next review";
-        case "no_work":
-          return event.result?.triggerReason
-            ? `no action needed: ${event.result.triggerReason}`
-            : "no action needed";
-        case "started":
-          return "background review started";
-        case "completed":
-          return "background review completed";
-        case "error":
-          return event.error ? `background review error: ${event.error}` : "background review error";
-        default:
-          return event.type;
-      }
-    };
-
-    const activityItems = activities.map((activity) => {
-      const mappedType =
-        activity.activityType === "comment" || activity.activityType === "mention" ? "comments"
-        : activity.activityType.startsWith("task_") || activity.activityType === "agent_assigned" ? "tasks"
-        : "status";
-      const agentName =
-        activity.actorType === "user" ? agentContext.getUiCopy("activityActorUser")
-        : getAgent(activity.agentRoleId)?.displayName || agentContext.getUiCopy("activityActorSystem");
-      const content = activity.description ? `${activity.title} — ${activity.description}` : activity.title;
-      return {
-        id: activity.id,
-        type: mappedType as FeedItem["type"],
-        agentId: activity.agentRoleId,
-        agentName,
-        content,
-        taskId: activity.taskId,
-        workspaceId: activity.workspaceId,
-        workspaceName: getWorkspaceName(activity.workspaceId),
-        timestamp: activity.createdAt,
-      };
-    });
-
-    const heartbeatItems = events
-      .filter((e) => { if (e.type === "completed") return false; if (e.type === "no_work" && e.result?.silent) return false; return true; })
-      .map<FeedItem>((e) => ({
-        id: e.rendererEventId,
-        type: "status",
-        agentId: e.agentRoleId,
-        agentName: normalizeMissionControlAgentDisplayName(e.agentName),
-        content: formatHeartbeatEventContent(e),
-        timestamp: e.timestamp,
-        taskId: undefined,
-        workspaceId: undefined,
-        workspaceName: undefined,
-      }));
-
-    return [...heartbeatItems, ...activityItems]
-      .filter((item) => {
-        if (feedFilter !== "all" && item.type !== feedFilter) return false;
-        if (selectedAgent) { if (!item.agentId || item.agentId !== selectedAgent) return false; }
-        return true;
-      })
-      .sort((a, b) => b.timestamp - a.timestamp)
-      .slice(0, 50);
-  }, [activities, events, feedFilter, selectedAgent, getAgent, agentContext, getWorkspaceName]);
+    return missionControlItems.map<FeedItem>((item) => ({
+      id: item.id,
+      type: item.category,
+      agentId: item.agentRoleId,
+      agentName: item.agentName || agentContext.getUiCopy("activityActorSystem"),
+      content: item.decision ? `${item.title} — ${item.summary} Decision: ${item.decision}` : `${item.title} — ${item.summary}`,
+      taskId: item.taskId,
+      workspaceId: item.workspaceId,
+      workspaceName: item.workspaceName,
+      timestamp: item.timestamp,
+    }));
+  }, [agentContext, missionControlItems]);
 
   // ── Utilities ──
   const formatRelativeTime = useCallback((timestamp?: number) => {
@@ -1279,7 +1285,10 @@ export function useMissionControlData(
 
     // Planner
     plannerConfig, plannerRuns, selectedPlannerRunId, setSelectedPlannerRunId,
+    symphonyConfig, symphonyStatus, symphonySaving, symphonyRunning,
     commandCenterSummary, plannerLoading, plannerSaving, plannerRunning,
+    missionControlBrief, missionControlItems, missionControlEvidence,
+    expandedMissionControlItems,
     coreFailureRecords, coreFailureClusters, coreEvalCases, coreExperiments, coreLearnings,
 
     // UI state
@@ -1288,6 +1297,7 @@ export function useMissionControlData(
     detailPanel, setDetailPanel,
     selectedAgent, setSelectedAgent,
     feedFilter, setFeedFilter,
+    feedSeverityFilter, setFeedSeverityFilter,
     dragOverColumn, setDragOverColumn,
     currentTime,
 
@@ -1322,7 +1332,9 @@ export function useMissionControlData(
     handleSetTaskPriority, handleSetTaskDueDate, handleSetTaskEstimate,
     handleAddTaskLabel, handleRemoveTaskLabel,
     handlePlannerConfigChange, handleRunPlanner, handlePostComment,
+    handleSymphonyConfigChange, handleRunSymphony,
     handleCreateAgent, handleEditAgent, handleSaveAgent,
+    loadMissionControlIntelligence, loadMissionControlEvidence, toggleMissionControlEvidence,
     formatRelativeTime, formatTaskEstimate, getTaskDueInfo, getTaskPriorityMeta,
     agentContext,
   };

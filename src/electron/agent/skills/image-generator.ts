@@ -18,7 +18,7 @@ export type ImageProvider = "gemini" | "openai" | "openai-codex" | "azure" | "op
  *
  * Notes:
  * - Gemini uses fixed model IDs under the hood, mapped from internal presets.
- * - OpenAI models are passed through to the Images API (e.g. gpt-image-1.5).
+ * - OpenAI models are passed through to the Images API (e.g. gpt-image-2).
  * - Azure OpenAI uses deployments; for Azure, "model" maps to deployment name.
  */
 export type ImageModel =
@@ -48,7 +48,7 @@ export interface ImageGenerationRequest {
   /**
    * Optional model override.
    * - Gemini: gemini-image-fast | gemini-image-pro
-   * - OpenAI: gpt-image-1 | gpt-image-1.5 | dall-e-3 | dall-e-2 (also accepts "gpt-1.5" alias)
+   * - OpenAI: gpt-image-2 | gpt-image-1 | gpt-image-1.5 | dall-e-3 | dall-e-2 (also accepts "gpt-2" alias)
    * - Azure: deployment name
    */
   model?: ImageModel;
@@ -202,11 +202,24 @@ const OPENAI_CODEX_PREFERRED_HOST_MODELS = [
   "gpt-5.1-codex-max",
   "gpt-5.1-codex-mini",
 ] as const;
-const OPENAI_CODEX_RESPONSES_IMAGE_MODELS = new Set([
-  "gpt-image-1",
-  "gpt-image-1.5",
-  "gpt-image-2",
-]);
+const OPENAI_CODEX_RESPONSES_IMAGE_MODEL_PREFERENCE = ["gpt-image-2"] as const;
+const OPENAI_CODEX_RESPONSES_IMAGE_MODELS = new Set<string>(
+  OPENAI_CODEX_RESPONSES_IMAGE_MODEL_PREFERENCE,
+);
+const OPENAI_CODEX_LEGACY_IMAGE_MODELS = new Set<string>(["gpt-image-1.5", "gpt-image-1"]);
+
+function getDefaultOpenAICodexImageModel(): ImageModel {
+  return OPENAI_CODEX_RESPONSES_IMAGE_MODEL_PREFERENCE[0];
+}
+
+function resolveOpenAICodexImageModelOverride(modelOverride?: string): string | null {
+  const normalized = normalizeOpenAIImageModel(modelOverride);
+  if (!normalized) return null;
+  if (OPENAI_CODEX_LEGACY_IMAGE_MODELS.has(normalized.toLowerCase())) {
+    return getDefaultOpenAICodexImageModel();
+  }
+  return normalized;
+}
 
 function buildSetupHint(provider: ImageProvider): { type: string; label: string; target: string } {
   if (provider === "gemini")
@@ -216,7 +229,7 @@ function buildSetupHint(provider: ImageProvider): { type: string; label: string;
   if (provider === "openrouter")
     return { type: "open_settings", label: "Set up OpenRouter API key", target: "openrouter" };
   if (provider === "openai-codex") {
-    return { type: "open_settings", label: "Sign in to OpenAI OAuth", target: "openai" };
+    return { type: "open_settings", label: "Sign in with ChatGPT", target: "openai" };
   }
   return { type: "open_settings", label: "Set up OpenAI API key", target: "openai" };
 }
@@ -374,7 +387,12 @@ export function inferImageProviderFromText(text: string): ImageProvider | null {
   const t = (text || "").toLowerCase();
   if (!t.trim()) return null;
   if (t.includes("azure openai") || /\bazure\b/.test(t)) return "azure";
-  if (t.includes("codex auth") || t.includes("openai oauth") || t.includes("chatgpt oauth"))
+  if (
+    t.includes("codex auth") ||
+    t.includes("openai oauth") ||
+    t.includes("chatgpt oauth") ||
+    t.includes("chatgpt subscription")
+  )
     return "openai-codex";
   if (t.includes("openrouter")) return "openrouter";
   if (t.includes("gemini")) return "gemini";
@@ -429,7 +447,7 @@ function sortProvidersByDefaultPreference(providers: ImageProvider[]): ImageProv
   return [...providers].sort((a, b) => (priority[a] ?? 99) - (priority[b] ?? 99));
 }
 
-type ImageModelPreset = "gpt-image-2" | "gpt-image-1.5" | "nano-banana-2";
+type ImageModelPreset = "gpt-image-2" | "gpt-image-1.5" | "nano-banana-2" | (string & {});
 
 function getCompatibleImageModelPreset(
   provider: ImageProvider,
@@ -437,8 +455,11 @@ function getCompatibleImageModelPreset(
 ): ImageModelPreset | undefined {
   if (!preset) return undefined;
   if (preset === "nano-banana-2") return provider === "gemini" ? preset : undefined;
-  if (preset === "gpt-image-2" || preset === "gpt-image-1.5")
-    return provider === "gemini" ? undefined : preset;
+  if (provider === "openai-codex") {
+    return resolveOpenAICodexImageModelOverride(preset) || undefined;
+  }
+  if (isOpenAIImageModel(preset))
+    return provider === "gemini" ? undefined : normalizeOpenAIImageModel(preset) || preset;
   return undefined;
 }
 
@@ -500,6 +521,37 @@ function buildProviderOrderFromImageSettings(
   return order;
 }
 
+function shouldPreferOpenAICodexFromActiveProvider(
+  settings: ReturnType<typeof LLMProviderFactory.loadSettings>,
+): boolean {
+  return (
+    settings.providerType === "openai" &&
+    settings.openai?.authMethod === "oauth" &&
+    hasOpenAIOAuthTokens(settings)
+  );
+}
+
+function buildOpenAICodexPreferredOrder(
+  configured: ImageProvider[],
+): Array<{ provider: ImageProvider; modelPreset?: ImageModelPreset }> {
+  const order: ImageProvider[] = ["openai-codex"];
+  for (const provider of configured) {
+    if (!order.includes(provider)) order.push(provider);
+  }
+  for (const provider of [
+    "gemini",
+    "openai",
+    "azure",
+    "openrouter",
+  ] as ImageProvider[]) {
+    if (!order.includes(provider)) order.push(provider);
+  }
+  return order.map((provider) => ({
+    provider,
+    modelPreset: provider === "openai-codex" ? getDefaultOpenAICodexImageModel() : undefined,
+  }));
+}
+
 export function selectImageProviderOrder(args: {
   settings: ReturnType<typeof LLMProviderFactory.loadSettings>;
   providerOverride?: ImageProvider | "auto";
@@ -520,6 +572,15 @@ export function selectImageProviderOrder(args: {
   const fromSettings = buildProviderOrderFromImageSettings(settings);
   if (fromSettings.length > 0 && !explicitProvider && !args.modelOverride) {
     return fromSettings;
+  }
+
+  if (
+    !explicitProvider &&
+    !args.modelOverride &&
+    shouldPreferOpenAICodexFromActiveProvider(settings) &&
+    configured.includes("openai-codex")
+  ) {
+    return buildOpenAICodexPreferredOrder(configured);
   }
 
   const legacyOrder: ImageProvider[] = [];
@@ -596,7 +657,7 @@ async function resolveOpenAICodexCredentials(
   const tokenExpiresAt = settings.openai?.tokenExpiresAt;
 
   if (!accessToken) {
-    throw new Error("OpenAI OAuth is not configured");
+    throw new Error("ChatGPT subscription sign-in is not configured");
   }
 
   if (refreshToken) {
@@ -622,7 +683,7 @@ async function resolveOpenAICodexCredentials(
     Number.isFinite(tokenExpiresAt) &&
     Date.now() > tokenExpiresAt - 5 * 60 * 1000
   ) {
-    throw new Error("OpenAI OAuth token has expired. Sign in again in Settings.");
+    throw new Error("ChatGPT subscription sign-in has expired. Sign in again in Settings.");
   }
 
   return { apiKey: accessToken, accessToken };
@@ -713,7 +774,7 @@ export class ImageGenerator {
         images: [],
         model: normalizeOpenAIImageModel(modelOverride) || "gpt-image-1.5",
         error:
-          "No image generation provider configured. Configure Gemini/OpenAI/Azure/OpenRouter/OpenAI OAuth in Settings.",
+          "No image generation provider configured. Configure Gemini/OpenAI/Azure/OpenRouter/ChatGPT Subscription in Settings.",
         actionHint: buildSetupHint("openai"),
       };
     }
@@ -779,8 +840,7 @@ export class ImageGenerator {
           const chosenModel =
             resolveOpenAIModelOverride(settings.imageGeneration?.openai?.model) ||
             resolveOpenAIModelOverride(modelOverride) ||
-            (modelPreset === "gpt-image-2" ? "gpt-image-2" : null) ||
-            (modelPreset === "gpt-image-1.5" ? "gpt-image-1.5" : null) ||
+            resolveOpenAIModelOverride(modelPreset) ||
             inferOpenAIImageModelFromText(prompt) ||
             "gpt-image-1.5";
           onProgress?.({
@@ -811,22 +871,21 @@ export class ImageGenerator {
           const providerTimeoutMs = getImageProviderTimeoutMs(settings, provider);
           if (!hasOpenAIOAuthTokens(settings)) {
             if (configuredProviders.includes("openai-codex")) {
-              considerError("openai-codex", "OpenAI OAuth is not connected.");
+              considerError("openai-codex", "ChatGPT subscription is not connected.");
             }
             continue;
           }
           const chosenModel =
-            resolveOpenAIModelOverride(settings.imageGeneration?.openaiCodex?.model) ||
-            resolveOpenAIModelOverride(modelOverride) ||
-            (modelPreset === "gpt-image-2" ? "gpt-image-2" : null) ||
-            (modelPreset === "gpt-image-1.5" ? "gpt-image-1.5" : null) ||
-            inferOpenAIImageModelFromText(prompt) ||
-            "gpt-image-1.5";
+            resolveOpenAICodexImageModelOverride(settings.imageGeneration?.openaiCodex?.model) ||
+            resolveOpenAICodexImageModelOverride(modelOverride) ||
+            resolveOpenAICodexImageModelOverride(modelPreset) ||
+            resolveOpenAICodexImageModelOverride(inferOpenAIImageModelFromText(prompt) || undefined) ||
+            getDefaultOpenAICodexImageModel();
           const normalizedChosenModel = normalizeOpenAIImageModel(chosenModel) || chosenModel;
           if (!OPENAI_CODEX_RESPONSES_IMAGE_MODELS.has(normalizedChosenModel.toLowerCase())) {
             considerError(
               "openai-codex",
-              "OpenAI OAuth image generation supports GPT Image models in the Responses tool path (for example gpt-image-1.5).",
+              `ChatGPT subscription image generation supports GPT Image models in the Responses tool path (for example ${getDefaultOpenAICodexImageModel()}).`,
               normalizedChosenModel,
             );
             continue;
@@ -837,7 +896,7 @@ export class ImageGenerator {
             provider,
             model: normalizedChosenModel,
             timeoutMs: providerTimeoutMs,
-            message: `Trying OpenAI OAuth image model ${normalizedChosenModel} (timeout ${Math.round(providerTimeoutMs / 1000)}s).`,
+            message: `Trying ChatGPT subscription image model ${normalizedChosenModel} (timeout ${Math.round(providerTimeoutMs / 1000)}s).`,
           });
           const attempt = await runWithImageProviderTimeout(signal, providerTimeoutMs, (attemptSignal) =>
             this.generateWithOpenAICodex({
@@ -854,7 +913,7 @@ export class ImageGenerator {
           if (attempt.result.success || !attempt.timedOut) return attempt.result;
           considerError(
             provider,
-            attempt.result.error || "OpenAI OAuth image generation timed out.",
+            attempt.result.error || "ChatGPT subscription image generation timed out.",
             normalizedChosenModel,
           );
           emitProviderFallback(provider, normalizedChosenModel, providerTimeoutMs, nextProviderEntry);
@@ -1061,13 +1120,13 @@ export class ImageGenerator {
       {
         id: "gpt-image-2",
         name: "OpenAI GPT Image 2",
-        description: "OpenAI GPT Image model (API key, Azure/OpenRouter, or OpenAI OAuth)",
+        description: "OpenAI GPT Image model (API key, Azure/OpenRouter, or ChatGPT subscription)",
         modelId: "gpt-image-2",
       },
       {
         id: "gpt-image-1.5",
         name: "OpenAI GPT Image 1.5",
-        description: "OpenAI GPT Image model (API key, Azure/OpenRouter, or OpenAI OAuth)",
+        description: "OpenAI GPT Image model (API key, Azure/OpenRouter, or ChatGPT subscription)",
         modelId: "gpt-image-1.5",
       },
     ];
@@ -1421,7 +1480,7 @@ export class ImageGenerator {
             images: [],
             provider: "openai-codex",
             model: args.model,
-            error: "No images were returned by OpenAI OAuth image generation.",
+            error: "No images were returned by ChatGPT subscription image generation.",
             actionHint: buildSetupHint("openai-codex"),
           };
         }

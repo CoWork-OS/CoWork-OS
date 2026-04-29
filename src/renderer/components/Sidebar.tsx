@@ -1,8 +1,8 @@
-import { useState, useRef, useEffect, useMemo, useCallback, Fragment, useDeferredValue } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback, Fragment, useDeferredValue } from "react";
 import { ChevronDown, ChevronRight, SlidersHorizontal, EyeOff, AppWindow, Bell, HardDrive, Rows3, Search, Server, Workflow, HeartPulse, Lightbulb, Inbox, Users, UsersRound, ListFilter } from "lucide-react";
 import { resolveTwinIcon } from "../utils/twin-icons";
 import { stripAllEmojis } from "../utils/emoji-replacer";
-import { Task, Workspace, UiDensity, InfraStatus } from "../../shared/types";
+import { Task, Workspace, UiDensity, InfraStatus, UpdateInfo } from "../../shared/types";
 import type { MailboxDigestSnapshot, MailboxSyncStatus } from "../../shared/mailbox";
 import { isAutomatedTaskLike } from "../../shared/automated-task-detection";
 import { VirtualList } from "./VirtualList";
@@ -63,6 +63,10 @@ interface SidebarProps {
   onLoadMoreTasks?: () => void;
   hasMoreTasks?: boolean;
   uiDensity?: UiDensity;
+  updateInfo?: UpdateInfo | null;
+  updateDismissed?: boolean;
+  onViewUpdate?: () => void;
+  onDismissUpdate?: () => void;
 }
 
 /** Visual session mode derived from task metadata */
@@ -274,6 +278,121 @@ export function getSidebarSessionTitle(node: Pick<TaskTreeNode, "displayTitle" |
   return "Untitled session";
 }
 
+const SIDEBAR_TITLE_ELLIPSIS = "...";
+
+type TextMeasurer = (value: string) => number;
+
+export function truncateSidebarTitleAtWordBoundary(
+  value: string,
+  maxWidth: number,
+  measureText: TextMeasurer,
+): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (!normalized) return "";
+  if (maxWidth <= 0) return normalized;
+  if (measureText(normalized) <= maxWidth) return normalized;
+
+  const ellipsisWidth = measureText(SIDEBAR_TITLE_ELLIPSIS);
+  if (ellipsisWidth > maxWidth) return "";
+
+  const words = normalized.split(" ");
+  if (words.length <= 1) return SIDEBAR_TITLE_ELLIPSIS;
+
+  let low = 0;
+  let high = words.length - 1;
+  let best = "";
+
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    const candidate = `${words.slice(0, mid + 1).join(" ")}${SIDEBAR_TITLE_ELLIPSIS}`;
+    if (measureText(candidate) <= maxWidth) {
+      best = candidate;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+
+  return best || SIDEBAR_TITLE_ELLIPSIS;
+}
+
+let sidebarTitleMeasureCanvas: HTMLCanvasElement | null = null;
+
+function getSidebarTitleMeasureContext(): CanvasRenderingContext2D | null {
+  if (typeof document === "undefined") return null;
+  sidebarTitleMeasureCanvas ||= document.createElement("canvas");
+  return sidebarTitleMeasureCanvas.getContext("2d");
+}
+
+function getElementFont(element: HTMLElement): string {
+  const style = window.getComputedStyle(element);
+  if (style.font) return style.font;
+  return [
+    style.fontStyle,
+    style.fontVariant,
+    style.fontWeight,
+    style.fontSize,
+    style.fontFamily,
+  ].join(" ");
+}
+
+function SidebarWordBoundaryTitle({
+  text,
+  className,
+  title,
+}: {
+  text: string;
+  className: string;
+  title: string;
+}) {
+  const ref = useRef<HTMLSpanElement | null>(null);
+  const [displayText, setDisplayText] = useState(() => text.replace(/\s+/g, " ").trim());
+
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element || typeof window === "undefined") {
+      setDisplayText(text.replace(/\s+/g, " ").trim());
+      return;
+    }
+
+    const update = () => {
+      const width = Math.floor(element.getBoundingClientRect().width);
+      if (width <= 0) return;
+
+      const context = getSidebarTitleMeasureContext();
+      if (!context) {
+        setDisplayText(text.replace(/\s+/g, " ").trim());
+        return;
+      }
+
+      context.font = getElementFont(element);
+      const next = truncateSidebarTitleAtWordBoundary(
+        text,
+        width,
+        (candidate) => context.measureText(candidate).width,
+      );
+      setDisplayText((current) => (current === next ? current : next));
+    };
+
+    update();
+
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", update);
+      return () => window.removeEventListener("resize", update);
+    }
+
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [text]);
+
+  return (
+    <span ref={ref} className={className} title={title}>
+      {displayText}
+    </span>
+  );
+}
+
 export function normalizeSidebarSessionSearch(value: string): string {
   return stripAllEmojis(value).toLocaleLowerCase().replace(/\s+/g, " ").trim();
 }
@@ -385,6 +504,10 @@ export function Sidebar({
   onLoadMoreTasks,
   hasMoreTasks = false,
   uiDensity = "focused",
+  updateInfo,
+  updateDismissed = false,
+  onViewUpdate,
+  onDismissUpdate,
 }: SidebarProps) {
   const [menuOpenTaskId, setMenuOpenTaskId] = useState<string | null>(null);
   const [renameTaskId, setRenameTaskId] = useState<string | null>(null);
@@ -483,6 +606,7 @@ export function Sidebar({
     inboxUnreadCount > 0
       ? `Inbox (${inboxUnreadCount > 99 ? "99+" : inboxUnreadCount})`
       : "Inbox";
+  const compactUpdateVersion = updateInfo?.latestVersion.replace(/\s*\([^)]*\)\s*$/, "").trim();
 
   // Build task tree from flat list
   const taskTree = useMemo(() => {
@@ -1301,33 +1425,37 @@ export function Sidebar({
               />
             ) : (
               <div className={`cli-task-title-row ${isAwaitingSession ? "cli-task-title-row-awaiting" : ""}`}>
-                <span
-                  className={`cli-task-title ${isSubAgent && task.assignedAgentRoleId ? "cli-task-title-with-agent" : ""}`}
-                  title={sessionTitle}
-                >
-                  {isSubAgent && task.assignedAgentRoleId
-                    ? (() => {
-                        const role = agentRoles.get(task.assignedAgentRoleId!);
-                        const full = sessionTitle;
-                        const fullNoEmoji = stripAllEmojis(full);
-                        const truncated =
-                          fullNoEmoji.length > 28 ? fullNoEmoji.slice(0, 25) + "..." : fullNoEmoji;
-                        return (
-                          <>
-                            <span className="cli-task-title-truncated">{truncated}</span>
-                            {role && (
-                              <span
-                                className="cli-task-agent-name"
-                                style={{ color: role.color }}
-                              >
-                                {stripAllEmojis(role.displayName)}
-                              </span>
-                            )}
-                          </>
-                        );
-                      })()
-                    : sessionTitle}
-                </span>
+                {isSubAgent && task.assignedAgentRoleId ? (
+                  <span className="cli-task-title cli-task-title-with-agent" title={sessionTitle}>
+                    {(() => {
+                      const role = agentRoles.get(task.assignedAgentRoleId!);
+                      const fullNoEmoji = stripAllEmojis(sessionTitle);
+                      return (
+                        <>
+                          <SidebarWordBoundaryTitle
+                            text={fullNoEmoji}
+                            className="cli-task-title-truncated"
+                            title={sessionTitle}
+                          />
+                          {role && (
+                            <span
+                              className="cli-task-agent-name"
+                              style={{ color: role.color }}
+                            >
+                              {stripAllEmojis(role.displayName)}
+                            </span>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </span>
+                ) : (
+                  <SidebarWordBoundaryTitle
+                    text={sessionTitle}
+                    className="cli-task-title"
+                    title={sessionTitle}
+                  />
+                )}
                 {isAwaitingSession && (
                   <span className="cli-task-awaiting-badge">Awaiting response</span>
                 )}
@@ -1341,8 +1469,13 @@ export function Sidebar({
                   </button>
                 )}
                 {!isAwaitingSession && (
-                  <span className="cli-task-time" aria-hidden="true">
-                    {formatRelativeShort(task.updatedAt || task.createdAt)}
+                  <span className="cli-task-time-wrap">
+                    {showCompletionAttention && (
+                      <span className="task-completion-unread-dot" aria-hidden="true" />
+                    )}
+                    <span className="cli-task-time" aria-hidden="true">
+                      {formatRelativeShort(task.updatedAt || task.createdAt)}
+                    </span>
                   </span>
                 )}
               </div>
@@ -1452,9 +1585,6 @@ export function Sidebar({
             </div>
           )}
 
-          {showCompletionAttention && (
-            <span className="task-completion-unread-dot" aria-hidden="true" />
-          )}
       </div>
     );
   };
@@ -1490,6 +1620,69 @@ export function Sidebar({
 
   return (
     <div className="sidebar cli-sidebar">
+      {updateInfo?.available && !updateDismissed && (
+        <div className="sidebar-update-slot">
+          <div
+            className="update-banner"
+            role="status"
+            aria-live="polite"
+            title={`Update v${updateInfo.latestVersion} is available`}
+          >
+            <div className="update-banner-content">
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                aria-hidden="true"
+              >
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" />
+              </svg>
+              <span className="update-banner-copy">
+                <strong>v{compactUpdateVersion || updateInfo.latestVersion}</strong>
+              </span>
+              <button
+                type="button"
+                className="update-banner-link"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onViewUpdate?.();
+                }}
+                onClick={(event) => event.stopPropagation()}
+              >
+                View
+              </button>
+            </div>
+            <button
+                type="button"
+                className="update-banner-dismiss"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onDismissUpdate?.();
+                }}
+                onClick={(event) => event.stopPropagation()}
+                aria-label="Dismiss update notification"
+              >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                aria-hidden="true"
+              >
+                <path d="M18 6L6 18M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* New Session Button */}
       <div className="sidebar-header">
         <div className="cli-header-actions sidebar-nav">

@@ -7,23 +7,26 @@ import {
   useMemo,
   useCallback,
   useDeferredValue,
+  lazy,
+  Suspense,
   startTransition,
 } from "react";
+import type {
+  KeyboardEvent as ReactKeyboardEvent,
+  PointerEvent as ReactPointerEvent,
+} from "react";
 import { useReplayMode, type ReplayControls } from "./hooks/useReplayMode";
+import { useTaskDuration } from "./hooks/useTaskDuration";
 import { Sidebar } from "./components/Sidebar";
-import { MainContent } from "./components/MainContent";
+import { MainContent, isTaskActivelyWorking } from "./components/MainContent";
 import { RightPanel } from "./components/RightPanel";
-import { Settings } from "./components/Settings";
+import { SpreadsheetArtifactViewer } from "./components/SpreadsheetArtifactViewer";
+import type { SpreadsheetTurnContext } from "./components/SpreadsheetArtifactViewer";
+import { DocumentArtifactViewer } from "./components/DocumentArtifactViewer";
+import { PresentationArtifactViewer } from "./components/PresentationArtifactViewer";
+import { WebArtifactViewer } from "./components/WebArtifactViewer";
 import { DisclaimerModal } from "./components/DisclaimerModal";
 import { Onboarding } from "./components/Onboarding";
-import { BrowserView } from "./components/BrowserView";
-import { HomeDashboard } from "./components/HomeDashboard";
-import { HealthPanel } from "./components/HealthPanel";
-import { DevicesPanel } from "./components/DevicesPanel";
-import { IdeasPanel } from "./components/IdeasPanel";
-import { InboxAgentPanel } from "./components/InboxAgentPanel";
-import { AgentsHubPanel } from "./components/AgentsHubPanel";
-import { MissionControlPanel } from "./components/mission-control";
 // TaskQueuePanel moved to RightPanel
 import { ToastContainer } from "./components/Toast";
 import {
@@ -79,6 +82,7 @@ import {
   removeTaskId,
   shouldClearUnseenOutputBadges,
   shouldShowCompletionToast,
+  shouldNotifyForTaskCompletionTerminalStatus,
   shouldTrackUnseenCompletion,
 } from "./utils/task-completion-ux";
 import { isSpawnSubagentsPrompt } from "../shared/spawn-intent-detection";
@@ -106,12 +110,309 @@ import {
   shouldRefreshCanonicalEventsForTerminalUpdate,
 } from "./utils/task-event-stream";
 
+const Settings = lazy(() =>
+  import("./components/Settings").then((module) => ({ default: module.Settings })),
+);
+const BrowserView = lazy(() =>
+  import("./components/BrowserView").then((module) => ({ default: module.BrowserView })),
+);
+const HomeDashboard = lazy(() =>
+  import("./components/HomeDashboard").then((module) => ({ default: module.HomeDashboard })),
+);
+const HealthPanel = lazy(() =>
+  import("./components/HealthPanel").then((module) => ({ default: module.HealthPanel })),
+);
+const DevicesPanel = lazy(() =>
+  import("./components/DevicesPanel").then((module) => ({ default: module.DevicesPanel })),
+);
+const IdeasPanel = lazy(() =>
+  import("./components/IdeasPanel").then((module) => ({ default: module.IdeasPanel })),
+);
+const InboxAgentPanel = lazy(() =>
+  import("./components/InboxAgentPanel").then((module) => ({ default: module.InboxAgentPanel })),
+);
+const AgentsHubPanel = lazy(() =>
+  import("./components/AgentsHubPanel").then((module) => ({ default: module.AgentsHubPanel })),
+);
+const MissionControlPanel = lazy(() =>
+  import("./components/mission-control").then((module) => ({
+    default: module.MissionControlPanel,
+  })),
+);
+
+const SPREADSHEET_SIDEBAR_DEFAULT_WIDTH = 720;
+const SPREADSHEET_SIDEBAR_MIN_WIDTH = 420;
+const SPREADSHEET_MAIN_MIN_WIDTH = 390;
+const SPREADSHEET_SIDEBAR_WIDTH_STORAGE_KEY = "cowork:spreadsheetSidebarWidth";
+type ActiveArtifactKind = "spreadsheet" | "document" | "presentation" | "webpage";
+
+function readPersistedSpreadsheetSidebarWidth(): number {
+  try {
+    const rawValue = window.localStorage.getItem(SPREADSHEET_SIDEBAR_WIDTH_STORAGE_KEY);
+    const parsedValue = rawValue ? Number(rawValue) : NaN;
+    if (!Number.isFinite(parsedValue)) return SPREADSHEET_SIDEBAR_DEFAULT_WIDTH;
+    return Math.max(Math.round(parsedValue), SPREADSHEET_SIDEBAR_MIN_WIDTH);
+  } catch {
+    return SPREADSHEET_SIDEBAR_DEFAULT_WIDTH;
+  }
+}
+
+function normalizeWorkspacePath(filePath: string): string {
+  return filePath.trim().replace(/\\/g, "/");
+}
+
+function getSpreadsheetFileName(filePath: string): string {
+  const normalized = normalizeWorkspacePath(filePath);
+  const index = normalized.lastIndexOf("/");
+  return index >= 0 ? normalized.slice(index + 1) : normalized;
+}
+
+function cleanTurnText(value: unknown, maxLength = 220): string {
+  if (typeof value !== "string") return "";
+  const cleaned = value.replace(/\s+/g, " ").trim();
+  if (cleaned.length <= maxLength) return cleaned;
+  return `${cleaned.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+}
+
+function getEventText(event: TaskEvent | undefined): string {
+  if (!event) return "";
+  const payload = event.payload || {};
+  const step = payload.step && typeof payload.step === "object" ? payload.step as Record<string, unknown> : null;
+  return cleanTurnText(
+    payload.message ??
+      payload.resultSummary ??
+      payload.semanticSummary ??
+      payload.text ??
+      step?.description,
+  );
+}
+
+function getSpreadsheetTurnEventKind(event: TaskEvent): {
+  kind: "step" | "assistant";
+  tone?: "muted" | "active" | "done";
+} | null {
+  const effectiveType = getEffectiveTaskEventType(event);
+  if (effectiveType === "assistant_message") return { kind: "assistant" };
+  if (effectiveType === "progress_update") return { kind: "step", tone: "active" };
+  if (event.type === "timeline_step_started" || event.type === "timeline_step_updated") {
+    return { kind: "step", tone: "active" };
+  }
+  if (event.type === "timeline_step_finished" || effectiveType === "step_completed") {
+    return { kind: "step", tone: "done" };
+  }
+  return null;
+}
+
+function getSpreadsheetTurnEventText(event: TaskEvent): string {
+  const effectiveType = getEffectiveTaskEventType(event);
+  const payload = event.payload || {};
+  const step = payload.step && typeof payload.step === "object" ? payload.step as Record<string, unknown> : null;
+  const path =
+    typeof payload.path === "string"
+      ? payload.path
+      : typeof payload.to === "string"
+        ? payload.to
+        : "";
+  if (
+    effectiveType === "file_created" ||
+    effectiveType === "artifact_created" ||
+    effectiveType === "file_modified"
+  ) {
+    return path ? getSpreadsheetFileName(path) : getEventText(event);
+  }
+  if (effectiveType === "tool_call") {
+    return cleanTurnText(payload.command ?? payload.description ?? payload.tool, 180);
+  }
+  return cleanTurnText(
+    payload.message ??
+      payload.resultSummary ??
+      payload.semanticSummary ??
+      payload.text ??
+      step?.description,
+    260,
+  );
+}
+
+function buildSpreadsheetTurnEvents(args: {
+  events: TaskEvent[];
+  taskId?: string;
+  sinceTimestamp?: number | null;
+  limit?: number;
+}): SpreadsheetTurnContext["events"] {
+  const rows: NonNullable<SpreadsheetTurnContext["events"]> = [];
+  for (const event of args.events) {
+    if (args.taskId && event.taskId !== args.taskId) continue;
+    if (args.sinceTimestamp && event.timestamp < args.sinceTimestamp) continue;
+    const eventKind = getSpreadsheetTurnEventKind(event);
+    if (!eventKind) continue;
+    if (event.payload?.internal === true && eventKind.kind === "assistant") continue;
+    const text = getSpreadsheetTurnEventText(event);
+    if (!text) continue;
+    const previous = rows[rows.length - 1];
+    if (previous?.kind === eventKind.kind && previous.text === text) continue;
+    rows.push({
+      id: event.id,
+      kind: eventKind.kind,
+      text,
+      tone: eventKind.tone,
+    });
+  }
+  return rows.slice(-(args.limit ?? 8));
+}
+
+function eventPathMatchesSpreadsheet(event: TaskEvent, filePath: string): boolean {
+  const target = normalizeWorkspacePath(filePath);
+  const targetName = getSpreadsheetFileName(target);
+  const payload = event.payload || {};
+  const candidatePaths = [payload.path, payload.to, payload.from, payload.filePath].filter(
+    (value): value is string => typeof value === "string",
+  );
+  return candidatePaths.some((candidate) => {
+    const normalized = normalizeWorkspacePath(candidate);
+    return normalized === target || getSpreadsheetFileName(normalized) === targetName;
+  });
+}
+
+function findSpreadsheetCreationEvent(events: TaskEvent[], filePath: string): TaskEvent | null {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    const effectiveType = getEffectiveTaskEventType(event);
+    if (
+      (effectiveType === "file_created" ||
+        effectiveType === "artifact_created" ||
+        event.type === "timeline_artifact_emitted") &&
+      eventPathMatchesSpreadsheet(event, filePath)
+    ) {
+      return event;
+    }
+  }
+  return null;
+}
+
+function findLatestUserMessageTimestamp(events: TaskEvent[], taskId?: string): number | null {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (taskId && event.taskId !== taskId) continue;
+    if (getEffectiveTaskEventType(event) === "user_message") return event.timestamp;
+  }
+  return null;
+}
+
+function buildSpreadsheetTurnContext(args: {
+  task: Task | undefined;
+  events: TaskEvent[];
+  filePath: string;
+  isWorking: boolean;
+  durationLabel: string;
+  turnStartedAt?: number | null;
+}): SpreadsheetTurnContext | null {
+  const fileName = getSpreadsheetFileName(args.filePath);
+  const latestUserMessageAt =
+    args.turnStartedAt ?? findLatestUserMessageTimestamp(args.events, args.task?.id);
+
+  if (args.isWorking) {
+    let summary = "";
+    for (let index = args.events.length - 1; index >= 0; index -= 1) {
+      const event = args.events[index];
+      if (args.task?.id && event.taskId !== args.task.id) continue;
+      if (latestUserMessageAt && event.timestamp < latestUserMessageAt) continue;
+      const effectiveType = getEffectiveTaskEventType(event);
+      if (
+        effectiveType === "assistant_message" ||
+        effectiveType === "progress_update" ||
+        event.type === "timeline_step_started" ||
+        event.type === "timeline_step_updated"
+      ) {
+        if (event.payload?.internal === true) continue;
+        summary = getEventText(event);
+        if (summary) break;
+      }
+    }
+    if (!summary) summary = cleanTurnText(args.task?.title) || `Working on ${fileName}.`;
+
+    const modifiedFiles = new Set<string>();
+    let runningCommandCount = 0;
+    for (const event of args.events) {
+      if (args.task?.id && event.taskId !== args.task.id) continue;
+      if (latestUserMessageAt && event.timestamp < latestUserMessageAt) continue;
+      const effectiveType = getEffectiveTaskEventType(event);
+      if (effectiveType === "file_modified") {
+        const path = typeof event.payload?.path === "string" ? event.payload.path : "";
+        if (path) modifiedFiles.add(path);
+      }
+      if (effectiveType === "tool_call" && event.payload?.tool === "run_command") {
+        runningCommandCount += 1;
+      }
+    }
+    const detailParts = [
+      modifiedFiles.size > 0 ? `Edited ${modifiedFiles.size} file${modifiedFiles.size === 1 ? "" : "s"}` : "",
+      runningCommandCount > 0
+        ? `running ${runningCommandCount} command${runningCommandCount === 1 ? "" : "s"}`
+        : "",
+    ].filter(Boolean);
+
+    return {
+      statusLabel: `Working for ${args.durationLabel}`,
+      summary,
+      secondaryText: detailParts.join(", "),
+      artifactPath: args.filePath,
+      artifactName: fileName,
+      events: buildSpreadsheetTurnEvents({
+        events: args.events,
+        taskId: args.task?.id,
+        sinceTimestamp: latestUserMessageAt,
+      }),
+    };
+  }
+
+  const creationEvent = findSpreadsheetCreationEvent(args.events, args.filePath);
+  const settledTurnStartedAt = latestUserMessageAt ?? creationEvent?.timestamp;
+  let completionEvent: TaskEvent | null = null;
+  for (let index = args.events.length - 1; index >= 0; index -= 1) {
+    const event = args.events[index];
+    if (args.task?.id && event.taskId !== args.task.id) continue;
+    if (getEffectiveTaskEventType(event) !== "task_completed") continue;
+    if (settledTurnStartedAt && event.timestamp < settledTurnStartedAt) continue;
+    completionEvent = event;
+    break;
+  }
+
+  const completionPayload = completionEvent?.payload || {};
+  const summary =
+    cleanTurnText(completionPayload.resultSummary) ||
+    cleanTurnText(completionPayload.semanticSummary) ||
+    cleanTurnText(completionPayload.message) ||
+    cleanTurnText(args.task?.semanticSummary) ||
+    cleanTurnText(args.task?.resultSummary) ||
+    `Created ${fileName}.`;
+
+  return {
+    statusLabel: "Latest turn",
+    summary,
+    artifactPath: args.filePath,
+    artifactName: fileName,
+    events: buildSpreadsheetTurnEvents({
+      events: args.events,
+      taskId: args.task?.id,
+      sinceTimestamp: settledTurnStartedAt,
+    }),
+  };
+}
+
 // Helper to get effective theme based on system preference
 function getEffectiveTheme(themeMode: ThemeMode): "light" | "dark" {
   if (themeMode === "system") {
     return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   }
   return themeMode;
+}
+
+function LazyViewFallback({ className = "main-content" }: { className?: string }) {
+  return (
+    <main className={className}>
+      <div className="loading">Loading...</div>
+    </main>
+  );
 }
 
 function mergeTaskPreservingIdentity(current: Task, updates: Partial<Task>): Task {
@@ -301,8 +602,367 @@ const SelectedTaskWorkspaceView = memo(function SelectedTaskWorkspaceView({
   onHighlightConsumed,
   onModelChange,
 }: SelectedTaskWorkspaceViewProps) {
+  const [spreadsheetArtifact, setSpreadsheetArtifact] = useState<{
+    kind: ActiveArtifactKind;
+    path: string;
+    mode: "sidebar" | "fullscreen";
+  } | null>(null);
+  const [lastSettledArtifactRefreshKey, setLastSettledArtifactRefreshKey] = useState<{
+    path: string;
+    key: string | null;
+  } | null>(null);
+  const [spreadsheetTurnStartedAt, setSpreadsheetTurnStartedAt] = useState<number | null>(null);
+  const [spreadsheetOptimisticWorkingStartedAt, setSpreadsheetOptimisticWorkingStartedAt] =
+    useState<number | null>(null);
+  const splitLayoutRef = useRef<HTMLDivElement | null>(null);
+  const [spreadsheetSidebarWidth, setSpreadsheetSidebarWidth] = useState(
+    readPersistedSpreadsheetSidebarWidth,
+  );
+  const [isSpreadsheetResizing, setIsSpreadsheetResizing] = useState(false);
+  const openSpreadsheetArtifact = useCallback((path: string) => {
+    setSpreadsheetArtifact({ kind: "spreadsheet", path, mode: "sidebar" });
+  }, []);
+  const openDocumentArtifact = useCallback((path: string) => {
+    setSpreadsheetArtifact({ kind: "document", path, mode: "sidebar" });
+  }, []);
+  const openPresentationArtifact = useCallback((path: string) => {
+    setSpreadsheetArtifact({ kind: "presentation", path, mode: "sidebar" });
+  }, []);
+  const openWebArtifact = useCallback((path: string) => {
+    setSpreadsheetArtifact({ kind: "webpage", path, mode: "sidebar" });
+  }, []);
+  const closeSpreadsheetArtifact = useCallback(() => {
+    setSpreadsheetArtifact(null);
+  }, []);
+  const showSpreadsheetFullscreen = useCallback(() => {
+    setSpreadsheetArtifact((current) =>
+      current ? { ...current, mode: "fullscreen" } : current,
+    );
+  }, []);
+  const showSpreadsheetSidebar = useCallback(() => {
+    setSpreadsheetArtifact((current) =>
+      current ? { ...current, mode: "sidebar" } : current,
+    );
+  }, []);
+  const sendSpreadsheetFullscreenMessage = useCallback(
+    async (message: string, images?: ImageAttachment[]) => {
+      const startedAt = Date.now();
+      setSpreadsheetTurnStartedAt(startedAt);
+      setSpreadsheetOptimisticWorkingStartedAt(startedAt);
+      await onSendMessage(message, images);
+    },
+    [onSendMessage],
+  );
+  useEffect(() => {
+    setSpreadsheetArtifact(null);
+    setLastSettledArtifactRefreshKey(null);
+    setSpreadsheetTurnStartedAt(null);
+    setSpreadsheetOptimisticWorkingStartedAt(null);
+  }, [selectedTaskId, workspace?.path]);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        SPREADSHEET_SIDEBAR_WIDTH_STORAGE_KEY,
+        String(Math.round(spreadsheetSidebarWidth)),
+      );
+    } catch {
+      // Ignore storage failures; resizing should still work for the current session.
+    }
+  }, [spreadsheetSidebarWidth]);
+  const clampSpreadsheetSidebarWidth = useCallback((width: number) => {
+    const containerWidth =
+      splitLayoutRef.current?.getBoundingClientRect().width || window.innerWidth;
+    const maxWidth = Math.max(
+      SPREADSHEET_SIDEBAR_MIN_WIDTH,
+      containerWidth - SPREADSHEET_MAIN_MIN_WIDTH,
+    );
+    return Math.min(Math.max(width, SPREADSHEET_SIDEBAR_MIN_WIDTH), maxWidth);
+  }, []);
+  useLayoutEffect(() => {
+    if (!spreadsheetArtifact || spreadsheetArtifact.mode !== "sidebar") return;
+    setSpreadsheetSidebarWidth((current) => clampSpreadsheetSidebarWidth(current));
+  }, [clampSpreadsheetSidebarWidth, spreadsheetArtifact]);
+  useEffect(() => {
+    if (!isSpreadsheetResizing) return;
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    return () => {
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+    };
+  }, [isSpreadsheetResizing]);
+  const handleSpreadsheetResizePointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const rect = splitLayoutRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      event.preventDefault();
+      const maxWidth = Math.max(
+        SPREADSHEET_SIDEBAR_MIN_WIDTH,
+        rect.width - SPREADSHEET_MAIN_MIN_WIDTH,
+      );
+      const clampWidth = (width: number) =>
+        Math.min(Math.max(width, SPREADSHEET_SIDEBAR_MIN_WIDTH), maxWidth);
+      setIsSpreadsheetResizing(true);
+
+      const handlePointerMove = (moveEvent: PointerEvent) => {
+        setSpreadsheetSidebarWidth(clampWidth(rect.right - moveEvent.clientX));
+      };
+      const handlePointerUp = () => {
+        setIsSpreadsheetResizing(false);
+        window.removeEventListener("pointermove", handlePointerMove);
+        window.removeEventListener("pointerup", handlePointerUp);
+        window.removeEventListener("pointercancel", handlePointerUp);
+      };
+
+      window.addEventListener("pointermove", handlePointerMove);
+      window.addEventListener("pointerup", handlePointerUp);
+      window.addEventListener("pointercancel", handlePointerUp);
+    },
+    [],
+  );
+  const handleSpreadsheetResizeKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLDivElement>) => {
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      event.preventDefault();
+      setSpreadsheetSidebarWidth((current) =>
+        clampSpreadsheetSidebarWidth(current + (event.key === "ArrowLeft" ? 32 : -32)),
+      );
+    },
+    [clampSpreadsheetSidebarWidth],
+  );
+  const spreadsheetEvents = replayControls.replayEvents;
+  const spreadsheetHasActiveChildren = useMemo(
+    () =>
+      childTasks.some((childTask) =>
+        childTask.status === "executing" ||
+        childTask.status === "planning" ||
+        childTask.status === "interrupted",
+      ),
+    [childTasks],
+  );
+  const isSpreadsheetTaskWorking = useMemo(
+    () => isTaskActivelyWorking(task, spreadsheetEvents, spreadsheetHasActiveChildren),
+    [task, spreadsheetEvents, spreadsheetHasActiveChildren],
+  );
+  useEffect(() => {
+    if (!spreadsheetOptimisticWorkingStartedAt) return;
+    const hasCompletionAfterFollowup = spreadsheetEvents.some(
+      (event) =>
+        event.timestamp >= spreadsheetOptimisticWorkingStartedAt &&
+        getEffectiveTaskEventType(event) === "task_completed",
+    );
+    if (hasCompletionAfterFollowup) {
+      setSpreadsheetOptimisticWorkingStartedAt(null);
+    }
+  }, [spreadsheetEvents, spreadsheetOptimisticWorkingStartedAt]);
+  const isSpreadsheetFollowupWorking = spreadsheetOptimisticWorkingStartedAt !== null;
+  const effectiveSpreadsheetTaskWorking = isSpreadsheetTaskWorking || isSpreadsheetFollowupWorking;
+  const latestSpreadsheetUserMessageTimestamp = useMemo(
+    () => findLatestUserMessageTimestamp(spreadsheetEvents, task?.id),
+    [spreadsheetEvents, task?.id],
+  );
+  const activeSpreadsheetTurnStartedAt =
+    spreadsheetTurnStartedAt ?? latestSpreadsheetUserMessageTimestamp;
+  const spreadsheetWorkStartedAt = task
+    ? (spreadsheetOptimisticWorkingStartedAt ?? activeSpreadsheetTurnStartedAt ?? task.createdAt)
+    : Date.now();
+  const spreadsheetWorkCompletedAt = spreadsheetOptimisticWorkingStartedAt
+    ? undefined
+    : isTerminalTaskStatus(task?.status)
+    ? (task?.completedAt ?? task?.updatedAt)
+    : task?.completedAt;
+  const spreadsheetWorkDuration = useTaskDuration(
+    spreadsheetWorkStartedAt,
+    spreadsheetWorkCompletedAt,
+    Boolean(task && effectiveSpreadsheetTaskWorking),
+  );
+  const spreadsheetTurnContext = useMemo(
+    () =>
+      spreadsheetArtifact
+        ? buildSpreadsheetTurnContext({
+            task,
+            events: spreadsheetEvents,
+            filePath: spreadsheetArtifact.path,
+            isWorking: effectiveSpreadsheetTaskWorking,
+            durationLabel: spreadsheetWorkDuration,
+            turnStartedAt: activeSpreadsheetTurnStartedAt,
+          })
+        : null,
+    [
+      activeSpreadsheetTurnStartedAt,
+      effectiveSpreadsheetTaskWorking,
+      spreadsheetArtifact,
+      spreadsheetEvents,
+      spreadsheetWorkDuration,
+      task,
+    ],
+  );
+  const computedArtifactRefreshKey = useMemo(() => {
+    if (!spreadsheetArtifact) return null;
+    let latestTimestamp = 0;
+    const hasActiveTurn = activeSpreadsheetTurnStartedAt !== null;
+    for (const event of spreadsheetEvents) {
+      if (task?.id && event.taskId !== task.id) continue;
+      if (hasActiveTurn && activeSpreadsheetTurnStartedAt !== null) {
+        if (effectiveSpreadsheetTaskWorking && event.timestamp >= activeSpreadsheetTurnStartedAt) {
+          continue;
+        }
+        if (!effectiveSpreadsheetTaskWorking && event.timestamp < activeSpreadsheetTurnStartedAt) {
+          continue;
+        }
+      }
+      const effectiveType = getEffectiveTaskEventType(event);
+      const touchesArtifact =
+        eventPathMatchesSpreadsheet(event, spreadsheetArtifact.path) ||
+        effectiveType === "task_completed";
+      if (!touchesArtifact) continue;
+      latestTimestamp = Math.max(latestTimestamp, event.timestamp);
+    }
+    return latestTimestamp > 0 ? `${spreadsheetArtifact.path}:${latestTimestamp}` : null;
+  }, [
+    activeSpreadsheetTurnStartedAt,
+    effectiveSpreadsheetTaskWorking,
+    spreadsheetArtifact,
+    spreadsheetEvents,
+    task?.id,
+  ]);
+  useEffect(() => {
+    if (!spreadsheetArtifact) {
+      setLastSettledArtifactRefreshKey(null);
+      return;
+    }
+    if (effectiveSpreadsheetTaskWorking) return;
+    setLastSettledArtifactRefreshKey((current) => {
+      if (
+        current?.path === spreadsheetArtifact.path &&
+        current.key === computedArtifactRefreshKey
+      ) {
+        return current;
+      }
+      return {
+        path: spreadsheetArtifact.path,
+        key: computedArtifactRefreshKey,
+      };
+    });
+  }, [computedArtifactRefreshKey, effectiveSpreadsheetTaskWorking, spreadsheetArtifact]);
+  const artifactRefreshKey =
+    effectiveSpreadsheetTaskWorking
+      ? lastSettledArtifactRefreshKey &&
+        lastSettledArtifactRefreshKey.path === spreadsheetArtifact?.path
+        ? lastSettledArtifactRefreshKey.key
+        : null
+      : computedArtifactRefreshKey;
+
+  if (spreadsheetArtifact?.mode === "fullscreen" && workspace?.path) {
+    const selectedModelLabel =
+      availableModels.find((model) => model.key === selectedModel)?.displayName || selectedModel;
+    if (spreadsheetArtifact.kind === "document") {
+      return (
+        <DocumentArtifactViewer
+          filePath={spreadsheetArtifact.path}
+          workspacePath={workspace.path}
+          mode="fullscreen"
+          onClose={closeSpreadsheetArtifact}
+          onFullscreen={showSpreadsheetFullscreen}
+          onExitFullscreen={showSpreadsheetSidebar}
+          onSendMessage={sendSpreadsheetFullscreenMessage}
+          selectedModelLabel={selectedModelLabel}
+          selectedModel={selectedModel}
+          selectedProvider={selectedProvider}
+          selectedReasoningEffort={selectedReasoningEffort}
+          availableModels={availableModels}
+          availableProviders={availableProviders}
+          workspaceId={workspace.id}
+          onModelChange={onModelChange}
+          onOpenSettings={onOpenSettings}
+          turnContext={spreadsheetTurnContext}
+          refreshKey={artifactRefreshKey}
+        />
+      );
+    }
+    if (spreadsheetArtifact.kind === "presentation") {
+      return (
+        <PresentationArtifactViewer
+          filePath={spreadsheetArtifact.path}
+          workspacePath={workspace.path}
+          mode="fullscreen"
+          onClose={closeSpreadsheetArtifact}
+          onFullscreen={showSpreadsheetFullscreen}
+          onExitFullscreen={showSpreadsheetSidebar}
+          onSendMessage={sendSpreadsheetFullscreenMessage}
+          selectedModelLabel={selectedModelLabel}
+          selectedModel={selectedModel}
+          selectedProvider={selectedProvider}
+          selectedReasoningEffort={selectedReasoningEffort}
+          availableModels={availableModels}
+          availableProviders={availableProviders}
+          workspaceId={workspace.id}
+          onModelChange={onModelChange}
+          onOpenSettings={onOpenSettings}
+          turnContext={spreadsheetTurnContext}
+          refreshKey={artifactRefreshKey}
+        />
+      );
+    }
+    if (spreadsheetArtifact.kind === "webpage") {
+      return (
+        <WebArtifactViewer
+          filePath={spreadsheetArtifact.path}
+          workspacePath={workspace.path}
+          mode="fullscreen"
+          onClose={closeSpreadsheetArtifact}
+          onFullscreen={showSpreadsheetFullscreen}
+          onExitFullscreen={showSpreadsheetSidebar}
+          onSendMessage={sendSpreadsheetFullscreenMessage}
+          selectedModelLabel={selectedModelLabel}
+          selectedModel={selectedModel}
+          selectedProvider={selectedProvider}
+          selectedReasoningEffort={selectedReasoningEffort}
+          availableModels={availableModels}
+          availableProviders={availableProviders}
+          workspaceId={workspace.id}
+          onModelChange={onModelChange}
+          onOpenSettings={onOpenSettings}
+          turnContext={spreadsheetTurnContext}
+          refreshKey={artifactRefreshKey}
+        />
+      );
+    }
+    return (
+      <SpreadsheetArtifactViewer
+        filePath={spreadsheetArtifact.path}
+        workspacePath={workspace.path}
+        mode="fullscreen"
+        onClose={closeSpreadsheetArtifact}
+        onFullscreen={showSpreadsheetFullscreen}
+        onExitFullscreen={showSpreadsheetSidebar}
+        onSendMessage={sendSpreadsheetFullscreenMessage}
+        selectedModelLabel={selectedModelLabel}
+        selectedModel={selectedModel}
+        selectedProvider={selectedProvider}
+        selectedReasoningEffort={selectedReasoningEffort}
+        availableModels={availableModels}
+        availableProviders={availableProviders}
+        workspaceId={workspace.id}
+        onModelChange={onModelChange}
+        onOpenSettings={onOpenSettings}
+        turnContext={spreadsheetTurnContext}
+      />
+    );
+  }
+
+  const hasSpreadsheetSidebar =
+    Boolean(spreadsheetArtifact && workspace?.path && !remoteTaskView);
+
   return (
-    <>
+    <div
+      ref={splitLayoutRef}
+      className={`selected-workspace-view ${hasSpreadsheetSidebar ? "has-spreadsheet-sidebar" : ""} ${
+        isSpreadsheetResizing ? "is-resizing" : ""
+      }`}
+    >
       <MainContent
         task={task}
         selectedTaskId={selectedTaskId}
@@ -342,8 +1002,71 @@ const SelectedTaskWorkspaceView = memo(function SelectedTaskWorkspaceView({
             ? { deviceId: remoteTaskView.deviceId, deviceName: remoteTaskView.deviceName }
             : null
         }
+        onOpenSpreadsheetArtifact={openSpreadsheetArtifact}
+        onOpenDocumentArtifact={openDocumentArtifact}
+        onOpenPresentationArtifact={openPresentationArtifact}
+        onOpenWebArtifact={openWebArtifact}
       />
-      {!effectiveRightCollapsed && !remoteTaskView && (
+      {spreadsheetArtifact && workspace?.path && !remoteTaskView ? (
+        <>
+          <div
+            className="spreadsheet-sidebar-resize-handle"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize spreadsheet sidebar"
+            aria-valuemin={SPREADSHEET_SIDEBAR_MIN_WIDTH}
+            aria-valuenow={Math.round(spreadsheetSidebarWidth)}
+            tabIndex={0}
+            onPointerDown={handleSpreadsheetResizePointerDown}
+            onKeyDown={handleSpreadsheetResizeKeyDown}
+          />
+          <div
+            className="spreadsheet-resizable-sidebar"
+            style={{ width: `${spreadsheetSidebarWidth}px` }}
+          >
+            {spreadsheetArtifact.kind === "document" ? (
+              <DocumentArtifactViewer
+                filePath={spreadsheetArtifact.path}
+                workspacePath={workspace.path}
+                mode="sidebar"
+                onClose={closeSpreadsheetArtifact}
+                onFullscreen={showSpreadsheetFullscreen}
+                onExitFullscreen={showSpreadsheetSidebar}
+                refreshKey={artifactRefreshKey}
+              />
+            ) : spreadsheetArtifact.kind === "presentation" ? (
+              <PresentationArtifactViewer
+                filePath={spreadsheetArtifact.path}
+                workspacePath={workspace.path}
+                mode="sidebar"
+                onClose={closeSpreadsheetArtifact}
+                onFullscreen={showSpreadsheetFullscreen}
+                onExitFullscreen={showSpreadsheetSidebar}
+                refreshKey={artifactRefreshKey}
+              />
+            ) : spreadsheetArtifact.kind === "webpage" ? (
+              <WebArtifactViewer
+                filePath={spreadsheetArtifact.path}
+                workspacePath={workspace.path}
+                mode="sidebar"
+                onClose={closeSpreadsheetArtifact}
+                onFullscreen={showSpreadsheetFullscreen}
+                onExitFullscreen={showSpreadsheetSidebar}
+                refreshKey={artifactRefreshKey}
+              />
+            ) : (
+              <SpreadsheetArtifactViewer
+                filePath={spreadsheetArtifact.path}
+                workspacePath={workspace.path}
+                mode="sidebar"
+                onClose={closeSpreadsheetArtifact}
+                onFullscreen={showSpreadsheetFullscreen}
+                onExitFullscreen={showSpreadsheetSidebar}
+              />
+            )}
+          </div>
+        </>
+      ) : !effectiveRightCollapsed && !remoteTaskView ? (
         <RightPanel
           task={rightPanelInput.task}
           workspace={rightPanelInput.workspace}
@@ -359,8 +1082,8 @@ const SelectedTaskWorkspaceView = memo(function SelectedTaskWorkspaceView({
           highlightOutputPath={rightPanelInput.highlightOutputPath}
           onHighlightConsumed={onHighlightConsumed}
         />
-      )}
-    </>
+      ) : null}
+    </div>
   );
 }, (prev, next) =>
   getAppTaskSignature(prev.task) === getAppTaskSignature(next.task) &&
@@ -1832,7 +2555,16 @@ export function App() {
           outputSummary,
           completionToastNotifiedPathsRef.current,
         );
-        const shouldShowToast = toastDecision.show && !isAutomatedTaskLike(task);
+        const terminalStatus =
+          typeof event.payload?.terminalStatus === "string"
+            ? event.payload.terminalStatus
+            : typeof task?.terminalStatus === "string"
+              ? task.terminalStatus
+            : undefined;
+        const shouldShowToast =
+          toastDecision.show &&
+          shouldNotifyForTaskCompletionTerminalStatus(terminalStatus) &&
+          !isAutomatedTaskLike(task);
         if (shouldShowToast) {
           recordCompletionToastShown(
             event.taskId,
@@ -1863,10 +2595,7 @@ export function App() {
               taskId: event.taskId,
               taskTitle: task?.title,
               outputSummary,
-              terminalStatus:
-                typeof event.payload?.terminalStatus === "string"
-                  ? event.payload.terminalStatus
-                  : undefined,
+              terminalStatus,
               actionDependencies: hasTaskOutputs(outputSummary)
                 ? {
                     resolveWorkspacePath: resolveWorkspacePathForTask,
@@ -2348,6 +3077,7 @@ export function App() {
 
       // Create a new workspace for this folder
       const folderName = folderPath.split("/").pop() || "Workspace";
+      const permissionSettings = await window.electronAPI.getPermissionSettings().catch(() => null);
       const workspace = await window.electronAPI.createWorkspace({
         name: folderName,
         path: folderPath,
@@ -2356,7 +3086,7 @@ export function App() {
           write: true,
           delete: true,
           network: true,
-          shell: false,
+          shell: permissionSettings?.defaultShellEnabled === true,
         },
       });
 
@@ -3466,51 +4196,6 @@ export function App() {
           </div>
         )}
       </div>
-      {/* Update notification banner */}
-      {updateInfo?.available && !updateDismissed && (
-        <div className="update-banner">
-          <div className="update-banner-content">
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" />
-            </svg>
-            <span>
-              New version <strong>v{updateInfo.latestVersion}</strong> is available!
-            </span>
-            <button
-              className="update-banner-link"
-              onClick={() => {
-                setSettingsTab("updates");
-                setCurrentView("settings");
-              }}
-            >
-              View Release
-            </button>
-          </div>
-          <button
-            className="update-banner-dismiss"
-            onClick={() => setUpdateDismissed(true)}
-            aria-label="Dismiss update notification"
-          >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <path d="M18 6L6 18M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-      )}
       {(currentView === "main" ||
         currentView === "home" ||
         currentView === "devices" ||
@@ -3554,38 +4239,46 @@ export function App() {
                 onLoadMoreTasks={loadMoreTasks}
                 hasMoreTasks={hasMoreTasks}
                 uiDensity={uiDensity}
+                updateInfo={updateInfo}
+                updateDismissed={updateDismissed}
+                onViewUpdate={() => {
+                  setSettingsTab("updates");
+                  setCurrentView("settings");
+                }}
+                onDismissUpdate={() => setUpdateDismissed(true)}
               />
             )}
-            {currentView === "home" ? (
-              <HomeDashboard
-                workspace={currentWorkspace}
-                tasks={tasks}
-                automationInboxFocusTick={homeAutomationFocusTick}
-                onOpenTask={(taskId) => {
-                  setSelectedTaskId(taskId);
-                  setCurrentView("main");
-                }}
-                onNewSession={handleNewSession}
-                onOpenScheduledTasks={() => {
-                  setSettingsTab("scheduled");
-                  setCurrentView("settings");
-                }}
-                onOpenMissionControl={() => {
-                  setMissionControlInitialCompanyId(null);
-                  setCurrentView("missionControl");
-                }}
-                onOpenEventTriggers={() => {
-                  setSettingsTab("triggers");
-                  setCurrentView("settings");
-                }}
-                onOpenSelfImprove={() => {
-                  setSettingsTab("subconscious");
-                  setCurrentView("settings");
-                }}
-                onCreateTask={handleCreateTask}
-              />
-            ) : currentView === "devices" ? (
-              <DevicesPanel
+            <Suspense fallback={<LazyViewFallback />}>
+              {currentView === "home" ? (
+                <HomeDashboard
+                  workspace={currentWorkspace}
+                  tasks={tasks}
+                  automationInboxFocusTick={homeAutomationFocusTick}
+                  onOpenTask={(taskId) => {
+                    setSelectedTaskId(taskId);
+                    setCurrentView("main");
+                  }}
+                  onNewSession={handleNewSession}
+                  onOpenScheduledTasks={() => {
+                    setSettingsTab("scheduled");
+                    setCurrentView("settings");
+                  }}
+                  onOpenMissionControl={() => {
+                    setMissionControlInitialCompanyId(null);
+                    setCurrentView("missionControl");
+                  }}
+                  onOpenEventTriggers={() => {
+                    setSettingsTab("triggers");
+                    setCurrentView("settings");
+                  }}
+                  onOpenSelfImprove={() => {
+                    setSettingsTab("subconscious");
+                    setCurrentView("settings");
+                  }}
+                  onCreateTask={handleCreateTask}
+                />
+              ) : currentView === "devices" ? (
+                <DevicesPanel
                 onOpenTask={(taskId, remote) => {
                   if (remote) {
                     void openRemoteTaskView(taskId, remote);
@@ -3664,56 +4357,56 @@ export function App() {
                   setCurrentView("settings");
                 }}
                 availableProviders={availableProviders}
-              />
-            ) : currentView === "health" ? (
-              <HealthPanel
-                onOpenSettings={() => {
-                  setSettingsTab("health");
-                  setCurrentView("settings");
-                }}
-                onCreateTask={(title, prompt) => {
-                  setCurrentView("main");
-                  handleCreateTask(title, prompt);
-                }}
-              />
-            ) : currentView === "ideas" ? (
-              <IdeasPanel onCreateTaskFromPrompt={handleCreateTaskFromIdea} />
-            ) : currentView === "inboxAgent" ? (
-              <InboxAgentPanel
-                onOpenMissionControlIssue={(companyId, issueId) => {
-                  setMissionControlInitialCompanyId(companyId);
-                  setMissionControlInitialIssueId(issueId);
-                  setCurrentView("missionControl");
-                }}
-              />
-            ) : currentView === "agents" ? (
-              <main className="main-content">
-                <AgentsHubPanel
-                  onOpenMissionControl={() => {
-                    setMissionControlInitialCompanyId(null);
-                    setMissionControlInitialIssueId(null);
+                />
+              ) : currentView === "health" ? (
+                <HealthPanel
+                  onOpenSettings={() => {
+                    setSettingsTab("health");
+                    setCurrentView("settings");
+                  }}
+                  onCreateTask={(title, prompt) => {
+                    setCurrentView("main");
+                    handleCreateTask(title, prompt);
+                  }}
+                />
+              ) : currentView === "ideas" ? (
+                <IdeasPanel onCreateTaskFromPrompt={handleCreateTaskFromIdea} />
+              ) : currentView === "inboxAgent" ? (
+                <InboxAgentPanel
+                  onOpenMissionControlIssue={(companyId, issueId) => {
+                    setMissionControlInitialCompanyId(companyId);
+                    setMissionControlInitialIssueId(issueId);
                     setCurrentView("missionControl");
                   }}
-                  onOpenAgentPersonas={() => {
-                    setSettingsTab("digitaltwins");
-                    setCurrentView("settings");
-                  }}
-                  onOpenSlackSettings={() => {
-                    setSettingsTab("slack");
-                    setCurrentView("settings");
-                  }}
                 />
-              </main>
-            ) : currentView === "missionControl" ? (
-              <main className="main-content mission-control-main">
-                <MissionControlPanel
-                  onOpenAgents={() => setCurrentView("agents")}
-                  initialCompanyId={missionControlInitialCompanyId}
-                  initialIssueId={missionControlInitialIssueId}
-                />
-              </main>
-            ) : (
-              <SelectedTaskWorkspaceView
+              ) : currentView === "agents" ? (
+                <main className="main-content">
+                  <AgentsHubPanel
+                    onOpenMissionControl={() => {
+                      setMissionControlInitialCompanyId(null);
+                      setMissionControlInitialIssueId(null);
+                      setCurrentView("missionControl");
+                    }}
+                    onOpenAgentPersonas={() => {
+                      setSettingsTab("digitaltwins");
+                      setCurrentView("settings");
+                    }}
+                    onOpenSlackSettings={() => {
+                      setSettingsTab("slack");
+                      setCurrentView("settings");
+                    }}
+                  />
+                </main>
+              ) : currentView === "missionControl" ? (
+                <main className="main-content mission-control-main">
+                  <MissionControlPanel
+                    onOpenAgents={() => setCurrentView("agents")}
+                    initialCompanyId={missionControlInitialCompanyId}
+                    initialIssueId={missionControlInitialIssueId}
+                  />
+                </main>
+              ) : (
+                <SelectedTaskWorkspaceView
                 task={selectedTask}
                 selectedTaskId={selectedTaskId}
                 workspace={currentWorkspace}
@@ -3754,8 +4447,9 @@ export function App() {
                 onCancelTaskById={handleCancelTaskById}
                 onHighlightConsumed={handleRightPanelHighlightConsumed}
                 onModelChange={handleModelChange}
-              />
-            )}
+                />
+              )}
+            </Suspense>
           </div>
 
           {/* Quick Task FAB */}
@@ -3806,45 +4500,49 @@ export function App() {
         </>
       )}
       {currentView === "settings" && (
-        <Settings
-          onBack={() => setCurrentView("main")}
-          onSettingsChanged={loadLLMConfig}
-          themeMode={themeMode}
-          visualTheme={visualTheme}
-          accentColor={accentColor}
-          transparencyEffectsEnabled={transparencyEffectsEnabled}
-          onThemeChange={handleThemeChange}
-          onVisualThemeChange={handleVisualThemeChange}
-          onAccentChange={handleAccentChange}
-          onTransparencyEffectsEnabledChange={handleTransparencyEffectsEnabledChange}
-          uiDensity={uiDensity}
-          onUiDensityChange={handleUiDensityChange}
-          devRunLoggingEnabled={devRunLoggingEnabled}
-          onDevRunLoggingEnabledChange={handleDevRunLoggingEnabledChange}
-          initialTab={settingsTab}
-          onShowOnboarding={handleShowOnboarding}
-          onboardingCompletedAt={onboardingCompletedAt}
-          workspaceId={currentWorkspace?.id}
-          onCreateTask={(title, prompt) => {
-            setCurrentView("main");
-            handleCreateTask(title, prompt);
-          }}
-          onOpenTask={(taskId) => {
-            setCurrentView("main");
-            setSelectedTaskId(taskId);
-            setRightSidebarCollapsed(false);
-          }}
-          onNavigateToMissionControl={(companyId) => {
-            setMissionControlInitialCompanyId(companyId);
-            setCurrentView("missionControl");
-          }}
-          onNavigateToAgents={() => {
-            setCurrentView("agents");
-          }}
-        />
+        <Suspense fallback={<LazyViewFallback />}>
+          <Settings
+            onBack={() => setCurrentView("main")}
+            onSettingsChanged={loadLLMConfig}
+            themeMode={themeMode}
+            visualTheme={visualTheme}
+            accentColor={accentColor}
+            transparencyEffectsEnabled={transparencyEffectsEnabled}
+            onThemeChange={handleThemeChange}
+            onVisualThemeChange={handleVisualThemeChange}
+            onAccentChange={handleAccentChange}
+            onTransparencyEffectsEnabledChange={handleTransparencyEffectsEnabledChange}
+            uiDensity={uiDensity}
+            onUiDensityChange={handleUiDensityChange}
+            devRunLoggingEnabled={devRunLoggingEnabled}
+            onDevRunLoggingEnabledChange={handleDevRunLoggingEnabledChange}
+            initialTab={settingsTab}
+            onShowOnboarding={handleShowOnboarding}
+            onboardingCompletedAt={onboardingCompletedAt}
+            workspaceId={currentWorkspace?.id}
+            onCreateTask={(title, prompt) => {
+              setCurrentView("main");
+              handleCreateTask(title, prompt);
+            }}
+            onOpenTask={(taskId) => {
+              setCurrentView("main");
+              setSelectedTaskId(taskId);
+              setRightSidebarCollapsed(false);
+            }}
+            onNavigateToMissionControl={(companyId) => {
+              setMissionControlInitialCompanyId(companyId);
+              setCurrentView("missionControl");
+            }}
+            onNavigateToAgents={() => {
+              setCurrentView("agents");
+            }}
+          />
+        </Suspense>
       )}
       {currentView === "browser" && (
-        <BrowserView initialUrl={browserUrl} onBack={() => setCurrentView("main")} />
+        <Suspense fallback={<LazyViewFallback />}>
+          <BrowserView initialUrl={browserUrl} onBack={() => setCurrentView("main")} />
+        </Suspense>
       )}
     </div>
   );

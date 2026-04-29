@@ -88,6 +88,18 @@ Supermemory does not replace CoWork's local memory system. It adds an external p
    - `BOOTSTRAP.md` is a one-time onboarding checklist; once you complete onboarding, removing it marks onboarding complete and CoWork OS tracks that state in `.cowork/workspace-state.json`
    - `HEARTBEAT.md` is reserved for recurring heartbeat-only checks rather than general task context
    - Project-specific context lives under `.cowork/projects/<projectId>/`, where `CONTEXT.md` captures project notes and `ACCESS.md` captures project access boundaries
+
+### Try The Everything Workbench
+
+After the app is configured, try tasks that produce or use visible work surfaces:
+
+- `create a small spreadsheet with 6 columns and 4 rows`
+- `create a sample Word document`
+- `create a two-slide presentation`
+- `create a simple HTML landing page`
+- `go to example.com and test the website as a normal user`
+
+Generated documents, spreadsheets, presentations, and web pages appear as artifact cards and open in the right sidebar or fullscreen workbench. Live website testing opens the [Browser Workbench](browser-workbench.md), where the agent and user share the same in-app browser, with visible cursor movement, screenshots, annotation, and follow-up controls.
    - Changes to tracked kit files keep revision snapshots under `.cowork/**/.history/`
    - You can validate kit health, freshness, and secret/missing-file warnings locally with `npm run kit:lint`
 

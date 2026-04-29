@@ -2,6 +2,17 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import {
+  applyDevLogRetention,
+  createDevLogEvent,
+  createInitialRunManifestEntry,
+  formatDevLogTextLine,
+  parseRetentionConfig,
+  serializeDevLogEvent,
+  summarizeDevLogRunFiles,
+  timestampForFilename,
+  upsertDevRunManifest,
+} from "./dev-log-utils.mjs";
 
 const DEV_LOG_SETTINGS_PATH = path.join(".cowork", "dev-log-settings.json");
 
@@ -11,14 +22,6 @@ function parseBoolean(value) {
   if (["1", "true", "yes", "on"].includes(normalized)) return true;
   if (["0", "false", "no", "off"].includes(normalized)) return false;
   return undefined;
-}
-
-function pad(value) {
-  return String(value).padStart(2, "0");
-}
-
-function timestampForFilename(date = new Date()) {
-  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
 }
 
 function prefixedLogLine(message) {
@@ -41,22 +44,36 @@ function resolveCaptureEnabled() {
   }
 }
 
-function createLineTimestampWriter(streamA, streamB) {
+function createStructuredDevLogWriter({ runId, textStreams, jsonlStreams }) {
   let buffer = "";
+  const stats = {
+    lineCount: 0,
+    errorCount: 0,
+    warnCount: 0,
+  };
 
-  const emitLine = (line) => {
-    const entry = prefixedLogLine(line);
-    streamA.write(entry);
-    streamB.write(entry);
+  const emitLine = (line, stream = "stdout", overrides = {}) => {
+    const timestamp = new Date().toISOString();
+    const textEntry = formatDevLogTextLine(timestamp, line);
+    const event = createDevLogEvent({ timestamp, runId, line, stream, overrides });
+    const jsonEntry = serializeDevLogEvent(event);
+
+    for (const target of textStreams) target.write(textEntry);
+    for (const target of jsonlStreams) target.write(jsonEntry);
+
+    stats.lineCount += 1;
+    if (event.level === "error") stats.errorCount += 1;
+    if (event.level === "warn") stats.warnCount += 1;
   };
 
   return {
-    write(chunk) {
+    stats,
+    write(chunk, stream = "stdout") {
       buffer += chunk.toString("utf8");
       const lines = buffer.split(/\r?\n/);
       buffer = lines.pop() ?? "";
       for (const line of lines) {
-        emitLine(line);
+        emitLine(line, stream);
       }
     },
     flush() {
@@ -65,10 +82,20 @@ function createLineTimestampWriter(streamA, streamB) {
         buffer = "";
       }
     },
-    line(message) {
-      emitLine(message);
+    line(message, overrides = {}) {
+      emitLine(message, "stdout", {
+        process: "dev-wrapper",
+        component: "dev-log",
+        ...overrides,
+      });
     },
   };
+}
+
+function endStream(stream) {
+  return new Promise((resolve) => {
+    stream.end(resolve);
+  });
 }
 
 function spawnDev(startWithCapture) {
@@ -113,11 +140,30 @@ if (!captureEnabled) {
   const logsDir = path.join(process.cwd(), "logs");
   fs.mkdirSync(logsDir, { recursive: true });
 
-  const runLogPath = path.join(logsDir, `dev-${timestampForFilename()}.log`);
+  const runId = timestampForFilename();
+  const runStartedAt = new Date().toISOString();
+  const runLogPath = path.join(logsDir, `dev-${runId}.log`);
+  const runJsonlPath = path.join(logsDir, `dev-${runId}.jsonl`);
   const latestLogPath = path.join(logsDir, "dev-latest.log");
+  const latestJsonlPath = path.join(logsDir, "dev-latest.jsonl");
   const runLogStream = fs.createWriteStream(runLogPath, { flags: "a" });
+  const runJsonlStream = fs.createWriteStream(runJsonlPath, { flags: "a" });
   const latestLogStream = fs.createWriteStream(latestLogPath, { flags: "w" });
-  const timestampedWriter = createLineTimestampWriter(runLogStream, latestLogStream);
+  const latestJsonlStream = fs.createWriteStream(latestJsonlPath, { flags: "w" });
+  const timestampedWriter = createStructuredDevLogWriter({
+    runId,
+    textStreams: [runLogStream, latestLogStream],
+    jsonlStreams: [runJsonlStream, latestJsonlStream],
+  });
+
+  const initialManifestEntry = createInitialRunManifestEntry({
+    runId,
+    startedAt: runStartedAt,
+    textPath: path.relative(process.cwd(), runLogPath),
+    jsonlPath: path.relative(process.cwd(), runJsonlPath),
+  });
+  upsertDevRunManifest(logsDir, initialManifestEntry);
+  applyDevLogRetention(logsDir, parseRetentionConfig());
 
   const child = spawnDev(true);
   process.stdout.write(prefixedLogLine(`Logging enabled. Writing to ${runLogPath}`));
@@ -125,12 +171,12 @@ if (!captureEnabled) {
 
   child.stdout.on("data", (chunk) => {
     process.stdout.write(chunk);
-    timestampedWriter.write(chunk);
+    timestampedWriter.write(chunk, "stdout");
   });
 
   child.stderr.on("data", (chunk) => {
     process.stderr.write(chunk);
-    timestampedWriter.write(chunk);
+    timestampedWriter.write(chunk, "stderr");
   });
 
   let finalized = false;
@@ -145,14 +191,26 @@ if (!captureEnabled) {
     process.stdout.write(prefixedLogLine(footer));
     timestampedWriter.line(footer);
 
-    runLogStream.end();
-    latestLogStream.end();
+    void Promise.all([
+      endStream(runLogStream),
+      endStream(runJsonlStream),
+      endStream(latestLogStream),
+      endStream(latestJsonlStream),
+    ]).then(() => {
+      upsertDevRunManifest(logsDir, {
+        runId,
+        endedAt: new Date().toISOString(),
+        exitCode,
+        signal,
+        ...summarizeDevLogRunFiles(runLogPath, runJsonlPath, timestampedWriter.stats),
+      });
 
-    if (typeof exitCode === "number") {
-      process.exit(exitCode);
-      return;
-    }
-    process.exit(signal ? 1 : 0);
+      if (typeof exitCode === "number") {
+        process.exit(exitCode);
+        return;
+      }
+      process.exit(signal ? 1 : 0);
+    });
   };
 
   child.on("error", (error) => {

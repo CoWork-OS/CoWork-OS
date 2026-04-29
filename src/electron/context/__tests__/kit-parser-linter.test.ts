@@ -26,6 +26,35 @@ describe("kit-parser-linter", () => {
     expect(result.body).not.toContain("file: AGENTS.md");
   });
 
+  it("preserves DESIGN.md frontmatter as injectable design tokens", () => {
+    const contract = WORKSPACE_KIT_CONTRACTS["DESIGN.md"];
+    const doc = parseKitDocumentFromString(
+      [
+        "---",
+        "name: Product UI",
+        "colors:",
+        '  primary: "#22d3ee"',
+        "radii:",
+        '  sm: "8px"',
+        "---",
+        "",
+        "# Design System",
+        "",
+        "## Principles",
+        "- Use calm operator UI",
+        "",
+      ].join("\n"),
+      contract,
+    );
+
+    expect(doc).not.toBeNull();
+    expect(doc?.meta.name).toBe("Product UI");
+    expect(doc?.body).toContain("colors:");
+    expect(doc?.body).toContain('primary: "#22d3ee"');
+    expect(doc?.body).toContain("# Design System");
+    expect(lintKitDoc(doc!, contract)).toEqual([]);
+  });
+
   it("warns when freshness-tracked docs are missing updated frontmatter", () => {
     const contract = WORKSPACE_KIT_CONTRACTS["AGENTS.md"];
     const doc = parseKitDocumentFromString("# Workspace Rules\n\n- Keep notes durable\n", contract);

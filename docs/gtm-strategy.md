@@ -4,15 +4,17 @@
 
 ## Category Definition
 
-CoWork OS is a **security-hardened, local-first AI operating system**.
+CoWork OS is a **security-hardened, local-first personal agentic operating system and everything app**.
 
 - OpenClaw is best positioned as an agent experimentation toolkit.
 - CoWork OS is positioned as the production runtime for running agents safely across real workflows.
 
 ## Primary Positioning Statement
 
-CoWork OS is the production alternative to OpenClaw for users who need:
+CoWork OS is a local-first personal agentic OS and production workbench for users who need:
 
+- One workspace for coding, web design, research, documents, spreadsheets, decks, web pages, automations, channels, and devices
+- Generated artifacts that can be opened, reviewed, lightly edited, and revised with the agent beside them
 - Guardrails and approval workflows by default
 - Local-first data ownership (BYOK, no telemetry)
 - A multi-channel operating layer (17 messaging channels)
@@ -20,7 +22,7 @@ CoWork OS is the production alternative to OpenClaw for users who need:
 
 Short form:
 
-> OpenClaw is excellent for experimentation. CoWork OS is optimized for governed daily operations.
+> OpenClaw is excellent for experimentation. CoWork OS is optimized for governed daily operations and generated work products you can keep working on in-place.
 
 ## Core Buyer Profiles
 
@@ -49,11 +51,21 @@ CoWork OS is not just a local runner. It is a messaging-native runtime across 17
 
 Users keep control of data and provider keys with optional offline model execution via Ollama.
 
+### 5) One Workspace for Knowledge-Work Artifacts
+
+CoWork OS reduces context switching for knowledge workers, founders, and operators by keeping generated documents, spreadsheets, presentations, web pages, PDFs, and task outputs in one local-first artifact workbench. Users can open artifacts in the app, review or lightly edit them, ask for changes, and still jump to Word, Excel, PowerPoint, Pages, Numbers, Keynote, or a browser when advanced native behavior is needed.
+
+### 6) Everything App Breadth
+
+The artifact workbench should not narrow the product category. CoWork OS also covers coding, repository work, frontend design, research, inbox work, automations, device/remote work, connectors, agent teams, and multi-channel task ingress. The strongest positioning is "personal agentic OS for real work," with the Everything Workbench as a concrete proof point.
+
 ## Proof Points to Reuse in Messaging
 
 - 30+ LLM providers
 - 17 messaging channels
 - 100+ built-in skills
+- Coding, web design, research, automations, channels, devices, and artifact workspaces in one app
+- Everything Workbench for docs, sheets, decks, web pages, PDFs, and previews
 - 4,932 automated tests in the suite across 390 test files
 - ZeroLeaks report published in-repo
 

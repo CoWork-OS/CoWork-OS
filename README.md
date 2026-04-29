@@ -22,6 +22,7 @@
 <p align="center">
   <a href="docs/getting-started.md">Getting Started</a> &middot;
   <a href="docs/everything-workbench.md">Everything Workbench</a> &middot;
+  <a href="docs/browser-workbench.md">Browser Workbench</a> &middot;
   <a href="docs/showcase.md">Use Cases</a> &middot;
   <a href="docs/release-notes-0.5.41.md">Release Notes 0.5.41</a> &middot;
   <a href="docs/integration-skill-bootstrap-lifecycle.md">Platform Updates</a> &middot;
@@ -39,6 +40,7 @@
 
 - **Personal Agentic OS** — CoWork OS is still a local-first operating system for personal AI agents: tasks, memory, skills, providers, approvals, channels, devices, and automations are governed in one workspace.
 - **Everything Workbench** — Chat, tasks, documents, spreadsheets, presentations, web pages, PDFs, and file outputs live in one local-first workspace. Generate an artifact, open it in the app, review or edit it, and ask for follow-up changes with fewer switches into separate office apps. [Learn more](docs/everything-workbench.md)
+- **Browser Workbench** — Test live websites and local apps in a visible in-app browser. The agent clicks, fills, scrolls, screenshots, annotates, and shows cursor movement in the same right-sidebar/fullscreen browser the user can see. [Learn more](docs/browser-workbench.md)
 - **Coding, web design, and knowledge work** — Use the same agentic workspace for repository work, frontend/product design, research, docs, spreadsheets, presentations, web pages, PDFs, and long-running operational tasks.
 - **Inbox Agent** — local-first email workspace with Classic and Today modes, AI triage, Mailbox Ask, manual reply/reply-all/forward, editable AI drafts, sender cleanup, commitments, and background sync.
 - **Workflow Intelligence** — Always-on cognition is now framed as one reviewable loop: Memory is the source of truth, Heartbeat schedules reflection, Reflection evaluates evidence internally, and Suggestions are the user-facing output.
@@ -85,6 +87,7 @@ Stable workflow entry points for the newest high-impact capabilities.
 - **Spreadsheet artifacts** — task-created spreadsheet files render as compact artifact cards. Excel workbooks and CSV/TSV files open in the editable right-sidebar viewer; native Numbers, Google Sheets shortcut, ODS, XLSB, and other recognized spreadsheet outputs still get the same card and external-app/folder actions. Fullscreen mode expands editable sheets across the app with cell/range/row/column selection, copy, zoom, add row/column, save, model picker, voice input, attachments, and follow-up task context. [Learn more](docs/spreadsheet-artifacts.md)
 - **Presentation artifacts** — generated `.pptx` decks render as compact artifact cards and open by default in the resizable right-sidebar presentation viewer. The viewer shows thumbnails, slide navigation, zoom, a white slide canvas, speaker notes, text-first fast loading, cached rendered slide images, fullscreen follow-up context, and background refresh after requested deck edits. Legacy PowerPoint formats are recognized with external-app/folder actions. [Learn more](docs/pptx-generation-and-preview.md)
 - **Web page artifacts** — generated `.html` / `.htm` pages and built React output such as `dist/index.html`, `build/index.html`, or `out/index.html` render as compact artifact cards and open by default in a resizable right-sidebar sandboxed iframe preview. Fullscreen mode keeps the functional follow-up composer and refreshes after the relevant file or build output changes. React-style source projects without build output show a clear build-output-needed state instead of auto-starting a dev server. [Learn more](docs/web-page-artifacts.md)
+- **Browser Workbench** — live website testing opens a visible in-app browser in the right sidebar by default. Browser-use tools target that shared webview, show cursor movement during actions, support screenshots and annotation, and can expand to fullscreen with the normal follow-up composer. [Learn more](docs/browser-workbench.md)
 - **Image generation** — configurable provider ordering across Gemini, OpenAI, Azure OpenAI, and OpenRouter.
 - **Video generation** — text-to-video and image-to-video routing with polling tools and inline preview.
 - **Programmatic technical video** — bundled `manim-video` skill for Manim CE explainers, equation walkthroughs, algorithm visualizations, and animated architecture/data stories. [Learn more](docs/skills/manim-video.md)
@@ -94,7 +97,7 @@ See [Workflow Intelligence](docs/workflow-intelligence.md), [Core Automation](do
 
 ### Latest Release
 
-**`0.5.41`** packages the Everything Workbench release: editable document artifacts, spreadsheet artifact editing, presentation artifact review, sandboxed web page artifacts, structured memory observations, format-aware file previews, Mission Control intelligence, developer log capture, renderer bundle reductions, and artifact cards that appear once at task completion. Start with [Release Notes 0.5.41](docs/release-notes-0.5.41.md), then [Features](docs/features.md), [Getting Started](docs/getting-started.md), [Everything Workbench](docs/everything-workbench.md), and the [Changelog](CHANGELOG.md).
+**`0.5.41`** packages the Everything Workbench release: editable document artifacts, spreadsheet artifact editing, presentation artifact review, sandboxed web page artifacts, visible Browser Workbench automation, structured memory observations, format-aware file previews, Mission Control intelligence, developer log capture, renderer bundle reductions, and artifact cards that appear once at task completion. Start with [Release Notes 0.5.41](docs/release-notes-0.5.41.md), then [Features](docs/features.md), [Getting Started](docs/getting-started.md), [Everything Workbench](docs/everything-workbench.md), [Browser Workbench](docs/browser-workbench.md), and the [Changelog](CHANGELOG.md).
 
 ## Quick Start
 

@@ -8,10 +8,10 @@ interface MCTopBarProps {
 }
 
 const TABS: { id: MCTab; label: string; requiresCompany?: boolean }[] = [
-  { id: "overview", label: "Overview" },
-  { id: "agents", label: "Agents" },
-  { id: "board", label: "Board" },
-  { id: "feed", label: "Feed" },
+  { id: "overview", label: "Brief" },
+  { id: "board", label: "Work" },
+  { id: "intelligence", label: "Intelligence" },
+  { id: "feed", label: "Evidence Feed" },
   { id: "ops", label: "Operations", requiresCompany: true },
 ];
 

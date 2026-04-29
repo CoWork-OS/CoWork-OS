@@ -6,7 +6,6 @@ import { execFile } from "child_process";
 import { promisify } from "util";
 import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import {
   BedrockRuntimeClient,
   BedrockRuntimeClientConfig,
@@ -17,11 +16,13 @@ import { SensitiveSourceRef, Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { LLMTool, MODELS } from "../llm/types";
 import { LLMProviderFactory, type LLMSettings } from "../llm/provider-factory";
+import { OpenAIProvider } from "../llm/openai-provider";
+import type { OpenAIOAuthTokens } from "../llm/openai-oauth";
 import { downscaleImage } from "./image-utils";
 import { createLogger } from "../../utils/logger";
 import { buildSensitiveSourceRefForPath } from "../security/export-permission-context";
 
-type VisionProvider = "azure" | "openai" | "anthropic" | "gemini" | "bedrock";
+type VisionProvider = "azure" | "openai" | "anthropic" | "bedrock";
 
 const DEFAULT_MAX_TOKENS = 900;
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024; // 20MB
@@ -107,12 +108,6 @@ function buildSetupHint(provider: VisionProvider): {
         type: "open_settings",
         label: "Set up Claude credentials",
         target: "anthropic",
-      };
-    case "gemini":
-      return {
-        type: "open_settings",
-        label: "Set up Gemini API key",
-        target: "gemini",
       };
     case "bedrock":
       return {
@@ -287,7 +282,7 @@ export class VisionTools {
         description:
           "Analyze an image file from the workspace using a vision-capable LLM. " +
           "Use this for screenshots/photos: extract text, describe items, answer questions, or summarize what is shown. " +
-          "This may require Azure OpenAI, OpenAI, Anthropic, Bedrock, or Gemini credentials.",
+          "Uses the active image-capable LLM provider; if the active model cannot accept images, ask the user to switch models.",
         input_schema: {
           type: "object",
           properties: {
@@ -303,9 +298,9 @@ export class VisionTools {
             },
             provider: {
               type: "string",
-              enum: ["azure", "openai", "anthropic", "gemini", "bedrock"],
+              enum: ["azure", "openai", "anthropic", "bedrock"],
               description:
-                "Optional provider override (default: uses configured provider if vision-capable, otherwise falls back).",
+                "Optional provider override for a non-Gemini vision provider.",
             },
             model: {
               type: "string",
@@ -346,7 +341,7 @@ export class VisionTools {
             },
             provider: {
               type: "string",
-              enum: ["azure", "openai", "anthropic", "gemini", "bedrock"],
+              enum: ["azure", "openai", "anthropic", "bedrock"],
               description: "Optional vision provider override.",
             },
           },
@@ -558,18 +553,21 @@ export class VisionTools {
         settings.azure?.deployment?.trim(),
     );
     const hasDirectOpenAIVisionConfig = Boolean(settings.openai?.apiKey?.trim());
+    const hasOpenAIOAuthVisionConfig = Boolean(
+      settings.openai?.accessToken?.trim() && settings.openai?.refreshToken?.trim(),
+    );
+    const hasOpenAIVisionConfig = hasDirectOpenAIVisionConfig || hasOpenAIOAuthVisionConfig;
     const normalizedProviderOverride =
       providerOverride === "openai" &&
       normalizedProviderType === "azure" &&
       hasAzureVisionConfig &&
-      !hasDirectOpenAIVisionConfig
+      !hasOpenAIVisionConfig
         ? "azure"
         : providerOverride;
     const preferred =
       normalizedProviderOverride === "azure" ||
       normalizedProviderOverride === "openai" ||
       normalizedProviderOverride === "anthropic" ||
-      normalizedProviderOverride === "gemini" ||
       normalizedProviderOverride === "bedrock"
         ? (normalizedProviderOverride as VisionProvider)
         : undefined;
@@ -582,9 +580,7 @@ export class VisionTools {
           if (normalizedProviderType === "bedrock") order.push("bedrock");
           if (normalizedProviderType === "openai") order.push("openai");
           if (normalizedProviderType === "anthropic") order.push("anthropic");
-          if (normalizedProviderType === "gemini") order.push("gemini");
-          order.push("azure", "bedrock", "openai", "anthropic", "gemini");
-          return order.filter((p, idx) => order.indexOf(p) === idx);
+          return order;
         })();
 
     let lastError: string | undefined;
@@ -624,20 +620,49 @@ export class VisionTools {
 
         if (provider === "openai") {
           const apiKey = settings.openai?.apiKey?.trim();
-          if (!apiKey) {
+          const accessToken = settings.openai?.accessToken?.trim();
+          const refreshToken = settings.openai?.refreshToken?.trim();
+          const canUseOAuth = Boolean(accessToken && refreshToken);
+          const useOAuth = settings.openai?.authMethod === "oauth" && canUseOAuth;
+          const model =
+            modelOverride || settings.openai?.model || (useOAuth ? "gpt-5.5" : "gpt-4o-mini");
+          let text: string;
+          if (useOAuth) {
+            text = await this.analyzeWithOpenAIOAuth({
+              accessToken: accessToken!,
+              refreshToken: refreshToken!,
+              tokenExpiresAt: settings.openai?.tokenExpiresAt,
+              model,
+              prompt,
+              base64,
+              mimeType,
+              maxTokens,
+            });
+          } else if (apiKey) {
+            text = await this.analyzeWithOpenAI({
+              apiKey,
+              model,
+              prompt,
+              base64,
+              mimeType,
+              maxTokens,
+            });
+          } else if (canUseOAuth) {
+            text = await this.analyzeWithOpenAIOAuth({
+              accessToken: accessToken!,
+              refreshToken: refreshToken!,
+              tokenExpiresAt: settings.openai?.tokenExpiresAt,
+              model,
+              prompt,
+              base64,
+              mimeType,
+              maxTokens,
+            });
+          } else {
             lastError =
-              "OpenAI API key not configured (OpenAI OAuth sign-in does not support image analysis here yet).";
+              "OpenAI credentials not configured. Sign in with ChatGPT subscription access or add an OpenAI API key.";
             continue;
           }
-          const model = modelOverride || "gpt-4o-mini";
-          const text = await this.analyzeWithOpenAI({
-            apiKey,
-            model,
-            prompt,
-            base64,
-            mimeType,
-            maxTokens,
-          });
           this.daemon.logEvent(this.taskId, "tool_result", {
             tool: toolName,
             success: true,
@@ -704,47 +729,23 @@ export class VisionTools {
           return { success: true, provider, model, text };
         }
 
-        if (provider === "gemini") {
-          const apiKey = settings.gemini?.apiKey?.trim();
-          if (!apiKey) {
-            lastError = "Gemini API key not configured.";
-            continue;
-          }
-          const model =
-            modelOverride || settings.gemini?.model || "gemini-2.0-flash";
-          const text = await this.analyzeWithGemini({
-            apiKey,
-            model,
-            prompt,
-            base64,
-            mimeType,
-            maxTokens,
-          });
-          this.daemon.logEvent(this.taskId, "tool_result", {
-            tool: toolName,
-            success: true,
-            provider,
-            model,
-          });
-          return { success: true, provider, model, text };
-        }
       } catch (error: Any) {
         lastErrorRaw = error;
         lastError = error?.message || String(error);
       }
     }
 
-    const fallbackProvider = preferred || tryOrder[0] || "openai";
-    const actionHint = buildSetupHint(fallbackProvider);
+    const fallbackProvider = preferred || tryOrder[0];
+    const actionHint = fallbackProvider ? buildSetupHint(fallbackProvider) : undefined;
 
     const fallbackError =
       lastError ||
-      "No vision-capable provider configured. Configure Azure OpenAI, OpenAI, Anthropic, Bedrock, or Gemini in Settings.";
+      "The current model cannot analyze images directly. Switch to an image-capable model/provider, then resend the image.";
     const retryable = this.shouldRetryVisionError(
       lastErrorRaw ?? fallbackError,
     );
     const configurationMissing =
-      /not configured|does not support image analysis here yet|no vision-capable provider configured|vision requires/i.test(
+      /not configured|does not support image analysis here yet|no vision-capable provider configured|vision requires|cannot analyze images directly|switch to an image-capable model/i.test(
         fallbackError,
       );
 
@@ -1072,6 +1073,71 @@ export class VisionTools {
     return response.choices?.[0]?.message?.content?.trim() || "";
   }
 
+  private async analyzeWithOpenAIOAuth(args: {
+    accessToken: string;
+    refreshToken: string;
+    tokenExpiresAt?: number;
+    model: string;
+    prompt: string;
+    base64: string;
+    mimeType: string;
+    maxTokens: number;
+  }): Promise<string> {
+    const provider = new OpenAIProvider({
+      type: "openai",
+      model: args.model,
+      openaiAccessToken: args.accessToken,
+      openaiRefreshToken: args.refreshToken,
+      openaiTokenExpiresAt: args.tokenExpiresAt,
+      openaiOAuthTokenUpdater: (tokens) => this.persistOpenAIOAuthTokens(tokens),
+    });
+
+    const response = await provider.createMessage({
+      model: args.model,
+      maxTokens: args.maxTokens,
+      system: "",
+      toolChoice: "none",
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: args.prompt },
+            {
+              type: "image",
+              data: args.base64,
+              mimeType: args.mimeType as
+                | "image/jpeg"
+                | "image/png"
+                | "image/gif"
+                | "image/webp",
+            },
+          ],
+        },
+      ],
+    });
+
+    return response.content
+      .filter((block) => block.type === "text")
+      .map((block) => block.text)
+      .join("\n")
+      .trim();
+  }
+
+  private persistOpenAIOAuthTokens(tokens: OpenAIOAuthTokens): void {
+    const latestSettings = LLMProviderFactory.loadSettings();
+    latestSettings.openai = {
+      ...latestSettings.openai,
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token,
+      tokenExpiresAt: tokens.expires_at,
+      accountId: tokens.accountId,
+      email: tokens.email,
+      authMethod: "oauth",
+    };
+    LLMProviderFactory.saveSettings(latestSettings);
+    LLMProviderFactory.clearCache();
+  }
+
   private async analyzeWithAzureOpenAI(args: {
     apiKey: string;
     endpoint: string;
@@ -1193,38 +1259,6 @@ export class VisionTools {
       .map((b) => (b as Anthropic.TextBlock).text)
       .join("\n")
       .trim();
-  }
-
-  private async analyzeWithGemini(args: {
-    apiKey: string;
-    model: string;
-    prompt: string;
-    base64: string;
-    mimeType: string;
-    maxTokens: number;
-  }): Promise<string> {
-    const client = new GoogleGenerativeAI(args.apiKey);
-    const model = client.getGenerativeModel({ model: args.model });
-
-    const result = await model.generateContent({
-      contents: [
-        {
-          role: "user",
-          parts: [
-            { text: args.prompt },
-            {
-              inlineData: {
-                mimeType: args.mimeType,
-                data: args.base64,
-              },
-            },
-          ],
-        },
-      ],
-      generationConfig: { maxOutputTokens: args.maxTokens },
-    });
-
-    return result.response.text().trim();
   }
 
   private async analyzeWithBedrock(args: {

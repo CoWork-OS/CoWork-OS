@@ -15,18 +15,52 @@ import {
   LLMSystemBlock,
   LLMTool,
   LLMToolResult,
+  LLMToolUse,
+  LLMTextContent,
+  LLMImageContent,
+  OpenAIReasoningEffort,
+  LLMTextVerbosity,
 } from "./types";
 import { OpenAIOAuth, OpenAIOAuthTokens } from "./openai-oauth";
 import { imageToTextFallback } from "./image-utils";
 import { loadPiAiModule } from "./pi-ai-loader";
 import { toOpenAICompatibleMessages } from "./openai-compatible";
 import { resolveOutputTokenParamName } from "./output-token-policy";
-import { buildOpenAIPromptCacheFields, extractOpenAICompatibleCacheUsage } from "./prompt-cache";
+import {
+  buildOpenAIPromptCacheFields,
+  extractOpenAICompatibleCacheUsage,
+  splitSystemBlocksForOpenAIPrefix,
+} from "./prompt-cache";
 import { createLogger } from "../../utils/logger";
 
 // Default model for openai-codex (ChatGPT backend)
 const DEFAULT_CODEX_MODEL = "gpt-5.1-codex-mini";
+const OPENAI_CODEX_PROVIDER = "openai-codex";
+const OPENAI_CODEX_API = "openai-codex-responses";
+const OPENAI_CODEX_BASE_URL = "https://chatgpt.com/backend-api";
+const CHATGPT_SUBSCRIPTION_MODEL_IDS = [
+  "gpt-5.5",
+  "gpt-5.4",
+  "gpt-5.4-mini",
+  "gpt-5.4-nano",
+  "gpt-5.3-codex-spark",
+  "gpt-5.3-codex",
+  "gpt-5.2",
+  "gpt-5.2-codex",
+  "gpt-5.1",
+  "gpt-5.1-codex-max",
+  "gpt-5.1-codex-mini",
+];
 const logger = createLogger("OpenAI");
+
+const isToolResult = (item: LLMContent | LLMToolResult): item is LLMToolResult =>
+  item?.type === "tool_result";
+const isToolUse = (item: LLMContent | LLMToolResult): item is LLMToolUse =>
+  item?.type === "tool_use";
+const isTextContent = (item: LLMContent | LLMToolResult): item is LLMTextContent =>
+  item?.type === "text";
+const isImageContent = (item: LLMContent | LLMToolResult): item is LLMImageContent =>
+  item?.type === "image";
 
 type OpenAIProviderErrorPhase = "api_key" | "oauth";
 
@@ -48,6 +82,9 @@ export class OpenAIProvider implements LLMProvider {
   private authMethod: "api_key" | "oauth";
   private oauthTokens?: OpenAIOAuthTokens;
   private model: string;
+  private openaiReasoningEffort?: OpenAIReasoningEffort;
+  private openaiTextVerbosity?: LLMTextVerbosity;
+  private oauthTokenUpdater?: LLMProviderConfig["openaiOAuthTokenUpdater"];
 
   constructor(config: LLMProviderConfig) {
     const apiKey = config.openaiApiKey;
@@ -55,6 +92,9 @@ export class OpenAIProvider implements LLMProvider {
     const refreshToken = config.openaiRefreshToken;
     const tokenExpiresAt = config.openaiTokenExpiresAt;
     this.model = config.model;
+    this.openaiReasoningEffort = config.openaiReasoningEffort || "medium";
+    this.openaiTextVerbosity = config.openaiTextVerbosity || "medium";
+    this.oauthTokenUpdater = config.openaiOAuthTokenUpdater;
 
     if (accessToken && refreshToken) {
       // Use OAuth - will use pi-ai SDK for API calls
@@ -126,12 +166,62 @@ export class OpenAIProvider implements LLMProvider {
     return wrapped;
   }
 
+  private async persistOAuthTokens(tokens: OpenAIOAuthTokens | undefined): Promise<void> {
+    if (!tokens || !this.oauthTokenUpdater) return;
+    try {
+      await this.oauthTokenUpdater(tokens);
+    } catch (error) {
+      logger.warn("Failed to persist refreshed OpenAI OAuth tokens:", error);
+    }
+  }
+
+  private normalizeCodexModelId(modelId: string): string {
+    const trimmed = String(modelId || "").trim();
+    const withoutProvider =
+      trimmed.startsWith("openai-codex/") || trimmed.startsWith("openai/")
+        ? trimmed.slice(trimmed.indexOf("/") + 1)
+        : trimmed;
+    const withoutProfile = withoutProvider.includes("@")
+      ? withoutProvider.slice(0, withoutProvider.indexOf("@"))
+      : withoutProvider;
+    return withoutProfile || DEFAULT_CODEX_MODEL;
+  }
+
+  private createCodexModel(modelId: string, availableModels: Array<Model<Any>>): Model<Any> {
+    const normalizedId = this.mapToCodexModel(modelId);
+    const found = availableModels.find((m) => m.id === normalizedId);
+    if (found) return found;
+
+    const template =
+      availableModels.find((m) => m.id === DEFAULT_CODEX_MODEL) || availableModels[0];
+    logger.info(
+      `Model ${normalizedId} not found in pi-ai registry; using OpenAI Codex model compatibility shim.`,
+    );
+    return {
+      ...template,
+      id: normalizedId,
+      name: this.formatModelName(normalizedId),
+      api: OPENAI_CODEX_API,
+      provider: OPENAI_CODEX_PROVIDER,
+      baseUrl: OPENAI_CODEX_BASE_URL,
+      reasoning: true,
+      input: normalizedId.includes("spark") ? ["text"] : ["text", "image"],
+      contextWindow:
+        normalizedId === "gpt-5.5" ? 400_000 : normalizedId === "gpt-5.4" ? 1_050_000 : 272_000,
+      maxTokens: 128_000,
+    } as Model<Any>;
+  }
+
   /**
    * Create message using API key (standard OpenAI SDK)
    */
   private async createMessageWithApiKey(request: LLMRequest): Promise<LLMResponse> {
     if (!this.client) {
       throw new Error("OpenAI client not initialized");
+    }
+
+    if (this.shouldUseResponsesApi(request.model)) {
+      return this.createResponsesMessageWithApiKey(request);
     }
 
     const messages = this.convertMessages(request.messages, request.system, request.systemBlocks);
@@ -179,10 +269,256 @@ export class OpenAIProvider implements LLMProvider {
     }
   }
 
+  private shouldUseResponsesApi(modelId: string | undefined): boolean {
+    return this.normalizeCodexModelId(modelId || this.model) === "gpt-5.5";
+  }
+
+  private getOpenAIReasoningEffort(request: LLMRequest): OpenAIReasoningEffort | undefined {
+    return request.reasoningEffort || this.openaiReasoningEffort || "medium";
+  }
+
+  private getOpenAITextVerbosity(request: LLMRequest): LLMTextVerbosity | undefined {
+    return request.textVerbosity || this.openaiTextVerbosity || "medium";
+  }
+
+  private buildResponsesInput(
+    messages: LLMMessage[],
+    system?: string,
+    systemBlocks?: LLMSystemBlock[],
+  ): Any[] {
+    const input: Any[] = [];
+    const { volatileText } = splitSystemBlocksForOpenAIPrefix(system || "", systemBlocks);
+
+    if (volatileText) {
+      input.push({
+        type: "message",
+        role: "system",
+        content: [{ type: "input_text", text: volatileText }],
+      });
+    }
+
+    for (const msg of messages) {
+      if (typeof msg.content === "string") {
+        input.push({
+          type: "message",
+          role: msg.role,
+          content: [
+            {
+              type: msg.role === "assistant" ? "output_text" : "input_text",
+              text: msg.content,
+            },
+          ],
+          ...(msg.role === "assistant" && msg.phase ? { phase: msg.phase } : {}),
+        });
+        continue;
+      }
+
+      if (!Array.isArray(msg.content)) {
+        continue;
+      }
+
+      for (const item of msg.content) {
+        if (isToolResult(item)) {
+          input.push({
+            type: "function_call_output",
+            call_id: item.tool_use_id,
+            output:
+              typeof item.content === "string" ? item.content : JSON.stringify(item.content ?? ""),
+          });
+        }
+      }
+
+      const textBlocks = msg.content.filter(isTextContent);
+      const imageBlocks = msg.content.filter(isImageContent);
+      if (textBlocks.length > 0 || imageBlocks.length > 0) {
+        const contentParts: Any[] = textBlocks.map((block) => ({
+          type: msg.role === "assistant" ? "output_text" : "input_text",
+          text: block.text,
+        }));
+        for (const img of imageBlocks) {
+          contentParts.push({
+            type: "input_image",
+            image_url: `data:${img.mimeType};base64,${img.data}`,
+          });
+        }
+        input.push({
+          type: "message",
+          role: msg.role,
+          content: contentParts,
+          ...(msg.role === "assistant" && msg.phase ? { phase: msg.phase } : {}),
+        });
+      }
+
+      if (msg.role === "assistant") {
+        const toolUses = msg.content.filter(isToolUse);
+        for (const toolUse of toolUses) {
+          input.push({
+            type: "function_call",
+            call_id: toolUse.id,
+            name: toolUse.name,
+            arguments: JSON.stringify(toolUse.input ?? {}),
+            ...(msg.phase ? { phase: msg.phase } : {}),
+          });
+        }
+      }
+    }
+
+    return input;
+  }
+
+  private toResponsesTools(
+    tools: LLMTool[],
+  ): Array<{ type: "function"; name: string; description: string; parameters: Any }> {
+    return tools.map((tool) => ({
+      type: "function" as const,
+      name: tool.name,
+      description: tool.description,
+      parameters: this.sanitizeResponsesSchema(tool.input_schema),
+    }));
+  }
+
+  private sanitizeResponsesSchema(schema: Any): Any {
+    if (!schema || typeof schema !== "object") return schema;
+    const result: Any = Array.isArray(schema) ? [...schema] : { ...schema };
+    if (result.properties && typeof result.properties === "object") {
+      const nextProperties: Record<string, Any> = {};
+      for (const [key, value] of Object.entries(result.properties)) {
+        nextProperties[key] = this.sanitizeResponsesSchema(value);
+      }
+      result.properties = nextProperties;
+    }
+    if (result.items) {
+      result.items = this.sanitizeResponsesSchema(result.items);
+    }
+    if (result.type === "array" && !result.items) {
+      result.items = { type: "string" };
+    }
+    return result;
+  }
+
+  private buildResponsesBody(request: LLMRequest): Record<string, Any> {
+    const { stableText } = splitSystemBlocksForOpenAIPrefix(
+      request.system || "",
+      request.systemBlocks,
+    );
+    const instructions =
+      stableText || (!request.systemBlocks && request.system ? request.system : "") || undefined;
+    const tools = request.tools ? this.toResponsesTools(request.tools) : undefined;
+    const reasoningEffort = this.getOpenAIReasoningEffort(request);
+    const textVerbosity = this.getOpenAITextVerbosity(request);
+    return {
+      model: request.model,
+      input: this.buildResponsesInput(request.messages, request.system, request.systemBlocks),
+      ...(instructions ? { instructions } : {}),
+      max_output_tokens: request.maxTokens,
+      ...(reasoningEffort ? { reasoning: { effort: reasoningEffort } } : {}),
+      ...(textVerbosity ? { text: { verbosity: textVerbosity } } : {}),
+      ...(tools && tools.length > 0
+        ? {
+            tools,
+            tool_choice: request.toolChoice || "auto",
+          }
+        : {}),
+      ...buildOpenAIPromptCacheFields(request.promptCache),
+    };
+  }
+
+  private async createResponsesMessageWithApiKey(request: LLMRequest): Promise<LLMResponse> {
+    try {
+      logger.debug(`Calling Responses API with model: ${request.model}`);
+      const body = this.buildResponsesBody(request);
+      const response = await (this.client as Any).responses.create(
+        body,
+        request.signal ? { signal: request.signal } : undefined,
+      );
+      return this.convertResponsesResponse(response);
+    } catch (error: Any) {
+      if (error.name === "AbortError" || error.message?.includes("aborted")) {
+        logger.info("Request aborted");
+        throw new Error("Request cancelled");
+      }
+
+      logger.error("Responses API error:", {
+        status: error.status,
+        message: error.message,
+        type: error.type || error.name,
+      });
+      throw this.toStructuredProviderError(error, "api_key");
+    }
+  }
+
+  private parseJsonObject(value: string | undefined): Record<string, Any> {
+    if (!value) return {};
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  private convertResponsesResponse(response: Any): LLMResponse {
+    const content: LLMContent[] = [];
+    for (const item of response?.output || []) {
+      if (item?.type === "message") {
+        for (const part of item.content || []) {
+          const text = part?.text || part?.content || "";
+          if (
+            text &&
+            (part.type === "output_text" ||
+              part.type === "text" ||
+              part.type === "input_text" ||
+              !part.type)
+          ) {
+            content.push({ type: "text", text });
+          }
+        }
+      } else if (item?.type === "function_call") {
+        content.push({
+          type: "tool_use",
+          id: item.call_id || item.id,
+          name: item.name,
+          input: this.parseJsonObject(item.arguments),
+        });
+      } else if (item?.type === "output_text" && item.text) {
+        content.push({ type: "text", text: item.text });
+      }
+    }
+
+    const hasToolUse = content.some((item) => item.type === "tool_use");
+    const incompleteReason = String(response?.incomplete_details?.reason || "");
+    const stopReason: LLMResponse["stopReason"] = hasToolUse
+      ? "tool_use"
+      : incompleteReason === "max_output_tokens" || response?.status === "incomplete"
+        ? "max_tokens"
+        : "end_turn";
+
+    const usage = response?.usage;
+    return {
+      content,
+      stopReason,
+      usage: usage
+        ? {
+            inputTokens: usage.input_tokens || usage.prompt_tokens || 0,
+            outputTokens: usage.output_tokens || usage.completion_tokens || 0,
+            cachedTokens:
+              usage.input_tokens_details?.cached_tokens ||
+              usage.prompt_tokens_details?.cached_tokens ||
+              undefined,
+            cacheWriteTokens:
+              usage.input_tokens_details?.cache_creation_input_tokens ||
+              usage.prompt_tokens_details?.cache_creation_input_tokens ||
+              undefined,
+          }
+        : undefined,
+    };
+  }
+
   /**
    * Map public model names to openai-codex model IDs
    */
   private mapToCodexModel(modelId: string): string {
+    const normalizedModelId = this.normalizeCodexModelId(modelId);
     // Map common public model names to ChatGPT internal models
     const modelMap: Record<string, string> = {
       // Map gpt-4o models to gpt-5.1
@@ -198,7 +534,7 @@ export class OpenAIProvider implements LLMProvider {
       "gpt-3.5-turbo": "gpt-5.1-codex-mini",
     };
 
-    return modelMap[modelId] || modelId;
+    return modelMap[normalizedModelId] || normalizedModelId;
   }
 
   /**
@@ -221,27 +557,26 @@ export class OpenAIProvider implements LLMProvider {
       let model: Model<Any>;
       try {
         // Get available models and find one that matches
-        const availableModels = getModels("openai-codex");
-        const found = availableModels.find((m) => m.id === codexModelId);
-        if (found) {
-          model = found;
-        } else {
-          // Use default if not found
-          logger.info(
-            `Model ${codexModelId} not found, using default: ${DEFAULT_CODEX_MODEL}`,
-          );
-          model = availableModels.find((m) => m.id === DEFAULT_CODEX_MODEL) || availableModels[0];
-        }
+        const availableModels = getModels(OPENAI_CODEX_PROVIDER);
+        model = this.createCodexModel(codexModelId, availableModels);
       } catch (e) {
         logger.error("Failed to get model from pi-ai SDK:", e);
         throw new Error(`Model not available: ${codexModelId}`);
       }
 
       // Convert messages to pi-ai format
-      const piAiMessages = this.convertMessagesToPiAi(request.messages);
+      const piAiMessages = this.convertMessagesToPiAi(
+        request.messages,
+        Array.isArray((model as Any).input) && (model as Any).input.includes("image"),
+      );
 
       // Convert tools to pi-ai format
-      const piAiTools = request.tools ? this.convertToolsToPiAi(request.tools) : undefined;
+      const piAiTools =
+        request.toolChoice === "none"
+          ? undefined
+          : request.tools
+            ? this.convertToolsToPiAi(request.tools)
+            : undefined;
 
       // Get API key from OAuth tokens (with auto-refresh)
       const { apiKey, newTokens } = await OpenAIOAuth.getApiKeyFromTokens(this.oauthTokens);
@@ -249,6 +584,7 @@ export class OpenAIProvider implements LLMProvider {
       // Update tokens if they were refreshed
       if (newTokens) {
         this.oauthTokens = newTokens;
+        await this.persistOAuthTokens(newTokens);
       }
 
       // Build context
@@ -263,6 +599,7 @@ export class OpenAIProvider implements LLMProvider {
         apiKey,
         maxTokens: request.maxTokens,
         signal: request.signal,
+        sessionId: request.promptCache?.cacheKey,
       });
 
       // pi-ai returns an AssistantMessage even on errors (stopReason: "error"/"aborted").
@@ -303,10 +640,14 @@ export class OpenAIProvider implements LLMProvider {
           return { success: false, error: "OAuth tokens not available" };
         }
 
-        const { apiKey } = await OpenAIOAuth.getApiKeyFromTokens(this.oauthTokens);
+        const { apiKey, newTokens } = await OpenAIOAuth.getApiKeyFromTokens(this.oauthTokens);
+        if (newTokens) {
+          this.oauthTokens = newTokens;
+          await this.persistOAuthTokens(newTokens);
+        }
 
         // Get a model from the available models
-        const availableModels = getModels("openai-codex");
+        const availableModels = getModels(OPENAI_CODEX_PROVIDER);
         const model =
           availableModels.find((m) => m.id === DEFAULT_CODEX_MODEL) || availableModels[0];
 
@@ -359,24 +700,28 @@ export class OpenAIProvider implements LLMProvider {
       try {
         const { getModels } = await loadPiAiModule();
         // Get models from pi-ai SDK for openai-codex provider
-        const piAiModels = getModels("openai-codex");
+        const piAiModels = getModels(OPENAI_CODEX_PROVIDER);
 
         const models = piAiModels.map((m) => ({
           id: m.id,
           name: m.name || this.formatModelName(m.id),
           description: this.getModelDescription(m.id),
         }));
+        for (const id of CHATGPT_SUBSCRIPTION_MODEL_IDS) {
+          if (!models.some((model) => model.id === id)) {
+            models.push({
+              id,
+              name: this.formatModelName(id),
+              description: this.getModelDescription(id),
+            });
+          }
+        }
 
         // Sort by priority
         models.sort((a, b) => {
           const priority = (id: string) => {
-            if (id.includes("5.1-codex-mini")) return 0;
-            if (id.includes("5.1-codex-max")) return 1;
-            if (id === "gpt-5.1") return 2;
-            if (id.includes("5.3-codex")) return 3;
-            if (id.includes("5.2-codex")) return 3;
-            if (id === "gpt-5.2") return 4;
-            return 5;
+            const knownIndex = CHATGPT_SUBSCRIPTION_MODEL_IDS.indexOf(id);
+            return knownIndex >= 0 ? knownIndex : CHATGPT_SUBSCRIPTION_MODEL_IDS.length;
           };
           return priority(a.id) - priority(b.id);
         });
@@ -436,6 +781,26 @@ export class OpenAIProvider implements LLMProvider {
   private getDefaultCodexModels(): Array<{ id: string; name: string; description: string }> {
     return [
       {
+        id: "gpt-5.5",
+        name: "GPT-5.5",
+        description: "Latest ChatGPT/Codex subscription model",
+      },
+      {
+        id: "gpt-5.4",
+        name: "GPT-5.4",
+        description: "Current Codex model for ChatGPT subscription access",
+      },
+      {
+        id: "gpt-5.4-mini",
+        name: "GPT-5.4 Mini",
+        description: "Fast GPT-5.4 model for ChatGPT subscription access",
+      },
+      {
+        id: "gpt-5.4-nano",
+        name: "GPT-5.4 Nano",
+        description: "Fastest GPT-5.4 model for ChatGPT subscription access",
+      },
+      {
         id: "gpt-5.1-codex-mini",
         name: "GPT-5.1 Codex Mini",
         description: "Fast and efficient for most tasks",
@@ -449,6 +814,7 @@ export class OpenAIProvider implements LLMProvider {
       { id: "gpt-5.2-codex", name: "GPT-5.2 Codex", description: "Advanced reasoning model" },
       { id: "gpt-5.3-codex", name: "GPT-5.3 Codex", description: "Advanced reasoning model" },
       { id: "gpt-5.2", name: "GPT-5.2", description: "Most advanced reasoning" },
+      { id: "gpt-5.3-codex-spark", name: "GPT-5.3 Codex Spark", description: "Entitlement-dependent Codex Spark model" },
     ];
   }
 
@@ -470,12 +836,17 @@ export class OpenAIProvider implements LLMProvider {
     if (modelId === "o1-preview") return "o1 Preview";
     if (modelId === "o3-mini") return "o3 Mini";
     // ChatGPT internal models
+    if (modelId === "gpt-5.5") return "GPT-5.5";
+    if (modelId === "gpt-5.4") return "GPT-5.4";
+    if (modelId === "gpt-5.4-mini") return "GPT-5.4 Mini";
+    if (modelId === "gpt-5.4-nano") return "GPT-5.4 Nano";
     if (modelId === "gpt-5.1") return "GPT-5.1";
     if (modelId === "gpt-5.1-codex-mini") return "GPT-5.1 Codex Mini";
     if (modelId === "gpt-5.1-codex-max") return "GPT-5.1 Codex Max";
     if (modelId === "gpt-5.2") return "GPT-5.2";
     if (modelId === "gpt-5.2-codex") return "GPT-5.2 Codex";
     if (modelId === "gpt-5.3-codex") return "GPT-5.3 Codex";
+    if (modelId === "gpt-5.3-codex-spark") return "GPT-5.3 Codex Spark";
     return modelId;
   }
 
@@ -490,19 +861,24 @@ export class OpenAIProvider implements LLMProvider {
     if (modelId === "o1-mini") return "Fast reasoning model";
     if (modelId.includes("o3")) return "Next generation reasoning";
     // ChatGPT internal models
+    if (modelId === "gpt-5.5") return "Latest ChatGPT/Codex subscription model";
+    if (modelId === "gpt-5.4") return "Current Codex model for ChatGPT subscription access";
+    if (modelId === "gpt-5.4-mini") return "Fast GPT-5.4 model for ChatGPT subscription access";
+    if (modelId === "gpt-5.4-nano") return "Fastest GPT-5.4 model for ChatGPT subscription access";
     if (modelId === "gpt-5.1") return "Balanced performance and capability";
     if (modelId === "gpt-5.1-codex-mini") return "Fast and efficient for most tasks";
     if (modelId === "gpt-5.1-codex-max") return "Maximum capability for complex tasks";
     if (modelId === "gpt-5.2") return "Most advanced reasoning";
     if (modelId === "gpt-5.2-codex") return "Advanced reasoning model";
     if (modelId === "gpt-5.3-codex") return "Advanced reasoning model";
+    if (modelId === "gpt-5.3-codex-spark") return "Entitlement-dependent Codex Spark model";
     return "OpenAI model";
   }
 
   /**
    * Convert messages to pi-ai SDK format
    */
-  private convertMessagesToPiAi(messages: LLMMessage[]): PiAiMessage[] {
+  private convertMessagesToPiAi(messages: LLMMessage[], supportsImages = true): PiAiMessage[] {
     const result: PiAiMessage[] = [];
     const now = Date.now();
 
@@ -543,11 +919,23 @@ export class OpenAIProvider implements LLMProvider {
         if (toolResults.length > 0) {
           // Convert tool results to pi-ai format
           for (const toolResult of toolResults) {
+            const content: Any[] = [{ type: "text", text: toolResult.content }];
+            for (const companion of toolResult.companion_user_content || []) {
+              if (companion.type === "image") {
+                content.push({
+                  type: "image",
+                  data: companion.data,
+                  mimeType: companion.mimeType,
+                });
+              } else if (companion.type === "text") {
+                content.push({ type: "text", text: companion.text });
+              }
+            }
             result.push({
               role: "toolResult",
               toolCallId: toolResult.tool_use_id,
               toolName: "", // Will be filled by the SDK
-              content: [{ type: "text", text: toolResult.content }],
+              content,
               isError: toolResult.is_error || false,
               timestamp: now,
             });
@@ -555,13 +943,20 @@ export class OpenAIProvider implements LLMProvider {
         } else {
           // Handle mixed content (text, tool_use, image)
           if (msg.role === "user") {
-            const textContent: Array<{ type: "text"; text: string }> = [];
+            const textContent: Any[] = [];
             for (const item of msg.content) {
               if (item.type === "text") {
                 textContent.push({ type: "text" as const, text: (item as Any).text });
               } else if (item.type === "image") {
-                // pi-ai SDK doesn't support inline images; use text fallback
-                textContent.push({ type: "text" as const, text: imageToTextFallback(item) });
+                if (!supportsImages) {
+                  textContent.push({ type: "text" as const, text: imageToTextFallback(item) });
+                } else {
+                  textContent.push({
+                    type: "image" as const,
+                    data: (item as Any).data,
+                    mimeType: (item as Any).mimeType,
+                  } as Any);
+                }
               }
             }
 

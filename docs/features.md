@@ -73,7 +73,7 @@
 - **Artifact-First Output Visibility**: Artifact-only tasks are treated the same as file-created outputs across progress, timeline, and Files panel surfaces.
 - **Paired LaTeX/PDF Outputs**: Compiled LaTeX artifacts preserve the editable `.tex` source as the durable artifact and pair it with the generated PDF in one task workbench, including Summary, source, and PDF tabs.
 - **Performance Reviews**: Score and review agent-role outcomes with autonomy-level recommendations
-- **Vision**: Analyze workspace images via `analyze_image` tool (OpenAI, Anthropic, Gemini, or Bedrock)
+- **Vision**: Analyze workspace images via the active image-capable model/provider (OpenAI, Anthropic, Azure OpenAI, or Bedrock)
 - **Image Attachments**: Attach images to tasks and follow-ups for multimodal analysis
 - **Image Generation**: Multi-provider support (Gemini, OpenAI gpt-image-1/1.5/DALL-E, Azure OpenAI, OpenRouter) with configurable provider ordering
 - **Video Generation**: Text-to-video and image-to-video via new video generation providers. Configure preferred video model in Settings > LLM. Generated videos render inline in the task feed.
@@ -1010,14 +1010,14 @@ Multi-provider image and PDF analysis with caching and optimization.
 
 | Tool | Description |
 |------|-------------|
-| `analyze_image` | Analyze any image with vision LLM (OpenAI, Anthropic, Gemini, Bedrock) |
+| `analyze_image` | Analyze any image with the active non-Gemini vision LLM (OpenAI, Anthropic, Azure OpenAI, Bedrock) |
 | `read_pdf_visual` | Convert PDF pages to images and analyze layout/design |
 
 | Feature | Description |
 |---------|-------------|
 | **Result caching** | SHA1-keyed cache (128 entries) prevents redundant vision API calls |
 | **Auto-downscaling** | Images >2MB automatically downscaled to 1600×1200 at 80% quality |
-| **Multi-provider fallback** | Ordered provider chain with retry/failover across OpenAI, Anthropic, Gemini, Bedrock, and other configured providers |
+| **Active-provider routing** | Image analysis uses the active non-Gemini image-capable provider; otherwise the user is asked to switch models |
 | **Retry logic** | Transient errors (429, 5xx, timeouts) trigger single retry |
 | **PDF conversion** | Uses `pdftoppm` to convert PDF pages to PNG at 72 DPI (5-page max) |
 
@@ -1088,7 +1088,21 @@ See [Live Canvas](live-canvas.md) for the full guide.
 
 ## Browser Automation
 
-Three-tier web interaction stack — from lightweight HTTP fetching to full browser automation to anti-bot scraping — all as native agent tools with no external CLI dependencies.
+Three-tier web interaction stack — from lightweight HTTP fetching to visible in-app browser automation to anti-bot scraping — all as native agent tools with no external CLI dependencies.
+
+### In-App Browser Workbench
+
+Interactive browser-use tasks open inside CoWork OS by default. When a user asks the agent to go to a site and test, use, click through, or inspect it as a normal user, `browser_navigate` opens a visible browser workbench in the resizable right sidebar. The agent controls the same webview the user can see, using a persistent per-workspace browser profile that is isolated from system Chrome.
+
+The browser workbench supports:
+
+- right-sidebar placement with the same persisted width behavior as document, spreadsheet, presentation, and web artifact workbenches
+- URL bar, back, forward, reload, fullscreen, and close controls
+- visible routing for `browser_navigate`, `browser_click`, `browser_fill`, `browser_type`, `browser_press`, `browser_scroll`, `browser_wait`, `browser_get_content`, `browser_get_text`, `browser_evaluate`, and screenshots
+- fullscreen mode with the same follow-up composer and latest-turn/working context frame used by artifact workbenches
+- optional fallback to forced headless Playwright or explicit Chrome DevTools attach for background runs and signed-in system Chrome sessions
+
+Use `web_fetch` for reading a known static URL. Use the browser workbench for interactive websites, JavaScript-heavy pages, forms, app testing, and visual checks.
 
 ### Web Search (6 providers, always available)
 
@@ -1110,21 +1124,21 @@ Paid providers are tried first in configured order. DuckDuckGo is automatically 
 ```
 Tier 0: web_search                   (multi-provider search — always available)
 Tier 1: web_fetch / http_request     (no browser — fastest)
-Tier 2: browser_* tools              (Playwright in-process — full interaction)
+Tier 2: browser_* tools              (visible in-app browser workbench by default, Playwright fallback)
 Tier 3: scrape_* tools               (Scrapling — anti-bot bypass)
 ```
 
-The agent auto-selects the appropriate tier: `web_search` for discovering information, `web_fetch` for reading known URLs, `browser_*` when interaction or JS rendering is needed, and `scrape_*` for anti-bot-protected sites.
+The agent auto-selects the appropriate tier: `web_search` for discovering information, `web_fetch` for reading known URLs, `browser_*` when interaction, JS rendering, or visible app testing is needed, and `scrape_*` for anti-bot-protected sites.
 
-### Browser Tools (19 tools — native Playwright)
+### Browser Tools (19 tools — visible workbench + native Playwright fallback)
 
-Native Playwright API integration — no CLI subprocess, no process spawning overhead.
+Browser tools first target the active visible browser workbench for the selected task. If no renderer/webview is available, or the task explicitly requests `force_headless`, `profile`, `browser_channel`, or `debugger_url`, the tools fall back to the existing native Playwright browser service. The legacy `headless` flag is compatibility-only and does not override visible browser workbench routing for normal site testing.
 
 | Tool | Description |
 |------|-------------|
 | `browser_attach` | Attach to existing Chrome via Chrome DevTools Protocol (signed-in sessions). See [Chrome DevTools attach](#chrome-devtools-attach-mode) below. |
 | `browser_act_batch` | Execute batched actions (click, fill, type, press, wait, scroll) in sequence with optional delays |
-| `browser_navigate` | Navigate to URL with configurable wait states (load, networkidle, domcontentloaded) |
+| `browser_navigate` | Navigate to URL with configurable wait states; opens the visible in-app browser workbench by default |
 | `browser_screenshot` | Capture viewport or full-page screenshots |
 | `browser_get_content` | Extract text, links, and form data from current page |
 | `browser_click` | Click elements via CSS selectors |
@@ -1173,6 +1187,8 @@ See [Chrome Remote Debugging](https://developer.chrome.com/docs/devtools/remote-
 | Feature | Description |
 |---------|-------------|
 | **Multi-Browser** | Chromium (bundled), Chrome (system), Brave (auto-discovered) |
+| **Visible Workbench** | Default browser-use surface inside the task sidebar/fullscreen workbench |
+| **Workspace Browser Profile** | Embedded webview uses a persistent workspace partition isolated from system Chrome |
 | **Profile Presets** | `user` (launch new Chrome with system profile — fails if Chrome is already running), `chrome-relay` (extension relay), `workspace` (workspace default). For existing signed-in sessions, use `browser_attach` instead. |
 | **Persistent Profiles** | Cookies and storage persist across tasks in `.cowork/browser-profiles/` |
 | **Consent Auto-Dismiss** | 40+ pattern detectors for cookie/GDPR consent popups |

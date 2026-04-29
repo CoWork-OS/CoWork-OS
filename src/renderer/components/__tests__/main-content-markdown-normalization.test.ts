@@ -3,7 +3,9 @@ import {
   autolinkBareDomains,
   createQuotedAssistantMessage,
   autolinkUrlsInBrackets,
+  normalizeCodeBlockTextForDisplay,
   normalizeSourcesSection,
+  resolveSafeCollapsedBubbleHeight,
   shouldCreateFreshTaskForSend,
 } from "../MainContent";
 
@@ -36,6 +38,17 @@ describe("MainContent markdown normalization helpers", () => {
     expect(autolinkUrlsInBrackets("Citations like [1] stay unchanged.")).toBe(
       "Citations like [1] stay unchanged.",
     );
+  });
+
+  it("trims trailing blank lines from diff code blocks only", () => {
+    expect(normalizeCodeBlockTextForDisplay("- old\n+ new\n\n\n", "diff")).toBe("- old\n+ new");
+    expect(normalizeCodeBlockTextForDisplay("line\n\n", "typescript")).toBe("line\n\n");
+  });
+
+  it("snaps collapsed user bubbles to a fully visible text line", () => {
+    expect(resolveSafeCollapsedBubbleHeight([42, 88, 136, 184, 231], 220, 96)).toBe(184);
+    expect(resolveSafeCollapsedBubbleHeight([42, 88], 220, 96)).toBe(96);
+    expect(resolveSafeCollapsedBubbleHeight([], 220, 96)).toBe(220);
   });
 
   it("reuses the current chat task for follow-up messages", () => {

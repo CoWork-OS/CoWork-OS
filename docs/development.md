@@ -101,6 +101,7 @@ Current bundle-splitting rules:
 
 - Keep the primary task workspace (`App`, `Sidebar`, `MainContent`, `RightPanel`) available on initial load.
 - Lazy-load secondary views from `App.tsx`: Settings, Browser, Home, Devices, Health, Ideas, Inbox Agent, Agents Hub, and Mission Control.
+- Keep the in-app browser workbench renderer-owned. `BrowserWorkbenchView` registers its Electron webview `webContentsId` with the main process, and browser tools route actions to that visible session through `BrowserWorkbenchService`. Do not replace generated web artifact iframes with this live browser path; artifact previews and live website testing are separate surfaces.
 - Do not import heavyweight optional renderers at module top level when they are needed only for specific content. Mermaid is loaded from `MainContent.tsx` only when a Mermaid code block is rendered.
 - Do not import the `highlight.js` package root in renderer code. Use `highlight.js/lib/core` and register only the language grammars the UI should support eagerly.
 - Prefer feature-level dynamic imports before adding Rollup `manualChunks`; manual chunks improve cache boundaries, but they do not remove code from startup if imports remain static.

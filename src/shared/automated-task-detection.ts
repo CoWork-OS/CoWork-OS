@@ -19,7 +19,8 @@ export function isAutomatedTaskLike(task: Task | null | undefined): boolean {
   if (
     task.source === "cron" ||
     task.source === "improvement" ||
-    task.source === "subconscious"
+    task.source === "subconscious" ||
+    task.source === "symphony"
   ) {
     return true;
   }

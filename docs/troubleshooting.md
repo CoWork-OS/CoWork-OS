@@ -72,6 +72,9 @@ Then inspect:
 logs/dev-latest.log
 ```
 
+For tooling or repeated-failure analysis, inspect `logs/dev-latest.jsonl`. It contains the same
+captured run as structured, redacted events with process, stream, level, component, and message fields.
+
 ### New mail does not appear immediately
 
 Inbox Agent autosyncs in the background, but it is not a push-only mail client yet. It loads cached mail immediately, then periodically refreshes a bounded recent batch. If a new message is missing:
@@ -103,12 +106,102 @@ Mailbox schema migrations should add classification, Today/domain, attachment, a
 
 ## PPTX previews only show text or speaker notes
 
-CoWork can always extract slide text and presenter notes from `.pptx` files. Rendered slide thumbnails are best-effort and depend on local conversion tools:
+CoWork can always extract slide text and presenter notes from `.pptx` files. The presentation viewer loads that fast text preview first, then renders slide images in the background. Rendered slide thumbnails are best-effort and use this order:
 
-- `soffice` from LibreOffice converts the deck to PDF
-- `pdftoppm` renders PDF pages to PNG thumbnails
+1. Codex bundled `@oai/artifact-tool` presentation renderer.
+2. `soffice` from LibreOffice to convert the deck to PDF.
+3. `pdftoppm` to render PDF pages to PNG thumbnails.
+4. Text/notes preview if image rendering fails.
 
-If either binary is missing or fails on a deck, the presentation viewer falls back to text/notes mode. Install LibreOffice and Poppler, restart CoWork, then reopen the artifact to regenerate the cached preview. The `.pptx` file itself is still available through **Open file** or **Show in Finder**.
+If artifact-tool is unavailable and either local binary is missing or fails on a deck, the presentation viewer stays in text/notes mode. Install LibreOffice and Poppler, restart CoWork, then reopen the artifact to regenerate the cached preview. The `.pptx` file itself is still available through **Open file** or **Show in Finder**.
+
+## Everything Workbench artifacts do not appear as cards
+
+Generated documents, spreadsheets, presentations, web pages, PDFs, and previews should appear as first-class artifact cards when CoWork recognizes the output type. The shared flow is: output card, main **Open** action, sidebar workbench, fullscreen artifact workspace, follow-up composer, and refresh after completed edits.
+
+If an output only appears as a plain file link:
+
+1. Confirm the file extension is one of the recognized artifact formats documented in [Everything Workbench](everything-workbench.md).
+2. Confirm the task emitted the file through `file_created`, `file_modified`, `artifact_created`, or primary completion output metadata.
+3. Reopen the task and use the artifact card's main **Open** action rather than an external-app dropdown action.
+4. Capture a fresh dev log if the card still does not appear.
+
+## Spreadsheet artifacts do not open in the sidebar
+
+Local spreadsheet outputs should render as spreadsheet artifact cards. The main **Open** action opens `.xlsx`, `.xls`, `.xlsm`, `.csv`, and `.tsv` files in the in-app sidebar viewer. Native/app-owned spreadsheet formats such as `.numbers`, `.gsheet`, `.ods`, and `.xlsb` are recognized as spreadsheet artifacts, but open externally or through the folder action.
+
+If a generated spreadsheet only appears as a plain file link or opens in the generic viewer:
+
+1. Confirm the output file extension is a recognized spreadsheet format such as `.xlsx`, `.xls`, `.xlsm`, `.csv`, `.tsv`, `.numbers`, `.gsheet`, `.ods`, or `.xlsb`.
+2. Confirm the file was emitted through `file_created`, `artifact_created`, or as the primary completion output.
+3. Reopen the task and click the main **Open** button, not an external-app dropdown item.
+4. If the viewer loads but grid data is missing, capture a dev log and check for spreadsheet parsing errors from `readFileForViewer`.
+
+For a fresh repro log:
+
+```bash
+npm run dev:log
+```
+
+Then inspect:
+
+```bash
+logs/dev-latest.log
+```
+
+See [Spreadsheet Artifacts](spreadsheet-artifacts.md) for the expected sidebar/fullscreen behavior and the focused tests for this surface.
+
+## Document artifacts do not open or refresh correctly
+
+Local Word-style outputs should render as document artifact cards. The main **Open** action opens `.docx` files in the in-app sidebar editor. `.doc`, `.rtf`, `.odt`, `.ott`, `.pages`, and related formats are recognized as document artifacts, but may use best-effort preview or external app actions depending on parser support.
+
+If a generated document only appears as a plain file link, stays collapsed behind `Output ready`, or opens in the generic viewer:
+
+1. Confirm the output file extension is a recognized document format such as `.docx`, `.docm`, `.dotx`, `.dotm`, `.doc`, `.rtf`, `.odt`, `.ott`, or `.pages`.
+2. Confirm the file was emitted through `file_created`, `file_modified`, `artifact_created`, or as the primary completion output.
+3. Reopen the task and click the main **Open** button, not an external-app dropdown item.
+4. For DOCX editing, make sure the file is a real `.docx` document and not a renamed plain-text file.
+5. If a fullscreen follow-up completes but the document content does not update, capture a dev log and check for document preview or `FILE_UPDATE_DOCUMENT` errors.
+
+For a fresh repro log:
+
+```bash
+npm run dev:log
+```
+
+Then inspect:
+
+```bash
+logs/dev-latest.log
+```
+
+See [Document Artifacts](document-artifacts.md) for the expected sidebar/fullscreen behavior and the focused tests for this surface.
+
+## Web page artifacts do not open in the sidebar
+
+Local web outputs should render as web page artifact cards. The main **Open** action opens generated `.html` and `.htm` files in the in-app sidebar viewer. Built React/Vite/Next output entrypoints such as `dist/index.html`, `build/index.html`, and `out/index.html` use the same sandboxed iframe preview.
+
+If a generated web page only appears as a plain file link or opens in the generic viewer:
+
+1. Confirm the output file extension is `.html` or `.htm`, or that the output path points to a built `index.html` under `dist`, `build`, or `out`.
+2. Confirm the file was emitted through `file_created`, `file_modified`, `artifact_created`, or as the primary completion output.
+3. Reopen the task and click the main **Open** button, not an external-app dropdown item.
+4. If the project is React/Vite/Next source only, build it first so one of `dist/index.html`, `build/index.html`, or `out/index.html` exists. The artifact viewer intentionally does not auto-start dev servers.
+5. If the iframe opens but local assets are missing, capture a dev log and check for HTML asset inlining errors from `readFileForViewer`.
+
+For a fresh repro log:
+
+```bash
+npm run dev:log
+```
+
+Then inspect:
+
+```bash
+logs/dev-latest.log
+```
+
+See [Web Page Artifacts](web-page-artifacts.md) for the expected sidebar/fullscreen behavior and the focused tests for this surface.
 
 ## Chronicle desktop screen context issues
 
@@ -155,6 +248,8 @@ Then inspect:
 ```bash
 logs/dev-latest.log
 ```
+
+Use `logs/dev-latest.jsonl` when you need structured fields such as `process`, `level`, or `component`.
 
 Look for lines such as:
 
@@ -382,6 +477,8 @@ Then inspect:
 ```bash
 logs/dev-latest.log
 ```
+
+If the readable log is noisy, use `logs/dev-latest.jsonl` to filter by structured `level` and `component`.
 
 Healthy startup should include:
 

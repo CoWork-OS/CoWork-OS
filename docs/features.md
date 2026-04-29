@@ -1099,10 +1099,12 @@ The browser workbench supports:
 - right-sidebar placement with the same persisted width behavior as document, spreadsheet, presentation, and web artifact workbenches
 - URL bar, back, forward, reload, fullscreen, and close controls
 - visible routing for `browser_navigate`, `browser_click`, `browser_fill`, `browser_type`, `browser_press`, `browser_scroll`, `browser_wait`, `browser_get_content`, `browser_get_text`, `browser_evaluate`, and screenshots
+- visible cursor movement and action pulses for agent clicks, fills, typing, selects, waits, reads, scrolls, and navigation
+- workspace screenshot capture plus in-app screenshot annotation that can be saved or sent back to the agent as an image attachment
 - fullscreen mode with the same follow-up composer and latest-turn/working context frame used by artifact workbenches
 - optional fallback to forced headless Playwright or explicit Chrome DevTools attach for background runs and signed-in system Chrome sessions
 
-Use `web_fetch` for reading a known static URL. Use the browser workbench for interactive websites, JavaScript-heavy pages, forms, app testing, and visual checks.
+Use `web_fetch` for reading a known static URL. Use the browser workbench for interactive websites, JavaScript-heavy pages, forms, app testing, and visual checks. See [Browser Workbench](browser-workbench.md) for the full behavior and implementation notes.
 
 ### Web Search (6 providers, always available)
 
@@ -1189,6 +1191,8 @@ See [Chrome Remote Debugging](https://developer.chrome.com/docs/devtools/remote-
 | **Multi-Browser** | Chromium (bundled), Chrome (system), Brave (auto-discovered) |
 | **Visible Workbench** | Default browser-use surface inside the task sidebar/fullscreen workbench |
 | **Workspace Browser Profile** | Embedded webview uses a persistent workspace partition isolated from system Chrome |
+| **Visible Cursor** | Agent browser actions render cursor movement and click/action pulses over the in-app webview |
+| **Screenshot Annotation** | Capture, mark up, save, and send browser screenshots back to the agent as image attachments |
 | **Profile Presets** | `user` (launch new Chrome with system profile — fails if Chrome is already running), `chrome-relay` (extension relay), `workspace` (workspace default). For existing signed-in sessions, use `browser_attach` instead. |
 | **Persistent Profiles** | Cookies and storage persist across tasks in `.cowork/browser-profiles/` |
 | **Consent Auto-Dismiss** | 40+ pattern detectors for cookie/GDPR consent popups |

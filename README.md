@@ -7,8 +7,8 @@
 </p>
 
 <p align="center">
-  <strong>CoWork OS is a local-first option for production workflows.</strong><br>
-  Security-hardened, local-first AI operating system — 34 LLM provider options, 17 messaging channels, 140 built-in skills
+  <strong>CoWork OS is a local-first personal agentic OS and everything app for getting real work done.</strong><br>
+  Code, research, design web pages, create documents, work with spreadsheets and decks, run automations, and ask your agent for changes without switching context.
 </p>
 
 <p align="center">
@@ -21,6 +21,7 @@
 
 <p align="center">
   <a href="docs/getting-started.md">Getting Started</a> &middot;
+  <a href="docs/everything-workbench.md">Everything Workbench</a> &middot;
   <a href="docs/showcase.md">Use Cases</a> &middot;
   <a href="docs/release-notes-0.5.40.md">Release Notes 0.5.40</a> &middot;
   <a href="docs/integration-skill-bootstrap-lifecycle.md">Platform Updates</a> &middot;
@@ -36,6 +37,9 @@
 
 ### Why CoWork OS?
 
+- **Personal Agentic OS** — CoWork OS is still a local-first operating system for personal AI agents: tasks, memory, skills, providers, approvals, channels, devices, and automations are governed in one workspace.
+- **Everything Workbench** — Chat, tasks, documents, spreadsheets, presentations, web pages, PDFs, and file outputs live in one local-first workspace. Generate an artifact, open it in the app, review or edit it, and ask for follow-up changes with fewer switches into separate office apps. [Learn more](docs/everything-workbench.md)
+- **Coding, web design, and knowledge work** — Use the same agentic workspace for repository work, frontend/product design, research, docs, spreadsheets, presentations, web pages, PDFs, and long-running operational tasks.
 - **Inbox Agent** — local-first email workspace with Classic and Today modes, AI triage, Mailbox Ask, manual reply/reply-all/forward, editable AI drafts, sender cleanup, commitments, and background sync.
 - **Workflow Intelligence** — Always-on cognition is now framed as one reviewable loop: Memory is the source of truth, Heartbeat schedules reflection, Reflection evaluates evidence internally, and Suggestions are the user-facing output.
 - **Digital Twin Personas** — Pre-built opt-in persona presets for every role. Twins stay visible and activatable, but they no longer own heartbeat, workflow-intelligence, or memory runtime state.
@@ -74,9 +78,13 @@ Stable workflow entry points for the newest high-impact capabilities.
 
 - **Ideas panel** — curated launchpad of pre-written workflow prompts and capability-aware starting points, with deep links into common tasks.
 - **Research vaults (`llm-wiki`)** — first-class workspace-local knowledge bases inspired by Andrej Karpathy's LLM Wiki concept, with deterministic raw-source capture, Obsidian-friendly notes, filed-back outputs, vault search, and vault-health analysis. [Learn more](docs/llm-wiki.md)
-- **Document editing sessions** — inline PDF region editing, DOCX block replacement, version browsing, and document-aware file viewing for active editing sessions.
+- **Everything Workbench** — generated documents, spreadsheets, decks, web pages, PDFs, and previews share the same artifact model: task-feed card, sidebar open, fullscreen workspace, follow-up composer, and refresh after the agent finishes the requested edit. [Learn more](docs/everything-workbench.md)
+- **Document artifacts** — task-created Word-style files render as compact artifact cards. `.docx` opens directly in an editable right-sidebar document surface with Google Docs-style controls, save, copy, external-open, fullscreen mode, and the same functional follow-up composer used by spreadsheet artifacts. `.doc`, `.rtf`, `.odt`, `.ott`, `.pages`, and related Word-style formats are recognized with best-effort preview or external-app/folder actions. [Learn more](docs/document-artifacts.md)
 - **Designed editorial documents** — bundled `kami` skill for resumes, one-pagers, white papers, letters, portfolios, diagrams, and slide decks with workspace-local source scaffolding and PDF/PPTX export helpers. [Learn more](docs/skills/kami.md)
-- **Rich presentation previews** — generated `.pptx` artifacts open in CoWork with slide thumbnails, slide navigation, extracted speaker notes, and best-effort rendered slide images. If local conversion tools are missing, CoWork still shows text and notes from the deck.
+- **Format-aware file preview popup** — clicking any file link in chat opens a unified preview modal that adapts to the format. Built-in support for HTML, Markdown, code (with `highlight.js` syntax colors), JSON / JSONL / GeoJSON (collapsible tree + raw toggle), CSV / TSV (RFC-4180 table), XLSX, DOCX, PDF (with page/OCR summary), images (fit / actual-size toggle, dimensions, alpha checkerboard), video, audio (with duration), LaTeX, and PPTX. Each format gets its own width profile, a header subtitle showing format-specific metadata, and a unified action bar with Copy path, Show in Finder, Open externally, and Close.
+- **Spreadsheet artifacts** — task-created spreadsheet files render as compact artifact cards. Excel workbooks and CSV/TSV files open in the editable right-sidebar viewer; native Numbers, Google Sheets shortcut, ODS, XLSB, and other recognized spreadsheet outputs still get the same card and external-app/folder actions. Fullscreen mode expands editable sheets across the app with cell/range/row/column selection, copy, zoom, add row/column, save, model picker, voice input, attachments, and follow-up task context. [Learn more](docs/spreadsheet-artifacts.md)
+- **Presentation artifacts** — generated `.pptx` decks render as compact artifact cards and open by default in the resizable right-sidebar presentation viewer. The viewer shows thumbnails, slide navigation, zoom, a white slide canvas, speaker notes, text-first fast loading, cached rendered slide images, fullscreen follow-up context, and background refresh after requested deck edits. Legacy PowerPoint formats are recognized with external-app/folder actions. [Learn more](docs/pptx-generation-and-preview.md)
+- **Web page artifacts** — generated `.html` / `.htm` pages and built React output such as `dist/index.html`, `build/index.html`, or `out/index.html` render as compact artifact cards and open by default in a resizable right-sidebar sandboxed iframe preview. Fullscreen mode keeps the functional follow-up composer and refreshes after the relevant file or build output changes. React-style source projects without build output show a clear build-output-needed state instead of auto-starting a dev server. [Learn more](docs/web-page-artifacts.md)
 - **Image generation** — configurable provider ordering across Gemini, OpenAI, Azure OpenAI, and OpenRouter.
 - **Video generation** — text-to-video and image-to-video routing with polling tools and inline preview.
 - **Programmatic technical video** — bundled `manim-video` skill for Manim CE explainers, equation walkthroughs, algorithm visualizations, and animated architecture/data stories. [Learn more](docs/skills/manim-video.md)
@@ -136,7 +144,7 @@ See the [Development Guide](docs/development.md) for prerequisites and details.
 
 ## How It Works
 
-1. **Create a task or start from Ideas** — Describe what you want ("organize my Downloads by file type", "create a quarterly report spreadsheet") or begin from a curated Ideas prompt. No workspace needed — a temp folder is used automatically if you don't select one.
+1. **Create a task or start from Ideas** — Describe what you want ("organize my Downloads by file type", "create a quarterly report spreadsheet", "draft a DOCX memo", "build a small landing page") or begin from a curated Ideas prompt. No workspace needed — a temp folder is used automatically if you don't select one.
 2. **Choose a mode** — Pick **Chat**, **Execute**, **Plan**, **Analyze**, or **Verified** for the runtime behavior, then optionally toggle **Autonomous** (auto-approve actions), **Collaborative** (multi-agent perspectives), or **Multi-LLM** (compare providers with a judge) per task.
 3. **Monitor execution** — Watch the real-time task timeline as the agent plans, executes, and produces artifacts. Parallel tool bursts are grouped into lane summaries, and shell commands run in a live terminal view where you can see output in real-time, stop execution, or provide input (e.g. `y`/`n`) directly.
 4. **Respond when needed** — Destructive operations require explicit approval (unless Autonomous mode is on), and plan-mode tasks can pause for structured multiple-choice input before continuing.
@@ -180,13 +188,17 @@ Workflow Intelligence reflections now use the same runtime with stricter safegua
 
 Completion state and file availability are now explicit:
 
+- **Everything Workbench**: generated knowledge-work outputs share one artifact model across docs, sheets, decks, pages, PDFs, and previews, reducing the need to jump into separate office apps for review, light editing, and follow-up changes
 - **High-signal completion toast**: finished tasks with outputs show `Task complete` with filename/count and actions for **Open file**, **Show in Finder**, and **View in Files**
 - **Right-sidebar focus**: if you are viewing the completed task and the panel is collapsed, the Files panel auto-opens and highlights the primary output
 - **Unseen-output badge**: if completion happens in another task/view, the collapsed right-panel toggle shows a numeric badge until you open Files
 - **Filename-first rows with clear location context**: Files rows stay filename-only, with output folder context shown separately (or **Workspace root**)
 - **Artifact parity**: artifact-only outputs are treated the same as normal file outputs in completion toasts, timeline details, and Files panel
+- **Spreadsheet artifact workbench**: spreadsheet outputs render as compact cards. `.xlsx`, `.xls`, `.xlsm`, `.csv`, and `.tsv` open into a resizable editable sidebar by default; `.numbers`, `.gsheet`, `.ods`, and `.xlsb` are recognized as spreadsheet artifacts with external-app/folder actions. Editable sheets can expand into fullscreen spreadsheet mode with copy/save controls, zoom, attachments, voice input, and model selection for follow-up prompts
+- **Document artifact workbench**: Word-style outputs render as compact cards. `.docx` opens into a resizable editable sidebar by default and can expand into fullscreen document mode with a Google Docs-style toolbar, save, copy, attachments, voice input, model selection, follow-up context, and automatic preview refresh after follow-up edits. `.doc`, `.rtf`, `.odt`, `.ott`, `.pages`, and related formats are recognized with preview/external actions according to local parser support
 - **LaTeX/PDF artifact workbench**: explicit LaTeX/TikZ paper tasks can write `.tex`, compile it with a system TeX engine, and show the source plus rendered PDF together with Summary, source, and PDF tabs
-- **Presentation previews**: `.pptx` outputs show inline deck cards in task events and open into a slide viewer with thumbnails, previous/next navigation, zoom, and speaker notes
+- **Presentation artifact workbench**: `.pptx` outputs show inline deck cards in task events and assistant summaries, then open into a resizable sidebar or fullscreen viewer with thumbnails, previous/next navigation, zoom, speaker notes, fast text-first loading, cached rendered slide images, external actions, and follow-up prompt context. `.ppt`, `.pptm`, `.potx`, `.potm`, `.ppsx`, and `.ppsm` are recognized with external-app/folder actions
+- **Web page artifact workbench**: generated `.html` / `.htm` files and built React output entrypoints show compact web page cards, then open into a resizable sidebar or fullscreen sandboxed iframe preview with browser/folder/copy actions, persisted sidebar width, and follow-up prompt context. React-style projects without `dist`, `build`, or `out` HTML output show a build-output-needed preview state rather than auto-running a dev server
 - **Semantic completion labels**: completed tool batches and verifier verdicts now feed the richer completion text shown in timelines, feed relays, and export surfaces
 
 ### Guided Input & Runtime Recovery
@@ -330,7 +342,7 @@ Persistent memory with privacy protection, FTS5 search, LLM compression, and a c
 
 The workspace kit separates workspace-wide files such as `AGENTS.md`, `USER.md`, `MEMORY.md`, `TOOLS.md`, `SOUL.md`, `IDENTITY.md`, `RULES.md`, `VIBES.md`, and `LORE.md` from project-scoped files such as `.cowork/projects/<projectId>/CONTEXT.md` and `.cowork/projects/<projectId>/ACCESS.md`. Special files get dedicated lifecycle handling: `BOOTSTRAP.md` is a one-time onboarding checklist tracked through `.cowork/workspace-state.json`, while `HEARTBEAT.md` is reserved for recurring Heartbeat v3 checklist work instead of general task context.
 
-Every tracked file follows a shared parser/linter model with freshness windows, secret detection, missing-file status, and revision snapshots stored under `.cowork/**/.history/`. Workspace kit health is surfaced in the app and can be checked locally with `npm run kit:lint` for human-readable output or JSON export. **Import your ChatGPT history** to eliminate the cold-start problem — CoWork OS knows you from day one. All imported data is stored locally and encrypted on your machine. **Optional Supermemory integration** adds an external provider lane with `supermemory_profile`, `supermemory_search`, `supermemory_remember`, and `supermemory_forget`, plus optional prompt-time profile injection and background mirroring of non-private local memory captures. **Proactive session compaction** automatically generates comprehensive structured summaries when context reaches 90% capacity, and checkpoint capture preserves exact supporting spans so recall quality survives compaction. [Learn more](docs/features.md#persistent-memory-system) | [Supermemory](docs/supermemory.md) | [Context Compaction](docs/context-compaction.md)
+Every tracked file follows a shared parser/linter model with freshness windows, secret detection, missing-file status, and revision snapshots stored under `.cowork/**/.history/`. Workspace kit health is surfaced in the app and can be checked locally with `npm run kit:lint` for human-readable output or JSON export. **Import your ChatGPT history** to eliminate the cold-start problem — CoWork OS knows you from day one. All imported data is stored locally and encrypted on your machine. **Structured memory observations** add inspectable local metadata, progressive recall tools, Memory Hub privacy controls, deterministic rebuild/backfill, and soft-delete suppression on top of archive memory. **Optional Supermemory integration** adds an external provider lane with `supermemory_profile`, `supermemory_search`, `supermemory_remember`, and `supermemory_forget`, plus optional prompt-time profile injection and background mirroring of non-private local memory captures. **Proactive session compaction** automatically generates comprehensive structured summaries when context reaches 90% capacity, and checkpoint capture preserves exact supporting spans so recall quality survives compaction. [Learn more](docs/features.md#persistent-memory-system) | [Structured Memory](docs/memory-observations.md) | [Supermemory](docs/supermemory.md) | [Context Compaction](docs/context-compaction.md)
 
 <p align="center">
   <img src="screenshots/cowork-os-agents.png" alt="Agent Personas" width="700">

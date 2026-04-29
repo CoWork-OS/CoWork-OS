@@ -198,6 +198,50 @@ describe("AzureOpenAIProvider", () => {
     expect(body.reasoning_effort).toBe("xhigh");
   });
 
+  it("shortens replayed tool call IDs in chat-completions requests", async () => {
+    mockFetch.mockResolvedValue(
+      createOkResponse({
+        choices: [{ message: { content: "done" }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 5, completion_tokens: 1 },
+      }),
+    );
+
+    const longId =
+      "call_fTqRlz9aYMXqPEzJkcc0NrzA|fc_074924a6cf3a48280169f173f70f988191b1e8342ae256b142";
+    const provider = new AzureOpenAIProvider(baseConfig);
+    const request: LLMRequest = {
+      model: "gpt-4o",
+      maxTokens: 20,
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: longId,
+              name: "scratchpad_write",
+              input: { key: "heartbeat", content: "done" },
+            },
+          ],
+        },
+        {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: longId, content: "ok" }],
+        },
+      ],
+    };
+
+    await provider.createMessage(request);
+
+    const [, options] = mockFetch.mock.calls[0];
+    const body = JSON.parse(options.body);
+    const toolCallId = body.messages[0].tool_calls[0].id;
+
+    expect(toolCallId).not.toBe(longId);
+    expect(toolCallId.length).toBeLessThanOrEqual(64);
+    expect(body.messages[1]).toMatchObject({ role: "tool", tool_call_id: toolCallId });
+  });
+
   it("sends prompt_cache_key and splits stable versus turn system prefix on chat completions", async () => {
     mockFetch.mockResolvedValue(
       createOkResponse({

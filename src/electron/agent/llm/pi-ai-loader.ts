@@ -11,6 +11,7 @@ type PiAiCompleteOptions = {
   apiKey?: string;
   maxTokens?: number;
   signal?: AbortSignal;
+  sessionId?: string;
 };
 
 export type PiAiModule = {
@@ -32,6 +33,7 @@ export type PiAiOAuthModule = {
     onAuth: (info: OAuthAuthInfo) => void;
     onPrompt: (prompt: OAuthPrompt) => Promise<string>;
     onProgress?: (message: string) => void;
+    onManualCodeInput?: () => Promise<string>;
     originator?: string;
   }) => Promise<OAuthCredentials>;
   refreshOpenAICodexToken: (refreshToken: string) => Promise<OAuthCredentials>;

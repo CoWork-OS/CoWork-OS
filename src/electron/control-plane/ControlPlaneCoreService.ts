@@ -1037,12 +1037,14 @@ export class ControlPlaneCoreService {
             : "failed";
     const issueStatus =
       runStatus === "completed"
-        ? task.terminalStatus === "needs_user_action" ||
+        ? task.source === "symphony"
+          ? "review"
+          : task.terminalStatus === "needs_user_action" ||
           task.terminalStatus === "awaiting_approval" ||
           task.terminalStatus === "resume_available" ||
           task.terminalStatus === "partial_success"
-          ? "review"
-          : "done"
+            ? "review"
+            : "done"
         : runStatus === "cancelled" || runStatus === "interrupted"
           ? "todo"
           : "blocked";

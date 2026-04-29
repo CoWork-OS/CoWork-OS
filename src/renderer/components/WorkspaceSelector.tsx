@@ -39,6 +39,7 @@ export function WorkspaceSelector({ onWorkspaceSelected }: WorkspaceSelectorProp
       if (!folderPath) return;
 
       const folderName = folderPath.split("/").pop() || "Workspace";
+      const permissionSettings = await window.electronAPI.getPermissionSettings().catch(() => null);
 
       const workspace = await window.electronAPI.createWorkspace({
         name: folderName,
@@ -48,7 +49,7 @@ export function WorkspaceSelector({ onWorkspaceSelected }: WorkspaceSelectorProp
           write: true,
           delete: true,
           network: false,
-          shell: false,
+          shell: permissionSettings?.defaultShellEnabled === true,
         },
       });
 

@@ -367,26 +367,34 @@ export class PermissionEngine {
               "Dangerous-only mode allows safe reads, edits, and non-destructive commands automatically.",
           },
         };
-      case "dont_ask":
-      case "bypass_permissions":
-        if (facts.isDataExport) {
-          return {
-            decision: "ask",
-            reason: {
-              type: "mode",
+	      case "dont_ask":
+	        if (facts.isDataExport) {
+	          return {
+	            decision: "ask",
+	            reason: {
+	              type: "mode",
               mode,
               summary: "Data export always requires an explicit prompt, even in bypass modes.",
             },
-          };
-        }
-        return {
-          decision: "allow",
-          reason: {
+	          };
+	        }
+	        return {
+	          decision: "allow",
+	          reason: {
             type: "mode",
             mode,
             summary: "Mode allows the action unless a higher-precedence hard policy blocks it.",
-          },
-        };
+	          },
+	        };
+	      case "bypass_permissions":
+	        return {
+	          decision: "allow",
+	          reason: {
+	            type: "mode",
+	            mode,
+	            summary: "Bypass-permissions mode allows the action unless a higher-precedence hard policy blocks it.",
+	          },
+	        };
       case "default":
       default:
         if (

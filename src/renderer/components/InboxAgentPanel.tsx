@@ -51,6 +51,7 @@ import type { AgentRoleData } from "../../electron/preload";
 import type { Company } from "../../shared/types";
 import { GOOGLE_SCOPE_GMAIL_MODIFY, hasScope } from "../../shared/google-workspace";
 import { useVoiceInput } from "../hooks/useVoiceInput";
+import { computeEmailFitScale, getEmailFitInset, measureEmailContentWidth } from "../utils/email-html-layout";
 
 type QueueMode = "cleanup" | "follow_up" | null;
 type ThreadSortOrder = "recent" | "priority";
@@ -271,6 +272,7 @@ function sanitizeEmailHtml(raw: string): string {
  */
 function EmailHtmlBody({ html }: { html: string }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const loadCleanupRef = useRef<(() => void) | null>(null);
   const [height, setHeight] = useState(200);
 
   const wrappedHtml = useMemo(() => {
@@ -281,7 +283,7 @@ function EmailHtmlBody({ html }: { html: string }) {
   /* Prevent newsletter CSS (height:100%, min-height:100vh) from stretching the document to the iframe height — that inflates scrollHeight and leaves a huge blank band under the message. */
   html, body { margin: 0; padding: 0; width: 100%; max-width: 100%; overflow-x: hidden; height: auto !important; min-height: 0 !important; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 14px; line-height: 1.6; color: #1a1a2e; word-wrap: break-word; overflow-wrap: break-word; }
-  #cowork-email-viewport { width: 100%; max-width: 100%; overflow: hidden; }
+  #cowork-email-viewport { width: 100%; max-width: 100%; overflow: hidden; box-sizing: border-box; }
   #cowork-email-root { display: block; width: 100%; max-width: 100%; transform-origin: top left; }
   /* Shrink wide images without collapsing table column widths (min-width:0 on td broke marketing layouts). */
   img { max-width: 100% !important; height: auto !important; }
@@ -297,26 +299,29 @@ function EmailHtmlBody({ html }: { html: string }) {
     const root = doc?.getElementById("cowork-email-root") as HTMLDivElement | null;
     if (!iframe || !doc?.body || !root) return;
 
-    const docEl = doc.documentElement;
     root.style.transform = "none";
+    root.style.removeProperty("zoom");
     root.style.width = "auto";
     root.style.maxWidth = "none";
 
     const availableWidth = iframe.clientWidth;
-    const contentWidth = Math.max(root.scrollWidth, doc.body.scrollWidth, docEl.scrollWidth);
+    const contentWidth = measureEmailContentWidth(doc, root);
+    const rightInset = getEmailFitInset(availableWidth);
+    const usableWidth = Math.max(1, availableWidth - rightInset);
+    const layoutWidth = Math.max(contentWidth, usableWidth);
+    const scale = computeEmailFitScale(availableWidth, contentWidth);
 
-    let scale = 1;
-    if (availableWidth > 0 && contentWidth > availableWidth) {
-      scale = availableWidth / contentWidth;
-    }
+    root.parentElement?.style.setProperty("padding-right", `${rightInset}px`);
 
     if (scale < 0.999) {
-      root.style.width = `${contentWidth}px`;
+      root.style.width = `${layoutWidth}px`;
       root.style.maxWidth = "none";
-      root.style.transform = `scale(${scale})`;
+      root.style.setProperty("zoom", String(scale));
+      root.style.transform = "none";
     } else {
       root.style.width = "100%";
       root.style.maxWidth = "100%";
+      root.style.removeProperty("zoom");
       root.style.transform = "none";
     }
 
@@ -329,11 +334,36 @@ function EmailHtmlBody({ html }: { html: string }) {
   }, []);
 
   const handleLoad = useCallback(() => {
+    loadCleanupRef.current?.();
+    loadCleanupRef.current = null;
+
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         updateIframeLayout();
       });
     });
+
+    const timeouts = [120, 360, 900].map((delay) =>
+      window.setTimeout(() => {
+        updateIframeLayout();
+      }, delay),
+    );
+
+    const doc = iframeRef.current?.contentDocument;
+    const images = doc ? Array.from(doc.images) : [];
+    const cleanupImageListeners = images.map((image) => {
+      image.addEventListener("load", updateIframeLayout);
+      image.addEventListener("error", updateIframeLayout);
+      return () => {
+        image.removeEventListener("load", updateIframeLayout);
+        image.removeEventListener("error", updateIframeLayout);
+      };
+    });
+
+    loadCleanupRef.current = () => {
+      timeouts.forEach((timeout) => window.clearTimeout(timeout));
+      cleanupImageListeners.forEach((cleanup) => cleanup());
+    };
   }, [updateIframeLayout]);
 
   useEffect(() => {
@@ -358,6 +388,8 @@ function EmailHtmlBody({ html }: { html: string }) {
       return () => {
         observer.disconnect();
         cancelAnimationFrame(rafId);
+        loadCleanupRef.current?.();
+        loadCleanupRef.current = null;
       };
     }
 
@@ -365,8 +397,10 @@ function EmailHtmlBody({ html }: { html: string }) {
     return () => {
       window.removeEventListener("resize", scheduleUpdate);
       cancelAnimationFrame(rafId);
+      loadCleanupRef.current?.();
+      loadCleanupRef.current = null;
     };
-  }, []);
+  }, [updateIframeLayout]);
 
   return (
     <iframe
@@ -376,6 +410,8 @@ function EmailHtmlBody({ html }: { html: string }) {
       sandbox="allow-same-origin"
       style={{
         width: "100%",
+        maxWidth: "100%",
+        minWidth: 0,
         height,
         border: "none",
         display: "block",

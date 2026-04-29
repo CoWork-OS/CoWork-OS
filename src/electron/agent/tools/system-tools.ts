@@ -8,6 +8,7 @@ import { Workspace, type VerbatimQuoteSourceType } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { LLMTool } from "../llm/types";
 import { MemoryService } from "../../memory/MemoryService";
+import { MemoryObservationService } from "../../memory/MemoryObservationService";
 import { SessionRecallService } from "../../memory/SessionRecallService";
 import { LayeredMemoryIndexService } from "../../memory/LayeredMemoryIndexService";
 import { QuoteRecallService } from "../../memory/QuoteRecallService";
@@ -34,6 +35,10 @@ function topicMemoryEnabled(): boolean {
 
 function verbatimRecallEnabled(): boolean {
   return MemoryFeaturesManager.loadSettings().verbatimRecallEnabled !== false;
+}
+
+function progressiveRecallEnabled(): boolean {
+  return MemoryFeaturesManager.loadSettings().progressiveRecallToolsEnabled !== false;
 }
 
 const PROTECTED_SYSTEM_PATHS = [
@@ -896,6 +901,152 @@ export class SystemTools {
     }
   }
 
+  async searchMemoryIndex(input: {
+    query: string;
+    limit?: number;
+    observationTypes?: string[];
+    privacyStates?: Array<"normal" | "private" | "redacted" | "suppressed">;
+  }): Promise<{
+    results: Array<{
+      id: string;
+      title: string;
+      type: string;
+      date: string;
+      sourceLabel: string;
+      files: string[];
+      concepts: string[];
+      snippet: string;
+      estimatedDetailTokens: number;
+    }>;
+    totalFound: number;
+  }> {
+    this.daemon.logEvent(this.taskId, "tool_call", {
+      tool: "memory_search_index",
+      query: input.query,
+    });
+    if (!progressiveRecallEnabled()) {
+      throw new Error("Progressive memory recall is disabled in Memory settings.");
+    }
+    const results = MemoryObservationService.search({
+      workspaceId: this.workspace.id,
+      query: input.query,
+      limit: Math.min(input.limit || 20, 50),
+      observationTypes: input.observationTypes,
+      privacyStates: input.privacyStates,
+    });
+    const mapped = results.map((result) => ({
+      id: result.memoryId,
+      title: result.title,
+      type: result.observationType,
+      date: new Date(result.createdAt).toISOString(),
+      sourceLabel: result.sourceLabel,
+      files: [...result.filesModified, ...result.filesRead].slice(0, 8),
+      concepts: result.concepts.slice(0, 8),
+      snippet: result.snippet,
+      estimatedDetailTokens: result.estimatedDetailTokens,
+    }));
+    this.daemon.logEvent(this.taskId, "tool_result", {
+      tool: "memory_search_index",
+      success: true,
+      resultCount: mapped.length,
+    });
+    return { results: mapped, totalFound: mapped.length };
+  }
+
+  async memoryTimeline(input: {
+    memoryId?: string;
+    query?: string;
+    windowSize?: number;
+  }): Promise<{
+    results: Array<{
+      id: string;
+      title: string;
+      type: string;
+      date: string;
+      sourceLabel: string;
+      snippet: string;
+      isAnchor?: boolean;
+    }>;
+    totalFound: number;
+  }> {
+    this.daemon.logEvent(this.taskId, "tool_call", {
+      tool: "memory_timeline",
+      memoryId: input.memoryId,
+      query: input.query,
+    });
+    if (!progressiveRecallEnabled()) {
+      throw new Error("Progressive memory recall is disabled in Memory settings.");
+    }
+    const results = MemoryObservationService.timeline({
+      workspaceId: this.workspace.id,
+      memoryId: input.memoryId,
+      query: input.query,
+      windowSize: input.windowSize,
+    });
+    const mapped = results.map((result) => ({
+      id: result.memoryId,
+      title: result.title,
+      type: result.observationType,
+      date: new Date(result.createdAt).toISOString(),
+      sourceLabel: result.sourceLabel,
+      snippet: result.snippet,
+      ...(result.isAnchor ? { isAnchor: true } : {}),
+    }));
+    this.daemon.logEvent(this.taskId, "tool_result", {
+      tool: "memory_timeline",
+      success: true,
+      resultCount: mapped.length,
+    });
+    return { results: mapped, totalFound: mapped.length };
+  }
+
+  async memoryDetails(input: { ids: string[] }): Promise<{
+    results: Array<{
+      id: string;
+      title: string;
+      type: string;
+      sourceLabel: string;
+      narrative: string;
+      facts: string[];
+      concepts: string[];
+      filesRead: string[];
+      filesModified: string[];
+      tools: string[];
+      privacyState: string;
+      content: string;
+    }>;
+    totalFound: number;
+  }> {
+    this.daemon.logEvent(this.taskId, "tool_call", {
+      tool: "memory_details",
+      count: input.ids?.length || 0,
+    });
+    if (!progressiveRecallEnabled()) {
+      throw new Error("Progressive memory recall is disabled in Memory settings.");
+    }
+    const details = MemoryObservationService.details((input.ids || []).slice(0, 10), this.workspace.id);
+    const mapped = details.map((detail) => ({
+      id: detail.memoryId,
+      title: detail.title,
+      type: detail.observationType,
+      sourceLabel: detail.origin,
+      narrative: detail.narrative,
+      facts: detail.facts,
+      concepts: detail.concepts,
+      filesRead: detail.filesRead,
+      filesModified: detail.filesModified,
+      tools: detail.tools,
+      privacyState: detail.privacyState,
+      content: detail.content || "",
+    }));
+    this.daemon.logEvent(this.taskId, "tool_result", {
+      tool: "memory_details",
+      success: true,
+      resultCount: mapped.length,
+    });
+    return { results: mapped, totalFound: mapped.length };
+  }
+
   async searchSessions(input: {
     query: string;
     taskId?: string;
@@ -1174,6 +1325,63 @@ export class SystemTools {
     const conciseTopicMemoryTools: LLMTool[] = enableTopicMemory
       ? [buildTopicMemoryTool("Load topical memory packs from `.cowork/memory/topics` for the current query.")]
       : [];
+    const progressiveMemoryTools: LLMTool[] = progressiveRecallEnabled()
+      ? [
+          {
+            name: "memory_search_index",
+            description:
+              "Search structured memory observations and return a compact index first. Prefer this over broad memory detail reads for deep recall.",
+            input_schema: {
+              type: "object",
+              properties: {
+                query: { type: "string", description: "Keywords, topic, person, file, or decision to recall" },
+                limit: { type: "number", description: "Maximum results (default 20, max 50)" },
+                observationTypes: {
+                  type: "array",
+                  items: { type: "string" },
+                  description: "Optional memory types to keep, such as decision, error, insight, screen_context",
+                },
+                privacyStates: {
+                  type: "array",
+                  items: { type: "string", enum: ["normal", "private", "redacted", "suppressed"] },
+                  description: "Optional privacy-state filters",
+                },
+              },
+              required: ["query"],
+            },
+          },
+          {
+            name: "memory_timeline",
+            description:
+              "Load compact observations around a memory ID or the best match for a query before requesting full details.",
+            input_schema: {
+              type: "object",
+              properties: {
+                memoryId: { type: "string", description: "Anchor memory ID from memory_search_index" },
+                query: { type: "string", description: "Fallback query when no anchor ID is available" },
+                windowSize: { type: "number", description: "Neighbor count on each side (default 5, max 20)" },
+              },
+              required: [],
+            },
+          },
+          {
+            name: "memory_details",
+            description:
+              "Fetch full structured details only for selected memory IDs after memory_search_index or memory_timeline narrows the set.",
+            input_schema: {
+              type: "object",
+              properties: {
+                ids: {
+                  type: "array",
+                  items: { type: "string" },
+                  description: "Memory IDs to expand (max 10)",
+                },
+              },
+              required: ["ids"],
+            },
+          },
+        ]
+      : [];
 
     // In headless/VPS mode, avoid exposing tools that require an interactive desktop session.
     // Keep informational tools and memory search available.
@@ -1211,13 +1419,14 @@ export class SystemTools {
             required: [],
           },
         },
+        ...progressiveMemoryTools,
         {
           name: "search_memories",
           description:
             "Search the workspace memory database for past observations, decisions, and insights " +
             "from previous sessions and imported conversations (e.g. ChatGPT history). " +
             "Use this tool when the user asks about something discussed previously, " +
-            "or when you need to recall past context. Returns matching memory snippets.",
+            "or when you need to recall past context. For deep recall, prefer memory_search_index, memory_timeline, then memory_details.",
           input_schema: {
             type: "object",
             properties: {
@@ -1406,7 +1615,7 @@ export class SystemTools {
           "for past observations, decisions, insights, and errors from previous sessions " +
           "and imported conversations (e.g. ChatGPT history). " +
           "Use this proactively when starting a task to check for relevant prior context, " +
-          "or when you need to recall past decisions and their rationale.",
+          "or when you need to recall past decisions and their rationale. For deep recall, prefer memory_search_index, memory_timeline, then memory_details.",
         input_schema: {
           type: "object",
           properties: {
@@ -1432,6 +1641,7 @@ export class SystemTools {
           required: ["query"],
         },
       },
+      ...progressiveMemoryTools,
       ...conciseQuoteRecallTools,
       ...conciseSessionRecallTools,
       ...conciseTopicMemoryTools,

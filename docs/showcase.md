@@ -2,6 +2,18 @@
 
 A comprehensive guide to what you can build, automate, and manage with CoWork OS. Each section includes the capabilities involved, example prompts, and which skills/connectors/packs power the workflow.
 
+## Personal Agentic OS And Everything App
+
+CoWork OS is positioned as a local-first personal agentic OS: one place for coding, research, web design, documents, spreadsheets, presentations, automations, channels, devices, and long-running work. The product is broader than an office artifact viewer; artifacts are one part of the larger agentic workspace.
+
+---
+
+## Everything Workbench For Knowledge Work
+
+Inside that broader OS, the Everything Workbench makes generated knowledge-work outputs first-class. Instead of treating docs, sheets, decks, pages, and PDFs as disconnected files, CoWork shows them as task artifacts: open them in the right sidebar, expand them fullscreen, review or lightly edit them, and ask the agent for follow-up changes in the same context. See [Everything Workbench](everything-workbench.md).
+
+This reduces the need to jump between Word, Excel, PowerPoint, browser previews, Finder, and chat for generated work. External app actions remain available when the task needs advanced native functionality.
+
 ---
 
 ## Software Engineering
@@ -1549,6 +1561,29 @@ Save as invoice-2026-02.pdf.
 ```
 
 **Powered by:** `nano-pdf` tools, document generation, `document-tools`
+
+---
+
+### Generated Web Pages
+
+Create durable local web page artifacts for prototypes, dashboards, microsites, and reviewable UI outputs.
+
+**What it handles:**
+- `.html` / `.htm` output cards in the task feed
+- built React/Vite/Next output such as `dist/index.html`, `build/index.html`, or `out/index.html`
+- sandboxed iframe preview in the resizable artifact sidebar or fullscreen mode
+- browser, folder, and copy-path actions
+- follow-up prompts from fullscreen mode with preview refresh after the generated file or build output changes
+- clear build-output-needed state for React-style projects without built HTML
+
+**Example prompt:**
+```
+Create a polished single-page HTML launch dashboard.
+Save it as artifacts/launch-dashboard.html.
+Use local CSS and JavaScript only, and make it responsive.
+```
+
+**Powered by:** local file tools, HTML asset inlining, [Web Page Artifacts](web-page-artifacts.md)
 
 ---
 

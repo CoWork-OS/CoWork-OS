@@ -1,6 +1,6 @@
 {
   "name": "cowork-os",
-  "version": "0.5.40",
+  "version": "0.5.41",
   "description": "CoWork OS - Local-first personal agentic OS and everything app for coding, knowledge work, web design, automations, and artifacts",
   "overrides": {
     "@whiskeysockets/baileys": {

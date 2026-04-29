@@ -8,12 +8,16 @@ import {
 export interface PermissionSettings {
   version: 1;
   defaultMode: PermissionMode;
+  defaultShellEnabled: boolean;
+  defaultPermissionAccess: "default" | "full";
   rules: PermissionRule[];
 }
 
 const DEFAULT_SETTINGS: PermissionSettings = {
   version: 1,
   defaultMode: "dangerous_only",
+  defaultShellEnabled: false,
+  defaultPermissionAccess: "default",
   rules: [],
 };
 
@@ -80,6 +84,8 @@ export class PermissionSettingsManager {
     return {
       version: 1,
       defaultMode: settings?.defaultMode || "dangerous_only",
+      defaultShellEnabled: settings?.defaultShellEnabled === true,
+      defaultPermissionAccess: settings?.defaultPermissionAccess === "full" ? "full" : "default",
       rules: Array.isArray(settings?.rules)
         ? settings.rules
             .filter((rule): rule is PermissionRule => !!rule && typeof rule === "object")

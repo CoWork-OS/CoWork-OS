@@ -2,8 +2,8 @@
 layout: home
 hero:
   name: CoWork OS
-  text: The operating system for personal AI assistants
-  tagline: Security-hardened, local-first runtime for operating AI agents in production
+  text: The local-first personal agentic OS and everything app
+  tagline: Code, research, design web pages, create documents, work with spreadsheets and decks, run automations, and ask your agent for changes without switching context.
   actions:
     - theme: brand
       text: Get Started
@@ -14,6 +14,9 @@ hero:
     - theme: alt
       text: Features
       link: /features
+    - theme: alt
+      text: Everything Workbench
+      link: /everything-workbench
     - theme: alt
       text: Core Automation
       link: /core-automation
@@ -38,6 +41,21 @@ hero:
     - theme: alt
       text: Runtime Visibility
       link: /operator-runtime-visibility
+    - theme: alt
+      text: Structured Memory
+      link: /memory-observations
+    - theme: alt
+      text: Spreadsheet Artifacts
+      link: /spreadsheet-artifacts
+    - theme: alt
+      text: Document Artifacts
+      link: /document-artifacts
+    - theme: alt
+      text: Presentation Artifacts
+      link: /pptx-generation-and-preview
+    - theme: alt
+      text: Web Page Artifacts
+      link: /web-page-artifacts
     - theme: alt
       text: Chronicle
       link: /chronicle
@@ -70,6 +88,12 @@ hero:
       link: https://github.com/CoWork-OS/CoWork-OS
 
 features:
+  - title: Personal Agentic OS
+    details: CoWork OS keeps tasks, memory, skills, providers, approvals, channels, devices, and automations in one local-first governed workspace for personal AI agents.
+  - title: Everything App
+    details: Use one workspace for coding, web design, research, documents, spreadsheets, presentations, web pages, PDFs, email, automations, and long-running operational work.
+  - title: Everything Workbench
+    details: Generated documents, spreadsheets, decks, web pages, PDFs, and file outputs live beside the agent. Open artifacts in the app, edit or review them, and ask for follow-up changes with fewer switches into separate office apps.
   - title: Production Runtime
     details: Local-first runtime with approvals, guardrails, and governance controls for production agent workflows.
   - title: 30+ LLM Providers
@@ -80,8 +104,18 @@ features:
     details: Direct LLM chat with no tools, same-session follow-ups, and chat-only streaming for supported providers.
   - title: Runtime Visibility
     details: Visible learning progression after each task, unified recall across tasks/messages/files, persistent shell sessions, and live provider routing/fallback status.
+  - title: Structured Memory
+    details: Local archive memories now have inspectable observation metadata, progressive index/timeline/detail recall tools, Memory Hub privacy controls, deterministic rebuild status, and soft-delete suppression.
   - title: Rich Artifact Previews
-    details: Generated PDFs, spreadsheets, videos, HTML, LaTeX/PDF pairs, and PPTX decks surface inline previews; PowerPoint artifacts open with slide thumbnails, navigation, text, and speaker notes.
+    details: Format-aware in-app preview popup for HTML, Markdown, code (with syntax highlighting), JSON tree view, CSV/TSV tables, XLSX, DOCX, PDF, images (fit/actual-size toggle, dimensions, alpha checkerboard), video, audio (with duration), LaTeX, and PPTX. Each format adapts the modal width, header subtitle metadata, and per-format actions; Copy path / Show in Finder / Open externally / Close are unified across every format.
+  - title: Spreadsheet Artifacts
+    details: Task-created spreadsheet files render as compact artifact cards. Excel workbooks and CSV/TSV open into a persisted resizable right sidebar by default; Numbers, Google Sheets shortcut, ODS, and XLSB outputs keep external-app/folder actions. Editable sheets can expand into a fullscreen spreadsheet workbench with selection, copy, zoom, add row/column, save, model picker, voice input, attachments, and follow-up task context.
+  - title: Document Artifacts
+    details: Task-created Word-style files render as compact artifact cards. DOCX opens directly into an editable right-sidebar document surface with Google Docs-style controls, save, copy, fullscreen mode, model picker, voice input, attachments, and follow-up task context; DOC, RTF, ODT, OTT, Pages, and related formats get best-effort preview or external-app/folder actions.
+  - title: Presentation Artifacts
+    details: Task-created PPTX decks render as compact artifact cards and open into a persisted resizable right-sidebar viewer with thumbnails, slide navigation, zoom, fast text-first loading, cached rendered images, speaker notes, external actions, and fullscreen follow-up context; legacy PowerPoint formats keep external-app/folder actions.
+  - title: Web Page Artifacts
+    details: Generated HTML/HTM files and built React output entrypoints render as compact artifact cards and open into a persisted resizable right-sidebar sandboxed iframe preview with browser/folder/copy actions and fullscreen follow-up context; React-style projects without build output show a build-output-needed state instead of auto-starting a dev server.
   - title: Chronicle
     details: Opt-in desktop recent-screen context for vague on-screen references, with Memory Hub controls, local passive capture, `screen_context` recall, pause/resume, and Mission Control evidence.
   - title: Optional Supermemory

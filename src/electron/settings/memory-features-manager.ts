@@ -25,6 +25,9 @@ const DEFAULT_SETTINGS: MemoryFeaturesSettings = {
   topicMemoryEnabled: true,
   defaultArchiveInjectionEnabled: false,
   autoPromoteToCuratedMemoryEnabled: false,
+  structuredObservationsEnabled: true,
+  progressiveRecallToolsEnabled: true,
+  memoryInspectorEnabled: true,
 };
 
 function isEnabled(value: boolean | undefined): boolean {
@@ -77,6 +80,9 @@ export class MemoryFeaturesManager {
       topicMemoryEnabled: settings.topicMemoryEnabled !== false,
       defaultArchiveInjectionEnabled: isEnabled(settings.defaultArchiveInjectionEnabled),
       autoPromoteToCuratedMemoryEnabled: isEnabled(settings.autoPromoteToCuratedMemoryEnabled),
+      structuredObservationsEnabled: settings.structuredObservationsEnabled !== false,
+      progressiveRecallToolsEnabled: settings.progressiveRecallToolsEnabled !== false,
+      memoryInspectorEnabled: settings.memoryInspectorEnabled !== false,
     };
 
     this.cachedSettings = settings;
@@ -106,6 +112,9 @@ export class MemoryFeaturesManager {
       topicMemoryEnabled: settings.topicMemoryEnabled !== false,
       defaultArchiveInjectionEnabled: isEnabled(settings.defaultArchiveInjectionEnabled),
       autoPromoteToCuratedMemoryEnabled: isEnabled(settings.autoPromoteToCuratedMemoryEnabled),
+      structuredObservationsEnabled: settings.structuredObservationsEnabled !== false,
+      progressiveRecallToolsEnabled: settings.progressiveRecallToolsEnabled !== false,
+      memoryInspectorEnabled: settings.memoryInspectorEnabled !== false,
     };
 
     const repository = SecureSettingsRepository.getInstance();

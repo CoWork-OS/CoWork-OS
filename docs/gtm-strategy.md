@@ -13,8 +13,8 @@ CoWork OS is a **security-hardened, local-first personal agentic operating syste
 
 CoWork OS is a local-first personal agentic OS and production workbench for users who need:
 
-- One workspace for coding, web design, research, documents, spreadsheets, decks, web pages, automations, channels, and devices
-- Generated artifacts that can be opened, reviewed, lightly edited, and revised with the agent beside them
+- One workspace for coding, web design, research, documents, spreadsheets, decks, generated web pages, live website testing, automations, channels, and devices
+- Generated artifacts and live websites that can be opened, reviewed, tested, lightly edited, annotated, and revised with the agent beside them
 - Guardrails and approval workflows by default
 - Local-first data ownership (BYOK, no telemetry)
 - A multi-channel operating layer (17 messaging channels)
@@ -53,7 +53,7 @@ Users keep control of data and provider keys with optional offline model executi
 
 ### 5) One Workspace for Knowledge-Work Artifacts
 
-CoWork OS reduces context switching for knowledge workers, founders, and operators by keeping generated documents, spreadsheets, presentations, web pages, PDFs, and task outputs in one local-first artifact workbench. Users can open artifacts in the app, review or lightly edit them, ask for changes, and still jump to Word, Excel, PowerPoint, Pages, Numbers, Keynote, or a browser when advanced native behavior is needed.
+CoWork OS reduces context switching for knowledge workers, founders, and operators by keeping generated documents, spreadsheets, presentations, web pages, PDFs, live website testing, and task outputs in one local-first workbench. Users can open artifacts in the app, review or lightly edit them, test websites in the visible Browser Workbench, annotate screenshots, ask for changes, and still jump to Word, Excel, PowerPoint, Pages, Numbers, Keynote, or a browser when advanced native behavior is needed.
 
 ### 6) Everything App Breadth
 
@@ -65,7 +65,7 @@ The artifact workbench should not narrow the product category. CoWork OS also co
 - 17 messaging channels
 - 100+ built-in skills
 - Coding, web design, research, automations, channels, devices, and artifact workspaces in one app
-- Everything Workbench for docs, sheets, decks, web pages, PDFs, and previews
+- Everything Workbench for docs, sheets, decks, web pages, live websites, PDFs, and previews
 - 4,932 automated tests in the suite across 390 test files
 - ZeroLeaks report published in-repo
 

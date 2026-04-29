@@ -69,6 +69,8 @@ import {
   type LLMRoutingRuntimeState,
   type CustomProviderConfig,
   type AzureReasoningEffort,
+  type OpenAIReasoningEffort,
+  type LLMTextVerbosity,
   type LLMProviderFallbackConfig,
 } from "../../shared/types";
 import { CUSTOM_PROVIDER_MAP } from "../../shared/llm-provider-catalog";
@@ -131,6 +133,8 @@ import { ContactIdentitySettings } from "./ContactIdentitySettings";
 import { TaskTraceDebuggerPanel } from "./TaskTraceDebuggerPanel";
 import {
   buildClaudeCredentialInput,
+  resolveOpenAIReasoningEffort,
+  resolveOpenAITextVerbosity,
   resolveClaudeAuthMethod,
   selectClaudeModelKey,
 } from "./settings-llm-helpers";
@@ -267,6 +271,55 @@ const AZURE_REASONING_EFFORT_OPTIONS: Array<{
     value: "extra_high",
     label: "Extra High",
     description: "Maximum effort. Azure maps this to High on the request.",
+  },
+];
+
+const OPENAI_REASONING_EFFORT_OPTIONS: Array<{
+  value: OpenAIReasoningEffort;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "low",
+    label: "Low",
+    description: "Faster GPT-5.5 reasoning for routine tool work.",
+  },
+  {
+    value: "medium",
+    label: "Medium",
+    description: "Balanced GPT-5.5 quality, latency, and cost.",
+  },
+  {
+    value: "high",
+    label: "High",
+    description: "More thorough GPT-5.5 reasoning for complex work.",
+  },
+  {
+    value: "xhigh",
+    label: "Extra High",
+    description: "Maximum GPT-5.5 effort for the hardest asynchronous tasks.",
+  },
+];
+
+const OPENAI_TEXT_VERBOSITY_OPTIONS: Array<{
+  value: LLMTextVerbosity;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "low",
+    label: "Low",
+    description: "Shorter final answers.",
+  },
+  {
+    value: "medium",
+    label: "Medium",
+    description: "Balanced final answer detail.",
+  },
+  {
+    value: "high",
+    label: "High",
+    description: "More detailed final answers.",
   },
 ];
 
@@ -975,6 +1028,35 @@ const getLLMProviderIcon = (
   return <Plus {...S} />;
 };
 
+interface SystemSettingsSectionProps {
+  icon: ReactNode;
+  title: string;
+  description: string;
+  children: ReactNode;
+  className?: string;
+}
+
+function SystemSettingsSection({
+  icon,
+  title,
+  description,
+  children,
+  className = "",
+}: SystemSettingsSectionProps) {
+  return (
+    <section className={`settings-combined-section ${className}`}>
+      <div className="settings-combined-section-header">
+        <div className="settings-combined-section-icon">{icon}</div>
+        <div className="settings-combined-section-copy">
+          <h2 className="settings-combined-heading">{title}</h2>
+          <p className="settings-description">{description}</p>
+        </div>
+      </div>
+      <div className="settings-combined-body">{children}</div>
+    </section>
+  );
+}
+
 export function Settings({
   onBack,
   onSettingsChanged,
@@ -1237,6 +1319,10 @@ export function Settings({
   const [openaiAuthMethod, setOpenaiAuthMethod] = useState<"api_key" | "oauth">(
     "api_key",
   );
+  const [openaiReasoningEffort, setOpenaiReasoningEffort] =
+    useState<OpenAIReasoningEffort>("medium");
+  const [openaiTextVerbosity, setOpenaiTextVerbosity] =
+    useState<LLMTextVerbosity>("medium");
   const [openaiOAuthConnected, setOpenaiOAuthConnected] = useState(false);
   const [openaiOAuthLoading, setOpenaiOAuthLoading] = useState(false);
 
@@ -2165,11 +2251,20 @@ export function Settings({
       if (loadedSettings.openai?.model) {
         setOpenaiModel(loadedSettings.openai.model);
       }
+      setOpenaiReasoningEffort(
+        resolveOpenAIReasoningEffort(loadedSettings.openai),
+      );
+      setOpenaiTextVerbosity(
+        resolveOpenAITextVerbosity(loadedSettings.openai),
+      );
       // Set OpenAI auth method and OAuth status
       if (loadedSettings.openai?.authMethod) {
         setOpenaiAuthMethod(loadedSettings.openai.authMethod);
         // If authMethod is 'oauth', check if tokens are available
         if (loadedSettings.openai.authMethod === "oauth") {
+          if (!loadedSettings.openai.model) {
+            setOpenaiModel("gpt-5.5");
+          }
           if (
             loadedSettings.openai.accessToken ||
             loadedSettings.openai.refreshToken
@@ -2857,6 +2952,9 @@ export function Settings({
         setOpenaiOAuthConnected(true);
         setOpenaiAuthMethod("oauth");
         setOpenaiApiKey(""); // Clear API key when using OAuth
+        if (!openaiModel || openaiModel === "gpt-4o-mini") {
+          setOpenaiModel("gpt-5.5");
+        }
         onSettingsChanged?.();
         // Load models after OAuth success
         loadOpenAIModels();
@@ -3287,6 +3385,8 @@ export function Settings({
               ? openaiApiKey || undefined
               : undefined,
           model: openaiModel || undefined,
+          reasoningEffort: openaiReasoningEffort,
+          textVerbosity: openaiTextVerbosity,
           authMethod: openaiAuthMethod,
           ...routingFor("openai"),
           ...failoverFor("openai"),
@@ -3548,6 +3648,8 @@ export function Settings({
                     ? openaiApiKey || undefined
                     : undefined,
                 model: openaiModel || undefined,
+                reasoningEffort: openaiReasoningEffort,
+                textVerbosity: openaiTextVerbosity,
                 authMethod: openaiAuthMethod,
                 // OAuth tokens are handled by the backend from stored settings
               }
@@ -4830,8 +4932,8 @@ export function Settings({
                       <span>Connected to ChatGPT</span>
                     </div>
                     <p className="settings-description">
-                      Your ChatGPT account is connected. You can use GPT-4o and
-                      other models with your subscription.
+                      Your ChatGPT account is connected. You can use Codex GPT models with
+                      your subscription.
                     </p>
                     <button
                       className="button-small button-secondary"
@@ -4846,8 +4948,8 @@ export function Settings({
                 ) : (
                   <div className="oauth-login">
                     <p className="settings-description">
-                      Sign in with your ChatGPT account to use GPT-4o, o1, and
-                      other models with your subscription.
+                      Sign in with your ChatGPT account to use Codex GPT models with your
+                      subscription.
                     </p>
                     <button
                       className="button-primary oauth-login-btn"
@@ -4962,6 +5064,64 @@ export function Settings({
                   {loadingOpenAIModels ? "Loading..." : "Refresh Models"}
                 </button>
               )}
+            </div>
+
+            <div className="settings-section">
+              <h3>GPT-5.5 Controls</h3>
+              <p className="settings-description">
+                Applies to OpenAI API-key GPT-5.5 requests. Other OpenAI models
+                keep their existing request behavior.
+              </p>
+              <div className="settings-form-grid two-columns">
+                <label className="settings-field">
+                  <span>Reasoning effort</span>
+                  <select
+                    className="settings-select"
+                    value={openaiReasoningEffort}
+                    onChange={(e) =>
+                      setOpenaiReasoningEffort(
+                        e.target.value as OpenAIReasoningEffort,
+                      )
+                    }
+                  >
+                    {OPENAI_REASONING_EFFORT_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <small>
+                    {
+                      OPENAI_REASONING_EFFORT_OPTIONS.find(
+                        (option) => option.value === openaiReasoningEffort,
+                      )?.description
+                    }
+                  </small>
+                </label>
+                <label className="settings-field">
+                  <span>Response verbosity</span>
+                  <select
+                    className="settings-select"
+                    value={openaiTextVerbosity}
+                    onChange={(e) =>
+                      setOpenaiTextVerbosity(e.target.value as LLMTextVerbosity)
+                    }
+                  >
+                    {OPENAI_TEXT_VERBOSITY_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <small>
+                    {
+                      OPENAI_TEXT_VERBOSITY_OPTIONS.find(
+                        (option) => option.value === openaiTextVerbosity,
+                      )?.description
+                    }
+                  </small>
+                </label>
+              </div>
             </div>
           </>
         )}
@@ -7092,33 +7252,60 @@ export function Settings({
             ) : activeTab === "health" ? (
               <HealthPanel compact onCreateTask={onCreateTask} />
             ) : activeTab === "system" ? (
-              <div className="settings-combined-panel">
-                <section className="settings-combined-section">
-                  <h2 className="settings-combined-heading">Profiles</h2>
+              <div className="settings-combined-panel system-security-panel">
+                <div className="system-security-panel-header">
+                  <h2>System &amp; Security</h2>
+                  <p className="settings-description">
+                    Manage local profiles, app presence, safety limits, permissions, and
+                    organization controls from one place.
+                  </p>
+                </div>
+                <SystemSettingsSection
+                  className="system-security-section--profiles"
+                  icon={<User {...S} />}
+                  title="Profiles"
+                  description="Keep user data isolated, switch profiles, and move profile bundles between machines."
+                >
                   <ProfileSettings />
-                </section>
-                <section className="settings-combined-section">
-                  <h2 className="settings-combined-heading">
-                    {platform === "win32"
+                </SystemSettingsSection>
+                <SystemSettingsSection
+                  className="system-security-section--tray"
+                  icon={<Monitor {...S} />}
+                  title={
+                    platform === "win32"
                       ? "System Tray"
                       : platform === "darwin"
                         ? "Menu Bar"
-                        : "Tray"}
-                  </h2>
+                        : "Tray"
+                  }
+                  description="Control how CoWork appears in the operating system and when it sends desktop alerts."
+                >
                   <TraySettings />
-                </section>
-                <section className="settings-combined-section">
-                  <h2 className="settings-combined-heading">Safety Limits</h2>
+                </SystemSettingsSection>
+                <SystemSettingsSection
+                  className="system-security-section--safety"
+                  icon={<Shield {...S} />}
+                  title="Safety Limits"
+                  description="Set budget, iteration, command, browser, and model guardrails for automated work."
+                >
                   <GuardrailSettings />
-                </section>
-                <section className="settings-combined-section">
-                  <h2 className="settings-combined-heading">Permissions</h2>
+                </SystemSettingsSection>
+                <SystemSettingsSection
+                  className="system-security-section--permissions"
+                  icon={<ShieldCheckIcon {...S} />}
+                  title="Permissions"
+                  description="Tune the default approval experience and manage profile or workspace-specific rules."
+                >
                   <PermissionSettingsPanel workspaceId={workspaceId} />
-                </section>
-                <section className="settings-combined-section">
-                  <h2 className="settings-combined-heading">Admin Policies</h2>
+                </SystemSettingsSection>
+                <SystemSettingsSection
+                  className="system-security-section--admin"
+                  icon={<Building2 {...S} />}
+                  title="Admin Policies"
+                  description="Apply organization-level limits for plugin packs, connectors, installation, and agents."
+                >
                   <AdminPoliciesPanel />
-                </section>
+                </SystemSettingsSection>
               </div>
             ) : activeTab === "voice" ? (
               <VoiceSettings />

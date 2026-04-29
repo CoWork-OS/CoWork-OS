@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import type { MissionControlData } from "./useMissionControlData";
 
 interface MCIssueDetailProps {
@@ -17,10 +18,11 @@ export function MCIssueDetail({ data, issueId }: MCIssueDetailProps) {
 
   const issue = issues.find((i) => i.id === issueId);
 
-  // Sync selectedIssueId for data loading
-  if (issueId !== data.selectedIssueId) {
-    setSelectedIssueId(issueId);
-  }
+  useEffect(() => {
+    if (issueId !== data.selectedIssueId) {
+      setSelectedIssueId(issueId);
+    }
+  }, [data.selectedIssueId, issueId, setSelectedIssueId]);
 
   if (!issue) return <div className="mc-v2-empty">Issue not found</div>;
 

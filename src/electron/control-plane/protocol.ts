@@ -352,6 +352,13 @@ export const Methods = {
   PLANNER_RUN: "planner.run",
   PLANNER_RUN_LIST: "planner.run.list",
 
+  // Symphony issue orchestration operations
+  SYMPHONY_CONFIG_GET: "symphony.config.get",
+  SYMPHONY_CONFIG_UPDATE: "symphony.config.update",
+  SYMPHONY_STATUS: "symphony.status",
+  SYMPHONY_RUN: "symphony.run",
+  SYMPHONY_PAUSE: "symphony.pause",
+
   // Goal operations
   GOAL_LIST: "goal.list",
   GOAL_GET: "goal.get",

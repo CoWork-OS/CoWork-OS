@@ -10,6 +10,11 @@ import type {
   AwarenessSource,
   AwarenessSummary,
   MemoryLayerPreviewPayload,
+  MemoryObservationBackfillStatus,
+  MemoryObservationMetadata,
+  MemoryObservationPrivacyState,
+  MemoryObservationSearchResult,
+  MemoryObservationTimelineEntry,
   MemoryFeaturesSettings,
   SupermemoryConfigStatus,
   SupermemorySearchMode,
@@ -27,6 +32,9 @@ const DEFAULT_FEATURES: MemoryFeaturesSettings = {
   verbatimRecallEnabled: true,
   wakeUpLayersEnabled: true,
   temporalKnowledgeEnabled: true,
+  structuredObservationsEnabled: true,
+  progressiveRecallToolsEnabled: true,
+  memoryInspectorEnabled: true,
 };
 
 type BadgeTone = "neutral" | "success" | "warning" | "error";
@@ -72,6 +80,18 @@ export function MemoryHubSettings(props?: {
   const [kitPreset, setKitPreset] = useState<"default" | "venture_operator">("default");
   const [newProjectId, setNewProjectId] = useState("");
   const [layerPreview, setLayerPreview] = useState<MemoryLayerPreviewPayload | null>(null);
+  const [observationQuery, setObservationQuery] = useState("");
+  const [observationPrivacy, setObservationPrivacy] = useState<"all" | MemoryObservationPrivacyState>("all");
+  const [observationResults, setObservationResults] = useState<MemoryObservationSearchResult[]>([]);
+  const [observationTimeline, setObservationTimeline] = useState<MemoryObservationTimelineEntry[]>([]);
+  const [selectedObservationId, setSelectedObservationId] = useState<string>("");
+  const [selectedObservation, setSelectedObservation] = useState<MemoryObservationMetadata | null>(null);
+  const [observationEditTitle, setObservationEditTitle] = useState("");
+  const [observationEditNarrative, setObservationEditNarrative] = useState("");
+  const [observationLoading, setObservationLoading] = useState(false);
+  const [observationBusy, setObservationBusy] = useState(false);
+  const [observationBackfillStatus, setObservationBackfillStatus] =
+    useState<MemoryObservationBackfillStatus | null>(null);
   const [awarenessConfig, setAwarenessConfig] = useState<AwarenessConfig | null>(null);
   const [awarenessBeliefs, setAwarenessBeliefs] = useState<AwarenessBelief[]>([]);
   const [awarenessSummary, setAwarenessSummary] = useState<AwarenessSummary | null>(null);
@@ -131,6 +151,8 @@ export function MemoryHubSettings(props?: {
     }
     void refreshKit();
     void refreshLayerPreview();
+    void refreshObservationBackfillStatus();
+    void searchObservations();
     void refreshAwareness();
     void refreshAutonomy();
   }, [selectedWorkspaceId]);
@@ -222,6 +244,172 @@ export function MemoryHubSettings(props?: {
     } catch (error) {
       logger.error("Failed to load memory layer preview:", error);
       setLayerPreview(null);
+    }
+  };
+
+  const refreshObservationBackfillStatus = async () => {
+    try {
+      const status = await window.electronAPI.getMemoryObservationBackfillStatus();
+      setObservationBackfillStatus(status);
+    } catch (error) {
+      logger.error("Failed to load memory observation backfill status:", error);
+    }
+  };
+
+  const searchObservations = async () => {
+    if (!selectedWorkspaceId) return;
+    try {
+      setObservationLoading(true);
+      const results = await window.electronAPI.searchMemoryObservations({
+        workspaceId: selectedWorkspaceId,
+        query: observationQuery.trim(),
+        limit: 30,
+        privacyStates: observationPrivacy === "all" ? undefined : [observationPrivacy],
+      });
+      setObservationResults(results);
+      const nextId = selectedObservationId || results[0]?.memoryId || "";
+      if (nextId) {
+        await loadObservation(nextId);
+      } else {
+        setSelectedObservation(null);
+        setObservationTimeline([]);
+      }
+    } catch (error) {
+      logger.error("Failed to search memory observations:", error);
+      setObservationResults([]);
+    } finally {
+      setObservationLoading(false);
+    }
+  };
+
+  const loadObservation = async (memoryId: string) => {
+    if (!selectedWorkspaceId || !memoryId) return;
+    try {
+      setSelectedObservationId(memoryId);
+      const [details, timeline] = await Promise.all([
+        window.electronAPI.getMemoryObservationDetails({ workspaceId: selectedWorkspaceId, ids: [memoryId] }),
+        window.electronAPI.getMemoryObservationTimeline({
+          workspaceId: selectedWorkspaceId,
+          memoryId,
+          windowSize: 4,
+        }),
+      ]);
+      setSelectedObservation(details[0] || null);
+      setObservationEditTitle(details[0]?.title || "");
+      setObservationEditNarrative(details[0]?.narrative || "");
+      setObservationTimeline(timeline);
+    } catch (error) {
+      logger.error("Failed to load memory observation:", error);
+    }
+  };
+
+  const updateObservationPrivacy = async (privacyState: MemoryObservationPrivacyState) => {
+    if (!selectedObservation) return;
+    try {
+      setObservationBusy(true);
+      await window.electronAPI.updateMemoryObservation({
+        workspaceId: selectedWorkspaceId,
+        memoryId: selectedObservation.memoryId,
+        patch: { privacyState },
+      });
+      await loadObservation(selectedObservation.memoryId);
+      await searchObservations();
+    } catch (error) {
+      logger.error("Failed to update memory observation:", error);
+    } finally {
+      setObservationBusy(false);
+    }
+  };
+
+  const saveObservationMetadata = async () => {
+    if (!selectedObservation) return;
+    try {
+      setObservationBusy(true);
+      await window.electronAPI.updateMemoryObservation({
+        workspaceId: selectedWorkspaceId,
+        memoryId: selectedObservation.memoryId,
+        patch: {
+          title: observationEditTitle.trim() || selectedObservation.title,
+          narrative: observationEditNarrative.trim() || selectedObservation.narrative,
+        },
+      });
+      await loadObservation(selectedObservation.memoryId);
+      await searchObservations();
+    } catch (error) {
+      logger.error("Failed to save memory observation metadata:", error);
+    } finally {
+      setObservationBusy(false);
+    }
+  };
+
+  const redactObservation = async () => {
+    if (!selectedObservation) return;
+    try {
+      setObservationBusy(true);
+      await window.electronAPI.redactMemoryObservation({
+        workspaceId: selectedWorkspaceId,
+        memoryId: selectedObservation.memoryId,
+      });
+      await loadObservation(selectedObservation.memoryId);
+      await searchObservations();
+    } catch (error) {
+      logger.error("Failed to redact memory observation:", error);
+    } finally {
+      setObservationBusy(false);
+    }
+  };
+
+  const deleteObservation = async () => {
+    if (!selectedObservation) return;
+    const confirmed = window.confirm(
+      "Hide this memory from recall? The record will be kept as suppressed metadata.",
+    );
+    if (!confirmed) return;
+    try {
+      setObservationBusy(true);
+      await window.electronAPI.deleteMemoryObservation({
+        workspaceId: selectedWorkspaceId,
+        memoryId: selectedObservation.memoryId,
+      });
+      setSelectedObservationId("");
+      setSelectedObservation(null);
+      setObservationTimeline([]);
+      await searchObservations();
+    } catch (error) {
+      logger.error("Failed to delete memory observation:", error);
+    } finally {
+      setObservationBusy(false);
+    }
+  };
+
+  const promoteObservation = async () => {
+    if (!selectedObservation) return;
+    try {
+      setObservationBusy(true);
+      await window.electronAPI.promoteMemoryObservation({
+        workspaceId: selectedWorkspaceId,
+        memoryId: selectedObservation.memoryId,
+        target: "workspace",
+        kind: "project_fact",
+      });
+      await refreshLayerPreview();
+    } catch (error) {
+      logger.error("Failed to promote memory observation:", error);
+    } finally {
+      setObservationBusy(false);
+    }
+  };
+
+  const rebuildObservationMetadata = async () => {
+    try {
+      setObservationBusy(true);
+      const status = await window.electronAPI.rebuildMemoryObservationMetadata({ force: true });
+      setObservationBackfillStatus(status);
+      await searchObservations();
+    } catch (error) {
+      logger.error("Failed to rebuild memory observation metadata:", error);
+    } finally {
+      setObservationBusy(false);
     }
   };
 
@@ -586,6 +774,75 @@ export function MemoryHubSettings(props?: {
             </label>
           </div>
         </div>
+
+        <div className="settings-form-group">
+          <div className="memory-hub-toggle-row">
+            <div className="memory-hub-grow">
+              <div className="memory-hub-primary-label">
+                Enable Structured Memory Observations
+              </div>
+              <p className="settings-form-hint memory-hub-hint-tight">
+                Stores inspectable sidecar metadata for memories without replacing the local
+                archive.
+              </p>
+            </div>
+            <label className="settings-toggle memory-hub-toggle">
+              <input
+                type="checkbox"
+                checked={features.structuredObservationsEnabled !== false}
+                onChange={(e) => saveFeatures({ structuredObservationsEnabled: e.target.checked })}
+                disabled={saving}
+              />
+              <span className="toggle-slider" />
+            </label>
+          </div>
+        </div>
+
+        <div className="settings-form-group">
+          <div className="memory-hub-toggle-row">
+            <div className="memory-hub-grow">
+              <div className="memory-hub-primary-label">
+                Enable Progressive Recall Tools
+              </div>
+              <p className="settings-form-hint memory-hub-hint-tight">
+                Adds index, timeline, and detail tools so agents retrieve memory in token-efficient
+                stages.
+              </p>
+            </div>
+            <label className="settings-toggle memory-hub-toggle">
+              <input
+                type="checkbox"
+                checked={features.progressiveRecallToolsEnabled !== false}
+                onChange={(e) => saveFeatures({ progressiveRecallToolsEnabled: e.target.checked })}
+                disabled={saving}
+              />
+              <span className="toggle-slider" />
+            </label>
+          </div>
+        </div>
+
+        <div className="settings-form-group">
+          <div className="memory-hub-toggle-row">
+            <div className="memory-hub-grow">
+              <div className="memory-hub-primary-label">
+                Enable Memory Inspector
+              </div>
+              <p className="settings-form-hint memory-hub-hint-tight">
+                Shows searchable observation metadata, provenance, privacy controls, and timeline
+                context in Memory Hub.
+              </p>
+            </div>
+            <label className="settings-toggle memory-hub-toggle">
+              <input
+                type="checkbox"
+                checked={features.memoryInspectorEnabled !== false}
+                onChange={(e) => saveFeatures({ memoryInspectorEnabled: e.target.checked })}
+                disabled={saving}
+              />
+              <span className="toggle-slider" />
+            </label>
+          </div>
+        </div>
       </div>
 
       <div className="settings-subsection">
@@ -900,6 +1157,215 @@ export function MemoryHubSettings(props?: {
                 )}
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {features.memoryInspectorEnabled !== false && selectedWorkspaceId && (
+        <div className="settings-subsection">
+          <h3>Memory Inspector</h3>
+          <p className="settings-form-hint">
+            Search structured memory observations, inspect provenance, and control what can be
+            reused in future prompts.
+          </p>
+
+          <div className="settings-card">
+            <div className="memory-hub-row">
+              <div className="memory-hub-section-title">
+                Observation metadata
+              </div>
+              <span className={badgeClass(observationBackfillStatus?.running ? "warning" : "success")}>
+                {observationBackfillStatus?.running ? "Backfilling" : "Ready"}
+              </span>
+            </div>
+            <div className="memory-hub-caption">
+              {observationBackfillStatus
+                ? `${observationBackfillStatus.processed}/${observationBackfillStatus.total} processed • ${observationBackfillStatus.failed} failed • ${observationBackfillStatus.pending} pending`
+                : "Metadata status unavailable"}
+            </div>
+            <div className="memory-hub-chip-row memory-hub-top-gap">
+              <button
+                className="settings-button"
+                disabled={observationBusy}
+                onClick={() => void rebuildObservationMetadata()}
+              >
+                Rebuild Metadata
+              </button>
+              <button
+                className="settings-button"
+                disabled={observationBusy}
+                onClick={() => void refreshObservationBackfillStatus()}
+              >
+                Refresh Status
+              </button>
+            </div>
+          </div>
+
+          <div className="settings-card memory-hub-top-gap memory-inspector-shell">
+            <div className="memory-inspector-search">
+              <input
+                className="settings-input"
+                value={observationQuery}
+                onChange={(event) => setObservationQuery(event.target.value)}
+                placeholder="Search memories, files, tools, concepts"
+              />
+              <select
+                className="settings-select"
+                value={observationPrivacy}
+                onChange={(event) =>
+                  setObservationPrivacy(event.target.value as "all" | MemoryObservationPrivacyState)
+                }
+              >
+                <option value="all">All privacy</option>
+                <option value="normal">Normal</option>
+                <option value="private">Private</option>
+                <option value="redacted">Redacted</option>
+                <option value="suppressed">Suppressed</option>
+              </select>
+              <button
+                className="settings-button primary"
+                disabled={observationLoading}
+                onClick={() => void searchObservations()}
+              >
+                {observationLoading ? "Searching..." : "Search"}
+              </button>
+            </div>
+
+            <div className="memory-inspector-layout">
+              <div className="memory-hub-column memory-inspector-results">
+                {observationResults.length === 0 ? (
+                  <div className="settings-empty">No memory observations found.</div>
+                ) : (
+                  observationResults.map((result) => (
+                    <button
+                      key={result.memoryId}
+                      className={`settings-card memory-observation-result${
+                        selectedObservationId === result.memoryId ? " is-selected" : ""
+                      }`}
+                      onClick={() => void loadObservation(result.memoryId)}
+                    >
+                      <div className="memory-hub-row memory-inspector-item-header">
+                        <div className="memory-hub-primary-label memory-inspector-title">
+                          {result.title}
+                        </div>
+                        <span className={badgeClass(result.privacyState === "normal" ? "neutral" : "warning")}>
+                          {result.privacyState}
+                        </span>
+                      </div>
+                      <div className="memory-hub-caption">
+                        {result.sourceLabel} • {result.observationType} •{" "}
+                        {formatTimestamp(result.createdAt) || "unknown date"} •{" "}
+                        {result.estimatedDetailTokens} tokens
+                      </div>
+                      <div className="memory-hub-text-block-primary memory-inspector-snippet">
+                        {result.snippet}
+                      </div>
+                      {result.concepts.length > 0 && (
+                        <div className="memory-hub-chip-row memory-inspector-chip-row">
+                          {result.concepts.slice(0, 4).map((concept) => (
+                            <span key={concept} className={badgeClass("neutral")}>{concept}</span>
+                          ))}
+                        </div>
+                      )}
+                    </button>
+                  ))
+                )}
+              </div>
+
+              <div className="settings-card memory-observation-detail">
+                {selectedObservation ? (
+                  <>
+                    <div className="memory-hub-row memory-inspector-item-header">
+                      <div className="memory-inspector-detail-heading">
+                        <div className="memory-hub-section-title memory-inspector-detail-title">
+                          {selectedObservation.title}
+                        </div>
+                        <div className="memory-hub-caption">
+                          {selectedObservation.origin} • {selectedObservation.observationType} •{" "}
+                          {formatTimestamp(selectedObservation.memoryCreatedAt) || "unknown date"}
+                        </div>
+                      </div>
+                      <span className={badgeClass(selectedObservation.privacyState === "normal" ? "success" : "warning")}>
+                        {selectedObservation.privacyState}
+                      </span>
+                    </div>
+                    <div className="memory-hub-top-gap">
+                      <input
+                        className="settings-input"
+                        value={observationEditTitle}
+                        onChange={(event) => setObservationEditTitle(event.target.value)}
+                        placeholder="Observation title"
+                      />
+                      <textarea
+                        className="settings-textarea memory-hub-top-gap memory-inspector-textarea"
+                        rows={4}
+                        value={observationEditNarrative}
+                        onChange={(event) => setObservationEditNarrative(event.target.value)}
+                        placeholder="Observation narrative"
+                      />
+                      <div className="memory-hub-chip-row">
+                        <button
+                          className="settings-button"
+                          disabled={observationBusy}
+                          onClick={() => void saveObservationMetadata()}
+                        >
+                          Save Metadata
+                        </button>
+                      </div>
+                    </div>
+                    {selectedObservation.facts.length > 0 && (
+                      <div className="memory-hub-top-gap">
+                        <div className="memory-hub-primary-label">Facts</div>
+                        <ul className="memory-hub-text-block-primary memory-inspector-facts">
+                          {selectedObservation.facts.map((fact) => (
+                            <li key={fact}>{fact}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    <div className="memory-hub-chip-row">
+                      <button className="settings-button" disabled={observationBusy} onClick={() => void promoteObservation()}>
+                        Promote
+                      </button>
+                      <button className="settings-button" disabled={observationBusy} onClick={() => void updateObservationPrivacy("private")}>
+                        Mark Private
+                      </button>
+                      <button className="settings-button" disabled={observationBusy} onClick={() => void updateObservationPrivacy("suppressed")}>
+                        Suppress Recall
+                      </button>
+                      <button className="settings-button" disabled={observationBusy} onClick={() => void redactObservation()}>
+                        Redact
+                      </button>
+                      <button className="settings-button danger" disabled={observationBusy} onClick={() => void deleteObservation()}>
+                        Delete
+                      </button>
+                    </div>
+
+                    <div className="memory-hub-top-gap">
+                      <div className="memory-hub-primary-label">Timeline</div>
+                      <div className="memory-hub-column">
+                        {observationTimeline.map((entry) => (
+                          <div key={entry.memoryId} className="settings-card memory-inspector-timeline-card">
+                            <div className="memory-hub-row memory-inspector-item-header">
+                              <span className="memory-inspector-title">{entry.title}</span>
+                              {entry.isAnchor && <span className={badgeClass("success")}>Anchor</span>}
+                            </div>
+                            <div className="memory-hub-caption">
+                              {formatTimestamp(entry.createdAt) || "unknown date"} • {entry.sourceLabel}
+                            </div>
+                            <div className="memory-hub-text-block-primary memory-inspector-snippet">
+                              {entry.snippet}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="settings-empty">Select a memory observation to inspect.</div>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -1577,6 +2043,9 @@ export function MemoryHubSettings(props?: {
                                   {f.specialHandling === "bootstrap" && (
                                     <span className={badgeClass("neutral")}>bootstrap</span>
                                   )}
+                                  {f.specialHandling === "design-system" && (
+                                    <span className={badgeClass("neutral")}>design</span>
+                                  )}
                                 </div>
                                 {metadata.length > 0 && (
                                   <div
@@ -1696,6 +2165,18 @@ export function MemoryHubSettings(props?: {
                 disabled={!selectedWorkspaceId || kitBusy}
               >
                 Open MEMORY.md
+              </button>
+              <button
+                className="settings-button"
+                onClick={() =>
+                  void window.electronAPI.openWorkspaceKitFile({
+                    workspaceId: selectedWorkspaceId,
+                    relPath: ".cowork/DESIGN.md",
+                  })
+                }
+                disabled={!selectedWorkspaceId || kitBusy}
+              >
+                Open DESIGN.md
               </button>
             </div>
           </div>

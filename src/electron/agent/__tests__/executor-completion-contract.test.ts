@@ -123,6 +123,20 @@ describe("TaskExecutor completion contract integration", () => {
     expect(contract.artifactKind).toBe("file");
   });
 
+  it("treats presentation prompts as requiring a pptx artifact", () => {
+    const executor = createExecuteHarness({
+      title: "CoWork OS presentation",
+      prompt: "Create a concise presentation about CoWork OS.",
+      lastOutput: "Prepared outline",
+    });
+
+    const contract = (executor as Any).buildCompletionContract();
+
+    expect(contract.requiresArtifactEvidence).toBe(true);
+    expect(contract.artifactKind).toBe("file");
+    expect(contract.requiredArtifactExtensions).toContain(".pptx");
+  });
+
   it("counts planCompletedEffectively as execution evidence during finalization", () => {
     const executor = createExecuteHarness({
       title: "Daily AI Agent Trends Research",

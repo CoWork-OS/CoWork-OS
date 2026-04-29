@@ -6,6 +6,7 @@ The foundation is still the hybrid memory system, but the runtime now makes it e
 
 - **Curated hot memory**: small, prompt-visible, explicitly edited or promoted
 - **Recall archive**: larger searchable memory/history, not injected by default
+- **Structured observations**: inspectable sidecar metadata for archive memories
 - **Session recall**: recent transcript/checkpoint history for “what happened in that run?”
 - **Topic packs**: focused `.cowork/memory/topics/*.md` files loaded explicitly for topical work
 
@@ -33,7 +34,9 @@ User messages / task events / accepted distill candidates
         │     └─→ .cowork/MEMORY.md (auto block)
         │
         ├─→ MemoryService
-        │     └─→ memories + embeddings + summaries (archive lane)
+        │     ├─→ memories + embeddings + summaries (archive lane)
+        │     └─→ MemoryObservationService
+        │           └─→ memory_observation_metadata + FTS sidecar
         │
         ├─→ SupermemoryService (optional)
         │     ├─→ prompt-time profile/search context
@@ -54,6 +57,9 @@ MemorySynthesizer.synthesize()
               └─→ playbook / KG / daily summaries
 
 Explicit recall tools
+        ├─→ memory_search_index
+        ├─→ memory_timeline
+        ├─→ memory_details
         ├─→ search_memories
         ├─→ search_sessions
         ├─→ search_quotes
@@ -112,6 +118,7 @@ Curated hot memory is injected by default through `<cowork_hot_memory>`.
 
 **Service:** `src/electron/memory/MemoryService.ts`  
 **Storage:** `memories`, `memory_embeddings`, `memory_summaries`
+**Structured sidecar:** `src/electron/memory/MemoryObservationService.ts`, `memory_observation_metadata`
 
 This is the broad searchable archive:
 
@@ -126,11 +133,31 @@ Chronicle-promoted observations remain provenance-rich `screen_context` records 
 
 This lane still uses hybrid lexical + local semantic retrieval, but it is **not injected by default**. The feature flag `defaultArchiveInjectionEnabled` now defaults to `false`.
 
+### Structured observations
+
+Every archive memory can have a structured observation sidecar keyed by `memory_id`. The sidecar stores title, subtitle, narrative, facts, concepts, file/tool provenance, source event IDs, content hash, capture reason, privacy state, generation source, and migration status.
+
+This gives CoWork a compact index for retrieval and a user-inspectable control plane without rewriting the original `memories` table. The original archive row remains authoritative for full content.
+
+Backfill is deterministic and local. It derives metadata from existing content and summaries without per-row LLM calls. It does not run as a synchronous startup write path; Memory Hub shows status and can trigger rebuild explicitly.
+
+Destructive inspector actions are workspace-scoped. Delete is implemented as confirmed soft-delete: the observation becomes `suppressed`, the underlying memory is marked private, and the row is excluded from default search and prompt recall instead of being hard-deleted directly.
+
 ### Retrieval path
 
 - `search_memories` searches archive memory plus indexed `.cowork/` markdown
+- `memory_search_index` returns compact structured observation matches first
+- `memory_timeline` returns compact neighboring observations around an anchor ID or query
+- `memory_details` expands only selected observation IDs and is scoped to the active workspace
 - archive recall can still be injected when explicitly enabled for a workspace/runtime
 - `MemoryTierService` still tracks reference counts and promotes/evicts archive entries over time
+
+### Privacy path
+
+- `<no-memory>` disables automatic capture for the relevant task content
+- `<private>...</private>` redacts that segment from captured memory and marks affected derived entries private when needed
+- private, redacted, and suppressed observations are excluded from Supermemory mirroring
+- redacted and suppressed observations are excluded from both search-based prompt recall and recent-memory prompt recall
 
 ## Screen Context Evidence — Chronicle Promotions
 
@@ -331,7 +358,7 @@ Workspace kit context is still injected separately and placed before the memory 
 - archive memory: **off by default**
 - Supermemory profile injection: **optional**
 - `L2 Topic Packs`: **tool-driven**
-- `L3 Deep Recall` (`search_quotes`, `search_sessions`, `search_memories`): **tool-driven**
+- `L3 Deep Recall` (`memory_search_index`, `memory_timeline`, `memory_details`, `search_quotes`, `search_sessions`, `search_memories`): **tool-driven**
 
 ---
 
@@ -375,4 +402,5 @@ Feedback reason values: `incorrect`, `too_verbose`, `ignored_instructions`, `wro
 - [Execution Runtime Model](execution-runtime-model.md)
 - [Features](features.md)
 - [Integration Setup, Skill Proposals, and Bootstrap Lifecycle](integration-skill-bootstrap-lifecycle.md)
+- [Structured Memory Observations](memory-observations.md)
 - [Supermemory Integration](supermemory.md)

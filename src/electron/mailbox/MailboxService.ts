@@ -5578,10 +5578,31 @@ export class MailboxService {
     messagesRaw: Any[],
   ): NormalizedThreadInput[] {
     const groups = new Map<string, Any[]>();
+    const referencedThreadKeys = new Map<string, string>();
     for (const message of messagesRaw) {
-      const subject = normalizeWhitespace(asString(message?.subject) || "(No subject)", 160);
-      const from = normalizeEmailAddress(message?.from);
-      const key = `${subject.toLowerCase()}::${from || "unknown"}`;
+      const references = Array.isArray(message?.references)
+        ? message.references.map((entry: unknown) => asString(entry)).filter(Boolean)
+        : [];
+      const inReplyTo = asString(message?.inReplyTo);
+      const threadSeed = references[0] || inReplyTo;
+      if (!threadSeed) continue;
+      const threadKey = `conversation:${sha256(threadSeed).slice(0, 24)}`;
+      referencedThreadKeys.set(threadSeed, threadKey);
+      for (const reference of references) {
+        referencedThreadKeys.set(reference, threadKey);
+      }
+    }
+
+    for (const message of messagesRaw) {
+      const providerMessageId = asString(message?.messageId) || String(message?.uid || randomUUID());
+      const references = Array.isArray(message?.references)
+        ? message.references.map((entry: unknown) => asString(entry)).filter(Boolean)
+        : [];
+      const inReplyTo = asString(message?.inReplyTo);
+      const threadSeed = references[0] || inReplyTo;
+      const key =
+        (threadSeed ? referencedThreadKeys.get(threadSeed) : referencedThreadKeys.get(providerMessageId)) ||
+        `message:${sha256(providerMessageId).slice(0, 24)}`;
       const bucket = groups.get(key) || [];
       bucket.push(message);
       groups.set(key, bucket);
@@ -5938,6 +5959,9 @@ export class MailboxService {
       );
 
     for (const message of thread.messages) {
+      const previousMessageThread = this.db
+        .prepare("SELECT thread_id FROM mailbox_messages WHERE id = ?")
+        .get(message.id) as { thread_id: string } | undefined;
       this.reconcileMailboxMessageIdentity(
         thread.accountId,
         thread.id,
@@ -5950,6 +5974,7 @@ export class MailboxService {
             (id, thread_id, provider_message_id, direction, from_name, from_email, to_json, cc_json, bcc_json, subject, snippet, body_text, body_html, received_at, is_unread, metadata_json, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET
+             thread_id = excluded.thread_id,
              provider_message_id = excluded.provider_message_id,
              direction = excluded.direction,
              from_name = excluded.from_name,
@@ -5988,6 +6013,9 @@ export class MailboxService {
         );
       this.upsertMessageSearchIndex(thread, message);
       this.upsertMessageAttachments(thread, message, now);
+      if (previousMessageThread?.thread_id && previousMessageThread.thread_id !== thread.id) {
+        this.deleteThreadIfEmpty(previousMessageThread.thread_id);
+      }
     }
 
     this.upsertPrimaryContact(thread);

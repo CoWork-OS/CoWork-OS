@@ -1,10 +1,10 @@
 {
   "id": "kami",
   "name": "Kami",
-  "description": "Typeset polished resumes, one-pagers, white papers, letters, portfolios, diagrams, and slide decks with the Kami editorial design system.",
+  "description": "Typeset documents with the Kami editorial design system only when the user explicitly asks for Kami.",
   "icon": "📄",
   "category": "Writing",
-  "prompt": "# Kami\n\nUse this skill when the user wants a professional document artifact with strong visual design: a resume, one-pager, white paper, formal letter, portfolio, polished report, editorial PDF, or slide deck. Use it when the deliverable should feel designed and ready to export, not like raw markdown.\n\nDo not use this skill when:\n- the user wants a web UI, landing page, dashboard, or app interface\n- the output must follow a different visual system such as Tailwind defaults, Material, dark cyberpunk, or saturated marketing graphics\n- the user only wants plain text drafting with no designed artifact\n- the request is for spreadsheet work rather than document/layout work\n\nInputs:\n- Document type: {{document_type}}\n- Language: {{language}}\n- Source material path: {{source_material_path}}\n- Output dir: {{output_dir}}\n- Render output: {{render_output}}\n\nExecution workflow:\n1. Resolve the document type first. If `{{document_type}}` is `auto`, infer it from the request: one-pager, long-doc, letter, portfolio, resume, slides, or a standalone diagram variant.\n2. Resolve the language before touching files. If `{{language}}` is `auto`, follow the user's language or the dominant language in `{{source_material_path}}` / supplied source content. If language is still ambiguous, ask one short question.\n3. Resolve the project directory. If `{{output_dir}}` is empty, use `{artifactDir}/kami-project`.\n4. Run `bash {baseDir}/scripts/setup.sh` to check local rendering support. Surface missing dependencies, but do not stop unless the requested output cannot be produced.\n5. Scaffold workspace-local source files with:\n   `python3 {baseDir}/scripts/bootstrap_project.py --project-dir \"<resolved project dir>\" --document \"<resolved document type>\" --language \"<resolved language>\"`\n6. Read `{baseDir}/SKILL.md` before editing. Then load the lightest relevant references:\n   - content tweak: `CHEATSHEET.md` or `CHEATSHEET.en.md`\n   - layout tweak: cheatsheet plus the scaffolded source file\n   - new document from scratch or raw material: cheatsheet plus `references/design*.md` and `references/writing*.md`\n   - rendering/debugging issues: `references/production*.md`\n   - standalone diagram work: `references/diagrams*.md`\n7. Edit only workspace-local files under the scaffolded project directory. Do not edit the bundled files under `{baseDir}`.\n8. If the user supplied raw notes, a transcript, or scattered bullets, distill them before layout:\n   - extract factual claims, names, dates, metrics, and action items\n   - map them into the target document sections\n   - identify missing high-value fields\n   - ask once if critical gaps remain instead of inventing facts\n9. Preserve Kami's design constraints: parchment background, single ink-blue accent, serif-led hierarchy, warm neutrals, restrained shadows, and tight editorial spacing.\n10. Rendering:\n    - HTML documents or standalone diagrams: when `{{render_output}}` is `auto`, `pdf`, or `both`, render the scaffolded HTML file to PDF with `python3 {baseDir}/scripts/render_html.py \"<source html>\" \"<output pdf>\"`.\n    - Slides: when `{{render_output}}` is `auto` or `pptx`, run `node {baseDir}/scripts/render_slides.mjs --source \"<scaffolded slide source>\" --output-dir \"<project dir>/outputs\" --format pptx`.\n    - Slides: when `{{render_output}}` is `pdf` or `both`, run `node {baseDir}/scripts/render_slides.mjs --source \"<scaffolded slide source>\" --output-dir \"<project dir>/outputs\" --format <pdf|both>`. This uses the bundled `pptxgenjs` module for PPTX plus Playwright with a local Chromium-family browser for PDF, so do not rely on `python-pptx` or `libreoffice`.\n11. Chinese font note: this bundled CoWork port does not ship the proprietary `TsangerJinKai02-W04.ttf` font. Chinese HTML templates are patched to use system serif fallbacks by default. If the user has a licensed copy, they may place it at `<project dir>/fonts/TsangerJinKai02-W04.ttf` and update the template intentionally.\n12. Write a short `{artifactDir}/manifest.md` or `<project dir>/manifest.md` that records:\n    - chosen document type and language\n    - workspace source files edited\n    - output files created\n    - assumptions, missing facts, and blockers\n13. End with the exact source file path(s), rendered output path(s), and any dependency blockers that remain.\n\nSuccess criteria:\n- The skill produces a workspace-local source project instead of mutating bundled templates.\n- The final artifact matches Kami's editorial style and the user's requested document type.\n- Raw source material is structured faithfully without invented metrics or claims.\n- Exact output file paths and unresolved blockers are reported clearly.",
+  "prompt": "# Kami\n\nUse this skill only when the user explicitly names Kami, asks to use the Kami skill, or asks for the Kami editorial design system. Generic requests for resumes, reports, PDFs, documents, slide decks, presentations, or polished artifacts should not trigger this skill by default.\n\nDo not use this skill when:\n- the user wants a web UI, landing page, dashboard, or app interface\n- the output must follow a different visual system such as Tailwind defaults, Material, dark cyberpunk, or saturated marketing graphics\n- the user only wants plain text drafting with no designed artifact\n- the request is for spreadsheet work rather than document/layout work\n- the user asks for a presentation, deck, slides, or PowerPoint without explicitly mentioning Kami; use the native presentation tools and artifact viewer instead\n\nInputs:\n- Document type: {{document_type}}\n- Language: {{language}}\n- Source material path: {{source_material_path}}\n- Output dir: {{output_dir}}\n- Render output: {{render_output}}\n\nExecution workflow:\n1. Resolve the document type first. If `{{document_type}}` is `auto`, infer it from the request: one-pager, long-doc, letter, portfolio, resume, slides, or a standalone diagram variant.\n2. Resolve the language before touching files. If `{{language}}` is `auto`, follow the user's language or the dominant language in `{{source_material_path}}` / supplied source content. If language is still ambiguous, ask one short question.\n3. Resolve the project directory. If `{{output_dir}}` is empty, use `{artifactDir}/kami-project`.\n4. Run `bash {baseDir}/scripts/setup.sh` to check local rendering support. Surface missing dependencies, but do not stop unless the requested output cannot be produced.\n5. Scaffold workspace-local source files with:\n   `python3 {baseDir}/scripts/bootstrap_project.py --project-dir \"<resolved project dir>\" --document \"<resolved document type>\" --language \"<resolved language>\"`\n6. Read `{baseDir}/SKILL.md` before editing. Then load the lightest relevant references:\n   - content tweak: `CHEATSHEET.md` or `CHEATSHEET.en.md`\n   - layout tweak: cheatsheet plus the scaffolded source file\n   - new document from scratch or raw material: cheatsheet plus `references/design*.md` and `references/writing*.md`\n   - rendering/debugging issues: `references/production*.md`\n   - standalone diagram work: `references/diagrams*.md`\n7. Edit only workspace-local files under the scaffolded project directory. Do not edit the bundled files under `{baseDir}`.\n8. If the user supplied raw notes, a transcript, or scattered bullets, distill them before layout:\n   - extract factual claims, names, dates, metrics, and action items\n   - map them into the target document sections\n   - identify missing high-value fields\n   - ask once if critical gaps remain instead of inventing facts\n9. Preserve Kami's design constraints: parchment background, single ink-blue accent, serif-led hierarchy, warm neutrals, restrained shadows, and tight editorial spacing.\n10. Rendering:\n    - HTML documents or standalone diagrams: when `{{render_output}}` is `auto`, `pdf`, or `both`, render the scaffolded HTML file to PDF with `python3 {baseDir}/scripts/render_html.py \"<source html>\" \"<output pdf>\"`.\n    - Slides: when `{{render_output}}` is `auto` or `pptx`, run `node {baseDir}/scripts/render_slides.mjs --source \"<scaffolded slide source>\" --output-dir \"<project dir>/outputs\" --format pptx`.\n    - Slides: when `{{render_output}}` is `pdf` or `both`, run `node {baseDir}/scripts/render_slides.mjs --source \"<scaffolded slide source>\" --output-dir \"<project dir>/outputs\" --format <pdf|both>`. This uses the bundled `pptxgenjs` module for PPTX plus Playwright with a local Chromium-family browser for PDF, so do not rely on `python-pptx` or `libreoffice`.\n11. Chinese font note: this bundled CoWork port does not ship the proprietary `TsangerJinKai02-W04.ttf` font. Chinese HTML templates are patched to use system serif fallbacks by default. If the user has a licensed copy, they may place it at `<project dir>/fonts/TsangerJinKai02-W04.ttf` and update the template intentionally.\n12. Write a short `{artifactDir}/manifest.md` or `<project dir>/manifest.md` that records:\n    - chosen document type and language\n    - workspace source files edited\n    - output files created\n    - assumptions, missing facts, and blockers\n13. End with the exact source file path(s), rendered output path(s), and any dependency blockers that remain.\n\nSuccess criteria:\n- The skill produces a workspace-local source project instead of mutating bundled templates.\n- The final artifact matches Kami's editorial style and the user's requested document type.\n- Raw source material is structured faithfully without invented metrics or claims.\n- Exact output file paths and unresolved blockers are reported clearly.",
   "parameters": [
     {
       "name": "document_type",
@@ -75,49 +75,37 @@
     "homepage": "https://github.com/tw93/Kami",
     "repository": "https://github.com/tw93/Kami",
     "tags": [
-      "document-design",
-      "pdf",
-      "pptx",
-      "resume",
-      "portfolio",
-      "white-paper",
-      "one-pager",
-      "slides",
-      "writing"
+      "kami",
+      "kami-skill",
+      "kami-editorial-design"
     ],
     "routing": {
-      "useWhen": "Use when the user asks to create a polished document artifact such as a resume, one-pager, white paper, formal letter, portfolio, editorial PDF, designed report, or slide deck with presentable typography and layout.",
-      "dontUseWhen": "Do not use for web app UI work, plain text drafting with no designed artifact, spreadsheet generation, or requests that explicitly require a different visual language such as Tailwind defaults, Material, or dark neon branding.",
-      "outputs": "A workspace-local Kami project with scaffolded source files plus rendered PDF or PPTX outputs when dependencies are available.",
+      "useWhen": "Use only when the user explicitly mentions Kami, asks for the Kami skill, or asks for the Kami editorial design system by name.",
+      "dontUseWhen": "Do not use for generic document, PDF, report, resume, slide deck, presentation, or PowerPoint requests unless the user explicitly mentions Kami. Use native document/presentation/spreadsheet tools for normal Office-style artifacts.",
+      "outputs": "A workspace-local Kami project with scaffolded source files plus rendered PDF or PPTX outputs when dependencies are available and Kami was explicitly requested.",
       "successCriteria": "The skill produces source files and polished outputs that match the requested document type, preserve Kami's design system, and avoid inventing missing facts from raw material.",
       "expectedArtifacts": [
         "manifest.md"
       ],
       "keywords": [
-        "resume",
-        "cv",
-        "one-pager",
-        "white paper",
-        "portfolio",
-        "formal letter",
-        "slide deck",
-        "presentation",
-        "polished pdf",
-        "typeset",
-        "make this presentable"
+        "kami",
+        "kami skill",
+        "kami editorial design system"
       ],
       "examples": {
         "positive": [
-          "Build me a polished resume and export it as a PDF.",
-          "Turn these startup notes into a one-pager that looks designed.",
-          "Create a white paper with good typography and export-ready output.",
-          "Use the kami skill for this request."
+          "Use the Kami skill for this request.",
+          "Create this as a Kami one-pager.",
+          "Make a Kami-style slide deck from these notes.",
+          "Use the Kami editorial design system."
         ],
         "negative": [
+          "Create a PowerPoint presentation from these notes.",
+          "Make a slide deck for my meeting.",
+          "Build me a polished resume and export it as a PDF.",
+          "Create a white paper with good typography.",
           "Design a dashboard UI for this SaaS app.",
-          "Write a rough outline only; no document artifact needed.",
-          "Make me an Excel budget workbook.",
-          "Build a cyberpunk landing page with bright gradients."
+          "Make me an Excel budget workbook."
         ]
       }
     },

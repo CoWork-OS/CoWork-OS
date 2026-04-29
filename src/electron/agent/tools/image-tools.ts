@@ -15,7 +15,7 @@ import { LLMTool } from "../llm/types";
  * Supports multiple backends depending on what's configured in Settings:
  * - Gemini (image generation)
  * - OpenAI (gpt-image-* / dall-e-*)
- * - OpenAI OAuth via Codex/ChatGPT (gpt-image-* through the Responses image_generation tool)
+ * - ChatGPT subscription via OAuth (gpt-image-* through the Responses image_generation tool)
  * - Azure OpenAI (deployment-based)
  *
  * If multiple are configured, the tool prefers the configured default provider,
@@ -163,11 +163,11 @@ export class ImageTools {
     return [
       {
         name: "generate_image",
-        description: `Generate an image from a text description using AI. CoWork OS will pick the best configured provider by default (Gemini/OpenAI/OpenAI OAuth/Azure/OpenRouter), unless you specify a provider/model.
+        description: `Generate an image from a text description using AI. CoWork OS will pick the best configured provider by default (Gemini/OpenAI/ChatGPT Subscription/Azure/OpenRouter), unless you specify a provider/model.
 
 Providers/models:
-- OpenAI: gpt-image-1, gpt-image-1.5, dall-e-3, dall-e-2 (also accepts "gpt-1.5" alias)
-- OpenAI (Codex auth): gpt-image-1, gpt-image-1.5 via ChatGPT/Codex OAuth
+- OpenAI: gpt-image-2, gpt-image-1, gpt-image-1.5, dall-e-3, dall-e-2 (also accepts "gpt-2" and "gpt-1.5" aliases)
+- ChatGPT subscription: gpt-image-2 via ChatGPT/Codex OAuth
 - Azure OpenAI: model maps to a deployment name (configured in Settings)
 - OpenRouter: gpt-image-1.5 via openai/gpt-image-1.5
 - Gemini: nano-banana-2 (gemini-3.1-flash-image-preview), gemini-image-pro, gemini-image-fast
@@ -190,7 +190,7 @@ The generated images are saved to the workspace folder.`,
             model: {
               type: "string",
               description:
-                'Optional model override. Examples: "gpt-image-1.5", "dall-e-3", or an Azure deployment name.',
+                'Optional model override. Examples: "gpt-image-2", "dall-e-3", or an Azure deployment name.',
             },
             filename: {
               type: "string",

@@ -22,3 +22,5 @@
 {"prompt":"Open a tmux session and run this long task in the background.","expectedSkillIds":["tmux"],"forbiddenSkillIds":["proofread"]}
 {"prompt":"Make a 3Blue1Brown-style Manim video explaining gradient descent.","expectedSkillIds":["manim-video"],"forbiddenSkillIds":["video-frames","generate-readme"]}
 {"prompt":"Create a Manim animation that visualizes Dijkstra's algorithm step by step.","expectedSkillIds":["manim-video"],"forbiddenSkillIds":["project-structure","video-frames"]}
+{"prompt":"Fix this bug without refactoring unrelated modules or changing behavior outside the failing path.","expectedSkillIds":["karpathy-guidelines"],"forbiddenSkillIds":["summarize","proofread"]}
+{"prompt":"Review this patch and call out unnecessary rewrites or overcomplicated abstractions.","expectedSkillIds":["karpathy-guidelines","code-review","code-reviewer"],"forbiddenSkillIds":["weather","translate"]}

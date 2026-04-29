@@ -58,7 +58,24 @@ describe("PermissionSettingsManager", () => {
     const settings = PermissionSettingsManager.loadSettings();
 
     expect(settings.defaultMode).toBe("dangerous_only");
+    expect(settings.defaultShellEnabled).toBe(false);
+    expect(settings.defaultPermissionAccess).toBe("default");
     expect(settings.rules).toEqual([]);
+  });
+
+  it("loads persisted default access preferences", () => {
+    repository.load.mockReturnValue({
+      version: 1,
+      defaultMode: "default",
+      defaultShellEnabled: true,
+      defaultPermissionAccess: "full",
+      rules: [],
+    });
+
+    const settings = PermissionSettingsManager.loadSettings();
+
+    expect(settings.defaultShellEnabled).toBe(true);
+    expect(settings.defaultPermissionAccess).toBe("full");
   });
 
   it("appends deduplicated profile rules and persists them", () => {

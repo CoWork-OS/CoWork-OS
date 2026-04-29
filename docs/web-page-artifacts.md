@@ -6,6 +6,8 @@ This page documents the current web artifact concept for generated `.html` / `.h
 
 Web page artifacts are one surface of the broader [Everything Workbench](everything-workbench.md): generated knowledge-work files open in-place, can be reviewed in context, and keep the follow-up composer beside the artifact.
 
+Live website testing uses a related but separate surface: the in-app browser workbench. Prompts such as "go to llmwizard.com and test the application as a normal user" open a visible browser session in the resizable right sidebar so the agent and user share the same page. Generated `.html` files remain durable web page artifacts; live URLs use browser automation.
+
 ## Supported Outputs
 
 In-app preview:
@@ -108,6 +110,16 @@ Web page artifacts and Live Canvas are related but separate surfaces.
 
 Use web page artifacts when the task produced a local output file that should be reviewed or revised. Use Live Canvas when the agent is actively building or iterating inside a live visual workspace.
 
+## Relationship To Browser Workbench
+
+Web page artifacts and browser-use testing are intentionally different:
+
+- **Web page artifacts** are local files created or updated by a task. They open from artifact cards into a sandboxed iframe preview and refresh only after the relevant output changes or the follow-up task completes.
+- **Browser workbench sessions** are live websites or local app URLs being used, clicked, filled, tested, or screenshotted by the agent. They open in a visible Electron webview in the same resizable right sidebar and use a persistent workspace browser profile.
+- `Open in browser` on a web artifact still means the external system browser.
+- Browser-use prompts can load a generated page into the browser workbench when the user explicitly asks to test it as a live site, but the default artifact-card open path remains the iframe artifact viewer.
+- Signed-in external Chrome control remains explicit through Chrome DevTools attach or profile options. The embedded workbench does not silently reuse system Chrome cookies.
+
 ## Implementation Files
 
 - `src/shared/web-page-formats.ts`: recognized web artifact extensions and metadata labels.
@@ -118,6 +130,7 @@ Use web page artifacts when the task produced a local output file that should be
 - `src/electron/preload.ts`: optional `webPreview` field on `FileViewerResult.data`.
 - `src/renderer/components/WebArtifactCard.tsx`: task-feed web artifact card and dropdown.
 - `src/renderer/components/WebArtifactViewer.tsx`: sidebar/fullscreen web viewer, iframe preview, actions, and fullscreen composer integration.
+- `src/renderer/components/BrowserWorkbenchView.tsx`: visible browser workbench for live URL testing and browser automation.
 - `src/renderer/App.tsx`: shared artifact sidebar/fullscreen state, persisted sidebar width, and follow-up refresh behavior.
 - `src/renderer/components/MainContent.tsx`: generated-output detection and inline web artifact card rendering.
 - `src/renderer/styles/index.css`: artifact card/viewer and web preview styling.

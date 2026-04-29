@@ -80,6 +80,8 @@ export function buildSavedLLMSettings(
     delete openaiSettings.accessToken;
     delete openaiSettings.refreshToken;
     delete openaiSettings.tokenExpiresAt;
+    delete openaiSettings.accountId;
+    delete openaiSettings.email;
   }
   if (shouldPreserveOpenAIOAuthTokens && existingOpenAISettings) {
     openaiSettings = {
@@ -87,6 +89,8 @@ export function buildSavedLLMSettings(
       accessToken: existingOpenAISettings.accessToken,
       refreshToken: existingOpenAISettings.refreshToken,
       tokenExpiresAt: existingOpenAISettings.tokenExpiresAt,
+      accountId: existingOpenAISettings.accountId,
+      email: existingOpenAISettings.email,
       authMethod:
         incomingOpenAISettings?.authMethod || existingOpenAISettings.authMethod,
     };

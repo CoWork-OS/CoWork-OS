@@ -57,6 +57,10 @@ function withKitFrontmatter(relPath: string, content: string, updated: string): 
   }
 
   const fileName = path.basename(relPath);
+  const contract = WORKSPACE_KIT_CONTRACTS[fileName];
+  if (contract?.parser === "design-system") {
+    return content.endsWith("\n") ? content : `${content}\n`;
+  }
   const frontmatter = buildKitFrontmatter(fileName, updated);
   const normalized = content.trimEnd() + "\n";
   if (!frontmatter) {

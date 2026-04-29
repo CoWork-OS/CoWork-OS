@@ -142,10 +142,9 @@ function nodeMajorVersion() {
 }
 
 function baseEnvWithJobs(jobs) {
-  // These influence node-gyp/make parallelism on macOS/Linux.
+  // Influence make parallelism without passing unsupported npm config keys.
   // Always set safe values so global MAKEFLAGS doesn't accidentally cause OOM.
   const env = { ...process.env };
-  env.npm_config_jobs = String(jobs);
   env.MAKEFLAGS = `-j${jobs}`;
   return env;
 }
@@ -176,6 +175,41 @@ function resolveElectronRebuildCli() {
       const entry = resolveFromCwd("@electron/rebuild");
       return entry ? path.join(path.dirname(entry), "cli.js") : null;
     })();
+}
+
+function runElectronRebuild(
+  electronRebuildCli,
+  env,
+  installRootDir,
+  { arch = null, electronVersion = null } = {}
+) {
+  const rebuildHome = path.join(installRootDir, "node_modules", ".cache", "electron-rebuild-home");
+  const rebuildEnv = {
+    ...env,
+    HOME: rebuildHome,
+    USERPROFILE: rebuildHome,
+  };
+  const args = [
+    electronRebuildCli,
+    "-f",
+    "--only",
+    "better-sqlite3",
+    "--sequential",
+  ];
+
+  if (arch) {
+    args.push("--arch", arch);
+  }
+
+  if (electronVersion) {
+    args.push("--version", electronVersion);
+  }
+
+  if (installRootDir) {
+    args.push("--module-dir", installRootDir);
+  }
+
+  return run(process.execPath, args, { env: rebuildEnv, cwd: installRootDir });
 }
 
 function getElectronVersion() {
@@ -248,26 +282,6 @@ function tryWindowsArm64X64Fallback(
   if (installRes.status !== 0) return installRes;
 
   const x64ElectronEnv = makeElectronTargetEnv(env, electronVersion, "x64");
-  const rebuildRes = runNpm(
-    ["rebuild", "--ignore-scripts=false", "better-sqlite3"],
-    { env: x64ElectronEnv, cwd: installRootDir }
-  );
-  if (rebuildRes.status !== 0) {
-    console.log(
-      "[cowork] x64 npm rebuild failed; trying electron-rebuild x64 fallback."
-    );
-  } else {
-    const testRes = testBetterSqlite3InElectron(x64ElectronEnv);
-    if (testRes.status === 0) {
-      console.log("[cowork] better-sqlite3 loads in Electron (x64 emulation mode).");
-      return testRes;
-    }
-
-    console.log(
-      "[cowork] x64 npm rebuild completed, but better-sqlite3 still did not load in Electron."
-    );
-  }
-
   if (!electronRebuildCli || !fs.existsSync(electronRebuildCli)) {
     console.log(
       "[cowork] @electron/rebuild is not installed; cannot run x64 fallback rebuild."
@@ -275,22 +289,11 @@ function tryWindowsArm64X64Fallback(
     return { status: 1, signal: null };
   }
 
-  const rebuildX64Res = run(
-    process.execPath,
-    [
-      electronRebuildCli,
-      "-f",
-      "--only",
-      "better-sqlite3",
-      "--sequential",
-      "--arch",
-      "x64",
-      "--version",
-      electronVersion,
-      "--module-dir",
-      installRootDir,
-    ],
-    { env, cwd: installRootDir }
+  const rebuildX64Res = runElectronRebuild(
+    electronRebuildCli,
+    env,
+    installRootDir,
+    { arch: "x64", electronVersion }
   );
   if (rebuildX64Res.status !== 0) return rebuildX64Res;
 
@@ -477,29 +480,35 @@ function main() {
       }`
     );
 
-    // 2) electron-rebuild for the one module (keeps rebuild surface small).
-    // 2) Prefer an Electron-targeted rebuild for better-sqlite3 (often prebuilt, lighter).
+    // 2) Rebuild the one native module against Electron's ABI.
     if (electronVersion) {
-      const electronEnv = makeElectronTargetEnv(env, electronVersion, process.arch);
-      const rebuildElectronRes = runNpm(
-        ["rebuild", "--ignore-scripts=false", "better-sqlite3"],
-        { env: electronEnv, cwd: installRootDir }
-      );
-      if (rebuildElectronRes.status !== 0) {
+      if (!electronRebuildCli || !fs.existsSync(electronRebuildCli)) {
         console.log(
-          "[cowork] Electron-targeted npm rebuild failed; trying fallback paths."
+          "[cowork] @electron/rebuild is not installed; trying fallback paths."
         );
       } else {
-        const testRes = testBetterSqlite3InElectron(electronEnv);
-        if (testRes.status === 0) {
-          console.log("[cowork] better-sqlite3 loads in Electron.");
-          return testRes;
-        }
-
-        console.log(
-          "[cowork] better-sqlite3 did not load after Electron-targeted rebuild; " +
-            "trying fallback paths."
+        const rebuildElectronRes = runElectronRebuild(
+          electronRebuildCli,
+          env,
+          installRootDir,
+          { arch: process.arch, electronVersion }
         );
+        if (rebuildElectronRes.status !== 0) {
+          console.log(
+            "[cowork] Electron rebuild failed; trying fallback paths."
+          );
+        } else {
+          const testRes = testBetterSqlite3InElectron(env);
+          if (testRes.status === 0) {
+            console.log("[cowork] better-sqlite3 loads in Electron.");
+            return testRes;
+          }
+
+          console.log(
+            "[cowork] better-sqlite3 did not load after Electron rebuild; " +
+              "trying fallback paths."
+          );
+        }
       }
 
       const winArmFallbackRes = tryWindowsArm64X64Fallback(
@@ -529,17 +538,7 @@ function main() {
       return testBetterSqlite3InElectron(env);
     }
 
-    const rebuildRes = run(
-      process.execPath,
-      [
-        electronRebuildCli,
-        "-f",
-        "--only",
-        "better-sqlite3",
-        "--sequential",
-      ],
-      { env, cwd: installRootDir }
-    );
+    const rebuildRes = runElectronRebuild(electronRebuildCli, env, installRootDir);
     if (rebuildRes.status !== 0) return rebuildRes;
 
     const testRes = testBetterSqlite3InElectron(env);

@@ -58,10 +58,11 @@ For LLM providers, retryable failures such as `429` rate limits immediately adva
 Before you start relying on long-term context, open **Settings > Memory Hub** and confirm how memory should behave for this profile.
 
 - **Workspace Kit** initializes the local `.cowork/` context files used for durable prompt injection and project guidance.
-- **Memory settings** control local capture, privacy mode, retention, and preview of the `L0/L1` memory payload.
+- **Memory settings** control local capture, privacy mode, retention, preview of the `L0/L1` memory payload, and the Memory Inspector for structured archive observations.
+- **Memory Inspector** lets you search observation metadata, inspect details and timelines, edit titles/narratives, promote useful entries to curated memory, mark entries private, suppress prompt recall, redact content, soft-delete entries, and rebuild deterministic metadata when needed.
 - **Supermemory** is optional. If you want an external memory provider, enable it here, paste your API key, keep the default `cowork:{workspaceId}` container template unless you need something else, save, and click **Test Connection**.
 
-Supermemory does not replace CoWork's local memory system. It adds an external profile/search layer, explicit `supermemory_*` tools, optional prompt-time profile injection, and optional mirroring of non-private local memory captures. See [Supermemory Integration](supermemory.md).
+Supermemory does not replace CoWork's local memory system. It adds an external profile/search layer, explicit `supermemory_*` tools, optional prompt-time profile injection, and optional mirroring of non-private local memory captures. Local structured observations remain authoritative for privacy controls; private, redacted, and suppressed entries stay local. See [Structured Memory Observations](memory-observations.md) and [Supermemory Integration](supermemory.md).
 
 ## Troubleshooting
 
@@ -107,6 +108,7 @@ Supermemory does not replace CoWork's local memory system. It adds an external p
 Once the app opens, the most important places to know are:
 
 - **Home**: quick launch plus recent sessions and recent automation activity
+- **Everything Workbench**: generated documents, spreadsheets, decks, web pages, PDFs, and previews open from task output cards into resizable sidebar or fullscreen artifact workspaces. Use this as the first stop for generated knowledge work: review or lightly edit the file, then ask the agent for changes without switching to a separate office app. See [Everything Workbench](everything-workbench.md).
 - **Devices**: manage the local machine and saved remote CoWork nodes, run remote tasks, and inspect remote task history
 - **Settings > Automations**: Task Queue, Workflow Intelligence, Scheduled Tasks, Webhooks, Event Triggers, and Daily Briefing
 - **Settings > Profiles**: create, switch, export, and import isolated app profiles
@@ -116,6 +118,10 @@ Once the app opens, the most important places to know are:
 - **Settings > Channels**: Slack multi-workspace setup, Telegram group routing, Discord guild allowlists, and enterprise channels such as Feishu/Lark and WeCom
 - **Settings → Tools → Computer use** (macOS): Accessibility + Screen Recording onboarding, built-in tool toggles, and context for [desktop automation](computer-use.md)
 - **Settings → Memory Hub → Chronicle**: primary Chronicle setup for consent-gated recent-screen context, pause/resume, capture scope, OCR status, and linked memory behavior. The dedicated `chronicle` tool category still lives in **Settings → Tools → Built-in tools**. See [Chronicle](chronicle.md).
+- **Spreadsheet artifacts**: when a task creates a spreadsheet, use the output card's **Open** action. Excel workbooks and CSV/TSV files open in the right sidebar; native Numbers, Google Sheets shortcut, ODS, and XLSB files use external-app/folder actions. Use fullscreen mode for editable spreadsheets with copy/save/zoom, row/column selection, attachments, voice input, and follow-up prompts. See [Spreadsheet Artifacts](spreadsheet-artifacts.md).
+- **Document artifacts**: when a task creates a Word-style document, the output card appears in the task feed. DOCX opens directly in the right-sidebar editor with Google Docs-style controls and save/copy actions; DOC, RTF, ODT, OTT, Pages, and related formats use best-effort preview or external-app/folder actions. Fullscreen mode keeps the follow-up composer and refreshes the preview after requested edits. See [Document Artifacts](document-artifacts.md).
+- **Presentation artifacts**: when a task creates a PowerPoint deck, the output card appears in the task feed. PPTX opens in the right-sidebar presentation viewer with thumbnails, slide navigation, zoom, speaker notes, and fast text-first loading while slide images render or load from cache. Fullscreen mode keeps the follow-up composer so you can request deck edits and see the preview refresh after the file is updated. See [Presentation Artifacts and PPTX Preview](pptx-generation-and-preview.md).
+- **Web page artifacts**: when a task creates `.html` / `.htm` or built React output such as `dist/index.html`, the output card appears in the task feed. The main **Open** action opens a sandboxed web preview in the right sidebar; fullscreen mode keeps the follow-up composer so you can request page edits and see the preview refresh after the file or build output is updated. React-style projects without built output show a build-output-needed state instead of starting a dev server. See [Web Page Artifacts](web-page-artifacts.md).
 
 If you are just getting started, do not configure everything at once. Set up an LLM provider, run one local task, then add Devices, Automations, or Companies as needed.
 
@@ -240,7 +246,7 @@ Title: Create quarterly report
 Description: Create a PowerPoint presentation with 5 slides covering Q1 2024 highlights. Include: Title slide, Overview, Key Metrics, Challenges, and Next Steps.
 ```
 
-When the task completes, the `.pptx` appears as a normal task artifact. Click the inline deck card or open the file from **Files** to inspect slides in CoWork with thumbnails, slide navigation, extracted speaker notes, and best-effort rendered slide images. If local rendering tools are missing, the viewer still shows extracted slide text and notes.
+When the task completes, the `.pptx` appears as a presentation artifact card. Click **Open** to inspect it in the right-sidebar viewer with thumbnails, slide navigation, zoom, extracted speaker notes, and a white slide canvas. CoWork shows slide text immediately, then loads cached or freshly rendered slide images in the background. Use fullscreen mode when you want to request follow-up deck edits from the same viewer.
 
 ### 5. Web Research (works out of the box; optional paid providers for richer results)
 

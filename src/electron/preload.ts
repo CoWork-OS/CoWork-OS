@@ -8,6 +8,11 @@ import type {
   ApplyOnboardingProfileRequest,
   ApplyOnboardingProfileResult,
 } from "../shared/onboarding";
+import type { SpreadsheetPreview } from "../shared/spreadsheet-preview";
+import type {
+  DocumentPreview,
+  EditableDocumentBlock,
+} from "../shared/document-preview";
 import type {
   AgentTeam,
   AgentTeamItem,
@@ -61,6 +66,11 @@ import type {
   ImageGenProfile,
   MemoryFeaturesSettings,
   MemoryLayerPreviewPayload,
+  MemoryObservationBackfillStatus,
+  MemoryObservationMetadata,
+  MemoryObservationSearchQuery,
+  MemoryObservationSearchResult,
+  MemoryObservationTimelineEntry,
   ManagedAgent,
   ManagedAgentRuntimeToolCatalog,
   ManagedAgentVersion,
@@ -119,6 +129,9 @@ import type {
   AgentMailSettingsData,
   AgentMailStatus,
   AgentMailWorkspaceBinding,
+  SymphonyConfig,
+  SymphonyConfigUpdate,
+  SymphonyStatus,
 } from "../shared/types";
 import type {
   SubconsciousBrainSummary,
@@ -894,6 +907,7 @@ type MemoryType =
   | "decision"
   | "error"
   | "insight"
+  | "screen_context"
   | "summary"
   | "preference"
   | "constraint"
@@ -1849,6 +1863,7 @@ interface ReadFileForViewerOptions {
   imageOcrMaxChars?: number;
   includeImageContent?: boolean;
   includePdfBase64?: boolean;
+  presentationRenderMode?: "fast" | "full";
 }
 
 export interface LlmWikiVaultEntry {
@@ -1886,6 +1901,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // File APIs
   openFile: (filePath: string, workspacePath?: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.FILE_OPEN, filePath, workspacePath),
+  openFileWithApp: (filePath: string, workspacePath: string | undefined, appName: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.FILE_OPEN_WITH_APP, filePath, workspacePath, appName),
   showInFinder: (filePath: string, workspacePath?: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.FILE_SHOW_IN_FINDER, filePath, workspacePath),
   readFileForViewer: (
@@ -1893,6 +1910,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
     workspacePath?: string,
     options?: ReadFileForViewerOptions,
   ) => ipcRenderer.invoke(IPC_CHANNELS.FILE_READ_FOR_VIEWER, { filePath, workspacePath, ...options }),
+  updateSpreadsheetFile: (data: {
+    filePath: string;
+    workspacePath: string;
+    preview: SpreadsheetPreview;
+  }) => ipcRenderer.invoke(IPC_CHANNELS.FILE_UPDATE_SPREADSHEET, data) as Promise<FileViewerResult>,
+  updateDocumentFile: (data: {
+    filePath: string;
+    workspacePath: string;
+    blocks: EditableDocumentBlock[];
+  }) => ipcRenderer.invoke(IPC_CHANNELS.FILE_UPDATE_DOCUMENT, data) as Promise<FileViewerResult>,
   getLlmWikiVaultSummary: (data: { workspacePath: string; vaultPath?: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.LLM_WIKI_GET_VAULT_SUMMARY, data) as Promise<LlmWikiVaultSummary>,
   importFilesToWorkspace: (data: { workspaceId: string; files: string[] }) =>
@@ -3254,6 +3281,35 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getMemoryTimeline: (data: { memoryId: string; windowSize?: number }) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_GET_TIMELINE, data),
   getMemoryDetails: (ids: string[]) => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_GET_DETAILS, ids),
+  searchMemoryObservations: (data: MemoryObservationSearchQuery) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_OBSERVATIONS_SEARCH, data),
+  getMemoryObservationTimeline: (data: {
+    workspaceId: string;
+    memoryId?: string;
+    query?: string;
+    windowSize?: number;
+  }) => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_OBSERVATIONS_TIMELINE, data),
+  getMemoryObservationDetails: (data: { workspaceId: string; ids: string[] }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_OBSERVATIONS_DETAILS, data),
+  updateMemoryObservation: (data: {
+    workspaceId: string;
+    memoryId: string;
+    patch: Partial<MemoryObservationMetadata>;
+  }) => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_OBSERVATIONS_UPDATE, data),
+  deleteMemoryObservation: (data: { workspaceId: string; memoryId: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_OBSERVATIONS_DELETE, data),
+  redactMemoryObservation: (data: { workspaceId: string; memoryId: string; replacement?: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_OBSERVATIONS_REDACT, data),
+  promoteMemoryObservation: (data: {
+    workspaceId: string;
+    memoryId: string;
+    target?: "user" | "workspace";
+    kind?: string;
+  }) => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_OBSERVATIONS_PROMOTE, data),
+  rebuildMemoryObservationMetadata: (data?: { force?: boolean }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_OBSERVATIONS_REBUILD_METADATA, data),
+  getMemoryObservationBackfillStatus: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_OBSERVATIONS_BACKFILL_STATUS),
   getRecentMemories: (data: { workspaceId: string; limit?: number }) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_GET_RECENT, data),
   getMemoryStats: (workspaceId: string) =>
@@ -3590,6 +3646,22 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.MC_COMMAND_CENTER_SUMMARY, companyId) as Promise<
       import("../shared/types").CompanyCommandCenterSummary
     >,
+  getMissionControlBrief: (request?: import("../shared/types").MissionControlScopeRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MISSION_CONTROL_GET_BRIEF, request) as Promise<
+      import("../shared/types").MissionControlBrief
+    >,
+  listMissionControlItems: (request?: import("../shared/types").MissionControlListRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MISSION_CONTROL_LIST_ITEMS, request) as Promise<
+      import("../shared/types").MissionControlItem[]
+    >,
+  getMissionControlItemEvidence: (itemId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MISSION_CONTROL_GET_ITEM_EVIDENCE, itemId) as Promise<
+      import("../shared/types").MissionControlItemEvidence[]
+    >,
+  refreshMissionControl: (request?: import("../shared/types").MissionControlScopeRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MISSION_CONTROL_REFRESH, request) as Promise<
+      import("../shared/types").MissionControlBrief
+    >,
   listCompanyGoals: (companyId: string) => ipcRenderer.invoke(IPC_CHANNELS.MC_GOAL_LIST, companyId),
   getGoal: (goalId: string) => ipcRenderer.invoke(IPC_CHANNELS.MC_GOAL_GET, goalId),
   createGoal: (input: import("../shared/types").GoalCreateInput) =>
@@ -3630,6 +3702,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
   runPlanner: (companyId: string) => ipcRenderer.invoke(IPC_CHANNELS.MC_PLANNER_RUN, companyId),
   listPlannerRuns: (companyId: string, limit?: number) =>
     ipcRenderer.invoke(IPC_CHANNELS.MC_PLANNER_LIST_RUNS, { companyId, limit }),
+  getSymphonyConfig: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.MC_SYMPHONY_GET_CONFIG) as Promise<SymphonyConfig>,
+  updateSymphonyConfig: (updates: SymphonyConfigUpdate) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MC_SYMPHONY_UPDATE_CONFIG, updates) as Promise<SymphonyConfig>,
+  getSymphonyStatus: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.MC_SYMPHONY_STATUS) as Promise<SymphonyStatus>,
+  runSymphony: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.MC_SYMPHONY_RUN) as Promise<SymphonyStatus>,
+  pauseSymphony: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.MC_SYMPHONY_PAUSE) as Promise<SymphonyConfig>,
 
   // Plugin Packs (Customize panel) APIs
   listPluginPacks: () => ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_PACK_LIST),
@@ -4184,13 +4266,17 @@ export interface FileViewerResult {
       | "code"
       | "text"
       | "docx"
+      | "document"
       | "pdf"
       | "latex"
       | "image"
       | "video"
+      | "audio"
       | "pptx"
       | "xlsx"
       | "html"
+      | "json"
+      | "csv"
       | "unsupported";
     content: string | null;
     htmlContent?: string;
@@ -4198,6 +4284,8 @@ export interface FileViewerResult {
     pdfThumbnailDataUrl?: string;
     pdfDataBase64?: string;
     pdfReviewSummary?: PdfReviewSummary;
+    spreadsheetPreview?: SpreadsheetPreview;
+    documentPreview?: DocumentPreview;
     presentationPreview?: {
       slideCount: number;
       title?: string;
@@ -4206,10 +4294,23 @@ export interface FileViewerResult {
         title?: string;
         text: string;
         notes?: string;
+        imageUrl?: string;
         imageDataUrl?: string;
       }>;
-      renderStatus: "rendered" | "text_only" | "failed";
+      renderStatus: "cached" | "rendering" | "rendered" | "text_only" | "failed";
       renderMessage?: string;
+    };
+    webPreview?: {
+      format: "html";
+      previewMode: "sandboxed_iframe";
+      title?: string;
+      htmlContent?: string;
+      sourcePath: string;
+      baseDir: string;
+      projectRoot?: string;
+      framework?: "react" | "vite" | "next" | "html";
+      canPreview: boolean;
+      previewMessage?: string;
     };
     playbackUrl?: string;
     mimeType?: string;
@@ -4293,12 +4394,27 @@ export interface ElectronAPI {
     Array<{ path: string; name: string; size: number; mimeType?: string }>
   >;
   openFile: (filePath: string, workspacePath?: string) => Promise<string>;
+  openFileWithApp: (
+    filePath: string,
+    workspacePath: string | undefined,
+    appName: string,
+  ) => Promise<string>;
   showInFinder: (filePath: string, workspacePath?: string) => Promise<void>;
   readFileForViewer: (
     filePath: string,
     workspacePath?: string,
     options?: ReadFileForViewerOptions,
   ) => Promise<FileViewerResult>;
+  updateSpreadsheetFile: (data: {
+    filePath: string;
+    workspacePath: string;
+    preview: SpreadsheetPreview;
+  }) => Promise<FileViewerResult>;
+  updateDocumentFile: (data: {
+    filePath: string;
+    workspacePath: string;
+    blocks: EditableDocumentBlock[];
+  }) => Promise<FileViewerResult>;
   getLlmWikiVaultSummary: (data: {
     workspacePath: string;
     vaultPath?: string;
@@ -5913,6 +6029,33 @@ export interface ElectronAPI {
     windowSize?: number;
   }) => Promise<MemoryTimelineEntry[]>;
   getMemoryDetails: (ids: string[]) => Promise<Memory[]>;
+  searchMemoryObservations: (data: MemoryObservationSearchQuery) => Promise<MemoryObservationSearchResult[]>;
+  getMemoryObservationTimeline: (data: {
+    workspaceId: string;
+    memoryId?: string;
+    query?: string;
+    windowSize?: number;
+  }) => Promise<MemoryObservationTimelineEntry[]>;
+  getMemoryObservationDetails: (data: { workspaceId: string; ids: string[] }) => Promise<MemoryObservationMetadata[]>;
+  updateMemoryObservation: (data: {
+    workspaceId: string;
+    memoryId: string;
+    patch: Partial<MemoryObservationMetadata>;
+  }) => Promise<MemoryObservationMetadata | null>;
+  deleteMemoryObservation: (data: { workspaceId: string; memoryId: string }) => Promise<{ success: boolean }>;
+  redactMemoryObservation: (data: {
+    workspaceId: string;
+    memoryId: string;
+    replacement?: string;
+  }) => Promise<MemoryObservationMetadata | null>;
+  promoteMemoryObservation: (data: {
+    workspaceId: string;
+    memoryId: string;
+    target?: "user" | "workspace";
+    kind?: string;
+  }) => Promise<{ success: boolean; error?: string }>;
+  rebuildMemoryObservationMetadata: (data?: { force?: boolean }) => Promise<MemoryObservationBackfillStatus>;
+  getMemoryObservationBackfillStatus: () => Promise<MemoryObservationBackfillStatus>;
   getRecentMemories: (data: { workspaceId: string; limit?: number }) => Promise<Memory[]>;
   getMemoryStats: (workspaceId: string) => Promise<MemoryStats>;
   clearMemory: (workspaceId: string) => Promise<{ success: boolean }>;
@@ -6167,6 +6310,18 @@ export interface ElectronAPI {
   getCommandCenterSummary: (
     companyId: string,
   ) => Promise<import("../shared/types").CompanyCommandCenterSummary>;
+  getMissionControlBrief: (
+    request?: import("../shared/types").MissionControlScopeRequest,
+  ) => Promise<import("../shared/types").MissionControlBrief>;
+  listMissionControlItems: (
+    request?: import("../shared/types").MissionControlListRequest,
+  ) => Promise<import("../shared/types").MissionControlItem[]>;
+  getMissionControlItemEvidence: (
+    itemId: string,
+  ) => Promise<import("../shared/types").MissionControlItemEvidence[]>;
+  refreshMissionControl: (
+    request?: import("../shared/types").MissionControlScopeRequest,
+  ) => Promise<import("../shared/types").MissionControlBrief>;
   listCompanyGoals: (companyId: string) => Promise<import("../shared/types").Goal[]>;
   getGoal: (goalId: string) => Promise<import("../shared/types").Goal | undefined>;
   createGoal: (input: import("../shared/types").GoalCreateInput) => Promise<import("../shared/types").Goal>;
@@ -6218,6 +6373,11 @@ export interface ElectronAPI {
     companyId: string,
     limit?: number,
   ) => Promise<import("../shared/types").StrategicPlannerRun[]>;
+  getSymphonyConfig: () => Promise<SymphonyConfig>;
+  updateSymphonyConfig: (updates: SymphonyConfigUpdate) => Promise<SymphonyConfig>;
+  getSymphonyStatus: () => Promise<SymphonyStatus>;
+  runSymphony: () => Promise<SymphonyStatus>;
+  pauseSymphony: () => Promise<SymphonyConfig>;
 
   // Plugin Packs (Customize panel)
   listPluginPacks: () => Promise<

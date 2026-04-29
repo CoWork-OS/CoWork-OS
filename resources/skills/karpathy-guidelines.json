@@ -1,31 +1,32 @@
 {
   "id": "karpathy-guidelines",
   "name": "Task Guidelines",
-  "description": "Best practices for high-quality task execution",
+  "description": "Surgical execution guardrails for coding, debugging, review, and refactor tasks",
   "icon": "🧠",
   "category": "Guidelines",
   "type": "guideline",
   "priority": 1,
-  "prompt": "## Task Guidelines\n\n**1. Think Before Acting**\n- State assumptions explicitly. If uncertain, ask.\n- If multiple interpretations exist, present them - don't pick silently.\n- If a simpler approach exists, say so. Push back when warranted.\n- If something is unclear, stop. Name what's confusing. Ask.\n\n**2. Simplicity First**\n- Do only what was asked - no extra features or \"improvements\".\n- Keep outputs focused and minimal.\n- Don't add unnecessary complexity or options.\n- If the task can be done simply, do it simply.\n\n**3. Focused Changes**\n- Only modify what's directly relevant to the task.\n- Don't reorganize, rename, or \"improve\" unrelated things.\n- Match existing patterns and conventions.\n- If you notice unrelated issues, mention them - don't fix them unsolicited.\n\n**4. Goal-Driven Execution**\n- Transform tasks into verifiable goals.\n- For multi-step tasks, state a brief plan with verification steps.\n- Loop until success criteria are met.",
+  "prompt": "## Surgical Task Guidelines\n\n- State assumptions only when they affect the work; ask before choosing between materially different interpretations.\n- Define the smallest verifiable success criteria before editing.\n- Change only files needed for the request. Avoid unrelated cleanup, broad rewrites, renames, and speculative abstractions.\n- Prefer the simplest implementation that fits existing project patterns.\n- For code changes, verify behavior with the narrowest useful test/build/check and report what passed or could not run.\n- If you notice unrelated issues, mention them separately instead of fixing them silently.",
   "parameters": [],
   "enabled": true,
   "metadata": {
     "routing": {
-      "useWhen": "Use when the user asks to best practices for high-quality task execution.",
-      "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
-      "outputs": "Outcome from Task Guidelines: task-specific result plus concrete action notes.",
-      "successCriteria": "Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior.",
+      "useWhen": "Use for coding, debugging, review, refactor, build, test, release, or file-editing tasks where scope control and verification matter.",
+      "dontUseWhen": "Do not use for pure brainstorming, broad strategy, or requests where the user explicitly asks for expansive ideation rather than execution.",
+      "outputs": "A focused task result with assumptions, scoped changes, verification evidence, and unrelated issues kept separate.",
+      "successCriteria": "The result satisfies the user's request with minimal relevant changes, no drive-by edits, and clear verification evidence.",
       "examples": {
         "positive": [
           "Use the karpathy-guidelines skill for this request.",
-          "Help me with task guidelines.",
-          "Use when the user asks to best practices for high-quality task execution.",
-          "Task Guidelines: provide an actionable result."
+          "Fix this bug without refactoring unrelated modules.",
+          "Review this patch and point out overcomplicated or unnecessary changes.",
+          "Refactor this file surgically while preserving behavior.",
+          "Implement this feature and verify the narrowest relevant test passes."
         ],
         "negative": [
-          "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
+          "Brainstorm ten moonshot product directions.",
+          "Write a broad strategy memo with multiple speculative options.",
           "Do not use karpathy-guidelines for unrelated requests.",
-          "This request is outside task guidelines scope.",
           "This is conceptual discussion only; no tool workflow is needed."
         ]
       }

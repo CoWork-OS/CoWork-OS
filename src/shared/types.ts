@@ -2894,6 +2894,8 @@ export interface TaskFollowUpInput {
   message: string;
   images?: ImageAttachment[];
   quotedAssistantMessage?: QuotedAssistantMessage;
+  permissionMode?: PermissionMode;
+  shellAccess?: boolean;
 }
 
 export interface TaskEvent {
@@ -6389,6 +6391,12 @@ export const IPC_CHANNELS = {
   FILE_READ_FOR_VIEWER: "file:readForViewer",
   FILE_UPDATE_SPREADSHEET: "file:updateSpreadsheet",
   FILE_UPDATE_DOCUMENT: "file:updateDocument",
+  BROWSER_WORKBENCH_REGISTER: "browserWorkbench:register",
+  BROWSER_WORKBENCH_UNREGISTER: "browserWorkbench:unregister",
+  BROWSER_WORKBENCH_STATUS: "browserWorkbench:status",
+  BROWSER_WORKBENCH_SCREENSHOT: "browserWorkbench:screenshot",
+  BROWSER_WORKBENCH_OPEN_REQUEST: "browserWorkbench:openRequest",
+  BROWSER_WORKBENCH_CURSOR: "browserWorkbench:cursor",
   LLM_WIKI_GET_VAULT_SUMMARY: "llmWiki:getVaultSummary",
   FILE_IMPORT_TO_WORKSPACE: "file:importToWorkspace",
   FILE_IMPORT_DATA_TO_WORKSPACE: "file:importDataToWorkspace",
@@ -7553,9 +7561,9 @@ export interface LLMProviderFallbackConfig {
   modelKey?: string;
 }
 
-export type LLMReasoningEffort = "low" | "medium" | "high" | "extra_high";
 export type OpenAIReasoningEffort = "low" | "medium" | "high" | "xhigh";
 export type AzureReasoningEffort = "low" | "medium" | "high" | "extra_high";
+export type LLMReasoningEffort = OpenAIReasoningEffort | AzureReasoningEffort;
 export type LLMTextVerbosity = "low" | "medium" | "high";
 
 export type PromptCacheSurface =

@@ -15,6 +15,8 @@ CoWork OS is built for production use: approval gates, guardrail budgets, local-
 
 These are the same reasons teams pick CoWork OS for daily governed operations. The outsourced-workflow fit is additive, not a repositioning.
 
+CoWork's Everything Workbench strengthens these lanes for knowledge workers and operators: reports, issue summaries, tables, decks, web pages, and PDFs stay attached to the task that produced them. Teams can review or lightly edit generated artifacts in-place, request follow-up changes, and still open native office apps when specialized functionality is needed.
+
 ---
 
 ## Three Best-Fit Workflow Lanes
@@ -82,12 +84,15 @@ Use these phrases:
 - "managed operational lane"
 - "vendor-swap-friendly workflow"
 - "best-fit workflow"
+- "one workspace for knowledge-work artifacts"
+- "fewer context switches for generated work"
 
 Avoid:
 
 - "replace employees" or "reorg"
 - "AI firm replacing teams"
 - Framing Digital Twins as labor replacement (prefer "offload", "governance", "orchestration")
+- Claiming full replacement for Word, Excel, PowerPoint, Keynote, Pages, Numbers, or browser development tools
 
 ---
 

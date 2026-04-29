@@ -6,8 +6,15 @@ import { Readable } from "stream";
 
 const MEDIA_SCHEME = "media";
 const TOKEN_TTL_MS = 60 * 60 * 1000;
-const ALLOWED_MIME_TYPES = new Set(["video/mp4", "video/webm", "audio/mpeg", "audio/mp3", "audio/wav"]);
-const ALLOWED_EXTENSIONS = new Set([".mp4", ".webm", ".mp3", ".wav"]);
+const ALLOWED_MIME_TYPES = new Set([
+  "video/mp4",
+  "video/webm",
+  "audio/mpeg",
+  "audio/mp3",
+  "audio/wav",
+  "image/png",
+]);
+const ALLOWED_EXTENSIONS = new Set([".mp4", ".webm", ".mp3", ".wav", ".png"]);
 
 type MediaTokenRecord = {
   resolvedPath: string;
@@ -98,6 +105,30 @@ export function createMediaPlaybackUrl(params: {
   workspaceRoot: string;
   mimeType: string;
 }): string {
+  return createTokenizedMediaUrl({
+    resolvedPath: params.resolvedPath,
+    workspaceRoot: params.workspaceRoot,
+    mimeType: params.mimeType,
+  });
+}
+
+export function createLocalPreviewFileUrl(params: {
+  resolvedPath: string;
+  rootPath: string;
+  mimeType: string;
+}): string {
+  return createTokenizedMediaUrl({
+    resolvedPath: params.resolvedPath,
+    workspaceRoot: params.rootPath,
+    mimeType: params.mimeType,
+  });
+}
+
+function createTokenizedMediaUrl(params: {
+  resolvedPath: string;
+  workspaceRoot: string;
+  mimeType: string;
+}): string {
   purgeExpiredTokens();
 
   const resolvedPath = path.resolve(params.resolvedPath);
@@ -105,7 +136,7 @@ export function createMediaPlaybackUrl(params: {
   const mimeType = String(params.mimeType || "").toLowerCase();
 
   if (!isPathWithinWorkspace(resolvedPath, workspaceRoot)) {
-    throw new Error("Access denied: media path is outside the workspace");
+    throw new Error("Access denied: media path is outside the allowed root");
   }
   if (!isSupportedMediaFile(resolvedPath, mimeType)) {
     throw new Error("Unsupported media type");

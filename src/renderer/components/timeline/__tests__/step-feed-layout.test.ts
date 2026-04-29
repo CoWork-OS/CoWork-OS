@@ -22,4 +22,16 @@ describe("StepFeed layout styles", () => {
     );
     expect(timelineCss).toMatch(/\.step-feed-card \.event-details\s*\{[\s\S]*max-width:\s*100%;/);
   });
+
+  it("keeps step cards compact inside expanded action blocks", () => {
+    expect(timelineCss).toMatch(/\.action-block-content\s*\{[\s\S]*padding:\s*0 8px 6px;/);
+    expect(timelineCss).toMatch(/\.action-block-events\s*\{[\s\S]*margin-top:\s*2px;/);
+    expect(timelineCss).toMatch(
+      /\.action-block-events > \.step-feed-card\s*\{[\s\S]*padding:\s*2px 0;/,
+    );
+    expect(timelineCss).toMatch(/\.step-feed-card \.event-details\s*\{[\s\S]*margin-top:\s*4px;/);
+    expect(timelineCss).toMatch(/\.step-feed-card \.inline-document-header\s*\{[\s\S]*display:\s*none;/);
+    expect(timelineCss).toMatch(/\.step-feed-card \.inline-document-markdown,[\s\S]*\.step-feed-card \.inline-document-content\s*\{[\s\S]*padding:\s*0;/);
+    expect(timelineCss).toMatch(/\.step-feed-card \.edit-diff-preview\s*\{[\s\S]*padding:\s*2px 0;/);
+  });
 });

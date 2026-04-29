@@ -179,6 +179,16 @@ function getPreviewLabel(fileType?: PreviewableFileType, filePath?: string): str
       return "HTML";
     case "text":
       return "Text";
+    case "json":
+      return "JSON";
+    case "csv":
+      return "CSV";
+    case "audio":
+      return "Audio";
+    case "video":
+      return "Video";
+    case "latex":
+      return "LaTeX";
     default:
       return filePath?.split(".").pop()?.toUpperCase() || "File";
   }

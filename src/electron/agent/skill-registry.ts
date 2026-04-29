@@ -524,14 +524,27 @@ export class SkillRegistry {
       return rootDir;
     }
 
-    const children = fs.readdirSync(rootDir, { withFileTypes: true });
-    const candidates = children
+    const directChildren = fs.readdirSync(rootDir, { withFileTypes: true });
+    const candidates = directChildren
       .filter((entry) => entry.isDirectory())
       .map((entry) => path.join(rootDir, entry.name))
       .filter((dirPath) => fs.existsSync(path.join(dirPath, "SKILL.md")));
 
     if (candidates.length === 1) {
       return candidates[0];
+    }
+
+    const skillsDir = path.join(rootDir, "skills");
+    if (candidates.length === 0 && fs.existsSync(skillsDir)) {
+      const nestedCandidates = fs
+        .readdirSync(skillsDir, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => path.join(skillsDir, entry.name))
+        .filter((dirPath) => fs.existsSync(path.join(dirPath, "SKILL.md")));
+
+      if (nestedCandidates.length === 1) {
+        return nestedCandidates[0];
+      }
     }
 
     return null;

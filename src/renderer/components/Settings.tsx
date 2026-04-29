@@ -1327,6 +1327,7 @@ export function Settings({
   const [openaiOAuthLoading, setOpenaiOAuthLoading] = useState(false);
 
   type ImageGenProvider = "openai" | "openai-codex" | "azure" | "openrouter" | "gemini";
+  type ImageProviderTab = ImageGenProvider | "auto";
   type ImageGenModel = "gpt-image-2" | "gpt-image-1.5" | "nano-banana-2";
 
   // Image generation (text-to-image) state
@@ -2442,7 +2443,7 @@ export function Settings({
       setImageOpenRouterModel(
         ig?.openrouter?.model ?? "openai/gpt-image-2",
       );
-      setImageOpenAICodexModel(ig?.openaiCodex?.model ?? "gpt-image-2");
+      setImageOpenAICodexModel("gpt-image-2");
       setImageOpenAITimeoutSeconds(String(ig?.timeouts?.openai ?? 300));
       setImageOpenAICodexTimeoutSeconds(String(ig?.timeouts?.openaiCodex ?? 300));
       setImageAzureTimeoutSeconds(String(ig?.timeouts?.azure ?? 300));
@@ -3811,7 +3812,7 @@ export function Settings({
     providerModelOptionsByType,
   ]);
 
-  const activeImageTab = imageGenDefaultProvider || "openai";
+  const activeImageTab: ImageProviderTab = imageGenDefaultProvider || "auto";
 
   const imageProviders = [
     {
@@ -3828,10 +3829,27 @@ export function Settings({
     },
     {
       type: "openai-codex" as const,
-      name: "OpenAI OAuth",
+      name: "ChatGPT Subscription",
       icon: <Sparkles {...S} />,
     },
   ];
+  const imageProviderTabs: Array<{
+    type: ImageProviderTab;
+    name: string;
+    icon: ReactNode;
+  }> = [
+    {
+      type: "auto",
+      name: "Automatic",
+      icon: <Sparkles {...S} />,
+    },
+    ...imageProviders,
+  ];
+
+  const automaticImageRoutingDescription =
+    currentProviderType === "openai" && openaiAuthMethod === "oauth"
+      ? "With ChatGPT selected in AI Model, automatic image generation uses your ChatGPT subscription by default."
+      : "Uses the best configured image provider. If AI Model is signed in with ChatGPT, automatic image generation will use that subscription first.";
 
   const getImageProviderModel = (provider: ImageGenProvider): ImageGenModel =>
     provider === "gemini" ? "nano-banana-2" : "gpt-image-2";
@@ -3875,6 +3893,15 @@ export function Settings({
     }
   };
 
+  const selectImageProviderTab = (provider: ImageProviderTab) => {
+    if (provider === "auto") {
+      setImageGenDefaultProvider("");
+      setImageGenDefaultModel("");
+      return;
+    }
+    selectImageDefaultProvider(provider);
+  };
+
   const selectImageBackupProvider = (provider: ImageGenProvider | "") => {
     setImageGenBackupProvider(provider);
     if (!provider) return;
@@ -3912,12 +3939,12 @@ export function Settings({
         </p>
       </div>
       <div className="llm-provider-tabs">
-        {imageProviders.map((provider) => (
+        {imageProviderTabs.map((provider) => (
           <button
             key={provider.type}
             type="button"
             className={`llm-provider-tab ${activeImageTab === provider.type ? "active" : ""}`}
-            onClick={() => selectImageDefaultProvider(provider.type)}
+            onClick={() => selectImageProviderTab(provider.type)}
           >
             {provider.icon}
             <span className="llm-provider-tab-label">{provider.name}</span>
@@ -3925,6 +3952,22 @@ export function Settings({
         ))}
       </div>
       <div className="llm-provider-content">
+        {activeImageTab === "auto" && (
+          <div className="settings-section">
+            <h3>Automatic Image Routing</h3>
+            <p className="settings-hint">{automaticImageRoutingDescription}</p>
+            {currentProviderType === "openai" && openaiAuthMethod === "oauth" && (
+              <p className="settings-hint">
+                Current route: ChatGPT Subscription with gpt-image-2.
+              </p>
+            )}
+            <p className="settings-hint">
+              Pick a specific provider tab only when you want image generation
+              to ignore the AI Model provider.
+            </p>
+          </div>
+        )}
+
         {activeImageTab === "openai" && (
           <div className="settings-section">
             <h3>OpenAI GPT Image</h3>
@@ -4105,9 +4148,9 @@ export function Settings({
 
         {activeImageTab === "openai-codex" && (
           <div className="settings-section">
-            <h3>OpenAI OAuth Image</h3>
+            <h3>ChatGPT Subscription Image</h3>
             <p className="settings-hint">
-              Uses the OpenAI OAuth connection configured in AI Model.
+              Uses the ChatGPT sign-in configured in AI Model.
             </p>
             <label className="settings-label">Default model</label>
             <select
@@ -4115,14 +4158,10 @@ export function Settings({
               value={imageOpenAICodexModel}
               onChange={(e) => {
                 setImageOpenAICodexModel(e.target.value);
-                setImageGenDefaultModel(
-                  e.target.value === "gpt-image-2" ? "gpt-image-2" : "gpt-image-1.5",
-                );
+                setImageGenDefaultModel("gpt-image-2");
               }}
             >
               <option value="gpt-image-2">gpt-image-2</option>
-              <option value="gpt-image-1.5">gpt-image-1.5</option>
-              <option value="gpt-image-1">gpt-image-1</option>
             </select>
             {renderImageTimeoutField(
               imageOpenAICodexTimeoutSeconds,

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
 /**
  * Tests for getSafeStorage helper.
@@ -10,9 +10,18 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
  */
 
 describe("getSafeStorage", () => {
+  const originalPlatform = process.platform;
+
   beforeEach(() => {
     vi.resetModules();
     delete process.env.COWORK_DISABLE_OS_KEYCHAIN;
+  });
+
+  afterEach(() => {
+    Object.defineProperty(process, "platform", {
+      value: originalPlatform,
+    });
+    vi.doUnmock("electron");
   });
 
   it("returns null when electron does not provide safeStorage (test env)", async () => {
@@ -40,7 +49,6 @@ describe("getSafeStorage", () => {
     const mod = await import("../safe-storage");
     const result = mod.getSafeStorage();
     expect(result).toBeNull();
-    vi.doUnmock("electron");
   });
 
   it("supports disabling OS keychain access via COWORK_DISABLE_OS_KEYCHAIN", async () => {
@@ -57,6 +65,69 @@ describe("getSafeStorage", () => {
     const mod = await import("../safe-storage");
     const result = mod.getSafeStorage();
     expect(result).toBeNull();
-    vi.doUnmock("electron");
+  });
+
+  it("decrypts with legacy macOS app names and restores the current app name", async () => {
+    Object.defineProperty(process, "platform", {
+      value: "darwin",
+    });
+
+    let appName = "CoWork OS";
+    const app = {
+      getName: () => appName,
+      setName: (nextName: string) => {
+        appName = nextName;
+      },
+    };
+
+    const safeStorage = {
+      isEncryptionAvailable: () => true,
+      encryptString: (plaintext: string) => Buffer.from(plaintext),
+      decryptString: vi.fn((ciphertext: Buffer) => {
+        if (appName === "Electron") return `legacy:${ciphertext.toString("utf8")}`;
+        throw new Error("Error while decrypting the ciphertext provided to safeStorage.decryptString.");
+      }),
+    };
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const { decryptSafeStorageString } = await import("../safe-storage");
+    const decrypted = decryptSafeStorageString(safeStorage, Buffer.from("secret"), app);
+
+    expect(decrypted).toBe("legacy:secret");
+    expect(safeStorage.decryptString).toHaveBeenCalledTimes(2);
+    expect(appName).toBe("CoWork OS");
+    warnSpy.mockRestore();
+  });
+
+  it("tries the package app name when macOS settings were encrypted before the display name was applied", async () => {
+    Object.defineProperty(process, "platform", {
+      value: "darwin",
+    });
+
+    let appName = "CoWork OS";
+    const app = {
+      getName: () => appName,
+      setName: (nextName: string) => {
+        appName = nextName;
+      },
+    };
+
+    const safeStorage = {
+      isEncryptionAvailable: () => true,
+      encryptString: (plaintext: string) => Buffer.from(plaintext),
+      decryptString: vi.fn((ciphertext: Buffer) => {
+        if (appName === "cowork-os") return `package:${ciphertext.toString("utf8")}`;
+        throw new Error("Error while decrypting the ciphertext provided to safeStorage.decryptString.");
+      }),
+    };
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const { decryptSafeStorageString } = await import("../safe-storage");
+    const decrypted = decryptSafeStorageString(safeStorage, Buffer.from("secret"), app);
+
+    expect(decrypted).toBe("package:secret");
+    expect(safeStorage.decryptString).toHaveBeenCalledTimes(3);
+    expect(appName).toBe("CoWork OS");
+    warnSpy.mockRestore();
   });
 });

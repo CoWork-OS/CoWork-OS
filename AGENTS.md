@@ -49,6 +49,7 @@ When a user reports a failure, error, or unexpected behavior that likely involve
 
 - Use `npm run package` for standard local installer packaging after a full build.
 - `npm run package` also runs `scripts/release-artifact-names.mjs` and `scripts/release-artifact-names.mjs --check` to align and verify updater metadata artifact filenames in `release/`.
+- Use `npm run package:win:x64` for Windows x64-only packaging; it runs `electron-builder --win --x64 --publish never` and then enforces release artifact naming checks.
 - On macOS distribution/signing flows, use `npm run package:mac`; it loads optional repo-root `.env.mac` (see `scripts/mac-notarize.env.example`) before running build + `electron-builder --mac --publish never`.
 - Use `npm run package:mac:unsigned` to force an unsigned macOS fallback build (sets `COWORK_MAC_UNSIGNED=1` and disables certificate auto-discovery).
 - `npm run package:mac` also respects `CSC_IDENTITY_AUTO_DISCOVERY=false`; when set, packaging uses unsigned macOS fallback settings (`identity: null`, notarization off, Gatekeeper assess off).

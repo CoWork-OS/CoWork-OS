@@ -253,6 +253,36 @@ describe("LLMProviderFactory custom provider config resolution", () => {
     );
   });
 
+  it("uses a documented OpenCode Go chat completions endpoint without appending the path twice", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: "ok" } }],
+      }),
+    } as Response);
+
+    const provider = LLMProviderFactory.createProviderFromConfig({
+      type: "openai-compatible",
+      model: "kimi-k2.5",
+      openaiCompatibleApiKey: "opencode-go-key",
+      openaiCompatibleBaseUrl: "https://opencode.ai/zen/go/v1/chat/completions",
+    } as Any);
+
+    await expect(provider.testConnection()).resolves.toEqual({
+      success: true,
+    });
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://opencode.ai/zen/go/v1/chat/completions",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          Authorization: "Bearer opencode-go-key",
+        }),
+      }),
+    );
+  });
+
   it("adds documented Z.AI coding-plan models to partial refresh results", async () => {
     vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue({
       providerType: "zai",

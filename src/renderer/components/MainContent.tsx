@@ -6772,6 +6772,123 @@ function areTaskConversationFlowPropsEqual(prev: any, next: any): boolean {
   );
 }
 
+const PLACEHOLDER_TYPE_DELAY_MS = 14;
+const PLACEHOLDER_DELETE_DELAY_MS = 8;
+const PLACEHOLDER_START_DELAY_MS = 80;
+const PLACEHOLDER_HOLD_DELAY_MS = 1200;
+const PLACEHOLDER_NEXT_DELAY_MS = 120;
+
+function usePrefersReducedMotion(): boolean {
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return false;
+    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const updatePreference = () => setPrefersReducedMotion(mediaQuery.matches);
+
+    updatePreference();
+    mediaQuery.addEventListener("change", updatePreference);
+    return () => mediaQuery.removeEventListener("change", updatePreference);
+  }, []);
+
+  return prefersReducedMotion;
+}
+
+function useTypewriterPlaceholder(phrases: string[], active: boolean): string {
+  const prefersReducedMotion = usePrefersReducedMotion();
+  const normalizedPhrases = useMemo(() => phrases.filter((phrase) => phrase.trim().length > 0), [
+    phrases,
+  ]);
+  const [displayText, setDisplayText] = useState(normalizedPhrases[0] ?? "");
+
+  useEffect(() => {
+    const firstPhrase = normalizedPhrases[0] ?? "";
+    if (!active || normalizedPhrases.length === 0 || prefersReducedMotion) {
+      setDisplayText(firstPhrase);
+      return;
+    }
+
+    let cancelled = false;
+    let timeoutId: number | null = null;
+    let phraseIndex = 0;
+    let characterIndex = 0;
+    let phase: "typing" | "holding" | "deleting" = "typing";
+
+    const schedule = (delay: number) => {
+      timeoutId = window.setTimeout(step, delay);
+    };
+
+    const step = () => {
+      if (cancelled) return;
+
+      const phrase = normalizedPhrases[phraseIndex] ?? "";
+
+      if (phase === "typing") {
+        characterIndex += 1;
+        setDisplayText(phrase.slice(0, characterIndex));
+
+        if (characterIndex < phrase.length) {
+          schedule(PLACEHOLDER_TYPE_DELAY_MS);
+          return;
+        }
+
+        if (normalizedPhrases.length === 1) return;
+
+        phase = "holding";
+        schedule(PLACEHOLDER_HOLD_DELAY_MS);
+        return;
+      }
+
+      if (phase === "holding") {
+        phase = "deleting";
+        schedule(PLACEHOLDER_DELETE_DELAY_MS);
+        return;
+      }
+
+      characterIndex -= 1;
+      setDisplayText(phrase.slice(0, Math.max(characterIndex, 0)));
+
+      if (characterIndex > 0) {
+        schedule(PLACEHOLDER_DELETE_DELAY_MS);
+        return;
+      }
+
+      phraseIndex = (phraseIndex + 1) % normalizedPhrases.length;
+      phase = "typing";
+      schedule(PLACEHOLDER_NEXT_DELAY_MS);
+    };
+
+    setDisplayText("");
+    schedule(PLACEHOLDER_START_DELAY_MS);
+
+    return () => {
+      cancelled = true;
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [active, normalizedPhrases, prefersReducedMotion]);
+
+  return displayText;
+}
+
+const TypewriterPlaceholder = memo(function TypewriterPlaceholder({
+  phrases,
+}: {
+  phrases: string[];
+}) {
+  const placeholder = useTypewriterPlaceholder(phrases, true);
+
+  return (
+    <span className="cli-rotating-placeholder" aria-hidden="true">
+      {placeholder}
+    </span>
+  );
+});
+
 function MainContentComponent({
   task,
   selectedTaskId,
@@ -6863,9 +6980,6 @@ function MainContentComponent({
 
   // ── Rotating placeholder prompts (persona-aware engine) ──────────────
   const [rotatingPlaceholders, setRotatingPlaceholders] = useState<string[]>([]);
-  const [rotatingIndex, setRotatingIndex] = useState(0);
-  const [placeholderFading, setPlaceholderFading] = useState(false);
-  const placeholderTimeoutRef = useRef<number | null>(null);
   const placeholderDebounceRef = useRef<number | null>(null);
   const placeholderPlaylistCacheRef = useRef<Map<string, string[]>>(new Map());
   const placeholderRequestIdRef = useRef(0);
@@ -6883,7 +6997,6 @@ function MainContentComponent({
 
     const cachedPlaylist = placeholderPlaylistCacheRef.current.get(cacheKey);
     if (cachedPlaylist !== undefined) {
-      setRotatingIndex(0);
       setRotatingPlaceholders(cachedPlaylist);
       return;
     }
@@ -6985,7 +7098,6 @@ function MainContentComponent({
         const dynamicPrompts = buildDynamicPrompts(signals);
         const playlist = buildPlaceholders(personaResult, dynamicPrompts, pluginPrompts);
         placeholderPlaylistCacheRef.current.set(cacheKey, playlist);
-        setRotatingIndex(0);
         setRotatingPlaceholders(playlist);
       })();
     }, 150);
@@ -6998,29 +7110,6 @@ function MainContentComponent({
       }
     };
   }, [workspace?.id]);
-
-  // Cycle placeholder every 4s with fade transition (only when input is empty)
-  useEffect(() => {
-    if (rotatingPlaceholders.length <= 1 || inputValue) return;
-    const interval = setInterval(() => {
-      if (placeholderTimeoutRef.current !== null) {
-        clearTimeout(placeholderTimeoutRef.current);
-      }
-      setPlaceholderFading((prev) => (prev ? prev : true));
-      placeholderTimeoutRef.current = window.setTimeout(() => {
-        setRotatingIndex((prev) => (prev + 1) % rotatingPlaceholders.length);
-        setPlaceholderFading((prev) => (prev ? false : prev));
-        placeholderTimeoutRef.current = null;
-      }, 300);
-    }, 4000);
-    return () => {
-      clearInterval(interval);
-      if (placeholderTimeoutRef.current !== null) {
-        clearTimeout(placeholderTimeoutRef.current);
-        placeholderTimeoutRef.current = null;
-      }
-    };
-  }, [rotatingPlaceholders.length, inputValue]);
 
   // Shell permission state - tracks current workspace's shell permission
   const [shellEnabled, setShellEnabled] = useState(workspace?.permissions?.shell ?? false);
@@ -9093,7 +9182,6 @@ function MainContentComponent({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mentionContainerRef = useRef<HTMLDivElement>(null);
   const mentionDropdownRef = useRef<HTMLDivElement>(null);
-  const placeholderTextRef = useRef<HTMLSpanElement>(null);
   const cliInputWrapperRef = useRef<HTMLDivElement>(null);
   const [cursorLeft, setCursorLeft] = useState<number>(0);
   const [isCliInputFocused, setIsCliInputFocused] = useState(false);
@@ -9146,12 +9234,12 @@ function MainContentComponent({
 
   // Active placeholder: rotating prompt when available, personality fallback otherwise
   const personalityPlaceholder = agentContext.getPlaceholder();
-  const placeholder =
-    rotatingPlaceholders.length > 0
-      ? rotatingPlaceholders[rotatingIndex % rotatingPlaceholders.length]
-      : personalityPlaceholder;
   const showCliPlaceholder = !inputValue && !isCliInputFocused;
   const showCliEmptyCursor = !inputValue && isCliInputFocused;
+  const placeholderPlaylist = useMemo(
+    () => (rotatingPlaceholders.length > 0 ? rotatingPlaceholders : [personalityPlaceholder]),
+    [personalityPlaceholder, rotatingPlaceholders],
+  );
 
   // Keep the empty focused cursor attached to the editable area instead of
   // relying on theme-specific padding and prompt-width constants.
@@ -10911,13 +10999,7 @@ function MainContentComponent({
                 <span className="cli-input-prompt">~$</span>
                 <div className="mention-autocomplete-wrapper" ref={mentionContainerRef}>
                   {showCliPlaceholder && (
-                    <span
-                      ref={placeholderTextRef}
-                      className={`cli-rotating-placeholder${placeholderFading ? " fading" : ""}`}
-                      aria-hidden="true"
-                    >
-                      {placeholder}
-                    </span>
+                    <TypewriterPlaceholder phrases={placeholderPlaylist} />
                   )}
                   <textarea
                     ref={textareaRef}

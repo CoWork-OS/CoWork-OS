@@ -13100,27 +13100,26 @@ button {
   }
 }
 
-/* Rotating placeholder inside the CLI input */
+/* Typewriter placeholder inside the CLI input */
 .cli-rotating-placeholder {
   position: absolute;
   left: 0;
-  top: 0;
-  bottom: 0;
-  display: flex;
+  top: 50%;
+  display: inline-flex;
   align-items: center;
   pointer-events: none;
   color: var(--color-text-muted);
   font-family: var(--font-mono);
   font-size: 14px;
+  line-height: 1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: calc(100% - 8px);
-  transition: opacity 0.3s ease;
-}
-
-.cli-rotating-placeholder.fading {
-  opacity: 0;
+  padding-right: 4px;
+  border-right: 1px solid currentColor;
+  transform: translateY(-50%);
+  animation: placeholder-caret-blink 1s step-end infinite;
 }
 
 /* CLI Input Styles */
@@ -13379,6 +13378,25 @@ button {
   51%,
   100% {
     opacity: 0;
+  }
+}
+
+@keyframes placeholder-caret-blink {
+  0%,
+  50% {
+    border-color: currentColor;
+  }
+
+  51%,
+  100% {
+    border-color: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cli-rotating-placeholder {
+    animation: none;
+    border-right-color: transparent;
   }
 }
 

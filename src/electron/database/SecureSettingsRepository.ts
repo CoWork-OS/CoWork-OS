@@ -16,7 +16,11 @@ import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import { getUserDataDir } from "../utils/user-data-dir";
-import { getSafeStorage, type SafeStorageLike } from "../utils/safe-storage";
+import {
+  decryptSafeStorageString,
+  getSafeStorage,
+  type SafeStorageLike,
+} from "../utils/safe-storage";
 import { createLogger } from "../utils/logger";
 
 /** Result status for load operations */
@@ -105,6 +109,10 @@ export class SecureSettingsRepository {
   private encryptionAvailable: boolean;
   private safeStorage: SafeStorageLike | null;
   private machineId: string | null = null;
+  private failedLoadCache = new Map<
+    SettingsCategory,
+    { encryptedData: string; result: LoadResult<Any> }
+  >();
 
   constructor(private db: Database.Database) {
     this.safeStorage = getSafeStorage();
@@ -205,6 +213,7 @@ export class SecureSettingsRepository {
       stmt.run(uuidv4(), category, encryptedData, checksum, now, now);
     }
 
+    this.failedLoadCache.delete(category);
     logger.debug(`Saved settings for category: ${category}`);
   }
 
@@ -229,6 +238,10 @@ export class SecureSettingsRepository {
     if (!row) {
       return { status: "not_found" };
     }
+    const cachedFailure = this.failedLoadCache.get(category);
+    if (cachedFailure?.encryptedData === row.encrypted_data) {
+      return cachedFailure.result as LoadResult<T>;
+    }
 
     try {
       const decrypted = this.decrypt(row.encrypted_data);
@@ -241,10 +254,15 @@ export class SecureSettingsRepository {
             `[SecureSettingsRepository] Checksum mismatch for category: ${category}. Data may be corrupted.`,
           );
         }
-        return {
+        const result: LoadResult<T> = {
           status: "checksum_mismatch",
           error: "Data integrity check failed. Settings may be corrupted.",
         };
+        this.failedLoadCache.set(category, {
+          encryptedData: row.encrypted_data,
+          result,
+        });
+        return result;
       }
 
       return {
@@ -262,17 +280,27 @@ export class SecureSettingsRepository {
 
       // Detect specific failure modes
       if (errorMessage.includes("OS encryption was used but is no longer available")) {
-        return {
+        const result: LoadResult<T> = {
           status: "os_encryption_unavailable",
           error:
             "Settings were encrypted with OS keychain which is no longer accessible. You may need to re-enter your credentials.",
         };
+        this.failedLoadCache.set(category, {
+          encryptedData: row.encrypted_data,
+          result,
+        });
+        return result;
       }
 
-      return {
+      const result: LoadResult<T> = {
         status: "decryption_failed",
         error: errorMessage,
       };
+      this.failedLoadCache.set(category, {
+        encryptedData: row.encrypted_data,
+        result,
+      });
+      return result;
     }
   }
 
@@ -293,6 +321,7 @@ export class SecureSettingsRepository {
   delete(category: SettingsCategory): boolean {
     const stmt = this.db.prepare("DELETE FROM secure_settings WHERE category = ?");
     const result = stmt.run(category);
+    this.failedLoadCache.delete(category);
     return result.changes > 0;
   }
 
@@ -503,7 +532,7 @@ export class SecureSettingsRepository {
       }
       const base64Data = encryptedData.slice(3);
       const encryptedBuffer = Buffer.from(base64Data, "base64");
-      return this.safeStorage.decryptString(encryptedBuffer);
+      return decryptSafeStorageString(this.safeStorage, encryptedBuffer);
     } else if (encryptedData.startsWith("app:")) {
       // App-level AES decryption
       const parts = encryptedData.slice(4).split(":");

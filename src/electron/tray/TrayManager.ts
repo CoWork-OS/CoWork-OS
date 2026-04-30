@@ -45,6 +45,10 @@ import {
 } from "../utils/temp-workspace-scope";
 import { getActiveTempWorkspaceLeases, touchTempWorkspaceLease } from "../utils/temp-workspace-lease";
 import { ChronicleCaptureService, ChronicleMemoryService, ChronicleSettingsManager } from "../chronicle";
+import {
+  NativeNotificationCenter,
+  NotificationOverlayManager,
+} from "../notifications";
 
 const LEGACY_SETTINGS_FILE = "tray-settings.json";
 
@@ -585,12 +589,13 @@ export class TrayManager {
 
       // Supply tray bounds so overlay notifications resolve the correct display (multi-monitor)
       try {
-        const { NotificationOverlayManager } = require("../notifications/NotificationOverlayWindow");
         const trayRef = this.tray;
         NotificationOverlayManager.getInstance().setAnchorBoundsProvider(
           () => trayRef?.getBounds() ?? null,
         );
-      } catch {}
+      } catch {
+        // Overlay fallback can still use the primary display if tray bounds are unavailable.
+      }
 
       // Build and set context menu
       this.updateContextMenu();
@@ -1192,13 +1197,17 @@ export class TrayManager {
   showNotification(title: string, body: string, taskId?: string): void {
     if (!this.settings.showNotifications) return;
 
-    const { NotificationOverlayManager } = require("../notifications/NotificationOverlayWindow");
-    NotificationOverlayManager.getInstance().show({
+    const notification = {
       id: `tray-${Date.now()}`,
       title,
       message: body,
       taskId,
-    });
+    };
+    if (NativeNotificationCenter.getInstance().show(notification)) {
+      return;
+    }
+
+    NotificationOverlayManager.getInstance().show(notification);
   }
 
   /**

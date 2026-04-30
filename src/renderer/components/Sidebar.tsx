@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback, Fragment, useDeferredValue } from "react";
-import { ChevronDown, ChevronRight, SlidersHorizontal, EyeOff, AppWindow, Bell, HardDrive, Rows3, Search, Server, Workflow, HeartPulse, Lightbulb, Inbox, Users, UsersRound, ListFilter } from "lucide-react";
+import { ChevronDown, ChevronRight, SlidersHorizontal, EyeOff, AppWindow, Bell, HardDrive, Rows3, Search, Server, Workflow, HeartPulse, Lightbulb, Inbox, Users, UsersRound, ListFilter, EllipsisVertical } from "lucide-react";
 import { resolveTwinIcon } from "../utils/twin-icons";
 import { stripAllEmojis } from "../utils/emoji-replacer";
 import { Task, Workspace, UiDensity, InfraStatus, UpdateInfo } from "../../shared/types";
@@ -1341,6 +1341,109 @@ export function Sidebar({
       completionAttentionSet.has(task.id);
     const isAwaitingSession = isAwaitingSessionStatus(task.status);
     const sessionTitle = getSidebarSessionTitle(node);
+    const sessionActions = !node.synthetic ? (
+      <div
+        className="task-item-actions cli-task-actions"
+        ref={menuOpenTaskId === task.id ? menuRef : null}
+      >
+        <button
+          type="button"
+          className="task-item-more cli-more-btn"
+          aria-haspopup="menu"
+          aria-expanded={menuOpenTaskId === task.id}
+          aria-controls={`task-menu-${task.id}`}
+          aria-label={`Session actions for ${sessionTitle}`}
+          onClick={(e) => handleMenuToggle(e, task.id)}
+          onKeyDown={(e) => handleMenuButtonKeyDown(e, task.id)}
+          ref={(el) => {
+            if (el) {
+              menuButtonRef.current.set(task.id, el);
+            } else {
+              menuButtonRef.current.delete(task.id);
+            }
+          }}
+        >
+          <EllipsisVertical size={16} strokeWidth={2.2} aria-hidden="true" />
+        </button>
+        {menuOpenTaskId === task.id && (
+          <div
+            id={`task-menu-${task.id}`}
+            className="task-item-menu cli-task-menu"
+            role="menu"
+            aria-label="Session actions"
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="task-item-menu-option cli-menu-option"
+              role="menuitem"
+              data-menu-option="rename"
+              onMouseDown={(e) => {
+                if (e.button === 0) {
+                  e.preventDefault();
+                  handleRenameClick(e as unknown as React.MouseEvent, task);
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  handleRenameClick(e as unknown as React.MouseEvent, task);
+                }
+                handleMenuItemKeyDown(e, task.id);
+              }}
+            >
+              <span className="cli-menu-prefix">&gt;</span>
+              rename
+            </button>
+            <button
+              type="button"
+              className="task-item-menu-option cli-menu-option"
+              role="menuitem"
+              data-menu-option="pin"
+              onMouseDown={(e) => {
+                if (e.button === 0) {
+                  e.preventDefault();
+                  handlePinClick(e as unknown as React.MouseEvent, task);
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  handlePinClick(e as unknown as React.MouseEvent, task);
+                }
+                handleMenuItemKeyDown(e, task.id);
+              }}
+            >
+              <span className="cli-menu-prefix">&gt;</span>
+              {task.pinned ? "unpin" : "pin"}
+            </button>
+            <button
+              type="button"
+              className="task-item-menu-option task-item-menu-option-danger cli-menu-option cli-menu-danger"
+              role="menuitem"
+              data-menu-option="archive"
+              onMouseDown={(e) => {
+                if (e.button === 0) {
+                  e.preventDefault();
+                  handleArchiveClick(e as unknown as React.MouseEvent, task.id);
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  handleArchiveClick(e as unknown as React.MouseEvent, task.id);
+                }
+                handleMenuItemKeyDown(e, task.id);
+              }}
+            >
+              <span className="cli-menu-prefix">&gt;</span>
+              archive
+            </button>
+          </div>
+        )}
+      </div>
+    ) : null;
 
     return (
       <div
@@ -1476,114 +1579,17 @@ export function Sidebar({
                     <span className="cli-task-time" aria-hidden="true">
                       {formatRelativeShort(task.updatedAt || task.createdAt)}
                     </span>
+                    {sessionActions}
+                  </span>
+                )}
+                {isAwaitingSession && sessionActions && (
+                  <span className="cli-task-action-wrap">
+                    {sessionActions}
                   </span>
                 )}
               </div>
             )}
           </div>
-
-          {!node.synthetic && (
-            <div
-              className="task-item-actions cli-task-actions"
-              ref={menuOpenTaskId === task.id ? menuRef : null}
-            >
-              <button
-                className="task-item-more cli-more-btn"
-                aria-haspopup="menu"
-                aria-expanded={menuOpenTaskId === task.id}
-                aria-controls={`task-menu-${task.id}`}
-                aria-label={`Session actions for ${sessionTitle}`}
-                onClick={(e) => handleMenuToggle(e, task.id)}
-                onKeyDown={(e) => handleMenuButtonKeyDown(e, task.id)}
-                ref={(el) => {
-                  if (el) {
-                    menuButtonRef.current.set(task.id, el);
-                  } else {
-                    menuButtonRef.current.delete(task.id);
-                  }
-                }}
-              >
-                ···
-              </button>
-              {menuOpenTaskId === task.id && (
-                <div
-                  id={`task-menu-${task.id}`}
-                  className="task-item-menu cli-task-menu"
-                  role="menu"
-                  aria-label="Session actions"
-                  onClick={(e) => e.stopPropagation()}
-                  onMouseDown={(e) => e.stopPropagation()}
-                >
-                  <button
-                    type="button"
-                    className="task-item-menu-option cli-menu-option"
-                    role="menuitem"
-                    data-menu-option="rename"
-                    onMouseDown={(e) => {
-                      if (e.button === 0) {
-                        e.preventDefault();
-                        handleRenameClick(e as unknown as React.MouseEvent, task);
-                      }
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        handleRenameClick(e as unknown as React.MouseEvent, task);
-                      }
-                      handleMenuItemKeyDown(e, task.id);
-                    }}
-                  >
-                    <span className="cli-menu-prefix">&gt;</span>
-                    rename
-                  </button>
-                  <button
-                    type="button"
-                    className="task-item-menu-option cli-menu-option"
-                    role="menuitem"
-                    data-menu-option="pin"
-                    onMouseDown={(e) => {
-                      if (e.button === 0) {
-                        e.preventDefault();
-                        handlePinClick(e as unknown as React.MouseEvent, task);
-                      }
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        handlePinClick(e as unknown as React.MouseEvent, task);
-                      }
-                      handleMenuItemKeyDown(e, task.id);
-                    }}
-                  >
-                    <span className="cli-menu-prefix">&gt;</span>
-                    {task.pinned ? "unpin" : "pin"}
-                  </button>
-                  <button
-                    type="button"
-                    className="task-item-menu-option task-item-menu-option-danger cli-menu-option cli-menu-danger"
-                    role="menuitem"
-                    data-menu-option="archive"
-                    onMouseDown={(e) => {
-                      if (e.button === 0) {
-                        e.preventDefault();
-                        handleArchiveClick(e as unknown as React.MouseEvent, task.id);
-                      }
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        handleArchiveClick(e as unknown as React.MouseEvent, task.id);
-                      }
-                      handleMenuItemKeyDown(e, task.id);
-                    }}
-                  >
-                    <span className="cli-menu-prefix">&gt;</span>
-                    archive
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
 
       </div>
     );

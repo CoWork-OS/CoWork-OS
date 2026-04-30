@@ -19379,7 +19379,7 @@ button {
 .cli-task-title-row {
   display: flex;
   align-items: center;
-  gap: 30px;
+  gap: 12px;
   min-width: 0;
 }
 
@@ -19399,6 +19399,16 @@ button {
   gap: 6px;
   flex-shrink: 0;
   margin-left: auto;
+  min-height: 28px;
+}
+
+.cli-task-action-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-shrink: 0;
+  margin-left: auto;
+  min-height: 28px;
 }
 
 .cli-task-title-with-agent {
@@ -19454,19 +19464,29 @@ button {
   display: none;
 }
 
-/* CLI Task Actions - absolute so they don't reserve space; overlay on hover */
 .cli-task-actions {
-  position: absolute;
-  right: 4px;
-  top: 50%;
-  transform: translateY(-50%);
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 0;
+  flex-shrink: 0;
+  margin-left: -6px;
   opacity: 0;
-  transition: opacity 0.15s ease;
+  pointer-events: none;
+  transition:
+    opacity 0.15s ease,
+    width 0.15s ease,
+    margin-left 0.15s ease;
 }
 
 .cli-task-item:hover .cli-task-actions,
+.cli-task-item:focus-within .cli-task-actions,
 .cli-task-actions:has(.task-item-menu) {
+  width: 30px;
+  margin-left: 0;
   opacity: 1;
+  pointer-events: auto;
 }
 
 .task-completion-unread-dot {
@@ -19481,19 +19501,34 @@ button {
 }
 
 .cli-more-btn {
-  font-family: var(--font-mono);
-  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
   color: var(--color-text-muted);
-  background: transparent;
-  border: none;
-  padding: 4px 6px;
+  background: color-mix(in srgb, var(--color-accent) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 42%, transparent);
+  padding: 0;
   cursor: pointer;
-  border-radius: var(--radius-sm);
+  border-radius: 10px;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
 }
 
-.cli-more-btn:hover {
+.cli-more-btn:hover,
+.cli-more-btn:focus-visible,
+.cli-more-btn[aria-expanded="true"] {
   color: var(--color-accent);
-  background: rgba(0, 0, 0, 0.2);
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  border-color: var(--color-accent);
+  outline: none;
+}
+
+.cli-more-btn svg {
+  flex-shrink: 0;
 }
 
 /* CLI Task Menu */

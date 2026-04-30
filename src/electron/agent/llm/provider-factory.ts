@@ -592,6 +592,61 @@ function normalizeSecret(value?: string): string | undefined {
   return trimmed;
 }
 
+function normalizeOptionalString(value?: string): string | undefined {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function normalizeProviderConfig(config: LLMProviderConfig): LLMProviderConfig {
+  return {
+    ...config,
+    model: config.model.trim(),
+    anthropicApiKey: normalizeSecret(config.anthropicApiKey),
+    awsRegion: normalizeOptionalString(config.awsRegion),
+    awsAccessKeyId: normalizeSecret(config.awsAccessKeyId),
+    awsSecretAccessKey: normalizeSecret(config.awsSecretAccessKey),
+    awsSessionToken: normalizeSecret(config.awsSessionToken),
+    awsProfile: normalizeOptionalString(config.awsProfile),
+    ollamaBaseUrl: normalizeOptionalString(config.ollamaBaseUrl),
+    ollamaApiKey: normalizeSecret(config.ollamaApiKey),
+    geminiApiKey: normalizeSecret(config.geminiApiKey),
+    openrouterApiKey: normalizeSecret(config.openrouterApiKey),
+    openrouterBaseUrl: normalizeOptionalString(config.openrouterBaseUrl),
+    openaiApiKey: normalizeSecret(config.openaiApiKey),
+    openaiAccessToken: normalizeSecret(config.openaiAccessToken),
+    openaiRefreshToken: normalizeSecret(config.openaiRefreshToken),
+    azureApiKey: normalizeSecret(config.azureApiKey),
+    azureEndpoint: normalizeOptionalString(config.azureEndpoint),
+    azureDeployment: normalizeOptionalString(config.azureDeployment),
+    azureApiVersion: normalizeOptionalString(config.azureApiVersion),
+    azureAnthropicApiKey: normalizeSecret(config.azureAnthropicApiKey),
+    azureAnthropicEndpoint: normalizeOptionalString(
+      config.azureAnthropicEndpoint,
+    ),
+    azureAnthropicDeployment: normalizeOptionalString(
+      config.azureAnthropicDeployment,
+    ),
+    azureAnthropicApiVersion: normalizeOptionalString(
+      config.azureAnthropicApiVersion,
+    ),
+    groqApiKey: normalizeSecret(config.groqApiKey),
+    groqBaseUrl: normalizeOptionalString(config.groqBaseUrl),
+    xaiApiKey: normalizeSecret(config.xaiApiKey),
+    xaiBaseUrl: normalizeOptionalString(config.xaiBaseUrl),
+    kimiApiKey: normalizeSecret(config.kimiApiKey),
+    kimiBaseUrl: normalizeOptionalString(config.kimiBaseUrl),
+    piProvider: normalizeOptionalString(config.piProvider),
+    piApiKey: normalizeSecret(config.piApiKey),
+    openaiCompatibleApiKey: normalizeSecret(config.openaiCompatibleApiKey),
+    openaiCompatibleBaseUrl: normalizeOptionalString(
+      config.openaiCompatibleBaseUrl,
+    ),
+    providerApiKey: normalizeSecret(config.providerApiKey),
+    providerBaseUrl: normalizeOptionalString(config.providerBaseUrl),
+  };
+}
+
 function resolveAnthropicCredential(
   anthropic?:
     | LLMSettings["anthropic"]
@@ -1995,6 +2050,7 @@ export class LLMProviderFactory {
    * Create a provider from explicit config
    */
   static createProviderFromConfig(config: LLMProviderConfig): LLMProvider {
+    config = normalizeProviderConfig(config);
     const customEntry = getCustomProviderEntry(config.type);
     if (customEntry) {
       const resolvedType = resolveCustomProviderId(config.type);

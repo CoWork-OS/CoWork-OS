@@ -201,6 +201,58 @@ describe("LLMProviderFactory custom provider config resolution", () => {
     expect(saveSpy).toHaveBeenCalled();
   });
 
+  it("trims pasted compatible-provider credentials before connection testing", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        content: [{ type: "text", text: "ok" }],
+        stop_reason: "end_turn",
+      }),
+    } as Response);
+
+    const provider = LLMProviderFactory.createProviderFromConfig({
+      type: "anthropic-compatible",
+      model: " moonshotai/kimi-k2.6:thinking \n",
+      providerApiKey: " nano-key\r\n",
+      providerBaseUrl: " https://nano-gpt.com/api/v1/ \n",
+    } as Any);
+
+    await expect(provider.testConnection()).resolves.toEqual({ success: true });
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://nano-gpt.com/api/v1/messages",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          "x-api-key": "nano-key",
+        }),
+      }),
+    );
+
+    fetchSpy.mockClear();
+
+    const openaiCompatibleProvider = LLMProviderFactory.createProviderFromConfig({
+      type: "openai-compatible",
+      model: " openai/gpt-5.2 \n",
+      openaiCompatibleApiKey: " nano-openai-key\r\n",
+      openaiCompatibleBaseUrl: " https://nano-gpt.com/api/v1 \n",
+    } as Any);
+
+    await expect(openaiCompatibleProvider.testConnection()).resolves.toEqual({
+      success: true,
+    });
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://nano-gpt.com/api/v1/chat/completions",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          Authorization: "Bearer nano-openai-key",
+        }),
+      }),
+    );
+  });
+
   it("adds documented Z.AI coding-plan models to partial refresh results", async () => {
     vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue({
       providerType: "zai",

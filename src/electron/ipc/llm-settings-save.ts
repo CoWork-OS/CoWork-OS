@@ -13,6 +13,54 @@ function mergeProviderSettings<T extends object>(
   };
 }
 
+function cleanString(value: string | undefined): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+const PROVIDER_STRING_KEYS = [
+  "apiKey",
+  "subscriptionToken",
+  "baseUrl",
+  "model",
+  "provider",
+  "endpoint",
+  "deployment",
+  "apiVersion",
+  "region",
+  "accessKeyId",
+  "secretAccessKey",
+  "sessionToken",
+  "profile",
+] as const;
+
+function cleanProviderSettings<T extends object>(
+  settings?: T,
+): T | undefined {
+  if (!settings) return undefined;
+  const cleaned = { ...settings };
+  const mutableCleaned = cleaned as Record<string, unknown>;
+  for (const key of PROVIDER_STRING_KEYS) {
+    const value = mutableCleaned[key];
+    if (typeof value === "string") {
+      mutableCleaned[key] = cleanString(value);
+    }
+  }
+  return cleaned;
+}
+
+function cleanCustomProviders(
+  providers?: LLMSettingsData["customProviders"],
+): LLMSettingsData["customProviders"] | undefined {
+  if (!providers) return undefined;
+  const cleaned: NonNullable<LLMSettingsData["customProviders"]> = {};
+  for (const [providerId, providerConfig] of Object.entries(providers)) {
+    cleaned[providerId] = cleanProviderSettings(providerConfig) ?? {};
+  }
+  return cleaned;
+}
+
 function normalizeAzureSettings(
   incoming?: LLMSettingsData["azure"],
   existing?: LLMSettingsData["azure"],
@@ -112,28 +160,45 @@ export function buildSavedLLMSettings(
       ? validated.failoverPrimaryRetryCooldownSeconds
       : existingSettings.failoverPrimaryRetryCooldownSeconds,
     promptCaching: validated.promptCaching ?? existingSettings.promptCaching,
-    anthropic: mergeProviderSettings(validated.anthropic, existingSettings.anthropic),
-    bedrock: mergeProviderSettings(validated.bedrock, existingSettings.bedrock),
-    ollama: mergeProviderSettings(validated.ollama, existingSettings.ollama),
-    gemini: mergeProviderSettings(validated.gemini, existingSettings.gemini),
-    openrouter: mergeProviderSettings(
-      validated.openrouter,
-      existingSettings.openrouter,
+    anthropic: cleanProviderSettings(
+      mergeProviderSettings(validated.anthropic, existingSettings.anthropic),
     ),
-    openai: openaiSettings,
+    bedrock: cleanProviderSettings(
+      mergeProviderSettings(validated.bedrock, existingSettings.bedrock),
+    ),
+    ollama: cleanProviderSettings(
+      mergeProviderSettings(validated.ollama, existingSettings.ollama),
+    ),
+    gemini: cleanProviderSettings(
+      mergeProviderSettings(validated.gemini, existingSettings.gemini),
+    ),
+    openrouter: cleanProviderSettings(
+      mergeProviderSettings(validated.openrouter, existingSettings.openrouter),
+    ),
+    openai: cleanProviderSettings(openaiSettings),
     azure: normalizeAzureSettings(validated.azure, existingSettings.azure),
     azureAnthropic: normalizeAzureAnthropicSettings(
       validated.azureAnthropic,
       existingSettings.azureAnthropic,
     ),
-    groq: mergeProviderSettings(validated.groq, existingSettings.groq),
-    xai: mergeProviderSettings(validated.xai, existingSettings.xai),
-    kimi: mergeProviderSettings(validated.kimi, existingSettings.kimi),
-    openaiCompatible: mergeProviderSettings(
-      validated.openaiCompatible,
-      existingSettings.openaiCompatible,
+    groq: cleanProviderSettings(
+      mergeProviderSettings(validated.groq, existingSettings.groq),
     ),
-    customProviders: validated.customProviders ?? existingSettings.customProviders,
+    xai: cleanProviderSettings(
+      mergeProviderSettings(validated.xai, existingSettings.xai),
+    ),
+    kimi: cleanProviderSettings(
+      mergeProviderSettings(validated.kimi, existingSettings.kimi),
+    ),
+    openaiCompatible: cleanProviderSettings(
+      mergeProviderSettings(
+        validated.openaiCompatible,
+        existingSettings.openaiCompatible,
+      ),
+    ),
+    customProviders: cleanCustomProviders(
+      validated.customProviders ?? existingSettings.customProviders,
+    ),
     imageGeneration: validated.imageGeneration ?? existingSettings.imageGeneration,
     videoGeneration: validated.videoGeneration ?? existingSettings.videoGeneration,
     cachedAnthropicModels: existingSettings.cachedAnthropicModels,

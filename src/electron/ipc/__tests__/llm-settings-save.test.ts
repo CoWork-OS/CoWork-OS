@@ -234,6 +234,43 @@ describe("buildSavedLLMSettings", () => {
     });
   });
 
+  it("trims pasted provider credentials before saving", () => {
+    const existingSettings: LLMSettingsData = {
+      providerType: "anthropic-compatible",
+      modelKey: "sonnet-4-5",
+    };
+
+    const validated: LLMSettingsData = {
+      providerType: "anthropic-compatible",
+      modelKey: "sonnet-4-5",
+      openaiCompatible: {
+        apiKey: " nano-openai-key\r\n",
+        baseUrl: " https://nano-gpt.com/api/v1/ ",
+        model: " openai/gpt-5.2 ",
+      },
+      customProviders: {
+        "anthropic-compatible": {
+          apiKey: "\r\nnano-anthropic-key ",
+          baseUrl: " https://nano-gpt.com/api/v1 ",
+          model: "\tmoonshotai/kimi-k2.6:thinking\n",
+        },
+      },
+    };
+
+    const saved = buildSavedLLMSettings(validated, existingSettings);
+
+    expect(saved.openaiCompatible).toMatchObject({
+      apiKey: "nano-openai-key",
+      baseUrl: "https://nano-gpt.com/api/v1/",
+      model: "openai/gpt-5.2",
+    });
+    expect(saved.customProviders?.["anthropic-compatible"]).toMatchObject({
+      apiKey: "nano-anthropic-key",
+      baseUrl: "https://nano-gpt.com/api/v1",
+      model: "moonshotai/kimi-k2.6:thinking",
+    });
+  });
+
   it("persists hidden prompt-caching settings without disturbing provider settings", () => {
     const existingSettings: LLMSettingsData = {
       providerType: "anthropic",

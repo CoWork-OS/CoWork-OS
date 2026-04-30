@@ -34,7 +34,7 @@ import {
   getTaskTraceSessionId,
 } from "./task-trace-projection";
 import { UsageInsightsProjector } from "../reports/UsageInsightsProjector";
-import { getSafeStorage } from "../utils/safe-storage";
+import { decryptSafeStorageString, getSafeStorage } from "../utils/safe-storage";
 import { createLogger } from "../utils/logger";
 
 /**
@@ -2109,6 +2109,7 @@ export class LLMModelRepository {
 
 const channelRepoLogger = createLogger("ChannelRepository");
 const CHANNEL_CONFIG_ENCRYPTED_PREFIX = "enc:";
+const loggedChannelConfigDecryptFailures = new Set<string>();
 
 interface ChannelConfigReadResult {
   json: string;
@@ -2153,20 +2154,26 @@ function decryptChannelConfig(value: string): ChannelConfigReadResult {
     if (safeStorage?.isEncryptionAvailable()) {
       const buf = Buffer.from(value.slice(CHANNEL_CONFIG_ENCRYPTED_PREFIX.length), "base64");
       return {
-        json: safeStorage.decryptString(buf),
+        json: decryptSafeStorageString(safeStorage, buf),
         encrypted: true,
       };
     }
     const readError =
       "Channel configuration is encrypted with OS secure storage and cannot be decrypted in this environment.";
-    channelRepoLogger.error(readError);
+    if (!loggedChannelConfigDecryptFailures.has(value)) {
+      loggedChannelConfigDecryptFailures.add(value);
+      channelRepoLogger.error(readError);
+    }
     return {
       json: "{}",
       encrypted: true,
       readError,
     };
   } catch (error) {
-    channelRepoLogger.error("Failed to decrypt channel config:", error);
+    if (!loggedChannelConfigDecryptFailures.has(value)) {
+      loggedChannelConfigDecryptFailures.add(value);
+      channelRepoLogger.error("Failed to decrypt channel config:", error);
+    }
     return {
       json: "{}",
       encrypted: true,

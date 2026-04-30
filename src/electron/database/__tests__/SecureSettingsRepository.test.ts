@@ -20,6 +20,8 @@ vi.mock("../../utils/safe-storage", () => ({
     decryptString: (buffer: Buffer) => mockDecryptString(buffer),
     isEncryptionAvailable: () => mockIsEncryptionAvailable(),
   }),
+  decryptSafeStorageString: (_safeStorage: unknown, buffer: Buffer) =>
+    mockDecryptString(buffer),
 }));
 
 vi.mock("electron", () => ({
@@ -743,6 +745,31 @@ describe("SecureSettingsRepository", () => {
 
       expect(result.status).toBe("decryption_failed");
       expect(result.error).toContain("decryption error");
+      consoleSpy.mockRestore();
+    });
+
+    it("should cache decryption failures for unchanged encrypted settings", () => {
+      mockStmt.get.mockReturnValue({
+        id: "test-id",
+        category: "voice",
+        encrypted_data: "os:invalid-data",
+        checksum: "checksum",
+        created_at: 1000,
+        updated_at: 2000,
+      });
+      mockDecryptString.mockImplementation(() => {
+        throw new Error("Some decryption error");
+      });
+
+      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const first = repository.loadWithStatus("voice");
+      const second = repository.loadWithStatus("voice");
+
+      expect(first.status).toBe("decryption_failed");
+      expect(second.status).toBe("decryption_failed");
+      expect(mockDecryptString).toHaveBeenCalledTimes(1);
+      expect(consoleSpy).toHaveBeenCalledTimes(1);
       consoleSpy.mockRestore();
     });
   });

@@ -272,6 +272,7 @@ import {
 import {
   NotificationService,
   NotificationOverlayManager,
+  NativeNotificationCenter,
 } from "../notifications";
 import type {
   NotificationType,
@@ -10250,11 +10251,12 @@ function setupCouncilHandlers(): void {
  * Set up Notification IPC handlers
  */
 function setupNotificationHandlers(): void {
-  // Initialize overlay manager for custom macOS-style notification banners
+  // Initialize native system notifications, with the custom overlay kept as a fallback.
+  const nativeNotificationCenter = NativeNotificationCenter.getInstance();
   const overlayManager = NotificationOverlayManager.getInstance();
 
-  // Clicking a notification overlay brings the main window to focus and opens the task
-  overlayManager.setOnClick((_notificationId, taskId) => {
+  // Clicking a notification brings the main window to focus and opens the task.
+  const handleNotificationClick = (_notificationId: string, taskId?: string) => {
     const mainWin = getMainWindow();
     if (mainWin && !mainWin.isDestroyed()) {
       if (mainWin.isMinimized()) mainWin.restore();
@@ -10264,7 +10266,20 @@ function setupNotificationHandlers(): void {
         mainWin.webContents.send(IPC_CHANNELS.NAVIGATE_TO_TASK, taskId);
       }
     }
-  });
+  };
+  nativeNotificationCenter.setOnClick(handleNotificationClick);
+  overlayManager.setOnClick(handleNotificationClick);
+
+  const shouldShowDesktopNotifications = (): boolean => {
+    try {
+      // Import lazily to avoid a startup dependency cycle with tray initialization.
+      // oxlint-disable-next-line typescript-eslint(no-require-imports)
+      const { trayManager } = require("../tray");
+      return trayManager.getSettings().showNotifications;
+    } catch {
+      return true;
+    }
+  };
 
   // Initialize notification service with event forwarding to main window
   notificationService = new NotificationService({
@@ -10280,15 +10295,27 @@ function setupNotificationHandlers(): void {
         }
       }
 
-      // Show custom overlay notification banner
+      // Show a native OS notification so macOS can route it through Notification Center.
       if (event.type === "added" && event.notification) {
-        overlayManager.show({
+        if (!shouldShowDesktopNotifications()) {
+          return;
+        }
+        const shownNatively = nativeNotificationCenter.show({
           id: event.notification.id,
           title: event.notification.title,
           message: event.notification.message,
           type: event.notification.type,
           taskId: event.notification.taskId,
         });
+        if (!shownNatively) {
+          overlayManager.show({
+            id: event.notification.id,
+            title: event.notification.title,
+            message: event.notification.message,
+            type: event.notification.type,
+            taskId: event.notification.taskId,
+          });
+        }
       }
     },
   });

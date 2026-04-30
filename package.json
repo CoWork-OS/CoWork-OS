@@ -267,7 +267,7 @@
       "gatekeeperAssess": true,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
-      "icon": "build/icon.png",
+      "icon": "build/icon.icns",
       "notarize": true
     },
     "win": {

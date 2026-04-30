@@ -72,8 +72,8 @@ hero:
       text: Supermemory
       link: /supermemory
     - theme: alt
-      text: Release Notes 0.5.41
-      link: /release-notes-0.5.41
+      text: Release Notes 0.5.42
+      link: /release-notes-0.5.42
     - theme: alt
       text: Heartbeat v3
       link: /heartbeat-v3
@@ -129,8 +129,8 @@ features:
     details: SessionRuntime owns task-session state, session checklists, visible-tool render caching, prompt-cache state, resume snapshots, and task projection while the turn kernel handles each active turn; sectioned prompts, stable-prefix prompt caching, graph-backed delegation, typed worker roles, semantic batch summaries, and terminal-state-safe resume logic keep execution, verification, and follow-up work coherent.
   - title: Managed Agents
     details: Versioned managed agents, reusable local environments, and durable managed sessions now sit on top of the existing task runtime through the control plane, while Mission Control and task surfaces observe the same backing tasks and team runs.
-  - title: Latest Release 0.5.41
-    details: Includes the Everything Workbench release with editable document artifacts, spreadsheet artifact editing, presentation artifact review, sandboxed web page artifacts, structured memory observations, format-aware file previews, Mission Control intelligence, dev log capture, renderer bundle reductions, and cleaner final-output artifact cards.
+  - title: Latest Release 0.5.42
+    details: Windows installer hotfix for the Everything Workbench release. The Windows app package is rebuilt as x64 so standard Windows PCs install CoWork OS.exe correctly.
   - title: Inbox Agent
     details: Local-first email workspace with Classic and Today modes, AI triage, Mailbox Ask, manual reply/reply-all/forward, editable AI drafts, commitment queues, sender cleanup, attachment indexing, and resync-safe background sync.
   - title: Managed Devices

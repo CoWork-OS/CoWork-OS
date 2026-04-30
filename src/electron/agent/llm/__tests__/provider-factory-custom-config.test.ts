@@ -251,6 +251,29 @@ describe("LLMProviderFactory custom provider config resolution", () => {
         }),
       }),
     );
+
+    fetchSpy.mockClear();
+
+    const openaiCompatibleEndpointProvider = LLMProviderFactory.createProviderFromConfig({
+      type: "openai-compatible",
+      model: "kimi-k2.5",
+      openaiCompatibleApiKey: "opencode-go-key",
+      openaiCompatibleBaseUrl: "https://opencode.ai/zen/go/v1/chat/completions",
+    } as Any);
+
+    await expect(openaiCompatibleEndpointProvider.testConnection()).resolves.toEqual({
+      success: true,
+    });
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://opencode.ai/zen/go/v1/chat/completions",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          Authorization: "Bearer opencode-go-key",
+        }),
+      }),
+    );
   });
 
   it("adds documented Z.AI coding-plan models to partial refresh results", async () => {

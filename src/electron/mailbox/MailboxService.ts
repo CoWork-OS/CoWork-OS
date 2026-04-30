@@ -2948,7 +2948,7 @@ export class MailboxService {
 
     const evidenceRefs = normalizeMailboxEvidenceRefs(event.evidenceRefs);
     const payload = {
-      ...(event.payload || {}),
+      ...event.payload,
       accountId: event.accountId,
       threadId: event.threadId,
       provider: event.provider,

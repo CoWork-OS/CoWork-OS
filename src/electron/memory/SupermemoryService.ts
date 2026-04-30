@@ -630,7 +630,7 @@ export class SupermemoryService {
         headers: {
           Authorization: `Bearer ${settings.apiKey}`,
           "Content-Type": "application/json",
-          ...(init.headers || {}),
+          ...init.headers,
         },
       });
 

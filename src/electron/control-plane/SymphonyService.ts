@@ -159,7 +159,7 @@ function getSymphonyMetadata(issue: Issue): AnyRecord {
 
 function setSymphonyMetadata(issue: Issue, updates: AnyRecord): Record<string, unknown> {
   return {
-    ...(issue.metadata || {}),
+    ...issue.metadata,
     symphony: {
       ...getSymphonyMetadata(issue),
       ...updates,

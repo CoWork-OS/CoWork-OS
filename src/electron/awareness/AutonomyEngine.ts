@@ -154,7 +154,7 @@ export class AutonomyEngine {
       ...config,
       actionPolicies: {
         ...DEFAULT_AUTONOMY_CONFIG.actionPolicies,
-        ...(config.actionPolicies || {}),
+        ...config.actionPolicies,
       },
     };
     this.save();
@@ -261,7 +261,7 @@ export class AutonomyEngine {
               ...stored.config,
               actionPolicies: {
                 ...DEFAULT_AUTONOMY_CONFIG.actionPolicies,
-                ...(stored.config?.actionPolicies || {}),
+                ...stored.config?.actionPolicies,
               },
             },
             worldModels: stored.worldModels || {},

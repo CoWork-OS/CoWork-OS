@@ -145,7 +145,7 @@ export class SearchTools {
           success: false,
           error: policyError,
           metadata: {
-            ...(filteredResponse.metadata || {}),
+            ...filteredResponse.metadata,
             error: policyError,
             policyReason: "domain_policy_filtered",
             blockedDomains,

@@ -164,7 +164,7 @@ export class DiscordAdapter implements ChannelAdapter {
           if (isSupervisorBotMessage) {
             incomingMessage.ingestOnly = true;
             incomingMessage.metadata = {
-              ...(incomingMessage.metadata || {}),
+              ...incomingMessage.metadata,
               discordSupervisorCandidate: true,
               authorIsBot: true,
             };

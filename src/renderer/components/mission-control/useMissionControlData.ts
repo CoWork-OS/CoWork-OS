@@ -503,23 +503,23 @@ export function useMissionControlData(
         workspaceId && workspaceId !== ALL_WORKSPACES_ID ? { workspaceId } : undefined;
       const [failures, clusters, evals, experiments, learnings] = await Promise.all([
         window.electronAPI.listCoreFailureRecords({
-          ...(workspaceScope || {}),
+          ...workspaceScope,
           limit: 20,
         }),
         window.electronAPI.listCoreFailureClusters({
-          ...(workspaceScope || {}),
+          ...workspaceScope,
           limit: 20,
         }),
         window.electronAPI.listCoreEvalCases({
-          ...(workspaceScope || {}),
+          ...workspaceScope,
           limit: 20,
         }),
         window.electronAPI.listCoreExperiments({
-          ...(workspaceScope || {}),
+          ...workspaceScope,
           limit: 20,
         }),
         window.electronAPI.listCoreLearnings({
-          ...(workspaceScope || {}),
+          ...workspaceScope,
           limit: 25,
         }),
       ]);

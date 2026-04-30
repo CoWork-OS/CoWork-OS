@@ -155,7 +155,7 @@ export class HeartbeatSignalStore {
         new Set([...(existing.evidenceRefs || []), ...(input.evidenceRefs || [])]),
       );
       existing.reason = input.reason || existing.reason;
-      existing.payload = { ...(existing.payload || {}), ...(input.payload || {}) };
+      existing.payload = { ...existing.payload, ...input.payload };
       existing.mergedCount += 1;
       this.save();
       return { signal: { ...existing }, merged: true };

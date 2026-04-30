@@ -4320,7 +4320,7 @@ ${skillDescriptions}`;
     skill: CustomSkill,
     parameters: Record<string, Any>,
   ): Record<string, Any> {
-    const resolved = { ...(parameters || {}) };
+    const resolved = { ...parameters };
     for (const param of skill.parameters || []) {
       if (!(param.name in resolved) && param.default !== undefined) {
         resolved[param.name] = param.default;
@@ -7834,7 +7834,7 @@ ${skillDescriptions}`;
     provider: Tier1IntegrationProvider,
   ): Record<string, string> {
     const merged: Record<string, string> = {
-      ...(currentEnv || {}),
+      ...currentEnv,
       ...inputEnv,
     };
     if (provider === "resend" && !merged.RESEND_BASE_URL?.trim()) {

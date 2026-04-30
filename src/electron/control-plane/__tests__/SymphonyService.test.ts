@@ -127,7 +127,7 @@ describeWithSqlite("SymphonyService", () => {
             workspaceId: params.workspaceId,
             agentConfig: params.agentConfig,
             source: params.source,
-            ...(params.taskOverrides || {}),
+            ...params.taskOverrides,
           });
           createdTaskIds.push(task.id);
           return task;
@@ -180,7 +180,7 @@ describeWithSqlite("SymphonyService", () => {
             workspaceId: params.workspaceId,
             agentConfig: params.agentConfig,
             source: params.source,
-            ...(params.taskOverrides || {}),
+            ...params.taskOverrides,
           }),
       } as Any,
     });

@@ -120,7 +120,7 @@ function createService(overrides?: Partial<HeartbeatServiceDeps>): HeartbeatServ
         createdAt: Date.now(),
         updatedAt: Date.now(),
         assignedAgentRoleId: agentRoleId,
-        ...(options?.taskOverrides || {}),
+        ...options?.taskOverrides,
       };
       createdTasks.push(task);
       mockTasks.set(task.id, task);
@@ -292,7 +292,7 @@ describe("HeartbeatService v3", () => {
           createdAt: Date.now(),
           updatedAt: Date.now(),
           assignedAgentRoleId: agentRoleId,
-          ...(options?.taskOverrides || {}),
+          ...options?.taskOverrides,
         };
         createdTasks.push(task);
         mockTasks.set(task.id, task);
@@ -438,7 +438,7 @@ describe("HeartbeatService v3", () => {
           createdAt: Date.now(),
           updatedAt: Date.now(),
           assignedAgentRoleId: agentRoleId,
-          ...(options?.taskOverrides || {}),
+          ...options?.taskOverrides,
         };
         createdTasks.push(task);
         mockTasks.set(task.id, task);
@@ -498,7 +498,7 @@ describe("HeartbeatService v3", () => {
           createdAt: Date.now(),
           updatedAt: Date.now(),
           assignedAgentRoleId: agentRoleId,
-          ...(options?.taskOverrides || {}),
+          ...options?.taskOverrides,
         };
         createdTasks.push(task);
         mockTasks.set(task.id, task);
@@ -544,7 +544,7 @@ describe("HeartbeatService v3", () => {
           createdAt: Date.now(),
           updatedAt: Date.now(),
           assignedAgentRoleId: agentRoleId,
-          ...(options?.taskOverrides || {}),
+          ...options?.taskOverrides,
         };
         createdTasks.push(task);
         mockTasks.set(task.id, task);

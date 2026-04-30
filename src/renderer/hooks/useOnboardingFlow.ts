@@ -1588,7 +1588,7 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
         return;
       }
       const settings = buildSaveSettings("ollama", "", {
-        ...(existingSettings || {}),
+        ...existingSettings,
         providerType: "ollama",
         modelKey: modelName,
         ollama: {
@@ -1654,7 +1654,7 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
       existingSettings?.providerType
         ? buildSaveSettings(fallbackProvider, "", existingSettings)
         : buildSaveSettings("openrouter", "", {
-            ...(existingSettings || {}),
+            ...existingSettings,
             providerType: "openrouter",
             modelKey: getDefaultModel("openrouter"),
             openrouter: {

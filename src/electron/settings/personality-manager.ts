@@ -902,7 +902,7 @@ COMPANION MINDSET:
   ): RelationshipData {
     const normalized = {
       ...DEFAULT_RELATIONSHIP,
-      ...(relationship || {}),
+      ...relationship,
     } as RelationshipData;
 
     const sanitizedName = sanitizeStoredPreferredName(normalized.userName);

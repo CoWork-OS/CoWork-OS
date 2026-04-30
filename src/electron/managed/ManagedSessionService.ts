@@ -115,7 +115,7 @@ function setStudioConfigMetadata(
   studio: ManagedAgentStudioConfig,
 ): Record<string, unknown> {
   return {
-    ...(metadata || {}),
+    ...metadata,
     studio,
   };
 }
@@ -2552,7 +2552,7 @@ export class ManagedSessionService {
       const nextTarget = (nextTargets || []).find(
         (target) => target.channelType === "slack" && target.channelId === channelId,
       );
-      const currentConfig = { ...(channel.config || {}) };
+      const currentConfig = { ...channel.config };
       const nextAllowed = Array.isArray(currentConfig.allowedAgentRoleIds)
         ? [...(currentConfig.allowedAgentRoleIds as string[])]
         : [];

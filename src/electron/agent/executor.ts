@@ -987,7 +987,7 @@ export class TaskExecutor {
     const reason = String(this.lastAwaitingUserInputReasonCode || this.lastPauseReason || "")
       .trim()
       .toLowerCase();
-    if (!/^required_decision/.test(reason)) return;
+    if (!reason.startsWith('required_decision')) return;
 
     const key = this.getRequiredDecisionPromptKey(this.lastRequiredDecisionPrompt);
     if (key) {
@@ -4861,7 +4861,7 @@ ${transcript}
     }
     const getLegacyAvailableTools = (this as Any).getAvailableTools.bind(this);
     return {
-      ...(toolRegistry || {}),
+      ...toolRegistry,
       __legacyFilteredGetTools: true,
       getTools: () => getLegacyAvailableTools(),
       getDeferredTools:
@@ -8820,7 +8820,7 @@ ${transcript}
         }
         this.pathDriftRecoverySignatureAttempts[pathDriftSignature] = 1;
       }
-      const retryInput = { ...(opts.input || {}), path: candidatePath };
+      const retryInput = { ...opts.input, path: candidatePath };
       const attemptedAliasRecovery = aliasRecoverable;
       const attemptedTaskRootRecovery = taskRootRecoverable;
       try {
@@ -10704,7 +10704,7 @@ ${transcript}
         existing.add(toolName);
       }
       this.task.agentConfig = {
-        ...(this.task.agentConfig || {}),
+        ...this.task.agentConfig,
         toolRestrictions: Array.from(existing),
       };
     }
@@ -10714,7 +10714,7 @@ ${transcript}
         existing.add(toolName);
       }
       this.task.agentConfig = {
-        ...(this.task.agentConfig || {}),
+        ...this.task.agentConfig,
         allowedTools: Array.from(existing),
       };
     }
@@ -12224,7 +12224,7 @@ ${transcript}
 
     const from = mode;
     this.task.agentConfig = {
-      ...(this.task.agentConfig || {}),
+      ...this.task.agentConfig,
       executionMode: "execute",
       executionModeSource: "auto_promote",
     };
@@ -17204,7 +17204,7 @@ You are continuing a previous conversation. The context from the previous conver
 
     const pushItem = (raw: string) => {
       const cleaned = raw
-        .replace(/^[-*•\d\)\.(\s]+/, "")
+        .replace(/^[-*•\d).(\s]+/, "")
         .replace(/\*\*/g, "")
         .replace(/`/g, "")
         .trim();
@@ -17217,7 +17217,7 @@ You are continuing a previous conversation. The context from the previous conver
 
     for (const line of lines) {
       if (!line) continue;
-      const bulletMatch = line.match(/^([-*•]|\d+[\).:])\s+(.+)$/);
+      const bulletMatch = line.match(/^([-*•]|\d+[).:])\s+(.+)$/);
       if (bulletMatch) {
         pushItem(bulletMatch[2] || "");
         continue;
@@ -20194,7 +20194,7 @@ You are continuing a previous conversation. The context from the previous conver
     }
     const mergedList = Array.from(merged);
     this.task.agentConfig = {
-      ...(this.task.agentConfig || {}),
+      ...this.task.agentConfig,
       toolRestrictions: mergedList,
     };
     this.emitEvent("log", {
@@ -20772,7 +20772,7 @@ You are continuing a previous conversation. The context from the previous conver
               maxTokens: explicitChatMaxTokens ?? (isThinkMode ? 2048 : 800),
               system: systemPrompt,
               messages: [{ role: "user", content: companionUserContent }],
-              ...(promptCacheExtras || {}),
+              ...promptCacheExtras,
             },
             LLM_TIMEOUT_MS,
             isThinkMode ? "Think-with-me response" : "Companion response",
@@ -20799,7 +20799,7 @@ You are continuing a previous conversation. The context from the previous conver
                 { role: "user", content: companionUserContent },
                 { role: "assistant", content: [{ type: "text", text }] },
               ],
-              ...(promptCacheExtras || {}),
+              ...promptCacheExtras,
             },
             LLM_TIMEOUT_MS,
             "Companion continuation",
@@ -22040,7 +22040,7 @@ Return ONLY a JSON object:
                   toolChoice: "none" as const,
                 }
               : {}),
-            ...(promptCacheExtras || {}),
+            ...promptCacheExtras,
           },
           requestTimeoutMs,
           "Plan creation",
@@ -22402,7 +22402,7 @@ Return ONLY a JSON object:
     };
     const isStepLineWithDescription = (line: string): { match: boolean; id: string; desc: string } => {
       const m =
-        line.match(/^(?:[-*]\s*)?(?:step\s*)?(\d+)\s*[\).:\-]\s*(.+)$/i) ||
+        line.match(/^(?:[-*]\s*)?(?:step\s*)?(\d+)\s*[).:-]\s*(.+)$/i) ||
         line.match(/^(\d+)\s+(.*)$/);
       if (!m) return { match: false, id: "", desc: "" };
       return { match: true, id: String(m[1]), desc: String(m[2] || "").trim() };
@@ -24329,7 +24329,7 @@ Return ONLY a JSON object:
                 type: "text",
                 text: this.sanitizeFallbackInstruction(
                   "Do not finalize this step with text-only output. " +
-                    `A real workspace/canvas mutation is still required${preferredTarget ? ` for target \"${preferredTarget}\"` : ""}. ` +
+                    `A real workspace/canvas mutation is still required${preferredTarget ? ` for target "${preferredTarget}"` : ""}. ` +
                     (pendingRequiredTools.length > 0
                       ? `Use one of these required mutation tools now: ${pendingRequiredTools.join(", ")}. `
                       : "Perform a write_file/edit_file/create_document/canvas mutation now. ") +
@@ -28754,8 +28754,7 @@ Return ONLY a JSON object:
                           },
                         ]
                       : recoveryClass === "local_runtime"
-                        ? [
-                            ...(workspaceBoundaryFailure
+                        ? (workspaceBoundaryFailure
                               ? [
                                   {
                                     description:
@@ -28791,8 +28790,7 @@ Return ONLY a JSON object:
                                       "If the corrected local approach also fails, try a fundamentally different local strategy. Be tenacious.",
                                     kind: "recovery" as const,
                                   },
-                                ]),
-                          ]
+                                ])
                         : [
                             {
                               description: `Research the error via web_search: "${failureSnippet}"`,
@@ -28819,8 +28817,7 @@ Return ONLY a JSON object:
                           },
                         ]
                       : recoveryClass === "local_runtime"
-                        ? [
-                            ...(workspaceBoundaryFailure
+                        ? (workspaceBoundaryFailure
                               ? [
                                   {
                                     description:
@@ -28843,8 +28840,7 @@ Return ONLY a JSON object:
                                       "Apply a corrected local tool/input strategy without external research and continue.",
                                     kind: "recovery" as const,
                                   },
-                                ]),
-                          ]
+                                ])
                         : [
                             {
                               description: `Try an alternative toolchain or different input strategy for: ${step.description}`,

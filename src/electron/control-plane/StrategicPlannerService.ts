@@ -478,7 +478,7 @@ export class StrategicPlannerService {
             priority: nextPriority,
             assigneeAgentRoleId: seed.assigneeAgentRoleId || existing.assigneeAgentRoleId,
             metadata: {
-              ...(existing.metadata || {}),
+              ...existing.metadata,
               plannerManaged: true,
               plannerKind: seed.kind,
               targetIssueId: seed.targetIssueId,

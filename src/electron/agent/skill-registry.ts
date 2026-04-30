@@ -1533,7 +1533,7 @@ export class SkillRegistry {
         skill.name = source.slug;
       }
       skill.metadata = {
-        ...(skill.metadata || {}),
+        ...skill.metadata,
         version,
         author: ownerHandle || skill.metadata?.author || "ClawHub",
         homepage: sourceUrl,
@@ -1661,7 +1661,7 @@ export class SkillRegistry {
           ...skill,
           source: "managed",
           metadata: {
-            ...(skill.metadata || {}),
+            ...skill.metadata,
             repository: parsed.url,
             homepage: skill.metadata?.homepage || parsed.url,
           },

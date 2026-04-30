@@ -480,7 +480,7 @@ export class AwarenessService {
               ...stored.config,
               sources: {
                 ...DEFAULT_AWARENESS_CONFIG.sources,
-                ...(stored.config?.sources || {}),
+                ...stored.config?.sources,
               },
             },
             beliefs: Array.isArray(stored.beliefs) ? stored.beliefs : [],

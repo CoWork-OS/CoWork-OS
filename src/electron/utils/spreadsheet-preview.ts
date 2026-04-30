@@ -188,7 +188,7 @@ function parseDelimitedRows(text: string, delimiter: string): string[][] {
 }
 
 function escapeDelimitedCell(value: string, delimiter: string): string {
-  if (!/[\"\r\n]/.test(value) && !value.includes(delimiter)) return value;
+  if (!/["\r\n]/.test(value) && !value.includes(delimiter)) return value;
   return `"${value.replace(/"/g, '""')}"`;
 }
 

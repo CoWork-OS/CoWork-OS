@@ -889,7 +889,7 @@ const isLowSignalPauseMessage = (
   const lower = trimmed.toLowerCase();
   if (reasonCode && lower === String(reasonCode).trim().toLowerCase()) return true;
   if (
-    /^required_decision/.test(String(reasonCode || "").trim().toLowerCase()) &&
+    String(reasonCode || "").trim().toLowerCase().startsWith('required_decision') &&
     /\b(best next task|recommend(?:ed|ation)?.{0,80}next task)\b/.test(lower)
   ) {
     return true;
@@ -2262,7 +2262,7 @@ export function autolinkBareUrls(text: string): string {
  * Only matches when not already inside a link or brackets.
  */
 const BARE_DOMAIN_REGEX =
-  /(?<!\(|\[|\/)(?:^|(?<=\s))((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,})(?=[\s\]\)\|,;:]|$)/gi;
+  /(?<!\(|\[|\/)(?:^|(?<=\s))((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,})(?=[\s\])|,;:]|$)/gi;
 const COMMON_BARE_DOMAIN_EXCLUSIONS = new Set(["e.g", "i.e"]);
 
 function shouldAutolinkBareDomain(domain: string): boolean {

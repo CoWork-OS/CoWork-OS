@@ -31,8 +31,8 @@ async function readPackageJson(packageJsonPath: string): Promise<PackageJsonShap
 function detectFramework(packageJson: PackageJsonShape | null): WebPagePreview["framework"] {
   if (!packageJson) return undefined;
   const deps = {
-    ...(packageJson.dependencies || {}),
-    ...(packageJson.devDependencies || {}),
+    ...packageJson.dependencies,
+    ...packageJson.devDependencies,
   };
   if ("next" in deps) return "next";
   if ("vite" in deps) return "vite";

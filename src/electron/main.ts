@@ -2250,7 +2250,7 @@ if (!gotTheLock) {
             workspaceId,
             agentConfig: {
               allowUserInput: false,
-              ...(options?.agentConfig ?? {}),
+              ...options?.agentConfig,
             },
             ...(options?.source ? { source: options.source } : {}),
             ...(options?.taskOverrides

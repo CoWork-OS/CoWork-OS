@@ -437,7 +437,7 @@ function createHarness() {
       task = {
         ...task,
         agentConfig: {
-          ...(task.agentConfig || {}),
+          ...task.agentConfig,
           ...(mode ? { executionMode: mode } : {}),
         },
       };

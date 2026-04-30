@@ -143,7 +143,7 @@ export class HookAgentIngress {
         source: "hook",
         agentConfig: {
           allowUserInput: false,
-          ...(action.agentConfig || {}),
+          ...action.agentConfig,
         },
       });
 

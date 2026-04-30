@@ -230,7 +230,7 @@ export function sanitizeToolCallTextFromAssistant(raw: string): ToolCallTextSani
     .replace(/[ \t]{2,}/g, " ")
     .replace(/\n{3,}/g, "\n\n")
     .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n[ \t]+(?=[{\[])/g, "\n")
+    .replace(/\n[ \t]+(?=[{[])/g, "\n")
     .trim();
 
   return {

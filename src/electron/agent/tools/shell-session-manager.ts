@@ -74,7 +74,7 @@ function normalizePathForShell(value: string): string {
 }
 
 function quoteForPosixShell(value: string): string {
-  return `'${String(value).replace(/'/g, `'\"'\"'`)}'`;
+  return `'${String(value).replace(/'/g, `'"'"'`)}'`;
 }
 
 function stripShellControlCodes(text: string): string {
@@ -194,7 +194,7 @@ function applyEnvUnset(name: string): string {
 }
 
 function applyAliasExport(name: string, value: string): string {
-  const escaped = value.replace(/'/g, `'\"'\"'`);
+  const escaped = value.replace(/'/g, `'"'"'`);
   return `alias ${name}='${escaped}'`;
 }
 

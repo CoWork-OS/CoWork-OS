@@ -44,7 +44,7 @@ export class XSettingsManager {
             ...stored,
             mentionTrigger: {
               ...DEFAULT_SETTINGS.mentionTrigger,
-              ...(stored.mentionTrigger || {}),
+              ...stored.mentionTrigger,
             },
           };
         }

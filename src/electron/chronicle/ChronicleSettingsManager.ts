@@ -60,7 +60,7 @@ export class ChronicleSettingsManager {
   static saveSettings(input: Partial<ChronicleSettings>): ChronicleSettings {
     const next = normalizeSettings({
       ...this.loadSettings(),
-      ...(input || {}),
+      ...input,
     });
     if (SecureSettingsRepository.isInitialized()) {
       SecureSettingsRepository.getInstance().save("chronicle", next);

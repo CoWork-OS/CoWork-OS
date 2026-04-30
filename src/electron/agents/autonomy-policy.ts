@@ -102,6 +102,6 @@ export function buildCoreAutomationAgentConfig(
     ...buildAgentConfigFromAutonomyPolicy(rolePolicy),
     allowUserInput: false,
     pauseForRequiredDecision: false,
-    ...(overrides || {}),
+    ...overrides,
   };
 }

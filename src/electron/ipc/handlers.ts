@@ -2055,8 +2055,8 @@ export async function setupIpcHandlers(
             devDependencies?: Record<string, unknown>;
           };
           const deps = {
-            ...(packageJson.dependencies || {}),
-            ...(packageJson.devDependencies || {}),
+            ...packageJson.dependencies,
+            ...packageJson.devDependencies,
           };
           if ("react" in deps || "react-dom" in deps || "vite" in deps || "next" in deps) {
             fileType = "html";
@@ -13570,10 +13570,10 @@ function setupLocalAIHandlers(): void {
         // Fall back to numbered list format: "1. unsloth/Model:q4_k_n"
         const modelLines = recOut
           .split("\n")
-          .filter((l: string) => /^\s*\d+[\.\)]\s+\S/.test(l));
+          .filter((l: string) => /^\s*\d+[.)]\s+\S/.test(l));
         models = modelLines
           .map((l: string) => {
-            const match = l.match(/\d+[\.\)]\s+(\S+)/);
+            const match = l.match(/\d+[.)]\s+(\S+)/);
             return match ? match[1] : l.trim();
           })
           .filter(Boolean);

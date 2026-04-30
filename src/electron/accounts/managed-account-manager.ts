@@ -279,7 +279,7 @@ export class ManagedAccountManager {
         if (!incomingSecrets) {
           return existing.secrets;
         }
-        return { ...(existing.secrets || {}), ...incomingSecrets };
+        return { ...existing.secrets, ...incomingSecrets };
       })();
 
       const updated: ManagedAccountRecord = {

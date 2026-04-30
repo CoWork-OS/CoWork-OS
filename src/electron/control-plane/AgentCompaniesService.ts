@@ -651,7 +651,7 @@ export class AgentCompaniesService {
               status: existing.status === "cancelled" ? "backlog" : existing.status,
               completedAt: existing.status === "cancelled" ? null : existing.completedAt,
               metadata: {
-                ...(existing.metadata || {}),
+                ...existing.metadata,
                 ...metadata,
               },
             })

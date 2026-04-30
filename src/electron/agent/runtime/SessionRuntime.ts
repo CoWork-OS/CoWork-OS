@@ -627,7 +627,7 @@ export class SessionRuntime {
                       : opts.initialMaxTokens,
                   system: opts.systemPrompt,
                   messages: requestMessages,
-                  ...(promptCacheExtras || {}),
+                  ...promptCacheExtras,
                   ...(opts.onStreamProgress ? { onStreamProgress: opts.onStreamProgress } : {}),
                 },
                 120_000,

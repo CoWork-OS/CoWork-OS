@@ -115,7 +115,7 @@ export class TimelineEmitter {
 
   startStep(step: StepDescriptor, options: StepOptions = {}): void {
     this.emit("timeline_step_started", {
-      ...(options.extraPayload || {}),
+      ...options.extraPayload,
       stepId: step.id || `step:${this.taskId}`,
       step,
       groupId: options.groupId,
@@ -128,7 +128,7 @@ export class TimelineEmitter {
 
   updateStep(step: StepDescriptor, options: StepOptions = {}): void {
     this.emit("timeline_step_updated", {
-      ...(options.extraPayload || {}),
+      ...options.extraPayload,
       stepId: step.id || `step:${this.taskId}`,
       step,
       groupId: options.groupId,
@@ -141,7 +141,7 @@ export class TimelineEmitter {
 
   finishStep(step: StepDescriptor, options: StepOptions = {}): void {
     this.emit("timeline_step_finished", {
-      ...(options.extraPayload || {}),
+      ...options.extraPayload,
       stepId: step.id || `step:${this.taskId}`,
       step,
       groupId: options.groupId,
@@ -154,7 +154,7 @@ export class TimelineEmitter {
 
   failStep(step: StepDescriptor, reason: string, options: StepOptions = {}): void {
     this.emit("timeline_step_finished", {
-      ...(options.extraPayload || {}),
+      ...options.extraPayload,
       stepId: step.id || `step:${this.taskId}`,
       step: {
         ...step,

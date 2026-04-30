@@ -177,7 +177,7 @@ function stripInlineMarkdownFormatting(text: string): string {
     .replace(/`([^`]+)`/g, "$1")
     .replace(/\*\*([^*]+)\*\*/g, "$1")
     .replace(/__([^_]+)__/g, "$1")
-    .replace(/(^|[^\*])\*([^\*\n]+)\*(?!\*)/g, "$1$2")
+    .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1$2")
     .replace(/(^|[^_])_([^_\n]+)_(?!_)/g, "$1$2")
     .replace(/[ \t]{2,}/g, " ")
     .trim();

@@ -50,7 +50,7 @@ export function unwrapMarkdownCodeBlocks(text: string): string {
  * literal asterisks visible.
  */
 function stripTrailingBoldFromGlobCodeBlocks(text: string): string {
-  return text.replace(/`(\*\*\/\*[\w*?[\]{}.\-]+)\s*\*\*`/g, "`$1`");
+  return text.replace(/`(\*\*\/\*[\w*?[\]{}.-]+)\s*\*\*`/g, "`$1`");
 }
 
 /**

@@ -40,26 +40,26 @@ export function setupSubconsciousHandlers(service: SubconsciousLoopService): voi
           ...settings,
           phaseModels: {
             ...DEFAULT_SUBCONSCIOUS_SETTINGS.phaseModels,
-            ...(settings.phaseModels || {}),
+            ...settings.phaseModels,
           },
           dispatchDefaults: {
             ...DEFAULT_SUBCONSCIOUS_SETTINGS.dispatchDefaults,
-            ...(settings.dispatchDefaults || {}),
+            ...settings.dispatchDefaults,
             defaultKinds: {
               ...DEFAULT_SUBCONSCIOUS_SETTINGS.dispatchDefaults.defaultKinds,
-              ...(settings.dispatchDefaults?.defaultKinds || {}),
+              ...settings.dispatchDefaults?.defaultKinds,
             },
           },
           notificationPolicy: {
             ...DEFAULT_SUBCONSCIOUS_SETTINGS.notificationPolicy,
-            ...(settings.notificationPolicy || {}),
+            ...settings.notificationPolicy,
           },
           perExecutorPolicy: {
             ...DEFAULT_SUBCONSCIOUS_SETTINGS.perExecutorPolicy,
-            ...(settings.perExecutorPolicy || {}),
+            ...settings.perExecutorPolicy,
             codeChangeTask: {
               ...DEFAULT_SUBCONSCIOUS_SETTINGS.perExecutorPolicy.codeChangeTask,
-              ...(settings.perExecutorPolicy?.codeChangeTask || {}),
+              ...settings.perExecutorPolicy?.codeChangeTask,
             },
           },
         },

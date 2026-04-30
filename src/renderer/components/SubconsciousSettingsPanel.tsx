@@ -150,18 +150,18 @@ export function SubconsciousSettingsPanel(props?: {
       ...updates,
       dispatchDefaults: {
         ...settings.dispatchDefaults,
-        ...(updates.dispatchDefaults || {}),
+        ...updates.dispatchDefaults,
         defaultKinds: {
           ...settings.dispatchDefaults.defaultKinds,
-          ...(updates.dispatchDefaults?.defaultKinds || {}),
+          ...updates.dispatchDefaults?.defaultKinds,
         },
       },
       perExecutorPolicy: {
         ...settings.perExecutorPolicy,
-        ...(updates.perExecutorPolicy || {}),
+        ...updates.perExecutorPolicy,
         codeChangeTask: {
           ...settings.perExecutorPolicy.codeChangeTask,
-          ...(updates.perExecutorPolicy?.codeChangeTask || {}),
+          ...updates.perExecutorPolicy?.codeChangeTask,
         },
       },
     };

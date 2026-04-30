@@ -246,8 +246,8 @@ export function withRuntimeToolMetadata(tool: LLMTool, overrides?: Partial<Runti
     ...tool,
     runtime: {
       ...getDefaultRuntimeToolMetadata(tool.name),
-      ...(tool.runtime || {}),
-      ...(overrides || {}),
+      ...tool.runtime,
+      ...overrides,
     },
   };
 }

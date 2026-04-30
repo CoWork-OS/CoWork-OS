@@ -259,7 +259,7 @@ function sanitizeEmailHtml(raw: string): string {
     .replace(/@import\s+url\([^)]*\)\s*;?/gi, "")
     .replace(/@import\s+['"][^'"]*['"]\s*;?/gi, "")
     // Neutralize <form> elements — remove action/method so they cannot submit to remote URLs
-    .replace(/<form\b([^>]*)\>/gi, (_match, attrs: string) => {
+    .replace(/<form\b([^>]*)>/gi, (_match, attrs: string) => {
       const sanitizedAttrs = attrs
         .replace(/\baction\s*=\s*(?:"[^"]*"|'[^']*'|\S+)/gi, "")
         .replace(/\bmethod\s*=\s*(?:"[^"]*"|'[^']*'|\S+)/gi, "");
@@ -616,6 +616,7 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
   const [selectedThreadIds, setSelectedThreadIds] = useState<string[]>([]);
   const [selectedThread, setSelectedThread] = useState<MailboxThreadDetail | null>(null);
   const [query, setQuery] = useState("");
+  const [searchExpanded, setSearchExpanded] = useState(false);
   const [category, setCategory] = useState<"all" | "priority" | "calendar" | "follow_up" | "promotions" | "updates">("all");
   const [focusFilter, setFocusFilter] = useState<FocusFilter>(null);
   const [queueMode, setQueueMode] = useState<QueueMode>(null);
@@ -691,6 +692,7 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
   const autoSyncInFlightRef = useRef(false);
   const autoMarkReadInFlightRef = useRef<Set<string>>(new Set());
   const selectedThreadIdRef = useRef<string | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   selectedThreadIdRef.current = selectedThreadId;
 
   const loadSnippets = async () => {
@@ -1066,6 +1068,11 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
   }, [selectedThreadId]);
 
   useEffect(() => {
+    if (!searchExpanded) return;
+    window.requestAnimationFrame(() => searchInputRef.current?.focus());
+  }, [searchExpanded]);
+
+  useEffect(() => {
     const draft = selectedThread?.drafts[0] || null;
     if (!draft) {
       setEditableDraftId(null);
@@ -1150,6 +1157,7 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
         void reviewQueue("follow_up");
         return;
       }
+      setSearchExpanded(true);
       setQuery(text);
       void loadThreads({ query: text });
     },
@@ -2842,54 +2850,8 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
             </div>
           )}
 
-          {/* Search */}
           <div style={{ display: "flex", gap: "6px", marginBottom: "6px" }}>
-            <div style={{ position: "relative", flex: 1 }}>
-              <MailSearch
-                size={13}
-                style={{
-                  position: "absolute",
-                  left: 10,
-                  top: "50%",
-                  transform: "translateY(-50%)",
-                  color: "var(--color-text-muted)",
-                  pointerEvents: "none",
-                }}
-              />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void loadThreads({ query: e.currentTarget.value });
-                }}
-                placeholder="Search threads…"
-                style={{
-                  width: "100%",
-                  boxSizing: "border-box",
-                  paddingLeft: "28px",
-                  paddingRight: "10px",
-                  paddingTop: "7px",
-                  paddingBottom: "7px",
-                  borderRadius: "var(--radius-sm, 8px)",
-                  border: "1px solid var(--color-border)",
-                  background: "var(--color-bg-input)",
-                  color: "var(--color-text-primary)",
-                  fontSize: "0.82rem",
-                  outline: "none",
-                  fontFamily: "var(--font-ui)",
-                }}
-              />
-            </div>
-            <IconBtn
-              onClick={() => void voice.toggleRecording()}
-              icon={voice.state === "recording" ? <MicOff size={13} /> : <Mic size={13} />}
-              active={voice.state === "recording"}
-              title={voice.state === "recording" ? "Stop recording" : "Voice search"}
-            />
-          </div>
-
-          <div style={{ display: "flex", gap: "6px", marginBottom: "6px" }}>
-            <div style={{ position: "relative", flex: 1 }}>
+            <div style={{ position: "relative", flex: 1, minWidth: 0 }}>
               <Sparkles
                 size={13}
                 style={{
@@ -2922,6 +2884,85 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
                 }}
               />
             </div>
+            {searchExpanded || query ? (
+              <div
+                style={{
+                  position: "relative",
+                  flex: "0 1 210px",
+                  minWidth: "142px",
+                }}
+              >
+                <MailSearch
+                  size={13}
+                  style={{
+                    position: "absolute",
+                    left: 10,
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    color: "var(--color-text-muted)",
+                    pointerEvents: "none",
+                  }}
+                />
+                <input
+                  ref={searchInputRef}
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void loadThreads({ query: e.currentTarget.value });
+                    if (e.key === "Escape") {
+                      if (query) {
+                        setQuery("");
+                        void loadThreads({ query: "" });
+                      }
+                      setSearchExpanded(false);
+                    }
+                  }}
+                  placeholder="Search threads…"
+                  style={{
+                    width: "100%",
+                    boxSizing: "border-box",
+                    padding: "7px 34px 7px 28px",
+                    borderRadius: "var(--radius-sm, 8px)",
+                    border: "1px solid var(--color-border)",
+                    background: "var(--color-bg-input)",
+                    color: "var(--color-text-primary)",
+                    fontSize: "0.78rem",
+                    outline: "none",
+                    fontFamily: "var(--font-ui)",
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => void voice.toggleRecording()}
+                  title={voice.state === "recording" ? "Stop recording" : "Voice search"}
+                  aria-label={voice.state === "recording" ? "Stop recording" : "Voice search"}
+                  style={{
+                    position: "absolute",
+                    right: 4,
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    width: 24,
+                    height: 24,
+                    display: "grid",
+                    placeItems: "center",
+                    border: 0,
+                    borderRadius: "var(--radius-xs, 6px)",
+                    background: voice.state === "recording" ? "var(--color-accent-subtle)" : "transparent",
+                    color: voice.state === "recording" ? "var(--color-accent)" : "var(--color-text-secondary)",
+                    cursor: "pointer",
+                    padding: 0,
+                  }}
+                >
+                  {voice.state === "recording" ? <MicOff size={12} /> : <Mic size={12} />}
+                </button>
+              </div>
+            ) : (
+              <IconBtn
+                onClick={() => setSearchExpanded(true)}
+                icon={<MailSearch size={13} />}
+                title="Search threads"
+              />
+            )}
             <IconBtn
               onClick={() => void runMailboxAsk()}
               icon={askBusy ? <RefreshCcw size={13} style={{ animation: "spin 1s linear infinite" }} /> : <Sparkles size={13} />}

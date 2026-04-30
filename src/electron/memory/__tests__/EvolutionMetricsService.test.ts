@@ -152,7 +152,7 @@ describe("EvolutionMetricsService", () => {
       const formatted = EvolutionMetricsService.formatForBriefing(snapshot);
 
       // Should contain at least one trend indicator
-      expect(formatted).toMatch(/\[[\+\-=]\]/);
+      expect(formatted).toMatch(/\[[+\-=]\]/);
     });
   });
 

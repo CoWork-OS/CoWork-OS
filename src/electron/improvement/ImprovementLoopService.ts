@@ -509,7 +509,7 @@ export class ImprovementLoopService {
       evaluationNotes: evaluation.notes.join("\n"),
       branchName: variant.branchName || task.worktreeBranch,
       observability: {
-        ...(variant.observability || {}),
+        ...variant.observability,
         stage: campaign.stage,
         executionMode: variant.observability?.executionMode,
         artifactSummary: evaluation.artifactSummary,
@@ -634,7 +634,7 @@ export class ImprovementLoopService {
       status: "verifying",
       stage: "verifying",
       observability: {
-        ...(campaign.observability || {}),
+        ...campaign.observability,
         promotionAttempts: (campaign.observability?.promotionAttempts || 0) + 1,
         lastPromotionError: undefined,
         stageTransitions: [
@@ -680,7 +680,7 @@ export class ImprovementLoopService {
         promotedBranchName: winner.branchName,
         completedAt: Date.now(),
         observability: {
-          ...(campaign.observability || {}),
+          ...campaign.observability,
           promotionAttempts: (campaign.observability?.promotionAttempts || 0) + 1,
           lastPromotionError: undefined,
           stageTransitions: [
@@ -1141,7 +1141,7 @@ export class ImprovementLoopService {
       status: "running",
       startedAt: Date.now(),
       observability: {
-        ...(variant.observability || {}),
+        ...variant.observability,
         stage: params.stage,
         executionMode: params.executionMode,
       },
@@ -1206,7 +1206,7 @@ export class ImprovementLoopService {
       stopReason: "promotion_failed",
       completedAt: Date.now(),
       observability: {
-        ...(campaign.observability || {}),
+        ...campaign.observability,
         lastPromotionError: message,
         promotionAttempts: (campaign.observability?.promotionAttempts || 0) + 1,
         stageTransitions: [

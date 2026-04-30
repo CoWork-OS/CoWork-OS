@@ -30,7 +30,7 @@ function describeToolResult(toolResult: LLMToolResult): string {
 function looksStructured(value: string): boolean {
   const text = value.trim();
   if (!text) return false;
-  if (/^[\[{]/.test(text)) return true;
+  if (/^[[{]/.test(text)) return true;
   if (/^[A-Za-z0-9_]+\s*\{/.test(text)) return true;
   if (/[{[]\s*[A-Za-z0-9_"']+\s*:/.test(text)) return true;
   return false;

@@ -593,7 +593,7 @@ export class CronService {
         modelKey: job.modelKey,
         allowUserInput: job.allowUserInput ?? false,
         agentConfig: {
-          ...(job.taskAgentConfig ?? {}),
+          ...job.taskAgentConfig,
           // Only restrict run_command when shellAccess is explicitly set to false.
           // undefined (legacy jobs) means unrestricted, preserving prior behavior.
           ...(job.shellAccess === false

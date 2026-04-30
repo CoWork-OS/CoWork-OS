@@ -497,7 +497,7 @@ export class AgentDaemon extends EventEmitter {
       return { task, changed: false };
     }
 
-    const nextAgentConfig: AgentConfig = { ...(task.agentConfig || {}) };
+    const nextAgentConfig: AgentConfig = { ...task.agentConfig };
     let changed = false;
 
     if (hasPermissionMode && nextAgentConfig.permissionMode !== options.permissionMode) {
@@ -1799,7 +1799,7 @@ export class AgentDaemon extends EventEmitter {
       strategyLock: isCronTask,
       budgetProfile: cronBudgetProfile,
       ...(params.source ? { source: params.source } : {}),
-      ...(safeTaskOverrides || {}),
+      ...safeTaskOverrides,
     });
     const memoryFeatures = MemoryFeaturesManager.loadSettings();
     const rootLineageUpdates: Partial<Task> = {
@@ -4157,7 +4157,7 @@ export class AgentDaemon extends EventEmitter {
           return;
         }
         await TranscriptStore.writeCheckpoint(params.workspacePath, params.task.id, {
-          ...(latestSnapshotPayload || {}),
+          ...latestSnapshotPayload,
           checkpointKind: "periodic",
           sourceEventId: params.event.eventId,
           sourceTimestamp: params.event.timestamp,
@@ -4187,7 +4187,7 @@ export class AgentDaemon extends EventEmitter {
         meaningfulEvents.slice(-Math.max(1, Math.min(meaningfulExchangeCount, 12))),
       );
       await TranscriptStore.writeCheckpoint(params.workspacePath, params.task.id, {
-        ...(latestSnapshotPayload || {}),
+        ...latestSnapshotPayload,
         checkpointKind: "completion",
         sourceEventId: params.event.eventId,
         sourceTimestamp: params.event.timestamp,
@@ -5144,7 +5144,7 @@ export class AgentDaemon extends EventEmitter {
             [summary, verificationSuffix].filter((value) => value.length > 0).join(" · ") ||
             task.title,
           metadata: {
-            ...(payload || {}),
+            ...payload,
             activityKind: "task_completed",
           },
         };
@@ -5159,7 +5159,7 @@ export class AgentDaemon extends EventEmitter {
           title: "What Cowork learned",
           description: payload?.summary || task.title,
           metadata: {
-            ...(payload || {}),
+            ...payload,
             activityKind: "learning_progress",
           },
         };
@@ -5184,7 +5184,7 @@ export class AgentDaemon extends EventEmitter {
                   : "Shell session updated",
           description: payload?.message || payload?.summary || task.title,
           metadata: {
-            ...(payload || {}),
+            ...payload,
             activityKind: type,
           },
         };
@@ -6969,7 +6969,7 @@ export class AgentDaemon extends EventEmitter {
           conversationMode: "task",
           verificationAgent: false,
           toolRestrictions: ["group:write", "group:destructive", "group:image"],
-          ...(params.agentConfig || {}),
+          ...params.agentConfig,
         },
         workerRole: params.workerRole,
       });

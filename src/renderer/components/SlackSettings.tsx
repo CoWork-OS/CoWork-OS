@@ -184,7 +184,7 @@ export function SlackSettings({ onStatusChange }: SlackSettingsProps) {
       await window.electronAPI.updateGatewayChannel({
         id: selectedChannel.id,
         config: {
-          ...(selectedChannel.config || {}),
+          ...selectedChannel.config,
           progressRelayMode: mode,
         },
       });
@@ -194,7 +194,7 @@ export function SlackSettings({ onStatusChange }: SlackSettingsProps) {
             ? {
                 ...entry,
                 config: {
-                  ...(entry.config || {}),
+                  ...entry.config,
                   progressRelayMode: mode,
                 },
               }

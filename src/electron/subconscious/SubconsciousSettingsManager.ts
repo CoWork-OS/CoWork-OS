@@ -23,26 +23,26 @@ export class SubconsciousSettingsManager {
             durableTargetKinds: stored.durableTargetKinds || DEFAULT_SUBCONSCIOUS_SETTINGS.durableTargetKinds,
             phaseModels: {
               ...DEFAULT_SUBCONSCIOUS_SETTINGS.phaseModels,
-              ...(stored.phaseModels || {}),
+              ...stored.phaseModels,
             },
             dispatchDefaults: {
               ...DEFAULT_SUBCONSCIOUS_SETTINGS.dispatchDefaults,
-              ...(stored.dispatchDefaults || {}),
+              ...stored.dispatchDefaults,
               defaultKinds: {
                 ...DEFAULT_SUBCONSCIOUS_SETTINGS.dispatchDefaults.defaultKinds,
-                ...(stored.dispatchDefaults?.defaultKinds || {}),
+                ...stored.dispatchDefaults?.defaultKinds,
               },
             },
             notificationPolicy: {
               ...DEFAULT_SUBCONSCIOUS_SETTINGS.notificationPolicy,
-              ...(stored.notificationPolicy || {}),
+              ...stored.notificationPolicy,
             },
             perExecutorPolicy: {
               ...DEFAULT_SUBCONSCIOUS_SETTINGS.perExecutorPolicy,
-              ...(stored.perExecutorPolicy || {}),
+              ...stored.perExecutorPolicy,
               codeChangeTask: {
                 ...DEFAULT_SUBCONSCIOUS_SETTINGS.perExecutorPolicy.codeChangeTask,
-                ...(stored.perExecutorPolicy?.codeChangeTask || {}),
+                ...stored.perExecutorPolicy?.codeChangeTask,
               },
             },
           };
@@ -120,7 +120,7 @@ export class SubconsciousSettingsManager {
         autoDispatch: input.dispatchDefaults?.autoDispatch === true,
         defaultKinds: {
           ...DEFAULT_SUBCONSCIOUS_SETTINGS.dispatchDefaults.defaultKinds,
-          ...(input.dispatchDefaults?.defaultKinds || {}),
+          ...input.dispatchDefaults?.defaultKinds,
         },
       },
       artifactRetentionDays: Math.min(Math.max(Math.round(input.artifactRetentionDays || 30), 1), 365),

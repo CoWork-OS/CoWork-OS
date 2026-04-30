@@ -138,7 +138,7 @@ export async function requestLLMResponseWithAdaptiveBudget(opts: {
           system: opts.systemPrompt,
           tools: availableTools,
           messages: opts.messages,
-          ...(promptCacheExtras || {}),
+          ...promptCacheExtras,
         },
         requestTimeoutMs,
         labelSuffix ? `${opts.operation} ${labelSuffix}` : opts.operation,

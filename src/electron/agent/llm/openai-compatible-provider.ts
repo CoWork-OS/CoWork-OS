@@ -12,6 +12,36 @@ import {
 } from "./openai-compatible";
 import { buildOpenAIPromptCacheFields } from "./prompt-cache";
 
+function joinUrl(baseUrl: string, path: string): string {
+  const trimmedBase = baseUrl.replace(/\/+$/, "");
+  const trimmedPath = path.startsWith("/") ? path : `/${path}`;
+  return `${trimmedBase}${trimmedPath}`;
+}
+
+function normalizeBaseUrl(baseUrl: string): string {
+  const trimmedBase = baseUrl.trim().replace(/\/+$/, "");
+  const lowerBase = trimmedBase.toLowerCase();
+  if (lowerBase.endsWith("/chat/completions")) {
+    return trimmedBase.slice(0, -"/chat/completions".length);
+  }
+  if (lowerBase.endsWith("/models")) {
+    return trimmedBase.slice(0, -"/models".length);
+  }
+  return trimmedBase;
+}
+
+function resolveChatCompletionsUrl(baseUrl: string): string {
+  const trimmedBase = baseUrl.trim().replace(/\/+$/, "");
+  if (trimmedBase.toLowerCase().endsWith("/chat/completions")) {
+    return trimmedBase;
+  }
+  return joinUrl(trimmedBase, "/chat/completions");
+}
+
+function resolveModelsUrl(baseUrl: string): string {
+  return joinUrl(normalizeBaseUrl(baseUrl), "/models");
+}
+
 export interface OpenAICompatibleProviderOptions {
   type: LLMProviderType;
   providerName: string;
@@ -24,7 +54,8 @@ export interface OpenAICompatibleProviderOptions {
 export class OpenAICompatibleProvider implements LLMProvider {
   readonly type: LLMProviderType;
   private apiKey: string;
-  private baseUrl: string;
+  private chatCompletionsUrl: string;
+  private modelsUrl: string;
   private defaultModel: string;
   private providerName: string;
   private extraHeaders?: Record<string, string>;
@@ -32,7 +63,8 @@ export class OpenAICompatibleProvider implements LLMProvider {
   constructor(options: OpenAICompatibleProviderOptions) {
     this.type = options.type;
     this.apiKey = options.apiKey;
-    this.baseUrl = options.baseUrl;
+    this.chatCompletionsUrl = resolveChatCompletionsUrl(options.baseUrl);
+    this.modelsUrl = resolveModelsUrl(options.baseUrl);
     this.defaultModel = options.defaultModel;
     this.providerName = options.providerName;
     this.extraHeaders = options.extraHeaders;
@@ -59,7 +91,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
         headers.Authorization = `Bearer ${this.apiKey}`;
       }
 
-      const response = await fetch(`${this.baseUrl}/chat/completions`, {
+      const response = await fetch(this.chatCompletionsUrl, {
         method: "POST",
         headers,
         body: JSON.stringify({
@@ -113,7 +145,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
         headers.Authorization = `Bearer ${this.apiKey}`;
       }
 
-      const response = await fetch(`${this.baseUrl}/chat/completions`, {
+      const response = await fetch(this.chatCompletionsUrl, {
         method: "POST",
         headers,
         body: JSON.stringify({
@@ -149,7 +181,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
         headers.Authorization = `Bearer ${this.apiKey}`;
       }
 
-      const response = await fetch(`${this.baseUrl}/models`, {
+      const response = await fetch(this.modelsUrl, {
         headers,
       });
 

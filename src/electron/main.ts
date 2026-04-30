@@ -11,7 +11,6 @@ import {
   dialog,
   session,
   shell,
-  Notification,
   nativeTheme,
   Menu,
   screen,
@@ -952,6 +951,10 @@ app.commandLine.appendSwitch("ignore-gpu-blocklist");
 registerCanvasScheme();
 registerMediaScheme();
 
+if (process.platform === "win32") {
+  app.setAppUserModelId("com.cowork-os.app");
+}
+
 applyStableUserDataPath();
 
 // Ensure only one CoWork OS instance runs at a time.
@@ -1545,14 +1548,15 @@ if (!gotTheLock) {
                   error,
                 );
               }
-            }
-            try {
-              trayManager.showNotification(title, message, taskId);
-            } catch (error) {
-              console.error(
-                "[Main] Failed to show subconscious desktop notification:",
-                error,
-              );
+            } else {
+              try {
+                trayManager.showNotification(title, message, taskId);
+              } catch (error) {
+                console.error(
+                  "[Main] Failed to show subconscious desktop notification:",
+                  error,
+                );
+              }
             }
           },
           isUserFocused: () => BrowserWindow.getAllWindows().some((window) => !window.isDestroyed() && window.isFocused()),

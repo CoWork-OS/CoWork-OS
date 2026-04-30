@@ -24,7 +24,7 @@
   <a href="docs/everything-workbench.md">Everything Workbench</a> &middot;
   <a href="docs/browser-workbench.md">Browser Workbench</a> &middot;
   <a href="docs/showcase.md">Use Cases</a> &middot;
-  <a href="docs/release-notes-0.5.41.md">Release Notes 0.5.41</a> &middot;
+  <a href="docs/release-notes-0.5.42.md">Release Notes 0.5.42</a> &middot;
   <a href="docs/integration-skill-bootstrap-lifecycle.md">Platform Updates</a> &middot;
   <a href="docs/">Documentation</a> &middot;
   <a href="CHANGELOG.md">Changelog</a> &middot;
@@ -97,7 +97,7 @@ See [Workflow Intelligence](docs/workflow-intelligence.md), [Core Automation](do
 
 ### Latest Release
 
-**`0.5.41`** packages the Everything Workbench release: editable document artifacts, spreadsheet artifact editing, presentation artifact review, sandboxed web page artifacts, visible Browser Workbench automation, structured memory observations, format-aware file previews, Mission Control intelligence, developer log capture, renderer bundle reductions, and artifact cards that appear once at task completion. Start with [Release Notes 0.5.41](docs/release-notes-0.5.41.md), then [Features](docs/features.md), [Getting Started](docs/getting-started.md), [Everything Workbench](docs/everything-workbench.md), [Browser Workbench](docs/browser-workbench.md), and the [Changelog](CHANGELOG.md).
+**`0.5.42`** is a Windows installer hotfix for the Everything Workbench release. It rebuilds the Windows installer as an x64 app package so standard Windows PCs install `CoWork OS.exe` correctly. Start with [Release Notes 0.5.42](docs/release-notes-0.5.42.md), then [Release Notes 0.5.41](docs/release-notes-0.5.41.md), [Features](docs/features.md), [Getting Started](docs/getting-started.md), [Everything Workbench](docs/everything-workbench.md), [Browser Workbench](docs/browser-workbench.md), and the [Changelog](CHANGELOG.md).
 
 ## Quick Start
 
@@ -461,7 +461,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
 |-------|-------------|
 | [Getting Started](docs/getting-started.md) | First-time setup and usage |
 | [Beginner's Guide](docs/cowork-school.md) | Practical guide to what CoWork OS is for and which workflows to try first |
-| [Release Notes 0.5.41](docs/release-notes-0.5.41.md) | What is new in the latest release |
+| [Release Notes 0.5.42](docs/release-notes-0.5.42.md) | What is new in the latest release |
 | [Use Case Showcase](docs/showcase.md) | Comprehensive guide to what you can build and automate |
 | [Features](docs/features.md) | Complete feature reference |
 | [Everything Workbench](docs/everything-workbench.md) | Unified in-app artifact model for docs, sheets, decks, web pages, PDFs, and live browser sessions |

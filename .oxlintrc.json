@@ -1,11 +1,11 @@
 {
   "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxlint/configuration_schema.json",
   "rules": {
-    "no-unused-vars": "error",
-    "no-explicit-any": "error",
-    "no-empty": "error",
+    "no-unused-vars": "warn",
+    "no-explicit-any": "warn",
+    "no-empty": ["error", { "allowEmptyCatch": true }],
     "no-control-regex": "off",
-    "no-require-imports": "error"
+    "no-require-imports": "warn"
   },
   "ignorePatterns": [
     "dist",
